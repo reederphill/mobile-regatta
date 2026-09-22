@@ -25,6 +25,7 @@ A complete **game design spec for Regatta v1.0**, the version we'd ship to the A
 
 <!-- one line per closed ticket: [title](tickets/NN-slug.md): gist -->
 
+- [Sailing game landscape teardown](tickets/01-sailing-game-landscape.md): Copy server-decided fouls with the rule number shown, one-tap tacks, bot fill, a chat lobby with ELO, ~10-minute races and wind drawn on the water. Avoid pay-to-win tactical aids, penalties that let barging pay, fixed-rate arrow or tilt steering, and losing a race to a disconnect. No mobile racer simulates current.
 - [Mobile monetization norms for niche competitive games](tickets/05-mobile-monetization-norms.md): A chess.com-style model fits: free racing plus a debrief/stats Pro subscription (~$4.99/mo, $30–40/yr) and direct-sale cosmetic liveries. No loot boxes, performance boosts or in-race ads.
 
 ## Not yet specified
