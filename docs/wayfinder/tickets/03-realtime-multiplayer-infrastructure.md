@@ -4,7 +4,7 @@ title: Real-time multiplayer infrastructure options
 labels: [wayfinder:research]
 parent: map
 status: open
-assignee:
+assignee: research-agent
 blocked_by: []
 ---
 

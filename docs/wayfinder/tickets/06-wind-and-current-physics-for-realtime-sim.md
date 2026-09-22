@@ -4,7 +4,7 @@ title: Physical models of wind, current and shoreline effects for a real-time si
 labels: [wayfinder:research]
 parent: map
 status: open
-assignee:
+assignee: research-agent
 blocked_by: []
 ---
 

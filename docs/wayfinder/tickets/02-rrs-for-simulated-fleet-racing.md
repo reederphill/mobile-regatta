@@ -4,7 +4,7 @@ title: Racing Rules of Sailing relevant to simulated fleet racing
 labels: [wayfinder:research]
 parent: map
 status: open
-assignee:
+assignee: research-agent
 blocked_by: []
 ---
 

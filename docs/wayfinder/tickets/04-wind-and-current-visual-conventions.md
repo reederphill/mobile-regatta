@@ -4,7 +4,7 @@ title: Wind and current visualisation conventions
 labels: [wayfinder:research]
 parent: map
 status: open
-assignee:
+assignee: research-agent
 blocked_by: []
 ---
 
