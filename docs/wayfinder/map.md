@@ -25,6 +25,7 @@ A complete **game design spec for Regatta v1.0**, the version we'd ship to the A
 
 <!-- one line per closed ticket: [title](tickets/NN-slug.md): gist -->
 
+- [Mobile monetization norms for niche competitive games](tickets/05-mobile-monetization-norms.md): A chess.com-style model fits: free racing plus a debrief/stats Pro subscription (~$4.99/mo, $30–40/yr) and direct-sale cosmetic liveries. No loot boxes, performance boosts or in-race ads.
 ## Not yet specified
 
 - **First-run experience without a tutorial:** v1.0 has no tutorial (that's 1.2), but a new player still has to learn to steer, start and avoid fouls. How much in-race hinting, and in what form, depends on the controls and information-design decisions.
