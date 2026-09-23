@@ -585,8 +585,8 @@ function drawWake(b, v) {
 }
 // D: no ring. A small next-mark chevron, the current arrow from the hull, and the penalty arc only while one is owed.
 function drawLean(sc, me) {
-  const wp = add([me.x, me.y], vec(sc.wind.from, px(46)));   // wind arrow on the windward side, no label
-  drawArrow(wp[0], wp[1], sc.wind.from + 180, px(22), px(4), 'rgba(255,255,255,.9)');
+  const wp = add([me.x, me.y], vec(sc.wind.from, px(58)));   // wind arrow on the windward side, no label
+  drawArrow(wp[0], wp[1], sc.wind.from + 180, px(30), px(6), 'rgba(255,255,255,.9)');
   const tb = bearing(sub(sc.target, [me.x, me.y])), tp = add([me.x, me.y], vec(tb, px(42)));
   drawArrow(tp[0], tp[1], tb, px(12), px(4), '#E69F00');
   if (sc.current) { const c = currentAt(me.x, me.y, sc); drawArrow(me.x + c[0] * 12, me.y + c[1] * 12, bearing(c), len(c) * 24, px(4), 'rgba(245,245,235,.95)'); }
