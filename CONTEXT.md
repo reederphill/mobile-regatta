@@ -66,6 +66,18 @@ The part of a course between consecutive marks (or the start line and the first 
 An object the course requires a boat to leave on a given side. The start and finish line ends are also marks.
 _Avoid_: buoy (a buoy is just the physical object)
 
+**Leeward gate**:
+A pair of marks at the bottom of the course that boats sail between, then round either one.
+_Avoid_: bottom mark (unless it's a single mark), gates
+
+**Offset mark**:
+A mark a short distance to one side of the windward mark, rounded straight after it, that keeps boats bearing away clear of boats still coming up.
+_Avoid_: spreader mark, wing mark (a wing mark is on a reaching course)
+
+**Race area**:
+The water a course's boats may sail in, bounded by land or a drawn boundary. A boat can't leave it.
+_Avoid_: arena, bounds, map edge
+
 ### Conditions
 
 **Conditions**:
@@ -99,6 +111,19 @@ Air deflected off a boat's sails that slows a boat just to windward of it. What 
 **Current**:
 Movement of the water itself, which carries every boat regardless of wind. May vary across the venue and over time (tide).
 _Avoid_: tide (tide is the rise and fall; current is the flow)
+
+**Adverse current** / **fair current**:
+Current against or with a boat's progress toward its mark.
+_Avoid_: foul tide (a foul is a rules breach)
+
+**Slack**:
+The time when the current is near zero as it reverses.
+
+**Turn of the tide**:
+The current reversing through slack. It turns first in the shallows and later in the channel.
+
+**Tidal venue**:
+A venue whose current changes noticeably during a race. Other venues have steady current or none.
 
 ### Boats
 
