@@ -352,8 +352,8 @@ function draw() {
     }
   }
 
-  // current arrows
-  if (sc.current) {
+  // current arrows (not in D: current is shown only in the briefing)
+  if (sc.current && !lean()) {
     const sp = 42, cx = Math.round(me.x / sp) * sp, cy = Math.round(me.y / sp) * sp;
     for (let i = -5; i <= 5; i++) for (let j = -7; j <= 7; j++) {
       const x = cx + i * sp + (j % 2) * sp / 2, y = cy + j * sp;
@@ -589,7 +589,6 @@ function drawLean(sc, me) {
   drawArrow(wp[0], wp[1], sc.wind.from + 180, px(30), px(6), 'rgba(255,255,255,.9)');
   const tb = bearing(sub(sc.target, [me.x, me.y])), tp = add([me.x, me.y], vec(tb, px(42)));
   drawArrow(tp[0], tp[1], tb, px(12), px(4), '#E69F00');
-  if (sc.current) { const c = currentAt(me.x, me.y, sc); drawArrow(me.x + c[0] * 12, me.y + c[1] * 12, bearing(c), len(c) * 24, px(4), 'rgba(245,245,235,.95)'); }
   if (sc.penalty) {
     const f = Math.max(0, (sc.penalty.startIn - sceneT()) / 15);
     ctx.strokeStyle = '#E69F00'; ctx.lineWidth = px(4);
@@ -891,9 +890,10 @@ const DESC = {
   D: `<b>D · On the water, lean.</b> B with the extras cut, after feedback on B.<ul>
       <li>Fixed readouts: clock and place top left, wind speed and compass direction (over the ground) top centre, and a small minimap top right.</li>
       <li>No speed number: every boat leaves a wake whose length and spread grow with speed. Shadow shows up as your wake shrinking.</li>
+      <li>No current on the water: no arrows and no current at the boat. The tide forecast is shown only in the pre-race briefing. The shallows tint stays, as part of the chart.</li>
       <li>No start aids: no ghost dot and no favoured-end marker.</li>
       <li>Laylines are as faint as ladder lines, and can be turned off.</li>
-      <li>No ring around the boat. Next to it: an unlabelled wind arrow on the windward side, a small next-mark chevron, the current arrow from the hull, and the penalty arc only while a turn is owed.</li>
+      <li>No ring around the boat. Next to it: an unlabelled wind arrow on the windward side, a small next-mark chevron and the penalty arc only while a turn is owed.</li>
       <li>Wind shadow has no words and no highlight: the cones are very faint, and you notice it because your wake shrinks.</li>
       <li>No names on the water, and the water is never tappable. Tap Protest to open a 4 s picker: nearby boats get name tags you tap to protest. Steering keeps working everywhere else. Tap Protest again to cancel.</li>
       <li>Right-of-way glyphs stay, with no words.</li>
