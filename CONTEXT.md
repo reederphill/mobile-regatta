@@ -19,7 +19,7 @@ The countdown before the gun, during which boats manoeuvre below the start line.
 _Avoid_: pre-race, lobby countdown
 
 **OCS** (On Course Side):
-A boat with any part of her hull on the course side of the start line at the gun. She must return until her whole hull is on the pre-start side before starting.
+A boat with any part of her hull on the course side of the start line at the gun. She must return until her whole hull is on the pre-start side before starting. A boat that never comes back is scored OCS, behind every boat placed by distance to finish.
 _Avoid_: false start, early
 
 **Penalty turn**:
@@ -50,8 +50,12 @@ How far a boat still has to sail, round its remaining marks, to finish. Places b
 _Avoid_: distance to the line (the finish line is also the start line)
 
 **RET** (retired):
-A boat whose player is gone when the race ends. She's placed behind every boat still racing, including those placed by distance to finish.
+A boat whose player is gone when the race ends. She's placed behind every boat still racing, including those placed by distance to finish. When several are RET, the player who left latest ranks highest.
 _Avoid_: DNF, quit, abandoned
+
+**Ghost**:
+A boat that has stopped racing (finished, disqualified, or OCS at the close). Still drawn, but it casts no wind shadow, can't be touched and has no rights or obligations.
+_Avoid_: spectator, dead boat
 
 **Bot**:
 A computer-helmed boat that fills an empty seat in a fleet. A bot also sails a dropped player's boat until they come back. Bots are always labelled as bots.
@@ -215,7 +219,7 @@ A pattern and sail graphic with two or three colour slots, which the player fill
 _Avoid_: skin, template
 
 **Safe palette**:
-The only colours a livery may use: readable against every venue's water and never the colours of an on-water cue (vermillion, orange, yellow).
+The only colours a livery may use: readable against every venue's water and never the hue of an on-water cue (vermillion, orange, yellow, or the give-way chevron's blue). White and charcoal are allowed.
 
 **Sail number**:
 A number from 1 to 9999 the player chooses for their boat. It need not be unique; when two boats in a fleet share one, the later one shows another number for that race.
