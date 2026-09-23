@@ -93,6 +93,14 @@ _Avoid_: ranked match
 An offline race against bots. Unrated, and needs no account.
 _Avoid_: single player, training
 
+**First race**:
+The fixed practice race a new player is dropped into on first launch, before the home screen. It can be skipped.
+_Avoid_: tutorial (that's a later, separate thing)
+
+**Hint**:
+A one-line message on the race screen that fires the first time its situation comes up and stops once the player has learned it.
+_Avoid_: tip, tooltip, coach mark
+
 ### Course
 
 **Venue**:
