@@ -137,7 +137,7 @@ const st = {
   vision: VISION[params.get('vision')] ? params.get('vision') : 'none',
   zoom: parseFloat(params.get('zoom')) || 3.2,
   ladder: params.get('ladder') === 'on' ? 'on' : 'off',
-  lay: params.get('lay') === 'on' ? 'on' : 'off',
+  lay: params.get('lay') === 'off' ? 'off' : 'on',
 };
 const isB = () => st.variant === 'B' || st.variant === 'D';
 const lean = () => st.variant === 'D';
@@ -417,7 +417,7 @@ function draw() {
   if (st.variant === 'B' && st.phase === 'prestart') drawGhost(sc, me);
 
   // labels + right-of-way glyphs (screen space)
-  const lbl = [];
+  const lbl = []; lastLabels = lbl;
   for (const b of boats) {
     const [sx, sy] = toScreen(b.x, b.y);
     lbl.push({ b, sx, sy });
@@ -425,7 +425,9 @@ function draw() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   for (const { b, sx, sy } of lbl) {
     const near = len(sub([b.x, b.y], [me.x, me.y])) < 35;
-    const showName = lean() ? near : st.variant !== 'C' || b.row || b.room || b.foul;
+    const selected = sel && sel.n === b.n && performance.now() < sel.until;
+    if (selected) { ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.arc(sx, sy, 20, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+    const showName = lean() ? selected : st.variant !== 'C' || b.row || b.room || b.foul;
     if (showName) {
       ctx.font = '600 11px -apple-system, system-ui'; ctx.textAlign = 'center';
       const txt = st.variant === 'B' && b.row ? `${b.n} · ${b.row === 'keepclear' ? 'keep clear' : 'your right of way'}` : b.n;
@@ -514,8 +516,9 @@ function drawLaylines(sc, me, upwind, legMarks) {
     const near = cross < 2 * BL;
     if (st.variant === 'C' && cross > 60) continue;
     ctx.strokeStyle = near ? '#F0E442' : 'rgba(240,228,66,.85)'; ctx.lineWidth = px(near ? 5 : 3);
+    if (lean()) { ctx.strokeStyle = 'rgba(240,228,66,.22)'; ctx.lineWidth = px(1); }
     ctx.setLineDash(a.dashed ? [px(12), px(7)] : []);
-    ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 3;
+    ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = lean() ? 0 : 3;
     line(a.m, end); ctx.setLineDash([]); ctx.shadowBlur = 0;
   }
 }
@@ -532,11 +535,12 @@ function shadowCone(b, windFrom, isMe, hit) {
 function drawBoat(b, color, isMe, sc) {
   const twa = isMe ? b.twa : null;
   ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(-b.h * D2R); ctx.scale(DRAW, DRAW);
+  if (isMe && lean()) { ctx.shadowColor = 'rgba(255,255,255,.55)'; ctx.shadowBlur = 10; }
   if (isMe && !lean()) { ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.strokeStyle = '#fff'; ctx.lineWidth = px(2) / DRAW; ctx.beginPath(); ctx.arc(0, 0, 3.8, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
   ctx.fillStyle = color; ctx.strokeStyle = isMe ? '#000' : 'rgba(0,0,0,.7)'; ctx.lineWidth = px(isMe ? 2.2 : 1.4) / DRAW;
   ctx.beginPath();
   ctx.moveTo(0, 2.1); ctx.bezierCurveTo(0.9, 1.2, 0.8, -1.4, 0.6, -2.1); ctx.lineTo(-0.6, -2.1); ctx.bezierCurveTo(-0.8, -1.4, -0.9, 1.2, 0, 2.1);
-  ctx.fill(); ctx.stroke();
+  ctx.fill(); ctx.stroke(); ctx.shadowBlur = 0;
   // boom: port tack → boom to starboard (+x)
   const heading = b.h, rel = wrap(heading - sc.wind.from);
   const boomSide = rel > 0 ? -1 : 1;           // wind over starboard (rel<0) → boom to port
@@ -593,7 +597,7 @@ function drawRing(sc, me) {
   }
   // screen-space text around ring
   const labels = [
-    [curP, vec(sc.wind.from + 180, px(22)), `${sc.wind.kn} kn`],
+    [curP, vec(sc.wind.from + 180, px(22)), lean() ? `${sc.wind.kn} kn @ ${Math.abs(Math.round(wrap(sc.wind.from - me.h)))}°` : `${sc.wind.kn} kn`],
     [meanP, [0, 0], ''],
     [tp, vec(tb, px(22)), `${Math.round(len(sub(sc.target, [me.x, me.y])))} m`],
   ];
@@ -601,7 +605,7 @@ function drawRing(sc, me) {
     labels.push([add([me.x, me.y], vec(sc.wind.from / 2 + (sc.wind.from < 0 ? -28 : 28), R)), vec(sc.wind.from / 2 + (sc.wind.from < 0 ? -28 : 28), px(22)), `${lift >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(lift))}°`]);
   }
   if (sc.current) { const c = currentAt(me.x, me.y, sc); labels.push([[me.x, me.y], vec(bearing(c), len(c) * 26 + px(16)), `${(len(c) * KN).toFixed(1)} kn`]); }
-  if (lean()) labels.splice(0, labels.length, ...labels.filter(l => !/ m$/.test(l[2]) && !(sc.current && l[0][0] === me.x && l[0][1] === me.y)));
+  if (lean()) labels.splice(0, labels.length, ...labels.filter(l => !/ m$/.test(l[2]) && !/[▲▼]/.test(l[2]) && !(sc.current && l[0][0] === me.x && l[0][1] === me.y)));
   const pts = labels.map(([p, o, s]) => [toScreen(p[0] + o[0], p[1] + o[1]), s]);
   ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.font = '800 12px -apple-system'; ctx.textAlign = 'center';
@@ -651,14 +655,31 @@ let lastHUD = 0;
 function fmtClock(s) { const neg = s < 0; s = Math.abs(Math.floor(neg ? Math.ceil(s) : s)); return (neg ? '−' : '') + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 function ord(n) { return n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th'); }
 function arrow(deg, size = 18, color = '#fff') { return `<svg width="${size}" height="${size}" viewBox="-10 -10 20 20" style="transform:rotate(${deg}deg);vertical-align:middle"><path d="M0 -9 L6 3 L1.5 1.5 L1.5 9 L-1.5 9 L-1.5 1.5 L-6 3Z" fill="${color}" stroke="#000" stroke-width="1"/></svg>`; }
+let sel = null, lastLabels = [], filed = null;
+cv.addEventListener('pointerdown', e => {
+  if (!lean()) return;
+  const rc = cv.getBoundingClientRect(), x = (e.clientX - rc.left) * 390 / rc.width, y = (e.clientY - rc.top) * 844 / rc.height;
+  const hit = lastLabels.map(l => ({ l, d: Math.hypot(l.sx - x, l.sy - y) })).filter(h => h.d < 28).sort((a, b) => a.d - b.d)[0];
+  sel = hit ? { n: hit.l.b.n, until: performance.now() + 3000 } : null;
+  lastHUD = 0;
+});
+hud.addEventListener('click', e => {
+  if (!e.target.closest('#protest')) return;
+  if (!sel || performance.now() > sel.until) return;
+  filed = { n: sel.n, until: performance.now() + 2500 }; sel = null; lastHUD = 0;
+});
 function controls(sc) {
   const running = sc.player.twa > 90;
   return `
     <div class="btn glass abs" style="left:16px;top:58px;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900">❚❚</div>
     <div class="btn ctl glass" style="left:16px;width:84px;height:56px;border-radius:18px;font-size:13px">EASE</div>
     <div class="btn ctl" style="left:50%;transform:translateX(-50%);width:128px;height:60px;border-radius:30px;background:#E69F00;color:#111;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,.4)">${running ? 'GYBE' : 'TACK'}</div>
-    <div class="btn ctl glass" style="right:16px;width:84px;height:56px;border-radius:18px;font-size:12px;flex-direction:column;gap:0">⚑<span style="font-size:11px">PROTEST</span></div>`;
+    <div id="protest" class="btn ctl glass" style="right:16px;width:84px;height:56px;border-radius:18px;font-size:12px;flex-direction:column;gap:0;${protestStyle()}">⚑<span style="font-size:11px">${protestLabel()}</span></div>
+    ${filed && performance.now() < filed.until ? `<div class="abs" style="left:0;right:0;bottom:170px"><div class="msg info">Protest filed against ${filed.n}. Recorded, doesn't change the result.</div></div>` : ''}`;
 }
+function protestArmed() { return !lean() || (sel && performance.now() < sel.until); }
+function protestStyle() { return protestArmed() ? (lean() ? 'border:2px solid #E69F00' : '') : 'opacity:.35'; }
+function protestLabel() { return lean() && sel && performance.now() < sel.until ? sel.n.toUpperCase() : 'PROTEST'; }
 function messages(sc) {
   return sc.msgs.map(m => `<div class="msg ${m.tone}"><span class="rule">${m.rule}</span>${m.text}</div>`).join('');
 }
@@ -836,11 +857,12 @@ const DESC = {
   D: `<b>D · On the water, lean.</b> B with the extras cut, after feedback on B.<ul>
       <li>Corner readouts: clock, place and speed top left, and a small minimap top right.</li>
       <li>No start aids: no ghost dot and no favoured-end marker.</li>
-      <li>Your boat has no halo. It's picked out by its white hull and black outline.</li>
-      <li>Laylines are off by default, as a setting (toggle in the panel).</li>
-      <li>Ring keeps the wind arrow with knots over the ground, the shift arc with ▲▼ and degrees, the next-mark chevron (no distance), and the current arrow (no number).</li>
+      <li>Laylines are as faint as ladder lines, and can be turned off.</li>
+      <li>Ring keeps the wind arrow with one label, "12 kn @ 42°" (wind speed over the ground and its angle off the bow), the shift arc (no number), the next-mark chevron (no distance), and the current arrow (no number).</li>
       <li>Wind shadow has no words and no highlight: the cones are very faint, and you notice it because your speed drops.</li>
-      <li>Names only on boats within about 35 m, with right-of-way glyphs and no words.</li>
+      <li>No names on the water. Touch a boat (click it here) to see its name for 3 s. That also arms the Protest button, which is greyed out otherwise and shows the selected boat's name.</li>
+      <li>Right-of-way glyphs stay, with no words.</li>
+      <li>Your boat has a very slight glow.</li>
       <li>Rule calls keep the tether and rule badge. The penalty is the ring plus a short "Turn · 11s / 26s".</li>
       <li>Ladder lines are a setting (toggle in the panel).</li></ul>`,
   C: `<b>C · Phase card.</b> One card near the top whose content follows the race moment, plus cues you can read without looking.<ul>
