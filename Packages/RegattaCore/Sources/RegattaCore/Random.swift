@@ -21,7 +21,8 @@ public struct SplitMix64: Sendable {
         Double(next() >> 11) * 0x1p-53
     }
 
-    /// Uniform in [a, b).
+    /// Uniform in [a, b], almost always below b: `unit()` is below 1, but `a + (b - a) * u` can
+    /// round up to exactly b. Callers must not rely on b being excluded.
     public mutating func range(_ a: Double, _ b: Double) -> Double {
         a + (b - a) * unit()
     }
@@ -31,10 +32,21 @@ public struct SplitMix64: Sendable {
         next() >> 63 == 1
     }
 
-    /// Uniform in `range`, without modulo bias (Lemire's multiply-and-reject).
+    /// Uniform in `range`, without modulo bias.
     public mutating func int(in range: Range<Int>) -> Int {
         precondition(!range.isEmpty, "int(in:) needs a non-empty range")
-        let span = UInt64(truncatingIfNeeded: range.upperBound &- range.lowerBound)
+        return int(from: range.lowerBound, span: UInt64(truncatingIfNeeded: range.upperBound &- range.lowerBound))
+    }
+
+    /// Uniform in `range`, inclusive of both ends. Works up to `Int.max` and for `Int.min...Int.max`.
+    public mutating func int(in range: ClosedRange<Int>) -> Int {
+        // Wrapping: the span of Int.min...Int.max is 2⁶⁴, which wraps to 0.
+        let span = UInt64(truncatingIfNeeded: range.upperBound &- range.lowerBound) &+ 1
+        return span == 0 ? Int(truncatingIfNeeded: next()) : int(from: range.lowerBound, span: span)
+    }
+
+    /// `lower + [0, span)`, by Lemire's multiply-and-reject. `span` must be non-zero.
+    private mutating func int(from lower: Int, span: UInt64) -> Int {
         var product = next().multipliedFullWidth(by: span)
         if product.low < span {
             let threshold = (0 &- span) % span
@@ -42,12 +54,7 @@ public struct SplitMix64: Sendable {
                 product = next().multipliedFullWidth(by: span)
             }
         }
-        return range.lowerBound &+ Int(truncatingIfNeeded: product.high)
-    }
-
-    /// Uniform in `range`, inclusive of both ends.
-    public mutating func int(in range: ClosedRange<Int>) -> Int {
-        int(in: range.lowerBound ..< range.upperBound + 1)
+        return lower &+ Int(truncatingIfNeeded: product.high)
     }
 
     /// Fisher–Yates shuffle, in place.

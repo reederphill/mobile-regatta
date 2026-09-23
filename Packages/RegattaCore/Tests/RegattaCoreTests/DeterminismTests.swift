@@ -60,6 +60,15 @@ import Testing
         #expect(heads > 400 && heads < 600)
     }
 
+    @Test func closedIntRangesReachTheEndsOfInt() {
+        var rng = SplitMix64(seed: 5)
+        for _ in 0..<100 {
+            #expect(rng.int(in: (Int.max - 1)...Int.max) >= Int.max - 1)
+            #expect(rng.int(in: Int.min...Int.min) == Int.min)
+            _ = rng.int(in: Int.min...Int.max)
+        }
+    }
+
     @Test func shuffleIsASeededPermutation() {
         var a = SplitMix64(seed: 4), b = SplitMix64(seed: 4)
         var x = Array(0..<20), y = Array(0..<20)
@@ -119,9 +128,12 @@ import Testing
 
     @Test func goldenRowsAreWellFormed() throws {
         for (version, digest) in try Self.goldenTable() {
-            let revision = version.split(separator: "/", maxSplits: 1).first.flatMap { Int($0) }
-            #expect(revision != nil && revision! <= simulationRevision, "bad golden key \(version)")
-            #expect(version.hasSuffix("/" + replayPlatform) || revision! < simulationRevision,
+            guard let revision = version.split(separator: "/", maxSplits: 1).first.flatMap({ Int($0) }) else {
+                Issue.record("golden key \(version) has no revision")
+                continue
+            }
+            #expect(revision <= simulationRevision, "bad golden key \(version)")
+            #expect(version.hasSuffix("/" + replayPlatform) || revision < simulationRevision,
                     "golden row \(version) is not for the replay platform")
             #expect(digest.count == 18 && digest.hasPrefix("0x") && UInt64(digest.dropFirst(2), radix: 16) != nil,
                     "bad golden digest \(digest)")
