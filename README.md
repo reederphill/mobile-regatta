@@ -17,6 +17,10 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Rules.swift             Rules 10, 11, 12, 13, 18, 22, 31 — who had to keep clear
   Race.swift              fixed-step race loop: start sequence, OCS, contacts, penalties, finish
   BotBrain.swift          AI helms: start timing, laylines, shifts, roundings, keeping clear
+  Random.swift            SplitMix64 and our own range, coin and shuffle mappings
+  SimulationVersion.swift simulation version: revision, toolchain, C library, architecture
+  Digest.swift            FNV-1a state digest for golden replay tests
+  Tests/Goldens.json      golden digests keyed by simulation version
 Regatta/                The iOS app
   Game/GameScene.swift    SpriteKit renderer, camera, touch steering
   Game/BoatNode.swift     batched boat sprites, sails, wakes, wind-shadow cones
@@ -24,9 +28,30 @@ Regatta/                The iOS app
   UI/                     menu, HUD, minimap, results
 ```
 
-The simulation runs at a fixed 60 Hz, independent of the display (the app renders at up to 120 Hz on
-ProMotion). Everything the rules engine decides lives in `RegattaCore`, so it can later move to a
-server for authoritative multiplayer.
+The simulation runs at a fixed 30 Hz (`Race.tickRate`), independent of the display (the app renders at
+up to 120 Hz on ProMotion). The race clock is an integer `tick`: 0 at the gun, so a 60 s sequence starts
+at −1800, and `time` is derived from it, never accumulated. Falling behind means running several fixed
+ticks, never one longer step. Everything the rules engine decides lives in `RegattaCore`, so it can move
+to a Linux server for authoritative multiplayer.
+
+### Determinism
+
+Races are replayed from their seed and input log (ADR 0002), so on the race server `RegattaCore` must be
+bit-for-bit deterministic:
+
+- All randomness comes from the race's `SplitMix64`, mapped with its own `unit()`, `range`, `bool()`,
+  `int(in:)` and `shuffle`. No standard-library random APIs, and no wall clock.
+- The step path never iterates a `Set` or `Dictionary`: their order depends on a per-process hash seed.
+  Look them up by key and iterate arrays.
+- `simulationVersion` is `<revision>/<toolchain>/<C library>/<architecture>`. Bump `simulationRevision`
+  for any change to simulation output and add its row to `Tests/Goldens.json`; a changed digest without a
+  new row fails the golden test.
+- The replay platform is pinned to the `swift:6.3.3-noble` image (by digest, in `scripts/linux-test.sh`)
+  on `linux/amd64`: Swift 6.3.3, glibc 2.39, x86_64. Trig uses that platform's libm rather than our own
+  implementation: the C library is already part of the simulation version, and iOS clients only have to
+  be close. Upgrading the image is a simulation version change.
+- Golden digests are asserted only on the replay platform. On macOS the tests check that the digest is
+  the same twice in one process and across two processes (`scripts/check-digest-stable.sh`).
 
 ## Building
 
@@ -39,6 +64,15 @@ Run the simulation tests from the command line:
 ```bash
 cd Packages/RegattaCore && swift test
 ```
+
+Run them on the pinned Linux replay platform, in debug and release (needs podman or docker):
+
+```bash
+scripts/linux-test.sh
+```
+
+CI (`.github/workflows/ci.yml`) runs `scripts/linux-test.sh` on Linux, and `swift test` plus
+`scripts/check-digest-stable.sh` on macOS.
 
 ### Launch arguments
 

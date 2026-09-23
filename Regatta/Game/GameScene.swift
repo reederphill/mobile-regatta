@@ -2,7 +2,7 @@ import SpriteKit
 import RegattaCore
 
 /// Renders the race and turns touches into rudder input. The simulation advances
-/// at a fixed 60 Hz regardless of display refresh rate.
+/// at a fixed 30 Hz (`Race.tickRate`) regardless of display refresh rate.
 final class GameScene: SKScene {
     static let pointsPerMeter: CGFloat = 8
 
@@ -21,7 +21,8 @@ final class GameScene: SKScene {
     private var boatNodes: [BoatNode] = []
     private var puffNodes: [SKSpriteNode] = []
 
-    private let fixedStep = 1.0 / 60
+    // Stopgap fixed-step loop; #61 replaces it.
+    private let fixedStep = Race.dt
     private var accumulator = 0.0
     private var lastUpdate: TimeInterval?
     private var hudCountdown = 0.0
@@ -139,7 +140,7 @@ final class GameScene: SKScene {
         race.setPlayerRudder(rudderInput)
         accumulator += frameTime
         while accumulator >= fixedStep {
-            race.step(fixedStep)
+            race.step()
             accumulator -= fixedStep
         }
 
