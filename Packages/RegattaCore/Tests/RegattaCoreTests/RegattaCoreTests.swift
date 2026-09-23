@@ -105,9 +105,9 @@ import Testing
     /// Steers the player toward `heading` with a simple proportional helm.
     func sail(_ race: Race, heading: Double, seconds: Double) -> [RaceEvent] {
         var events: [RaceEvent] = []
-        for _ in 0..<Int(seconds * 60) {
+        for _ in 0..<Int(seconds * Double(Race.tickRate)) {
             race.setPlayerRudder(wrapAngle(heading - race.player.heading) / deg2rad(20))
-            race.step(1.0 / 60)
+            race.step()
             events += race.drainEvents()
         }
         return events
@@ -134,16 +134,15 @@ import Testing
         let race = Race(config: .init(opponents: 0, seed: 3))
         let before = race.player
         race.playerTackOrGybe()
-        for _ in 0..<(60 * 5) { race.step(1.0 / 60) }
+        for _ in 0..<(Race.tickRate * 5) { race.step() }
         #expect(race.player.tack != before.tack || race.player.twa > deg2rad(80))
     }
 
     @Test func botFleetCompletesARace() {
         let race = Race(config: .init(opponents: 7, laps: 2, prestartSeconds: 45, seed: 42, autopilotPlayer: true))
-        let dt = 1.0 / 30
         var steps = 0
-        while !race.isOver && steps < Int(1_500 / dt) {
-            race.step(dt)
+        while !race.isOver && steps < 1_500 * Race.tickRate {
+            race.step()
             steps += 1
         }
         let finishers = race.boats.filter { $0.status == .finished }

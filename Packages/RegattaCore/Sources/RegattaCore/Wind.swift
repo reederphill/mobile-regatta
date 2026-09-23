@@ -30,7 +30,10 @@ public struct WindField: Sendable {
     /// Metres per second.
     public let baseSpeed: Double
     public private(set) var puffs: [Puff] = []
-    public private(set) var time: Double = 0
+    /// Ticks stepped since the field was created.
+    public private(set) var tick = 0
+    /// Seconds since the field was created, derived from `tick` so it never accumulates rounding.
+    public var time: Double { Double(tick) / Double(Race.tickRate) }
 
     private let areaMin: Vec2
     private let areaMax: Vec2
@@ -40,7 +43,7 @@ public struct WindField: Sendable {
 
     public init(seed: UInt64, baseDirection: Double = 0, baseSpeed: Double = 6.5, areaMin: Vec2, areaMax: Vec2) {
         var generator = SplitMix64(seed: seed)
-        phases = (0..<4).map { _ in Double.random(in: 0..<(2 * .pi), using: &generator) }
+        phases = (0..<4).map { _ in generator.range(0, 2 * .pi) }
         rng = generator
         self.baseDirection = baseDirection
         self.baseSpeed = baseSpeed
@@ -48,7 +51,7 @@ public struct WindField: Sendable {
         self.areaMax = areaMax
         for _ in 0..<puffCount {
             var puff = makePuff()
-            puff.age = Double.random(in: 0..<puff.lifetime, using: &rng)
+            puff.age = rng.range(0, puff.lifetime)
             puffs.append(puff)
         }
     }
@@ -70,8 +73,10 @@ public struct WindField: Sendable {
         return baseSpeed * max(0.4, factor)
     }
 
-    public mutating func step(_ dt: Double) {
-        time += dt
+    /// Advances one fixed tick of `Race.dt`.
+    public mutating func step() {
+        let dt = Race.dt
+        tick += 1
         let drift = -Vec2.heading(baseDirection + globalShift) * baseSpeed * 0.35
         for i in puffs.indices {
             puffs[i].age += dt
@@ -82,16 +87,16 @@ public struct WindField: Sendable {
     }
 
     private mutating func makePuff() -> Puff {
-        let isLull = Double.random(in: 0..<1, using: &rng) < 0.3
+        let isLull = rng.unit() < 0.3
         return Puff(
             center: Vec2(
-                Double.random(in: areaMin.x...areaMax.x, using: &rng),
-                Double.random(in: areaMin.y...areaMax.y, using: &rng)
+                rng.range(areaMin.x, areaMax.x),
+                rng.range(areaMin.y, areaMax.y)
             ),
-            radius: Double.random(in: 35...90, using: &rng),
-            strength: isLull ? -Double.random(in: 0.12...0.22, using: &rng) : Double.random(in: 0.15...0.35, using: &rng),
+            radius: rng.range(35, 90),
+            strength: isLull ? -rng.range(0.12, 0.22) : rng.range(0.15, 0.35),
             age: 0,
-            lifetime: Double.random(in: 40...90, using: &rng)
+            lifetime: rng.range(40, 90)
         )
     }
 }
