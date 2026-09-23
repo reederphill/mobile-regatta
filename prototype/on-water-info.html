@@ -427,7 +427,7 @@ function draw() {
     const near = len(sub([b.x, b.y], [me.x, me.y])) < 35;
     const selected = sel && sel.n === b.n && performance.now() < sel.until;
     if (selected) { ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.arc(sx, sy, 20, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
-    const showName = lean() ? selected : st.variant !== 'C' || b.row || b.room || b.foul;
+    const showName = lean() ? false : st.variant !== 'C' || b.row || b.room || b.foul;
     if (showName) {
       ctx.font = '600 11px -apple-system, system-ui'; ctx.textAlign = 'center';
       const txt = st.variant === 'B' && b.row ? `${b.n} · ${b.row === 'keepclear' ? 'keep clear' : 'your right of way'}` : b.n;
@@ -655,19 +655,21 @@ let lastHUD = 0;
 function fmtClock(s) { const neg = s < 0; s = Math.abs(Math.floor(neg ? Math.ceil(s) : s)); return (neg ? '−' : '') + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
 function ord(n) { return n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th'); }
 function arrow(deg, size = 18, color = '#fff') { return `<svg width="${size}" height="${size}" viewBox="-10 -10 20 20" style="transform:rotate(${deg}deg);vertical-align:middle"><path d="M0 -9 L6 3 L1.5 1.5 L1.5 9 L-1.5 9 L-1.5 1.5 L-6 3Z" fill="${color}" stroke="#000" stroke-width="1"/></svg>`; }
-let sel = null, lastLabels = [], filed = null;
-cv.addEventListener('pointerdown', e => {
-  if (!lean()) return;
-  const rc = cv.getBoundingClientRect(), x = (e.clientX - rc.left) * 390 / rc.width, y = (e.clientY - rc.top) * 844 / rc.height;
-  const hit = lastLabels.map(l => ({ l, d: Math.hypot(l.sx - x, l.sy - y) })).filter(h => h.d < 28).sort((a, b) => a.d - b.d)[0];
-  sel = hit ? { n: hit.l.b.n, until: performance.now() + 3000 } : null;
-  lastHUD = 0;
-});
+let sel = null, lastLabels = [], filed = null, picking = null;   // sel stays null: the water is never tappable
+const picker = () => lean() && picking && performance.now() < picking;
 hud.addEventListener('click', e => {
-  if (!e.target.closest('#protest')) return;
-  if (!sel || performance.now() > sel.until) return;
-  filed = { n: sel.n, until: performance.now() + 2500 }; sel = null; lastHUD = 0;
+  const tag = e.target.closest('[data-boat]');
+  if (tag && picker()) { filed = { n: tag.dataset.boat, until: performance.now() + 2500 }; picking = null; lastHUD = 0; return; }
+  if (!e.target.closest('#protest') || !lean()) return;
+  picking = picker() ? null : performance.now() + 4000; lastHUD = 0;
 });
+function pickerTags() {
+  if (!picker()) return '';
+  const left = Math.ceil((picking - performance.now()) / 1000);
+  return lastLabels.filter(l => l.sx > 10 && l.sx < 380 && l.sy > 100 && l.sy < 760).map(l =>
+    `<div class="btn abs" data-boat="${l.b.n}" style="left:${l.sx - 44}px;top:${l.sy + 14}px;width:88px;height:30px;border-radius:15px;background:#111;border:2px solid #E69F00;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;cursor:pointer">⚑ ${l.b.n}</div>`).join('')
+    + `<div class="abs" style="left:0;right:0;bottom:92px;text-align:center"><span class="msg info" style="display:inline-block">Protest who? ${left}s · tap Protest again to cancel</span></div>`;
+}
 function controls(sc) {
   const running = sc.player.twa > 90;
   return `
@@ -677,9 +679,8 @@ function controls(sc) {
     <div id="protest" class="btn ctl glass" style="right:16px;width:84px;height:56px;border-radius:18px;font-size:12px;flex-direction:column;gap:0;${protestStyle()}">⚑<span style="font-size:11px">${protestLabel()}</span></div>
     ${filed && performance.now() < filed.until ? `<div class="abs" style="left:0;right:0;bottom:170px"><div class="msg info">Protest filed against ${filed.n}. Recorded, doesn't change the result.</div></div>` : ''}`;
 }
-function protestArmed() { return !lean() || (sel && performance.now() < sel.until); }
-function protestStyle() { return protestArmed() ? (lean() ? 'border:2px solid #E69F00' : '') : 'opacity:.35'; }
-function protestLabel() { return lean() && sel && performance.now() < sel.until ? sel.n.toUpperCase() : 'PROTEST'; }
+function protestStyle() { return picker() ? 'background:#E69F00;color:#111' : ''; }
+function protestLabel() { return picker() ? 'CANCEL' : 'PROTEST'; }
 function messages(sc) {
   return sc.msgs.map(m => `<div class="msg ${m.tone}"><span class="rule">${m.rule}</span>${m.text}</div>`).join('');
 }
@@ -703,7 +704,7 @@ function renderHUD(sc, me, t) {
   const lift = liftDeg(sc);
   const cur = sc.current ? currentAt(me.x, me.y, sc) : null;
   const common = { clock, tb, tdist, windTo, lift, cur };
-  hud.innerHTML = (st.variant === 'A' ? hudA : st.variant === 'B' ? hudB : st.variant === 'D' ? hudD : hudC)(sc, me, t, common) + controls(sc);
+  hud.innerHTML = (st.variant === 'A' ? hudA : st.variant === 'B' ? hudB : st.variant === 'D' ? hudD : hudC)(sc, me, t, common) + controls(sc) + pickerTags();
 }
 
 // A: cockpit — fixed top bar, minimap, instrument strip
@@ -860,7 +861,7 @@ const DESC = {
       <li>Laylines are as faint as ladder lines, and can be turned off.</li>
       <li>Ring keeps the wind arrow with one label, "12 kn @ 42°" (wind speed over the ground and its angle off the bow), the shift arc (no number), the next-mark chevron (no distance), and the current arrow (no number).</li>
       <li>Wind shadow has no words and no highlight: the cones are very faint, and you notice it because your speed drops.</li>
-      <li>No names on the water. Touch a boat (click it here) to see its name for 3 s. That also arms the Protest button, which is greyed out otherwise and shows the selected boat's name.</li>
+      <li>No names on the water, and the water is never tappable. Tap Protest to open a 4 s picker: nearby boats get name tags you tap to protest. Steering keeps working everywhere else. Tap Protest again to cancel.</li>
       <li>Right-of-way glyphs stay, with no words.</li>
       <li>Your boat has a very slight glow.</li>
       <li>Rule calls keep the tether and rule badge. The penalty is the ring plus a short "Turn · 11s / 26s".</li>
