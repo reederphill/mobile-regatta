@@ -30,6 +30,21 @@ _Avoid_: spin, 720 (except as UI shorthand)
 Breaking a rule of Part 2 of the RRS with respect to another boat.
 _Avoid_: collision (contact is not itself a foul)
 
+**Finish window**:
+The time after the first boat finishes during which the rest of the fleet can still finish.
+_Avoid_: time limit (that's the overall cap)
+
+**Time limit**:
+The latest time after the gun at which the race ends, whether or not any boat has finished.
+
+**Distance to finish**:
+How far a boat still has to sail, round its remaining marks, to finish. Places boats that haven't finished when the race ends.
+_Avoid_: distance to the line (the finish line is also the start line)
+
+**Bot**:
+A computer-helmed boat that fills an empty seat in a fleet.
+_Avoid_: AI, CPU
+
 ### Course
 
 **Venue**:
