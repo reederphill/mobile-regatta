@@ -45,9 +45,34 @@ The latest time after the gun at which the race ends, whether or not any boat ha
 How far a boat still has to sail, round its remaining marks, to finish. Places boats that haven't finished when the race ends.
 _Avoid_: distance to the line (the finish line is also the start line)
 
+**RET** (retired):
+A boat whose player is gone when the race ends. She's placed behind every boat still racing, including those placed by distance to finish.
+_Avoid_: DNF, quit, abandoned
+
 **Bot**:
 A computer-helmed boat that fills an empty seat in a fleet.
 _Avoid_: AI, CPU
+
+**Briefing**:
+The short screen between fleet lock and the start sequence showing the venue, conditions, the wind and tide forecasts, the course and the fleet. The only place current is shown.
+_Avoid_: loading screen, pre-race
+
+### Online play
+
+**Queue**:
+Where players wait to be placed in an online race. There's one, global.
+_Avoid_: lobby (the lobby is the chat space), room, matchmaking
+
+**Fleet lock**:
+The moment an online race's boats are fixed and the briefing begins. Leaving before the gun costs nothing; a bot takes the seat.
+
+**Rated race**:
+An online race with at least two humans at the gun. Only results between humans move ratings.
+_Avoid_: ranked match
+
+**Practice race**:
+An offline race against bots. Unrated, and needs no account.
+_Avoid_: single player, training
 
 ### Course
 
@@ -77,6 +102,12 @@ _Avoid_: spreader mark, wing mark (a wing mark is on a reaching course)
 **Race area**:
 The water a course's boats may sail in, bounded by land or a drawn boundary. A boat can't leave it.
 _Avoid_: arena, bounds, map edge
+
+**Layline**:
+The line from a mark along which a boat, at her best angle to the wind, can just fetch it without another tack or gybe. Drawn from the wind only, never from current.
+
+**Ladder line**:
+A line drawn across the wind, so boats on the same line are level in the race to windward or leeward.
 
 ### Conditions
 
