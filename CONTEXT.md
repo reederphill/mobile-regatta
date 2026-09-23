@@ -199,5 +199,15 @@ Letting the sheets out so the sail flaps and the boat slows, e.g. to hold positi
 _Avoid_: luff (in the rules, luffing means turning toward the wind)
 
 **Livery**:
-The player-chosen colours and graphics applied to their boat. Cosmetic only.
+How a player's boat looks: a livery design, the colours filling it, and a sail number. Cosmetic only, and every other player sees it.
 _Avoid_: skin
+
+**Livery design**:
+A pattern and sail graphic with two or three colour slots, which the player fills from the safe palette. Starter designs are free, some are earned by racing, and the rest are sold one at a time.
+_Avoid_: skin, template
+
+**Safe palette**:
+The only colours a livery may use: readable against every venue's water and never the colours of an on-water cue (vermillion, orange, yellow).
+
+**Sail number**:
+A number from 1 to 9999 the player chooses for their boat. It need not be unique; when two boats in a fleet share one, the later one shows another number for that race.
