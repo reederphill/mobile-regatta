@@ -462,6 +462,23 @@ function draw() {
     ctx.fillStyle = '#111'; ctx.font = '900 14px -apple-system'; ctx.textAlign = 'center'; ctx.fillText('RULE 10', mx, my + 5);
   }
 
+  // D: next-mark arrow pinned to the screen edge, only while the mark is off screen
+  if (lean() && !sc.briefing) {
+    setWorldTransform(me, sc);
+    const [mx, my] = toScreen(sc.target[0], sc.target[1]), [bx, by] = toScreen(me.x, me.y);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const box = { l: 18, r: W - 18, t: 112, b: H - 100 };
+    if (mx < box.l || mx > box.r || my < box.t || my > box.b) {
+      const dx = mx - bx, dy = my - by;
+      const k = Math.min(dx > 0 ? (box.r - bx) / dx : dx < 0 ? (box.l - bx) / dx : Infinity, dy > 0 ? (box.b - by) / dy : dy < 0 ? (box.t - by) / dy : Infinity);
+      const ex = bx + dx * k, ey = by + dy * k, a = Math.atan2(dy, dx);
+      ctx.save(); ctx.translate(ex, ey); ctx.rotate(a);
+      ctx.fillStyle = '#E69F00'; ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-10, -10); ctx.lineTo(-5, 0); ctx.lineTo(-10, 10); ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   // phase-card edge cues (C)
   if (st.variant === 'C' && !sc.briefing) drawEdges(sc, me);
 
@@ -593,8 +610,6 @@ function drawWake(b, v) {
 }
 // D: no ring. A small next-mark chevron, the current arrow from the hull, and the penalty arc only while one is owed.
 function drawLean(sc, me) {
-  const tb = bearing(sub(sc.target, [me.x, me.y])), tp = add([me.x, me.y], vec(tb, px(42)));
-  drawArrow(tp[0], tp[1], tb, px(12), px(4), '#E69F00');
   if (sc.penalty) {
     const f = Math.max(0, (sc.penalty.startIn - sceneT()) / 15);
     ctx.strokeStyle = '#E69F00'; ctx.lineWidth = px(4);
@@ -899,7 +914,7 @@ const DESC = {
       <li>No current on the water: no arrows and no current at the boat. The tide forecast is shown only in the pre-race briefing. The shallows tint stays, as part of the chart.</li>
       <li>No start aids: no ghost dot and no favoured-end marker.</li>
       <li>Laylines are as faint as ladder lines, come from the wind alone (never adjusted for current), and can be turned off.</li>
-      <li>No ring around the boat. Next to it: a wind vane (a thin vermillion arrow drawn under the hull, one boat length from the boat's centre toward the wind), a small next-mark chevron and the penalty arc only while a turn is owed.</li>
+      <li>No ring around the boat. Next to it: a wind vane (a thin vermillion arrow drawn under the hull, one boat length from the boat's centre toward the wind) and the penalty arc only while a turn is owed. The next mark gets an orange arrow pinned to the screen edge, only while the mark is off screen.</li>
       <li>Wind shadow has no words and no highlight: the cones are very faint, and you notice it because your wake shrinks.</li>
       <li>No names on the water, and the water is never tappable. Tap Protest to open a 4 s picker: nearby boats get name tags you tap to protest. Steering keeps working everywhere else. Tap Protest again to cancel.</li>
       <li>Right-of-way glyphs stay, with no words.</li>
