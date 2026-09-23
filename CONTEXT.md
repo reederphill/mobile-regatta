@@ -54,8 +54,15 @@ A boat whose player is gone when the race ends. She's placed behind every boat s
 _Avoid_: DNF, quit, abandoned
 
 **Bot**:
-A computer-helmed boat that fills an empty seat in a fleet.
+A computer-helmed boat that fills an empty seat in a fleet. A bot also sails a dropped player's boat until they come back. Bots are always labelled as bots.
 _Avoid_: AI, CPU
+
+**Bot tier**:
+How well a bot sails: **Club**, **Regional** or **National**. Online, bots are matched to the fleet's ratings instead of using a fixed tier.
+_Avoid_: difficulty, level
+
+**Mixed fleet**:
+A practice race whose bots are drawn from all three bot tiers. The default for practice.
 
 **Briefing**:
 The short screen between fleet lock and the start sequence showing the venue, conditions, the wind and tide forecasts, the course and the fleet. The only place current is shown.
