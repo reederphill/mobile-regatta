@@ -30,6 +30,10 @@ _Avoid_: spin, 720, 360 (except as UI shorthand)
 Breaking a rule of Part 2 of the RRS with respect to another boat.
 _Avoid_: collision (contact is not itself a foul)
 
+**Last point of certainty**:
+The last moment at which it was certain whether two boats were overlapped, or whether a boat was in a mark's zone. A change counts only once it has held for a short margin.
+_Avoid_: overlap timer
+
 **Protest**:
 A player's claim that a rule was broken in an incident, or that a rule call was wrong. In v1.0 it's recorded but never changes a result.
 _Avoid_: report, appeal (an appeal is a later challenge to a protest decision)
