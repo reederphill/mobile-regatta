@@ -409,11 +409,13 @@ function draw() {
   }
 
   // boats
+  if (lean()) { for (const b of boats) drawWake(b, b.v); drawWake(me, playerSpeed(sc, me, t)); }
   for (const b of boats) drawBoat(b, LIV[b.c], false, sc);
   drawBoat(me, '#ffffff', true, sc);
 
   // B: in-world instruments around the player
-  if (isB() && !sc.briefing) drawRing(sc, me);
+  if (st.variant === 'B' && !sc.briefing) drawRing(sc, me);
+  if (lean() && !sc.briefing) drawLean(sc, me);
   if (st.variant === 'B' && st.phase === 'prestart') drawGhost(sc, me);
 
   // labels + right-of-way glyphs (screen space)
@@ -566,6 +568,32 @@ function roomGlyph(x, y) {
 }
 
 // B: compass ring around own boat
+// D: speed is the wake. Length and spread grow with speed, so a boat slowed by shadow visibly trails less.
+function playerSpeed(sc, me, t) { return sc.shadowed ? me.v * (1 - 0.3 * Math.min(1, t / 3)) : me.v; }
+function drawWake(b, v) {
+  const back = vec(b.h + 180, 1), stern = add([b.x, b.y], vec(b.h + 180, 2.1 * DRAW)), L = v * 5.5, spread = 14 + v * 2;
+  for (const side of [-1, 1]) {
+    const end = add(stern, vec(b.h + 180 + side * spread, L));
+    const g = ctx.createLinearGradient(stern[0], stern[1], end[0], end[1]);
+    g.addColorStop(0, 'rgba(255,255,255,.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.strokeStyle = g; ctx.lineWidth = px(2); line(stern, end);
+  }
+  const tail = add(stern, [back[0] * L * 1.2, back[1] * L * 1.2]);
+  const g = ctx.createLinearGradient(stern[0], stern[1], tail[0], tail[1]);
+  g.addColorStop(0, 'rgba(255,255,255,.35)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.strokeStyle = g; ctx.lineWidth = px(4); line(stern, tail);
+}
+// D: no ring. A small next-mark chevron, the current arrow from the hull, and the penalty arc only while one is owed.
+function drawLean(sc, me) {
+  const tb = bearing(sub(sc.target, [me.x, me.y])), tp = add([me.x, me.y], vec(tb, px(42)));
+  drawArrow(tp[0], tp[1], tb, px(12), px(4), '#E69F00');
+  if (sc.current) { const c = currentAt(me.x, me.y, sc); drawArrow(me.x + c[0] * 12, me.y + c[1] * 12, bearing(c), len(c) * 24, px(4), 'rgba(245,245,235,.95)'); }
+  if (sc.penalty) {
+    const f = Math.max(0, (sc.penalty.startIn - sceneT()) / 15);
+    ctx.strokeStyle = '#E69F00'; ctx.lineWidth = px(4);
+    ctx.beginPath(); ctx.arc(me.x, me.y, px(34), Math.PI / 2, Math.PI / 2 + f * Math.PI * 2); ctx.stroke();
+  }
+}
 function drawRing(sc, me) {
   const R = px(78);
   ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = px(1.5);
@@ -751,11 +779,14 @@ function hudB(sc, me, t, c) {
 // D: B trimmed — clock, place and speed only; shadow shows up as the speed falling, never as words
 function hudD(sc, me, t, c) {
   const pre = st.phase === 'prestart';
-  const v = sc.shadowed ? me.v * (1 - 0.12 * Math.min(1, t / 3)) : me.v;
   return `
     <div class="abs" style="left:66px;top:56px;text-shadow:0 1px 3px #000">
       <div class="mono big" style="font-size:24px;${c.clock < 0 ? 'color:#ffde3b' : ''}">${fmtClock(c.clock)}</div>
-      <div class="mono" style="font-size:13px;font-weight:700">${sc.ocs ? 'OCS · ' : pre ? '' : `${ord(sc.place[0])}/${sc.place[1]} · `}${(v * KN).toFixed(1)} kn</div>
+      <div class="mono" style="font-size:13px;font-weight:700">${sc.ocs ? 'OCS' : pre ? '' : `${ord(sc.place[0])}/${sc.place[1]}`}</div>
+    </div>
+    <div class="abs mono" style="left:150px;right:118px;top:58px;text-align:center;text-shadow:0 1px 3px #000">
+      <div style="font-size:22px;font-weight:800">${arrow(c.windTo, 20)} ${sc.wind.kn} kn</div>
+      <div style="font-size:13px;font-weight:700;opacity:.85">from ${String((Math.round(sc.wind.from) + 360) % 360).padStart(3, '0')}°</div>
     </div>
     <canvas id="mini" class="abs" width="200" height="300" style="right:16px;top:54px;width:84px;height:126px;border-radius:12px"></canvas>
     <div class="abs" style="left:0;right:0;top:120px">${sc.msgs.filter(m => m.rule !== '10').map(m => `<div class="msg ${m.tone}"><span class="rule">${m.rule}</span>${m.short || m.text}</div>`).join('')}${sc.penalty ? `<div class="msg alert mono">Turn · ${Math.max(0, Math.ceil(sc.penalty.startIn - t))}s / ${Math.max(0, Math.ceil(sc.penalty.finishIn - t))}s</div>` : ''}</div>`;
@@ -856,11 +887,12 @@ const DESC = {
       <li>Rule calls tether the two boats with the rule number; the penalty clock is a ring around your boat.</li>
       <li>Boat labels spell out right of way.</li></ul>`,
   D: `<b>D · On the water, lean.</b> B with the extras cut, after feedback on B.<ul>
-      <li>Corner readouts: clock, place and speed top left, and a small minimap top right.</li>
+      <li>Fixed readouts: clock and place top left, wind speed and compass direction (over the ground) top centre, and a small minimap top right.</li>
+      <li>No speed number: every boat leaves a wake whose length and spread grow with speed. Shadow shows up as your wake shrinking.</li>
       <li>No start aids: no ghost dot and no favoured-end marker.</li>
       <li>Laylines are as faint as ladder lines, and can be turned off.</li>
-      <li>Ring keeps the wind arrow with one label, "12 kn @ 42°" (wind speed over the ground and its angle off the bow), the shift arc (no number), the next-mark chevron (no distance), and the current arrow (no number).</li>
-      <li>Wind shadow has no words and no highlight: the cones are very faint, and you notice it because your speed drops.</li>
+      <li>No ring around the boat. Next to it: a small next-mark chevron, the current arrow from the hull, and the penalty arc only while a turn is owed.</li>
+      <li>Wind shadow has no words and no highlight: the cones are very faint, and you notice it because your wake shrinks.</li>
       <li>No names on the water, and the water is never tappable. Tap Protest to open a 4 s picker: nearby boats get name tags you tap to protest. Steering keeps working everywhere else. Tap Protest again to cancel.</li>
       <li>Right-of-way glyphs stay, with no words.</li>
       <li>Your boat has a very slight glow.</li>
