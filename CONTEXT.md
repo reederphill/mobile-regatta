@@ -67,6 +67,14 @@ _Avoid_: loading screen, pre-race
 Where players wait to be placed in an online race. There's one, global.
 _Avoid_: lobby (the lobby is the chat space), room, matchmaking
 
+**Lobby**:
+The one global chat space where signed-in players talk between races. Queued players wait here. It isn't a room or a match.
+_Avoid_: room, channel
+
+**Quick-chat**:
+The fixed set of phrases and emotes a player can post to the lobby with one tap.
+_Avoid_: emotes (as the umbrella term), canned messages
+
 **Fleet lock**:
 The moment an online race's boats are fixed and the briefing begins. Leaving before the gun costs nothing; a bot takes the seat.
 
