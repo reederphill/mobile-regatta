@@ -505,9 +505,10 @@ function drawLaylines(sc, me, upwind, legMarks) {
       const hdg = upwind ? sc.wind.from + side * beatTWA : sc.wind.from + 180 + side * (180 - runTWA);
       if (sc.gate && ((m === C.gl && side === 1) || (m === C.gr && side === -1))) continue;
       const through = vec(hdg, 1);
-      const ground = sc.current ? add(through, [currentAt(m[0], m[1], sc)[0] / 3.2, currentAt(m[0], m[1], sc)[1] / 3.2]) : through;
+      const adjust = sc.current && !lean();   // D: laylines come from the wind alone
+      const ground = adjust ? add(through, [currentAt(m[0], m[1], sc)[0] / 3.2, currentAt(m[0], m[1], sc)[1] / 3.2]) : through;
       const back = [-ground[0] / len(ground), -ground[1] / len(ground)];
-      arms.push({ m, back, dashed: !!sc.current });
+      arms.push({ m, back, dashed: adjust });
     }
   }
   for (const a of arms) {
@@ -892,7 +893,7 @@ const DESC = {
       <li>No speed number: every boat leaves a wake whose length and spread grow with speed. Shadow shows up as your wake shrinking.</li>
       <li>No current on the water: no arrows and no current at the boat. The tide forecast is shown only in the pre-race briefing. The shallows tint stays, as part of the chart.</li>
       <li>No start aids: no ghost dot and no favoured-end marker.</li>
-      <li>Laylines are as faint as ladder lines, and can be turned off.</li>
+      <li>Laylines are as faint as ladder lines, come from the wind alone (never adjusted for current), and can be turned off.</li>
       <li>No ring around the boat. Next to it: an unlabelled wind arrow on the windward side, a small next-mark chevron and the penalty arc only while a turn is owed.</li>
       <li>Wind shadow has no words and no highlight: the cones are very faint, and you notice it because your wake shrinks.</li>
       <li>No names on the water, and the water is never tappable. Tap Protest to open a 4 s picker: nearby boats get name tags you tap to protest. Steering keeps working everywhere else. Tap Protest again to cancel.</li>
