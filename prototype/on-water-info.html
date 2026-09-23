@@ -1,0 +1,837 @@
+<!doctype html>
+<!--
+PROTOTYPE for "On-water information design" (issue #15). Throwaway: lives only on the
+prototype/on-water-info branch.
+
+Three variants of the race screen, switchable via ?variant=A|B|C (or ← →), across seven race
+moments (?phase=...). The scene is a scripted mock, not RegattaCore: it exists to judge what the
+player sees, not how the sim behaves. Built as HTML rather than in the app because the app has no
+current, gate, offset mark or boundary yet, and because the colour-blind and sunlight filters are
+the point.
+
+  A  Cockpit      — fixed instrument cluster + minimap; the water carries only geometry and pressure.
+  B  On the water — almost no HUD; numbers and hints drawn in the world around your boat.
+  C  Phase card   — one context card that changes with the race moment + peripheral edge cues.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>On-water info prototype</title>
+<style>
+  :root { --panel:#f4f4f2; --ink:#1b1b1b; --muted:#666; --line:#ddd; }
+  @media (prefers-color-scheme: dark) { :root { --panel:#1c1d20; --ink:#eee; --muted:#999; --line:#333; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 -apple-system, system-ui, sans-serif; background:var(--panel); color:var(--ink); }
+  .wrap { display:flex; gap:24px; padding:16px 16px 90px; justify-content:center; flex-wrap:wrap; }
+  .phone { position:relative; width:390px; height:844px; border-radius:44px; overflow:hidden; background:#1f5c7d;
+           box-shadow:0 0 0 10px #111, 0 20px 50px rgba(0,0,0,.35); flex:none; }
+  canvas#world { position:absolute; inset:0; }
+  #hud { position:absolute; inset:0; pointer-events:none; color:#fff;
+         font-family:-apple-system, "SF Pro Rounded", system-ui, sans-serif; }
+  #hud .btn { pointer-events:auto; }
+  .panel { width:360px; max-width:100%; }
+  .panel h2 { font-size:15px; margin:18px 0 6px; }
+  .panel h1 { font-size:18px; margin:0 0 4px; }
+  .seg { display:flex; flex-wrap:wrap; gap:6px; }
+  .seg button { font:inherit; font-size:13px; padding:5px 10px; border-radius:8px; border:1px solid var(--line);
+                background:transparent; color:var(--ink); cursor:pointer; }
+  .seg button.on { background:var(--ink); color:var(--panel); border-color:var(--ink); }
+  .note { color:var(--muted); font-size:13px; }
+  .desc { border-left:3px solid var(--ink); padding:4px 10px; margin:8px 0; font-size:13px; }
+  .desc ul { margin:4px 0; padding-left:18px; }
+  #switcher { position:fixed; left:50%; bottom:18px; transform:translateX(-50%); display:flex; align-items:center; gap:10px;
+              background:#ffde3b; color:#111; border-radius:999px; padding:6px 8px; box-shadow:0 6px 20px rgba(0,0,0,.35);
+              font-weight:700; z-index:10; }
+  #switcher button { border:0; background:#111; color:#ffde3b; width:32px; height:32px; border-radius:50%; font-size:16px; cursor:pointer; }
+  #switcher span { min-width:170px; text-align:center; }
+  @media (max-width: 800px) { .phone { transform-origin: top center; } }
+
+  /* HUD atoms */
+  .glass { background:rgba(8,20,32,.55); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); border-radius:14px; }
+  .mono { font-variant-numeric: tabular-nums; }
+  .abs { position:absolute; }
+  .lbl { font-size:10px; opacity:.7; font-weight:600; letter-spacing:.3px; text-transform:uppercase; }
+  .big { font-size:28px; font-weight:800; }
+  .ctl { position:absolute; bottom:22px; display:flex; align-items:center; justify-content:center; font-weight:800; letter-spacing:1px; }
+  .msg { margin:6px auto 0; width:max-content; max-width:340px; padding:8px 12px; border-radius:12px; font-size:13px; font-weight:600; text-align:center; }
+  .msg.alert { background:#1b1b1b; border:2px solid #E69F00; }
+  .msg.info { background:rgba(0,0,0,.55); }
+  .msg .rule { display:inline-block; background:#E69F00; color:#111; border-radius:6px; padding:0 6px; margin-right:6px; font-weight:900; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <!-- Machado et al. 2009, severity 1.0 -->
+  <filter id="deut"><feColorMatrix type="matrix" values="0.367 0.861 -0.228 0 0  0.280 0.673 0.047 0 0  -0.012 0.043 0.969 0 0  0 0 0 1 0"/></filter>
+  <filter id="prot"><feColorMatrix type="matrix" values="0.152 1.053 -0.205 0 0  0.115 0.786 0.099 0 0  -0.004 -0.048 1.052 0 0  0 0 0 1 0"/></filter>
+  <filter id="trit"><feColorMatrix type="matrix" values="1.256 -0.077 -0.179 0 0  -0.078 0.931 0.148 0 0  0.005 0.691 0.304 0 0  0 0 0 1 0"/></filter>
+</svg>
+
+<div class="wrap">
+  <div class="phone" id="phone">
+    <canvas id="world" width="390" height="844"></canvas>
+    <div id="hud"></div>
+  </div>
+
+  <div class="panel">
+    <h1>On-water information design</h1>
+    <div class="note">Prototype for issue #15. Scripted scenes, not the real sim. Touching the water steers, so only the pause, ease, tack and protest buttons are tappable.</div>
+
+    <h2>Race moment</h2>
+    <div class="seg" id="phases"></div>
+
+    <h2>Camera</h2>
+    <div class="seg" id="cams"></div>
+
+    <h2>Vision check</h2>
+    <div class="seg" id="vision"></div>
+
+    <h2>Zoom</h2>
+    <div class="seg" id="zooms"></div>
+
+    <h2>This variant</h2>
+    <div class="desc" id="desc"></div>
+
+    <h2>Shared across all three</h2>
+    <div class="note">
+      <ul>
+        <li>Puffs are darker water and lulls lighter, relative to the course average, with a catspaw texture inside puffs.</li>
+        <li>Wind direction: faint streaks drifting downwind.</li>
+        <li>Current: chunky arrows, thicker and longer where it runs harder. Shallows get a tan tint of the same lightness.</li>
+        <li>Laylines are yellow (#F0E442), dashed when adjusted for current and thicker within 2 lengths.</li>
+        <li>Marks of the current leg are orange with a dashed 3-length zone and a rounding-side arrow. Other marks are grey.</li>
+        <li>Right of way: an orange triangle with "!" on a boat you must keep clear of, a blue chevron on a boat that must keep clear of you.</li>
+        <li>The race-area boundary is a solid line with a hatched band outside it.</li>
+        <li>Liveries use Okabe–Ito colours plus a sail number. Yellow is kept for laylines.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div id="switcher"><button id="prev">←</button><span id="vlabel"></span><button id="next">→</button></div>
+
+<script>
+// ---------------------------------------------------------------- state
+const params = new URLSearchParams(location.search);
+const VARIANTS = { A: 'Cockpit', B: 'On the water', C: 'Phase card' };
+const PHASES = {
+  briefing: 'Briefing', prestart: 'Pre-start', ocs: 'OCS at gun', beat: 'Beat',
+  mark: 'Mark rounding', call: 'Rule call', run: 'Run + current',
+};
+const CAMS = { course: 'Course-up', boat: 'Boat-up' };
+const VISION = { none: 'Normal', deut: 'Deuteranopia', prot: 'Protanopia', trit: 'Tritanopia', grey: 'Greyscale', sun: 'Sunlight glare' };
+const ZOOMS = { 2.2: 'Wide', 3.2: 'Default', 4.6: 'Close' };
+const st = {
+  variant: VARIANTS[params.get('variant')] ? params.get('variant') : 'A',
+  phase: PHASES[params.get('phase')] ? params.get('phase') : 'beat',
+  cam: CAMS[params.get('cam')] ? params.get('cam') : 'course',
+  vision: VISION[params.get('vision')] ? params.get('vision') : 'none',
+  zoom: parseFloat(params.get('zoom')) || 3.2,
+};
+function syncURL() {
+  const p = new URLSearchParams({ variant: st.variant, phase: st.phase, cam: st.cam, vision: st.vision, zoom: st.zoom });
+  history.replaceState(null, '', '?' + p);
+}
+
+// ---------------------------------------------------------------- world model
+const BL = 4.2, DRAW = 1.9;                 // hull length, and how much boats are drawn larger than life
+const D2R = Math.PI / 180, KN = 1.94384;
+const C = {
+  pin: [-26, 0], cb: [27, 0], wm: [0, 360], off: [-20, 352], gl: [-9, 40], gr: [9, 40],
+  zone: 3 * BL, bound: 105,
+};
+const LIV = { orange: '#E69F00', sky: '#56B4E9', green: '#009E73', blue: '#0072B2', verm: '#D55E00', pink: '#CC79A7', black: '#222', grey: '#9aa' };
+const vec = (h, d = 1) => [Math.sin(h * D2R) * d, Math.cos(h * D2R) * d];
+const add = (a, b) => [a[0] + b[0], a[1] + b[1]];
+const sub = (a, b) => [a[0] - b[0], a[1] - b[1]];
+const len = a => Math.hypot(a[0], a[1]);
+const bearing = a => (Math.atan2(a[0], a[1]) / D2R + 360) % 360;
+const wrap = d => ((d + 540) % 360) - 180;
+function currentAt(x, y, sc) {
+  if (!sc.current) return [0, 0];
+  const shallow = x > 55;
+  const edge = Math.max(0, 1 - Math.abs(x - 10) / 140);
+  const rate = sc.current.peak * (shallow ? 0.35 : 0.6 + 0.4 * edge);   // m/s
+  return vec(sc.current.set, rate);
+}
+
+// Each scene: player, fleet, wind, what the HUD reports. Numbers the sim would compute are written in.
+const SCENES = {
+  prestart: {
+    venue: 'Open bay', clock: -38, wind: { from: -4, kn: 11 }, leg: 'Start', legName: 'Start line',
+    player: { x: 6, y: -34, h: 314, v: 2.2, tack: 'stbd', twa: 45 },
+    boats: [
+      { n: 'Orange 3', c: 'orange', x: -14, y: -12, h: 318, v: 1.2 },
+      { n: 'Sky 7', c: 'sky', x: 20, y: -9, h: 316, v: 1.0 },
+      { n: 'Green 2', c: 'green', x: -2, y: -22, h: 40, v: 1.8, row: 'rights' },
+      { n: 'Blue 5', c: 'blue', x: 12, y: -26, h: 318, v: 1.4, row: 'keepclear' },
+      { n: 'Pink 9', c: 'pink', x: -22, y: -30, h: 320, v: 1.5 },
+      { n: 'Verm 4', c: 'verm', x: 26, y: -40, h: 300, v: 1.6 },
+    ],
+    puffs: [[-40, 60, 26, .9], [30, 120, 30, .7], [60, 10, 18, -.6]],
+    target: C.pin, targetName: 'Start line', place: null,
+    prestart: { toLine: 24, dist: 34, favoured: 'pin', bias: 4 },
+    msgs: [],
+  },
+  ocs: {
+    venue: 'Open bay', clock: 4, wind: { from: -4, kn: 11 }, leg: 'Start', legName: 'Return below the line',
+    player: { x: 4, y: 3.5, h: 318, v: 3.0, tack: 'stbd', twa: 44 },
+    boats: [
+      { n: 'Orange 3', c: 'orange', x: -14, y: -2, h: 318, v: 3.1 },
+      { n: 'Sky 7', c: 'sky', x: 18, y: -3, h: 316, v: 3.0 },
+      { n: 'Blue 5', c: 'blue', x: 10, y: -6, h: 318, v: 3.0 },
+      { n: 'Pink 9', c: 'pink', x: -24, y: -4, h: 320, v: 2.9 },
+      { n: 'Verm 4', c: 'verm', x: 24, y: -9, h: 316, v: 3.0 },
+      { n: 'Green 2', c: 'green', x: -4, y: -8, h: 318, v: 2.8 },
+    ],
+    puffs: [[-40, 70, 26, .9], [30, 120, 30, .7]],
+    target: [4, -15], targetName: 'Below the line', place: [10, 10], ocs: true,
+    msgs: [{ tone: 'alert', rule: 'OCS', text: 'You were over at the gun. Return below the line.' }],
+  },
+  beat: {
+    venue: 'Open bay', clock: 160, wind: { from: -8, kn: 12 }, leg: 'Beat 1 of 4', legName: 'Windward mark',
+    player: { x: 42, y: 236, h: 34, v: 3.0, tack: 'port', twa: 42 },
+    boats: [
+      { n: 'Blue 5', c: 'blue', x: 44, y: 252, h: 35, v: 3.0 },
+      { n: 'Sky 7', c: 'sky', x: 18, y: 262, h: 310, v: 3.0, row: 'keepclear' },
+      { n: 'Orange 3', c: 'orange', x: -30, y: 290, h: 312, v: 3.1 },
+      { n: 'Green 2', c: 'green', x: 70, y: 200, h: 34, v: 2.8 },
+      { n: 'Pink 9', c: 'pink', x: -5, y: 205, h: 312, v: 2.9 },
+    ],
+    puffs: [[10, 320, 34, 1], [70, 290, 22, .7], [-40, 240, 28, -.8], [30, 180, 20, .5]],
+    target: C.wm, targetName: 'Windward mark', place: [4, 10], shadowed: true,
+    gaps: { ahead: ['Blue 5', 9], behind: ['Green 2', 14] },
+    msgs: [],
+  },
+  mark: {
+    venue: 'Open bay', clock: 318, wind: { from: -3, kn: 12 }, leg: 'Beat 1 of 4', legName: 'Windward mark',
+    player: { x: 14, y: 344, h: 316, v: 3.0, tack: 'stbd', twa: 41 },
+    boats: [
+      { n: 'Orange 3', c: 'orange', x: 9.5, y: 347.5, h: 316, v: 3.0, room: 'give' },
+      { n: 'Blue 5', c: 'blue', x: 22, y: 338, h: 317, v: 3.0 },
+      { n: 'Sky 7', c: 'sky', x: -14, y: 332, h: 45, v: 3.0, row: 'rights' },
+      { n: 'Green 2', c: 'green', x: -6, y: 356, h: 250, v: 3.6 },
+    ],
+    puffs: [[-20, 400, 30, .8], [40, 330, 20, -.5]],
+    target: C.wm, targetName: 'Windward mark', next: C.off, place: [3, 10],
+    gaps: { ahead: ['Orange 3', 2], behind: ['Blue 5', 5] },
+    msgs: [{ tone: 'info', rule: '18.2', text: 'Orange 3 was overlapped inside you at the zone. Give her room.' }],
+  },
+  call: {
+    venue: 'Open bay', clock: 185, wind: { from: 2, kn: 13 }, leg: 'Beat 1 of 4', legName: 'Windward mark',
+    player: { x: 30, y: 200, h: 58, v: 2.6, tack: 'port', twa: 56 },
+    boats: [
+      { n: 'Sky 7', c: 'sky', x: 34, y: 207, h: 318, v: 3.0, row: 'keepclear', foul: true },
+      { n: 'Blue 5', c: 'blue', x: 48, y: 222, h: 44, v: 3.0 },
+      { n: 'Orange 3', c: 'orange', x: -20, y: 240, h: 316, v: 3.1 },
+      { n: 'Pink 9', c: 'pink', x: 5, y: 180, h: 316, v: 2.9 },
+    ],
+    puffs: [[0, 280, 30, .8], [60, 170, 24, -.6]],
+    target: C.wm, targetName: 'Windward mark', place: [6, 10],
+    gaps: { ahead: ['Blue 5', 11], behind: ['Pink 9', 6] },
+    penalty: { startIn: 12, finishIn: 27 },
+    msgs: [{ tone: 'alert', rule: '10', text: 'Port–starboard. You (port) didn\'t keep clear of Sky 7 (starboard). Take one turn.' }],
+  },
+  run: {
+    venue: 'Tidal estuary', clock: 395, wind: { from: 4, kn: 10 }, leg: 'Run 1 of 4', legName: 'Leeward gate',
+    current: { set: 100, peak: 0.7 }, tide: { state: 'Flood', trend: 'building', peak: 1.4, peakIn: '3 min' },
+    player: { x: 18, y: 170, h: 152, v: 3.3, tack: 'port', twa: 148 },
+    boats: [
+      { n: 'Orange 3', c: 'orange', x: -10, y: 150, h: 208, v: 3.3 },
+      { n: 'Blue 5', c: 'blue', x: 30, y: 192, h: 152, v: 3.2, row: 'rights' },
+      { n: 'Sky 7', c: 'sky', x: -25, y: 196, h: 205, v: 3.2 },
+      { n: 'Green 2', c: 'green', x: 70, y: 210, h: 150, v: 3.1 },
+    ],
+    puffs: [[-10, 230, 30, .9], [50, 140, 24, .6], [-40, 120, 26, -.7]],
+    target: C.gr, targetName: 'Leeward gate', gate: true, place: [3, 10],
+    gaps: { ahead: ['Orange 3', 12], behind: ['Blue 5', 7] },
+    msgs: [],
+  },
+};
+SCENES.briefing = { ...SCENES.run, briefing: true, clock: -120 };
+
+// ---------------------------------------------------------------- canvas
+const cv = document.getElementById('world'), ctx = cv.getContext('2d');
+const dpr = window.devicePixelRatio || 1;
+cv.width = 390 * dpr; cv.height = 844 * dpr; cv.style.width = '390px'; cv.style.height = '844px';
+const W = 390, H = 844;
+
+function hatchPattern(color, gap = 7, width = 1.5) {
+  const p = document.createElement('canvas'); p.width = p.height = gap * 2;
+  const g = p.getContext('2d'); g.strokeStyle = color; g.lineWidth = width;
+  g.beginPath(); for (let i = -2; i < 4; i++) { g.moveTo(i * gap, 0); g.lineTo(i * gap + gap * 2, gap * 2); } g.stroke();
+  return ctx.createPattern(p, 'repeat');
+}
+const SHADOW_HATCH = hatchPattern('rgba(0,0,0,.30)', 6, 1.6);
+const SHADOW_HATCH_ME = hatchPattern('rgba(255,255,255,.55)', 6, 1.6);
+const BOUND_HATCH = hatchPattern('rgba(255,255,255,.35)', 9, 2);
+
+let S = 3.2, camRot = 0, t0 = performance.now();
+function sceneT() { return ((performance.now() - t0) / 1000) % 14; }
+
+function playerNow(sc, t) {
+  const p = sc.player; const cur = currentAt(p.x, p.y, sc);
+  const v = add(vec(p.h, p.v), cur);
+  return { ...p, x: p.x + v[0] * t * 0.35, y: p.y + v[1] * t * 0.35 };
+}
+function boatNow(b, t) { const v = vec(b.h, b.v); return { ...b, x: b.x + v[0] * t * 0.35, y: b.y + v[1] * t * 0.35 }; }
+
+function setWorldTransform(me, sc) {
+  const up = st.cam === 'boat' ? me.h : 0;
+  camRot = up;
+  const ahead = st.cam === 'boat' ? vec(me.h, 30) : [0, sc.player.twa > 90 ? -28 : 28];
+  const cam = add([me.x, me.y], ahead);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.translate(W / 2, H * 0.5);
+  ctx.rotate(-up * D2R);
+  ctx.scale(S, -S);
+  ctx.translate(-cam[0], -cam[1]);
+}
+const toScreen = (x, y) => { const m = ctx.getTransform(); const p = m.transformPoint(new DOMPoint(x, y)); return [p.x / dpr, p.y / dpr]; };
+const px = n => n / S;       // screen pixels → world metres
+
+function draw() {
+  const sc = SCENES[st.phase], t = sceneT();
+  S = st.zoom;
+  const me = playerNow(sc, t);
+  const boats = sc.boats.map(b => boatNow(b, t));
+  const windFrom = sc.wind.from;
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = '#1f5c7d'; ctx.fillRect(0, 0, W, H);
+  setWorldTransform(me, sc);
+
+  // shallows (hue shift, same lightness)
+  if (sc.current) {
+    ctx.fillStyle = 'rgba(128,108,64,.55)';
+    ctx.fillRect(55, -200, 400, 900);
+    ctx.fillStyle = 'rgba(128,108,64,.25)'; ctx.fillRect(48, -200, 7, 900);
+  }
+
+  // pressure: puffs darker, lulls lighter
+  for (const [x0, y0, r, k] of sc.puffs) {
+    const d = vec(windFrom + 180, 1.4 * t);
+    const x = x0 + d[0], y = y0 + d[1];
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    if (k > 0) { g.addColorStop(0, `rgba(4,22,44,${.55 * k})`); g.addColorStop(.6, `rgba(4,22,44,${.35 * k})`); g.addColorStop(1, 'rgba(4,22,44,0)'); }
+    else { g.addColorStop(0, `rgba(210,235,245,${.32 * -k})`); g.addColorStop(.6, `rgba(210,235,245,${.18 * -k})`); g.addColorStop(1, 'rgba(210,235,245,0)'); }
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    if (k > 0) { // catspaws
+      ctx.strokeStyle = `rgba(0,10,25,${.45 * k})`; ctx.lineWidth = px(1.2);
+      for (let i = 0; i < 26; i++) {
+        const a = i * 2.39996, rr = r * 0.7 * Math.sqrt((i + .5) / 26);
+        const cx = x + Math.cos(a) * rr, cy = y + Math.sin(a) * rr, s = px(5);
+        ctx.beginPath(); ctx.moveTo(cx - s, cy); ctx.quadraticCurveTo(cx, cy + s * .6, cx + s, cy); ctx.stroke();
+      }
+    }
+  }
+
+  // wind streaks
+  {
+    const sp = 14, dir = vec(windFrom + 180, 1), drift = (t * 3) % sp;
+    ctx.strokeStyle = 'rgba(255,255,255,.13)'; ctx.lineWidth = px(1.2);
+    const cx = Math.round(me.x / sp) * sp, cy = Math.round(me.y / sp) * sp;
+    for (let i = -14; i <= 14; i++) for (let j = -18; j <= 18; j++) {
+      const jx = ((i * 7 + j * 13) % 5) - 2, jy = ((i * 11 + j * 3) % 5) - 2;
+      const x = cx + i * sp + jx + dir[0] * drift, y = cy + j * sp + jy + dir[1] * drift;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + dir[0] * 4, y + dir[1] * 4); ctx.stroke();
+    }
+  }
+
+  // current arrows
+  if (sc.current) {
+    const sp = 42, cx = Math.round(me.x / sp) * sp, cy = Math.round(me.y / sp) * sp;
+    for (let i = -5; i <= 5; i++) for (let j = -7; j <= 7; j++) {
+      const x = cx + i * sp + (j % 2) * sp / 2, y = cy + j * sp;
+      const c = currentAt(x, y, sc), r = len(c), h = bearing(c);
+      drawArrow(x, y, h, 4 + r * 14, px(2 + r * 6), 'rgba(245,245,235,.75)');
+    }
+  }
+
+  // boundary
+  ctx.fillStyle = BOUND_HATCH; ctx.fillRect(C.bound, -300, 300, 1100); ctx.fillRect(-C.bound - 300, -300, 300, 1100);
+  ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = px(2.5);
+  line([C.bound, -300], [C.bound, 800]); line([-C.bound, -300], [-C.bound, 800]);
+
+  // ladder lines (B only)
+  if (st.variant === 'B' && !sc.briefing && sc.player.twa < 170) {
+    const perp = windFrom + 90, sp = 25;
+    const along = me.x * Math.sin(windFrom * D2R) + me.y * Math.cos(windFrom * D2R);
+    const base = Math.floor(along / sp) * sp;
+    for (let k = -3; k <= 4; k++) {
+      const d = base + k * sp, c = vec(windFrom, d), a = add(c, vec(perp, 140)), b = add(c, vec(perp, -140));
+      ctx.strokeStyle = `rgba(255,255,255,${.22 - Math.abs(k - .5) * .04})`; ctx.lineWidth = px(1);
+      ctx.setLineDash([px(2), px(6)]); line(a, b); ctx.setLineDash([]);
+    }
+  }
+
+  // start line
+  const startPhase = st.phase === 'prestart' || st.phase === 'ocs';
+  ctx.strokeStyle = startPhase ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.45)'; ctx.lineWidth = px(startPhase ? 2.5 : 1.5);
+  ctx.setLineDash([px(8), px(5)]); line(C.pin, C.cb); ctx.setLineDash([]);
+  mark(C.pin, startPhase, 'pin'); committeeBoat(C.cb);
+  if (st.phase === 'ocs') { // course side of line glows
+    ctx.fillStyle = 'rgba(230,159,0,.16)'; ctx.fillRect(C.pin[0], 0, C.cb[0] - C.pin[0], 14);
+  }
+
+  // marks, zones, laylines
+  const upwind = sc.player.twa < 90;
+  const legMarks = startPhase ? [] : sc.gate ? [C.gl, C.gr] : [C.wm];
+  for (const m of [C.wm, C.off, C.gl, C.gr]) {
+    const active = legMarks.some(a => a === m);
+    if (active && !(st.variant === 'C' && len(sub(m, [me.x, me.y])) > 90)) {
+      ctx.strokeStyle = 'rgba(230,159,0,.8)'; ctx.lineWidth = px(1.5); ctx.setLineDash([px(4), px(4)]);
+      ctx.beginPath(); ctx.arc(m[0], m[1], C.zone, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]);
+    }
+    mark(m, active, m === C.gl ? 'gateL' : m === C.gr ? 'gateR' : 'port', sc.next === m);
+  }
+  if (!startPhase) drawLaylines(sc, me, upwind, legMarks);
+
+  // wind shadow cones
+  const shadowRange = st.variant === 'C' ? 5 * BL * DRAW : 1e9;
+  for (const b of [...boats]) {
+    if (len(sub([b.x, b.y], [me.x, me.y])) > shadowRange) continue;
+    shadowCone(b, windFrom, false, sc.shadowed && b.n === 'Blue 5');
+  }
+
+  // boats
+  for (const b of boats) drawBoat(b, LIV[b.c], false, sc);
+  drawBoat(me, '#ffffff', true, sc);
+
+  // B: in-world instruments around the player
+  if (st.variant === 'B' && !sc.briefing) drawRing(sc, me);
+  if (st.variant === 'B' && st.phase === 'prestart') drawGhost(sc, me);
+
+  // labels + right-of-way glyphs (screen space)
+  const lbl = [];
+  for (const b of boats) {
+    const [sx, sy] = toScreen(b.x, b.y);
+    lbl.push({ b, sx, sy });
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  for (const { b, sx, sy } of lbl) {
+    const showName = st.variant !== 'C' || b.row || b.room || b.foul;
+    if (showName) {
+      ctx.font = '600 11px -apple-system, system-ui'; ctx.textAlign = 'center';
+      const txt = st.variant === 'B' && b.row ? `${b.n} · ${b.row === 'keepclear' ? 'keep clear' : 'your right of way'}` : b.n;
+      const w = ctx.measureText(txt).width + 10;
+      ctx.fillStyle = 'rgba(0,0,0,.45)'; roundRect(sx - w / 2, sy + 16, w, 16, 8); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.fillText(txt, sx, sy + 28);
+    }
+    if (b.row === 'keepclear') rowGlyphKeepClear(sx, sy - 26);
+    if (b.row === 'rights') rowGlyphRights(sx, sy - 24);
+    if (b.room === 'give') roomGlyph(sx, sy - 26);
+  }
+  if (sc.call && false) {}
+  // rule call tether between the two boats (B draws it in the world)
+  const foul = boats.find(b => b.foul);
+  if (foul && st.variant === 'B') {
+    setWorldTransform(me, sc);
+    const [ax, ay] = toScreen(me.x, me.y), [bx, by] = toScreen(foul.x, foul.y);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.strokeStyle = '#E69F00'; ctx.lineWidth = 3; ctx.setLineDash([6, 4]);
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke(); ctx.setLineDash([]);
+    const mx = (ax + bx) / 2 + 40, my = (ay + by) / 2 - 40;
+    ctx.fillStyle = '#E69F00'; roundRect(mx - 30, my - 12, 60, 24, 6); ctx.fill();
+    ctx.fillStyle = '#111'; ctx.font = '900 14px -apple-system'; ctx.textAlign = 'center'; ctx.fillText('RULE 10', mx, my + 5);
+  }
+
+  // phase-card edge cues (C)
+  if (st.variant === 'C' && !sc.briefing) drawEdges(sc, me);
+
+  renderHUD(sc, me, t);
+  requestAnimationFrame(draw);
+}
+
+function line(a, b) { ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+function roundRect(x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+function drawArrow(x, y, h, l, w, color) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(-h * D2R);
+  ctx.fillStyle = color; ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = px(1);
+  const hw = Math.max(w * 1.8, px(5)), hl = Math.max(l * .35, px(6));
+  ctx.beginPath();
+  ctx.moveTo(-w / 2, -l / 2); ctx.lineTo(w / 2, -l / 2); ctx.lineTo(w / 2, l / 2 - hl); ctx.lineTo(hw / 2, l / 2 - hl);
+  ctx.lineTo(0, l / 2); ctx.lineTo(-hw / 2, l / 2 - hl); ctx.lineTo(-w / 2, l / 2 - hl); ctx.closePath();
+  ctx.fill(); ctx.stroke(); ctx.restore();
+}
+function mark(m, active, kind, isNext) {
+  const r = Math.max(0.8, px(6));
+  ctx.fillStyle = active ? '#E69F00' : isNext ? '#c9c9c9' : '#8a9aa4';
+  ctx.strokeStyle = '#111'; ctx.lineWidth = px(1.5);
+  ctx.beginPath(); ctx.arc(m[0], m[1], r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  if (active && kind !== 'pin') { // rounding-side arrow: leave to port → anticlockwise
+    const ccw = kind !== 'gateL';
+    ctx.strokeStyle = '#E69F00'; ctx.lineWidth = px(2.5);
+    const rr = r + px(8);
+    ctx.beginPath(); ctx.arc(m[0], m[1], rr, ccw ? 0.2 : 2.9, ccw ? 2.6 : 0.5, !ccw); ctx.stroke();
+    const end = ccw ? 2.6 : 0.5, ex = m[0] + Math.cos(end) * rr, ey = m[1] + Math.sin(end) * rr;
+    const tang = end + (ccw ? Math.PI / 2 : -Math.PI / 2);
+    ctx.fillStyle = '#E69F00'; ctx.beginPath();
+    ctx.moveTo(ex + Math.cos(tang) * px(6), ey + Math.sin(tang) * px(6));
+    ctx.lineTo(ex + Math.cos(tang + 2.5) * px(5), ey + Math.sin(tang + 2.5) * px(5));
+    ctx.lineTo(ex + Math.cos(tang - 2.5) * px(5), ey + Math.sin(tang - 2.5) * px(5)); ctx.fill();
+  }
+}
+function committeeBoat(p) {
+  ctx.save(); ctx.translate(p[0], p[1]);
+  ctx.fillStyle = '#ddd'; ctx.strokeStyle = '#111'; ctx.lineWidth = px(1.5);
+  ctx.beginPath(); ctx.roundRect(-3, -1.5, 6, 3, 1); ctx.fill(); ctx.stroke(); ctx.restore();
+}
+function drawLaylines(sc, me, upwind, legMarks) {
+  const tws = sc.wind.kn, beatTWA = 42, runTWA = 148;
+  const arms = [];
+  for (const m of legMarks) {
+    for (const side of [-1, 1]) {
+      // heading a boat sails on this layline
+      const hdg = upwind ? sc.wind.from + side * beatTWA : sc.wind.from + 180 + side * (180 - runTWA);
+      if (sc.gate && ((m === C.gl && side === 1) || (m === C.gr && side === -1))) continue;
+      const through = vec(hdg, 1);
+      const ground = sc.current ? add(through, [currentAt(m[0], m[1], sc)[0] / 3.2, currentAt(m[0], m[1], sc)[1] / 3.2]) : through;
+      const back = [-ground[0] / len(ground), -ground[1] / len(ground)];
+      arms.push({ m, back, dashed: !!sc.current });
+    }
+  }
+  for (const a of arms) {
+    const end = add(a.m, [a.back[0] * 320, a.back[1] * 320]);
+    // distance from player to this line
+    const rel = sub([me.x, me.y], a.m);
+    const cross = Math.abs(rel[0] * a.back[1] - rel[1] * a.back[0]);
+    const near = cross < 2 * BL;
+    if (st.variant === 'C' && cross > 60) continue;
+    ctx.strokeStyle = near ? '#F0E442' : 'rgba(240,228,66,.85)'; ctx.lineWidth = px(near ? 5 : 3);
+    ctx.setLineDash(a.dashed ? [px(12), px(7)] : []);
+    ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 3;
+    line(a.m, end); ctx.setLineDash([]); ctx.shadowBlur = 0;
+  }
+}
+function shadowCone(b, windFrom, isMe, hit) {
+  const down = windFrom + 180 + (b.h > 180 ? 8 : -8), L = 8 * BL, half = 13;
+  const p0 = [b.x, b.y], p1 = add(p0, vec(down - half, L)), p2 = add(p0, vec(down + half, L));
+  ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.closePath();
+  const pat = hit ? SHADOW_HATCH_ME : SHADOW_HATCH;
+  pat.setTransform(new DOMMatrix().scale(1 / S, -1 / S));
+  ctx.fillStyle = 'rgba(0,15,30,.22)'; ctx.fill();
+  ctx.fillStyle = pat; ctx.fill();
+  if (hit) { ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = px(2); ctx.setLineDash([px(5), px(4)]); ctx.stroke(); ctx.setLineDash([]); }
+}
+function drawBoat(b, color, isMe, sc) {
+  const twa = isMe ? b.twa : null;
+  ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(-b.h * D2R); ctx.scale(DRAW, DRAW);
+  if (isMe) { ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.strokeStyle = '#fff'; ctx.lineWidth = px(2) / DRAW; ctx.beginPath(); ctx.arc(0, 0, 3.8, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+  ctx.fillStyle = color; ctx.strokeStyle = isMe ? '#000' : 'rgba(0,0,0,.7)'; ctx.lineWidth = px(isMe ? 2.2 : 1.4) / DRAW;
+  ctx.beginPath();
+  ctx.moveTo(0, 2.1); ctx.bezierCurveTo(0.9, 1.2, 0.8, -1.4, 0.6, -2.1); ctx.lineTo(-0.6, -2.1); ctx.bezierCurveTo(-0.8, -1.4, -0.9, 1.2, 0, 2.1);
+  ctx.fill(); ctx.stroke();
+  // boom: port tack → boom to starboard (+x)
+  const heading = b.h, rel = wrap(heading - sc.wind.from);
+  const boomSide = rel > 0 ? -1 : 1;           // wind over starboard (rel<0) → boom to port
+  const ang = Math.min(80, Math.abs(rel) / 2) * D2R;
+  ctx.strokeStyle = isMe ? '#000' : '#fff'; ctx.lineWidth = px(2.4) / DRAW;
+  ctx.beginPath(); ctx.moveTo(0, 0.7); ctx.lineTo(-boomSide * Math.sin(ang) * 2.4 * -1, 0.7 - Math.cos(ang) * 2.4); ctx.stroke();
+  ctx.restore();
+}
+function rowGlyphKeepClear(x, y) {
+  ctx.fillStyle = '#E69F00'; ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x, y - 10); ctx.lineTo(x + 10, y + 7); ctx.lineTo(x - 10, y + 7); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#111'; ctx.font = '900 12px -apple-system'; ctx.textAlign = 'center'; ctx.fillText('!', x, y + 5);
+}
+function rowGlyphRights(x, y) {
+  ctx.fillStyle = '#56B4E9'; ctx.strokeStyle = '#111'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x - 9, y + 4); ctx.lineTo(x, y - 5); ctx.lineTo(x + 9, y + 4); ctx.lineTo(x + 9, y + 9); ctx.lineTo(x, y); ctx.lineTo(x - 9, y + 9); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+}
+function roomGlyph(x, y) {
+  ctx.fillStyle = '#111'; ctx.strokeStyle = '#E69F00'; ctx.lineWidth = 2;
+  roundRect(x - 26, y - 9, 52, 18, 9); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#E69F00'; ctx.font = '800 10px -apple-system'; ctx.textAlign = 'center'; ctx.fillText('ROOM', x, y + 4);
+}
+
+// B: compass ring around own boat
+function drawRing(sc, me) {
+  const R = px(78);
+  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = px(1.5);
+  ctx.beginPath(); ctx.arc(me.x, me.y, R, 0, Math.PI * 2); ctx.stroke();
+  // mean wind tick and current wind arrow on the ring (windward side)
+  const meanP = add([me.x, me.y], vec(0, R)), curP = add([me.x, me.y], vec(sc.wind.from, R));
+  ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = px(2); line(add([me.x, me.y], vec(0, R - px(6))), add([me.x, me.y], vec(0, R + px(6))));
+  // shift arc
+  const lift = liftDeg(sc);
+  const a0 = (90 - 0) * D2R, a1 = (90 - sc.wind.from) * D2R;
+  ctx.strokeStyle = lift >= 0 ? '#56B4E9' : '#E69F00'; ctx.lineWidth = px(6);
+  if (lift < 0) ctx.setLineDash([px(3), px(3)]);
+  ctx.beginPath(); ctx.arc(me.x, me.y, R, Math.min(a0, a1), Math.max(a0, a1)); ctx.stroke(); ctx.setLineDash([]);
+  drawArrow(curP[0] + vec(sc.wind.from, px(14))[0], curP[1] + vec(sc.wind.from, px(14))[1], sc.wind.from + 180, px(22), px(5), '#fff');
+  // next mark chevron
+  const tb = bearing(sub(sc.target, [me.x, me.y]));
+  const tp = add([me.x, me.y], vec(tb, R));
+  drawArrow(tp[0], tp[1], tb, px(14), px(4), '#E69F00');
+  // current vector from hull
+  if (sc.current) {
+    const c = currentAt(me.x, me.y, sc);
+    drawArrow(me.x + c[0] * 12, me.y + c[1] * 12, bearing(c), len(c) * 24, px(4), 'rgba(245,245,235,.95)');
+  }
+  // penalty countdown ring
+  if (sc.penalty) {
+    const tt = sceneT(), f = Math.max(0, (sc.penalty.startIn - tt) / 15);
+    ctx.strokeStyle = '#E69F00'; ctx.lineWidth = px(5);
+    ctx.beginPath(); ctx.arc(me.x, me.y, R + px(10), Math.PI / 2, Math.PI / 2 + f * Math.PI * 2); ctx.stroke();
+  }
+  // screen-space text around ring
+  const labels = [
+    [curP, vec(sc.wind.from + 180, px(22)), `${sc.wind.kn} kn`],
+    [meanP, [0, 0], ''],
+    [tp, vec(tb, px(22)), `${Math.round(len(sub(sc.target, [me.x, me.y])))} m`],
+  ];
+  if (!(st.phase === 'prestart' || st.phase === 'ocs') && sc.player.twa < 90 || sc.player.twa > 90) {
+    labels.push([add([me.x, me.y], vec(sc.wind.from / 2 + (sc.wind.from < 0 ? -28 : 28), R)), vec(sc.wind.from / 2 + (sc.wind.from < 0 ? -28 : 28), px(22)), `${lift >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(lift))}°`]);
+  }
+  if (sc.current) { const c = currentAt(me.x, me.y, sc); labels.push([[me.x, me.y], vec(bearing(c), len(c) * 26 + px(16)), `${(len(c) * KN).toFixed(1)} kn`]); }
+  const pts = labels.map(([p, o, s]) => [toScreen(p[0] + o[0], p[1] + o[1]), s]);
+  ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '800 12px -apple-system'; ctx.textAlign = 'center';
+  for (const [[x, y], s] of pts) if (s) { ctx.fillStyle = 'rgba(0,0,0,.55)'; const w = ctx.measureText(s).width + 8; roundRect(x - w / 2, y - 9, w, 17, 6); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillText(s, x, y + 4); }
+  ctx.restore();
+}
+function drawGhost(sc, me) {
+  // where you'd hit the line at full speed, and how early
+  const p = sc.prestart, hit = [me.x - 22, 0];
+  ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(hit[0], hit[1], px(6), 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.setLineDash([px(3), px(4)]); ctx.lineWidth = px(1.5); line([me.x, me.y], hit); ctx.setLineDash([]);
+  const burn = Math.round(-sc.clock - sceneT() - p.toLine);
+  const [sx, sy] = toScreen(hit[0], hit[1]);
+  // favoured-end arrow
+  const [fx, fy] = toScreen(C.pin[0], C.pin[1] + 6);
+  ctx.save(); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.font = '800 12px -apple-system'; ctx.textAlign = 'center';
+  const s = burn > 0 ? `${burn} s early` : `${-burn} s late`;
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; roundRect(sx - 36, sy - 30, 72, 18, 6); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillText(s, sx, sy - 17);
+  ctx.fillStyle = 'rgba(0,0,0,.6)'; roundRect(fx - 44, fy - 26, 88, 18, 6); ctx.fill(); ctx.fillStyle = '#fff'; ctx.fillText(`★ favoured ${p.bias}°`, fx, fy - 13);
+  ctx.restore();
+}
+// C: edge strip for shifts + layline side glow
+function drawEdges(sc, me) {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  if (sc.player.twa < 170 && !(st.phase === 'prestart')) {
+    const lift = liftDeg(sc), shift = sc.wind.from, n = 9, w = 30, gap = 4, x0 = W / 2 - (n * w + (n - 1) * gap) / 2, y = 54;
+    for (let i = 0; i < n; i++) {
+      const k = i - 4;              // -4..4, 2° per segment
+      const lit = shift !== 0 && Math.sign(k) === Math.sign(shift) && Math.abs(k) <= Math.ceil(Math.abs(shift) / 2);
+      const x = x0 + i * (w + gap);
+      ctx.fillStyle = k === 0 ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.15)';
+      if (lit) ctx.fillStyle = lift >= 0 ? '#56B4E9' : hatchPattern('#E69F00', 4, 2);
+      roundRect(x, y, w, 7, 3); ctx.fill();
+    }
+  }
+}
+function liftDeg(sc) {
+  const upwind = sc.player.twa < 90;
+  let l = sc.player.tack === 'stbd' ? sc.wind.from : -sc.wind.from;
+  return upwind ? l : -l;
+}
+
+// ---------------------------------------------------------------- HUD
+const hud = document.getElementById('hud');
+let lastHUD = 0;
+function fmtClock(s) { const neg = s < 0; s = Math.abs(Math.floor(neg ? Math.ceil(s) : s)); return (neg ? '−' : '') + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function ord(n) { return n + (['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th'); }
+function arrow(deg, size = 18, color = '#fff') { return `<svg width="${size}" height="${size}" viewBox="-10 -10 20 20" style="transform:rotate(${deg}deg);vertical-align:middle"><path d="M0 -9 L6 3 L1.5 1.5 L1.5 9 L-1.5 9 L-1.5 1.5 L-6 3Z" fill="${color}" stroke="#000" stroke-width="1"/></svg>`; }
+function controls(sc) {
+  const running = sc.player.twa > 90;
+  return `
+    <div class="btn glass abs" style="left:16px;top:58px;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900">❚❚</div>
+    <div class="btn ctl glass" style="left:16px;width:84px;height:56px;border-radius:18px;font-size:13px">EASE</div>
+    <div class="btn ctl" style="left:50%;transform:translateX(-50%);width:128px;height:60px;border-radius:30px;background:#E69F00;color:#111;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,.4)">${running ? 'GYBE' : 'TACK'}</div>
+    <div class="btn ctl glass" style="right:16px;width:84px;height:56px;border-radius:18px;font-size:12px;flex-direction:column;gap:0">⚑<span style="font-size:11px">PROTEST</span></div>`;
+}
+function messages(sc) {
+  return sc.msgs.map(m => `<div class="msg ${m.tone}"><span class="rule">${m.rule}</span>${m.text}</div>`).join('');
+}
+function penaltyBlock(sc, t, compact) {
+  if (!sc.penalty) return '';
+  const s = Math.max(0, Math.ceil(sc.penalty.startIn - t)), f = Math.max(0, Math.ceil(sc.penalty.finishIn - t));
+  return `<div class="glass" style="display:flex;gap:14px;padding:8px 14px;margin:6px auto 0;width:max-content;border:2px solid #E69F00">
+    <div style="text-align:center"><div class="lbl">Start turn</div><div class="mono" style="font-size:22px;font-weight:800">${s}s</div></div>
+    <div style="text-align:center"><div class="lbl">Finish turn</div><div class="mono" style="font-size:22px;font-weight:800">${f}s</div></div>
+    ${compact ? '' : '<div style="align-self:center;font-size:12px;max-width:120px;opacity:.85">One tack + one gybe, one direction</div>'}</div>`;
+}
+
+function renderHUD(sc, me, t) {
+  if (performance.now() - lastHUD < 120) return;
+  lastHUD = performance.now();
+  if (sc.briefing) { hud.innerHTML = briefing(sc); return; }
+  const clock = sc.clock + t;
+  const tb = bearing(sub(sc.target, [me.x, me.y])) - camRot;
+  const tdist = Math.round(len(sub(sc.target, [me.x, me.y])));
+  const windTo = sc.wind.from + 180 - camRot;
+  const lift = liftDeg(sc);
+  const cur = sc.current ? currentAt(me.x, me.y, sc) : null;
+  const common = { clock, tb, tdist, windTo, lift, cur };
+  hud.innerHTML = (st.variant === 'A' ? hudA : st.variant === 'B' ? hudB : hudC)(sc, me, t, common) + controls(sc);
+}
+
+// A: cockpit — fixed top bar, minimap, instrument strip
+function hudA(sc, me, t, c) {
+  const pre = st.phase === 'prestart';
+  const status = sc.ocs ? '<span style="color:#E69F00">OCS · return</span>' : pre ? 'Start sequence' : `${ord(sc.place[0])} / ${sc.place[1]} · ${sc.leg}`;
+  const shiftCell = `<div><div class="lbl">Shift</div><div class="mono" style="font-weight:800">${c.lift >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(c.lift))}° ${c.lift >= 0 ? 'lift' : 'hdr'}</div></div>`;
+  const curCell = c.cur ? `<div><div class="lbl">Current</div><div class="mono" style="font-weight:800">${arrow(bearing(c.cur) - camRot, 16)} ${(len(c.cur) * KN).toFixed(1)}</div></div>` : '';
+  const tideChip = sc.tide ? `<div class="glass" style="position:absolute;right:16px;top:218px;padding:5px 10px;font-size:11px;font-weight:700">🌊 ${sc.tide.state} ${sc.tide.trend} · ${sc.tide.peak} kn in ${sc.tide.peakIn}</div>` : '';
+  const preBlock = pre ? `<div class="glass" style="margin:8px auto 0;width:max-content;padding:8px 14px;display:flex;gap:16px">
+      <div><div class="lbl">To line</div><div class="mono big" style="font-size:20px">${fmtClock(sc.prestart.toLine)}</div></div>
+      <div><div class="lbl">Burn</div><div class="mono big" style="font-size:20px">${Math.round(-c.clock - sc.prestart.toLine)}s</div></div>
+      <div><div class="lbl">Distance</div><div class="mono big" style="font-size:20px">${sc.prestart.dist} m</div></div>
+      <div><div class="lbl">Favoured</div><div class="big" style="font-size:20px">Pin ${sc.prestart.bias}°</div></div></div>` : '';
+  const countdown = pre && -c.clock < 10 ? `<div style="text-align:center;font-size:64px;font-weight:900">${Math.ceil(-c.clock)}</div>` : '';
+  return `
+    <div class="glass abs" style="left:66px;right:128px;top:54px;padding:6px 12px">
+      <div class="mono big" style="font-size:26px;${c.clock < 0 ? 'color:#ffde3b' : ''}">${fmtClock(c.clock)}</div>
+      <div style="font-size:12px;font-weight:600">${status}</div>
+      <div style="font-size:12px;font-weight:600;margin-top:4px">${arrow(c.tb, 14, '#E69F00')} ${sc.targetName} · ${c.tdist} m</div>
+    </div>
+    <canvas id="mini" class="abs" width="200" height="300" style="right:16px;top:54px;width:100px;height:150px;border-radius:12px"></canvas>
+    ${tideChip}
+    <div class="abs" style="left:0;right:0;top:${pre ? 150 : 150}px">${preBlock}${messages(sc)}${penaltyBlock(sc, t)}${countdown}</div>
+    <div class="glass abs mono" style="left:16px;right:16px;bottom:96px;padding:8px 10px;display:flex;justify-content:space-around;text-align:center;font-size:15px">
+      <div><div class="lbl">Speed</div><div style="font-weight:800">${(me.v * KN).toFixed(1)}</div></div>
+      <div><div class="lbl">${me.tack === 'stbd' ? 'Stbd' : 'Port'}</div><div style="font-weight:800">${me.twa}°</div></div>
+      <div style="${sc.shadowed ? 'outline:2px dashed #fff;outline-offset:3px;border-radius:6px' : ''}"><div class="lbl">${sc.shadowed ? '▦ Shadow' : 'Wind'}</div><div style="font-weight:800">${arrow(c.windTo, 16)} ${sc.shadowed ? sc.wind.kn - 2 : sc.wind.kn}</div></div>
+      ${shiftCell}${curCell}
+    </div>`;
+}
+// B: on the water — tiny corner readout, everything else is drawn in the world
+function hudB(sc, me, t, c) {
+  const pre = st.phase === 'prestart';
+  return `
+    <div class="abs" style="left:66px;top:56px;text-shadow:0 1px 3px #000">
+      <div class="mono big" style="font-size:24px;${c.clock < 0 ? 'color:#ffde3b' : ''}">${fmtClock(c.clock)}</div>
+      <div style="font-size:12px;font-weight:700">${sc.ocs ? 'OCS' : pre ? `${(me.v * KN).toFixed(1)} kn` : `${ord(sc.place[0])}/${sc.place[1]} · ${(me.v * KN).toFixed(1)} kn`}</div>
+    </div>
+    ${sc.tide ? `<div class="abs" style="right:16px;top:60px;font-size:11px;font-weight:700;text-shadow:0 1px 3px #000">${sc.tide.state} ↑ ${sc.tide.peak} kn in ${sc.tide.peakIn}</div>` : ''}
+    ${sc.shadowed ? `<div class="abs" style="left:0;right:0;top:120px;text-align:center"><span class="glass" style="padding:4px 10px;font-size:12px;font-weight:800">▦ In Blue 5's shadow</span></div>` : ''}
+    <div class="abs" style="left:0;right:0;top:140px">${sc.msgs.filter(m => m.rule !== '10').map(m => `<div class="msg ${m.tone}"><span class="rule">${m.rule}</span>${m.text}</div>`).join('')}${sc.penalty ? `<div class="msg alert">Turn now: start in ${Math.max(0, Math.ceil(sc.penalty.startIn - t))}s, finish in ${Math.max(0, Math.ceil(sc.penalty.finishIn - t))}s</div>` : ''}</div>`;
+}
+// C: phase card — one card whose content depends on the moment
+function hudC(sc, me, t, c) {
+  let body = '';
+  const row = (l, v) => `<div style="display:flex;justify-content:space-between;gap:12px;font-size:14px;font-weight:700"><span style="opacity:.75">${l}</span><span class="mono">${v}</span></div>`;
+  if (st.phase === 'prestart') {
+    const burn = Math.round(-c.clock - sc.prestart.toLine);
+    body = `<div style="display:flex;align-items:baseline;justify-content:space-between"><div class="mono" style="font-size:40px;font-weight:900;color:#ffde3b">${fmtClock(c.clock)}</div><div style="text-align:right"><div class="lbl">Burn</div><div class="mono" style="font-size:26px;font-weight:900">${burn}s</div></div></div>
+      <div style="height:10px;background:rgba(255,255,255,.15);border-radius:5px;margin:6px 0;position:relative"><div style="position:absolute;left:0;top:0;bottom:0;width:${Math.min(100, sc.prestart.toLine / -c.clock * 100)}%;background:#fff;border-radius:5px"></div></div>
+      ${row('To line at full speed', fmtClock(sc.prestart.toLine))}${row('Distance to line', sc.prestart.dist + ' m')}${row('Favoured end', `Pin · ${sc.prestart.bias}°`)}`;
+  } else if (sc.ocs) {
+    body = `<div style="font-size:22px;font-weight:900;color:#E69F00">OCS</div><div style="font-weight:700">You were over at the gun. Dip below the line to start.</div>${row('Clock', fmtClock(c.clock))}`;
+  } else if (sc.penalty) {
+    const s = Math.max(0, Math.ceil(sc.penalty.startIn - t)), f = Math.max(0, Math.ceil(sc.penalty.finishIn - t));
+    body = `<div><span class="rule" style="background:#E69F00;color:#111;border-radius:6px;padding:0 6px;font-weight:900">RULE 10</span> <b>Port–starboard</b></div>
+      <div style="font-size:13px;margin:4px 0">You (port) didn't keep clear of Sky 7 (starboard).</div>
+      <div style="display:flex;gap:18px;margin-top:4px"><div><div class="lbl">Start turn</div><div class="mono" style="font-size:30px;font-weight:900">${s}s</div></div><div><div class="lbl">Finish turn</div><div class="mono" style="font-size:30px;font-weight:900">${f}s</div></div></div>`;
+  } else if (st.phase === 'mark') {
+    body = `<div style="font-size:12px;opacity:.8;font-weight:700">IN THE ZONE · ${sc.targetName.toUpperCase()}</div>
+      <div style="font-size:16px;font-weight:800;margin:4px 0"><span style="color:#E69F00">◆ Give room</span> to Orange 3 <span style="opacity:.7;font-size:12px">18.2</span></div>
+      <div style="font-size:14px;font-weight:700"><span style="color:#56B4E9">▲</span> Sky 7 (port) must keep clear of you</div>
+      ${row('Then', 'Offset mark, bear away left')}`;
+  } else {
+    const lay = st.phase === 'beat' ? 'Starboard layline 38 m →' : 'Gate right: layline 21 m';
+    body = `<div style="display:flex;justify-content:space-between;align-items:center">
+        <div><div class="lbl">Shift</div><div style="font-size:26px;font-weight:900">${c.lift >= 0 ? '▲' : '▼'} ${Math.abs(Math.round(c.lift))}° <span style="font-size:14px">${c.lift >= 0 ? 'lift' : 'header'}</span></div></div>
+        <div style="text-align:right"><div class="lbl">Wind</div><div style="font-size:20px;font-weight:800">${arrow(c.windTo, 18)} ${sc.wind.kn} kn</div></div></div>
+      ${row('Next', `${arrow(c.tb, 13, '#E69F00')} ${sc.targetName} ${c.tdist} m`)}${row('Layline', lay)}
+      ${c.cur ? row('Current', `${arrow(bearing(c.cur) - camRot, 13)} ${(len(c.cur) * KN).toFixed(1)} kn · ${sc.tide.state} ↑ ${sc.tide.peak} in ${sc.tide.peakIn}`) : ''}
+      ${sc.shadowed ? `<div style="font-size:13px;margin-top:6px;padding:4px 8px;border:2px dashed #fff;border-radius:8px;font-weight:700">▦ In Blue 5's shadow · −2 kn</div>` : ''}`;
+  }
+  const place = sc.place ? `<div class="glass abs mono" style="left:16px;right:16px;bottom:96px;padding:6px 12px;display:flex;justify-content:space-between;font-size:13px;font-weight:700">
+      <span>${ord(sc.place[0])} of ${sc.place[1]}</span>${sc.gaps ? `<span>▲ ${sc.gaps.ahead[0]} +${sc.gaps.ahead[1]} m</span><span>▼ ${sc.gaps.behind[0]} −${sc.gaps.behind[1]} m</span>` : '<span>—</span>'}</div>` : '';
+  return `<div class="glass abs" style="left:66px;right:16px;top:70px;padding:10px 14px">${body}</div>${place}`;
+}
+
+function briefing(sc) {
+  const bars = [0.2, 0.5, 0.8, 1.0, 0.95, 0.7, 0.4, 0.1].map((v, i) => `<div style="flex:1;height:${Math.round(v * 44)}px;background:${i === 1 ? '#fff' : 'rgba(255,255,255,.45)'};border-radius:3px 3px 0 0"></div>`).join('');
+  return `<div style="position:absolute;inset:0;background:rgba(10,25,38,.82);padding:70px 22px 0">
+    <div class="lbl">Race briefing · starts in 2:00</div>
+    <div style="font-size:26px;font-weight:900">Tidal estuary</div>
+    <div style="font-size:14px;opacity:.85;margin-bottom:14px">Moderate · 10 players incl. 6 bots · 2 laps</div>
+    <div class="glass" style="padding:12px 14px;margin-bottom:10px">
+      <div class="lbl">Wind</div>
+      <div style="display:flex;gap:14px;align-items:center"><div style="font-size:32px">${arrow(180 + 4, 34)}</div>
+        <div><div style="font-size:20px;font-weight:800">9–13 kn from 004°</div><div style="font-size:13px;opacity:.85">Shifts ±8°, about one swing per beat. Puffs frequent, from the left side.</div></div></div>
+    </div>
+    <div class="glass" style="padding:12px 14px;margin-bottom:10px">
+      <div class="lbl">Tide forecast · flood</div>
+      <div style="display:flex;align-items:flex-end;gap:4px;height:48px;margin:8px 0 4px">${bars}</div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;opacity:.75"><span>gun</span><span>4 min</span><span>8 min</span><span>12</span><span>16</span></div>
+      <div style="font-size:13px;margin-top:6px">Flood to the east, peaking 1.4 kn around minute 6. Shallows on the right turn first and run at a third of the channel rate.</div>
+    </div>
+    <div class="glass" style="padding:12px 14px">
+      <div class="lbl">Course</div>
+      <div style="font-size:13px">Windward–leeward, offset mark, leeward gate, 2 laps. Beat about 360 m.</div>
+    </div>
+    <div class="note" style="color:#ddd;margin-top:14px;font-size:12px">Briefing is shared by all three variants in this prototype.</div>
+  </div>`;
+}
+
+function drawMini(sc, me) {
+  const m = document.getElementById('mini'); if (!m) return;
+  const g = m.getContext('2d'); g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, 200, 300);
+  g.fillStyle = 'rgba(8,20,32,.6)'; g.fillRect(0, 0, 200, 300);
+  const T = (x, y) => [100 + x * 0.9, 286 - (y + 20) * 0.68];
+  g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = 1.5;
+  const bx = T(C.bound, 0)[0], bxl = T(-C.bound, 0)[0]; g.strokeRect(bxl, 6, bx - bxl, 288);
+  if (sc.current) { g.fillStyle = 'rgba(128,108,64,.5)'; g.fillRect(T(55, 0)[0], 6, bx - T(55, 0)[0], 288); }
+  g.setLineDash([4, 3]); g.beginPath(); g.moveTo(...T(...C.pin)); g.lineTo(...T(...C.cb)); g.stroke(); g.setLineDash([]);
+  for (const mk of [C.wm, C.off, C.gl, C.gr]) { g.fillStyle = mk === sc.target || (sc.gate && (mk === C.gl || mk === C.gr)) ? '#E69F00' : '#aaa'; g.beginPath(); g.arc(...T(...mk), 4, 0, Math.PI * 2); g.fill(); }
+  const t = sceneT();
+  for (const b of sc.boats) { const p = boatNow(b, t); g.fillStyle = LIV[b.c]; g.beginPath(); g.arc(...T(p.x, p.y), 4, 0, Math.PI * 2); g.fill(); }
+  g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = 2; g.beginPath(); g.arc(...T(me.x, me.y), 6, 0, Math.PI * 2); g.fill(); g.stroke();
+}
+const _render = renderHUD;
+renderHUD = function (sc, me, t) { const before = lastHUD; _render(sc, me, t); if (lastHUD !== before && st.variant === 'A' && !sc.briefing) drawMini(sc, me); };
+
+// ---------------------------------------------------------------- controls
+function seg(id, items, key, parse = x => x) {
+  const el = document.getElementById(id);
+  el.innerHTML = Object.entries(items).map(([k, v]) => `<button data-k="${k}">${v}</button>`).join('');
+  el.onclick = e => { const k = e.target.dataset.k; if (!k) return; st[key] = parse(k); if (key === 'phase') t0 = performance.now(); apply(); };
+}
+seg('phases', PHASES, 'phase'); seg('cams', CAMS, 'cam'); seg('vision', VISION, 'vision'); seg('zooms', ZOOMS, 'zoom', parseFloat);
+const DESC = {
+  A: `<b>A · Cockpit.</b> Numbers live in fixed places; the water carries only geometry and pressure.<ul>
+      <li>Top bar: clock, place and leg, next mark with arrow and distance. Minimap top right.</li>
+      <li>Instrument strip above the controls: speed, tack + wind angle, wind arrow + knots, shift (▲ lift / ▼ header) or ▦ Shadow, and current when there is some.</li>
+      <li>Pre-start adds a strip: time to line, burn, distance, favoured end.</li>
+      <li>Rule calls and notices stack under the top bar, with the rule number as a badge.</li></ul>`,
+  B: `<b>B · On the water.</b> The HUD is just a clock and place; everything else is drawn in the world next to your boat.<ul>
+      <li>A compass ring on your boat: wind arrow and knots at its windward edge, the shift as a coloured arc from the mean (solid blue lift / dashed orange header) with ▲▼ and degrees, the next-mark chevron and distance, and current as an arrow from the hull.</li>
+      <li>Ladder lines across the wind show gains on rivals.</li>
+      <li>Pre-start: a ghost dot where you'd hit the line, with "N s early", plus a ★ at the favoured end.</li>
+      <li>Rule calls tether the two boats with the rule number; the penalty clock is a ring around your boat.</li>
+      <li>Boat labels spell out right of way.</li></ul>`,
+  C: `<b>C · Phase card.</b> One card near the top whose content follows the race moment, plus cues you can read without looking.<ul>
+      <li>Pre-start: big clock, burn, a time-to-line bar. Beat and run: shift, wind, next mark, layline distance, current and tide. Zone: who you owe room to and who must keep clear. Penalty: the rule and two big countdowns.</li>
+      <li>A 9-segment shift strip at the top edge fills toward the side the wind moved. Solid blue means a lift, hatched orange a header.</li>
+      <li>Less on the water: shadow cones only within 5 lengths, laylines only when near, zones only close to marks, names only on boats that matter now.</li>
+      <li>A place bar shows the gap to the boats ahead and behind.</li></ul>`,
+};
+function apply() {
+  for (const [id, key] of [['phases', 'phase'], ['cams', 'cam'], ['vision', 'vision'], ['zooms', 'zoom']])
+    for (const b of document.getElementById(id).children) b.classList.toggle('on', String(st[key]) === b.dataset.k);
+  document.getElementById('vlabel').textContent = `${st.variant} (${VARIANTS[st.variant]})`;
+  document.getElementById('desc').innerHTML = DESC[st.variant];
+  const f = { none: 'none', deut: 'url(#deut)', prot: 'url(#prot)', trit: 'url(#trit)', grey: 'grayscale(1)', sun: 'contrast(.55) brightness(1.35) saturate(.7)' };
+  document.getElementById('phone').style.filter = f[st.vision];
+  lastHUD = 0; syncURL();
+}
+const keys = Object.keys(VARIANTS);
+function cycle(d) { st.variant = keys[(keys.indexOf(st.variant) + d + keys.length) % keys.length]; apply(); }
+document.getElementById('prev').onclick = () => cycle(-1);
+document.getElementById('next').onclick = () => cycle(1);
+addEventListener('keydown', e => {
+  if (e.target.closest('input,textarea,[contenteditable]')) return;
+  if (e.key === 'ArrowLeft') cycle(-1); if (e.key === 'ArrowRight') cycle(1);
+});
+apply();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
