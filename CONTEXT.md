@@ -144,6 +144,10 @@ The part of a boat's speed that carries her straight upwind or downwind, or towa
 **Sailing by the lee**:
 Sailing downwind with the wind past dead astern on the same side as the boom, short of the point where the boom crosses and she gybes.
 
+**Ease**:
+Letting the sheets out so the sail flaps and the boat slows, e.g. to hold position before the start.
+_Avoid_: luff (in the rules, luffing means turning toward the wind)
+
 **Livery**:
 The player-chosen colours and graphics applied to their boat. Cosmetic only.
 _Avoid_: skin
