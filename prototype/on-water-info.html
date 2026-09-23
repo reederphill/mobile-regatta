@@ -87,6 +87,9 @@ the point.
     <h2>Vision check</h2>
     <div class="seg" id="vision"></div>
 
+    <h2>Laylines (D only)</h2>
+    <div class="seg" id="lays"></div>
+
     <h2>Ladder lines</h2>
     <div class="seg" id="ladders"></div>
 
@@ -119,6 +122,7 @@ the point.
 const params = new URLSearchParams(location.search);
 const VARIANTS = { A: 'Cockpit', B: 'On the water', C: 'Phase card', D: 'On the water, lean' };
 const LADDER = { off: 'Off', on: 'On' };
+const LAY = { off: 'Off', on: 'On' };
 const PHASES = {
   briefing: 'Briefing', prestart: 'Pre-start', ocs: 'OCS at gun', beat: 'Beat',
   mark: 'Mark rounding', call: 'Rule call', run: 'Run + current',
@@ -133,11 +137,12 @@ const st = {
   vision: VISION[params.get('vision')] ? params.get('vision') : 'none',
   zoom: parseFloat(params.get('zoom')) || 3.2,
   ladder: params.get('ladder') === 'on' ? 'on' : 'off',
+  lay: params.get('lay') === 'on' ? 'on' : 'off',
 };
 const isB = () => st.variant === 'B' || st.variant === 'D';
 const lean = () => st.variant === 'D';
 function syncURL() {
-  const p = new URLSearchParams({ variant: st.variant, phase: st.phase, cam: st.cam, vision: st.vision, zoom: st.zoom, ladder: st.ladder });
+  const p = new URLSearchParams({ variant: st.variant, phase: st.phase, cam: st.cam, vision: st.vision, zoom: st.zoom, ladder: st.ladder, lay: st.lay });
   history.replaceState(null, '', '?' + p);
 }
 
@@ -271,6 +276,7 @@ function hatchPattern(color, gap = 7, width = 1.5) {
   return ctx.createPattern(p, 'repeat');
 }
 const SHADOW_HATCH = hatchPattern('rgba(0,0,0,.30)', 6, 1.6);
+const SHADOW_HATCH_FAINT = hatchPattern('rgba(0,0,0,.10)', 6, 1.2);
 const SHADOW_HATCH_ME = hatchPattern('rgba(255,255,255,.55)', 6, 1.6);
 const BOUND_HATCH = hatchPattern('rgba(255,255,255,.35)', 9, 2);
 
@@ -393,7 +399,7 @@ function draw() {
     }
     mark(m, active, m === C.gl ? 'gateL' : m === C.gr ? 'gateR' : 'port', sc.next === m);
   }
-  if (!startPhase) drawLaylines(sc, me, upwind, legMarks);
+  if (!startPhase && (!lean() || st.lay === 'on')) drawLaylines(sc, me, upwind, legMarks);
 
   // wind shadow cones
   const shadowRange = st.variant === 'C' ? 5 * BL * DRAW : 1e9;
@@ -408,7 +414,7 @@ function draw() {
 
   // B: in-world instruments around the player
   if (isB() && !sc.briefing) drawRing(sc, me);
-  if (isB() && st.phase === 'prestart') drawGhost(sc, me);
+  if (st.variant === 'B' && st.phase === 'prestart') drawGhost(sc, me);
 
   // labels + right-of-way glyphs (screen space)
   const lbl = [];
@@ -517,16 +523,16 @@ function shadowCone(b, windFrom, isMe, hit) {
   const down = windFrom + 180 + (b.h > 180 ? 8 : -8), L = 8 * BL, half = 13;
   const p0 = [b.x, b.y], p1 = add(p0, vec(down - half, L)), p2 = add(p0, vec(down + half, L));
   ctx.beginPath(); ctx.moveTo(p0[0], p0[1]); ctx.lineTo(p1[0], p1[1]); ctx.lineTo(p2[0], p2[1]); ctx.closePath();
-  const pat = hit ? SHADOW_HATCH_ME : SHADOW_HATCH;
+  const pat = hit ? SHADOW_HATCH_ME : lean() ? SHADOW_HATCH_FAINT : SHADOW_HATCH;
   pat.setTransform(new DOMMatrix().scale(1 / S, -1 / S));
-  ctx.fillStyle = lean() ? 'rgba(0,15,30,.12)' : 'rgba(0,15,30,.22)'; ctx.fill();
+  ctx.fillStyle = lean() ? 'rgba(0,15,30,.05)' : 'rgba(0,15,30,.22)'; ctx.fill();
   ctx.fillStyle = pat; ctx.fill();
   if (hit) { ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = px(2); ctx.setLineDash([px(5), px(4)]); ctx.stroke(); ctx.setLineDash([]); }
 }
 function drawBoat(b, color, isMe, sc) {
   const twa = isMe ? b.twa : null;
   ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(-b.h * D2R); ctx.scale(DRAW, DRAW);
-  if (isMe) { ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.strokeStyle = '#fff'; ctx.lineWidth = px(2) / DRAW; ctx.beginPath(); ctx.arc(0, 0, 3.8, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+  if (isMe && !lean()) { ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.strokeStyle = '#fff'; ctx.lineWidth = px(2) / DRAW; ctx.beginPath(); ctx.arc(0, 0, 3.8, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
   ctx.fillStyle = color; ctx.strokeStyle = isMe ? '#000' : 'rgba(0,0,0,.7)'; ctx.lineWidth = px(isMe ? 2.2 : 1.4) / DRAW;
   ctx.beginPath();
   ctx.moveTo(0, 2.1); ctx.bezierCurveTo(0.9, 1.2, 0.8, -1.4, 0.6, -2.1); ctx.lineTo(-0.6, -2.1); ctx.bezierCurveTo(-0.8, -1.4, -0.9, 1.2, 0, 2.1);
@@ -727,11 +733,9 @@ function hudD(sc, me, t, c) {
   return `
     <div class="abs" style="left:66px;top:56px;text-shadow:0 1px 3px #000">
       <div class="mono big" style="font-size:24px;${c.clock < 0 ? 'color:#ffde3b' : ''}">${fmtClock(c.clock)}</div>
-      <div style="font-size:12px;font-weight:700">${sc.ocs ? 'OCS' : pre ? '' : `${ord(sc.place[0])}/${sc.place[1]}`}</div>
+      <div class="mono" style="font-size:13px;font-weight:700">${sc.ocs ? 'OCS · ' : pre ? '' : `${ord(sc.place[0])}/${sc.place[1]} · `}${(v * KN).toFixed(1)} kn</div>
     </div>
-    <div class="abs mono" style="right:18px;top:56px;text-align:right;text-shadow:0 1px 3px #000">
-      <div class="big" style="font-size:24px">${(v * KN).toFixed(1)}</div><div style="font-size:11px;font-weight:700;opacity:.8">kn</div>
-    </div>
+    <canvas id="mini" class="abs" width="200" height="300" style="right:16px;top:54px;width:84px;height:126px;border-radius:12px"></canvas>
     <div class="abs" style="left:0;right:0;top:120px">${sc.msgs.filter(m => m.rule !== '10').map(m => `<div class="msg ${m.tone}"><span class="rule">${m.rule}</span>${m.short || m.text}</div>`).join('')}${sc.penalty ? `<div class="msg alert mono">Turn · ${Math.max(0, Math.ceil(sc.penalty.startIn - t))}s / ${Math.max(0, Math.ceil(sc.penalty.finishIn - t))}s</div>` : ''}</div>`;
 }
 // C: phase card — one card whose content depends on the moment
@@ -809,7 +813,7 @@ function drawMini(sc, me) {
   g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = 2; g.beginPath(); g.arc(...T(me.x, me.y), 6, 0, Math.PI * 2); g.fill(); g.stroke();
 }
 const _render = renderHUD;
-renderHUD = function (sc, me, t) { const before = lastHUD; _render(sc, me, t); if (lastHUD !== before && st.variant === 'A' && !sc.briefing) drawMini(sc, me); };
+renderHUD = function (sc, me, t) { const before = lastHUD; _render(sc, me, t); if (lastHUD !== before && (st.variant === 'A' || st.variant === 'D') && !sc.briefing) drawMini(sc, me); };
 
 // ---------------------------------------------------------------- controls
 function seg(id, items, key, parse = x => x) {
@@ -817,7 +821,7 @@ function seg(id, items, key, parse = x => x) {
   el.innerHTML = Object.entries(items).map(([k, v]) => `<button data-k="${k}">${v}</button>`).join('');
   el.onclick = e => { const k = e.target.dataset.k; if (!k) return; st[key] = parse(k); if (key === 'phase') t0 = performance.now(); apply(); };
 }
-seg('phases', PHASES, 'phase'); seg('cams', CAMS, 'cam'); seg('vision', VISION, 'vision'); seg('zooms', ZOOMS, 'zoom', parseFloat); seg('ladders', LADDER, 'ladder');
+seg('phases', PHASES, 'phase'); seg('cams', CAMS, 'cam'); seg('vision', VISION, 'vision'); seg('zooms', ZOOMS, 'zoom', parseFloat); seg('ladders', LADDER, 'ladder'); seg('lays', LAY, 'lay');
 const DESC = {
   A: `<b>A · Cockpit.</b> Numbers live in fixed places; the water carries only geometry and pressure.<ul>
       <li>Top bar: clock, place and leg, next mark with arrow and distance. Minimap top right.</li>
@@ -830,9 +834,12 @@ const DESC = {
       <li>Rule calls tether the two boats with the rule number; the penalty clock is a ring around your boat.</li>
       <li>Boat labels spell out right of way.</li></ul>`,
   D: `<b>D · On the water, lean.</b> B with the extras cut, after feedback on B.<ul>
-      <li>Corner readouts: clock and place top left, speed top right. Nothing else is fixed on screen.</li>
+      <li>Corner readouts: clock, place and speed top left, and a small minimap top right.</li>
+      <li>No start aids: no ghost dot and no favoured-end marker.</li>
+      <li>Your boat has no halo. It's picked out by its white hull and black outline.</li>
+      <li>Laylines are off by default, as a setting (toggle in the panel).</li>
       <li>Ring keeps the wind arrow with knots over the ground, the shift arc with ▲▼ and degrees, the next-mark chevron (no distance), and the current arrow (no number).</li>
-      <li>Wind shadow has no words and no highlight: the cones are fainter, and you notice it because your speed drops.</li>
+      <li>Wind shadow has no words and no highlight: the cones are very faint, and you notice it because your speed drops.</li>
       <li>Names only on boats within about 35 m, with right-of-way glyphs and no words.</li>
       <li>Rule calls keep the tether and rule badge. The penalty is the ring plus a short "Turn · 11s / 26s".</li>
       <li>Ladder lines are a setting (toggle in the panel).</li></ul>`,
@@ -843,7 +850,7 @@ const DESC = {
       <li>A place bar shows the gap to the boats ahead and behind.</li></ul>`,
 };
 function apply() {
-  for (const [id, key] of [['phases', 'phase'], ['cams', 'cam'], ['vision', 'vision'], ['zooms', 'zoom'], ['ladders', 'ladder']])
+  for (const [id, key] of [['phases', 'phase'], ['cams', 'cam'], ['vision', 'vision'], ['zooms', 'zoom'], ['ladders', 'ladder'], ['lays', 'lay']])
     for (const b of document.getElementById(id).children) b.classList.toggle('on', String(st[key]) === b.dataset.k);
   document.getElementById('vlabel').textContent = `${st.variant} (${VARIANTS[st.variant]})`;
   document.getElementById('desc').innerHTML = DESC[st.variant];
