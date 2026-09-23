@@ -35,6 +35,8 @@ public struct Boat: Identifiable, Sendable {
     public var desiredRudder = 0.0
     /// When set, the boat steers itself to this heading (auto-tack / gybe).
     public var autopilot: Double?
+    /// Sheets let go: the sail luffs and the boat slows.
+    public var isEased = false
 
     public var status: BoatStatus = .prestart
     public var legIndex = 0

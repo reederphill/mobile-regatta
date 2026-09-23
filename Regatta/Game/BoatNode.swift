@@ -84,12 +84,22 @@ final class BoatNode: SKNode {
         alpha = boat.isOnCourse ? 1 : 0.45
     }
 
+    /// Keeps the name and badge upright and on the screen-top side of the boat when the camera rotates.
+    func faceCamera(_ rotation: CGFloat) {
+        let length = CGFloat(Boat.length) * ppm
+        let up = CGPoint(x: -sin(rotation), y: cos(rotation))
+        label.zRotation = rotation
+        badge.zRotation = rotation
+        label.position = CGPoint(x: up.x * length * 0.75, y: up.y * length * 0.75)
+        badge.position = CGPoint(x: -up.x * length * 0.8, y: -up.y * length * 0.8)
+    }
+
     private func updateSail(_ boat: Boat, time: Double, dt: Double) {
         // Sail sits to leeward, eased further the further off the wind.
         let twa = boat.twa
         let side: CGFloat = boat.relativeWind >= 0 ? -1 : 1
         var target: CGFloat
-        if twa < deg2rad(32) {
+        if twa < deg2rad(32) || boat.isEased {
             target = CGFloat(deg2rad(3) + sin(time * 22) * deg2rad(6)) // luffing
         } else {
             target = CGFloat(((twa - deg2rad(25)) * 0.6).clamped(to: deg2rad(4)...deg2rad(85)))

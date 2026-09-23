@@ -5,7 +5,7 @@ import UIKit
 /// camera so it looks endless while only ever drawing one screen's worth of sprites.
 final class WaterNode: SKNode {
     private let spacing: CGFloat = 96
-    private let columns = 14
+    private let columns = 28
     private let rows = 32
     private var arrows: [SKSpriteNode] = []
     private var lastRotation: CGFloat = .nan

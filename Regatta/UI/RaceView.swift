@@ -20,8 +20,11 @@ struct RaceView: View {
             SpriteView(scene: session.scene, preferredFramesPerSecond: 120, options: [.ignoresSiblingOrder], debugOptions: debugOptions)
                 .ignoresSafeArea()
 
-            HUDView(hud: session.hud, messages: session.messages)
+            HUDView(hud: session.hud, messages: session.messages, instrumentsInset: lab.steer == .dial ? 200 : 160)
                 .allowsHitTesting(false)
+
+            TillerIndicator(lab: lab)
+                .ignoresSafeArea()
 
             controls
 
@@ -37,7 +40,10 @@ struct RaceView: View {
                 ResultsView(rows: session.results, onRestart: onRestart, onExit: onExit)
             }
         }
+        .onChange(of: lab.steer) { session.showSteeringHint() }
     }
+
+    private var lab: ControlLab { session.scene.lab }
 
     private var controls: some View {
         VStack {
@@ -59,7 +65,10 @@ struct RaceView: View {
             Spacer()
 
             HStack(alignment: .bottom) {
-                SteerHint(systemImage: "chevron.left", label: "Port")
+                VStack(spacing: 10) {
+                    if session.hud.penaltyTurns > 0 { SpinButton(lab: lab) }
+                    HoldButton(title: "EASE") { lab.isEased = $0 }
+                }
                 Spacer()
                 Button {
                     session.tackOrGybe()
@@ -74,26 +83,20 @@ struct RaceView: View {
                 }
                 .disabled(!session.hud.status.isRacingOrStarting)
                 Spacer()
-                SteerHint(systemImage: "chevron.right", label: "Starboard")
+                if lab.steer == .dial {
+                    HeadingDial(lab: lab, heading: session.hud.heading, windDirection: session.hud.windDirection)
+                } else {
+                    RudderGauge(lab: lab)
+                }
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 16)
-        }
-    }
-}
 
-private struct SteerHint: View {
-    let systemImage: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: systemImage).font(.title2.weight(.bold))
-            Text(label).font(.caption2.weight(.semibold))
+            #if DEBUG
+            ControlLabBar(lab: lab)
+                .padding(.top, 10)
+            #endif
         }
-        .foregroundStyle(.white.opacity(0.35))
-        .frame(width: 70)
-        .allowsHitTesting(false)
+        .padding(.bottom, 8)
     }
 }
 

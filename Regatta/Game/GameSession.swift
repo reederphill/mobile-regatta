@@ -43,12 +43,16 @@ final class GameSession {
         scene = GameScene(race: race)
         scene.session = self
         hud = HUDState(race: race)
-        post("Hold the left or right side of the screen to steer. Be below the line at the gun.", .info, seconds: 6)
+        post("\(scene.lab.steer.hint) Be below the line at the gun.", .info, seconds: 6)
     }
 
     func tackOrGybe() {
-        race.playerTackOrGybe()
+        scene.tackOrGybe()
         impact.impactOccurred(intensity: 0.4)
+    }
+
+    func showSteeringHint() {
+        post(scene.lab.steer.hint, .info, seconds: 5)
     }
 
     func setPaused(_ paused: Bool) {
@@ -58,6 +62,7 @@ final class GameSession {
 
     func refreshHUD() {
         hud = HUDState(race: race)
+        hud.viewHeading = scene.viewHeading
         let now = Date.now
         messages.removeAll { $0.expires < now }
         if playerDone { results = makeResults() }

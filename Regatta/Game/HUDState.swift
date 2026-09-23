@@ -30,6 +30,10 @@ struct HUDState {
     var targetDistance = 0.0
     /// Compass bearing to the target, radians.
     var targetBearing = 0.0
+    /// Compass heading of the boat, radians.
+    var heading = 0.0
+    /// Compass heading at the top of the screen, radians.
+    var viewHeading = 0.0
     var penaltyTurns = 0
     var penaltyProgress = 0.0
     var boats: [MiniBoat] = []
@@ -51,6 +55,7 @@ struct HUDState {
         windKnots = p.windSpeed * p.shadow * 1.943_84
         windShiftDegrees = rad2deg(wrapAngle(p.windDirection - course.axis))
         windDirection = p.windDirection
+        heading = p.heading
         inShadow = p.shadow < 0.97
         fleet = race.boats.count
         place = (race.standings().firstIndex(of: race.playerIndex) ?? 0) + 1

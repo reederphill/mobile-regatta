@@ -4,6 +4,7 @@ import RegattaCore
 struct HUDView: View {
     let hud: HUDState
     let messages: [RaceMessage]
+    var instrumentsInset: CGFloat = 92
 
     var body: some View {
         VStack(spacing: 10) {
@@ -43,7 +44,7 @@ struct HUDView: View {
             Spacer()
 
             instruments
-                .padding(.bottom, 92)
+                .padding(.bottom, instrumentsInset)
         }
     }
 
@@ -72,7 +73,7 @@ struct HUDView: View {
     private var targetIndicator: some View {
         HStack(spacing: 6) {
             Image(systemName: "location.north.fill")
-                .rotationEffect(.radians(hud.targetBearing))
+                .rotationEffect(.radians(hud.targetBearing - hud.viewHeading))
                 .foregroundStyle(Color(uiColor: Palette.mark))
             Text("\(hud.targetName) · \(Int(hud.targetDistance)) m")
                 .font(.caption.weight(.semibold))
@@ -87,7 +88,7 @@ struct HUDView: View {
         HStack(spacing: 0) {
             Instrument(value: String(format: "%.1f", hud.speedKnots), unit: "kn", label: "Speed")
             Instrument(value: "\(Int(hud.twaDegrees.rounded()))°", unit: hud.tack == .starboard ? "STBD" : "PORT", label: "Wind angle")
-            WindGauge(direction: hud.windDirection, shift: hud.windShiftDegrees, knots: hud.windKnots, inShadow: hud.inShadow)
+            WindGauge(direction: hud.windDirection - hud.viewHeading, shift: hud.windShiftDegrees, knots: hud.windKnots, inShadow: hud.inShadow)
         }
         .padding(.vertical, 8)
         .background(.black.opacity(0.3), in: .rect(cornerRadius: 16))

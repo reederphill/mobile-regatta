@@ -1,3 +1,4 @@
+import CoreMotion
 import SpriteKit
 import RegattaCore
 
@@ -31,6 +32,14 @@ final class GameScene: SKScene {
     private var portTouches = Set<UITouch>()
     private var starboardTouches = Set<UITouch>()
     private var rudderInput = 0.0
+
+    let lab = ControlLab.shared
+    private(set) var viewHeading = 0.0
+    private var appliedScheme: SteerScheme?
+    private var dragTouch: UITouch?
+    private var dragStartAngle = 0.0
+    private let motion = CMMotionManager()
+    private var tiltReference: Double?
 
     init(race: Race) {
         self.race = race
@@ -137,6 +146,8 @@ final class GameScene: SKScene {
 
         updateRudder(frameTime)
         race.setPlayerRudder(rudderInput)
+        race.setPlayerEased(lab.isEased)
+        if abs(lab.rudder - rudderInput) > 0.02 { lab.rudder = rudderInput }
         accumulator += frameTime
         while accumulator >= fixedStep {
             race.step(fixedStep)
@@ -163,6 +174,7 @@ final class GameScene: SKScene {
         let k = CGFloat(1 - exp(-dt * 3))
         cam.position = CGPoint(x: cam.position.x + (target.x - cam.position.x) * k,
                                y: cam.position.y + (target.y - cam.position.y) * k)
+        updateCamera(dt)
 
         water.update(center: cam.position, windDirection: race.wind.direction(at: player.position))
         updatePuffs()
@@ -226,24 +238,119 @@ final class GameScene: SKScene {
     // MARK: - Input
 
     private func updateRudder(_ dt: Double) {
-        let target = (starboardTouches.isEmpty ? 0.0 : 1.0) - (portTouches.isEmpty ? 0.0 : 1.0)
-        if target == 0 {
-            rudderInput = 0
+        if appliedScheme != lab.steer { applyScheme() }
+        let player = race.player
+        if lab.isSpinning {
+            if player.penaltyTurnsOwed > 0 && player.isOnCourse {
+                rudderInput = 1
+                return
+            }
+            lab.isSpinning = false
+        }
+
+        switch lab.steer {
+        case .halves:
+            let target = (starboardTouches.isEmpty ? 0.0 : 1.0) - (portTouches.isEmpty ? 0.0 : 1.0)
+            if target == 0 {
+                rudderInput = 0
+            } else {
+                let maxChange = 3.5 * dt
+                rudderInput += (target - rudderInput).clamped(to: -maxChange...maxChange)
+            }
+        case .tiller:
+            if let origin = lab.dragOrigin, let point = lab.dragPoint {
+                rudderInput = Double((point.x - origin.x) / 80).clamped(to: -1...1)
+            } else {
+                rudderInput = 0
+            }
+        case .dial:
+            rudderInput = lab.dialHeading.map(rudder(toward:)) ?? 0
+        case .tilt:
+            rudderInput = tiltRudder()
+        case .windLock:
+            rudderInput = lab.lockedWindAngle.map { rudder(toward: player.windDirection - $0) } ?? 0
+        }
+    }
+
+    private func rudder(toward heading: Double) -> Double {
+        (wrapAngle(heading - race.player.heading) / deg2rad(20)).clamped(to: -1...1)
+    }
+
+    private func tiltRudder() -> Double {
+        guard let x = motion.deviceMotion?.gravity.x else { return 0 }
+        guard let reference = tiltReference else {
+            tiltReference = x
+            return 0
+        }
+        let tilt = x - reference
+        let excess = max(0, abs(tilt) - 0.05)
+        return (excess / 0.3).clamped(to: 0...1) * (tilt < 0 ? -1 : 1)
+    }
+
+    private func applyScheme() {
+        appliedScheme = lab.steer
+        clearTouches()
+        let player = race.player
+        lab.dialHeading = player.heading
+        let side = player.relativeWind >= 0 ? 1.0 : -1.0
+        lab.lockedWindAngle = side * player.twa.clamped(to: deg2rad(30)...deg2rad(180))
+        tiltReference = nil
+        if lab.steer == .tilt, motion.isDeviceMotionAvailable {
+            motion.deviceMotionUpdateInterval = 1.0 / 60
+            motion.startDeviceMotionUpdates()
         } else {
-            let maxChange = 3.5 * dt
-            rudderInput += (target - rudderInput).clamped(to: -maxChange...maxChange)
+            motion.stopDeviceMotionUpdates()
+        }
+    }
+
+    func tackOrGybe() {
+        let player = race.player
+        guard player.isOnCourse else { return }
+        switch lab.steer {
+        case .dial:
+            lab.dialHeading = wrapAngle(player.windDirection + player.relativeWind)
+        case .windLock:
+            lab.lockedWindAngle = -(lab.lockedWindAngle ?? player.relativeWind)
+        case .halves, .tiller, .tilt:
+            race.playerTackOrGybe()
         }
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let view else { return }
         for touch in touches {
-            if touch.location(in: view).x < view.bounds.midX {
-                portTouches.insert(touch)
-            } else {
-                starboardTouches.insert(touch)
+            let location = touch.location(in: view)
+            switch lab.steer {
+            case .halves:
+                if location.x < view.bounds.midX {
+                    portTouches.insert(touch)
+                } else {
+                    starboardTouches.insert(touch)
+                }
+            case .tiller, .windLock:
+                guard dragTouch == nil else { continue }
+                dragTouch = touch
+                lab.dragOrigin = location
+                lab.dragPoint = location
+                dragStartAngle = lab.lockedWindAngle ?? race.player.relativeWind
+            case .tilt:
+                tiltReference = nil
+            case .dial:
+                break
             }
         }
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let view, let dragTouch, touches.contains(dragTouch) else { return }
+        let location = dragTouch.location(in: view)
+        lab.dragPoint = location
+        guard lab.steer == .windLock, let origin = lab.dragOrigin else { return }
+        // Sliding right always turns the boat to starboard, whichever tack it's on.
+        let side = dragStartAngle >= 0 ? 1.0 : -1.0
+        let turn = Double(location.x - origin.x) * deg2rad(0.5)
+        let magnitude = (abs(dragStartAngle) - side * turn).clamped(to: deg2rad(30)...deg2rad(180))
+        lab.lockedWindAngle = side * magnitude
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -258,21 +365,66 @@ final class GameScene: SKScene {
         for touch in touches {
             portTouches.remove(touch)
             starboardTouches.remove(touch)
+            if touch == dragTouch {
+                dragTouch = nil
+                lab.dragOrigin = nil
+                lab.dragPoint = nil
+            }
         }
     }
 
     @objc private func pinched(_ gesture: UIPinchGestureRecognizer) {
-        guard gesture.state == .began || gesture.state == .changed else { return }
+        guard lab.zoom == .pinch, gesture.state == .began || gesture.state == .changed else { return }
         zoom = (zoom * gesture.scale).clamped(to: 0.45...2.2)
         gesture.scale = 1
         cam.setScale(1 / zoom)
     }
 
-    /// Clears held touches, e.g. when an overlay steals them.
-    func resetInput() {
+    // MARK: - Camera
+
+    private func updateCamera(_ dt: Double) {
+        let player = race.player
+        let wanted: Double
+        let rate: Double
+        switch lab.camera {
+        case .courseUp: (wanted, rate) = (race.course.axis, 3)
+        case .windUp: (wanted, rate) = (player.windDirection, 0.8)
+        case .boatUp: (wanted, rate) = (player.heading, 4)
+        }
+        viewHeading = wrapAngle(viewHeading + wrapAngle(wanted - viewHeading) * (1 - exp(-dt * rate)))
+        cam.zRotation = CGFloat(-viewHeading)
+        for node in boatNodes { node.faceCamera(cam.zRotation) }
+        if abs(wrapAngle(lab.viewHeading - viewHeading)) > 0.003 { lab.viewHeading = viewHeading }
+
+        if lab.zoom == .auto {
+            let wantedZoom = size.width / 2 / (CGFloat(autoZoomRadius()) * ppm)
+            zoom += (wantedZoom - zoom) * CGFloat(1 - exp(-dt * 1.2))
+            cam.setScale(1 / zoom)
+        }
+    }
+
+    /// Half the screen width, in metres: the whole start line before the start, then tighter the
+    /// closer the nearest boat or the next mark.
+    private func autoZoomRadius() -> Double {
+        let player = race.player
+        guard player.status == .racing else { return 55 }
+        let boats = race.boats.filter { !$0.isPlayer && $0.isOnCourse }.map { ($0.position - player.position).length }
+        let mark = (race.course.targetPosition(for: race.course.legs[player.legIndex]) - player.position).length
+        return (min(boats.min() ?? .infinity, mark) * 1.4).clamped(to: 22...60)
+    }
+
+    private func clearTouches() {
         portTouches.removeAll()
         starboardTouches.removeAll()
+        dragTouch = nil
+        lab.dragOrigin = nil
+        lab.dragPoint = nil
         rudderInput = 0
+    }
+
+    /// Clears held touches, e.g. when an overlay steals them.
+    func resetInput() {
+        clearTouches()
         lastUpdate = nil
     }
 

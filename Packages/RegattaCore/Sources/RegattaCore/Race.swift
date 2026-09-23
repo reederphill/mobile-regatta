@@ -111,6 +111,11 @@ public final class Race {
         }
     }
 
+    public func setPlayerEased(_ eased: Bool) {
+        guard brains[playerIndex] == nil else { return }
+        boats[playerIndex].isEased = eased
+    }
+
     /// Mirror the heading across the wind: a tack when upwind, a gybe when downwind.
     public func playerTackOrGybe() {
         let b = boats[playerIndex]
@@ -215,8 +220,9 @@ public final class Race {
             b.isTacking = false
         }
 
-        let target = b.isOnCourse ? polar.targetSpeed(twa: b.twa, windSpeed: b.windSpeed * b.shadow) : 0
-        let timeConstant = target > b.speed ? 2.5 : 5.0
+        var target = b.isOnCourse ? polar.targetSpeed(twa: b.twa, windSpeed: b.windSpeed * b.shadow) : 0
+        if b.isEased { target *= 0.15 }
+        let timeConstant = target > b.speed ? 2.5 : (b.isEased ? 3.0 : 5.0)
         b.speed += (target - b.speed) * min(1, dt / timeConstant)
         b.speed -= b.speed * abs(b.rudder) * 0.3 * dt
         b.speed = max(0, b.speed)
