@@ -7,7 +7,8 @@ struct RaceSettings {
     var prestartSeconds = 60.0
 
     var config: Race.Config {
-        Race.Config(opponents: opponents, laps: laps, prestartSeconds: prestartSeconds)
+        // A local practice race picks its own seed; online races get theirs from the server.
+        Race.Config(opponents: opponents, laps: laps, prestartSeconds: prestartSeconds, seed: .random(in: 0 ... .max))
     }
 }
 

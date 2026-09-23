@@ -1,5 +1,4 @@
 import Foundation
-import simd
 
 /// A 2D vector in metres. x = east, y = north.
 public typealias Vec2 = SIMD2<Double>
@@ -8,15 +7,15 @@ public extension SIMD2 where Scalar == Double {
     /// Unit vector for a compass heading in radians (0 = north, positive clockwise).
     static func heading(_ angle: Double) -> SIMD2<Double> { SIMD2(sin(angle), cos(angle)) }
 
-    var length: Double { simd_length(self) }
-    var lengthSquared: Double { simd_length_squared(self) }
+    var length: Double { lengthSquared.squareRoot() }
+    var lengthSquared: Double { x * x + y * y }
 
     var normalized: SIMD2<Double> {
         let l = length
         return l > 1e-12 ? self / l : .zero
     }
 
-    func dot(_ other: SIMD2<Double>) -> Double { simd_dot(self, other) }
+    func dot(_ other: SIMD2<Double>) -> Double { x * other.x + y * other.y }
 
     /// z of the 3D cross product: positive when `other` is counter-clockwise of `self`.
     func cross(_ other: SIMD2<Double>) -> Double { x * other.y - y * other.x }

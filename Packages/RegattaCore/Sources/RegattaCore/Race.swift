@@ -1,6 +1,10 @@
 import Foundation
 
-/// The authoritative race simulation. Advance it with `step(_:)` at a fixed rate.
+/// The authoritative race simulation. Advance it with `step()`, one fixed tick of `Race.dt` at a time.
+///
+/// Determinism (ADR 0002): the step path draws randomness only from the race's `SplitMix64`,
+/// never reads the wall clock, and never iterates a `Set` or `Dictionary` — their order depends on
+/// a per-process hash seed. Look them up by key; iterate arrays. `DeterminismTests` scans for all three.
 public final class Race {
     public struct Config: Sendable {
         public var opponents: Int
@@ -15,7 +19,7 @@ public final class Race {
             opponents: Int = 7,
             laps: Int = 2,
             prestartSeconds: Double = 60,
-            seed: UInt64 = .random(in: 0 ... .max),
+            seed: UInt64,
             playerName: String = "You",
             autopilotPlayer: Bool = false
         ) {
@@ -34,6 +38,11 @@ public final class Race {
     public static func shadowHalfWidth(at distance: Double) -> Double { 2 + distance * 0.18 }
     public static let timeLimitAfterFirstFinish = 180.0
 
+    /// Simulation ticks per second. A server that falls behind catches up with several ticks, never a longer one.
+    public static let tickRate = 30
+    /// Seconds per tick.
+    public static let dt = 1.0 / Double(tickRate)
+
     static let botNames = [
         "Gannet", "Petrel", "Skua", "Fulmar", "Tern", "Osprey", "Curlew", "Kittiwake",
         "Shearwater", "Puffin", "Cormorant", "Albatross", "Plover", "Heron", "Merlin", "Dunlin",
@@ -46,8 +55,10 @@ public final class Race {
 
     public private(set) var wind: WindField
     public private(set) var boats: [Boat]
-    /// Race clock in seconds; negative during the start sequence, 0 at the gun.
-    public private(set) var time: Double
+    /// Race clock in ticks; negative during the start sequence, 0 at the gun.
+    public private(set) var tick: Int
+    /// Race clock in seconds, derived from `tick` so it never accumulates rounding.
+    public var time: Double { Double(tick) / Double(Race.tickRate) }
     public private(set) var isOver = false
     public private(set) var firstFinishTime: Double?
 
@@ -63,7 +74,7 @@ public final class Race {
     private var events: [RaceEvent] = []
     private var finishers = 0
 
-    public init(config: Config = Config()) {
+    public init(config: Config) {
         self.config = config
         var rng = SplitMix64(seed: config.seed)
         let course = Course.standard(laps: config.laps)
@@ -74,7 +85,7 @@ public final class Race {
             areaMin: Vec2(-450, -250),
             areaMax: Vec2(450, course.marks[0].position.y + 200)
         )
-        time = -config.prestartSeconds
+        tick = -Int((config.prestartSeconds * Double(Race.tickRate)).rounded())
 
         var fleet = [
             Boat(id: 0, name: config.playerName, isPlayer: true, colorIndex: 0,
@@ -83,10 +94,10 @@ public final class Race {
         for k in 0..<max(0, config.opponents) {
             var position = Vec2.zero
             for _ in 0..<50 {
-                position = Vec2(Double.random(in: -130...130, using: &rng), Double.random(in: -100 ... -35, using: &rng))
+                position = Vec2(rng.range(-130, 130), rng.range(-100, -35))
                 if fleet.allSatisfy({ ($0.position - position).length > 10 }) { break }
             }
-            let heading = Bool.random(using: &rng) ? Double.pi / 2 : -Double.pi / 2
+            let heading = rng.bool() ? Double.pi / 2 : -Double.pi / 2
             fleet.append(Boat(id: k + 1, name: Race.botNames[k % Race.botNames.count], isPlayer: false,
                               colorIndex: k + 1, position: position, heading: heading, speed: 2))
         }
@@ -125,12 +136,12 @@ public final class Race {
         return events
     }
 
-    public func step(_ dt: Double) {
+    /// Advances the race by one tick.
+    public func step() {
         guard !isOver else { return }
-        let before = time
-        time += dt
-        wind.step(dt)
-        if before < 0 && time >= 0 { fireGun() }
+        tick += 1
+        wind.step()
+        if tick == 0 { fireGun() }
 
         refreshWind()
         applyWindShadows()
@@ -143,7 +154,7 @@ public final class Race {
         }
 
         let previous = boats.map(\.position)
-        for i in boats.indices { integrate(i, dt) }
+        for i in boats.indices { integrate(i, Race.dt) }
         resolveBoatContacts()
         resolveObstacleContacts()
         for i in boats.indices { updateProgress(i, from: previous[i]) }

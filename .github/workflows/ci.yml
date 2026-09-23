@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  linux:
+    name: RegattaCore on the pinned Linux replay platform
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test (debug and release) in the pinned swift image
+        shell: bash  # explicit, so the step runs with pipefail and a test failure isn't hidden by tee
+        run: scripts/linux-test.sh 2>&1 | tee linux-test.log
+      - name: Golden digest
+        if: always()
+        run: |
+          grep -o 'GOLDEN simulationVersion=.*' linux-test.log | sort -u | tee -a "$GITHUB_STEP_SUMMARY" || true
+
+  macos:
+    name: RegattaCore on macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: swift test
+        working-directory: Packages/RegattaCore
+        run: swift test
+      - name: Same digest across two test processes
+        run: scripts/check-digest-stable.sh

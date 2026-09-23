@@ -16,12 +16,12 @@ struct BotBrain {
     var lastTackTime = -1_000.0
 
     init(rng: inout SplitMix64) {
-        skill = Double.random(in: 0.35...1, using: &rng)
-        startSpot = Double.random(in: 0.1...0.9, using: &rng)
-        finishSpot = Double.random(in: 0.6...0.85, using: &rng)
-        holdDepth = Double.random(in: 18...35, using: &rng)
-        timingSlack = Double.random(in: -2.5...5, using: &rng) * (1.3 - skill)
-        penaltyDirection = Bool.random(using: &rng) ? 1 : -1
+        skill = rng.range(0.35, 1)
+        startSpot = rng.range(0.1, 0.9)
+        finishSpot = rng.range(0.6, 0.85)
+        holdDepth = rng.range(18, 35)
+        timingSlack = rng.range(-2.5, 5) * (1.3 - skill)
+        penaltyDirection = rng.bool() ? 1 : -1
     }
 
     mutating func rudder(for i: Int, in race: Race) -> Double {
