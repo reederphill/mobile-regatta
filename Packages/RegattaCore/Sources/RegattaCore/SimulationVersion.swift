@@ -8,6 +8,8 @@ import Glibc
 
 /// Bumped by hand whenever simulation output changes: physics, rules, wind, tick rate, or
 /// anything else a golden digest would see. Add the new row to `Tests/Goldens.json` with it.
+/// The golden currently sails every seat with `BotBrain`, so bot changes move it too, until
+/// #59's brain-free race-log replay golden replaces it (ADR 0002: replays never run bot brains).
 public let simulationRevision = 1
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`

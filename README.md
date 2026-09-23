@@ -45,7 +45,8 @@ bit-for-bit deterministic:
   Look them up by key and iterate arrays.
 - `simulationVersion` is `<revision>/<toolchain>/<C library>/<architecture>`. Bump `simulationRevision`
   for any change to simulation output and add its row to `Tests/Goldens.json`; a changed digest without a
-  new row fails the golden test.
+  new row fails the golden test. For now the golden sails every seat with `BotBrain`, so bot changes also
+  move it, until #59's brain-free race-log replay golden replaces it (ADR 0002: replays never run bots).
 - The replay platform is pinned to the `swift:6.3.3-noble` image (by digest, in `scripts/linux-test.sh`)
   on `linux/amd64`: Swift 6.3.3, glibc 2.39, x86_64. Trig uses that platform's libm rather than our own
   implementation: the C library is already part of the simulation version, and iOS clients only have to

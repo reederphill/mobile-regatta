@@ -44,11 +44,17 @@ trap 'rm -f "$log"' EXIT
         swift test -c release -Xswiftc -enable-testing --scratch-path /tmp/build-release
     ' 2>&1 | tee "$log"
 
-digests="$(grep -o 'GOLDEN simulationVersion=.*' "$log" | sort -u)"
+# One GOLDEN line per configuration (debug, release), and both the same.
+lines="$(grep -o 'GOLDEN simulationVersion=.*' "$log" || true)"
 echo
 echo "Golden digests (debug and release):"
-echo "$digests"
-if [[ "$(echo "$digests" | wc -l | tr -d ' ')" != "1" ]]; then
+echo "$lines"
+count="$(printf '%s' "$lines" | grep -c . || true)"
+if [[ "$count" != "2" ]]; then
+    echo "linux-test.sh: expected 2 GOLDEN lines (debug and release), got $count" >&2
+    exit 1
+fi
+if [[ "$(printf '%s\n' "$lines" | sort -u | wc -l | tr -d ' ')" != "1" ]]; then
     echo "linux-test.sh: debug and release digests differ" >&2
     exit 1
 fi
