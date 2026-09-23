@@ -134,6 +134,16 @@ _Avoid_: boat type, model
 **Tack** (starboard or port):
 The side opposite the boom. A boat changes tack only by tacking or gybing, never by just sailing by the lee.
 
+**Polar**:
+A boat class's speed through the water at each wind angle and wind strength.
+_Avoid_: speed curve, performance table
+
+**VMG** (velocity made good):
+The part of a boat's speed that carries her straight upwind or downwind, or toward her mark.
+
+**Sailing by the lee**:
+Sailing downwind with the wind past dead astern on the same side as the boom, short of the point where the boom crosses and she gybes.
+
 **Livery**:
 The player-chosen colours and graphics applied to their boat. Cosmetic only.
 _Avoid_: skin
