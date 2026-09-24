@@ -2,17 +2,14 @@ import SpriteKit
 import RegattaBots
 import RegattaCore
 
-/// Renders the race and turns touches into rudder input. The simulation advances
-/// at a fixed 30 Hz (`Race.tickRate`) regardless of display refresh rate.
+/// Renders the race and turns touches into rudder input. The driver runs the simulation at a fixed
+/// 30 Hz (`Race.tickRate`) whatever the display's refresh rate, and the scene draws between its last
+/// two ticks (`RenderWorld`). The scene never holds a `Race`.
 final class GameScene: SKScene {
     static let pointsPerMeter: CGFloat = 8
 
-    let race: Race
-    /// Who sails each seat. Bots send their inputs through the race's input API before each tick (#60).
-    private(set) var seats: SeatControllers
+    let driver: any RaceDriver
     let roster: FleetRoster
-    /// Simulated seconds per real second (`-timescale`).
-    let timescale: Double
     weak var session: GameSession?
 
     private let world = SKNode()
@@ -27,10 +24,9 @@ final class GameScene: SKScene {
     private var boatNodes: [BoatNode] = []
     private var puffNodes: [SKSpriteNode] = []
 
-    // Stopgap fixed-step loop; #61 replaces it.
-    private let fixedStep = Race.dt
-    private var accumulator = 0.0
     private var lastUpdate: TimeInterval?
+    /// The race clock last drawn, so effects run on simulated time (`-timescale` included).
+    private var lastRenderTime: Double?
     private var hudCountdown = 0.0
     private var laylineCountdown = 0.0
     private var zoom: CGFloat = 0.8
@@ -39,11 +35,9 @@ final class GameScene: SKScene {
     private var starboardTouches = Set<UITouch>()
     private var rudderInput = 0.0
 
-    init(race: Race, seats: SeatControllers, roster: FleetRoster, timescale: Double = 1) {
-        self.race = race
-        self.seats = seats
+    init(driver: any RaceDriver, roster: FleetRoster) {
+        self.driver = driver
         self.roster = roster
-        self.timescale = timescale
         // A placeholder: `RaceView` sets the size from `RaceViewportPolicy`, so the visible world area
         // doesn't depend on the window. The view has the scene's aspect, so aspect-fit scales it uniformly.
         super.init(size: CGSize(width: 390, height: 844))
@@ -78,7 +72,7 @@ final class GameScene: SKScene {
         addChild(cam)
         camera = cam
         cam.setScale(1 / zoom)
-        cam.position = point(race.player.position)
+        cam.position = point(driver.renderWorld.me.position)
 
         laylines.strokeColor = UIColor.white.withAlphaComponent(0.22)
         laylines.lineWidth = 1
@@ -88,7 +82,7 @@ final class GameScene: SKScene {
     }
 
     private func buildCourse() {
-        let course = race.course
+        let course = driver.course
 
         for mark in course.marks {
             let zone = SKShapeNode(circleOfRadius: CGFloat(course.zoneRadius) * ppm)
@@ -131,8 +125,9 @@ final class GameScene: SKScene {
     }
 
     private func buildBoats() {
-        for boat in race.boats {
-            let node = BoatNode(boat: boat, name: roster.label(of: boat.id, playerSeat: race.playerIndex),
+        let me = driver.myBoatIndex
+        for boat in driver.currentFrame.boats {
+            let node = BoatNode(boat: boat, name: roster.label(of: boat.id, playerSeat: me), isMine: boat.id == me,
                                 color: Palette.boat(boat.colorIndex), pointsPerMeter: ppm)
             boatNodes.append(node)
             boatLayer.addChild(node)
@@ -149,12 +144,12 @@ final class GameScene: SKScene {
         guard let session, !session.isPaused else { return }
 
         updateRudder(frameTime)
-        // With `-demo` a bot sails your seat, and your touches don't reach it.
-        if seats[race.playerIndex].isHuman { race.setPlayerRudder(rudderInput) }
-        advanceSimulation(by: frameTime)
+        // The driver latches it for the next tick. With `-demo` a bot sails your seat and ignores it.
+        driver.submit(BoatInput(rudder: rudderInput))
+        driver.tick(frameTime)
 
-        Signpost.renderUpdate.measure { render(frameTime * timescale) }
-        session.consume(race.drainEvents())
+        Signpost.renderUpdate.measure { render(driver.renderWorld) }
+        session.consume(driver.drainEvents())
 
         hudCountdown -= frameTime
         if hudCountdown <= 0 {
@@ -163,44 +158,38 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Runs the fixed ticks that `frameTime` seconds of real time cover at `timescale`, each after
-    /// the bots have had their say.
-    func advanceSimulation(by frameTime: Double) {
-        accumulator += frameTime * timescale
-        while accumulator >= fixedStep {
-            Signpost.botBrains.measure { seats.drive(race) }
-            Signpost.simStep.measure { race.step() }
-            accumulator -= fixedStep
-        }
-    }
-
-    private func render(_ dt: Double) {
-        for (i, boat) in race.boats.enumerated() {
-            boatNodes[i].update(with: boat, time: race.time, dt: dt)
+    private func render(_ world: RenderWorld) {
+        // Simulated seconds since the last frame drawn.
+        let dt = max(0, world.time - (lastRenderTime ?? world.time))
+        lastRenderTime = world.time
+        for (i, boat) in world.boats.enumerated() {
+            boatNodes[i].update(with: boat, time: world.time, dt: dt)
         }
 
-        let player = race.player
+        let player = world.me
         let target = point(player.position + player.velocity * 2)
         let k = CGFloat(1 - exp(-dt * 3))
         cam.position = CGPoint(x: cam.position.x + (target.x - cam.position.x) * k,
                                y: cam.position.y + (target.y - cam.position.y) * k)
 
-        water.update(center: cam.position, windDirection: race.groundWind(at: player.position).direction)
-        updatePuffs()
+        if let wind = world.groundWind(at: player.position) {
+            water.update(center: cam.position, windDirection: wind.direction)
+        }
+        updatePuffs(world)
 
-        startLine.strokeColor = race.time < 0
+        startLine.strokeColor = world.time < 0
             ? Palette.startLine.withAlphaComponent(0.9)
             : UIColor.white.withAlphaComponent(0.4)
 
         laylineCountdown -= dt
         if laylineCountdown <= 0 {
             laylineCountdown = 0.25
-            updateLaylines()
+            updateLaylines(world)
         }
     }
 
-    private func updatePuffs() {
-        let puffs = race.wind.activePuffs(atTick: race.tick)
+    private func updatePuffs(_ world: RenderWorld) {
+        let puffs = world.puffs
         while puffNodes.count < puffs.count {
             let node = SKSpriteNode(texture: puffTexture)
             node.colorBlendFactor = 1
@@ -224,17 +213,20 @@ final class GameScene: SKScene {
         }
     }
 
-    private func updateLaylines() {
-        let player = race.player
-        let course = race.course
+    private func updateLaylines(_ world: RenderWorld) {
+        let player = world.me
+        let course = world.course
         let leg = player.status == .racing ? course.legs[player.legIndex] : (player.isOnCourse ? course.legs[0] : .finish)
         guard case .round(let index) = leg else {
             laylines.path = nil
             return
         }
         let mark = course.marks[index]
-        let w = race.groundWind(at: mark.position).direction
-        let angle = mark.kind == .windward ? race.polar.upwindTWA : race.polar.downwindTWA
+        guard let w = world.groundWind(at: mark.position)?.direction else {
+            laylines.path = nil
+            return
+        }
+        let angle = mark.kind == .windward ? world.polar.upwindTWA : world.polar.downwindTWA
         let path = CGMutablePath()
         for heading in [w - angle, w + angle] {
             // The layline is the track that arrives at the mark on this heading.

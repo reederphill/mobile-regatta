@@ -93,6 +93,6 @@ import RegattaCore
     @Test func perfIsASixteenBoatDemoRace() throws {
         let config = try #require(parse("-perf").launchRaceConfig(from: RaceSettings()))
         #expect(config.botSailsYourBoat)
-        #expect(Race(config: config).boats.count == 16)
+        #expect(PracticeDriver(config: config).currentFrame.boats.count == 16)
     }
 }

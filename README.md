@@ -62,10 +62,13 @@ Packages/RegattaClient/   The online race client, over a transport protocol, no 
   RaceTransport.swift     the transport protocol the app (#68) and the load client (#67) implement
   FaultInjectingLink.swift  an in-memory link on a virtual clock: seeded delay, jitter, loss, reorder, disconnect
 Regatta/                The iOS app
-  Game/GameScene.swift    SpriteKit renderer, camera, touch steering
+  Game/RaceDriver.swift   what the app sails a race through: 30 Hz tick clock, tick frames, the interpolated RenderWorld
+  Game/PracticeDriver.swift  an offline practice race: owns the Race and on-device bots, latches your input per tick, keeps the log
+  Game/VisualCorrection.swift  eases a corrected prediction's drawn position over ~150 ms, snaps past a hull length (online, #68)
+  Game/GameScene.swift    SpriteKit renderer, camera, touch steering; reads RenderWorld, never a Race
   Game/BoatNode.swift     batched boat sprites, sails, wakes, wind-shadow cones
-  Game/GameSession.swift  bridges the race to SwiftUI: HUD, rule-call messages, haptics
-  Game/RaceShim.swift     seat-0 player shim over the per-seat input API, until the practice driver (#61)
+  Game/GameSession.swift  hosts a driver and bridges it to SwiftUI: HUD, rule-call messages, haptics
+  Game/RaceConfig.swift   a practice race's settings, seeds and seat controllers; roster names and the bot glyph
   Game/RaceViewportPolicy.swift  race-view sizing: letterboxed portrait in any window (G5)
   UI/                     menu, HUD, minimap, results
   App/                    app and scene delegates, launch arguments, acknowledgements
@@ -81,6 +84,11 @@ up to 120 Hz on ProMotion). The race clock is an integer `tick`: 0 at the gun, s
 at −1800, and `time` is derived from it, never accumulated. Falling behind means running several fixed
 ticks, never one longer step. Everything the rules engine decides lives in `RegattaCore`, so it can move
 to a Linux server for authoritative multiplayer.
+
+In the app a `RaceDriver` runs the ticks (`TickClock`) and the scene draws the fleet between the last two
+(`RenderWorld`: positions lerped, headings the short way round), one tick behind the simulation. Your input
+is latched: the scene sends it every frame and the driver applies the latest once per tick. A practice
+race's driver is `PracticeDriver`; the online one (#68) wraps the client's prediction the same way.
 
 ### Determinism
 

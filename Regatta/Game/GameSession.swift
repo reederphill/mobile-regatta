@@ -24,11 +24,11 @@ struct ResultRow: Identifiable {
     let isBot: Bool
 }
 
-/// Owns one race and bridges it to SwiftUI: HUD snapshots, rule-call messages,
-/// haptics and results.
+/// Hosts one race's driver and bridges it to SwiftUI: HUD snapshots, rule-call messages,
+/// haptics and results. It never holds a `Race`: a practice race is a `PracticeDriver`.
 @Observable
 final class GameSession {
-    let race: Race
+    let driver: any RaceDriver
     let scene: GameScene
     /// Names and bot marks, kept outside the simulation (#60).
     let roster: FleetRoster
@@ -43,30 +43,36 @@ final class GameSession {
     @ObservationIgnored private let impact = UIImpactFeedbackGenerator(style: .medium)
     @ObservationIgnored private let notification = UINotificationFeedbackGenerator()
 
-    /// `timescale` runs the simulation that many times real time (`-timescale`, for tests).
-    init(config: RaceConfig, timescale: Double = 1) {
-        race = Race(config: config)
-        roster = config.roster
-        scene = GameScene(race: race, seats: config.seatControllers, roster: roster, timescale: timescale)
+    /// A practice race on the device. `timescale` runs the simulation that many times real time
+    /// (`-timescale`, for tests).
+    convenience init(config: RaceConfig, timescale: Double = 1) {
+        let driver = PracticeDriver(config: config, timescale: timescale)
+        self.init(driver: driver, roster: driver.roster)
+    }
+
+    init(driver: any RaceDriver, roster: FleetRoster) {
+        self.driver = driver
+        self.roster = roster
+        scene = GameScene(driver: driver, roster: roster)
         scene.session = self
-        hud = HUDState(race: race)
+        hud = HUDState(world: driver.renderWorld)
         post("Hold the left or right side of the screen to steer. Be below the line at the gun.", .info, seconds: 6)
     }
 
     func tackOrGybe() {
-        // With `-demo` a bot sails your seat, and the button doesn't reach it.
-        guard scene.seats[race.playerIndex].isHuman else { return }
-        race.playerTackOrGybe()
+        // With `-demo` a bot sails your seat, and the driver refuses the tap.
+        guard driver.tap(.tackGybe) else { return }
         impact.impactOccurred(intensity: 0.4)
     }
 
+    /// Pauses a race that can pause; one that can't (online) keeps running.
     func setPaused(_ paused: Bool) {
-        isPaused = paused
+        isPaused = paused && driver.isPausable
         scene.resetInput()
     }
 
     func refreshHUD() {
-        hud = HUDState(race: race)
+        hud = HUDState(world: driver.renderWorld)
         let now = Date.now
         messages.removeAll { $0.expires < now }
         if playerDone { results = makeResults() }
@@ -74,8 +80,9 @@ final class GameSession {
 
     func consume(_ events: [RaceEvent]) {
         for event in events { handle(event) }
-        if race.time < 0 {
-            let second = Int(ceil(-race.time))
+        let time = driver.currentFrame.time
+        if time < 0 {
+            let second = Int(ceil(-time))
             if second != lastCountdownSecond {
                 lastCountdownSecond = second
                 if second <= 5 || second == 10 || second == 30 { impact.impactOccurred(intensity: 0.5) }
@@ -86,7 +93,7 @@ final class GameSession {
     // MARK: - Events
 
     private func handle(_ event: RaceEvent) {
-        let me = race.playerIndex
+        let me = driver.myBoatIndex
         func name(_ i: Int) -> String { roster.label(of: i, playerSeat: me) }
 
         switch event.kind {
@@ -146,12 +153,14 @@ final class GameSession {
     }
 
     private func placeOfPlayer() -> Int {
-        (race.standings().firstIndex(of: race.playerIndex) ?? 0) + 1
+        driver.currentFrame.place(of: driver.myBoatIndex)
     }
 
     private func makeResults() -> [ResultRow] {
-        race.standings().enumerated().map { rank, i in
-            let b = race.boats[i]
+        let frame = driver.currentFrame
+        let me = driver.myBoatIndex
+        return frame.standings.enumerated().map { rank, i in
+            let b = frame.boats[i]
             let place: String
             let detail: String
             switch b.status {
@@ -171,8 +180,8 @@ final class GameSession {
                 place = "\(rank + 1)"
                 detail = "Not started"
             }
-            return ResultRow(id: b.id, place: place, name: roster.name(of: i, playerSeat: race.playerIndex), detail: detail,
-                             colorIndex: b.colorIndex, isPlayer: b.isPlayer, isBot: roster[i].isBot)
+            return ResultRow(id: b.id, place: place, name: roster.name(of: i, playerSeat: me), detail: detail,
+                             colorIndex: b.colorIndex, isPlayer: i == me, isBot: roster[i].isBot)
         }
     }
 }

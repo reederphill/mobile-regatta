@@ -49,17 +49,20 @@ struct RaceView: View {
     private var controls: some View {
         VStack {
             HStack {
-                Button {
-                    session.setPaused(true)
-                } label: {
-                    Image(systemName: "pause.fill")
-                        .font(.headline)
-                        .frame(width: 40, height: 40)
-                        .background(.ultraThinMaterial, in: .circle)
+                if session.driver.isPausable {
+                    Button {
+                        session.setPaused(true)
+                    } label: {
+                        Image(systemName: "pause.fill")
+                            .font(.headline)
+                            .frame(width: 40, height: 40)
+                            .background(.ultraThinMaterial, in: .circle)
+                    }
+                    .foregroundStyle(.white)
                 }
-                .foregroundStyle(.white)
                 Spacer()
             }
+            .frame(minHeight: 40)
             .padding(.horizontal, 16)
             .padding(.top, 4)
 
