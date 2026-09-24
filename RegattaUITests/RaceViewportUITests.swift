@@ -6,8 +6,8 @@ final class RaceViewportUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    override func tearDown() {
-        XCUIDevice.shared.orientation = .portrait
+    override func tearDown() async throws {
+        await MainActor.run { XCUIDevice.shared.orientation = .portrait }
     }
 
     /// In a full-screen portrait window the race fills the window.
@@ -48,8 +48,8 @@ final class RaceViewportUITests: XCTestCase {
 
     @MainActor private func raceRect(in app: XCUIApplication) -> CGRect {
         let viewport = app.otherElements["race-viewport"]
-        XCTAssertTrue(viewport.waitForExistence(timeout: 15), "no race viewport after -autostart")
-        XCTAssertTrue(app.staticTexts["race-clock"].waitForExistence(timeout: 15), "no race clock after -autostart")
+        XCTAssertTrue(viewport.waitForExistence(timeout: 60), "no race viewport after -autostart")
+        XCTAssertTrue(app.staticTexts["race-clock"].waitForExistence(timeout: 60), "no race clock after -autostart")
         return viewport.frame
     }
 }

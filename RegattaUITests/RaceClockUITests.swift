@@ -11,7 +11,7 @@ final class RaceClockUITests: XCTestCase {
         app.launch()
 
         let clock = app.staticTexts["race-clock"]
-        XCTAssertTrue(clock.waitForExistence(timeout: 15), "no race clock after -autostart")
+        XCTAssertTrue(clock.waitForExistence(timeout: 60), "no race clock after -autostart")
         let first = try tick(of: clock)
         Thread.sleep(forTimeInterval: 1)
         let second = try tick(of: clock)

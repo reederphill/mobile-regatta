@@ -61,7 +61,7 @@ jobs:
     # GitHub's Xcode 27 image (preview; macOS 27, arm64). Apps built with the iOS 27 SDK need the scene life
     # cycle and a launch screen, and UIRequiresFullScreen is ignored (#107).
     runs-on: xcode-27
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: SDKs
@@ -75,18 +75,40 @@ jobs:
             -destination 'generic/platform=iOS' -archivePath Regatta.xcarchive CODE_SIGNING_ALLOWED=NO
       - name: Archived Info.plist and privacy manifest
         run: scripts/check-shipping-config.sh Regatta.xcarchive/Products/Applications/Regatta.app iphoneos27
+      - name: Boot the iOS 27 simulators
+        # Booted up front: the first boot on this image is slow enough to time out UI test launches.
+        run: |
+          xcrun simctl bootstatus 'iPhone 17' -b
+          xcrun simctl bootstatus 'iPad Air 13-inch (M4)' -b
+      - name: Launch on the iOS 27 simulator
+        run: |
+          xcodebuild build -project Regatta.xcodeproj -scheme Regatta \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' -derivedDataPath DerivedData
+          app=DerivedData/Build/Products/Debug-iphonesimulator/Regatta.app
+          scripts/check-shipping-config.sh "$app" iphonesimulator27
+          xcrun simctl install 'iPhone 17' "$app"
+          xcrun simctl launch 'iPhone 17' com.phillreeder.regatta
+          sleep 15
+          xcrun simctl io 'iPhone 17' screenshot launch-ios27.png
+          xcrun simctl spawn 'iPhone 17' launchctl list | grep 'com.phillreeder.regatta' \
+            || { echo "Regatta isn't running 15 s after launch" >&2; exit 1; }
+          echo "Regatta is running on iOS 27."
       - name: xcodebuild test (unit + UI) on iOS 27, iPhone and iPad
         run: |
           xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' \
             -destination 'platform=iOS Simulator,name=iPad Air 13-inch (M4),OS=27.0' \
+            -disable-concurrent-destination-testing \
             -derivedDataPath DerivedData -resultBundlePath Regatta-ios27.xcresult
-      - name: Built with the iOS 27 simulator SDK
-        run: scripts/check-shipping-config.sh DerivedData/Build/Products/Debug-iphonesimulator/Regatta.app iphonesimulator27
-      - name: Upload the result bundle (screenshots, logs)
+      - name: Test failures
+        if: failure()
+        run: xcrun xcresulttool get test-results summary --path Regatta-ios27.xcresult || true
+      - name: Upload the result bundle and launch screenshot
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Regatta-ios27.xcresult
-          path: Regatta-ios27.xcresult
+          name: Regatta-ios27
+          path: |
+            Regatta-ios27.xcresult
+            launch-ios27.png
           if-no-files-found: ignore
