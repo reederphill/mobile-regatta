@@ -8,7 +8,7 @@ on:
 
 jobs:
   linux:
-    name: RegattaCore on the pinned Linux replay platform
+    name: Packages on the pinned Linux replay platform
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +21,7 @@ jobs:
           grep -o 'GOLDEN simulationVersion=.*' linux-test.log | sort -u | tee -a "$GITHUB_STEP_SUMMARY" || true
 
   macos:
-    name: RegattaCore on macOS
+    name: Packages on macOS
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
