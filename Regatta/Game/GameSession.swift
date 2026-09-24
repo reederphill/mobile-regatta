@@ -38,8 +38,8 @@ final class GameSession {
     @ObservationIgnored private let impact = UIImpactFeedbackGenerator(style: .medium)
     @ObservationIgnored private let notification = UINotificationFeedbackGenerator()
 
-    init(config: Race.Config) {
-        race = Race(config: config)
+    init(config: RaceConfig) {
+        race = Race(setup: config.setup, windSeed: config.windSeed, botBrainSeats: config.botBrainSeats)
         scene = GameScene(race: race)
         scene.session = self
         hud = HUDState(race: race)
@@ -80,7 +80,7 @@ final class GameSession {
         let me = race.playerIndex
         func name(_ i: Int) -> String { race.boats[i].name }
 
-        switch event {
+        switch event.kind {
         case .gun:
             post("Gun! Race on.", .good)
             impact.impactOccurred(intensity: 1)
@@ -162,7 +162,7 @@ final class GameSession {
                 place = "\(rank + 1)"
                 detail = "Not started"
             }
-            return ResultRow(id: b.id, place: place, name: b.name, detail: detail, colorIndex: b.colorIndex, isPlayer: b.isPlayer)
+            return ResultRow(id: b.id, place: place, name: b.displayName, detail: detail, colorIndex: b.colorIndex, isPlayer: b.isPlayer)
         }
     }
 }

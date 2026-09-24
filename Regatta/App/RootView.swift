@@ -6,9 +6,17 @@ struct RaceSettings {
     var laps = 2
     var prestartSeconds = 60.0
 
-    var config: Race.Config {
-        // A local practice race picks its own seed; online races get theirs from the server.
-        Race.Config(opponents: opponents, laps: laps, prestartSeconds: prestartSeconds, seed: .random(in: 0 ... .max))
+    var config: RaceConfig {
+        // A practice race: you in seat 0, bots in the rest. The device picks both seeds; online races
+        // get the race seed from the server, which keeps the wind seed to itself (ADR 0001).
+        // The menu keeps opponents in 1...15, so the fleet is always a valid 2...16.
+        let setup = try! RaceSetup(
+            raceSeed: RaceSeed(UInt64.random(in: .min ... .max)),
+            seats: [.human] + Array(repeating: .bot, count: opponents),
+            laps: laps,
+            startSequenceTicks: Int((prestartSeconds * Double(Race.tickRate)).rounded())
+        )
+        return RaceConfig(setup: setup, windSeed: WindSeed(UInt64.random(in: .min ... .max)))
     }
 }
 

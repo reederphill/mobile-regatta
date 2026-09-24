@@ -8,9 +8,10 @@ import Glibc
 
 /// Bumped by hand whenever simulation output changes: physics, rules, wind, tick rate, or
 /// anything else a golden digest would see. Add the new row to `Tests/Goldens.json` with it.
-/// The golden currently sails every seat with `BotBrain`, so bot changes move it too, until
-/// #59's brain-free race-log replay golden replaces it (ADR 0002: replays never run bot brains).
-public let simulationRevision = 1
+/// The golden replays a fixed input log with no bot brains (ADR 0002), so retuning bots never moves it.
+///
+/// 2: the wind is keyed by its own seed, not the race seed; held inputs are int8 (#59).
+public let simulationRevision = 2
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

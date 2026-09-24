@@ -31,13 +31,15 @@ public struct FNV1a: Sendable {
 }
 
 public extension Race {
-    /// Golden digest: FNV-1a over the tick and the bit pattern of every field of every boat.
-    /// Equal digests on the replay platform mean bit-for-bit equal races (ADR 0002).
+    /// Golden digest: FNV-1a over the tick, the bit pattern of every field of every boat, and each
+    /// seat's held input. Equal digests on the replay platform mean bit-for-bit equal races (ADR 0002).
     func digest() -> UInt64 {
         var h = FNV1a()
         h.combine(tick)
         h.combine(boats.count)
-        for b in boats {
+        for (seat, b) in boats.enumerated() {
+            h.combine(Int(heldInputs[seat].rudder))
+            h.combine(heldInputs[seat].ease)
             h.combine(b.id)
             h.combine(b.name)
             h.combine(b.isPlayer)
@@ -77,4 +79,17 @@ extension BoatStatus {
         case .dnf: 5
         }
     }
+}
+
+/// A digest or seed as "0x" and 16 lowercase hex digits.
+public func hex64(_ value: UInt64) -> String {
+    let digits = String(value, radix: 16)
+    return "0x" + String(repeating: "0", count: 16 - digits.count) + digits
+}
+
+/// Parses "0x" and 1…16 hex digits.
+public func parseHex64(_ text: String) -> UInt64? {
+    let digits = text.dropFirst(2)
+    guard text.hasPrefix("0x"), (1...16).contains(digits.count), digits.allSatisfy(\.isHexDigit) else { return nil }
+    return UInt64(digits, radix: 16)
 }

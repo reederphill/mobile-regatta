@@ -1,13 +1,26 @@
-public enum RaceEvent: Sendable, Equatable {
-    case gun
-    case ocs(boat: Int)
-    case cleared(boat: Int)
-    case started(boat: Int)
-    case foul(RuleCall)
-    case markTouch(boat: Int, mark: String)
-    case penaltyServed(boat: Int)
-    case rounded(boat: Int, mark: String)
-    case finished(boat: Int, place: Int)
-    case disqualified(boat: Int, reason: String)
-    case raceOver
+/// Something the race decided, stamped with the tick it happened on. Seat ids index `Race.boats`.
+public struct RaceEvent: Sendable, Equatable {
+    public enum Kind: Sendable, Equatable {
+        case gun
+        case ocs(seat: Int)
+        case cleared(seat: Int)
+        case started(seat: Int)
+        case foul(RuleCall)
+        case markTouch(seat: Int, mark: String)
+        case penaltyServed(seat: Int)
+        case rounded(seat: Int, mark: String)
+        case finished(seat: Int, place: Int)
+        case disqualified(seat: Int, reason: String)
+        /// A protest tap, acknowledged. Recorded, never changes a result in v1.0.
+        case protest(seat: Int, target: Int)
+        case raceOver
+    }
+
+    public let tick: Int
+    public let kind: Kind
+
+    public init(tick: Int, kind: Kind) {
+        self.tick = tick
+        self.kind = kind
+    }
 }

@@ -44,7 +44,7 @@ final class BoatNode: SKNode {
         body.addChild(sail)
         addChild(body)
 
-        label.text = boat.name
+        label.text = boat.displayName
         label.fontSize = boat.isPlayer ? 12 : 10
         label.fontColor = UIColor.white.withAlphaComponent(boat.isPlayer ? 1 : 0.75)
         label.position = CGPoint(x: 0, y: length * 0.75)

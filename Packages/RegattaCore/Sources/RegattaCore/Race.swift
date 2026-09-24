@@ -6,37 +6,14 @@ import Foundation
 /// never reads the wall clock, and never iterates a `Set` or `Dictionary` — their order depends on
 /// a per-process hash seed. Look them up by key; iterate arrays. `DeterminismTests` scans for all three.
 public final class Race {
-    public struct Config: Sendable {
-        public var opponents: Int
-        public var laps: Int
-        public var prestartSeconds: Double
-        public var seed: UInt64
-        public var playerName: String
-        /// A bot sails the player's boat too (demo mode, headless tests).
-        public var autopilotPlayer: Bool
-
-        public init(
-            opponents: Int = 7,
-            laps: Int = 2,
-            prestartSeconds: Double = 60,
-            seed: UInt64,
-            playerName: String = "You",
-            autopilotPlayer: Bool = false
-        ) {
-            self.opponents = opponents
-            self.laps = laps
-            self.prestartSeconds = prestartSeconds
-            self.seed = seed
-            self.playerName = playerName
-            self.autopilotPlayer = autopilotPlayer
-        }
-    }
-
     /// Length of the disturbed-air cone behind a boat.
     public static let shadowLength = Boat.length * 8
     /// Half-width of the shadow cone at `distance` downwind of the boat.
     public static func shadowHalfWidth(at distance: Double) -> Double { 2 + distance * 0.18 }
     public static let timeLimitAfterFirstFinish = 180.0
+    /// An eased boat's target speed as a fraction of the polar's: the prototype's 15 % (#13).
+    /// A placeholder until the boat class's ease amount and rate are wired in (#58, #81).
+    public static let easedSpeedFactor = 0.15
 
     /// Simulation ticks per second. A server that falls behind catches up with several ticks, never a longer one.
     public static let tickRate = 30
@@ -48,13 +25,16 @@ public final class Race {
         "Shearwater", "Puffin", "Cormorant", "Albatross", "Plover", "Heron", "Merlin", "Dunlin",
     ]
 
-    public let config: Config
+    public let setup: RaceSetup
+    public let windSeed: WindSeed
     public let course: Course
     public let polar = Polar.dinghy
-    public let playerIndex = 0
 
     public private(set) var wind: WindField
+    /// One boat per seat: `boats[seat]`.
     public private(set) var boats: [Boat]
+    /// Each seat's held input, in force until the seat sends a different one.
+    public private(set) var heldInputs: [BoatInput]
     /// Race clock in ticks; negative during the start sequence, 0 at the gun.
     public private(set) var tick: Int
     /// Race clock in seconds, derived from `tick` so it never accumulates rounding.
@@ -73,60 +53,168 @@ public final class Race {
     private var lastFoul: [Pair: Double] = [:]
     private var events: [RaceEvent] = []
     private var finishers = 0
+    /// Inputs stamped for ticks not yet simulated, in the order they arrived.
+    private var pending: [InputRecord] = []
+    private var appliedInputs: [InputRecord] = []
+    private var seatEvents: [SeatEvent] = []
 
-    public init(config: Config) {
-        self.config = config
-        var rng = SplitMix64(seed: config.seed)
-        let course = Course.standard(laps: config.laps)
+    /// Builds the race at the start of its sequence, tick −`setup.startSequenceTicks`.
+    ///
+    /// The wind comes from `windSeed` alone, never from the race seed (ADR 0001).
+    /// `botBrainSeats` are sailed by the built-in `BotBrain`, which feeds them through the same
+    /// held-input path as any seat, so the log still holds every input applied (ADR 0002). A replay
+    /// passes none: replays never run bots. Temporary until bots become seat controllers (#60).
+    public init(setup: RaceSetup, windSeed: WindSeed, botBrainSeats: [Int] = []) {
+        self.setup = setup
+        self.windSeed = windSeed
+        var rng = SplitMix64(seed: setup.raceSeed.value)
+        let course = Course.standard(laps: setup.laps)
         self.course = course
         wind = WindField(
-            seed: rng.next(),
+            seed: windSeed.value,
             baseDirection: course.axis,
             areaMin: Vec2(-450, -250),
             areaMax: Vec2(450, course.marks[0].position.y + 200)
         )
-        tick = -Int((config.prestartSeconds * Double(Race.tickRate)).rounded())
+        tick = -setup.startSequenceTicks
 
-        var fleet = [
-            Boat(id: 0, name: config.playerName, isPlayer: true, colorIndex: 0,
-                 position: Vec2(0, -55), heading: .pi / 2, speed: 2),
-        ]
-        for k in 0..<max(0, config.opponents) {
-            var position = Vec2.zero
-            for _ in 0..<50 {
-                position = Vec2(rng.range(-130, 130), rng.range(-100, -35))
-                if fleet.allSatisfy({ ($0.position - position).length > 10 }) { break }
+        // Prototype placement until the start row (#35): seat 0 mid-line, the rest scattered by the race seed.
+        var fleet: [Boat] = []
+        var botsNamed = 0
+        for seat in setup.seats.indices {
+            let kind = setup.seats[seat]
+            let name: String
+            if kind == .bot {
+                name = Race.botNames[botsNamed % Race.botNames.count]
+                botsNamed += 1
+            } else {
+                name = "Helm \(seat + 1)"
             }
-            let heading = rng.bool() ? Double.pi / 2 : -Double.pi / 2
-            fleet.append(Boat(id: k + 1, name: Race.botNames[k % Race.botNames.count], isPlayer: false,
-                              colorIndex: k + 1, position: position, heading: heading, speed: 2))
+            var position = Vec2(0, -55)
+            var heading = Double.pi / 2
+            if seat > 0 {
+                for _ in 0..<50 {
+                    position = Vec2(rng.range(-130, 130), rng.range(-100, -35))
+                    if fleet.allSatisfy({ ($0.position - position).length > 10 }) { break }
+                }
+                heading = rng.bool() ? Double.pi / 2 : -Double.pi / 2
+            }
+            fleet.append(Boat(id: seat, name: name, isPlayer: kind == .human, colorIndex: seat,
+                              position: position, heading: heading, speed: 2))
         }
         boats = fleet
+        heldInputs = Array(repeating: .neutral, count: fleet.count)
 
-        for i in boats.indices where i != playerIndex || config.autopilotPlayer {
-            brains[i] = BotBrain(rng: &rng)
+        // Every seat draws a style, so a seat's style doesn't depend on which seats have brains.
+        for seat in boats.indices {
+            let brain = BotBrain(rng: &rng)
+            if botBrainSeats.contains(seat) { brains[seat] = brain }
         }
         refreshWind()
     }
 
-    public var player: Boat { boats[playerIndex] }
+    // MARK: - Input
 
-    // MARK: - Player input
+    /// Holds `input` for `seat` from tick `stamp` until the seat sends another. A stamp the race has
+    /// already simulated applies at the next tick instead, and is logged there (#18).
+    /// Returns the tick it applies at, or nil if rejected: an unknown seat, a seat sailed by a
+    /// built-in brain, or a race that is over.
+    @discardableResult
+    public func apply(_ input: BoatInput, seat: Int, atTick stamp: Int) -> Int? {
+        guard acceptsInput(from: seat) else { return nil }
+        let at = max(stamp, tick + 1)
+        pending.append(InputRecord(tick: at, seat: seat, kind: .held(input)))
+        return at
+    }
 
-    /// Rudder from the touch controls, -1…1. Any real input cancels an auto-tack.
-    public func setPlayerRudder(_ value: Double) {
-        guard brains[playerIndex] == nil else { return }
-        if abs(value) > 0.05 { boats[playerIndex].autopilot = nil }
-        if boats[playerIndex].autopilot == nil {
-            boats[playerIndex].desiredRudder = value.clamped(to: -1...1)
+    /// Applies `tap` for `seat` once, at tick `stamp` (or the next unsimulated tick if that has passed).
+    /// Returns the tick it applies at, or nil if rejected, as for `apply`, or for a protest of an
+    /// unknown seat or of the protesting seat itself.
+    @discardableResult
+    public func tap(_ tap: BoatTap, seat: Int, atTick stamp: Int) -> Int? {
+        guard acceptsInput(from: seat) else { return nil }
+        if case .protest(let target) = tap {
+            guard boats.indices.contains(target), target != seat else { return nil }
+        }
+        let at = max(stamp, tick + 1)
+        pending.append(InputRecord(tick: at, seat: seat, kind: .tap(tap)))
+        return at
+    }
+
+    /// Records a change in who is at `seat`, stamped with the current tick. Returns nil for an unknown seat.
+    @discardableResult
+    public func record(_ kind: SeatEvent.Kind, seat: Int) -> SeatEvent? {
+        guard boats.indices.contains(seat) else { return nil }
+        let event = SeatEvent(tick: tick, seat: seat, kind: kind)
+        seatEvents.append(event)
+        return event
+    }
+
+    /// The race so far as a log: its keys, and every input and seat event exactly as applied.
+    public var log: RaceLog {
+        RaceLog(header: .init(setup: setup, windSeed: windSeed), inputs: appliedInputs,
+                seatEvents: seatEvents, finalTick: tick)
+    }
+
+    private func acceptsInput(from seat: Int) -> Bool {
+        boats.indices.contains(seat) && brains[seat] == nil && !isOver
+    }
+
+    /// Queues this tick's input from each built-in brain whose boat is on the course.
+    private func runBrains() {
+        for i in boats.indices where boats[i].isOnCourse {
+            guard var brain = brains[i] else { continue }
+            let rudder = brain.rudder(for: i, in: self)
+            brains[i] = brain
+            pending.append(InputRecord(tick: tick, seat: i, kind: .held(BoatInput(rudder: rudder))))
         }
     }
 
-    /// Mirror the heading across the wind: a tack when upwind, a gybe when downwind.
-    public func playerTackOrGybe() {
-        let b = boats[playerIndex]
-        guard b.isOnCourse else { return }
-        boats[playerIndex].autopilot = wrapAngle(b.windDirection + b.relativeWind)
+    /// Applies the inputs stamped for this tick and logs them: held inputs first, the last one per
+    /// seat winning and logged only if it changed, then taps in the order they came. So a seat's
+    /// held input and tap in the same tick act the same whichever arrived first.
+    private func applyInputs() {
+        var held = heldInputs
+        var taps: [InputRecord] = []
+        if !pending.isEmpty {
+            var later: [InputRecord] = []
+            for record in pending {
+                guard record.tick == tick else {
+                    later.append(record)
+                    continue
+                }
+                switch record.kind {
+                case .held(let input): held[record.seat] = input
+                case .tap: taps.append(record)
+                }
+            }
+            pending = later
+        }
+        for seat in boats.indices where held[seat] != heldInputs[seat] {
+            heldInputs[seat] = held[seat]
+            appliedInputs.append(InputRecord(tick: tick, seat: seat, kind: .held(held[seat])))
+        }
+
+        // Any real rudder input cancels an auto-tack (#13).
+        for i in boats.indices {
+            let rudder = heldInputs[i].rudderValue
+            if abs(rudder) > 0.05 { boats[i].autopilot = nil }
+            if boats[i].autopilot == nil { boats[i].desiredRudder = rudder }
+        }
+
+        for record in taps {
+            appliedInputs.append(record)
+            guard case .tap(let tap) = record.kind else { continue }
+            let i = record.seat
+            switch tap {
+            case .tackGybe:
+                // Mirror the heading across the wind: a tack when upwind, a gybe when downwind.
+                let b = boats[i]
+                if b.isOnCourse { boats[i].autopilot = wrapAngle(b.windDirection + b.relativeWind) }
+            case .protest(let target):
+                emit(.protest(seat: i, target: target))
+            }
+        }
     }
 
     // MARK: - Simulation
@@ -134,6 +222,10 @@ public final class Race {
     public func drainEvents() -> [RaceEvent] {
         defer { events.removeAll() }
         return events
+    }
+
+    private func emit(_ kind: RaceEvent.Kind) {
+        events.append(RaceEvent(tick: tick, kind: kind))
     }
 
     /// Advances the race by one tick.
@@ -146,12 +238,8 @@ public final class Race {
         refreshWind()
         applyWindShadows()
 
-        for i in boats.indices where boats[i].isOnCourse {
-            guard var brain = brains[i] else { continue }
-            let rudder = brain.rudder(for: i, in: self)
-            brains[i] = brain
-            boats[i].desiredRudder = rudder
-        }
+        runBrains()
+        applyInputs()
 
         let previous = boats.map(\.position)
         for i in boats.indices { integrate(i, Race.dt) }
@@ -214,7 +302,7 @@ public final class Race {
             if abs(b.penaltyProgress) >= 2 * .pi * Double(b.penaltyTurnsOwed) {
                 b.penaltyTurnsOwed = 0
                 b.penaltyProgress = 0
-                events.append(.penaltyServed(boat: i))
+                emit(.penaltyServed(seat: i))
             }
         }
 
@@ -226,7 +314,8 @@ public final class Race {
             b.isTacking = false
         }
 
-        let target = b.isOnCourse ? polar.targetSpeed(twa: b.twa, windSpeed: b.windSpeed * b.shadow) : 0
+        var target = b.isOnCourse ? polar.targetSpeed(twa: b.twa, windSpeed: b.windSpeed * b.shadow) : 0
+        if heldInputs[i].ease { target *= Race.easedSpeedFactor }
         let timeConstant = target > b.speed ? 2.5 : 5.0
         b.speed += (target - b.speed) * min(1, dt / timeConstant)
         b.speed -= b.speed * abs(b.rudder) * 0.3 * dt
@@ -256,7 +345,7 @@ public final class Race {
                         lastFoul[pair] = time
                         let call = Rules.judge(boats[i], boats[j], course: course)
                         penalize(call.offender, turns: 2)
-                        events.append(.foul(call))
+                        emit(.foul(call))
                     }
                 }
                 boats[i].position += push * 0.5
@@ -279,7 +368,7 @@ public final class Race {
                 if !obstacleContacts.contains(pair) {
                     boats[i].speed *= 0.5
                     penalize(i, turns: 1)
-                    events.append(.markTouch(boat: i, mark: obstacle.name))
+                    emit(.markTouch(seat: i, mark: obstacle.name))
                 }
                 boats[i].position += push
             }
@@ -297,9 +386,9 @@ public final class Race {
     private func fireGun() {
         for i in boats.indices where boats[i].status == .prestart && course.lineSide(boats[i].position) > 0 {
             boats[i].status = .ocs
-            events.append(.ocs(boat: i))
+            emit(.ocs(seat: i))
         }
-        events.append(.gun)
+        emit(.gun)
     }
 
     private func updateProgress(_ i: Int, from p0: Vec2) {
@@ -312,12 +401,12 @@ public final class Race {
                 boats[i].status = .racing
                 boats[i].legIndex = 0
                 boats[i].roundingStage = 0
-                events.append(.started(boat: i))
+                emit(.started(seat: i))
             }
         case .ocs:
             if course.lineSide(p1) < 0 {
                 boats[i].status = .prestart
-                events.append(.cleared(boat: i))
+                emit(.cleared(seat: i))
             }
         case .racing:
             switch course.legs[boats[i].legIndex] {
@@ -329,7 +418,7 @@ public final class Race {
                     if boats[i].roundingStage == gates.count {
                         boats[i].legIndex += 1
                         boats[i].roundingStage = 0
-                        events.append(.rounded(boat: i, mark: course.marks[m].name))
+                        emit(.rounded(seat: i, mark: course.marks[m].name))
                     }
                 } else if stage > 0 && crossing(from: p0, to: p1, over: gates[stage - 1]) == -1 {
                     boats[i].roundingStage -= 1
@@ -346,14 +435,14 @@ public final class Race {
         firstFinishTime = firstFinishTime ?? time
         if boats[i].penaltyTurnsOwed > 0 {
             boats[i].status = .dsq
-            events.append(.disqualified(boat: i, reason: "finished without taking a penalty"))
+            emit(.disqualified(seat: i, reason: "finished without taking a penalty"))
             return
         }
         finishers += 1
         boats[i].status = .finished
         boats[i].place = finishers
         boats[i].finishTime = time
-        events.append(.finished(boat: i, place: finishers))
+        emit(.finished(seat: i, place: finishers))
     }
 
     private func checkForEnd() {
@@ -361,7 +450,7 @@ public final class Race {
         guard timedOut || !boats.contains(where: \.isOnCourse) else { return }
         for i in boats.indices where boats[i].isOnCourse { boats[i].status = .dnf }
         isOver = true
-        events.append(.raceOver)
+        emit(.raceOver)
     }
 
     // MARK: - Standings

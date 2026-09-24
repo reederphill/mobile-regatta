@@ -15,16 +15,24 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Course.swift            windward-leeward course, start/finish line, rounding gates
   Boat.swift              boat state and hull shape
   Rules.swift             Rules 10, 11, 12, 13, 18, 22, 31 — who had to keep clear
-  Race.swift              fixed-step race loop: start sequence, OCS, contacts, penalties, finish
+  Race.swift              fixed-step race loop: per-seat inputs, start sequence, OCS, contacts, penalties, finish
+  RaceSetup.swift         race setup (seats, laps, race seed, data-file refs) and the separate wind seed
+  BoatInput.swift         held input (int8 rudder, ease) and taps (tack/gybe, protest)
+  RaceLog.swift           race log: header, inputs as applied, seat events; stable JSON
+  Replayer.swift          re-simulates a race log to its final state, never running a bot brain
+  FileRef.swift           reference to one version of a data file (id, version, content hash)
   BotBrain.swift          AI helms: start timing, laylines, shifts, roundings, keeping clear
   Random.swift            SplitMix64 and our own range, coin and shuffle mappings
   SimulationVersion.swift simulation version: revision, toolchain, C library, architecture
   Digest.swift            FNV-1a state digest for golden replay tests
+  Sources/regatta-replay  `regatta-replay <log>`: replays a race log and prints its final digest
   Tests/Goldens.json      golden digests keyed by simulation version
+  Tests/Fixtures/         the golden 16-seat scripted race log
 Regatta/                The iOS app
   Game/GameScene.swift    SpriteKit renderer, camera, touch steering
   Game/BoatNode.swift     batched boat sprites, sails, wakes, wind-shadow cones
   Game/GameSession.swift  bridges the race to SwiftUI: HUD, rule-call messages, haptics
+  Game/RaceShim.swift     seat-0 player shim over the per-seat input API, until the practice driver (#61)
   UI/                     menu, HUD, minimap, results
 ```
 
@@ -45,8 +53,12 @@ bit-for-bit deterministic:
   Look them up by key and iterate arrays.
 - `simulationVersion` is `<revision>/<toolchain>/<C library>/<architecture>`. Bump `simulationRevision`
   for any change to simulation output and add its row to `Tests/Goldens.json`; a changed digest without a
-  new row fails the golden test. For now the golden sails every seat with `BotBrain`, so bot changes also
-  move it, until #59's brain-free race-log replay golden replaces it (ADR 0002: replays never run bots).
+  new row fails the golden test. The golden replays a fixed 16-seat input log with no bot brains (ADR 0002:
+  replays never run bots), so retuning bots never moves it.
+- Every input reaches the race through `Race.apply(_:seat:atTick:)` (held) or `Race.tap(_:seat:atTick:)`, and
+  the race logs it exactly as applied. `Race.log` is the race as stored (ADR 0002); `Replayer` and
+  `swift run regatta-replay <log>` re-simulate it. The wind seed is kept apart from the public race seed
+  (ADR 0001).
 - The replay platform is pinned to the `swift:6.3.3-noble` image (by digest, in `scripts/linux-test.sh`)
   on `linux/amd64`: Swift 6.3.3, glibc 2.39, x86_64. Trig uses that platform's libm rather than our own
   implementation: the C library is already part of the simulation version, and iOS clients only have to
