@@ -41,15 +41,25 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: Acknowledgements list is up to date
+        run: swift scripts/generate-acknowledgements.swift --check
       - name: xcodebuild test (unit + UI)
         run: |
           xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
-            -resultBundlePath Regatta.xcresult
-      - name: Upload the result bundle (screenshots, logs)
+            -derivedDataPath DerivedData -resultBundlePath Regatta.xcresult
+      - name: xcodebuild test (UI) on iPad, for the letterboxed race view (G5)
+        run: |
+          xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
+            -destination 'platform=iOS Simulator,name=iPad Air 13-inch (M4),OS=26.5' \
+            -only-testing:RegattaUITests \
+            -derivedDataPath DerivedData -resultBundlePath Regatta-iPad.xcresult
+      - name: Upload the result bundles (screenshots, logs)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Regatta.xcresult
-          path: Regatta.xcresult
+          path: |
+            Regatta.xcresult
+            Regatta-iPad.xcresult
           if-no-files-found: ignore
