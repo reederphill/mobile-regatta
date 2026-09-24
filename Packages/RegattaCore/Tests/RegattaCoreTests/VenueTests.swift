@@ -477,6 +477,32 @@ enum VenueFixtures {
         }
     }
 
+    /// The macOS CI failure on PR 185: Darwin's JSONSerialization keeps the first copy of a repeated
+    /// key, so the placeholder check resolved `/current/eddies/0/peakKnots` against the typo copy and
+    /// threw first. Duplicates are now refused before any parse, the same on every platform.
+    @Test func duplicateKeyIsRefusedBeforeThePlaceholderCheck() throws {
+        let typoCopy = #"{ "typo": 1 }"#
+        // The typo copy on its own fails the placeholder check...
+        let alone = try VenueFixtures.edited([(of: #""eddies": ["#, #""eddies": [\#(typoCopy)], "oldEddies": ["#)])
+        #expect(throws: DataFileError.unresolvedPlaceholder(kind: "venue", id: "test-venue", pointer: "/current/eddies/0/peakKnots")) {
+            try VenueFile(data: alone)
+        }
+        // ...but repeated, before or after the good copy, the duplicate is what's reported.
+        for with in [#""eddies": [\#(typoCopy)], "eddies": ["#, #""eddies": [\#(typoCopy)], "x": 1, "eddies": ["#] {
+            let data = try VenueFixtures.edited([(of: #""eddies": ["#, with: with)])
+            #expect(throws: DataFileError.malformed(kind: "venue", reason: "duplicate field /current/eddies")) {
+                try VenueFile(data: data)
+            }
+        }
+        let reversed = try VenueFixtures.edited([
+            (of: #""floodRotation": "clockwise"\#n      }\#n    ]"#,
+             with: #""floodRotation": "clockwise"\#n      }\#n    ], "eddies": [\#(typoCopy)]"#),
+        ])
+        #expect(throws: DataFileError.malformed(kind: "venue", reason: "duplicate field /current/eddies")) {
+            try VenueFile(data: reversed)
+        }
+    }
+
     @Test func duplicateKeyScanFollowsPointersAndIgnoresStrings() {
         func first(_ json: String) -> String? { JSONDuplicateKeys.first(in: Data(json.utf8)) }
         #expect(first(#"{"a": 1, "b": {"c": [1, 2]}, "s": "{\"a\": 1, \"a\": 2}", "t": "\\"}"#) == nil)

@@ -196,6 +196,12 @@ public struct DataFile<Content: DataFileContent>: Sendable {
     /// Loads a file from its exact bytes.
     public init(data: Data) throws {
         let kind = Content.kind
+        // Before anything parses the file: with a key repeated in one object, JSONDecoder keeps the
+        // first copy and JSONSerialization keeps the first on Darwin but the last on Linux, so every
+        // later check could read a different file on each platform.
+        if let pointer = JSONDuplicateKeys.first(in: data) {
+            throw DataFileError.malformed(kind: kind, reason: "duplicate field \(pointer)")
+        }
         let header: DataFileHeader
         do {
             header = try JSONDecoder().decode(DataFileHeader.self, from: data)
@@ -357,8 +363,10 @@ enum JSONPointer {
     }
 }
 
-/// Finds a repeated key in any object of a JSON document. JSONDecoder keeps the first copy and
-/// JSONSerialization the last, so a file with one would read differently depending on who parses it.
+/// Finds a repeated key in any object of a JSON document. Parsers disagree on which copy wins
+/// (JSONDecoder the first; JSONSerialization the first on Darwin, the last on Linux), so a file with
+/// one would read differently depending on who parses it. Keys compare as Swift strings, so two
+/// canonically equivalent spellings count as a repeat.
 /// A byte scan: strings are skipped over, and everything else (numbers in a grid) costs one comparison.
 enum JSONDuplicateKeys {
     private enum Frame {
@@ -366,8 +374,8 @@ enum JSONDuplicateKeys {
         case array(pointer: String, index: Int)
     }
 
-    /// JSON Pointer of the first repeated key, or nil. Assumes `data` is well-formed JSON; on anything
-    /// else it returns nil and leaves the error to the parser.
+    /// JSON Pointer of the first repeated key, or nil. Runs before any parser, so it accepts any
+    /// bytes: on malformed JSON it may return nil or a pointer, and either way the file is refused.
     static func first(in data: Data) -> String? {
         let bytes = [UInt8](data)
         var stack: [Frame] = []

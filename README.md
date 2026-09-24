@@ -81,7 +81,8 @@ files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`. The ven
 `docs/venue-file.md`.
 
 - Every file starts with `schemaVersion`, `id` and `version`. A schema version the build doesn't know
-  throws. A file's `FileRef` is its id, version and the SHA-256 of its exact bytes, so a released file
+  throws, and so does a key repeated in one object, before anything parses the file (parsers disagree on
+  which copy wins, and differently on Darwin and Linux). A file's `FileRef` is its id, version and the SHA-256 of its exact bytes, so a released file
   never changes: tuning ships `<id>@<version + 1>.json` next to it, and old versions keep loading.
   `.gitattributes` stops git rewriting their line endings.
 - Files use knots, degrees, seconds and hull lengths; the loader converts them once to m/s, radians and

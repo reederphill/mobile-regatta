@@ -252,10 +252,7 @@ public struct Venue: DataFileContent, Equatable {
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
         case 1:
-            // Duplicate keys first: JSONDecoder and JSONSerialization disagree on which copy wins.
-            if let pointer = JSONDuplicateKeys.first(in: fileData) {
-                throw DataFileError.malformed(kind: Self.kind, reason: "duplicate field \(pointer)")
-            }
+            // Duplicate keys were already refused by `DataFile`, so every parse below reads the same file.
             let document = try JSONDecoder().decode(VenueSchema1.self, from: fileData)
             try document.rejectUnknownFields(in: fileData)
             self = try document.venue(id: header.id)

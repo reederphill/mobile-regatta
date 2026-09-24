@@ -95,6 +95,19 @@ enum Fixtures {
         #expect(throws: DataFileError.self) { try BoatClassFile(data: Data("not json".utf8)) }
     }
 
+    @Test(arguments: [
+        (#""name": "Dinghy","#, #""name": "Dinghy", "name": "Other","#, "/name"),
+        (#""beamMetres": 1.5,"#, #""beamMetres": 1.5, "beamMetres": 2,"#, "/hull/beamMetres"),
+        (#""schemaVersion": 1,"#, #""schemaVersion": 1, "schemaVersion": 2,"#, "/schemaVersion"),
+    ])
+    func duplicateKeyIsMalformed(of: String, with: String, pointer: String) throws {
+        // Refused before anything parses the file, whatever the kind: parsers disagree on which copy wins.
+        let data = try Fixtures.edited([(of: of, with: with)])
+        #expect(throws: DataFileError.malformed(kind: "boat class", reason: "duplicate field \(pointer)")) {
+            try BoatClassFile(data: data)
+        }
+    }
+
     @Test func badIDOrVersionThrows() throws {
         let badID = try Fixtures.edited([(of: #""id": "ilca-dinghy""#, with: #""id": "ILCA dinghy""#)])
         let badVersion = try Fixtures.edited([(of: #""version": 1,"#, with: #""version": 0,"#)])
