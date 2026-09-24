@@ -28,7 +28,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   RaceLog.swift           race log: header, inputs as applied, seat events; stable JSON
   Replayer.swift          re-simulates a race log to its final state, never running a bot brain
   BotBrain.swift          AI helms: start timing, laylines, shifts, roundings, keeping clear
-  Random.swift            SplitMix64 and our own range, coin and shuffle mappings
+  Random.swift            SplitMix64, named streams of a seed, and our own range, coin and shuffle mappings
   SimulationVersion.swift simulation version: revision, toolchain, C library, architecture
   Digest.swift            FNV-1a state digest for golden replay tests
   Sources/regatta-replay  `regatta-replay <log>`: replays a race log and prints its final digest

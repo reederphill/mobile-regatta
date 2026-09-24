@@ -44,7 +44,9 @@ public struct Conditions: DataFileContent, Hashable {
     public struct Trend: Hashable, Sendable {
         /// Range of the net shift over `duration`, radians, always toward the trend direction.
         public let size: ClosedRange<Double>
-        /// Seconds the net shift accrues over.
+        /// Seconds the net shift is measured over: only the span `size` is given for, not a schedule.
+        /// When the trend starts and how it unfolds are keyed (#75), so this fixed, public duration
+        /// reveals no timing (#10).
         public let duration: Double
     }
 

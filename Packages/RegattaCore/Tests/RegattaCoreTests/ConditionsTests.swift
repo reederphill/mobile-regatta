@@ -167,10 +167,7 @@ enum ConditionsFixtures {
     /// Pinned bit for bit on every platform: the draw uses only IEEE arithmetic and `fmod`, no libm trig.
     /// If this fails, every race's wind setup (and briefing) changed.
     @Test func drawIsPinned() throws {
-        var stream = SplitMix64(seed: 42, stream: WindSetup.seedStream)
-        #expect(stream.next() == 0x1879_B57E_A745_501B)
-        #expect(stream.next() == 0x4471_799F_4664_BC5E)
-
+        #expect(WindSetup.seedStream == 0x7769_6E64_7365_7470) // "windsetp"; its stream is pinned in RandomTests
         let classic = WindSetup(conditions: try ConditionsFixtures.file("classic-oscillating"), pairing: .stub, raceSeed: RaceSeed(42))
         #expect(classic.meanDirection.bitPattern == 13_817_625_872_785_592_704) // −0.1412 rad, 351.9°
         #expect(classic.baseStrength.bitPattern == 4_617_673_216_712_196_771) // 5.3177 m/s, 10.34 kn
@@ -178,17 +175,6 @@ enum ConditionsFixtures {
         let seaBreeze = WindSetup(conditions: try ConditionsFixtures.file("sea-breeze"), pairing: .stub, raceSeed: RaceSeed(42))
         #expect(seaBreeze.meanDirection == classic.meanDirection)
         #expect(seaBreeze.trend == .left)
-    }
-
-    @Test func streamIsIndependentOfTheRaceStream() {
-        // The wind setup's stream doesn't consume or mirror the race's own race-seed stream.
-        for seed in Self.seeds.prefix(100) {
-            var race = SplitMix64(seed: seed)
-            var wind = SplitMix64(seed: seed, stream: WindSetup.seedStream)
-            let raceValues = (0..<64).map { _ in race.next() }
-            let windValues = (0..<64).map { _ in wind.next() }
-            #expect(raceValues.allSatisfy { !windValues.contains($0) })
-        }
     }
 
     @Test func meanDirectionIsWithinTenDegreesOfAuthored() throws {
@@ -255,6 +241,27 @@ enum ConditionsFixtures {
         let withArea = WindSetup(conditions: file, pairing: .stub, raceSeed: RaceSeed(7), raceArea: area)
         #expect(withArea.raceArea == area)
         #expect(withArea.baseStrength == setup.baseStrength && withArea.meanDirection == setup.meanDirection)
+    }
+
+    @Test func withRaceAreaAttachesTheAreaAndKeepsEveryOtherField() throws {
+        let file = try ConditionsFixtures.file("sea-breeze")
+        let pairing = VenuePairing(meanDirection: deg2rad(200), trend: .either)
+        let area = RaceArea(centre: Vec2(10, 150), axis: deg2rad(200), halfWidth: 270, halfLength: 300)
+        for seed in Self.seeds.prefix(100) {
+            let drawn = WindSetup(conditions: file, pairing: pairing, raceSeed: RaceSeed(seed))
+            let attached = drawn.with(raceArea: area)
+            #expect(attached.raceArea == area)
+            #expect(attached.conditionsRef == drawn.conditionsRef)
+            #expect(attached.conditions == drawn.conditions)
+            #expect(attached.pairing == drawn.pairing)
+            #expect(attached.meanDirection.bitPattern == drawn.meanDirection.bitPattern)
+            #expect(attached.baseStrength.bitPattern == drawn.baseStrength.bitPattern)
+            #expect(attached.trend == drawn.trend)
+            #expect(attached.forecast == drawn.forecast)
+            // The same as drawing with the area up front, and removable again.
+            #expect(attached == WindSetup(conditions: file, pairing: pairing, raceSeed: RaceSeed(seed), raceArea: area))
+            #expect(attached.with(raceArea: nil) == drawn)
+        }
     }
 }
 

@@ -5,8 +5,9 @@ public enum SeatKind: String, Codable, Hashable, Sendable {
 }
 
 /// The public race seed: boat placement, start order and bot styles (#35, #19). Every client gets it
-/// in the join/resync message (#18), so nothing secret may come from it; in particular the wind
-/// never does (ADR 0001).
+/// in the join/resync message (#18), so nothing secret may come from it; in particular the keyed wind
+/// never does (ADR 0001). The public `WindSetup` (mean direction, base strength, trend direction) is
+/// drawn from it, on its own stream so it never moves the other draws.
 public struct RaceSeed: Hashable, Sendable {
     public let value: UInt64
     public init(_ value: UInt64) { self.value = value }

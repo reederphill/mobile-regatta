@@ -86,7 +86,7 @@ public struct WindSetup: Hashable, Sendable {
     /// its size and timing are not.
     public let trend: TrendDirection?
     /// The race area, once course derivation lays it out (#80); nil until then.
-    public let raceArea: RaceArea?
+    public private(set) var raceArea: RaceArea?
 
     /// Draws the race's wind setup from its public race seed.
     ///
@@ -114,6 +114,14 @@ public struct WindSetup: Hashable, Sendable {
             }
         }
         self.raceArea = raceArea
+    }
+
+    /// This setup with `raceArea` attached, every drawn value unchanged: course derivation (#80) needs
+    /// the drawn setup to lay out the area, so it attaches the area afterwards instead of drawing twice.
+    public func with(raceArea: RaceArea?) -> WindSetup {
+        var copy = self
+        copy.raceArea = raceArea
+        return copy
     }
 
     /// The briefing's wind forecast (#15).
@@ -171,17 +179,5 @@ public struct WindForecast: Hashable, Sendable {
             lullLoss: c.puffs.lullLoss,
             fanDegrees: rad2deg(c.puffs.fan)
         )
-    }
-}
-
-extension SplitMix64 {
-    /// An independent stream of `seed`, named by a fixed `stream` tag: the tag is mixed into the seed
-    /// through one SplitMix64 output, and the stream starts there. Drawing from it never advances the
-    /// plain `SplitMix64(seed: seed)` stream, so a new stream never moves an existing draw (ADR 0002).
-    /// The mixing is invertible, so a stream of a public seed is public too: never use it for anything
-    /// secret (ADR 0001).
-    public init(seed: UInt64, stream: UInt64) {
-        var mixer = SplitMix64(seed: seed ^ stream)
-        self.init(seed: mixer.next())
     }
 }
