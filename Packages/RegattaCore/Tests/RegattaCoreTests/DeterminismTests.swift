@@ -223,7 +223,8 @@ import Testing
     }
 }
 
-/// Source scans for the determinism rules in ADR 0002 and on `Race`.
+/// Source scans for the determinism rules in ADR 0002 and on `Race`, over RegattaCore's own sources.
+/// RegattaProtocol runs the same scans over its own (its `SourceTests`).
 @Suite struct SourceScanTests {
     static func sources() throws -> [(name: String, text: String)] {
         let dir = URL(fileURLWithPath: #filePath)
@@ -234,8 +235,10 @@ import Testing
         return try names.map { ($0, try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8)) }
     }
 
+    /// Word boundaries are the simple kind: with Unicode's default, `a.keys` is one word, so
+    /// `\bkeys` wouldn't match inside `lastFoul.keys.sorted()`.
     static func violations(_ pattern: String, in files: [(name: String, text: String)]) throws -> [String] {
-        let regex = try Regex(pattern)
+        let regex = try Regex(pattern).wordBoundaryKind(.simple)
         return files.flatMap { file in
             file.text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()
                 .filter { $0.element.contains(regex) }
@@ -282,10 +285,17 @@ import Testing
     }
 
     @Test func iterationScanCatchesAnIteratedSet() throws {
-        let sample = [(name: "Sample.swift", text: "var contacts = Set<Pair>()\nfor p in contacts { use(p) }\nlet ok = contacts.contains(p)")]
+        let sample = [(name: "Sample.swift", text: [
+            "var contacts = Set<Pair>()", "for p in contacts { use(p) }", "let ok = contacts.contains(p)",
+            "let k = self.contacts.keys.sorted()", "let all = snapshot.contacts.allSatisfy(valid)",
+        ].joined(separator: "\n"))]
         let names = try Self.unorderedNames(in: sample)
         #expect(names == ["contacts"])
-        #expect(try Self.iterations(of: names, in: sample) == ["Sample.swift:2: for p in contacts { use(p) }"])
+        #expect(try Self.iterations(of: names, in: sample) == [
+            "Sample.swift:2: for p in contacts { use(p) }",
+            "Sample.swift:4: let k = self.contacts.keys.sorted()",
+            "Sample.swift:5: let all = snapshot.contacts.allSatisfy(valid)",
+        ])
     }
 
     /// The step path never iterates a `Set` or `Dictionary`: their order changes with the per-process hash seed.
@@ -293,6 +303,7 @@ import Testing
         let files = try Self.sources()
         let names = try Self.unorderedNames(in: files)
         #expect(names.contains("boatContacts"))
-        #expect(try Self.iterations(of: names, in: files) == [])
+        let hits = try Self.iterations(of: names, in: files)
+        #expect(hits == [], "\(hits.joined(separator: "\n"))")
     }
 }

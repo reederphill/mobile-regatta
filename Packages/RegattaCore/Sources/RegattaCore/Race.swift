@@ -523,3 +523,139 @@ public final class Race {
         }
     }
 }
+
+// MARK: - World snapshot (ADR 0005)
+
+extension Race {
+    /// The whole predictable world at this tick. Lossless: `importSnapshot` of it continues exactly
+    /// like this race. Pairs are listed by seat and obstacle index, never by iterating a set.
+    public func exportSnapshot() -> WorldSnapshot {
+        var boatPairs: [WorldSnapshot.SeatPair] = []
+        var fouls: [WorldSnapshot.FoulMemory] = []
+        for a in boats.indices {
+            for b in boats.indices where b > a {
+                let pair = Pair(a: a, b: b)
+                if boatContacts.contains(pair) { boatPairs.append(.init(a, b)) }
+                if let time = lastFoul[pair] { fouls.append(.init(pair: .init(a, b), time: time)) }
+            }
+        }
+        var obstacles: [WorldSnapshot.ObstacleContact] = []
+        let obstacleCount = course.obstacles.count
+        for seat in boats.indices {
+            for k in 0..<obstacleCount where obstacleContacts.contains(Pair(a: seat, b: k)) {
+                obstacles.append(.init(seat: seat, obstacle: k))
+            }
+        }
+        return WorldSnapshot(
+            tick: tick,
+            seats: boats.indices.map { WorldSnapshot.Seat(boat: boats[$0], heldInput: heldInputs[$0]) },
+            touchingBoats: boatPairs, touchingObstacles: obstacles, foulMemory: fouls,
+            firstFinishTime: firstFinishTime, isOver: isOver, windKeys: wind.keys
+        )
+    }
+
+    /// Replaces the world with `snapshot`, so stepping on continues from its tick (ADR 0005). The race
+    /// keeps what isn't world state: its setup, course and wind seed, and its bot brains, whose own
+    /// memory isn't in a snapshot, so a race restored with brains won't make the same bot decisions.
+    /// Inputs queued but not yet applied and undrained events are dropped. `log` is left as it was and
+    /// no longer describes the race: a race that imports is a prediction, never the record. The
+    /// authoritative host never imports a snapshot a client could have supplied (ADR 0005).
+    ///
+    /// The wind is a function of the tick and the keys (ADR 0001), so the race takes the snapshot's
+    /// keys, which must be this race's, and moves its own key generator (which holds the wind seed, never
+    /// in a snapshot) to just after them, so the keys it makes as the clock runs on are the ones the
+    /// exporting race would have made. The generator is rebuilt from the wind seed when the snapshot
+    /// holds fewer keys than it has made: at most one HMAC per window.
+    ///
+    /// Throws, leaving the race unchanged, for a snapshot it couldn't sail on from: another fleet
+    /// size, a tick outside the sequence start … `WorldSnapshot.maxTick`, a non-finite value, a leg or
+    /// rounding stage the course doesn't have, a negative penalty count, a bad contact, or a missing
+    /// key from the window before the snapshot's through the last key it holds.
+    public func importSnapshot(_ snapshot: WorldSnapshot) throws {
+        guard snapshot.seats.count == boats.count else {
+            throw WorldSnapshotError.seatCount(expected: boats.count, found: snapshot.seats.count)
+        }
+        for (seat, entry) in snapshot.seats.enumerated() where entry.boat.id != seat {
+            throw WorldSnapshotError.boatID(seat: seat, found: entry.boat.id)
+        }
+        guard snapshot.tick >= -setup.startSequenceTicks else { throw WorldSnapshotError.tickBeforeStart(snapshot.tick) }
+        guard snapshot.tick <= WorldSnapshot.maxTick else { throw WorldSnapshotError.tickTooLate(snapshot.tick) }
+        for (seat, entry) in snapshot.seats.enumerated() {
+            if let field = invalidField(of: entry.boat) { throw WorldSnapshotError.invalidBoat(seat: seat, field: field) }
+        }
+        guard snapshot.firstFinishTime?.isFinite ?? true, snapshot.foulMemory.allSatisfy({ $0.time.isFinite }) else {
+            throw WorldSnapshotError.invalidTime
+        }
+        let seatRange = boats.indices
+        let validPair = { (p: WorldSnapshot.SeatPair) in seatRange.contains(p.a) && seatRange.contains(p.b) && p.a < p.b }
+        guard snapshot.touchingBoats.allSatisfy(validPair),
+              snapshot.foulMemory.allSatisfy({ validPair($0.pair) }),
+              snapshot.touchingObstacles.allSatisfy({ seatRange.contains($0.seat) && course.obstacles.indices.contains($0.obstacle) })
+        else { throw WorldSnapshotError.invalidContact }
+
+        let snapshotWind = WindField(setup: windSetup, windows: wind.windows, keys: snapshot.windKeys)
+        do {
+            _ = try snapshotWind.shift(atTick: snapshot.tick)
+        } catch {
+            switch error {
+            case .missingKey(let window): throw WorldSnapshotError.missingWindKey(window)
+            case .beforeOrigin: throw WorldSnapshotError.tickBeforeStart(snapshot.tick)
+            }
+        }
+        // From the window before the snapshot's on, the keys must run without a gap: the generator
+        // resumes after the last one, so a missing key in between would never be made, and the wind
+        // would trap when the clock reached it.
+        let firstNeeded = max(0, wind.windows.window(containing: snapshot.tick) - 1)
+        if let gap = (firstNeeded..<max(firstNeeded, snapshot.windKeys.endWindow)).first(where: { snapshot.windKeys[$0] == nil }) {
+            throw WorldSnapshotError.missingWindKey(gap)
+        }
+        var generator = windKeys
+        if generator.nextWindow > snapshot.windKeys.endWindow {
+            do {
+                generator = try WindKeyGenerator(windSeed: windSeed, setup: windSetup, windows: wind.windows)
+            } catch {
+                preconditionFailure("the race's own conditions can't be keyed: \(error)")
+            }
+        }
+        _ = generator.keys(through: snapshot.windKeys.endWindow - 1)
+
+        wind = snapshotWind
+        windKeys = generator
+
+        tick = snapshot.tick
+        boats = snapshot.seats.map(\.boat)
+        heldInputs = snapshot.seats.map(\.heldInput)
+        boatContacts = Set(snapshot.touchingBoats.map { Pair(a: $0.a, b: $0.b) })
+        obstacleContacts = Set(snapshot.touchingObstacles.map { Pair(a: $0.seat, b: $0.obstacle) })
+        var foulTimes: [Pair: Double] = [:]
+        for memory in snapshot.foulMemory { foulTimes[Pair(a: memory.pair.a, b: memory.pair.b)] = memory.time }
+        lastFoul = foulTimes
+        firstFinishTime = snapshot.firstFinishTime
+        isOver = snapshot.isOver
+        // Places count up from the boats already finished.
+        finishers = boats.filter { $0.status == .finished }.count
+        pending.removeAll()
+        events.removeAll()
+    }
+
+    /// The first field of `boat` the race couldn't step from, or nil.
+    private func invalidField(of boat: Boat) -> String? {
+        let doubles: [(String, Double?)] = [
+            ("position.x", boat.position.x), ("position.y", boat.position.y), ("heading", boat.heading),
+            ("speed", boat.speed), ("rudder", boat.rudder), ("desiredRudder", boat.desiredRudder),
+            ("autopilot", boat.autopilot), ("penaltyProgress", boat.penaltyProgress),
+            ("windDirection", boat.windDirection), ("windSpeed", boat.windSpeed), ("shadow", boat.shadow),
+            ("finishTime", boat.finishTime),
+        ]
+        if let bad = doubles.first(where: { !($0.1?.isFinite ?? true) }) { return bad.0 }
+        guard course.legs.indices.contains(boat.legIndex) else { return "legIndex" }
+        let stages: Int
+        switch course.legs[boat.legIndex] {
+        case .round(let mark): stages = course.gates(forMark: mark).count
+        case .finish: stages = 1 // a finishing boat has no rounding stages: always 0
+        }
+        guard (0..<stages).contains(boat.roundingStage) else { return "roundingStage" }
+        guard boat.penaltyTurnsOwed >= 0 else { return "penaltyTurnsOwed" }
+        return nil
+    }
+}

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# Runs the RegattaCore tests on the pinned replay platform (the race server's toolchain,
-# C library and architecture; ADR 0002), in debug and release, with podman or docker.
+# Runs the tests of every Linux package (RegattaCore, RegattaProtocol) on the pinned replay
+# platform (the race server's toolchain, C library and architecture; ADR 0002), in debug and
+# release, with podman or docker.
 #
 #   scripts/linux-test.sh
 #
-# The golden test asserts Tests/Goldens.json here. Each run prints its digest as
+# RegattaCore's golden test asserts Tests/Goldens.json here. Each run prints its digest as
 #   GOLDEN simulationVersion=<version> digest=<hex>
 # which is the value for a new Goldens.json row after a simulationRevision bump.
 #
@@ -37,20 +38,27 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
 
-# Build inside the container's own scratch path so Linux artefacts never mix with the host's .build.
+# Packages under Packages/, tested in this order. Each one's tests run in debug and release.
+# Packages depend on each other by relative path, so the whole Packages/ folder is mounted.
+PACKAGES="RegattaCore RegattaProtocol"
+
+# Build inside the container's own scratch paths so Linux artefacts never mix with the host's .build.
 "$engine" run --rm --platform "$PLATFORM" ${run_args[@]+"${run_args[@]}"} \
-    -e REGATTA_EXPECT_REPLAY_PLATFORM=1 \
-    -v "$root/Packages/RegattaCore:/src" -w /src \
+    -e REGATTA_EXPECT_REPLAY_PLATFORM=1 -e PACKAGES="$PACKAGES" \
+    -v "$root/Packages:/packages" -w /packages \
     "$IMAGE" \
     bash -euo pipefail -c '
         swift --version
-        echo "== debug =="
-        swift test --scratch-path /tmp/build-debug
-        echo "== release =="
-        swift test -c release -Xswiftc -enable-testing --scratch-path /tmp/build-release
+        for package in $PACKAGES; do
+            echo "== $package: debug =="
+            swift test --package-path "/packages/$package" --scratch-path "/tmp/build-debug-$package"
+            echo "== $package: release =="
+            swift test --package-path "/packages/$package" -c release -Xswiftc -enable-testing \
+                --scratch-path "/tmp/build-release-$package"
+        done
     ' 2>&1 | tee "$log"
 
-# One GOLDEN line per configuration (debug, release), and both the same.
+# One GOLDEN line per configuration (debug, release), and both the same. Only RegattaCore prints one.
 lines="$(grep -o 'GOLDEN simulationVersion=.*' "$log" || true)"
 echo
 echo "Golden digests (debug and release):"
