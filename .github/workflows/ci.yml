@@ -28,6 +28,9 @@ jobs:
       - name: swift test
         working-directory: Packages/RegattaCore
         run: swift test
+      - name: swift test (RegattaProtocol)
+        working-directory: Packages/RegattaProtocol
+        run: swift test
       - name: Same digest across two test processes
         run: scripts/check-digest-stable.sh
 

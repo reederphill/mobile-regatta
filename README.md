@@ -36,9 +36,16 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Random.swift            SplitMix64, named streams of a seed, and our own range, coin and shuffle mappings
   SimulationVersion.swift simulation version: revision, toolchain, C library, architecture
   Digest.swift            FNV-1a state digest for golden replay tests
+  WorldSnapshot.swift     the whole predictable world at a tick; `Race.exportSnapshot()` / `importSnapshot(_:)` (ADR 0005)
   Sources/regatta-replay  `regatta-replay <log>`: replays a race log and prints its final digest
   Tests/Goldens.json      golden digests keyed by simulation version
   Tests/Fixtures/         the golden 16-seat scripted race log, and a wind seed pool for the loader
+Packages/RegattaProtocol/ The race wire protocol: messages, frames and a binary codec, no transport (#63)
+  Frame.swift             frame (type, seq, tick) and every message type
+  Messages.swift          handshake, race start, resync, snapshot, ping; placeholder payloads for later tickets
+  SnapshotWire.swift      the quantised wire snapshot and its field list (what's sent, what's left out and why)
+  EventWire.swift         race events on the wire, and who each one is sent to
+  WireCodec.swift         little-endian integers, varints, strings; strict decoding
 Regatta/                The iOS app
   Game/GameScene.swift    SpriteKit renderer, camera, touch steering
   Game/BoatNode.swift     batched boat sprites, sails, wakes, wind-shadow cones
@@ -118,7 +125,9 @@ Run the simulation tests from the command line:
 cd Packages/RegattaCore && swift test
 ```
 
-Run them on the pinned Linux replay platform, in debug and release (needs podman or docker):
+and the protocol's with `cd Packages/RegattaProtocol && swift test`.
+
+Run both packages' tests on the pinned Linux replay platform, in debug and release (needs podman or docker):
 
 ```bash
 scripts/linux-test.sh
@@ -159,7 +168,7 @@ after adding either, and CI checks it's current:
 swift scripts/generate-acknowledgements.swift
 ```
 
-CI (`.github/workflows/ci.yml`) runs `scripts/linux-test.sh` on Linux, `swift test` plus
+CI (`.github/workflows/ci.yml`) runs `scripts/linux-test.sh` on Linux, `swift test` in both packages plus
 `scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the iOS Simulator (iPhone, plus the UI tests
 on iPad). `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
 the archive with `scripts/check-shipping-config.sh`, launches the app, and runs its tests on iOS 27 iPhone and
