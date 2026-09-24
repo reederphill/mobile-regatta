@@ -350,6 +350,25 @@ enum Fixtures {
         #expect(Self.problem(#"{"a\u0062": 1, "ab": 2}"#) == .duplicate(pointer: "/ab"))
     }
 
+    @Test func undecodableEscapedKeyFailsClosed() throws {
+        // A lone surrogate: the scan can't decode the key, so it refuses the file rather than skip the rest.
+        #expect(Self.problem(#"{"\ud800":1,"a":1,"a":2}"#) == .badKey(pointer: #"/\ud800"#))
+        #expect(Self.problem(#"{"x": [{"ok\n": 1, "b\udfff": 2}]}"#) == .badKey(pointer: #"/x/0/b\udfff"#))
+        #expect(throws: DataFileError.malformed(kind: "boat class", reason: #"undecodable key at /\ud800"#)) {
+            try BoatClassFile(data: Data(#"{"\ud800":1,"a":1,"a":2}"#.utf8))
+        }
+        // Every other malformed escape, and escapes that do decode.
+        for key in [#"\udc00"#, #"\ud800\u0041"#, #"\ud800x"#, #"\u12"#, #"\u12g4"#, #"\x41"#, #"\ud83d\ud83d"#] {
+            #expect(Self.problem(#"{"\#(key)": 1}"#) == .badKey(pointer: "/" + key), "\(key)")
+        }
+        #expect(Self.problem(#"{"\ud83d\ude00": 1, "😀": 2}"#) == .duplicate(pointer: "/😀"))
+        #expect(Self.problem(#"{"\"\\\/\b\f\n\r\t": 1, "\u0022\u005c/\u0008\u000C\u000a\u000D\u0009": 2}"#)
+                == .duplicate(pointer: "/\"\\~1\u{08}\u{0C}\n\r\t"))
+        #expect(Self.problem(#"{"caf\u00e9": 1, "café": 2}"#) == .duplicate(pointer: "/café"))
+        // An unterminated string is left to the parser.
+        #expect(Self.problem(#"{"a": "b"#) == nil)
+    }
+
     @Test func onlyUTF8IsAccepted() throws {
         let json = #"{"name": "∞ Ģ", "other": 1}"#
         #expect(Self.problem(json) == nil)

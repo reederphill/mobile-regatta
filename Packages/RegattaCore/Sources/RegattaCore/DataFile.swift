@@ -374,7 +374,7 @@ enum JSONPointer {
 ///   strings, so two canonically equivalent spellings count as a repeat.
 ///
 /// One pass over the bytes, linear in the file: strings are skipped over, and a number in a grid costs
-/// a comparison. A JSON Pointer is built only to report a duplicate. On malformed JSON it may report
+/// a comparison. A JSON Pointer is built only to report a problem. On malformed JSON it may report
 /// nothing or a false problem; either way the file is refused.
 enum JSONPrecheck {
     static let maxDepth = 512
@@ -383,12 +383,16 @@ enum JSONPrecheck {
         case notUTF8
         case tooDeep
         case duplicate(pointer: String)
+        /// A key whose escapes don't decode (e.g. a lone surrogate, `"\ud800"`). Refused rather than
+        /// skipped, so the duplicate check never depends on how each parser, on each platform, treats it.
+        case badKey(pointer: String)
 
         var description: String {
             switch self {
             case .notUTF8: "not UTF-8"
             case .tooDeep: "nested deeper than \(JSONPrecheck.maxDepth)"
             case .duplicate(let pointer): "duplicate field \(pointer)"
+            case .badKey(let pointer): "undecodable key at \(pointer)"
             }
         }
     }
@@ -454,10 +458,12 @@ enum JSONPrecheck {
                 if top >= 0 && frames[top].expectingKey {
                     let key: String
                     if escaped {
-                        // "\u0061" is the same key as "a": let the parser decode the escapes.
-                        let quoted = Data(bytes[start...i])
-                        guard let decoded = try? JSONSerialization.jsonObject(with: quoted, options: [.fragmentsAllowed]) as? String
-                        else { return nil }
+                        // "\u0061" is the same key as "a". Decoded here, not by a parser, so a key no
+                        // parser should accept fails the same way on every platform.
+                        guard let decoded = unescape(bytes[(start + 1)..<i]) else {
+                            let raw = String(decoding: bytes[(start + 1)..<i], as: UTF8.self)
+                            return .badKey(pointer: pointer(frames.dropLast()) + "/" + escape(raw))
+                        }
                         key = decoded
                     } else {
                         key = String(decoding: bytes[(start + 1)..<i], as: UTF8.self)
@@ -474,6 +480,62 @@ enum JSONPrecheck {
             i += 1
         }
         return nil
+    }
+
+    /// A JSON string's contents with its escapes decoded (RFC 8259 §7), or nil if an escape is invalid:
+    /// an unknown escape, bad hex, or a surrogate that isn't half of a pair. The bytes are valid UTF-8.
+    private static func unescape(_ body: Slice<UnsafeRawBufferPointer>) -> String? {
+        var out: [UInt8] = []
+        out.reserveCapacity(body.count)
+        var k = body.startIndex
+        func hex4(at j: Int) -> UInt32? {
+            guard j + 4 <= body.endIndex else { return nil }
+            var value: UInt32 = 0
+            for b in body[j..<(j + 4)] {
+                let digit: UInt8
+                switch b {
+                case UInt8(ascii: "0")...UInt8(ascii: "9"): digit = b - UInt8(ascii: "0")
+                case UInt8(ascii: "a")...UInt8(ascii: "f"): digit = b - UInt8(ascii: "a") + 10
+                case UInt8(ascii: "A")...UInt8(ascii: "F"): digit = b - UInt8(ascii: "A") + 10
+                default: return nil
+                }
+                value = value << 4 | UInt32(digit)
+            }
+            return value
+        }
+        while k < body.endIndex {
+            let b = body[k]
+            guard b == UInt8(ascii: "\\") else { out.append(b); k += 1; continue }
+            guard k + 1 < body.endIndex else { return nil }
+            let e = body[k + 1]
+            k += 2
+            switch e {
+            case UInt8(ascii: "\""), UInt8(ascii: "\\"), UInt8(ascii: "/"): out.append(e)
+            case UInt8(ascii: "b"): out.append(0x08)
+            case UInt8(ascii: "f"): out.append(0x0C)
+            case UInt8(ascii: "n"): out.append(0x0A)
+            case UInt8(ascii: "r"): out.append(0x0D)
+            case UInt8(ascii: "t"): out.append(0x09)
+            case UInt8(ascii: "u"):
+                guard let unit = hex4(at: k) else { return nil }
+                k += 4
+                var value = unit
+                if (0xD800...0xDBFF).contains(unit) {
+                    guard k + 6 <= body.endIndex, body[k] == UInt8(ascii: "\\"), body[k + 1] == UInt8(ascii: "u"),
+                          let low = hex4(at: k + 2), (0xDC00...0xDFFF).contains(low)
+                    else { return nil }
+                    k += 6
+                    value = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00)
+                } else if (0xDC00...0xDFFF).contains(unit) {
+                    return nil
+                }
+                guard let scalar = Unicode.Scalar(value) else { return nil }
+                out.append(contentsOf: String(scalar).utf8)
+            default:
+                return nil
+            }
+        }
+        return String(decoding: out, as: UTF8.self)
     }
 
     /// JSON Pointer of the innermost open container: each enclosing frame's current key or index.
