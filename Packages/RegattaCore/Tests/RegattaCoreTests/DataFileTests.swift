@@ -10,7 +10,7 @@ enum Fixtures {
     static let pinnedHash = "8eb6e20398d859edafec53ef904227672dd5ef081d1611fcb2e89d7e9da5849d"
 
     static func bytes() throws -> Data {
-        try #require(BoatClassFile.bundledData(id: classID, version: 1))
+        try #require(try BoatClassFile.bundledData(id: classID, version: 1))
     }
 
     static func text() throws -> String {
@@ -127,19 +127,38 @@ enum Fixtures {
         // Same id and version, one byte different: a different file.
         var changed = data
         changed.append(UInt8(ascii: "\n"))
-        #expect {
+        #expect(throws: DataFileError.refMismatch(expected: ref, foundHash: ContentHash(of: changed))) {
             try BoatClassFile(data: changed, expecting: ref)
-        } throws: { error in
-            if case .refMismatch(expected: ref, found: let found) = error as? DataFileError {
-                return found.id == ref.id && found.version == ref.version && found.hash != ref.hash
+        }
+        // Checked before parsing: bytes that aren't even JSON fail on the hash.
+        let junk = Data("not json".utf8)
+        #expect(throws: DataFileError.refMismatch(expected: ref, foundHash: ContentHash(of: junk))) {
+            try BoatClassFile(data: junk, expecting: ref)
+        }
+        // The right bytes named with the wrong id or version: the ref itself is wrong.
+        for wrong in [FileRef(id: "other-boat", version: 1, hash: ref.hash), FileRef(id: ref.id, version: 2, hash: ref.hash)] {
+            #expect {
+                try BoatClassFile(data: data, expecting: wrong)
+            } throws: { error in
+                if case .invalidHeader(kind: "boat class", reason: _) = error as? DataFileError { return true }
+                return false
             }
-            return false
         }
     }
 
     @Test func notBundledThrows() {
         #expect(throws: DataFileError.notBundled(kind: "boat class", id: "ilca-dinghy", version: 99)) {
             try BoatClassFile.bundled(id: "ilca-dinghy", version: 99)
+        }
+    }
+
+    @Test(arguments: ["", "../boat-classes/ilca-dinghy", "ILCA-dinghy", "ilca dinghy", "ilca/dinghy"])
+    func bundledRejectsInvalidIDs(id: String) {
+        #expect(throws: DataFileError.invalidID(kind: "boat class", id: id)) {
+            try BoatClassFile.bundled(id: id, version: 1)
+        }
+        #expect(throws: DataFileError.invalidID(kind: "boat class", id: id)) {
+            try BoatClassFile.bundledData(id: id, version: 1)
         }
     }
 
@@ -225,6 +244,41 @@ enum Fixtures {
 
         #expect(c.contact == .init(boat: 0.6, mark: 0.5))
         #expect(c.ease.speedFraction > 0 && c.ease.speedFraction < 1 && c.ease.timeConstant > 0)
+    }
+
+    static let outline = "[[0, 2.1], [0.75, 0.21], [0.63, -2.1], [-0.63, -2.1], [-0.75, 0.21]]"
+
+    @Test(arguments: [
+        // A notch in the transom: concave.
+        "[[0, 2.1], [0.75, 0.21], [0.63, -2.1], [0, -1.0], [-0.63, -2.1], [-0.75, 0.21]]",
+        // The same hull wound the other way (anticlockwise).
+        "[[-0.75, 0.21], [-0.63, -2.1], [0.63, -2.1], [0.75, 0.21], [0, 2.1]]",
+        // A five-pointed star: every corner turns the same way, but it winds twice.
+        "[[0, 2], [1.18, -1.62], [-1.9, 0.62], [1.9, 0.62], [-1.18, -1.62]]",
+        // Three points on a line.
+        "[[0, 2], [0, 0], [0, -2]]",
+    ])
+    func nonConvexOrMiswoundOutlineThrows(outline: String) throws {
+        let data = try Fixtures.edited([(of: Self.outline, with: outline)])
+        #expect {
+            try BoatClassFile(data: data)
+        } throws: { error in
+            if case .invalidContent(kind: "boat class", id: "ilca-dinghy", reason: let reason) = error as? DataFileError {
+                return reason.contains("convex")
+            }
+            return false
+        }
+    }
+
+    @Test func bundledOutlineMatchesThePrototypeHull() throws {
+        let hull = try Fixtures.boatClass().hull
+        let boat = Boat(id: 0, name: "", isPlayer: false, colorIndex: 0, position: .zero, heading: 0, speed: 0)
+        // Heading 0 is north, so the boat's frame is the world frame.
+        let prototype = boat.hull()
+        #expect(hull.outline.count == prototype.count)
+        for (a, b) in zip(hull.outline, prototype) {
+            #expect((a - b).length < 1e-9)
+        }
     }
 
     @Test func turnRateRisesWithSpeedFromMinToTop() throws {

@@ -122,11 +122,13 @@ public enum DataFileError: Error, Equatable, CustomStringConvertible {
     /// The file decoded but its values break the kind's rules (e.g. a polar that isn't rectangular).
     case invalidContent(kind: String, id: String, reason: String)
     case unresolvedPlaceholder(kind: String, id: String, pointer: String)
-    /// The bytes aren't the file the caller (the server, a race log) named.
-    case refMismatch(expected: FileRef, found: FileRef)
+    /// The bytes aren't the file the caller (the server, a race log) named: their hash differs.
+    case refMismatch(expected: FileRef, foundHash: ContentHash)
     /// Two different files claim the same id and version. A released version never changes.
     case conflictingVersion(existing: FileRef, new: FileRef)
     case notBundled(kind: String, id: String, version: Int)
+    /// A requested id that no data file can have (lowercase letters, digits and hyphens only).
+    case invalidID(kind: String, id: String)
 
     public var description: String {
         switch self {
@@ -136,9 +138,10 @@ public enum DataFileError: Error, Equatable, CustomStringConvertible {
         case let .invalidHeader(kind, reason): "bad \(kind) file header: \(reason)"
         case let .invalidContent(kind, id, reason): "invalid \(kind) \(id): \(reason)"
         case let .unresolvedPlaceholder(kind, id, pointer): "\(kind) \(id): placeholder \(pointer) points at nothing"
-        case let .refMismatch(expected, found): "expected \(expected), got \(found)"
+        case let .refMismatch(expected, foundHash): "expected \(expected), got bytes with \(foundHash)"
         case let .conflictingVersion(existing, new): "\(new) conflicts with already loaded \(existing)"
         case let .notBundled(kind, id, version): "no bundled \(kind) \(id)@\(version)"
+        case let .invalidID(kind, id): "\"\(id)\" is not a valid \(kind) id"
         }
     }
 }
@@ -180,7 +183,7 @@ public struct DataFile<Content: DataFileContent>: Sendable {
             throw DataFileError.unsupportedSchemaVersion(
                 kind: kind, found: header.schemaVersion, supported: Content.supportedSchemaVersions)
         }
-        guard !header.id.isEmpty, header.id.utf8.allSatisfy(Self.isIDCharacter) else {
+        guard Self.isValidID(header.id) else {
             throw DataFileError.invalidHeader(kind: kind, reason: "id \"\(header.id)\" must be lowercase letters, digits and hyphens")
         }
         guard header.version >= 1 else {
@@ -210,15 +213,22 @@ public struct DataFile<Content: DataFileContent>: Sendable {
         self.content = content
     }
 
-    /// Loads a file and checks that it is exactly the one `expected` names (id, version and hash).
+    /// Loads a file and checks that it is exactly the one `expected` names. The hash is checked
+    /// before anything is parsed; bytes with the right hash but another id or version in their
+    /// header mean `expected` itself is wrong, and throw `invalidHeader`.
     public init(data: Data, expecting expected: FileRef) throws {
+        let hash = ContentHash(of: data)
+        guard hash == expected.hash else { throw DataFileError.refMismatch(expected: expected, foundHash: hash) }
         try self.init(data: data)
-        guard ref == expected else { throw DataFileError.refMismatch(expected: expected, found: ref) }
+        guard id == expected.id, version == expected.version else {
+            throw DataFileError.invalidHeader(
+                kind: Content.kind, reason: "file \(ref) was expected to be \(expected.id)@\(expected.version)")
+        }
     }
 
     /// Loads `<id>@<version>.json` from this package's bundled resources.
     public static func bundled(id: String, version: Int) throws -> DataFile {
-        guard let data = bundledData(id: id, version: version) else {
+        guard let data = try bundledData(id: id, version: version) else {
             throw DataFileError.notBundled(kind: Content.kind, id: id, version: version)
         }
         let file = try DataFile(data: data)
@@ -229,17 +239,22 @@ public struct DataFile<Content: DataFileContent>: Sendable {
         return file
     }
 
-    /// The exact bytes of a bundled file, or nil if this build doesn't ship it.
-    public static func bundledData(id: String, version: Int) -> Data? {
+    /// The exact bytes of a bundled file, or nil if this build doesn't ship it. Throws `invalidID`
+    /// for an id no file can have, and passes on any error reading a file that is there.
+    public static func bundledData(id: String, version: Int) throws -> Data? {
+        guard isValidID(id) else { throw DataFileError.invalidID(kind: Content.kind, id: id) }
         guard let url = Bundle.module.url(
             forResource: "\(id)@\(version)", withExtension: "json", subdirectory: Content.bundleDirectory
         ) else { return nil }
-        return try? Data(contentsOf: url)
+        return try Data(contentsOf: url)
     }
 
-    private static func isIDCharacter(_ c: UInt8) -> Bool {
-        (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(c) || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(c)
-            || c == UInt8(ascii: "-")
+    /// Lowercase ASCII letters, digits and hyphens, at least one. Safe to use in a resource name.
+    static func isValidID(_ id: String) -> Bool {
+        !id.isEmpty && id.utf8.allSatisfy { c in
+            (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(c) || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(c)
+                || c == UInt8(ascii: "-")
+        }
     }
 }
 

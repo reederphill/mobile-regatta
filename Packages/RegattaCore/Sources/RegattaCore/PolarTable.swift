@@ -6,6 +6,10 @@ import Foundation
 /// The best upwind and downwind angles and their VMG are derived from the table when it loads,
 /// once per TWS column, never stored in the file (ADR 0004). Laylines, bots, course sizing and the
 /// start use `bestUpwind(tws:)` and `bestDownwind(tws:)`.
+///
+/// Non-finite inputs: a NaN wind speed or wind angle, or an infinite wind angle, gives NaN results
+/// (never a trap or a clamp to a table value), so check inputs where they can be non-finite.
+/// An infinite wind speed is clamped like any out-of-range one: +∞ reads the last column, −∞ the 0 kn one.
 public struct PolarTable: Sendable {
     /// Best VMG at one wind speed.
     public struct Optimum: Sendable, Equatable {
@@ -75,7 +79,8 @@ public struct PolarTable: Sendable {
 
     /// Boat speed in m/s at true wind angle `twa` (radians; sign ignored, and angles past 180°
     /// mirror, so by the lee reads as the same angle on the other side, before `byTheLeePenalty`)
-    /// and true wind speed `tws` (m/s; capped at the last column, 0 below 0).
+    /// and true wind speed `tws` (m/s; capped at the last column, 0 below 0). NaN in either, or an
+    /// infinite `twa`, gives NaN; an infinite `tws` is clamped (see the type's note on non-finite inputs).
     public func speed(twa: Double, tws: Double) -> Double {
         let (c, t) = axisSegment(twsAxis, tws)
         let a = Self.foldedTWA(twa)
@@ -83,13 +88,15 @@ public struct PolarTable: Sendable {
     }
 
     /// Best upwind VMG at `tws` (m/s). Exact at the table's columns; between them the angle is
-    /// interpolated and the speed and VMG are read from the polar at that angle.
+    /// interpolated and the speed and VMG are read from the polar at that angle. A NaN `tws` gives a
+    /// NaN angle, speed and VMG; an infinite one is clamped to the first or last column.
     public func bestUpwind(tws: Double) -> Optimum { optimum(upwindOptima, tws: tws, direction: 1) }
 
     /// Best downwind VMG at `tws` (m/s), as `bestUpwind(tws:)`.
     public func bestDownwind(tws: Double) -> Optimum { optimum(downwindOptima, tws: tws, direction: -1) }
 
-    /// How far by the lee the boat may sail at `tws` (m/s) before she gybes, radians.
+    /// How far by the lee the boat may sail at `tws` (m/s) before she gybes, radians. NaN gives NaN
+    /// (with two or more limit points); an infinite `tws` is clamped to the first or last point.
     public func byTheLeeLimit(tws: Double) -> Double {
         guard byTheLeeLimitTWS.count > 1 else { return byTheLeeLimits[0] }
         let (i, t) = axisSegment(byTheLeeLimitTWS, tws)

@@ -225,6 +225,9 @@ private struct BoatClassSchema1: Decodable {
         try check(positive(hull.lengthMetres) && positive(hull.beamMetres), "hull length and beam must be positive")
         try check(hull.outlineMetres.count >= 3 && hull.outlineMetres.allSatisfy { $0.count == 2 && $0.allSatisfy(\.isFinite) },
                   "hull outline needs at least three [x, y] points")
+        let outline = hull.outlineMetres.map { Vec2($0[0], $0[1]) }
+        try check(Self.isConvexClockwise(outline),
+                  "hull outline must be convex and run clockwise (bow, starboard side, stern, port side), as Boat.hull() does")
         try check(polar.twaDegrees.first == 0 && polar.twaDegrees.last == 180, "polar TWA rows must run from 0° to 180°")
 
         let table: PolarTable
@@ -266,7 +269,7 @@ private struct BoatClassSchema1: Decodable {
         let length = hull.lengthMetres
         return BoatClass(
             name: name,
-            hull: .init(length: length, beam: hull.beamMetres, outline: hull.outlineMetres.map { Vec2($0[0], $0[1]) }),
+            hull: .init(length: length, beam: hull.beamMetres, outline: outline),
             polar: table,
             momentum: .init(speedingUp: momentum.speedingUpSeconds, slowingDown: momentum.slowingDownSeconds,
                             noGo: momentum.noGoSeconds),
@@ -292,5 +295,20 @@ private struct BoatClassSchema1: Decodable {
             contact: .init(boat: contact.boatSpeedFactor, mark: contact.markSpeedFactor),
             ease: .init(speedFraction: ease.speedFraction, timeConstant: ease.timeConstantSeconds)
         )
+    }
+
+    /// A simple convex polygon wound clockwise in the boat's frame (x to starboard, y towards the bow):
+    /// every corner turns right, and the turns add up to exactly one full turn (a star turns twice).
+    /// Separating-axis collision needs convex hulls.
+    static func isConvexClockwise(_ points: [Vec2]) -> Bool {
+        var turning = 0.0
+        for k in points.indices {
+            let a = points[k], b = points[(k + 1) % points.count], c = points[(k + 2) % points.count]
+            let e1 = b - a, e2 = c - b
+            let turn = e1.cross(e2)
+            guard turn < 0 else { return false }
+            turning += atan2(turn, e1.dot(e2))
+        }
+        return abs(turning + 2 * .pi) < 1e-6
     }
 }

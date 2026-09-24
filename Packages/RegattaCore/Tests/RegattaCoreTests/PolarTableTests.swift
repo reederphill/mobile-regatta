@@ -49,6 +49,25 @@ import Testing
         }
     }
 
+    /// As documented on `PolarTable`: NaN in, NaN out; infinite wind speed is clamped.
+    @Test func nonFiniteInputsBehaveAsDocumented() {
+        let w12 = metresPerSecond(knots: 12), w25 = metresPerSecond(knots: 25)
+        #expect(polar.speed(twa: .nan, tws: w12).isNaN)
+        #expect(polar.speed(twa: .infinity, tws: w12).isNaN)
+        #expect(polar.speed(twa: -.infinity, tws: w12).isNaN)
+        #expect(polar.speed(twa: deg2rad(45), tws: .nan).isNaN)
+        #expect(polar.speed(twa: deg2rad(45), tws: .infinity) == polar.speed(twa: deg2rad(45), tws: w25))
+        #expect(polar.speed(twa: deg2rad(45), tws: -.infinity) == 0)
+        let nanUp = polar.bestUpwind(tws: .nan)
+        #expect(nanUp.twa.isNaN && nanUp.speed.isNaN && nanUp.vmg.isNaN)
+        #expect(polar.bestUpwind(tws: .infinity) == polar.bestUpwind(tws: w25))
+        #expect(polar.bestDownwind(tws: .infinity) == polar.bestDownwind(tws: w25))
+        #expect(polar.bestUpwind(tws: -.infinity) == polar.bestUpwind(tws: 0))
+        #expect(polar.byTheLeeLimit(tws: .nan).isNaN)
+        #expect(polar.byTheLeeLimit(tws: .infinity) == polar.byTheLeeLimit(tws: w25))
+        #expect(polar.byTheLeeLimit(tws: -.infinity) == polar.byTheLeeLimit(tws: 0))
+    }
+
     @Test func byTheLeeMirrorsDeadDownwind() {
         #expect(abs(speed(200, 12) - speed(160, 12)) < 1e-9)
         #expect(abs(speed(-200, 12) - speed(160, 12)) < 1e-9)
