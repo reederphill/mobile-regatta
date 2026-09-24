@@ -14,6 +14,8 @@ build/
 .build/
 .swiftpm/
 Package.resolved
+# ...except RegattaCore's: it pins swift-crypto so each simulation version has a reproducible build (ADR 0002).
+!Packages/RegattaCore/Package.resolved
 
 # Claude Code agent worktrees
 .claude/worktrees/

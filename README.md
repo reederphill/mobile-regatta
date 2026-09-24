@@ -11,7 +11,11 @@ This first cut is single-player against bots. Multiplayer, the lobby and ranking
 Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Geometry.swift          vectors, angles, line crossings, SAT collision
   Wind.swift              oscillating shifts, left/right bias, drifting puffs and lulls
-  Polar.swift             boat speed by true wind angle
+  Polar.swift             the prototype's boat speed by true wind angle (the race still sails it until #70)
+  DataFile.swift          versioned data-file loader: header, schema check, SHA-256 content hash, FileRef
+  BoatClass.swift         boat class file schema: hull, polar, momentum, steering, shadow, contact, ease
+  PolarTable.swift        polar by TWA × TWS, bilinear, with best upwind and downwind VMG derived at load
+  Resources/boat-classes/ boat class files, `<id>@<version>.json`
   Course.swift            windward-leeward course, start/finish line, rounding gates
   Boat.swift              boat state and hull shape
   Rules.swift             Rules 10, 11, 12, 13, 18, 22, 31 — who had to keep clear
@@ -56,6 +60,20 @@ bit-for-bit deterministic:
   be close. Upgrading the image is a simulation version change.
 - Golden digests are asserted only on the replay platform. On macOS the tests check that the digest is
   the same twice in one process and across two processes (`scripts/check-digest-stable.sh`).
+
+### Data files
+
+Boat classes (and later venues, conditions and the rules configuration) are immutable, versioned JSON
+files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`:
+
+- Every file starts with `schemaVersion`, `id` and `version`. A schema version the build doesn't know
+  throws. A file's `FileRef` is its id, version and the SHA-256 of its exact bytes, so a released file
+  never changes: tuning ships `<id>@<version + 1>.json` next to it, and old versions keep loading.
+  `.gitattributes` stops git rewriting their line endings.
+- Files use knots, degrees, seconds and hull lengths; the loader converts them once to m/s, radians and
+  metres. Derived values, such as the best upwind and downwind angles, are computed at load, never stored.
+- `placeholders` lists JSON Pointers to values that are placeholders awaiting tuning; the loader checks
+  each one resolves. `notes` is free text for provenance and is ignored by the loader.
 
 ## Building
 
