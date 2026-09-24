@@ -223,21 +223,16 @@ import Testing
     }
 }
 
-/// Source scans for the determinism rules in ADR 0002 and on `Race`, over RegattaCore and the wire
-/// protocol that carries its state (`Packages/RegattaProtocol`, a sibling package).
+/// Source scans for the determinism rules in ADR 0002 and on `Race`, over RegattaCore's own sources.
+/// RegattaProtocol runs the same scans over its own (its `SourceTests`).
 @Suite struct SourceScanTests {
-    static let sourceDirectories = ["RegattaCore/Sources/RegattaCore", "RegattaProtocol/Sources/RegattaProtocol"]
-
     static func sources() throws -> [(name: String, text: String)] {
-        let packages = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        return try sourceDirectories.flatMap { directory in
-            let dir = packages.appendingPathComponent(directory)
-            let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }.sorted()
-            #expect(!names.isEmpty, "no sources in \(directory)")
-            let package = directory.split(separator: "/")[0]
-            return try names.map { ("\(package)/\($0)", try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8)) }
-        }
+        let dir = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/RegattaCore")
+        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }.sorted()
+        #expect(!names.isEmpty)
+        return try names.map { ($0, try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8)) }
     }
 
     /// Word boundaries are the simple kind: with Unicode's default, `a.keys` is one word, so

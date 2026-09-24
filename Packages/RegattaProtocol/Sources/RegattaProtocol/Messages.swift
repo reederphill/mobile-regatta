@@ -5,11 +5,12 @@ import RegattaCore
 ///
 /// Bump it for any change a peer of this version couldn't decode: a changed encoding of an existing
 /// message, and any new code the server may send without being asked, such as a new message type,
-/// a new `RaceEvent` kind or a new enum code in a server message. Only three things are frozen
-/// forever, so that any future client and server can still tell each other apart: the frame header
-/// (`Frame`), the `protocolVersion` at the start of `Hello`'s body (`Frame.helloProtocolVersion(in:)`),
-/// and the whole `UpdateRequired` body. `UpdateRequired.Reason` and `RaceCancelled.Reason` decode
-/// codes they don't know as `.unknown`, so a newer server's reason still reaches an older client.
+/// a new `RaceEvent` kind or a new enum code in a server message. The one exception is the two
+/// reason enums, `UpdateRequired.Reason` and `RaceCancelled.Reason`: they decode codes they don't
+/// know as `.unknown`, so adding a reason needs no bump, and a newer server's reason still reaches an
+/// older client. Only three things are frozen forever, so that any future client and server can still
+/// tell each other apart: the frame header (`Frame`), the `protocolVersion` at the start of `Hello`'s
+/// body (`Frame.helloProtocolVersion(in:)`), and the whole `UpdateRequired` body.
 public let wireProtocolVersion: UInt16 = 1
 
 /// Bytes whose shape is owned by a later ticket, tagged with that shape's schema, so the owner can
@@ -383,7 +384,8 @@ public struct Pong: Equatable, Sendable {
 }
 
 /// Server → client: the race won't be sailed. Placeholder reasons until the multiplayer flow (#66)
-/// adds its own; a new reason is a new code, not a format change.
+/// adds its own. A new reason is a new code and needs no `wireProtocolVersion` bump: an older client
+/// decodes it as `.unknown` (the exception in `wireProtocolVersion`'s policy).
 public struct RaceCancelled: Equatable, Sendable {
     public enum Reason: Hashable, Sendable {
         case unspecified
