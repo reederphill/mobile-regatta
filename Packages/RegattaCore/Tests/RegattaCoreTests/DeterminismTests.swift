@@ -21,31 +21,13 @@ import Testing
     }
 
     @Test func timeIsDerivedFromTheTickExactly() {
-        let race = testRace(opponents: 1, prestartSeconds: 60, seed: 11, brains: [])
+        let race = testRace(opponents: 1, prestartSeconds: 60, seed: 11)
         for _ in 0..<10_000 { race.step() }
         #expect(!race.isOver)
         #expect(race.tick == -1800 + 10_000)
         #expect(race.time == Double(race.tick) / 30)
         // The wind holds keys through the current window, and none beyond it.
         #expect(race.wind.keys.endWindow == race.wind.windows.window(containing: race.tick) + 1)
-    }
-}
-
-@Suite struct InstrumentationTests {
-    @Test func botBrainsIntervalWrapsEachStepOnceWithoutChangingOutput() {
-        let plain = testRace(opponents: 5, prestartSeconds: 10, seed: 9, brains: Array(0...5))
-        let timed = testRace(opponents: 5, prestartSeconds: 10, seed: 9, brains: Array(0...5))
-        var intervals = 0
-        timed.botBrainsInterval = { body in
-            intervals += 1
-            body()
-        }
-        for _ in 0..<600 {
-            plain.step()
-            timed.step()
-        }
-        #expect(intervals == 600)
-        #expect(timed.digest() == plain.digest())
     }
 }
 
@@ -223,16 +205,19 @@ import Testing
     }
 }
 
-/// Source scans for the determinism rules in ADR 0002 and on `Race`, over RegattaCore's own sources.
-/// RegattaProtocol runs the same scans over its own (its `SourceTests`).
+/// Source scans for the determinism rules in ADR 0002 and on `Race`, over this package's sources:
+/// RegattaCore, and RegattaBots, since bots draw only from their own seeds, so a race with a pinned
+/// seed sails the same every time. RegattaProtocol runs the same scans over its own (its `SourceTests`).
 @Suite struct SourceScanTests {
     static func sources() throws -> [(name: String, text: String)] {
-        let dir = URL(fileURLWithPath: #filePath)
+        let package = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Sources/RegattaCore")
-        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }.sorted()
-        #expect(!names.isEmpty)
-        return try names.map { ($0, try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8)) }
+        return try ["RegattaCore", "RegattaBots"].flatMap { target in
+            let dir = package.appendingPathComponent("Sources/\(target)")
+            let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }.sorted()
+            #expect(!names.isEmpty, "no sources in \(target)")
+            return try names.map { ("\(target)/\($0)", try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8)) }
+        }
     }
 
     /// Word boundaries are the simple kind: with Unicode's default, `a.keys` is one word, so

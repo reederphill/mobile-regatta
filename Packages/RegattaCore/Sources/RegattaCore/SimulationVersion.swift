@@ -17,7 +17,9 @@ import Glibc
 ///    (⌈startSequenceTicks / 900⌉ + 1) ticks before the gun, so knots fall on whole windows from the gun
 ///    and the race starts in window 1. First knot: `WindField.firstKnot` (no shift, base strength, level)
 ///    at the origin, never sampled by a race. No puffs until #76.
-public let simulationRevision = 3
+/// 4: boats carry no names (bot names moved to the roster outside the sim), so the digest no longer
+///    hashes them; bot brains left `Race` for RegattaBots' seat controllers (#60).
+public let simulationRevision = 4
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

@@ -5,16 +5,15 @@ import Testing
 /// `Packages/RegattaCore/Tests`.
 let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
 
-/// A race for tests: by default seat 0 is human and `opponents` bot seats follow, sailed by brains.
+/// A race for tests: by default seat 0 is human and `opponents` bot seats follow. Nothing sails the
+/// bot seats here (RegattaBotsTests does): every seat only answers to the inputs a test sends.
 func testRace(
-    opponents: Int = 7, seats: [SeatKind]? = nil, laps: Int = 2, prestartSeconds: Int = 60,
-    seed: UInt64, brains: [Int]? = nil
+    opponents: Int = 7, seats: [SeatKind]? = nil, laps: Int = 2, prestartSeconds: Int = 60, seed: UInt64
 ) -> Race {
     let seats = seats ?? [.human] + Array(repeating: .bot, count: opponents)
     let setup = try! RaceSetup(raceSeed: RaceSeed(seed), seats: seats, laps: laps,
                                startSequenceTicks: prestartSeconds * Race.tickRate)
-    let brainSeats = brains ?? seats.indices.filter { seats[$0] == .bot }
-    return Race(setup: setup, windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1), botBrainSeats: brainSeats)
+    return Race(setup: setup, windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1))
 }
 
 /// The golden input log: 16 seats sailed by a seeded script, with every kind of input and seat event.
@@ -192,7 +191,7 @@ enum ScriptedLog {
     }
 
     @Test func heldInputStampedTAppliesFromTickT() {
-        let race = testRace(seats: [.human, .human], seed: 5, brains: [])
+        let race = testRace(seats: [.human, .human], seed: 5)
         let t = race.tick + 10
         let input = BoatInput(rudder: Int8(127), ease: true)
         #expect(race.apply(input, seat: 0, atTick: t) == t)
@@ -212,7 +211,7 @@ enum ScriptedLog {
     }
 
     @Test func lateInputAppliesAtTheNextTickAndIsLoggedThere() {
-        let race = testRace(seats: [.human, .human], seed: 5, brains: [])
+        let race = testRace(seats: [.human, .human], seed: 5)
         for _ in 0..<5 { race.step() }
         let next = race.tick + 1
         #expect(race.apply(BoatInput(rudder: -0.5), seat: 1, atTick: race.tick - 3) == next)
@@ -221,7 +220,7 @@ enum ScriptedLog {
     }
 
     @Test func unchangedHeldInputIsNotLoggedAgain() {
-        let race = testRace(seats: [.human, .human], seed: 5, brains: [])
+        let race = testRace(seats: [.human, .human], seed: 5)
         let input = BoatInput(rudder: 0.25)
         for _ in 0..<20 {
             race.apply(input, seat: 0, atTick: race.tick + 1)
@@ -232,7 +231,7 @@ enum ScriptedLog {
     }
 
     @Test func tapAppliesOnce() {
-        let race = testRace(seats: [.human, .human], seed: 3, brains: [])
+        let race = testRace(seats: [.human, .human], seed: 3)
         let t = race.tick + 10
         #expect(race.tap(.tackGybe, seat: 0, atTick: t) == t)
         #expect(race.tap(.protest(target: 1), seat: 0, atTick: t) == t)
@@ -257,7 +256,7 @@ enum ScriptedLog {
     }
 
     @Test func rudderInputCancelsTheTackAutopilot() {
-        let race = testRace(seats: [.human, .human], seed: 3, brains: [])
+        let race = testRace(seats: [.human, .human], seed: 3)
         let t = race.tick + 1
         race.tap(.tackGybe, seat: 0, atTick: t)
         race.apply(BoatInput(rudder: 0.5), seat: 0, atTick: t + 5)
@@ -272,15 +271,15 @@ enum ScriptedLog {
         let race = testRace(seats: [.human, .bot], seed: 3)
         #expect(race.apply(.neutral, seat: 2, atTick: race.tick + 1) == nil)
         #expect(race.apply(.neutral, seat: -1, atTick: race.tick + 1) == nil)
-        #expect(race.apply(.neutral, seat: 1, atTick: race.tick + 1) == nil, "seat 1 is sailed by a brain")
+        #expect(race.apply(.neutral, seat: 1, atTick: race.tick + 1) != nil, "a bot seat takes inputs like any other")
         #expect(race.tap(.protest(target: 0), seat: 0, atTick: race.tick + 1) == nil)
         #expect(race.tap(.protest(target: 5), seat: 0, atTick: race.tick + 1) == nil)
         #expect(race.record(.left, seat: 9) == nil)
     }
 
     @Test func easeSlowsTheBoat() {
-        let eased = testRace(seats: [.human, .human], seed: 8, brains: [])
-        let sailing = testRace(seats: [.human, .human], seed: 8, brains: [])
+        let eased = testRace(seats: [.human, .human], seed: 8)
+        let sailing = testRace(seats: [.human, .human], seed: 8)
         eased.apply(BoatInput(rudder: Int8(0), ease: true), seat: 0, atTick: eased.tick + 1)
         for _ in 0..<(Race.tickRate * 10) {
             eased.step()
@@ -347,28 +346,6 @@ enum ScriptedLog {
         #expect(race.tick == fixture.finalTick)
         #expect(race.log.inputs == fixture.inputs)
         #expect(race.log.seatEvents == fixture.seatEvents)
-    }
-
-    /// A live race whose bots are sailed by brains replays, with no brains, to the same digest (ADR 0002).
-    @Test func liveRaceWithBrainsReplaysWithoutThem() throws {
-        let race = testRace(opponents: 7, prestartSeconds: 30, seed: 42)
-        for seat in race.boats.indices { race.record(.joined(race.setup.seats[seat]), seat: seat) }
-        var rng = SplitMix64(seed: 9)
-        for step in 0..<(Race.tickRate * 80) {
-            if step % 40 == 0 {
-                race.apply(BoatInput(rudder: Int8(rng.int(in: -60...60)), ease: step < 300), seat: 0, atTick: race.tick + 1)
-            }
-            if step == 1200 { race.tap(.tackGybe, seat: 0, atTick: race.tick + 2) }
-            if step == 1300 { race.tap(.protest(target: 3), seat: 0, atTick: race.tick + 1) }
-            race.step()
-        }
-        race.record(.left, seat: 0)
-
-        let log = race.log
-        let replayed = try Replayer.replay(log)
-        #expect(replayed.digest() == race.digest())
-        #expect(replayed.log == log)
-        #expect(log.inputs.contains { $0.seat == 4 }, "brain inputs are logged")
     }
 
     @Test func replayRefusesAnotherSimulationVersion() throws {
