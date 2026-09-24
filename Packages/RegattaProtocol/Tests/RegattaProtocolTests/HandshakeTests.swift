@@ -1,3 +1,4 @@
+import RegattaBots
 import RegattaCore
 @testable import RegattaProtocol
 import Testing
@@ -100,9 +101,8 @@ import Testing
     /// server sends a client.
     @Test func theWindSeedsBytesNeverAppearOnTheWire() throws {
         let windSeed = WindSeed(0xD1CE_5EED_0BAD_F00D)
-        let kinds: [SeatKind] = (0..<16).map { $0 % 4 == 0 ? .human : .bot }
-        let setup = try RaceSetup(raceSeed: RaceSeed(63), seats: kinds, laps: 1, startSequenceTicks: 900)
-        let race = Race(setup: setup, windSeed: windSeed, botBrainSeats: Array(0..<16))
+        let race = botRace(seats: 16, laps: 1, prestartSeconds: 30, seed: 63, windSeed: windSeed)
+        let setup = race.setup
         let le = (0..<8).map { UInt8(truncatingIfNeeded: windSeed.value >> (8 * UInt64($0))) }
         let needles = [le, Array(le.reversed())]
         func contains(_ bytes: [UInt8], _ needle: [UInt8]) -> Bool {
@@ -112,7 +112,8 @@ import Testing
             let bytes = try frame.encoded()
             #expect(needles.allSatisfy { !contains(bytes, $0) }, "wind seed bytes in \(frame.message.type)")
         }
-        let roster = (0..<16).map { RosterEntry(name: race.boats[$0].name, colorIndex: $0) }
+        let names = FleetRoster(setup: setup)
+        let roster = (0..<16).map { RosterEntry(name: names[$0].sailingName ?? "Helm \($0 + 1)", colorIndex: $0) }
         try check(Frame(seq: 1, tick: race.tick, message: .raceStart(RaceStart(yourSeat: 0, setup: setup, roster: roster,
                                                                                windKeys: race.wind.keys.keys))))
         var seq: UInt32 = 0

@@ -519,8 +519,8 @@ extension Race {
     }
 
     /// Replaces the world with `snapshot`, so stepping on continues from its tick (ADR 0005). The race
-    /// keeps what isn't world state: its setup, course and wind seed, and its bot brains, whose own
-    /// memory isn't in a snapshot, so a race restored with brains won't make the same bot decisions.
+    /// keeps what isn't world state: its setup, course and wind seed. Bots run outside the race (#60),
+    /// and their memory isn't in a snapshot, so bots driving a restored race won't make the same decisions.
     /// Inputs queued but not yet applied and undrained events are dropped. `log` is left as it was and
     /// no longer describes the race: a race that imports is a prediction, never the record. The
     /// authoritative host never imports a snapshot a client could have supplied (ADR 0005).

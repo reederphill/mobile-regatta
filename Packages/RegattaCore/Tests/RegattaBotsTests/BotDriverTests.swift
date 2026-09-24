@@ -167,6 +167,30 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         print("REGATTABOTS replay digest=\(hex64(race.digest()))")
     }
 
+    /// Bots are predicted like anyone else, on their held inputs (ADR 0005): a race with no bots that
+    /// imports a bot race's snapshot and is fed the inputs the bots applied follows it exactly. (From #63's
+    /// WorldSnapshotTests, moved here when bots left `Race`.)
+    @Test func aBotlessImportFedTheBotsAppliedInputsFollowsTheBotRace() throws {
+        let botRace = botRace(seats: [.human] + Array(repeating: .bot, count: 9), prestartSeconds: 30, seed: 63)
+        var bots = SeatControllers(setup: botRace.setup)
+        sail(botRace, &bots, ticks: 1500)
+        _ = botRace.drainEvents()
+        let copy = Race(setup: botRace.setup, windSeed: botRace.windSeed)
+        try copy.importSnapshot(botRace.exportSnapshot())
+        #expect(copy.digest() == botRace.digest())
+        for _ in 0..<600 {
+            sail(botRace, &bots, ticks: 1)
+            for record in botRace.log.inputs where record.tick == copy.tick + 1 {
+                switch record.kind {
+                case .held(let input): copy.apply(input, seat: record.seat, atTick: record.tick)
+                case .tap(let tap): copy.tap(tap, seat: record.seat, atTick: record.tick)
+                }
+            }
+            copy.step()
+            #expect(copy.digest() == botRace.digest())
+        }
+    }
+
     /// No exceptions for bots (#19): a scripted seat that sends a bot's applied inputs sails the same boat.
     @Test func scriptedSeatReplayingABotsInputsSailsTheSameBoat() {
         let ticks = Race.tickRate * 150

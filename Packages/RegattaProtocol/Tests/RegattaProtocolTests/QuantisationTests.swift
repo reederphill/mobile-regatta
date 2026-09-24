@@ -95,7 +95,7 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         #expect(merged.touchingBoats == [.init(1, 2)] && merged.foulMemory == receiver.foulMemory)
         for i in 0..<8 {
             let (m, r, s) = (merged.seats[i].boat, receiver.seats[i].boat, sender.seats[i].boat)
-            #expect(m.name == r.name && m.isPlayer == r.isPlayer && m.colorIndex == r.colorIndex && m.id == r.id)
+            #expect(m.isPlayer == r.isPlayer && m.colorIndex == r.colorIndex && m.id == r.id)
             #expect(m.desiredRudder == r.desiredRudder && m.windDirection == r.windDirection)
             #expect(m.windSpeed == r.windSpeed && m.shadow == r.shadow)
             #expect(m.place == (i == 3 ? 1 : nil))

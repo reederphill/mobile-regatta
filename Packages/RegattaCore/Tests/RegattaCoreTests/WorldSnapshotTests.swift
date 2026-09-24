@@ -179,26 +179,6 @@ struct LogFeeder {
         #expect(a.seats.map { String(describing: $0.boat) } == b.seats.map { String(describing: $0.boat) })
     }
 
-    /// Bots are predicted like anyone else, on their held inputs (ADR 0005): a race without brains that
-    /// imports a bot race and is fed the inputs the bots' brains applied follows it exactly.
-    @Test func aBrainlessImportFedTheBotsAppliedInputsFollowsTheBotRace() throws {
-        let botRace = testRace(opponents: 9, prestartSeconds: 30, seed: 63)
-        for _ in 0..<1500 { botRace.step() }
-        _ = botRace.drainEvents()
-        let snapshot = botRace.exportSnapshot()
-        let copy = Race(setup: botRace.setup, windSeed: botRace.windSeed)
-        try copy.importSnapshot(snapshot)
-        #expect(copy.digest() == botRace.digest())
-        for _ in 0..<600 {
-            botRace.step()
-            for record in botRace.log.inputs where record.tick == copy.tick + 1 {
-                if case .held(let input) = record.kind { copy.apply(input, seat: record.seat, atTick: record.tick) }
-            }
-            copy.step()
-            #expect(copy.digest() == botRace.digest())
-        }
-    }
-
     @Test func invalidSnapshotsAreRejected() throws {
         let race = Self.feeder.race(at: -1700)
         let good = race.exportSnapshot()
@@ -292,8 +272,6 @@ struct LogFeeder {
         "polar": "fixed for the race",
         "windSetup": "fixed for the race, drawn from the public race seed",
         "windKeys": "the key generator: it holds the wind seed, never in a snapshot (ADR 0001); import moves it past the snapshot's keys",
-        "botBrainsInterval": "profiling hook, never changes output",
-        "brains": "bot brains run only where the race is hosted; a boat's future is its held input (ADR 0005)",
         "finishers": "derived on import: the count of finished boats",
         "pending": "inputs not yet applied are not world state; import drops them",
         "events": "undrained output, not state; import drops them",
