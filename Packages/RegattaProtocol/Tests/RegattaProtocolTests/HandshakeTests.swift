@@ -247,7 +247,7 @@ import Testing
         let frame = try Frame(decoding: Frame(seq: 0, tick: server.tick, message: .resync(
             Resync(raceSeed: server.setup.raceSeed, world: world, windKeys: keys, nextEventSeq: 1))).encoded())
         guard case .resync(let resync) = frame.message else { Issue.record("not a resync"); return }
-        let client = Race(setup: server.setup, windSeed: server.windSeed)
+        let client = Race(setup: server.setup, windSeed: try #require(server.windSeed))
         let before = client.digest()
         #expect(throws: WorldSnapshotError.missingWindKey(current + 1)) {
             try client.importSnapshot(resync.world(base: client.exportSnapshot(), tick: frame.tick))
