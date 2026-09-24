@@ -30,7 +30,24 @@ public final class Race {
     public let course: Course
     public let polar = Polar.dinghy
 
+    /// The conditions every race sails until race assembly reads `RaceSetup.conditions` (#81).
+    /// Schema 2: the keyed wind needs its wobble and ramp tuning (#75).
+    public static let defaultConditions: ConditionsFile = {
+        do {
+            return try ConditionsFile.bundled(id: "classic-oscillating", version: 2)
+        } catch {
+            preconditionFailure("bundled conditions classic-oscillating@2 failed to load: \(error)")
+        }
+    }()
+
+    /// The public wind setup, drawn from the race seed: mean direction, base strength, trend direction.
+    public let windSetup: WindSetup
+    /// The keyed wind (ADR 0001), holding the keys through the current window and no further.
     public private(set) var wind: WindField
+    /// Makes this race's keys from its wind seed, one window at a time as the clock enters it. A race
+    /// always holds its wind seed (practice on the device, the server, a replay), so it is never
+    /// missing a key; an online client that holds only revealed keys needs its own source (#95).
+    private var windKeys: WindKeyGenerator
     /// One boat per seat: `boats[seat]`.
     public private(set) var boats: [Boat]
     /// Each seat's held input, in force until the seat sends a different one.
@@ -64,7 +81,10 @@ public final class Race {
 
     /// Builds the race at the start of its sequence, tick −`setup.startSequenceTicks`.
     ///
-    /// The wind comes from `windSeed` alone, never from the race seed (ADR 0001).
+    /// The public wind setup (mean direction, base strength, trend direction) is drawn from the race
+    /// seed in `defaultConditions` with the stub venue pairing, and the course is laid square to its
+    /// mean direction (#10). Everything that changes during the race comes from the key chain of
+    /// `windSeed` alone, never from the race seed (ADR 0001).
     /// `botBrainSeats` are sailed by the built-in `BotBrain`, which feeds them through the same
     /// held-input path as any seat, so the log still holds every input applied (ADR 0002). A replay
     /// passes none: replays never run bots. Temporary until bots become seat controllers (#60).
@@ -72,14 +92,17 @@ public final class Race {
         self.setup = setup
         self.windSeed = windSeed
         var rng = SplitMix64(seed: setup.raceSeed.value)
-        let course = Course.standard(laps: setup.laps)
+        let windSetup = WindSetup(conditions: Race.defaultConditions, pairing: .stub, raceSeed: setup.raceSeed)
+        self.windSetup = windSetup
+        let course = Course.standard(laps: setup.laps, axis: windSetup.meanDirection)
         self.course = course
-        wind = WindField(
-            seed: windSeed.value,
-            baseDirection: course.axis,
-            areaMin: Vec2(-450, -250),
-            areaMax: Vec2(450, course.marks[0].position.y + 200)
-        )
+        let windows = WindWindows(startSequenceTicks: setup.startSequenceTicks)
+        wind = WindField(setup: windSetup, windows: windows)
+        do {
+            windKeys = try WindKeyGenerator(windSeed: windSeed, setup: windSetup, windows: windows)
+        } catch {
+            preconditionFailure("default conditions can't be keyed: \(error)")
+        }
         tick = -setup.startSequenceTicks
 
         // Prototype placement until the start row (#35): seat 0 mid-line, the rest scattered by the race seed.
@@ -114,6 +137,7 @@ public final class Race {
             let brain = BotBrain(rng: &rng)
             if botBrainSeats.contains(seat) { brains[seat] = brain }
         }
+        makeWindKeys()
         refreshWind()
     }
 
@@ -236,7 +260,7 @@ public final class Race {
     public func step() {
         guard !isOver else { return }
         tick += 1
-        wind.step()
+        makeWindKeys()
         if tick == 0 { fireGun() }
 
         refreshWind()
@@ -253,10 +277,28 @@ public final class Race {
         checkForEnd()
     }
 
+    /// The ground wind at `p` now. The race holds every key through the current window, so this never
+    /// fails; if it ever did, it traps rather than extrapolate (ADR 0001).
+    public func groundWind(at p: Vec2) -> GroundWind {
+        do {
+            return try wind.sample(p, tick: tick)
+        } catch {
+            preconditionFailure("race at tick \(tick) is missing wind: \(error)")
+        }
+    }
+
+    /// Adds the keys through the window holding the current tick, one window at a time: the race never
+    /// holds a key before its window starts.
+    private func makeWindKeys() {
+        let current = wind.windows.window(containing: tick)
+        while windKeys.nextWindow <= current { wind.add(windKeys.next()) }
+    }
+
     private func refreshWind() {
         for i in boats.indices {
-            boats[i].windDirection = wind.direction(at: boats[i].position)
-            boats[i].windSpeed = wind.speed(at: boats[i].position)
+            let ground = groundWind(at: boats[i].position)
+            boats[i].windDirection = ground.direction
+            boats[i].windSpeed = ground.speed
         }
     }
 

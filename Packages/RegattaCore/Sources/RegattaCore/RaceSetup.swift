@@ -15,8 +15,8 @@ public struct RaceSeed: Hashable, Sendable {
 
 /// Keys the wind. Online it stays on the server, which reveals the wind one window ahead (ADR 0001);
 /// for a practice race it's held on the device. Deliberately a separate type from `RaceSeed`, kept
-/// out of `RaceSetup` and never derived from the race seed. Until the keyed wind lands it is the
-/// single seed of `WindField`.
+/// out of `RaceSetup` and never derived from the race seed. `WindKeyGenerator` derives the wind's key
+/// chain from it one way, by HMAC-SHA256 (#75).
 public struct WindSeed: Hashable, Sendable {
     public let value: UInt64
     public init(_ value: UInt64) { self.value = value }

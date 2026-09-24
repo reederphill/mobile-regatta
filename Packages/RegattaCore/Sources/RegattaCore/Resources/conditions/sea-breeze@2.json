@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 2,
+  "id": "sea-breeze",
+  "version": 2,
+  "name": "Sea breeze",
+  "placeholders": [
+    "/shift/periodSeconds",
+    "/shift/wobbleDegrees",
+    "/trend/overSeconds",
+    "/trend/rampFraction",
+    "/build/minFraction",
+    "/build/overSeconds",
+    "/build/rampFraction",
+    "/puffs"
+  ],
+  "notes": [
+    "Wind model #10: 11-16 kn, oscillation +/-5 deg with a period of about 120 s, a persistent trend of 5-15 deg one way, building up to 15 %; regular, mild (+20 %) puffs, few lulls.",
+    "Units: knots, degrees, seconds, metres; gains, losses, shares, coverage, build, ramps and drift as fractions.",
+    "The trend is the net shift over overSeconds from the gun, the 16-minute time limit; the build is the total rise in strength over its overSeconds as a fraction of base strength, capped so the wind never goes above the top of the strength range (#75: the forecast is never wrong). The race seed picks neither: the keyed wind does (ADR 0001).",
+    "Version 2 (schema 2, #75) is version 1 plus the keyed wind's tuning. wobbleDegrees is the peak of the smaller, faster wobble (#10) each 30 s window's key draws on top of the oscillation, vanishing at the window's knots. rampFraction is the longest the trend's shift, or the build's rise (the strength channel), may take, as a fraction of its overSeconds: the key chain draws that longest duration in the range and a start so it ends within overSeconds of the gun, and each 30 s window's key draws the pace, so the change finishes between half and all of that duration after it starts.",
+    "Placeholders (JSON Pointers above) await tuning: the 110-130 s period range (#10 says about 120 s), the 0.6 deg wobble (#10 says only smaller and faster; about 1/8 of the amplitude keeps the peak shift within 1.2 x the amplitude), the trend's 960 s span and 0.5-1 ramp, the build's 0 minimum (#10 says only up to 15 %), 960 s span and 0.5-1 ramp, and the puff columns, set from #10's words (regular, mild, few lulls) and its shared ranges (60-150 m, puffs +20-35 %, lulls -15-25 %, fan up to 8 deg, drift 0.3-0.5 x wind)."
+  ],
+  "strength": { "minKnots": 11, "maxKnots": 16 },
+  "shift": {
+    "amplitudeDegrees": 5,
+    "periodSeconds": { "min": 110, "max": 130 },
+    "wobbleDegrees": 0.6
+  },
+  "trend": { "minDegrees": 5, "maxDegrees": 15, "overSeconds": 960, "rampFraction": { "min": 0.5, "max": 1 } },
+  "build": { "minFraction": 0, "maxFraction": 0.15, "overSeconds": 960, "rampFraction": { "min": 0.5, "max": 1 } },
+  "puffs": {
+    "coverage": 0.33,
+    "diameterMetres": { "min": 60, "max": 150 },
+    "lifetimeSeconds": { "min": 40, "max": 90 },
+    "driftFraction": { "min": 0.3, "max": 0.5 },
+    "fanDegrees": 4,
+    "puffGain": { "min": 0.20, "max": 0.24 },
+    "lullShare": 0.15,
+    "lullLoss": { "min": 0.15, "max": 0.18 }
+  }
+}

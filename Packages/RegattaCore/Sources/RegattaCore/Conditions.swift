@@ -11,10 +11,13 @@ import Foundation
 /// Nothing here is secret: every client has the file. What the keyed wind draws from these ranges
 /// (#75, #76) is secret until its window's key is revealed (ADR 0001); what the public race seed
 /// draws from them is in `WindSetup`.
+///
+/// Schema 2 adds the keyed wind's tuning (`keyedWind`): the wobble and the timing of the trend and
+/// build. Schema 1 files still load, but only schema 2 can be sailed.
 public struct Conditions: DataFileContent, Hashable {
     public static let kind = "conditions"
     public static let bundleDirectory = "conditions"
-    public static let supportedSchemaVersions = [1]
+    public static let supportedSchemaVersions = [1, 2]
 
     /// Every conditions entry oscillates with a main period in 90–180 s, about one cycle per beat
     /// (#10, ADR 0001). A file's own period range must lie inside this envelope, and wins inside it.
@@ -30,6 +33,9 @@ public struct Conditions: DataFileContent, Hashable {
     /// A rise in strength over the race, or nil for strength fixed for the race.
     public let build: Build?
     public let puffs: Puffs
+    /// What the keyed wind (#75) reads beyond schema 1, or nil for a schema 1 file, which predates it.
+    /// `WindKeyGenerator` refuses conditions without it.
+    public let keyedWind: KeyedWind?
 
     /// The oscillating shift about the mean direction.
     public struct Shift: Hashable, Sendable {
@@ -76,32 +82,56 @@ public struct Conditions: DataFileContent, Hashable {
         public let lullLoss: ClosedRange<Double>
     }
 
+    /// The keyed wind's tuning (#75, schema 2). Nothing here says when anything happens: the key
+    /// chain draws that within these ranges (ADR 0001).
+    public struct KeyedWind: Hashable, Sendable {
+        /// Peak of the smaller, faster wobble on the oscillating shift, radians (#10). Each window's key
+        /// draws its own wobble, which vanishes at both of the window's knots. Below `shift.amplitude`.
+        public let wobble: Double
+        /// The longest the trend's change may take, as fractions of `trend.duration`, within (0, 1]; nil
+        /// when there's no trend. The key chain draws the longest duration within this range and a start
+        /// so it ends within `trend.duration` of the gun; each window's key draws the pace, so the change
+        /// finishes between half and all of that duration after it starts (`WindKeyGenerator`).
+        public let trendRamp: ClosedRange<Double>?
+        /// Seconds after the gun the build's total rise is measured over (the strength channel's span);
+        /// nil when there's no build.
+        public let buildDuration: Double?
+        /// The longest the rise may take, as fractions of `buildDuration`, within (0, 1], drawn like
+        /// `trendRamp`; nil when there's no build.
+        public let buildRamp: ClosedRange<Double>?
+    }
+
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1:
-            self = try JSONDecoder().decode(ConditionsSchema1.self, from: fileData).conditions(id: header.id)
+        case 1, 2:
+            self = try JSONDecoder().decode(ConditionsSchema.self, from: fileData)
+                .conditions(id: header.id, schemaVersion: header.schemaVersion)
         default:
             throw DataFileError.unsupportedSchemaVersion(
                 kind: Self.kind, found: header.schemaVersion, supported: Self.supportedSchemaVersions)
         }
     }
 
-    fileprivate init(name: String, strength: ClosedRange<Double>, shift: Shift, trend: Trend?, build: Build?, puffs: Puffs) {
+    fileprivate init(name: String, strength: ClosedRange<Double>, shift: Shift, trend: Trend?, build: Build?, puffs: Puffs,
+                     keyedWind: KeyedWind?) {
         self.name = name
         self.strength = strength
         self.shift = shift
         self.trend = trend
         self.build = build
         self.puffs = puffs
+        self.keyedWind = keyedWind
     }
 }
 
 public typealias ConditionsFile = DataFile<Conditions>
 
-// MARK: - Schema 1
+// MARK: - Schemas 1 and 2
 
-/// The conditions file, schema version 1, as written: knots, degrees, seconds, metres, fractions.
-private struct ConditionsSchema1: Decodable {
+/// The conditions file, schema versions 1 and 2, as written: knots, degrees, seconds, metres, fractions.
+/// Schema 2 is schema 1 plus `shift.wobbleDegrees`, `trend.rampFraction`, `build.overSeconds` and
+/// `build.rampFraction` (#75): required in schema 2, refused in schema 1.
+private struct ConditionsSchema: Decodable {
     /// `{ "min": a, "max": b }`, in the unit its key names.
     struct Range: Decodable {
         let min: Double
@@ -116,17 +146,25 @@ private struct ConditionsSchema1: Decodable {
     struct Shift: Decodable {
         let amplitudeDegrees: Double
         let periodSeconds: Range
+        /// Schema 2.
+        let wobbleDegrees: Double?
     }
 
     struct Trend: Decodable {
         let minDegrees: Double
         let maxDegrees: Double
         let overSeconds: Double
+        /// Schema 2.
+        let rampFraction: Range?
     }
 
     struct Build: Decodable {
         let minFraction: Double
         let maxFraction: Double
+        /// Schema 2.
+        let overSeconds: Double?
+        /// Schema 2.
+        let rampFraction: Range?
     }
 
     struct Puffs: Decodable {
@@ -147,7 +185,7 @@ private struct ConditionsSchema1: Decodable {
     let build: Build?
     let puffs: Puffs
 
-    func conditions(id: String) throws -> Conditions {
+    func conditions(id: String, schemaVersion: Int) throws -> Conditions {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
             if !condition { throw DataFileError.invalidContent(kind: Conditions.kind, id: id, reason: reason()) }
         }
@@ -196,13 +234,45 @@ private struct ConditionsSchema1: Decodable {
             lullLoss: try bounds(puffs.lullLoss, in: 0...0.99, "lull loss")
         )
 
+        // Schema 2's keyed-wind fields: all present (for whichever of trend and build the file has),
+        // or in schema 1 none of them.
+        var keyedWind: Conditions.KeyedWind?
+        if schemaVersion >= 2 {
+            func required<T>(_ value: T?, _ field: String) throws -> T {
+                guard let value else {
+                    throw DataFileError.malformed(kind: Conditions.kind, reason: "schema \(schemaVersion) needs \(field)")
+                }
+                return value
+            }
+            // A ramp takes some time, and at most the whole span.
+            let rampFractions = Double.leastNonzeroMagnitude...1
+            let wobble = try required(shift.wobbleDegrees, "shift.wobbleDegrees")
+            try check(wobble.isFinite && wobble >= 0 && (wobble < shift.amplitudeDegrees || wobble == 0),
+                      "shift wobble must be at least 0° and smaller than the amplitude")
+            let trendRamp = try trend.map { try bounds(try required($0.rampFraction, "trend.rampFraction"), in: rampFractions, "trend ramp") }
+            var buildDuration: Double?
+            var buildRamp: ClosedRange<Double>?
+            if let build {
+                let over = try required(build.overSeconds, "build.overSeconds")
+                try check(over.isFinite && over > 0, "build duration must be positive")
+                buildDuration = over
+                buildRamp = try bounds(try required(build.rampFraction, "build.rampFraction"), in: rampFractions, "build ramp")
+            }
+            keyedWind = .init(wobble: deg2rad(wobble), trendRamp: trendRamp, buildDuration: buildDuration, buildRamp: buildRamp)
+        } else {
+            try check(shift.wobbleDegrees == nil && trend?.rampFraction == nil && build?.overSeconds == nil
+                        && build?.rampFraction == nil,
+                      "shift.wobbleDegrees, trend.rampFraction, build.overSeconds and build.rampFraction need schema 2")
+        }
+
         return Conditions(
             name: name,
             strength: metresPerSecond(knots: knots.lowerBound)...metresPerSecond(knots: knots.upperBound),
             shift: .init(amplitude: deg2rad(shift.amplitudeDegrees), period: period),
             trend: parsedTrend,
             build: parsedBuild,
-            puffs: parsedPuffs
+            puffs: parsedPuffs,
+            keyedWind: keyedWind
         )
     }
 }
