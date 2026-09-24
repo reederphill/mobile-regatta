@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "light-and-patchy",
+  "version": 1,
+  "name": "Light and patchy",
+  "placeholders": [
+    "/puffs"
+  ],
+  "notes": [
+    "Wind model #10: 6-9 kn, oscillation +/-10 deg over 150-180 s, no persistent trend; sparse, strong (+35 %) puffs and many lulls.",
+    "Units: knots, degrees, seconds, metres; gains, losses, shares, coverage and drift as fractions.",
+    "Placeholders (JSON Pointers above) await tuning: the puff columns, set from #10's words (sparse, strong, many lulls) and its shared ranges (60-150 m, puffs +20-35 %, lulls -15-25 %, fan up to 8 deg, drift 0.3-0.5 x wind)."
+  ],
+  "strength": { "minKnots": 6, "maxKnots": 9 },
+  "shift": {
+    "amplitudeDegrees": 10,
+    "periodSeconds": { "min": 150, "max": 180 }
+  },
+  "trend": null,
+  "build": null,
+  "puffs": {
+    "coverage": 0.27,
+    "diameterMetres": { "min": 60, "max": 150 },
+    "lifetimeSeconds": { "min": 40, "max": 90 },
+    "driftFraction": { "min": 0.3, "max": 0.5 },
+    "fanDegrees": 5,
+    "puffGain": { "min": 0.30, "max": 0.35 },
+    "lullShare": 0.5,
+    "lullLoss": { "min": 0.15, "max": 0.20 }
+  }
+}

@@ -16,6 +16,9 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   BoatClass.swift         boat class file schema: hull, polar, momentum, steering, shadow, contact, ease
   PolarTable.swift        polar by TWA × TWS, bilinear, with best upwind and downwind VMG derived at load
   Resources/boat-classes/ boat class files, `<id>@<version>.json`
+  Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns
+  Resources/conditions/   the four conditions files, `<id>@<version>.json`
+  WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast, the venue pairing stub
   Course.swift            windward-leeward course, start/finish line, rounding gates
   Boat.swift              boat state and hull shape
   Rules.swift             Rules 10, 11, 12, 13, 18, 22, 31 — who had to keep clear
@@ -54,7 +57,9 @@ Races are replayed from their seed and input log (ADR 0002), so on the race serv
 bit-for-bit deterministic:
 
 - All randomness comes from the race's `SplitMix64`, mapped with its own `unit()`, `range`, `bool()`,
-  `int(in:)` and `shuffle`. No standard-library random APIs, and no wall clock.
+  `int(in:)` and `shuffle`. No standard-library random APIs, and no wall clock. A new use of a seed takes
+  its own stream, `SplitMix64(seed:stream:)`, so it never moves existing draws: `WindSetup` draws from the
+  race seed's `"windsetp"` stream, never from the wind seed.
 - The step path never iterates a `Set` or `Dictionary`: their order depends on a per-process hash seed.
   Look them up by key and iterate arrays.
 - `simulationVersion` is `<revision>/<toolchain>/<C library>/<architecture>`. Bump `simulationRevision`
@@ -74,7 +79,7 @@ bit-for-bit deterministic:
 
 ### Data files
 
-Boat classes (and later venues, conditions and the rules configuration) are immutable, versioned JSON
+Boat classes and conditions (and later venues and the rules configuration) are immutable, versioned JSON
 files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`:
 
 - Every file starts with `schemaVersion`, `id` and `version`. A schema version the build doesn't know
