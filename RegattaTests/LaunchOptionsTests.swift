@@ -1,4 +1,5 @@
 import Testing
+import RegattaBots
 import RegattaCore
 @testable import Regatta
 
@@ -78,17 +79,20 @@ import RegattaCore
         let config = try #require(parse("-autostart", "-seed", "1").launchRaceConfig(from: settings))
         #expect(config.seed == 1)
         #expect(config.opponents == settings.opponents)
-        #expect(!config.autopilotPlayer)
+        #expect(!config.botSailsYourBoat)
     }
 
     @Test func demoLetsABotSailThePlayer() throws {
         let config = try #require(parse("-demo").launchRaceConfig(from: RaceSettings()))
-        #expect(config.autopilotPlayer)
+        #expect(config.botSailsYourBoat)
+        #expect(config.seatControllers[0].driver?.seat == 0, "a bot controller is attached to seat 0")
+        #expect(config.seatControllers.seats.allSatisfy { !$0.isHuman })
+        #expect(config.setup.seats[0] == .human, "it's still your seat")
     }
 
     @Test func perfIsASixteenBoatDemoRace() throws {
         let config = try #require(parse("-perf").launchRaceConfig(from: RaceSettings()))
-        #expect(config.autopilotPlayer)
+        #expect(config.botSailsYourBoat)
         #expect(Race(config: config).boats.count == 16)
     }
 }

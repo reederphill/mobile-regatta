@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import RegattaBots
 import RegattaCore
 import UIKit
 
@@ -19,6 +20,8 @@ struct ResultRow: Identifiable {
     let detail: String
     let colorIndex: Int
     let isPlayer: Bool
+    /// Marked with the bot glyph (#19).
+    let isBot: Bool
 }
 
 /// Owns one race and bridges it to SwiftUI: HUD snapshots, rule-call messages,
@@ -27,6 +30,8 @@ struct ResultRow: Identifiable {
 final class GameSession {
     let race: Race
     let scene: GameScene
+    /// Names and bot marks, kept outside the simulation (#60).
+    let roster: FleetRoster
 
     var hud = HUDState()
     var messages: [RaceMessage] = []
@@ -41,7 +46,8 @@ final class GameSession {
     /// `timescale` runs the simulation that many times real time (`-timescale`, for tests).
     init(config: RaceConfig, timescale: Double = 1) {
         race = Race(config: config)
-        scene = GameScene(race: race, timescale: timescale)
+        roster = config.roster
+        scene = GameScene(race: race, seats: config.seatControllers, roster: roster, timescale: timescale)
         scene.session = self
         hud = HUDState(race: race)
         post("Hold the left or right side of the screen to steer. Be below the line at the gun.", .info, seconds: 6)
@@ -79,7 +85,7 @@ final class GameSession {
 
     private func handle(_ event: RaceEvent) {
         let me = race.playerIndex
-        func name(_ i: Int) -> String { race.boats[i].name }
+        func name(_ i: Int) -> String { roster.label(of: i, playerSeat: me) }
 
         switch event.kind {
         case .gun:
@@ -163,7 +169,8 @@ final class GameSession {
                 place = "\(rank + 1)"
                 detail = "Not started"
             }
-            return ResultRow(id: b.id, place: place, name: b.displayName, detail: detail, colorIndex: b.colorIndex, isPlayer: b.isPlayer)
+            return ResultRow(id: b.id, place: place, name: roster.name(of: i, playerSeat: race.playerIndex), detail: detail,
+                             colorIndex: b.colorIndex, isPlayer: b.isPlayer, isBot: roster[i].isBot)
         }
     }
 }

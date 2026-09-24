@@ -1,3 +1,4 @@
+import RegattaBots
 import RegattaCore
 
 /// Thin shim over the per-seat input API (#59) until the practice driver owns input and
@@ -6,9 +7,9 @@ extension Race {
     var playerIndex: Int { 0 }
     var player: Boat { boats[playerIndex] }
 
-    /// Builds a practice race from the app's settings.
+    /// Builds a practice race from the app's settings. Its bots are the config's `seatControllers`.
     convenience init(config: RaceConfig) {
-        self.init(setup: config.setup, windSeed: WindSeed(config.windSeed), botBrainSeats: config.botBrainSeats)
+        self.init(setup: config.setup, windSeed: WindSeed(config.windSeed))
     }
 
     /// Rudder from the touch controls, −1…1, held from the next tick. Any real input cancels an auto-tack.
@@ -22,9 +23,26 @@ extension Race {
     }
 }
 
-extension Boat {
-    /// The only human seat in a practice race is yours.
-    var displayName: String { isPlayer ? "You" : name }
+/// The bot glyph (#19): every bot is marked with it wherever its name shows. A placeholder until
+/// the art direction's glyph lands.
+enum BotGlyph {
+    static let text = "\u{2699}\u{FE0E}"
+    static let symbolName = "gearshape.fill"
+}
+
+extension FleetRoster {
+    /// Your boat is "You" and a bot shows its sailing name. Another player (none offline yet) is "Helm n"
+    /// until handles come with the online client.
+    func name(of seat: Int, playerSeat: Int) -> String {
+        if seat == playerSeat { return "You" }
+        return self[seat].sailingName ?? "Helm \(seat + 1)"
+    }
+
+    /// `name(of:playerSeat:)` with the bot glyph in front of a bot's name, for text-only places.
+    func label(of seat: Int, playerSeat: Int) -> String {
+        let name = name(of: seat, playerSeat: playerSeat)
+        return self[seat].isBot && seat != playerSeat ? "\(BotGlyph.text) \(name)" : name
+    }
 }
 
 /// A practice race as the app starts it: you in seat 0 and `opponents` bots, the race seed, and the
@@ -33,22 +51,22 @@ struct RaceConfig: Equatable {
     var opponents = 7
     var laps = RaceSetup.defaultLaps
     var prestartSeconds = 60.0
-    /// The public race seed: placement and bot styles.
+    /// The public race seed: placement, and the bots' seeds (styles and sailing names).
     var seed: UInt64
     /// Keys the wind. Always given explicitly: drawn independently of `seed` for a real race, and
     /// derived with `windSeed(pinnedTo:)` only for a pinned `-seed` launch or a test (ADR 0001).
     var windSeed: UInt64
-    /// A bot sails your boat too (`-demo`, `-perf`).
-    var autopilotPlayer = false
+    /// A bot controller sails your seat too (`-demo`, `-perf`).
+    var botSailsYourBoat = false
 
     init(opponents: Int = 7, laps: Int = RaceSetup.defaultLaps, prestartSeconds: Double = 60,
-         seed: UInt64, windSeed: UInt64, autopilotPlayer: Bool = false) {
+         seed: UInt64, windSeed: UInt64, botSailsYourBoat: Bool = false) {
         self.opponents = opponents
         self.laps = laps
         self.prestartSeconds = prestartSeconds
         self.seed = seed
         self.windSeed = windSeed
-        self.autopilotPlayer = autopilotPlayer
+        self.botSailsYourBoat = botSailsYourBoat
     }
 
     /// The wind seed for a race pinned to `seed` by a developer (`-seed`) or a test: a fixed mix of the
@@ -69,7 +87,12 @@ struct RaceConfig: Equatable {
         )
     }
 
-    var botBrainSeats: [Int] {
-        Array((autopilotPlayer ? 0 : 1)...opponents)
+    /// A bot for each bot seat and you in seat 0, or, for `-demo`, a bot attached to seat 0 as well.
+    var seatControllers: SeatControllers {
+        var controllers = SeatControllers(setup: setup)
+        if botSailsYourBoat { controllers[0] = .bot(BotDriver(seat: 0, raceSeed: RaceSeed(seed))) }
+        return controllers
     }
+
+    var roster: FleetRoster { FleetRoster(setup: setup) }
 }

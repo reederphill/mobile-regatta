@@ -16,7 +16,7 @@ final class BoatNode: SKNode {
     private var wakePoints: [CGPoint] = []
     private var wakeTimer = 0.0
 
-    init(boat: Boat, color: UIColor, pointsPerMeter ppm: CGFloat) {
+    init(boat: Boat, name: String, color: UIColor, pointsPerMeter ppm: CGFloat) {
         self.ppm = ppm
         let length = CGFloat(Boat.length) * ppm
 
@@ -44,7 +44,7 @@ final class BoatNode: SKNode {
         body.addChild(sail)
         addChild(body)
 
-        label.text = boat.displayName
+        label.text = name
         label.fontSize = boat.isPlayer ? 12 : 10
         label.fontColor = UIColor.white.withAlphaComponent(boat.isPlayer ? 1 : 0.75)
         label.position = CGPoint(x: 0, y: length * 0.75)

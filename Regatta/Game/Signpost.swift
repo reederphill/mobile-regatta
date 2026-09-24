@@ -3,9 +3,9 @@ import os
 /// `os_signpost` intervals on Instruments' Points of Interest track, to measure the frame against the
 /// #27 budgets (sim + prediction < 3 ms, bots < 2 ms). `-perf` launches a 16-boat race to profile.
 nonisolated enum Signpost {
-    /// One fixed simulation tick, `Race.step()`, bot brains included.
+    /// One fixed simulation tick, `Race.step()`.
     case simStep
-    /// The bot brains inside one tick.
+    /// The bots deciding before one tick: `SeatControllers.drive` (RegattaBots), outside `Race.step()`.
     case botBrains
     /// Moving the SpriteKit nodes and camera for one frame.
     case renderUpdate
