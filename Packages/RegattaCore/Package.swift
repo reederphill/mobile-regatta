@@ -19,7 +19,10 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
             ],
             // Copied byte for byte: a data file's hash is taken over its exact bytes (ADR 0004).
-            resources: [.copy("Resources/boat-classes")]
+            resources: [
+                .copy("Resources/boat-classes"),
+                .copy("Resources/conditions"),
+            ]
         ),
         .executableTarget(name: "regatta-replay", dependencies: ["RegattaCore"]),
         // regatta-replay is a dependency so `swift test` builds it: the golden test runs it as its own process.

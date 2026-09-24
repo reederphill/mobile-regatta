@@ -8,6 +8,16 @@ public struct SplitMix64: Sendable {
 
     public init(seed: UInt64) { state = seed }
 
+    /// An independent stream of `seed`, named by a fixed `stream` tag: the tag is mixed into the seed
+    /// through one SplitMix64 output, and the stream starts there. Drawing from it never advances the
+    /// plain `SplitMix64(seed: seed)` stream, so a new stream never moves an existing draw (ADR 0002).
+    /// The mixing is invertible, so a stream of a public seed is public too: never use it for anything
+    /// secret (ADR 0001).
+    public init(seed: UInt64, stream: UInt64) {
+        var mixer = SplitMix64(seed: seed ^ stream)
+        self.init(seed: mixer.next())
+    }
+
     public mutating func next() -> UInt64 {
         state &+= 0x9E37_79B9_7F4A_7C15
         var z = state
