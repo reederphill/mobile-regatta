@@ -38,6 +38,26 @@
                ReferencedContainer = "container:Packages/RegattaCore">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "AA000000000000000000001B"
+               BuildableName = "RegattaTests.xctest"
+               BlueprintName = "RegattaTests"
+               ReferencedContainer = "container:Regatta.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "AA000000000000000000001C"
+               BuildableName = "RegattaUITests.xctest"
+               BlueprintName = "RegattaUITests"
+               ReferencedContainer = "container:Regatta.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction
