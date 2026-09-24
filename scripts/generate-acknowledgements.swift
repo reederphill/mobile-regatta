@@ -8,6 +8,10 @@
 //     plus an optional one-line ThirdParty/<Name>/VERSION
 // Local packages (Packages/*) are ours and aren't listed.
 //
+// Package versions float: Package.resolved is gitignored, so each run resolves the newest allowed versions. The
+// list leaves versions out for that reason, but an upstream licence change still makes --check fail until the
+// list is regenerated and committed.
+//
 //   swift scripts/generate-acknowledgements.swift          # rewrite the plist
 //   swift scripts/generate-acknowledgements.swift --check  # fail if the committed plist is out of date (CI)
 import Foundation
@@ -85,7 +89,7 @@ func vendoredAcknowledgements() -> [Acknowledgement] {
 }
 
 let acknowledgements = (packageAcknowledgements() + vendoredAcknowledgements())
-    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    .sorted { ($0.name.lowercased(), $0.name) < ($1.name.lowercased(), $1.name) }  // locale-independent
 let encoder = PropertyListEncoder()
 encoder.outputFormat = .xml
 guard let plist = try? encoder.encode(acknowledgements) else { fail("couldn't encode the list") }

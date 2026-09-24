@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Checks a built or archived Regatta.app against the shipping config (#107): the A12 device capability,
-# the scene manifest and launch screen in Info.plist, no UIRequiresFullScreen, and a privacy manifest.
+# the scene manifest and launch screen in Info.plist, no UIRequiresFullScreen, a privacy manifest, and the
+# production App Attest environment in the Release configuration.
 # With an SDK prefix (e.g. iphoneos27), also checks the SDK the app was built with.
 #
 #   scripts/check-shipping-config.sh path/to/Regatta.app [sdk-prefix]
@@ -36,6 +37,13 @@ if [[ -f "$app/PrivacyInfo.xcprivacy" ]]; then
 else
     fail "no PrivacyInfo.xcprivacy in the bundle"
 fi
+
+# The App Attest environment entitlement expands $(APP_ATTEST_ENVIRONMENT); shipping builds must use production.
+# Unsigned archives don't embed entitlements, so check the Release build setting instead.
+project="$(dirname "$0")/../Regatta.xcodeproj"
+attest="$(xcodebuild -showBuildSettings -project "$project" -target Regatta -configuration Release 2>/dev/null \
+    | awk -F' = ' '/^ *APP_ATTEST_ENVIRONMENT = / { print $2; exit }')"
+[[ "$attest" == "production" ]] || fail "Release APP_ATTEST_ENVIRONMENT is '$attest', expected production"
 
 if ((problems > 0)); then exit 1; fi
 echo "Shipping config OK: $app"
