@@ -121,7 +121,13 @@ public final class RaceClient {
             send(.ping(ping), tick: clientTick)
             stats.pingsSent += 1
         }
-        guard let serverTick = clock.serverTick(at: now) else { return }
+        if let serverTick = clock.serverTick(at: now) { sail(now: now, serverTick: serverTick) }
+        if reliable.isBroken(now: now) { wantsResync = true }
+        if wantsResync { requestResync(now: now) }
+    }
+
+    /// Sends the inputs due and sails the fleet to the client's tick, once the clock is synchronised.
+    private func sail(now: UInt64, serverTick: Double) {
         lead.update(uplinkDelays: clock.uplinkDelays, now: now)
 
         let target = Int((serverTick + lead.lead).rounded(.down))
@@ -152,8 +158,6 @@ public final class RaceClient {
         } else {
             status = .predicting
         }
-        if reliable.isBroken(now: now) { wantsResync = true }
-        if wantsResync { requestResync(now: now) }
     }
 
     // MARK: - Receiving
