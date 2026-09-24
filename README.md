@@ -41,8 +41,12 @@ Regatta/                The iOS app
   Game/BoatNode.swift     batched boat sprites, sails, wakes, wind-shadow cones
   Game/GameSession.swift  bridges the race to SwiftUI: HUD, rule-call messages, haptics
   Game/RaceShim.swift     seat-0 player shim over the per-seat input API, until the practice driver (#61)
+  Game/RaceViewportPolicy.swift  race-view sizing: letterboxed portrait in any window (G5)
   UI/                     menu, HUD, minimap, results
-  App/LaunchOptions.swift development and test launch arguments
+  App/                    app and scene delegates, launch arguments, acknowledgements
+  Info.plist              shipping keys: A12 minimum, scene manifest, launch screen, export compliance
+  PrivacyInfo.xcprivacy   privacy manifest (#28)
+  Regatta.entitlements    Game Center and App Attest environment
 RegattaTests/           Hosted unit tests for the app
 RegattaUITests/         UI tests; screenshots attach to the xcresult
 ```
@@ -123,8 +127,39 @@ xcodebuild test -scheme Regatta -destination 'platform=iOS Simulator,name=iPhone
 
 UI tests attach screenshots to the result bundle with `attachScreenshot(named:)`.
 
+### Shipping config
+
+The app ships for iOS 18 on A12 or newer (`iphone-ipad-minimum-performance-a12`, which can never be tightened
+after v1.0). It uses the scene life cycle and a launch screen, which apps built with the iOS 27 SDK need to
+launch, and doesn't set `UIRequiresFullScreen`: on iPad it runs in any window, and the race sequence keeps its
+full-screen portrait shape and world area, letterboxed with water (`RaceViewportPolicy`). Menus adapt to the
+window. The root view controller prefers a locked orientation only while the race sequence shows; iPhone is
+portrait only. `SceneDelegate` forwards the scene's activation state to `SceneState.phase` (`\.sceneState`), since
+`@Environment(\.scenePhase)` isn't reliable when UIKit owns the scene.
+
+Signing is done by a person in Xcode (automatic signing, team `8S5TQ65X3B`). The App Attest environment
+entitlement is `development` in Debug and `production` in Release (`APP_ATTEST_ENVIRONMENT`). To archive
+without signing and check the archived bundle:
+
+```bash
+xcodebuild archive -scheme Regatta -destination 'generic/platform=iOS' -archivePath Regatta.xcarchive CODE_SIGNING_ALLOWED=NO
+scripts/check-shipping-config.sh Regatta.xcarchive/Products/Applications/Regatta.app
+```
+
+`Regatta/Acknowledgements.plist` lists third-party licences for Settings → About. It's generated from the
+resolved remote Swift packages and `ThirdParty/<Name>/LICENSE` (plus an optional `VERSION`), so regenerate it
+after adding either, and CI checks it's current:
+
+```bash
+swift scripts/generate-acknowledgements.swift
+```
+
 CI (`.github/workflows/ci.yml`) runs `scripts/linux-test.sh` on Linux, `swift test` plus
-`scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the iOS Simulator.
+`scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the iOS Simulator (iPhone, plus the UI tests
+on iPad). `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
+the archive with `scripts/check-shipping-config.sh`, launches the app, and runs its tests on iOS 27 iPhone and
+iPad simulators. To save macOS minutes it runs only on pull requests that touch shipping config, on main, weekly
+and by hand.
 
 ### Launch arguments
 
