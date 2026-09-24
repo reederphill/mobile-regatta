@@ -16,6 +16,13 @@ struct RaceView: View {
     }
 
     var body: some View {
+        RaceViewport { layout in
+            race
+                .onChange(of: layout.sceneSize, initial: true) { _, size in session.scene.size = size }
+        }
+    }
+
+    private var race: some View {
         ZStack {
             SpriteView(scene: session.scene, preferredFramesPerSecond: 120, options: [.ignoresSiblingOrder], debugOptions: debugOptions)
                 .ignoresSafeArea()

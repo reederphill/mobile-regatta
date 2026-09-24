@@ -38,9 +38,11 @@ final class GameScene: SKScene {
     init(race: Race, timescale: Double = 1) {
         self.race = race
         self.timescale = timescale
+        // A placeholder: `RaceView` sets the size from `RaceViewportPolicy`, so the visible world area
+        // doesn't depend on the window. The view has the scene's aspect, so aspect-fit scales it uniformly.
         super.init(size: CGSize(width: 390, height: 844))
         race.botBrainsInterval = { Signpost.botBrains.measure($0) }
-        scaleMode = .resizeFill
+        scaleMode = .aspectFit
         anchorPoint = CGPoint(x: 0.5, y: 0.5)
         backgroundColor = Palette.water
     }
