@@ -48,8 +48,11 @@ final class ScriptedHost {
     private(set) var arrivals: [Arrival] = []
     private(set) var rejected = 0
     private(set) var resyncsSent = 0
-    /// The client's boat position after each tick, by tick.
-    private(set) var ownPositions: [Int: Vec2] = [:]
+    /// Every boat's position after each tick, by tick.
+    private(set) var positions: [Int: [Vec2]] = [:]
+
+    /// The client's boat position after `tick`.
+    func ownPosition(atTick tick: Int) -> Vec2? { positions[tick]?[clientSeat] }
 
     init(setup: RaceSetup, windSeed: WindSeed, clientSeat: Int, transport: RaceTransport, clock: VirtualClock) throws {
         let bots = setup.seats.indices.filter { $0 != clientSeat }
@@ -60,7 +63,7 @@ final class ScriptedHost {
         startedAt = clock.now
         keys = try WindKeyGenerator(windSeed: windSeed, setup: race.windSetup, windows: race.wind.windows)
         revealKeys(send: false) // in the RaceStart
-        ownPositions[race.tick] = race.boats[clientSeat].position
+        positions[race.tick] = race.boats.map(\.position)
     }
 
     /// The `RaceStart` the client joins with: the keys revealed so far, never the seed.
@@ -122,7 +125,7 @@ final class ScriptedHost {
 
     private func step() {
         race.step()
-        ownPositions[race.tick] = race.boats[clientSeat].position
+        positions[race.tick] = race.boats.map(\.position)
         let applied = queued.filter { $0.tick <= race.tick }
         if let last = applied.max(by: { $0.seq < $1.seq }) {
             ack = InputAck(seq: max(last.seq, ack?.seq ?? 0), appliedTick: last.tick, margin: latestMargin)

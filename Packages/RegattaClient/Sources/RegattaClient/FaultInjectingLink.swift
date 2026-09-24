@@ -94,6 +94,9 @@ public final class FaultInjectingLink {
     /// Called for every frame sent while connected, lost or not, with the send time: for tests that
     /// count what an end sent.
     public var onSend: ((Direction, _ time: UInt64, _ frame: [UInt8]) -> Void)?
+    /// Scripted loss on top of `loss`: a frame for which it returns true is lost. For tests that need
+    /// one particular frame to go missing.
+    public var drop: ((Direction, _ frame: [UInt8]) -> Bool)?
 
     /// The client's end: it sends on the uplink.
     public private(set) var client: Endpoint!
@@ -148,7 +151,7 @@ public final class FaultInjectingLink {
         let faults = direction == .uplink ? uplink : downlink
         // Every draw is made for every frame, so one fault's setting never moves another's draws.
         var r = direction == .uplink ? rng.uplink : rng.downlink
-        let lost = r.unit() < faults.loss
+        let lost = r.unit() < faults.loss || drop?(direction, frame) == true
         let jitter = faults.jitter == 0 ? 0 : UInt64(r.unit() * Double(faults.jitter + 1))
         let held = r.unit() < faults.reorder
         if direction == .uplink { rng.uplink = r } else { rng.downlink = r }

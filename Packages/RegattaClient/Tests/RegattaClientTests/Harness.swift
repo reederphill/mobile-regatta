@@ -12,7 +12,7 @@ final class Harness {
     /// Every frame the client sent: when, and its type.
     private(set) var clientSends: [(time: UInt64, type: MessageType)] = []
 
-    init(seats: Int = 8, startSequenceTicks: Int = 900, raceSeed: UInt64 = 64, windSeed: UInt64 = 0x5EED,
+    init(seats: Int = 8, startSequenceTicks: Int = 600, raceSeed: UInt64 = 64, windSeed: UInt64 = 0x5EED,
          uplink: LinkFaults = .none, downlink: LinkFaults = .none, linkSeed: UInt64 = 1,
          limits: InputLimits = InputLimits()) throws {
         link = FaultInjectingLink(clock: clock, uplink: uplink, downlink: downlink, seed: linkSeed)
