@@ -26,7 +26,8 @@ import Testing
         #expect(!race.isOver)
         #expect(race.tick == -1800 + 10_000)
         #expect(race.time == Double(race.tick) / 30)
-        #expect(race.wind.time == Double(race.wind.tick) / 30)
+        // The wind holds keys through the current window, and none beyond it.
+        #expect(race.wind.keys.endWindow == race.wind.windows.window(containing: race.tick) + 1)
     }
 }
 

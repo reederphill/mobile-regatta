@@ -176,7 +176,7 @@ final class GameScene: SKScene {
         cam.position = CGPoint(x: cam.position.x + (target.x - cam.position.x) * k,
                                y: cam.position.y + (target.y - cam.position.y) * k)
 
-        water.update(center: cam.position, windDirection: race.wind.direction(at: player.position))
+        water.update(center: cam.position, windDirection: race.groundWind(at: player.position).direction)
         updatePuffs()
 
         startLine.strokeColor = race.time < 0
@@ -191,7 +191,7 @@ final class GameScene: SKScene {
     }
 
     private func updatePuffs() {
-        let puffs = race.wind.puffs
+        let puffs = race.wind.activePuffs(atTick: race.tick)
         while puffNodes.count < puffs.count {
             let node = SKSpriteNode(texture: puffTexture)
             node.colorBlendFactor = 1
@@ -224,7 +224,7 @@ final class GameScene: SKScene {
             return
         }
         let mark = course.marks[index]
-        let w = race.wind.direction(at: mark.position)
+        let w = race.groundWind(at: mark.position).direction
         let angle = mark.kind == .windward ? race.polar.upwindTWA : race.polar.downwindTWA
         let path = CGMutablePath()
         for heading in [w - angle, w + angle] {

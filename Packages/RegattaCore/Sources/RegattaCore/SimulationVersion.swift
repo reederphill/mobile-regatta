@@ -11,7 +11,13 @@ import Glibc
 /// The golden replays a fixed input log with no bot brains (ADR 0002), so retuning bots never moves it.
 ///
 /// 2: the wind is keyed by its own seed, not the race seed; held inputs are int8 (#59).
-public let simulationRevision = 2
+/// 3: keyed wind (#75). The wind is a `WindField` of the public `WindSetup` (classic-oscillating@2, stub
+///    pairing; the course laid square to its mean direction) and the key chain `WindKeyGenerator` makes
+///    from the wind seed by HMAC-SHA256. Window origin: `WindWindows(startSequenceTicks:)`, 900 ·
+///    (⌈startSequenceTicks / 900⌉ + 1) ticks before the gun, so knots fall on whole windows from the gun
+///    and the race starts in window 1. First knot: `WindField.firstKnot` (no shift, base strength, level)
+///    at the origin, never sampled by a race. No puffs until #76.
+public let simulationRevision = 3
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

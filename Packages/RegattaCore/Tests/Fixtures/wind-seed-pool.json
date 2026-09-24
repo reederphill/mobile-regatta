@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "kind": "wind-seed-pool",
+  "venue": { "id": "test-venue", "version": 1 },
+  "conditions": { "id": "classic-oscillating", "version": 2 },
+  "tideStateDegrees": 90,
+  "notes": [
+    "Test fixture for the WindSeedPool loader (#75). Unvetted seeds: vetting and the real pools are #106. Pools are server-only and never bundled in the app."
+  ],
+  "seeds": [
+    "0x0123456789abcdef",
+    "0xd1ce000000590002",
+    "0xfffffffffffffffe",
+    "0x0000000000000001"
+  ]
+}

@@ -10,13 +10,16 @@ This first cut is single-player against bots. Multiplayer, the lobby and ranking
 ```
 Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Geometry.swift          vectors, angles, line crossings, SAT collision
-  Wind.swift              oscillating shifts, left/right bias, drifting puffs and lulls
+  WindKey.swift           the 30 s wind windows, a window's key (knot, strength, wobble, puff seed) and the key chain
+  WindKeyGenerator.swift  the server-side (or practice) key chain from the wind seed, by HMAC-SHA256
+  WindField.swift         the pure keyed wind: Hermite knots between keys, sampled by position and tick
+  WindSeedPool.swift      server-only pools of vetted wind seeds per venue × conditions × tide state
   Polar.swift             the prototype's boat speed by true wind angle (the race still sails it until #70)
   DataFile.swift          versioned data-file loader: header, schema check, SHA-256 content hash, FileRef
   BoatClass.swift         boat class file schema: hull, polar, momentum, steering, shadow, contact, ease
   PolarTable.swift        polar by TWA × TWS, bilinear, with best upwind and downwind VMG derived at load
   Resources/boat-classes/ boat class files, `<id>@<version>.json`
-  Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns
+  Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns; schema 2 adds the keyed wind's wobble and ramps
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast, the venue pairing stub
   Venue.swift             venue file schema: land, pairings with geographic grids, current (docs/venue-file.md)
@@ -35,7 +38,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Digest.swift            FNV-1a state digest for golden replay tests
   Sources/regatta-replay  `regatta-replay <log>`: replays a race log and prints its final digest
   Tests/Goldens.json      golden digests keyed by simulation version
-  Tests/Fixtures/         the golden 16-seat scripted race log
+  Tests/Fixtures/         the golden 16-seat scripted race log, and a wind seed pool for the loader
 Regatta/                The iOS app
   Game/GameScene.swift    SpriteKit renderer, camera, touch steering
   Game/BoatNode.swift     batched boat sprites, sails, wakes, wind-shadow cones
@@ -65,7 +68,9 @@ bit-for-bit deterministic:
 - All randomness comes from the race's `SplitMix64`, mapped with its own `unit()`, `range`, `bool()`,
   `int(in:)` and `shuffle`. No standard-library random APIs, and no wall clock. A new use of a seed takes
   its own stream, `SplitMix64(seed:stream:)`, so it never moves existing draws: `WindSetup` draws from the
-  race seed's `"windsetp"` stream, never from the wind seed.
+  race seed's `"windsetp"` stream, never from the wind seed. The keyed wind is the exception: each
+  window's key is drawn from HMAC-SHA256 of the wind seed and the window index, which is one-way where
+  SplitMix64 is not (ADR 0001, `WindKeyGenerator`).
 - The step path never iterates a `Set` or `Dictionary`: their order depends on a per-process hash seed.
   Look them up by key and iterate arrays.
 - `simulationVersion` is `<revision>/<toolchain>/<C library>/<architecture>`. Bump `simulationRevision`

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "id": "light-and-patchy",
+  "version": 2,
+  "name": "Light and patchy",
+  "placeholders": [
+    "/shift/wobbleDegrees",
+    "/puffs"
+  ],
+  "notes": [
+    "Wind model #10: 6-9 kn, oscillation +/-10 deg over 150-180 s, no persistent trend; sparse, strong (+35 %) puffs and many lulls.",
+    "Units: knots, degrees, seconds, metres; gains, losses, shares, coverage and drift as fractions.",
+    "Version 2 (schema 2, #75) is version 1 plus the keyed wind's wobble: wobbleDegrees is the peak of the smaller, faster wobble (#10) each 30 s window's key draws on top of the oscillation, vanishing at the window's knots. Strength is fixed for the race (#10), so there is no strength-channel tuning.",
+    "Placeholders (JSON Pointers above) await tuning: the 1 deg wobble (#10 says only smaller and faster; about 1/10 of the amplitude keeps the peak shift within 1.2 x the amplitude), and the puff columns, set from #10's words (sparse, strong, many lulls) and its shared ranges (60-150 m, puffs +20-35 %, lulls -15-25 %, fan up to 8 deg, drift 0.3-0.5 x wind)."
+  ],
+  "strength": { "minKnots": 6, "maxKnots": 9 },
+  "shift": {
+    "amplitudeDegrees": 10,
+    "periodSeconds": { "min": 150, "max": 180 },
+    "wobbleDegrees": 1
+  },
+  "trend": null,
+  "build": null,
+  "puffs": {
+    "coverage": 0.27,
+    "diameterMetres": { "min": 60, "max": 150 },
+    "lifetimeSeconds": { "min": 40, "max": 90 },
+    "driftFraction": { "min": 0.3, "max": 0.5 },
+    "fanDegrees": 5,
+    "puffGain": { "min": 0.30, "max": 0.35 },
+    "lullShare": 0.5,
+    "lullLoss": { "min": 0.15, "max": 0.20 }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 2,
+  "id": "gusty-offshore",
+  "version": 2,
+  "name": "Gusty offshore",
+  "placeholders": [
+    "/shift/wobbleDegrees",
+    "/puffs"
+  ],
+  "notes": [
+    "Wind model #10: 14-20 kn, oscillation +/-12 deg over 90-120 s, no persistent trend; frequent, strong puffs with wide fanning, and deep lulls.",
+    "Units: knots, degrees, seconds, metres; gains, losses, shares, coverage and drift as fractions.",
+    "Version 2 (schema 2, #75) is version 1 plus the keyed wind's wobble: wobbleDegrees is the peak of the smaller, faster wobble (#10) each 30 s window's key draws on top of the oscillation, vanishing at the window's knots. Strength is fixed for the race (#10), so there is no strength-channel tuning.",
+    "Placeholders (JSON Pointers above) await tuning: the 1.5 deg wobble (#10 says only smaller and faster; about 1/8 of the amplitude keeps the peak shift within 1.2 x the amplitude), and the puff columns, set from #10's words (frequent, strong, wide fanning, deep lulls) and its shared ranges (60-150 m, puffs +20-35 %, lulls -15-25 %, fan up to 8 deg, drift 0.3-0.5 x wind)."
+  ],
+  "strength": { "minKnots": 14, "maxKnots": 20 },
+  "shift": {
+    "amplitudeDegrees": 12,
+    "periodSeconds": { "min": 90, "max": 120 },
+    "wobbleDegrees": 1.5
+  },
+  "trend": null,
+  "build": null,
+  "puffs": {
+    "coverage": 0.38,
+    "diameterMetres": { "min": 60, "max": 150 },
+    "lifetimeSeconds": { "min": 40, "max": 90 },
+    "driftFraction": { "min": 0.3, "max": 0.5 },
+    "fanDegrees": 8,
+    "puffGain": { "min": 0.28, "max": 0.35 },
+    "lullShare": 0.35,
+    "lullLoss": { "min": 0.20, "max": 0.25 }
+  }
+}

@@ -144,8 +144,9 @@ enum ScriptedLog {
         let c = Race(setup: other, windSeed: WindSeed(10))
         #expect(a.boats.map(\.position) == b.boats.map(\.position))
         #expect(a.boats.map(\.position) != c.boats.map(\.position))
-        #expect(a.wind.puffs.map(\.center) != b.wind.puffs.map(\.center))
-        #expect(a.wind.puffs.map(\.center) == c.wind.puffs.map(\.center))
+        // The default conditions have no trend or build, so the public setup doesn't touch the keys.
+        #expect(a.wind.keys.bytes != b.wind.keys.bytes)
+        #expect(a.wind.keys.bytes == c.wind.keys.bytes)
     }
 }
 
