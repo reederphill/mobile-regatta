@@ -17,7 +17,8 @@ final class PracticeDriver: RaceDriver {
 
     private(set) var previousFrame: TickFrame
     private(set) var currentFrame: TickFrame
-    var alpha: Double { clock.alpha }
+    /// Once the race is over the clock stops, and the world is drawn at its last tick.
+    var alpha: Double { race.isOver ? 1 : clock.alpha }
 
     private let race: Race
     /// Who sails each seat. Bots send their inputs through the race's input API before each tick (#60).
@@ -49,7 +50,7 @@ final class PracticeDriver: RaceDriver {
 
     /// The race as stored: its keys and every input as applied (ADR 0002).
     var log: RaceLog {
-        guard let log = race.log else { preconditionFailure("a practice race holds its wind seed") }
+        guard let log = race.log else { preconditionFailure("practice race has no log: Race.log is nil, so it was built keys-only") }
         return log
     }
 
@@ -58,10 +59,13 @@ final class PracticeDriver: RaceDriver {
 
     @discardableResult
     func tick(_ dt: Double) -> [TickFrame] {
+        // A finished race stands still: no ticks, and `alpha` holds at the last one.
+        guard !race.isOver else { return [] }
         let due = clock.advance(by: dt)
         var frames: [TickFrame] = []
-        for _ in 0..<due where !race.isOver {
+        for _ in 0..<due {
             frames.append(step())
+            if race.isOver { break }
         }
         return frames
     }

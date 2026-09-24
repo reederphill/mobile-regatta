@@ -98,6 +98,34 @@ import RegattaCore
         #expect(replayed.digest() == driver.digest())
     }
 
+    /// Once the race is over the clock stops: display frames run no ticks and the drawn world stays at the
+    /// last tick, so the fleet doesn't wobble between the last two ticks behind the results.
+    @Test func aFinishedRaceStandsStill() {
+        let config = RaceConfig(opponents: 3, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1), botSailsYourBoat: true)
+        let driver = PracticeDriver(config: config)
+        var seconds = 0
+        while !driver.currentFrame.isOver && seconds < 1_500 {
+            driver.tick(1)
+            seconds += 1
+        }
+        #expect(driver.currentFrame.isOver)
+        let finalTick = driver.currentFrame.tick
+        let world = driver.renderWorld
+        #expect(driver.alpha == 1)
+        #expect(zip(world.boats, driver.currentFrame.boats).allSatisfy { $0.position == $1.position && $0.heading == $1.heading },
+                "drawn at the last tick")
+
+        for frame in 0..<600 {
+            #expect(driver.tick(1.0 / 60).isEmpty, "frame \(frame) ran a tick")
+            let now = driver.renderWorld
+            #expect(driver.alpha == 1)
+            #expect(now.time == world.time)
+            #expect(zip(now.boats, world.boats).allSatisfy { $0.position == $1.position && $0.heading == $1.heading },
+                    "frame \(frame) moved the fleet")
+        }
+        #expect(driver.currentFrame.tick == finalTick)
+    }
+
     /// Inputs submitted between ticks are latched: only the last one before a tick is applied, at that tick.
     @Test func inputIsLatchedPerTick() {
         let driver = PracticeDriver(config: RaceDriverTests.config)
@@ -146,6 +174,8 @@ import RegattaCore
 
 /// The scene never drives the race itself (#61): it reads `RenderWorld` and sends input through the driver.
 @MainActor @Suite struct GameSceneSourceTests {
+    /// Reads the scene's source from the checkout on the host: `#filePath` is this test file's path at build
+    /// time, and the simulator shares the Mac's filesystem, so the hosted test can open it directly.
     @Test func sceneNeverStepsOrSteersTheRace() throws {
         let source = try String(contentsOf: RaceDriverTests.repoRoot.appending(path: "Regatta/Game/GameScene.swift"), encoding: .utf8)
         #expect(!source.contains("race.step"))
