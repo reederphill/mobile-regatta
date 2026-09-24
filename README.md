@@ -28,7 +28,8 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Course.swift            windward-leeward course, start/finish line, rounding gates
   Boat.swift              boat state and hull shape
   Rules.swift             Rules 10, 11, 12, 13, 18, 22, 31 — who had to keep clear
-  Race.swift              fixed-step race loop: per-seat inputs, start sequence, OCS, contacts, penalties, finish
+  Race.swift              fixed-step race loop: per-seat inputs, start sequence, OCS, contacts, penalties, finish;
+                          keys-only (seedless) races for online prediction, whose tryStep() stops at a missing wind key
   RaceSetup.swift         race setup (seats, laps, race seed, data-file refs) and the separate wind seed
   BoatInput.swift         held input (int8 rudder, ease) and taps (tack/gybe, protest)
   RaceLog.swift           race log: header, inputs as applied, seat events; stable JSON
@@ -51,6 +52,15 @@ Packages/RegattaProtocol/ The race wire protocol: messages, frames and a binary 
   SnapshotWire.swift      the quantised wire snapshot and its field list (what's sent, what's left out and why)
   EventWire.swift         race events on the wire, and who each one is sent to
   WireCodec.swift         little-endian integers, varints, strings; strict decoding
+Packages/RegattaClient/   The online race client, over a transport protocol, no sockets or UI (#64)
+  RaceClient.swift        one race over one transport: update(now:) reads frames, pings, stamps inputs, predicts
+  PredictedRace.swift     the whole fleet predicted on a keys-only Race: snapshot import, re-prediction, Resync
+  ClockSync.swift         the server's tick from Ping/Pong: min-RTT offset, per-ping uplink delays
+  LeadController.swift    the adaptive lead: uplink delay + jitter buffer + 1 tick, the server's late feedback, ≤ 30 ticks
+  InputStamper.swift      held input on change + 200 ms heartbeat, taps; the #26 caps over a sliding window
+  ReliableStream.swift    events and wind keys back in order; a lasting gap asks for a Resync
+  RaceTransport.swift     the transport protocol the app (#68) and the load client (#67) implement
+  FaultInjectingLink.swift  an in-memory link on a virtual clock: seeded delay, jitter, loss, reorder, disconnect
 Regatta/                The iOS app
   Game/GameScene.swift    SpriteKit renderer, camera, touch steering
   Game/BoatNode.swift     batched boat sprites, sails, wakes, wind-shadow cones
@@ -142,9 +152,9 @@ Run the simulation and bot tests (RegattaCore and RegattaBots) from the command 
 cd Packages/RegattaCore && swift test
 ```
 
-and the protocol's with `cd Packages/RegattaProtocol && swift test`.
+and the protocol's and the client's with `swift test` in `Packages/RegattaProtocol` and `Packages/RegattaClient`.
 
-Run both packages' tests on the pinned Linux replay platform, in debug and release (needs podman or docker):
+Run every package's tests on the pinned Linux replay platform, in debug and release (needs podman or docker):
 
 ```bash
 scripts/linux-test.sh
@@ -191,7 +201,7 @@ after adding either, and CI checks it's current:
 swift scripts/generate-acknowledgements.swift
 ```
 
-CI (`.github/workflows/ci.yml`) runs `scripts/linux-test.sh` on Linux, `swift test` in both packages plus
+CI (`.github/workflows/ci.yml`) runs `scripts/linux-test.sh` on Linux, `swift test` in each package plus
 `scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the iOS Simulator (iPhone, plus the UI tests
 on iPad). `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
 the archive with `scripts/check-shipping-config.sh`, launches the app, and runs its tests on iOS 27 iPhone and

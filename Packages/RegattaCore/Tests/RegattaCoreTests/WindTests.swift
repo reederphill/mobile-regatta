@@ -412,7 +412,7 @@ enum WindFixtures {
     @Test func raceWindIsTheKeyedFieldOfItsWindSeed() throws {
         let race = testRace(opponents: 3, prestartSeconds: 60, seed: 12)
         for _ in 0..<2000 { race.step() }
-        var generator = try WindKeyGenerator(windSeed: race.windSeed, setup: race.windSetup, windows: race.wind.windows)
+        var generator = try WindKeyGenerator(windSeed: try #require(race.windSeed), setup: race.windSetup, windows: race.wind.windows)
         #expect(race.wind.keys == WindKeyChain(generator.keys(through: race.wind.keys.endWindow - 1)))
         for boat in race.boats {
             let wind = try race.wind.sample(boat.position, tick: race.tick)

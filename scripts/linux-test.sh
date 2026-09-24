@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the tests of every Linux package (RegattaCore, with its RegattaBots target, which runs on the
-# race server too; RegattaProtocol) on the pinned replay platform (the race server's toolchain,
-# C library and architecture; ADR 0002), in debug and release, with podman or docker.
+# race server too; RegattaProtocol; RegattaClient) on the pinned replay platform (the race server's
+# toolchain, C library and architecture; ADR 0002), in debug and release, with podman or docker.
 #
 #   scripts/linux-test.sh
 #
@@ -40,7 +40,7 @@ trap 'rm -f "$log"' EXIT
 
 # Packages under Packages/, tested in this order. Each one's tests run in debug and release.
 # Packages depend on each other by relative path, so the whole Packages/ folder is mounted.
-PACKAGES="RegattaCore RegattaProtocol"
+PACKAGES="RegattaCore RegattaProtocol RegattaClient"
 
 # Build inside the container's own scratch paths so Linux artefacts never mix with the host's .build.
 "$engine" run --rm --platform "$PLATFORM" ${run_args[@]+"${run_args[@]}"} \

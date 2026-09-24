@@ -222,6 +222,9 @@ public struct EventState: Equatable, Sendable {
     }
 
     /// The reliable-stream sequence number of the next `Event` or `WindKey` frame this client gets.
+    /// In a `Resync` it must exceed every reliable sequence number the host sent before it built the
+    /// resync (#65): the resync's state includes those frames, and a client that already had later ones
+    /// re-applies them on top of it (#64).
     public var nextEventSeq: UInt32
     /// Boats that have finished, by seat.
     public var finishes: [Finish]
@@ -340,6 +343,11 @@ public struct Resync: Equatable, Sendable {
 // MARK: - In the race
 
 /// What the server did with a client's inputs: the last it applied, and how early it arrived.
+///
+/// The contract a predicting client relies on (#64): the ack in a snapshot is the latest input the
+/// server applied in a tick at or before the snapshot's tick, never one merely received or queued for a
+/// later tick. The client drops its own inputs up to `seq` stamped at or before the snapshot's tick,
+/// and re-applies the rest on top of the snapshot.
 public struct InputAck: Equatable, Sendable {
     /// The input stream sequence number of the client's last input the server applied.
     public var seq: UInt32

@@ -128,7 +128,7 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         var wrong = server.exportSnapshot()
         wrong.isOver = true
         wrong.firstFinishTime = 1
-        let client = Race(setup: server.setup, windSeed: server.windSeed)
+        let client = Race(setup: server.setup, windSeed: try #require(server.windSeed))
         try client.importSnapshot(wrong)
         #expect(client.apply(.neutral, seat: 0, atTick: client.tick + 1) == nil) // frozen
 
@@ -194,9 +194,9 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         while !server.isOver && server.tick < 9000 {
             for _ in 0..<30 { server.step() }
             let world = server.exportSnapshot()
-            let exact = Race(setup: server.setup, windSeed: server.windSeed)
+            let exact = Race(setup: server.setup, windSeed: try #require(server.windSeed))
             try exact.importSnapshot(world)
-            let quantised = Race(setup: server.setup, windSeed: server.windSeed)
+            let quantised = Race(setup: server.setup, windSeed: try #require(server.windSeed))
             let bytes = try Frame(seq: 0, tick: world.tick, message: .snapshot(Snapshot(world: world))).encoded()
             guard case .snapshot(let snapshot) = try Frame(decoding: bytes).message else { return }
             // Merged into the exact world, so only quantisation differs: a predicting client's own
@@ -233,7 +233,7 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         guard case .resync(let back) = decoded.message else { Issue.record("not a resync"); return }
         #expect(back == resync)
 
-        let client = Race(setup: server.setup, windSeed: server.windSeed)
+        let client = Race(setup: server.setup, windSeed: try #require(server.windSeed))
         try client.importSnapshot(back.world(base: client.exportSnapshot(), tick: decoded.tick))
         #expect(client.tick == server.tick)
         #expect(client.wind == server.wind) // the revealed keys came with it

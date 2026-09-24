@@ -21,7 +21,9 @@ public final class Race {
     public static let dt = 1.0 / Double(tickRate)
 
     public let setup: RaceSetup
-    public let windSeed: WindSeed
+    /// The secret wind seed (ADR 0001), or nil for a keys-only race (`init(setup:revealedWindKeys:)`),
+    /// which is how an online client predicts: it never holds the seed.
+    public let windSeed: WindSeed?
     public let course: Course
     public let polar = Polar.dinghy
 
@@ -39,10 +41,11 @@ public final class Race {
     public let windSetup: WindSetup
     /// The keyed wind (ADR 0001), holding the keys through the current window and no further.
     public private(set) var wind: WindField
-    /// Makes this race's keys from its wind seed, one window at a time as the clock enters it. A race
-    /// always holds its wind seed (practice on the device, the server, a replay), so it is never
-    /// missing a key; an online client that holds only revealed keys needs its own source (#95).
-    private var windKeys: WindKeyGenerator
+    /// Makes this race's keys from its wind seed, one window at a time as the clock enters it. A seeded
+    /// race (practice on the device, the server, a replay) is never missing a key. Nil for a keys-only
+    /// race, which holds only the keys it is given (`addRevealedWindKey(_:)`) and never makes or guesses
+    /// one: it steps with `tryStep()`, which refuses to enter a window it holds no key for.
+    private var windKeys: WindKeyGenerator?
     /// One boat per seat: `boats[seat]`.
     public private(set) var boats: [Boat]
     /// Each seat's held input, in force until the seat sends a different one.
@@ -78,7 +81,23 @@ public final class Race {
     /// The race runs no bots: every seat, bot or human, is sailed from outside through `apply` and
     /// `tap` (RegattaBots' seat controllers for bots, #60), so the log holds every input applied and
     /// a replay needs nothing but the log (ADR 0002). Names and the rest of the roster live outside too.
-    public init(setup: RaceSetup, windSeed: WindSeed) {
+    public convenience init(setup: RaceSetup, windSeed: WindSeed) {
+        self.init(setup: setup, windSeed: Optional(windSeed), revealedWindKeys: [])
+    }
+
+    /// A keys-only race: no wind seed, only the revealed `keys` (ADR 0001), which later keys join through
+    /// `addRevealedWindKey(_:)`. How an online client predicts (#64, ADR 0005). It has no `log`:
+    /// a prediction is never the record.
+    ///
+    /// Step it with `tryStep()`, which throws `WindFieldError.missingKey` instead of entering a tick whose
+    /// wind needs a key it doesn't hold; plain `step()` and `groundWind(at:)` trap there, as they would
+    /// for a seeded race with a bug. If `keys` don't cover the first tick, the boats' wind stays unset
+    /// until the race imports a snapshot or steps.
+    public convenience init(setup: RaceSetup, revealedWindKeys keys: [WindKey]) {
+        self.init(setup: setup, windSeed: nil, revealedWindKeys: keys)
+    }
+
+    private init(setup: RaceSetup, windSeed: WindSeed?, revealedWindKeys: [WindKey]) {
         self.setup = setup
         self.windSeed = windSeed
         var rng = SplitMix64(seed: setup.raceSeed.value)
@@ -87,11 +106,13 @@ public final class Race {
         let course = Course.standard(laps: setup.laps, axis: windSetup.meanDirection)
         self.course = course
         let windows = WindWindows(startSequenceTicks: setup.startSequenceTicks)
-        wind = WindField(setup: windSetup, windows: windows)
-        do {
-            windKeys = try WindKeyGenerator(windSeed: windSeed, setup: windSetup, windows: windows)
-        } catch {
-            preconditionFailure("default conditions can't be keyed: \(error)")
+        wind = WindField(setup: windSetup, windows: windows, keys: WindKeyChain(revealedWindKeys))
+        if let windSeed {
+            do {
+                windKeys = try WindKeyGenerator(windSeed: windSeed, setup: windSetup, windows: windows)
+            } catch {
+                preconditionFailure("default conditions can't be keyed: \(error)")
+            }
         }
         tick = -setup.startSequenceTicks
 
@@ -114,7 +135,7 @@ public final class Race {
         boats = fleet
         heldInputs = Array(repeating: .neutral, count: fleet.count)
         makeWindKeys()
-        refreshWind()
+        if windKeys != nil || (try? wind.shift(atTick: tick)) != nil { refreshWind() }
     }
 
     // MARK: - Input
@@ -153,9 +174,11 @@ public final class Race {
         return event
     }
 
-    /// The race so far as a log: its keys, and every input and seat event exactly as applied.
-    public var log: RaceLog {
-        RaceLog(header: .init(setup: setup, windSeed: windSeed), inputs: appliedInputs,
+    /// The race so far as a log: its keys, and every input and seat event exactly as applied. Nil for a
+    /// keys-only race: it is a prediction, never the record (ADR 0005), and has no wind seed to log.
+    public var log: RaceLog? {
+        guard let windSeed else { return nil }
+        return RaceLog(header: .init(setup: setup, windSeed: windSeed), inputs: appliedInputs,
                 seatEvents: seatEvents, finalTick: tick)
     }
 
@@ -221,6 +244,34 @@ public final class Race {
         events.append(RaceEvent(tick: tick, kind: kind))
     }
 
+    /// Advances the race by one tick, like `step()`, unless the race is keys-only and the next tick's
+    /// wind needs a key it doesn't hold: then it throws `missingKey` and leaves the race unchanged, so a
+    /// client can fetch the key (#64: request a `Resync`) instead of guessing the wind (ADR 0001). A
+    /// seeded race makes its own keys, so for it this is exactly `step()` and never throws.
+    ///
+    /// It samples the wind first exactly where the step will: at every boat's position at the next tick
+    /// (`refreshWind`). A new read of the wind inside `step()`, such as keyed puffs (#76) or the
+    /// geographic grid (#77) sampled anywhere else, must be checked here too, or a keys-only race could
+    /// trap where it should throw.
+    public func tryStep() throws(WindFieldError) {
+        if windKeys == nil && !isOver {
+            for boat in boats { _ = try wind.sample(boat.position, tick: tick + 1) }
+        }
+        step()
+    }
+
+    /// Adds a key the server revealed (ADR 0001, #95) to a keys-only race, replacing any key held for its
+    /// window. Returns false, adding nothing, for a seeded race: it makes its own keys.
+    @discardableResult
+    public func addRevealedWindKey(_ key: WindKey) -> Bool {
+        guard windKeys == nil else { return false }
+        wind.add(key)
+        return true
+    }
+
+    /// Whether the race holds only revealed keys and no wind seed.
+    public var isKeysOnly: Bool { windKeys == nil }
+
     /// Advances the race by one tick.
     public func step() {
         guard !isOver else { return }
@@ -241,8 +292,9 @@ public final class Race {
         checkForEnd()
     }
 
-    /// The ground wind at `p` now. The race holds every key through the current window, so this never
-    /// fails; if it ever did, it traps rather than extrapolate (ADR 0001).
+    /// The ground wind at `p` now. A seeded race holds every key through the current window, and a
+    /// keys-only one does once it has stepped or imported a snapshot, so this never fails; if it ever
+    /// did, it traps rather than extrapolate (ADR 0001).
     public func groundWind(at p: Vec2) -> GroundWind {
         do {
             return try wind.sample(p, tick: tick)
@@ -254,8 +306,9 @@ public final class Race {
     /// Adds the keys through the window holding the current tick, one window at a time: the race never
     /// holds a key before its window starts.
     private func makeWindKeys() {
+        guard windKeys != nil else { return }
         let current = wind.windows.window(containing: tick)
-        while windKeys.nextWindow <= current { wind.add(windKeys.next()) }
+        while windKeys!.nextWindow <= current { wind.add(windKeys!.next()) }
     }
 
     private func refreshWind() {
@@ -530,6 +583,7 @@ extension Race {
     /// in a snapshot) to just after them, so the keys it makes as the clock runs on are the ones the
     /// exporting race would have made. The generator is rebuilt from the wind seed when the snapshot
     /// holds fewer keys than it has made: at most one HMAC per window.
+    /// A keys-only race has no generator: it takes the snapshot's keys, and adds revealed keys after them.
     ///
     /// Throws, leaving the race unchanged, for a snapshot it couldn't sail on from: another fleet
     /// size, a tick outside the sequence start … `WorldSnapshot.maxTick`, a non-finite value, a leg or
@@ -573,15 +627,19 @@ extension Race {
         if let gap = (firstNeeded..<max(firstNeeded, snapshot.windKeys.endWindow)).first(where: { snapshot.windKeys[$0] == nil }) {
             throw WorldSnapshotError.missingWindKey(gap)
         }
+        // A keys-only race has no generator: it keeps the snapshot's keys and adds revealed ones.
         var generator = windKeys
-        if generator.nextWindow > snapshot.windKeys.endWindow {
-            do {
-                generator = try WindKeyGenerator(windSeed: windSeed, setup: windSetup, windows: wind.windows)
-            } catch {
-                preconditionFailure("the race's own conditions can't be keyed: \(error)")
+        if let windSeed, var seeded = generator {
+            if seeded.nextWindow > snapshot.windKeys.endWindow {
+                do {
+                    seeded = try WindKeyGenerator(windSeed: windSeed, setup: windSetup, windows: wind.windows)
+                } catch {
+                    preconditionFailure("the race's own conditions can't be keyed: \(error)")
+                }
             }
+            _ = seeded.keys(through: snapshot.windKeys.endWindow - 1)
+            generator = seeded
         }
-        _ = generator.keys(through: snapshot.windKeys.endWindow - 1)
 
         wind = snapshotWind
         windKeys = generator
