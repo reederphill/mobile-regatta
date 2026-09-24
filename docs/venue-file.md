@@ -186,10 +186,12 @@ flips to the other side, turning the other way, when the tide turns.
 
 The loader throws `DataFileError.malformed` for a missing field, a wrong type, an unknown enum value
 (such as a `trendDirection`), or **a field the schema doesn't have** (a typo such as `"eddys"`, or a
-`null`): a released file can't be fixed, so it mustn't carry a field nothing reads. A **key repeated
-in one object** is refused first, before anything parses the file, for every kind of data file:
-parsers disagree on which copy wins (JSONDecoder the first; JSONSerialization the first on Darwin and
-the last on Linux). (Boat class files
+`null`): a released file can't be fixed, so it mustn't carry a field nothing reads. Three things are
+refused first, before anything parses the file, for every kind of data file, so every parser on every
+platform reads the same document: a file that isn't **UTF-8** (files are UTF-8 only; UTF-16 and UTF-32
+are refused, as is any 0x00 byte), nesting deeper than 512 (JSONDecoder's limit), and a **key repeated
+in one object** (parsers disagree on which copy wins: JSONDecoder the first, JSONSerialization the
+first on Darwin and the last on Linux). (Boat class files
 don't check this yet.) It throws `invalidContent` for a venue that breaks any of these:
 
 - `displayName` is non-empty; every landmark `asset` is non-empty; every point is two finite numbers.

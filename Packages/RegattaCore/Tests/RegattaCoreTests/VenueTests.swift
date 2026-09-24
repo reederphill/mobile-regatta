@@ -513,13 +513,21 @@ enum VenueFixtures {
         }
     }
 
-    @Test func duplicateKeyScanFollowsPointersAndIgnoresStrings() {
-        func first(_ json: String) -> String? { JSONDuplicateKeys.first(in: Data(json.utf8)) }
-        #expect(first(#"{"a": 1, "b": {"c": [1, 2]}, "s": "{\"a\": 1, \"a\": 2}", "t": "\\"}"#) == nil)
-        #expect(first(#"{"a": [{"x": 1}, {"x": 1, "y": {"z": 1, "z": 2}}]}"#) == "/a/1/y/z")
-        #expect(first(#"{"a/b": {"~": 1, "~": 2}}"#) == "/a~1b/~0")
-        #expect(first(#"[{"k": 1}, {"k": 2}]"#) == nil)
-        #expect(first(#"{"k": "x", "v": "k", "k": 2}"#) == "/k")
+    /// The scanner review's repro: in UTF-16, "∞" (U+221E) is the bytes 1E 22, and 0x22 is a quote to a
+    /// UTF-8 byte scan, which then missed the duplicate while the parsers read different copies.
+    @Test func utf16VenueIsRefusedBeforeItsDuplicateCanHide() throws {
+        let text = String(decoding: try VenueFixtures.edited([
+            (of: #""displayName": "Test Water","#, with: #""displayName": "∞", "displayName": "Other","#),
+        ]), as: UTF8.self)
+        for encoding: String.Encoding in [.utf16LittleEndian, .utf16BigEndian, .utf16, .utf32LittleEndian, .utf32] {
+            let data = try #require(text.data(using: encoding))
+            #expect(throws: DataFileError.malformed(kind: "venue", reason: "not UTF-8"), "\(encoding)") {
+                try VenueFile(data: data)
+            }
+        }
+        #expect(throws: DataFileError.malformed(kind: "venue", reason: "duplicate field /displayName")) {
+            try VenueFile(data: Data(text.utf8))
+        }
     }
 
     @Test func boatClassesStillIgnoreUnknownFields() throws {

@@ -85,11 +85,13 @@ Boat classes, conditions and venues (and later the rules configuration) are immu
 files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`. The venue schema is in
 `docs/venue-file.md`.
 
+- Files are UTF-8 JSON. Before anything parses one, the loader refuses other encodings, nesting deeper
+  than 512 and a key repeated in one object (parsers disagree on which copy wins, and differently on
+  Darwin and Linux), so every parser reads the same document.
 - Every file starts with `schemaVersion`, `id` and `version`. A schema version the build doesn't know
-  throws, and so does a key repeated in one object, before anything parses the file (parsers disagree on
-  which copy wins, and differently on Darwin and Linux). A file's `FileRef` is its id, version and the
-  SHA-256 of its exact bytes, so a released file never changes: tuning ships `<id>@<version + 1>.json`
-  next to it, and old versions keep loading. `.gitattributes` stops git rewriting their line endings.
+  throws. A file's `FileRef` is its id, version and the SHA-256 of its exact bytes, so a released file
+  never changes: tuning ships `<id>@<version + 1>.json` next to it, and old versions keep loading.
+  `.gitattributes` stops git rewriting their line endings.
 - Files use knots, degrees, seconds and hull lengths; the loader converts them once to m/s, radians and
   metres. Derived values, such as the best upwind and downwind angles, are computed at load, never stored.
 - `placeholders` lists JSON Pointers to values that are placeholders awaiting tuning; the loader checks

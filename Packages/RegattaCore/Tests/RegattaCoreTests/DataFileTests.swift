@@ -336,3 +336,67 @@ enum Fixtures {
         #expect(JSONPointer.resolve(pointer, in: Self.document) == nil)
     }
 }
+
+@Suite struct JSONPrecheckTests {
+    static func problem(_ json: String) -> JSONPrecheck.Problem? { JSONPrecheck.problem(in: Data(json.utf8)) }
+
+    @Test func duplicatesAreFoundWithTheirPointer() {
+        #expect(Self.problem(#"{"a": 1, "b": {"c": [1, 2]}, "s": "{\"a\": 1, \"a\": 2}", "t": "\\"}"#) == nil)
+        #expect(Self.problem(#"{"a": [{"x": 1}, {"x": 1, "y": {"z": 1, "z": 2}}]}"#) == .duplicate(pointer: "/a/1/y/z"))
+        #expect(Self.problem(#"{"a/b": {"~": 1, "~": 2}}"#) == .duplicate(pointer: "/a~1b/~0"))
+        #expect(Self.problem(#"[{"k": 1}, {"k": 2}]"#) == nil)
+        #expect(Self.problem(#"{"k": "x", "v": "k", "k": 2}"#) == .duplicate(pointer: "/k"))
+        #expect(Self.problem(#"[[0], [1, {"q": {}, "q": 2}]]"#) == .duplicate(pointer: "/1/1/q"))
+        #expect(Self.problem(#"{"a\u0062": 1, "ab": 2}"#) == .duplicate(pointer: "/ab"))
+    }
+
+    @Test func onlyUTF8IsAccepted() throws {
+        let json = #"{"name": "∞ Ģ", "other": 1}"#
+        #expect(Self.problem(json) == nil)
+        for encoding: String.Encoding in [.utf16LittleEndian, .utf16BigEndian, .utf16, .utf32LittleEndian, .utf32BigEndian, .utf32] {
+            let data = try #require(json.data(using: encoding))
+            #expect(JSONPrecheck.problem(in: data) == .notUTF8, "\(encoding)")
+        }
+        // Invalid UTF-8 (a lone continuation byte, an overlong "/"), and a raw NUL.
+        #expect(JSONPrecheck.problem(in: Data([0x7B, 0x22, 0x80, 0x22, 0x3A, 0x31, 0x7D])) == .notUTF8)
+        #expect(JSONPrecheck.problem(in: Data([0x7B, 0x22, 0xC0, 0xAF, 0x22, 0x3A, 0x31, 0x7D])) == .notUTF8)
+        #expect(JSONPrecheck.problem(in: Data([0x7B, 0x7D, 0x00])) == .notUTF8)
+        #expect(JSONPrecheck.problem(in: Data()) == nil)
+    }
+
+    @Test func nestingIsCappedAtJSONDecodersLimit() {
+        func nested(_ depth: Int) -> String { String(repeating: "[", count: depth) + String(repeating: "]", count: depth) }
+        #expect(Self.problem(nested(JSONPrecheck.maxDepth)) == nil)
+        #expect(Self.problem(nested(JSONPrecheck.maxDepth + 1)) == .tooDeep)
+        let objects = String(repeating: #"{"a":"#, count: 513) + "1" + String(repeating: "}", count: 513)
+        #expect(Self.problem(objects) == .tooDeep)
+        // Deep input used to build a pointer string per level: quadratic. Now it stops at the cap.
+        let clock = ContinuousClock()
+        let elapsed = clock.measure { #expect(Self.problem(String(repeating: "[", count: 200_000)) == .tooDeep) }
+        #expect(elapsed < .seconds(2))
+    }
+
+    @Test func manyKeysScanInLinearTime() {
+        // Inserting used to copy the object's whole key set: 40k keys took seconds.
+        let count = 50_000
+        var json = "{" + (0..<count).map { #""k\#($0)": 0"# }.joined(separator: ", ")
+        let clock = ContinuousClock()
+        var result: JSONPrecheck.Problem?
+        let elapsed = clock.measure { result = Self.problem(json + "}") }
+        #expect(result == nil)
+        #expect(elapsed < .seconds(3), "\(elapsed) for \(count) keys")
+        json += #", "k0": 1}"#
+        #expect(Self.problem(json) == .duplicate(pointer: "/k0"))
+    }
+
+    @Test func dataFileRefusesEachProblemAsMalformed() throws {
+        let deep = Data((String(repeating: "[", count: 600) + String(repeating: "]", count: 600)).utf8)
+        #expect(throws: DataFileError.malformed(kind: "boat class", reason: "nested deeper than 512")) {
+            try BoatClassFile(data: deep)
+        }
+        let utf16 = try #require(String(decoding: try Fixtures.bytes(), as: UTF8.self).data(using: .utf16LittleEndian))
+        #expect(throws: DataFileError.malformed(kind: "boat class", reason: "not UTF-8")) {
+            try BoatClassFile(data: utf16)
+        }
+    }
+}

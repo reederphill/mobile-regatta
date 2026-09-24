@@ -196,11 +196,11 @@ public struct DataFile<Content: DataFileContent>: Sendable {
     /// Loads a file from its exact bytes.
     public init(data: Data) throws {
         let kind = Content.kind
-        // Before anything parses the file: with a key repeated in one object, JSONDecoder keeps the
-        // first copy and JSONSerialization keeps the first on Darwin but the last on Linux, so every
-        // later check could read a different file on each platform.
-        if let pointer = JSONDuplicateKeys.first(in: data) {
-            throw DataFileError.malformed(kind: kind, reason: "duplicate field \(pointer)")
+        // Before anything parses the file, so every later check reads the same file on every platform:
+        // UTF-8 only, nesting JSONDecoder accepts, and no key repeated in one object (JSONDecoder keeps
+        // the first copy; JSONSerialization the first on Darwin and the last on Linux).
+        if let problem = JSONPrecheck.problem(in: data) {
+            throw DataFileError.malformed(kind: kind, reason: problem.description)
         }
         let header: DataFileHeader
         do {
@@ -363,49 +363,83 @@ enum JSONPointer {
     }
 }
 
-/// Finds a repeated key in any object of a JSON document. Parsers disagree on which copy wins
-/// (JSONDecoder the first; JSONSerialization the first on Darwin, the last on Linux), so a file with
-/// one would read differently depending on who parses it. Keys compare as Swift strings, so two
-/// canonically equivalent spellings count as a repeat.
-/// A byte scan: strings are skipped over, and everything else (numbers in a grid) costs one comparison.
-enum JSONDuplicateKeys {
-    private enum Frame {
-        case object(pointer: String, keys: Set<String>, key: String?, expectingKey: Bool)
-        case array(pointer: String, index: Int)
-    }
+/// Checks a data file's bytes before any parser sees them, so that JSONDecoder and JSONSerialization,
+/// on Darwin and on Linux, all read the same document:
+///
+/// - UTF-8 only. Both parsers also accept UTF-16 and UTF-32, whose code units can hold the bytes of
+///   `"` and `\`, and a byte scan can't follow them. Any 0x00 byte is refused too: it can't occur in
+///   UTF-8 JSON (control characters must be escaped) and always occurs in UTF-16 or UTF-32 JSON.
+/// - At most `maxDepth` nested objects and arrays, JSONDecoder's own limit.
+/// - No key repeated in one object: parsers disagree on which copy wins. Keys compare as Swift
+///   strings, so two canonically equivalent spellings count as a repeat.
+///
+/// One pass over the bytes, linear in the file: strings are skipped over, and a number in a grid costs
+/// a comparison. A JSON Pointer is built only to report a duplicate. On malformed JSON it may report
+/// nothing or a false problem; either way the file is refused.
+enum JSONPrecheck {
+    static let maxDepth = 512
 
-    /// JSON Pointer of the first repeated key, or nil. Runs before any parser, so it accepts any
-    /// bytes: on malformed JSON it may return nil or a pointer, and either way the file is refused.
-    static func first(in data: Data) -> String? {
-        let bytes = [UInt8](data)
-        var stack: [Frame] = []
-        var i = 0
-        func escape(_ key: String) -> String {
-            key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
-        }
-        /// Pointer of the value about to start inside the innermost container.
-        func childPointer() -> String {
-            switch stack.last {
-            case .object(let pointer, _, let key, _)?: return pointer + "/" + escape(key ?? "")
-            case .array(let pointer, let index)?: return pointer + "/\(index)"
-            case nil: return ""
+    enum Problem: Equatable, CustomStringConvertible {
+        case notUTF8
+        case tooDeep
+        case duplicate(pointer: String)
+
+        var description: String {
+            switch self {
+            case .notUTF8: "not UTF-8"
+            case .tooDeep: "nested deeper than \(JSONPrecheck.maxDepth)"
+            case .duplicate(let pointer): "duplicate field \(pointer)"
             }
         }
+    }
+
+    private struct Frame {
+        let isObject: Bool
+        /// The key whose value is being read (objects), or nil between members.
+        var key: String?
+        /// The element being read (arrays).
+        var index: Int
+        /// An object's next string is a key.
+        var expectingKey: Bool
+    }
+
+    static func problem(in data: Data) -> Problem? {
+        data.withUnsafeBytes { bytes in
+            if bytes.contains(0) || !isValidUTF8(bytes) { return .notUTF8 }
+            return scan(bytes)
+        }
+    }
+
+    private static func isValidUTF8(_ bytes: UnsafeRawBufferPointer) -> Bool {
+        !transcode(bytes.makeIterator(), from: UTF8.self, to: UTF32.self, stoppingOnError: true, into: { _ in })
+    }
+
+    private static func scan(_ bytes: UnsafeRawBufferPointer) -> Problem? {
+        var frames: [Frame] = []
+        // Each frame's keys, kept apart from `frames` so inserting never copies a set.
+        var keySets: [Set<String>] = []
+        var i = 0
         while i < bytes.count {
             switch bytes[i] {
-            case UInt8(ascii: "{"):
-                stack.append(.object(pointer: childPointer(), keys: [], key: nil, expectingKey: true))
-            case UInt8(ascii: "["):
-                stack.append(.array(pointer: childPointer(), index: 0))
+            case UInt8(ascii: "{"), UInt8(ascii: "["):
+                guard frames.count < maxDepth else { return .tooDeep }
+                let isObject = bytes[i] == UInt8(ascii: "{")
+                frames.append(Frame(isObject: isObject, key: nil, index: 0, expectingKey: isObject))
+                keySets.append([])
             case UInt8(ascii: "}"), UInt8(ascii: "]"):
-                if !stack.isEmpty { stack.removeLast() }
+                if !frames.isEmpty {
+                    frames.removeLast()
+                    keySets.removeLast()
+                }
             case UInt8(ascii: ","):
-                switch stack.last {
-                case .object(let pointer, let keys, _, _)?:
-                    stack[stack.count - 1] = .object(pointer: pointer, keys: keys, key: nil, expectingKey: true)
-                case .array(let pointer, let index)?:
-                    stack[stack.count - 1] = .array(pointer: pointer, index: index + 1)
-                case nil: break
+                if !frames.isEmpty {
+                    let top = frames.count - 1
+                    if frames[top].isObject {
+                        frames[top].key = nil
+                        frames[top].expectingKey = true
+                    } else {
+                        frames[top].index += 1
+                    }
                 }
             case UInt8(ascii: "\""):
                 let start = i
@@ -416,19 +450,23 @@ enum JSONDuplicateKeys {
                     i += 1
                 }
                 guard i < bytes.count else { return nil }
-                if case .object(let pointer, var keys, _, true)? = stack.last {
-                    let raw = Data(bytes[start...i])
+                let top = frames.count - 1
+                if top >= 0 && frames[top].expectingKey {
                     let key: String
                     if escaped {
                         // "\u0061" is the same key as "a": let the parser decode the escapes.
-                        guard let decoded = try? JSONSerialization.jsonObject(with: raw, options: [.fragmentsAllowed]) as? String
+                        let quoted = Data(bytes[start...i])
+                        guard let decoded = try? JSONSerialization.jsonObject(with: quoted, options: [.fragmentsAllowed]) as? String
                         else { return nil }
                         key = decoded
                     } else {
                         key = String(decoding: bytes[(start + 1)..<i], as: UTF8.self)
                     }
-                    if !keys.insert(key).inserted { return pointer + "/" + escape(key) }
-                    stack[stack.count - 1] = .object(pointer: pointer, keys: keys, key: key, expectingKey: false)
+                    if !keySets[top].insert(key).inserted {
+                        return .duplicate(pointer: pointer(frames.dropLast()) + "/" + escape(key))
+                    }
+                    frames[top].key = key
+                    frames[top].expectingKey = false
                 }
             default:
                 break
@@ -436,5 +474,14 @@ enum JSONDuplicateKeys {
             i += 1
         }
         return nil
+    }
+
+    /// JSON Pointer of the innermost open container: each enclosing frame's current key or index.
+    private static func pointer(_ enclosing: ArraySlice<Frame>) -> String {
+        enclosing.map { "/" + ($0.isObject ? escape($0.key ?? "") : String($0.index)) }.joined()
+    }
+
+    private static func escape(_ key: String) -> String {
+        key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
     }
 }
