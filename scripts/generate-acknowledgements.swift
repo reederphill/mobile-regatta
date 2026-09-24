@@ -2,7 +2,8 @@
 // Generates Regatta/Acknowledgements.plist, the third-party licences Settings → About lists (#25, #107).
 //
 // Sources:
-//   - every remote Swift package the Regatta scheme resolves, with the licence file from its checkout
+//   - every remote Swift package the Regatta scheme resolves, with the licence file from its checkout. This
+//     includes packages only linked on other platforms (swift-crypto is Linux only), which errs on the safe side.
 //   - every folder under ThirdParty/ (fonts, sounds, art that isn't a Swift package): ThirdParty/<Name>/LICENSE*,
 //     plus an optional one-line ThirdParty/<Name>/VERSION
 // Local packages (Packages/*) are ours and aren't listed.
@@ -53,12 +54,7 @@ func packageAcknowledgements() -> [Acknowledgement] {
         struct Object: Decodable { var dependencies: [Dependency] }
         struct Dependency: Decodable {
             struct Ref: Decodable { var kind: String; var name: String }
-            struct PackageState: Decodable {
-                struct Checkout: Decodable { var version: String?; var revision: String }
-                var checkoutState: Checkout?
-            }
             var packageRef: Ref
-            var state: PackageState
             var subpath: String
         }
         var object: Object
@@ -70,8 +66,8 @@ func packageAcknowledgements() -> [Acknowledgement] {
     return state.object.dependencies.filter { $0.packageRef.kind.hasPrefix("remote") }.map { dependency in
         let checkout = scratch.appendingPathComponent("checkouts").appendingPathComponent(dependency.subpath)
         guard let license = licenseText(in: checkout) else { fail("no licence file in package \(dependency.packageRef.name)") }
-        let version = dependency.state.checkoutState.map { $0.version ?? String($0.revision.prefix(12)) }
-        return Acknowledgement(name: dependency.packageRef.name, version: version, license: license)
+        // No version: Package.resolved isn't committed, so versions float and would make --check flaky.
+        return Acknowledgement(name: dependency.packageRef.name, version: nil, license: license)
     }
 }
 
