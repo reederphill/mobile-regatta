@@ -16,6 +16,8 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   BoatClass.swift         boat class file schema: hull, polar, momentum, steering, shadow, contact, ease
   PolarTable.swift        polar by TWA × TWS, bilinear, with best upwind and downwind VMG derived at load
   Resources/boat-classes/ boat class files, `<id>@<version>.json`
+  Venue.swift             venue file schema: land, pairings with geographic grids, current (docs/venue-file.md)
+  Resources/venues/       venue files; `dev-venue@1` stands in until the real venues (#83)
   Course.swift            windward-leeward course, start/finish line, rounding gates
   Boat.swift              boat state and hull shape
   Rules.swift             Rules 10, 11, 12, 13, 18, 22, 31 — who had to keep clear
@@ -74,8 +76,9 @@ bit-for-bit deterministic:
 
 ### Data files
 
-Boat classes (and later venues, conditions and the rules configuration) are immutable, versioned JSON
-files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`:
+Boat classes and venues (and later conditions and the rules configuration) are immutable, versioned JSON
+files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`. The venue schema is in
+`docs/venue-file.md`.
 
 - Every file starts with `schemaVersion`, `id` and `version`. A schema version the build doesn't know
   throws. A file's `FileRef` is its id, version and the SHA-256 of its exact bytes, so a released file
