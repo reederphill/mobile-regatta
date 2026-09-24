@@ -10,8 +10,27 @@
 		AA0000000000000000000010 /* RegattaCore in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000012 /* RegattaCore */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		AA0000000000000000000023 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000000000000000000006 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA0000000000000000000005;
+			remoteInfo = Regatta;
+		};
+		AA0000000000000000000025 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000000000000000000006 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA0000000000000000000005;
+			remoteInfo = Regatta;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		AA0000000000000000000004 /* Regatta.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Regatta.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000017 /* RegattaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RegattaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000018 /* RegattaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RegattaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -33,6 +52,16 @@
 			path = Regatta;
 			sourceTree = "<group>";
 		};
+		AA0000000000000000000019 /* RegattaTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RegattaTests;
+			sourceTree = "<group>";
+		};
+		AA000000000000000000001A /* RegattaUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = RegattaUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -44,6 +73,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA000000000000000000001E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0000000000000000000021 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -51,6 +94,8 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000003 /* Regatta */,
+				AA0000000000000000000019 /* RegattaTests */,
+				AA000000000000000000001A /* RegattaUITests */,
 				AA0000000000000000000002 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -59,6 +104,8 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000004 /* Regatta.app */,
+				AA0000000000000000000017 /* RegattaTests.xctest */,
+				AA0000000000000000000018 /* RegattaUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -89,6 +136,48 @@
 			productReference = AA0000000000000000000004 /* Regatta.app */;
 			productType = "com.apple.product-type.application";
 		};
+		AA000000000000000000001B /* RegattaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000027 /* Build configuration list for PBXNativeTarget "RegattaTests" */;
+			buildPhases = (
+				AA000000000000000000001D /* Sources */,
+				AA000000000000000000001E /* Frameworks */,
+				AA000000000000000000001F /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AA0000000000000000000024 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AA0000000000000000000019 /* RegattaTests */,
+			);
+			name = RegattaTests;
+			productName = RegattaTests;
+			productReference = AA0000000000000000000017 /* RegattaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		AA000000000000000000001C /* RegattaUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA000000000000000000002A /* Build configuration list for PBXNativeTarget "RegattaUITests" */;
+			buildPhases = (
+				AA0000000000000000000020 /* Sources */,
+				AA0000000000000000000021 /* Frameworks */,
+				AA0000000000000000000022 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AA0000000000000000000026 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AA000000000000000000001A /* RegattaUITests */,
+			);
+			name = RegattaUITests;
+			productName = RegattaUITests;
+			productReference = AA0000000000000000000018 /* RegattaUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -101,6 +190,14 @@
 				TargetAttributes = {
 					AA0000000000000000000005 = {
 						CreatedOnToolsVersion = 26.0;
+					};
+					AA000000000000000000001B = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = AA0000000000000000000005;
+					};
+					AA000000000000000000001C = {
+						CreatedOnToolsVersion = 26.0;
+						TestTargetID = AA0000000000000000000005;
 					};
 				};
 			};
@@ -122,12 +219,28 @@
 			projectRoot = "";
 			targets = (
 				AA0000000000000000000005 /* Regatta */,
+				AA000000000000000000001B /* RegattaTests */,
+				AA000000000000000000001C /* RegattaUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		AA0000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA000000000000000000001F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0000000000000000000022 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -144,7 +257,34 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA000000000000000000001D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA0000000000000000000020 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AA0000000000000000000024 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA0000000000000000000005 /* Regatta */;
+			targetProxy = AA0000000000000000000023 /* PBXContainerItemProxy */;
+		};
+		AA0000000000000000000026 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA0000000000000000000005 /* Regatta */;
+			targetProxy = AA0000000000000000000025 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		AA000000000000000000000F /* Debug */ = {
@@ -264,6 +404,88 @@
 			};
 			name = Release;
 		};
+		AA0000000000000000000028 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8S5TQ65X3B;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.phillreeder.regatta.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Regatta.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Regatta";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000029 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8S5TQ65X3B;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.phillreeder.regatta.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Regatta.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Regatta";
+			};
+			name = Release;
+		};
+		AA000000000000000000002B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8S5TQ65X3B;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.phillreeder.regatta.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Regatta;
+			};
+			name = Debug;
+		};
+		AA000000000000000000002C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8S5TQ65X3B;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.phillreeder.regatta.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Regatta;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -281,6 +503,24 @@
 			buildConfigurations = (
 				AA0000000000000000000014 /* Debug */,
 				AA0000000000000000000015 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0000000000000000000027 /* Build configuration list for PBXNativeTarget "RegattaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000028 /* Debug */,
+				AA0000000000000000000029 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA000000000000000000002A /* Build configuration list for PBXNativeTarget "RegattaUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA000000000000000000002B /* Debug */,
+				AA000000000000000000002C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

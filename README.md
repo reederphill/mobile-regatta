@@ -26,6 +26,9 @@ Regatta/                The iOS app
   Game/BoatNode.swift     batched boat sprites, sails, wakes, wind-shadow cones
   Game/GameSession.swift  bridges the race to SwiftUI: HUD, rule-call messages, haptics
   UI/                     menu, HUD, minimap, results
+  App/LaunchOptions.swift development and test launch arguments
+RegattaTests/           Hosted unit tests for the app
+RegattaUITests/         UI tests; screenshots attach to the xcresult
 ```
 
 The simulation runs at a fixed 30 Hz (`Race.tickRate`), independent of the display (the app renders at
@@ -72,13 +75,37 @@ Run them on the pinned Linux replay platform, in debug and release (needs podman
 scripts/linux-test.sh
 ```
 
-CI (`.github/workflows/ci.yml`) runs `scripts/linux-test.sh` on Linux, and `swift test` plus
-`scripts/check-digest-stable.sh` on macOS.
+Run the app's unit tests (`RegattaTests`) and UI tests (`RegattaUITests`) on the simulator:
+
+```bash
+xcodebuild test -scheme Regatta -destination 'platform=iOS Simulator,name=iPhone 17'
+```
+
+UI tests attach screenshots to the result bundle with `attachScreenshot(named:)`.
+
+CI (`.github/workflows/ci.yml`) runs `scripts/linux-test.sh` on Linux, `swift test` plus
+`scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the iOS Simulator.
 
 ### Launch arguments
 
+Parsed by `LaunchOptions`; bad values are logged and ignored.
+
 - `-autostart` skips the menu and starts a race.
-- `-demo` starts a race with a bot sailing your boat too. Useful for watching the AI and profiling.
+- `-demo` starts a race with a bot sailing your boat too. Useful for watching the AI.
+- `-perf` starts a 16-boat demo race for profiling.
+- `-seed <n>` sails every race on seed `n`.
+- `-timescale <n>` runs the simulation at `n`× real time.
+- `-uitesting` marks a UI test run. It and `-fixture` hide the Debug FPS, node and draw-count overlay so
+  screenshots are deterministic.
+- `-fixture <name>`, `-scheme halves|tiller` and `-camera course|boat` are parsed for the render fixtures
+  (#62), steering schemes (#112) and camera (#113).
+
+### Profiling
+
+The app emits `os_signpost` intervals on the Points of Interest track: **Sim step**, **Bot brains**,
+**Render update** and **HUD refresh**. Profile the Regatta scheme in Instruments with `-perf` and compare
+them against the budgets in #27 (sim + prediction < 3 ms, bots < 2 ms). **Sim step** includes the **Bot
+brains** inside it, so subtract Bot brains from Sim step when checking the sim budget.
 
 ## Playing
 

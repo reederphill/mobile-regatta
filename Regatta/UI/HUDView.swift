@@ -52,6 +52,9 @@ struct HUDView: View {
             Text(formatClock(hud.clock))
                 .font(.system(size: 30, weight: .heavy, design: .rounded).monospacedDigit())
                 .foregroundStyle(hud.clock < 0 ? Color(uiColor: Palette.startLine) : .white)
+                // UI tests read the tick to see the race advance at sub-second resolution.
+                .accessibilityIdentifier("race-clock")
+                .accessibilityValue(String(hud.tick))
             Text(statusLine)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(hud.status == .ocs ? .red : .white.opacity(0.8))

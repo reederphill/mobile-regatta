@@ -30,3 +30,26 @@ jobs:
         run: swift test
       - name: Same digest across two test processes
         run: scripts/check-digest-stable.sh
+
+  app:
+    name: App tests on the iOS Simulator
+    # Pinned so the SDK and simulator runtime only change on purpose: Xcode 26.6, iOS 26.5.
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      # DEVELOPER_DIR rather than xcode-select: switching with xcode-select hid the simulators.
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: xcodebuild test (unit + UI)
+        run: |
+          xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+            -resultBundlePath Regatta.xcresult
+      - name: Upload the result bundle (screenshots, logs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Regatta.xcresult
+          path: Regatta.xcresult
+          if-no-files-found: ignore

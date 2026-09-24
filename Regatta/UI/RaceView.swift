@@ -9,7 +9,7 @@ struct RaceView: View {
 
     private var debugOptions: SpriteView.DebugOptions {
         #if DEBUG
-        [.showsFPS, .showsNodeCount, .showsDrawCount]
+        LaunchOptions.current.showsDebugStats ? [.showsFPS, .showsNodeCount, .showsDrawCount] : []
         #else
         []
         #endif

@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 import RegattaCore
 
@@ -16,31 +17,36 @@ struct RootView: View {
     @State private var settings = RaceSettings()
     @State private var session: GameSession?
     @State private var checkedLaunchArguments = false
+    private let launchOptions = LaunchOptions.current
 
     var body: some View {
         if let session {
             RaceView(
                 session: session,
-                onRestart: { self.session = GameSession(config: settings.config) },
+                onRestart: { self.session = makeSession(launchOptions.raceConfig(from: settings)) },
                 onExit: { self.session = nil }
             )
             .id(ObjectIdentifier(session))
         } else {
             MenuView(settings: $settings) {
-                session = GameSession(config: settings.config)
+                session = makeSession(launchOptions.raceConfig(from: settings))
             }
             .onAppear(perform: autostartIfRequested)
         }
     }
 
-    /// Development launch arguments: `-autostart` skips the menu, `-demo` also lets a bot sail your boat.
+    private func makeSession(_ config: Race.Config) -> GameSession {
+        GameSession(config: config, timescale: launchOptions.timescale)
+    }
+
+    /// Development launch arguments (`LaunchOptions`): `-autostart`, `-demo` and `-perf` skip the menu.
     private func autostartIfRequested() {
         guard !checkedLaunchArguments else { return }
         checkedLaunchArguments = true
-        let arguments = ProcessInfo.processInfo.arguments
-        guard arguments.contains("-autostart") || arguments.contains("-demo") else { return }
-        var config = settings.config
-        config.autopilotPlayer = arguments.contains("-demo")
-        session = GameSession(config: config)
+        for problem in launchOptions.problems {
+            Logger(subsystem: "com.phillreeder.regatta", category: "launch").warning("Ignoring launch argument \(problem, privacy: .public)")
+        }
+        guard let config = launchOptions.launchRaceConfig(from: settings) else { return }
+        session = makeSession(config)
     }
 }
