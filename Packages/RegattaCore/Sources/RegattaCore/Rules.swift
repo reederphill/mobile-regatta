@@ -25,6 +25,12 @@ public struct RuleCall: Sendable, Equatable {
     public let rule: RacingRule
     public let offender: Int
     public let victim: Int
+
+    public init(rule: RacingRule, offender: Int, victim: Int) {
+        self.rule = rule
+        self.offender = offender
+        self.victim = victim
+    }
 }
 
 public enum Rules {
