@@ -110,3 +110,4 @@ Sources: #21 (liveries), #22 (art direction, audio), #36 (venues, icon), #53. De
 | Name | Value |
 |---|---|
 | `AccentColor` | `ChromePalette.tint` light `#1B4F82` / dark `#7FB3E0` |
+| `LaunchBackground` | `ChartPalette.water` `#174D70` (exists, #107) |
