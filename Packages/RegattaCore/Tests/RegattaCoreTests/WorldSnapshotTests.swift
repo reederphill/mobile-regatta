@@ -137,6 +137,21 @@ struct LogFeeder {
         missing.windKeys = WindKeyChain()
         #expect(throws: WorldSnapshotError.self) { try Self.imported(missing) }
 
+        // A gap between the current window and a key held further ahead would never be filled: the
+        // race would trap when the clock reached it (the review's repro). Refused, race unchanged.
+        let target = Race(setup: Self.log.header.setup, windSeed: Self.log.header.windSeed)
+        let before = target.digest()
+        var gapped = snapshot
+        gapped.windKeys.insert(Self.feeder.race(at: 2900).wind.keys[current + 3]!)
+        #expect(gapped.windKeys.endWindow == current + 4)
+        #expect(throws: WorldSnapshotError.missingWindKey(current + 1)) { try target.importSnapshot(gapped) }
+        #expect(target.digest() == before && target.tick == -1800)
+        // Keys below the window before the snapshot's aren't needed.
+        var recent = snapshot
+        for window in 0..<(current - 1) { recent.windKeys.remove(window: window) }
+        let fromRecent = try Self.imported(recent)
+        for _ in 0..<1200 { Self.feeder.step(fromRecent) }
+
         // Keys revealed ahead (a client's) are kept, and the race makes no key it already holds.
         let ahead = Self.feeder.race(at: 1300).wind.keys
         #expect(ahead.endWindow == snapshot.windKeys.endWindow + 1)

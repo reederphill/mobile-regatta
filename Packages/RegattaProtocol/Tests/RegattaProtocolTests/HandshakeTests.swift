@@ -152,5 +152,110 @@ import Testing
         for i in 8..<16 { nan[i] = 0xFF } // shift value: a NaN
         #expect(throws: WireError.invalidValue("windKey")) { try Frame(decoding: header + nan) }
         #expect(throws: WireError.truncated) { try Frame(decoding: Array(bytes.dropLast())) }
+
+        // Hostile but finite values: a knot of 1.7e308 turned boats' wind to NaN within 60 ticks.
+        let hostile = WindKey(window: 3, shift: WindKnot(value: 1.7e308, slope: 0), strength: key.strength, wobble: key.wobble, puffSeed: 1)
+        #expect(throws: WireError.invalidValue("windKey")) { try Frame(decoding: header + hostile.bytes) }
+        #expect(throws: WireError.outOfRange("windKey")) { try Frame(seq: 0, tick: 0, message: .windKey(hostile)).encoded() }
+        let spoilers: [(inout WindKey) -> Void] = [
+            { $0 = WindKey(window: $0.window, shift: WindKnot(value: 3.2, slope: 0), strength: $0.strength, wobble: $0.wobble, puffSeed: 0) },
+            { $0 = WindKey(window: $0.window, shift: WindKnot(value: 0, slope: -1.01), strength: $0.strength, wobble: $0.wobble, puffSeed: 0) },
+            { $0 = WindKey(window: $0.window, shift: $0.shift, strength: WindKnot(value: -0.01, slope: 0), wobble: $0.wobble, puffSeed: 0) },
+            { $0 = WindKey(window: $0.window, shift: $0.shift, strength: WindKnot(value: 10.5, slope: 0), wobble: $0.wobble, puffSeed: 0) },
+            { $0 = WindKey(window: $0.window, shift: $0.shift, strength: WindKnot(value: 1, slope: 2), wobble: $0.wobble, puffSeed: 0) },
+            { $0 = WindKey(window: $0.window, shift: $0.shift, strength: $0.strength, wobble: WindWobble(hump: 1.5, wiggle: 0), puffSeed: 0) },
+            { $0 = WindKey(window: $0.window, shift: $0.shift, strength: $0.strength, wobble: WindWobble(hump: 0, wiggle: -1.5), puffSeed: 0) },
+        ]
+        for spoil in spoilers {
+            var bad = key
+            spoil(&bad)
+            #expect(!WindKeyWire.isSane(bad))
+            #expect(throws: WireError.invalidValue("windKey")) { try Frame(decoding: header + bad.bytes) }
+        }
+    }
+
+    /// Key lists are in strictly increasing windows, so each message has one encoding and no key twice.
+    @Test func keyListsAreStrictlyIncreasing() throws {
+        var gen = Gen(seed: 95)
+        let a = gen.windKey(window: 5), b = gen.windKey(window: 7), a2 = gen.windKey(window: 5)
+        let world = WorldSnapshot(tick: 0, seats: [gen.seat(0), gen.seat(1)])
+        func resync(_ keys: [WindKey]) throws -> Frame {
+            Frame(seq: 0, tick: 0, message: .resync(try Resync(raceSeed: RaceSeed(1), world: world, windKeys: keys, nextEventSeq: 0)))
+        }
+        let good = try resync([a, b]).encoded()
+        #expect(try Frame(decoding: good) == resync([a, b]))
+        for keys in [[b, a], [a, a2]] {
+            #expect(throws: WireError.outOfRange("windKeys")) { try resync(keys).encoded() }
+        }
+        let setup = try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot])
+        let roster = [RosterEntry(name: "A", colorIndex: 0), RosterEntry(name: "B", colorIndex: 1)]
+        #expect(throws: WireError.outOfRange("windKeys")) {
+            try Frame(seq: 0, tick: 0, message: .raceStart(RaceStart(yourSeat: 0, setup: setup, roster: roster, windKeys: [b, a]))).encoded()
+        }
+        // The same bytes with the two keys swapped, or the first key twice, don't decode.
+        let pair = a.bytes + b.bytes
+        let at = try #require((0...(good.count - pair.count)).first { Array(good[$0..<($0 + pair.count)]) == pair })
+        var swapped = good, doubled = good
+        swapped.replaceSubrange(at..<(at + pair.count), with: b.bytes + a.bytes)
+        doubled.replaceSubrange(at..<(at + pair.count), with: a.bytes + a2.bytes)
+        #expect(throws: WireError.invalidValue("windKeys")) { try Frame(decoding: swapped) }
+        #expect(throws: WireError.invalidValue("windKeys")) { try Frame(decoding: doubled) }
+    }
+
+    /// The bounds hold every key the generator makes, from every conditions file, far into a race.
+    @Test func generatedKeysStayInBounds() throws {
+        var largest = (shift: 0.0, shiftSlope: 0.0, strength: 0.0, strengthSlope: 0.0, wobble: 0.0)
+        var checked = 0
+        for id in ["classic-oscillating", "gusty-offshore", "light-and-patchy", "sea-breeze"] {
+            let conditions = try ConditionsFile.bundled(id: id, version: 2)
+            for seed in 0..<150 as Range<UInt64> {
+                let setup = WindSetup(conditions: conditions, pairing: .stub, raceSeed: RaceSeed(seed &* 0x9E37_79B9 &+ 7))
+                var generator = try WindKeyGenerator(windSeed: WindSeed(seed ^ 0xD1CE), setup: setup,
+                                                     windows: WindWindows(startSequenceTicks: 1800))
+                // 90 windows: 45 minutes, past every trend and build span (960 s).
+                for key in generator.keys(through: 89) {
+                    #expect(WindKeyWire.isSane(key), "\(id) seed \(seed): \(key)")
+                    largest.shift = max(largest.shift, abs(key.shift.value))
+                    largest.shiftSlope = max(largest.shiftSlope, abs(key.shift.slope))
+                    largest.strength = max(largest.strength, key.strength.value)
+                    largest.strengthSlope = max(largest.strengthSlope, abs(key.strength.slope))
+                    largest.wobble = max(largest.wobble, abs(key.wobble.hump), abs(key.wobble.wiggle))
+                    checked += 1
+                }
+            }
+        }
+        print("WINDKEYS largest of \(checked) generated: \(largest)")
+        #expect(checked == 4 * 150 * 90)
+        // At least 5× headroom on every bound.
+        #expect(largest.shift * 5 < WindKeyWire.shiftLimit)
+        #expect(largest.shiftSlope * 5 < WindKeyWire.slopeLimit && largest.strengthSlope * 5 < WindKeyWire.slopeLimit)
+        #expect(largest.strength * 5 < WindKeyWire.strengthRange.upperBound)
+        #expect(largest.wobble * 5 < WindKeyWire.wobbleLimit)
+    }
+
+    /// The review's crash over the wire: a Resync whose keys have a gap past the current window is
+    /// refused on import, and the race is unchanged, instead of trapping when the clock reaches the gap.
+    @Test func aResyncWithAGapInItsKeysIsRefused() throws {
+        let server = botRace(prestartSeconds: 60)
+        for _ in 0..<1500 { server.step() } // tick −300
+        let current = server.wind.windows.window(containing: server.tick)
+        let later = botRace(prestartSeconds: 60)
+        while later.wind.keys.endWindow <= current + 3 { later.step() }
+        let keys = server.wind.keys.keys + [later.wind.keys[current + 3]!]
+        let world = server.exportSnapshot()
+        let frame = try Frame(decoding: Frame(seq: 0, tick: server.tick, message: .resync(
+            Resync(raceSeed: server.setup.raceSeed, world: world, windKeys: keys, nextEventSeq: 1))).encoded())
+        guard case .resync(let resync) = frame.message else { Issue.record("not a resync"); return }
+        let client = Race(setup: server.setup, windSeed: server.windSeed)
+        let before = client.digest()
+        #expect(throws: WorldSnapshotError.missingWindKey(current + 1)) {
+            try client.importSnapshot(resync.world(base: client.exportSnapshot(), tick: frame.tick))
+        }
+        #expect(client.digest() == before)
+        // Without the stray key it imports and sails through the gun and past the window it would have missed.
+        let clean = try Resync(raceSeed: server.setup.raceSeed, world: world, nextEventSeq: 1)
+        try client.importSnapshot(clean.world(base: client.exportSnapshot(), tick: server.tick))
+        for _ in 0..<2000 { client.step() }
+        #expect(client.tick == server.tick + 2000)
     }
 }

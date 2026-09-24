@@ -93,18 +93,26 @@ struct Gen {
         )
     }
 
-    /// A key with every field anywhere in its range: any finite double, any window the wire allows.
-    mutating func windKey() -> WindKey {
-        func finite(_ g: inout Gen) -> Double {
-            if g.bool() { return g.double(-1, 1) }
-            let bits = g.u64()
-            let d = Double(bitPattern: bits)
-            return d.isFinite ? d : Double(bitPattern: bits & ~(1 << 52)) // any bit pattern but inf and NaN
+    /// A value anywhere in `limit`: often exactly at an end, sometimes a subnormal.
+    mutating func within(_ limit: ClosedRange<Double>) -> Double {
+        switch int(0...5) {
+        case 0: return limit.lowerBound
+        case 1: return limit.upperBound
+        case 2:
+            let tiny = Double(bitPattern: u64() & 0x000F_FFFF_FFFF_FFFF)
+            return limit.lowerBound < 0 && bool() ? -tiny : tiny
+        default: return double(limit.lowerBound, limit.upperBound)
         }
-        return WindKey(window: int(0...WindKeyWire.maxWindow),
-                       shift: WindKnot(value: finite(&self), slope: finite(&self)),
-                       strength: WindKnot(value: finite(&self), slope: finite(&self)),
-                       wobble: WindWobble(hump: finite(&self), wiggle: finite(&self)), puffSeed: u64())
+    }
+
+    /// A key with every field anywhere in the wire's bounds (`WindKeyWire`), in any window it allows.
+    mutating func windKey(window: Int? = nil) -> WindKey {
+        typealias B = WindKeyWire
+        let shift = -B.shiftLimit...B.shiftLimit, slope = -B.slopeLimit...B.slopeLimit, wobble = -B.wobbleLimit...B.wobbleLimit
+        return WindKey(window: window ?? int(0...B.maxWindow),
+                       shift: WindKnot(value: within(shift), slope: within(slope)),
+                       strength: WindKnot(value: within(B.strengthRange), slope: within(slope)),
+                       wobble: WindWobble(hump: within(wobble), wiggle: within(wobble)), puffSeed: u64())
     }
 
     /// `windKey()` on a copy, for a single key from a fixed seed.
@@ -113,8 +121,13 @@ struct Gen {
         return copy.windKey()
     }
 
+    /// Keys in strictly increasing windows, as the wire requires.
     mutating func windKeys() -> [WindKey] {
-        (0..<int(0...6)).map { _ in windKey() }
+        var window = int(0...20)
+        return (0..<int(0...6)).map { _ in
+            defer { window += int(1...3) }
+            return windKey(window: window)
+        }
     }
 
     /// Every `RaceEvent.Kind`, by `index` (see `eventKindIndex`).

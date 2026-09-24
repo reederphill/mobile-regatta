@@ -569,8 +569,8 @@ extension Race {
     ///
     /// Throws, leaving the race unchanged, for a snapshot it couldn't sail on from: another fleet
     /// size, a tick outside the sequence start … `WorldSnapshot.maxTick`, a non-finite value, a leg or
-    /// rounding stage the course doesn't have, a negative penalty count, a bad contact, or no key for
-    /// the wind at the snapshot's tick.
+    /// rounding stage the course doesn't have, a negative penalty count, a bad contact, or a missing
+    /// key from the window before the snapshot's through the last key it holds.
     public func importSnapshot(_ snapshot: WorldSnapshot) throws {
         guard snapshot.seats.count == boats.count else {
             throw WorldSnapshotError.seatCount(expected: boats.count, found: snapshot.seats.count)
@@ -601,6 +601,13 @@ extension Race {
             case .missingKey(let window): throw WorldSnapshotError.missingWindKey(window)
             case .beforeOrigin: throw WorldSnapshotError.tickBeforeStart(snapshot.tick)
             }
+        }
+        // From the window before the snapshot's on, the keys must run without a gap: the generator
+        // resumes after the last one, so a missing key in between would never be made, and the wind
+        // would trap when the clock reached it.
+        let firstNeeded = max(0, wind.windows.window(containing: snapshot.tick) - 1)
+        if let gap = (firstNeeded..<max(firstNeeded, snapshot.windKeys.endWindow)).first(where: { snapshot.windKeys[$0] == nil }) {
+            throw WorldSnapshotError.missingWindKey(gap)
         }
         var generator = windKeys
         if generator.nextWindow > snapshot.windKeys.endWindow {

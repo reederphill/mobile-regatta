@@ -70,7 +70,8 @@ public struct WorldSnapshot: Sendable {
     public var firstFinishTime: Double?
     public var isOver: Bool
     /// The wind keys held (ADR 0001): a race holds every key through the window of `tick`. Importing
-    /// needs at least the keys the wind reads at `tick`, and they must be this race's.
+    /// needs every key from the window before `tick`'s through the last one held, without a gap, and
+    /// they must be this race's.
     public var windKeys: WindKeyChain
 
     /// The latest tick an import accepts: three hours after the gun, far past any race's time limit.
@@ -107,7 +108,8 @@ public enum WorldSnapshotError: Error, Equatable, Sendable {
     case invalidBoat(seat: Int, field: String)
     /// A race-level time that isn't finite.
     case invalidTime
-    /// The wind at the snapshot's tick needs key `window`, which the snapshot doesn't hold.
+    /// Key `window` is missing: the wind at the snapshot's tick needs it, or it is a gap between that
+    /// and the last key the snapshot holds.
     case missingWindKey(Int)
     /// A pair or contact naming a seat or obstacle the race doesn't have, or a pair with `a >= b`.
     case invalidContact

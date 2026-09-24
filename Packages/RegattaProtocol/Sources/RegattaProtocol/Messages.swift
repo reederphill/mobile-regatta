@@ -148,6 +148,35 @@ public enum WindKeyWire {
     /// The highest window a key on the wire may have: past the longest sequence and
     /// `WorldSnapshot.maxTick`, so a hostile key can't make a receiver's `WindKeyChain` grow without bound.
     public static let maxWindow = (RaceStart.maxStartSequenceTicks + WorldSnapshot.maxTick) / WindWindows.ticksPerWindow + 2
+
+    // Sanity bounds on a key's values, so a hostile key can't drive the wind to infinity or NaN (a knot
+    // of 1e308 does, within two seconds). Far outside anything `WindKeyGenerator` makes from the
+    // conditions files (the largest in parentheses, from their schema-2 values; `windKeysStayInBounds`
+    // samples every file):
+    //   shift value: the oscillation amplitude plus the trend (12° + 15° = 0.47 rad); bound π, 6.6×
+    //   shift slope: amplitude · 2π / period plus the trend's rate (0.015 + 0.0011 rad/s); bound 1 rad/s, 60×
+    //   strength value: 1 + the build, capped at the forecast's top (≤ 1.15); bound 0 … 10, 8.7×
+    //   strength slope: the build's rate (0.0006 /s); bound 1 /s, over 1000×
+    //   wobble hump and wiggle: ± half the wobble (0.013 rad); bound 1 rad, 76×
+    // With every value inside them, a window's Hermite curve stays within tens of radians and a few
+    // times the base strength (which `WindField` clamps to the forecast anyway): finite.
+
+    /// |shift value| at a knot, radians.
+    public static let shiftLimit = Double.pi
+    /// |slope| of either channel at a knot, per second.
+    public static let slopeLimit = 1.0
+    /// The strength channel's value at a knot, a factor of the base strength.
+    public static let strengthRange = 0.0...10.0
+    /// |hump| and |wiggle|, radians.
+    public static let wobbleLimit = 1.0
+
+    /// Whether `key` is one a receiver can sail with: a window it may hold and values inside the bounds.
+    public static func isSane(_ key: WindKey) -> Bool {
+        (0...maxWindow).contains(key.window)
+            && abs(key.shift.value) <= shiftLimit && abs(key.shift.slope) <= slopeLimit
+            && strengthRange.contains(key.strength.value) && abs(key.strength.slope) <= slopeLimit
+            && abs(key.wobble.hump) <= wobbleLimit && abs(key.wobble.wiggle) <= wobbleLimit
+    }
 }
 
 /// Server → client, once per race and again before a `Resync` on rejoin: the race as the client
@@ -161,7 +190,7 @@ public struct RaceStart: Equatable, Sendable {
     public var roster: [RosterEntry]
     /// Tide state (#78). Placeholder until #78 defines schema 1: `.none`.
     public var tide: VersionedPayload
-    /// Wind keys revealed so far (#95).
+    /// Wind keys revealed so far (#95), in increasing windows.
     public var windKeys: [WindKey]
 
     /// Sane caps on what a race can be, so a decoded setup never builds a huge course or sequence.
@@ -277,7 +306,8 @@ public struct Resync: Equatable, Sendable {
     public var raceSeed: RaceSeed
     /// The world at the frame's tick.
     public var seats: [WireSeat]
-    /// Every wind key revealed so far (#95).
+    /// Every wind key revealed so far (#95), in increasing windows. A receiver that imports needs them
+    /// without a gap from the window before the resync's tick (`WorldSnapshotError.missingWindKey`).
     public var windKeys: [WindKey]
     public var eventState: EventState
 
@@ -494,24 +524,30 @@ extension JoinRace {
 extension WindKey {
     func encode(to w: inout WireWriter) throws {
         guard window <= WindKeyWire.maxWindow else { throw WireError.outOfRange("windKey.window") }
+        guard WindKeyWire.isSane(self) else { throw WireError.outOfRange("windKey") }
         w.raw(bytes)
     }
 
     init(from r: inout WireReader) throws {
         guard let key = WindKey(bytes: try r.raw(WindKey.byteCount)) else { throw WireError.invalidValue("windKey") }
         guard key.window <= WindKeyWire.maxWindow else { throw WireError.invalidValue("windKey.window") }
+        guard WindKeyWire.isSane(key) else { throw WireError.invalidValue("windKey") }
         self = key
     }
 }
 
+/// A list of keys, in strictly increasing windows: one encoding per message, no key twice.
 func encodeWindKeys(_ keys: [WindKey], to w: inout WireWriter) throws {
+    guard zip(keys, keys.dropFirst()).allSatisfy({ $0.window < $1.window }) else { throw WireError.outOfRange("windKeys") }
     try w.count(keys.count, limit: WireLimit.list, "windKeys")
     for key in keys { try key.encode(to: &w) }
 }
 
 func decodeWindKeys(from r: inout WireReader) throws -> [WindKey] {
     let n = try r.count(limit: WireLimit.list, "windKeys")
-    return try (0..<n).map { _ in try WindKey(from: &r) }
+    let keys = try (0..<n).map { _ in try WindKey(from: &r) }
+    guard zip(keys, keys.dropFirst()).allSatisfy({ $0.window < $1.window }) else { throw WireError.invalidValue("windKeys") }
+    return keys
 }
 
 extension RaceStart {
