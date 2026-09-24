@@ -19,9 +19,16 @@ struct RootView: View {
     @State private var settings = RaceSettings()
     @State private var session: GameSession?
     @State private var checkedLaunchArguments = false
+    @Environment(\.sceneState) private var sceneState
     private let launchOptions = LaunchOptions.current
 
     var body: some View {
+        content
+            // #108's AppModel phase takes this over.
+            .onChange(of: session != nil, initial: true) { _, racing in sceneState.isRaceSequenceShowing = racing }
+    }
+
+    @ViewBuilder private var content: some View {
         if let session {
             RaceView(
                 session: session,
