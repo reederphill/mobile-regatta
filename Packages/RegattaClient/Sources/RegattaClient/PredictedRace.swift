@@ -1,6 +1,11 @@
 import RegattaCore
 import RegattaProtocol
 
+public enum PredictedRaceError: Error, Equatable, Sendable {
+    /// A `Resync` for a race with another race seed than the `RaceStart`'s.
+    case otherRace(RaceSeed)
+}
+
 /// The whole fleet, predicted ahead of the server to the client's tick (#18, ADR 0005).
 ///
 /// It sails a keys-only `Race` (`Race(setup:revealedWindKeys:)`): no wind seed, only the keys the server
@@ -16,7 +21,10 @@ import RegattaProtocol
 /// the key comes, by a `WindKey` event or the resync.
 ///
 /// The race's own events are drained and dropped: online, rule calls, finishes and penalties are shown
-/// only from the server's reliable events (#18, #68); #96 stops the prediction making them at all.
+/// only from the server's reliable events (#18, #68); #96 stops the prediction making them at all. The
+/// app (#68) reads finishes, places and whether the race is over from `events`, the server's event
+/// state, which a `Resync` can restore without replaying the events that built it; the events
+/// `RaceClient.drainServerEvents()` hands out are for showing calls as they happen.
 public final class PredictedRace {
     public let start: RaceStart
     /// The keys-only race, at the client's predicted tick (or before it, while a key is missing).
@@ -46,6 +54,7 @@ public final class PredictedRace {
         self.start = start
         race = Race(setup: start.setup, revealedWindKeys: start.windKeys)
         events = EventState(nextEventSeq: 1)
+        missingWindKey = missingKeyNow()
     }
 
     /// An input the client just sent. It applies at its tick as the race reaches it.
@@ -64,7 +73,7 @@ public final class PredictedRace {
     public func reveal(_ key: WindKey, seq: UInt32) {
         race.addRevealedWindKey(key)
         events.nextEventSeq = seq &+ 1
-        missingWindKey = nil
+        missingWindKey = missingKeyNow()
     }
 
     /// Imports the server's world at `tick` from `snapshot` and sails back to where the race was.
@@ -81,15 +90,17 @@ public final class PredictedRace {
         try race.importSnapshot(world)
         serverTick = tick
         snapshotsImported += 1
-        if let ack = snapshot.ack { acknowledge(through: ack.seq) }
+        if let ack = snapshot.ack { acknowledge(through: ack.seq, snapshotTick: tick) }
         repredict(to: resumeAt)
         return true
     }
 
     /// Rebuilds the race from a `Resync` at `tick`: the server's world, every key revealed so far and
     /// the event state (#18), then sails on to where the race was. The inputs stamped after `tick` are
-    /// kept; the server has the ones before it, or has lost them.
+    /// kept; the server has the ones before it, or has lost them. Throws `PredictedRaceError.otherRace`
+    /// for a resync of another race, and what the import throws; either way the race is unchanged.
     public func apply(_ resync: Resync, tick: Int) throws {
+        guard resync.raceSeed == start.setup.raceSeed else { throw PredictedRaceError.otherRace(resync.raceSeed) }
         let resumeAt = race.tick
         let world = try resync.world(base: race.exportSnapshot(), tick: tick)
         try race.importSnapshot(world)
@@ -101,7 +112,6 @@ public final class PredictedRace {
 
     /// Sails the race on to `tick`, stopping before any tick whose wind needs a key it doesn't hold.
     public func advance(to tick: Int) {
-        missingWindKey = nil
         while race.tick < tick && !race.isOver {
             let next = race.tick + 1
             // Queue the inputs due by `next`. If the step can't go, they stay queued in the race until it can.
@@ -116,18 +126,40 @@ public final class PredictedRace {
             do {
                 try race.tryStep()
             } catch {
-                if case .missingKey(let window) = error { missingWindKey = window }
-                return
+                switch error {
+                case .missingKey(let window):
+                    missingWindKey = window
+                    return
+                case .beforeOrigin:
+                    // Never: the window grid starts a whole window before the sequence, and the race
+                    // never goes back past its start (`WindWindows(startSequenceTicks:)`, `importSnapshot`).
+                    preconditionFailure("predicted race at tick \(race.tick) is before its wind's origin")
+                }
             }
             _ = race.drainEvents()
         }
+        missingWindKey = missingKeyNow()
     }
 
-    /// Drops the inputs up to `seq`: the server has applied them, or a later one. An ack past anything
-    /// sent can't be right, so it counts only up to the last input sent.
-    private func acknowledge(through seq: UInt32) {
+    /// The key the wind at the race's own tick needs and the race doesn't hold, if any: only before the
+    /// race has stepped or imported, when `RaceStart` held too few keys to draw it.
+    private func missingKeyNow() -> Int? {
+        do {
+            for boat in race.boats { _ = try race.wind.sample(boat.position, tick: race.tick) }
+            return nil
+        } catch {
+            if case .missingKey(let window) = error { return window }
+            return nil
+        }
+    }
+
+    /// Drops the inputs up to `seq` stamped at or before `snapshotTick`: the server applied them, or a
+    /// later one, by the snapshot (the `InputAck` contract). One stamped after the snapshot stays, to be
+    /// applied at its stamp, even if the host acknowledged it early. An ack past anything sent can't be
+    /// right, so it counts only up to the last input sent.
+    private func acknowledge(through seq: UInt32, snapshotTick: Int) {
         ackedSeq = max(ackedSeq, min(seq, highestSent))
-        unacked.removeAll { $0.seq <= ackedSeq }
+        unacked.removeAll { $0.seq <= ackedSeq && $0.tick <= snapshotTick }
     }
 
     /// After an import: queue the unapplied inputs again and sail to `tick`.

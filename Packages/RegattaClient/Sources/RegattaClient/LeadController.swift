@@ -18,8 +18,20 @@
 ///
 /// The lead rises at once (a late input costs a tick of the player's steering) and falls at
 /// `fallPerSecond` (running too far ahead only costs responsiveness), and never leaves 0…`maxLead`.
+///
+/// Early margins steer it only through the target, never directly. The clock sync already measures
+/// the uplink every ping, so when the link gets faster the target drops and the lead follows it down
+/// within a few seconds. An early margin, on the other hand, is mostly the jitter buffer doing its job:
+/// lowering the lead on it would give away the buffer the next slow frame needs, and a late input costs
+/// the player more than a tick of extra lead. So the server's early/late feedback steers the lead up
+/// (late) directly and down (early) only as the late correction decays and the measured target falls.
 public struct LeadController: Sendable {
-    /// The server rejects inputs stamped more than 30 ticks (1 s) ahead (#18, #65).
+    /// The server rejects inputs stamped more than 30 ticks (1 s) ahead (#18, #65). The lead plus the
+    /// downlink delay must also stay below the wind-key reveal lead (30 ticks, #95), or the client
+    /// reaches a window before its key arrives and stops to wait for it (it never guesses the wind).
+    /// Since the lead follows the uplink, that holds while the round trip plus jitter is under about a
+    /// second; past that the client waits at each window boundary, and the lead is at this cap anyway.
+    /// So never raise this above the reveal lead.
     public static let maxLead = 30.0
 
     public var lateHoldoff: UInt64 = 250_000

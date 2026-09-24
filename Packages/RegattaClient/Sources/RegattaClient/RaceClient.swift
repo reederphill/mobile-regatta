@@ -7,19 +7,23 @@ import RegattaProtocol
 /// The owner (the app's online driver, #68, or the load client, #67) makes the connection, does the
 /// handshake and joins the race, then hands the `RaceStart` and the transport over. After that it sets
 /// the helm (`setHeld`), taps (`tap`), and calls `update(now:)` every frame with its monotonic clock
-/// in microseconds; the client does nothing between calls. It reads `predicted` to draw the fleet and
-/// `drainServerEvents()` for the server's rule calls and results. Not thread-safe: one owner drives it.
+/// in microseconds; the client does nothing between calls. It reads `predicted` to draw the fleet,
+/// `predicted.events` for the server's finishes, places and whether the race is over, and
+/// `drainServerEvents()` for the server's calls as they happen. Not thread-safe: one owner drives it.
 ///
 /// Each update:
 /// 1. reads every frame that has arrived: pongs into the clock, snapshots and resyncs into the
 ///    prediction, reliable events and keys in order, and the server's input feedback into the lead;
 /// 2. pings if one is due;
 /// 3. once the clock is synchronised, moves the client's tick to `⌊server tick + lead⌋`, never back,
-///    sends the input messages due (stamped for the first tick it's about to sail) and sails the fleet
-///    to the client's tick;
+///    sends the input messages due, stamped from the clock (`max(client tick + 1, ⌊server tick + lead⌋)`,
+///    so an update that comes late never stamps behind the server), and sails the fleet to the client's
+///    tick, unless it is waiting for a resync to rebuild it;
 /// 4. asks for a `Resync` when it can't go on without one: a wind key it needs is missing (never
-///    guessed, ADR 0001), the reliable stream has a gap, or a snapshot won't import. At most once per
-///    `resyncInterval`, until one comes.
+///    guessed, ADR 0001), the reliable stream has a gap, a snapshot won't import, or it has joined a race
+///    under way (`attach`, a second `RaceStart`, `joiningUnderway`). At most once per `resyncInterval`,
+///    until one comes. In the last case it sails nothing until the resync is in: sailing a fresh race
+///    from the start sequence to the server's tick would take the whole race's simulation in one frame.
 public final class RaceClient {
     public enum Status: Equatable, Sendable {
         /// Waiting for the first pong: not sailing or sending inputs yet.
@@ -27,6 +31,8 @@ public final class RaceClient {
         case predicting
         /// Stopped before a tick whose wind needs this key, and asking for a resync.
         case waitingForWindKey(Int)
+        /// Joined a race under way, or reconnected: not sailing until the resync is in.
+        case awaitingResync
         case disconnected
         /// `RaceClosed` or `RaceCancelled` came.
         case finished
@@ -64,13 +70,18 @@ public final class RaceClient {
     private var wantsResync = false
     private var otherSeq: UInt32 = 1
     private var closed = false
-    private var started = false
+    /// Sail nothing until a resync is applied.
+    private var awaitingResync = false
 
-    public init(start: RaceStart, transport: RaceTransport, limits: InputLimits = InputLimits()) {
+    /// `joiningUnderway`: the race started before this client joined it (a rejoin, #68). The server
+    /// sends a `Resync` after the `RaceStart`; the client asks for one too, and sails from it.
+    public init(start: RaceStart, transport: RaceTransport, limits: InputLimits = InputLimits(),
+                joiningUnderway: Bool = false) {
         self.transport = transport
         predicted = PredictedRace(start: start)
         stamper = InputStamper(limits: limits)
         clientTick = predicted.tick
+        if joiningUnderway { awaitResync() }
     }
 
     public var seat: Int { predicted.seat }
@@ -93,17 +104,19 @@ public final class RaceClient {
         return serverEvents
     }
 
-    /// Carries on over a new connection, after a reconnect and join (#68): asks for a resync straight away.
+    /// Carries on over a new connection, after a reconnect and join (#68): asks for a resync straight
+    /// away, and sails nothing until it's in.
     public func attach(_ transport: RaceTransport) {
         self.transport = transport
-        wantsResync = true
         lastResyncRequest = nil
-        if status == .disconnected { status = clock.isSynchronised ? .predicting : .synchronising }
+        awaitResync()
     }
 
     public func update(now: UInt64) {
         guard transport.isConnected else {
             status = .disconnected
+            // Taps made while the connection is down would be stale when it's back.
+            stamper.clearPendingTaps()
             return
         }
         for bytes in transport.receive() {
@@ -131,13 +144,9 @@ public final class RaceClient {
         lead.update(uplinkDelays: clock.uplinkDelays, now: now)
 
         let target = Int((serverTick + lead.lead).rounded(.down))
-        if !started {
-            // The first synchronised update: the race start's tick is long gone on the server.
-            started = true
-            clientTick = max(clientTick, target - 1)
-        }
-        // Inputs are stamped for the first tick this update sails.
-        let stamp = clientTick + 1
+        // Stamped from the clock: after a late update (a hitch, the first update, a stall) the ticks
+        // before `target` are already past on the clock, and stamping them would make the input late.
+        let stamp = max(clientTick + 1, target)
         for input in stamper.outgoing(now: now, tick: stamp) {
             switch input.kind {
             case .held(let held):
@@ -150,6 +159,10 @@ public final class RaceClient {
             predicted.sent(input)
         }
         clientTick = max(clientTick, target)
+        guard !awaitingResync else {
+            status = .awaitingResync
+            return
+        }
         predicted.advance(to: clientTick)
 
         if let key = predicted.missingWindKey {
@@ -167,12 +180,15 @@ public final class RaceClient {
         case .pong(let pong):
             clock.receive(pong, tick: frame.tick, now: now)
         case .snapshot(let snapshot):
-            if let ack = snapshot.ack, ack.seq != lastAckSeq {
-                lastAckSeq = ack.seq
-                lead.feedback(margin: Int(ack.margin), now: now)
-            }
+            // Until the resync is in, the race is at another tick altogether: nothing to import into.
+            guard !awaitingResync else { return }
             do {
-                try predicted.apply(snapshot, tick: frame.tick)
+                // Feedback only from a snapshot newer than the last: a stale one's ack is older news.
+                guard try predicted.apply(snapshot, tick: frame.tick) else { return }
+                if let ack = snapshot.ack, ack.seq != lastAckSeq {
+                    lastAckSeq = ack.seq
+                    lead.feedback(margin: Int(ack.margin), now: now)
+                }
             } catch {
                 stats.snapshotsRefused += 1
                 wantsResync = true
@@ -184,17 +200,25 @@ public final class RaceClient {
                 try predicted.apply(resync, tick: frame.tick)
                 stats.resyncsApplied += 1
                 wantsResync = false
-                reliable.restart(at: resync.eventState.nextEventSeq)
-                for ready in reliable.drain(now: now) { deliver(ready) }
+                awaitingResync = false
+                let next = resync.eventState.nextEventSeq
+                if let already = reliable.delivered(since: next) {
+                    // Frames from `next` on reached us before the resync, and the server won't send them
+                    // again: its state lacks them, so they go on top. Shown once already, so not again.
+                    for frame in already { apply(frame) }
+                } else {
+                    reliable.restart(at: next)
+                    for ready in reliable.drain(now: now) { deliver(ready) }
+                }
             } catch {
                 wantsResync = true
             }
         case .raceStart(let start):
-            // A rejoin (#68): the race again, then a resync to bring it up to the server's tick.
+            // A rejoin (#68): the race again, then the resync to bring it up to the server's tick.
             predicted = PredictedRace(start: start)
             clientTick = max(clientTick, predicted.tick)
             reliable = ReliableStream(next: 1)
-            wantsResync = true
+            awaitResync()
         case .raceClosed, .raceCancelled:
             closed = true
         case .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync, .helloAck, .updateRequired:
@@ -202,17 +226,28 @@ public final class RaceClient {
         }
     }
 
+    /// A reliable frame, in order, for the first time: into the prediction, and an event to the owner.
     private func deliver(_ frame: Frame) {
+        apply(frame)
+        if let event = frame.raceEvent { serverEvents.append(event) }
+    }
+
+    private func apply(_ frame: Frame) {
         switch frame.message {
         case .event:
             guard let event = frame.raceEvent else { return }
             predicted.record(event, seq: frame.seq)
-            serverEvents.append(event)
         case .windKey(let key):
             predicted.reveal(key, seq: frame.seq)
         default:
             break
         }
+    }
+
+    private func awaitResync() {
+        awaitingResync = true
+        wantsResync = true
+        status = .awaitingResync
     }
 
     // MARK: - Sending

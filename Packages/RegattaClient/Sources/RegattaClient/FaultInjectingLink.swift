@@ -53,7 +53,8 @@ public final class FaultInjectingLink {
 
     /// One end of the link.
     public final class Endpoint: RaceTransport {
-        unowned let link: FaultInjectingLink
+        /// Weak: an end outliving its link reads as a closed connection.
+        weak var link: FaultInjectingLink?
         let sends: Direction
         /// The connection this end belongs to; `reconnect()` starts another.
         let connection: Int
@@ -64,15 +65,18 @@ public final class FaultInjectingLink {
             connection = link.connection
         }
 
-        public var isConnected: Bool { link.isConnected && connection == link.connection }
+        public var isConnected: Bool {
+            guard let link else { return false }
+            return link.isConnected && connection == link.connection
+        }
 
         public func send(_ frame: [UInt8]) {
-            guard isConnected else { return }
+            guard isConnected, let link else { return }
             link.send(frame, sends)
         }
 
         public func receive() -> [[UInt8]] {
-            guard isConnected else { return [] }
+            guard isConnected, let link else { return [] }
             return link.deliver(sends == .uplink ? .downlink : .uplink)
         }
     }
@@ -129,6 +133,7 @@ public final class FaultInjectingLink {
     public func disconnect() {
         isConnected = false
         inFlight = ([], [])
+        lastDeliverAt = (0, 0)
     }
 
     /// Restores the connection, as a new one: the ends are replaced, so an owner still holding an old

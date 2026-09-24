@@ -16,6 +16,9 @@ public struct InputLimits: Hashable, Sendable {
     /// for a dropped player (#18: it holds the last input 0.5 s, then treats the seat as gone). A builder
     /// choice: 200 ms, so two in a row can be lost inside that 0.5 s.
     public var heartbeat: UInt64 = 200_000
+    /// A tap not sent within this long of being made is dropped: stamped any later, a tack would
+    /// surprise the player. A builder choice: 250 ms.
+    public var maxTapAge: UInt64 = 250_000
 
     public init() {}
 }
@@ -59,7 +62,8 @@ public struct StampedInput: Hashable, Sendable {
 ///   last held input for a tick, so more would be wasted), and again every `heartbeat` when it doesn't.
 ///   Over the cap, a change waits for room and then goes with its latest value: it is never lost.
 /// - A tap goes once, stamped with the next tick. Over the cap it is refused when it's made (`tap`
-///   returns false), as the server would drop it, rather than delayed until it no longer makes sense.
+///   returns false), as the server would drop it, rather than delayed until it no longer makes sense;
+///   one that can't be sent within `maxTapAge` (the client wasn't synchronised or updating) is dropped.
 public struct InputStamper: Sendable {
     public let limits: InputLimits
     /// The input the player holds now.
@@ -68,7 +72,12 @@ public struct InputStamper: Sendable {
     public private(set) var nextSeq: UInt32 = 1
     private var lastHeldTick: Int?
     private var lastHeldAt: UInt64?
-    private var pendingTaps: [BoatTap] = []
+    private struct PendingTap: Sendable {
+        let tap: BoatTap
+        let madeAt: UInt64
+    }
+
+    private var pendingTaps: [PendingTap] = []
     private var heldLimiter: SlidingWindowLimiter
     private var tapLimiter: SlidingWindowLimiter
 
@@ -83,9 +92,12 @@ public struct InputStamper: Sendable {
     /// Queues `tap` for the next send; false, and nothing queued, if it would pass the tap cap.
     public mutating func tap(_ tap: BoatTap, now: UInt64) -> Bool {
         guard tapLimiter.allows(now: now, extra: pendingTaps.count) else { return false }
-        pendingTaps.append(tap)
+        pendingTaps.append(PendingTap(tap: tap, madeAt: now))
         return true
     }
+
+    /// Drops the taps not yet sent, e.g. when the connection goes: they'd be stale by the time it's back.
+    public mutating func clearPendingTaps() { pendingTaps.removeAll() }
 
     /// The messages to send at `now`, stamped for `tick`: the held input if it changed or a heartbeat
     /// is due, then any taps.
@@ -101,9 +113,9 @@ public struct InputStamper: Sendable {
             lastHeldTick = tick
             lastHeldAt = now
         }
-        for tap in pendingTaps {
+        for pending in pendingTaps where now - pending.madeAt <= limits.maxTapAge {
             tapLimiter.record(now: now)
-            out.append(StampedInput(seq: takeSeq(), tick: tick, kind: .tap(tap)))
+            out.append(StampedInput(seq: takeSeq(), tick: tick, kind: .tap(pending.tap)))
         }
         pendingTaps.removeAll()
         return out
