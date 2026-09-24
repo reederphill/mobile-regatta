@@ -16,6 +16,9 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   BoatClass.swift         boat class file schema: hull, polar, momentum, steering, shadow, contact, ease
   PolarTable.swift        polar by TWA × TWS, bilinear, with best upwind and downwind VMG derived at load
   Resources/boat-classes/ boat class files, `<id>@<version>.json`
+  Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns
+  Resources/conditions/   the four conditions files, `<id>@<version>.json`
+  WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast, the venue pairing stub
   Venue.swift             venue file schema: land, pairings with geographic grids, current (docs/venue-file.md)
   Resources/venues/       venue files; `dev-venue@1` stands in until the real venues (#83)
   Course.swift            windward-leeward course, start/finish line, rounding gates
@@ -27,7 +30,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   RaceLog.swift           race log: header, inputs as applied, seat events; stable JSON
   Replayer.swift          re-simulates a race log to its final state, never running a bot brain
   BotBrain.swift          AI helms: start timing, laylines, shifts, roundings, keeping clear
-  Random.swift            SplitMix64 and our own range, coin and shuffle mappings
+  Random.swift            SplitMix64, named streams of a seed, and our own range, coin and shuffle mappings
   SimulationVersion.swift simulation version: revision, toolchain, C library, architecture
   Digest.swift            FNV-1a state digest for golden replay tests
   Sources/regatta-replay  `regatta-replay <log>`: replays a race log and prints its final digest
@@ -56,7 +59,9 @@ Races are replayed from their seed and input log (ADR 0002), so on the race serv
 bit-for-bit deterministic:
 
 - All randomness comes from the race's `SplitMix64`, mapped with its own `unit()`, `range`, `bool()`,
-  `int(in:)` and `shuffle`. No standard-library random APIs, and no wall clock.
+  `int(in:)` and `shuffle`. No standard-library random APIs, and no wall clock. A new use of a seed takes
+  its own stream, `SplitMix64(seed:stream:)`, so it never moves existing draws: `WindSetup` draws from the
+  race seed's `"windsetp"` stream, never from the wind seed.
 - The step path never iterates a `Set` or `Dictionary`: their order depends on a per-process hash seed.
   Look them up by key and iterate arrays.
 - `simulationVersion` is `<revision>/<toolchain>/<C library>/<architecture>`. Bump `simulationRevision`
@@ -76,15 +81,15 @@ bit-for-bit deterministic:
 
 ### Data files
 
-Boat classes and venues (and later conditions and the rules configuration) are immutable, versioned JSON
+Boat classes, conditions and venues (and later the rules configuration) are immutable, versioned JSON
 files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`. The venue schema is in
 `docs/venue-file.md`.
 
 - Every file starts with `schemaVersion`, `id` and `version`. A schema version the build doesn't know
   throws, and so does a key repeated in one object, before anything parses the file (parsers disagree on
-  which copy wins, and differently on Darwin and Linux). A file's `FileRef` is its id, version and the SHA-256 of its exact bytes, so a released file
-  never changes: tuning ships `<id>@<version + 1>.json` next to it, and old versions keep loading.
-  `.gitattributes` stops git rewriting their line endings.
+  which copy wins, and differently on Darwin and Linux). A file's `FileRef` is its id, version and the
+  SHA-256 of its exact bytes, so a released file never changes: tuning ships `<id>@<version + 1>.json`
+  next to it, and old versions keep loading. `.gitattributes` stops git rewriting their line endings.
 - Files use knots, degrees, seconds and hull lengths; the loader converts them once to m/s, radians and
   metres. Derived values, such as the best upwind and downwind angles, are computed at load, never stored.
 - `placeholders` lists JSON Pointers to values that are placeholders awaiting tuning; the loader checks

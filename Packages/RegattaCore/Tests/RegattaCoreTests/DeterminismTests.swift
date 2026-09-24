@@ -49,6 +49,32 @@ import Testing
 }
 
 @Suite struct RandomTests {
+    @Test func streamFirstValuesArePinned() {
+        // The WindSetup stream ("windsetp") of seed 42: the tag mixed through one SplitMix64 output.
+        var stream = SplitMix64(seed: 42, stream: 0x7769_6E64_7365_7470)
+        #expect(stream.next() == 0x1879_B57E_A745_501B)
+        #expect(stream.next() == 0x4471_799F_4664_BC5E)
+        var mixer = SplitMix64(seed: 42 ^ 0x7769_6E64_7365_7470)
+        var expected = SplitMix64(seed: mixer.next())
+        var again = SplitMix64(seed: 42, stream: 0x7769_6E64_7365_7470)
+        #expect((0..<8).map { _ in again.next() } == (0..<8).map { _ in expected.next() })
+    }
+
+    @Test func streamIsIndependentOfThePlainStream() {
+        // A named stream neither consumes nor mirrors the plain stream of the same seed, and two tags differ.
+        for k in 0..<100 {
+            let seed = UInt64(k) &* 0x9E37_79B9_7F4A_7C15 ^ 0x5EED
+            var plain = SplitMix64(seed: seed)
+            var a = SplitMix64(seed: seed, stream: 0x7769_6E64_7365_7470)
+            var b = SplitMix64(seed: seed, stream: 1)
+            let plainValues = (0..<64).map { _ in plain.next() }
+            let aValues = (0..<64).map { _ in a.next() }
+            let bValues = (0..<64).map { _ in b.next() }
+            #expect(plainValues.allSatisfy { !aValues.contains($0) && !bValues.contains($0) })
+            #expect(aValues.allSatisfy { !bValues.contains($0) })
+        }
+    }
+
     @Test func unitFirstValuesArePinned() {
         var rng = SplitMix64(seed: 1)
         let values = (0..<3).map { _ in rng.unit() }

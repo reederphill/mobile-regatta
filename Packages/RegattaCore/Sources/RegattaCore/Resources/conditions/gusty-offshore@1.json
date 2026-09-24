@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "gusty-offshore",
+  "version": 1,
+  "name": "Gusty offshore",
+  "placeholders": [
+    "/puffs"
+  ],
+  "notes": [
+    "Wind model #10: 14-20 kn, oscillation +/-12 deg over 90-120 s, no persistent trend; frequent, strong puffs with wide fanning, and deep lulls.",
+    "Units: knots, degrees, seconds, metres; gains, losses, shares, coverage and drift as fractions.",
+    "Placeholders (JSON Pointers above) await tuning: the puff columns, set from #10's words (frequent, strong, wide fanning, deep lulls) and its shared ranges (60-150 m, puffs +20-35 %, lulls -15-25 %, fan up to 8 deg, drift 0.3-0.5 x wind)."
+  ],
+  "strength": { "minKnots": 14, "maxKnots": 20 },
+  "shift": {
+    "amplitudeDegrees": 12,
+    "periodSeconds": { "min": 90, "max": 120 }
+  },
+  "trend": null,
+  "build": null,
+  "puffs": {
+    "coverage": 0.38,
+    "diameterMetres": { "min": 60, "max": 150 },
+    "lifetimeSeconds": { "min": 40, "max": 90 },
+    "driftFraction": { "min": 0.3, "max": 0.5 },
+    "fanDegrees": 8,
+    "puffGain": { "min": 0.28, "max": 0.35 },
+    "lullShare": 0.35,
+    "lullLoss": { "min": 0.20, "max": 0.25 }
+  }
+}

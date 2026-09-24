@@ -78,6 +78,16 @@ enum VenueFixtures {
         #expect(file.header.placeholders.contains("/pairings/0/geographicGrid"))
     }
 
+    @Test func devVenuePairingsNameBundledConditionsFiles() throws {
+        let venue = try VenueFile.bundled(id: VenueFixtures.devID, version: 1).content
+        #expect(venue.pairings.count == 4)
+        for pairing in venue.pairings {
+            let conditions = try ConditionsFile.bundled(id: pairing.conditions.id, version: pairing.conditions.version)
+            #expect(conditions.ref.key == pairing.conditions)
+            #expect(venue.pairing(for: conditions.ref.key) == pairing)
+        }
+    }
+
     @Test func hashesArePinned() throws {
         let test = try VenueFixtures.testFile()
         #expect(test.ref.hash.hex == VenueFixtures.testPinnedHash)
