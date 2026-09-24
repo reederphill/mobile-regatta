@@ -10,6 +10,10 @@
 #
 # Changing IMAGE changes the simulation version: update replayPlatform in
 # Sources/RegattaCore/SimulationVersion.swift, bump simulationRevision and add a golden row.
+#
+# The container fetches package dependencies (swift-crypto) from GitHub. Behind a proxy, pass
+# extra container arguments in CONTAINER_RUN_ARGS, e.g.
+#   CONTAINER_RUN_ARGS="--network host -e HTTPS_PROXY=$HTTPS_PROXY" scripts/linux-test.sh
 set -euo pipefail
 
 IMAGE="swift:6.3.3-noble@sha256:8de8ea332a61e961ead4ef41029c2552b18e1a70dd5942d25ecf7d8de2eec5b5"
@@ -27,12 +31,14 @@ if [[ -z "$engine" ]]; then
     fi
 fi
 
+read -r -a run_args <<< "${CONTAINER_RUN_ARGS:-}"
+
 root="$(cd "$(dirname "$0")/.." && pwd)"
 log="$(mktemp)"
 trap 'rm -f "$log"' EXIT
 
 # Build inside the container's own scratch path so Linux artefacts never mix with the host's .build.
-"$engine" run --rm --platform "$PLATFORM" \
+"$engine" run --rm --platform "$PLATFORM" ${run_args[@]+"${run_args[@]}"} \
     -e REGATTA_EXPECT_REPLAY_PLATFORM=1 \
     -v "$root/Packages/RegattaCore:/src" -w /src \
     "$IMAGE" \

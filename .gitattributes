@@ -1,0 +1,2 @@
+# Data files are hashed byte for byte (ADR 0004), so git must never rewrite their line endings.
+Packages/RegattaCore/Sources/RegattaCore/Resources/** -text
