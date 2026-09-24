@@ -142,6 +142,10 @@ Run both packages' tests on the pinned Linux replay platform, in debug and relea
 scripts/linux-test.sh
 ```
 
+The image is `linux/amd64`. On Apple silicon, run it in a podman machine with Rosetta enabled (for example
+`podman machine init --rosetta …`, made the default connection). Without Rosetta, podman emulates x86_64 with
+qemu, which is very slow and has deadlocked the parallel build.
+
 Run the app's unit tests (`RegattaTests`) and UI tests (`RegattaUITests`) on the simulator:
 
 ```bash

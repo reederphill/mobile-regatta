@@ -38,6 +38,18 @@ import RegattaCore
         #expect(session.roster[1].isBot && !session.roster[race.playerIndex].isBot)
     }
 
+    /// Under `-demo` the tack button doesn't reach the bot-sailed seat; in a normal race it does.
+    @Test func tackButtonOnlyReachesAHumanSeat() {
+        let demo = GameSession(config: RaceConfig(opponents: 3, seed: 1, windSeed: 2, botSailsYourBoat: true))
+        let normal = GameSession(config: Self.config)
+        for session in [demo, normal] {
+            session.tackOrGybe()
+            session.race.step()
+        }
+        #expect(!demo.race.log.inputs.contains { $0.seat == 0 && $0.kind == .tap(.tackGybe) })
+        #expect(normal.race.log.inputs.contains { $0.seat == 0 && $0.kind == .tap(.tackGybe) })
+    }
+
     @Test func hudClockCarriesTheTick() {
         let session = GameSession(config: Self.config)
         for _ in 0..<45 { session.race.step() }

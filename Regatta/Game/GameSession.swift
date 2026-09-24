@@ -54,6 +54,8 @@ final class GameSession {
     }
 
     func tackOrGybe() {
+        // With `-demo` a bot sails your seat, and the button doesn't reach it.
+        guard scene.seats[race.playerIndex].isHuman else { return }
         race.playerTackOrGybe()
         impact.impactOccurred(intensity: 0.4)
     }

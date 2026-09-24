@@ -104,6 +104,14 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         #expect(BotDriver(seat: 2, raceSeed: RaceSeed(7)).seed == seeds[2])
         #expect(BotDriver(seat: 2, raceSeed: RaceSeed(7)).style == BotDriver(seat: 2, raceSeed: RaceSeed(7)).style)
     }
+
+    /// Server and device must agree on every bot's seed, so its style and sailing name: pinned, so a
+    /// change to `FNV1a` or the seed's inputs can't move them silently. Computed independently of Swift:
+    /// FNV-1a 64 over the little-endian bytes of the race seed, the seat, the tag's length, then each tag byte.
+    @Test func botSeedKnownAnswers() {
+        #expect(botSeed(raceSeed: RaceSeed(7), seat: 0) == 0x749F_ACB9_8825_5498)
+        #expect(botSeed(raceSeed: RaceSeed(7), seat: 5) == 0xDFAF_56EF_8D24_77FD)
+    }
 }
 
 @Suite struct SeatControllerTests {
@@ -156,7 +164,8 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         #expect(replayed.digest() == race.digest())
         #expect(replayed.log == log)
         // scripts/linux-test.sh counts these lines: RegattaBots built and ran in both configurations.
-        print("REGATTABOTS replay digest=\(hex64(race.digest()))")    }
+        print("REGATTABOTS replay digest=\(hex64(race.digest()))")
+    }
 
     /// No exceptions for bots (#19): a scripted seat that sends a bot's applied inputs sails the same boat.
     @Test func scriptedSeatReplayingABotsInputsSailsTheSameBoat() {
