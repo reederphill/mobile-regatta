@@ -57,6 +57,12 @@ import RegattaCore
         #expect(options.problems == ["-seed needs a value", "-fixture needs a value"])
     }
 
+    @Test func uiTestsAndFixturesHideTheDebugStats() {
+        #expect(parse("-autostart").showsDebugStats)
+        #expect(!parse("-uitesting", "-autostart").showsDebugStats)
+        #expect(!parse("-fixture", "start").showsDebugStats)
+    }
+
     @Test func aPinnedSeedSailsEveryRace() {
         let options = parse("-seed", "1")
         #expect(options.raceConfig(from: RaceSettings()).seed == 1)

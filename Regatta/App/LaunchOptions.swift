@@ -9,6 +9,7 @@ import RegattaCore
 /// - `-seed <n>` sails every race on seed `n` instead of a random one.
 /// - `-fixture <name>` names a render fixture to replay (#62).
 /// - `-timescale <n>` runs the simulation at `n`× real time.
+/// - `-uitesting` marks a UI test run.
 /// - `-scheme halves|tiller` overrides the device's steering scheme (#112).
 /// - `-camera course|boat` overrides the device's camera (#113).
 struct LaunchOptions: Equatable {
@@ -26,6 +27,7 @@ struct LaunchOptions: Equatable {
     var autostart = false
     var demo = false
     var perf = false
+    var uiTesting = false
     var seed: UInt64?
     var fixture: String?
     var timescale = 1.0
@@ -48,6 +50,7 @@ struct LaunchOptions: Equatable {
             case "-autostart": autostart = true
             case "-demo": demo = true
             case "-perf": perf = true
+            case "-uitesting": uiTesting = true
             case "-seed", "-fixture", "-timescale", "-scheme", "-camera":
                 guard let value = rest.first, !Self.flags.contains(value) else {
                     problems.append("\(argument) needs a value")
@@ -61,7 +64,7 @@ struct LaunchOptions: Equatable {
         }
     }
 
-    private static let flags: Set = ["-autostart", "-demo", "-perf", "-seed", "-fixture", "-timescale", "-scheme", "-camera"]
+    private static let flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-seed", "-fixture", "-timescale", "-scheme", "-camera"]
 
     private mutating func apply(_ argument: String, _ value: String) {
         switch argument {
@@ -83,6 +86,10 @@ struct LaunchOptions: Equatable {
     private mutating func reject(_ argument: String, _ value: String, _ expected: String) {
         problems.append("\(argument) \(value): expected \(expected)")
     }
+
+    /// Whether the Debug FPS, node and draw-count overlay shows. UI tests and render fixtures hide it,
+    /// so their screenshots are deterministic.
+    var showsDebugStats: Bool { !uiTesting && fixture == nil }
 
     /// Whether launch skips the menu and starts a race.
     var startsRace: Bool { autostart || demo || perf }

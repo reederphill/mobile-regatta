@@ -7,7 +7,7 @@ final class RaceClockUITests: XCTestCase {
 
     @MainActor func testRaceClockAdvancesAfterAutostart() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-autostart", "-seed", "1"]
+        app.launchArguments = ["-uitesting", "-autostart", "-seed", "1"]
         app.launch()
 
         let clock = app.staticTexts["race-clock"]
