@@ -37,6 +37,7 @@ public final class PredictedRace {
     private var unacked: [StampedInput] = []
     /// How many of `unacked` the race has queued since it last imported.
     private var queued = 0
+    private var highestSent: UInt32 = 0
 
     public var seat: Int { start.yourSeat }
     public var tick: Int { race.tick }
@@ -50,6 +51,7 @@ public final class PredictedRace {
     /// An input the client just sent. It applies at its tick as the race reaches it.
     public func sent(_ input: StampedInput) {
         unacked.append(input)
+        highestSent = max(highestSent, input.seq)
     }
 
     /// A reliable event, in order; `seq` is its reliable-stream number.
@@ -62,7 +64,7 @@ public final class PredictedRace {
     public func reveal(_ key: WindKey, seq: UInt32) {
         race.addRevealedWindKey(key)
         events.nextEventSeq = seq &+ 1
-        if missingWindKey != nil { missingWindKey = nil }
+        missingWindKey = nil
     }
 
     /// Imports the server's world at `tick` from `snapshot` and sails back to where the race was.
@@ -121,9 +123,10 @@ public final class PredictedRace {
         }
     }
 
-    /// Drops the inputs up to `seq`: the server has applied them, or a later one.
+    /// Drops the inputs up to `seq`: the server has applied them, or a later one. An ack past anything
+    /// sent can't be right, so it counts only up to the last input sent.
     private func acknowledge(through seq: UInt32) {
-        ackedSeq = max(ackedSeq, seq)
+        ackedSeq = max(ackedSeq, min(seq, highestSent))
         unacked.removeAll { $0.seq <= ackedSeq }
     }
 

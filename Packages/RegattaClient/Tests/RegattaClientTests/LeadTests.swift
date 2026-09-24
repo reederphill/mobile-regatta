@@ -76,3 +76,56 @@ import Testing
         #expect(harness.host.rejected == 0)
     }
 }
+
+/// The lead controller on its own: the target, the server's late feedback, and the cap.
+@Suite struct LeadControllerTests {
+    static let tick = ClockSync.tickMicros
+
+    @Test func aSteadyUplinkGivesItsDelayPlusOneTick() {
+        var lead = LeadController()
+        lead.update(uplinkDelays: Array(repeating: 5 * Self.tick, count: 10), now: 0)
+        #expect(abs(lead.lead - 6) < 1e-9)
+    }
+
+    /// A late input raises the lead by the ticks it was late, once per holdoff; with no more late inputs
+    /// for 2 s the raise decays at half a tick a second.
+    @Test func lateFeedbackRaisesTheLeadThenDecays() {
+        var lead = LeadController()
+        let delays = Array(repeating: 5 * Self.tick, count: 10)
+        lead.update(uplinkDelays: delays, now: 0)
+        lead.feedback(margin: -3, now: 10_000)
+        lead.feedback(margin: -2, now: 100_000) // in flight with the old lead: ignored
+        lead.update(uplinkDelays: delays, now: 100_000)
+        #expect(abs(lead.lead - 9) < 1e-9)
+        #expect(lead.lateInputs == 2)
+        lead.feedback(margin: 4, now: 200_000) // early: nothing to do
+        var now: UInt64 = 100_000
+        while now < 2_010_000 {
+            now += 10_000
+            lead.update(uplinkDelays: delays, now: now)
+        }
+        #expect(abs(lead.lead - 9) < 1e-9) // still within 2 s of the last late input
+        while now < 4_010_000 {
+            now += 10_000
+            lead.update(uplinkDelays: delays, now: now)
+        }
+        #expect(abs(lead.lead - 8) < 0.05)
+        while now < 12_000_000 {
+            now += 10_000
+            lead.update(uplinkDelays: delays, now: now)
+        }
+        #expect(abs(lead.lead - 6) < 1e-9)
+    }
+
+    /// The lead falls at most 8 ticks a second when the link gets faster, and never passes 30 ticks.
+    @Test func itFallsGentlyAndNeverPassesTheCap() {
+        var lead = LeadController()
+        lead.update(uplinkDelays: [60 * Self.tick], now: 0)
+        #expect(lead.lead == 30)
+        lead.feedback(margin: -100, now: 0)
+        lead.update(uplinkDelays: [60 * Self.tick], now: 10_000)
+        #expect(lead.lead == 30 && lead.feedback == lead.maxFeedback)
+        lead.update(uplinkDelays: [2 * Self.tick], now: 510_000)
+        #expect(abs(lead.lead - 26) < 1e-9)
+    }
+}
