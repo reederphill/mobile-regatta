@@ -83,7 +83,7 @@ import Testing
         let angle = rad2deg(best.twa)
         #expect(angle >= 40 - 1e-9 && angle <= 45 + 1e-9, "best upwind TWA \(angle)°")
         #expect(abs(best.speed - polar.speed(twa: best.twa, tws: metresPerSecond(knots: tws))) < 1e-12)
-        #expect(abs(best.vmg - best.speed * cos(best.twa)) < 1e-12)
+        #expect(abs(best.vmg - best.speed * RegattaCore.cos(best.twa)) < 1e-12)
     }
 
     @Test func bestDownwindIs165In6KnotsAnd180From8() {
@@ -103,15 +103,15 @@ import Testing
         for (c, w) in polar.twsAxis.enumerated() {
             let up = polar.bestUpwind(tws: w), down = polar.bestDownwind(tws: w)
             for (r, twa) in polar.twaAxis.enumerated() {
-                #expect(polar.speeds[c][r] * cos(twa) <= up.vmg + 1e-12, "upwind row \(rad2deg(twa))°, column \(c)")
-                #expect(-polar.speeds[c][r] * cos(twa) <= down.vmg + 1e-12, "downwind row \(rad2deg(twa))°, column \(c)")
+                #expect(polar.speeds[c][r] * RegattaCore.cos(twa) <= up.vmg + 1e-12, "upwind row \(rad2deg(twa))°, column \(c)")
+                #expect(-polar.speeds[c][r] * RegattaCore.cos(twa) <= down.vmg + 1e-12, "downwind row \(rad2deg(twa))°, column \(c)")
             }
             var bestUp = 0.0, bestDown = 0.0
             for tenths in 0...1800 {
                 let twa = deg2rad(Double(tenths) / 10)
                 let s = polar.speed(twa: twa, tws: w)
-                bestUp = max(bestUp, s * cos(twa))
-                bestDown = max(bestDown, -s * cos(twa))
+                bestUp = max(bestUp, s * RegattaCore.cos(twa))
+                bestDown = max(bestDown, -s * RegattaCore.cos(twa))
             }
             #expect(bestUp <= up.vmg + tolerance && bestDown <= down.vmg + tolerance, "column \(c)")
         }

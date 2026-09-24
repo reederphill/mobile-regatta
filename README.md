@@ -10,6 +10,7 @@ This first cut is single-player against bots. Multiplayer, the lobby and ranking
 ```
 Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Geometry.swift          vectors, angles, line crossings, SAT collision
+  Trig.swift              `sin` and `cos` that optimized builds can't merge into `sincos` (Determinism, below)
   WindKey.swift           the 30 s wind windows, a window's key (knot, strength, wobble, puff seed) and the key chain
   WindKeyGenerator.swift  the server-side (or practice) key chain from the wind seed, by HMAC-SHA256
   WindField.swift         the pure keyed wind: Hermite knots between keys, sampled by position and tick
@@ -101,8 +102,15 @@ bit-for-bit deterministic:
   on `linux/amd64`: Swift 6.3.3, glibc 2.39, x86_64. Trig uses that platform's libm rather than our own
   implementation: the C library is already part of the simulation version, and iOS clients only have to
   be close. Upgrading the image is a simulation version change.
-- Golden digests are asserted only on the replay platform. On macOS the tests check that the digest is
-  the same twice in one process and across two processes (`scripts/check-digest-stable.sh`).
+- Debug and release builds must replay a race identically. Swift doesn't fuse `a * b + c` into a
+  multiply-add, but LLVM merges `sin(x)` and `cos(x)` into one `sincos` call in optimized code, and
+  Apple's `__sincos_stret` rounds differently from `sin`. RegattaCore's own `sin` and `cos`
+  (`Trig.swift`) shadow the C library's and prevent the merge, so don't qualify them as
+  `Foundation.sin` or `Darwin.cos`.
+- Golden digests are asserted only on the replay platform, where `scripts/linux-test.sh` also checks
+  that debug and release agree on the golden and on RegattaBots' replay race. On macOS the tests check
+  that the digest is the same twice in one process, across two processes and in release
+  (`scripts/check-digest-stable.sh`).
 
 ### Data files
 

@@ -74,9 +74,17 @@ if [[ "$(printf '%s\n' "$lines" | sort -u | wc -l | tr -d ' ')" != "1" ]]; then
 fi
 
 # RegattaBots built and its tests ran in both configurations: its replay test prints one line each.
-bots="$(grep -c 'REGATTABOTS replay digest=' "$log" || true)"
-if [[ "$bots" != "2" ]]; then
-    echo "linux-test.sh: expected 2 REGATTABOTS lines (debug and release), got $bots" >&2
+# It sails a different race from the golden (bots, contacts, penalty turns), so it must agree too.
+bots="$(grep -o 'REGATTABOTS replay digest=.*' "$log" || true)"
+echo
+echo "RegattaBots replay digests (debug and release):"
+echo "$bots"
+count="$(printf '%s' "$bots" | grep -c . || true)"
+if [[ "$count" != "2" ]]; then
+    echo "linux-test.sh: expected 2 REGATTABOTS lines (debug and release), got $count" >&2
     exit 1
 fi
-echo "RegattaBots tests ran in debug and release."
+if [[ "$(printf '%s\n' "$bots" | sort -u | wc -l | tr -d ' ')" != "1" ]]; then
+    echo "linux-test.sh: debug and release RegattaBots replay digests differ" >&2
+    exit 1
+fi
