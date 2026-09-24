@@ -62,6 +62,10 @@ public final class Race {
     public private(set) var isOver = false
     public private(set) var firstFinishTime: Double?
 
+    /// Wraps the bot-brain phase of `step()` so a profiler can time it; the app emits an `os_signpost` interval.
+    /// It must call `body` exactly once and must not touch the race, so it never changes simulation output.
+    public var botBrainsInterval: ((_ body: () -> Void) -> Void)?
+
     private struct Pair: Hashable {
         let a: Int
         let b: Int
@@ -146,12 +150,7 @@ public final class Race {
         refreshWind()
         applyWindShadows()
 
-        for i in boats.indices where boats[i].isOnCourse {
-            guard var brain = brains[i] else { continue }
-            let rudder = brain.rudder(for: i, in: self)
-            brains[i] = brain
-            boats[i].desiredRudder = rudder
-        }
+        if let botBrainsInterval { botBrainsInterval(runBotBrains) } else { runBotBrains() }
 
         let previous = boats.map(\.position)
         for i in boats.indices { integrate(i, Race.dt) }
@@ -159,6 +158,15 @@ public final class Race {
         resolveObstacleContacts()
         for i in boats.indices { updateProgress(i, from: previous[i]) }
         checkForEnd()
+    }
+
+    private func runBotBrains() {
+        for i in boats.indices where boats[i].isOnCourse {
+            guard var brain = brains[i] else { continue }
+            let rudder = brain.rudder(for: i, in: self)
+            brains[i] = brain
+            boats[i].desiredRudder = rudder
+        }
     }
 
     private func refreshWind() {
