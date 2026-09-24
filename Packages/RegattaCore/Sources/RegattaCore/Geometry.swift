@@ -37,6 +37,12 @@ public extension SIMD2 where Scalar == Double {
 @inlinable public func deg2rad(_ degrees: Double) -> Double { degrees * .pi / 180 }
 @inlinable public func rad2deg(_ radians: Double) -> Double { radians * 180 / .pi }
 
+/// Metres per second in one knot (1852 m per hour). Data files use knots; code uses m/s.
+public let metresPerSecondPerKnot = 1852.0 / 3600.0
+
+@inlinable public func metresPerSecond(knots: Double) -> Double { knots * metresPerSecondPerKnot }
+@inlinable public func knots(metresPerSecond: Double) -> Double { metresPerSecond / metresPerSecondPerKnot }
+
 public extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
         min(max(self, range.lowerBound), range.upperBound)

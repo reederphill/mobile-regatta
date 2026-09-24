@@ -389,6 +389,16 @@ Notes on the choices:
 - **The 20 kn 52° and 60° cells are reduced from D4's values** (6.45 and 7.0, judgement). Otherwise the upwind optimum would move to 52°, contradicting both the VPP and D8 (43–46°).
 - **For TWA over 180° (by the lee),** mirror the polar with a 0–3% penalty (§5).
 
+**Erratum (2026-09-24, #58).** The boat class file `ilca-dinghy@1.json` changes two cells of this table:
+
+- **165° at 8 kn: 5.3 → 5.2.** With 5.3, VMG at 165° (5.3 × cos 15° = 5.12) beats 5.1 at 180°, so the
+  best downwind angle at 8 kn would be 165°, not the 180° claimed above. With 5.2 it is 5.02, and 180° wins.
+- **110° at 14 kn: 9.1 → 9.2.** With 9.1 the reach gains the same 0.6 kn per knot of wind from 12 to 14 kn
+  as from 14 to 16 kn, so there is no planing step at about 12 kn (§4.4). With 9.2, 12–14 kn is the
+  steepest step (0.65 kn per knot), and the cell still matches race reach VMG above 12 kn (9.1–9.5).
+
+Both cells were interpolated (i M6→M9 and i M12→b19). The best-VMG results listed above hold for the changed table.
+
 ---
 
 ## Sources

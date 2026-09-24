@@ -295,10 +295,10 @@ enum ScriptedLog {
         #expect(try RaceLog(jsonData: fixture.jsonData()) == fixture)
         #expect(try RaceLog(jsonData: fixture.jsonData(pretty: false)) == fixture)
 
-        let file = FileRef(id: "ilca-dinghy", version: 1, hash: "sha256:00ff")
+        let file = FileRef(id: "ilca-dinghy", version: 1, hash: ContentHash(of: Data("class".utf8)))
         let setup = try RaceSetup(raceSeed: RaceSeed(.max), seats: [.human, .bot], laps: 1, startSequenceTicks: 90,
-                                  boatClass: file, venue: FileRef(id: "dev-venue", version: 1, hash: "sha256:01"),
-                                  conditions: nil, rulesConfiguration: FileRef(id: "rules", version: 3, hash: "sha256:02"))
+                                  boatClass: file, venue: FileRef(id: "dev-venue", version: 1, hash: ContentHash(of: Data("venue".utf8))),
+                                  conditions: nil, rulesConfiguration: FileRef(id: "rules", version: 3, hash: ContentHash(of: Data("rules".utf8))))
         let log = RaceLog(
             header: .init(setup: setup, windSeed: WindSeed(0xFFFF_FFFF_FFFF_FFFE)),
             inputs: [
@@ -324,6 +324,7 @@ enum ScriptedLog {
         let text = String(decoding: data, as: UTF8.self)
         #expect(text.contains(#""raceSeed" : "0xffffffffffffffff""#))
         #expect(text.contains(#""windSeed" : "0xfffffffffffffffe""#))
+        #expect(text.contains(#""hash" : "\#(file.hash.hex)""#), "FileRef keeps #58's {id, version, hash} shape")
     }
 
     /// The checked-in fixture is exactly what the script records.
