@@ -250,6 +250,20 @@ import Testing
         #expect(try Self.violations(Self.wallClock, in: Self.sources()) == [])
     }
 
+    /// Trig goes through `Trig.swift`'s non-inlined `sin` and `cos`, so an optimized build can't fuse
+    /// them into `sincos` and replay differently from debug. RegattaCore may call them bare (they
+    /// resolve to the wrappers) but never the C library's by module name. RegattaBots can't see the
+    /// internal wrappers, so a bare call there would reach libm directly: it must call none.
+    @Test func trigGoesThroughTheWrappers() throws {
+        let files = try Self.sources()
+        let qualified = #"\b(?:Foundation|Darwin|Glibc)\.(?:sin|cos|sincos)\b"#
+        #expect(try Self.violations(qualified, in: files.filter { $0.name != "RegattaCore/Trig.swift" }) == [])
+        let bare = #"\b(?:sin|cos|sincos|__sincos\w*)\("#
+        #expect(try Self.violations(bare, in: files.filter { $0.name.hasPrefix("RegattaBots/") }) == [])
+        #expect(try Self.violations(bare, in: [(name: "Sample.swift", text: "let y = sin(x) + Darwin.cos(x)")]).count == 1)
+        #expect(try Self.violations(qualified, in: [(name: "Sample.swift", text: "let y = Glibc.sin(x)")]).count == 1)
+    }
+
     /// Names declared as a `Set` or `Dictionary`, by `var`/`let` with a type annotation or initialiser.
     static func unorderedNames(in files: [(name: String, text: String)]) throws -> [String] {
         let declaration = try Regex(

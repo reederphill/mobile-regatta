@@ -152,7 +152,9 @@ scripts/linux-test.sh
 
 The image is `linux/amd64`. On Apple silicon, run it in a podman machine with Rosetta enabled (for example
 `podman machine init --rosetta …`, made the default connection). Without Rosetta, podman emulates x86_64 with
-qemu, which is very slow and has deadlocked the parallel build.
+qemu, which is very slow and has deadlocked the parallel build. On the Rosetta machine SwiftPM can now and then
+fail copying package resources ("encountered an I/O error (code: 4)", an interrupted read) before any test
+runs; rerun the script.
 
 Run the app's unit tests (`RegattaTests`) and UI tests (`RegattaUITests`) on the simulator:
 

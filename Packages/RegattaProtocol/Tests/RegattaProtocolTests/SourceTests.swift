@@ -71,6 +71,15 @@ import Testing
         #expect(try Self.violations(Self.wallClock, in: Self.sources()) == [])
     }
 
+    /// No trig of its own: RegattaCore's non-inlined `sin` and `cos` (its `Trig.swift`, which keeps an
+    /// optimized build from fusing them into `sincos`) are internal, so a call here would reach libm
+    /// directly and could replay differently in debug and release.
+    @Test func noTrigInSources() throws {
+        let trig = #"\b(?:(?:Foundation|Darwin|Glibc)\.)?(?:sin|cos|sincos|__sincos\w*)\("#
+        #expect(try Self.violations(trig, in: Self.sources()) == [])
+        #expect(try Self.violations(trig, in: [(name: "Sample.swift", text: "let y = Darwin.sin(x)")]).count == 1)
+    }
+
     /// Names declared as a `Set` or `Dictionary`, by `var`/`let` with a type annotation or initialiser.
     static func unorderedNames(in files: [(name: String, text: String)]) throws -> [String] {
         let declaration = try Regex(
