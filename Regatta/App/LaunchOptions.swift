@@ -6,7 +6,8 @@ import RegattaCore
 /// - `-autostart` skips the menu and starts a race.
 /// - `-demo` starts a race with a bot sailing your boat too.
 /// - `-perf` starts a 16-boat demo race to profile against the signposts.
-/// - `-seed <n>` sails every race on seed `n` instead of a random one.
+/// - `-seed <n>` sails every race on race seed `n` instead of a random one, with the wind seed pinned
+///   to it by `RaceConfig.windSeed(pinnedTo:)`, so the whole race reproduces.
 /// - `-fixture <name>` names a render fixture to replay (#62).
 /// - `-timescale <n>` runs the simulation at `n`× real time.
 /// - `-uitesting` marks a UI test run.
@@ -95,14 +96,17 @@ struct LaunchOptions: Equatable {
     var startsRace: Bool { autostart || demo || perf }
 
     /// A race started from the menu or restarted: the player's settings, on the pinned seed if there is one.
-    func raceConfig(from settings: RaceSettings) -> Race.Config {
+    func raceConfig(from settings: RaceSettings) -> RaceConfig {
         var config = settings.config
-        if let seed { config.seed = seed }
+        if let seed {
+            config.seed = seed
+            config.windSeed = RaceConfig.windSeed(pinnedTo: seed)
+        }
         return config
     }
 
     /// The race started at launch, or nil to show the menu.
-    func launchRaceConfig(from settings: RaceSettings) -> Race.Config? {
+    func launchRaceConfig(from settings: RaceSettings) -> RaceConfig? {
         guard startsRace else { return nil }
         var config = raceConfig(from: settings)
         config.autopilotPlayer = demo || perf

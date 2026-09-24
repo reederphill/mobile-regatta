@@ -39,7 +39,7 @@ final class GameSession {
     @ObservationIgnored private let notification = UINotificationFeedbackGenerator()
 
     /// `timescale` runs the simulation that many times real time (`-timescale`, for tests).
-    init(config: Race.Config, timescale: Double = 1) {
+    init(config: RaceConfig, timescale: Double = 1) {
         race = Race(config: config)
         scene = GameScene(race: race, timescale: timescale)
         scene.session = self
@@ -81,7 +81,7 @@ final class GameSession {
         let me = race.playerIndex
         func name(_ i: Int) -> String { race.boats[i].name }
 
-        switch event {
+        switch event.kind {
         case .gun:
             post("Gun! Race on.", .good)
             impact.impactOccurred(intensity: 1)
@@ -163,7 +163,7 @@ final class GameSession {
                 place = "\(rank + 1)"
                 detail = "Not started"
             }
-            return ResultRow(id: b.id, place: place, name: b.name, detail: detail, colorIndex: b.colorIndex, isPlayer: b.isPlayer)
+            return ResultRow(id: b.id, place: place, name: b.displayName, detail: detail, colorIndex: b.colorIndex, isPlayer: b.isPlayer)
         }
     }
 }

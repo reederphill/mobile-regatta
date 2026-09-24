@@ -65,8 +65,12 @@ import RegattaCore
 
     @Test func aPinnedSeedSailsEveryRace() {
         let options = parse("-seed", "1")
-        #expect(options.raceConfig(from: RaceSettings()).seed == 1)
-        #expect(options.raceConfig(from: RaceSettings()).seed == 1)
+        let first = options.raceConfig(from: RaceSettings())
+        let second = options.raceConfig(from: RaceSettings())
+        #expect(first.seed == 1)
+        #expect(second.seed == 1)
+        #expect(first.windSeed == second.windSeed, "the wind seed is pinned too")
+        #expect(first.windSeed == RaceConfig.windSeed(pinnedTo: 1))
     }
 
     @Test func autostartSailsTheSettingsRace() throws {

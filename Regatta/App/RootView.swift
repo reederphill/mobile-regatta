@@ -7,9 +7,11 @@ struct RaceSettings {
     var laps = 2
     var prestartSeconds = 60.0
 
-    var config: Race.Config {
-        // A local practice race picks its own seed; online races get theirs from the server.
-        Race.Config(opponents: opponents, laps: laps, prestartSeconds: prestartSeconds, seed: .random(in: 0 ... .max))
+    var config: RaceConfig {
+        // A practice race draws both seeds on the device, independently; online races get the race
+        // seed from the server, which keeps the wind seed to itself (ADR 0001).
+        RaceConfig(opponents: opponents, laps: laps, prestartSeconds: prestartSeconds,
+                   seed: .random(in: .min ... .max), windSeed: .random(in: .min ... .max))
     }
 }
 
@@ -35,7 +37,7 @@ struct RootView: View {
         }
     }
 
-    private func makeSession(_ config: Race.Config) -> GameSession {
+    private func makeSession(_ config: RaceConfig) -> GameSession {
         GameSession(config: config, timescale: launchOptions.timescale)
     }
 

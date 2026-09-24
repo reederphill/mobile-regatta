@@ -102,44 +102,46 @@ import Testing
         #expect(stage == 2)
     }
 
-    /// Steers the player toward `heading` with a simple proportional helm.
-    func sail(_ race: Race, heading: Double, seconds: Double) -> [RaceEvent] {
-        var events: [RaceEvent] = []
+    /// Steers seat 0 toward `heading` with a simple proportional helm.
+    func sail(_ race: Race, heading: Double, seconds: Double) -> [RaceEvent.Kind] {
+        var events: [RaceEvent.Kind] = []
         for _ in 0..<Int(seconds * Double(Race.tickRate)) {
-            race.setPlayerRudder(wrapAngle(heading - race.player.heading) / deg2rad(20))
+            let rudder = wrapAngle(heading - race.boats[0].heading) / deg2rad(20)
+            race.apply(BoatInput(rudder: rudder), seat: 0, atTick: race.tick + 1)
             race.step()
-            events += race.drainEvents()
+            events += race.drainEvents().map(\.kind)
         }
         return events
     }
 
     @Test func boatOverTheLineAtTheGunIsOCSAndMustReturn() {
-        let race = Race(config: .init(opponents: 0, prestartSeconds: 40, seed: 1))
+        // Seat 1 is a second human who sends no inputs, so she sails straight on out of the way.
+        let race = testRace(seats: [.human, .human], prestartSeconds: 40, seed: 1, brains: [])
         let early = sail(race, heading: deg2rad(-45), seconds: 41)
-        #expect(early.contains(.ocs(boat: 0)))
-        #expect(race.player.status == .ocs)
+        #expect(early.contains(.ocs(seat: 0)))
+        #expect(race.boats[0].status == .ocs)
 
         let back = sail(race, heading: .pi, seconds: 15)
-        #expect(back.contains(.cleared(boat: 0)))
+        #expect(back.contains(.cleared(seat: 0)))
 
         // The boat is now off the pin end: run deeper, then port tack brings it
         // back up between the ends of the line.
         _ = sail(race, heading: .pi, seconds: 10)
         let start = sail(race, heading: deg2rad(45), seconds: 40)
-        #expect(start.contains(.started(boat: 0)))
-        #expect(race.player.status == .racing)
+        #expect(start.contains(.started(seat: 0)))
+        #expect(race.boats[0].status == .racing)
     }
 
     @Test func autopilotTackMirrorsHeading() {
-        let race = Race(config: .init(opponents: 0, seed: 3))
-        let before = race.player
-        race.playerTackOrGybe()
+        let race = testRace(seats: [.human, .human], seed: 3, brains: [])
+        let before = race.boats[0]
+        race.tap(.tackGybe, seat: 0, atTick: race.tick + 1)
         for _ in 0..<(Race.tickRate * 5) { race.step() }
-        #expect(race.player.tack != before.tack || race.player.twa > deg2rad(80))
+        #expect(race.boats[0].tack != before.tack || race.boats[0].twa > deg2rad(80))
     }
 
     @Test func botFleetCompletesARace() {
-        let race = Race(config: .init(opponents: 7, laps: 2, prestartSeconds: 45, seed: 42, autopilotPlayer: true))
+        let race = testRace(opponents: 7, laps: 2, prestartSeconds: 45, seed: 42, brains: Array(0...7))
         var steps = 0
         while !race.isOver && steps < 1_500 * Race.tickRate {
             race.step()

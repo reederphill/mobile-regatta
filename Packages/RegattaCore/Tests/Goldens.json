@@ -1,5 +1,6 @@
 {
   "digests": {
-    "1/swift-6.3.3/glibc-2.39/x86_64": "0x14bb6b704c5211c5"
+    "1/swift-6.3.3/glibc-2.39/x86_64": "0x14bb6b704c5211c5",
+    "2/swift-6.3.3/glibc-2.39/x86_64": "0xf9c1be2103e6a87a"
   }
 }

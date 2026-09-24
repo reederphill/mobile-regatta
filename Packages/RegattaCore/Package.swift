@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.iOS(.v18), .macOS(.v15)],
     products: [
         .library(name: "RegattaCore", targets: ["RegattaCore"]),
+        .executable(name: "regatta-replay", targets: ["regatta-replay"]),
     ],
     dependencies: [
         // SHA-256 of data files on Linux (the race server); Apple platforms use CryptoKit.
@@ -20,6 +21,8 @@ let package = Package(
             // Copied byte for byte: a data file's hash is taken over its exact bytes (ADR 0004).
             resources: [.copy("Resources/boat-classes")]
         ),
-        .testTarget(name: "RegattaCoreTests", dependencies: ["RegattaCore"]),
+        .executableTarget(name: "regatta-replay", dependencies: ["RegattaCore"]),
+        // regatta-replay is a dependency so `swift test` builds it: the golden test runs it as its own process.
+        .testTarget(name: "RegattaCoreTests", dependencies: ["RegattaCore", "regatta-replay"]),
     ]
 )
