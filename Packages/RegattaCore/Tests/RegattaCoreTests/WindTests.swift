@@ -340,29 +340,59 @@ enum WindFixtures {
     /// The sea breeze's build never takes the wind above the forecast's top strength (#10: the forecast
     /// is never wrong), and conditions with no build keep the base strength.
     @Test func strengthStaysInTheForecastRange() throws {
-        var capped = 0
+        var squeezed = 0
         for seed in WindFixtures.seeds {
             let setup = try WindFixtures.setup("sea-breeze", raceSeed: seed)
             let (field, parts) = try WindFixtures.parts(setup, windSeed: seed, through: 80)
             let range = setup.conditions.strength
             let headroom = range.upperBound / setup.baseStrength - 1
             for tick in stride(from: -1800, to: 1200 * Race.tickRate, by: 29) {
+                // The channel itself stays in range, before `sample` clamps the speed as a safety net.
+                let strength = try field.channels(atTick: tick).strength
+                #expect(setup.baseStrength * strength <= range.upperBound * (1 + 1e-12))
+                #expect(strength >= 1 - 1e-12, "the build only rises")
                 let speed = try field.sample(.zero, tick: tick).speed
-                #expect(speed <= range.upperBound)
-                #expect(speed >= setup.baseStrength * (1 - 1e-12), "the build only rises")
+                #expect(speed <= range.upperBound && speed >= setup.baseStrength * (1 - 1e-12))
             }
             let rise = parts[field.windows.window(containing: 960 * Race.tickRate) - 1].build.value
             #expect(rise >= 0 && rise <= 0.15 && rise <= headroom + 1e-12)
             #expect(parts.allSatisfy { $0.build.value <= rise })
-            if rise >= headroom - 1e-12 { capped += 1 }
+            if headroom < 0.15 { squeezed += 1 }
         }
-        #expect(capped > 0, "some bases near the top have their build capped")
+        #expect(squeezed > 0, "some bases are near enough the top to squeeze the build")
 
         let setup = try WindFixtures.setup("classic-oscillating", raceSeed: 8)
         let (field, _) = try WindFixtures.field(setup, windSeed: 8, through: 20)
         for tick in stride(from: -1800, to: 15000, by: 97) {
             #expect(try field.sample(.zero, tick: tick).speed == setup.baseStrength)
         }
+    }
+
+    /// The build is drawn uniformly inside the capped range, so no measurable share of races finishes
+    /// exactly at the top of the forecast: the base is public, and a point mass on the cap would give
+    /// the finish away from race-start information (ADR 0001).
+    @Test func buildHasNoPointMassAtTheCap() throws {
+        var squeezed = 0, onTheCap = 0
+        var shares: [Double] = []
+        for seed in (0..<1000).map({ UInt64($0) &* 0x9E37_79B9_7F4A_7C15 ^ 0xB01D }) {
+            let setup = try WindFixtures.setup("sea-breeze", raceSeed: seed)
+            let build = try #require(setup.conditions.build)
+            let headroom = setup.conditions.strength.upperBound / setup.baseStrength - 1
+            // Only bases whose headroom squeezes the build's range, and not so far that it's empty.
+            guard headroom < build.fraction.upperBound, headroom > build.fraction.lowerBound else { continue }
+            squeezed += 1
+            let (field, parts) = try WindFixtures.parts(setup, windSeed: seed, through: 40)
+            let rise = parts[field.windows.window(containing: 960 * Race.tickRate) - 1].build.value
+            #expect(rise <= headroom + 1e-12)
+            if abs(rise - headroom) < 1e-9 { onTheCap += 1 }
+            shares.append((rise - build.fraction.lowerBound) / (headroom - build.fraction.lowerBound))
+        }
+        #expect(squeezed > 100)
+        #expect(onTheCap <= 1, "\(onTheCap) of \(squeezed) squeezed races finish exactly on the cap")
+        // Uniform in the capped range: about half-way on average, and spread across it.
+        let mean = shares.reduce(0, +) / Double(shares.count)
+        #expect(mean > 0.4 && mean < 0.6, "mean share of the capped range \(mean)")
+        #expect(shares.filter { $0 < 0.25 }.count > squeezed / 8 && shares.filter { $0 > 0.75 }.count > squeezed / 8)
     }
 
 }

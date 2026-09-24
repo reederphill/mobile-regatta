@@ -78,9 +78,13 @@ public struct WindKeyGenerator: Sendable {
                          fraction: lerp(ramp, first.unit(9)), start: first.unit(10))
         }
         if let b = c.build, let span = keyed.buildDuration, let ramp = keyed.buildRamp {
-            // Cap the rise so base × (1 + rise) never passes the top of the strength range.
+            // Cap the rise so base × (1 + rise) never passes the top of the strength range. The size is
+            // drawn uniformly inside the capped range, not clamped after the draw: clamping would put a
+            // point mass on the cap, and since the base is public, a race near the top would be known to
+            // finish exactly at the top from race-start information (ADR 0001).
             let headroom = max(0, c.strength.upperBound / setup.baseStrength - 1)
-            build = Ramp(size: min(lerp(b.fraction, first.unit(11)), headroom), spanEnd: Self.lastKnot(within: span, windows),
+            let sizes = min(b.fraction.lowerBound, headroom)...min(b.fraction.upperBound, headroom)
+            build = Ramp(size: lerp(sizes, first.unit(11)), spanEnd: Self.lastKnot(within: span, windows),
                          fraction: lerp(ramp, first.unit(12)), start: first.unit(13))
         }
     }
@@ -186,6 +190,9 @@ private struct Ramp: Sendable {
         // This window's rate, eased so neither neighbouring window's Hermite curve turns back: slope × 30 s
         // at most 3 × the rise either side (Fritsch–Carlson). The next window rises by at least half this
         // one's rate, or by all that's left.
+        // When the `3 · (size − reached) / h` limit binds, key k's slope shows what is left of the ramp one
+        // window early. That is at most rate · h / 3 (≤ 0.625° of trend, or 0.625 % of base strength, with
+        // today's files), and the leak is accepted: it is what guarantees the curve never overshoots.
         let limit = 3 * min(rise, abs(size - reached)) / h
         return WindKnot(value: reached, slope: (size < 0 ? -1 : 1) * min(abs(rate), limit))
     }
