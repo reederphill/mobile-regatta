@@ -6,39 +6,107 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# A new push supersedes the run in progress for the same branch or pull request.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  linux:
-    name: Packages on the pinned Linux replay platform
+  # Jobs a change can't reach are skipped, which counts as passing for a required check.
+  changes:
+    name: What the change reaches
     runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+      protocol: ${{ steps.filter.outputs.protocol }}
+      client: ${{ steps.filter.outputs.client }}
+      app: ${{ steps.filter.outputs.app }}
     steps:
       - uses: actions/checkout@v4
-      - name: swift test (debug and release) in the pinned swift image, RegattaBots included
-        shell: bash  # explicit, so the step runs with pipefail and a test failure isn't hidden by tee
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ci: &ci
+              - ".github/workflows/ci.yml"
+              - "scripts/**"
+            core:
+              - *ci
+              - "Packages/RegattaCore/**"
+            protocol:
+              - *ci
+              - "Packages/RegattaCore/**"
+              - "Packages/RegattaProtocol/**"
+            client:
+              - *ci
+              - "Packages/**"
+            app:
+              - *ci
+              - "Regatta/**"
+              - "RegattaTests/**"
+              - "RegattaUITests/**"
+              - "Regatta.xcodeproj/**"
+              - "ThirdParty/**"
+              - "Packages/RegattaCore/Sources/**"
+              - "Packages/RegattaCore/Package.*"
+
+  linux:
+    name: Golden and builds on the pinned Linux replay platform
+    needs: changes
+    if: needs.changes.outputs.client == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      LINUX_SCRATCH: ${{ github.workspace }}/.linux-scratch
+      LINUX_TEST_TIMEOUT_MINUTES: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .linux-scratch
+          key: linux-scratch-${{ hashFiles('scripts/linux-test.sh', 'Packages/*/Package.resolved') }}
+          restore-keys: linux-scratch-
+      - name: Golden and RegattaBots replay digests (debug and release); every package builds
+        shell: bash  # explicit, so the step runs with pipefail and a failure isn't hidden by tee
         run: scripts/linux-test.sh 2>&1 | tee linux-test.log
       - name: Golden digest
         if: always()
         run: |
           grep -o 'GOLDEN simulationVersion=.*' linux-test.log | sort -u | tee -a "$GITHUB_STEP_SUMMARY" || true
+      - name: Let the cache read the container's build
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .linux-scratch || true
 
   macos:
     name: Packages on macOS
+    needs: changes
+    if: needs.changes.outputs.client == 'true'
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: swift test (RegattaCore and RegattaBots)
-        working-directory: Packages/RegattaCore
-        run: swift test
-      - name: swift test (RegattaProtocol)
-        working-directory: Packages/RegattaProtocol
-        run: swift test
-      - name: swift test (RegattaClient)
-        working-directory: Packages/RegattaClient
-        run: swift test
+      - uses: actions/cache@v4
+        with:
+          path: .build/check
+          key: check-${{ runner.os }}-${{ hashFiles('Packages/*/Package.resolved') }}
+          restore-keys: check-${{ runner.os }}-
+      - name: Build, then test, the packages the change reaches (scripts/check.sh)
+        run: |
+          packages=""
+          [[ "${{ needs.changes.outputs.core }}" == true ]] && packages+=" RegattaCore"
+          [[ "${{ needs.changes.outputs.protocol }}" == true ]] && packages+=" RegattaProtocol"
+          packages+=" RegattaClient"
+          scripts/check.sh --force --no-app --packages "$packages"
       - name: Same digest across two test processes
+        if: needs.changes.outputs.core == 'true'
+        timeout-minutes: 10
         run: scripts/check-digest-stable.sh
 
   app:
     name: App tests on the iOS Simulator
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
     # Pinned so the SDK and simulator runtime only change on purpose: Xcode 26.6, iOS 26.5.
     runs-on: macos-26
     timeout-minutes: 30

@@ -13,6 +13,10 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 Infer the repo from `git remote -v`; `gh` does this automatically when run inside a clone.
 
+## Acceptance items
+
+Each acceptance item names the test that proves it: `<Package>: <Suite>.<test>` (for example `RegattaClient: LeadTests.leadNeverExceedsThirtyTicks`), or `new: <Suite>.<test>` for a test the ticket adds. The acceptance check runs exactly those tests (`docs/agents/validation.md`).
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

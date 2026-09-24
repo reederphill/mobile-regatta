@@ -8,6 +8,10 @@ Native iOS sailing race game. The simulation lives in `Packages/RegattaCore` (pu
 
 Issues, including the wayfinder design map, live in GitHub Issues on `reederphill/mobile-regatta` (use the `gh` CLI). See `docs/agents/issue-tracker.md`.
 
+### Validation
+
+`scripts/check.sh` locally, CI before merge; the golden runs only in CI. See `docs/agents/validation.md`.
+
 ### Domain docs
 
 Single-context: `CONTEXT.md` glossary and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

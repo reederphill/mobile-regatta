@@ -154,17 +154,24 @@ cd Packages/RegattaCore && swift test
 
 and the protocol's and the client's with `swift test` in `Packages/RegattaProtocol` and `Packages/RegattaClient`.
 
-Run every package's tests on the pinned Linux replay platform, in debug and release (needs podman or docker):
+Check everything a change reaches, compiling it all before running any test (flags are in the script):
+
+```bash
+scripts/check.sh
+```
+
+Run the golden and RegattaBots' replay race in debug and release, and build every package, on the pinned Linux
+replay platform (needs podman or docker); `--all` runs every package's tests there too:
 
 ```bash
 scripts/linux-test.sh
 ```
 
-The image is `linux/amd64`. On Apple silicon, run it in a podman machine with Rosetta enabled (for example
-`podman machine init --rosetta …`, made the default connection). Without Rosetta, podman emulates x86_64 with
-qemu, which is very slow and has deadlocked the parallel build. On the Rosetta machine SwiftPM can now and then
-fail copying package resources ("encountered an I/O error (code: 4)", an interrupted read) before any test
-runs; rerun the script.
+The image is `linux/amd64`. On Apple silicon, run it in a podman machine with Rosetta enabled and at least 6 GiB
+of memory (for example `podman machine init --rosetta --memory 8192 …`, made the default connection). Without
+Rosetta, podman emulates x86_64 with qemu, which is very slow and has deadlocked the parallel build. The build
+persists between runs in a podman volume. On the Rosetta machine SwiftPM can now and then fail copying package
+resources ("encountered an I/O error (code: 4)", an interrupted read); the script retries that step.
 
 Run the app's unit tests (`RegattaTests`) and UI tests (`RegattaUITests`) on the simulator:
 
@@ -201,9 +208,9 @@ after adding either, and CI checks it's current:
 swift scripts/generate-acknowledgements.swift
 ```
 
-CI (`.github/workflows/ci.yml`) runs `scripts/linux-test.sh` on Linux, `swift test` in each package plus
-`scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the iOS Simulator (iPhone, plus the UI tests
-on iPad). `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
+CI (`.github/workflows/ci.yml`) runs only the jobs a change reaches: `scripts/linux-test.sh` on Linux,
+`scripts/check.sh` for the packages plus `scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the
+iOS Simulator (iPhone, plus the UI tests on iPad). `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
 the archive with `scripts/check-shipping-config.sh`, launches the app, and runs its tests on iOS 27 iPhone and
 iPad simulators. To save macOS minutes it runs only on pull requests that touch shipping config, on main, weekly
 and by hand.
