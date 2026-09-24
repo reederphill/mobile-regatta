@@ -97,6 +97,9 @@ public struct DataFileKey: Hashable, Sendable, Codable, CustomStringConvertible 
     }
 
     public var description: String { "\(id)@\(version)" }
+
+    /// Explicit, so a data file's strict-field check can list them.
+    public enum CodingKeys: String, CodingKey, CaseIterable { case id, version }
 }
 
 public extension FileRef {
@@ -351,5 +354,79 @@ enum JSONPointer {
             }
         }
         return node
+    }
+}
+
+/// Finds a repeated key in any object of a JSON document. JSONDecoder keeps the first copy and
+/// JSONSerialization the last, so a file with one would read differently depending on who parses it.
+/// A byte scan: strings are skipped over, and everything else (numbers in a grid) costs one comparison.
+enum JSONDuplicateKeys {
+    private enum Frame {
+        case object(pointer: String, keys: Set<String>, key: String?, expectingKey: Bool)
+        case array(pointer: String, index: Int)
+    }
+
+    /// JSON Pointer of the first repeated key, or nil. Assumes `data` is well-formed JSON; on anything
+    /// else it returns nil and leaves the error to the parser.
+    static func first(in data: Data) -> String? {
+        let bytes = [UInt8](data)
+        var stack: [Frame] = []
+        var i = 0
+        func escape(_ key: String) -> String {
+            key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
+        }
+        /// Pointer of the value about to start inside the innermost container.
+        func childPointer() -> String {
+            switch stack.last {
+            case .object(let pointer, _, let key, _)?: return pointer + "/" + escape(key ?? "")
+            case .array(let pointer, let index)?: return pointer + "/\(index)"
+            case nil: return ""
+            }
+        }
+        while i < bytes.count {
+            switch bytes[i] {
+            case UInt8(ascii: "{"):
+                stack.append(.object(pointer: childPointer(), keys: [], key: nil, expectingKey: true))
+            case UInt8(ascii: "["):
+                stack.append(.array(pointer: childPointer(), index: 0))
+            case UInt8(ascii: "}"), UInt8(ascii: "]"):
+                if !stack.isEmpty { stack.removeLast() }
+            case UInt8(ascii: ","):
+                switch stack.last {
+                case .object(let pointer, let keys, _, _)?:
+                    stack[stack.count - 1] = .object(pointer: pointer, keys: keys, key: nil, expectingKey: true)
+                case .array(let pointer, let index)?:
+                    stack[stack.count - 1] = .array(pointer: pointer, index: index + 1)
+                case nil: break
+                }
+            case UInt8(ascii: "\""):
+                let start = i
+                var escaped = false
+                i += 1
+                while i < bytes.count && bytes[i] != UInt8(ascii: "\"") {
+                    if bytes[i] == UInt8(ascii: "\\") { escaped = true; i += 1 }
+                    i += 1
+                }
+                guard i < bytes.count else { return nil }
+                if case .object(let pointer, var keys, _, true)? = stack.last {
+                    let raw = Data(bytes[start...i])
+                    let key: String
+                    if escaped {
+                        // "\u0061" is the same key as "a": let the parser decode the escapes.
+                        guard let decoded = try? JSONSerialization.jsonObject(with: raw, options: [.fragmentsAllowed]) as? String
+                        else { return nil }
+                        key = decoded
+                    } else {
+                        key = String(decoding: bytes[(start + 1)..<i], as: UTF8.self)
+                    }
+                    if !keys.insert(key).inserted { return pointer + "/" + escape(key) }
+                    stack[stack.count - 1] = .object(pointer: pointer, keys: keys, key: key, expectingKey: false)
+                }
+            default:
+                break
+            }
+            i += 1
+        }
+        return nil
     }
 }

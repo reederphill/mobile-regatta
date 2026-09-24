@@ -186,7 +186,8 @@ flips to the other side, turning the other way, when the tide turns.
 
 The loader throws `DataFileError.malformed` for a missing field, a wrong type, an unknown enum value
 (such as a `trendDirection`), or **a field the schema doesn't have** (a typo such as `"eddys"`, or a
-`null`): a released file can't be fixed, so it mustn't carry a field nothing reads. (Boat class files
+`null`), or **a key repeated in one object** (parsers disagree on which copy wins): a released file
+can't be fixed, so it mustn't carry a field nothing reads. (Boat class files
 don't check this yet.) It throws `invalidContent` for a venue that breaks any of these:
 
 - `displayName` is non-empty; every landmark `asset` is non-empty; every point is two finite numbers.

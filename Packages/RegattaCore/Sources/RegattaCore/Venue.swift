@@ -180,7 +180,7 @@ public struct Venue: DataFileContent, Equatable {
             return w < 0 ? w + 2 * .pi : w
         }
 
-        public var isWholeCycle: Bool { width == 2 * .pi }
+        public var isWholeCycle: Bool { from == 0 && to == 2 * .pi }
 
         /// Whether tide state `phase` (radians, any turn) lies in the range.
         public func contains(_ phase: Double) -> Bool {
@@ -252,6 +252,10 @@ public struct Venue: DataFileContent, Equatable {
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
         case 1:
+            // Duplicate keys first: JSONDecoder and JSONSerialization disagree on which copy wins.
+            if let pointer = JSONDuplicateKeys.first(in: fileData) {
+                throw DataFileError.malformed(kind: Self.kind, reason: "duplicate field \(pointer)")
+            }
             let document = try JSONDecoder().decode(VenueSchema1.self, from: fileData)
             try document.rejectUnknownFields(in: fileData)
             self = try document.venue(id: header.id)
@@ -391,11 +395,11 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
     }
 
     /// Every field schema 1 has, from each type's `CodingKeys`, so it can't drift from the decoder.
-    private static let fields: FieldTree = .object(CodingKeys.self, [
+    static let fields: FieldTree = .object(CodingKeys.self, [
         .landmarks: .array(.object(Landmark.CodingKeys.self)),
         .land: .array(.object(Land.CodingKeys.self)),
         .pairings: .array(.object(Pairing.CodingKeys.self, [
-            .conditionsRef: .object(["id": .value, "version": .value]),
+            .conditionsRef: .object(DataFileKey.CodingKeys.self),
             .geographicGrid: .object(GeographicGrid.CodingKeys.self),
         ])),
         .current: .object(Current.CodingKeys.self, [
@@ -618,7 +622,7 @@ private extension VenueSchema1.Current {
 
 /// The object keys a data file may have, for rejecting unknown fields. Leaves (`value`) aren't walked,
 /// so the numbers in a grid cost nothing.
-private indirect enum FieldTree: Sendable {
+indirect enum FieldTree: Sendable {
     case value
     case object([String: FieldTree])
     case array(FieldTree)

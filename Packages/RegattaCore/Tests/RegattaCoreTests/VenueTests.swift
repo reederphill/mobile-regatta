@@ -144,6 +144,46 @@ enum VenueFixtures {
         #expect(reloaded.ref.key == original.ref.key)
     }
 
+    /// Every object, or array of objects, that a fully populated file has must be an object node in the
+    /// strict-field tree, so a nested field added later can't silently be treated as a leaf.
+    @Test func fieldTreeCoversEveryNestedObject() throws {
+        var document = try JSONDecoder().decode(VenueSchema1.self, from: VenueFixtures.bytes())
+        // Every optional field present (the fixture already has them all; keep it that way).
+        #expect(document.placeholders != nil && document.notes != nil && document.current.eddies?.isEmpty == false)
+        #expect(document.current.tideClockRate != nil && document.current.byDepth != nil && !document.landmarks.isEmpty)
+        document.notes = ["n"]
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(document))
+
+        var checked: [String] = []
+        func walk(_ value: Any, _ node: FieldTree, _ path: String) {
+            if let members = value as? [String: Any] {
+                guard case .object(let fields) = node else {
+                    Issue.record("\(path) is an object but the field tree has no object node for it")
+                    return
+                }
+                checked.append(path)
+                for (key, member) in members.sorted(by: { $0.key < $1.key }) {
+                    guard let field = fields[key] else {
+                        Issue.record("\(path)/\(key) is missing from the field tree")
+                        continue
+                    }
+                    walk(member, field, path + "/" + key)
+                }
+            } else if let elements = value as? [Any], elements.contains(where: { $0 is [String: Any] }) {
+                guard case .array(let element) = node else {
+                    Issue.record("\(path) is an array of objects but the field tree has no array node for it")
+                    return
+                }
+                for (k, member) in elements.enumerated() { walk(member, element, path + "/\(k)") }
+            }
+        }
+        walk(json, VenueSchema1.fields, "")
+        for path in ["", "/landmarks/0", "/land/0", "/pairings/0", "/pairings/0/conditionsRef", "/pairings/0/geographicGrid",
+                     "/current", "/current/allowedTideStatesAtGun", "/current/grid", "/current/byDepth", "/current/eddies/0"] {
+            #expect(checked.contains(path), "\(path) wasn't checked")
+        }
+    }
+
     @Test func encodingKeepsOptionalFieldsOut() throws {
         let data = try #require(try VenueFile.bundledData(id: VenueFixtures.devID, version: 1))
         let decoded = try JSONDecoder().decode(VenueSchema1.self, from: data)
@@ -415,6 +455,35 @@ enum VenueFixtures {
             kind: "venue", reason: "unknown or null field \(pointer): a venue file has only its schema's fields")) {
             try VenueFile(data: data)
         }
+    }
+
+    @Test(arguments: [
+        // Top level, and nested in the current, in an eddy and in a pairing's conditionsRef.
+        (#""displayName": "Test Water","#, #""displayName": "Test Water", "displayName": "Other","#, "/displayName"),
+        (#""tidal": true,"#, #""tidal": true, "tidal": false,"#, "/current/tidal"),
+        (#""floodRotation": "clockwise""#, #""floodRotation": "anticlockwise", "floodRotation": "clockwise""#,
+         "/current/eddies/0/floodRotation"),
+        (#""id": "gusty-offshore", "version": 2"#, #""id": "gusty-offshore", "version": 2, "version": 3"#,
+         "/pairings/1/conditionsRef/version"),
+        // A typo copy first and a clean copy last: each parser would read a different one.
+        (#""eddies": ["#, #""eddies": [{ "typo": 1 }], "eddies": ["#, "/current/eddies"),
+        // The same key spelled with an escape.
+        (#""displayName": "Test Water","#, #""displayName": "Test Water", "display\u004eame": "Other","#, "/displayName"),
+    ])
+    func duplicateFieldIsMalformed(of: String, with: String, pointer: String) throws {
+        let data = try VenueFixtures.edited([(of: of, with: with)])
+        #expect(throws: DataFileError.malformed(kind: "venue", reason: "duplicate field \(pointer)")) {
+            try VenueFile(data: data)
+        }
+    }
+
+    @Test func duplicateKeyScanFollowsPointersAndIgnoresStrings() {
+        func first(_ json: String) -> String? { JSONDuplicateKeys.first(in: Data(json.utf8)) }
+        #expect(first(#"{"a": 1, "b": {"c": [1, 2]}, "s": "{\"a\": 1, \"a\": 2}", "t": "\\"}"#) == nil)
+        #expect(first(#"{"a": [{"x": 1}, {"x": 1, "y": {"z": 1, "z": 2}}]}"#) == "/a/1/y/z")
+        #expect(first(#"{"a/b": {"~": 1, "~": 2}}"#) == "/a~1b/~0")
+        #expect(first(#"[{"k": 1}, {"k": 2}]"#) == nil)
+        #expect(first(#"{"k": "x", "v": "k", "k": 2}"#) == "/k")
     }
 
     @Test func boatClassesStillIgnoreUnknownFields() throws {
