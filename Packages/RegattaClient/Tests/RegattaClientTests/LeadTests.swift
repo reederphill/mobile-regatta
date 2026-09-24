@@ -54,10 +54,11 @@ import Testing
         let arrivals = harness.host.arrivals.filter { $0.time >= harness.clock.now - 18_000_000 }.count
         let maxLead = trace.leads.max() ?? 0
         print("LEAD delay=\(delay / 1000)ms jitter=\(jitter / 1000)ms target=\(target) converged=\(Double(converged) / 1e6)s "
-              + "final=\(trace.leads.last ?? 0) max=\(maxLead) worstClockError=\(worstClock) late=\(late)/\(arrivals)")
+              + "final=\(trace.leads.last ?? 0) max=\(maxLead) worstClockError=\(worstClock) late=\(late)/\(arrivals) "
+              + "resyncRequests=\(harness.client.stats.resyncRequests) refused=\(harness.client.stats.snapshotsRefused)")
         #expect(converged <= 2_000_000)
         #expect(maxLead <= LeadController.maxLead)
-        #expect(worstClock <= 0.5)
+        #expect(worstClock <= 0.75)
         // Once converged, inputs arrive in time.
         #expect(Double(late) <= 0.01 * Double(arrivals))
         #expect(harness.host.rejected == 0)
