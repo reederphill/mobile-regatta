@@ -29,6 +29,8 @@ let package = Package(
                 "RegattaClient",
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
+                // The scripted host sails its bot seats with RegattaBots' seat controllers (#60).
+                .product(name: "RegattaBots", package: "RegattaCore"),
             ]
         ),
     ]

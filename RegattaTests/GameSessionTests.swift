@@ -34,20 +34,21 @@ import RegattaCore
         }
         #expect(race.isOver)
         #expect(race.boats[race.playerIndex].status == .finished, "your boat: \(race.boats[race.playerIndex].status)")
-        #expect(race.log.inputs.contains { $0.seat == race.playerIndex }, "the bot's inputs went through the input API")
+        #expect(try #require(race.log).inputs.contains { $0.seat == race.playerIndex }, "the bot's inputs went through the input API")
         #expect(session.roster[1].isBot && !session.roster[race.playerIndex].isBot)
     }
 
     /// Under `-demo` the tack button doesn't reach the bot-sailed seat; in a normal race it does.
-    @Test func tackButtonOnlyReachesAHumanSeat() {
+    @Test func tackButtonOnlyReachesAHumanSeat() throws {
         let demo = GameSession(config: RaceConfig(opponents: 3, seed: 1, windSeed: 2, botSailsYourBoat: true))
         let normal = GameSession(config: Self.config)
         for session in [demo, normal] {
             session.tackOrGybe()
             session.race.step()
         }
-        #expect(!demo.race.log.inputs.contains { $0.seat == 0 && $0.kind == .tap(.tackGybe) })
-        #expect(normal.race.log.inputs.contains { $0.seat == 0 && $0.kind == .tap(.tackGybe) })
+        let (demoLog, normalLog) = (try #require(demo.race.log), try #require(normal.race.log))
+        #expect(!demoLog.inputs.contains { $0.seat == 0 && $0.kind == .tap(.tackGybe) })
+        #expect(normalLog.inputs.contains { $0.seat == 0 && $0.kind == .tap(.tackGybe) })
     }
 
     @Test func hudClockCarriesTheTick() {

@@ -1,3 +1,4 @@
+import RegattaBots
 import RegattaClient
 import RegattaCore
 import RegattaProtocol
@@ -23,6 +24,8 @@ final class ScriptedHost {
     static let maxAhead = 30
 
     let race: Race
+    /// Every seat but the client's is a bot, sailed through the input API as the host sails bots (#60).
+    private var bots: SeatControllers
     let clientSeat: Int
     let clock: VirtualClock
     var transport: RaceTransport
@@ -55,8 +58,8 @@ final class ScriptedHost {
     func ownPosition(atTick tick: Int) -> Vec2? { positions[tick]?[clientSeat] }
 
     init(setup: RaceSetup, windSeed: WindSeed, clientSeat: Int, transport: RaceTransport, clock: VirtualClock) throws {
-        let bots = setup.seats.indices.filter { $0 != clientSeat }
-        race = Race(setup: setup, windSeed: windSeed, botBrainSeats: bots)
+        race = Race(setup: setup, windSeed: windSeed)
+        bots = SeatControllers(race: race, humanSeat: clientSeat)
         self.clientSeat = clientSeat
         self.clock = clock
         self.transport = transport
@@ -68,8 +71,7 @@ final class ScriptedHost {
 
     /// The `RaceStart` the client joins with: the keys revealed so far, never the seed.
     func raceStart() -> RaceStart {
-        let roster = race.boats.map { RosterEntry(name: $0.name, colorIndex: $0.colorIndex) }
-        return RaceStart(yourSeat: clientSeat, setup: race.setup, roster: roster, windKeys: revealed)
+        RaceStart(yourSeat: clientSeat, setup: race.setup, roster: roster(of: race), windKeys: revealed)
     }
 
     /// The server's continuous tick at `time`.
@@ -124,6 +126,7 @@ final class ScriptedHost {
     }
 
     private func step() {
+        bots.drive(race)
         race.step()
         positions[race.tick] = race.boats.map(\.position)
         let applied = queued.filter { $0.tick <= race.tick }

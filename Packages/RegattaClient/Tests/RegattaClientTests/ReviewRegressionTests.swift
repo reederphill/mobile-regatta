@@ -24,17 +24,16 @@ final class ManualTransport: RaceTransport {
 /// Regressions from the #64 review: each was a probe that showed the bug.
 @Suite struct ReviewRegressionTests {
     /// An authoritative race of `seats` (seat 0 human, the rest bots) and its key generator.
-    static func host(seats: Int = 4) throws -> (Race, WindKeyGenerator) {
+    static func host(seats: Int = 4) throws -> (BotSailedRace, WindKeyGenerator) {
         let kinds: [SeatKind] = (0..<seats).map { $0 == 0 ? .human : .bot }
         let setup = try RaceSetup(raceSeed: RaceSeed(64), seats: kinds, laps: 1, startSequenceTicks: 600)
-        let race = Race(setup: setup, windSeed: WindSeed(0x5EED), botBrainSeats: Array(1..<seats))
+        let race = Race(setup: setup, windSeed: WindSeed(0x5EED))
         let keys = try WindKeyGenerator(windSeed: WindSeed(0x5EED), setup: race.windSetup, windows: race.wind.windows)
-        return (race, keys)
+        return (BotSailedRace(race, humanSeat: 0), keys)
     }
 
-    static func start(_ race: Race, keys: [WindKey]) -> RaceStart {
-        RaceStart(yourSeat: 0, setup: race.setup, roster: race.boats.map { RosterEntry(name: $0.name, colorIndex: $0.colorIndex) },
-                  windKeys: keys)
+    static func start(_ host: BotSailedRace, keys: [WindKey]) -> RaceStart {
+        RaceStart(yourSeat: 0, setup: host.setup, roster: roster(of: host.race), windKeys: keys)
     }
 
     /// The client's update loop stalls (a frame hitch, a brief suspension) with the helm moving. Its

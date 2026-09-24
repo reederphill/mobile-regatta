@@ -40,11 +40,11 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     }
 
     /// A decision taken at tick t is applied at t + 1, and the input is held until the next decision.
-    @Test func decisionsApplyOnTheNextTickAndAreHeldBetween() {
+    @Test func decisionsApplyOnTheNextTickAndAreHeldBetween() throws {
         let race = botRace(seed: 6)
         var controllers = allBots(race)
         sail(race, &controllers, ticks: 900)
-        let inputs = race.log.inputs
+        let inputs = try #require(race.log).inputs
         #expect(inputs.count > 100)
         for record in inputs {
             let phase = record.seat % BotDriver.decisionInterval
@@ -94,7 +94,8 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
                 #expect(try a.wind.sample(p, tick: a.tick) == b.wind.sample(p, tick: b.tick))
             }
         }
-        #expect(a.log.inputs.filter { $0.seat == 3 } != b.log.inputs.filter { $0.seat == 3 }, "the style changed how seat 3 sailed")
+        let (logA, logB) = (try #require(a.log), try #require(b.log))
+        #expect(logA.inputs.filter { $0.seat == 3 } != logB.inputs.filter { $0.seat == 3 }, "the style changed how seat 3 sailed")
     }
 
     @Test func botSeedsDifferBySeatAndRaceSeed() {
@@ -123,7 +124,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     }
 
     /// A bot takes a dropped player's boat at any tick and hands it back; only then does it send inputs.
-    @Test func controllersSwapAtAnyTick() {
+    @Test func controllersSwapAtAnyTick() throws {
         let race = botRace(seats: [.human, .bot, .bot], seed: 3)
         var controllers = SeatControllers(setup: race.setup)
         sail(race, &controllers, ticks: 301)
@@ -134,7 +135,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         controllers[0] = .human
         sail(race, &controllers, ticks: 300)
 
-        let seat0 = race.log.inputs.filter { $0.seat == 0 }
+        let seat0 = try #require(race.log).inputs.filter { $0.seat == 0 }
         #expect(!seat0.isEmpty)
         #expect(seat0.allSatisfy { $0.tick > dropped && $0.tick <= rejoined + 1 })
     }
@@ -158,7 +159,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         }
         race.record(.left, seat: 0)
 
-        let log = race.log
+        let log = try #require(race.log)
         #expect(log.inputs.contains { $0.seat == 4 }, "bot inputs are logged")
         let replayed = try Replayer.replay(log)
         #expect(replayed.digest() == race.digest())
@@ -175,12 +176,12 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         var bots = SeatControllers(setup: botRace.setup)
         sail(botRace, &bots, ticks: 1500)
         _ = botRace.drainEvents()
-        let copy = Race(setup: botRace.setup, windSeed: botRace.windSeed)
+        let copy = Race(setup: botRace.setup, windSeed: try #require(botRace.windSeed))
         try copy.importSnapshot(botRace.exportSnapshot())
         #expect(copy.digest() == botRace.digest())
         for _ in 0..<600 {
             sail(botRace, &bots, ticks: 1)
-            for record in botRace.log.inputs where record.tick == copy.tick + 1 {
+            for record in try #require(botRace.log).inputs where record.tick == copy.tick + 1 {
                 switch record.kind {
                 case .held(let input): copy.apply(input, seat: record.seat, atTick: record.tick)
                 case .tap(let tap): copy.tap(tap, seat: record.seat, atTick: record.tick)
@@ -192,12 +193,12 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     }
 
     /// No exceptions for bots (#19): a scripted seat that sends a bot's applied inputs sails the same boat.
-    @Test func scriptedSeatReplayingABotsInputsSailsTheSameBoat() {
+    @Test func scriptedSeatReplayingABotsInputsSailsTheSameBoat() throws {
         let ticks = Race.tickRate * 150
         let botSailed = botRace(seed: 17)
         var bots = SeatControllers(setup: botSailed.setup)
         sail(botSailed, &bots, ticks: ticks)
-        let script = botSailed.log.inputs.filter { $0.seat == 2 }
+        let script = try #require(botSailed.log).inputs.filter { $0.seat == 2 }
         #expect(script.count > 50)
 
         let scripted = botRace(seed: 17)
