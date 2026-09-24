@@ -20,11 +20,6 @@ public final class Race {
     /// Seconds per tick.
     public static let dt = 1.0 / Double(tickRate)
 
-    static let botNames = [
-        "Gannet", "Petrel", "Skua", "Fulmar", "Tern", "Osprey", "Curlew", "Kittiwake",
-        "Shearwater", "Puffin", "Cormorant", "Albatross", "Plover", "Heron", "Merlin", "Dunlin",
-    ]
-
     public let setup: RaceSetup
     public let windSeed: WindSeed
     public let course: Course
@@ -59,16 +54,11 @@ public final class Race {
     public private(set) var isOver = false
     public private(set) var firstFinishTime: Double?
 
-    /// Wraps the bot-brain phase of `step()` so a profiler can time it; the app emits an `os_signpost` interval.
-    /// It must call `body` exactly once and must not touch the race, so it never changes simulation output.
-    public var botBrainsInterval: ((_ body: () -> Void) -> Void)?
-
     private struct Pair: Hashable {
         let a: Int
         let b: Int
     }
 
-    private var brains: [Int: BotBrain] = [:]
     private var boatContacts = Set<Pair>()
     private var obstacleContacts = Set<Pair>()
     private var lastFoul: [Pair: Double] = [:]
@@ -85,10 +75,10 @@ public final class Race {
     /// seed in `defaultConditions` with the stub venue pairing, and the course is laid square to its
     /// mean direction (#10). Everything that changes during the race comes from the key chain of
     /// `windSeed` alone, never from the race seed (ADR 0001).
-    /// `botBrainSeats` are sailed by the built-in `BotBrain`, which feeds them through the same
-    /// held-input path as any seat, so the log still holds every input applied (ADR 0002). A replay
-    /// passes none: replays never run bots. Temporary until bots become seat controllers (#60).
-    public init(setup: RaceSetup, windSeed: WindSeed, botBrainSeats: [Int] = []) {
+    /// The race runs no bots: every seat, bot or human, is sailed from outside through `apply` and
+    /// `tap` (RegattaBots' seat controllers for bots, #60), so the log holds every input applied and
+    /// a replay needs nothing but the log (ADR 0002). Names and the rest of the roster live outside too.
+    public init(setup: RaceSetup, windSeed: WindSeed) {
         self.setup = setup
         self.windSeed = windSeed
         var rng = SplitMix64(seed: setup.raceSeed.value)
@@ -107,16 +97,8 @@ public final class Race {
 
         // Prototype placement until the start row (#35): seat 0 mid-line, the rest scattered by the race seed.
         var fleet: [Boat] = []
-        var botsNamed = 0
         for seat in setup.seats.indices {
             let kind = setup.seats[seat]
-            let name: String
-            if kind == .bot {
-                name = Race.botNames[botsNamed % Race.botNames.count]
-                botsNamed += 1
-            } else {
-                name = "Helm \(seat + 1)"
-            }
             var position = Vec2(0, -55)
             var heading = Double.pi / 2
             if seat > 0 {
@@ -126,17 +108,11 @@ public final class Race {
                 }
                 heading = rng.bool() ? Double.pi / 2 : -Double.pi / 2
             }
-            fleet.append(Boat(id: seat, name: name, isPlayer: kind == .human, colorIndex: seat,
+            fleet.append(Boat(id: seat, isPlayer: kind == .human, colorIndex: seat,
                               position: position, heading: heading, speed: 2))
         }
         boats = fleet
         heldInputs = Array(repeating: .neutral, count: fleet.count)
-
-        // Every seat draws a style, so a seat's style doesn't depend on which seats have brains.
-        for seat in boats.indices {
-            let brain = BotBrain(rng: &rng)
-            if botBrainSeats.contains(seat) { brains[seat] = brain }
-        }
         makeWindKeys()
         refreshWind()
     }
@@ -145,8 +121,7 @@ public final class Race {
 
     /// Holds `input` for `seat` from tick `stamp` until the seat sends another. A stamp the race has
     /// already simulated applies at the next tick instead, and is logged there (#18).
-    /// Returns the tick it applies at, or nil if rejected: an unknown seat, a seat sailed by a
-    /// built-in brain, or a race that is over.
+    /// Returns the tick it applies at, or nil if rejected: an unknown seat or a race that is over.
     @discardableResult
     public func apply(_ input: BoatInput, seat: Int, atTick stamp: Int) -> Int? {
         guard acceptsInput(from: seat) else { return nil }
@@ -185,17 +160,7 @@ public final class Race {
     }
 
     private func acceptsInput(from seat: Int) -> Bool {
-        boats.indices.contains(seat) && brains[seat] == nil && !isOver
-    }
-
-    /// Queues this tick's input from each built-in brain whose boat is on the course.
-    private func runBotBrains() {
-        for i in boats.indices where boats[i].isOnCourse {
-            guard var brain = brains[i] else { continue }
-            let rudder = brain.rudder(for: i, in: self)
-            brains[i] = brain
-            pending.append(InputRecord(tick: tick, seat: i, kind: .held(BoatInput(rudder: rudder))))
-        }
+        boats.indices.contains(seat) && !isOver
     }
 
     /// Applies the inputs stamped for this tick and logs them: held inputs first, the last one per
@@ -266,7 +231,6 @@ public final class Race {
         refreshWind()
         applyWindShadows()
 
-        if let botBrainsInterval { botBrainsInterval(runBotBrains) } else { runBotBrains() }
         applyInputs()
 
         let previous = boats.map(\.position)
@@ -555,8 +519,8 @@ extension Race {
     }
 
     /// Replaces the world with `snapshot`, so stepping on continues from its tick (ADR 0005). The race
-    /// keeps what isn't world state: its setup, course and wind seed, and its bot brains, whose own
-    /// memory isn't in a snapshot, so a race restored with brains won't make the same bot decisions.
+    /// keeps what isn't world state: its setup, course and wind seed. Bots run outside the race (#60),
+    /// and their memory isn't in a snapshot, so bots driving a restored race won't make the same decisions.
     /// Inputs queued but not yet applied and undrained events are dropped. `log` is left as it was and
     /// no longer describes the race: a race that imports is a prediction, never the record. The
     /// authoritative host never imports a snapshot a client could have supplied (ADR 0005).

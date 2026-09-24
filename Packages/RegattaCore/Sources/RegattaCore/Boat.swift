@@ -20,7 +20,6 @@ public struct Boat: Identifiable, Sendable {
     public static let beam = 1.5
 
     public let id: Int
-    public let name: String
     public let isPlayer: Bool
     public let colorIndex: Int
 
@@ -55,9 +54,8 @@ public struct Boat: Identifiable, Sendable {
     public var finishTime: Double?
     public var place: Int?
 
-    public init(id: Int, name: String, isPlayer: Bool, colorIndex: Int, position: Vec2, heading: Double, speed: Double) {
+    public init(id: Int, isPlayer: Bool, colorIndex: Int, position: Vec2, heading: Double, speed: Double) {
         self.id = id
-        self.name = name
         self.isPlayer = isPlayer
         self.colorIndex = colorIndex
         self.position = position

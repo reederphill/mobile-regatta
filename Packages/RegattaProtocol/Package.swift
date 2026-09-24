@@ -19,7 +19,12 @@ let package = Package(
         ),
         .testTarget(
             name: "RegattaProtocolTests",
-            dependencies: ["RegattaProtocol", .product(name: "RegattaCore", package: "RegattaCore")]
+            dependencies: [
+                "RegattaProtocol",
+                .product(name: "RegattaCore", package: "RegattaCore"),
+                // Real bot-sailed races for snapshot tests (#60).
+                .product(name: "RegattaBots", package: "RegattaCore"),
+            ]
         ),
     ]
 )

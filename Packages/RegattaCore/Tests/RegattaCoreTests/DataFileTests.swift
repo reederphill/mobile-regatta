@@ -285,7 +285,7 @@ enum Fixtures {
 
     @Test func bundledOutlineMatchesThePrototypeHull() throws {
         let hull = try Fixtures.boatClass().hull
-        let boat = Boat(id: 0, name: "", isPlayer: false, colorIndex: 0, position: .zero, heading: 0, speed: 0)
+        let boat = Boat(id: 0, isPlayer: false, colorIndex: 0, position: .zero, heading: 0, speed: 0)
         // Heading 0 is north, so the boat's frame is the world frame.
         let prototype = boat.hull()
         #expect(hull.outline.count == prototype.count)

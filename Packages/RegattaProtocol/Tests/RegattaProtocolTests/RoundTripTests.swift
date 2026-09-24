@@ -207,7 +207,7 @@ import Testing
 
 /// A copy of `boat` whose roster metadata (and so its bot flag) is changed.
 func relabel(_ boat: Boat, isPlayer: Bool) -> Boat {
-    var copy = Boat(id: boat.id, name: isPlayer ? "Helm" : "Gannet", isPlayer: isPlayer, colorIndex: (boat.colorIndex + 5) % 16,
+    var copy = Boat(id: boat.id, isPlayer: isPlayer, colorIndex: (boat.colorIndex + 5) % 16,
                     position: boat.position, heading: boat.heading, speed: boat.speed)
     copy.rudder = boat.rudder
     copy.desiredRudder = boat.desiredRudder

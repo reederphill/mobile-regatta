@@ -1,3 +1,4 @@
+import RegattaBots
 import RegattaCore
 @testable import RegattaProtocol
 
@@ -45,7 +46,8 @@ struct Gen {
 
     /// A seat with every field anywhere in its wire range.
     mutating func seat(_ id: Int) -> WorldSnapshot.Seat {
-        var boat = Boat(id: id, name: string(), isPlayer: bool(), colorIndex: int(0...15),
+        _ = string() // was the boat's name (#60 moved names to the roster); kept so the cases don't move
+        var boat = Boat(id: id, isPlayer: bool(), colorIndex: int(0...15),
                         position: Vec2(double(-32_000, 32_000), double(-32_000, 32_000)),
                         heading: double(-.pi, .pi), speed: double(0, 63.99))
         boat.rudder = double(-1, 1)
@@ -216,10 +218,35 @@ func eventKindIndex(_ kind: RaceEvent.Kind) -> Int {
 
 let eventKindCount = 12
 
-/// A fleet race sailed by bot brains, for real snapshots: starts, OCS, contacts, roundings, finishes.
-func botRace(seats: Int = 16, laps: Int = 1, prestartSeconds: Int = 30, seed: UInt64 = 63) -> Race {
+/// A fleet race with a bot sailing every seat, for real snapshots: starts, OCS, contacts, roundings, finishes.
+func botRace(seats: Int = 16, laps: Int = 1, prestartSeconds: Int = 30, seed: UInt64 = 63,
+             windSeed: WindSeed? = nil) -> BotSailedRace {
     let kinds: [SeatKind] = (0..<seats).map { $0 % 4 == 0 ? .human : .bot }
     let setup = try! RaceSetup(raceSeed: RaceSeed(seed), seats: kinds, laps: laps,
                                startSequenceTicks: prestartSeconds * Race.tickRate)
-    return Race(setup: setup, windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1), botBrainSeats: Array(0..<seats))
+    return BotSailedRace(Race(setup: setup, windSeed: windSeed ?? WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)))
+}
+
+/// A race whose seats are all sailed by RegattaBots' seat controllers through the input API (#60), as a
+/// race host sails its bots: `step()` lets the bots decide, then steps the race. Reads the race's
+/// properties through to it.
+@dynamicMemberLookup
+final class BotSailedRace {
+    let race: Race
+    private var seats: SeatControllers
+
+    init(_ race: Race) {
+        self.race = race
+        seats = SeatControllers(race.boats.indices.map { .bot(BotDriver(seat: $0, raceSeed: race.setup.raceSeed)) })
+    }
+
+    subscript<T>(dynamicMember keyPath: KeyPath<Race, T>) -> T { race[keyPath: keyPath] }
+
+    func step() {
+        seats.drive(race)
+        race.step()
+    }
+
+    func exportSnapshot() -> WorldSnapshot { race.exportSnapshot() }
+    func drainEvents() -> [RaceEvent] { race.drainEvents() }
 }

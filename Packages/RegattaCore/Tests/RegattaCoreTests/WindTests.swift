@@ -401,7 +401,7 @@ enum WindFixtures {
     /// The race makes each key as its window starts: it holds keys through the current window, never
     /// the next one, and never misses one (practice and replay hold the wind seed).
     @Test func raceHoldsKeysExactlyThroughTheCurrentWindow() {
-        let race = testRace(opponents: 1, prestartSeconds: 60, seed: 3, brains: [])
+        let race = testRace(opponents: 1, prestartSeconds: 60, seed: 3)
         #expect(race.wind.keys.endWindow == 2)
         for _ in 0..<(4 * WindWindows.ticksPerWindow + 17) {
             race.step()
@@ -425,7 +425,7 @@ enum WindFixtures {
 
     /// A long race keeps making keys: well past the 16-minute time limit, the wind never runs out.
     @Test func raceWindNeverRunsOut() {
-        let race = testRace(opponents: 1, prestartSeconds: 60, seed: 21, brains: [])
+        let race = testRace(opponents: 1, prestartSeconds: 60, seed: 21)
         for _ in 0..<(40 * 60 * Race.tickRate) where !race.isOver { race.step() }
         #expect(race.wind.keys.endWindow == race.wind.windows.window(containing: race.tick) + 1)
     }

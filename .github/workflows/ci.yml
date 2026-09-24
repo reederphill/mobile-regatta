@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: swift test (debug and release) in the pinned swift image
+      - name: swift test (debug and release) in the pinned swift image, RegattaBots included
         shell: bash  # explicit, so the step runs with pipefail and a test failure isn't hidden by tee
         run: scripts/linux-test.sh 2>&1 | tee linux-test.log
       - name: Golden digest
@@ -25,7 +25,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: swift test
+      - name: swift test (RegattaCore and RegattaBots)
         working-directory: Packages/RegattaCore
         run: swift test
       - name: swift test (RegattaProtocol)

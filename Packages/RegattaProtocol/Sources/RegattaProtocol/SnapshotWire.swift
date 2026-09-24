@@ -226,7 +226,6 @@ public enum SnapshotFields {
     /// (`WireSeat.apply(to:)` merges into its snapshot).
     public static let excluded: [String: String] = [
         "boat.id": "the seat index: the seat's position in the snapshot",
-        "boat.name": "roster metadata, sent once in RaceStart's seat table",
         "boat.isPlayer": "the bot flag: roster metadata in RaceStart only, so bots look like humans on the wire (#18, #19)",
         "boat.colorIndex": "roster metadata, sent once in RaceStart's seat table",
         "boat.desiredRudder": "derived: set from the held input or the autopilot every tick before it is read",

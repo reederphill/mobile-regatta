@@ -19,7 +19,7 @@ import Testing
     }
 
     @Test func separatingAxisFindsOverlap() {
-        let a = Boat(id: 0, name: "a", isPlayer: false, colorIndex: 0, position: .zero, heading: 0, speed: 0)
+        let a = Boat(id: 0, isPlayer: false, colorIndex: 0, position: .zero, heading: 0, speed: 0)
         var b = a
         b.position = Vec2(1, 0)
         #expect(Collision.penetration(a.hull(), b.hull()) != nil)
@@ -44,7 +44,7 @@ import Testing
     let course = Course.standard()
 
     func boat(_ id: Int, at p: Vec2, heading degrees: Double, wind: Double = 0) -> Boat {
-        var b = Boat(id: id, name: "\(id)", isPlayer: false, colorIndex: id, position: p, heading: deg2rad(degrees), speed: 3)
+        var b = Boat(id: id, isPlayer: false, colorIndex: id, position: p, heading: deg2rad(degrees), speed: 3)
         b.windDirection = deg2rad(wind)
         b.status = .racing
         return b
@@ -116,7 +116,7 @@ import Testing
 
     @Test func boatOverTheLineAtTheGunIsOCSAndMustReturn() {
         // Seat 1 is a second human who sends no inputs, so she sails straight on out of the way.
-        let race = testRace(seats: [.human, .human], prestartSeconds: 40, seed: 1, brains: [])
+        let race = testRace(seats: [.human, .human], prestartSeconds: 40, seed: 1)
         let early = sail(race, heading: deg2rad(-45), seconds: 41)
         #expect(early.contains(.ocs(seat: 0)))
         #expect(race.boats[0].status == .ocs)
@@ -133,22 +133,10 @@ import Testing
     }
 
     @Test func autopilotTackMirrorsHeading() {
-        let race = testRace(seats: [.human, .human], seed: 3, brains: [])
+        let race = testRace(seats: [.human, .human], seed: 3)
         let before = race.boats[0]
         race.tap(.tackGybe, seat: 0, atTick: race.tick + 1)
         for _ in 0..<(Race.tickRate * 5) { race.step() }
         #expect(race.boats[0].tack != before.tack || race.boats[0].twa > deg2rad(80))
-    }
-
-    @Test func botFleetCompletesARace() {
-        let race = testRace(opponents: 7, laps: 2, prestartSeconds: 45, seed: 42, brains: Array(0...7))
-        var steps = 0
-        while !race.isOver && steps < 1_500 * Race.tickRate {
-            race.step()
-            steps += 1
-        }
-        let finishers = race.boats.filter { $0.status == .finished }
-        #expect(race.isOver)
-        #expect(finishers.count >= 5, "finished: \(finishers.map(\.name)), statuses: \(race.boats.map(\.status))")
     }
 }

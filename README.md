@@ -10,6 +10,7 @@ This first cut is single-player against bots. Multiplayer, the lobby and ranking
 ```
 Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Geometry.swift          vectors, angles, line crossings, SAT collision
+  Trig.swift              `sin` and `cos` that optimized builds can't merge into `sincos` (Determinism, below)
   WindKey.swift           the 30 s wind windows, a window's key (knot, strength, wobble, puff seed) and the key chain
   WindKeyGenerator.swift  the server-side (or practice) key chain from the wind seed, by HMAC-SHA256
   WindField.swift         the pure keyed wind: Hermite knots between keys, sampled by position and tick
@@ -32,12 +33,16 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   BoatInput.swift         held input (int8 rudder, ease) and taps (tack/gybe, protest)
   RaceLog.swift           race log: header, inputs as applied, seat events; stable JSON
   Replayer.swift          re-simulates a race log to its final state, never running a bot brain
-  BotBrain.swift          AI helms: start timing, laylines, shifts, roundings, keeping clear
   Random.swift            SplitMix64, named streams of a seed, and our own range, coin and shuffle mappings
   SimulationVersion.swift simulation version: revision, toolchain, C library, architecture
   Digest.swift            FNV-1a state digest for golden replay tests
   WorldSnapshot.swift     the whole predictable world at a tick; `Race.exportSnapshot()` / `importSnapshot(_:)` (ADR 0005)
   Sources/regatta-replay  `regatta-replay <log>`: replays a race log and prints its final digest
+  Sources/RegattaBots/    bots, outside the simulation: they sail seats through the input API (#60)
+    SeatController.swift    who sails each seat (human, bot, dropped), swappable at any tick
+    BotDriver.swift         10 Hz decisions applied next tick; the bot's own seed, hash(race seed, seat, "bot")
+    BotBrain.swift          AI helms: start timing, laylines, shifts, roundings, keeping clear
+    FleetRoster.swift       display metadata: which seats are bots, and their sailing names
   Tests/Goldens.json      golden digests keyed by simulation version
   Tests/Fixtures/         the golden 16-seat scripted race log, and a wind seed pool for the loader
 Packages/RegattaProtocol/ The race wire protocol: messages, frames and a binary codec, no transport (#63)
@@ -88,12 +93,24 @@ bit-for-bit deterministic:
   the race logs it exactly as applied. `Race.log` is the race as stored (ADR 0002); `Replayer` and
   `swift run regatta-replay <log>` re-simulate it. The wind seed is kept apart from the public race seed
   (ADR 0001).
+- `Race` runs no bots. RegattaBots' seat controllers send each bot's decisions through the same input API,
+  so the log holds them as applied and replays never run a brain (ADR 0002). A bot draws only from its
+  own seed, `botSeed(raceSeed:seat:)`, never from the race's streams, so retuning bots moves neither
+  placement, wind nor the golden, and needs no simulation version bump. Names and bot marks live in
+  `FleetRoster`, outside the simulation.
 - The replay platform is pinned to the `swift:6.3.3-noble` image (by digest, in `scripts/linux-test.sh`)
   on `linux/amd64`: Swift 6.3.3, glibc 2.39, x86_64. Trig uses that platform's libm rather than our own
   implementation: the C library is already part of the simulation version, and iOS clients only have to
   be close. Upgrading the image is a simulation version change.
-- Golden digests are asserted only on the replay platform. On macOS the tests check that the digest is
-  the same twice in one process and across two processes (`scripts/check-digest-stable.sh`).
+- Debug and release builds must replay a race identically. Swift doesn't fuse `a * b + c` into a
+  multiply-add, but LLVM merges `sin(x)` and `cos(x)` into one `sincos` call in optimized code, and
+  Apple's `__sincos_stret` rounds differently from `sin`. RegattaCore's own `sin` and `cos`
+  (`Trig.swift`) shadow the C library's and prevent the merge, so don't qualify them as
+  `Foundation.sin` or `Darwin.cos`.
+- Golden digests are asserted only on the replay platform, where `scripts/linux-test.sh` also checks
+  that debug and release agree on the golden and on RegattaBots' replay race. On macOS the tests check
+  that the digest is the same twice in one process, across two processes and in release
+  (`scripts/check-digest-stable.sh`).
 
 ### Data files
 
@@ -119,7 +136,7 @@ Open `Regatta.xcodeproj` and run the **Regatta** scheme. Xcode must have the iOS
 its SDK installed (Xcode → Settings → Components); if it doesn't, the scheme will show no run
 destinations.
 
-Run the simulation tests from the command line:
+Run the simulation and bot tests (RegattaCore and RegattaBots) from the command line:
 
 ```bash
 cd Packages/RegattaCore && swift test
@@ -132,6 +149,12 @@ Run both packages' tests on the pinned Linux replay platform, in debug and relea
 ```bash
 scripts/linux-test.sh
 ```
+
+The image is `linux/amd64`. On Apple silicon, run it in a podman machine with Rosetta enabled (for example
+`podman machine init --rosetta …`, made the default connection). Without Rosetta, podman emulates x86_64 with
+qemu, which is very slow and has deadlocked the parallel build. On the Rosetta machine SwiftPM can now and then
+fail copying package resources ("encountered an I/O error (code: 4)", an interrupted read) before any test
+runs; rerun the script.
 
 Run the app's unit tests (`RegattaTests`) and UI tests (`RegattaUITests`) on the simulator:
 
@@ -180,7 +203,7 @@ and by hand.
 Parsed by `LaunchOptions`; bad values are logged and ignored.
 
 - `-autostart` skips the menu and starts a race.
-- `-demo` starts a race with a bot sailing your boat too. Useful for watching the AI.
+- `-demo` starts a race with a bot controller attached to your seat too. Useful for watching the AI.
 - `-perf` starts a 16-boat demo race for profiling.
 - `-seed <n>` sails every race on race seed `n`, with the wind seed pinned to it too, so the whole race reproduces.
 - `-timescale <n>` runs the simulation at `n`× real time.
@@ -193,8 +216,8 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
 
 The app emits `os_signpost` intervals on the Points of Interest track: **Sim step**, **Bot brains**,
 **Render update** and **HUD refresh**. Profile the Regatta scheme in Instruments with `-perf` and compare
-them against the budgets in #27 (sim + prediction < 3 ms, bots < 2 ms). **Sim step** includes the **Bot
-brains** inside it, so subtract Bot brains from Sim step when checking the sim budget.
+them against the budgets in #27 (sim + prediction < 3 ms, bots < 2 ms). **Bot brains** is the seat
+controllers deciding before each tick, outside `Race.step()`, so **Sim step** is the simulation alone.
 
 ## Playing
 

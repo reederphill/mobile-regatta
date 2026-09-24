@@ -1,4 +1,5 @@
 import SpriteKit
+import RegattaBots
 import RegattaCore
 
 /// Renders the race and turns touches into rudder input. The simulation advances
@@ -7,6 +8,9 @@ final class GameScene: SKScene {
     static let pointsPerMeter: CGFloat = 8
 
     let race: Race
+    /// Who sails each seat. Bots send their inputs through the race's input API before each tick (#60).
+    private(set) var seats: SeatControllers
+    let roster: FleetRoster
     /// Simulated seconds per real second (`-timescale`).
     let timescale: Double
     weak var session: GameSession?
@@ -35,13 +39,14 @@ final class GameScene: SKScene {
     private var starboardTouches = Set<UITouch>()
     private var rudderInput = 0.0
 
-    init(race: Race, timescale: Double = 1) {
+    init(race: Race, seats: SeatControllers, roster: FleetRoster, timescale: Double = 1) {
         self.race = race
+        self.seats = seats
+        self.roster = roster
         self.timescale = timescale
         // A placeholder: `RaceView` sets the size from `RaceViewportPolicy`, so the visible world area
         // doesn't depend on the window. The view has the scene's aspect, so aspect-fit scales it uniformly.
         super.init(size: CGSize(width: 390, height: 844))
-        race.botBrainsInterval = { Signpost.botBrains.measure($0) }
         scaleMode = .aspectFit
         anchorPoint = CGPoint(x: 0.5, y: 0.5)
         backgroundColor = Palette.water
@@ -127,7 +132,8 @@ final class GameScene: SKScene {
 
     private func buildBoats() {
         for boat in race.boats {
-            let node = BoatNode(boat: boat, color: Palette.boat(boat.colorIndex), pointsPerMeter: ppm)
+            let node = BoatNode(boat: boat, name: roster.label(of: boat.id, playerSeat: race.playerIndex),
+                                color: Palette.boat(boat.colorIndex), pointsPerMeter: ppm)
             boatNodes.append(node)
             boatLayer.addChild(node)
             effectsLayer.addChild(node.shadowCone)
@@ -143,7 +149,8 @@ final class GameScene: SKScene {
         guard let session, !session.isPaused else { return }
 
         updateRudder(frameTime)
-        race.setPlayerRudder(rudderInput)
+        // With `-demo` a bot sails your seat, and your touches don't reach it.
+        if seats[race.playerIndex].isHuman { race.setPlayerRudder(rudderInput) }
         advanceSimulation(by: frameTime)
 
         Signpost.renderUpdate.measure { render(frameTime * timescale) }
@@ -156,10 +163,12 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Runs the fixed ticks that `frameTime` seconds of real time cover at `timescale`.
+    /// Runs the fixed ticks that `frameTime` seconds of real time cover at `timescale`, each after
+    /// the bots have had their say.
     func advanceSimulation(by frameTime: Double) {
         accumulator += frameTime * timescale
         while accumulator >= fixedStep {
+            Signpost.botBrains.measure { seats.drive(race) }
             Signpost.simStep.measure { race.step() }
             accumulator -= fixedStep
         }

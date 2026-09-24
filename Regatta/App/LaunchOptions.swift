@@ -109,7 +109,7 @@ struct LaunchOptions: Equatable {
     func launchRaceConfig(from settings: RaceSettings) -> RaceConfig? {
         guard startsRace else { return nil }
         var config = raceConfig(from: settings)
-        config.autopilotPlayer = demo || perf
+        config.botSailsYourBoat = demo || perf
         if perf { config.opponents = Self.perfFleetSize - 1 }
         return config
     }

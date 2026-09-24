@@ -53,7 +53,7 @@ struct SeatWithProbe: CustomReflectable {
 /// in neither list; later core tickets extend the snapshot and the lists to pass it.
 @Suite struct SnapshotCoverageTests {
     static let seat = WorldSnapshot.Seat(
-        boat: Boat(id: 0, name: "Helm 1", isPlayer: true, colorIndex: 0, position: Vec2(0, 0), heading: 0, speed: 0),
+        boat: Boat(id: 0, isPlayer: true, colorIndex: 0, position: Vec2(0, 0), heading: 0, speed: 0),
         heldInput: .neutral
     )
 

@@ -1,21 +1,35 @@
-import Foundation
+import RegattaCore
 
-/// Helms a computer-controlled boat: pre-start timing, beating and running between
-/// laylines, playing shifts, mark roundings, penalty turns, and keeping clear when
-/// it is the give-way boat.
-struct BotBrain {
-    let skill: Double
+/// A bot's hidden, seeded style (#19): where it starts, how early it risks being, how it serves
+/// penalties, and a skill value. Drawn from the bot's own seed (`BotDriver.seed`), never from the
+/// race's streams, so changing a style never moves placement or wind. Tuning it needs no simulation
+/// version bump: the race log holds the inputs a bot applied, and replays never run brains (ADR 0002).
+public struct BotStyle: Hashable, Sendable {
+    /// 0…1. Today it gates shift-playing and sets the keep-clear look-ahead; #102 grows it into the tiers.
+    public var skill: Double
     /// Where on the line to start, 0 = pin, 1 = committee boat.
-    let startSpot: Double
-    let finishSpot: Double
-    let holdDepth: Double
+    public var startSpot: Double
+    /// Where on the line to finish, 0 = pin, 1 = committee boat.
+    public var finishSpot: Double
+    /// Metres below the start spot to hold before the approach.
+    public var holdDepth: Double
     /// Seconds added to the approach; negative values make the bot early (and risk OCS).
-    let timingSlack: Double
-    let penaltyDirection: Double
-    var plannedTack: Tack = .starboard
-    var lastTackTime = -1_000.0
+    public var timingSlack: Double
+    /// Hard over to this side (−1 port, 1 starboard) for penalty turns.
+    public var penaltyDirection: Double
 
-    init(rng: inout SplitMix64) {
+    public init(skill: Double, startSpot: Double, finishSpot: Double, holdDepth: Double,
+                timingSlack: Double, penaltyDirection: Double) {
+        self.skill = skill
+        self.startSpot = startSpot
+        self.finishSpot = finishSpot
+        self.holdDepth = holdDepth
+        self.timingSlack = timingSlack
+        self.penaltyDirection = penaltyDirection
+    }
+
+    /// The prototype brain's draws, in its order.
+    public init(rng: inout SplitMix64) {
         skill = rng.range(0.35, 1)
         startSpot = rng.range(0.1, 0.9)
         finishSpot = rng.range(0.6, 0.85)
@@ -23,17 +37,69 @@ struct BotBrain {
         timingSlack = rng.range(-2.5, 5) * (1.3 - skill)
         penaltyDirection = rng.bool() ? 1 : -1
     }
+}
 
-    mutating func rudder(for i: Int, in race: Race) -> Double {
+/// One bot decision: exactly what a human could send (#19), a held input and at most one tap.
+public struct BotDecision: Hashable, Sendable {
+    public var input: BoatInput
+    public var tap: BoatTap?
+
+    public init(input: BoatInput, tap: BoatTap? = nil) {
+        self.input = input
+        self.tap = tap
+    }
+}
+
+/// Helms a computer-controlled boat: pre-start timing, beating and running between
+/// laylines, playing shifts, mark roundings, penalty turns, and keeping clear when
+/// it is the give-way boat.
+///
+/// The prototype brain behind a temporary adapter (#60): it reads only the public race, as a
+/// player's device could, and answers with a `BotDecision`, an int8 rudder plus the tack/gybe tap.
+/// The bot phase (#98–#104) rebuilds it: ease, tiers, player-visible information only.
+struct BotBrain: Sendable {
+    let style: BotStyle
+    var plannedTack: Tack = .starboard
+    var lastTackTime = -1_000.0
+
+    init(style: BotStyle) {
+        self.style = style
+    }
+
+    private var skill: Double { style.skill }
+    private var startSpot: Double { style.startSpot }
+    private var finishSpot: Double { style.finishSpot }
+    private var holdDepth: Double { style.holdDepth }
+    private var timingSlack: Double { style.timingSlack }
+
+    mutating func decide(for i: Int, in race: Race) -> BotDecision {
         let boat = race.boats[i]
-        guard boat.isOnCourse else { return 0 }
+        guard boat.isOnCourse else { return BotDecision(input: .neutral) }
         if boat.penaltyTurnsOwed > 0 && (boat.isTakingPenalty || isClearOfTraffic(boat, race)) {
-            return penaltyDirection
+            return BotDecision(input: BoatInput(rudder: style.penaltyDirection))
         }
-        var heading = desiredHeading(boat, race)
-        heading = keepClear(boat, race, desired: heading)
+        let desired = desiredHeading(boat, race)
+        var heading = keepClear(boat, race, desired: desired)
+        let keepingClear = heading != desired
         heading = avoidMarks(boat, race, desired: heading)
-        return (wrapAngle(heading - boat.heading) / deg2rad(20)).clamped(to: -1...1)
+
+        // The tap's autopilot is tacking or gybing the boat: hands off, since any rudder cancels it,
+        // unless the boat has to keep clear of someone.
+        if boat.autopilot != nil && !keepingClear { return BotDecision(input: .neutral) }
+        if !keepingClear && wantsTackOrGybe(boat, to: heading, race) {
+            return BotDecision(input: .neutral, tap: .tackGybe)
+        }
+        return BotDecision(input: BoatInput(rudder: (wrapAngle(heading - boat.heading) / deg2rad(20)).clamped(to: -1...1)))
+    }
+
+    /// Whether `heading` is the mirror of a close-hauled or running course on the other tack, which
+    /// the tack/gybe tap sails to as a player's would.
+    private func wantsTackOrGybe(_ b: Boat, to heading: Double, _ race: Race) -> Bool {
+        let target = wrapAngle(b.windDirection - heading)
+        guard (target >= 0) != (b.relativeWind >= 0), abs(wrapAngle(heading - b.heading)) > deg2rad(50) else { return false }
+        let upwind = race.polar.upwindTWA + deg2rad(15)
+        let downwind = race.polar.downwindTWA - deg2rad(15)
+        return (b.twa < upwind && abs(target) < upwind) || (b.twa > downwind && abs(target) > downwind)
     }
 
     private mutating func desiredHeading(_ b: Boat, _ race: Race) -> Double {

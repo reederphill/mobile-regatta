@@ -41,7 +41,6 @@ public extension Race {
             h.combine(Int(heldInputs[seat].rudder))
             h.combine(heldInputs[seat].ease)
             h.combine(b.id)
-            h.combine(b.name)
             h.combine(b.isPlayer)
             h.combine(b.colorIndex)
             h.combine(b.position.x)

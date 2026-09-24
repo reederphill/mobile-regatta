@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.iOS(.v18), .macOS(.v15)],
     products: [
         .library(name: "RegattaCore", targets: ["RegattaCore"]),
+        .library(name: "RegattaBots", targets: ["RegattaBots"]),
         .executable(name: "regatta-replay", targets: ["regatta-replay"]),
     ],
     dependencies: [
@@ -25,6 +26,8 @@ let package = Package(
                 .copy("Resources/venues"),
             ]
         ),
+        // Bots sail seats through RegattaCore's public input API only (#60), on the server and the device.
+        .target(name: "RegattaBots", dependencies: ["RegattaCore"]),
         .executableTarget(name: "regatta-replay", dependencies: ["RegattaCore"]),
         // regatta-replay is a dependency so `swift test` builds it: the golden test runs it as its own process.
         .testTarget(
@@ -33,5 +36,6 @@ let package = Package(
             // Fixture data files, byte for byte, loaded with `DataFile.bundled(id:version:in: .module)`.
             resources: [.copy("Resources/venues")]
         ),
+        .testTarget(name: "RegattaBotsTests", dependencies: ["RegattaBots", "RegattaCore"]),
     ]
 )

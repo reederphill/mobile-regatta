@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Runs the tests of every Linux package (RegattaCore, RegattaProtocol) on the pinned replay
-# platform (the race server's toolchain, C library and architecture; ADR 0002), in debug and
-# release, with podman or docker.
+# Runs the tests of every Linux package (RegattaCore, with its RegattaBots target, which runs on the
+# race server too; RegattaProtocol) on the pinned replay platform (the race server's toolchain,
+# C library and architecture; ADR 0002), in debug and release, with podman or docker.
 #
 #   scripts/linux-test.sh
 #
@@ -70,5 +70,21 @@ if [[ "$count" != "2" ]]; then
 fi
 if [[ "$(printf '%s\n' "$lines" | sort -u | wc -l | tr -d ' ')" != "1" ]]; then
     echo "linux-test.sh: debug and release digests differ" >&2
+    exit 1
+fi
+
+# RegattaBots built and its tests ran in both configurations: its replay test prints one line each.
+# It sails a different race from the golden (bots, contacts, penalty turns), so it must agree too.
+bots="$(grep -o 'REGATTABOTS replay digest=.*' "$log" || true)"
+echo
+echo "RegattaBots replay digests (debug and release):"
+echo "$bots"
+count="$(printf '%s' "$bots" | grep -c . || true)"
+if [[ "$count" != "2" ]]; then
+    echo "linux-test.sh: expected 2 REGATTABOTS lines (debug and release), got $count" >&2
+    exit 1
+fi
+if [[ "$(printf '%s\n' "$bots" | sort -u | wc -l | tr -d ' ')" != "1" ]]; then
+    echo "linux-test.sh: debug and release RegattaBots replay digests differ" >&2
     exit 1
 fi

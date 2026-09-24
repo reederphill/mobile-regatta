@@ -20,6 +20,11 @@ struct ResultsView: View {
                                 Circle()
                                     .fill(Palette.boatColor(row.colorIndex))
                                     .frame(width: 10, height: 10)
+                                if row.isBot {
+                                    Image(systemName: BotGlyph.symbolName)
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityLabel("Bot")
+                                }
                                 Text(row.name).font(.body.weight(row.isPlayer ? .bold : .regular))
                                 Spacer()
                                 Text(row.detail)
