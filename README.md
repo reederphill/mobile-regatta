@@ -127,7 +127,9 @@ The app ships for iOS 18 on A12 or newer (`iphone-ipad-minimum-performance-a12`,
 after v1.0). It uses the scene life cycle and a launch screen, which apps built with the iOS 27 SDK need to
 launch, and doesn't set `UIRequiresFullScreen`: on iPad it runs in any window, and the race sequence keeps its
 full-screen portrait shape and world area, letterboxed with water (`RaceViewportPolicy`). Menus adapt to the
-window. The root view controller prefers a locked orientation; iPhone is portrait only.
+window. The root view controller prefers a locked orientation only while the race sequence shows; iPhone is
+portrait only. `SceneDelegate` forwards the scene's activation state to `SceneState.phase` (`\.sceneState`), since
+`@Environment(\.scenePhase)` isn't reliable when UIKit owns the scene.
 
 Signing is done by a person in Xcode (automatic signing, team `8S5TQ65X3B`). The App Attest environment
 entitlement is `development` in Debug and `production` in Release (`APP_ATTEST_ENVIRONMENT`). To archive
@@ -147,9 +149,11 @@ swift scripts/generate-acknowledgements.swift
 ```
 
 CI (`.github/workflows/ci.yml`) runs `scripts/linux-test.sh` on Linux, `swift test` plus
-`scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the iOS Simulator. A second app job on
-GitHub's Xcode 27 image archives with the iOS 27 SDK, checks the archive with `scripts/check-shipping-config.sh`,
-and runs the app's tests on iOS 27 iPhone and iPad simulators.
+`scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the iOS Simulator (iPhone, plus the UI tests
+on iPad). `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
+the archive with `scripts/check-shipping-config.sh`, launches the app, and runs its tests on iOS 27 iPhone and
+iPad simulators. To save macOS minutes it runs only on pull requests that touch shipping config, on main, weekly
+and by hand.
 
 ### Launch arguments
 
