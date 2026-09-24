@@ -84,6 +84,9 @@ public struct WireWriter: Sendable {
         bytes.append(contentsOf: utf8)
     }
 
+    /// Bytes of a fixed length, with no length before them.
+    mutating func raw(_ b: [UInt8]) { bytes.append(contentsOf: b) }
+
     mutating func blob(_ b: [UInt8], limit: Int, _ field: String) throws {
         try count(b.count, limit: limit, field)
         bytes.append(contentsOf: b)
@@ -172,6 +175,13 @@ public struct WireReader: Sendable {
     }
 
     mutating func index() throws -> Int { Int(try u8()) }
+
+    /// Exactly `n` bytes.
+    mutating func raw(_ n: Int) throws -> [UInt8] {
+        guard n <= remaining else { throw WireError.truncated }
+        defer { offset += n }
+        return Array(bytes[offset..<(offset + n)])
+    }
 
     mutating func blob(limit: Int, _ field: String) throws -> [UInt8] {
         let n = try count(limit: limit, field)

@@ -106,15 +106,46 @@ struct LogFeeder {
         Self.expectSameFuture(race, try Self.imported(snapshot), steps: 300)
     }
 
-    /// A client imports the server's world at an earlier tick than its own, then predicts forward again.
+    /// A client imports the server's world at an earlier tick than its own, a window earlier, then
+    /// predicts forward again across window boundaries: its key generator was ahead, so it is rebuilt.
     @Test func importingAnEarlierTickRewindsTheWind() throws {
         let server = Self.feeder.race(at: 1200)
         _ = server.drainEvents()
-        let client = Self.feeder.race(at: 1230)
+        let client = Self.feeder.race(at: 2000)
+        #expect(client.wind.keys.endWindow > server.wind.keys.endWindow)
         try client.importSnapshot(server.exportSnapshot())
         #expect(client.tick == 1200)
-        #expect(client.wind.tick == server.wind.tick)
-        Self.expectSameFuture(server, client, steps: 300)
+        #expect(client.wind == server.wind)
+        Self.expectSameFuture(server, client, steps: 1000)
+        #expect(client.wind == server.wind)
+        #expect(client.wind.keys.endWindow == client.wind.windows.window(containing: client.tick) + 1)
+    }
+
+    /// The wind is in a snapshot only as its keys (ADR 0001): enough of them to sample at its tick.
+    @Test func theSnapshotCarriesTheKeysAndNeedsThem() throws {
+        let race = Self.feeder.race(at: 450)
+        _ = race.drainEvents()
+        let snapshot = race.exportSnapshot()
+        #expect(snapshot.windKeys == race.wind.keys)
+        let current = race.wind.windows.window(containing: 450)
+        #expect(snapshot.windKeys.endWindow == current + 1)
+
+        var missing = snapshot
+        missing.windKeys.remove(window: current)
+        #expect(throws: WorldSnapshotError.missingWindKey(current)) { try Self.imported(missing) }
+        missing = snapshot
+        missing.windKeys = WindKeyChain()
+        #expect(throws: WorldSnapshotError.self) { try Self.imported(missing) }
+
+        // Keys revealed ahead (a client's) are kept, and the race makes no key it already holds.
+        let ahead = Self.feeder.race(at: 1300).wind.keys
+        #expect(ahead.endWindow == snapshot.windKeys.endWindow + 1)
+        var withAhead = snapshot
+        withAhead.windKeys = ahead
+        let copy = try Self.imported(withAhead)
+        #expect(copy.wind.keys == ahead)
+        Self.expectSameFuture(race, copy, steps: 900)
+        #expect(copy.wind == race.wind)
     }
 
     @Test func exportOfAnImportIsTheSameWorld() throws {
@@ -127,6 +158,7 @@ struct LogFeeder {
         #expect(a.foulMemory == b.foulMemory)
         #expect(a.firstFinishTime == b.firstFinishTime)
         #expect(a.isOver == b.isOver)
+        #expect(a.windKeys == b.windKeys)
         #expect(a.seats.map(\.heldInput) == b.seats.map(\.heldInput))
         // Every stored boat field, bit for bit: the description prints each Double in full.
         #expect(a.seats.map { String(describing: $0.boat) } == b.seats.map { String(describing: $0.boat) })
@@ -234,6 +266,7 @@ struct LogFeeder {
     /// Race properties carried by `WorldSnapshot`.
     static let carried: Set<String> = [
         "tick", "boats", "heldInputs", "boatContacts", "obstacleContacts", "lastFoul", "firstFinishTime", "isOver",
+        "wind", // as its keys, `windKeys`; its setup and window grid are fixed for the race
     ]
 
     /// Race properties deliberately left out, and why.
@@ -242,7 +275,8 @@ struct LogFeeder {
         "windSeed": "secret key, never in a snapshot (ADR 0001); the importing race has its own wind",
         "course": "fixed for the race, derived from the setup",
         "polar": "fixed for the race",
-        "wind": "a function of the tick and the wind's keys (ADR 0001); import brings it to the snapshot's tick",
+        "windSetup": "fixed for the race, drawn from the public race seed",
+        "windKeys": "the key generator: it holds the wind seed, never in a snapshot (ADR 0001); import moves it past the snapshot's keys",
         "botBrainsInterval": "profiling hook, never changes output",
         "brains": "bot brains run only where the race is hosted; a boat's future is its held input (ADR 0005)",
         "finishers": "derived on import: the count of finished boats",

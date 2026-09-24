@@ -3,9 +3,10 @@
 /// `Race.exportSnapshot()` continues bit for bit like the race it came from, given the same inputs.
 ///
 /// It is lossless and in memory only: the wire carries a quantised subset (`RegattaProtocol`), which
-/// a receiver merges into its own snapshot. Two things are never in it:
-/// - the wind, which is a function of the race clock and the wind's keys (ADR 0001), never state
-///   that travels; an importing race brings its own wind to the snapshot's tick;
+/// a receiver merges into its own snapshot. The wind is in it only as the keys held (`windKeys`): the
+/// wind is a function of the race clock and the keys (ADR 0001), and keys are public once revealed.
+/// Two things are never in it:
+/// - the wind seed, which never leaves the race's key generator (ADR 0001);
 /// - anything about who sails a seat: bot brains run only where the race is hosted, and a boat's
 ///   future is its held input, bot or human (#18, #19).
 ///
@@ -68,6 +69,9 @@ public struct WorldSnapshot: Sendable {
     public var foulMemory: [FoulMemory]
     public var firstFinishTime: Double?
     public var isOver: Bool
+    /// The wind keys held (ADR 0001): a race holds every key through the window of `tick`. Importing
+    /// needs at least the keys the wind reads at `tick`, and they must be this race's.
+    public var windKeys: WindKeyChain
 
     /// The latest tick an import accepts: three hours after the gun, far past any race's time limit.
     /// It bounds the work of bringing the wind to the snapshot's tick.
@@ -75,7 +79,8 @@ public struct WorldSnapshot: Sendable {
 
     public init(
         tick: Int, seats: [Seat], touchingBoats: [SeatPair] = [], touchingObstacles: [ObstacleContact] = [],
-        foulMemory: [FoulMemory] = [], firstFinishTime: Double? = nil, isOver: Bool = false
+        foulMemory: [FoulMemory] = [], firstFinishTime: Double? = nil, isOver: Bool = false,
+        windKeys: WindKeyChain = WindKeyChain()
     ) {
         self.tick = tick
         self.seats = seats
@@ -84,6 +89,7 @@ public struct WorldSnapshot: Sendable {
         self.foulMemory = foulMemory
         self.firstFinishTime = firstFinishTime
         self.isOver = isOver
+        self.windKeys = windKeys
     }
 }
 
@@ -101,6 +107,8 @@ public enum WorldSnapshotError: Error, Equatable, Sendable {
     case invalidBoat(seat: Int, field: String)
     /// A race-level time that isn't finite.
     case invalidTime
+    /// The wind at the snapshot's tick needs key `window`, which the snapshot doesn't hold.
+    case missingWindKey(Int)
     /// A pair or contact naming a seat or obstacle the race doesn't have, or a pair with `a >= b`.
     case invalidContact
 }

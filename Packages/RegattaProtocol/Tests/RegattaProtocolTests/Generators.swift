@@ -93,8 +93,28 @@ struct Gen {
         )
     }
 
-    mutating func windKeys() -> [WindKeyReveal] {
-        (0..<int(0...6)).map { _ in WindKeyReveal(window: int(-10...200), key: payload()) }
+    /// A key with every field anywhere in its range: any finite double, any window the wire allows.
+    mutating func windKey() -> WindKey {
+        func finite(_ g: inout Gen) -> Double {
+            if g.bool() { return g.double(-1, 1) }
+            let bits = g.u64()
+            let d = Double(bitPattern: bits)
+            return d.isFinite ? d : Double(bitPattern: bits & ~(1 << 52)) // any bit pattern but inf and NaN
+        }
+        return WindKey(window: int(0...WindKeyWire.maxWindow),
+                       shift: WindKnot(value: finite(&self), slope: finite(&self)),
+                       strength: WindKnot(value: finite(&self), slope: finite(&self)),
+                       wobble: WindWobble(hump: finite(&self), wiggle: finite(&self)), puffSeed: u64())
+    }
+
+    /// `windKey()` on a copy, for a single key from a fixed seed.
+    func windKeyCopy() -> WindKey {
+        var copy = self
+        return copy.windKey()
+    }
+
+    mutating func windKeys() -> [WindKey] {
+        (0..<int(0...6)).map { _ in windKey() }
     }
 
     /// Every `RaceEvent.Kind`, by `index` (see `eventKindIndex`).
@@ -152,7 +172,7 @@ struct Gen {
             let ack = bool() ? InputAck(seq: u32(), appliedTick: tick(), margin: int(-32_768...32_767)) : nil
             message = .snapshot(Snapshot(seats: wireSeats(int(2...16)), ack: ack))
         case .event: message = .event(eventKind(int(0...11)))
-        case .windKey: message = .windKey(WindKeyReveal(window: int(-10...200), key: payload()))
+        case .windKey: message = .windKey(windKey())
         case .pong: message = .pong(Pong(clientTime: u64(), sinceTickMicros: u16()))
         case .raceCancelled:
             message = .raceCancelled(RaceCancelled(reason: RaceCancelled.Reason(code: UInt8(int(0...255)))))

@@ -113,12 +113,19 @@ import Testing
             #expect(needles.allSatisfy { !contains(bytes, $0) }, "wind seed bytes in \(frame.message.type)")
         }
         let roster = (0..<16).map { RosterEntry(name: race.boats[$0].name, colorIndex: $0) }
-        try check(Frame(seq: 1, tick: race.tick, message: .raceStart(RaceStart(yourSeat: 0, setup: setup, roster: roster))))
+        try check(Frame(seq: 1, tick: race.tick, message: .raceStart(RaceStart(yourSeat: 0, setup: setup, roster: roster,
+                                                                               windKeys: race.wind.keys.keys))))
         var seq: UInt32 = 0
+        var keysSent = race.wind.keys.endWindow
         while !race.isOver && race.tick < 6000 {
             for _ in 0..<3 { race.step() }
             seq += 1
             let world = race.exportSnapshot()
+            // Every key the race makes goes out as a WindKey frame (on the race's own schedule, not #95's).
+            while keysSent < race.wind.keys.endWindow, let key = race.wind.keys[keysSent] {
+                try check(Frame(seq: seq, tick: race.tick, message: .windKey(key)))
+                keysSent += 1
+            }
             try check(Frame(seq: seq, tick: race.tick, message: .snapshot(Snapshot(world: world, ack: InputAck(seq: seq, appliedTick: race.tick, margin: 2)))))
             if seq % 100 == 0 {
                 try check(Frame(seq: seq, tick: race.tick, message: .resync(Resync(raceSeed: setup.raceSeed, world: world, nextEventSeq: seq))))
@@ -126,5 +133,24 @@ import Testing
             for event in race.drainEvents() { try check(Frame(seq: seq, event: event)) }
         }
         #expect(seq > 1000)
+        #expect(keysSent > 5)
+    }
+
+    @Test func windKeysTravelAsTheCoreEncodes() throws {
+        let key = Gen(seed: 75).windKeyCopy()
+        let frame = Frame(seq: 3, tick: 900, message: .windKey(key))
+        let bytes = try frame.encoded()
+        #expect(bytes.count == Frame.headerSize + WindKey.byteCount)
+        #expect(Array(bytes.dropFirst(Frame.headerSize)) == key.bytes)
+        #expect(try Frame(decoding: bytes) == frame)
+
+        let far = WindKey(window: WindKeyWire.maxWindow + 1, shift: key.shift, strength: key.strength, wobble: key.wobble, puffSeed: 1)
+        #expect(throws: WireError.outOfRange("windKey.window")) { try Frame(seq: 0, tick: 0, message: .windKey(far)).encoded() }
+        let header = Array(bytes.prefix(Frame.headerSize))
+        #expect(throws: WireError.invalidValue("windKey.window")) { try Frame(decoding: header + far.bytes) }
+        var nan = key.bytes
+        for i in 8..<16 { nan[i] = 0xFF } // shift value: a NaN
+        #expect(throws: WireError.invalidValue("windKey")) { try Frame(decoding: header + nan) }
+        #expect(throws: WireError.truncated) { try Frame(decoding: Array(bytes.dropLast())) }
     }
 }

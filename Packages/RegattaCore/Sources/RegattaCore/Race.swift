@@ -550,7 +550,7 @@ extension Race {
             tick: tick,
             seats: boats.indices.map { WorldSnapshot.Seat(boat: boats[$0], heldInput: heldInputs[$0]) },
             touchingBoats: boatPairs, touchingObstacles: obstacles, foulMemory: fouls,
-            firstFinishTime: firstFinishTime, isOver: isOver
+            firstFinishTime: firstFinishTime, isOver: isOver, windKeys: wind.keys
         )
     }
 
@@ -561,12 +561,16 @@ extension Race {
     /// no longer describes the race: a race that imports is a prediction, never the record. The
     /// authoritative host never imports a snapshot a client could have supplied (ADR 0005).
     ///
-    /// The wind is brought to the snapshot's tick; until the keyed wind (#75) makes it a function of
-    /// the tick, going back rebuilds it from the start of the sequence.
+    /// The wind is a function of the tick and the keys (ADR 0001), so the race takes the snapshot's
+    /// keys, which must be this race's, and moves its own key generator (which holds the wind seed, never
+    /// in a snapshot) to just after them, so the keys it makes as the clock runs on are the ones the
+    /// exporting race would have made. The generator is rebuilt from the wind seed when the snapshot
+    /// holds fewer keys than it has made: at most one HMAC per window.
     ///
     /// Throws, leaving the race unchanged, for a snapshot it couldn't sail on from: another fleet
     /// size, a tick outside the sequence start … `WorldSnapshot.maxTick`, a non-finite value, a leg or
-    /// rounding stage the course doesn't have, a negative penalty count, or a bad contact.
+    /// rounding stage the course doesn't have, a negative penalty count, a bad contact, or no key for
+    /// the wind at the snapshot's tick.
     public func importSnapshot(_ snapshot: WorldSnapshot) throws {
         guard snapshot.seats.count == boats.count else {
             throw WorldSnapshotError.seatCount(expected: boats.count, found: snapshot.seats.count)
@@ -589,9 +593,27 @@ extension Race {
               snapshot.touchingObstacles.allSatisfy({ seatRange.contains($0.seat) && course.obstacles.indices.contains($0.obstacle) })
         else { throw WorldSnapshotError.invalidContact }
 
-        let windTick = snapshot.tick + setup.startSequenceTicks
-        if wind.tick > windTick { wind = Race(setup: setup, windSeed: windSeed).wind }
-        while wind.tick < windTick { wind.step() }
+        let snapshotWind = WindField(setup: windSetup, windows: wind.windows, keys: snapshot.windKeys)
+        do {
+            _ = try snapshotWind.shift(atTick: snapshot.tick)
+        } catch {
+            switch error {
+            case .missingKey(let window): throw WorldSnapshotError.missingWindKey(window)
+            case .beforeOrigin: throw WorldSnapshotError.tickBeforeStart(snapshot.tick)
+            }
+        }
+        var generator = windKeys
+        if generator.nextWindow > snapshot.windKeys.endWindow {
+            do {
+                generator = try WindKeyGenerator(windSeed: windSeed, setup: windSetup, windows: wind.windows)
+            } catch {
+                preconditionFailure("the race's own conditions can't be keyed: \(error)")
+            }
+        }
+        _ = generator.keys(through: snapshot.windKeys.endWindow - 1)
+
+        wind = snapshotWind
+        windKeys = generator
 
         tick = snapshot.tick
         boats = snapshot.seats.map(\.boat)

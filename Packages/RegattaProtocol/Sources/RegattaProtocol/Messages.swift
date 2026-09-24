@@ -141,17 +141,13 @@ public struct RosterEntry: Equatable, Sendable {
     }
 }
 
-/// A revealed wind key (ADR 0001), sent reliably about a window ahead (#95).
-/// TODO(#75, #95): the key's shape is the keyed wind's (`WindKey`, #75). Until it lands this carries
-/// the key as an opaque payload with the window it opens; #95 defines schema 1. Never the wind seed.
-public struct WindKeyReveal: Equatable, Sendable {
-    public var window: Int
-    public var key: VersionedPayload
-
-    public init(window: Int, key: VersionedPayload) {
-        self.window = window
-        self.key = key
-    }
+/// Wind keys on the wire are RegattaCore's `WindKey` (#75) in its own fixed 64-byte encoding
+/// (`WindKey.bytes`), revealed about a window ahead (ADR 0001; the schedule is #95's). A key is derived
+/// one way from the wind seed, which is never on the wire.
+public enum WindKeyWire {
+    /// The highest window a key on the wire may have: past the longest sequence and
+    /// `WorldSnapshot.maxTick`, so a hostile key can't make a receiver's `WindKeyChain` grow without bound.
+    public static let maxWindow = (RaceStart.maxStartSequenceTicks + WorldSnapshot.maxTick) / WindWindows.ticksPerWindow + 2
 }
 
 /// Server → client, once per race and again before a `Resync` on rejoin: the race as the client
@@ -166,14 +162,14 @@ public struct RaceStart: Equatable, Sendable {
     /// Tide state (#78). Placeholder until #78 defines schema 1: `.none`.
     public var tide: VersionedPayload
     /// Wind keys revealed so far (#95).
-    public var windKeys: [WindKeyReveal]
+    public var windKeys: [WindKey]
 
     /// Sane caps on what a race can be, so a decoded setup never builds a huge course or sequence.
     /// Far beyond any real race: two laps by default (#8), a 60 s sequence (#85).
     public static let maxLaps = 50
     public static let maxStartSequenceTicks = 30 * 60 * Race.tickRate
 
-    public init(yourSeat: Int, setup: RaceSetup, roster: [RosterEntry], tide: VersionedPayload = .none, windKeys: [WindKeyReveal] = []) {
+    public init(yourSeat: Int, setup: RaceSetup, roster: [RosterEntry], tide: VersionedPayload = .none, windKeys: [WindKey] = []) {
         self.yourSeat = yourSeat
         self.setup = setup
         self.roster = roster
@@ -282,28 +278,31 @@ public struct Resync: Equatable, Sendable {
     /// The world at the frame's tick.
     public var seats: [WireSeat]
     /// Every wind key revealed so far (#95).
-    public var windKeys: [WindKeyReveal]
+    public var windKeys: [WindKey]
     public var eventState: EventState
 
-    public init(raceSeed: RaceSeed, seats: [WireSeat], windKeys: [WindKeyReveal] = [], eventState: EventState) {
+    public init(raceSeed: RaceSeed, seats: [WireSeat], windKeys: [WindKey] = [], eventState: EventState) {
         self.raceSeed = raceSeed
         self.seats = seats
         self.windKeys = windKeys
         self.eventState = eventState
     }
 
-    public init(raceSeed: RaceSeed, world: WorldSnapshot, windKeys: [WindKeyReveal] = [], nextEventSeq: UInt32,
+    /// `windKeys` defaults to the keys `world` holds, which a race holds only through its current
+    /// window; a host that reveals keys ahead (#95) passes every key revealed so far.
+    public init(raceSeed: RaceSeed, world: WorldSnapshot, windKeys: [WindKey]? = nil, nextEventSeq: UInt32,
                 rules: VersionedPayload = .none) throws {
-        self.init(raceSeed: raceSeed, seats: try wireSeats(of: world), windKeys: windKeys,
+        self.init(raceSeed: raceSeed, seats: try wireSeats(of: world), windKeys: windKeys ?? world.windKeys.keys,
                   eventState: EventState(world: world, nextEventSeq: nextEventSeq, rules: rules))
     }
 
     /// The world at `tick` (the frame's tick), built on `base`, the receiver's own snapshot (a freshly
-    /// built race's, on a rejoin): the wire seats, and finishes and the race's end from the event state.
-    /// Contact and foul memory stay as the base has them.
+    /// built race's, on a rejoin): the wire seats, finishes and the race's end from the event state, and
+    /// the revealed wind keys. Contact and foul memory stay as the base has them.
     public func world(base: WorldSnapshot, tick: Int) throws -> WorldSnapshot {
         var world = try merge(seats, into: base, tick: tick)
         try eventState.apply(to: &world)
+        world.windKeys = WindKeyChain(windKeys)
         return world
     }
 }
@@ -492,26 +491,27 @@ extension JoinRace {
     init(from r: inout WireReader) throws { token = try r.blob(limit: WireLimit.token, "token") }
 }
 
-extension WindKeyReveal {
+extension WindKey {
     func encode(to w: inout WireWriter) throws {
-        try w.i32(window, "window")
-        try key.encode(to: &w, "key")
+        guard window <= WindKeyWire.maxWindow else { throw WireError.outOfRange("windKey.window") }
+        w.raw(bytes)
     }
 
     init(from r: inout WireReader) throws {
-        window = try r.i32()
-        key = try VersionedPayload(from: &r, "key")
+        guard let key = WindKey(bytes: try r.raw(WindKey.byteCount)) else { throw WireError.invalidValue("windKey") }
+        guard key.window <= WindKeyWire.maxWindow else { throw WireError.invalidValue("windKey.window") }
+        self = key
     }
 }
 
-func encodeWindKeys(_ keys: [WindKeyReveal], to w: inout WireWriter) throws {
+func encodeWindKeys(_ keys: [WindKey], to w: inout WireWriter) throws {
     try w.count(keys.count, limit: WireLimit.list, "windKeys")
     for key in keys { try key.encode(to: &w) }
 }
 
-func decodeWindKeys(from r: inout WireReader) throws -> [WindKeyReveal] {
+func decodeWindKeys(from r: inout WireReader) throws -> [WindKey] {
     let n = try r.count(limit: WireLimit.list, "windKeys")
-    return try (0..<n).map { _ in try WindKeyReveal(from: &r) }
+    return try (0..<n).map { _ in try WindKey(from: &r) }
 }
 
 extension RaceStart {

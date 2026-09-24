@@ -236,6 +236,7 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         let client = Race(setup: server.setup, windSeed: server.windSeed)
         try client.importSnapshot(back.world(base: client.exportSnapshot(), tick: decoded.tick))
         #expect(client.tick == server.tick)
+        #expect(client.wind == server.wind) // the revealed keys came with it
         #expect(client.firstFinishTime == server.firstFinishTime)
         #expect(client.isOver == server.isOver)
         let rebuilt = client.exportSnapshot()

@@ -70,7 +70,8 @@ public enum Message: Equatable, Sendable {
     case snapshot(Snapshot)
     /// A race event (#18 reliable events); the frame's tick is the event's.
     case event(RaceEvent.Kind)
-    case windKey(WindKeyReveal)
+    /// A revealed wind key (ADR 0001, #95), on the reliable stream.
+    case windKey(WindKey)
     case pong(Pong)
     case raceCancelled(RaceCancelled)
     case raceClosed(RaceClosed)
@@ -191,7 +192,7 @@ public struct Frame: Equatable, Sendable {
         case .resync: message = .resync(try Resync(from: &r))
         case .snapshot: message = .snapshot(try Snapshot(from: &r))
         case .event: message = .event(try RaceEvent.Kind(from: &r))
-        case .windKey: message = .windKey(try WindKeyReveal(from: &r))
+        case .windKey: message = .windKey(try WindKey(from: &r))
         case .pong: message = .pong(Pong(clientTime: try r.u64(), sinceTickMicros: try r.u16()))
         case .raceCancelled:
             message = .raceCancelled(RaceCancelled(reason: RaceCancelled.Reason(code: try r.u8())))
