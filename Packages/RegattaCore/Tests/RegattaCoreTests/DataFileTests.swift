@@ -304,3 +304,22 @@ enum Fixtures {
         #expect(polar.byTheLeePenalty == 0.02)
     }
 }
+
+@Suite struct JSONPointerTests {
+    static var document: Any {
+        try! JSONSerialization.jsonObject(with: Data(#"""
+            {"a": {"b": [10, {"c": null}], "x/y": 1, "m~n": 2, "": 3}, "list": [[0, 1], [2]], "s": "text"}
+            """#.utf8))
+    }
+
+    @Test(arguments: ["", "/a", "/a/b", "/a/b/0", "/a/b/1/c", "/a/x~1y", "/a/m~0n", "/a/", "/list/1/0", "/s"])
+    func resolves(pointer: String) {
+        #expect(JSONPointer.resolve(pointer, in: Self.document) != nil)
+    }
+
+    @Test(arguments: ["a", "/b", "/a/b/2", "/a/b/01", "/a/b/-1", "/a/b/-", "/a/b/x", "/a/b/", "/a/b/0/c", "/s/0", "/a/x/y",
+                      "/list/99999999999999999999999"])
+    func pointsAtNothing(pointer: String) {
+        #expect(JSONPointer.resolve(pointer, in: Self.document) == nil)
+    }
+}

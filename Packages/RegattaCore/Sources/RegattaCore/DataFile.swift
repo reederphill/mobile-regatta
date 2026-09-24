@@ -84,6 +84,26 @@ public struct FileRef: Hashable, Sendable, Codable, CustomStringConvertible {
     public var description: String { "\(id)@\(version) (\(hash))" }
 }
 
+/// Names a data file by id and version only, without its hash: how one data file refers to another
+/// (a venue's pairing names its conditions this way). The hash is checked where the file is loaded,
+/// against the `FileRef` the server names at race start (ADR 0004).
+public struct DataFileKey: Hashable, Sendable, Codable, CustomStringConvertible {
+    public let id: String
+    public let version: Int
+
+    public init(id: String, version: Int) {
+        self.id = id
+        self.version = version
+    }
+
+    public var description: String { "\(id)@\(version)" }
+}
+
+public extension FileRef {
+    /// This file's id and version.
+    var key: DataFileKey { DataFileKey(id: id, version: version) }
+}
+
 /// The fields every data file starts with, whatever its kind.
 public struct DataFileHeader: Sendable, Equatable, Decodable {
     /// The shape of the rest of the file. Each kind lists the schema versions it can decode.
@@ -190,13 +210,15 @@ public struct DataFile<Content: DataFileContent>: Sendable {
             throw DataFileError.invalidHeader(kind: kind, reason: "version \(header.version) must be at least 1")
         }
         if !header.placeholders.isEmpty {
-            let document: JSONValue
+            // JSONSerialization, not a Decodable tree: venue grids hold tens of thousands of numbers,
+            // and decoding each through `try?` made loading them tens of times slower.
+            let document: Any
             do {
-                document = try JSONDecoder().decode(JSONValue.self, from: data)
+                document = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
             } catch {
                 throw DataFileError.malformed(kind: kind, reason: "\(error)")
             }
-            for pointer in header.placeholders where document.value(at: pointer) == nil {
+            for pointer in header.placeholders where JSONPointer.resolve(pointer, in: document) == nil {
                 throw DataFileError.unresolvedPlaceholder(kind: kind, id: header.id, pointer: pointer)
             }
         }
@@ -228,7 +250,13 @@ public struct DataFile<Content: DataFileContent>: Sendable {
 
     /// Loads `<id>@<version>.json` from this package's bundled resources.
     public static func bundled(id: String, version: Int) throws -> DataFile {
-        guard let data = try bundledData(id: id, version: version) else {
+        try bundled(id: id, version: version, in: .module)
+    }
+
+    /// Loads `<id>@<version>.json` from `bundle`'s `Content.bundleDirectory`, e.g. a test target's
+    /// fixtures, through the same checks as the package's own files.
+    public static func bundled(id: String, version: Int, in bundle: Bundle) throws -> DataFile {
+        guard let data = try bundledData(id: id, version: version, in: bundle) else {
             throw DataFileError.notBundled(kind: Content.kind, id: id, version: version)
         }
         let file = try DataFile(data: data)
@@ -242,8 +270,13 @@ public struct DataFile<Content: DataFileContent>: Sendable {
     /// The exact bytes of a bundled file, or nil if this build doesn't ship it. Throws `invalidID`
     /// for an id no file can have, and passes on any error reading a file that is there.
     public static func bundledData(id: String, version: Int) throws -> Data? {
+        try bundledData(id: id, version: version, in: .module)
+    }
+
+    /// The exact bytes of `<id>@<version>.json` in `bundle`, or nil if it isn't there.
+    public static func bundledData(id: String, version: Int, in bundle: Bundle) throws -> Data? {
         guard isValidID(id) else { throw DataFileError.invalidID(kind: Content.kind, id: id) }
-        guard let url = Bundle.module.url(
+        guard let url = bundle.url(
             forResource: "\(id)@\(version)", withExtension: "json", subdirectory: Content.bundleDirectory
         ) else { return nil }
         return try Data(contentsOf: url)
@@ -294,41 +327,26 @@ public struct DataFileCatalog<Content: DataFileContent>: Sendable {
     }
 }
 
-/// Just enough of a JSON document to resolve a placeholder's JSON Pointer.
-private indirect enum JSONValue: Decodable {
-    case object([String: JSONValue])
-    case array([JSONValue])
-    case scalar
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let members = try? container.decode([String: JSONValue].self) {
-            self = .object(members)
-        } else if let elements = try? container.decode([JSONValue].self) {
-            self = .array(elements)
-        } else {
-            self = .scalar
-        }
-    }
-
+/// Resolves a placeholder's JSON Pointer in a document parsed by `JSONSerialization`.
+enum JSONPointer {
     /// RFC 6901: "" is the whole document; "/a/0" is member "a", then element 0; "~1" is "/", "~0" is "~".
-    func value(at pointer: String) -> JSONValue? {
-        guard !pointer.isEmpty else { return self }
+    /// An array index is decimal digits with no leading zero. Nil when the pointer names nothing.
+    static func resolve(_ pointer: String, in document: Any) -> Any? {
+        guard !pointer.isEmpty else { return document }
         guard pointer.hasPrefix("/") else { return nil }
-        var node = self
+        var node = document
         for raw in pointer.dropFirst().split(separator: "/", omittingEmptySubsequences: false) {
             let token = raw.replacingOccurrences(of: "~1", with: "/").replacingOccurrences(of: "~0", with: "~")
-            switch node {
-            case .object(let members):
+            if let members = node as? [String: Any] {
                 guard let next = members[token] else { return nil }
                 node = next
-            case .array(let elements):
+            } else if let elements = node as? [Any] {
                 guard !token.isEmpty, token.utf8.allSatisfy({ (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0) }),
                       token == "0" || !token.hasPrefix("0"),
                       let index = Int(token), index < elements.count
                 else { return nil }
                 node = elements[index]
-            case .scalar:
+            } else {
                 return nil
             }
         }
