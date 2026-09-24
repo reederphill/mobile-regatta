@@ -11,6 +11,8 @@ struct MiniBoat: Identifiable {
 
 /// A throttled snapshot of the race for the SwiftUI overlay.
 struct HUDState {
+    /// Race clock in ticks (`Race.tick`); `clock` is the same in seconds.
+    var tick = 0
     var clock = 0.0
     var status: BoatStatus = .prestart
     var speedKnots = 0.0
@@ -43,6 +45,7 @@ struct HUDState {
         let p = race.player
         let course = race.course
         self.course = course
+        tick = race.tick
         clock = race.time
         status = p.status
         speedKnots = p.speed * 1.943_84
