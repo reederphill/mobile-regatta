@@ -3,7 +3,7 @@ import RegattaCore
 @testable import Regatta
 
 @MainActor @Suite struct GameSessionTests {
-    private static let config = RaceConfig(opponents: 3, prestartSeconds: 60, seed: 1)
+    private static let config = RaceConfig(opponents: 3, prestartSeconds: 60, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
 
     /// Ticks run for `seconds` of real time in 60 Hz frames.
     private func ticks(timescale: Double, seconds: Double) -> Int {

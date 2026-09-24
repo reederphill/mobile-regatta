@@ -166,6 +166,30 @@ enum ScriptedLog {
         #expect(throws: DecodingError.self) { try JSONDecoder().decode(InputRecord.self, from: json) }
     }
 
+    @Test func malformedInputRecordsAreRejected() throws {
+        let malformed = [
+            #"{"tick": 1, "seat": 0, "tap": "tackGybe", "rudder": 10, "ease": false}"#,
+            #"{"tick": 1, "seat": 0, "tap": "protest", "target": 2, "ease": true}"#,
+            #"{"tick": 1, "seat": 0, "tap": "tackGybe", "target": 2}"#,
+            #"{"tick": 1, "seat": 0, "tap": "protest"}"#,
+            #"{"tick": 1, "seat": 0, "rudder": 10, "ease": false, "target": 2}"#,
+            #"{"tick": 1, "seat": 0, "tap": null, "rudder": 10, "ease": false}"#,
+            #"{"tick": 1, "seat": 0, "rudder": 10}"#,
+            #"{"tick": 1, "seat": 0, "tap": "gybe"}"#,
+        ]
+        for json in malformed {
+            #expect(throws: DecodingError.self, "\(json)") { try JSONDecoder().decode(InputRecord.self, from: Data(json.utf8)) }
+        }
+        let wellFormed = [
+            #"{"tick": 1, "seat": 0, "rudder": 10, "ease": false}"#,
+            #"{"tick": 1, "seat": 0, "tap": "tackGybe"}"#,
+            #"{"tick": 1, "seat": 0, "tap": "protest", "target": 2}"#,
+        ]
+        for json in wellFormed {
+            _ = try JSONDecoder().decode(InputRecord.self, from: Data(json.utf8))
+        }
+    }
+
     @Test func heldInputStampedTAppliesFromTickT() {
         let race = testRace(seats: [.human, .human], seed: 5, brains: [])
         let t = race.tick + 10

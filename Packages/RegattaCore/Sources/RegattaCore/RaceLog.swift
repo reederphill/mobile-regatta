@@ -114,16 +114,29 @@ extension InputRecord: Codable {
     private enum CodingKeys: String, CodingKey { case tick, seat, rudder, ease, tap, target }
     private enum TapName: String, Codable { case tackGybe, protest }
 
+    /// Strict: a record is exactly a held input (`rudder`, `ease`) or exactly a tap (`tap`, plus `target`
+    /// for a protest). Anything else is malformed and rejected, never read leniently.
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         tick = try c.decode(Int.self, forKey: .tick)
         seat = try c.decode(Int.self, forKey: .seat)
+        func reject(_ key: CodingKeys, _ why: String) -> DecodingError {
+            DecodingError.dataCorruptedError(forKey: key, in: c, debugDescription: why)
+        }
         if let tap = try c.decodeIfPresent(TapName.self, forKey: .tap) {
+            for key in [CodingKeys.rudder, .ease] where c.contains(key) {
+                throw reject(key, "a tap record has no \(key.stringValue)")
+            }
             switch tap {
-            case .tackGybe: kind = .tap(.tackGybe)
-            case .protest: kind = .tap(.protest(target: try c.decode(Int.self, forKey: .target)))
+            case .tackGybe:
+                if c.contains(.target) { throw reject(.target, "a tackGybe tap has no target") }
+                kind = .tap(.tackGybe)
+            case .protest:
+                kind = .tap(.protest(target: try c.decode(Int.self, forKey: .target)))
             }
         } else {
+            if c.contains(.tap) { throw reject(.tap, "tap is null") }
+            if c.contains(.target) { throw reject(.target, "a held input record has no target") }
             let raw = try c.decode(Int.self, forKey: .rudder)
             guard let input = BoatInput(checkedRudder: raw, ease: try c.decode(Bool.self, forKey: .ease)) else {
                 throw DecodingError.dataCorruptedError(forKey: .rudder, in: c, debugDescription: "rudder \(raw) is outside −127…127")

@@ -35,24 +35,25 @@ struct RaceConfig: Equatable {
     var prestartSeconds = 60.0
     /// The public race seed: placement and bot styles.
     var seed: UInt64
-    /// Keys the wind. Never computed from the race seed in play; see `windSeed(pinnedTo:)`.
+    /// Keys the wind. Always given explicitly: drawn independently of `seed` for a real race, and
+    /// derived with `windSeed(pinnedTo:)` only for a pinned `-seed` launch or a test (ADR 0001).
     var windSeed: UInt64
     /// A bot sails your boat too (`-demo`, `-perf`).
     var autopilotPlayer = false
 
-    /// `windSeed` nil pins it to `seed` with `windSeed(pinnedTo:)`, so tests reproduce the whole race.
     init(opponents: Int = 7, laps: Int = RaceSetup.defaultLaps, prestartSeconds: Double = 60,
-         seed: UInt64, windSeed: UInt64? = nil, autopilotPlayer: Bool = false) {
+         seed: UInt64, windSeed: UInt64, autopilotPlayer: Bool = false) {
         self.opponents = opponents
         self.laps = laps
         self.prestartSeconds = prestartSeconds
         self.seed = seed
-        self.windSeed = windSeed ?? Self.windSeed(pinnedTo: seed)
+        self.windSeed = windSeed
         self.autopilotPlayer = autopilotPlayer
     }
 
     /// The wind seed for a race pinned to `seed` by a developer (`-seed`) or a test: a fixed mix of the
-    /// launch option, so a pinned launch replays the same wind. Real races draw both seeds independently.
+    /// launch option, so a pinned launch replays the same wind. Only those call it: real races draw both
+    /// seeds independently, since the wind must never be derivable from the race seed (ADR 0001).
     static func windSeed(pinnedTo seed: UInt64) -> UInt64 {
         var rng = SplitMix64(seed: seed ^ 0x5749_4E44_5345_4544) // "WINDSEED"
         return rng.next()

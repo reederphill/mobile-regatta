@@ -134,6 +134,8 @@ import Testing
         if let row { #expect(row == digest, "simulation output changed: bump simulationRevision and add a Goldens.json row") }
     }
 
+    // Foundation's `Process` exists only on macOS and Linux, not on iOS.
+    #if os(macOS) || os(Linux)
     /// `regatta-replay`, in its own process, prints the same digest as the in-process replay, and the
     /// pinned one on the replay platform.
     @Test func regattaReplayPrintsTheGoldenDigest() throws {
@@ -177,6 +179,7 @@ import Testing
             .map { $0.appendingPathComponent("regatta-replay") }
             .first { FileManager.default.isExecutableFile(atPath: $0.path) }
     }
+    #endif
 
     @Test func goldenRowsAreWellFormed() throws {
         for (version, digest) in try Self.goldenTable() {
