@@ -84,6 +84,29 @@ public struct FileRef: Hashable, Sendable, Codable, CustomStringConvertible {
     public var description: String { "\(id)@\(version) (\(hash))" }
 }
 
+/// Names a data file by id and version only, without its hash: how one data file refers to another
+/// (a venue's pairing names its conditions this way). The hash is checked where the file is loaded,
+/// against the `FileRef` the server names at race start (ADR 0004).
+public struct DataFileKey: Hashable, Sendable, Codable, CustomStringConvertible {
+    public let id: String
+    public let version: Int
+
+    public init(id: String, version: Int) {
+        self.id = id
+        self.version = version
+    }
+
+    public var description: String { "\(id)@\(version)" }
+
+    /// Explicit, so a data file's strict-field check can list them.
+    public enum CodingKeys: String, CodingKey, CaseIterable { case id, version }
+}
+
+public extension FileRef {
+    /// This file's id and version.
+    var key: DataFileKey { DataFileKey(id: id, version: version) }
+}
+
 /// The fields every data file starts with, whatever its kind.
 public struct DataFileHeader: Sendable, Equatable, Decodable {
     /// The shape of the rest of the file. Each kind lists the schema versions it can decode.
@@ -173,6 +196,12 @@ public struct DataFile<Content: DataFileContent>: Sendable {
     /// Loads a file from its exact bytes.
     public init(data: Data) throws {
         let kind = Content.kind
+        // Before anything parses the file, so every later check reads the same file on every platform:
+        // UTF-8 only, nesting JSONDecoder accepts, and no key repeated in one object (JSONDecoder keeps
+        // the first copy; JSONSerialization the first on Darwin and the last on Linux).
+        if let problem = JSONPrecheck.problem(in: data) {
+            throw DataFileError.malformed(kind: kind, reason: problem.description)
+        }
         let header: DataFileHeader
         do {
             header = try JSONDecoder().decode(DataFileHeader.self, from: data)
@@ -190,13 +219,15 @@ public struct DataFile<Content: DataFileContent>: Sendable {
             throw DataFileError.invalidHeader(kind: kind, reason: "version \(header.version) must be at least 1")
         }
         if !header.placeholders.isEmpty {
-            let document: JSONValue
+            // JSONSerialization, not a Decodable tree: venue grids hold tens of thousands of numbers,
+            // and decoding each through `try?` made loading them tens of times slower.
+            let document: Any
             do {
-                document = try JSONDecoder().decode(JSONValue.self, from: data)
+                document = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
             } catch {
                 throw DataFileError.malformed(kind: kind, reason: "\(error)")
             }
-            for pointer in header.placeholders where document.value(at: pointer) == nil {
+            for pointer in header.placeholders where JSONPointer.resolve(pointer, in: document) == nil {
                 throw DataFileError.unresolvedPlaceholder(kind: kind, id: header.id, pointer: pointer)
             }
         }
@@ -228,7 +259,13 @@ public struct DataFile<Content: DataFileContent>: Sendable {
 
     /// Loads `<id>@<version>.json` from this package's bundled resources.
     public static func bundled(id: String, version: Int) throws -> DataFile {
-        guard let data = try bundledData(id: id, version: version) else {
+        try bundled(id: id, version: version, in: .module)
+    }
+
+    /// Loads `<id>@<version>.json` from `bundle`'s `Content.bundleDirectory`, e.g. a test target's
+    /// fixtures, through the same checks as the package's own files.
+    public static func bundled(id: String, version: Int, in bundle: Bundle) throws -> DataFile {
+        guard let data = try bundledData(id: id, version: version, in: bundle) else {
             throw DataFileError.notBundled(kind: Content.kind, id: id, version: version)
         }
         let file = try DataFile(data: data)
@@ -242,8 +279,13 @@ public struct DataFile<Content: DataFileContent>: Sendable {
     /// The exact bytes of a bundled file, or nil if this build doesn't ship it. Throws `invalidID`
     /// for an id no file can have, and passes on any error reading a file that is there.
     public static func bundledData(id: String, version: Int) throws -> Data? {
+        try bundledData(id: id, version: version, in: .module)
+    }
+
+    /// The exact bytes of `<id>@<version>.json` in `bundle`, or nil if it isn't there.
+    public static func bundledData(id: String, version: Int, in bundle: Bundle) throws -> Data? {
         guard isValidID(id) else { throw DataFileError.invalidID(kind: Content.kind, id: id) }
-        guard let url = Bundle.module.url(
+        guard let url = bundle.url(
             forResource: "\(id)@\(version)", withExtension: "json", subdirectory: Content.bundleDirectory
         ) else { return nil }
         return try Data(contentsOf: url)
@@ -294,44 +336,214 @@ public struct DataFileCatalog<Content: DataFileContent>: Sendable {
     }
 }
 
-/// Just enough of a JSON document to resolve a placeholder's JSON Pointer.
-private indirect enum JSONValue: Decodable {
-    case object([String: JSONValue])
-    case array([JSONValue])
-    case scalar
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let members = try? container.decode([String: JSONValue].self) {
-            self = .object(members)
-        } else if let elements = try? container.decode([JSONValue].self) {
-            self = .array(elements)
-        } else {
-            self = .scalar
-        }
-    }
-
+/// Resolves a placeholder's JSON Pointer in a document parsed by `JSONSerialization`.
+enum JSONPointer {
     /// RFC 6901: "" is the whole document; "/a/0" is member "a", then element 0; "~1" is "/", "~0" is "~".
-    func value(at pointer: String) -> JSONValue? {
-        guard !pointer.isEmpty else { return self }
+    /// An array index is decimal digits with no leading zero. Nil when the pointer names nothing.
+    static func resolve(_ pointer: String, in document: Any) -> Any? {
+        guard !pointer.isEmpty else { return document }
         guard pointer.hasPrefix("/") else { return nil }
-        var node = self
+        var node = document
         for raw in pointer.dropFirst().split(separator: "/", omittingEmptySubsequences: false) {
             let token = raw.replacingOccurrences(of: "~1", with: "/").replacingOccurrences(of: "~0", with: "~")
-            switch node {
-            case .object(let members):
+            if let members = node as? [String: Any] {
                 guard let next = members[token] else { return nil }
                 node = next
-            case .array(let elements):
+            } else if let elements = node as? [Any] {
                 guard !token.isEmpty, token.utf8.allSatisfy({ (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0) }),
                       token == "0" || !token.hasPrefix("0"),
                       let index = Int(token), index < elements.count
                 else { return nil }
                 node = elements[index]
-            case .scalar:
+            } else {
                 return nil
             }
         }
         return node
+    }
+}
+
+/// Checks a data file's bytes before any parser sees them, so that JSONDecoder and JSONSerialization,
+/// on Darwin and on Linux, all read the same document:
+///
+/// - UTF-8 only. Both parsers also accept UTF-16 and UTF-32, whose code units can hold the bytes of
+///   `"` and `\`, and a byte scan can't follow them. Any 0x00 byte is refused too: it can't occur in
+///   UTF-8 JSON (control characters must be escaped) and always occurs in UTF-16 or UTF-32 JSON.
+/// - At most `maxDepth` nested objects and arrays, JSONDecoder's own limit.
+/// - No key repeated in one object: parsers disagree on which copy wins. Keys compare as Swift
+///   strings, so two canonically equivalent spellings count as a repeat.
+///
+/// One pass over the bytes, linear in the file: strings are skipped over, and a number in a grid costs
+/// a comparison. A JSON Pointer is built only to report a problem. On malformed JSON it may report
+/// nothing or a false problem; either way the file is refused.
+enum JSONPrecheck {
+    static let maxDepth = 512
+
+    enum Problem: Equatable, CustomStringConvertible {
+        case notUTF8
+        case tooDeep
+        case duplicate(pointer: String)
+        /// A key whose escapes don't decode (e.g. a lone surrogate, `"\ud800"`). Refused rather than
+        /// skipped, so the duplicate check never depends on how each parser, on each platform, treats it.
+        case badKey(pointer: String)
+
+        var description: String {
+            switch self {
+            case .notUTF8: "not UTF-8"
+            case .tooDeep: "nested deeper than \(JSONPrecheck.maxDepth)"
+            case .duplicate(let pointer): "duplicate field \(pointer)"
+            case .badKey(let pointer): "undecodable key at \(pointer)"
+            }
+        }
+    }
+
+    private struct Frame {
+        let isObject: Bool
+        /// The key whose value is being read (objects), or nil between members.
+        var key: String?
+        /// The element being read (arrays).
+        var index: Int
+        /// An object's next string is a key.
+        var expectingKey: Bool
+    }
+
+    static func problem(in data: Data) -> Problem? {
+        data.withUnsafeBytes { bytes in
+            if bytes.contains(0) || !isValidUTF8(bytes) { return .notUTF8 }
+            return scan(bytes)
+        }
+    }
+
+    private static func isValidUTF8(_ bytes: UnsafeRawBufferPointer) -> Bool {
+        !transcode(bytes.makeIterator(), from: UTF8.self, to: UTF32.self, stoppingOnError: true, into: { _ in })
+    }
+
+    private static func scan(_ bytes: UnsafeRawBufferPointer) -> Problem? {
+        var frames: [Frame] = []
+        // Each frame's keys, kept apart from `frames` so inserting never copies a set.
+        var keySets: [Set<String>] = []
+        var i = 0
+        while i < bytes.count {
+            switch bytes[i] {
+            case UInt8(ascii: "{"), UInt8(ascii: "["):
+                guard frames.count < maxDepth else { return .tooDeep }
+                let isObject = bytes[i] == UInt8(ascii: "{")
+                frames.append(Frame(isObject: isObject, key: nil, index: 0, expectingKey: isObject))
+                keySets.append([])
+            case UInt8(ascii: "}"), UInt8(ascii: "]"):
+                if !frames.isEmpty {
+                    frames.removeLast()
+                    keySets.removeLast()
+                }
+            case UInt8(ascii: ","):
+                if !frames.isEmpty {
+                    let top = frames.count - 1
+                    if frames[top].isObject {
+                        frames[top].key = nil
+                        frames[top].expectingKey = true
+                    } else {
+                        frames[top].index += 1
+                    }
+                }
+            case UInt8(ascii: "\""):
+                let start = i
+                var escaped = false
+                i += 1
+                while i < bytes.count && bytes[i] != UInt8(ascii: "\"") {
+                    if bytes[i] == UInt8(ascii: "\\") { escaped = true; i += 1 }
+                    i += 1
+                }
+                guard i < bytes.count else { return nil }
+                let top = frames.count - 1
+                if top >= 0 && frames[top].expectingKey {
+                    let key: String
+                    if escaped {
+                        // "\u0061" is the same key as "a". Decoded here, not by a parser, so a key no
+                        // parser should accept fails the same way on every platform.
+                        guard let decoded = unescape(bytes[(start + 1)..<i]) else {
+                            let raw = String(decoding: bytes[(start + 1)..<i], as: UTF8.self)
+                            return .badKey(pointer: pointer(frames.dropLast()) + "/" + escape(raw))
+                        }
+                        key = decoded
+                    } else {
+                        key = String(decoding: bytes[(start + 1)..<i], as: UTF8.self)
+                    }
+                    if !keySets[top].insert(key).inserted {
+                        return .duplicate(pointer: pointer(frames.dropLast()) + "/" + escape(key))
+                    }
+                    frames[top].key = key
+                    frames[top].expectingKey = false
+                }
+            default:
+                break
+            }
+            i += 1
+        }
+        return nil
+    }
+
+    /// A JSON string's contents with its escapes decoded (RFC 8259 §7), or nil if an escape is invalid:
+    /// an unknown escape, bad hex, or a surrogate that isn't half of a pair. The bytes are valid UTF-8.
+    private static func unescape(_ body: Slice<UnsafeRawBufferPointer>) -> String? {
+        var out: [UInt8] = []
+        out.reserveCapacity(body.count)
+        var k = body.startIndex
+        func hex4(at j: Int) -> UInt32? {
+            guard j + 4 <= body.endIndex else { return nil }
+            var value: UInt32 = 0
+            for b in body[j..<(j + 4)] {
+                let digit: UInt8
+                switch b {
+                case UInt8(ascii: "0")...UInt8(ascii: "9"): digit = b - UInt8(ascii: "0")
+                case UInt8(ascii: "a")...UInt8(ascii: "f"): digit = b - UInt8(ascii: "a") + 10
+                case UInt8(ascii: "A")...UInt8(ascii: "F"): digit = b - UInt8(ascii: "A") + 10
+                default: return nil
+                }
+                value = value << 4 | UInt32(digit)
+            }
+            return value
+        }
+        while k < body.endIndex {
+            let b = body[k]
+            guard b == UInt8(ascii: "\\") else { out.append(b); k += 1; continue }
+            guard k + 1 < body.endIndex else { return nil }
+            let e = body[k + 1]
+            k += 2
+            switch e {
+            case UInt8(ascii: "\""), UInt8(ascii: "\\"), UInt8(ascii: "/"): out.append(e)
+            case UInt8(ascii: "b"): out.append(0x08)
+            case UInt8(ascii: "f"): out.append(0x0C)
+            case UInt8(ascii: "n"): out.append(0x0A)
+            case UInt8(ascii: "r"): out.append(0x0D)
+            case UInt8(ascii: "t"): out.append(0x09)
+            case UInt8(ascii: "u"):
+                guard let unit = hex4(at: k) else { return nil }
+                k += 4
+                var value = unit
+                if (0xD800...0xDBFF).contains(unit) {
+                    guard k + 6 <= body.endIndex, body[k] == UInt8(ascii: "\\"), body[k + 1] == UInt8(ascii: "u"),
+                          let low = hex4(at: k + 2), (0xDC00...0xDFFF).contains(low)
+                    else { return nil }
+                    k += 6
+                    value = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00)
+                } else if (0xDC00...0xDFFF).contains(unit) {
+                    return nil
+                }
+                guard let scalar = Unicode.Scalar(value) else { return nil }
+                out.append(contentsOf: String(scalar).utf8)
+            default:
+                return nil
+            }
+        }
+        return String(decoding: out, as: UTF8.self)
+    }
+
+    /// JSON Pointer of the innermost open container: each enclosing frame's current key or index.
+    private static func pointer(_ enclosing: ArraySlice<Frame>) -> String {
+        enclosing.map { "/" + ($0.isObject ? escape($0.key ?? "") : String($0.index)) }.joined()
+    }
+
+    private static func escape(_ key: String) -> String {
+        key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
     }
 }

@@ -22,10 +22,16 @@ let package = Package(
             resources: [
                 .copy("Resources/boat-classes"),
                 .copy("Resources/conditions"),
+                .copy("Resources/venues"),
             ]
         ),
         .executableTarget(name: "regatta-replay", dependencies: ["RegattaCore"]),
         // regatta-replay is a dependency so `swift test` builds it: the golden test runs it as its own process.
-        .testTarget(name: "RegattaCoreTests", dependencies: ["RegattaCore", "regatta-replay"]),
+        .testTarget(
+            name: "RegattaCoreTests",
+            dependencies: ["RegattaCore", "regatta-replay"],
+            // Fixture data files, byte for byte, loaded with `DataFile.bundled(id:version:in: .module)`.
+            resources: [.copy("Resources/venues")]
+        ),
     ]
 )

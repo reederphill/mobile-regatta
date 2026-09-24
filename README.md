@@ -19,6 +19,8 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast, the venue pairing stub
+  Venue.swift             venue file schema: land, pairings with geographic grids, current (docs/venue-file.md)
+  Resources/venues/       venue files; `dev-venue@1` stands in until the real venues (#83)
   Course.swift            windward-leeward course, start/finish line, rounding gates
   Boat.swift              boat state and hull shape
   Rules.swift             Rules 10, 11, 12, 13, 18, 22, 31 — who had to keep clear
@@ -83,9 +85,13 @@ bit-for-bit deterministic:
 
 ### Data files
 
-Boat classes and conditions (and later venues and the rules configuration) are immutable, versioned JSON
-files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`:
+Boat classes, conditions and venues (and later the rules configuration) are immutable, versioned JSON
+files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`. The venue schema is in
+`docs/venue-file.md`.
 
+- Files are UTF-8 JSON. Before anything parses one, the loader refuses other encodings, nesting deeper
+  than 512 and a key repeated in one object (parsers disagree on which copy wins, and differently on
+  Darwin and Linux), so every parser reads the same document.
 - Every file starts with `schemaVersion`, `id` and `version`. A schema version the build doesn't know
   throws. A file's `FileRef` is its id, version and the SHA-256 of its exact bytes, so a released file
   never changes: tuning ships `<id>@<version + 1>.json` next to it, and old versions keep loading.
