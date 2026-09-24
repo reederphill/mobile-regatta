@@ -95,6 +95,8 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
 - `-perf` starts a 16-boat demo race for profiling.
 - `-seed <n>` sails every race on seed `n`.
 - `-timescale <n>` runs the simulation at `n`× real time.
+- `-uitesting` marks a UI test run. It and `-fixture` hide the Debug FPS, node and draw-count overlay so
+  screenshots are deterministic.
 - `-fixture <name>`, `-scheme halves|tiller` and `-camera course|boat` are parsed for the render fixtures
   (#62), steering schemes (#112) and camera (#113).
 
@@ -102,7 +104,8 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
 
 The app emits `os_signpost` intervals on the Points of Interest track: **Sim step**, **Bot brains**,
 **Render update** and **HUD refresh**. Profile the Regatta scheme in Instruments with `-perf` and compare
-them against the budgets in #27 (sim + prediction < 3 ms, bots < 2 ms).
+them against the budgets in #27 (sim + prediction < 3 ms, bots < 2 ms). **Sim step** includes the **Bot
+brains** inside it, so subtract Bot brains from Sim step when checking the sim budget.
 
 ## Playing
 

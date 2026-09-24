@@ -33,13 +33,17 @@ jobs:
 
   app:
     name: App tests on the iOS Simulator
-    runs-on: macos-latest
+    # Pinned so the SDK and simulator runtime only change on purpose: Xcode 26.6, iOS 26.5.
+    runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode 26.6
+        run: sudo xcode-select -s /Applications/Xcode_26.6.app
       - name: xcodebuild test (unit + UI)
         run: |
           xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
-            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
             -resultBundlePath Regatta.xcresult
       - name: Upload the result bundle (screenshots, logs)
         if: always()
