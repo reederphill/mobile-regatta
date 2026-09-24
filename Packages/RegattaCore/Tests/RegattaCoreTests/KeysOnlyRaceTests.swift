@@ -40,6 +40,7 @@ import Testing
         let keysOnly = Race(setup: try Self.setup(), revealedWindKeys: keys)
         #expect(keysOnly.isKeysOnly && !seeded.isKeysOnly)
         #expect(keysOnly.windSeed == nil)
+        #expect(keysOnly.log == nil && seeded.log != nil)
         // The import takes the snapshot's keys, which run only through the current window; the keys
         // revealed ahead go back in after it.
         try keysOnly.importSnapshot(seeded.exportSnapshot())

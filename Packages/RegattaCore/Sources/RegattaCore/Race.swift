@@ -22,9 +22,8 @@ public final class Race {
 
     public let setup: RaceSetup
     /// The secret wind seed (ADR 0001), or nil for a keys-only race (`init(setup:revealedWindKeys:)`),
-    /// which is how an online client predicts: it never holds the seed. Implicitly unwrapped so every
-    /// seeded caller reads it as before; only a keys-only race has none.
-    public let windSeed: WindSeed!
+    /// which is how an online client predicts: it never holds the seed.
+    public let windSeed: WindSeed?
     public let course: Course
     public let polar = Polar.dinghy
 
@@ -175,10 +174,10 @@ public final class Race {
         return event
     }
 
-    /// The race so far as a log: its keys, and every input and seat event exactly as applied.
-    /// A keys-only race has none, and traps: it is a prediction, never the record (ADR 0005).
-    public var log: RaceLog {
-        guard let windSeed else { preconditionFailure("a keys-only race is a prediction and has no log") }
+    /// The race so far as a log: its keys, and every input and seat event exactly as applied. Nil for a
+    /// keys-only race: it is a prediction, never the record (ADR 0005), and has no wind seed to log.
+    public var log: RaceLog? {
+        guard let windSeed else { return nil }
         return RaceLog(header: .init(setup: setup, windSeed: windSeed), inputs: appliedInputs,
                 seatEvents: seatEvents, finalTick: tick)
     }
@@ -249,8 +248,15 @@ public final class Race {
     /// wind needs a key it doesn't hold: then it throws `missingKey` and leaves the race unchanged, so a
     /// client can fetch the key (#64: request a `Resync`) instead of guessing the wind (ADR 0001). A
     /// seeded race makes its own keys, so for it this is exactly `step()` and never throws.
+    ///
+    /// It samples the wind first exactly where the step will: at every boat's position at the next tick
+    /// (`refreshWind`). A new read of the wind inside `step()`, such as keyed puffs (#76) or the
+    /// geographic grid (#77) sampled anywhere else, must be checked here too, or a keys-only race could
+    /// trap where it should throw.
     public func tryStep() throws(WindFieldError) {
-        if windKeys == nil && !isOver { _ = try wind.shift(atTick: tick + 1) }
+        if windKeys == nil && !isOver {
+            for boat in boats { _ = try wind.sample(boat.position, tick: tick + 1) }
+        }
         step()
     }
 

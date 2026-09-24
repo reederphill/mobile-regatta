@@ -97,7 +97,7 @@ enum ScriptedLog {
             recordDue()
         }
         precondition(nextEvent == events.count, "seat events past the end of the script")
-        return race.log
+        return race.log!
     }
 }
 
@@ -190,7 +190,7 @@ enum ScriptedLog {
         }
     }
 
-    @Test func heldInputStampedTAppliesFromTickT() {
+    @Test func heldInputStampedTAppliesFromTickT() throws {
         let race = testRace(seats: [.human, .human], seed: 5)
         let t = race.tick + 10
         let input = BoatInput(rudder: Int8(127), ease: true)
@@ -207,19 +207,19 @@ enum ScriptedLog {
 
         for _ in 0..<30 { race.step() }
         #expect(race.heldInputs[0] == input, "held until the seat sends another")
-        #expect(race.log.inputs == [InputRecord(tick: t, seat: 0, kind: .held(input))])
+        #expect(try #require(race.log).inputs == [InputRecord(tick: t, seat: 0, kind: .held(input))])
     }
 
-    @Test func lateInputAppliesAtTheNextTickAndIsLoggedThere() {
+    @Test func lateInputAppliesAtTheNextTickAndIsLoggedThere() throws {
         let race = testRace(seats: [.human, .human], seed: 5)
         for _ in 0..<5 { race.step() }
         let next = race.tick + 1
         #expect(race.apply(BoatInput(rudder: -0.5), seat: 1, atTick: race.tick - 3) == next)
         race.step()
-        #expect(race.log.inputs.map(\.tick) == [next])
+        #expect(try #require(race.log).inputs.map(\.tick) == [next])
     }
 
-    @Test func unchangedHeldInputIsNotLoggedAgain() {
+    @Test func unchangedHeldInputIsNotLoggedAgain() throws {
         let race = testRace(seats: [.human, .human], seed: 5)
         let input = BoatInput(rudder: 0.25)
         for _ in 0..<20 {
@@ -227,10 +227,10 @@ enum ScriptedLog {
             race.apply(input, seat: 0, atTick: race.tick + 1)
             race.step()
         }
-        #expect(race.log.inputs.count == 1)
+        #expect(try #require(race.log).inputs.count == 1)
     }
 
-    @Test func tapAppliesOnce() {
+    @Test func tapAppliesOnce() throws {
         let race = testRace(seats: [.human, .human], seed: 3)
         let t = race.tick + 10
         #expect(race.tap(.tackGybe, seat: 0, atTick: t) == t)
@@ -249,7 +249,7 @@ enum ScriptedLog {
         #expect(autopilotStarts == [t])
         #expect(!engaged, "the tack finished and wasn't started again")
         #expect(protests == [RaceEvent(tick: t, kind: .protest(seat: 0, target: 1))])
-        #expect(race.log.inputs == [
+        #expect(try #require(race.log).inputs == [
             InputRecord(tick: t, seat: 0, kind: .tap(.tackGybe)),
             InputRecord(tick: t, seat: 0, kind: .tap(.protest(target: 1))),
         ])
@@ -344,8 +344,8 @@ enum ScriptedLog {
         let fixture = try ScriptedLog.fixture()
         let race = try Replayer.replay(fixture, requireMatchingVersion: false)
         #expect(race.tick == fixture.finalTick)
-        #expect(race.log.inputs == fixture.inputs)
-        #expect(race.log.seatEvents == fixture.seatEvents)
+        #expect(try #require(race.log).inputs == fixture.inputs)
+        #expect(try #require(race.log).seatEvents == fixture.seatEvents)
     }
 
     @Test func replayRefusesAnotherSimulationVersion() throws {
