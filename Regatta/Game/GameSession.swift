@@ -38,9 +38,10 @@ final class GameSession {
     @ObservationIgnored private let impact = UIImpactFeedbackGenerator(style: .medium)
     @ObservationIgnored private let notification = UINotificationFeedbackGenerator()
 
-    init(config: RaceConfig) {
-        race = Race(setup: config.setup, windSeed: config.windSeed, botBrainSeats: config.botBrainSeats)
-        scene = GameScene(race: race)
+    /// `timescale` runs the simulation that many times real time (`-timescale`, for tests).
+    init(config: RaceConfig, timescale: Double = 1) {
+        race = Race(config: config)
+        scene = GameScene(race: race, timescale: timescale)
         scene.session = self
         hud = HUDState(race: race)
         post("Hold the left or right side of the screen to steer. Be below the line at the gun.", .info, seconds: 6)

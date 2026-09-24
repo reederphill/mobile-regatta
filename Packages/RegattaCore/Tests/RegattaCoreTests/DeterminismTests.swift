@@ -30,6 +30,24 @@ import Testing
     }
 }
 
+@Suite struct InstrumentationTests {
+    @Test func botBrainsIntervalWrapsEachStepOnceWithoutChangingOutput() {
+        let plain = testRace(opponents: 5, prestartSeconds: 10, seed: 9, brains: Array(0...5))
+        let timed = testRace(opponents: 5, prestartSeconds: 10, seed: 9, brains: Array(0...5))
+        var intervals = 0
+        timed.botBrainsInterval = { body in
+            intervals += 1
+            body()
+        }
+        for _ in 0..<600 {
+            plain.step()
+            timed.step()
+        }
+        #expect(intervals == 600)
+        #expect(timed.digest() == plain.digest())
+    }
+}
+
 @Suite struct RandomTests {
     @Test func unitFirstValuesArePinned() {
         var rng = SplitMix64(seed: 1)

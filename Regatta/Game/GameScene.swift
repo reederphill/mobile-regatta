@@ -7,6 +7,8 @@ final class GameScene: SKScene {
     static let pointsPerMeter: CGFloat = 8
 
     let race: Race
+    /// Simulated seconds per real second (`-timescale`).
+    let timescale: Double
     weak var session: GameSession?
 
     private let world = SKNode()
@@ -33,9 +35,11 @@ final class GameScene: SKScene {
     private var starboardTouches = Set<UITouch>()
     private var rudderInput = 0.0
 
-    init(race: Race) {
+    init(race: Race, timescale: Double = 1) {
         self.race = race
+        self.timescale = timescale
         super.init(size: CGSize(width: 390, height: 844))
+        race.botBrainsInterval = { Signpost.botBrains.measure($0) }
         scaleMode = .resizeFill
         anchorPoint = CGPoint(x: 0.5, y: 0.5)
         backgroundColor = Palette.water
@@ -138,19 +142,24 @@ final class GameScene: SKScene {
 
         updateRudder(frameTime)
         race.setPlayerRudder(rudderInput)
-        accumulator += frameTime
-        while accumulator >= fixedStep {
-            race.step()
-            accumulator -= fixedStep
-        }
+        advanceSimulation(by: frameTime)
 
-        render(frameTime)
+        Signpost.renderUpdate.measure { render(frameTime * timescale) }
         session.consume(race.drainEvents())
 
         hudCountdown -= frameTime
         if hudCountdown <= 0 {
             hudCountdown = 1.0 / 15
-            session.refreshHUD()
+            Signpost.hudRefresh.measure { session.refreshHUD() }
+        }
+    }
+
+    /// Runs the fixed ticks that `frameTime` seconds of real time cover at `timescale`.
+    func advanceSimulation(by frameTime: Double) {
+        accumulator += frameTime * timescale
+        while accumulator >= fixedStep {
+            Signpost.simStep.measure { race.step() }
+            accumulator -= fixedStep
         }
     }
 

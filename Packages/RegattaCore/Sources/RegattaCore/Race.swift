@@ -42,6 +42,10 @@ public final class Race {
     public private(set) var isOver = false
     public private(set) var firstFinishTime: Double?
 
+    /// Wraps the bot-brain phase of `step()` so a profiler can time it; the app emits an `os_signpost` interval.
+    /// It must call `body` exactly once and must not touch the race, so it never changes simulation output.
+    public var botBrainsInterval: ((_ body: () -> Void) -> Void)?
+
     private struct Pair: Hashable {
         let a: Int
         let b: Int
@@ -161,7 +165,7 @@ public final class Race {
     }
 
     /// Queues this tick's input from each built-in brain whose boat is on the course.
-    private func runBrains() {
+    private func runBotBrains() {
         for i in boats.indices where boats[i].isOnCourse {
             guard var brain = brains[i] else { continue }
             let rudder = brain.rudder(for: i, in: self)
@@ -238,7 +242,7 @@ public final class Race {
         refreshWind()
         applyWindShadows()
 
-        runBrains()
+        if let botBrainsInterval { botBrainsInterval(runBotBrains) } else { runBotBrains() }
         applyInputs()
 
         let previous = boats.map(\.position)

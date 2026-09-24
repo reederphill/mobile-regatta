@@ -11,6 +11,7 @@ let package = Package(
     targets: [
         .target(name: "RegattaCore"),
         .executableTarget(name: "regatta-replay", dependencies: ["RegattaCore"]),
-        .testTarget(name: "RegattaCoreTests", dependencies: ["RegattaCore"]),
+        // regatta-replay is a dependency so `swift test` builds it: the golden test runs it as its own process.
+        .testTarget(name: "RegattaCoreTests", dependencies: ["RegattaCore", "regatta-replay"]),
     ]
 )
