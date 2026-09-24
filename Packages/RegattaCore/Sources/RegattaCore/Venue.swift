@@ -26,9 +26,10 @@ public struct Venue: DataFileContent, Equatable {
 
     public var hasCurrent: Bool { current != nil }
 
-    /// The pairing for conditions `id`, whatever its version.
-    public func pairing(conditionsID id: String) -> Pairing? {
-        pairings.first { $0.conditions.id == id }
+    /// The pairing for exactly this conditions file, id and version: e.g. `pairing(for: setup.conditions.key)`.
+    /// Nil when the venue has no pairing for that version, even if it has one for another.
+    public func pairing(for conditions: DataFileKey) -> Pairing? {
+        pairings.first { $0.conditions == conditions }
     }
 
     /// Whether `p` is on any of the venue's land.
@@ -77,7 +78,8 @@ public struct Venue: DataFileContent, Equatable {
         public let origin: Vec2
         /// Distance between neighbouring nodes, metres.
         public let cellSize: Double
-        /// Compass bearing of `rowAxis`, radians in [0, 2π). At 0, rows run north and columns east.
+        /// Compass bearing of `rowAxis`, radians in [0, 2π). At 0 the row index grows northward and the
+        /// column index eastward.
         public let orientation: Double
         /// Nodes per row and per column, at least 2 each.
         public let columns: Int
@@ -116,17 +118,21 @@ public struct Venue: DataFileContent, Equatable {
     ///
     /// Tide state is the phase of the tidal cycle, radians: at the deepest node the current is
     /// `peak × sin(phase)` along the flood direction, so 0 is slack before the flood, π/2 peak flood,
-    /// π slack before the ebb, 3π/2 peak ebb. It reverses, never rotates.
+    /// π slack before the ebb, 3π/2 peak ebb. The channel current reverses, never rotates; eddies add to it.
     public struct Current: Sendable, Equatable {
-        /// One tidal cycle (the M2 constituent, 12 h 25 min 12 s) in real seconds.
-        public static let tidalCycle: Double = 44_712
+        /// Speed of the principal lunar semidiurnal constituent M2, degrees per hour (NOAA CO-OPS,
+        /// harmonic constituents: https://tidesandcurrents.noaa.gov/about_harmonic_constituents.html).
+        public static let m2DegreesPerHour = 28.984_104_2
+        /// One tidal cycle, the M2 period (12.420 601 2 h ≈ 44 714.164 s), in tide-clock seconds.
+        public static let tidalCycle: Double = 360 / m2DegreesPerHour * 3600
 
         /// Strength at the venue's deepest point at peak tide, m/s (0.5–2 kn, #11).
         public let peak: Double
         /// A tidal venue's tide clock runs faster than real time, so the current changes during a race.
         public let isTidal: Bool
         /// Tide-clock seconds per race second: > 1 when tidal (about 19, so slack to peak takes about
-        /// 10 min), exactly 1 when not, so the current is steady within a race (#11).
+        /// 10 min), exactly 1 when not, so the current is steady within a race (#11). Only approximately:
+        /// at 1 the phase still advances about 10° in a 20-minute race.
         public let tideClockRate: Double
         /// Tide states a race may start at; drawn per race from the race seed (#11, #78).
         public let allowedTideStatesAtGun: TideStateRange
@@ -136,7 +142,7 @@ public struct Venue: DataFileContent, Equatable {
         public let depths: [Double]
         /// Compass bearing the flood flows towards, per node, radians. The ebb flows the opposite way.
         public let floodDirections: [Double]
-        /// Strength at depth d is `peak × (d / maxDepth)^strengthExponent` (Manning: 2/3).
+        /// Strength at depth d is `peak × (d / maxDepth)^strengthExponent`. Authored; 2/3 recommended (Manning).
         public let strengthExponent: Double
         /// How far ahead of the deepest water a dry node's tide runs, radians of tide phase. At depth d
         /// the local phase is `phase + shallowsLead × (1 − d / maxDepth)`: the shallows turn first.
@@ -161,17 +167,20 @@ public struct Venue: DataFileContent, Equatable {
         public func floodDirection(column: Int, row: Int) -> Double { floodDirections[grid.index(column: column, row: row)] }
     }
 
-    /// Tide states from `from` forward to `to`, radians in [0, 2π), wrapping through 0 when `to < from`.
-    /// Equal ends mean one tide state.
+    /// Tide states from `from` forward to `to`, radians, wrapping through 0 when `to < from`. Equal ends
+    /// mean one tide state. `from` is in [0, 2π) and `to` in [0, 2π), except that `from == 0, to == 2π` is
+    /// the whole cycle: any tide state.
     public struct TideStateRange: Sendable, Equatable {
         public let from: Double
         public let to: Double
 
-        /// Radians from `from` forward to `to`, in [0, 2π).
+        /// Radians from `from` forward to `to`, in [0, 2π]; 2π for the whole cycle.
         public var width: Double {
             let w = to - from
             return w < 0 ? w + 2 * .pi : w
         }
+
+        public var isWholeCycle: Bool { width == 2 * .pi }
 
         /// Whether tide state `phase` (radians, any turn) lies in the range.
         public func contains(_ phase: Double) -> Bool {
@@ -194,15 +203,29 @@ public struct Venue: DataFileContent, Equatable {
         /// Centre while the tide floods and while it ebbs, metres.
         public let floodCentre: Vec2
         public let ebbCentre: Vec2
-        /// Solid-body rotation inside this radius, metres; speed falls as `coreRadius / r` outside it.
+        /// Solid-body rotation inside this radius, metres; outside it the speed falls as `coreRadius / r`,
+        /// tapered to zero at `outerRadius` (`relativeSpeed(atDistance:)`).
         public let coreRadius: Double
-        /// The eddy has no effect beyond this radius, metres.
+        /// The eddy has no effect from this radius out, metres.
         public let outerRadius: Double
-        /// Speed at the core radius at peak tide, m/s; scales with the strength of the tide.
+        /// Speed at the core radius at peak tide, m/s. Each centre scales it by the tide running its way
+        /// at that centre: `max(0, ±sin(local phase))` (docs/venue-file.md).
         public let peak: Double
         public let floodRotation: Rotation
 
         public var ebbRotation: Rotation { floodRotation.reversed }
+
+        /// Fraction of the eddy's speed at distance `r` (metres) from its active centre, in 0...1:
+        /// solid-body `r / coreRadius` inside the core, then Rankine `coreRadius / r` tapered linearly to
+        /// zero at `outerRadius`, so the speed is continuous everywhere, 1 at the core radius and 0 from
+        /// the outer radius out. The velocity is this × the eddy's tide-scaled speed, tangential to the
+        /// centre in the active rotation (docs/venue-file.md).
+        public func relativeSpeed(atDistance r: Double) -> Double {
+            guard r > 0 else { return 0 }
+            if r <= coreRadius { return r / coreRadius }
+            guard r < outerRadius else { return 0 }
+            return coreRadius / r * (outerRadius - r) / (outerRadius - coreRadius)
+        }
     }
 
     /// A simple polygon of land: its edges never cross or touch except at shared corners.
@@ -229,7 +252,9 @@ public struct Venue: DataFileContent, Equatable {
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
         case 1:
-            self = try JSONDecoder().decode(VenueSchema1.self, from: fileData).venue(id: header.id)
+            let document = try JSONDecoder().decode(VenueSchema1.self, from: fileData)
+            try document.rejectUnknownFields(in: fileData)
+            self = try document.venue(id: header.id)
         default:
             throw DataFileError.unsupportedSchemaVersion(
                 kind: Self.kind, found: header.schemaVersion, supported: Self.supportedSchemaVersions)
@@ -264,14 +289,20 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
     public var pairings: [Pairing]
     public var current: Current
 
+    enum CodingKeys: String, CodingKey, CaseIterable { case schemaVersion, id, version, placeholders, notes, displayName, landmarks, land, pairings, current }
+
     public struct Landmark: Codable, Equatable, Sendable {
         public var asset: String
         public var positionMetres: [Double]
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case asset, positionMetres }
     }
 
     public struct Land: Codable, Equatable, Sendable {
         /// `[x, y]` corners; the last repeats the first, closing the ring.
         public var outlineMetres: [[Double]]
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case outlineMetres }
     }
 
     public struct Pairing: Codable, Equatable, Sendable {
@@ -280,6 +311,8 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
         public var trendDirection: Venue.TrendDirection
         public var startLineCentreMetres: [Double]
         public var geographicGrid: GeographicGrid
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case conditionsRef, meanDirectionDegrees, trendDirection, startLineCentreMetres, geographicGrid }
     }
 
     public struct GeographicGrid: Codable, Equatable, Sendable {
@@ -291,6 +324,8 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
         /// `rows` arrays of `columns` values each; row 0 passes through the origin.
         public var directionDeltaDegrees: [[Double]]
         public var speedFactor: [[Double]]
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case originMetres, cellSizeMetres, orientationDegrees, columns, rows, directionDeltaDegrees, speedFactor }
     }
 
     public struct Current: Codable, Equatable, Sendable {
@@ -304,11 +339,15 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
         public var grid: CurrentGrid?
         public var byDepth: ByDepth?
         public var eddies: [Eddy]?
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case hasCurrent, peakKnots, tidal, tideClockRate, allowedTideStatesAtGun, grid, byDepth, eddies }
     }
 
     public struct TideStateRange: Codable, Equatable, Sendable {
         public var fromDegrees: Double
         public var toDegrees: Double
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case fromDegrees, toDegrees }
     }
 
     public struct CurrentGrid: Codable, Equatable, Sendable {
@@ -319,11 +358,15 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
         public var rows: Int
         public var depthMetres: [[Double]]
         public var floodDirectionDegrees: [[Double]]
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case originMetres, cellSizeMetres, orientationDegrees, columns, rows, depthMetres, floodDirectionDegrees }
     }
 
     public struct ByDepth: Codable, Equatable, Sendable {
         public var strengthExponent: Double
         public var shallowsLeadDegrees: Double
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case strengthExponent, shallowsLeadDegrees }
     }
 
     public struct Eddy: Codable, Equatable, Sendable {
@@ -333,7 +376,35 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
         public var outerRadiusMetres: Double
         public var peakKnots: Double
         public var floodRotation: Venue.Eddy.Rotation
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case floodCentreMetres, ebbCentreMetres, coreRadiusMetres, outerRadiusMetres, peakKnots, floodRotation }
     }
+
+    /// Throws `malformed` naming the first field in `data` that schema 1 doesn't have (such as a typo,
+    /// `"eddys"`), or that is `null`, which the decoder would otherwise ignore. A released file can't be
+    /// fixed, so it mustn't ship with a field nothing reads. Call after decoding, so type errors come first.
+    func rejectUnknownFields(in data: Data) throws {
+        let document = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        if let pointer = Self.fields.firstUnknownField(in: document, at: "") {
+            throw DataFileError.malformed(kind: Venue.kind, reason: "unknown or null field \(pointer): a venue file has only its schema's fields")
+        }
+    }
+
+    /// Every field schema 1 has, from each type's `CodingKeys`, so it can't drift from the decoder.
+    private static let fields: FieldTree = .object(CodingKeys.self, [
+        .landmarks: .array(.object(Landmark.CodingKeys.self)),
+        .land: .array(.object(Land.CodingKeys.self)),
+        .pairings: .array(.object(Pairing.CodingKeys.self, [
+            .conditionsRef: .object(["id": .value, "version": .value]),
+            .geographicGrid: .object(GeographicGrid.CodingKeys.self),
+        ])),
+        .current: .object(Current.CodingKeys.self, [
+            .allowedTideStatesAtGun: .object(TideStateRange.CodingKeys.self),
+            .grid: .object(CurrentGrid.CodingKeys.self),
+            .byDepth: .object(ByDepth.CodingKeys.self),
+            .eddies: .array(.object(Eddy.CodingKeys.self)),
+        ]),
+    ])
 
     /// Peak current allowed at a venue's strongest point, knots (#11).
     public static let peakKnotsRange = 0.5...2.0
@@ -498,9 +569,16 @@ private extension VenueSchema1.Current {
             try v.check(tideClockRate == nil, "current: tideClockRate is only for tidal venues; steady current runs at 1")
             rate = 1
         }
-        let range = Venue.TideStateRange(
-            from: try v.bearing(allowedTideStatesAtGun.fromDegrees, "current allowedTideStatesAtGun.fromDegrees"),
-            to: try v.bearing(allowedTideStatesAtGun.toDegrees, "current allowedTideStatesAtGun.toDegrees"))
+        let states = allowedTideStatesAtGun
+        let range: Venue.TideStateRange
+        if states.fromDegrees == 0 && states.toDegrees == 360 {
+            range = Venue.TideStateRange(from: 0, to: 2 * .pi) // the whole cycle
+        } else {
+            range = Venue.TideStateRange(
+                from: try v.bearing(states.fromDegrees, "current allowedTideStatesAtGun.fromDegrees"),
+                to: try v.bearing(states.toDegrees,
+                                  "current allowedTideStatesAtGun.toDegrees (or 0 to 360 for the whole cycle)"))
+        }
         let geometry = try v.grid(
             "current grid", origin: grid.originMetres, cellSize: grid.cellSizeMetres, orientation: grid.orientationDegrees,
             columns: grid.columns, rows: grid.rows,
@@ -535,5 +613,40 @@ private extension VenueSchema1.Current {
             allowedTideStatesAtGun: range, grid: geometry, depths: depths, floodDirections: floods,
             strengthExponent: byDepth.strengthExponent, shallowsLead: deg2rad(byDepth.shallowsLeadDegrees),
             eddies: eddies, maxDepth: maxDepth)
+    }
+}
+
+/// The object keys a data file may have, for rejecting unknown fields. Leaves (`value`) aren't walked,
+/// so the numbers in a grid cost nothing.
+private indirect enum FieldTree: Sendable {
+    case value
+    case object([String: FieldTree])
+    case array(FieldTree)
+
+    static func object<Key: CodingKey & CaseIterable & Hashable>(_: Key.Type, _ nested: [Key: FieldTree] = [:]) -> FieldTree {
+        .object(Dictionary(uniqueKeysWithValues: Key.allCases.map { ($0.stringValue, nested[$0] ?? .value) }))
+    }
+
+    /// JSON Pointer of the first member, in key order, that isn't in the tree or is null. Values of the
+    /// wrong shape are left to the decoder.
+    func firstUnknownField(in value: Any, at path: String) -> String? {
+        switch self {
+        case .value:
+            return nil
+        case .object(let fields):
+            guard let members = value as? [String: Any] else { return nil }
+            for key in members.keys.sorted() {
+                let pointer = path + "/" + key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
+                guard let field = fields[key], let member = members[key], !(member is NSNull) else { return pointer }
+                if let found = field.firstUnknownField(in: member, at: pointer) { return found }
+            }
+            return nil
+        case .array(let element):
+            guard let elements = value as? [Any] else { return nil }
+            for (k, member) in elements.enumerated() {
+                if let found = element.firstUnknownField(in: member, at: path + "/\(k)") { return found }
+            }
+            return nil
+        }
     }
 }

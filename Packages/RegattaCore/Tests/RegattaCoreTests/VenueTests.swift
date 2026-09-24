@@ -74,7 +74,7 @@ enum VenueFixtures {
             #expect(!venue.isLand(pairing.startLineCentre))
             #expect(pairing.geographicGrid.grid.nodeCount == 21 * 16)
         }
-        #expect(venue.pairing(conditionsID: "sea-breeze")?.trendDirection == .veer)
+        #expect(venue.pairing(for: DataFileKey(id: "sea-breeze", version: 1))?.trendDirection == .veer)
         #expect(file.header.placeholders.contains("/pairings/0/geographicGrid"))
     }
 
@@ -179,8 +179,15 @@ enum VenueFixtures {
         #expect(abs(east.bearing - deg2rad(120)) < 1e-12 && abs(east.length - 300) < 1e-9)
         #expect(abs(north.bearing - deg2rad(30)) < 1e-12 && abs(north.length - 300) < 1e-9)
         #expect(p1.geographicGrid.speedFactor(column: 1, row: 1) == 0.85)
-        #expect(venue.pairing(conditionsID: "gusty-offshore") == p1)
-        #expect(venue.pairing(conditionsID: "sea-breeze") == nil)
+        #expect(venue.pairing(for: DataFileKey(id: "gusty-offshore", version: 2)) == p1)
+        #expect(venue.pairing(for: DataFileKey(id: "classic-oscillating", version: 1)) == p0)
+        // The pairing is pinned to its conditions version: any other version has no pairing.
+        #expect(venue.pairing(for: DataFileKey(id: "gusty-offshore", version: 1)) == nil)
+        #expect(venue.pairing(for: DataFileKey(id: "classic-oscillating", version: 2)) == nil)
+        #expect(venue.pairing(for: DataFileKey(id: "sea-breeze", version: 1)) == nil)
+        // As #81 will look it up, from the conditions FileRef in the race setup.
+        let ref = FileRef(id: "gusty-offshore", version: 2, hash: ContentHash(of: Data()))
+        #expect(venue.pairing(for: ref.key) == p1)
     }
 
     @Test func landIsConcaveAndWoundAnticlockwise() throws {
@@ -232,6 +239,11 @@ enum VenueFixtures {
         #expect(abs(current.phaseLead(depth: 4) - deg2rad(10)) < 1e-12)
     }
 
+    @Test func tidalCycleIsTheM2Period() {
+        // 360° / 28.9841042° per hour = 12.4206012 h.
+        #expect(abs(Venue.Current.tidalCycle - 44_714.164_394) < 1e-5)
+    }
+
     @Test func tidalClockTakesAboutTenMinutesFromSlackToPeak() throws {
         let current = try #require(try VenueFixtures.testVenue().current)
         let slackToPeak = Venue.Current.tidalCycle / 4 / current.tideClockRate
@@ -249,6 +261,39 @@ enum VenueFixtures {
         }
         let single = Venue.TideStateRange(from: deg2rad(90), to: deg2rad(90))
         #expect(single.width == 0 && single.contains(deg2rad(90)) && !single.contains(deg2rad(91)))
+        #expect(!range.isWholeCycle && !single.isWholeCycle)
+    }
+
+    @Test func wholeTideCycleIsZeroTo360() throws {
+        let data = try VenueFixtures.edited([(of: #""fromDegrees": 330, "toDegrees": 30"#, with: #""fromDegrees": 0, "toDegrees": 360"#)])
+        let range = try #require(try VenueFile(data: data).content.current).allowedTideStatesAtGun
+        #expect(range == .init(from: 0, to: 2 * .pi))
+        #expect(range.isWholeCycle && range.width == 2 * .pi)
+        for degrees in stride(from: -360.0, through: 720, by: 7.5) {
+            #expect(range.contains(deg2rad(degrees)), "\(degrees)°")
+        }
+        // 360 means the whole cycle only from 0.
+        let partial = try VenueFixtures.edited([(of: #""fromDegrees": 330, "toDegrees": 30"#, with: #""fromDegrees": 10, "toDegrees": 360"#)])
+        VenueFixtures.expectInvalid(partial, "toDegrees (or 0 to 360 for the whole cycle) must be in [0, 360)")
+    }
+
+    @Test func eddySpeedIsRankineTaperedToZeroAtTheOuterRadius() throws {
+        let eddy = try #require(try VenueFixtures.testVenue().current?.eddies.first)
+        #expect(eddy.coreRadius == 40 && eddy.outerRadius == 150)
+        #expect(eddy.relativeSpeed(atDistance: 0) == 0)
+        #expect(eddy.relativeSpeed(atDistance: 20) == 0.5)
+        #expect(eddy.relativeSpeed(atDistance: 40) == 1)
+        #expect(eddy.relativeSpeed(atDistance: 150) == 0)
+        #expect(eddy.relativeSpeed(atDistance: 1000) == 0)
+        // Rankine 1/r outside the core, times a linear taper.
+        #expect(abs(eddy.relativeSpeed(atDistance: 80) - 40.0 / 80 * 70 / 110) < 1e-12)
+        // Continuous: no jump anywhere, in particular at the core and outer radii.
+        var previous = 0.0
+        for tenth in 0...2000 {
+            let s = eddy.relativeSpeed(atDistance: Double(tenth) / 10)
+            #expect(s >= 0 && s <= 1 && abs(s - previous) < 0.01)
+            previous = s
+        }
     }
 }
 
@@ -351,6 +396,30 @@ enum VenueFixtures {
             replacements.append((of: row, with: "[0, 0, 0, 0, 0]"))
         }
         VenueFixtures.expectInvalid(try VenueFixtures.edited(replacements), "needs some water deeper than 0 m")
+    }
+
+    @Test(arguments: [
+        // A typo at the top level, in a pairing's grid, in the current and in an eddy.
+        (#""displayName": "Test Water","#, #""displayName": "Test Water", "displayname": "Typo","#, "/displayname"),
+        (#""cellSizeMetres": 300,"#, #""cellSizeMetres": 300, "cellSize": 300,"#, "/pairings/1/geographicGrid/cellSize"),
+        (#""eddies": ["#, #""eddys": [], "eddies": ["#, "/current/eddys"),
+        (#""floodRotation": "clockwise""#, #""floodRotation": "clockwise", "ebbRotation": "clockwise""#, "/current/eddies/0/ebbRotation"),
+        (#""conditionsRef": { "id": "classic-oscillating", "version": 1 }"#,
+         #""conditionsRef": { "id": "classic-oscillating", "version": 1, "hash": "" }"#, "/pairings/0/conditionsRef/hash"),
+        // Null is not the same as leaving a field out.
+        (#""notes": ["#, #""notes": null, "oldNotes": ["#, "/notes"),
+    ])
+    func unknownFieldIsMalformed(of: String, with: String, pointer: String) throws {
+        let data = try VenueFixtures.edited([(of: of, with: with)])
+        #expect(throws: DataFileError.malformed(
+            kind: "venue", reason: "unknown or null field \(pointer): a venue file has only its schema's fields")) {
+            try VenueFile(data: data)
+        }
+    }
+
+    @Test func boatClassesStillIgnoreUnknownFields() throws {
+        let data = try Fixtures.edited([(of: #""name": "Dinghy","#, with: #""name": "Dinghy", "nmae": "typo","#)])
+        #expect(try BoatClassFile(data: data).content.name == "Dinghy")
     }
 
     @Test func unknownTrendDirectionIsMalformed() throws {

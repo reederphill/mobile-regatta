@@ -70,6 +70,8 @@ without the repeated closing point.
 `conditionsRef` names a version but no hash: the pairing's anchor, grid and the offline checks (#83)
 were made against that conditions entry's wind range, so retuning the conditions ships a new venue
 version too. Hashes are checked where files are loaded, against the refs the server names at race start.
+`Venue.pairing(for:)` looks a pairing up by exact id and version (`pairing(for: setup.conditions.key)`);
+another version of the same conditions has no pairing.
 
 ### Grids
 
@@ -79,7 +81,7 @@ The geographic grid and the current grid share one layout:
 |---|---|---|
 | `originMetres` | [x, y] | Node (column 0, row 0). |
 | `cellSizeMetres` | number | Spacing between neighbouring nodes. |
-| `orientationDegrees` | bearing | Direction along which the row index grows. At 0, rows run north and columns east. |
+| `orientationDegrees` | bearing | Direction along which the row index grows. At 0 the row index grows northward and the column index eastward. |
 | `columns`, `rows` | integer | Nodes per row and per column, at least 2 each. |
 | value arrays | [[number]] | `rows` arrays of `columns` numbers each. Row 0 passes through the origin, so a file lists its southern row first when the grid isn't rotated. |
 
@@ -106,34 +108,66 @@ With current:
 | `peakKnots` | number | Strength at the deepest node at peak tide, 0.5–2 kn (#11). |
 | `tidal` | bool | A tidal venue's tide clock runs faster than real time. |
 | `tideClockRate` | number | Tidal venues only, and required for them: tide-clock seconds per race second, > 1. About 19, so slack to peak takes about 10 min. Steady venues omit it and run at 1. |
-| `allowedTideStatesAtGun` | `{ "fromDegrees", "toDegrees" }` | Tide states a race may start at, drawn per race (#11, #78). The range runs forward from `from` to `to`, wrapping through 0 when `to < from`; equal ends mean one tide state. |
+| `allowedTideStatesAtGun` | `{ "fromDegrees", "toDegrees" }` | Tide states a race may start at, drawn per race (#11, #78). Both in [0, 360). The range runs forward from `from` to `to`, wrapping through 0 when `to < from`; equal ends mean one tide state. The one exception is `{ "fromDegrees": 0, "toDegrees": 360 }`: the whole cycle, any tide state. |
 | `grid` | Grid | Layout as above, with `depthMetres` (≥ 0; 0 is dry, and some node must be deeper) and `floodDirectionDegrees` (bearing the flood flows towards; the ebb flows the opposite way). This is the channel direction field. |
-| `byDepth` | `{ "strengthExponent", "shallowsLeadDegrees" }` | How strength and the turn of the tide follow depth, below. `strengthExponent` > 0; `shallowsLeadDegrees` in [0, 90). |
+| `byDepth` | `{ "strengthExponent", "shallowsLeadDegrees" }` | How strength and the turn of the tide follow depth, below. Both required. `strengthExponent` > 0 (authored; 2/3 recommended, Manning); `shallowsLeadDegrees` in [0, 90). |
 | `eddies` | [Eddy] | Optional headland eddies. |
 
 ### Tide state and the tide clock
 
 The **tide state** is the phase φ of the tidal cycle, in degrees in files and radians in code:
 0° is slack before the flood, 90° peak flood, 180° slack before the ebb, 270° peak ebb. The cycle is
-the M2 tide, 12 h 25 min 12 s (`Venue.Current.tidalCycle`, 44,712 s) of tide-clock time, so during a race
+the M2 tide (the principal lunar semidiurnal constituent), whose speed is 28.9841042° per hour
+([NOAA CO-OPS, harmonic constituents](https://tidesandcurrents.noaa.gov/about_harmonic_constituents.html)),
+so one cycle is 360 / 28.9841042 = 12.4206012 h ≈ 44,714.164 s of tide-clock time
+(`Venue.Current.tidalCycle`). During a race
 
-    φ(t) = φ_gun + 360° × tideClockRate × t / 44,712 s
+    φ(t) = φ_gun + 360° × tideClockRate × t / 44,714.164 s
 
-where t is race seconds since the gun. At 19× slack to peak takes 44,712 / 4 / 19 ≈ 588 s.
+where t is race seconds since the gun. At 19× slack to peak takes 44,714.164 / 4 / 19 ≈ 588 s.
 
-### Strength and turn by depth (the builder's formula)
+A steady (non-tidal) venue runs the same clock at rate 1, so its phase still advances, slowly: about
+0.48° a minute, ≈ 10° over a 20-minute race. Its current is steady only approximately. Near peak
+(φ ≈ 90°) that changes the strength by under 2 %; a steady venue should allow tide states near 90° or
+270°, not near slack, where the same 10° is a large relative change.
 
-With `d_max` the deepest node (derived at load) and d the depth at a point:
+### The current field (the builder's formula for #78)
 
-    relative strength  s(d) = (d / d_max) ^ strengthExponent       (0 when dry, 1 at d_max)
-    phase lead         δ(d) = shallowsLeadDegrees × (1 − d / d_max)  (shallows turn first)
-    current(p, t)          = peakKnots × s(d) × sin(φ(t) + δ(d)) along floodDirection(p)  + eddies
+With `d_max` the deepest node (derived at load), d(p) the depth at p and θ(p) the flood direction at p,
+both sampled from the grid by `CurrentField` (#78):
 
-`strengthExponent` is 2/3 by default (Manning's law: for the same surface slope, speed ∝ depth^(2/3);
-see `docs/research/wind-and-current-physics-for-realtime-sim.md` §5), normalised so the deepest water
-reaches `peakKnots`. The current only reverses, never rotates: the flood direction is fixed per node and
-the sine changes its sign. `Venue.Current.relativeStrength(depth:)` and `phaseLead(depth:)` implement
-the two depth formulas; `CurrentField` (#78) combines them.
+    relative strength  s(d) = (d / d_max) ^ strengthExponent        (0 when dry, 1 at d_max)
+    phase lead         δ(d) = shallowsLeadDegrees × (1 − d / d_max)   (shallows turn first)
+    local phase        φ_p(t) = φ(t) + δ(d(p))
+    channel current    c(p, t) = peakKnots × s(d(p)) × sin(φ_p(t)) × heading(θ(p))
+    current            current(p, t) = c(p, t) + Σ eddies e(p, t)
+
+`strengthExponent` is authored per venue; 2/3 is recommended (Manning's law: for the same surface slope,
+speed ∝ depth^(2/3); see `docs/research/wind-and-current-physics-for-realtime-sim.md` §5), normalised so
+the deepest water reaches `peakKnots`. The channel current only reverses, never rotates: θ is fixed per
+node and the sine changes its sign. `Venue.Current.relativeStrength(depth:)` and `phaseLead(depth:)`
+implement s and δ.
+
+**Eddies.** Each eddy has a flood centre and an ebb centre, and each centre follows the local phase at
+that centre (so a headland eddy turns with the shallows around it, not with the channel):
+
+    flood strength  a_f(t) = eddy peakKnots × max(0,  sin(φ_{c_f}(t)))    at the flood centre c_f
+    ebb strength    a_e(t) = eddy peakKnots × max(0, −sin(φ_{c_e}(t)))    at the ebb centre c_e
+    e(p, t) = a_f(t) × f(|p − c_f|) × tangent_f(p) + a_e(t) × f(|p − c_e|) × tangent_e(p)
+
+where φ_c is the local phase at a centre (with the shallows lead at the depth there), `tangent` is the
+unit vector at right angles to p − c in the centre's rotation (`floodRotation` at the flood centre,
+the other way at the ebb centre; clockwise is `(p − c).rightPerp`, normalised), and f is the radial
+profile, `Venue.Eddy.relativeSpeed(atDistance:)`:
+
+    f(r) = r / r_core                                               r ≤ r_core   (solid body)
+    f(r) = (r_core / r) × (r_outer − r) / (r_outer − r_core)        r_core < r < r_outer   (Rankine, tapered)
+    f(r) = 0                                                        r ≥ r_outer
+
+f is continuous (1 at the core radius, 0 at the outer radius), and each centre's strength passes
+through zero at its local slack, so the eddy never jumps in space or time. Each centre is active only
+while the tide runs its way; when the two centres' depths differ, both can be weak but active for a
+moment around slack. Nothing bounds the sum: channel current plus an eddy can exceed `peakKnots`.
 
 ### Eddy
 
@@ -143,15 +177,17 @@ flips to the other side, turning the other way, when the tide turns.
 | Field | Type | Meaning |
 |---|---|---|
 | `floodCentreMetres`, `ebbCentreMetres` | [x, y] | Centre while the tide floods, and while it ebbs. |
-| `coreRadiusMetres` | number | Solid-body rotation inside; speed falls as core radius / r outside. > 0. |
-| `outerRadiusMetres` | number | No effect beyond this radius. > core radius. |
-| `peakKnots` | number | Speed at the core radius at peak tide, > 0 and at most the venue's `peakKnots`. Scales with the strength of the tide. |
+| `coreRadiusMetres` | number | Solid-body rotation inside, > 0. |
+| `outerRadiusMetres` | number | No effect from here out; > core radius. |
+| `peakKnots` | number | Speed at the core radius at peak tide, > 0 and at most the venue's `peakKnots`. |
 | `floodRotation` | `"clockwise"` or `"anticlockwise"` | Sense while flooding; the ebb eddy turns the other way. |
 
 ## Validation
 
-The loader throws `DataFileError.invalidContent` for a venue that breaks any of these, and
-`malformed` for a missing field, a wrong type or an unknown enum value (such as a `trendDirection`):
+The loader throws `DataFileError.malformed` for a missing field, a wrong type, an unknown enum value
+(such as a `trendDirection`), or **a field the schema doesn't have** (a typo such as `"eddys"`, or a
+`null`): a released file can't be fixed, so it mustn't carry a field nothing reads. (Boat class files
+don't check this yet.) It throws `invalidContent` for a venue that breaks any of these:
 
 - `displayName` is non-empty; every landmark `asset` is non-empty; every point is two finite numbers.
 - Every land ring is **closed** (last point repeats the first, at least 3 corners) and **simple**: no
