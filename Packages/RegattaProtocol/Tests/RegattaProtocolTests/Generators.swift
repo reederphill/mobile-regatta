@@ -87,8 +87,8 @@ struct Gen {
         let seats: [SeatKind] = (0..<int(2...16)).map { _ in bool() ? .bot : .human }
         func file(_ g: inout Gen) -> FileRef? { g.bool() ? g.fileRef() : nil }
         return try! RaceSetup(
-            simulationVersion: string(1...40), raceSeed: RaceSeed(u64()), seats: seats, laps: int(1...9),
-            startSequenceTicks: int(1...100_000), boatClass: file(&self), venue: file(&self),
+            simulationVersion: string(1...40), raceSeed: RaceSeed(u64()), seats: seats, laps: int(1...RaceStart.maxLaps),
+            startSequenceTicks: int(1...RaceStart.maxStartSequenceTicks), boatClass: file(&self), venue: file(&self),
             conditions: file(&self), rulesConfiguration: file(&self)
         )
     }
@@ -132,8 +132,8 @@ struct Gen {
         case .requestResync: message = .requestResync
         case .helloAck: message = .helloAck(HelloAck(serverBuild: string()))
         case .updateRequired:
-            let reasons = UpdateRequired.Reason.allCases
-            message = .updateRequired(UpdateRequired(reason: reasons[int(0...(reasons.count - 1))],
+            // Any code: the known ones and codes from a newer server.
+            message = .updateRequired(UpdateRequired(reason: UpdateRequired.Reason(code: UInt8(int(0...255))),
                                                      simulationVersion: string(), protocolVersion: u16()))
         case .raceStart:
             let setup = setup()
@@ -155,8 +155,7 @@ struct Gen {
         case .windKey: message = .windKey(WindKeyReveal(window: int(-10...200), key: payload()))
         case .pong: message = .pong(Pong(clientTime: u64(), sinceTickMicros: u16()))
         case .raceCancelled:
-            let reasons = RaceCancelled.Reason.allCases
-            message = .raceCancelled(RaceCancelled(reason: reasons[int(0...(reasons.count - 1))]))
+            message = .raceCancelled(RaceCancelled(reason: RaceCancelled.Reason(code: UInt8(int(0...255)))))
         case .raceClosed: message = .raceClosed(RaceClosed(results: payload()))
         }
         return Frame(seq: u32(), tick: int(Int(Int32.min)...Int(Int32.max)), message: message)

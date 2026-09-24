@@ -61,22 +61,26 @@ public struct WorldSnapshot: Sendable {
     /// Indexed by seat.
     public var seats: [Seat]
     /// Boat pairs in contact at this tick, by `a` then `b`: a contact costs speed once, when it begins.
-    public var boatContacts: [SeatPair]
+    public var touchingBoats: [SeatPair]
     /// Seats touching an obstacle at this tick, by seat then obstacle.
-    public var obstacleContacts: [ObstacleContact]
+    public var touchingObstacles: [ObstacleContact]
     /// By pair.
     public var foulMemory: [FoulMemory]
     public var firstFinishTime: Double?
     public var isOver: Bool
 
+    /// The latest tick an import accepts: three hours after the gun, far past any race's time limit.
+    /// It bounds the work of bringing the wind to the snapshot's tick.
+    public static let maxTick = 3 * 60 * 60 * Race.tickRate
+
     public init(
-        tick: Int, seats: [Seat], boatContacts: [SeatPair] = [], obstacleContacts: [ObstacleContact] = [],
+        tick: Int, seats: [Seat], touchingBoats: [SeatPair] = [], touchingObstacles: [ObstacleContact] = [],
         foulMemory: [FoulMemory] = [], firstFinishTime: Double? = nil, isOver: Bool = false
     ) {
         self.tick = tick
         self.seats = seats
-        self.boatContacts = boatContacts
-        self.obstacleContacts = obstacleContacts
+        self.touchingBoats = touchingBoats
+        self.touchingObstacles = touchingObstacles
         self.foulMemory = foulMemory
         self.firstFinishTime = firstFinishTime
         self.isOver = isOver
@@ -90,6 +94,13 @@ public enum WorldSnapshotError: Error, Equatable, Sendable {
     case boatID(seat: Int, found: Int)
     /// Before the start of the sequence, `-setup.startSequenceTicks`.
     case tickBeforeStart(Int)
+    /// After `WorldSnapshot.maxTick`.
+    case tickTooLate(Int)
+    /// A boat field the race can't sail from: not finite, or a leg, rounding stage or penalty count
+    /// the course doesn't have. Names the seat and the field.
+    case invalidBoat(seat: Int, field: String)
+    /// A race-level time that isn't finite.
+    case invalidTime
     /// A pair or contact naming a seat or obstacle the race doesn't have, or a pair with `a >= b`.
     case invalidContact
 }

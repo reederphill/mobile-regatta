@@ -17,6 +17,12 @@ import RegattaCore
 ///
 /// Rounding is to nearest, so a field's error is at most half its step. A value outside its range
 /// can't be sent: encoding throws `WireError.outOfRange` rather than clamping it.
+///
+/// None of the ranges can be reached in a valid race: boats can't leave the race area, which a venue
+/// keeps well inside ±32 km of the course origin, speeds stay far below 64 m/s, and penalty turns are
+/// capped at 4. So an out-of-range throw on the host (#65) is a simulation bug, never a player's
+/// doing: the host logs it, skips that snapshot and keeps the race running, and clients keep
+/// predicting until the next snapshot that encodes. It never clamps, which would hide the bug.
 public enum SnapshotQuantisation {
     public static let positionStep = 1.0 / 256
     public static let headingStep = 2 * Double.pi / 65_536
@@ -227,8 +233,8 @@ public enum SnapshotFields {
         "boat.windDirection": "derived: sampled from the wind at the start of every step",
         "boat.windSpeed": "derived: sampled from the wind at the start of every step",
         "boat.shadow": "derived: recomputed from the fleet at the start of every step",
-        "boat.finishTime": "event state: the reliable `finished` event's tick, and Resync's event state",
-        "boat.place": "event state: the reliable `finished` event, and Resync's event state",
+        "boat.finishTime": "event state (`EventState`, from Resync and the reliable `finished` event), applied with every snapshot",
+        "boat.place": "event state (`EventState`, from Resync and the reliable `finished` event), applied with every snapshot",
     ]
 }
 

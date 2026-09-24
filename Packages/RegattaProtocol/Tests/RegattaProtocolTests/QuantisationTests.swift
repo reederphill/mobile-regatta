@@ -70,39 +70,120 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
             let frame = Frame(seq: UInt32(checked), tick: race.tick, message: .snapshot(try Snapshot(world: world)))
             let decoded = try Frame(decoding: frame.encoded())
             guard case .snapshot(let snapshot) = decoded.message else { Issue.record("not a snapshot"); return }
-            let back = try snapshot.applied(to: world, tick: decoded.tick)
+            let back = try snapshot.applied(to: world, tick: decoded.tick, events: EventState(world: world, nextEventSeq: 0))
             for (a, b) in zip(world.seats, back.seats) { expectWithinSteps(a, b) }
             checked += 1
         }
         #expect(checked > 2000)
     }
 
-    /// A merge overwrites only wire fields: the rest (roster, derived and event fields) and race-level
-    /// state stay as the receiver has them.
+    /// A merge overwrites the wire fields from the snapshot and race-level state (finishes, first finish,
+    /// the race's end) from the server's event state. The rest (roster, derived fields, contact and
+    /// foul memory) stays as the receiver has it.
     @Test func applyingKeepsTheReceiversExcludedFields() throws {
         var gen = Gen(seed: 0xE8C1)
         let sender = gen.world(seats: 8)
         var receiver = gen.world(seats: 8)
         receiver.firstFinishTime = 12
         receiver.isOver = true
-        receiver.boatContacts = [.init(1, 2)]
-        let merged = try Snapshot(world: sender).applied(to: receiver, tick: 77)
+        receiver.touchingBoats = [.init(1, 2)]
+        receiver.foulMemory = [.init(pair: .init(1, 2), time: 11)]
+        let events = EventState(nextEventSeq: 9, finishes: [.init(seat: 3, place: 1, tick: 600)], firstFinishTick: 600)
+        let merged = try Snapshot(world: sender).applied(to: receiver, tick: 77, events: events)
         #expect(merged.tick == 77)
-        #expect(merged.firstFinishTime == 12 && merged.isOver && merged.boatContacts == [.init(1, 2)])
+        #expect(merged.firstFinishTime == 20 && !merged.isOver)
+        #expect(merged.touchingBoats == [.init(1, 2)] && merged.foulMemory == receiver.foulMemory)
         for i in 0..<8 {
             let (m, r, s) = (merged.seats[i].boat, receiver.seats[i].boat, sender.seats[i].boat)
             #expect(m.name == r.name && m.isPlayer == r.isPlayer && m.colorIndex == r.colorIndex && m.id == r.id)
             #expect(m.desiredRudder == r.desiredRudder && m.windDirection == r.windDirection)
             #expect(m.windSpeed == r.windSpeed && m.shadow == r.shadow)
-            #expect(m.finishTime == r.finishTime && m.place == r.place)
+            #expect(m.place == (i == 3 ? 1 : nil))
+            #expect(m.finishTime == (i == 3 ? 20 : nil))
             expectWithinSteps(sender.seats[i], merged.seats[i])
             #expect(m.status == s.status)
         }
         #expect(throws: WorldSnapshotError.seatCount(expected: 7, found: 8)) {
             var short = receiver
             short.seats.removeLast()
-            _ = try Snapshot(world: sender).applied(to: short, tick: 0)
+            _ = try Snapshot(world: sender).applied(to: short, tick: 0, events: events)
         }
+        #expect(throws: WireError.invalidValue("finishes.seat")) {
+            _ = try Snapshot(world: sender).applied(to: receiver, tick: 0, events: EventState(nextEventSeq: 0, finishes: [.init(seat: 8, place: 1, tick: 0)]))
+        }
+    }
+
+    /// The freeze the review found: a client whose own prediction ended the race kept `isOver` through
+    /// every snapshot, so it stopped predicting and refused inputs. The server's event state now wins.
+    @Test func aClientThatWronglyEndedTheRaceRecoversAtTheNextSnapshot() throws {
+        let server = botRace()
+        var events = EventState(nextEventSeq: 1)
+        func sail(_ ticks: Int) {
+            for _ in 0..<ticks {
+                server.step()
+                for event in server.drainEvents() { events.record(event) }
+            }
+        }
+        sail(600)
+        var wrong = server.exportSnapshot()
+        wrong.isOver = true
+        wrong.firstFinishTime = 1
+        let client = Race(setup: server.setup, windSeed: server.windSeed)
+        try client.importSnapshot(wrong)
+        #expect(client.apply(.neutral, seat: 0, atTick: client.tick + 1) == nil) // frozen
+
+        sail(3)
+        let snapshot = try Snapshot(world: server.exportSnapshot())
+        try client.importSnapshot(snapshot.applied(to: client.exportSnapshot(), tick: server.tick, events: events))
+        #expect(!client.isOver && client.firstFinishTime == nil)
+        #expect(client.apply(.neutral, seat: 0, atTick: client.tick + 1) != nil)
+        let tick = client.tick
+        client.step()
+        #expect(client.tick == tick + 1)
+    }
+
+    /// `EventState.record` of the reliable events keeps the same state the server's world has.
+    @Test func recordedEventsMatchTheServersEventState() throws {
+        let server = botRace()
+        var events = EventState(nextEventSeq: 1)
+        var checked = 0
+        while !server.isOver && server.tick < 30_000 {
+            server.step()
+            for event in server.drainEvents() { events.record(event) }
+            if server.tick % 90 == 0 {
+                #expect(events == EventState(world: server.exportSnapshot(), nextEventSeq: 1))
+                checked += 1
+            }
+        }
+        #expect(server.isOver)
+        #expect(events == EventState(world: server.exportSnapshot(), nextEventSeq: 1))
+        #expect(!events.finishes.isEmpty && checked > 50)
+    }
+
+    /// The review's crash: a snapshot with a leg the course doesn't have decoded and imported, then
+    /// trapped in the next step. The import now refuses it and the race is unchanged.
+    @Test func aSnapshotTheRaceCantSailFromIsRefused() throws {
+        var gen = Gen(seed: 1)
+        var seats = gen.wireSeats(2)
+        for i in seats.indices {
+            seats[i].legIndex = 200
+            seats[i].status = .racing
+            seats[i].roundingStage = 0
+            seats[i].x = 0
+            seats[i].y = 0
+        }
+        let setup = try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .human], startSequenceTicks: 30)
+        let race = Race(setup: setup, windSeed: WindSeed(2))
+        for _ in 0..<40 { race.step() }
+        let bytes = try Frame(seq: 0, tick: race.tick, message: .snapshot(Snapshot(seats: seats))).encoded()
+        guard case .snapshot(let snapshot) = try Frame(decoding: bytes).message else { return }
+        let base = race.exportSnapshot()
+        let world = try snapshot.applied(to: base, tick: race.tick, events: EventState(world: base, nextEventSeq: 0))
+        let digest = race.digest()
+        #expect(throws: WorldSnapshotError.invalidBoat(seat: 0, field: "legIndex")) { try race.importSnapshot(world) }
+        #expect(race.digest() == digest)
+        race.step()
+        #expect(race.tick == 11)
     }
 
     /// Importing a quantised snapshot predicts almost exactly like importing the exact world: over the
@@ -120,7 +201,7 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
             guard case .snapshot(let snapshot) = try Frame(decoding: bytes).message else { return }
             // Merged into the exact world, so only quantisation differs: a predicting client's own
             // excluded fields and contact memory are close to the server's, not exact.
-            try quantised.importSnapshot(snapshot.applied(to: world, tick: world.tick))
+            try quantised.importSnapshot(snapshot.applied(to: world, tick: world.tick, events: EventState(world: world, nextEventSeq: 0)))
             // Both hold every boat's last input, as a predicting client does.
             for step in 1...30 {
                 exact.step()

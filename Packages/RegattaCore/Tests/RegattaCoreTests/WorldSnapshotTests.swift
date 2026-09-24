@@ -69,7 +69,7 @@ struct LogFeeder {
         while race.tick < Self.log.finalTick {
             Self.feeder.step(race)
             let snapshot = race.exportSnapshot()
-            if !snapshot.boatContacts.isEmpty && !snapshot.foulMemory.isEmpty { found = snapshot; break }
+            if !snapshot.touchingBoats.isEmpty && !snapshot.foulMemory.isEmpty { found = snapshot; break }
         }
         let snapshot = try #require(found, "the golden race has no boat contact")
         _ = race.drainEvents()
@@ -77,7 +77,7 @@ struct LogFeeder {
 
         // Dropping the contact memory changes the future: the contact would count as new again.
         var forgetful = snapshot
-        forgetful.boatContacts = []
+        forgetful.touchingBoats = []
         forgetful.foulMemory = []
         let original = try Self.imported(snapshot)
         let copy = try Self.imported(forgetful)
@@ -99,7 +99,7 @@ struct LogFeeder {
         while race.tick < -1500 {
             Self.feeder.step(race)
             let snapshot = race.exportSnapshot()
-            if !snapshot.obstacleContacts.isEmpty { found = snapshot; break }
+            if !snapshot.touchingObstacles.isEmpty { found = snapshot; break }
         }
         let snapshot = try #require(found, "the golden race has no mark contact")
         _ = race.drainEvents()
@@ -122,8 +122,8 @@ struct LogFeeder {
         let copy = try Self.imported(original.exportSnapshot())
         let a = original.exportSnapshot(), b = copy.exportSnapshot()
         #expect(a.tick == b.tick)
-        #expect(a.boatContacts == b.boatContacts)
-        #expect(a.obstacleContacts == b.obstacleContacts)
+        #expect(a.touchingBoats == b.touchingBoats)
+        #expect(a.touchingObstacles == b.touchingObstacles)
         #expect(a.foulMemory == b.foulMemory)
         #expect(a.firstFinishTime == b.firstFinishTime)
         #expect(a.isOver == b.isOver)
@@ -170,17 +170,59 @@ struct LogFeeder {
 
         for bad in [WorldSnapshot.SeatPair(3, 3), .init(4, 2), .init(0, 16)] {
             var contact = good
-            contact.boatContacts = [bad]
+            contact.touchingBoats = [bad]
             #expect(throws: WorldSnapshotError.invalidContact) { try Self.imported(contact) }
         }
         var obstacle = good
-        obstacle.obstacleContacts = [.init(seat: 0, obstacle: 99)]
+        obstacle.touchingObstacles = [.init(seat: 0, obstacle: 99)]
         #expect(throws: WorldSnapshotError.invalidContact) { try Self.imported(obstacle) }
 
-        // A rejected import leaves the race as it was.
+        var late = good
+        late.tick = WorldSnapshot.maxTick + 1
+        #expect(throws: WorldSnapshotError.tickTooLate(WorldSnapshot.maxTick + 1)) { try Self.imported(late) }
+
+        // Values the step would trap on or carry as NaN: each names its seat and field.
+        let finishLeg = race.course.legs.count - 1
+        let badBoats: [(String, (inout Boat) -> Void)] = [
+            ("legIndex", { $0.legIndex = 200 }),
+            ("legIndex", { $0.legIndex = -1 }),
+            ("roundingStage", { $0.roundingStage = 2 }),
+            ("roundingStage", { $0.roundingStage = -1 }),
+            ("roundingStage", { $0.legIndex = finishLeg; $0.roundingStage = 1 }),
+            ("penaltyTurnsOwed", { $0.penaltyTurnsOwed = -1 }),
+            ("position.x", { $0.position.x = .nan }),
+            ("heading", { $0.heading = .infinity }),
+            ("speed", { $0.speed = .nan }),
+            ("autopilot", { $0.autopilot = -.infinity }),
+            ("penaltyProgress", { $0.penaltyProgress = .nan }),
+            ("shadow", { $0.shadow = .nan }),
+            ("finishTime", { $0.finishTime = .nan }),
+        ]
+        for (field, spoil) in badBoats {
+            var bad = good
+            spoil(&bad.seats[5].boat)
+            #expect(throws: WorldSnapshotError.invalidBoat(seat: 5, field: field)) { try Self.imported(bad) }
+        }
+        var finishing = good
+        finishing.seats[5].boat.legIndex = finishLeg
+        _ = try Self.imported(finishing) // the finish leg itself is fine
+
+        var badTime = good
+        badTime.firstFinishTime = .nan
+        #expect(throws: WorldSnapshotError.invalidTime) { try Self.imported(badTime) }
+        badTime = good
+        badTime.foulMemory = [.init(pair: .init(0, 1), time: .infinity)]
+        #expect(throws: WorldSnapshotError.invalidTime) { try Self.imported(badTime) }
+
+        // A rejected import leaves the race as it was, and it sails on.
         let digest = race.digest()
         #expect(throws: WorldSnapshotError.self) { try race.importSnapshot(short) }
+        var crash = good
+        crash.seats[1].boat.status = .racing
+        crash.seats[1].boat.legIndex = 200
+        #expect(throws: WorldSnapshotError.invalidBoat(seat: 1, field: "legIndex")) { try race.importSnapshot(crash) }
         #expect(race.digest() == digest)
+        for _ in 0..<30 { race.step() }
     }
 }
 

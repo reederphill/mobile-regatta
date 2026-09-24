@@ -24,7 +24,13 @@ public enum MessageType: UInt8, Sendable, CaseIterable {
 
     public enum Direction: Sendable { case clientToServer, serverToClient }
 
-    public var direction: Direction { rawValue < 16 ? .clientToServer : .serverToClient }
+    public var direction: Direction {
+        switch self {
+        case .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync: .clientToServer
+        case .helloAck, .updateRequired, .raceStart, .resync, .snapshot, .event, .windKey, .pong, .raceCancelled,
+             .raceClosed: .serverToClient
+        }
+    }
 
     /// What a frame's `seq` counts for this type.
     public enum Stream: Sendable {
@@ -100,9 +106,21 @@ public enum Message: Equatable, Sendable {
 /// no length field. `seq` counts within the type's `MessageType.Stream`. `tick` is the tick the
 /// message is about: an input's stamp, an event's tick, the snapshot's or resync's tick; otherwise the
 /// sender's race clock when it sent it (the client's predicted tick, the server's tick).
+///
+/// The header layout is frozen forever, as are the codes of `hello` (1) and `updateRequired` (17):
+/// every version of the protocol has to be able to read a `Hello`'s version and answer it
+/// (`wireProtocolVersion`).
 public struct Frame: Equatable, Sendable {
     /// Bytes before the body.
     public static let headerSize = 9
+
+    /// The `protocolVersion` of a `Hello` frame, read without decoding the rest of its body, which a
+    /// future version may lay out differently. Nil for anything that isn't a `Hello` long enough to
+    /// have one. The server reads it first and answers any version but its own with `UpdateRequired`.
+    public static func helloProtocolVersion(in bytes: [UInt8]) -> UInt16? {
+        guard bytes.count >= headerSize + 2, bytes[0] == MessageType.hello.rawValue else { return nil }
+        return UInt16(bytes[headerSize]) | UInt16(bytes[headerSize + 1]) << 8
+    }
 
     public var seq: UInt32
     public var tick: Int
@@ -147,7 +165,7 @@ public struct Frame: Equatable, Sendable {
         case .pong(let m):
             w.u64(m.clientTime)
             w.u16(m.sinceTickMicros)
-        case .raceCancelled(let m): w.u8(m.reason.rawValue)
+        case .raceCancelled(let m): w.u8(try m.reason.canonicalCode())
         case .raceClosed(let m): try m.results.encode(to: &w, "results")
         }
         return w.bytes
@@ -176,8 +194,7 @@ public struct Frame: Equatable, Sendable {
         case .windKey: message = .windKey(try WindKeyReveal(from: &r))
         case .pong: message = .pong(Pong(clientTime: try r.u64(), sinceTickMicros: try r.u16()))
         case .raceCancelled:
-            guard let reason = RaceCancelled.Reason(rawValue: try r.u8()) else { throw WireError.invalidValue("reason") }
-            message = .raceCancelled(RaceCancelled(reason: reason))
+            message = .raceCancelled(RaceCancelled(reason: RaceCancelled.Reason(code: try r.u8())))
         case .raceClosed: message = .raceClosed(RaceClosed(results: try VersionedPayload(from: &r, "results")))
         }
         try r.finish()

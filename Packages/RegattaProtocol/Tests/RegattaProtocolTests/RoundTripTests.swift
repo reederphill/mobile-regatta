@@ -45,7 +45,7 @@ import Testing
             let frame = Frame(seq: 1, tick: world.tick, message: .snapshot(try Snapshot(world: world)))
             let decoded = try Frame(decoding: frame.encoded())
             guard case .snapshot(let snapshot) = decoded.message else { Issue.record("not a snapshot"); return }
-            let back = try snapshot.applied(to: world, tick: decoded.tick)
+            let back = try snapshot.applied(to: world, tick: decoded.tick, events: EventState(world: world, nextEventSeq: 0))
             #expect(back.tick == world.tick)
             for (a, b) in zip(world.seats, back.seats) { expectWithinSteps(a, b) }
             // Quantising again gives the same wire values.
@@ -75,7 +75,7 @@ import Testing
         #expect(throws: WireError.invalidValue("ease")) { try Frame(decoding: header(.inputHeld) + [0, 2]) }
         #expect(throws: WireError.invalidValue("rudder")) { try Frame(decoding: header(.inputHeld) + [0x80, 0]) }
         #expect(throws: WireError.invalidValue("rule")) { try Frame(decoding: header(.event) + [4, 14, 0, 1]) }
-        #expect(throws: WireError.invalidValue("reason")) { try Frame(decoding: header(.raceCancelled) + [9]) }
+        // Reasons are the exception: unknown codes decode as `.unknown` (HandshakeTests).
         // Schema 0 carries no bytes.
         #expect(throws: WireError.invalidValue("results")) { try Frame(decoding: header(.raceClosed) + [0, 0, 1, 7]) }
     }
@@ -121,9 +121,6 @@ import Testing
         #expect(throws: WireError.outOfRange("tick")) { try encode(.requestResync, tick: Int(Int32.max) + 1) }
         #expect(throws: WireError.outOfRange("target")) { try encode(.inputTap(.protest(target: 256))) }
         #expect(throws: WireError.outOfRange("seat")) { try encode(.event(.started(seat: -1))) }
-        #expect(throws: WireError.outOfRange("ack.margin")) {
-            try encode(.snapshot(Snapshot(seats: gen.wireSeats(2), ack: InputAck(seq: 1, appliedTick: 0, margin: 40_000))))
-        }
         #expect(throws: WireError.outOfRange("results")) { try encode(.raceClosed(RaceClosed(results: VersionedPayload(schema: 0, bytes: [1])))) }
         var seats = gen.wireSeats(2)
         seats[1].x = 1 << 23

@@ -1,8 +1,15 @@
 import RegattaCore
 
-/// The wire protocol's version, checked in the handshake alongside the simulation version (#18).
-/// Bump it for any change to an existing message's encoding; a new message type or a new code in an
-/// enum doesn't need it, since an older peer never receives one it didn't ask for.
+/// The wire protocol's version. The handshake requires an exact match, as it does for the
+/// simulation version (#18): a client with any other version gets `UpdateRequired` and nothing else.
+///
+/// Bump it for any change a peer of this version couldn't decode: a changed encoding of an existing
+/// message, and any new code the server may send without being asked, such as a new message type,
+/// a new `RaceEvent` kind or a new enum code in a server message. Only three things are frozen
+/// forever, so that any future client and server can still tell each other apart: the frame header
+/// (`Frame`), the `protocolVersion` at the start of `Hello`'s body (`Frame.helloProtocolVersion(in:)`),
+/// and the whole `UpdateRequired` body. `UpdateRequired.Reason` and `RaceCancelled.Reason` decode
+/// codes they don't know as `.unknown`, so a newer server's reason still reaches an older client.
 public let wireProtocolVersion: UInt16 = 1
 
 /// Bytes whose shape is owned by a later ticket, tagged with that shape's schema, so the owner can
@@ -36,6 +43,8 @@ public struct VersionedPayload: Hashable, Sendable {
 
 /// Client → server, first on a connection: who is asking, and whether they can sail with us (#18, #32).
 public struct Hello: Equatable, Sendable {
+    /// First in the body, as a uint16, in every version forever (`Frame.helloProtocolVersion(in:)`).
+    /// Everything after it belongs to that version.
     public var protocolVersion: UInt16
     /// The app's build, e.g. "1.0 (42)". For support and the update prompt; never trusted.
     public var clientBuild: String
@@ -64,12 +73,34 @@ public struct HelloAck: Equatable, Sendable {
 }
 
 /// Server → client: the client can't sail here until it updates (#18, #16). The connection closes after it.
+///
+/// Frozen forever (see `wireProtocolVersion`): `reason` uint8 | `simulationVersion` string |
+/// `protocolVersion` uint16. A client of any version must be able to read it.
 public struct UpdateRequired: Equatable, Sendable {
-    public enum Reason: UInt8, Sendable, CaseIterable {
-        case protocolVersion = 1
-        case simulationVersion = 2
-        case clientBuild = 3
-        case dataFiles = 4
+    public enum Reason: Hashable, Sendable {
+        case protocolVersion
+        case simulationVersion
+        case clientBuild
+        case dataFiles
+        /// A code this build doesn't know, from a newer server: show a generic update prompt.
+        case unknown(UInt8)
+
+        public static let known: [Reason] = [.protocolVersion, .simulationVersion, .clientBuild, .dataFiles]
+
+        public var code: UInt8 {
+            switch self {
+            case .protocolVersion: 1
+            case .simulationVersion: 2
+            case .clientBuild: 3
+            case .dataFiles: 4
+            case .unknown(let code): code
+            }
+        }
+
+        /// Never fails: a code this build doesn't know is `.unknown`.
+        public init(code: UInt8) {
+            self = Reason.known.first { $0.code == code } ?? .unknown(code)
+        }
     }
 
     public var reason: Reason
@@ -136,6 +167,11 @@ public struct RaceStart: Equatable, Sendable {
     /// Wind keys revealed so far (#95).
     public var windKeys: [WindKeyReveal]
 
+    /// Sane caps on what a race can be, so a decoded setup never builds a huge course or sequence.
+    /// Far beyond any real race: two laps by default (#8), a 60 s sequence (#85).
+    public static let maxLaps = 50
+    public static let maxStartSequenceTicks = 30 * 60 * Race.tickRate
+
     public init(yourSeat: Int, setup: RaceSetup, roster: [RosterEntry], tide: VersionedPayload = .none, windKeys: [WindKeyReveal] = []) {
         self.yourSeat = yourSeat
         self.setup = setup
@@ -191,6 +227,46 @@ public struct EventState: Equatable, Sendable {
         self.rules = rules
     }
 
+    /// Makes `world`'s race-level state the server's: every boat's place and finish time (nil for boats
+    /// not in `finishes`), the first finish and whether the race is over. Contact and foul memory are
+    /// left alone. Throws for a finish naming a seat `world` doesn't have.
+    public func apply(to world: inout WorldSnapshot) throws {
+        guard finishes.allSatisfy({ world.seats.indices.contains($0.seat) }) else {
+            throw WireError.invalidValue("finishes.seat")
+        }
+        for i in world.seats.indices {
+            world.seats[i].boat.place = nil
+            world.seats[i].boat.finishTime = nil
+        }
+        for finish in finishes {
+            world.seats[finish.seat].boat.place = finish.place
+            world.seats[finish.seat].boat.finishTime = EventState.time(of: finish.tick)
+        }
+        world.firstFinishTime = firstFinishTick.map(EventState.time)
+        world.isOver = isOver
+    }
+
+    /// Brings the state up to date with a reliable event from the server, received in order: how a
+    /// client keeps it between `RaceStart` / `Resync` and each `Snapshot` (#64). The reliable stream's
+    /// sequence number (`nextEventSeq`) is the caller's to advance.
+    public mutating func record(_ event: RaceEvent) {
+        switch event.kind {
+        case .finished(let seat, let place):
+            finishes.removeAll { $0.seat == seat }
+            finishes.append(Finish(seat: seat, place: place, tick: event.tick))
+            finishes.sort { $0.seat < $1.seat } // by seat, as `init(world:)` lists them
+            firstFinishTick = min(firstFinishTick ?? event.tick, event.tick)
+        case .disqualified:
+            // Today a boat is disqualified only as she crosses the finish line with a penalty unserved,
+            // which also starts the finish window (`Race.firstFinishTime`).
+            firstFinishTick = min(firstFinishTick ?? event.tick, event.tick)
+        case .raceOver:
+            isOver = true
+        case .gun, .ocs, .cleared, .started, .foul, .markTouch, .penaltyServed, .rounded, .protest:
+            break
+        }
+    }
+
     /// The race tick of a race time, which is always a whole number of ticks.
     static func tick(of time: Double) -> Int { Int((time * Double(Race.tickRate)).rounded()) }
     /// Exactly `Race.time` at `tick`.
@@ -226,17 +302,7 @@ public struct Resync: Equatable, Sendable {
     /// Contact and foul memory stay as the base has them.
     public func world(base: WorldSnapshot, tick: Int) throws -> WorldSnapshot {
         var world = try merge(seats, into: base, tick: tick)
-        for i in world.seats.indices {
-            world.seats[i].boat.place = nil
-            world.seats[i].boat.finishTime = nil
-        }
-        for finish in eventState.finishes {
-            guard world.seats.indices.contains(finish.seat) else { throw WireError.invalidValue("finishes.seat") }
-            world.seats[finish.seat].boat.place = finish.place
-            world.seats[finish.seat].boat.finishTime = EventState.time(of: finish.tick)
-        }
-        world.firstFinishTime = eventState.firstFinishTick.map(EventState.time)
-        world.isOver = eventState.isOver
+        try eventState.apply(to: &world)
         return world
     }
 }
@@ -251,13 +317,15 @@ public struct InputAck: Equatable, Sendable {
     public var appliedTick: Int
     /// Lead feedback for the client's clock (#18, #64): the stamp of the client's latest input minus the
     /// server's next tick when it arrived. ≥ 0: early by that many ticks; < 0: late by that many, and
-    /// applied at the next tick instead. int16 on the wire.
-    public var margin: Int
+    /// applied at the next tick instead. It comes from a client's stamp, so it saturates at
+    /// ±32 767 ticks rather than ever making a snapshot unsendable.
+    public var margin: Int16
 
+    /// Clamps `margin` to the int16 range.
     public init(seq: UInt32, appliedTick: Int, margin: Int) {
         self.seq = seq
         self.appliedTick = appliedTick
-        self.margin = margin
+        self.margin = Int16(clamping: margin)
     }
 }
 
@@ -279,11 +347,16 @@ public struct Snapshot: Equatable, Sendable {
         self.init(seats: try wireSeats(of: world), ack: ack)
     }
 
-    /// The receiver's snapshot `base` with this one's seats merged in at `tick` (the frame's tick):
-    /// what a predicting client imports (ADR 0005). Fields the wire leaves out (`SnapshotFields.excluded`)
-    /// and race-level state keep the base's values.
-    public func applied(to base: WorldSnapshot, tick: Int) throws -> WorldSnapshot {
-        try merge(seats, into: base, tick: tick)
+    /// What a predicting client imports (ADR 0005): its own snapshot `base` with this one's seats
+    /// merged in at `tick` (the frame's tick), and race-level state (finishes, first finish, whether the
+    /// race is over) from `events`, the server's event state as the client has it from `RaceStart` /
+    /// `Resync` and the reliable events since (`EventState.record`). So a client whose own prediction
+    /// ended the race, or finished a boat, takes the server's word at every snapshot. The other fields
+    /// the wire leaves out (`SnapshotFields.excluded`) and contact and foul memory keep the base's values.
+    public func applied(to base: WorldSnapshot, tick: Int, events: EventState) throws -> WorldSnapshot {
+        var world = try merge(seats, into: base, tick: tick)
+        try events.apply(to: &world)
+        return world
     }
 }
 
@@ -299,7 +372,8 @@ public struct Ping: Equatable, Sendable {
 public struct Pong: Equatable, Sendable {
     /// The ping's `clientTime`, echoed.
     public var clientTime: UInt64
-    /// Microseconds since the frame's tick began on the server, for sub-tick clock sync.
+    /// Microseconds since the frame's tick began on the server, for sub-tick clock sync. A tick is
+    /// 33 334 µs, so it fits; the host clamps (`UInt16(clamping:)`) if its scheduler runs late.
     public var sinceTickMicros: UInt16
 
     public init(clientTime: UInt64, sinceTickMicros: UInt16) {
@@ -311,9 +385,26 @@ public struct Pong: Equatable, Sendable {
 /// Server → client: the race won't be sailed. Placeholder reasons until the multiplayer flow (#66)
 /// adds its own; a new reason is a new code, not a format change.
 public struct RaceCancelled: Equatable, Sendable {
-    public enum Reason: UInt8, Sendable, CaseIterable {
-        case unspecified = 0
-        case serverShutdown = 1
+    public enum Reason: Hashable, Sendable {
+        case unspecified
+        case serverShutdown
+        /// A code this build doesn't know, from a newer server.
+        case unknown(UInt8)
+
+        public static let known: [Reason] = [.unspecified, .serverShutdown]
+
+        public var code: UInt8 {
+            switch self {
+            case .unspecified: 0
+            case .serverShutdown: 1
+            case .unknown(let code): code
+            }
+        }
+
+        /// Never fails: a code this build doesn't know is `.unknown`.
+        public init(code: UInt8) {
+            self = Reason.known.first { $0.code == code } ?? .unknown(code)
+        }
     }
 
     public var reason: Reason
@@ -382,14 +473,13 @@ extension HelloAck {
 
 extension UpdateRequired {
     func encode(to w: inout WireWriter) throws {
-        w.u8(reason.rawValue)
+        w.u8(try reason.canonicalCode())
         try w.string(simulationVersion, limit: WireLimit.string, "simulationVersion")
         w.u16(protocolVersion)
     }
 
     init(from r: inout WireReader) throws {
-        guard let reason = Reason(rawValue: try r.u8()) else { throw WireError.invalidValue("reason") }
-        self.reason = reason
+        reason = Reason(code: try r.u8())
         simulationVersion = try r.string(limit: WireLimit.string, "simulationVersion")
         protocolVersion = try r.u16()
     }
@@ -429,8 +519,8 @@ extension RaceStart {
         try w.index(yourSeat, "yourSeat")
         try w.string(setup.simulationVersion, limit: WireLimit.string, "simulationVersion")
         w.u64(setup.raceSeed.value)
-        try w.count(setup.laps, limit: Int(UInt32.max), "laps")
-        try w.count(setup.startSequenceTicks, limit: Int(UInt32.max), "startSequenceTicks")
+        try w.count(setup.laps, limit: RaceStart.maxLaps, "laps")
+        try w.count(setup.startSequenceTicks, limit: RaceStart.maxStartSequenceTicks, "startSequenceTicks")
         for file in [setup.boatClass, setup.venue, setup.conditions, setup.rulesConfiguration] {
             w.bool(file != nil)
             try file?.encode(to: &w)
@@ -450,9 +540,9 @@ extension RaceStart {
         let yourSeat = try r.index()
         let simulationVersion = try r.string(limit: WireLimit.string, "simulationVersion")
         let raceSeed = RaceSeed(try r.u64())
-        let limit = UInt64(UInt32.max)
         let rawLaps = try r.varint("laps"), rawSequence = try r.varint("startSequenceTicks")
-        guard rawLaps <= limit, rawSequence <= limit else { throw WireError.invalidValue("setup") }
+        guard rawLaps <= UInt64(RaceStart.maxLaps) else { throw WireError.invalidValue("laps") }
+        guard rawSequence <= UInt64(RaceStart.maxStartSequenceTicks) else { throw WireError.invalidValue("startSequenceTicks") }
         let laps = Int(rawLaps), startSequenceTicks = Int(rawSequence)
         var files: [FileRef?] = []
         for _ in 0..<4 { files.append(try r.bool("file") ? try FileRef(from: &r) : nil) }
@@ -524,8 +614,7 @@ extension Snapshot {
         if let ack {
             w.u32(ack.seq)
             try w.i32(ack.appliedTick, "ack.appliedTick")
-            guard let margin = Int16(exactly: ack.margin) else { throw WireError.outOfRange("ack.margin") }
-            w.i16(margin)
+            w.i16(ack.margin)
         }
         try encodeSeats(seats, to: &w)
     }
@@ -565,5 +654,21 @@ extension BoatTap {
         case 1: self = .protest(target: try r.index())
         default: throw WireError.invalidValue("tap")
         }
+    }
+}
+
+extension UpdateRequired.Reason {
+    /// `.unknown` of a known code has another encoding already, so it can't be sent.
+    func canonicalCode() throws -> UInt8 {
+        guard Self(code: code) == self else { throw WireError.outOfRange("reason") }
+        return code
+    }
+}
+
+extension RaceCancelled.Reason {
+    /// `.unknown` of a known code has another encoding already, so it can't be sent.
+    func canonicalCode() throws -> UInt8 {
+        guard Self(code: code) == self else { throw WireError.outOfRange("reason") }
+        return code
     }
 }
