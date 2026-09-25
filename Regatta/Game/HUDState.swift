@@ -54,9 +54,10 @@ struct HUDState {
         speedKnots = p.speed * 1.943_84
         twaDegrees = rad2deg(p.twa)
         tack = p.tack
-        windKnots = p.windSpeed * p.shadow * 1.943_84
-        windShiftDegrees = rad2deg(wrapAngle(p.windDirection - course.axis))
-        windDirection = p.windDirection
+        // The wind readouts show the wind over the ground (#15); the wind angle is the one she sails at.
+        windKnots = p.windOverGround.speed * p.shadow * 1.943_84
+        windShiftDegrees = rad2deg(wrapAngle(p.windOverGround.direction - course.axis))
+        windDirection = p.windOverGround.direction
         inShadow = p.shadow < 0.97
         fleet = frame.boats.count
         place = frame.place(of: me)

@@ -138,7 +138,8 @@ enum Interpolation {
         var boat = b
         boat.position = position(from: a.position, to: b.position, t)
         boat.heading = angle(from: a.heading, to: b.heading, t)
-        boat.windDirection = angle(from: a.windDirection, to: b.windDirection, t)
+        boat.windOverGround.direction = angle(from: a.windOverGround.direction, to: b.windOverGround.direction, t)
+        boat.apparentWind.direction = angle(from: a.apparentWind.direction, to: b.apparentWind.direction, t)
         return boat
     }
 }
