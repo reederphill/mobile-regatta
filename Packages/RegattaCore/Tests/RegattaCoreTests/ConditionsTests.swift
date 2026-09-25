@@ -138,7 +138,7 @@ enum ConditionsFixtures {
         let file = try ConditionsFixtures.file(id)
         var lowest = Double.infinity, highest = -Double.infinity
         for seed in Self.seeds {
-            let setup = WindSetup(conditions: file, pairing: .stub, raceSeed: RaceSeed(seed))
+            let setup = WindSetup(conditions: file, pairing: VenueFixtures.pairing(for: file), raceSeed: RaceSeed(seed))
             #expect(file.content.strength.contains(setup.baseStrength))
             lowest = min(lowest, setup.baseStrength)
             highest = max(highest, setup.baseStrength)
@@ -151,7 +151,7 @@ enum ConditionsFixtures {
 
     @Test func sameRaceSeedGivesIdenticalWindSetup() throws {
         let file = try ConditionsFixtures.file("sea-breeze")
-        let pairing = VenuePairing(meanDirection: deg2rad(250), trend: .either)
+        let pairing = VenueFixtures.pairing(for: file, meanDirection: deg2rad(250))
         for seed in Self.seeds.prefix(100) {
             let a = WindSetup(conditions: file, pairing: pairing, raceSeed: RaceSeed(seed))
             let b = WindSetup(conditions: file, pairing: pairing, raceSeed: RaceSeed(seed))
@@ -168,49 +168,76 @@ enum ConditionsFixtures {
     /// If this fails, every race's wind setup (and briefing) changed.
     @Test func drawIsPinned() throws {
         #expect(WindSetup.seedStream == 0x7769_6E64_7365_7470) // "windsetp"; its stream is pinned in RandomTests
-        let classic = WindSetup(conditions: try ConditionsFixtures.file("classic-oscillating"), pairing: .stub, raceSeed: RaceSeed(42))
+        let classicFile = try ConditionsFixtures.file("classic-oscillating")
+        let classic = WindSetup(conditions: classicFile, pairing: VenueFixtures.pairing(for: classicFile), raceSeed: RaceSeed(42))
         #expect(classic.meanDirection.bitPattern == 13_817_625_872_785_592_704) // −0.1412 rad, 351.9°
         #expect(classic.baseStrength.bitPattern == 4_617_673_216_712_196_771) // 5.3177 m/s, 10.34 kn
         #expect(classic.trend == nil)
-        let seaBreeze = WindSetup(conditions: try ConditionsFixtures.file("sea-breeze"), pairing: .stub, raceSeed: RaceSeed(42))
+        let seaBreezeFile = try ConditionsFixtures.file("sea-breeze")
+        let seaBreeze = WindSetup(conditions: seaBreezeFile, pairing: VenueFixtures.pairing(for: seaBreezeFile), raceSeed: RaceSeed(42))
         #expect(seaBreeze.meanDirection == classic.meanDirection)
         #expect(seaBreeze.trend == .left)
     }
 
+    /// Every authored mean direction to check: each test-venue pairing with its own conditions file, and
+    /// directions near ±π, where the result wraps.
+    static func authoredPairings() throws -> [(ConditionsFile, Venue.Pairing)] {
+        let loaded = try VenueFixtures.testVenue().pairings.map { pairing in
+            (try ConditionsFile.bundled(id: pairing.conditions.id, version: pairing.conditions.version), pairing)
+        }
+        let gusty = try ConditionsFixtures.file("gusty-offshore")
+        let synthetic = [0.0, deg2rad(90), deg2rad(179), deg2rad(-175)].map {
+            (gusty, VenueFixtures.pairing(for: gusty, meanDirection: $0))
+        }
+        return loaded + synthetic
+    }
+
+    /// #77 acceptance: the seeded mean direction is within ±10° of the pairing's authored one (#10).
     @Test func meanDirectionIsWithinTenDegreesOfAuthored() throws {
-        let file = try ConditionsFixtures.file("gusty-offshore")
-        // Includes an authored direction near ±π, where the result wraps.
-        for authored in [0.0, deg2rad(90), deg2rad(179), deg2rad(-175)] {
-            var below = 0, above = 0
+        for (file, pairing) in try Self.authoredPairings() {
             for seed in Self.seeds {
-                let setup = WindSetup(conditions: file, pairing: VenuePairing(meanDirection: authored, trend: .either),
-                                      raceSeed: RaceSeed(seed))
-                let offset = wrapAngle(setup.meanDirection - authored)
+                let setup = WindSetup(conditions: file, pairing: pairing, raceSeed: RaceSeed(seed))
+                let offset = wrapAngle(setup.meanDirection - pairing.meanDirection)
                 #expect(abs(offset) <= deg2rad(10) + 1e-12)
                 #expect(setup.meanDirection >= -.pi && setup.meanDirection < .pi)
-                if offset < 0 { below += 1 } else { above += 1 }
             }
-            #expect(below > 400 && above > 400)
         }
     }
 
+    /// Tuning placeholder (#77): #10 bounds the seeded mean direction only to ±10°; that each half of the
+    /// range gets at least 40 % of seeds is a guess at "spread across it", to revisit with playtesting.
+    @Test func meanDirectionSpreadsAcrossBothHalvesOfTheRange() throws {
+        for (file, pairing) in try Self.authoredPairings() {
+            var below = 0, above = 0
+            for seed in Self.seeds {
+                let setup = WindSetup(conditions: file, pairing: pairing, raceSeed: RaceSeed(seed))
+                if wrapAngle(setup.meanDirection - pairing.meanDirection) < 0 { below += 1 } else { above += 1 }
+            }
+            #expect(below >= 400 && above >= 400, "\(pairing.conditions) at \(rad2deg(pairing.meanDirection))°")
+        }
+    }
+
+    /// #77 acceptance: veer is always right and back always left; either is chosen by the seed, both ways.
     @Test func trendDirectionFollowsThePairing() throws {
         let seaBreeze = try ConditionsFixtures.file("sea-breeze")
         let noTrend = try ["light-and-patchy", "classic-oscillating", "gusty-offshore"].map(ConditionsFixtures.file)
+        let veer = VenueFixtures.pairing(for: seaBreeze, trend: .veer)
+        let back = VenueFixtures.pairing(for: seaBreeze, trend: .back)
+        let either = VenueFixtures.pairing(for: seaBreeze, trend: .either)
         var lefts = 0, rights = 0
         for seed in Self.seeds {
             let raceSeed = RaceSeed(seed)
-            #expect(WindSetup(conditions: seaBreeze, pairing: .init(meanDirection: 0, trend: .left), raceSeed: raceSeed).trend == .left)
-            #expect(WindSetup(conditions: seaBreeze, pairing: .init(meanDirection: 0, trend: .right), raceSeed: raceSeed).trend == .right)
-            switch WindSetup(conditions: seaBreeze, pairing: .init(meanDirection: 0, trend: .either), raceSeed: raceSeed).trend {
+            #expect(WindSetup(conditions: seaBreeze, pairing: veer, raceSeed: raceSeed).trend == .right)
+            #expect(WindSetup(conditions: seaBreeze, pairing: back, raceSeed: raceSeed).trend == .left)
+            switch WindSetup(conditions: seaBreeze, pairing: either, raceSeed: raceSeed).trend {
             case .left: lefts += 1
             case .right: rights += 1
             case nil: Issue.record("sea breeze has a trend")
             }
             // Conditions with no trend never get one, whatever the pairing says.
             for file in noTrend {
-                for trend in [VenuePairing.Trend.left, .right, .either] {
-                    let setup = WindSetup(conditions: file, pairing: .init(meanDirection: 0, trend: trend), raceSeed: raceSeed)
+                for trend in Venue.TrendDirection.allCases {
+                    let setup = WindSetup(conditions: file, pairing: VenueFixtures.pairing(for: file, trend: trend), raceSeed: raceSeed)
                     #expect(setup.trend == nil)
                 }
             }
@@ -218,12 +245,23 @@ enum ConditionsFixtures {
         #expect(lefts > 400 && rights > 400)
     }
 
+    /// The loaded dev venue's sea breeze veers (#72): every seed trends right, and never flips.
+    @Test func devVenueSeaBreezeAlwaysVeers() throws {
+        let seaBreeze = try ConditionsFile.bundled(id: "sea-breeze", version: 2)
+        let pairing = try #require(Race.defaultVenue.content.pairing(for: seaBreeze.ref.key))
+        #expect(pairing.trendDirection == .veer)
+        for seed in Self.seeds {
+            #expect(WindSetup(conditions: seaBreeze, pairing: pairing, raceSeed: RaceSeed(seed)).trend == .right)
+        }
+    }
+
     @Test func pairingDoesNotMoveTheOtherDraws() throws {
         // Each draw has a fixed slot: the trend choice never shifts the direction or the strength.
         let file = try ConditionsFixtures.file("sea-breeze")
         for seed in Self.seeds.prefix(100) {
-            let fixed = WindSetup(conditions: file, pairing: .init(meanDirection: 1, trend: .left), raceSeed: RaceSeed(seed))
-            let either = WindSetup(conditions: file, pairing: .init(meanDirection: 1, trend: .either), raceSeed: RaceSeed(seed))
+            let fixed = WindSetup(conditions: file, pairing: VenueFixtures.pairing(for: file, meanDirection: 1, trend: .back),
+                                  raceSeed: RaceSeed(seed))
+            let either = WindSetup(conditions: file, pairing: VenueFixtures.pairing(for: file, meanDirection: 1), raceSeed: RaceSeed(seed))
             #expect(fixed.meanDirection == either.meanDirection)
             #expect(fixed.baseStrength == either.baseStrength)
         }
@@ -231,21 +269,22 @@ enum ConditionsFixtures {
 
     @Test func carriesTheConditionsRefAndRaceArea() throws {
         let file = try ConditionsFixtures.file("light-and-patchy")
-        let setup = WindSetup(conditions: file, pairing: .stub, raceSeed: RaceSeed(7))
+        let pairing = VenueFixtures.pairing(for: file)
+        let setup = WindSetup(conditions: file, pairing: pairing, raceSeed: RaceSeed(7))
         #expect(setup.conditionsRef == file.ref)
         #expect(setup.conditions == file.content)
-        #expect(setup.pairing == .stub)
+        #expect(setup.pairing == pairing)
         #expect(setup.raceArea == nil)
 
         let area = RaceArea(centre: Vec2(0, 150), axis: 0, halfWidth: 270, halfLength: 300)
-        let withArea = WindSetup(conditions: file, pairing: .stub, raceSeed: RaceSeed(7), raceArea: area)
+        let withArea = WindSetup(conditions: file, pairing: pairing, raceSeed: RaceSeed(7), raceArea: area)
         #expect(withArea.raceArea == area)
         #expect(withArea.baseStrength == setup.baseStrength && withArea.meanDirection == setup.meanDirection)
     }
 
     @Test func withRaceAreaAttachesTheAreaAndKeepsEveryOtherField() throws {
         let file = try ConditionsFixtures.file("sea-breeze")
-        let pairing = VenuePairing(meanDirection: deg2rad(200), trend: .either)
+        let pairing = VenueFixtures.pairing(for: file, meanDirection: deg2rad(200))
         let area = RaceArea(centre: Vec2(10, 150), axis: deg2rad(200), halfWidth: 270, halfLength: 300)
         for seed in Self.seeds.prefix(100) {
             let drawn = WindSetup(conditions: file, pairing: pairing, raceSeed: RaceSeed(seed))
@@ -268,7 +307,7 @@ enum ConditionsFixtures {
 @Suite struct WindForecastTests {
     @Test func forecastShowsRangeDirectionShiftAndPuffCharacter() throws {
         let file = try ConditionsFixtures.file("sea-breeze")
-        let setup = WindSetup(conditions: file, pairing: VenuePairing(meanDirection: deg2rad(-90), trend: .right),
+        let setup = WindSetup(conditions: file, pairing: VenueFixtures.pairing(for: file, meanDirection: deg2rad(270), trend: .veer),
                               raceSeed: RaceSeed(3))
         let f = setup.forecast
         #expect(f.conditionsName == "Sea breeze")
@@ -291,7 +330,7 @@ enum ConditionsFixtures {
         let file = try ConditionsFixtures.file("classic-oscillating")
         for seed in WindSetupTests.seeds.prefix(200) {
             for authored in [0.0, deg2rad(5), deg2rad(355), deg2rad(180)] {
-                let f = WindSetup(conditions: file, pairing: .init(meanDirection: authored, trend: .either),
+                let f = WindSetup(conditions: file, pairing: VenueFixtures.pairing(for: file, meanDirection: authored),
                                   raceSeed: RaceSeed(seed)).forecast
                 #expect(f.meanDirectionDegrees >= 0 && f.meanDirectionDegrees < 360)
                 let offset = wrapAngle(deg2rad(f.meanDirectionDegrees) - authored)

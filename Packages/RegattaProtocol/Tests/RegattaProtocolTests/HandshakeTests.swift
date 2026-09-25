@@ -209,8 +209,9 @@ import Testing
         var checked = 0
         for id in ["classic-oscillating", "gusty-offshore", "light-and-patchy", "sea-breeze"] {
             let conditions = try ConditionsFile.bundled(id: id, version: 2)
+            let pairing = try #require(Race.defaultVenue.content.pairing(for: conditions.ref.key))
             for seed in 0..<150 as Range<UInt64> {
-                let setup = WindSetup(conditions: conditions, pairing: .stub, raceSeed: RaceSeed(seed &* 0x9E37_79B9 &+ 7))
+                let setup = WindSetup(conditions: conditions, pairing: pairing, raceSeed: RaceSeed(seed &* 0x9E37_79B9 &+ 7))
                 var generator = try WindKeyGenerator(windSeed: WindSeed(seed ^ 0xD1CE), setup: setup,
                                                      windows: WindWindows(startSequenceTicks: 1800))
                 // 90 windows: 45 minutes, past every trend and build span (960 s).
