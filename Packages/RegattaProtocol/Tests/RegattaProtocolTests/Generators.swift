@@ -141,20 +141,32 @@ struct Gen {
         let seat = int(0...15)
         switch index {
         case 0: return .gun
-        case 1: return .ocs(seat: seat)
+        case 1: return .ocsNotice(recipient: seat)
         case 2: return .cleared(seat: seat)
         case 3: return .started(seat: seat)
         case 4:
             let rule = RacingRule.allCases[int(0...(RacingRule.allCases.count - 1))]
-            return .foul(RuleCall(rule: rule, offender: seat, victim: int(0...15)))
+            let at = tick()
+            return .ruleCall(RuleCall(
+                incidentId: int(0...65_535), tick: at, rule: rule, offender: seat, victim: int(0...15),
+                leg: int(0...255), turnsOwed: int(0...255), startDeadlineTick: tick(), completeDeadlineTick: tick()))
         case 5: return .markTouch(seat: seat, mark: string())
-        case 6: return .penaltyServed(seat: seat)
-        case 7: return .rounded(seat: seat, mark: string())
-        case 8: return .finished(seat: seat, place: int(1...16))
-        case 9: return .disqualified(seat: seat, reason: string())
-        case 10: return .protest(seat: seat, target: int(0...15))
-        case 11: return .raceOver
-        case 12: return .tacked(seat: seat)
+        case 6: return .obstructionContact(seat: seat, kind: bool() ? .land : .boundary)
+        case 7:
+            let other = int(0...14)
+            return .contact(SeatPair(seat, other >= seat ? other + 1 : other))
+        case 8: return .penaltyStarted(seat: seat)
+        case 9: return .penaltyReset(seat: seat)
+        case 10: return .penaltyServed(seat: seat)
+        case 11: return .disqualified(seat: seat, reason: string())
+        case 12: return .markRoomNotice(recipients: (0..<int(0...4)).map { _ in int(0...15) })
+        case 13: return .becameGhost(seat: seat)
+        case 14: return .rounded(seat: seat, mark: string())
+        case 15: return .finished(seat: seat, place: int(1...16))
+        case 16: return .firstFinish(closeTick: tick())
+        case 17: return .raceClosed
+        case 18: return .protestRecorded(seat: seat, target: int(0...15))
+        case 19: return .tacked(seat: seat)
         default: return .gybed(seat: seat)
         }
     }
@@ -208,23 +220,30 @@ struct Gen {
 func eventKindIndex(_ kind: RaceEvent.Kind) -> Int {
     switch kind {
     case .gun: 0
-    case .ocs: 1
+    case .ocsNotice: 1
     case .cleared: 2
     case .started: 3
-    case .foul: 4
+    case .ruleCall: 4
     case .markTouch: 5
-    case .penaltyServed: 6
-    case .rounded: 7
-    case .finished: 8
-    case .disqualified: 9
-    case .protest: 10
-    case .raceOver: 11
-    case .tacked: 12
-    case .gybed: 13
+    case .obstructionContact: 6
+    case .contact: 7
+    case .penaltyStarted: 8
+    case .penaltyReset: 9
+    case .penaltyServed: 10
+    case .disqualified: 11
+    case .markRoomNotice: 12
+    case .becameGhost: 13
+    case .rounded: 14
+    case .finished: 15
+    case .firstFinish: 16
+    case .raceClosed: 17
+    case .protestRecorded: 18
+    case .tacked: 19
+    case .gybed: 20
     }
 }
 
-let eventKindCount = 14
+let eventKindCount = 21
 
 /// A fleet race with a bot sailing every seat, for real snapshots: starts, OCS, contacts, roundings, finishes.
 func botRace(seats: Int = 16, laps: Int = 1, prestartSeconds: Int = 30, seed: UInt64 = 63,

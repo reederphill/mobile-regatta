@@ -1,0 +1,5 @@
+# The server image needs only the packages' sources (Dockerfile).
+*
+!Packages/
+Packages/**/.build/
+Packages/**/.swiftpm/

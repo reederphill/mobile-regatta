@@ -70,11 +70,17 @@ import Testing
             #expect(throws: WireError.unknownMessageType(UInt8(code))) { try Frame(decoding: [UInt8(code)] + Array(repeating: 0, count: 8)) }
         }
         let header: (MessageType) -> [UInt8] = { [$0.rawValue, 0, 0, 0, 0, 0, 0, 0, 0] }
-        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [UInt8(eventKindCount)]) }
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [22]) }
+        // Code 4 was the pre-#73 `foul`: retired, never reused.
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [4, 14, 0, 1]) }
         #expect(throws: WireError.invalidValue("tap")) { try Frame(decoding: header(.inputTap) + [2]) }
         #expect(throws: WireError.invalidValue("ease")) { try Frame(decoding: header(.inputHeld) + [0, 2]) }
         #expect(throws: WireError.invalidValue("rudder")) { try Frame(decoding: header(.inputHeld) + [0x80, 0]) }
-        #expect(throws: WireError.invalidValue("rule")) { try Frame(decoding: header(.event) + [4, 14, 0, 1]) }
+        // A rule call: incident id (u16), tick (i32), then the rule's code; there are 16 rules.
+        #expect(throws: WireError.invalidValue("rule")) { try Frame(decoding: header(.event) + [12, 0, 0, 0, 0, 0, 0, 16]) }
+        #expect(throws: WireError.invalidValue("obstruction")) { try Frame(decoding: header(.event) + [13, 0, 2]) }
+        #expect(throws: WireError.invalidValue("contact")) { try Frame(decoding: header(.event) + [14, 3, 3]) }
+        #expect(throws: WireError.invalidValue("contact")) { try Frame(decoding: header(.event) + [14, 3, 1]) }
         // Reasons are the exception: unknown codes decode as `.unknown` (HandshakeTests).
         // Schema 0 carries no bytes.
         #expect(throws: WireError.invalidValue("results")) { try Frame(decoding: header(.raceClosed) + [0, 0, 1, 7]) }
@@ -191,10 +197,15 @@ import Testing
         for index in 0..<eventKindCount {
             let kind = gen.eventKind(index)
             let audience = EventAudience(kind)
-            if case .protest(let seat, let target) = kind {
+            switch kind {
+            case .protestRecorded(let seat, let target):
                 #expect(audience == .seats([seat, target]))
                 #expect(!EventAudience.seats([seat, target]).includes(seat: 16))
-            } else {
+            case .ocsNotice(let recipient):
+                #expect(audience == .seats([recipient]))
+            case .markRoomNotice(let recipients):
+                #expect(audience == .seats(recipients))
+            default:
                 #expect(audience == .everyone)
             }
             #expect((0..<16).allSatisfy { audience == .everyone ? audience.includes(seat: $0) : true })

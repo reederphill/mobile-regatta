@@ -21,6 +21,7 @@ jobs:
       core: ${{ steps.filter.outputs.core }}
       protocol: ${{ steps.filter.outputs.protocol }}
       client: ${{ steps.filter.outputs.client }}
+      server: ${{ steps.filter.outputs.server }}
       app: ${{ steps.filter.outputs.app }}
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +42,11 @@ jobs:
             client:
               - *ci
               - "Packages/**"
+            server:
+              - *ci
+              - "Packages/**"
+              - "Dockerfile"
+              - ".dockerignore"
             app:
               - *ci
               - "Regatta/**"
@@ -77,6 +83,37 @@ jobs:
       - name: Let the cache read the container's build
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" .linux-scratch || true
+
+  container:
+    name: Server image; load clients sail a race in the Linux container
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image (Dockerfile)
+        run: docker build --platform linux/amd64 -t regatta-server .
+      - name: The server refuses to start without ENV=dev
+        run: |
+          set +e
+          docker run --rm regatta-server
+          status=$?
+          set -e
+          echo "exit status $status"
+          test "$status" -eq 78
+      - name: One client, then 16 in one race, within the bandwidth budget (#67, #27)
+        run: |
+          docker run -d --name regatta -e ENV=dev -p 8080:8080 regatta-server
+          for i in $(seq 1 30); do curl --silent --fail localhost:8080/health && break; sleep 1; done
+          curl --silent --show-error --fail localhost:8080/health
+          echo
+          docker exec regatta regatta-loadclient --clients 1 --race-seconds 5 --start-seconds 2
+          docker exec regatta regatta-loadclient --clients 16 --race-seconds 20 --start-seconds 5 --check-bandwidth \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Server log
+        if: always()
+        run: docker logs regatta || true
 
   macos:
     name: Packages on macOS
@@ -119,6 +156,22 @@ jobs:
       TEST_RUNNER_GITHUB_ACTIONS: "true"
     steps:
       - uses: actions/checkout@v4
+      # A cold simulator boot is minutes on this image (about 4 for the iPhone, 2 for the iPad), which xcodebuild
+      # otherwise spends between the build and the first test. Both start booting now, in the background, so the
+      # boots overlap the acknowledgements check, the build and the iPhone tests. Best effort: a device not found
+      # here is booted by xcodebuild as before.
+      - name: Start booting the simulators
+        run: |
+          for name in 'iPhone 17' 'iPad Air 13-inch (M4)'; do
+            udid="$(xcrun simctl list devices available -j | jq -r --arg name "$name" \
+              '.devices["com.apple.CoreSimulator.SimRuntime.iOS-26-5"][]? | select(.name == $name) | .udid' | head -1)"
+            if [[ -z "$udid" ]]; then
+              echo "::warning::No iOS 26.5 '$name' simulator to boot early"
+              continue
+            fi
+            echo "$name: $udid"
+            nohup xcrun simctl bootstatus "$udid" -b > "$RUNNER_TEMP/boot-$udid.log" 2>&1 &
+          done
       - name: Acknowledgements list is up to date
         run: swift scripts/generate-acknowledgements.swift --check
       # A failed test runs once more (-retry-tests-on-failure -test-iterations 2): the simulator now and
