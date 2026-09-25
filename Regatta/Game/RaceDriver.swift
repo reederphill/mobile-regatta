@@ -3,9 +3,9 @@ import RegattaCore
 /// Runs a race for the app at the fixed 30 Hz tick (#18, #61) and hands the scene and HUD what to draw.
 /// The scene never touches a `Race`: it reads `renderWorld` and sends input through `submit` and `tap`.
 ///
-/// `PracticeDriver` sails an offline practice race on the device, bots included (#16, #19). The online
-/// driver (#68) wraps the client's `PredictedRace` (#64) behind the same protocol, easing its corrections
-/// with `VisualCorrection`, and isn't pausable.
+/// `PracticeDriver` sails an offline practice race on the device, bots included (#16, #19). `OnlineDriver`
+/// (#68) wraps the client's `PredictedRace` (#64) behind the same protocol, easing its corrections with
+/// `VisualCorrection`, and isn't pausable.
 protocol RaceDriver: AnyObject {
     /// Your seat. Every "you" in the scene, HUD and results reads it, never seat 0.
     var myBoatIndex: Int { get }
@@ -67,11 +67,36 @@ struct TickFrame {
     var time: Double { Double(tick) / Double(Race.tickRate) }
 
     init(race: Race) {
+        self.init(race: race, isOver: race.isOver)
+    }
+
+    /// `race` after its tick, over when `isOver` says: online, the server decides that, not the
+    /// prediction (#68).
+    init(race: Race, isOver: Bool) {
         tick = race.tick
         boats = race.boats
         standings = race.standings()
         wind = race.wind
-        isOver = race.isOver
+        self.isOver = isOver
+    }
+
+    private init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool) {
+        self.tick = tick
+        self.boats = boats
+        self.standings = standings
+        self.wind = wind
+        self.isOver = isOver
+    }
+
+    /// This frame a tick earlier, each boat moved back along its velocity: what the renderer draws from
+    /// when the tick before isn't on the same track, after a correction or a jump of more than a tick (#68).
+    func extrapolatedBackOneTick() -> TickFrame {
+        let moved = boats.map { boat in
+            var boat = boat
+            boat.position -= boat.velocity * Race.dt
+            return boat
+        }
+        return TickFrame(tick: tick - 1, boats: moved, standings: standings, wind: wind, isOver: isOver)
     }
 
     /// Where `seat` stands in the fleet, from 1.
@@ -89,7 +114,7 @@ struct RenderWorld {
     /// The latest tick: statuses, standings, wind and puffs come from it.
     let frame: TickFrame
     /// Each boat's position, heading and wind interpolated from the previous tick to `frame`.
-    let boats: [Boat]
+    private(set) var boats: [Boat]
     /// Race clock in seconds, between the two ticks.
     let time: Double
 
@@ -108,6 +133,13 @@ struct RenderWorld {
     }
 
     var me: Boat { boats[myBoatIndex] }
+
+    /// This world with each seat's boat drawn as `draw` says: the online driver's visual corrections (#68).
+    func drawing(_ draw: (_ seat: Int, Boat) -> Boat) -> RenderWorld {
+        var world = self
+        world.boats = boats.enumerated().map { draw($0.offset, $0.element) }
+        return world
+    }
 
     /// The ground wind at `p` at the latest tick, or nil if the race doesn't hold its key yet (online).
     func groundWind(at p: Vec2) -> GroundWind? {

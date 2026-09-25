@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		AA0000000000000000000010 /* RegattaCore in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000012 /* RegattaCore */; };
 		AA000000000000000000002D /* RegattaBots in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000030 /* RegattaBots */; };
+		AA0000000000000000000033 /* RegattaClient in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000036 /* RegattaClient */; };
+		AA0000000000000000000034 /* RegattaProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000037 /* RegattaProtocol */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -92,6 +94,8 @@
 			files = (
 				AA0000000000000000000010 /* RegattaCore in Frameworks */,
 				AA000000000000000000002D /* RegattaBots in Frameworks */,
+				AA0000000000000000000033 /* RegattaClient in Frameworks */,
+				AA0000000000000000000034 /* RegattaProtocol in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -154,6 +158,8 @@
 			packageProductDependencies = (
 				AA0000000000000000000012 /* RegattaCore */,
 				AA0000000000000000000030 /* RegattaBots */,
+				AA0000000000000000000036 /* RegattaClient */,
+				AA0000000000000000000037 /* RegattaProtocol */,
 			);
 			productName = Regatta;
 			productReference = AA0000000000000000000004 /* Regatta.app */;
@@ -235,6 +241,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				AA0000000000000000000011 /* XCLocalSwiftPackageReference "Packages/RegattaCore" */,
+				AA0000000000000000000035 /* XCLocalSwiftPackageReference "Packages/RegattaClient" */,
+				AA0000000000000000000038 /* XCLocalSwiftPackageReference "Packages/RegattaProtocol" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = AA0000000000000000000002 /* Products */;
@@ -557,6 +565,14 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/RegattaCore;
 		};
+		AA0000000000000000000035 /* XCLocalSwiftPackageReference "Packages/RegattaClient" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/RegattaClient;
+		};
+		AA0000000000000000000038 /* XCLocalSwiftPackageReference "Packages/RegattaProtocol" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/RegattaProtocol;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -567,6 +583,14 @@
 		AA0000000000000000000030 /* RegattaBots */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RegattaBots;
+		};
+		AA0000000000000000000036 /* RegattaClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RegattaClient;
+		};
+		AA0000000000000000000037 /* RegattaProtocol */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RegattaProtocol;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

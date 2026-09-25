@@ -23,6 +23,7 @@ jobs:
       client: ${{ steps.filter.outputs.client }}
       server: ${{ steps.filter.outputs.server }}
       app: ${{ steps.filter.outputs.app }}
+      viewport: ${{ steps.filter.outputs.viewport }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -56,6 +57,22 @@ jobs:
               - "ThirdParty/**"
               - "Packages/RegattaCore/Sources/**"
               - "Packages/RegattaCore/Package.*"
+              # The app races online with RegattaClient over RegattaProtocol (#68).
+              - "Packages/RegattaProtocol/Sources/**"
+              - "Packages/RegattaProtocol/Package.*"
+              - "Packages/RegattaClient/Sources/**"
+              - "Packages/RegattaClient/Package.*"
+            # What shapes the race view in the window (G5): the iPad's letterbox test runs only for these.
+            viewport:
+              - *ci
+              - "Regatta/Game/RaceViewportPolicy.swift"
+              - "Regatta/UI/RaceView.swift"
+              - "Regatta/UI/HUDView.swift"
+              - "Regatta/App/**"
+              - "Regatta/Info.plist"
+              - "Regatta.xcodeproj/**"
+              - "RegattaUITests/RaceViewportUITests.swift"
+              - "RegattaUITests/RaceUITestCase.swift"
 
   linux:
     name: Golden and builds on the pinned Linux replay platform
@@ -146,47 +163,44 @@ jobs:
     if: needs.changes.outputs.app == 'true'
     # Pinned so the SDK and simulator runtime only change on purpose: Xcode 26.6, iOS 26.5.
     runs-on: macos-26
-    # Room for a retried UI test: the practice-race finish test alone takes about 2.5 min per device.
-    timeout-minutes: 45
+    # About 10 min, 15 with the iPad: a cold boot of each simulator is 2-4 min of it. Room for retried UI tests.
+    timeout-minutes: 30
     env:
       # DEVELOPER_DIR rather than xcode-select: switching with xcode-select hid the simulators.
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       # Reaches the test runner as CI: render fixture references are never recorded here (#62).
       TEST_RUNNER_CI: "true"
       TEST_RUNNER_GITHUB_ACTIONS: "true"
+    # No simulator boots in the background: while one boots, everything else that reaches CoreSimulator crawls
+    # (actool's thinned asset catalog went from 7 s to 4-10 min, the acknowledgements check from 25 s to 5 min),
+    # which cost more than the boot saved. Each device boots when its tests start.
     steps:
       - uses: actions/checkout@v4
-      # A cold simulator boot is minutes on this image (about 4 for the iPhone, 2 for the iPad), which xcodebuild
-      # otherwise spends between the build and the first test. Both start booting now, in the background, so the
-      # boots overlap the acknowledgements check, the build and the iPhone tests. Best effort: a device not found
-      # here is booted by xcodebuild as before.
-      - name: Start booting the simulators
-        run: |
-          for name in 'iPhone 17' 'iPad Air 13-inch (M4)'; do
-            udid="$(xcrun simctl list devices available -j | jq -r --arg name "$name" \
-              '.devices["com.apple.CoreSimulator.SimRuntime.iOS-26-5"][]? | select(.name == $name) | .udid' | head -1)"
-            if [[ -z "$udid" ]]; then
-              echo "::warning::No iOS 26.5 '$name' simulator to boot early"
-              continue
-            fi
-            echo "$name: $udid"
-            nohup xcrun simctl bootstatus "$udid" -b > "$RUNNER_TEMP/boot-$udid.log" 2>&1 &
-          done
       - name: Acknowledgements list is up to date
         run: swift scripts/generate-acknowledgements.swift --check
+      # Built once; both devices run the same products.
+      - name: xcodebuild build-for-testing
+        run: |
+          xcodebuild build-for-testing -project Regatta.xcodeproj -scheme Regatta \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' -derivedDataPath DerivedData
       # A failed test runs once more (-retry-tests-on-failure -test-iterations 2): the simulator now and
       # then fails to launch or terminate the app between UI tests. A test that fails twice fails the job.
-      - name: xcodebuild test (unit + UI)
+      - name: xcodebuild test (unit + UI) on iPhone
         run: |
-          xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
+          xcodebuild test-without-building -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
             -retry-tests-on-failure -test-iterations 2 \
             -derivedDataPath DerivedData -resultBundlePath Regatta.xcresult
+      # Only the letterboxed race view (G5) differs on iPad; the other UI tests don't depend on the device. It
+      # runs when a change reaches the view's shape (the viewport filter), and in the iOS 27 workflow's iPad run.
+      # The iPhone shuts down first, so the iPad boots on a runner with its memory back.
       - name: xcodebuild test (UI) on iPad, for the letterboxed race view (G5)
+        if: needs.changes.outputs.viewport == 'true'
         run: |
-          xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
+          xcrun simctl shutdown all || true
+          xcodebuild test-without-building -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPad Air 13-inch (M4),OS=26.5' \
-            -only-testing:RegattaUITests -retry-tests-on-failure -test-iterations 2 \
+            -only-testing:RegattaUITests/RaceViewportUITests -retry-tests-on-failure -test-iterations 2 \
             -derivedDataPath DerivedData -resultBundlePath Regatta-iPad.xcresult
       - name: Upload the result bundles (screenshots, logs)
         if: always()
@@ -196,4 +210,30 @@ jobs:
           path: |
             Regatta.xcresult
             Regatta-iPad.xcresult
+          if-no-files-found: ignore
+
+  # The online client against a real server (#68): the app's UI test above skips its online race without one.
+  e2e:
+    name: Online race end to end (app on the iOS Simulator, local RegattaServer)
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.server == 'true'
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      TEST_RUNNER_CI: "true"
+      TEST_RUNNER_GITHUB_ACTIONS: "true"
+      E2E_DESTINATION: platform=iOS Simulator,name=iPhone 17,OS=26.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: scripts/e2e.sh (a dev instant race with bots, raced to its close)
+        run: |
+          scripts/e2e.sh -retry-tests-on-failure -test-iterations 2 \
+            -derivedDataPath DerivedData -resultBundlePath E2E.xcresult
+      - name: Upload the result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: E2E.xcresult
+          path: E2E.xcresult
           if-no-files-found: ignore
