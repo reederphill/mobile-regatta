@@ -25,9 +25,10 @@ enum RegattaServerMain {
             FileHandle.standardError.write(Data("RegattaServer: can't start: \(error)\n".utf8))
             exit(1)
         }
-        print("RegattaServer \(config.serverBuild) (ENV=\(config.environment.name)) listening on \(config.host):\(server.port)")
-        // Line-buffered either way, so a container's log and a test reading the pipe see it at once.
-        fflush(stdout)
+        // Written unbuffered, so a container's log and a test reading the pipe see it at once. (Not
+        // `print` + `fflush(stdout)`: Glibc's `stdout` is a mutable global Swift 6 refuses.)
+        FileHandle.standardOutput.write(Data(
+            "RegattaServer \(config.serverBuild) (ENV=\(config.environment.name)) listening on \(config.host):\(server.port)\n".utf8))
         await server.wait()
     }
 }
