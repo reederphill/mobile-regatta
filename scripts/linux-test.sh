@@ -3,7 +3,8 @@
 # architecture; ADR 0002), with podman or docker:
 # - RegattaCore's golden test, which asserts Tests/Goldens.json here, and RegattaBots' replay race, each in
 #   debug and release, which must agree;
-# - every package builds with its tests (RegattaCore with RegattaBots, RegattaProtocol, RegattaClient), since
+# - every package builds with its tests (RegattaCore with RegattaBots, RegattaProtocol, RegattaClient,
+#   RegattaServer), since
 #   each must build on the race server.
 # Unit tests run on macOS (scripts/check.sh). --all runs every package's tests here too.
 #
@@ -67,7 +68,7 @@ trap 'rm -f "$log"' EXIT
 
 # Packages under Packages/, built in this order. They depend on each other by relative path, so the whole
 # Packages/ folder is mounted.
-PACKAGES="RegattaCore RegattaProtocol RegattaClient"
+PACKAGES="RegattaCore RegattaProtocol RegattaClient RegattaServer"
 
 # Linux artefacts never mix with the host's .build.
 scratch="${LINUX_SCRATCH:-regatta-linux-scratch-$(echo "${IMAGE##*sha256:}" | cut -c1-12)}"

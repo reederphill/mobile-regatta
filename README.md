@@ -61,6 +61,10 @@ Packages/RegattaClient/   The online race client, over a transport protocol, no 
   ReliableStream.swift    events and wind keys back in order; a lasting gap asks for a Resync
   RaceTransport.swift     the transport protocol the app (#68) and the load client (#67) implement
   FaultInjectingLink.swift  an in-memory link on a virtual clock: seeded delay, jitter, loss, reorder, disconnect
+Packages/RegattaServer/   The race server's core, over an injected clock and transports, no sockets (#65)
+  RaceHost/RaceHost.swift  actor owning one Race: 30 Hz catch-up scheduler, input buffer, snapshots, events, close
+  RaceHost/InputGate.swift the #26 caps over a sliding window, strikes to disconnect; the 1 s stamp limit
+  RaceHost/HostIO.swift    the clock and seat transport protocols the host is driven through
 Regatta/                The iOS app
   Game/RaceDriver.swift   what the app sails a race through: 30 Hz tick clock, tick frames, the interpolated RenderWorld
   Game/PracticeDriver.swift  an offline practice race: owns the Race and on-device bots, latches your input per tick, keeps the log
@@ -160,7 +164,8 @@ Run the simulation and bot tests (RegattaCore and RegattaBots) from the command 
 cd Packages/RegattaCore && swift test
 ```
 
-and the protocol's and the client's with `swift test` in `Packages/RegattaProtocol` and `Packages/RegattaClient`.
+and the protocol's, the client's and the server's with `swift test` in `Packages/RegattaProtocol`,
+`Packages/RegattaClient` and `Packages/RegattaServer`.
 
 Check everything a change reaches, compiling it all before running any test (flags are in the script):
 
