@@ -49,7 +49,9 @@ public extension Race {
             h.combine(b.speed)
             h.combine(b.rudder)
             h.combine(b.desiredRudder)
-            h.combine(b.autopilot)
+            h.combine(b.autopilot?.heading)
+            h.combine(b.autopilot?.boomSide.digestCode)
+            h.combine(b.boomSide.digestCode)
             h.combine(b.status.digestCode)
             h.combine(b.legIndex)
             h.combine(b.roundingStage)
@@ -76,6 +78,16 @@ extension BoatStatus {
         case .finished: 3
         case .dsq: 4
         case .dnf: 5
+        }
+    }
+}
+
+extension BoomSide {
+    /// Stable codes for the digest, independent of the enum's declaration order.
+    var digestCode: Int {
+        switch self {
+        case .port: 0
+        case .starboard: 1
         }
     }
 }

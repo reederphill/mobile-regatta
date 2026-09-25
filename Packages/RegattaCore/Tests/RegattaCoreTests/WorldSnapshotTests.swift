@@ -220,7 +220,7 @@ struct LogFeeder {
             ("position.x", { $0.position.x = .nan }),
             ("heading", { $0.heading = .infinity }),
             ("speed", { $0.speed = .nan }),
-            ("autopilot", { $0.autopilot = -.infinity }),
+            ("autopilot", { $0.autopilot = Autopilot(heading: -.infinity, boomSide: .port) }),
             ("penaltyProgress", { $0.penaltyProgress = .nan }),
             ("shadow", { $0.shadow = .nan }),
             ("finishTime", { $0.finishTime = .nan }),

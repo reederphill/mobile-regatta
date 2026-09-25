@@ -96,7 +96,7 @@ struct BotBrain: Sendable {
     /// the tack/gybe tap sails to as a player's would.
     private func wantsTackOrGybe(_ b: Boat, to heading: Double, _ race: Race) -> Bool {
         let target = wrapAngle(b.windDirection - heading)
-        guard (target >= 0) != (b.relativeWind >= 0), abs(wrapAngle(heading - b.heading)) > deg2rad(50) else { return false }
+        guard BoomSide.leeward(ofRelativeWind: target) != b.boomSide, abs(wrapAngle(heading - b.heading)) > deg2rad(50) else { return false }
         let polar = race.boatClass.polar
         let upwind = polar.bestUpwind(tws: b.windSpeed).twa + deg2rad(15)
         let downwind = polar.bestDownwind(tws: b.windSpeed).twa - deg2rad(15)

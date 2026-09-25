@@ -12,7 +12,8 @@ import RegattaCore
 /// | rudder (actual)         | int16   | 1/32 767                  | −1 … 1                        |
 /// | penalty progress        | int16   | 1/1024 rad                | ±32 rad (5 turns)             |
 /// | held rudder             | int8    | exact                     | −127 … 127                    |
-/// | status, turns owed, rounding stage, flags | bits | exact     | 3 bits each                   |
+/// | status, turns owed, rounding stage | bits | exact            | 3 bits each                   |
+/// | ease, autopilot, tacking, boom sides | bits | exact          | 1 bit each                    |
 /// | leg index               | uint8   | exact                     | 0 … 255                       |
 ///
 /// Rounding is to nearest, so a field's error is at most half its step. A value outside its range
@@ -49,6 +50,17 @@ public enum SnapshotQuantisation {
     static func radians(_ q: Int16) -> Double { Double(q) * headingStep }
 }
 
+/// The tack/gybe autopilot on the wire: its heading in 1/65 536ths of a turn, and its boom side.
+public struct WireAutopilot: Hashable, Sendable {
+    public var heading: Int16
+    public var boomSide: BoomSide
+
+    public init(heading: Int16, boomSide: BoomSide) {
+        self.heading = heading
+        self.boomSide = boomSide
+    }
+}
+
 /// One seat of a wire snapshot, in quantised units (`SnapshotQuantisation`). The same for a bot's
 /// seat as for a human's: the bot flag is roster metadata in `RaceStart`, never here (#18, #19).
 public struct WireSeat: Hashable, Sendable {
@@ -58,10 +70,11 @@ public struct WireSeat: Hashable, Sendable {
     public var heading: Int16
     public var speed: UInt16
     public var rudder: Int16
-    public var autopilot: Int16?
+    public var autopilot: WireAutopilot?
     public var penaltyProgress: Int16
     public var heldInput: BoatInput
     public var isTacking: Bool
+    public var boomSide: BoomSide
     public var status: BoatStatus
     /// 0…7.
     public var penaltyTurnsOwed: UInt8
@@ -70,9 +83,9 @@ public struct WireSeat: Hashable, Sendable {
     public var legIndex: UInt8
 
     public init(
-        x: Int32, y: Int32, heading: Int16, speed: UInt16, rudder: Int16, autopilot: Int16?, penaltyProgress: Int16,
-        heldInput: BoatInput, isTacking: Bool, status: BoatStatus, penaltyTurnsOwed: UInt8, roundingStage: UInt8,
-        legIndex: UInt8
+        x: Int32, y: Int32, heading: Int16, speed: UInt16, rudder: Int16, autopilot: WireAutopilot?, penaltyProgress: Int16,
+        heldInput: BoatInput, isTacking: Bool, boomSide: BoomSide, status: BoatStatus, penaltyTurnsOwed: UInt8,
+        roundingStage: UInt8, legIndex: UInt8
     ) {
         self.x = x
         self.y = y
@@ -83,6 +96,7 @@ public struct WireSeat: Hashable, Sendable {
         self.penaltyProgress = penaltyProgress
         self.heldInput = heldInput
         self.isTacking = isTacking
+        self.boomSide = boomSide
         self.status = status
         self.penaltyTurnsOwed = penaltyTurnsOwed
         self.roundingStage = roundingStage
@@ -99,10 +113,11 @@ public struct WireSeat: Hashable, Sendable {
         heading = try Q.angle(b.heading, "heading")
         speed = UInt16(try Q.quantise(b.speed, step: Q.speedStep, in: 0...65_535, "speed"))
         rudder = Int16(try Q.quantise(b.rudder, step: Q.rudderStep, in: -32_767...32_767, "rudder"))
-        autopilot = try b.autopilot.map { try Q.angle($0, "autopilot") }
+        autopilot = try b.autopilot.map { WireAutopilot(heading: try Q.angle($0.heading, "autopilot"), boomSide: $0.boomSide) }
         penaltyProgress = Int16(try Q.quantise(b.penaltyProgress, step: Q.penaltyProgressStep, in: -32_768...32_767, "penaltyProgress"))
         heldInput = seat.heldInput
         isTacking = b.isTacking
+        boomSide = b.boomSide
         status = b.status
         guard let owed = UInt8(exactly: b.penaltyTurnsOwed), owed <= 7 else { throw WireError.outOfRange("penaltyTurnsOwed") }
         guard let stage = UInt8(exactly: b.roundingStage), stage <= 7 else { throw WireError.outOfRange("roundingStage") }
@@ -119,9 +134,10 @@ public struct WireSeat: Hashable, Sendable {
         seat.boat.heading = Q.radians(heading)
         seat.boat.speed = Double(speed) * Q.speedStep
         seat.boat.rudder = Double(rudder) * Q.rudderStep
-        seat.boat.autopilot = autopilot.map(Q.radians)
+        seat.boat.autopilot = autopilot.map { Autopilot(heading: Q.radians($0.heading), boomSide: $0.boomSide) }
         seat.boat.penaltyProgress = Double(penaltyProgress) * Q.penaltyProgressStep
         seat.boat.isTacking = isTacking
+        seat.boat.boomSide = boomSide
         seat.boat.status = status
         seat.boat.penaltyTurnsOwed = Int(penaltyTurnsOwed)
         seat.boat.roundingStage = Int(roundingStage)
@@ -131,7 +147,8 @@ public struct WireSeat: Hashable, Sendable {
 
     // Layout, 20 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autopilot int16
     // (0 when absent), penalty progress int16, held rudder int8, then two flag bytes and the leg index.
-    //   flags:  bit 0 ease, bit 1 has autopilot, bit 2 tacking, bits 3–5 status, bits 6–7 zero
+    //   flags:  bit 0 ease, bit 1 has autopilot, bit 2 tacking, bits 3–5 status, bit 6 boom to starboard,
+    //           bit 7 the autopilot's boom to starboard (zero without an autopilot)
     //   counts: bits 0–2 penalty turns owed, bits 3–5 rounding stage, bits 6–7 zero
 
     func encode(to w: inout WireWriter) throws {
@@ -143,13 +160,15 @@ public struct WireSeat: Hashable, Sendable {
         w.i16(heading)
         w.u16(speed)
         w.i16(rudder)
-        w.i16(autopilot ?? 0)
+        w.i16(autopilot?.heading ?? 0)
         w.i16(penaltyProgress)
         w.i8(heldInput.rudder)
         var flags: UInt8 = heldInput.ease ? 1 : 0
         if autopilot != nil { flags |= 1 << 1 }
         if isTacking { flags |= 1 << 2 }
         flags |= status.wireCode << 3
+        if boomSide == .starboard { flags |= 1 << 6 }
+        if autopilot?.boomSide == .starboard { flags |= 1 << 7 }
         w.u8(flags)
         w.u8(penaltyTurnsOwed | roundingStage << 3)
         w.u8(legIndex)
@@ -169,14 +188,14 @@ public struct WireSeat: Hashable, Sendable {
         let flags = try r.u8()
         let counts = try r.u8()
         legIndex = try r.u8()
-        guard flags >> 6 == 0 else { throw WireError.invalidValue("flags") }
         guard counts >> 6 == 0 else { throw WireError.invalidValue("counts") }
         guard let status = BoatStatus(wireCode: flags >> 3 & 0b111) else { throw WireError.invalidValue("status") }
         let hasAutopilot = flags & 1 << 1 != 0
-        guard hasAutopilot || pilot == 0 else { throw WireError.invalidValue("autopilot") }
+        guard hasAutopilot || (pilot == 0 && flags & 1 << 7 == 0) else { throw WireError.invalidValue("autopilot") }
         heldInput = BoatInput(rudder: held, ease: flags & 1 != 0)
-        autopilot = hasAutopilot ? pilot : nil
+        autopilot = hasAutopilot ? WireAutopilot(heading: pilot, boomSide: flags & 1 << 7 != 0 ? .starboard : .port) : nil
         isTacking = flags & 1 << 2 != 0
+        boomSide = flags & 1 << 6 != 0 ? .starboard : .port
         self.status = status
         penaltyTurnsOwed = counts & 0b111
         roundingStage = counts >> 3 & 0b111
@@ -218,7 +237,7 @@ public enum SnapshotFields {
     public static let wire: [String] = [
         "boat.position", "boat.heading", "boat.speed", "boat.rudder", "boat.autopilot",
         "boat.status", "boat.legIndex", "boat.roundingStage",
-        "boat.penaltyTurnsOwed", "boat.penaltyProgress", "boat.isTacking",
+        "boat.penaltyTurnsOwed", "boat.penaltyProgress", "boat.isTacking", "boat.boomSide",
         "heldInput.rudder", "heldInput.ease",
     ]
 

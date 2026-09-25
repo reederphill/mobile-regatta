@@ -70,7 +70,7 @@ import Testing
             #expect(throws: WireError.unknownMessageType(UInt8(code))) { try Frame(decoding: [UInt8(code)] + Array(repeating: 0, count: 8)) }
         }
         let header: (MessageType) -> [UInt8] = { [$0.rawValue, 0, 0, 0, 0, 0, 0, 0, 0] }
-        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [12]) }
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [UInt8(eventKindCount)]) }
         #expect(throws: WireError.invalidValue("tap")) { try Frame(decoding: header(.inputTap) + [2]) }
         #expect(throws: WireError.invalidValue("ease")) { try Frame(decoding: header(.inputHeld) + [0, 2]) }
         #expect(throws: WireError.invalidValue("rudder")) { try Frame(decoding: header(.inputHeld) + [0x80, 0]) }
@@ -92,10 +92,10 @@ import Testing
             change(&bytes[seat0 + offset])
             return bytes
         }
-        #expect(throws: WireError.invalidValue("flags")) { try Frame(decoding: mutated(17) { $0 |= 0x40 }) }
         #expect(throws: WireError.invalidValue("status")) { try Frame(decoding: mutated(17) { $0 = $0 & 0b1100_0111 | 6 << 3 }) }
         #expect(throws: WireError.invalidValue("counts")) { try Frame(decoding: mutated(18) { $0 |= 0x80 }) }
         #expect(throws: WireError.invalidValue("autopilot")) { try Frame(decoding: mutated(12) { $0 = 1 }) } // value without the flag
+        #expect(throws: WireError.invalidValue("autopilot")) { try Frame(decoding: mutated(17) { $0 |= 0x80 }) } // boom side without it
         #expect(throws: WireError.invalidValue("heldInput.rudder")) { try Frame(decoding: mutated(16) { $0 = 0x80 }) }
     }
 
@@ -218,6 +218,7 @@ func relabel(_ boat: Boat, isPlayer: Bool) -> Boat {
     copy.penaltyTurnsOwed = boat.penaltyTurnsOwed
     copy.penaltyProgress = boat.penaltyProgress
     copy.isTacking = boat.isTacking
+    copy.boomSide = boat.boomSide
     copy.windDirection = boat.windDirection
     copy.windSpeed = boat.windSpeed
     copy.shadow = boat.shadow

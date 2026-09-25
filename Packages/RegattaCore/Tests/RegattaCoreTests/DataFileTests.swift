@@ -2,24 +2,28 @@ import Foundation
 import Testing
 @testable import RegattaCore
 
-/// The bundled v1.0 boat class and edited copies of its bytes.
+/// The bundled boat class races sail (`Race.defaultBoatClass`) and edited copies of its bytes.
 enum Fixtures {
     static let classID = "ilca-dinghy"
-    /// SHA-256 of `Resources/boat-classes/ilca-dinghy@1.json`. A released file never changes (ADR 0004):
-    /// if this fails, ship the change as `ilca-dinghy@2.json` instead of editing version 1.
-    static let pinnedHash = "8eb6e20398d859edafec53ef904227672dd5ef081d1611fcb2e89d7e9da5849d"
+    static let version = 2
+    /// SHA-256 of each bundled `Resources/boat-classes/ilca-dinghy@<version>.json`. A released file
+    /// never changes (ADR 0004): if one fails, ship the change as the next version instead of editing it.
+    static let pinnedHashes = [
+        1: "8eb6e20398d859edafec53ef904227672dd5ef081d1611fcb2e89d7e9da5849d",
+        2: "f5c8f1677a45f76c2ffe27914671ea0ce615614944f331027c506cafb6caa12d",
+    ]
 
-    static func bytes() throws -> Data {
-        try #require(try BoatClassFile.bundledData(id: classID, version: 1))
+    static func bytes(version: Int = version) throws -> Data {
+        try #require(try BoatClassFile.bundledData(id: classID, version: version))
     }
 
-    static func text() throws -> String {
-        String(decoding: try bytes(), as: UTF8.self)
+    static func text(version: Int = version) throws -> String {
+        String(decoding: try bytes(version: version), as: UTF8.self)
     }
 
     /// The bundled file with each `(of, with)` replacement applied, each of which must match.
-    static func edited(_ replacements: [(of: String, with: String)]) throws -> Data {
-        var text = try text()
+    static func edited(_ replacements: [(of: String, with: String)], version: Int = version) throws -> Data {
+        var text = try text(version: version)
         for r in replacements {
             #expect(text.contains(r.of), "fixture no longer contains \(r.of)")
             text = text.replacingOccurrences(of: r.of, with: r.with)
@@ -28,7 +32,7 @@ enum Fixtures {
     }
 
     static func boatClass() throws -> BoatClass {
-        try BoatClassFile.bundled(id: classID, version: 1).content
+        try BoatClassFile.bundled(id: classID, version: version).content
     }
 }
 
@@ -48,7 +52,7 @@ enum Fixtures {
     }
 
     @Test func fileRefRoundTripsThroughJSON() throws {
-        let ref = try BoatClassFile.bundled(id: Fixtures.classID, version: 1).ref
+        let ref = try BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
         let decoded = try JSONDecoder().decode(FileRef.self, from: JSONEncoder().encode(ref))
         #expect(decoded == ref)
     }
@@ -56,24 +60,25 @@ enum Fixtures {
 
 @Suite struct DataFileLoaderTests {
     @Test func bundledBoatClassDecodes() throws {
-        let file = try BoatClassFile.bundled(id: Fixtures.classID, version: 1)
+        let file = try BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version)
         #expect(file.schemaVersion == 1)
         #expect(file.id == "ilca-dinghy")
-        #expect(file.version == 1)
-        #expect(file.ref.id == "ilca-dinghy" && file.ref.version == 1)
+        #expect(file.version == Fixtures.version)
+        #expect(file.ref.id == "ilca-dinghy" && file.ref.version == Fixtures.version)
         #expect(file.content.name == "Dinghy")
     }
 
     @Test func decodesFromDataNotPaths() throws {
         let data = try Fixtures.bytes()
         let file = try BoatClassFile(data: data)
-        #expect(file.ref == (try BoatClassFile.bundled(id: Fixtures.classID, version: 1)).ref)
+        #expect(file.ref == (try BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version)).ref)
     }
 
-    @Test func hashOfBundledFileIsPinned() throws {
-        let file = try BoatClassFile.bundled(id: Fixtures.classID, version: 1)
-        #expect(file.ref.hash.hex == Fixtures.pinnedHash)
-        #expect(file.ref.hash == ContentHash(of: try Fixtures.bytes()))
+    @Test(arguments: Fixtures.pinnedHashes.keys.sorted())
+    func hashOfBundledFileIsPinned(version: Int) throws {
+        let file = try BoatClassFile.bundled(id: Fixtures.classID, version: version)
+        #expect(file.ref.hash.hex == Fixtures.pinnedHashes[version])
+        #expect(file.ref.hash == ContentHash(of: try #require(try BoatClassFile.bundledData(id: Fixtures.classID, version: version))))
     }
 
     @Test(arguments: [0, 2, 99])
@@ -110,7 +115,7 @@ enum Fixtures {
 
     @Test func badIDOrVersionThrows() throws {
         let badID = try Fixtures.edited([(of: #""id": "ilca-dinghy""#, with: #""id": "ILCA dinghy""#)])
-        let badVersion = try Fixtures.edited([(of: #""version": 1,"#, with: #""version": 0,"#)])
+        let badVersion = try Fixtures.edited([(of: #""version": \#(Fixtures.version),"#, with: #""version": 0,"#)])
         for data in [badID, badVersion] {
             #expect {
                 try BoatClassFile(data: data)
@@ -149,7 +154,7 @@ enum Fixtures {
             try BoatClassFile(data: junk, expecting: ref)
         }
         // The right bytes named with the wrong id or version: the ref itself is wrong.
-        for wrong in [FileRef(id: "other-boat", version: 1, hash: ref.hash), FileRef(id: ref.id, version: 2, hash: ref.hash)] {
+        for wrong in [FileRef(id: "other-boat", version: 1, hash: ref.hash), FileRef(id: ref.id, version: ref.version + 1, hash: ref.hash)] {
             #expect {
                 try BoatClassFile(data: data, expecting: wrong)
             } throws: { error in
@@ -180,7 +185,7 @@ enum Fixtures {
         let v2 = try BoatClassFile(data: Fixtures.edited([
             (of: #""version": 1,"#, with: #""version": 2,"#),
             (of: #""boatSpeedFactor": 0.6"#, with: #""boatSpeedFactor": 0.7"#),
-        ]))
+        ], version: 1))
         #expect(v2.version == 2 && v2.id == v1.id)
         #expect(v2.ref.hash != v1.ref.hash)
         #expect(v1.content.contact.boat == 0.6)
@@ -200,7 +205,7 @@ enum Fixtures {
         let otherV2 = try BoatClassFile(data: Fixtures.edited([
             (of: #""version": 1,"#, with: #""version": 2,"#),
             (of: #""boatSpeedFactor": 0.6"#, with: #""boatSpeedFactor": 0.8"#),
-        ]))
+        ], version: 1))
         #expect(throws: DataFileError.conflictingVersion(existing: v2.ref, new: otherV2.ref)) {
             try catalog.add(otherV2)
         }
@@ -208,7 +213,7 @@ enum Fixtures {
     }
 
     @Test func placeholdersResolveAndCoverTheTuningList() throws {
-        let file = try BoatClassFile.bundled(id: Fixtures.classID, version: 1)
+        let file = try BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version)
         let placeholders = file.header.placeholders
         let polar = file.content.polar
         // The 0, 4 and 25 kn polar columns.
@@ -243,7 +248,7 @@ enum Fixtures {
         #expect(c.polar.twsAxis[5] == metresPerSecond(knots: 12))
         #expect(c.polar.speeds[5][4] == metresPerSecond(knots: 5.3))
 
-        #expect(c.momentum == .init(speedingUp: 4, slowingDown: 5, noGo: 3))
+        #expect(c.momentum == .init(speedingUp: 4, slowingDown: 5, noGo: 4))
         #expect(c.steering.topTurnRate == deg2rad(30))
         #expect(c.steering.minTurnRate == deg2rad(10))
         #expect(c.steering.rudderSlew > 0 && c.steering.rudderDrag >= 0 && c.steering.headToWindFallOffRate > 0)

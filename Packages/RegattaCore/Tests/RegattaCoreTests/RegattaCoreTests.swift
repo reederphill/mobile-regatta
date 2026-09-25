@@ -35,6 +35,7 @@ import Testing
     func boat(_ id: Int, at p: Vec2, heading degrees: Double, wind: Double = 0) -> Boat {
         var b = Boat(id: id, isPlayer: false, colorIndex: id, position: p, heading: deg2rad(degrees), speed: 3)
         b.windDirection = deg2rad(wind)
+        b.boomSide = .leeward(ofRelativeWind: b.relativeWind)
         b.status = .racing
         return b
     }

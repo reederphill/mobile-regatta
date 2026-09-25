@@ -24,9 +24,9 @@ public final class Race {
 
     public static let defaultBoatClass: BoatClass = {
         do {
-            return try BoatClassFile.bundled(id: "ilca-dinghy", version: 1).content
+            return try BoatClassFile.bundled(id: "ilca-dinghy", version: 2).content
         } catch {
-            preconditionFailure("bundled boat class ilca-dinghy@1 failed to load: \(error)")
+            preconditionFailure("bundled boat class ilca-dinghy@2 failed to load: \(error)")
         }
     }()
 
@@ -133,8 +133,10 @@ public final class Race {
                 }
                 heading = rng.bool() ? Double.pi / 2 : -Double.pi / 2
             }
+            // The boom starts to leeward of the mean wind: the sampled wind may not be known yet (keys-only).
             fleet.append(Boat(id: seat, isPlayer: kind == .human, colorIndex: seat,
-                              position: position, heading: heading, speed: 2))
+                              position: position, heading: heading, speed: 2,
+                              boomSide: .leeward(ofRelativeWind: wrapAngle(windSetup.meanDirection - heading))))
         }
         boats = fleet
         heldInputs = Array(repeating: .neutral, count: fleet.count)
@@ -228,9 +230,11 @@ public final class Race {
             let i = record.seat
             switch tap {
             case .tackGybe:
-                // Mirror the heading across the wind: a tack when upwind, a gybe when downwind.
+                // The same wind angle with the boom on the other side: a tack upwind, a gybe downwind.
                 let b = boats[i]
-                if b.isOnCourse { boats[i].autopilot = wrapAngle(b.windDirection + b.relativeWind) }
+                if b.isOnCourse {
+                    boats[i].autopilot = .tackOrGybe(heading: b.heading, boomSide: b.boomSide, windDirection: b.windDirection)
+                }
             case .protest(let target):
                 emit(.protest(seat: i, target: target))
             }
@@ -355,26 +359,28 @@ public final class Race {
     private func integrate(_ i: Int, _ dt: Double) {
         var b = boats[i]
 
-        if let target = b.autopilot {
-            let error = wrapAngle(target - b.heading)
-            b.desiredRudder = (error / deg2rad(20)).clamped(to: -1...1)
-            if abs(error) < deg2rad(3) {
+        if let pilot = b.autopilot {
+            if let rudder = pilot.rudder(heading: b.heading, boomSide: b.boomSide, windDirection: b.windDirection) {
+                b.desiredRudder = rudder
+            } else {
                 b.autopilot = nil
                 b.desiredRudder = 0
             }
         }
 
-        let wasStarboard = b.relativeWind >= 0
         let before = b.heading
+        let tws = b.windSpeed * b.shadow
         let moved = BoatDynamics.advance(
-            BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder),
+            BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide),
             control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: b.isOnCourse),
-            env: BoatDynamics.Environment(windDirection: b.windDirection, windSpeed: b.windSpeed * b.shadow),
+            env: BoatDynamics.Environment(windDirection: b.windDirection, windSpeed: tws),
             boatClass: boatClass, dt: dt)
         b.position = moved.position
         b.heading = moved.heading
         b.speed = moved.speed
         b.rudder = moved.rudder
+        let crossing = moved.boomSide != b.boomSide
+        b.boomSide = moved.boomSide
         let turn = wrapAngle(b.heading - before)
 
         if b.penaltyTurnsOwed > 0 {
@@ -386,11 +392,12 @@ public final class Race {
             }
         }
 
-        // Rule 13: from passing head to wind until close-hauled on the new tack.
-        if (b.relativeWind >= 0) != wasStarboard {
+        // Rule 13: from the boom crossing head to wind until close-hauled on the new tack.
+        if crossing {
             b.isTacking = b.twa < .pi / 2
+            emit(b.isTacking ? .tacked(seat: i) : .gybed(seat: i))
         }
-        if b.isTacking && b.twa >= boatClass.polar.bestUpwind(tws: b.windSpeed * b.shadow).twa - deg2rad(5) {
+        if b.isTacking && b.twa >= boatClass.polar.bestUpwind(tws: tws).twa - deg2rad(5) {
             b.isTacking = false
         }
 
@@ -675,7 +682,7 @@ extension Race {
         let doubles: [(String, Double?)] = [
             ("position.x", boat.position.x), ("position.y", boat.position.y), ("heading", boat.heading),
             ("speed", boat.speed), ("rudder", boat.rudder), ("desiredRudder", boat.desiredRudder),
-            ("autopilot", boat.autopilot), ("penaltyProgress", boat.penaltyProgress),
+            ("autopilot", boat.autopilot?.heading), ("penaltyProgress", boat.penaltyProgress),
             ("windDirection", boat.windDirection), ("windSpeed", boat.windSpeed), ("shadow", boat.shadow),
             ("finishTime", boat.finishTime),
         ]

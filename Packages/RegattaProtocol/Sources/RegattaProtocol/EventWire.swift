@@ -19,7 +19,7 @@ public enum EventAudience: Equatable, Sendable {
     public init(_ kind: RaceEvent.Kind) {
         switch kind {
         case .gun, .ocs, .cleared, .started, .foul, .markTouch, .penaltyServed, .rounded, .finished,
-             .disqualified, .raceOver:
+             .disqualified, .raceOver, .tacked, .gybed:
             // `.ocs` is today's broadcast; #85 adds the targeted `ocsNotice` beside it.
             self = .everyone
         case .protest(let seat, let target):
@@ -74,6 +74,12 @@ extension RaceEvent.Kind {
             try w.index(seat, "seat")
             try w.index(target, "target")
         case .raceOver: w.u8(11)
+        case .tacked(let seat):
+            w.u8(12)
+            try w.index(seat, "seat")
+        case .gybed(let seat):
+            w.u8(13)
+            try w.index(seat, "seat")
         }
     }
 
@@ -93,6 +99,8 @@ extension RaceEvent.Kind {
         case 9: self = .disqualified(seat: try r.index(), reason: try r.string(limit: WireLimit.string, "reason"))
         case 10: self = .protest(seat: try r.index(), target: try r.index())
         case 11: self = .raceOver
+        case 12: self = .tacked(seat: try r.index())
+        case 13: self = .gybed(seat: try r.index())
         default: throw WireError.invalidValue("event")
         }
     }

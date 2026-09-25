@@ -291,7 +291,7 @@ public struct EventState: Equatable, Sendable {
             firstFinishTick = min(firstFinishTick ?? event.tick, event.tick)
         case .raceOver:
             isOver = true
-        case .gun, .ocs, .cleared, .started, .foul, .markTouch, .penaltyServed, .rounded, .protest:
+        case .gun, .ocs, .cleared, .started, .foul, .markTouch, .penaltyServed, .rounded, .protest, .tacked, .gybed:
             break
         }
     }

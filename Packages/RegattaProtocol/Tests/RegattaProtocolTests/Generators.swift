@@ -42,6 +42,8 @@ struct Gen {
 
     mutating func tap(seats: Int = 16) -> BoatTap { bool() ? .tackGybe : .protest(target: int(0...(seats - 1))) }
 
+    mutating func boomSide() -> BoomSide { bool() ? .starboard : .port }
+
     mutating func status() -> BoatStatus { [.prestart, .ocs, .racing, .finished, .dsq, .dnf][int(0...5)] }
 
     /// A seat with every field anywhere in its wire range.
@@ -52,13 +54,14 @@ struct Gen {
                         heading: double(-.pi, .pi), speed: double(0, 63.99))
         boat.rudder = double(-1, 1)
         boat.desiredRudder = double(-1, 1)
-        boat.autopilot = bool() ? double(-.pi, .pi) : nil
+        boat.autopilot = bool() ? Autopilot(heading: double(-.pi, .pi), boomSide: boomSide()) : nil
         boat.status = status()
         boat.legIndex = int(0...255)
         boat.roundingStage = int(0...7)
         boat.penaltyTurnsOwed = int(0...7)
         boat.penaltyProgress = double(-31.9, 31.9)
         boat.isTacking = bool()
+        boat.boomSide = boomSide()
         boat.windDirection = double(-.pi, .pi)
         boat.windSpeed = double(0, 15)
         boat.shadow = double(0.6, 1)
@@ -78,9 +81,10 @@ struct Gen {
             WireSeat(
                 x: Int32(int(-(1 << 23)...((1 << 23) - 1))), y: Int32(int(-(1 << 23)...((1 << 23) - 1))),
                 heading: Int16(truncatingIfNeeded: u16()), speed: u16(), rudder: Int16(int(-32_767...32_767)),
-                autopilot: bool() ? Int16(truncatingIfNeeded: u16()) : nil, penaltyProgress: Int16(truncatingIfNeeded: u16()),
-                heldInput: input(), isTacking: bool(), status: status(), penaltyTurnsOwed: UInt8(int(0...7)),
-                roundingStage: UInt8(int(0...7)), legIndex: UInt8(int(0...255))
+                autopilot: bool() ? WireAutopilot(heading: Int16(truncatingIfNeeded: u16()), boomSide: boomSide()) : nil,
+                penaltyProgress: Int16(truncatingIfNeeded: u16()), heldInput: input(), isTacking: bool(), boomSide: boomSide(),
+                status: status(), penaltyTurnsOwed: UInt8(int(0...7)), roundingStage: UInt8(int(0...7)),
+                legIndex: UInt8(int(0...255))
             )
         }
     }
@@ -149,7 +153,9 @@ struct Gen {
         case 8: return .finished(seat: seat, place: int(1...16))
         case 9: return .disqualified(seat: seat, reason: string())
         case 10: return .protest(seat: seat, target: int(0...15))
-        default: return .raceOver
+        case 11: return .raceOver
+        case 12: return .tacked(seat: seat)
+        default: return .gybed(seat: seat)
         }
     }
 
@@ -186,7 +192,7 @@ struct Gen {
         case .snapshot:
             let ack = bool() ? InputAck(seq: u32(), appliedTick: tick(), margin: int(-32_768...32_767)) : nil
             message = .snapshot(Snapshot(seats: wireSeats(int(2...16)), ack: ack))
-        case .event: message = .event(eventKind(int(0...11)))
+        case .event: message = .event(eventKind(int(0...(eventKindCount - 1))))
         case .windKey: message = .windKey(windKey())
         case .pong: message = .pong(Pong(clientTime: u64(), sinceTickMicros: u16()))
         case .raceCancelled:
@@ -213,10 +219,12 @@ func eventKindIndex(_ kind: RaceEvent.Kind) -> Int {
     case .disqualified: 9
     case .protest: 10
     case .raceOver: 11
+    case .tacked: 12
+    case .gybed: 13
     }
 }
 
-let eventKindCount = 12
+let eventKindCount = 14
 
 /// A fleet race with a bot sailing every seat, for real snapshots: starts, OCS, contacts, roundings, finishes.
 func botRace(seats: Int = 16, laps: Int = 1, prestartSeconds: Int = 30, seed: UInt64 = 63,

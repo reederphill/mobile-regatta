@@ -1,5 +1,5 @@
 /// How one boat moves through one tick, from her boat class alone (ADR 0004): momentum, steering,
-/// rudder drag, head-to-wind fall-off and the ease. Pure: no events, no other boats, no rules.
+/// rudder drag, head-to-wind fall-off, the ease, and the boom crossing on a tack or gybe. Pure: no events, no other boats, no rules.
 /// `Race` calls it for every boat every tick; tests call it with a constant `Environment`.
 public enum BoatDynamics {
     /// The part of a boat the dynamics move.
@@ -11,12 +11,15 @@ public enum BoatDynamics {
         public var speed: Double
         /// Actual rudder, −1 … 1.
         public var rudder: Double
+        /// Which side the boom is on.
+        public var boomSide: BoomSide
 
-        public init(position: Vec2 = .zero, heading: Double, speed: Double, rudder: Double = 0) {
+        public init(position: Vec2 = .zero, heading: Double, speed: Double, rudder: Double = 0, boomSide: BoomSide = .port) {
             self.position = position
             self.heading = heading
             self.speed = speed
             self.rudder = rudder
+            self.boomSide = boomSide
         }
     }
 
@@ -69,6 +72,9 @@ public enum BoatDynamics {
     ///   the sail can't draw and the target is 0), and `ease.timeConstant` towards the eased target
     ///   (`ease.speedFraction` of the polar's).
     /// - Rudder drag takes `rudderDrag` of the speed per second at full rudder.
+    /// - The boom crosses (`boomCrosses`) on the tick the bow passes head to wind (a tack), or when she
+    ///   bears away by the lee past the polar's `byTheLeeLimit` (a gybe). By the lee the speed target is
+    ///   the polar mirrored past dead downwind, less `byTheLeePenalty`.
     public static func advance(_ state: State, control: Control, env: Environment, boatClass: BoatClass, dt: Double) -> State {
         let steering = boatClass.steering
         let polar = boatClass.polar
@@ -88,9 +94,17 @@ public enum BoatDynamics {
         }
         s.heading = wrapAngle(s.heading + turn)
 
-        let twa = abs(wrapAngle(env.windDirection - s.heading))
+        let relativeWind = wrapAngle(env.windDirection - s.heading)
+        if boomCrosses(sailingAngle: s.boomSide.sailingAngle(relativeWind: relativeWind), tws: env.windSpeed, polar: polar) != nil {
+            s.boomSide = s.boomSide.opposite
+        }
+
+        let twa = abs(relativeWind)
         let inNoGo = twa < noGoAngle(polar)
         var target = control.sailing && !inNoGo ? polar.speed(twa: twa, tws: env.windSpeed) : 0
+        if BoomSide.isByTheLee(s.boomSide.sailingAngle(relativeWind: relativeWind)) {
+            target *= 1 - polar.byTheLeePenalty
+        }
         let timeConstant: Double
         if control.ease && control.sailing {
             target *= boatClass.ease.speedFraction
@@ -105,6 +119,23 @@ public enum BoatDynamics {
         s.speed = max(0, s.speed)
         s.position += Vec2.heading(s.heading) * s.speed * dt + env.current * dt
         return s
+    }
+
+    /// How the boom crosses.
+    public enum Crossing: Sendable, Equatable {
+        /// The bow passed head to wind.
+        case tack
+        /// She bore away by the lee past the class's limit.
+        case gybe
+    }
+
+    /// Whether the boom crosses at `sailingAngle` (`BoomSide.sailingAngle(relativeWind:)`), in `tws` (m/s).
+    /// With the wind on the boom's side forward of the beam she has passed head to wind: a tack. Aft
+    /// of the beam she is by the lee, and gybes once that's more than `byTheLeeLimit(tws:)`.
+    public static func boomCrosses(sailingAngle: Double, tws: Double, polar: PolarTable) -> Crossing? {
+        guard sailingAngle < 0 else { return nil }
+        if -sailingAngle < .pi / 2 { return .tack }
+        return .pi + sailingAngle > polar.byTheLeeLimit(tws: tws) ? .gybe : nil
     }
 
     /// The no-go zone's edge: the polar's first row above head to wind. Inside it the sail can't draw.
