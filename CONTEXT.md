@@ -97,6 +97,14 @@ _Avoid_: ranked match
 An online race in which the player's result is finished, placed by distance, DSQ or OCS: they stayed in the race. RET never counts, and a cancelled race counts for nothing. Earned liveries and the free-text unlock count completed races.
 _Avoid_: finished race (when DSQ and OCS are meant too)
 
+**Race token**:
+What hands a player one seat in one online race: the race, the seat and an expiry, signed by the server. The client sends it, unread, to join.
+_Avoid_: ticket, invite, session key
+
+**Instant race**:
+A dev-only online race started on request for the clients asking, with bots filling it to ten boats. It exists only on a dev server, for testing; players never see it.
+_Avoid_: quick race, private race
+
 **Practice race**:
 An offline race against bots. Unrated, and needs no account.
 _Avoid_: single player, training
