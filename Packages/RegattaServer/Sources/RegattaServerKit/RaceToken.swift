@@ -23,19 +23,14 @@ public struct RaceToken: Hashable, Sendable {
         self.expiresAt = expiresAt
     }
 
-    /// The token's bytes, signed with `key`.
-    public func signed(with key: SymmetricKey) -> [UInt8] {
-        let body = self.body
+    /// The token's bytes, signed with `key`, or nil if the seat doesn't fit the token's one byte (0…255).
+    public func signed(with key: SymmetricKey) -> [UInt8]? {
+        guard let seat = UInt8(exactly: seat) else { return nil }
+        var body: [UInt8] = [Self.version]
+        withUnsafeBytes(of: raceID.uuid) { body += $0 }
+        body.append(seat)
+        withUnsafeBytes(of: expiresAt.littleEndian) { body += $0 }
         return body + Array(HMAC<SHA256>.authenticationCode(for: body, using: key))
-    }
-
-    private var body: [UInt8] {
-        precondition((0...255).contains(seat), "a seat is 0…255")
-        var bytes: [UInt8] = [Self.version]
-        withUnsafeBytes(of: raceID.uuid) { bytes += $0 }
-        bytes.append(UInt8(seat))
-        withUnsafeBytes(of: expiresAt.littleEndian) { bytes += $0 }
-        return bytes
     }
 
     /// The token `bytes` carry, if `key` signed them and they haven't expired at `now` (Unix seconds).

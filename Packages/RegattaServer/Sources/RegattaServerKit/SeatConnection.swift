@@ -14,7 +14,8 @@ import RegattaProtocol
 /// 3. Everything after goes to `RaceHost.receive(_:from:)`.
 ///
 /// Anything out of turn, or a bad token, closes the connection with a policy-violation close: the
-/// protocol has no join-refused message.
+/// protocol has no join-refused message. So does not being seated within `ServerConfig.handshakeTimeout`
+/// (the server's read loop enforces that).
 struct SeatConnection {
     enum Phase {
         case awaitingHello
@@ -40,6 +41,7 @@ struct SeatConnection {
     }
 
     var isClosed: Bool { if case .closed = phase { true } else { false } }
+    var isSeated: Bool { if case .seated = phase { true } else { false } }
 
     mutating func receive(_ bytes: [UInt8]) async {
         switch phase {
@@ -63,10 +65,8 @@ struct SeatConnection {
             return refuse("undecodable Hello")
         }
         guard Self.canSail(clientSimulationVersion: hello.simulationVersion) else { return updateRequired(.simulationVersion) }
-        // Dev auth: no attestation (#158), no account; data files are checked when #81 resolves them.
-        switch config.auth {
-        case .dev: break
-        }
+        // Dev auth (`config.auth`, the only policy): no attestation (#158), no account; data files are
+        // checked when #81 resolves them.
         send(.helloAck(HelloAck(serverBuild: config.serverBuild)))
         phase = .awaitingJoin
     }

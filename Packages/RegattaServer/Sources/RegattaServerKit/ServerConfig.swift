@@ -59,7 +59,7 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | variable | default | |
 /// |---|---|---|
 /// | `ENV` | none | must be `dev` |
-/// | `HOST` | `0.0.0.0` | address to bind |
+/// | `HOST` | `127.0.0.1` | address to bind; the container sets `0.0.0.0` |
 /// | `PORT` | `8080` | 0 picks a free port |
 /// | `RACE_TOKEN_SECRET` | random per process | HMAC key for race tokens |
 /// | `RACE_TOKEN_TTL` | `600` | seconds a race token joins for |
@@ -74,6 +74,8 @@ public struct ServerConfig: Sendable {
     public var tokenLifetime: TimeInterval
     public var serverBuild: String
     public var maxRaces: Int
+    /// How long a race connection has to send `Hello` and `JoinRace` before it's closed (policy violation).
+    public var handshakeTimeout: Duration = .seconds(10)
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
@@ -104,7 +106,7 @@ public struct ServerConfig: Sendable {
         } else {
             key = SymmetricKey(size: .bits256)
         }
-        return ServerConfig(environment: environment, auth: auth, host: env["HOST"] ?? "0.0.0.0", port: port,
+        return ServerConfig(environment: environment, auth: auth, host: env["HOST"] ?? "127.0.0.1", port: port,
                             tokenKey: key, tokenLifetime: TimeInterval(lifetime),
                             serverBuild: env["SERVER_BUILD"] ?? "dev", maxRaces: maxRaces)
     }

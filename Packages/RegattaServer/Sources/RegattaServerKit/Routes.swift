@@ -101,15 +101,19 @@ public struct RequestHandler: Sendable {
         } catch {
             return HTTPReply(.badRequest, error: "\(error)")
         }
+        let expiry = now() + Int64(config.tokenLifetime)
+        let seats = session.humanSeats.sorted()
+        var tokens: [String] = []
+        for seat in seats {
+            guard let token = RaceToken(raceID: session.id, seat: seat, expiresAt: expiry).signed(with: config.tokenKey) else {
+                return HTTPReply(.internalServerError, error: "seat \(seat) doesn't fit a race token")
+            }
+            tokens.append(Data(token).base64EncodedString())
+        }
         do {
             try await registry.start(session)
         } catch {
             return HTTPReply(.serviceUnavailable, error: "too many races")
-        }
-        let expiry = now() + Int64(config.tokenLifetime)
-        let seats = session.humanSeats.sorted()
-        let tokens = seats.map {
-            Data(RaceToken(raceID: session.id, seat: $0, expiresAt: expiry).signed(with: config.tokenKey)).base64EncodedString()
         }
         return HTTPReply(.created, json: InstantRaceResponse(
             raceID: session.id.uuidString, fleetSize: session.setup.fleetSize, bots: session.setup.fleetSize - seats.count,

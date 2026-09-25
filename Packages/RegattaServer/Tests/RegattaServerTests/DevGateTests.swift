@@ -19,6 +19,9 @@ struct DevGateTests {
         let config = try ServerConfig.load(from: ["ENV": "dev", "PORT": "0"])
         #expect(config.environment == .dev)
         #expect(config.port == 0)
+        // Loopback unless told otherwise: the container sets HOST=0.0.0.0.
+        #expect(config.host == "127.0.0.1")
+        #expect(try ServerConfig.load(from: ["ENV": "dev", "HOST": "0.0.0.0"]).host == "0.0.0.0")
 
         // Even a config built by hand can't start a server outside dev.
         var production = ServerConfig.dev()
@@ -49,8 +52,14 @@ struct DevGateTests {
             process.standardError = errors
             process.standardOutput = Pipe()
             try process.run()
-            let printed = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            // A watchdog: if it started after all, it would never exit, so fail rather than hang.
+            let deadline = Date().addingTimeInterval(10)
+            while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+            let started = process.isRunning
+            if started { process.terminate() }
             process.waitUntilExit()
+            let printed = String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            #expect(!started, "RegattaServer was still running after 10 s with ENV=\(env ?? "(unset)")")
             #expect(process.terminationStatus == 78)
             #expect(printed.contains("refuses to start unless ENV=dev"))
         }

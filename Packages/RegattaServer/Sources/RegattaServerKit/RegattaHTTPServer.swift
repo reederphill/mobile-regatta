@@ -113,12 +113,21 @@ public final class RegattaHTTPServer: Sendable {
     private static func serveRace(_ channel: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>, handler: RequestHandler) async throws {
         let transport = WebSocketSeatTransport(channel: channel.channel)
         var connection = SeatConnection(config: handler.config, registry: handler.registry, transport: transport)
+        // A connection that never sends Hello and JoinRace mustn't hold its socket and task for ever.
+        let timeout = handler.config.handshakeTimeout
+        let handshakeDeadline = Task {
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            transport.close(code: .policyViolation, reason: "no JoinRace in time")
+        }
+        defer { handshakeDeadline.cancel() }
         do {
             try await channel.executeThenClose { inbound, outbound in
                 for try await frame in inbound {
                     switch frame.opcode {
                     case .binary:
                         await connection.receive(Array(buffer: frame.unmaskedData))
+                        if connection.isSeated { handshakeDeadline.cancel() }
                         if connection.isClosed { return }
                     case .ping:
                         try await outbound.write(WebSocketFrame(fin: true, opcode: .pong, data: frame.unmaskedData))

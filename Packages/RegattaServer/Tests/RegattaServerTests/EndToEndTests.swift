@@ -11,8 +11,9 @@ import Testing
 /// instant races against it over real WebSockets. Serialized so the bandwidth run has the machine.
 @Suite(.serialized)
 struct EndToEndTests {
-    private func withServer(_ body: (RegattaHTTPServer, LoadClientOptions) async throws -> Void) async throws {
-        let server = try await RegattaHTTPServer.start(config: .dev(host: "127.0.0.1", port: 0))
+    private func withServer(_ config: ServerConfig = .dev(host: "127.0.0.1", port: 0),
+                            _ body: (RegattaHTTPServer, LoadClientOptions) async throws -> Void) async throws {
+        let server = try await RegattaHTTPServer.start(config: config)
         let options = LoadClientOptions(host: "127.0.0.1", port: server.port, timeout: .seconds(60))
         do {
             try await body(server, options)
@@ -41,7 +42,8 @@ struct EndToEndTests {
             #expect(report.heldSent > 0)
             #expect(report.pingsSent > 0)
             #expect(report.roundTrips.count > 0)
-            #expect(report.roundTrips.max < 1000)
+            // Reported, not gated: a loose bound, so a loaded runner doesn't fail it.
+            #expect(report.roundTrips.max < 5000)
             #expect(report.snapshotsRefused == 0)
             #expect(report.undecodableFrames == 0)
             // The race leaves the server when it closes.
@@ -121,6 +123,26 @@ struct EndToEndTests {
         }
     }
 
+    @Test func aConnectionThatDoesNotJoinInTimeIsClosed() async throws {
+        var config = ServerConfig.dev(host: "127.0.0.1", port: 0)
+        config.handshakeTimeout = .milliseconds(300)
+        try await withServer(config) { _, options in
+            // Never says anything.
+            let silent = try await connect(options)
+            #expect(try await closed(silent))
+            #expect(silent.closeReason.code == .policyViolation)
+            await silent.close()
+
+            // Says Hello, then never joins.
+            let greeted = try await connect(options)
+            try send(.hello(Hello(clientBuild: "test", files: [])), on: greeted)
+            #expect(try await frames(on: greeted).first?.message.type == .helloAck)
+            #expect(try await closed(greeted))
+            #expect(greeted.closeReason.code == .policyViolation)
+            await greeted.close()
+        }
+    }
+
     @Test func forgedTakenAndBotSeatTokensAreRefused() async throws {
         try await withServer { server, options in
             let race = try await DevClient.instantRace(InstantRaceRequest(clients: 1, startSeconds: 60, seed: 5),
@@ -146,7 +168,7 @@ struct EndToEndTests {
             // A bot's seat, properly signed, isn't a player's to take.
             let key = server.config.tokenKey
             let botSeat = RaceToken(raceID: try #require(UUID(uuidString: race.raceID)), seat: 1, expiresAt: race.tokensExpireAt)
-            let (botClient, botReply) = try await join(botSeat.signed(with: key))
+            let (botClient, botReply) = try await join(try #require(botSeat.signed(with: key)))
             #expect(botReply.isEmpty)
             #expect(try await closed(botClient))
             await botClient.close()

@@ -209,7 +209,7 @@ there (404 otherwise). It reads:
 | variable | default | |
 |---|---|---|
 | `ENV` | none | must be `dev` |
-| `HOST`, `PORT` | `0.0.0.0`, `8080` | where it listens; `PORT=0` picks a free port |
+| `HOST`, `PORT` | `127.0.0.1`, `8080` | where it listens (the container sets `HOST=0.0.0.0`); `PORT=0` picks a free port |
 | `RACE_TOKEN_SECRET` | random per process | HMAC key for race tokens, at least 16 bytes |
 | `RACE_TOKEN_TTL` | `600` | seconds a race token joins for |
 | `SERVER_BUILD` | `dev` | reported in `HelloAck` and `/health` |
@@ -227,7 +227,7 @@ non-zero unless every client sailed to the race's close; `--check-bandwidth` als
 
 ```bash
 cd Packages/RegattaServer
-ENV=dev swift run RegattaServer                    # listening on 0.0.0.0:8080
+ENV=dev swift run RegattaServer                    # listening on 127.0.0.1:8080
 swift run regatta-loadclient --clients 16 --race-seconds 20 --start-seconds 5 --check-bandwidth
 curl localhost:8080/health
 ```
@@ -242,9 +242,12 @@ podman stop regatta
 ```
 
 Bandwidth: with 16 boats a client receives about 3.5 KB/s (a snapshot of about 350 bytes 10 times a second,
-plus pongs and events) and joins in about 0.4 KB. A race costs the join plus that rate times its length from the
-join to the close, so under 1 MB for races up to about 4.5 minutes; an 8-minute race with a 60 s sequence is
-about 1.9 MB. Fewer boats send less: about 2.3 KB/s with 10.
+plus pongs and events) and joins in about 0.4 KB. Fewer boats send less: about 2.3 KB/s with 10. The 5 KB/s
+budget (#27) holds. The 1 MB per race budget is measured only on the short e2e races (8 to 20 s after the
+start sequence), where it passes trivially. A race costs the join plus that rate times its length from the join to
+the close, so it extrapolates to about 1.7 to 1.9 MB for an 8-minute race (with a 60 s sequence): at the
+measured rate 1 MB holds only to about 4.5 minutes. The two budgets disagree for real race lengths; which one
+gives way (or whether the snapshot rate changes) is an open question for the product owner.
 
 Run the app's unit tests (`RegattaTests`) and UI tests (`RegattaUITests`) on the simulator:
 

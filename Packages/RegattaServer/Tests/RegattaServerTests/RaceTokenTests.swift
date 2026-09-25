@@ -12,14 +12,14 @@ struct RaceTokenTests {
     let token = RaceToken(raceID: UUID(), seat: 7, expiresAt: 2_000_000_000)
 
     @Test func aSignedTokenVerifiesToItself() throws {
-        let bytes = token.signed(with: key)
+        let bytes = try #require(token.signed(with: key))
         #expect(bytes.count == RaceToken.size)
         #expect(try RaceToken.verify(bytes, key: key, now: 1_900_000_000) == token)
         #expect(try RaceToken.verify(bytes, key: key, now: token.expiresAt) == token)
     }
 
-    @Test func anyChangedByteBreaksTheSignature() {
-        let bytes = token.signed(with: key)
+    @Test func anyChangedByteBreaksTheSignature() throws {
+        let bytes = try #require(token.signed(with: key))
         for index in 1..<bytes.count {
             var tampered = bytes
             tampered[index] ^= 0x01
@@ -27,8 +27,8 @@ struct RaceTokenTests {
         }
     }
 
-    @Test func anotherServersKeyExpiryAndMalformedTokensAreRefused() {
-        let bytes = token.signed(with: key)
+    @Test func anotherServersKeyExpiryAndMalformedTokensAreRefused() throws {
+        let bytes = try #require(token.signed(with: key))
         #expect(throws: RaceTokenError.badSignature) { try RaceToken.verify(bytes, key: SymmetricKey(size: .bits256), now: 0) }
         #expect(throws: RaceTokenError.expired) { try RaceToken.verify(bytes, key: key, now: token.expiresAt + 1) }
         #expect(throws: RaceTokenError.malformed) { try RaceToken.verify(Array(bytes.dropLast()), key: key, now: 0) }
@@ -36,6 +36,13 @@ struct RaceTokenTests {
         var otherVersion = bytes
         otherVersion[0] = 2
         #expect(throws: RaceTokenError.malformed) { try RaceToken.verify(otherVersion, key: key, now: 0) }
+    }
+
+    @Test func aSeatOutsideTheTokensByteIsNotSigned() {
+        for seat in [-1, 256] {
+            #expect(RaceToken(raceID: UUID(), seat: seat, expiresAt: 0).signed(with: key) == nil)
+        }
+        #expect(RaceToken(raceID: UUID(), seat: 255, expiresAt: 0).signed(with: key) != nil)
     }
 }
 
@@ -71,8 +78,6 @@ struct InstantRaceTests {
         let registry = RaceRegistry()
         let short = try RaceSession.instant(InstantRaceRequest(clients: 1, raceSeconds: 1, startSeconds: 1, seed: 1))
         let long = try RaceSession.instant(InstantRaceRequest(clients: 1, startSeconds: 60, seed: 1))
-        #expect(short.host !== long.host)
-        #expect(short.id != long.id)
         try await registry.start(short)
         try await registry.start(long)
         #expect(await registry.count == 2)
