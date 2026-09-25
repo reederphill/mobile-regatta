@@ -40,6 +40,29 @@ import RegattaCore
     }
 }
 
+/// #79 (#15): the HUD's wind readouts show the wind over the ground, not the wind she sails in.
+@MainActor @Suite struct HUDWindTests {
+    @Test func windReadoutsShowTheWindOverTheGround() {
+        let driver = PracticeDriver(config: RaceDriverTests.config)
+        let frame = driver.currentFrame
+        let me = driver.myBoatIndex
+        var boats = frame.boats
+        boats[me].windOverGround = Wind(direction: deg2rad(20), speed: 5)
+        boats[me].sailingWind = Wind(direction: deg2rad(-10), speed: 3)
+        boats[me].apparentWind = Wind(direction: deg2rad(-40), speed: 4)
+        boats[me].shadow = 1
+        let moved = TickFrame(tick: frame.tick, boats: boats, standings: frame.standings, wind: frame.wind, isOver: frame.isOver)
+        let world = RenderWorld(course: driver.course, boatClass: driver.boatClass, myBoatIndex: me,
+                                previous: moved, current: moved, alpha: 1)
+        let hud = HUDState(world: world)
+        #expect(abs(hud.windDirection - deg2rad(20)) < 1e-12)
+        #expect(abs(hud.windKnots - 5 * 1.943_84) < 1e-9)
+        #expect(abs(hud.windShiftDegrees - rad2deg(wrapAngle(deg2rad(20) - driver.course.axis))) < 1e-9)
+        // Her wind angle is the one she sails at: the sailing wind's.
+        #expect(abs(hud.twaDegrees - rad2deg(boats[me].twa)) < 1e-9)
+    }
+}
+
 @MainActor @Suite struct TickClockTests {
     /// Ticks run for `seconds` of real time at `fps`.
     private func ticks(fps: Int, seconds: Int, timescale: Double = 1) -> Int {
