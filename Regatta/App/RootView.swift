@@ -18,6 +18,8 @@ struct RaceSettings {
 struct RootView: View {
     @State private var settings = RaceSettings()
     @State private var session: GameSession?
+    /// An online race, from joining to its close (#68).
+    @State private var online: OnlineLaunch?
     @State private var checkedLaunchArguments = false
     /// Why the `-fixture` launch couldn't start, shown instead of the menu so a UI test sees it.
     @State private var fixtureError: String?
@@ -27,7 +29,7 @@ struct RootView: View {
     var body: some View {
         content
             // #108's AppModel phase takes this over.
-            .onChange(of: session != nil, initial: true) { _, racing in sceneState.isRaceSequenceShowing = racing }
+            .onChange(of: session != nil || online != nil, initial: true) { _, racing in sceneState.isRaceSequenceShowing = racing }
     }
 
     @ViewBuilder private var content: some View {
@@ -42,12 +44,39 @@ struct RootView: View {
                 onExit: { self.session = nil }
             )
             .id(ObjectIdentifier(session))
+        } else if let online {
+            OnlineLaunchView(launch: online, onRestart: startOnlineRace, onExit: { self.online = nil })
+                .id(ObjectIdentifier(online))
         } else {
-            MenuView(settings: $settings) {
+            MenuView(settings: $settings, onStart: {
                 session = makeSession(launchOptions.raceConfig(from: settings))
-            }
+            }, onRaceOnline: onlineRaceStarter)
             .onAppear(perform: autostartIfRequested)
         }
+    }
+
+    /// The menu's "Race online (dev)" (#68): Debug builds only, until there is matchmaking.
+    private var onlineRaceStarter: (() -> Void)? {
+        #if DEBUG
+        startOnlineRace
+        #else
+        nil
+        #endif
+    }
+
+    /// A new online race: in a Debug build, the dev server's instant race on the menu's host or
+    /// `-onlineHost`, with `-raceSeconds` and `-startSeconds` if given.
+    private func startOnlineRace() {
+        #if DEBUG
+        let server = RaceServer(address: launchOptions.onlineHost
+            ?? UserDefaults.standard.string(forKey: RaceServer.addressDefaultsKey) ?? RaceServer.defaultAddress)
+        let (raceSeconds, startSeconds) = (launchOptions.raceSeconds, launchOptions.startSeconds)
+        let launch = OnlineLaunch(server: server) {
+            try await DevInstantRace.ticket(server: server, raceSeconds: raceSeconds, startSeconds: startSeconds)
+        }
+        online = launch
+        Task { await launch.start() }
+        #endif
     }
 
     private func makeSession(_ config: RaceConfig) -> GameSession {
@@ -63,6 +92,10 @@ struct RootView: View {
         }
         if let name = launchOptions.fixture {
             startFixture(named: name)
+            return
+        }
+        if launchOptions.online {
+            startOnlineRace()
             return
         }
         guard let config = launchOptions.launchRaceConfig(from: settings) else { return }

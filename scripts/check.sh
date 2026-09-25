@@ -7,7 +7,8 @@
 #
 # What a change reaches, from the files changed since its merge base with --base (default origin/main),
 # committed or not: RegattaCore reaches every package, and the app through its sources; RegattaProtocol
-# reaches RegattaClient and RegattaServer; RegattaClient reaches RegattaServer (its load client). --all
+# reaches RegattaClient and RegattaServer; RegattaClient reaches RegattaServer (its load client); RegattaProtocol
+# and RegattaClient reach the app through their sources too (the online client, #68). --all
 # checks everything; --packages names the packages instead (no app unless it changed); --no-app skips the app.
 #
 # Every package builds into one scratch directory, .build/check, so shared dependencies build once.
@@ -74,7 +75,9 @@ else
             scripts/check.sh | scripts/lib.sh) core=1 protocol=1 client=1 server=1 app=1 ;;
             Packages/RegattaCore/Sources/* | Packages/RegattaCore/Package.*) core=1 app=1 ;;
             Packages/RegattaCore/*) core=1 ;;
+            Packages/RegattaProtocol/Sources/* | Packages/RegattaProtocol/Package.*) protocol=1 app=1 ;;
             Packages/RegattaProtocol/*) protocol=1 ;;
+            Packages/RegattaClient/Sources/* | Packages/RegattaClient/Package.*) client=1 app=1 ;;
             Packages/RegattaClient/*) client=1 ;;
             Packages/RegattaServer/*) server=1 ;;
             Regatta/* | RegattaTests/* | RegattaUITests/* | Regatta.xcodeproj/*) app=1 ;;
