@@ -4,6 +4,7 @@ import Foundation
 /// A race handed to one client (#67): which race, which seat, until when, signed by the server so a client
 /// can't forge or alter one. The client carries it opaquely, in `JoinRace` (#18). For now the server that
 /// signs it is the server that races it; the race session service (#143) will sign them later.
+/// Not single-use, by design: the same token rejoins after a drop, so claiming its seat must be atomic.
 ///
 /// Wire layout, 58 bytes: `version` uint8 (1) | race id, 16 bytes | seat uint8 | expiry, Unix seconds,
 /// int64 little-endian | HMAC-SHA256 of the 26 bytes before it, 32 bytes.

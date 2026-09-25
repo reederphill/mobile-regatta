@@ -18,6 +18,9 @@ public actor RaceSession {
     private let clock: any HostClock
     /// The connection holding each seat, so a stale connection's goodbye can't drop a newer one.
     private var holders: [Int: ObjectIdentifier] = [:]
+    /// Seats a join is claiming right now. `join` suspends on the host, and the actor is reentrant, so a
+    /// second join for the seat (one token, two sockets) is refused here rather than racing the first.
+    private var claiming: Set<Int> = []
 
     public init(id: UUID = UUID(), setup: RaceSetup, windSeed: WindSeed, closeAtTick: Int? = nil,
                 clock: any HostClock = SystemClock(), options: RaceHostOptions = RaceHostOptions()) {
@@ -71,9 +74,11 @@ public actor RaceSession {
     }
 
     /// Seats `transport` in `seat`: the host sends it the race. Refused for a bot seat, a seat another
-    /// connection holds, or a closed race. (Taking over a seat from a live connection is #66's.)
+    /// connection holds or another join is claiming, or a closed race. (Taking over a seat from a live connection is #66's.)
     public func join(seat: Int, transport: any SeatTransport) async throws(JoinRefusal) {
         guard humanSeats.contains(seat) else { throw .notAHumanSeat }
+        guard claiming.insert(seat).inserted else { throw .seatTaken }
+        defer { claiming.remove(seat) }
         guard await host.outcome == nil else { throw .raceClosed }
         guard await !host.isAttached(seat: seat) else { throw .seatTaken }
         guard await host.attach(seat: seat, transport: transport) else { throw .raceClosed }
