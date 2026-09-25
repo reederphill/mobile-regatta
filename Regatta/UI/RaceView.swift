@@ -22,10 +22,32 @@ struct RaceView: View {
         }
     }
 
-    private var race: some View {
+    @ViewBuilder private var race: some View {
+        if session.driver.isFrozen {
+            fixture
+        } else {
+            live
+        }
+    }
+
+    private var scene: some View {
+        SpriteView(scene: session.scene, preferredFramesPerSecond: 120, options: [.ignoresSiblingOrder], debugOptions: debugOptions)
+            .ignoresSafeArea()
+    }
+
+    /// A frozen render fixture (#62): the scene alone, no HUD or controls, so a UI test's screenshot of
+    /// `render-fixture` is the render and nothing else.
+    private var fixture: some View {
+        scene
+            .accessibilityElement()
+            .accessibilityLabel("Render fixture")
+            .accessibilityIdentifier("render-fixture")
+            .persistentSystemOverlays(.hidden)
+    }
+
+    private var live: some View {
         ZStack {
-            SpriteView(scene: session.scene, preferredFramesPerSecond: 120, options: [.ignoresSiblingOrder], debugOptions: debugOptions)
-                .ignoresSafeArea()
+            scene
 
             HUDView(hud: session.hud, messages: session.messages)
                 .allowsHitTesting(false)
