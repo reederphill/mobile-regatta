@@ -9,7 +9,7 @@
 | 2 | CI on the PR | GitHub Actions | before merge; required |
 | 3 | `scripts/linux-test.sh` | local podman | only if CI can't run, or a new golden row is needed |
 
-- `check.sh`: compiles every affected package + tests (+ app tests if reached), then tests, then app unit tests. Affected = changed since merge base with `origin/main`. Tests build at `-O` (the simulation is ~15x faster); debug = release digests are CI's job. Each package has its own scratch dir, and check.sh fails a package if any of its test targets didn't run.
+- `check.sh`: a few minutes. Compiles every affected package + tests (+ the app and its tests if reached), then tests only the packages the change touched. Downstream packages' tests and the app's unit tests are CI's (`--all` runs them locally). Affected = reached from files changed since merge base with `origin/main`. Tests build at `-O` (the simulation is ~15x faster); debug = release digests are CI's job. Each package has its own scratch dir, and check.sh fails a package if any of its test targets didn't run.
 - CI: Linux golden + RegattaBots digests (debug/release), Linux build of every package, macOS package tests, digest stability, app unit + UI tests. Skips jobs the change can't reach.
 - Golden / Linux: once, before merge, in CI. Never in the edit loop.
 

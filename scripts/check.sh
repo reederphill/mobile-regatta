@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The local gate, fastest failure first: compile every package the change reaches with its tests (and the
-# app's tests, if it reaches the app), then run the packages' tests, then the app's unit tests. The golden and
-# Linux run in CI before merge (scripts/linux-test.sh locally).
+# The local gate, kept to a few minutes: compile every package the change reaches with its tests (and the
+# app with its tests, if it reaches the app), then run the tests of the packages the change touched. The
+# tests of the packages downstream of them, the app's tests, the golden and Linux run in CI before merge
+# (--all runs every test here; scripts/linux-test.sh runs Linux).
 #
 #   scripts/check.sh [--base <ref>] [--all] [--packages "<names>"] [--no-app] [--force]
 #   scripts/check.sh --status [--rev <commit>] [--base <ref>] [--all] [--packages "<names>"] [--no-app]
@@ -10,7 +11,8 @@
 # committed or not: RegattaCore reaches every package, and the app through its sources; RegattaProtocol
 # reaches RegattaClient and RegattaServer; RegattaClient reaches RegattaServer (its load client); RegattaProtocol
 # and RegattaClient reach the app through their sources too (the online client, #68). --all
-# checks everything; --packages names the packages instead (no app unless it changed); --no-app skips the app.
+# builds and tests everything; --packages builds and tests the named packages instead (no app); --no-app skips
+# the app.
 #
 # Tests are built optimized (-O): the simulation runs about 15x faster than at -Onone, and the tests are mostly
 # simulation. Debug and release digests are held equal in CI (check-digest-stable.sh, the Linux job).
@@ -19,10 +21,10 @@
 # the scratch directory, not the root package, so packages sharing one ran another package's tests. After each
 # package's tests, check.sh confirms that every one of its test targets ran.
 #
-# A passed test step is recorded under the git common dir (shared by every worktree of the clone), keyed by the
+# A passed build or test step is recorded under the git common dir (shared by every worktree of the clone), keyed by the
 # content of what it depends on: its package and the packages below it (the app: its sources, tests and
 # project, and the packages it links), check.sh itself, the Xcode version and, for the app, the destination.
-# A step whose key has passed is skipped with its build, so a rebase or a commit elsewhere in the tree doesn't
+# A step whose key has passed is skipped (a passed test with its build), so a rebase or a commit elsewhere in the tree doesn't
 # rerun it; --force reruns it. Each record keeps the names of the tests that passed, in
 # check-passed/<key>.tests. --status prints what has passed for the working tree (or --rev's commit) without
 # running anything, and exits 1 if anything the change reaches hasn't.
@@ -92,33 +94,38 @@ changed_files() {
     fi
 }
 
+# Built: what the change reaches. Tested: what it touched (the t_ flags); everything with --all or --packages.
 core=0 protocol=0 client=0 server=0 app=0
+t_core=0 t_protocol=0 t_client=0 t_server=0 t_app=0
 if (( all )); then
     core=1 protocol=1 client=1 server=1 app=1
+    t_core=1 t_protocol=1 t_client=1 t_server=1 t_app=1
 elif [[ -n "$explicit" ]]; then
     for package in $explicit; do
         case "$package" in
-            RegattaCore) core=1 ;;
-            RegattaProtocol) protocol=1 ;;
-            RegattaClient) client=1 ;;
-            RegattaServer) server=1 ;;
+            RegattaCore) core=1 t_core=1 ;;
+            RegattaProtocol) protocol=1 t_protocol=1 ;;
+            RegattaClient) client=1 t_client=1 ;;
+            RegattaServer) server=1 t_server=1 ;;
             *) echo "check.sh: unknown package $package" >&2; exit 2 ;;
         esac
     done
 elif ! merge_base="$(git merge-base "$base" "${rev:-HEAD}" 2>/dev/null)"; then
     echo "check.sh: no merge base with $base; checking everything"
     core=1 protocol=1 client=1 server=1 app=1
+    t_core=1 t_protocol=1 t_client=1 t_server=1 t_app=1
 else
     while IFS= read -r file; do
         case "$file" in
-            scripts/check.sh | scripts/lib.sh) core=1 protocol=1 client=1 server=1 app=1 ;;
-            Packages/RegattaCore/Sources/* | Packages/RegattaCore/Package.*) core=1 app=1 ;;
-            Packages/RegattaCore/*) core=1 ;;
-            Packages/RegattaProtocol/Sources/* | Packages/RegattaProtocol/Package.*) protocol=1 app=1 ;;
-            Packages/RegattaProtocol/*) protocol=1 ;;
-            Packages/RegattaClient/Sources/* | Packages/RegattaClient/Package.*) client=1 app=1 ;;
-            Packages/RegattaClient/*) client=1 ;;
-            Packages/RegattaServer/*) server=1 ;;
+            scripts/check.sh | scripts/lib.sh) core=1 protocol=1 client=1 server=1 app=1
+                t_core=1 t_protocol=1 t_client=1 t_server=1 ;;
+            Packages/RegattaCore/Sources/* | Packages/RegattaCore/Package.*) core=1 t_core=1 app=1 ;;
+            Packages/RegattaCore/*) core=1 t_core=1 ;;
+            Packages/RegattaProtocol/Sources/* | Packages/RegattaProtocol/Package.*) protocol=1 t_protocol=1 app=1 ;;
+            Packages/RegattaProtocol/*) protocol=1 t_protocol=1 ;;
+            Packages/RegattaClient/Sources/* | Packages/RegattaClient/Package.*) client=1 t_client=1 app=1 ;;
+            Packages/RegattaClient/*) client=1 t_client=1 ;;
+            Packages/RegattaServer/*) server=1 t_server=1 ;;
             Regatta/* | RegattaTests/* | RegattaUITests/* | Regatta.xcodeproj/*) app=1 ;;
         esac
     done < <(changed_files)
@@ -126,7 +133,7 @@ else
     (( protocol )) && client=1 && server=1
     (( client )) && server=1
 fi
-(( no_app )) && app=0
+(( no_app )) && app=0 t_app=0
 
 packages=()
 (( core )) && packages+=(RegattaCore)
@@ -154,11 +161,11 @@ inputs() {
 }
 toolchain="$(xcodebuild -version 2>/dev/null | tr '\n' ' ')"
 
-# The record key of a unit's test step: the hash of everything the step's result depends on.
+# The record key of a unit's build or test step: the hash of everything the step's result depends on.
 key() {
-    local unit=$1 path
+    local action=$1 unit=$2 path
     {
-        echo "test $unit"
+        echo "$action $unit"
         echo "$toolchain"
         [[ "$unit" == app ]] && echo "$destination"
         for path in scripts/check.sh scripts/lib.sh $(inputs "$unit"); do
@@ -166,18 +173,34 @@ key() {
         done
     } | git hash-object --stdin
 }
-passed() { (( ! force )) && [[ -f "$records/$(key "$1")" ]]; }
+passed() { (( ! force )) && [[ -f "$records/$(key "$1" "$2")" ]]; }
 
 units=(${packages[@]+"${packages[@]}"})
 (( app )) && units+=(app)
+# Whether this run tests the unit, or only builds it.
+tested() {
+    case "$1" in
+        RegattaCore) (( t_core )) ;;
+        RegattaProtocol) (( t_protocol )) ;;
+        RegattaClient) (( t_client )) ;;
+        RegattaServer) (( t_server )) ;;
+        app) (( t_app )) ;;
+    esac
+}
+# The step a unit's result rests on: its test when tested, else its build.
+action() { tested "$1" && echo test || echo build; }
 
 if (( status_only )); then
     missing=0
     for unit in "${units[@]}"; do
-        if passed "$unit"; then
-            echo "passed   test $unit ($(wc -l < "$records/$(key "$unit").tests" | tr -d ' ') tests: $records/$(key "$unit").tests)"
+        a="$(action "$unit")"
+        if passed test "$unit"; then
+            k="$(key test "$unit")"
+            echo "passed   test $unit ($(wc -l < "$records/$k.tests" | tr -d ' ') tests: $records/$k.tests)"
+        elif [[ "$a" == build ]] && passed build "$unit"; then
+            echo "passed   build $unit (its tests are CI's)"
         else
-            echo "not run  test $unit"
+            echo "not run  $a $unit"
             missing=1
         fi
     done
@@ -206,12 +229,12 @@ step() {
     echo "== PASS $label ($((SECONDS - start)) s)"
 }
 
-# Records a unit's passed test step with the names of the tests that ran.
+# Records a unit's passed build or test step; a test's with the names of the tests that ran.
 record() {
-    local unit=$1 tests=$2 k
-    k="$(key "$unit")"
-    cp "$tests" "$records/$k.tests"
-    printf 'test %s\ntree %s\n' "$unit" "$tree" > "$records/$k"
+    local action=$1 unit=$2 tests=${3:-} k
+    k="$(key "$action" "$unit")"
+    [[ -n "$tests" ]] && cp "$tests" "$records/$k.tests"
+    printf '%s %s\ntree %s\n' "$action" "$unit" "$tree" > "$records/$k"
 }
 
 # The test names in a Swift Testing xUnit report, one "Target.Suite/test" per line.
@@ -235,8 +258,10 @@ check_targets_ran() {
 
 todo=()
 for unit in "${units[@]}"; do
-    if passed "$unit"; then
+    if passed test "$unit"; then
         echo "== test $unit: passed before on this content, skipped with its build"
+    elif ! tested "$unit" && passed build "$unit"; then
+        echo "== build $unit: passed before on this content, skipped (its tests are CI's)"
     else
         todo+=("$unit")
     fi
@@ -256,16 +281,18 @@ for unit in "${todo[@]}"; do
         step "build $unit" build swift build --build-tests --package-path "Packages/$unit" \
             --scratch-path "$scratch/$unit" "${optimize[@]}"
     fi
+    record build "$unit"
 done
 for unit in "${todo[@]}"; do
     [[ "$unit" == app ]] && continue
+    tested "$unit" || continue
     step "test $unit" build swift test --package-path "Packages/$unit" --scratch-path "$scratch/$unit" \
         "${optimize[@]}" --xunit-output "$reports/$unit.xml"
     xunit_tests "$reports/$unit"*.xml > "$reports/$unit.tests"
     check_targets_ran "$unit" "$reports/$unit.tests" || { echo "check.sh: FAIL test $unit" >&2; exit 1; }
-    record "$unit" "$reports/$unit.tests"
+    record test "$unit" "$reports/$unit.tests"
 done
-if [[ " ${todo[*]} " == *" app "* ]]; then
+if [[ " ${todo[*]} " == *" app "* ]] && tested app; then
     step "test app" simulator "${app_build[@]}" test-without-building -resultBundlePath "$reports/app.xcresult"
     xcrun xcresulttool get test-results tests --path "$reports/app.xcresult" | python3 -c '
 import json, sys
@@ -277,6 +304,6 @@ def walk(node, suite):
 for node in json.load(sys.stdin)["testNodes"]:
     walk(node, "")
 ' | sort -u > "$reports/app.tests"
-    record app "$reports/app.tests"
+    record test app "$reports/app.tests"
 fi
 echo "check.sh: all passed"
