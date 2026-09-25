@@ -116,7 +116,7 @@ final class FixtureDriver: RaceDriver {
 
     let myBoatIndex: Int
     let course: Course
-    let polar: Polar
+    let boatClass: BoatClass
     let isPausable = false
     let isFrozen = true
     let roster: FleetRoster
@@ -137,7 +137,7 @@ final class FixtureDriver: RaceDriver {
         let setup = log.header.setup
         myBoatIndex = setup.seats.firstIndex(of: .human) ?? 0
         course = race.course
-        polar = race.polar
+        boatClass = race.boatClass
         roster = FleetRoster(setup: setup)
         currentFrame = TickFrame(race: race)
     }
