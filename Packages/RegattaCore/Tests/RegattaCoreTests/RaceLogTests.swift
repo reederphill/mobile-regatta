@@ -244,11 +244,11 @@ enum ScriptedLog {
             let now = race.boats[0].autopilot != nil
             if now && !engaged { autopilotStarts.append(race.tick) }
             engaged = now
-            protests += race.drainEvents().filter { $0.kind == .protest(seat: 0, target: 1) }
+            protests += race.drainEvents().filter { $0.kind == .protestRecorded(seat: 0, target: 1) }
         }
         #expect(autopilotStarts == [t])
         #expect(!engaged, "the tack finished and wasn't started again")
-        #expect(protests == [RaceEvent(tick: t, kind: .protest(seat: 0, target: 1))])
+        #expect(protests == [RaceEvent(tick: t, kind: .protestRecorded(seat: 0, target: 1))])
         #expect(try #require(race.log).inputs == [
             InputRecord(tick: t, seat: 0, kind: .tap(.tackGybe)),
             InputRecord(tick: t, seat: 0, kind: .tap(.protest(target: 1))),
