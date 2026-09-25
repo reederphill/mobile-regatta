@@ -105,7 +105,8 @@ jobs:
       - name: One client, then 16 in one race, within the bandwidth budget (#67, #27)
         run: |
           docker run -d --name regatta -e ENV=dev -p 8080:8080 regatta-server
-          curl --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 localhost:8080/health
+          for i in $(seq 1 30); do curl --silent --fail localhost:8080/health && break; sleep 1; done
+          curl --silent --show-error --fail localhost:8080/health
           echo
           docker exec regatta regatta-loadclient --clients 1 --race-seconds 5 --start-seconds 2
           docker exec regatta regatta-loadclient --clients 16 --race-seconds 20 --start-seconds 5 --check-bandwidth \
