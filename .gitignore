@@ -17,6 +17,8 @@ Package.resolved
 # ...except the packages': they pin swift-crypto so each simulation version has a reproducible build (ADR 0002).
 !Packages/RegattaCore/Package.resolved
 !Packages/RegattaProtocol/Package.resolved
+# ...and the server's, which pins SwiftNIO too (ADR 0006).
+!Packages/RegattaServer/Package.resolved
 
 # Claude Code agent worktrees
 .claude/worktrees/
