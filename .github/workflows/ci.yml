@@ -156,6 +156,22 @@ jobs:
       TEST_RUNNER_GITHUB_ACTIONS: "true"
     steps:
       - uses: actions/checkout@v4
+      # A cold simulator boot is minutes on this image (about 4 for the iPhone, 2 for the iPad), which xcodebuild
+      # otherwise spends between the build and the first test. Both start booting now, in the background, so the
+      # boots overlap the acknowledgements check, the build and the iPhone tests. Best effort: a device not found
+      # here is booted by xcodebuild as before.
+      - name: Start booting the simulators
+        run: |
+          for name in 'iPhone 17' 'iPad Air 13-inch (M4)'; do
+            udid="$(xcrun simctl list devices available -j | jq -r --arg name "$name" \
+              '.devices["com.apple.CoreSimulator.SimRuntime.iOS-26-5"][]? | select(.name == $name) | .udid' | head -1)"
+            if [[ -z "$udid" ]]; then
+              echo "::warning::No iOS 26.5 '$name' simulator to boot early"
+              continue
+            fi
+            echo "$name: $udid"
+            nohup xcrun simctl bootstatus "$udid" -b > "$RUNNER_TEMP/boot-$udid.log" 2>&1 &
+          done
       - name: Acknowledgements list is up to date
         run: swift scripts/generate-acknowledgements.swift --check
       # A failed test runs once more (-retry-tests-on-failure -test-iterations 2): the simulator now and
