@@ -14,7 +14,11 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
         sceneState.phase = SceneState.phase(for: windowScene.activationState)
         let window = UIWindow(windowScene: windowScene)
-        window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size)
+        window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size,
+                                                          connectivity: PathConnectivity())
+        if let appearance = LaunchOptions.current.appearance {
+            window.overrideUserInterfaceStyle = appearance == .dark ? .dark : .light
+        }
         window.makeKeyAndVisible()
         self.window = window
     }
@@ -25,24 +29,25 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneDidEnterBackground(_ scene: UIScene) { sceneState.phase = .background }
 }
 
-/// The root view with the app-wide environment and appearance.
+/// The root view with the app-wide environment. Menus follow the system appearance; the race cover sets its own.
 struct AppRoot: View {
+    let model: AppModel
     let sceneState: SceneState
     let screenSize: CGSize
+    let connectivity: any Connectivity
 
     var body: some View {
-        RootView()
+        RootView(model: model)
             .environment(\.sceneState, sceneState)
             .environment(\.screenSize, screenSize)
-            .preferredColorScheme(.dark)
-            .statusBarHidden()
+            .environment(\.connectivity, connectivity)
     }
 }
 
 final class RootHostingController: UIHostingController<AppRoot> {
     /// Locks the interface orientation while the window fills the screen. Follows
-    /// `SceneState.isRaceSequenceShowing`. It's a preference only: the system drops it in a resized or shared
-    /// window, where the race letterboxes instead.
+    /// `SceneState.isRaceSequenceShowing`, which `AppModel.phase` sets. It's a preference only: the system drops
+    /// it in a resized or shared window, where the race letterboxes instead.
     var isOrientationLocked = false {
         didSet {
             guard isOrientationLocked != oldValue else { return }
@@ -50,8 +55,9 @@ final class RootHostingController: UIHostingController<AppRoot> {
         }
     }
 
-    init(sceneState: SceneState, screenSize: CGSize) {
-        super.init(rootView: AppRoot(sceneState: sceneState, screenSize: screenSize))
+    init(sceneState: SceneState, screenSize: CGSize, connectivity: any Connectivity = FixedConnectivity(isOnline: true)) {
+        let model = AppModel(sceneState: sceneState)
+        super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize, connectivity: connectivity))
         isOrientationLocked = sceneState.isRaceSequenceShowing
         sceneState.onRaceSequenceShowingChange = { [weak self] showing in self?.isOrientationLocked = showing }
     }

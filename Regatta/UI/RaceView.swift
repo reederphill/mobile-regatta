@@ -81,6 +81,8 @@ struct RaceView: View {
                             .background(.ultraThinMaterial, in: .circle)
                     }
                     .foregroundStyle(.white)
+                    .accessibilityLabel("Pause")
+                    .accessibilityIdentifier("race-pause")
                 }
                 Spacer()
             }
