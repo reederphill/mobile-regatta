@@ -277,8 +277,15 @@ final class GameScene: SKScene {
         }
         let w = ground.direction
         let polar = world.boatClass.polar
-        let angle = index == CourseLayout.windwardIndex
-            ? polar.bestUpwind(tws: ground.speed).twa : polar.bestDownwind(tws: ground.speed).twa
+        let angle: Double
+        switch index {
+        case CourseLayout.windwardIndex: angle = polar.bestUpwind(tws: ground.speed).twa
+        case CourseLayout.gateIndex: angle = polar.bestDownwind(tws: ground.speed).twa
+        default:
+            // The reach to the offset mark is laid across the wind: a boat fetches it, so it has no laylines.
+            laylines.path = nil
+            return
+        }
         let path = CGMutablePath()
         for heading in [w - angle, w + angle] {
             // The layline is the track that arrives at the mark on this heading.
