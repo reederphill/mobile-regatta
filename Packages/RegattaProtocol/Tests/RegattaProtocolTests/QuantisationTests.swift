@@ -235,7 +235,9 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         // Steps are 3.9 mm and 0.0055°: a boat clear of contact is off by at most a diagonal half step
         // (2.8 mm) and what that does to her wind and shadow in 3 ticks.
         #expect(worstClear100ms < 0.01)
-        // A contact starting a tick apart in the two races (above): up to 0.4 × 3 m/s × 2 ticks = 8 cm.
+        // A contact starting a tick apart in the two races (above): 0.4 × speed × 2 ticks, 8 cm at 3 m/s
+        // but more on a fast reach. The bound rests on the measured worst (5.4 cm over 24 Linux races,
+        // 5.7 cm on macOS), not on that formula.
         #expect(worst100ms < 0.1)
         // Far below a boat length (4.2 m), past which a client snaps visibly (ADR 0005).
         #expect(worst1s < 1)
