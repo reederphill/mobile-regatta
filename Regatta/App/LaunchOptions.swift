@@ -13,6 +13,10 @@ import RegattaCore
 /// - `-uitesting` marks a UI test run.
 /// - `-scheme halves|tiller` overrides the device's steering scheme (#112).
 /// - `-camera course|boat` overrides the device's camera (#113).
+/// - `-online` starts an online race on the dev server's instant race at launch (#68, Debug builds).
+/// - `-onlineHost <host:port>` is the dev race server, instead of the menu's field.
+/// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override).
+/// - `-startSeconds <n>` gives an online dev race an `n`-second start sequence, 1…60.
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -34,6 +38,10 @@ struct LaunchOptions: Equatable {
     var timescale = 1.0
     var steeringScheme: SteeringScheme?
     var camera: CameraMode?
+    var online = false
+    var onlineHost: String?
+    var raceSeconds: Int?
+    var startSeconds: Int?
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
 
@@ -52,7 +60,8 @@ struct LaunchOptions: Equatable {
             case "-demo": demo = true
             case "-perf": perf = true
             case "-uitesting": uiTesting = true
-            case "-seed", "-fixture", "-timescale", "-scheme", "-camera":
+            case "-online": online = true
+            case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds":
                 guard let value = rest.first, !Self.flags.contains(value) else {
                     problems.append("\(argument) needs a value")
                     continue
@@ -65,7 +74,8 @@ struct LaunchOptions: Equatable {
         }
     }
 
-    private static let flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-seed", "-fixture", "-timescale", "-scheme", "-camera"]
+    private static let flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-online", "-seed", "-fixture", "-timescale",
+                                     "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds"]
 
     private mutating func apply(_ argument: String, _ value: String) {
         switch argument {
@@ -79,6 +89,12 @@ struct LaunchOptions: Equatable {
             if let scheme = SteeringScheme(rawValue: value) { steeringScheme = scheme } else { reject(argument, value, "halves or tiller") }
         case "-camera":
             if let mode = CameraMode(rawValue: value) { camera = mode } else { reject(argument, value, "course or boat") }
+        case "-onlineHost":
+            if !value.contains("/"), URL(string: "ws://\(value)/")?.host != nil { onlineHost = value } else { reject(argument, value, "host:port") }
+        case "-raceSeconds":
+            if let n = Int(value), (1...3600).contains(n) { raceSeconds = n } else { reject(argument, value, "a whole number of seconds, 1…3600") }
+        case "-startSeconds":
+            if let n = Int(value), (1...60).contains(n) { startSeconds = n } else { reject(argument, value, "a whole number of seconds, 1…60") }
         default:
             break
         }

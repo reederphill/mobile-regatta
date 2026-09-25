@@ -252,6 +252,22 @@ the close, so it extrapolates to about 1.7 to 1.9 MB for an 8-minute race (with 
 measured rate 1 MB holds only to about 4.5 minutes. The two budgets disagree for real race lengths; which one
 gives way (or whether the snapshot rate changes) is an open question for the product owner.
 
+### Online client
+
+The app races online with `RaceClient` over a `URLSessionWebSocketTask` (`Regatta/Online/`, #68). In a Debug
+build the menu has **Race online (dev)**: it asks the dev server at the menu's `host:port` field (default
+`127.0.0.1:8080`, the Mac the simulator runs on) for an instant race and joins it. `OnlineDriver` draws the
+predicted fleet, shows rule calls, OCS, penalties and finishes only from the server's events, rejoins with a
+`Resync` when the connection drops, and raises a lag signal after about 5 s of round trips over 250 ms.
+
+`scripts/e2e.sh` runs the end-to-end check: it builds and starts `RegattaServer` with `ENV=dev` on a free port,
+runs `OnlineRaceUITests` on the simulator against it (a short instant race with bots, raced to the close), and
+stops the server. The regular UI test run skips that test, saying why, since it has no server.
+
+```bash
+scripts/e2e.sh
+```
+
 Run the app's unit tests (`RegattaTests`) and UI tests (`RegattaUITests`) on the simulator:
 
 ```bash
@@ -289,7 +305,7 @@ swift scripts/generate-acknowledgements.swift
 
 CI (`.github/workflows/ci.yml`) runs only the jobs a change reaches: `scripts/linux-test.sh` on Linux,
 `scripts/check.sh` for the packages plus `scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the
-iOS Simulator (iPhone, plus the UI tests on iPad). `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
+iOS Simulator (iPhone, plus the UI tests on iPad), and `scripts/e2e.sh` when the app or server changes. `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
 the archive with `scripts/check-shipping-config.sh`, launches the app, and runs its tests on iOS 27 iPhone and
 iPad simulators. To save macOS minutes it runs only on pull requests that touch shipping config, on main, weekly
 and by hand.
@@ -307,6 +323,8 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
   screenshots are deterministic.
 - `-fixture <name>`, `-scheme halves|tiller` and `-camera course|boat` are parsed for the render fixtures
   (#62), steering schemes (#112) and camera (#113).
+- `-online` starts an online dev race at launch (Debug builds), on `-onlineHost <host:port>` or the menu's
+  host; `-startSeconds <n>` (1…60) and `-raceSeconds <n>` ask the dev server for a short sequence and race.
 
 ### Profiling
 
