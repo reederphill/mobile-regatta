@@ -188,9 +188,16 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
 
     /// Importing a quantised snapshot predicts almost exactly like importing the exact world: over the
     /// 100 ms to the next snapshot, and well beyond it.
+    ///
+    /// A boat clear of contact stays within the quantisation. Contact is the one amplifier: its first
+    /// tick cuts the speed by 40 % (the ILCA's `boatSpeedFactor` 0.6) and pushes the hulls apart, and a
+    /// 3.9 mm step can move that tick by one. At 2–3 m/s that is 3–4 cm a tick until both races touch.
+    /// Measured on Linux over 24 races (seeds 1–24) with puffs (#76) and without: every error above 2.8 mm
+    /// was a boat touching another, the worst 5.4 cm (a 0.8 m/s speed difference, dws < 0.001 m/s);
+    /// clear boats' worst was 2.8 mm with and without puffs. macOS's race (its own libm) caught a 5.7 cm one.
     @Test func quantisedImportPredictsCloseToTheExactWorld() throws {
         let server = botRace()
-        var worst100ms = 0.0, worst1s = 0.0, samples = 0
+        var worst100ms = 0.0, worstClear100ms = 0.0, worst1s = 0.0, samples = 0
         while !server.isOver && server.tick < 9000 {
             for _ in 0..<30 { server.step() }
             let world = server.exportSnapshot()
@@ -203,19 +210,35 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
             // excluded fields and contact memory are close to the server's, not exact.
             try quantised.importSnapshot(snapshot.applied(to: world, tick: world.tick, events: EventState(world: world, nextEventSeq: 0)))
             // Both hold every boat's last input, as a predicting client does.
+            var touched = Set<Int>() // seats touching a boat or obstacle in either race so far
             for step in 1...30 {
                 exact.step()
                 quantised.step()
-                let error = zip(exact.boats, quantised.boats).map { ($0.position - $1.position).length }.max() ?? 0
-                if step <= 3 { worst100ms = max(worst100ms, error) }
+                let errors = zip(exact.boats, quantised.boats).map { ($0.position - $1.position).length }
+                let error = errors.max() ?? 0
+                if step <= 3 {
+                    for world in [exact.exportSnapshot(), quantised.exportSnapshot()] {
+                        for pair in world.touchingBoats { touched.formUnion([pair.a, pair.b]) }
+                        for contact in world.touchingObstacles { touched.insert(contact.seat) }
+                    }
+                    worst100ms = max(worst100ms, error)
+                    for (seat, error) in errors.enumerated() where !touched.contains(seat) {
+                        worstClear100ms = max(worstClear100ms, error)
+                    }
+                }
                 worst1s = max(worst1s, error)
             }
             samples += 1
         }
-        print("PREDICTION quantised-vs-exact worst position error: \(worst100ms) m over 3 ticks, \(worst1s) m over 30 ticks, \(samples) samples")
+        print("PREDICTION quantised-vs-exact worst position error: \(worst100ms) m over 3 ticks (\(worstClear100ms) m clear of contact), \(worst1s) m over 30 ticks, \(samples) samples")
         #expect(samples > 100)
-        // Steps are 3.9 mm and 0.0055°; a contact can amplify an error, so the bounds leave room.
-        #expect(worst100ms < 0.05)
+        // Steps are 3.9 mm and 0.0055°: a boat clear of contact is off by at most a diagonal half step
+        // (2.8 mm) and what that does to her wind and shadow in 3 ticks.
+        #expect(worstClear100ms < 0.01)
+        // A contact starting a tick apart in the two races (above): 0.4 × speed × 2 ticks, 8 cm at 3 m/s
+        // but more on a fast reach. The bound rests on the measured worst (5.4 cm over 24 Linux races,
+        // 5.7 cm on macOS), not on that formula.
+        #expect(worst100ms < 0.1)
         // Far below a boat length (4.2 m), past which a client snaps visibly (ADR 0005).
         #expect(worst1s < 1)
     }

@@ -7,8 +7,8 @@
 #
 # What a change reaches, from the files changed since its merge base with --base (default origin/main),
 # committed or not: RegattaCore reaches every package, and the app through its sources; RegattaProtocol
-# reaches RegattaClient and RegattaServer. --all checks everything; --packages names the packages instead (no app unless it
-# changed); --no-app skips the app.
+# reaches RegattaClient and RegattaServer; RegattaClient reaches RegattaServer (its load client). --all
+# checks everything; --packages names the packages instead (no app unless it changed); --no-app skips the app.
 #
 # Every package builds into one scratch directory, .build/check, so shared dependencies build once.
 # Each passed step is recorded against the tree it ran on, in check-passed/<tree hash> under the git common
@@ -82,6 +82,7 @@ else
     done < <(git diff --name-only "$merge_base"; git ls-files --others --exclude-standard)
     (( core )) && protocol=1
     (( protocol )) && client=1 && server=1
+    (( client )) && server=1
 fi
 (( no_app )) && app=0
 
