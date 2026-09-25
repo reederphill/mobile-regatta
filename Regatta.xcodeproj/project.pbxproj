@@ -54,6 +54,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				ImageDiff.swift,
+				ReferencePolicy.swift,
 			);
 			target = AA000000000000000000001B /* RegattaTests */;
 		};

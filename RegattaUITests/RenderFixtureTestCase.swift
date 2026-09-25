@@ -9,8 +9,9 @@ import XCTest
 ///   renders are only reproducible on one device and OS (Apple's libm and GPU, ADR 0002). CI pins both.
 /// - To record: run the UI tests with `-recordReferences` in the test runner's arguments, or with
 ///   `TEST_RUNNER_RECORD_REFERENCES=1` in `xcodebuild`'s environment. Each reference test then rewrites its
-///   reference and fails, so a recording run can't pass for a real one. Recording in CI (the `CI` variable,
-///   passed in as `TEST_RUNNER_CI`) is refused.
+///   reference and fails, so a recording run can't pass for a real one. Recording in CI (`CI` or
+///   `GITHUB_ACTIONS`, passed in as `TEST_RUNNER_CI` / `TEST_RUNNER_GITHUB_ACTIONS`) is refused, and in CI a
+///   missing reference fails rather than skips. See `ReferencePolicy`.
 class RenderFixtureTestCase: RaceUITestCase {
     static let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures")
     static let references = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("References")
@@ -29,14 +30,14 @@ class RenderFixtureTestCase: RaceUITestCase {
         let description: String
     }
 
-    static var isRecording: Bool {
-        let environment = ProcessInfo.processInfo.environment
-        return ProcessInfo.processInfo.arguments.contains("-recordReferences") || environment["RECORD_REFERENCES"] == "1"
+    static var isCI: Bool {
+        ReferencePolicy.isCI(environment: ProcessInfo.processInfo.environment)
     }
 
-    static var isCI: Bool {
-        let environment = ProcessInfo.processInfo.environment
-        return environment["CI"].map { !$0.isEmpty && $0 != "false" } ?? false
+    static var referenceMode: ReferencePolicy.Mode {
+        let process = ProcessInfo.processInfo
+        let flag = ReferencePolicy.recordRequested(arguments: process.arguments, environment: process.environment)
+        return ReferencePolicy.mode(flag: flag, isCI: isCI)
     }
 
     /// Launches `-fixture <name>` and returns its render once two screenshots in a row agree, so the
@@ -96,16 +97,18 @@ class RenderFixtureTestCase: RaceUITestCase {
     }
 
     /// Renders fixture `name` and diffs it against this device's committed reference. With no reference
-    /// for this device it attaches the render and skips; while recording it writes the reference.
+    /// for this device it attaches the render, then fails in CI and skips locally; while recording it
+    /// writes the reference.
     @MainActor func assertMatchesReference(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws {
-        if Self.isRecording && Self.isCI {
+        let mode = Self.referenceMode
+        if mode == .refused {
             XCTFail("-recordReferences is refused in CI: record on a local simulator and commit the PNGs", file: file, line: line)
             return
         }
         let actual = try renderFixture(name, file: file, line: line)
         let url = Self.deviceReferences.appendingPathComponent("\(name).png")
 
-        if Self.isRecording {
+        if mode == .record {
             let data = try XCTUnwrap(actual.pngData)
             try FileManager.default.createDirectory(at: Self.deviceReferences, withIntermediateDirectories: true)
             try data.write(to: url)
@@ -120,8 +123,15 @@ class RenderFixtureTestCase: RaceUITestCase {
                 attachment.lifetime = .keepAlways
                 add(attachment)
             }
-            throw XCTSkip("no reference for \(Self.deviceName) at \(url.path): record one with -recordReferences, "
-                + "or commit the attached \(name)-actual.png there")
+            let message = "no reference for \(Self.deviceName) at \(url.path): record one with -recordReferences, "
+                + "or commit the attached \(name)-actual.png there"
+            switch ReferencePolicy.missingReference(isCI: Self.isCI) {
+            case .fail:
+                XCTFail(message, file: file, line: line)
+                return
+            case .skip:
+                throw XCTSkip(message)
+            }
         }
         let reference = try XCTUnwrap(PixelImage(pngData: data), "\(url.path) isn't a PNG", file: file, line: line)
         assertMatches(actual, reference, named: name, file: file, line: line)

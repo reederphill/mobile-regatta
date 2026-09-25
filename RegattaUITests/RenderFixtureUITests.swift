@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// Render fixtures (#62): a race log replayed to a freeze tick, screenshot, and diffed pixel by pixel.
@@ -7,7 +8,6 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         let first = try renderFixture("prestart")
         let second = try renderFixture("prestart")
         let diff = assertMatches(second, first, named: "prestart-twice", tolerance: .exact)
-        XCTAssertEqual(diff.differingPixels, 0)
         XCTAssertFalse(diff.sizeMismatch)
     }
 
@@ -32,10 +32,16 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
 
         let attachments = attachDiff(diff, actual: moved, reference: reference, named: "prestart-moved")
         XCTAssertEqual(attachments.map(\.name), ["prestart-moved-actual.png", "prestart-moved-reference.png", "prestart-moved-diff.png"])
+        let pngs = [moved.pngData, reference.pngData, diff.image.pngData]
+        XCTAssertTrue(pngs.allSatisfy { ($0?.count ?? 0) > 0 }, "an attached PNG is empty")
     }
 
-    /// The committed reference for this device (References/<device>/prestart.png).
+    /// The committed reference for this device (References/<device>/prestart.png). References are
+    /// recorded on iPhone only; the iPad run skips here on purpose. Anywhere else, a missing reference
+    /// fails in CI rather than skipping.
     @MainActor func testPrestartMatchesItsReference() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad,
+                      "render references are recorded on iPhone 17 only; the iPad run doesn't compare them")
         try assertMatchesReference("prestart")
     }
 }
