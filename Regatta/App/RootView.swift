@@ -19,6 +19,8 @@ struct RootView: View {
     @State private var settings = RaceSettings()
     @State private var session: GameSession?
     @State private var checkedLaunchArguments = false
+    /// Why the `-fixture` launch couldn't start, shown instead of the menu so a UI test sees it.
+    @State private var fixtureError: String?
     @Environment(\.sceneState) private var sceneState
     private let launchOptions = LaunchOptions.current
 
@@ -29,7 +31,11 @@ struct RootView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if let session {
+        if let fixtureError {
+            Text("Render fixture failed: \(fixtureError)")
+                .padding()
+                .accessibilityIdentifier("fixture-error")
+        } else if let session {
             RaceView(
                 session: session,
                 onRestart: { self.session = makeSession(launchOptions.raceConfig(from: settings)) },
@@ -55,7 +61,22 @@ struct RootView: View {
         for problem in launchOptions.problems {
             Logger(subsystem: "com.phillreeder.regatta", category: "launch").warning("Ignoring launch argument \(problem, privacy: .public)")
         }
+        if let name = launchOptions.fixture {
+            startFixture(named: name)
+            return
+        }
         guard let config = launchOptions.launchRaceConfig(from: settings) else { return }
         session = makeSession(config)
+    }
+
+    /// `-fixture <name>`: replays the fixture's log to its freeze tick and freezes the race there (#62).
+    private func startFixture(named name: String) {
+        do {
+            let (fixture, log) = try RenderFixture.load(named: name)
+            session = try GameSession(fixture: fixture, log: log)
+        } catch {
+            Logger(subsystem: "com.phillreeder.regatta", category: "launch").error("Render fixture \(name, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+            fixtureError = String(describing: error)
+        }
     }
 }

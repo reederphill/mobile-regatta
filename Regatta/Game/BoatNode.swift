@@ -69,12 +69,13 @@ final class BoatNode: SKNode {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func update(with boat: Boat, time: Double, dt: Double) {
+    /// `settled` trims the sail straight to its target rather than easing it there (a frozen render fixture).
+    func update(with boat: Boat, time: Double, dt: Double, settled: Bool = false) {
         let point = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
         position = point
         body.zRotation = CGFloat(-boat.heading)
 
-        updateSail(boat, time: time, dt: dt)
+        updateSail(boat, time: time, dt: dt, settled: settled)
         updateBadge(boat)
         updateWake(point, dt: dt, active: boat.isOnCourse)
 
@@ -85,7 +86,7 @@ final class BoatNode: SKNode {
         alpha = boat.isOnCourse ? 1 : 0.45
     }
 
-    private func updateSail(_ boat: Boat, time: Double, dt: Double) {
+    private func updateSail(_ boat: Boat, time: Double, dt: Double, settled: Bool) {
         // Sail sits to leeward, eased further the further off the wind.
         let twa = boat.twa
         let side: CGFloat = boat.relativeWind >= 0 ? -1 : 1
@@ -96,7 +97,7 @@ final class BoatNode: SKNode {
             target = CGFloat(((twa - deg2rad(25)) * 0.6).clamped(to: deg2rad(4)...deg2rad(85)))
         }
         target *= side
-        sailAngle += (target - sailAngle) * min(1, CGFloat(dt) * 8)
+        sailAngle += (target - sailAngle) * (settled ? 1 : min(1, CGFloat(dt) * 8))
         sail.zRotation = sailAngle
         sail.xScale = sailAngle < 0 ? -1 : 1
     }

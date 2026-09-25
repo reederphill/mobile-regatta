@@ -37,9 +37,15 @@ protocol RaceDriver: AnyObject {
 
     /// The world to draw this display frame.
     var renderWorld: RenderWorld { get }
+
+    /// Whether the race stands still at one tick for a render fixture (`FixtureDriver`, #62): the scene
+    /// draws it settled, with no easing or animation, and hides the HUD and controls.
+    var isFrozen: Bool { get }
 }
 
 extension RaceDriver {
+    var isFrozen: Bool { false }
+
     /// Interpolates the fleet from `previousFrame` to `currentFrame` by `alpha`.
     var renderWorld: RenderWorld {
         RenderWorld(course: course, boatClass: boatClass, myBoatIndex: myBoatIndex,

@@ -114,6 +114,9 @@ jobs:
     env:
       # DEVELOPER_DIR rather than xcode-select: switching with xcode-select hid the simulators.
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      # Reaches the test runner as CI: render fixture references are never recorded here (#62).
+      TEST_RUNNER_CI: "true"
+      TEST_RUNNER_GITHUB_ACTIONS: "true"
     steps:
       - uses: actions/checkout@v4
       - name: Acknowledgements list is up to date

@@ -1,0 +1,6 @@
+{
+  "log" : "prestart.racelog.json",
+  "freezeTick" : -1470,
+  "camera" : "boat",
+  "vision" : "none"
+}

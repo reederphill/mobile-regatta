@@ -50,6 +50,15 @@ final class GameSession {
         self.init(driver: driver, roster: driver.roster)
     }
 
+    /// A render fixture (#62): `log` replayed to the fixture's freeze tick and frozen there, drawn from
+    /// its camera through its vision filter.
+    convenience init(fixture: RenderFixture, log: RaceLog) throws {
+        let driver = try FixtureDriver(log: log, freezeTick: fixture.freezeTick)
+        self.init(driver: driver, roster: driver.roster)
+        scene.cameraMode = fixture.camera
+        scene.vision = fixture.vision
+    }
+
     init(driver: any RaceDriver, roster: FleetRoster) {
         self.driver = driver
         self.roster = roster
