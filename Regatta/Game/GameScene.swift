@@ -1,3 +1,4 @@
+import CoreImage
 import SpriteKit
 import RegattaBots
 import RegattaCore
@@ -11,6 +12,12 @@ final class GameScene: SKScene {
     let driver: any RaceDriver
     let roster: FleetRoster
     weak var session: GameSession?
+    /// Follow your boat, or frame the whole course. Render fixtures set it (#62); the device setting is #113.
+    var cameraMode: LaunchOptions.CameraMode = .boat
+    /// A colour-vision filter over the whole scene, for render fixtures (#22, #62).
+    var vision: VisionFilter = .none {
+        didSet { applyVision() }
+    }
 
     private let world = SKNode()
     private let cam = SKCameraNode()
@@ -139,6 +146,11 @@ final class GameScene: SKScene {
     // MARK: - Loop
 
     override func update(_ currentTime: TimeInterval) {
+        // A render fixture draws the same settled world every frame: nothing steps and nothing eases.
+        if driver.isFrozen {
+            render(driver.renderWorld, settled: true)
+            return
+        }
         let frameTime = min(currentTime - (lastUpdate ?? currentTime), 0.1)
         lastUpdate = currentTime
         guard let session, !session.isPaused else { return }
@@ -158,19 +170,26 @@ final class GameScene: SKScene {
         }
     }
 
-    private func render(_ world: RenderWorld) {
+    /// Draws `world`. `settled` draws it as if it had been standing still forever: the camera on its
+    /// target and every sail trimmed, with no easing towards them (a frozen render fixture).
+    private func render(_ world: RenderWorld, settled: Bool = false) {
         // Simulated seconds since the last frame drawn.
-        let dt = max(0, world.time - (lastRenderTime ?? world.time))
+        let dt = settled ? 0 : max(0, world.time - (lastRenderTime ?? world.time))
         lastRenderTime = world.time
         for (i, boat) in world.boats.enumerated() {
-            boatNodes[i].update(with: boat, time: world.time, dt: dt)
+            boatNodes[i].update(with: boat, time: world.time, dt: dt, settled: settled)
         }
 
         let player = world.me
-        let target = point(player.position + player.velocity * 2)
-        let k = CGFloat(1 - exp(-dt * 3))
-        cam.position = CGPoint(x: cam.position.x + (target.x - cam.position.x) * k,
-                               y: cam.position.y + (target.y - cam.position.y) * k)
+        switch cameraMode {
+        case .boat:
+            let target = point(player.position + player.velocity * 2)
+            let k = settled ? 1 : CGFloat(1 - exp(-dt * 3))
+            cam.position = CGPoint(x: cam.position.x + (target.x - cam.position.x) * k,
+                                   y: cam.position.y + (target.y - cam.position.y) * k)
+        case .course:
+            frameCourse(world.course)
+        }
 
         if let wind = world.groundWind(at: player.position) {
             water.update(center: cam.position, windDirection: wind.direction)
@@ -186,6 +205,35 @@ final class GameScene: SKScene {
             laylineCountdown = 0.25
             updateLaylines(world)
         }
+    }
+
+    /// Puts the whole course, marks, pin and committee boat, in view with a margin.
+    private func frameCourse(_ course: Course) {
+        let points = course.marks.map(\.position) + [course.pin, course.committee]
+        let xs = points.map { CGFloat($0.x) * ppm }, ys = points.map { CGFloat($0.y) * ppm }
+        guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
+              size.width > 0, size.height > 0 else { return }
+        cam.position = CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
+        let margin: CGFloat = 1.2
+        cam.setScale(max((maxX - minX) / size.width, (maxY - minY) / size.height, 1 / zoom) * margin)
+    }
+
+    private func applyVision() {
+        guard vision != .none else {
+            filter = nil
+            shouldEnableEffects = false
+            return
+        }
+        let m = vision.matrix, bias = CGFloat(vision.bias)
+        func row(_ i: Int) -> CIVector { CIVector(x: CGFloat(m[i][0]), y: CGFloat(m[i][1]), z: CGFloat(m[i][2]), w: 0) }
+        let matrix = CIFilter(name: "CIColorMatrix")
+        matrix?.setValue(row(0), forKey: "inputRVector")
+        matrix?.setValue(row(1), forKey: "inputGVector")
+        matrix?.setValue(row(2), forKey: "inputBVector")
+        matrix?.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+        matrix?.setValue(CIVector(x: bias, y: bias, z: bias, w: 0), forKey: "inputBiasVector")
+        filter = matrix
+        shouldEnableEffects = true
     }
 
     private func updatePuffs(_ world: RenderWorld) {
