@@ -13,6 +13,7 @@ import RegattaCore
 /// - `-uitesting` marks a UI test run.
 /// - `-scheme halves|tiller` overrides the device's steering scheme (#112).
 /// - `-camera course|boat` overrides the device's camera (#113).
+/// - `-appearance light|dark` overrides the system appearance, for UI tests of the menus in both (#108).
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -20,6 +21,10 @@ struct LaunchOptions: Equatable {
 
     enum CameraMode: String, CaseIterable {
         case course, boat
+    }
+
+    enum Appearance: String, CaseIterable {
+        case light, dark
     }
 
     /// Boats in the `-perf` race, the largest fleet.
@@ -34,6 +39,7 @@ struct LaunchOptions: Equatable {
     var timescale = 1.0
     var steeringScheme: SteeringScheme?
     var camera: CameraMode?
+    var appearance: Appearance?
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
 
@@ -52,7 +58,7 @@ struct LaunchOptions: Equatable {
             case "-demo": demo = true
             case "-perf": perf = true
             case "-uitesting": uiTesting = true
-            case "-seed", "-fixture", "-timescale", "-scheme", "-camera":
+            case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-appearance":
                 guard let value = rest.first, !Self.flags.contains(value) else {
                     problems.append("\(argument) needs a value")
                     continue
@@ -65,7 +71,8 @@ struct LaunchOptions: Equatable {
         }
     }
 
-    private static let flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-seed", "-fixture", "-timescale", "-scheme", "-camera"]
+    private static let flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-seed", "-fixture", "-timescale", "-scheme", "-camera",
+                                     "-appearance"]
 
     private mutating func apply(_ argument: String, _ value: String) {
         switch argument {
@@ -79,6 +86,8 @@ struct LaunchOptions: Equatable {
             if let scheme = SteeringScheme(rawValue: value) { steeringScheme = scheme } else { reject(argument, value, "halves or tiller") }
         case "-camera":
             if let mode = CameraMode(rawValue: value) { camera = mode } else { reject(argument, value, "course or boat") }
+        case "-appearance":
+            if let style = Appearance(rawValue: value) { appearance = style } else { reject(argument, value, "light or dark") }
         default:
             break
         }

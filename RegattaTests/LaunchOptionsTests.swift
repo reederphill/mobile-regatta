@@ -50,6 +50,16 @@ import RegattaCore
         #expect(options.problems.count == 4)
     }
 
+    /// `-appearance` lets UI tests render the menus in light and dark (#108).
+    @Test func parsesTheAppearance() {
+        #expect(parse().appearance == nil)
+        #expect(parse("-appearance", "light").appearance == .light)
+        #expect(parse("-appearance", "dark", "-autostart").appearance == .dark)
+        let bad = parse("-appearance", "sepia")
+        #expect(bad.appearance == nil)
+        #expect(bad.problems == ["-appearance sepia: expected light or dark"])
+    }
+
     @Test func aMissingValueDoesNotSwallowTheNextFlag() {
         let options = parse("-seed", "-autostart", "-fixture")
         #expect(options.seed == nil)
