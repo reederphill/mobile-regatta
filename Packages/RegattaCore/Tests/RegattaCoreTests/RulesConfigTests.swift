@@ -228,12 +228,14 @@ import Testing
 
     @Test func codableRoundTrip() throws {
         let index = Self.sample()
-        let data = try JSONEncoder().encode(index)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let data = try encoder.encode(index)
         let decoded = try JSONDecoder().decode(IncidentIndex.self, from: data)
         #expect(decoded == index)
         #expect(decoded.pairs == index.pairs)
         #expect(decoded.incidents(between: 2, and: 5) == index.incidents(between: 2, and: 5))
-        #expect(try JSONEncoder().encode(decoded) == data)
+        #expect(try encoder.encode(decoded) == data)
 
         // Ids must count up from 0, and a call must name its own incident.
         var json = try #require(String(data: data, encoding: .utf8))
