@@ -93,6 +93,10 @@ The moment an online race's boats are fixed and the briefing begins. Leaving bef
 An online race with at least two humans at the gun. Only results between humans move ratings.
 _Avoid_: ranked match
 
+**Completed race**:
+An online race in which the player's result is finished, placed by distance, DSQ or OCS: they stayed in the race. RET never counts, and a cancelled race counts for nothing. Earned liveries and the free-text unlock count completed races.
+_Avoid_: finished race (when DSQ and OCS are meant too)
+
 **Practice race**:
 An offline race against bots. Unrated, and needs no account.
 _Avoid_: single player, training

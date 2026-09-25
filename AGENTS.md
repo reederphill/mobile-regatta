@@ -12,6 +12,10 @@ Issues, including the wayfinder design map, live in GitHub Issues on `reederphil
 
 `scripts/check.sh` locally, CI before merge; the golden runs only in CI. See `docs/agents/validation.md`.
 
+### Orchestration
+
+One ticket per session, short briefs, fresh agents per round. See `docs/agents/orchestration.md`.
+
 ### Domain docs
 
 Single-context: `CONTEXT.md` glossary and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

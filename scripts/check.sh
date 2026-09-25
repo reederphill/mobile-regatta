@@ -11,8 +11,9 @@
 # changed); --no-app skips the app.
 #
 # Every package builds into one scratch directory, .build/check, so shared dependencies build once.
-# Each passed step is recorded against the tree it ran on, in .build/check/passed/<tree hash>, and is
-# skipped when that tree is checked again; --force reruns it. Each step is killed after
+# Each passed step is recorded against the tree it ran on, in check-passed/<tree hash> under the git common
+# dir (shared by every worktree of the clone, so an agent in another worktree sees it), and is skipped when
+# that tree is checked again; --force reruns it. Each step is killed after
 # CHECK_STEP_TIMEOUT_MINUTES (default 15). The app runs on CHECK_DESTINATION (default the iPhone 17 simulator).
 set -euo pipefail
 
@@ -47,8 +48,9 @@ trap 'rm -f "$index"' EXIT
 cp "$(git rev-parse --git-path index)" "$index"
 GIT_INDEX_FILE="$index" git add -A
 tree="$(GIT_INDEX_FILE="$index" git write-tree)"
-passed="$scratch/passed/$tree"
-mkdir -p "$scratch/passed"
+records="$(cd "$(git rev-parse --git-common-dir)" && pwd)/check-passed"
+passed="$records/$tree"
+mkdir -p "$records"
 
 core=0 protocol=0 client=0 app=0
 if (( all )); then
