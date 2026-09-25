@@ -10,6 +10,7 @@ Each parked ticket is labelled `needs:human`, unassigned, and has the question a
 
 | Ticket | Question | Suggested answer | Parked |
 |---|---|---|---|
+| #71 Boom side, sailing by the lee and gybes | [#200](https://github.com/reederphill/mobile-regatta/pull/200) is ready apart from one thing (CI golden + macOS packages green on 9ca4817, no blocking review findings, acceptance 7/7 from CI). `testPrestartMatchesItsReference` fails at 3.02% because the boats now move differently and the sail follows the boom. | Re-record `prestart.png` on iPhone 17 / iOS 26.5 / Xcode 26.6 on `ticket-71-boom-side` (as for #70), push, merge #200 | 2026-09-25 |
 
 ## Answered by the orchestrator (high confidence)
 
@@ -21,6 +22,7 @@ Each parked ticket is labelled `needs:human`, unassigned, and has the question a
 | #107 | The iOS 27 CI job (preview `xcode-27` runner, ~21 min, private repo, 10× macOS billing) was running on every push. | Now runs only on main pushes, manual dispatch, weekly, and PRs touching shipping paths. The iPad letterbox test moves into the regular app job. **You may want to set a macOS minutes budget** (`docs/prerequisites.md` says "Not recorded"). |
 | #66 | What does "stub bot inputs from exactly tick + 15" mean, given BotDriver decides only every 3rd tick? | The host applies `BoatInput.neutral` at exactly T+15 (last held input, or the disconnect if later, + 15). That is the first stub-bot input. After it the bot decides on the seat's usual phase; there's no BotDriver flag. #150 can revisit this. |
 | #70 | The cloud container is Linux (docker, no Swift, no Xcode) and no frontier ticket is fully validatable there | You chose #70: core runs in `linux-test.sh` via docker, CI covers app call sites |
+| #71 | #14's tack/gybe cost targets can't be met on ilca-dinghy@1 (a 10 kn tack took 5.1 s, bottomed out at 11 %, lost 2.4 L), whose steering values were placeholders. | Ship `ilca-dinghy@2` (turn-rate curve full at 2.5 kn, `rudderDragPerSecond` 0.075, `noGoSeconds` 4) and race on it; @1 stays bundled and pinned (ADR 0004). Posted on #71 for you to overrule. |
 | all | The pre-existing `objective-c-xcode.yml` "Build and Analyze" check fails on main. | Not a merge gate. Gates are the ticket's own CI jobs plus the acceptance items. |
 
 ## Completed
