@@ -29,6 +29,13 @@ enum RegattaServerMain {
         // `print` + `fflush(stdout)`: Glibc's `stdout` is a mutable global Swift 6 refuses.)
         FileHandle.standardOutput.write(Data(
             "RegattaServer \(config.serverBuild) (ENV=\(config.environment.name)) listening on \(config.host):\(server.port)\n".utf8))
-        await server.wait()
+        // It serves until it's killed: the listener stopping is a failure, whatever the reason.
+        do {
+            try await server.wait()
+            FileHandle.standardError.write(Data("RegattaServer: the listener closed\n".utf8))
+        } catch {
+            FileHandle.standardError.write(Data("RegattaServer: the listener failed: \(error)\n".utf8))
+        }
+        exit(1)
     }
 }

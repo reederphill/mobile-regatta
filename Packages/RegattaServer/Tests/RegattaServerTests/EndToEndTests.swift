@@ -1,4 +1,5 @@
 import Foundation
+import NIOCore
 import NIOWebSocket
 import RegattaCore
 import RegattaDevAPI
@@ -72,6 +73,22 @@ struct EndToEndTests {
             let most = reports.map(\.bytesReceived).max() ?? 0
             let join = reports.map(\.joinBytes).max() ?? 0
             print("16 clients: worst downstream \(Int(worst)) B/s, most bytes \(most) B (join \(join) B) in \(race.startSeconds + (race.raceSeconds ?? 0)) s")
+        }
+    }
+
+    /// #67: in the Linux container every accepted connection failed to set up (a socket option refused), and
+    /// NIO reports that on the listener's pipeline, which ended the accept loop: the server exited on its
+    /// first connection. One connection's failure is that connection's; the server keeps accepting.
+    @Test func aConnectionThatFailsToSetUpDoesNotStopTheServer() async throws {
+        struct SetupFailed: Error {}
+        try await withServer { server, options in
+            #expect(try await DevClient.health(host: options.host, port: options.port).status == "ok")
+            // What NIO's accept handler fires when a child channel's options or initializer fail.
+            server.listenerChannel.pipeline.fireErrorCaught(SetupFailed())
+            #expect(try await DevClient.health(host: options.host, port: options.port).status == "ok")
+            let (_, results) = try await LoadClient.sailInstantRace(
+                InstantRaceRequest(clients: 1, raceSeconds: 2, startSeconds: 1, seed: 671), options: options)
+            #expect(try #require(try results.first?.get()).completed)
         }
     }
 

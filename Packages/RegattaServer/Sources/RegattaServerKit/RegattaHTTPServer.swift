@@ -22,7 +22,8 @@ public final class RegattaHTTPServer: Sendable {
     public let port: Int
     private let listener: NIOAsyncChannel<EventLoopFuture<Connection>, Never>
     private let handler: RequestHandler
-    private let task: Task<Void, Never>
+    /// The accept loop; ends with the listener's error, or nil if the listener closed.
+    private let task: Task<(any Error)?, Never>
 
     /// Binds and starts serving. Refuses to start outside `ENV=dev` (dev auth is all there is).
     public static func start(config: ServerConfig, group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> RegattaHTTPServer {
@@ -30,12 +31,24 @@ public final class RegattaHTTPServer: Sendable {
         let registry = RaceRegistry(maxRaces: config.maxRaces)
         let listener = try await ServerBootstrap(group: group)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
-            .childChannelOption(.socketOption(.tcp_nodelay), value: 1)
+            // A TCP-level option. (`.socketOption(.tcp_nodelay)` is SOL_SOCKET option 1: SO_DEBUG on Linux,
+            // which needs CAP_NET_ADMIN, so every accepted connection failed in the container (#67).)
+            .childChannelOption(.tcpOption(.tcp_nodelay), value: 1)
             .bind(host: config.host, port: config.port) { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try Self.configure(channel)
                 }
             }
+        do {
+            try await listener.channel.eventLoop.submit {
+                let pipeline = listener.channel.pipeline.syncOperations
+                let accept = try pipeline.context(name: "AcceptHandler")
+                try pipeline.addHandler(ConnectionSetupErrorHandler(), position: .after(accept.handler))
+            }.get()
+        } catch {
+            try? await listener.channel.close()
+            throw error
+        }
         return RegattaHTTPServer(config: config, registry: registry, listener: listener)
     }
 
@@ -48,25 +61,36 @@ public final class RegattaHTTPServer: Sendable {
         self.handler = handler
         task = Task {
             await withDiscardingTaskGroup { group in
-                try? await listener.executeThenClose { inbound in
-                    for try await connection in inbound {
-                        group.addTask { await Self.serve(connection, handler: handler) }
+                defer { group.cancelAll() }
+                do {
+                    try await listener.executeThenClose { inbound in
+                        for try await connection in inbound {
+                            group.addTask { await Self.serve(connection, handler: handler) }
+                        }
                     }
+                    return nil
+                } catch {
+                    return error
                 }
-                group.cancelAll()
             }
         }
     }
 
-    /// Runs until the listener closes.
-    public func wait() async { await task.value }
+    /// The listening channel, for tests.
+    var listenerChannel: any Channel { listener.channel }
+
+    /// Runs until the listener stops, and throws its error if it failed. Only `shutdown()` stops it on purpose;
+    /// no single connection can.
+    public func wait() async throws {
+        if let error = await task.value { throw error }
+    }
 
     /// Stops listening, closes every race where it stands and every connection.
     public func shutdown() async {
         listener.channel.close(promise: nil)
         await registry.closeAll()
         task.cancel()
-        await task.value
+        _ = await task.value
     }
 
     private static func configure(_ channel: any Channel) throws -> EventLoopFuture<Connection> {
@@ -171,6 +195,17 @@ public final class RegattaHTTPServer: Sendable {
                 }
             }
         }
+    }
+}
+
+/// On the listener, after NIO's accept handler: a connection that fails to set up (a socket option, its
+/// pipeline) fires its error down the listener's pipeline, and the async listener would end on it, taking
+/// the server with it. That connection is already closed; log it and keep accepting.
+private final class ConnectionSetupErrorHandler: ChannelInboundHandler {
+    typealias InboundIn = any Channel
+
+    func errorCaught(context: ChannelHandlerContext, error: any Error) {
+        FileHandle.standardError.write(Data("RegattaServer: a connection failed to set up: \(error)\n".utf8))
     }
 }
 

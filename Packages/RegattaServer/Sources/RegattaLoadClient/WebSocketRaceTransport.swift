@@ -95,7 +95,7 @@ public final class WebSocketRaceTransport: RaceTransport, @unchecked Sendable {
         }
         let counter = ByteCounter()
         let upgrade: EventLoopFuture<Upgrade> = try await ClientBootstrap(group: group)
-            .channelOption(.socketOption(.tcp_nodelay), value: 1)
+            .channelOption(.tcpOption(.tcp_nodelay), value: 1)
             .connect(host: host, port: port) { channel in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandler(ByteCountingHandler(counter))
