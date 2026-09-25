@@ -10,6 +10,7 @@ Each parked ticket is labelled `needs:human`, unassigned, and has the question a
 
 | Ticket | Question | Suggested answer | Parked |
 |---|---|---|---|
+| #69 Linux tick benchmark | [#197](https://github.com/reederphill/mobile-regatta/pull/197) is ready (CI green on d8a4839, no blocking review findings, acceptance items 1–2 pass). One item is left: "reference plan name recorded" needs a real `scripts/ref-runner.sh up` with your Hetzner token. | Run `up`, record the plan and price in `docs/prerequisites.md` Hosting, run `down`, then merge #197 | 2026-09-25 |
 
 ## Answered by the orchestrator (high confidence)
 
