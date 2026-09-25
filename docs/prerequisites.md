@@ -62,6 +62,9 @@ From [Hosting account, server city and domain](https://github.com/reederphill/mo
 | TLS | Let's Encrypt certificates on each server |
 | Load-test budget | Up to $50 a month on hourly Hetzner servers ([#168](https://github.com/reederphill/mobile-regatta/issues/168)) |
 
+output from `scripts/ref-runner.sh up`:
+cpx11: 2 shared x86 vCPU, 2 GB RAM, 40 GB disk; 20.49 a month, 0.0328 an hour (gross, EUR or USD per the account)
+
 ### When servers run
 
 Nothing runs all the time before launch.
