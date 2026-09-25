@@ -65,8 +65,8 @@ struct SeatConnection {
             return refuse("undecodable Hello")
         }
         guard Self.canSail(clientSimulationVersion: hello.simulationVersion) else { return updateRequired(.simulationVersion) }
-        // Dev auth (`config.auth`, the only policy): no attestation (#158), no account; data files are
-        // checked when #81 resolves them.
+        // Dev auth (`config.auth`, the only policy): no attestation (#158), no account; the data files a race
+        // names resolve on the server (`RaceFiles`), but Hello's are not checked against them yet.
         send(.helloAck(HelloAck(serverBuild: config.serverBuild)))
         phase = .awaitingJoin
     }

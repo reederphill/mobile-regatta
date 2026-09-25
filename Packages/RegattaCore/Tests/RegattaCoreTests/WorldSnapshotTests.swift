@@ -133,7 +133,7 @@ struct LogFeeder {
         let race = Self.feeder.race(at: -1800)
         var aimed = race.exportSnapshot()
         let heading = Double.pi / 3
-        aimed.seats[0].boat.position = race.course.pin - Vec2.heading(heading) * 3.4
+        aimed.seats[0].boat.position = race.course.startLine.pin.position - Vec2.heading(heading) * 3.4
         aimed.seats[0].boat.heading = heading
         aimed.seats[0].boat.speed = 3
         try race.importSnapshot(aimed)

@@ -91,7 +91,7 @@ final class GameScene: SKScene {
     private func buildCourse() {
         let course = driver.course
 
-        for mark in course.marks {
+        for mark in course.elements.flatMap(\.marks) {
             let zone = SKShapeNode(circleOfRadius: CGFloat(course.zoneRadius) * ppm)
             zone.path = zone.path?.copy(dashingWithPhase: 0, lengths: [6, 6])
             zone.strokeColor = UIColor.white.withAlphaComponent(0.18)
@@ -101,13 +101,14 @@ final class GameScene: SKScene {
             courseLayer.addChild(buoy(at: mark.position, radius: mark.radius, color: Palette.mark))
         }
 
-        courseLayer.addChild(buoy(at: course.pin, radius: course.pinRadius, color: Palette.startLine))
+        let pin = course.startLine.pin
+        courseLayer.addChild(buoy(at: pin.position, radius: pin.radius, color: Palette.startLine))
 
         let committee = SKShapeNode(ellipseOf: CGSize(width: 4.6 * ppm, height: 5.2 * ppm))
         committee.fillColor = UIColor(white: 0.95, alpha: 1)
         committee.strokeColor = UIColor(white: 0.55, alpha: 1)
         committee.lineWidth = 1.5
-        committee.position = point(course.committee)
+        committee.position = point(course.startLine.committee.position)
         let flag = SKShapeNode(rect: CGRect(x: -3, y: -3, width: 10, height: 7))
         flag.fillColor = Palette.mark
         flag.lineWidth = 0
@@ -115,8 +116,8 @@ final class GameScene: SKScene {
         courseLayer.addChild(committee)
 
         let line = CGMutablePath()
-        line.move(to: point(course.pin))
-        line.addLine(to: point(course.committee))
+        line.move(to: point(course.startLine.pin.position))
+        line.addLine(to: point(course.startLine.committee.position))
         startLine.path = line.copy(dashingWithPhase: 0, lengths: [8, 6])
         startLine.lineWidth = 2
         courseLayer.addChild(startLine)
@@ -208,8 +209,8 @@ final class GameScene: SKScene {
     }
 
     /// Puts the whole course, marks, pin and committee boat, in view with a margin.
-    private func frameCourse(_ course: Course) {
-        let points = course.marks.map(\.position) + [course.pin, course.committee]
+    private func frameCourse(_ course: CourseLayout) {
+        let points = course.obstacles.map(\.position)
         let xs = points.map { CGFloat($0.x) * ppm }, ys = points.map { CGFloat($0.y) * ppm }
         guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
               size.width > 0, size.height > 0 else { return }
@@ -269,19 +270,20 @@ final class GameScene: SKScene {
             laylines.path = nil
             return
         }
-        let mark = course.marks[index]
-        guard let ground = world.groundWind(at: mark.position) else {
+        let mark = course.targetPosition(for: leg)
+        guard let ground = world.groundWind(at: mark) else {
             laylines.path = nil
             return
         }
         let w = ground.direction
         let polar = world.boatClass.polar
-        let angle = mark.kind == .windward ? polar.bestUpwind(tws: ground.speed).twa : polar.bestDownwind(tws: ground.speed).twa
+        let angle = index == CourseLayout.windwardIndex
+            ? polar.bestUpwind(tws: ground.speed).twa : polar.bestDownwind(tws: ground.speed).twa
         let path = CGMutablePath()
         for heading in [w - angle, w + angle] {
             // The layline is the track that arrives at the mark on this heading.
-            path.move(to: point(mark.position))
-            path.addLine(to: point(mark.position - Vec2.heading(heading) * 350))
+            path.move(to: point(mark))
+            path.addLine(to: point(mark - Vec2.heading(heading) * 350))
         }
         laylines.path = path.copy(dashingWithPhase: 0, lengths: [10, 10])
     }

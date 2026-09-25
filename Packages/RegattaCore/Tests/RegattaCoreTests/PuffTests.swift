@@ -4,13 +4,15 @@ import Testing
 
 /// Keyed puffs and lulls (#76): each window's key spawns them from its `puffSeed` in the race area.
 enum PuffFixtures {
-    /// `id`'s setup with the race area a `Race` gives it until course derivation (#80): the placeholder
-    /// around the standard course, laid square to the setup's mean direction.
+    /// `id`'s setup with the race area a `Race` gives it: its derived course's (#80, #81), for a fleet of 10.
     static func setup(_ id: String, raceSeed: UInt64 = 1) throws -> WindSetup {
-        let drawn = try WindFixtures.setup(id, raceSeed: raceSeed)
-        let zoneRadius = Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length)
-        let course = Course.standard(axis: drawn.meanDirection, zoneRadius: zoneRadius)
-        return drawn.with(raceArea: .placeholder(around: course))
+        withRaceArea(try WindFixtures.setup(id, raceSeed: raceSeed))
+    }
+
+    static func withRaceArea(_ drawn: WindSetup) -> WindSetup {
+        let course = CourseLayout.derive(windSetup: drawn, fleetSize: 10, laps: RaceSetup.defaultLaps,
+                                         boatClass: Race.defaultBoatClass, rules: Race.defaultRulesConfiguration.content)
+        return drawn.with(raceArea: course.raceArea)
     }
 
     /// Points `spacing` metres apart over `area`, cell centres.
@@ -282,17 +284,15 @@ enum PuffFixtures {
         #expect(field.spawns(ofWindow: k - 3).contains { $0.endTick >= tick })
     }
 
-    /// A race attaches the placeholder race area until course derivation (#80), so its wind has puffs.
-    @Test func aRaceHasPuffsInItsPlaceholderRaceArea() throws {
+    /// A race attaches its derived course's race area (#80, #81), so its wind has puffs there.
+    @Test func aRaceHasPuffsInItsCoursesRaceArea() throws {
         let race = Race(setup: try RaceSetup(raceSeed: RaceSeed(76), seats: [.human, .bot]), windSeed: WindSeed(76))
-        let course = Course.standard(laps: race.setup.laps, axis: race.windSetup.meanDirection,
-                                     zoneRadius: race.rules.zoneRadius(hullLength: race.boatClass.hull.length))
-        #expect(race.windSetup.raceArea == .placeholder(around: course))
+        let course = race.course
+        #expect(race.windSetup.raceArea == course.raceArea)
         for _ in 0..<(4 * WindWindows.ticksPerWindow) { race.step() }
         #expect(race.wind.activePuffs(atTick: race.tick).count > 20)
-        let area = try #require(race.windSetup.raceArea)
-        #expect(area.halfLength >= 300 && area.halfWidth >= 250)
-        #expect(race.course.marks.allSatisfy { m in
+        let area = course.raceArea
+        #expect(course.obstacles.allSatisfy { m in
             let offset = m.position - area.centre
             return abs(offset.dot(course.upwind)) < area.halfLength && abs(offset.dot(course.right)) < area.halfWidth
         })
@@ -308,10 +308,8 @@ enum PuffFixtures {
             text = text.replacingOccurrences(of: of, with: with)
         }
         let conditions = try ConditionsFile(data: Data(text.utf8))
-        let drawn = WindSetup(conditions: conditions, pairing: VenueFixtures.pairing(for: conditions), raceSeed: RaceSeed(2))
-        let zoneRadius = Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length)
-        let course = Course.standard(axis: drawn.meanDirection, zoneRadius: zoneRadius)
-        let setup = drawn.with(raceArea: .placeholder(around: course))
+        let setup = PuffFixtures.withRaceArea(
+            WindSetup(conditions: conditions, pairing: VenueFixtures.pairing(for: conditions), raceSeed: RaceSeed(2)))
         let (field, _) = try WindFixtures.field(setup, windSeed: 76, through: 10)
         let area = try #require(setup.raceArea)
         for window in 1...10 {
@@ -319,8 +317,9 @@ enum PuffFixtures {
             let tick = Self.w.start(of: window) + 450
             let course = try field.courseAverageSpeed(atTick: tick)
             for p in PuffFixtures.grid(area, spacing: 100) {
+                // The plain channel, bent and shaded only by the venue's geographic grid (#77).
                 let wind = try field.sample(p, tick: tick)
-                #expect(wind.speed == course && wind.direction.isFinite)
+                #expect(wind.speed == course * setup.pairing.geographicGrid.sample(p).speedFactor && wind.direction.isFinite)
             }
         }
     }

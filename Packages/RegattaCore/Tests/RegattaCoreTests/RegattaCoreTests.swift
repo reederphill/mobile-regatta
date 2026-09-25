@@ -30,7 +30,7 @@ import Testing
 }
 
 @Suite struct RulesTests {
-    let course = Course.standard(zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length))
+    let course = try! CourseLayoutTests.layout()
 
     func boat(_ id: Int, at p: Vec2, heading degrees: Double, wind: Double = 0) -> Boat {
         var b = Boat(id: id, isPlayer: false, colorIndex: id, position: p, heading: deg2rad(degrees), speed: 3)
@@ -70,7 +70,7 @@ import Testing
     }
 
     @Test func outsideBoatGivesMarkRoom() {
-        let mark = course.marks[0].position
+        let mark = course.elements[CourseLayout.windwardIndex].marks[0].position
         let inside = boat(1, at: mark + Vec2(3, -2), heading: -45)
         let outside = boat(2, at: mark + Vec2(5, -3), heading: -45)
         let call = Rules.judge(inside, outside, course: course, hull: Race.defaultBoatClass.hull)
@@ -80,18 +80,6 @@ import Testing
 }
 
 @Suite struct RaceTests {
-    @Test func windwardMarkIsRoundedToPort() {
-        let course = Course.standard(zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length))
-        let m = course.marks[0].position
-        let path = [m + Vec2(6, -10), m + Vec2(6, 5), m + Vec2(-8, 6)]
-        var stage = 0
-        let gates = course.gates(forMark: 0)
-        for k in 0..<(path.count - 1) where stage < gates.count {
-            if crossing(from: path[k], to: path[k + 1], over: gates[stage]) == 1 { stage += 1 }
-        }
-        #expect(stage == 2)
-    }
-
     /// Steers seat 0 toward `heading` with a simple proportional helm.
     func sail(_ race: Race, heading: Double, seconds: Double) -> [RaceEvent.Kind] {
         var events: [RaceEvent.Kind] = []

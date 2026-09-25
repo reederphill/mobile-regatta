@@ -31,7 +31,7 @@ final class OnlineDriver: RaceDriver {
     }
 
     let myBoatIndex: Int
-    let course: Course
+    let course: CourseLayout
     let boatClass: BoatClass
     let isPausable = false
     /// Names and bot marks, from the race's setup (#60).
