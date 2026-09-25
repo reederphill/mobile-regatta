@@ -52,7 +52,7 @@ From [Hosting account, server city and domain](https://github.com/reederphill/mo
 |---|---|
 | Provider | Hetzner Cloud. Account created 2026-09-23. |
 | City | Ashburn, Virginia (`ash`). Every v1.0 race runs here ([#31](https://github.com/reederphill/mobile-regatta/issues/31)). |
-| Reference instance type | The smallest shared-vCPU x86 plan in Ashburn, used by both production and the benchmark. The plan name and price are recorded here the first time one is created ([#69](https://github.com/reederphill/mobile-regatta/issues/69)). |
+| Reference instance type | The smallest shared-vCPU x86 plan in Ashburn, used by both production and the benchmark: `cpx11` (2 shared x86 vCPU, 2 GB RAM, 40 GB disk), 20.49 a month or 0.0328 an hour gross, recorded from the first `scripts/ref-runner.sh up` ([#69](https://github.com/reederphill/mobile-regatta/issues/69)). |
 | CPU architecture | x86_64. It matches GitHub's x86 Linux CI, so the golden table ([#56](https://github.com/reederphill/mobile-regatta/issues/56)) needs no arm64 job. |
 | Postgres | Self-hosted on its own small Hetzner server in Ashburn, so it never takes CPU from race ticks. Hetzner server backups are on, and a nightly `pg_dump` goes to R2. Staging runs Postgres on the staging server. |
 | Object storage | Cloudflare R2 (free up to 10 GB) for `WindSeedPool` files and database dumps |
@@ -61,9 +61,6 @@ From [Hosting account, server city and domain](https://github.com/reederphill/mo
 | DNS | Cloudflare (`tadeo.ns.cloudflare.com`, `tia.ns.cloudflare.com`). Game and API records are DNS only, not proxied. |
 | TLS | Let's Encrypt certificates on each server |
 | Load-test budget | Up to $50 a month on hourly Hetzner servers ([#168](https://github.com/reederphill/mobile-regatta/issues/168)) |
-
-output from `scripts/ref-runner.sh up`:
-cpx11: 2 shared x86 vCPU, 2 GB RAM, 40 GB disk; 20.49 a month, 0.0328 an hour (gross, EUR or USD per the account)
 
 ### When servers run
 
