@@ -75,8 +75,8 @@ public final class Race {
     public private(set) var incidents = IncidentIndex()
 
     /// The public wind setup, drawn from the race seed: mean direction, base strength, trend direction;
-    /// with the placeholder race area around the course (`RaceArea.placeholder(around:)`) until course
-    /// derivation (#80) lays one out.
+    /// with the placeholder race area around the course (`RaceArea.placeholder(around:)`) until race
+    /// assembly (#81) sails `CourseLayout` and attaches its derived area (#80).
     public let windSetup: WindSetup
     /// The keyed wind (ADR 0001), holding the keys through the current window and no further.
     public private(set) var wind: WindField
@@ -145,7 +145,7 @@ public final class Race {
                                      zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(
                                         hullLength: Race.defaultBoatClass.hull.length))
         self.course = course
-        // Puffs (#76) spawn in the race area, which course derivation (#80) will lay out; until then a
+        // Puffs (#76) spawn in the race area, which `CourseLayout` derives (#80) and #81 wires in; until then a
         // placeholder around the course, from public information only.
         let windSetup = drawn.with(raceArea: .placeholder(around: course))
         self.windSetup = windSetup

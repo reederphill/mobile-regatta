@@ -132,3 +132,8 @@ The simulation behaviour is unchanged by #73: the zone (3 L) and the start seque
 the file, and each rule call's penalty deadlines come from `penalty`. The other values are loaded,
 checked and exposed for the tickets that use them (#80–#96); until then the race keeps its old
 behaviour (for example, a 180 s finish window and no time limit).
+
+Course derivation (#80): `CourseLayout.derive` reads `startLine`, `leewardGate`, `offsetMark`,
+`raceArea`, `startRow`, `edgeSpeedRetention` and `beatSizing` to lay out the course, sizing the beat
+from the class polar in the race's base strength (the model is on `CourseLayout.beat`). The race
+sails it from #81; until then it sails `Course.standard`.
