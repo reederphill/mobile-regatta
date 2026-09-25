@@ -29,9 +29,10 @@ struct SeatLifecycleTests {
     }
 
     /// Checks the dropped-boat path for seat 0 with its hold starting at `hold`: nothing from the seat in
-    /// between, a neutral held input at exactly `hold + 15`, and the dropped-boat bot from that tick on.
-    private func expectDrop(_ rig: Rig, holdFrom hold: Int) async {
-        let drop = hold + 15
+    /// between, a neutral held input at exactly `hold + holdTicks`, and the dropped-boat bot from that tick on.
+    /// `helmCentred`: the seat never moved the helm, so releasing it changes nothing and logs nothing.
+    private func expectDrop(_ rig: Rig, holdFrom hold: Int, holdTicks: Int = 15, helmCentred: Bool = false) async {
+        let drop = hold + holdTicks
         await rig.run(to: drop - 1)
         #expect(await rig.host.controller(seat: 0).isHuman)
         await rig.run(to: drop)
@@ -42,7 +43,11 @@ struct SeatLifecycleTests {
         let log = await rig.host.log
         let records = heldInputs(log)
         #expect(!records.contains { $0.tick > hold && $0.tick < drop })
-        #expect(records.contains { $0.tick == drop && $0.input == .neutral })
+        if helmCentred {
+            #expect(!records.contains { $0.tick <= drop })
+        } else {
+            #expect(records.contains { $0.tick == drop && $0.input == .neutral })
+        }
         // After the neutral input the bot decides on its seat's usual phase, and sends for the next tick.
         let driver = BotDriver(seat: 0, raceSeed: rig.setup.raceSeed)
         #expect(records.filter { $0.tick > drop }.allSatisfy { driver.decides(atTick: $0.tick - 1) })
@@ -99,6 +104,82 @@ struct SeatLifecycleTests {
         #expect(await rig.host.controller(seat: 0).isHuman)
         let kinds = await rig.host.log.seatEvents.map(\.kind)
         #expect(kinds == [.joined(.human), .disconnected, .rejoined])
+    }
+
+    // MARK: First input after an attach
+
+    /// The first held input comes a handshake after the attach (`RaceStart`, then a ping and its pong),
+    /// so the host waits 1 s for it rather than the 0.5 s hold. A seat that never sends is still dropped.
+    @Test func seatThatNeverSendsIsDroppedOneSecondAfterItAttaches() async throws {
+        #expect(RaceHostOptions().firstInputHoldTicks == 30)
+        let rig = try await Rig(firstInputHold: true)
+        await expectDrop(rig, holdFrom: -300, holdTicks: 30, helmCentred: true)
+        #expect(await rig.host.isAttached(seat: 0))
+        let kinds = await rig.host.log.seatEvents.map(\.kind)
+        #expect(kinds == [.joined(.human), .dropped, .botTookOver(.cautious)])
+    }
+
+    @Test func firstHeldInputEndsTheFirstInputWaitAndStartsTheUsualHold() async throws {
+        let rig = try await Rig(firstInputHold: true)
+        await rig.run(to: -276)
+        await rig.send(held(60), seq: 1, stamp: -275)
+        // The 1 s wait would have run out at -270: the hold runs from the input instead.
+        await expectDrop(rig, holdFrom: -275)
+        let kinds = await rig.host.log.seatEvents.map(\.kind)
+        #expect(kinds == [.joined(.human), .dropped, .botTookOver(.cautious)])
+    }
+
+    /// A rejoin inside the hold cancels the drop, but the seat must then send within 1 s.
+    @Test func rejoinedSeatThatNeverSendsIsDroppedOneSecondAfterTheRejoin() async throws {
+        let rig = try await Rig(firstInputHold: true)
+        await rig.run(to: -290)
+        let last = -289
+        await rig.send(held(60), seq: 1, stamp: last)
+        await rig.host.disconnect(seat: 0)
+        await rig.run(to: last + 10)
+        #expect(await rig.host.attach(seat: 0, transport: RecordingTransport()))
+        await expectDrop(rig, holdFrom: last + 10, holdTicks: 30)
+        let kinds = await rig.host.log.seatEvents.map(\.kind)
+        #expect(kinds == [.joined(.human), .disconnected, .rejoined, .dropped, .botTookOver(.cautious)])
+    }
+
+    /// A seat no player attaches to is silent from the host's start: dropped 1 s in, so the bot sails it
+    /// and it counts as gone. A late attach still takes the boat, as a join.
+    @Test func seatNoOneAttachesToIsDroppedOneSecondAfterTheHostStarts() async throws {
+        let rig = try await Rig(humans: 2, firstInputHold: true)
+        await rig.run(to: -271)
+        #expect(await rig.host.controller(seat: 1).isHuman)
+        await rig.run(to: -270)
+        #expect(isDropped(await rig.host.controller(seat: 1)))
+        #expect(await rig.host.log.seatEvents.filter { $0.seat == 1 } == [
+            SeatEvent(tick: -270, seat: 1, kind: .dropped),
+            SeatEvent(tick: -270, seat: 1, kind: .botTookOver(.cautious)),
+        ])
+
+        await rig.run(to: -200)
+        let late = RecordingTransport()
+        #expect(await rig.host.attach(seat: 1, transport: late))
+        #expect(await rig.host.controller(seat: 1).isHuman)
+        #expect(await rig.host.log.seatEvents.last == SeatEvent(tick: -200, seat: 1, kind: .joined(.human)))
+        #expect(hasResync(late))
+    }
+
+    @Test func seatNoOneAttachesToCountsTowardAllGone() async throws {
+        var options = RaceHostOptions()
+        options.allGone.graceTicks = 90
+        let rig = try await Rig(humans: 2, options: options, firstInputHold: true)
+        await rig.run(to: -280)
+        #expect(await rig.host.leave(seat: 0))
+        await rig.run(to: 0)
+        // Seat 0 left at -280 and seat 1 was dropped at -270: the grace runs from -270.
+        #expect(rig.allGones == [AllGone(tick: -180, leaveOrder: [0, 1], isMassDrop: false)])
+    }
+
+    @Test func disconnectBeforeTheFirstInputStartsTheUsualHold() async throws {
+        let rig = try await Rig(firstInputHold: true)
+        await rig.run(to: -295)
+        await rig.host.disconnect(seat: 0)
+        await expectDrop(rig, holdFrom: -295, helmCentred: true)
     }
 
     // MARK: Rejoin

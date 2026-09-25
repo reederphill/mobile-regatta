@@ -11,6 +11,10 @@ public struct RaceHostOptions: Hashable, Sendable {
     public var behindAlertTicks = Race.tickRate
     /// How long the host holds a seat's last input after its inputs stop, before it drops the boat (#18: 0.5 s).
     public var inputHoldTicks = Race.tickRate / 2
+    /// How long the host waits for a seat's first held input after it attaches, before it drops the boat
+    /// as it would a silent one. Longer than the hold: the input comes a handshake after the attach
+    /// (`RaceStart`, then a ping and its pong), about 1.5 round trips.
+    public var firstInputHoldTicks = Race.tickRate
     /// When every human is gone (G3).
     public var allGone = AllGoneConfig()
 
@@ -55,8 +59,10 @@ public struct RaceOutcome: Hashable, Sendable {
 ///
 /// Seats (#66): a player attaches with `attach(seat:transport:)`. When a seat's held inputs stop, whether
 /// its socket closed or not, the host holds its last input `inputHoldTicks` (#18), then releases the helm
-/// with a neutral input and a cautious bot sails the dropped boat until the player rejoins. A seat left
-/// before the gun goes to a fleet bot for good (#35); left after it, the boat takes the dropped-boat path.
+/// with a neutral input and a cautious bot sails the dropped boat until the player rejoins. A seat that
+/// attaches and sends no held input is dropped the same way, `firstInputHoldTicks` after the attach, and
+/// a seat no player attaches to `firstInputHoldTicks` after the host starts. A seat left before the gun
+/// goes to a fleet bot for good (#35); left after it, the boat takes the dropped-boat path.
 /// When every human is gone, `onAllGone` fires once, after the grace (G3).
 public actor RaceHost {
     /// Wind keys to reveal once the race has simulated `tick` (#95). Stub until #95: reveals nothing.
@@ -79,7 +85,8 @@ public actor RaceHost {
         /// The tick of the last held input the host applied for the seat.
         var lastHeldTick: Int?
         /// The tick the input hold runs out at (#18), while a player sails the seat and its inputs have
-        /// stopped or may yet. Cleared by an attach: a rejoin before it cancels the drop.
+        /// stopped or may yet. The host's start and each attach set it to the wait for the first input: a
+        /// rejoin before it runs out cancels the drop, and a seat that never sends is still dropped.
         var holdDeadline: Int?
 
         init(caps: InputCaps) { gate = InputGate(caps: caps) }
@@ -114,7 +121,8 @@ public actor RaceHost {
     public private(set) var outcome: RaceOutcome?
 
     /// A host for a new race, at the start of its sequence now. Seats the setup marks `.bot` are sailed
-    /// by RegattaBots; the rest wait for a player to attach. `roster` defaults to "Seat n" names.
+    /// by RegattaBots; the rest wait `firstInputHoldTicks` for a player to attach, then are dropped until
+    /// one does. `roster` defaults to "Seat n" names.
     /// `onAllGone` fires once when every human is gone and the grace is over (G3; #148 closes the race).
     public init(setup: RaceSetup, windSeed: WindSeed, clock: any HostClock, options: RaceHostOptions = RaceHostOptions(),
                 roster: [RosterEntry]? = nil, windKeyReveal: @escaping WindKeyReveal = { _ in [] },
@@ -134,6 +142,7 @@ public actor RaceHost {
         seats = Array(repeating: Seat(caps: options.caps), count: race.boats.count)
         humanSeats = setup.seats.indices.filter { setup.seats[$0] == .human }
         gone = Array(repeating: nil, count: race.boats.count)
+        for seat in humanSeats { seats[seat].holdDeadline = startTick + options.firstInputHoldTicks }
     }
 
     // MARK: - Reading
@@ -267,7 +276,8 @@ public actor RaceHost {
 
     /// Connects a player's `transport` to `seat` and sends it the race (`RaceStart`, and a `Resync` if
     /// the race has begun stepping). Records the join, or a rejoin: a rejoin takes the seat back from the
-    /// bot sailing the dropped boat, or cancels the input hold if the boat isn't dropped yet. False for a
+    /// bot sailing the dropped boat, or cancels the input hold if the boat isn't dropped yet. Either way the
+    /// seat then has `firstInputHoldTicks` to send a held input before it is dropped. False for a
     /// bot seat, a seat that left (#35: it was given away), a seat out of range or a closed race.
     @discardableResult
     public func attach(seat: Int, transport: any SeatTransport) -> Bool {
@@ -276,6 +286,7 @@ public actor RaceHost {
         seats[seat] = Seat(caps: options.caps)
         seats[seat].transport = transport
         seats[seat].hasJoined = true
+        seats[seat].holdDeadline = race.tick + options.firstInputHoldTicks
         bots[seat] = .human
         gone[seat] = nil
         race.record(rejoin ? .rejoined : .joined(.human), seat: seat)
