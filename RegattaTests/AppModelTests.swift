@@ -13,7 +13,7 @@ import RegattaCore
         #expect(model.phase == .home)
         #expect(model.path.isEmpty)
         #expect(model.sheet == nil)
-        #expect(model.session == nil)
+        #expect(model.race == nil)
     }
 
     @Test func dismissAllClearsPathAndSheet() {
@@ -41,7 +41,7 @@ import RegattaCore
 
         model.endRaceSequence()
         #expect(model.phase == .home)
-        #expect(model.session == nil)
+        #expect(model.race == nil)
         #expect(!state.isRaceSequenceShowing)
         #expect(!controller.isOrientationLocked)
         if #available(iOS 26.0, *) { #expect(!controller.prefersInterfaceOrientationLocked) }
@@ -59,6 +59,23 @@ import RegattaCore
 
         model.endRaceSequence()
         #expect(model.path == [.practiceSetup])
+    }
+
+    /// An online race (#68) goes through the same race sequence, and quitting it returns home.
+    @Test func anOnlineRaceUsesTheRaceSequence() {
+        let state = SceneState()
+        let model = AppModel(sceneState: state)
+        let launch = OnlineLaunch(server: RaceServer(address: RaceServer.defaultAddress)) { [] }
+
+        model.startRaceSequence(.online(launch))
+        #expect(model.phase == .raceSequence)
+        #expect(state.isRaceSequenceShowing)
+        #expect(model.session == nil)
+
+        model.endRaceSequence()
+        #expect(model.phase == .home)
+        #expect(model.race == nil)
+        #expect(!state.isRaceSequenceShowing)
     }
 
     /// Practice and restarts use the setup, on the pinned seed when there is one.

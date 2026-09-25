@@ -68,6 +68,26 @@ import RegattaCore
         #expect(options.problems == ["-seed needs a value", "-fixture needs a value"])
     }
 
+    /// The online dev race (#68): the flag, the server and the race-length overrides; not a practice race.
+    @Test func parsesTheOnlineDevRace() {
+        let options = parse("-online", "-onlineHost", "127.0.0.1:50123", "-startSeconds", "5", "-raceSeconds", "20")
+        #expect(options.online)
+        #expect(options.onlineHost == "127.0.0.1:50123")
+        #expect(options.startSeconds == 5)
+        #expect(options.raceSeconds == 20)
+        #expect(options.problems.isEmpty)
+        #expect(options.launchRaceConfig(from: RaceSettings()) == nil)
+        #expect(RaceServer(address: options.onlineHost!).raceURL?.absoluteString == "ws://127.0.0.1:50123/race")
+    }
+
+    @Test func ignoresBadOnlineValues() {
+        let options = parse("-onlineHost", "http://host/", "-startSeconds", "61", "-raceSeconds", "0")
+        #expect(options.onlineHost == nil)
+        #expect(options.startSeconds == nil)
+        #expect(options.raceSeconds == nil)
+        #expect(options.problems.count == 3)
+    }
+
     @Test func uiTestsAndFixturesHideTheDebugStats() {
         #expect(parse("-autostart").showsDebugStats)
         #expect(!parse("-uitesting", "-autostart").showsDebugStats)

@@ -31,10 +31,10 @@ struct RootView: View {
                 .padding()
                 .accessibilityIdentifier("fixture-error")
         } else {
-            HomeView(model: model, onRaceOnline: { showsOnlineStub = true })
+            HomeView(model: model, onRaceOnline: raceOnline)
                 .onAppear(perform: autostartIfRequested)
                 .fullScreenCover(isPresented: isRaceSequenceShowing) { raceCover }
-                // A stub until online racing lands (#68).
+                // A stub until matchmaking; Debug builds join the dev server's instant race instead (#68).
                 .alert("Online racing is on its way", isPresented: $showsOnlineStub) {
                     Button("OK", role: .cancel) {}
                 } message: {
@@ -44,29 +44,37 @@ struct RootView: View {
     }
 
     private var isRaceSequenceShowing: Binding<Bool> {
-        Binding(get: { model.phase == .raceSequence && model.session != nil },
+        Binding(get: { model.phase == .raceSequence && model.race != nil },
                 set: { showing in if !showing { model.endRaceSequence() } })
     }
 
     /// The race sequence keeps its fixed look whatever the system appearance: dark, with no status bar, and it
     /// can't be swiped down. The cover is its own presentation, so it gets the scene's environment explicitly.
     @ViewBuilder private var raceCover: some View {
-        if let session = model.session {
-            RaceView(session: session, onRestart: model.startPractice, onExit: model.endRaceSequence)
-                .id(ObjectIdentifier(session))
-                // UI tests swipe on it and check it stays.
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("race-cover")
-                .environment(\.sceneState, sceneState)
-                .environment(\.screenSize, screenSize)
-                .preferredColorScheme(.dark)
-                .statusBarHidden()
-                .interactiveDismissDisabled()
+        if let race = model.race {
+            Group {
+                switch race {
+                case .practice(let session):
+                    RaceView(session: session, onRestart: model.startPractice, onExit: model.endRaceSequence)
+                        .id(ObjectIdentifier(session))
+                case .online(let launch):
+                    OnlineLaunchView(launch: launch, onRestart: startOnlineRace, onExit: model.endRaceSequence)
+                        .id(ObjectIdentifier(launch))
+                }
+            }
+            // UI tests swipe on it and check it stays.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("race-cover")
+            .environment(\.sceneState, sceneState)
+            .environment(\.screenSize, screenSize)
+            .preferredColorScheme(.dark)
+            .statusBarHidden()
+            .interactiveDismissDisabled()
         }
     }
 
-    /// Development launch arguments (`LaunchOptions`): `-autostart`, `-demo`, `-perf` and `-fixture` open on the
-    /// race sequence. The cover appears without its animation, so a render fixture's frame is the same as ever.
+    /// Development launch arguments (`LaunchOptions`): `-autostart`, `-demo`, `-perf`, `-fixture` and `-online` open
+    /// on the race sequence. The cover appears without its animation, so a render fixture's frame is the same as ever.
     private func autostartIfRequested() {
         guard !checkedLaunchArguments else { return }
         checkedLaunchArguments = true
@@ -79,10 +87,38 @@ struct RootView: View {
         withTransaction(transaction) {
             if let name = launchOptions.fixture {
                 startFixture(named: name)
+            } else if launchOptions.online {
+                startOnlineRace()
             } else if let config = launchOptions.launchRaceConfig(from: model.settings) {
                 model.startRaceSequence(GameSession(config: config, timescale: launchOptions.timescale))
             }
         }
+    }
+
+    /// Home's Race online: a stub until matchmaking, except that a Debug build joins the dev server's instant
+    /// race (#68).
+    private func raceOnline() {
+        #if DEBUG
+        startOnlineRace()
+        #else
+        showsOnlineStub = true
+        #endif
+    }
+
+    /// A new online race: in a Debug build, the dev server's instant race on the Settings page's host or
+    /// `-onlineHost`, with `-raceSeconds` and `-startSeconds` if given.
+    private func startOnlineRace() {
+        #if DEBUG
+        let launchOptions = model.launchOptions
+        let server = RaceServer(address: launchOptions.onlineHost
+            ?? UserDefaults.standard.string(forKey: RaceServer.addressDefaultsKey) ?? RaceServer.defaultAddress)
+        let (raceSeconds, startSeconds) = (launchOptions.raceSeconds, launchOptions.startSeconds)
+        let launch = OnlineLaunch(server: server) {
+            try await DevInstantRace.ticket(server: server, raceSeconds: raceSeconds, startSeconds: startSeconds)
+        }
+        model.startRaceSequence(.online(launch))
+        Task { await launch.start() }
+        #endif
     }
 
     /// `-fixture <name>`: replays the fixture's log to its freeze tick and freezes the race there (#62).

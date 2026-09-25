@@ -20,7 +20,11 @@ struct MenuPageView: View {
                             message: "How to steer, start and keep clear arrives here.")
         case .settings:
             PlaceholderPage(title: "Settings", systemImage: "gearshape", id: "page-settings",
-                            message: "Steering, camera, sound and lobby settings arrive here.")
+                            message: "Steering, camera, sound and lobby settings arrive here.") {
+                #if DEBUG
+                DevRaceServerField()
+                #endif
+            }
         }
     }
 }
@@ -80,11 +84,20 @@ private struct PracticeSetupView: View {
 }
 
 /// A page whose content a later ticket builds.
-private struct PlaceholderPage: View {
+private struct PlaceholderPage<Extra: View>: View {
     let title: String
     let systemImage: String
     let id: String
     let message: String
+    let extra: Extra
+
+    init(title: String, systemImage: String, id: String, message: String, @ViewBuilder extra: () -> Extra = { EmptyView() }) {
+        self.title = title
+        self.systemImage = systemImage
+        self.id = id
+        self.message = message
+        self.extra = extra()
+    }
 
     var body: some View {
         ScrollView {
@@ -96,6 +109,7 @@ private struct PlaceholderPage: View {
                 Text(message)
                     .font(MenuFont.body())
                     .multilineTextAlignment(.center)
+                extra
             }
             .padding(.vertical, 40)
             .readableColumn()
@@ -107,6 +121,25 @@ private struct PlaceholderPage: View {
         .navigationTitle(title)
     }
 }
+
+#if DEBUG
+/// The dev race server Race online joins in a Debug build (#68), `host:port`. `-onlineHost` overrides it.
+private struct DevRaceServerField: View {
+    @AppStorage(RaceServer.addressDefaultsKey) private var host = RaceServer.defaultAddress
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Race server (dev)").font(MenuFont.heading(.headline))
+            TextField("host:port", text: $host)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .textFieldStyle(.roundedBorder)
+        }
+        .padding(.top, 24)
+    }
+}
+#endif
 
 /// A brief sheet over the home screen (#25). Placeholders until sign-in (#109) and the lobby's boat card.
 struct MenuSheetView: View {

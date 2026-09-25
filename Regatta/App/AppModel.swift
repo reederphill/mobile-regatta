@@ -28,6 +28,14 @@ final class AppModel {
         var id: Self { self }
     }
 
+    /// What the race sequence shows.
+    enum Race {
+        /// A practice race, or a render fixture, sailed on the device.
+        case practice(GameSession)
+        /// An online race, from joining to its close (#68).
+        case online(OnlineLaunch)
+    }
+
     /// A message at the top of the home screen.
     struct Notice: Equatable {
         var title: String
@@ -48,7 +56,11 @@ final class AppModel {
     /// The practice race setup, kept between races.
     var settings = RaceSettings()
     /// The race the cover shows, while `phase` is `.raceSequence`.
-    private(set) var session: GameSession?
+    private(set) var race: Race?
+    /// The practice race the cover shows, if it's one.
+    var session: GameSession? {
+        if case .practice(let session) = race { session } else { nil }
+    }
     /// Home's notice slot. Nothing posts one yet.
     var notice: Notice?
     /// Home's last-race slot. Filled once results are kept (#24).
@@ -70,13 +82,18 @@ final class AppModel {
         sheet = nil
     }
 
-    /// Shows `session` in the race sequence, replacing any race there. The one way into a race, whether it's a
-    /// practice race, a restart, a launch argument or (later) an online race. The pushed pages stay under the
-    /// cover, so quitting a practice race returns to its setup.
-    func startRaceSequence(_ session: GameSession) {
+    /// Shows `race` in the race sequence, replacing any race there. The one way into a race, whether it's a
+    /// practice race, a restart, a launch argument or an online race. The pushed pages stay under the cover, so
+    /// quitting a practice race returns to its setup.
+    func startRaceSequence(_ race: Race) {
         sheet = nil
-        self.session = session
+        self.race = race
         phase = .raceSequence
+    }
+
+    /// Shows the practice race `session` in the race sequence.
+    func startRaceSequence(_ session: GameSession) {
+        startRaceSequence(.practice(session))
     }
 
     /// A practice race on the current settings.
@@ -87,6 +104,6 @@ final class AppModel {
     /// Quits the race sequence back to the menus.
     func endRaceSequence() {
         phase = .home
-        session = nil
+        race = nil
     }
 }

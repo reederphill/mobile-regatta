@@ -75,8 +75,8 @@ public final class Race {
     public private(set) var incidents = IncidentIndex()
 
     /// The public wind setup, drawn from the race seed: mean direction, base strength, trend direction;
-    /// with the placeholder race area around the course (`RaceArea.placeholder(around:)`) until course
-    /// derivation (#80) lays one out.
+    /// with the placeholder race area around the course (`RaceArea.placeholder(around:)`) until race
+    /// assembly (#81) sails `CourseLayout` and attaches its derived area (#80).
     public let windSetup: WindSetup
     /// The keyed wind (ADR 0001), holding the keys through the current window and no further.
     public private(set) var wind: WindField
@@ -145,7 +145,7 @@ public final class Race {
                                      zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(
                                         hullLength: Race.defaultBoatClass.hull.length))
         self.course = course
-        // Puffs (#76) spawn in the race area, which course derivation (#80) will lay out; until then a
+        // Puffs (#76) spawn in the race area, which `CourseLayout` derives (#80) and #81 wires in; until then a
         // placeholder around the course, from public information only.
         let windSetup = drawn.with(raceArea: .placeholder(around: course))
         self.windSetup = windSetup
@@ -643,7 +643,7 @@ extension Race {
         return WorldSnapshot(
             tick: tick,
             seats: boats.indices.map { WorldSnapshot.Seat(boat: boats[$0], heldInput: heldInputs[$0]) },
-            touchingBoats: boatPairs, touchingObstacles: obstacles, foulMemory: fouls,
+            touchingBoats: boatPairs, touchingObstacles: obstacles, foulMemory: fouls, incidents: incidents,
             firstFinishTime: firstFinishTime, isOver: isOver, windKeys: wind.keys
         )
     }
@@ -664,10 +664,10 @@ extension Race {
     ///
     /// Throws, leaving the race unchanged, for a snapshot it couldn't sail on from: another fleet
     /// size, a tick outside the sequence start … `WorldSnapshot.maxTick`, a non-finite value, a leg or
-    /// rounding stage the course doesn't have, a negative penalty count, a bad contact, or a missing
-    /// key from the first window the wind at the snapshot's tick needs (`WindField.firstWindowNeeded`:
-    /// the window before the snapshot's, or further back for puffs that may still be alive) through the
-    /// last key it holds.
+    /// rounding stage the course doesn't have, a negative penalty count, a bad contact or incident, or
+    /// a missing key from the first window the wind at the snapshot's tick needs
+    /// (`WindField.firstWindowNeeded`: the window before the snapshot's, or further back for puffs that
+    /// may still be alive) through the last key it holds.
     public func importSnapshot(_ snapshot: WorldSnapshot) throws {
         guard snapshot.seats.count == boats.count else {
             throw WorldSnapshotError.seatCount(expected: boats.count, found: snapshot.seats.count)
@@ -689,6 +689,12 @@ extension Race {
               snapshot.foulMemory.allSatisfy({ validPair($0.pair) }),
               snapshot.touchingObstacles.allSatisfy({ seatRange.contains($0.seat) && course.obstacles.indices.contains($0.obstacle) })
         else { throw WorldSnapshotError.invalidContact }
+        if let bad = snapshot.incidents.incidents.first(where: {
+            !seatRange.contains($0.parties.low) || !seatRange.contains($0.parties.high)
+                || !course.legs.indices.contains($0.leg) || $0.tick > snapshot.tick
+        }) {
+            throw WorldSnapshotError.invalidIncident(id: bad.id)
+        }
 
         let snapshotWind = WindField(setup: windSetup, windows: wind.windows, keys: snapshot.windKeys)
         do {
@@ -731,6 +737,7 @@ extension Race {
         var foulTimes: [Pair: Double] = [:]
         for memory in snapshot.foulMemory { foulTimes[Pair(a: memory.pair.a, b: memory.pair.b)] = memory.time }
         lastFoul = foulTimes
+        incidents = snapshot.incidents
         firstFinishTime = snapshot.firstFinishTime
         isOver = snapshot.isOver
         // Places count up from the boats already finished.

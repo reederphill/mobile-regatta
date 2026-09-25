@@ -4,7 +4,7 @@ import SwiftUI
 /// pushed on top. No tab bar.
 struct HomeView: View {
     @Bindable var model: AppModel
-    /// Race online. A stub until online racing lands (#68).
+    /// Race online: a stub until matchmaking (Debug builds join the dev server's instant race, #68).
     var onRaceOnline: () -> Void
     @Environment(\.connectivity) private var connectivity
     @Environment(\.lobbyStatus) private var lobbyStatus

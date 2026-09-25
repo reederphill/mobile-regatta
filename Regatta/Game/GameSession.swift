@@ -25,7 +25,12 @@ struct ResultRow: Identifiable {
 }
 
 /// Hosts one race's driver and bridges it to SwiftUI: HUD snapshots, rule-call messages,
-/// haptics and results. It never holds a `Race`: a practice race is a `PracticeDriver`.
+/// haptics and results. It never holds a `Race`: a practice race is a `PracticeDriver`, an online one
+/// an `OnlineDriver`.
+///
+/// Messages come only from the events the driver drains. Online those are the server's alone (#18, #68):
+/// the prediction's own rule calls, OCS, penalties and finishes never reach here, so none is shown
+/// before the server calls it.
 @Observable
 final class GameSession {
     let driver: any RaceDriver
@@ -40,6 +45,7 @@ final class GameSession {
     var playerDone = false
 
     @ObservationIgnored private var lastCountdownSecond = Int.max
+    @ObservationIgnored private var toldUpdateRequired = false
     @ObservationIgnored private let impact = UIImpactFeedbackGenerator(style: .medium)
     @ObservationIgnored private let notification = UINotificationFeedbackGenerator()
 
@@ -47,6 +53,11 @@ final class GameSession {
     /// (`-timescale`, for tests).
     convenience init(config: RaceConfig, timescale: Double = 1) {
         let driver = PracticeDriver(config: config, timescale: timescale)
+        self.init(driver: driver, roster: driver.roster)
+    }
+
+    /// An online race (#68).
+    convenience init(online driver: OnlineDriver) {
         self.init(driver: driver, roster: driver.roster)
     }
 
@@ -85,6 +96,10 @@ final class GameSession {
         let now = Date.now
         messages.removeAll { $0.expires < now }
         if playerDone { results = makeResults() }
+        if let online = driver as? OnlineDriver, case .updateRequired = online.connection, !toldUpdateRequired {
+            toldUpdateRequired = true
+            post("Update Regatta to race online. This race can't reconnect.", .alert, seconds: 10)
+        }
     }
 
     func consume(_ events: [RaceEvent]) {
