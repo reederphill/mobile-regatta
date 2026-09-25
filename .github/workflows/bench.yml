@@ -1,0 +1,49 @@
+# The tick benchmark and budget gate (#69): regatta-bench on the reference server type (docs/prerequisites.md,
+# Hosting), gated on #27's budget (p99 tick <= 5 ms, >= 20 races per vCPU). Started by hand only, after
+# `scripts/ref-runner.sh up` has registered a `regatta-ref` runner; `scripts/ref-runner.sh down` removes it.
+# Its first green run with #105's scenarios and final brains is #105's acceptance.
+name: Bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticks:
+        description: Timed ticks per race (blank for each scenario's own)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: regatta-bench --gate on the reference server
+    runs-on: [self-hosted, regatta-ref]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build regatta-bench (release)
+        run: swift build -c release --package-path Packages/RegattaServer --product regatta-bench
+      - name: Bench and gate
+        shell: bash  # explicit, so the step runs with pipefail and a gate failure isn't hidden by tee
+        env:
+          TICKS: ${{ inputs.ticks }}
+        run: |
+          bin="$(swift build -c release --package-path Packages/RegattaServer --show-bin-path)"
+          args=(--gate --json bench.json)
+          [[ -n "$TICKS" ]] && args+=(--ticks "$TICKS")
+          echo "$(nproc) vCPU, $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2-)" | tee bench.txt
+          "$bin/regatta-bench" "${args[@]}" 2>&1 | tee -a bench.txt
+      - name: Summary
+        if: always()
+        run: |
+          { echo '```'; cat bench.txt || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      # The numbers for #105.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-${{ github.run_id }}
+          path: |
+            bench.json
+            bench.txt
+          if-no-files-found: warn

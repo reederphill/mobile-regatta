@@ -89,7 +89,7 @@ import RegattaCore
         }
         #expect(driver.currentFrame.isOver)
         #expect(driver.currentFrame.boats[driver.myBoatIndex].status == .finished)
-        #expect(driver.drainEvents().contains { $0.kind == .raceOver })
+        #expect(driver.drainEvents().contains { $0.kind == .raceClosed })
 
         let log = driver.log
         #expect(log.inputs.contains { $0.seat == driver.myBoatIndex }, "the bot's inputs went through the input API")

@@ -192,8 +192,8 @@ struct RaceHostTests {
         await rig.run(to: -250)
 
         // The recall notice goes to the boat that is over only (#9).
-        await rig.host.sendEvent(.ocs(seat: 2), to: .seats([2]))
-        #expect(seat2.events.map(\.kind) == [.ocs(seat: 2)])
+        await rig.host.sendEvent(.ocsNotice(recipient: 2), to: .seats([2]))
+        #expect(seat2.events.map(\.kind) == [.ocsNotice(recipient: 2)])
         #expect(seat1.events.isEmpty)
         #expect(rig.seat0.events.isEmpty)
 

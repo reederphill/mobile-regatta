@@ -109,22 +109,22 @@ final class GameSession {
         case .gun:
             post("Gun! Race on.", .good)
             impact.impactOccurred(intensity: 1)
-        case .ocs(let b) where b == me:
-            post("Rule 22 — OCS. You were over at the gun: dip back below the line, then start.", .alert, seconds: 6)
+        case .ocsNotice(let b) where b == me:
+            post("Rule 29.1 — OCS. You were over at the gun: dip back below the line, then start.", .alert, seconds: 6)
             notification.notificationOccurred(.error)
-        case .ocs(let b):
+        case .ocsNotice(let b):
             post("\(name(b)) is OCS", .info)
         case .cleared(let b) where b == me:
             post("Cleared. Now cross the line to start.", .info)
         case .started(let b) where b == me:
             post("You're away.", .good)
-        case .foul(let call) where call.offender == me:
+        case .ruleCall(let call) where call.offender == me:
             post("Rule \(call.rule.rawValue) — \(call.rule.title). Your foul on \(name(call.victim)): spin a 720°.", .alert, seconds: 6)
             notification.notificationOccurred(.error)
-        case .foul(let call) where call.victim == me:
+        case .ruleCall(let call) where call.victim == me:
             post("Rule \(call.rule.rawValue) — \(call.rule.title). \(name(call.offender)) fouled you and must spin.", .good, seconds: 5)
             impact.impactOccurred(intensity: 0.8)
-        case .foul(let call):
+        case .ruleCall(let call):
             post("\(name(call.offender)) fouled \(name(call.victim)) — Rule \(call.rule.rawValue)", .info)
         case .markTouch(let b, let mark) where b == me:
             post("Rule 31 — you hit the \(mark). Spin a 360°.", .alert, seconds: 5)
@@ -143,7 +143,7 @@ final class GameSession {
             post("DSQ — \(reason).", .alert, seconds: 8)
             notification.notificationOccurred(.error)
             finishForPlayer()
-        case .raceOver:
+        case .raceClosed:
             finishForPlayer()
         default:
             break

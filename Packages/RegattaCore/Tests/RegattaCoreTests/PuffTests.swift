@@ -8,7 +8,8 @@ enum PuffFixtures {
     /// around the standard course, laid square to the setup's mean direction.
     static func setup(_ id: String, raceSeed: UInt64 = 1) throws -> WindSetup {
         let drawn = try WindFixtures.setup(id, raceSeed: raceSeed)
-        let course = Course.standard(axis: drawn.meanDirection, hullLength: Race.defaultBoatClass.hull.length)
+        let zoneRadius = Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length)
+        let course = Course.standard(axis: drawn.meanDirection, zoneRadius: zoneRadius)
         return drawn.with(raceArea: .placeholder(around: course))
     }
 
@@ -285,7 +286,7 @@ enum PuffFixtures {
     @Test func aRaceHasPuffsInItsPlaceholderRaceArea() throws {
         let race = Race(setup: try RaceSetup(raceSeed: RaceSeed(76), seats: [.human, .bot]), windSeed: WindSeed(76))
         let course = Course.standard(laps: race.setup.laps, axis: race.windSetup.meanDirection,
-                                     hullLength: race.boatClass.hull.length)
+                                     zoneRadius: race.rules.zoneRadius(hullLength: race.boatClass.hull.length))
         #expect(race.windSetup.raceArea == .placeholder(around: course))
         for _ in 0..<(4 * WindWindows.ticksPerWindow) { race.step() }
         #expect(race.wind.activePuffs(atTick: race.tick).count > 20)
@@ -307,7 +308,8 @@ enum PuffFixtures {
             text = text.replacingOccurrences(of: of, with: with)
         }
         let drawn = WindSetup(conditions: try ConditionsFile(data: Data(text.utf8)), pairing: .stub, raceSeed: RaceSeed(2))
-        let course = Course.standard(axis: drawn.meanDirection, hullLength: Race.defaultBoatClass.hull.length)
+        let zoneRadius = Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length)
+        let course = Course.standard(axis: drawn.meanDirection, zoneRadius: zoneRadius)
         let setup = drawn.with(raceArea: .placeholder(around: course))
         let (field, _) = try WindFixtures.field(setup, windSeed: 76, through: 10)
         let area = try #require(setup.raceArea)
