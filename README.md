@@ -64,10 +64,23 @@ Packages/RegattaClient/   The online race client, over a transport protocol, no 
   ReliableStream.swift    events and wind keys back in order; a lasting gap asks for a Resync
   RaceTransport.swift     the transport protocol the app (#68) and the load client (#67) implement
   FaultInjectingLink.swift  an in-memory link on a virtual clock: seeded delay, jitter, loss, reorder, disconnect
-Packages/RegattaServer/   The race server's core, over an injected clock and transports, no sockets (#65)
+Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftNIO WebSockets (ADR 0006)
   RaceHost/RaceHost.swift  actor owning one Race: 30 Hz catch-up scheduler, input buffer, snapshots, events, close
   RaceHost/InputGate.swift the #26 caps over a sliding window, strikes to disconnect; the 1 s stamp limit
   RaceHost/HostIO.swift    the clock and seat transport protocols the host is driven through
+  RegattaServerKit/        the server as a library: config and the ENV=dev gate, race tokens, races, the endpoint
+    ServerConfig.swift       environment variables; dev auth; refuses to start unless ENV=dev
+    RaceToken.swift          the signed race token (race, seat, expiry; HMAC-SHA256) a client joins with
+    RaceSession.swift        one race: its RaceHost, wall-clock driver, seats, close; the instant-race fleet
+    RaceRegistry.swift       running races by id, and nothing else
+    SeatConnection.swift     one connection's Hello, JoinRace and hand-off to the host
+    WebSocketSeatTransport.swift  a seat's WebSocket as the host's SeatTransport: buffered, never blocks
+    Routes.swift             /health and the dev-only /dev/instant-race
+    RegattaHTTPServer.swift  the port: HTTP/1.1, upgraded to a WebSocket at /race
+  RegattaServer/           the `RegattaServer` executable
+  RegattaDevAPI/           the dev endpoints' JSON, shared by the server and the load client
+  RegattaLoadClient/       RegattaClient over a NIO WebSocket: scripted helm, bytes and RTT measured
+  regatta-loadclient/      the `regatta-loadclient` executable
 Regatta/                The iOS app
   Game/RaceDriver.swift   what the app sails a race through: 30 Hz tick clock, tick frames, the interpolated RenderWorld
   Game/PracticeDriver.swift  an offline practice race: owns the Race and on-device bots, latches your input per tick, keeps the log
@@ -188,6 +201,56 @@ of memory (for example `podman machine init --rosetta --memory 8192 …`, made t
 Rosetta, podman emulates x86_64 with qemu, which is very slow and has deadlocked the parallel build. The build
 persists between runs in a podman volume. On the Rosetta machine SwiftPM can now and then fail copying package
 resources ("encountered an I/O error (code: 4)", an interrupted read); the script retries that step.
+
+### Race server and load client
+
+`RegattaServer` serves races on one port: `GET /health`, the race WebSocket at `/race` (`Hello`, then `JoinRace`
+with a race token, then the race; #18), and in dev `POST /dev/instant-race`. It has dev auth only (no accounts,
+no App Attest yet), so it refuses to start (exit status 78) unless `ENV=dev`, and the instant race exists only
+there (404 otherwise). It reads:
+
+| variable | default | |
+|---|---|---|
+| `ENV` | none | must be `dev` |
+| `HOST`, `PORT` | `127.0.0.1`, `8080` | where it listens (the container sets `HOST=0.0.0.0`); `PORT=0` picks a free port |
+| `RACE_TOKEN_SECRET` | random per process | HMAC key for race tokens, at least 16 bytes |
+| `RACE_TOKEN_TTL` | `600` | seconds a race token joins for |
+| `SERVER_BUILD` | `dev` | reported in `HelloAck` and `/health` |
+| `MAX_RACES` | `64` | races at once |
+
+`POST /dev/instant-race?clients=N` starts a race now for N clients (1…16), with bots filling it to 10 boats,
+and answers each client's seat and signed race token. `raceSeconds=S` closes the race S seconds after the gun,
+where it stands (the dev race-length override, for e2e runs); `startSeconds=S` sets the start sequence (default 60);
+`seed=X` makes it reproducible.
+
+`regatta-loadclient` creates an instant race and sails every seat at once with `RaceClient` on a scripted helm,
+then prints each client's bytes down and up (TCP payload, the join included) and its ping round trips. It exits
+non-zero unless every client sailed to the race's close; `--check-bandwidth` also fails a client over #27's budget
+(5 KiB/s down, under 1 MB per race). `--token` sails one seat of a race made elsewhere; `--json` prints the reports.
+
+```bash
+cd Packages/RegattaServer
+ENV=dev swift run RegattaServer                    # listening on 127.0.0.1:8080
+swift run regatta-loadclient --clients 16 --race-seconds 20 --start-seconds 5 --check-bandwidth
+curl localhost:8080/health
+```
+
+In a container (Linux, no host-specific dependencies; build `linux/amd64` for the authoritative replay platform):
+
+```bash
+podman build --platform linux/amd64 -t regatta-server .
+podman run --rm -d --name regatta -e ENV=dev -p 8080:8080 regatta-server
+podman exec regatta regatta-loadclient --clients 16 --race-seconds 20 --check-bandwidth
+podman stop regatta
+```
+
+Bandwidth: with 16 boats a client receives about 3.5 KB/s (a snapshot of about 350 bytes 10 times a second,
+plus pongs and events) and joins in about 0.4 KB. Fewer boats send less: about 2.3 KB/s with 10. The 5 KB/s
+budget (#27) holds. The 1 MB per race budget is measured only on the short e2e races (8 to 20 s after the
+start sequence), where it passes trivially. A race costs the join plus that rate times its length from the join to
+the close, so it extrapolates to about 1.7 to 1.9 MB for an 8-minute race (with a 60 s sequence): at the
+measured rate 1 MB holds only to about 4.5 minutes. The two budgets disagree for real race lengths; which one
+gives way (or whether the snapshot rate changes) is an open question for the product owner.
 
 Run the app's unit tests (`RegattaTests`) and UI tests (`RegattaUITests`) on the simulator:
 

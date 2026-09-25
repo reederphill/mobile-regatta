@@ -18,6 +18,23 @@ public struct RaceArea: Hashable, Sendable {
         self.halfWidth = halfWidth
         self.halfLength = halfLength
     }
+
+    /// A placeholder area around `course` until course derivation (#80) lays out the real one: square to
+    /// its axis, from 150 m behind the start line (the start sequence) to 100 m past the windward mark,
+    /// and half the beat plus 75 m either side of the axis (a beat's laylines, and room to overstand).
+    /// For `Course.standard`'s 450 m beat: 700 m long, 600 m wide. Only the course's public layout goes
+    /// into it, so it reveals nothing of the keyed wind (ADR 0001).
+    public static func placeholder(around course: Course) -> RaceArea {
+        let beat = course.marks.filter { $0.kind == .windward }
+            .map { ($0.position - course.lineCenter).dot(course.upwind) }.max() ?? 0
+        let behind = 150.0, beyond = 100.0
+        return RaceArea(
+            centre: course.lineCenter + course.upwind * ((beat + beyond - behind) / 2),
+            axis: course.axis,
+            halfWidth: beat / 2 + 75,
+            halfLength: (beat + beyond + behind) / 2
+        )
+    }
 }
 
 /// Everything about a race's wind that is known before the gun: the conditions, the venue's pairing for

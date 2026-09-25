@@ -225,7 +225,7 @@ enum WindFixtures {
             #expect(a == b)
             #expect(abs(wrapAngle(a.direction - setup.meanDirection - (try field.shift(atTick: tick)))) < 1e-12)
         }
-        #expect(field.activePuffs(atTick: 0).isEmpty, "no puffs until #76")
+        #expect(field.activePuffs(atTick: 0).isEmpty, "no race area, so no puffs (#76)")
     }
 
     /// The wobble moves the shift within a window: at the middle it adds exactly the hump.
@@ -412,13 +412,17 @@ enum WindFixtures {
 
     @Test func raceWindIsTheKeyedFieldOfItsWindSeed() throws {
         let race = testRace(opponents: 3, prestartSeconds: 60, seed: 12)
-        for _ in 0..<2000 { race.step() }
+        for _ in 0..<1999 { race.step() }
+        // A step takes each boat's wind where it starts the tick, before it moves: with puffs (#76) the
+        // wind varies across the water.
+        let sampledAt = race.boats.map(\.position)
+        race.step()
         var generator = try WindKeyGenerator(windSeed: try #require(race.windSeed), setup: race.windSetup, windows: race.wind.windows)
         #expect(race.wind.keys == WindKeyChain(generator.keys(through: race.wind.keys.endWindow - 1)))
-        for boat in race.boats {
-            let wind = try race.wind.sample(boat.position, tick: race.tick)
+        for (boat, position) in zip(race.boats, sampledAt) {
+            let wind = try race.wind.sample(position, tick: race.tick)
             #expect(boat.windDirection == wind.direction && boat.windSpeed == wind.speed)
-            #expect(race.groundWind(at: boat.position) == wind)
+            #expect(race.groundWind(at: position) == wind)
         }
         #expect(race.windSetup.conditionsRef == Race.defaultConditions.ref)
         #expect(race.course.axis == race.windSetup.meanDirection, "the course is square to the mean direction")
