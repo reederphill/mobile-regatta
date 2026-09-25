@@ -17,13 +17,13 @@ final class BoatNode: SKNode {
     private var wakeTimer = 0.0
 
     /// `isMine` marks your boat (the driver's `myBoatIndex`): outlined, named larger and drawn on top.
-    init(boat: Boat, name: String, isMine: Bool, color: UIColor, pointsPerMeter ppm: CGFloat) {
+    init(boat: Boat, name: String, isMine: Bool, color: UIColor, boatClass: BoatClass, pointsPerMeter ppm: CGFloat) {
         self.ppm = ppm
-        let length = CGFloat(Boat.length) * ppm
+        let length = CGFloat(boatClass.hull.length) * ppm
 
         // Hulls, sails and shadow cones are sprites sharing a few textures so
         // SpriteKit can batch the whole fleet into a handful of draw calls.
-        let art = BoatArt.shared(pointsPerMeter: ppm)
+        let art = BoatArt.shared(boatClass: boatClass, pointsPerMeter: ppm)
         let hull = SKSpriteNode(texture: isMine ? art.playerHull : art.hull)
         hull.color = color
         hull.colorBlendFactor = 1
@@ -143,20 +143,21 @@ private struct BoatArt {
 
     private static var cache: [CGFloat: BoatArt] = [:]
 
-    static func shared(pointsPerMeter ppm: CGFloat) -> BoatArt {
+    /// One class sails a race, so the art is cached by scale alone.
+    static func shared(boatClass: BoatClass, pointsPerMeter ppm: CGFloat) -> BoatArt {
         if let art = cache[ppm] { return art }
-        let art = BoatArt(ppm: ppm)
+        let art = BoatArt(boatClass: boatClass, ppm: ppm)
         cache[ppm] = art
         return art
     }
 
-    private init(ppm: CGFloat) {
-        let length = CGFloat(Boat.length) * ppm
-        let beam = CGFloat(Boat.beam) * ppm
+    private init(boatClass: BoatClass, ppm: CGFloat) {
+        let length = CGFloat(boatClass.hull.length) * ppm
+        let beam = CGFloat(boatClass.hull.beam) * ppm
         hull = BoatArt.hullTexture(length: length, beam: beam, outlined: false)
         playerHull = BoatArt.hullTexture(length: length, beam: beam, outlined: true)
         (sail, sailAnchor) = BoatArt.sailTexture(length: length * 0.62, bulge: beam * 0.45, mastRadius: max(1.5, beam * 0.1))
-        cone = BoatArt.coneTexture(ppm: ppm)
+        cone = BoatArt.coneTexture(boatClass.windShadow, ppm: ppm)
     }
 
     /// Renders `draw` into a texture whose coordinate space is y-up with `bounds`
@@ -225,13 +226,14 @@ private struct BoatArt {
     }
 
     /// The wind-shadow cone, starting at the boat and widening downwind along +y.
-    private static func coneTexture(ppm: CGFloat) -> SKTexture {
-        let length = CGFloat(Race.shadowLength) * ppm
-        let halfEnd = CGFloat(Race.shadowHalfWidth(at: Race.shadowLength)) * ppm
+    private static func coneTexture(_ shadow: BoatClass.WindShadow, ppm: CGFloat) -> SKTexture {
+        let length = CGFloat(shadow.coneLength) * ppm
+        let halfStart = CGFloat(shadow.coneWidthAtBoat / 2) * ppm
+        let halfEnd = CGFloat(shadow.coneWidthAtEnd / 2) * ppm
         let bounds = CGRect(x: -halfEnd, y: 0, width: halfEnd * 2, height: length)
         return texture(bounds: bounds, scale: 1) { cg in
-            cg.move(to: CGPoint(x: -2 * ppm, y: 0))
-            cg.addLine(to: CGPoint(x: 2 * ppm, y: 0))
+            cg.move(to: CGPoint(x: -halfStart, y: 0))
+            cg.addLine(to: CGPoint(x: halfStart, y: 0))
             cg.addLine(to: CGPoint(x: halfEnd, y: length))
             cg.addLine(to: CGPoint(x: -halfEnd, y: length))
             cg.closePath()

@@ -97,8 +97,9 @@ struct BotBrain: Sendable {
     private func wantsTackOrGybe(_ b: Boat, to heading: Double, _ race: Race) -> Bool {
         let target = wrapAngle(b.windDirection - heading)
         guard (target >= 0) != (b.relativeWind >= 0), abs(wrapAngle(heading - b.heading)) > deg2rad(50) else { return false }
-        let upwind = race.polar.upwindTWA + deg2rad(15)
-        let downwind = race.polar.downwindTWA - deg2rad(15)
+        let polar = race.boatClass.polar
+        let upwind = polar.bestUpwind(tws: b.windSpeed).twa + deg2rad(15)
+        let downwind = polar.bestDownwind(tws: b.windSpeed).twa - deg2rad(15)
         return (b.twa < upwind && abs(target) < upwind) || (b.twa > downwind && abs(target) > downwind)
     }
 
@@ -127,7 +128,7 @@ struct BotBrain: Sendable {
         let spot = startPoint(c)
         let timeLeft = -race.time
         let distance = (spot - b.position).length
-        let beatSpeed = race.polar.targetSpeed(twa: race.polar.upwindTWA, windSpeed: b.windSpeed)
+        let beatSpeed = race.boatClass.polar.bestUpwind(tws: b.windSpeed).speed
         let timeNeeded = distance / max(beatSpeed, 0.5) * 1.25 + 5 + timingSlack
 
         if timeLeft > timeNeeded + 4 {
@@ -180,8 +181,8 @@ struct BotBrain: Sendable {
         let bearing = toTarget.bearing
         let w = b.windDirection
         let offWind = abs(wrapAngle(bearing - w))
-        let up = race.polar.upwindTWA
-        let down = race.polar.downwindTWA
+        let up = race.boatClass.polar.bestUpwind(tws: b.windSpeed).twa
+        let down = race.boatClass.polar.bestDownwind(tws: b.windSpeed).twa
         let lateral = (b.position - target).dot(Vec2.heading(w).rightPerp)
         let corridor = max(20, distance * 0.35)
 
@@ -228,9 +229,9 @@ struct BotBrain: Sendable {
             let relativeVelocity = other.velocity - myVelocity
             let vv = relativeVelocity.lengthSquared
             let t = vv > 1e-6 ? (-offset.dot(relativeVelocity) / vv).clamped(to: 0...lookahead) : 0
-            guard (offset + relativeVelocity * t).length < Boat.length * 1.3 else { continue }
+            guard (offset + relativeVelocity * t).length < race.boatClass.hull.length * 1.3 else { continue }
 
-            let call = Rules.judge(b, other, course: race.course)
+            let call = Rules.judge(b, other, course: race.course, hull: race.boatClass.hull)
             guard call.offender == b.id else { continue }
 
             // Headings are set relative to the wind so evasive action never parks the boat in irons.
@@ -256,7 +257,7 @@ struct BotBrain: Sendable {
             guard offset.length < 20 else { continue }
             let along = offset.dot(ahead)
             guard along > 0, along < max(b.speed, 1) * 3 + 3 else { continue }
-            guard abs(offset.cross(ahead)) < obstacle.radius + Boat.beam + 1 else { continue }
+            guard abs(offset.cross(ahead)) < obstacle.radius + race.boatClass.hull.beam + 1 else { continue }
             let markIsToStarboard = offset.dot(ahead.rightPerp) > 0
             return sailable(desired + (markIsToStarboard ? -1 : 1) * deg2rad(30), wind: b.windDirection)
         }

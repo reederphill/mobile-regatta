@@ -19,7 +19,10 @@ import Glibc
 ///    at the origin, never sampled by a race. No puffs until #76.
 /// 4: boats carry no names (bot names moved to the roster outside the sim), so the digest no longer
 ///    hashes them; bot brains left `Race` for RegattaBots' seat controllers (#60).
-public let simulationRevision = 4
+/// 5: boats sail their class file (#70): `BoatDynamics` with the class's momentum, steering, rudder
+///    drag and slew, head-to-wind fall-off and ease; the polar table, hull outline, shadow cone and
+///    contact factors of ilca-dinghy@1.
+public let simulationRevision = 5
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

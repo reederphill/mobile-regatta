@@ -40,7 +40,7 @@ import Testing
 
     /// The acceptance run: 150 ms round trip (65 ms + 0…20 ms jitter each way), 2 % loss both ways, a
     /// scripted 60 s: 20 s of the start sequence, the gun, and 40 s of racing. The client's own boat as drawn stays within one boat length
-    /// (`Boat.length`, 4.2 m, the hull the core sails today) of where the server had her at that tick.
+    /// (`Race.defaultBoatClass.hull.length`, 4.2 m, the hull the core sails today) of where the server had her at that tick.
     /// Five link seeds, so five different sets of frames are lost.
     @Test(arguments: [150, 151, 152, 153, 154] as [UInt64])
     func ownBoatStaysWithinABoatLengthAt150msAnd2PercentLoss(seed: UInt64) throws {
@@ -57,7 +57,7 @@ import Testing
               + "resync requests \(stats.resyncRequests), applied \(stats.resyncsApplied); lead \(harness.client.lead.lead); "
               + "snapshots \(harness.client.predicted.snapshotsImported), stale \(harness.client.predicted.staleSnapshots)")
         #expect(sorted.count > 3000)
-        #expect(worst < Boat.length)
+        #expect(worst < Race.defaultBoatClass.hull.length)
         // The run crossed the gun and sailed on.
         #expect(harness.host.race.tick > 1100)
         #expect(errors.predictedTicks.last! > 1100)
@@ -76,7 +76,7 @@ import Testing
         print("PREDICTION reorder 10%, loss 2%: worst \(worst) m; stale snapshots \(predicted.staleSnapshots); "
               + "resync requests \(stats.resyncRequests), applied \(stats.resyncsApplied)")
         #expect(predicted.staleSnapshots > 0)
-        #expect(worst < Boat.length)
+        #expect(worst < Race.defaultBoatClass.hull.length)
         // Quiet the link and let the last frames land: the event state is the server's.
         harness.link.uplink = .none
         harness.link.downlink = .none
@@ -109,6 +109,6 @@ import Testing
         }
         print("PREDICTION other boats: worst \(worst) m, mean \(total / Double(max(count, 1))) m over \(count) samples")
         #expect(count > 10_000)
-        #expect(worst < Boat.length)
+        #expect(worst < Race.defaultBoatClass.hull.length)
     }
 }

@@ -90,7 +90,7 @@ import Testing
         #expect(statuses.contains(.disconnected))
         #expect(harness.client.status == .predicting)
         #expect(harness.client.stats.resyncsApplied >= 1)
-        #expect(worst < Boat.length)
+        #expect(worst < Race.defaultBoatClass.hull.length)
     }
 
     /// A `Resync` rebuilds a fresh prediction from the snapshot, the revealed keys and the event state.

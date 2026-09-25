@@ -19,29 +19,18 @@ import Testing
     }
 
     @Test func separatingAxisFindsOverlap() {
+        let outline = Race.defaultBoatClass.hull.outline
         let a = Boat(id: 0, isPlayer: false, colorIndex: 0, position: .zero, heading: 0, speed: 0)
         var b = a
         b.position = Vec2(1, 0)
-        #expect(Collision.penetration(a.hull(), b.hull()) != nil)
+        #expect(Collision.penetration(a.hull(outline: outline), b.hull(outline: outline)) != nil)
         b.position = Vec2(5, 0)
-        #expect(Collision.penetration(a.hull(), b.hull()) == nil)
-    }
-}
-
-@Suite struct PolarTests {
-    @Test func noGoZoneIsDead() {
-        #expect(Polar.dinghy.ratio(twa: deg2rad(20)) == 0)
-    }
-
-    @Test func reachingIsFastest() {
-        let p = Polar.dinghy
-        #expect(p.ratio(twa: deg2rad(95)) > p.ratio(twa: deg2rad(45)))
-        #expect(p.ratio(twa: deg2rad(95)) > p.ratio(twa: .pi))
+        #expect(Collision.penetration(a.hull(outline: outline), b.hull(outline: outline)) == nil)
     }
 }
 
 @Suite struct RulesTests {
-    let course = Course.standard()
+    let course = Course.standard(hullLength: Race.defaultBoatClass.hull.length)
 
     func boat(_ id: Int, at p: Vec2, heading degrees: Double, wind: Double = 0) -> Boat {
         var b = Boat(id: id, isPlayer: false, colorIndex: id, position: p, heading: deg2rad(degrees), speed: 3)
@@ -55,35 +44,35 @@ import Testing
         let port = boat(2, at: Vec2(1, 0), heading: 45)
         #expect(starboard.tack == .starboard)
         #expect(port.tack == .port)
-        #expect(Rules.judge(starboard, port, course: course) == RuleCall(rule: .portStarboard, offender: 2, victim: 1))
+        #expect(Rules.judge(starboard, port, course: course, hull: Race.defaultBoatClass.hull) == RuleCall(rule: .portStarboard, offender: 2, victim: 1))
     }
 
     @Test func windwardKeepsClearOfLeeward() {
         let leeward = boat(1, at: .zero, heading: 90)
         let windward = boat(2, at: Vec2(0, 1.4), heading: 90)
-        #expect(Rules.judge(leeward, windward, course: course).offender == 2)
-        #expect(Rules.judge(leeward, windward, course: course).rule == .windwardLeeward)
+        #expect(Rules.judge(leeward, windward, course: course, hull: Race.defaultBoatClass.hull).offender == 2)
+        #expect(Rules.judge(leeward, windward, course: course, hull: Race.defaultBoatClass.hull).rule == .windwardLeeward)
     }
 
     @Test func clearAsternKeepsClear() {
         let ahead = boat(1, at: .zero, heading: 90)
         let astern = boat(2, at: Vec2(-4.5, 0), heading: 90)
-        #expect(Rules.judge(ahead, astern, course: course) == RuleCall(rule: .clearAstern, offender: 2, victim: 1))
+        #expect(Rules.judge(ahead, astern, course: course, hull: Race.defaultBoatClass.hull) == RuleCall(rule: .clearAstern, offender: 2, victim: 1))
     }
 
     @Test func tackingBoatKeepsClear() {
         let steady = boat(1, at: .zero, heading: -45)
         var tacking = boat(2, at: Vec2(1, 0), heading: -45)
         tacking.isTacking = true
-        #expect(Rules.judge(steady, tacking, course: course).rule == .whileTacking)
-        #expect(Rules.judge(steady, tacking, course: course).offender == 2)
+        #expect(Rules.judge(steady, tacking, course: course, hull: Race.defaultBoatClass.hull).rule == .whileTacking)
+        #expect(Rules.judge(steady, tacking, course: course, hull: Race.defaultBoatClass.hull).offender == 2)
     }
 
     @Test func outsideBoatGivesMarkRoom() {
         let mark = course.marks[0].position
         let inside = boat(1, at: mark + Vec2(3, -2), heading: -45)
         let outside = boat(2, at: mark + Vec2(5, -3), heading: -45)
-        let call = Rules.judge(inside, outside, course: course)
+        let call = Rules.judge(inside, outside, course: course, hull: Race.defaultBoatClass.hull)
         #expect(call.rule == .markRoom)
         #expect(call.offender == 2)
     }
@@ -91,7 +80,7 @@ import Testing
 
 @Suite struct RaceTests {
     @Test func windwardMarkIsRoundedToPort() {
-        let course = Course.standard()
+        let course = Course.standard(hullLength: Race.defaultBoatClass.hull.length)
         let m = course.marks[0].position
         let path = [m + Vec2(6, -10), m + Vec2(6, 5), m + Vec2(-8, 6)]
         var stage = 0
@@ -116,8 +105,9 @@ import Testing
 
     @Test func boatOverTheLineAtTheGunIsOCSAndMustReturn() {
         // Seat 1 is a second human who sends no inputs, so she sails straight on out of the way.
-        let race = testRace(seats: [.human, .human], prestartSeconds: 40, seed: 1)
-        let early = sail(race, heading: deg2rad(-45), seconds: 41)
+        // 44 s: the class's turn rate costs a few seconds tacking onto port at the start of the run.
+        let race = testRace(seats: [.human, .human], prestartSeconds: 44, seed: 1)
+        let early = sail(race, heading: deg2rad(-45), seconds: 45)
         #expect(early.contains(.ocs(seat: 0)))
         #expect(race.boats[0].status == .ocs)
 

@@ -10,7 +10,7 @@ protocol RaceDriver: AnyObject {
     /// Your seat. Every "you" in the scene, HUD and results reads it, never seat 0.
     var myBoatIndex: Int { get }
     var course: Course { get }
-    var polar: Polar { get }
+    var boatClass: BoatClass { get }
     /// Whether the race can stop while you pause: a practice race can, an online one can't.
     var isPausable: Bool { get }
 
@@ -42,7 +42,7 @@ protocol RaceDriver: AnyObject {
 extension RaceDriver {
     /// Interpolates the fleet from `previousFrame` to `currentFrame` by `alpha`.
     var renderWorld: RenderWorld {
-        RenderWorld(course: course, polar: polar, myBoatIndex: myBoatIndex,
+        RenderWorld(course: course, boatClass: boatClass, myBoatIndex: myBoatIndex,
                     previous: previousFrame, current: currentFrame, alpha: alpha)
     }
 }
@@ -78,7 +78,7 @@ struct TickFrame {
 /// else from the latest. Read-only: nothing here can change the race.
 struct RenderWorld {
     let course: Course
-    let polar: Polar
+    let boatClass: BoatClass
     let myBoatIndex: Int
     /// The latest tick: statuses, standings, wind and puffs come from it.
     let frame: TickFrame
@@ -87,9 +87,9 @@ struct RenderWorld {
     /// Race clock in seconds, between the two ticks.
     let time: Double
 
-    init(course: Course, polar: Polar, myBoatIndex: Int, previous: TickFrame, current: TickFrame, alpha: Double) {
+    init(course: Course, boatClass: BoatClass, myBoatIndex: Int, previous: TickFrame, current: TickFrame, alpha: Double) {
         self.course = course
-        self.polar = polar
+        self.boatClass = boatClass
         self.myBoatIndex = myBoatIndex
         frame = current
         let t = alpha.clamped(to: 0...1)
