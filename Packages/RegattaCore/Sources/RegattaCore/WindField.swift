@@ -152,7 +152,8 @@ public struct WindField: Hashable, Sendable {
         }
         let puffs = setup.conditions.puffs
         let factor = (1 + gain).clamped(to: (1 - puffs.lullLoss.upperBound)...(1 + puffs.gain.upperBound))
-        let turn = (puffs.fan * fan / plan.strongest).clamped(to: -puffs.fan...puffs.fan)
+        // No spawn is stronger than `strongest`, so with it 0 (no gain and no loss) every fan share is 0.
+        let turn = plan.strongest > 0 ? (puffs.fan * fan / plan.strongest).clamped(to: -puffs.fan...puffs.fan) : 0
         return (factor, turn)
     }
 
@@ -243,6 +244,7 @@ struct PuffPlan: Hashable, Sendable {
     /// so the water at the edges is as puffy as the middle.
     let margin: Double
     /// Expected spawns per window: the count is `floor` of it, plus one with its fractional part's chance.
+    /// 0 when no spawn could ever change the speed by more than `coverageThreshold`: none could cover water.
     let spawnsPerWindow: Double
     /// The longest a puff lives, ticks.
     let maxLifetimeTicks: Int
@@ -274,7 +276,7 @@ struct PuffPlan: Hashable, Sendable {
         let meanRadiusSquared = (d.upperBound * d.upperBound + d.upperBound * d.lowerBound + d.lowerBound * d.lowerBound) / 12
         let meanLifetime = (puffs.lifetime.lowerBound + puffs.lifetime.upperBound) / 2
         let footprint = meanLifetime * Double.pi * meanRadiusSquared * Self.meanShareOverThreshold(puffs)
-        spawnsPerWindow = -log(1 - puffs.coverage) * water * WindWindows.seconds / footprint
+        spawnsPerWindow = footprint > 0 ? -log(1 - puffs.coverage) * water * WindWindows.seconds / footprint : 0
     }
 
     static func ticks(seconds: Double) -> Int {
@@ -397,7 +399,8 @@ public struct Puff: Sendable {
     }
 
     /// Current strength, fading in and out over the puff's life: `strength · sin(π · age / lifetime)`,
-    /// exactly 0 at spawn and at the end of life, and the same either side of mid-life.
+    /// exactly 0 at spawn and at the end of life, and the same either side of mid-life. Taken on the
+    /// nearer end's side of mid-life because `sin(.pi)` is 1.2e-16 in floating point, not 0.
     public var intensity: Double {
         let x = (age / lifetime).clamped(to: 0...1)
         return strength * sin(.pi * min(x, 1 - x))

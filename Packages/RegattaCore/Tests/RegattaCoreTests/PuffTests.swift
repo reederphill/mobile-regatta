@@ -296,4 +296,29 @@ enum PuffFixtures {
             return abs(offset.dot(course.upwind)) < area.halfLength && abs(offset.dot(course.right)) < area.halfWidth
         })
     }
+
+    /// Conditions whose puffs and lulls change nothing (gain and loss 0) spawn none, rather than
+    /// dividing by a zero footprint or a zero strongest strength, and sample the plain channel.
+    @Test func conditionsWithNoPuffStrengthSpawnNoPuffs() throws {
+        var text = String(decoding: try #require(try ConditionsFile.bundledData(id: "classic-oscillating", version: 2)), as: UTF8.self)
+        for (of, with) in [(#""puffGain": { "min": 0.22, "max": 0.30 }"#, #""puffGain": { "min": 0, "max": 0 }"#),
+                           (#""lullLoss": { "min": 0.15, "max": 0.20 }"#, #""lullLoss": { "min": 0, "max": 0 }"#)] {
+            #expect(text.contains(of))
+            text = text.replacingOccurrences(of: of, with: with)
+        }
+        let drawn = WindSetup(conditions: try ConditionsFile(data: Data(text.utf8)), pairing: .stub, raceSeed: RaceSeed(2))
+        let course = Course.standard(axis: drawn.meanDirection, hullLength: Race.defaultBoatClass.hull.length)
+        let setup = drawn.with(raceArea: .placeholder(around: course))
+        let (field, _) = try WindFixtures.field(setup, windSeed: 76, through: 10)
+        let area = try #require(setup.raceArea)
+        for window in 1...10 {
+            #expect(field.spawns(ofWindow: window).isEmpty)
+            let tick = Self.w.start(of: window) + 450
+            let course = try field.courseAverageSpeed(atTick: tick)
+            for p in PuffFixtures.grid(area, spacing: 100) {
+                let wind = try field.sample(p, tick: tick)
+                #expect(wind.speed == course && wind.direction.isFinite)
+            }
+        }
+    }
 }
