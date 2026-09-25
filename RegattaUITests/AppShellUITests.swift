@@ -67,7 +67,9 @@ final class AppShellUITests: RaceUITestCase {
 
         XCTAssertTrue(cover.exists, "the race cover was dismissed")
         XCTAssertTrue(app.staticTexts["race-clock"].exists, "the race clock went away")
-        XCTAssertFalse(app.buttons["race-online"].isHittable, "home is showing through the race")
+        // A full-screen cover takes the home screen out of the hierarchy; if it's still there, it's covered.
+        let raceOnline = app.buttons["race-online"]
+        XCTAssertFalse(raceOnline.exists && raceOnline.isHittable, "home is showing through the race")
     }
 
     @MainActor func testAutostartPresentsTheRaceCover() {
