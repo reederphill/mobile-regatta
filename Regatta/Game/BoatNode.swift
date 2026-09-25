@@ -16,14 +16,15 @@ final class BoatNode: SKNode {
     private var wakePoints: [CGPoint] = []
     private var wakeTimer = 0.0
 
-    init(boat: Boat, name: String, color: UIColor, pointsPerMeter ppm: CGFloat) {
+    /// `isMine` marks your boat (the driver's `myBoatIndex`): outlined, named larger and drawn on top.
+    init(boat: Boat, name: String, isMine: Bool, color: UIColor, pointsPerMeter ppm: CGFloat) {
         self.ppm = ppm
         let length = CGFloat(Boat.length) * ppm
 
         // Hulls, sails and shadow cones are sprites sharing a few textures so
         // SpriteKit can batch the whole fleet into a handful of draw calls.
         let art = BoatArt.shared(pointsPerMeter: ppm)
-        let hull = SKSpriteNode(texture: boat.isPlayer ? art.playerHull : art.hull)
+        let hull = SKSpriteNode(texture: isMine ? art.playerHull : art.hull)
         hull.color = color
         hull.colorBlendFactor = 1
 
@@ -45,8 +46,8 @@ final class BoatNode: SKNode {
         addChild(body)
 
         label.text = name
-        label.fontSize = boat.isPlayer ? 12 : 10
-        label.fontColor = UIColor.white.withAlphaComponent(boat.isPlayer ? 1 : 0.75)
+        label.fontSize = isMine ? 12 : 10
+        label.fontColor = UIColor.white.withAlphaComponent(isMine ? 1 : 0.75)
         label.position = CGPoint(x: 0, y: length * 0.75)
         label.verticalAlignmentMode = .center
         addChild(label)
@@ -63,7 +64,7 @@ final class BoatNode: SKNode {
         wake.lineCap = .round
         wake.lineJoin = .round
 
-        zPosition = boat.isPlayer ? 10 : 5
+        zPosition = isMine ? 10 : 5
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

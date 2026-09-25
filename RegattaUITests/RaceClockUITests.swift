@@ -1,17 +1,9 @@
 import XCTest
 
-final class RaceClockUITests: XCTestCase {
-    override func setUp() {
-        continueAfterFailure = false
-    }
-
+final class RaceClockUITests: RaceUITestCase {
     @MainActor func testRaceClockAdvancesAfterAutostart() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["-uitesting", "-autostart", "-seed", "1"]
-        app.launch()
-
+        let app = launchRace()
         let clock = app.staticTexts["race-clock"]
-        XCTAssertTrue(clock.waitForExistence(timeout: 60), "no race clock after -autostart")
         let first = try tick(of: clock)
         Thread.sleep(forTimeInterval: 1)
         let second = try tick(of: clock)

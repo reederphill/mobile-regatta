@@ -1,28 +1,6 @@
 import RegattaBots
 import RegattaCore
 
-/// Thin shim over the per-seat input API (#59) until the practice driver owns input and
-/// `myBoatIndex` (#61). A practice race puts you in seat 0.
-extension Race {
-    var playerIndex: Int { 0 }
-    var player: Boat { boats[playerIndex] }
-
-    /// Builds a practice race from the app's settings. Its bots are the config's `seatControllers`.
-    convenience init(config: RaceConfig) {
-        self.init(setup: config.setup, windSeed: WindSeed(config.windSeed))
-    }
-
-    /// Rudder from the touch controls, −1…1, held from the next tick. Any real input cancels an auto-tack.
-    func setPlayerRudder(_ value: Double) {
-        apply(BoatInput(rudder: value), seat: playerIndex, atTick: tick + 1)
-    }
-
-    /// Mirror the heading across the wind: a tack when upwind, a gybe when downwind.
-    func playerTackOrGybe() {
-        tap(.tackGybe, seat: playerIndex, atTick: tick + 1)
-    }
-}
-
 /// The bot glyph (#19): every bot is marked with it wherever its name shows. A placeholder until
 /// the art direction's glyph lands.
 enum BotGlyph {

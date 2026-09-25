@@ -41,12 +41,15 @@ struct HUDState {
 
     init() {}
 
-    init(race: Race) {
-        let p = race.player
-        let course = race.course
+    /// The HUD for `world`'s latest tick, from your seat.
+    init(world: RenderWorld) {
+        let frame = world.frame
+        let me = world.myBoatIndex
+        let p = frame.boats[me]
+        let course = world.course
         self.course = course
-        tick = race.tick
-        clock = race.time
+        tick = frame.tick
+        clock = frame.time
         status = p.status
         speedKnots = p.speed * 1.943_84
         twaDegrees = rad2deg(p.twa)
@@ -55,8 +58,8 @@ struct HUDState {
         windShiftDegrees = rad2deg(wrapAngle(p.windDirection - course.axis))
         windDirection = p.windDirection
         inShadow = p.shadow < 0.97
-        fleet = race.boats.count
-        place = (race.standings().firstIndex(of: race.playerIndex) ?? 0) + 1
+        fleet = frame.boats.count
+        place = frame.place(of: me)
         legCount = course.legs.count
         legNumber = min(p.legIndex + 1, legCount)
         penaltyTurns = p.penaltyTurnsOwed
@@ -66,7 +69,7 @@ struct HUDState {
 
         let target: Vec2
         switch p.status {
-        case .prestart where race.time < 0:
+        case .prestart where frame.time < 0:
             targetName = "Start line"
             target = course.lineCenter
         case .prestart:
@@ -86,8 +89,8 @@ struct HUDState {
         targetDistance = (target - p.position).length
         targetBearing = (target - p.position).bearing
 
-        boats = race.boats.map {
-            MiniBoat(id: $0.id, position: $0.position, colorIndex: $0.colorIndex, isPlayer: $0.isPlayer, isActive: $0.isOnCourse)
+        boats = frame.boats.map {
+            MiniBoat(id: $0.id, position: $0.position, colorIndex: $0.colorIndex, isPlayer: $0.id == me, isActive: $0.isOnCourse)
         }
     }
 }

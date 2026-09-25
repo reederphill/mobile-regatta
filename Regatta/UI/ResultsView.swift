@@ -10,6 +10,8 @@ struct ResultsView: View {
             Color.black.opacity(0.45).ignoresSafeArea()
             VStack(spacing: 16) {
                 Text("Results").font(.title.bold())
+                    // UI tests wait for it: the race reached its finish state.
+                    .accessibilityIdentifier("race-results")
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(rows) { row in
