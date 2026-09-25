@@ -1,14 +1,13 @@
 name: iOS 27 SDK
 
 # The app built with the iOS 27 SDK (#107). It runs on GitHub's Xcode 27 image, which is slow and bills macOS
-# minutes, so it doesn't run on every pull request: only when shipping-relevant files change, on main, weekly,
-# and by hand.
+# minutes, so it doesn't run on every push: only when shipping-relevant files change (on a pull request or on
+# main), weekly, and by hand. Its runs hold one of the account's few macOS runners for 30-45 min, so a run on
+# every merge and every orchestration-log commit left CI's macOS jobs queued behind it.
 on:
   push:
     branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-    paths:
+    paths: &shipping
       - "Regatta/Info.plist"
       - "Regatta.xcodeproj/**"
       - "**/*.entitlements"
@@ -16,11 +15,18 @@ on:
       - "Regatta/App/**"
       - "**/RaceViewportPolicy.swift"
       - "scripts/check-shipping-config.sh"
-      - ".github/workflows/ci.yml"
       - ".github/workflows/ios27.yml"
+  pull_request:
+    branches: [ "main" ]
+    paths: *shipping
   schedule:
     - cron: "0 6 * * 1"  # Mondays 06:00 UTC
   workflow_dispatch:
+
+# A new push supersedes the run in progress for the same branch or pull request.
+concurrency:
+  group: ios27-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   app:
