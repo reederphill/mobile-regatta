@@ -50,6 +50,7 @@ struct LogFeeder {
         }
         #expect(copy.isOver == original.isOver, sourceLocation: sourceLocation)
         #expect(copy.firstFinishTime == original.firstFinishTime, sourceLocation: sourceLocation)
+        #expect(copy.incidents == original.incidents, sourceLocation: sourceLocation)
     }
 
     /// The acceptance test: import(export(s)) then N steps == stepping s N steps, by digest, across the
@@ -84,6 +85,47 @@ struct LogFeeder {
         Self.feeder.step(original)
         Self.feeder.step(copy)
         #expect(copy.digest() != original.digest())
+    }
+
+    /// A rule call carries its incident's id, so a race imported after incidents goes on numbering from
+    /// where the original was, not from 0. The golden race calls one foul, so the test sails on 10 s past
+    /// it (clear of the 5 s foul memory) and puts the two boats back as they were the tick before it.
+    @Test func importAfterIncidentsNumbersTheNextCallOn() throws {
+        let race = Self.feeder.race(at: -1800)
+        var firstCall: RuleCall?
+        while race.tick < Self.log.finalTick && firstCall == nil {
+            Self.feeder.step(race)
+            for event in race.drainEvents() { if case .ruleCall(let call) = event.kind { firstCall = call } }
+        }
+        let call = try #require(firstCall, "the golden race has no rule call")
+        let before = Self.feeder.race(at: call.tick - 1).exportSnapshot()
+        let original = Self.feeder.race(at: call.tick + 10 * Race.tickRate)
+        var aimed = original.exportSnapshot()
+        let incidentsBefore = aimed.incidents.count
+        #expect(incidentsBefore > 0)
+        for seat in [call.offender, call.victim] { aimed.seats[seat] = before.seats[seat] }
+        aimed.touchingBoats.removeAll { $0 == .init(min(call.offender, call.victim), max(call.offender, call.victim)) }
+        try original.importSnapshot(aimed)
+        _ = original.drainEvents()
+        let copy = try Self.imported(original.exportSnapshot())
+
+        Self.feeder.step(original)
+        Self.feeder.step(copy)
+        let ids = { (race: Race) in
+            race.drainEvents().compactMap { event -> Int? in
+                if case .ruleCall(let call) = event.kind { return call.incidentId } else { return nil }
+            }
+        }
+        #expect(ids(original) == [incidentsBefore])
+        #expect(ids(copy) == [incidentsBefore])
+        Self.expectSameFuture(original, copy, steps: 300)
+
+        // Without the incidents the call would reuse id 0.
+        var forgetful = aimed
+        forgetful.incidents = IncidentIndex()
+        let amnesiac = try Self.imported(forgetful)
+        Self.feeder.step(amnesiac)
+        #expect(ids(amnesiac) == [0])
     }
 
     @Test func importMidObstacleContactMatches() throws {
@@ -179,6 +221,7 @@ struct LogFeeder {
         #expect(a.touchingBoats == b.touchingBoats)
         #expect(a.touchingObstacles == b.touchingObstacles)
         #expect(a.foulMemory == b.foulMemory)
+        #expect(a.incidents == b.incidents)
         #expect(a.firstFinishTime == b.firstFinishTime)
         #expect(a.isOver == b.isOver)
         #expect(a.windKeys == b.windKeys)
@@ -211,6 +254,16 @@ struct LogFeeder {
         var obstacle = good
         obstacle.touchingObstacles = [.init(seat: 0, obstacle: 99)]
         #expect(throws: WorldSnapshotError.invalidContact) { try Self.imported(obstacle) }
+
+        let lastLeg = race.course.legs.count - 1
+        // Seats outside the fleet, a tick after the snapshot's, a leg the course doesn't have.
+        let badIncidents = [(0, 16, good.tick, 0), (-1, 2, good.tick, 0), (0, 1, good.tick + 1, 0), (0, 1, good.tick, lastLeg + 1)]
+        for (a, b, tick, leg) in badIncidents {
+            var incident = good
+            incident.incidents.open(between: 2, and: 3, tick: good.tick, leg: lastLeg) // valid: the error names the next
+            incident.incidents.open(between: a, and: b, tick: tick, leg: leg)
+            #expect(throws: WorldSnapshotError.invalidIncident(id: 1)) { try Self.imported(incident) }
+        }
 
         var late = good
         late.tick = WorldSnapshot.maxTick + 1
@@ -268,7 +321,8 @@ struct LogFeeder {
 @Suite struct WorldSnapshotCoverageTests {
     /// Race properties carried by `WorldSnapshot`.
     static let carried: Set<String> = [
-        "tick", "boats", "heldInputs", "boatContacts", "obstacleContacts", "lastFoul", "firstFinishTime", "isOver",
+        "tick", "boats", "heldInputs", "boatContacts", "obstacleContacts", "lastFoul", "incidents", "firstFinishTime",
+        "isOver",
         "wind", // as its keys, `windKeys`; its setup and window grid are fixed for the race
     ]
 
@@ -279,7 +333,6 @@ struct LogFeeder {
         "course": "fixed for the race, derived from the setup",
         "boatClass": "fixed for the race: the class file (ADR 0004)",
         "rules": "fixed for the race: the rules configuration file (ADR 0004)",
-        "incidents": "no step reads it yet: it only numbers rule calls, which are events, not world state; carry it once a rule decides from past incidents (#73)",
         "windSetup": "fixed for the race, drawn from the public race seed",
         "windKeys": "the key generator: it holds the wind seed, never in a snapshot (ADR 0001); import moves it past the snapshot's keys",
         "finishers": "derived on import: the count of finished boats",
