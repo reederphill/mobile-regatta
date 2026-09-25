@@ -40,6 +40,24 @@ public final class Race {
         }
     }()
 
+    /// The venue every race sails at until race assembly reads `RaceSetup.venue` (#81). Its pairing for
+    /// `defaultConditions` is what the race's wind setup is drawn around (#77).
+    public static let defaultVenue: VenueFile = {
+        do {
+            return try VenueFile.bundled(id: "dev-venue", version: 2)
+        } catch {
+            preconditionFailure("bundled venue dev-venue@2 failed to load: \(error)")
+        }
+    }()
+
+    /// `defaultVenue`'s pairing for `defaultConditions`.
+    public static let defaultPairing: Venue.Pairing = {
+        guard let pairing = defaultVenue.content.pairing(for: defaultConditions.ref.key) else {
+            preconditionFailure("\(defaultVenue.ref) has no pairing for \(defaultConditions.ref)")
+        }
+        return pairing
+    }()
+
     /// The rules configuration every race sails until race assembly reads `RaceSetup.rulesConfiguration`
     /// (#81). Its ref is what a race log records for it (ADR 0004).
     public static let defaultRulesConfiguration: RulesConfigFile = {
@@ -94,7 +112,7 @@ public final class Race {
     /// Builds the race at the start of its sequence, tick −`setup.startSequenceTicks`.
     ///
     /// The public wind setup (mean direction, base strength, trend direction) is drawn from the race
-    /// seed in `defaultConditions` with the stub venue pairing, and the course is laid square to its
+    /// seed in `defaultConditions` with `defaultVenue`'s pairing for them, and the course is laid square to its
     /// mean direction (#10). Everything that changes during the race comes from the key chain of
     /// `windSeed` alone, never from the race seed (ADR 0001).
     /// The race runs no bots: every seat, bot or human, is sailed from outside through `apply` and
@@ -120,7 +138,7 @@ public final class Race {
         self.setup = setup
         self.windSeed = windSeed
         var rng = SplitMix64(seed: setup.raceSeed.value)
-        let windSetup = WindSetup(conditions: Race.defaultConditions, pairing: .stub, raceSeed: setup.raceSeed)
+        let windSetup = WindSetup(conditions: Race.defaultConditions, pairing: Race.defaultPairing, raceSeed: setup.raceSeed)
         self.windSetup = windSetup
         let course = Course.standard(laps: setup.laps, axis: windSetup.meanDirection,
                                      zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(
