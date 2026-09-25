@@ -19,7 +19,8 @@ public enum EventAudience: Equatable, Sendable {
     public init(_ kind: RaceEvent.Kind) {
         switch kind {
         case .gun, .cleared, .started, .ruleCall, .markTouch, .obstructionContact, .contact, .penaltyStarted,
-             .penaltyReset, .penaltyServed, .disqualified, .becameGhost, .rounded, .finished, .firstFinish, .raceClosed:
+             .penaltyReset, .penaltyServed, .tacked, .gybed, .disqualified, .becameGhost, .rounded, .finished,
+             .firstFinish, .raceClosed:
             self = .everyone
         case .ocsNotice(let recipient):
             // The individual recall (rule 29.1) is told to the boat that was over, and only to her.
@@ -111,6 +112,12 @@ extension RaceEvent.Kind {
         case .firstFinish(let closeTick):
             w.u8(19)
             try w.i32(closeTick, "closeTick")
+        case .tacked(let seat):
+            w.u8(20)
+            try w.index(seat, "seat")
+        case .gybed(let seat):
+            w.u8(21)
+            try w.index(seat, "seat")
         }
     }
 
@@ -150,6 +157,8 @@ extension RaceEvent.Kind {
             self = .markRoomNotice(recipients: try (0..<n).map { _ in try r.index() })
         case 18: self = .becameGhost(seat: try r.index())
         case 19: self = .firstFinish(closeTick: try r.i32())
+        case 20: self = .tacked(seat: try r.index())
+        case 21: self = .gybed(seat: try r.index())
         default: throw WireError.invalidValue("event")
         }
     }

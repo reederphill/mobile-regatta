@@ -25,6 +25,10 @@ public struct RaceEvent: Sendable, Equatable {
         /// A penalty turn given up part way, to be started again.
         case penaltyReset(seat: Int)
         case penaltyServed(seat: Int)
+        /// The boom crossed as the bow passed head to wind.
+        case tacked(seat: Int)
+        /// The boom crossed downwind.
+        case gybed(seat: Int)
         case disqualified(seat: Int, reason: String)
         /// The boats that must be told about mark-room at a rounding (#96).
         case markRoomNotice(recipients: [Int])

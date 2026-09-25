@@ -14,7 +14,7 @@ let wireFieldBounds: [String: @Sendable (WorldSnapshot.Seat, WorldSnapshot.Seat)
     "boat.autopilot": {
         switch ($0.boat.autopilot, $1.boat.autopilot) {
         case (nil, nil): true
-        case let (a?, b?): angleError(a, b) <= Q.headingStep / 2 + 1e-12
+        case let (a?, b?): angleError(a.heading, b.heading) <= Q.headingStep / 2 + 1e-12 && a.boomSide == b.boomSide
         default: false
         }
     },
@@ -24,6 +24,7 @@ let wireFieldBounds: [String: @Sendable (WorldSnapshot.Seat, WorldSnapshot.Seat)
     "boat.roundingStage": { $0.boat.roundingStage == $1.boat.roundingStage },
     "boat.penaltyTurnsOwed": { $0.boat.penaltyTurnsOwed == $1.boat.penaltyTurnsOwed },
     "boat.isTacking": { $0.boat.isTacking == $1.boat.isTacking },
+    "boat.boomSide": { $0.boat.boomSide == $1.boat.boomSide },
     "heldInput.rudder": { $0.heldInput.rudder == $1.heldInput.rudder },
     "heldInput.ease": { $0.heldInput.ease == $1.heldInput.ease },
 ]

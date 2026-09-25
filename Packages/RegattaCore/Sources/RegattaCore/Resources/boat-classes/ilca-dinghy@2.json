@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "id": "ilca-dinghy",
+  "version": 2,
+  "name": "Dinghy",
+  "placeholders": [
+    "/polar/columns/0",
+    "/polar/columns/1",
+    "/polar/columns/9",
+    "/steering/headToWindFallOffDegreesPerSecond",
+    "/steering/rudderSlewPerSecond",
+    "/windShadow/coneWidthAtBoatHullLengths",
+    "/windShadow/coneWidthAtEndHullLengths",
+    "/windShadow/stackingFloor",
+    "/windShadow/backwind",
+    "/ease"
+  ],
+  "notes": [
+    "A fictional single-handed 4.2 m dinghy modelled on the ILCA (Laser), no spinnaker (#14).",
+    "Units: knots, degrees, seconds, metres; shadow and backwind sizes in hull lengths.",
+    "Polar 6-20 kn: docs/research/ilca-dinghy-polars-and-handling.md section 7, except two cells: 165 deg at 8 kn is 5.2 (not 5.3) so the best downwind angle is 180 deg from 8 kn up, and 110 deg at 14 kn is 9.2 (not 9.1) so the reach's steepest gain starts at 12 kn (planing onset).",
+    "Version 2 (#71): the turn rate curve, rudder drag and no-go time constant are tuned so tacks and gybes cost what #14 asks: at 10 kn a tack takes about 3.5 s, bottoms out at about half its entry speed and loses about a hull length; a gybe loses a quarter to half a hull length.",
+    "Placeholders (JSON Pointers above) await tuning: the 0, 4 and 25 kn polar columns and every value the research and #14 give no number for."
+  ],
+  "hull": {
+    "lengthMetres": 4.2,
+    "beamMetres": 1.5,
+    "outlineMetres": [[0, 2.1], [0.75, 0.21], [0.63, -2.1], [-0.63, -2.1], [-0.75, 0.21]]
+  },
+  "polar": {
+    "twaDegrees": [0, 30, 35, 40, 45, 52, 60, 75, 90, 110, 135, 150, 165, 180],
+    "columns": [
+      { "twsKnots": 0, "speedKnots": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+      { "twsKnots": 4, "speedKnots": [0, 1.7, 2.1, 2.4, 2.6, 2.8, 3.0, 3.4, 3.8, 3.7, 3.5, 3.3, 3.1, 2.9] },
+      { "twsKnots": 6, "speedKnots": [0, 2.4, 3.0, 3.4, 3.7, 4.0, 4.3, 4.8, 5.4, 5.2, 5.0, 4.7, 4.4, 4.1] },
+      { "twsKnots": 8, "speedKnots": [0, 3.0, 3.8, 4.3, 4.6, 4.9, 5.2, 5.6, 6.0, 5.9, 5.7, 5.5, 5.2, 5.1] },
+      { "twsKnots": 10, "speedKnots": [0, 3.3, 4.2, 4.7, 5.1, 5.5, 5.9, 6.4, 6.7, 6.8, 6.7, 6.4, 6.1, 6.0] },
+      { "twsKnots": 12, "speedKnots": [0, 3.4, 4.3, 4.9, 5.3, 5.8, 6.3, 7.0, 7.4, 7.9, 7.9, 7.4, 6.8, 6.7] },
+      { "twsKnots": 14, "speedKnots": [0, 3.5, 4.4, 5.0, 5.3, 6.0, 6.5, 7.3, 8.2, 9.2, 9.0, 8.4, 7.9, 7.8] },
+      { "twsKnots": 16, "speedKnots": [0, 3.5, 4.4, 5.0, 5.4, 6.1, 6.7, 7.6, 8.9, 10.3, 10.1, 9.5, 9.0, 8.8] },
+      { "twsKnots": 20, "speedKnots": [0, 3.6, 4.5, 5.1, 5.5, 5.9, 6.5, 8.5, 10.8, 12.6, 12.3, 11.6, 11.0, 10.8] },
+      { "twsKnots": 25, "speedKnots": [0, 3.6, 4.5, 5.1, 5.6, 6.0, 6.6, 9.6, 12.5, 15.0, 14.6, 13.7, 13.0, 12.8] }
+    ],
+    "byTheLeeLimit": [
+      { "twsKnots": 6, "degrees": 30 },
+      { "twsKnots": 15, "degrees": 15 }
+    ],
+    "byTheLeePenalty": 0.02
+  },
+  "momentum": {
+    "speedingUpSeconds": 4,
+    "slowingDownSeconds": 5,
+    "noGoSeconds": 4
+  },
+  "steering": {
+    "topTurnRateDegreesPerSecond": 30,
+    "minTurnRateDegreesPerSecond": 10,
+    "turnRateCurve": [
+      { "speedKnots": 0, "fraction": 0 },
+      { "speedKnots": 1, "fraction": 0.5 },
+      { "speedKnots": 2, "fraction": 0.9 },
+      { "speedKnots": 2.5, "fraction": 1 }
+    ],
+    "headToWindFallOffDegreesPerSecond": 6,
+    "rudderDragPerSecond": 0.075,
+    "rudderSlewPerSecond": 5
+  },
+  "windShadow": {
+    "coneLengthHullLengths": 8,
+    "coneWidthAtBoatHullLengths": 1.0,
+    "coneWidthAtEndHullLengths": 3.8,
+    "lossCloseIn": 0.25,
+    "stackingFloor": 0.6,
+    "backwind": {
+      "lengthHullLengths": 1.5,
+      "widthHullLengths": 1.0,
+      "loss": 0.1
+    }
+  },
+  "contact": {
+    "boatSpeedFactor": 0.6,
+    "markSpeedFactor": 0.5
+  },
+  "ease": {
+    "speedFraction": 0.3,
+    "timeConstantSeconds": 2
+  }
+}
