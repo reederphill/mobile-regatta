@@ -96,7 +96,7 @@ jobs:
           packages=""
           [[ "${{ needs.changes.outputs.core }}" == true ]] && packages+=" RegattaCore"
           [[ "${{ needs.changes.outputs.protocol }}" == true ]] && packages+=" RegattaProtocol"
-          packages+=" RegattaClient"
+          packages+=" RegattaClient RegattaServer"
           scripts/check.sh --force --no-app --packages "$packages"
       - name: Same digest across two test processes
         if: needs.changes.outputs.core == 'true'

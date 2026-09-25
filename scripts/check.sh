@@ -7,7 +7,7 @@
 #
 # What a change reaches, from the files changed since its merge base with --base (default origin/main),
 # committed or not: RegattaCore reaches every package, and the app through its sources; RegattaProtocol
-# reaches RegattaClient. --all checks everything; --packages names the packages instead (no app unless it
+# reaches RegattaClient and RegattaServer. --all checks everything; --packages names the packages instead (no app unless it
 # changed); --no-app skips the app.
 #
 # Every package builds into one scratch directory, .build/check, so shared dependencies build once.
@@ -52,34 +52,36 @@ records="$(cd "$(git rev-parse --git-common-dir)" && pwd)/check-passed"
 passed="$records/$tree"
 mkdir -p "$records"
 
-core=0 protocol=0 client=0 app=0
+core=0 protocol=0 client=0 server=0 app=0
 if (( all )); then
-    core=1 protocol=1 client=1 app=1
+    core=1 protocol=1 client=1 server=1 app=1
 elif [[ -n "$explicit" ]]; then
     for package in $explicit; do
         case "$package" in
             RegattaCore) core=1 ;;
             RegattaProtocol) protocol=1 ;;
             RegattaClient) client=1 ;;
+            RegattaServer) server=1 ;;
             *) echo "check.sh: unknown package $package" >&2; exit 2 ;;
         esac
     done
 elif ! merge_base="$(git merge-base "$base" HEAD 2>/dev/null)"; then
     echo "check.sh: no merge base with $base; checking everything"
-    core=1 protocol=1 client=1 app=1
+    core=1 protocol=1 client=1 server=1 app=1
 else
     while IFS= read -r file; do
         case "$file" in
-            scripts/check.sh | scripts/lib.sh) core=1 protocol=1 client=1 app=1 ;;
+            scripts/check.sh | scripts/lib.sh) core=1 protocol=1 client=1 server=1 app=1 ;;
             Packages/RegattaCore/Sources/* | Packages/RegattaCore/Package.*) core=1 app=1 ;;
             Packages/RegattaCore/*) core=1 ;;
             Packages/RegattaProtocol/*) protocol=1 ;;
             Packages/RegattaClient/*) client=1 ;;
+            Packages/RegattaServer/*) server=1 ;;
             Regatta/* | RegattaTests/* | RegattaUITests/* | Regatta.xcodeproj/*) app=1 ;;
         esac
     done < <(git diff --name-only "$merge_base"; git ls-files --others --exclude-standard)
     (( core )) && protocol=1
-    (( protocol )) && client=1
+    (( protocol )) && client=1 && server=1
 fi
 (( no_app )) && app=0
 
@@ -87,6 +89,7 @@ packages=()
 (( core )) && packages+=(RegattaCore)
 (( protocol )) && packages+=(RegattaProtocol)
 (( client )) && packages+=(RegattaClient)
+(( server )) && packages+=(RegattaServer)
 
 if (( ${#packages[@]} == 0 && ! app )); then
     echo "check.sh: nothing to check"
