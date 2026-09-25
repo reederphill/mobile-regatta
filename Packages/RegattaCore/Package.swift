@@ -23,6 +23,7 @@ let package = Package(
             resources: [
                 .copy("Resources/boat-classes"),
                 .copy("Resources/conditions"),
+                .copy("Resources/rules"),
                 .copy("Resources/venues"),
             ]
         ),

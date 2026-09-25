@@ -40,6 +40,22 @@ public final class Race {
         }
     }()
 
+    /// The rules configuration every race sails until race assembly reads `RaceSetup.rulesConfiguration`
+    /// (#81). Its ref is what a race log records for it (ADR 0004).
+    public static let defaultRulesConfiguration: RulesConfigFile = {
+        do {
+            return try RulesConfigFile.bundled(id: "fleet-rules", version: 1)
+        } catch {
+            preconditionFailure("bundled rules configuration fleet-rules@1 failed to load: \(error)")
+        }
+    }()
+
+    /// The rules and race-format values this race uses (#73). So far the zone, the start sequence and
+    /// a rule call's penalty deadlines read it; the rest wait for the tickets that use them.
+    public let rules: RulesConfig = Race.defaultRulesConfiguration.content
+    /// Every incident so far, by id and by pair of boats.
+    public private(set) var incidents = IncidentIndex()
+
     /// The public wind setup, drawn from the race seed: mean direction, base strength, trend direction.
     public let windSetup: WindSetup
     /// The keyed wind (ADR 0001), holding the keys through the current window and no further.
@@ -107,7 +123,8 @@ public final class Race {
         let windSetup = WindSetup(conditions: Race.defaultConditions, pairing: .stub, raceSeed: setup.raceSeed)
         self.windSetup = windSetup
         let course = Course.standard(laps: setup.laps, axis: windSetup.meanDirection,
-                                     hullLength: Race.defaultBoatClass.hull.length)
+                                     zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(
+                                        hullLength: Race.defaultBoatClass.hull.length))
         self.course = course
         let windows = WindWindows(startSequenceTicks: setup.startSequenceTicks)
         wind = WindField(setup: windSetup, windows: windows, keys: WindKeyChain(revealedWindKeys))
@@ -232,7 +249,7 @@ public final class Race {
                 let b = boats[i]
                 if b.isOnCourse { boats[i].autopilot = wrapAngle(b.windDirection + b.relativeWind) }
             case .protest(let target):
-                emit(.protest(seat: i, target: target))
+                emit(.protestRecorded(seat: i, target: target))
             }
         }
     }
@@ -416,9 +433,8 @@ public final class Race {
                     boats[j].speed = BoatDynamics.speed(after: .boat, speed: boats[j].speed, boatClass: boatClass)
                     if (lastFoul[pair] ?? -.infinity) + 5 < time {
                         lastFoul[pair] = time
-                        let call = Rules.judge(boats[i], boats[j], course: course, hull: boatClass.hull)
-                        penalize(call.offender, turns: 2)
-                        emit(.foul(call))
+                        let verdict = Rules.judge(boats[i], boats[j], course: course, hull: boatClass.hull)
+                        call(verdict)
                     }
                 }
                 boats[i].position += push * 0.5
@@ -449,6 +465,26 @@ public final class Race {
         obstacleContacts = touching
     }
 
+    /// Turns a foul costs today, until the penalty rules move to the single penalty turn.
+    private static let foulTurns = 2
+
+    /// Opens an incident for `verdict`, decides it with a rule call, penalises the offender and
+    /// announces the call. The deadlines come from the rules configuration; nothing enforces them yet.
+    private func call(_ verdict: Verdict) {
+        let leg = boats[verdict.offender].legIndex
+        var incident = incidents.open(between: verdict.offender, and: verdict.victim, tick: tick, leg: leg)
+        let penalty = rules.raceFormat.penalty
+        let call = RuleCall(
+            incidentId: incident.id, tick: tick, rule: verdict.rule, offender: verdict.offender, victim: verdict.victim,
+            leg: leg, turnsOwed: Race.foulTurns,
+            startDeadlineTick: tick + RulesConfig.ticks(penalty.start),
+            completeDeadlineTick: tick + RulesConfig.ticks(penalty.complete))
+        incident.outcome = .called(call)
+        incidents.update(incident)
+        penalize(verdict.offender, turns: Race.foulTurns)
+        emit(.ruleCall(call))
+    }
+
     private func penalize(_ i: Int, turns: Int) {
         if boats[i].penaltyTurnsOwed == 0 { boats[i].penaltyProgress = 0 }
         boats[i].penaltyTurnsOwed = min(boats[i].penaltyTurnsOwed + turns, 4)
@@ -459,7 +495,7 @@ public final class Race {
     private func fireGun() {
         for i in boats.indices where boats[i].status == .prestart && course.lineSide(boats[i].position) > 0 {
             boats[i].status = .ocs
-            emit(.ocs(seat: i))
+            emit(.ocsNotice(recipient: i))
         }
         emit(.gun)
     }
@@ -523,7 +559,7 @@ public final class Race {
         guard timedOut || !boats.contains(where: \.isOnCourse) else { return }
         for i in boats.indices where boats[i].isOnCourse { boats[i].status = .dnf }
         isOver = true
-        emit(.raceOver)
+        emit(.raceClosed)
     }
 
     // MARK: - Standings

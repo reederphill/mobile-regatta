@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "id": "fleet-rules",
+  "version": 1,
+  "placeholders": [
+    "/raceFormat/startRow/depthLineLengths",
+    "/raceFormat/startRow/spreadLineLengths",
+    "/raceFormat/startRow/polarSpeedFraction",
+    "/raceFormat/edgeSpeedRetention",
+    "/raceFormat/beatSizing/calibrationFactor"
+  ],
+  "builderValues": [
+    "/incidents/nearMissSweep/headingSamples",
+    "/incidents/nearMissSweep/stepTicks",
+    "/incidents/nearMissSweep/clearanceHullLengths",
+    "/incidents/escape/candidates",
+    "/incidents/escape/startTickOffset",
+    "/incidents/escape/initiallySeconds",
+    "/markRoomGiven",
+    "/onABeat"
+  ],
+  "notes": [
+    "The rules configuration for a v1.0 fleet race (#73): every replay-affecting rules and race-format value, recorded in each race log by ref (ADR 0004).",
+    "Rules in 2025 RRS numbering. Units: seconds, degrees, ticks; sizes in hull lengths of the race's boat class, line lengths or fractions of the beat. Schema: docs/rules-file.md.",
+    "builderValues (JSON Pointers above) are the values the spec leaves to the builder: the near-miss sweep geometry, the escape simulation's candidates, start tick and 'initially' window, and the mark-room-given and 'on a beat' tests.",
+    "placeholders await tuning: the start row (#35), edge speed retention (#82) and the beat-sizing calibration factor (#80, #105)."
+  ],
+  "incidents": {
+    "nearMissSweep": {
+      "headingDegrees": 10,
+      "seconds": 0.5,
+      "headingSamples": 5,
+      "stepTicks": 1,
+      "clearanceHullLengths": 0
+    },
+    "escape": {
+      "horizonSeconds": 2,
+      "candidates": {
+        "rudder": [-1, -0.5, 0, 0.5, 1],
+        "ease": [false, true]
+      },
+      "startTickOffset": 1,
+      "initiallySeconds": 2
+    },
+    "separationHullLengths": 2,
+    "lastPointOfCertaintySeconds": 0.5
+  },
+  "zone": {
+    "radiusHullLengths": 3
+  },
+  "markRoomGiven": {
+    "roundingDistanceHullLengths": 1,
+    "clearanceHullLengths": 0.25
+  },
+  "onABeat": {
+    "maxTrueWindAngleDegrees": 60,
+    "windwardLegOnly": true
+  },
+  "raceFormat": {
+    "startSequenceSeconds": 60,
+    "penalty": {
+      "startSeconds": 15,
+      "completeSeconds": 30,
+      "startedTurnDegrees": 30
+    },
+    "protestWindowSeconds": 15,
+    "finishWindowSeconds": 120,
+    "timeLimitSeconds": 960,
+    "startLine": {
+      "hullLengthsPerBoat": 1.25,
+      "minimumMetres": 42
+    },
+    "leewardGate": {
+      "aboveLineBeatDivisor": 6,
+      "widthHullLengths": 10
+    },
+    "offsetMark": {
+      "toPortHullLengths": 12
+    },
+    "raceArea": {
+      "acrossAxisBeatFraction": 0.75,
+      "belowLineLineLengths": 1,
+      "aboveWindwardBeatFraction": 0.25
+    },
+    "startRow": {
+      "depthLineLengths": 0.5,
+      "spreadLineLengths": 1.5,
+      "trueWindAngleDegrees": 90,
+      "polarSpeedFraction": 1
+    },
+    "edgeSpeedRetention": 0.3,
+    "beatSizing": {
+      "leaderSeconds": 480,
+      "maxMetres": 360,
+      "calibrationFactor": 1
+    }
+  }
+}
