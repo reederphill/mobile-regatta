@@ -9,8 +9,11 @@ enum VenueFixtures {
     /// SHA-256 of `Tests/RegattaCoreTests/Resources/venues/test-venue@1.json`. A released file never
     /// changes (ADR 0004): ship `test-venue@2.json` rather than editing version 1.
     static let testPinnedHash = "a6006f51d15b369557181ce4da8744b633df8c96eb3441fbc415ae20ccc1ab5f"
-    /// SHA-256 of `Resources/venues/dev-venue@1.json`.
-    static let devPinnedHash = "5f114297c5191a38366f9b38a59460023e5e08dbe295f1af6f1e8ff19d8df958"
+    /// SHA-256 of `Resources/venues/dev-venue@1.json` and `@2.json`, by version.
+    static let devPinnedHashes = [
+        1: "5f114297c5191a38366f9b38a59460023e5e08dbe295f1af6f1e8ff19d8df958",
+        2: "42154e3d263171997dcd444383b0dcf0d89a04fc2b31280b10a4a5f5af220785",
+    ]
 
     static func testFile() throws -> VenueFile {
         try VenueFile.bundled(id: testID, version: 1, in: .module)
@@ -42,6 +45,15 @@ enum VenueFixtures {
         }
     }
 
+    /// A pairing for `conditions` for tests that aren't about the venue: the default venue's geographic
+    /// grid, with the mean and trend direction given. The defaults are what the #74 stub pairing was:
+    /// wind from the north, trend chosen by the seed.
+    static func pairing(for conditions: ConditionsFile, meanDirection: Double = 0,
+                        trend: Venue.TrendDirection = .either) -> Venue.Pairing {
+        Venue.Pairing(conditions: conditions.ref.key, meanDirection: meanDirection, trendDirection: trend,
+                      startLineCentre: .zero, geographicGrid: Race.defaultPairing.geographicGrid)
+    }
+
     static let land0Ring = "[[-600, -200], [-400, -200], [-400, 100], [-500, 150], [-400, 200], [-400, 600], [-600, 600], [-600, -200]]"
 }
 
@@ -63,8 +75,9 @@ enum VenueFixtures {
         #expect(venue.hasCurrent)
     }
 
-    @Test func bundledDevVenueDecodes() throws {
-        let file = try VenueFile.bundled(id: VenueFixtures.devID, version: 1)
+    @Test(arguments: [1, 2])
+    func bundledDevVenueDecodes(version: Int) throws {
+        let file = try VenueFile.bundled(id: VenueFixtures.devID, version: version)
         let venue = file.content
         #expect(venue.displayName == "Dev Water")
         #expect(!venue.hasCurrent)
@@ -74,26 +87,54 @@ enum VenueFixtures {
             #expect(!venue.isLand(pairing.startLineCentre))
             #expect(pairing.geographicGrid.grid.nodeCount == 21 * 16)
         }
-        #expect(venue.pairing(for: DataFileKey(id: "sea-breeze", version: 1))?.trendDirection == .veer)
+        #expect(venue.pairing(for: DataFileKey(id: "sea-breeze", version: version))?.trendDirection == .veer)
         #expect(file.header.placeholders.contains("/pairings/0/geographicGrid"))
     }
 
-    @Test func devVenuePairingsNameBundledConditionsFiles() throws {
-        let venue = try VenueFile.bundled(id: VenueFixtures.devID, version: 1).content
+    /// Version 1 pairs the schema-1 conditions files, version 2 the schema-2 ones the keyed wind needs (#77).
+    @Test(arguments: [1, 2])
+    func devVenuePairingsNameBundledConditionsFiles(version: Int) throws {
+        let venue = try VenueFile.bundled(id: VenueFixtures.devID, version: version).content
         #expect(venue.pairings.count == 4)
         for pairing in venue.pairings {
+            #expect(pairing.conditions.version == version)
             let conditions = try ConditionsFile.bundled(id: pairing.conditions.id, version: pairing.conditions.version)
             #expect(conditions.ref.key == pairing.conditions)
             #expect(venue.pairing(for: conditions.ref.key) == pairing)
         }
     }
 
+    @Test func devVenue2ChangesOnlyTheConditionsVersions() throws {
+        let v1 = try VenueFile.bundled(id: VenueFixtures.devID, version: 1).content
+        let v2 = try VenueFile.bundled(id: VenueFixtures.devID, version: 2).content
+        #expect(v2.displayName == v1.displayName && v2.landmarks == v1.landmarks && v2.land == v1.land)
+        #expect(v2.current == v1.current)
+        #expect(v2.pairings.count == v1.pairings.count)
+        for (a, b) in zip(v1.pairings, v2.pairings) {
+            #expect(b.conditions == DataFileKey(id: a.conditions.id, version: 2))
+            #expect(b.meanDirection == a.meanDirection && b.trendDirection == a.trendDirection)
+            #expect(b.startLineCentre == a.startLineCentre && b.geographicGrid == a.geographicGrid)
+        }
+    }
+
+    /// Races sail at dev-venue@2 until race assembly (#81), drawn around its pairing for the default conditions.
+    @Test func raceUsesTheDefaultVenuePairingForTheDefaultConditions() throws {
+        #expect(Race.defaultVenue.ref.key == DataFileKey(id: VenueFixtures.devID, version: 2))
+        let pairing = try #require(Race.defaultVenue.content.pairing(for: Race.defaultConditions.ref.key))
+        #expect(Race.defaultPairing == pairing)
+        let race = Race(setup: try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot]), windSeed: WindSeed(2))
+        #expect(race.windSetup.pairing == pairing)
+        #expect(race.windSetup.conditionsRef == Race.defaultConditions.ref)
+    }
+
     @Test func hashesArePinned() throws {
         let test = try VenueFixtures.testFile()
         #expect(test.ref.hash.hex == VenueFixtures.testPinnedHash)
         #expect(test.ref.hash == ContentHash(of: try VenueFixtures.bytes()))
-        let dev = try VenueFile.bundled(id: VenueFixtures.devID, version: 1)
-        #expect(dev.ref.hash.hex == VenueFixtures.devPinnedHash)
+        for (version, hash) in VenueFixtures.devPinnedHashes {
+            let dev = try VenueFile.bundled(id: VenueFixtures.devID, version: version)
+            #expect(dev.ref.hash.hex == hash, "dev-venue@\(version)")
+        }
     }
 
     @Test(arguments: [0, 2, 99])

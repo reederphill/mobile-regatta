@@ -146,11 +146,19 @@ struct LogFeeder {
         #expect(gapped.windKeys.endWindow == current + 4)
         #expect(throws: WorldSnapshotError.missingWindKey(current + 1)) { try target.importSnapshot(gapped) }
         #expect(target.digest() == before && target.tick == -1800)
-        // Keys below the window before the snapshot's aren't needed.
-        var recent = snapshot
-        for window in 0..<(current - 1) { recent.windKeys.remove(window: window) }
+        // Keys below the first window the wind needs aren't: the window before the snapshot's, or further
+        // back for puffs that may still be alive (#76), three windows for classic oscillating's 90 s.
+        let later = Self.feeder.race(at: 2900).exportSnapshot()
+        let laterWindow = race.wind.windows.window(containing: 2900)
+        let firstNeeded = race.wind.firstWindowNeeded(atTick: 2900)
+        #expect(firstNeeded == laterWindow - 3)
+        var recent = later
+        for window in 0..<firstNeeded { recent.windKeys.remove(window: window) }
         let fromRecent = try Self.imported(recent)
         for _ in 0..<1200 { Self.feeder.step(fromRecent) }
+        var tooRecent = recent
+        tooRecent.windKeys.remove(window: firstNeeded)
+        #expect(throws: WorldSnapshotError.missingWindKey(firstNeeded)) { try Self.imported(tooRecent) }
 
         // Keys revealed ahead (a client's) are kept, and the race makes no key it already holds.
         let ahead = Self.feeder.race(at: 1300).wind.keys

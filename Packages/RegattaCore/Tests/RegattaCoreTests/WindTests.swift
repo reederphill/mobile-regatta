@@ -9,8 +9,10 @@ enum WindFixtures {
     static let windows = WindWindows(startSequenceTicks: 60 * Race.tickRate)
     static let seeds: [UInt64] = (0..<200).map { UInt64($0) &* 0x9E37_79B9_7F4A_7C15 ^ 0xD1CE }
 
-    static func setup(_ id: String, raceSeed: UInt64 = 1, pairing: VenuePairing = .stub) throws -> WindSetup {
-        WindSetup(conditions: try ConditionsFile.bundled(id: id, version: 2), pairing: pairing, raceSeed: RaceSeed(raceSeed))
+    /// The setup for conditions `id`@2, with `pairing` or else `VenueFixtures.pairing(for:)`'s default.
+    static func setup(_ id: String, raceSeed: UInt64 = 1, pairing: Venue.Pairing? = nil) throws -> WindSetup {
+        let file = try ConditionsFile.bundled(id: id, version: 2)
+        return WindSetup(conditions: file, pairing: pairing ?? VenueFixtures.pairing(for: file), raceSeed: RaceSeed(raceSeed))
     }
 
     static func generator(_ setup: WindSetup, windSeed: UInt64) throws -> WindKeyGenerator {
@@ -104,7 +106,7 @@ enum WindFixtures {
 
     @Test func generatorRefusesSchema1Conditions() throws {
         let file = try ConditionsFile.bundled(id: "classic-oscillating", version: 1)
-        let setup = WindSetup(conditions: file, pairing: .stub, raceSeed: RaceSeed(1))
+        let setup = WindSetup(conditions: file, pairing: VenueFixtures.pairing(for: file), raceSeed: RaceSeed(1))
         #expect(throws: WindKeyGeneratorError.conditionsPredateKeyedWind(file.ref)) {
             try WindKeyGenerator(windSeed: WindSeed(1), setup: setup, windows: WindFixtures.windows)
         }
@@ -223,7 +225,7 @@ enum WindFixtures {
             #expect(a == b)
             #expect(abs(wrapAngle(a.direction - setup.meanDirection - (try field.shift(atTick: tick)))) < 1e-12)
         }
-        #expect(field.activePuffs(atTick: 0).isEmpty, "no puffs until #76")
+        #expect(field.activePuffs(atTick: 0).isEmpty, "no race area, so no puffs (#76)")
     }
 
     /// The wobble moves the shift within a window: at the middle it adds exactly the hump.
@@ -285,8 +287,7 @@ enum WindFixtures {
         var lefts = 0, rights = 0
         var paces: [Double] = []
         for seed in WindFixtures.seeds {
-            let pairing = VenuePairing(meanDirection: 0, trend: .either)
-            let setup = try WindFixtures.setup("sea-breeze", raceSeed: seed, pairing: pairing)
+            let setup = try WindFixtures.setup("sea-breeze", raceSeed: seed)
             let direction = try #require(setup.trend)
             if direction == .left { lefts += 1 } else { rights += 1 }
             let (field, parts) = try WindFixtures.parts(setup, windSeed: seed ^ 0xABCD, through: 120)
@@ -411,13 +412,17 @@ enum WindFixtures {
 
     @Test func raceWindIsTheKeyedFieldOfItsWindSeed() throws {
         let race = testRace(opponents: 3, prestartSeconds: 60, seed: 12)
-        for _ in 0..<2000 { race.step() }
+        for _ in 0..<1999 { race.step() }
+        // A step takes each boat's wind where it starts the tick, before it moves: with puffs (#76) the
+        // wind varies across the water.
+        let sampledAt = race.boats.map(\.position)
+        race.step()
         var generator = try WindKeyGenerator(windSeed: try #require(race.windSeed), setup: race.windSetup, windows: race.wind.windows)
         #expect(race.wind.keys == WindKeyChain(generator.keys(through: race.wind.keys.endWindow - 1)))
-        for boat in race.boats {
-            let wind = try race.wind.sample(boat.position, tick: race.tick)
+        for (boat, position) in zip(race.boats, sampledAt) {
+            let wind = try race.wind.sample(position, tick: race.tick)
             #expect(boat.windDirection == wind.direction && boat.windSpeed == wind.speed)
-            #expect(race.groundWind(at: boat.position) == wind)
+            #expect(race.groundWind(at: position) == wind)
         }
         #expect(race.windSetup.conditionsRef == Race.defaultConditions.ref)
         #expect(race.course.axis == race.windSetup.meanDirection, "the course is square to the mean direction")

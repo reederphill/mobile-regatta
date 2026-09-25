@@ -40,6 +40,24 @@ public final class Race {
         }
     }()
 
+    /// The venue every race sails at until race assembly reads `RaceSetup.venue` (#81). Its pairing for
+    /// `defaultConditions` is what the race's wind setup is drawn around (#77).
+    public static let defaultVenue: VenueFile = {
+        do {
+            return try VenueFile.bundled(id: "dev-venue", version: 2)
+        } catch {
+            preconditionFailure("bundled venue dev-venue@2 failed to load: \(error)")
+        }
+    }()
+
+    /// `defaultVenue`'s pairing for `defaultConditions`.
+    public static let defaultPairing: Venue.Pairing = {
+        guard let pairing = defaultVenue.content.pairing(for: defaultConditions.ref.key) else {
+            preconditionFailure("\(defaultVenue.ref) has no pairing for \(defaultConditions.ref)")
+        }
+        return pairing
+    }()
+
     /// The rules configuration every race sails until race assembly reads `RaceSetup.rulesConfiguration`
     /// (#81). Its ref is what a race log records for it (ADR 0004).
     public static let defaultRulesConfiguration: RulesConfigFile = {
@@ -56,7 +74,9 @@ public final class Race {
     /// Every incident so far, by id and by pair of boats.
     public private(set) var incidents = IncidentIndex()
 
-    /// The public wind setup, drawn from the race seed: mean direction, base strength, trend direction.
+    /// The public wind setup, drawn from the race seed: mean direction, base strength, trend direction;
+    /// with the placeholder race area around the course (`RaceArea.placeholder(around:)`) until course
+    /// derivation (#80) lays one out.
     public let windSetup: WindSetup
     /// The keyed wind (ADR 0001), holding the keys through the current window and no further.
     public private(set) var wind: WindField
@@ -94,7 +114,7 @@ public final class Race {
     /// Builds the race at the start of its sequence, tick −`setup.startSequenceTicks`.
     ///
     /// The public wind setup (mean direction, base strength, trend direction) is drawn from the race
-    /// seed in `defaultConditions` with the stub venue pairing, and the course is laid square to its
+    /// seed in `defaultConditions` with `defaultVenue`'s pairing for them, and the course is laid square to its
     /// mean direction (#10). Everything that changes during the race comes from the key chain of
     /// `windSeed` alone, never from the race seed (ADR 0001).
     /// The race runs no bots: every seat, bot or human, is sailed from outside through `apply` and
@@ -120,12 +140,15 @@ public final class Race {
         self.setup = setup
         self.windSeed = windSeed
         var rng = SplitMix64(seed: setup.raceSeed.value)
-        let windSetup = WindSetup(conditions: Race.defaultConditions, pairing: .stub, raceSeed: setup.raceSeed)
-        self.windSetup = windSetup
-        let course = Course.standard(laps: setup.laps, axis: windSetup.meanDirection,
+        let drawn = WindSetup(conditions: Race.defaultConditions, pairing: Race.defaultPairing, raceSeed: setup.raceSeed)
+        let course = Course.standard(laps: setup.laps, axis: drawn.meanDirection,
                                      zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(
                                         hullLength: Race.defaultBoatClass.hull.length))
         self.course = course
+        // Puffs (#76) spawn in the race area, which course derivation (#80) will lay out; until then a
+        // placeholder around the course, from public information only.
+        let windSetup = drawn.with(raceArea: .placeholder(around: course))
+        self.windSetup = windSetup
         let windows = WindWindows(startSequenceTicks: setup.startSequenceTicks)
         wind = WindField(setup: windSetup, windows: windows, keys: WindKeyChain(revealedWindKeys))
         if let windSeed {
@@ -156,7 +179,7 @@ public final class Race {
         boats = fleet
         heldInputs = Array(repeating: .neutral, count: fleet.count)
         makeWindKeys()
-        if windKeys != nil || (try? wind.shift(atTick: tick)) != nil { refreshWind() }
+        if windKeys != nil || (try? wind.requireKeys(atTick: tick)) != nil { refreshWind() }
     }
 
     // MARK: - Input
@@ -271,7 +294,8 @@ public final class Race {
     /// seeded race makes its own keys, so for it this is exactly `step()` and never throws.
     ///
     /// It samples the wind first exactly where the step will: at every boat's position at the next tick
-    /// (`refreshWind`). A new read of the wind inside `step()`, such as keyed puffs (#76) or the
+    /// (`refreshWind`), which needs every key back to `WindField.firstWindowNeeded(atTick:)` for the
+    /// puffs (#76) that may still be alive. A new read of the wind inside `step()`, such as the
     /// geographic grid (#77) sampled anywhere else, must be checked here too, or a keys-only race could
     /// trap where it should throw.
     public func tryStep() throws(WindFieldError) {
@@ -634,7 +658,9 @@ extension Race {
     /// Throws, leaving the race unchanged, for a snapshot it couldn't sail on from: another fleet
     /// size, a tick outside the sequence start … `WorldSnapshot.maxTick`, a non-finite value, a leg or
     /// rounding stage the course doesn't have, a negative penalty count, a bad contact, or a missing
-    /// key from the window before the snapshot's through the last key it holds.
+    /// key from the first window the wind at the snapshot's tick needs (`WindField.firstWindowNeeded`:
+    /// the window before the snapshot's, or further back for puffs that may still be alive) through the
+    /// last key it holds.
     public func importSnapshot(_ snapshot: WorldSnapshot) throws {
         guard snapshot.seats.count == boats.count else {
             throw WorldSnapshotError.seatCount(expected: boats.count, found: snapshot.seats.count)
@@ -659,17 +685,17 @@ extension Race {
 
         let snapshotWind = WindField(setup: windSetup, windows: wind.windows, keys: snapshot.windKeys)
         do {
-            _ = try snapshotWind.shift(atTick: snapshot.tick)
+            try snapshotWind.requireKeys(atTick: snapshot.tick)
         } catch {
             switch error {
             case .missingKey(let window): throw WorldSnapshotError.missingWindKey(window)
             case .beforeOrigin: throw WorldSnapshotError.tickBeforeStart(snapshot.tick)
             }
         }
-        // From the window before the snapshot's on, the keys must run without a gap: the generator
-        // resumes after the last one, so a missing key in between would never be made, and the wind
-        // would trap when the clock reached it.
-        let firstNeeded = max(0, wind.windows.window(containing: snapshot.tick) - 1)
+        // From the first window the wind at the snapshot's tick needs on, the keys must run without a
+        // gap: the generator resumes after the last one, so a missing key in between would never be
+        // made, and the wind would trap when the clock reached it.
+        let firstNeeded = snapshotWind.firstWindowNeeded(atTick: snapshot.tick)
         if let gap = (firstNeeded..<max(firstNeeded, snapshot.windKeys.endWindow)).first(where: { snapshot.windKeys[$0] == nil }) {
             throw WorldSnapshotError.missingWindKey(gap)
         }
