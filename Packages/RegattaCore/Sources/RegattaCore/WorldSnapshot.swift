@@ -67,6 +67,10 @@ public struct WorldSnapshot: Sendable {
     public var touchingObstacles: [ObstacleContact]
     /// By pair.
     public var foulMemory: [FoulMemory]
+    /// Every incident so far. Umpire memory like `foulMemory`: never sent to clients (#18, #96), and a
+    /// receiver keeps its own. Rule calls carry their incident's id, so a race that imports goes on
+    /// numbering from here, and the rules read past incidents (#88, #94).
+    public var incidents: IncidentIndex
     public var firstFinishTime: Double?
     public var isOver: Bool
     /// The wind keys held (ADR 0001): a race holds every key through the window of `tick`. Importing
@@ -80,14 +84,15 @@ public struct WorldSnapshot: Sendable {
 
     public init(
         tick: Int, seats: [Seat], touchingBoats: [SeatPair] = [], touchingObstacles: [ObstacleContact] = [],
-        foulMemory: [FoulMemory] = [], firstFinishTime: Double? = nil, isOver: Bool = false,
-        windKeys: WindKeyChain = WindKeyChain()
+        foulMemory: [FoulMemory] = [], incidents: IncidentIndex = IncidentIndex(), firstFinishTime: Double? = nil,
+        isOver: Bool = false, windKeys: WindKeyChain = WindKeyChain()
     ) {
         self.tick = tick
         self.seats = seats
         self.touchingBoats = touchingBoats
         self.touchingObstacles = touchingObstacles
         self.foulMemory = foulMemory
+        self.incidents = incidents
         self.firstFinishTime = firstFinishTime
         self.isOver = isOver
         self.windKeys = windKeys
@@ -113,4 +118,6 @@ public enum WorldSnapshotError: Error, Equatable, Sendable {
     case missingWindKey(Int)
     /// A pair or contact naming a seat or obstacle the race doesn't have, or a pair with `a >= b`.
     case invalidContact
+    /// Incident `id` names a seat or leg the race doesn't have, or happened after the snapshot's tick.
+    case invalidIncident(id: Int)
 }

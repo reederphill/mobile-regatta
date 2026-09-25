@@ -257,8 +257,8 @@ public struct EventState: Equatable, Sendable {
     }
 
     /// Makes `world`'s race-level state the server's: every boat's place and finish time (nil for boats
-    /// not in `finishes`), the first finish and whether the race is over. Contact and foul memory are
-    /// left alone. Throws for a finish naming a seat `world` doesn't have.
+    /// not in `finishes`), the first finish and whether the race is over. Contact, foul and incident
+    /// memory are left alone. Throws for a finish naming a seat `world` doesn't have.
     public func apply(to world: inout WorldSnapshot) throws {
         guard finishes.allSatisfy({ world.seats.indices.contains($0.seat) }) else {
             throw WireError.invalidValue("finishes.seat")
@@ -335,7 +335,7 @@ public struct Resync: Equatable, Sendable {
 
     /// The world at `tick` (the frame's tick), built on `base`, the receiver's own snapshot (a freshly
     /// built race's, on a rejoin): the wire seats, finishes and the race's end from the event state, and
-    /// the revealed wind keys. Contact and foul memory stay as the base has them.
+    /// the revealed wind keys. Contact, foul and incident memory stay as the base has them.
     public func world(base: WorldSnapshot, tick: Int) throws -> WorldSnapshot {
         var world = try merge(seats, into: base, tick: tick)
         try eventState.apply(to: &world)
@@ -394,7 +394,8 @@ public struct Snapshot: Equatable, Sendable {
     /// race is over) from `events`, the server's event state as the client has it from `RaceStart` /
     /// `Resync` and the reliable events since (`EventState.record`). So a client whose own prediction
     /// ended the race, or finished a boat, takes the server's word at every snapshot. The other fields
-    /// the wire leaves out (`SnapshotFields.excluded`) and contact and foul memory keep the base's values.
+    /// the wire leaves out (`SnapshotFields.excluded`) and contact, foul and incident memory keep the
+    /// base's values: incidents are umpire memory, which stays on the server (#18, #96).
     public func applied(to base: WorldSnapshot, tick: Int, events: EventState) throws -> WorldSnapshot {
         var world = try merge(seats, into: base, tick: tick)
         try events.apply(to: &world)
