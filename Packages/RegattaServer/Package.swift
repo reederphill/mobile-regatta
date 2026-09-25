@@ -28,6 +28,8 @@ let package = Package(
             dependencies: [
                 "RaceHost",
                 .product(name: "RegattaCore", package: "RegattaCore"),
+                // The seat tests read which controller sails a seat (#66).
+                .product(name: "RegattaBots", package: "RegattaCore"),
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
                 // Built so a test can replay the host's log with it in its own process (#59).
                 .product(name: "regatta-replay", package: "RegattaCore"),
