@@ -10,6 +10,7 @@ Each parked ticket is labelled `needs:human`, unassigned, and has the question a
 
 | Ticket | Question | Suggested answer | Parked |
 |---|---|---|---|
+| #66 RaceHost seat lifecycle | Code complete in [#193](https://github.com/reederphill/mobile-regatta/pull/193) (CI green, review and acceptance passed) but not merged: run `scripts/check.sh` locally with Swift, then merge and close? Labelled `needs:swift-validation`, not `needs:human`. | Merge if `check.sh` passes; the review nits can ride along | 2026-09-25 |
 
 ## Answered by the orchestrator (high confidence)
 
@@ -19,6 +20,7 @@ Each parked ticket is labelled `needs:human`, unassigned, and has the question a
 | #56 | The golden digest sails all seats with BotBrain, so a bot retune moves it (ADR 0002 wants bots retunable without a version bump). | Accept for #56. #59's brain-free race-log replay golden replaces it; add a note by `simulationRevision`. |
 | #107 | Should the iPad orientation lock be always on, or only during the race sequence? | Only during the race sequence. G5 says menus adapt to any window; iPhone stays portrait via Info.plist. |
 | #107 | The iOS 27 CI job (preview `xcode-27` runner, ~21 min, private repo, 10× macOS billing) was running on every push. | Now runs only on main pushes, manual dispatch, weekly, and PRs touching shipping paths. The iPad letterbox test moves into the regular app job. **You may want to set a macOS minutes budget** (`docs/prerequisites.md` says "Not recorded"). |
+| #66 | What does "stub bot inputs from exactly tick + 15" mean, given BotDriver decides only every 3rd tick? | The host applies `BoatInput.neutral` at exactly T+15 (last held input, or the disconnect if later, + 15). That is the first stub-bot input. After it the bot decides on the seat's usual phase; there's no BotDriver flag. #150 can revisit this. |
 | all | The pre-existing `objective-c-xcode.yml` "Build and Analyze" check fails on main. | Not a merge gate. Gates are the ticket's own CI jobs plus the acceptance items. |
 
 ## Completed
