@@ -15,7 +15,9 @@ source scripts/lib.sh
 
 destination="${E2E_DESTINATION:-platform=iOS Simulator,name=iPhone 17}"
 step_seconds=$(( ${E2E_STEP_TIMEOUT_MINUTES:-15} * 60 ))
-scratch="$root/.build/check"
+# check.sh's RegattaServer build, with its flags, so a checked tree builds nothing here.
+scratch="$root/.build/check/RegattaServer"
+optimize=(-Xswiftc -O)
 log="$(mktemp -t regatta-e2e-server)"
 server_pid=""
 
@@ -34,8 +36,8 @@ stop_server() {
 trap stop_server EXIT
 
 echo "== build RegattaServer"
-with_timeout "$step_seconds" swift build --package-path Packages/RegattaServer --scratch-path "$scratch" --product RegattaServer
-server="$(swift build --package-path Packages/RegattaServer --scratch-path "$scratch" --show-bin-path)/RegattaServer"
+with_timeout "$step_seconds" swift build --package-path Packages/RegattaServer --scratch-path "$scratch" "${optimize[@]}" --product RegattaServer
+server="$(swift build --package-path Packages/RegattaServer --scratch-path "$scratch" "${optimize[@]}" --show-bin-path)/RegattaServer"
 
 port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')"
 echo "== start RegattaServer on 127.0.0.1:$port (ENV=dev)"
