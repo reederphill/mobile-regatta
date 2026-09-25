@@ -103,10 +103,19 @@ import Testing
         let back = sail(race, heading: .pi, seconds: 15)
         #expect(back.contains(.cleared(seat: 0)))
 
-        // The boat is now off the pin end: run deeper, then port tack brings it
-        // back up between the ends of the line.
-        _ = sail(race, heading: .pi, seconds: 10)
-        let start = sail(race, heading: deg2rad(45), seconds: 40)
+        // The boat is now off an end of the line: run deeper, as far below it as she is out to the side,
+        // then sail up at the line's centre, never closer than 45° to the axis, to cross between its ends.
+        let line = race.course.startLine
+        func across() -> Double { (race.boats[0].position - line.centre).dot(race.course.right) }
+        while -line.side(race.boats[0].position) < abs(across()) + 10 {
+            _ = sail(race, heading: race.course.axis + .pi, seconds: 1)
+        }
+        var start: [RaceEvent.Kind] = []
+        for _ in 0..<90 where race.boats[0].status == .prestart {
+            let toCentre = wrapAngle((line.centre - race.boats[0].position).bearing - race.course.axis)
+            let offAxis = toCentre < 0 ? min(toCentre, -deg2rad(45)) : max(toCentre, deg2rad(45))
+            start += sail(race, heading: race.course.axis + offAxis, seconds: 1)
+        }
         #expect(start.contains(.started(seat: 0)))
         #expect(race.boats[0].status == .racing)
     }

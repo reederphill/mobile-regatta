@@ -205,7 +205,8 @@ import Testing
 
     /// `WindField.sample` bends and shades the channel wind by the venue's geographic grid (#77).
     @Test func theGeographicGridIsComposedIntoTheWind() throws {
-        let setup = try WindFixtures.setup("classic-oscillating") // no race area: no puffs
+        // The default venue's pairing, with no race area: no puffs.
+        let setup = WindSetup(conditions: Race.defaultConditions, pairing: Race.defaultPairing, raceSeed: RaceSeed(1))
         let windows = WindWindows(startSequenceTicks: 900)
         var generator = try WindKeyGenerator(windSeed: Self.windSeed, setup: setup, windows: windows)
         let field = WindField(setup: setup, windows: windows, keys: WindKeyChain(generator.keys(through: 3)))
