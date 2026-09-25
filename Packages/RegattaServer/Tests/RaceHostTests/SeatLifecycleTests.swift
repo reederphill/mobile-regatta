@@ -143,6 +143,38 @@ struct SeatLifecycleTests {
         #expect(kinds == [.joined(.human), .disconnected, .rejoined, .dropped, .botTookOver(.cautious)])
     }
 
+    /// A seat no player attaches to is silent from the host's start: dropped 1 s in, so the bot sails it
+    /// and it counts as gone. A late attach still takes the boat, as a join.
+    @Test func seatNoOneAttachesToIsDroppedOneSecondAfterTheHostStarts() async throws {
+        let rig = try await Rig(humans: 2, firstInputHold: true)
+        await rig.run(to: -271)
+        #expect(await rig.host.controller(seat: 1).isHuman)
+        await rig.run(to: -270)
+        #expect(isDropped(await rig.host.controller(seat: 1)))
+        #expect(await rig.host.log.seatEvents.filter { $0.seat == 1 } == [
+            SeatEvent(tick: -270, seat: 1, kind: .dropped),
+            SeatEvent(tick: -270, seat: 1, kind: .botTookOver(.cautious)),
+        ])
+
+        await rig.run(to: -200)
+        let late = RecordingTransport()
+        #expect(await rig.host.attach(seat: 1, transport: late))
+        #expect(await rig.host.controller(seat: 1).isHuman)
+        #expect(await rig.host.log.seatEvents.last == SeatEvent(tick: -200, seat: 1, kind: .joined(.human)))
+        #expect(hasResync(late))
+    }
+
+    @Test func seatNoOneAttachesToCountsTowardAllGone() async throws {
+        var options = RaceHostOptions()
+        options.allGone.graceTicks = 90
+        let rig = try await Rig(humans: 2, options: options, firstInputHold: true)
+        await rig.run(to: -280)
+        #expect(await rig.host.leave(seat: 0))
+        await rig.run(to: 0)
+        // Seat 0 left at -280 and seat 1 was dropped at -270: the grace runs from -270.
+        #expect(rig.allGones == [AllGone(tick: -180, leaveOrder: [0, 1], isMassDrop: false)])
+    }
+
     @Test func disconnectBeforeTheFirstInputStartsTheUsualHold() async throws {
         let rig = try await Rig(firstInputHold: true)
         await rig.run(to: -295)

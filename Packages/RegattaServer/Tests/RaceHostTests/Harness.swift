@@ -33,7 +33,7 @@ final class RecordingTransport: SeatTransport {
 /// A host on a virtual clock: seat 0 human, the rest bots.
 ///
 /// The rig's seats send only what a test sends, not a real client's heartbeat every 200 ms, so unless
-/// `firstInputHold` is set the host waits for ever for a seat's first held input after an attach.
+/// `firstInputHold` is set the host waits for ever for a seat's attach and its first held input.
 struct Rig {
     let clock = VirtualClock()
     let host: RaceHost
