@@ -1,0 +1,12 @@
+[
+    {
+        "name": "fleet-16-bots",
+        "boats": 16,
+        "raceSeed": 69,
+        "windSeed": 6969,
+        "laps": 2,
+        "startSequenceTicks": 900,
+        "warmupTicks": 30,
+        "ticks": 9000
+    }
+]

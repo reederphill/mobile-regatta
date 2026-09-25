@@ -4,7 +4,8 @@ import PackageDescription
 // The race server. `RaceHost` (#65): an actor owning one authoritative `Race`, stepped at 30 Hz on an
 // injectable clock, talking to each seat over an injectable transport (no sockets). `RegattaServer` (#67):
 // the executable that puts races behind a WebSocket endpoint (SwiftNIO, ADR 0006), and
-// `regatta-loadclient`, the headless client that sails races against it over the same stack. Builds on Linux.
+// `regatta-loadclient`, the headless client that sails races against it over the same stack.
+// `regatta-bench` (#69) measures the host's per-tick work against the server budget (#27). Builds on Linux.
 let package = Package(
     name: "RegattaServer",
     platforms: [.iOS(.v18), .macOS(.v15)],
@@ -12,6 +13,7 @@ let package = Package(
         .library(name: "RaceHost", targets: ["RaceHost"]),
         .executable(name: "RegattaServer", targets: ["RegattaServer"]),
         .executable(name: "regatta-loadclient", targets: ["regatta-loadclient"]),
+        .executable(name: "regatta-bench", targets: ["regatta-bench"]),
     ],
     dependencies: [
         .package(path: "../RegattaCore"),
@@ -67,6 +69,25 @@ let package = Package(
             ]
         ),
         .executableTarget(name: "regatta-loadclient", dependencies: ["RegattaLoadClient"]),
+        // The tick benchmark (#69): scenarios, the tick loop, stats, the gate and the JSON report.
+        .target(
+            name: "Bench",
+            dependencies: [
+                "RaceHost",
+                .product(name: "RegattaCore", package: "RegattaCore"),
+                .product(name: "RegattaBots", package: "RegattaCore"),
+                .product(name: "RegattaProtocol", package: "RegattaProtocol"),
+            ],
+            // The scenario list is data (#69); #105 adds its scenarios here.
+            resources: [.copy("scenarios.json")]
+        ),
+        // A thin command line over Bench.
+        .executableTarget(name: "regatta-bench", dependencies: ["Bench"]),
+        // regatta-bench is a dependency so `swift test` builds it: the gate tests run it as its own process.
+        .testTarget(
+            name: "BenchTests",
+            dependencies: ["Bench", "regatta-bench", .product(name: "RegattaCore", package: "RegattaCore")]
+        ),
         .testTarget(
             name: "RaceHostTests",
             dependencies: [
