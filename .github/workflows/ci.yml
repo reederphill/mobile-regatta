@@ -21,6 +21,7 @@ jobs:
       core: ${{ steps.filter.outputs.core }}
       protocol: ${{ steps.filter.outputs.protocol }}
       client: ${{ steps.filter.outputs.client }}
+      server: ${{ steps.filter.outputs.server }}
       app: ${{ steps.filter.outputs.app }}
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +42,11 @@ jobs:
             client:
               - *ci
               - "Packages/**"
+            server:
+              - *ci
+              - "Packages/**"
+              - "Dockerfile"
+              - ".dockerignore"
             app:
               - *ci
               - "Regatta/**"
@@ -77,6 +83,36 @@ jobs:
       - name: Let the cache read the container's build
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" .linux-scratch || true
+
+  container:
+    name: Server image; load clients sail a race in the Linux container
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image (Dockerfile)
+        run: docker build --platform linux/amd64 -t regatta-server .
+      - name: The server refuses to start without ENV=dev
+        run: |
+          set +e
+          docker run --rm regatta-server
+          status=$?
+          set -e
+          echo "exit status $status"
+          test "$status" -eq 78
+      - name: One client, then 16 in one race, within the bandwidth budget (#67, #27)
+        run: |
+          docker run -d --name regatta -e ENV=dev -p 8080:8080 regatta-server
+          curl --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 localhost:8080/health
+          echo
+          docker exec regatta regatta-loadclient --clients 1 --race-seconds 5 --start-seconds 2
+          docker exec regatta regatta-loadclient --clients 16 --race-seconds 20 --start-seconds 5 --check-bandwidth \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Server log
+        if: always()
+        run: docker logs regatta || true
 
   macos:
     name: Packages on macOS
