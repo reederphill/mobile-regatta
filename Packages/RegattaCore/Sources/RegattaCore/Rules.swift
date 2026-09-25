@@ -34,8 +34,8 @@ public struct RuleCall: Sendable, Equatable {
 }
 
 public enum Rules {
-    /// Decides which of two boats in contact was required to keep clear.
-    public static func judge(_ a: Boat, _ b: Boat, course: Course) -> RuleCall {
+    /// Decides which of two boats in contact was required to keep clear. `hull` is their boat class's.
+    public static func judge(_ a: Boat, _ b: Boat, course: Course, hull: BoatClass.Hull) -> RuleCall {
         func call(_ rule: RacingRule, _ offender: Boat, _ victim: Boat) -> RuleCall {
             RuleCall(rule: rule, offender: offender.id, victim: victim.id)
         }
@@ -54,8 +54,8 @@ public enum Rules {
             return a.tack == .port ? call(.portStarboard, a, b) : call(.portStarboard, b, a)
         }
 
-        let aAstern = isClearAstern(a, of: b)
-        let bAstern = isClearAstern(b, of: a)
+        let aAstern = isClearAstern(a, of: b, hull: hull)
+        let bAstern = isClearAstern(b, of: a, hull: hull)
 
         if !aAstern && !bAstern, let mark = sharedMarkInZone(a, b, course: course) {
             let aDistance = (a.position - mark).length
@@ -73,9 +73,9 @@ public enum Rules {
     }
 
     /// `a` is clear astern of `b` when its whole hull is behind a line abeam of `b`'s stern.
-    public static func isClearAstern(_ a: Boat, of b: Boat) -> Bool {
-        let stern = b.position - b.forward * Boat.length / 2
-        return a.hull().allSatisfy { ($0 - stern).dot(b.forward) < 0 }
+    public static func isClearAstern(_ a: Boat, of b: Boat, hull: BoatClass.Hull) -> Bool {
+        let stern = b.position - b.forward * hull.length / 2
+        return a.hull(outline: hull.outline).allSatisfy { ($0 - stern).dot(b.forward) < 0 }
     }
 
     /// The mark both boats are rounding, if both are inside its zone.

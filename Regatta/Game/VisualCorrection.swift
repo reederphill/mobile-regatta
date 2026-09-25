@@ -12,19 +12,24 @@ struct VisualCorrection {
     static let easeDuration = 0.15
     /// Three half-lives make the ease: an error halves in about 50 ms.
     static let halfLife = easeDuration / 3
-    /// A position error larger than this snaps rather than eases: one hull length.
-    static let snapDistance = Boat.length
+    /// A position error larger than this snaps rather than eases: one hull length of the boat class.
+    let snapDistance: Double
 
     /// What's drawn minus the prediction.
     private(set) var positionError = Vec2.zero
     private(set) var headingError = 0.0
+
+    /// `snapDistance`: the boat class's hull length (`BoatClass.Hull.length`).
+    init(snapDistance: Double) {
+        self.snapDistance = snapDistance
+    }
 
     /// The prediction moved from where the boat was drawn, `shown` (with any easing still running), to
     /// `corrected`. The drawing starts from `shown` and eases onto the prediction, or snaps to it if the
     /// jump is more than `snapDistance`.
     mutating func correct(shown: Boat, corrected: Boat) {
         let jump = shown.position - corrected.position
-        if jump.length > VisualCorrection.snapDistance {
+        if jump.length > snapDistance {
             positionError = .zero
             headingError = 0
         } else {

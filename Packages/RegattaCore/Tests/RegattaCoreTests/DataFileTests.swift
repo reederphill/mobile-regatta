@@ -283,15 +283,19 @@ enum Fixtures {
         }
     }
 
-    @Test func bundledOutlineMatchesThePrototypeHull() throws {
+    @Test func hullOutlinePlacesTheBundledOutlineInTheWorld() throws {
         let hull = try Fixtures.boatClass().hull
-        let boat = Boat(id: 0, isPlayer: false, colorIndex: 0, position: .zero, heading: 0, speed: 0)
+        var boat = Boat(id: 0, isPlayer: false, colorIndex: 0, position: .zero, heading: 0, speed: 0)
         // Heading 0 is north, so the boat's frame is the world frame.
-        let prototype = boat.hull()
-        #expect(hull.outline.count == prototype.count)
-        for (a, b) in zip(hull.outline, prototype) {
+        let placed = boat.hull(outline: hull.outline)
+        #expect(placed.count == hull.outline.count)
+        for (a, b) in zip(hull.outline, placed) {
             #expect((a - b).length < 1e-9)
         }
+        // Heading east at (10, 5): the bow (0, length / 2) lands half a hull length east of the boat.
+        boat.heading = .pi / 2
+        boat.position = Vec2(10, 5)
+        #expect((boat.hull(outline: hull.outline)[0] - Vec2(10 + hull.length / 2, 5)).length < 1e-9)
     }
 
     @Test func turnRateRisesWithSpeedFromMinToTop() throws {

@@ -269,7 +269,7 @@ struct LogFeeder {
         "setup": "fixed for the race; the importing race is built from the same setup",
         "windSeed": "secret key, never in a snapshot (ADR 0001); the importing race has its own wind",
         "course": "fixed for the race, derived from the setup",
-        "polar": "fixed for the race",
+        "boatClass": "fixed for the race: the class file (ADR 0004)",
         "windSetup": "fixed for the race, drawn from the public race seed",
         "windKeys": "the key generator: it holds the wind seed, never in a snapshot (ADR 0001); import moves it past the snapshot's keys",
         "finishers": "derived on import: the count of finished boats",

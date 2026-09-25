@@ -10,7 +10,7 @@ import RegattaCore
 final class PracticeDriver: RaceDriver {
     let myBoatIndex: Int
     let course: Course
-    let polar: Polar
+    let boatClass: BoatClass
     let isPausable = true
     /// Names and bot marks, kept outside the simulation (#60).
     let roster: FleetRoster
@@ -39,7 +39,7 @@ final class PracticeDriver: RaceDriver {
         roster = config.roster
         myBoatIndex = setup.seats.firstIndex(of: .human) ?? 0
         course = race.course
-        polar = race.polar
+        boatClass = race.boatClass
         clock = TickClock(timescale: timescale)
         currentFrame = TickFrame(race: race)
         previousFrame = currentFrame

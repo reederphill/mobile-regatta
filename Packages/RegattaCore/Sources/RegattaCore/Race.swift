@@ -6,14 +6,7 @@ import Foundation
 /// never reads the wall clock, and never iterates a `Set` or `Dictionary` — their order depends on
 /// a per-process hash seed. Look them up by key; iterate arrays. `DeterminismTests` scans for all three.
 public final class Race {
-    /// Length of the disturbed-air cone behind a boat.
-    public static let shadowLength = Boat.length * 8
-    /// Half-width of the shadow cone at `distance` downwind of the boat.
-    public static func shadowHalfWidth(at distance: Double) -> Double { 2 + distance * 0.18 }
     public static let timeLimitAfterFirstFinish = 180.0
-    /// An eased boat's target speed as a fraction of the polar's: the prototype's 15 % (#13).
-    /// A placeholder until the boat class's ease amount and rate are wired in (#58, #81).
-    public static let easedSpeedFactor = 0.15
 
     /// Simulation ticks per second. A server that falls behind catches up with several ticks, never a longer one.
     public static let tickRate = 30
@@ -25,7 +18,17 @@ public final class Race {
     /// which is how an online client predicts: it never holds the seed.
     public let windSeed: WindSeed?
     public let course: Course
-    public let polar = Polar.dinghy
+    /// The class every boat sails: hull, polar and handling (ADR 0004). The bundled dinghy until race
+    /// assembly reads `RaceSetup.boatClass` (#81).
+    public let boatClass: BoatClass = Race.defaultBoatClass
+
+    public static let defaultBoatClass: BoatClass = {
+        do {
+            return try BoatClassFile.bundled(id: "ilca-dinghy", version: 1).content
+        } catch {
+            preconditionFailure("bundled boat class ilca-dinghy@1 failed to load: \(error)")
+        }
+    }()
 
     /// The conditions every race sails until race assembly reads `RaceSetup.conditions` (#81).
     /// Schema 2: the keyed wind needs its wobble and ramp tuning (#75).
@@ -103,7 +106,8 @@ public final class Race {
         var rng = SplitMix64(seed: setup.raceSeed.value)
         let windSetup = WindSetup(conditions: Race.defaultConditions, pairing: .stub, raceSeed: setup.raceSeed)
         self.windSetup = windSetup
-        let course = Course.standard(laps: setup.laps, axis: windSetup.meanDirection)
+        let course = Course.standard(laps: setup.laps, axis: windSetup.meanDirection,
+                                     hullLength: Race.defaultBoatClass.hull.length)
         self.course = course
         let windows = WindWindows(startSequenceTicks: setup.startSequenceTicks)
         wind = WindField(setup: windSetup, windows: windows, keys: WindKeyChain(revealedWindKeys))
@@ -325,19 +329,27 @@ public final class Race {
                 boats[i].shadow = 1
                 continue
             }
+            let cone = boatClass.windShadow
             var factor = 1.0
             for j in boats.indices where j != i && boats[j].isOnCourse {
                 let offset = boats[i].position - boats[j].position
                 let downwind = -Vec2.heading(boats[j].windDirection)
                 let along = offset.dot(downwind)
-                guard along > 0, along < Race.shadowLength else { continue }
-                let width = Race.shadowHalfWidth(at: along)
+                guard along > 0, along < cone.coneLength else { continue }
+                let width = Race.shadowHalfWidth(cone, at: along)
                 let lateral = abs(offset.cross(downwind))
                 guard lateral < width else { continue }
-                factor *= 1 - 0.22 * (1 - along / Race.shadowLength) * (1 - lateral / width)
+                factor *= 1 - cone.lossCloseIn * (1 - along / cone.coneLength) * (1 - lateral / width)
             }
-            boats[i].shadow = max(factor, 0.6)
+            boats[i].shadow = max(factor, cone.stackingFloor)
         }
+    }
+
+    /// Half-width of `cone` at `distance` downwind of the boat: from half its width at the boat to half
+    /// its width at its end, straight between.
+    public static func shadowHalfWidth(_ cone: BoatClass.WindShadow, at distance: Double) -> Double {
+        let t = (distance / cone.coneLength).clamped(to: 0...1)
+        return (cone.coneWidthAtBoat + (cone.coneWidthAtEnd - cone.coneWidthAtBoat) * t) / 2
     }
 
     private func integrate(_ i: Int, _ dt: Double) {
@@ -351,14 +363,19 @@ public final class Race {
                 b.desiredRudder = 0
             }
         }
-        let rudderRate = 5 * dt
-        b.rudder += (b.desiredRudder - b.rudder).clamped(to: -rudderRate...rudderRate)
 
-        // Steering: more authority with more flow over the rudder.
-        let steerage = (0.45 + b.speed / 3).clamped(to: 0.45...1)
-        let turn = b.rudder * deg2rad(85) * steerage * dt
         let wasStarboard = b.relativeWind >= 0
-        b.heading = wrapAngle(b.heading + turn)
+        let before = b.heading
+        let moved = BoatDynamics.advance(
+            BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder),
+            control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: b.isOnCourse),
+            env: BoatDynamics.Environment(windDirection: b.windDirection, windSpeed: b.windSpeed * b.shadow),
+            boatClass: boatClass, dt: dt)
+        b.position = moved.position
+        b.heading = moved.heading
+        b.speed = moved.speed
+        b.rudder = moved.rudder
+        let turn = wrapAngle(b.heading - before)
 
         if b.penaltyTurnsOwed > 0 {
             b.penaltyProgress += turn
@@ -373,17 +390,9 @@ public final class Race {
         if (b.relativeWind >= 0) != wasStarboard {
             b.isTacking = b.twa < .pi / 2
         }
-        if b.isTacking && b.twa >= polar.upwindTWA - deg2rad(5) {
+        if b.isTacking && b.twa >= boatClass.polar.bestUpwind(tws: b.windSpeed * b.shadow).twa - deg2rad(5) {
             b.isTacking = false
         }
-
-        var target = b.isOnCourse ? polar.targetSpeed(twa: b.twa, windSpeed: b.windSpeed * b.shadow) : 0
-        if heldInputs[i].ease { target *= Race.easedSpeedFactor }
-        let timeConstant = target > b.speed ? 2.5 : 5.0
-        b.speed += (target - b.speed) * min(1, dt / timeConstant)
-        b.speed -= b.speed * abs(b.rudder) * 0.3 * dt
-        b.speed = max(0, b.speed)
-        b.position += b.forward * b.speed * dt
 
         boats[i] = b
     }
@@ -392,21 +401,22 @@ public final class Race {
 
     private func resolveBoatContacts() {
         var touching = Set<Pair>()
-        let hulls = boats.map { $0.hull() }
+        let outline = boatClass.hull.outline
+        let hulls = boats.map { $0.hull(outline: outline) }
         for i in boats.indices where boats[i].isOnCourse {
             for j in (i + 1)..<boats.count where boats[j].isOnCourse {
-                guard (boats[i].position - boats[j].position).length < Boat.length * 1.3,
+                guard (boats[i].position - boats[j].position).length < boatClass.hull.length * 1.3,
                       let push = Collision.penetration(hulls[i], hulls[j])
                 else { continue }
 
                 let pair = Pair(a: i, b: j)
                 touching.insert(pair)
                 if !boatContacts.contains(pair) {
-                    boats[i].speed *= 0.6
-                    boats[j].speed *= 0.6
+                    boats[i].speed = BoatDynamics.speed(after: .boat, speed: boats[i].speed, boatClass: boatClass)
+                    boats[j].speed = BoatDynamics.speed(after: .boat, speed: boats[j].speed, boatClass: boatClass)
                     if (lastFoul[pair] ?? -.infinity) + 5 < time {
                         lastFoul[pair] = time
-                        let call = Rules.judge(boats[i], boats[j], course: course)
+                        let call = Rules.judge(boats[i], boats[j], course: course, hull: boatClass.hull)
                         penalize(call.offender, turns: 2)
                         emit(.foul(call))
                     }
@@ -423,13 +433,13 @@ public final class Race {
         let obstacles = course.obstacles
         for i in boats.indices where boats[i].isOnCourse {
             for (k, obstacle) in obstacles.enumerated() {
-                guard (boats[i].position - obstacle.position).length < Boat.length + obstacle.radius,
-                      let push = Collision.penetration(polygon: boats[i].hull(), circle: obstacle.position, radius: obstacle.radius)
+                guard (boats[i].position - obstacle.position).length < boatClass.hull.length + obstacle.radius,
+                      let push = Collision.penetration(polygon: boats[i].hull(outline: boatClass.hull.outline), circle: obstacle.position, radius: obstacle.radius)
                 else { continue }
                 let pair = Pair(a: i, b: k)
                 touching.insert(pair)
                 if !obstacleContacts.contains(pair) {
-                    boats[i].speed *= 0.5
+                    boats[i].speed = BoatDynamics.speed(after: .mark, speed: boats[i].speed, boatClass: boatClass)
                     penalize(i, turns: 1)
                     emit(.markTouch(seat: i, mark: obstacle.name))
                 }

@@ -5,54 +5,57 @@ import Foundation
 ///
 /// Files use knots, degrees, seconds and hull lengths; everything here is converted once at load
 /// to m/s, radians, seconds and metres.
+///
+/// Values are checked once, at load. The scalars are `var` so a test or a tuning tool can edit a copy;
+/// a race sails the file as loaded.
 public struct BoatClass: DataFileContent {
     public static let kind = "boat class"
     public static let bundleDirectory = "boat-classes"
     public static let supportedSchemaVersions = [1]
 
     /// Name shown to players.
-    public let name: String
-    public let hull: Hull
-    public let polar: PolarTable
-    public let momentum: Momentum
-    public let steering: Steering
-    public let windShadow: WindShadow
-    public let contact: Contact
-    public let ease: Ease
+    public var name: String
+    public var hull: Hull
+    public var polar: PolarTable
+    public var momentum: Momentum
+    public var steering: Steering
+    public var windShadow: WindShadow
+    public var contact: Contact
+    public var ease: Ease
 
     public struct Hull: Sendable, Equatable {
         /// Metres.
-        public let length: Double
-        public let beam: Double
+        public var length: Double
+        public var beam: Double
         /// Convex collision outline in metres, in the boat's frame: x to starboard, y towards the bow.
-        public let outline: [Vec2]
+        public var outline: [Vec2]
     }
 
     /// Time constants of the approach to polar speed.
     public struct Momentum: Sendable, Equatable {
         /// Seconds, when the polar target is above the boat's speed.
-        public let speedingUp: Double
+        public var speedingUp: Double
         /// Seconds, when the target is below it with the sail drawing (lulls, shadow).
-        public let slowingDown: Double
+        public var slowingDown: Double
         /// Seconds, inside the no-go zone.
-        public let noGo: Double
+        public var noGo: Double
     }
 
     public struct Steering: Sendable, Equatable {
         /// Full-rudder turn rate at full speed, radians per second.
-        public let topTurnRate: Double
+        public var topTurnRate: Double
         /// Full-rudder turn rate however slow the boat is, radians per second.
-        public let minTurnRate: Double
+        public var minTurnRate: Double
         /// Fraction of `topTurnRate` by speed through the water: speeds in m/s, ascending, and the
         /// fraction at each. Linear between points, flat beyond them.
         public let turnRateCurveSpeeds: [Double]
         public let turnRateCurveFractions: [Double]
         /// How fast a boat head to wind falls off towards close-hauled on her own, radians per second.
-        public let headToWindFallOffRate: Double
+        public var headToWindFallOffRate: Double
         /// Fraction of speed lost per second at full rudder.
-        public let rudderDrag: Double
+        public var rudderDrag: Double
         /// How fast the rudder moves, in full rudder (1.0) per second.
-        public let rudderSlew: Double
+        public var rudderSlew: Double
 
         /// Full-rudder turn rate at speed through the water `speed` (m/s), radians per second.
         public func turnRate(speed: Double) -> Double {
@@ -70,35 +73,35 @@ public struct BoatClass: DataFileContent {
     /// The disturbed air behind a boat's sails, and the backwind just to windward of them.
     public struct WindShadow: Sendable, Equatable {
         /// Length of the shadow cone downwind of the boat, metres.
-        public let coneLength: Double
+        public var coneLength: Double
         /// Full width of the cone at the boat and at its downwind end, metres.
-        public let coneWidthAtBoat: Double
-        public let coneWidthAtEnd: Double
+        public var coneWidthAtBoat: Double
+        public var coneWidthAtEnd: Double
         /// Fraction of wind speed lost right behind the boat (0.25 = 25 %).
-        public let lossCloseIn: Double
+        public var lossCloseIn: Double
         /// Lowest wind multiplier from stacked shadows (0.6 = never below 60 % of the wind).
-        public let stackingFloor: Double
+        public var stackingFloor: Double
         /// The backwind zone: how far it reaches to windward of the boat and how wide it is,
         /// metres, and the fraction of wind speed a boat inside it loses.
-        public let backwindLength: Double
-        public let backwindWidth: Double
-        public let backwindLoss: Double
+        public var backwindLength: Double
+        public var backwindWidth: Double
+        public var backwindLoss: Double
     }
 
     /// Speed multipliers on contact.
     public struct Contact: Sendable, Equatable {
         /// Hitting another boat.
-        public let boat: Double
+        public var boat: Double
         /// Hitting a mark.
-        public let mark: Double
+        public var mark: Double
     }
 
     /// Letting the sheets go so the boat slows.
     public struct Ease: Sendable, Equatable {
         /// Fraction of polar speed the boat slows to while eased.
-        public let speedFraction: Double
+        public var speedFraction: Double
         /// Time constant of slowing down when eased, seconds.
-        public let timeConstant: Double
+        public var timeConstant: Double
     }
 
     public init(fileData: Data, header: DataFileHeader) throws {
@@ -227,7 +230,7 @@ private struct BoatClassSchema1: Decodable {
                   "hull outline needs at least three [x, y] points")
         let outline = hull.outlineMetres.map { Vec2($0[0], $0[1]) }
         try check(Self.isConvexClockwise(outline),
-                  "hull outline must be convex and run clockwise (bow, starboard side, stern, port side), as Boat.hull() does")
+                  "hull outline must be convex and run clockwise (bow, starboard side, stern, port side), as Boat.hull(outline:) does")
         try check(polar.twaDegrees.first == 0 && polar.twaDegrees.last == 180, "polar TWA rows must run from 0° to 180°")
 
         let table: PolarTable

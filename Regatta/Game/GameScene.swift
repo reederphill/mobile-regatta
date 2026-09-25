@@ -135,7 +135,7 @@ final class GameScene: SKScene {
         let me = driver.myBoatIndex
         for boat in driver.currentFrame.boats {
             let node = BoatNode(boat: boat, name: roster.label(of: boat.id, playerSeat: me), isMine: boat.id == me,
-                                color: Palette.boat(boat.colorIndex), pointsPerMeter: ppm)
+                                color: Palette.boat(boat.colorIndex), boatClass: driver.boatClass, pointsPerMeter: ppm)
             boatNodes.append(node)
             boatLayer.addChild(node)
             effectsLayer.addChild(node.shadowCone)
@@ -270,11 +270,13 @@ final class GameScene: SKScene {
             return
         }
         let mark = course.marks[index]
-        guard let w = world.groundWind(at: mark.position)?.direction else {
+        guard let ground = world.groundWind(at: mark.position) else {
             laylines.path = nil
             return
         }
-        let angle = mark.kind == .windward ? world.polar.upwindTWA : world.polar.downwindTWA
+        let w = ground.direction
+        let polar = world.boatClass.polar
+        let angle = mark.kind == .windward ? polar.bestUpwind(tws: ground.speed).twa : polar.bestDownwind(tws: ground.speed).twa
         let path = CGMutablePath()
         for heading in [w - angle, w + angle] {
             // The layline is the track that arrives at the mark on this heading.

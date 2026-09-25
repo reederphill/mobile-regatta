@@ -16,9 +16,6 @@ public enum BoatStatus: Sendable, Equatable {
 }
 
 public struct Boat: Identifiable, Sendable {
-    public static let length = 4.2
-    public static let beam = 1.5
-
     public let id: Int
     public let isPlayer: Bool
     public let colorIndex: Int
@@ -78,18 +75,10 @@ public struct Boat: Identifiable, Sendable {
         penaltyTurnsOwed > 0 && abs(penaltyProgress) > deg2rad(30)
     }
 
-    /// Hull outline in world coordinates (convex).
-    public func hull() -> [Vec2] {
+    /// The boat class's hull `outline` (`BoatClass.Hull.outline`, boat frame) in world coordinates. Convex.
+    public func hull(outline: [Vec2]) -> [Vec2] {
         let f = forward
         let r = f.rightPerp
-        let l = Boat.length, b = Boat.beam
-        let local: [Vec2] = [
-            Vec2(0, l / 2),
-            Vec2(b / 2, l * 0.05),
-            Vec2(b * 0.42, -l / 2),
-            Vec2(-b * 0.42, -l / 2),
-            Vec2(-b / 2, l * 0.05),
-        ]
-        return local.map { position + r * $0.x + f * $0.y }
+        return outline.map { position + r * $0.x + f * $0.y }
     }
 }
