@@ -11,6 +11,7 @@ Each parked ticket is labelled `needs:human`, unassigned, and has the question a
 | Ticket | Question | Suggested answer | Parked |
 |---|---|---|---|
 | #71 Boom side, sailing by the lee and gybes | [#200](https://github.com/reederphill/mobile-regatta/pull/200) is ready apart from one thing (CI golden + macOS packages green on 9ca4817, no blocking review findings, acceptance 7/7 from CI). `testPrestartMatchesItsReference` fails at 3.02% because the boats now move differently and the sail follows the boom. | Re-record `prestart.png` on iPhone 17 / iOS 26.5 / Xcode 26.6 on `ticket-71-boom-side` (as for #70), push, merge #200 | 2026-09-25 |
+| #76 Keyed puffs and lulls | [#199](https://github.com/reederphill/mobile-regatta/pull/199) is ready apart from one thing (CI golden + macOS packages green on 968145e, no blocking review findings in 2 rounds, acceptance 6/6 from CI). `testPrestartMatchesItsReference` fails at 10.76% because the prestart fixture now draws puffs. Both #199 and #200 claim `simulationRevision` 6 (goldens differ). | Merge #200 first. Then on `claude/nice-ritchie-39maba`: merge main, bump to revision 7 with the new golden row, re-record `prestart.png` (iPhone 17 / iOS 26.5 / Xcode 26.6), push, merge #199 | 2026-09-25 |
 
 ## Answered by the orchestrator (high confidence)
 
@@ -26,6 +27,9 @@ Each parked ticket is labelled `needs:human`, unassigned, and has the question a
 | all | The pre-existing `objective-c-xcode.yml` "Build and Analyze" check fails on main. | Not a merge gate. Gates are the ticket's own CI jobs plus the acceptance items. |
 | #73 | The wire policy comment in `Messages.swift` says a new `RaceEvent` kind needs a `wireProtocolVersion` bump; #73 adds 8 kinds and retires code 4. | Keep version 1 while nothing is deployed (no peers to protect). From the first release on, follow the policy. |
 | #73 | Brief said `turnsOwed` 1; the sim still penalises a foul with 2 turns. | Report 2: the call reports what the sim does, until the penalties ticket changes it. |
+| #76 | Race area for puff spawns: `WindSetup.raceArea` is nil until #80. | `RaceArea.placeholder(around:)` around the standard course (700 × 600 m), attached by `Race`. A field with no race area has no puffs. #80 replaces it. |
+| #76 | `QuantisationTests.quantisedImportPredictsCloseToTheExactWorld` hit 5.7 cm (> 5 cm) on macOS once puffs were in. | Root cause is contact: a 3.9 mm step can move a contact's first tick by one. New 1 cm bound for boats clear of contact; the all-boats 3-tick bound goes to 10 cm, based on the measured worst (5.4 cm Linux, 5.7 cm macOS). |
+| #76 | Lull fan sign and stacking. | Lulls turn the wind the opposite way to puffs (inflow). The summed factor is clamped to [1 − max loss, 1 + max gain] and the turn to ±fan. Puffs apply after the channel clamp, so they can go above the forecast strength range. |
 
 ## Completed
 
