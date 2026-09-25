@@ -27,7 +27,11 @@ import Glibc
 ///    #80; the count is calibrated from the conditions' coverage. They fade in and out, drift downwind at
 ///    their drift × base strength and fan the direction; `WindField.sample` adds them on top of the
 ///    clamped channel speed, and needs the keys back to the oldest window whose puffs may be alive.
-public let simulationRevision = 6
+/// 7: the boom (#71). Each boat has a boom side and her tack follows it; the boom crosses at head to wind
+///    or past the class's by-the-lee limit, and by the lee she sails the mirrored polar less the class's
+///    penalty. The tap steers to the same wind angle with the boom on the other side. Tacked and gybed
+///    events. Boats sail ilca-dinghy@2 (turn rate curve, rudder drag and no-go time constant retuned).
+public let simulationRevision = 7
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

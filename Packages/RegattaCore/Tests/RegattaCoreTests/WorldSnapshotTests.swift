@@ -40,10 +40,20 @@ struct LogFeeder {
     static func expectSameFuture(_ original: Race, _ copy: Race, steps: Int, feeder: LogFeeder = feeder,
                                  sourceLocation: SourceLocation = #_sourceLocation) {
         #expect(copy.digest() == original.digest(), "differs at import, tick \(original.tick)", sourceLocation: sourceLocation)
+        // The incident index isn't in a snapshot (see the coverage test's `incidents` note), so an imported
+        // race numbers its rule calls from its own count: the same calls, ids shifted by the incidents before.
+        let idOffset = original.incidents.count - copy.incidents.count
+        let renumbered: (RaceEvent) -> RaceEvent = { event in
+            guard case .ruleCall(let c) = event.kind else { return event }
+            return RaceEvent(tick: event.tick, kind: .ruleCall(RuleCall(
+                incidentId: c.incidentId + idOffset, tick: c.tick, rule: c.rule, offender: c.offender, victim: c.victim,
+                leg: c.leg, turnsOwed: c.turnsOwed, startDeadlineTick: c.startDeadlineTick,
+                completeDeadlineTick: c.completeDeadlineTick)))
+        }
         for _ in 0..<steps {
             feeder.step(original)
             feeder.step(copy)
-            guard copy.digest() == original.digest(), copy.drainEvents() == original.drainEvents() else {
+            guard copy.digest() == original.digest(), copy.drainEvents().map(renumbered) == original.drainEvents() else {
                 Issue.record("diverged at tick \(original.tick)", sourceLocation: sourceLocation)
                 return
             }
@@ -281,7 +291,7 @@ struct LogFeeder {
             ("position.x", { $0.position.x = .nan }),
             ("heading", { $0.heading = .infinity }),
             ("speed", { $0.speed = .nan }),
-            ("autopilot", { $0.autopilot = -.infinity }),
+            ("autopilot", { $0.autopilot = Autopilot(heading: -.infinity, boomSide: .port) }),
             ("penaltyProgress", { $0.penaltyProgress = .nan }),
             ("shadow", { $0.shadow = .nan }),
             ("finishTime", { $0.finishTime = .nan }),

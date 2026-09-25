@@ -173,6 +173,15 @@ through zero at its local slack, so the eddy never jumps in space or time. Each 
 while the tide runs its way; when the two centres' depths differ, both can be weak but active for a
 moment around slack. Nothing bounds the sum: channel current plus an eddy can exceed `peakKnots`.
 
+**Sampling (`CurrentField`, #78).** Between nodes the depth is bilinear and the flood direction is the
+bilinear of the four nodes' unit flood vectors, normalised (the nearest node's where they cancel).
+Beyond the outer nodes the channel current is zero and the depth counts as 0 (so an eddy centre there
+takes the full shallows lead); eddies still apply by their own distances. `channel` is the channel term
+alone (at most `peakKnots`), `eddies` the eddies' term, `sample` their sum. The tide state at the gun
+is drawn uniformly over `allowedTideStatesAtGun` from the race seed on its own stream
+(`CurrentField.seedStream`), so it moves no other draw. `TideForecast` works the slack and peak ticks
+out analytically from the local phase (slack at 0° and 180°, peak at 90° and 270°).
+
 ### Eddy
 
 A headland eddy is a Rankine vortex on the down-current side of a headland. It follows the tide and

@@ -87,9 +87,9 @@ final class BoatNode: SKNode {
     }
 
     private func updateSail(_ boat: Boat, time: Double, dt: Double, settled: Bool) {
-        // Sail sits to leeward, eased further the further off the wind.
+        // Sail sits on the boom side, to leeward except by the lee, eased further the further off the wind.
         let twa = boat.twa
-        let side: CGFloat = boat.relativeWind >= 0 ? -1 : 1
+        let side: CGFloat = boat.boomSide == .port ? -1 : 1
         var target: CGFloat
         if twa < deg2rad(32) {
             target = CGFloat(deg2rad(3) + sin(time * 22) * deg2rad(6)) // luffing
