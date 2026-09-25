@@ -27,7 +27,10 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Resources/venues/       venue files; `dev-venue@1` stands in until the real venues (#83)
   Course.swift            windward-leeward course, start/finish line, rounding gates
   Boat.swift              boat state and hull shape
-  Rules.swift             Rules 10, 11, 12, 13, 18, 22, 31 — who had to keep clear
+  Rules.swift             racing rules in 2025 numbering, who had to keep clear, rule calls
+  RulesConfig.swift       rules configuration file schema: incidents, zone, race format (docs/rules-file.md)
+  Resources/rules/        rules configuration files; `fleet-rules@1` is the v1.0 fleet race
+  Incident.swift          incidents and the array-backed IncidentIndex, keyed by sorted seat pairs
   Race.swift              fixed-step race loop: per-seat inputs, start sequence, OCS, contacts, penalties, finish;
                           keys-only (seedless) races for online prediction, whose tryStep() stops at a missing wind key
   RaceSetup.swift         race setup (seats, laps, race seed, data-file refs) and the separate wind seed
@@ -149,9 +152,9 @@ bit-for-bit deterministic:
 
 ### Data files
 
-Boat classes, conditions and venues (and later the rules configuration) are immutable, versioned JSON
+Boat classes, conditions, venues and the rules configuration are immutable, versioned JSON
 files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`. The venue schema is in
-`docs/venue-file.md`.
+`docs/venue-file.md`; the rules configuration schema in `docs/rules-file.md`.
 
 - Files are UTF-8 JSON. Before anything parses one, the loader refuses other encodings, nesting deeper
   than 512 and a key repeated in one object (parsers disagree on which copy wins, and differently on

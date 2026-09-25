@@ -30,7 +30,7 @@ import Testing
 }
 
 @Suite struct RulesTests {
-    let course = Course.standard(hullLength: Race.defaultBoatClass.hull.length)
+    let course = Course.standard(zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length))
 
     func boat(_ id: Int, at p: Vec2, heading degrees: Double, wind: Double = 0) -> Boat {
         var b = Boat(id: id, isPlayer: false, colorIndex: id, position: p, heading: deg2rad(degrees), speed: 3)
@@ -44,7 +44,7 @@ import Testing
         let port = boat(2, at: Vec2(1, 0), heading: 45)
         #expect(starboard.tack == .starboard)
         #expect(port.tack == .port)
-        #expect(Rules.judge(starboard, port, course: course, hull: Race.defaultBoatClass.hull) == RuleCall(rule: .portStarboard, offender: 2, victim: 1))
+        #expect(Rules.judge(starboard, port, course: course, hull: Race.defaultBoatClass.hull) == Verdict(rule: .portStarboard, offender: 2, victim: 1))
     }
 
     @Test func windwardKeepsClearOfLeeward() {
@@ -57,7 +57,7 @@ import Testing
     @Test func clearAsternKeepsClear() {
         let ahead = boat(1, at: .zero, heading: 90)
         let astern = boat(2, at: Vec2(-4.5, 0), heading: 90)
-        #expect(Rules.judge(ahead, astern, course: course, hull: Race.defaultBoatClass.hull) == RuleCall(rule: .clearAstern, offender: 2, victim: 1))
+        #expect(Rules.judge(ahead, astern, course: course, hull: Race.defaultBoatClass.hull) == Verdict(rule: .clearAstern, offender: 2, victim: 1))
     }
 
     @Test func tackingBoatKeepsClear() {
@@ -73,14 +73,14 @@ import Testing
         let inside = boat(1, at: mark + Vec2(3, -2), heading: -45)
         let outside = boat(2, at: mark + Vec2(5, -3), heading: -45)
         let call = Rules.judge(inside, outside, course: course, hull: Race.defaultBoatClass.hull)
-        #expect(call.rule == .markRoom)
+        #expect(call.rule == .givingMarkRoom)
         #expect(call.offender == 2)
     }
 }
 
 @Suite struct RaceTests {
     @Test func windwardMarkIsRoundedToPort() {
-        let course = Course.standard(hullLength: Race.defaultBoatClass.hull.length)
+        let course = Course.standard(zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length))
         let m = course.marks[0].position
         let path = [m + Vec2(6, -10), m + Vec2(6, 5), m + Vec2(-8, 6)]
         var stage = 0
@@ -108,7 +108,7 @@ import Testing
         // 44 s: the class's turn rate costs a few seconds tacking onto port at the start of the run.
         let race = testRace(seats: [.human, .human], prestartSeconds: 44, seed: 1)
         let early = sail(race, heading: deg2rad(-45), seconds: 45)
-        #expect(early.contains(.ocs(seat: 0)))
+        #expect(early.contains(.ocsNotice(recipient: 0)))
         #expect(race.boats[0].status == .ocs)
 
         let back = sail(race, heading: .pi, seconds: 15)

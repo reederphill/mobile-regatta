@@ -36,14 +36,15 @@ public struct Course: Sendable {
     public let legs: [Leg]
     public let pinRadius = 1.0
     public let committeeRadius = 2.5
-    /// Rule 18 zone: three hull lengths of the boat class sailing it.
+    /// Rule 18 zone radius, metres: the rules configuration's zone in hull lengths of the boat class
+    /// sailing it (`RulesConfig.zoneRadius(hullLength:)`, 3 L in `fleet-rules@1`).
     public let zoneRadius: Double
     /// How far the rounding gates extend from each mark.
     public static let gateLength = 250.0
 
-    /// `hullLength`: the boat class's (`BoatClass.Hull.length`), metres; it sizes the rule 18 zone.
-    public init(axis: Double, pin: Vec2, committee: Vec2, marks: [Mark], legs: [Leg], hullLength: Double) {
-        self.zoneRadius = hullLength * 3
+    /// `zoneRadius`: the rule 18 zone, metres (`RulesConfig.zoneRadius(hullLength:)`).
+    public init(axis: Double, pin: Vec2, committee: Vec2, marks: [Mark], legs: [Leg], zoneRadius: Double) {
+        self.zoneRadius = zoneRadius
         self.axis = axis
         self.pin = pin
         self.committee = committee
@@ -53,7 +54,7 @@ public struct Course: Sendable {
 
     /// `laps` windward roundings, with a leeward rounding between each, then a downwind finish.
     public static func standard(
-        laps: Int = 2, beat: Double = 450, lineLength: Double = 160, axis: Double = 0, hullLength: Double
+        laps: Int = 2, beat: Double = 450, lineLength: Double = 160, axis: Double = 0, zoneRadius: Double
     ) -> Course {
         let up = Vec2.heading(axis)
         let right = up.rightPerp
@@ -69,7 +70,7 @@ public struct Course: Sendable {
         }
         legs.append(.finish)
         return Course(axis: axis, pin: -right * lineLength / 2, committee: right * lineLength / 2, marks: marks, legs: legs,
-                      hullLength: hullLength)
+                      zoneRadius: zoneRadius)
     }
 
     public var upwind: Vec2 { .heading(axis) }

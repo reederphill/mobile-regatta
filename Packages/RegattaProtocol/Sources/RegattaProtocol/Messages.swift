@@ -289,9 +289,11 @@ public struct EventState: Equatable, Sendable {
             // Today a boat is disqualified only as she crosses the finish line with a penalty unserved,
             // which also starts the finish window (`Race.firstFinishTime`).
             firstFinishTick = min(firstFinishTick ?? event.tick, event.tick)
-        case .raceOver:
+        case .raceClosed:
             isOver = true
-        case .gun, .ocs, .cleared, .started, .foul, .markTouch, .penaltyServed, .rounded, .protest:
+        case .gun, .ocsNotice, .cleared, .started, .ruleCall, .markTouch, .obstructionContact, .contact, .penaltyStarted,
+             .penaltyReset, .penaltyServed, .markRoomNotice, .becameGhost, .rounded, .firstFinish, .protestRecorded:
+            // `firstFinish` is announced beside the finish that starts the window, which `finished` records.
             break
         }
     }
