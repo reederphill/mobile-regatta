@@ -58,6 +58,21 @@ public struct WorldSnapshot: Sendable {
         }
     }
 
+    /// A pair's overlap as of the last point of certainty, and the ticks in a row its hulls have shown
+    /// otherwise (`OverlapTracker`, #87). Like foul memory, never sent to clients: a receiver keeps its own.
+    public struct OverlapMemory: Hashable, Sendable {
+        public let pair: SeatPair
+        public let isOverlapped: Bool
+        /// 0 ..< the last point of certainty in ticks.
+        public let changeTicks: Int
+
+        public init(pair: SeatPair, isOverlapped: Bool, changeTicks: Int) {
+            self.pair = pair
+            self.isOverlapped = isOverlapped
+            self.changeTicks = changeTicks
+        }
+    }
+
     public var tick: Int
     /// Indexed by seat.
     public var seats: [Seat]
@@ -77,6 +92,8 @@ public struct WorldSnapshot: Sendable {
     /// needs every key from the window before `tick`'s through the last one held, without a gap, and
     /// they must be this race's.
     public var windKeys: WindKeyChain
+    /// The pairs overlapped or changing, by `a` then `b`; every pair not listed is neither.
+    public var overlaps: [OverlapMemory]
 
     /// The latest tick an import accepts: three hours after the gun, far past any race's time limit.
     /// It bounds the work of bringing the wind to the snapshot's tick.
@@ -85,7 +102,8 @@ public struct WorldSnapshot: Sendable {
     public init(
         tick: Int, seats: [Seat], touchingBoats: [SeatPair] = [], touchingObstacles: [ObstacleContact] = [],
         foulMemory: [FoulMemory] = [], incidents: IncidentIndex = IncidentIndex(), firstFinishTime: Double? = nil,
-        isOver: Bool = false, windKeys: WindKeyChain = WindKeyChain()
+        isOver: Bool = false, windKeys: WindKeyChain = WindKeyChain(),
+        overlaps: [OverlapMemory] = []
     ) {
         self.tick = tick
         self.seats = seats
@@ -96,6 +114,7 @@ public struct WorldSnapshot: Sendable {
         self.firstFinishTime = firstFinishTime
         self.isOver = isOver
         self.windKeys = windKeys
+        self.overlaps = overlaps
     }
 }
 
@@ -120,4 +139,7 @@ public enum WorldSnapshotError: Error, Equatable, Sendable {
     case invalidContact
     /// Incident `id` names a seat or leg the race doesn't have, or happened after the snapshot's tick.
     case invalidIncident(id: Int)
+    /// An overlap naming a seat the race doesn't have, a pair with `a >= b` or out of order, or a
+    /// change count outside 0 ..< the last point of certainty.
+    case invalidOverlap
 }

@@ -323,6 +323,7 @@ struct LogFeeder {
     static let carried: Set<String> = [
         "tick", "boats", "heldInputs", "boatContacts", "obstacleContacts", "lastFoul", "incidents", "firstFinishTime",
         "isOver",
+        "overlaps", // as the pairs overlapped or changing
         "wind", // as its keys, `windKeys`; its setup and window grid are fixed for the race
     ]
 
