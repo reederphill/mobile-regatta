@@ -334,6 +334,7 @@ struct LogFeeder {
         "boatClass": "fixed for the race: the class file (ADR 0004)",
         "rules": "fixed for the race: the rules configuration file (ADR 0004)",
         "windSetup": "fixed for the race, drawn from the public race seed",
+        "current": "fixed for the race: a pure function of the venue and the public race seed (ADR 0003)",
         "windKeys": "the key generator: it holds the wind seed, never in a snapshot (ADR 0001); import moves it past the snapshot's keys",
         "finishers": "derived on import: the count of finished boats",
         "pending": "inputs not yet applied are not world state; import drops them",

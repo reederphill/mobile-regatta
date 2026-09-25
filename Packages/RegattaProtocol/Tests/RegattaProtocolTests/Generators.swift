@@ -64,6 +64,10 @@ struct Gen {
         boat.boomSide = boomSide()
         boat.windDirection = double(-.pi, .pi)
         boat.windSpeed = double(0, 15)
+        // Derived from the draws above, so the generator's stream (and every case after it) doesn't move.
+        boat.windOverGround = Wind(direction: wrapAngle(boat.windDirection + 0.1), speed: boat.windSpeed + 0.5)
+        boat.apparentWind = Wind(direction: wrapAngle(boat.windDirection - 0.3), speed: boat.windSpeed + boat.speed)
+        boat.current = Vec2(boat.rudder, boat.desiredRudder)
         boat.shadow = double(0.6, 1)
         if bool() {
             boat.finishTime = Double(int(0...30_000)) / 30

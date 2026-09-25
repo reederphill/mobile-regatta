@@ -31,7 +31,14 @@ import Glibc
 ///    or past the class's by-the-lee limit, and by the lee she sails the mirrored polar less the class's
 ///    penalty. The tap steers to the same wind angle with the boom on the other side. Tacked and gybed
 ///    events. Boats sail ilca-dinghy@2 (turn rate curve, rudder drag and no-go time constant retuned).
-public let simulationRevision = 7
+/// 8: sailing in current (#79). Every boat has three winds (`BoatWinds`): over the ground, sailing
+///    (ground less the current at her position, `CurrentField` from the default venue and the race
+///    seed's tide state at the gun) and apparent (sailing less her velocity through the water). The
+///    polar reads the sailing wind and the current carries every boat, ghosts too. The shadow cone
+///    follows the caster's apparent wind, and a backwind zone reaches to windward of her
+///    (`ShadowCone`), both under the class's stacking floor. The digest hashes the three winds and
+///    the current.
+public let simulationRevision = 8
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

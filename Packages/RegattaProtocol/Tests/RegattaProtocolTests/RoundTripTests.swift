@@ -230,8 +230,10 @@ func relabel(_ boat: Boat, isPlayer: Bool) -> Boat {
     copy.penaltyProgress = boat.penaltyProgress
     copy.isTacking = boat.isTacking
     copy.boomSide = boat.boomSide
-    copy.windDirection = boat.windDirection
-    copy.windSpeed = boat.windSpeed
+    copy.windOverGround = boat.windOverGround
+    copy.sailingWind = boat.sailingWind
+    copy.apparentWind = boat.apparentWind
+    copy.current = boat.current
     copy.shadow = boat.shadow
     copy.finishTime = boat.finishTime
     copy.place = boat.place
