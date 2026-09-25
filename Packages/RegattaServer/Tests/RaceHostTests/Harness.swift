@@ -37,15 +37,20 @@ struct Rig {
     let setup: RaceSetup
     let seat0 = RecordingTransport()
     private let alerts = AlertLog()
+    private let allGoneLog = AllGoneLog()
     /// Every behind alert, in ticks behind.
     var behindAlerts: [Int] { alerts.ticks }
+    /// Every time the all-gone hook fired.
+    var allGones: [AllGone] { allGoneLog.fired }
 
     init(humans: Int = 1, seats: Int = 4, startSequenceTicks: Int = 300, options: RaceHostOptions = RaceHostOptions()) async throws {
         let kinds: [SeatKind] = (0..<seats).map { $0 < humans ? .human : .bot }
         setup = try RaceSetup(raceSeed: RaceSeed(65), seats: kinds, laps: 1, startSequenceTicks: startSequenceTicks)
         let alerts = alerts
+        let allGoneLog = allGoneLog
         host = RaceHost(setup: setup, windSeed: WindSeed(0x65), clock: clock, options: options,
-                        onBehind: { ticks in alerts.append(ticks) })
+                        onBehind: { ticks in alerts.append(ticks) },
+                        onAllGone: { allGone in allGoneLog.append(allGone) })
         #expect(await host.attach(seat: 0, transport: seat0))
     }
 
@@ -65,4 +70,10 @@ final class AlertLog: Sendable {
     private let log = Mutex<[Int]>([])
     func append(_ ticks: Int) { log.withLock { $0.append(ticks) } }
     var ticks: [Int] { log.withLock { $0 } }
+}
+
+final class AllGoneLog: Sendable {
+    private let log = Mutex<[AllGone]>([])
+    func append(_ allGone: AllGone) { log.withLock { $0.append(allGone) } }
+    var fired: [AllGone] { log.withLock { $0 } }
 }

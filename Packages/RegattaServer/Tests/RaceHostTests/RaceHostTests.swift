@@ -266,7 +266,11 @@ struct RaceHostTests {
         let log = outcome.log
         #expect(Set(log.inputs.map(\.seat)) == [0, 1, 2, 3])
         #expect(log.inputs.contains(InputRecord(tick: -119, seat: 0, kind: .held(BoatInput(rudder: 60 as Int8)))))
-        #expect(log.seatEvents.map(\.kind) == [.joined(.human), .disconnected])
+        // Held inputs stopped after -119 and -55: each time the hold ran out 15 ticks on and a bot took the
+        // boat, and the input at -55 took it back (#66).
+        #expect(log.seatEvents.map(\.kind) == [.joined(.human), .dropped, .botTookOver(.cautious), .rejoined,
+                                                 .dropped, .botTookOver(.cautious), .disconnected])
+        #expect(log.seatEvents.filter { $0.kind == .dropped }.map(\.tick) == [-104, -40])
         #expect(try Replayer.digest(of: log) == outcome.digest)
 
         #if os(macOS) || os(Linux)
