@@ -22,9 +22,9 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Resources/boat-classes/ boat class files, `<id>@<version>.json`
   Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns; schema 2 adds the keyed wind's wobble and ramps
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
-  WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast, the venue pairing stub
+  WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast
   Venue.swift             venue file schema: land, pairings with geographic grids, current (docs/venue-file.md)
-  Resources/venues/       venue files; `dev-venue@1` stands in until the real venues (#83)
+  Resources/venues/       venue files; `dev-venue@2` stands in until the real venues (#83)
   Course.swift            windward-leeward course, start/finish line, rounding gates
   Boat.swift              boat state and hull shape
   Rules.swift             racing rules in 2025 numbering, who had to keep clear, rule calls

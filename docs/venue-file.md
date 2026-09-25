@@ -11,7 +11,10 @@ Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/
 `<id>@<version + 1>.json`, and the venue's seed pools are re-vetted with it.
 
 - `dev-venue@1` (bundled): a stand-in for the app until the three real venues ship (#83). Open water,
-  a shore strip beyond each side of the race area, no current, a pairing for each of the four conditions.
+  a shore strip beyond each side of the race area, no current, a pairing for each of the four conditions
+  at version 1.
+- `dev-venue@2` (bundled): `dev-venue@1` with its pairings on the schema-2 conditions files; the venue
+  races use until race assembly reads `RaceSetup.venue` (#77, #81).
 - `test-venue@1` (test resource): small hand-checkable grids, concave land, a tidal current with an eddy.
 
 ## Frame and units
@@ -87,8 +90,9 @@ The geographic grid and the current grid share one layout:
 
 Node (c, r) is at `origin + c × cellSize × columnAxis + r × cellSize × rowAxis`, where
 `rowAxis` points along `orientation` and `columnAxis` is 90° clockwise of it. Values are stored per node;
-how they're sampled between nodes belongs to the consumer (the geographic grid is bilinear and neutral
-outside the grid, #77; the current field is #78).
+how they're sampled between nodes belongs to the consumer: `Venue.Grid.cell(containing:)` places a point
+in the grid, and the geographic grid samples bilinearly and is neutral (no shift, factor 1) outside the
+outer nodes, a point on the edge being inside (`Venue.GeographicGrid.sample`, #77); the current field is #78.
 
 Geographic grid values:
 

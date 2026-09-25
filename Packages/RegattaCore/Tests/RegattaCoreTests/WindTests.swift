@@ -9,8 +9,10 @@ enum WindFixtures {
     static let windows = WindWindows(startSequenceTicks: 60 * Race.tickRate)
     static let seeds: [UInt64] = (0..<200).map { UInt64($0) &* 0x9E37_79B9_7F4A_7C15 ^ 0xD1CE }
 
-    static func setup(_ id: String, raceSeed: UInt64 = 1, pairing: VenuePairing = .stub) throws -> WindSetup {
-        WindSetup(conditions: try ConditionsFile.bundled(id: id, version: 2), pairing: pairing, raceSeed: RaceSeed(raceSeed))
+    /// The setup for conditions `id`@2, with `pairing` or else `VenueFixtures.pairing(for:)`'s default.
+    static func setup(_ id: String, raceSeed: UInt64 = 1, pairing: Venue.Pairing? = nil) throws -> WindSetup {
+        let file = try ConditionsFile.bundled(id: id, version: 2)
+        return WindSetup(conditions: file, pairing: pairing ?? VenueFixtures.pairing(for: file), raceSeed: RaceSeed(raceSeed))
     }
 
     static func generator(_ setup: WindSetup, windSeed: UInt64) throws -> WindKeyGenerator {
@@ -104,7 +106,7 @@ enum WindFixtures {
 
     @Test func generatorRefusesSchema1Conditions() throws {
         let file = try ConditionsFile.bundled(id: "classic-oscillating", version: 1)
-        let setup = WindSetup(conditions: file, pairing: .stub, raceSeed: RaceSeed(1))
+        let setup = WindSetup(conditions: file, pairing: VenueFixtures.pairing(for: file), raceSeed: RaceSeed(1))
         #expect(throws: WindKeyGeneratorError.conditionsPredateKeyedWind(file.ref)) {
             try WindKeyGenerator(windSeed: WindSeed(1), setup: setup, windows: WindFixtures.windows)
         }
@@ -285,8 +287,7 @@ enum WindFixtures {
         var lefts = 0, rights = 0
         var paces: [Double] = []
         for seed in WindFixtures.seeds {
-            let pairing = VenuePairing(meanDirection: 0, trend: .either)
-            let setup = try WindFixtures.setup("sea-breeze", raceSeed: seed, pairing: pairing)
+            let setup = try WindFixtures.setup("sea-breeze", raceSeed: seed)
             let direction = try #require(setup.trend)
             if direction == .left { lefts += 1 } else { rights += 1 }
             let (field, parts) = try WindFixtures.parts(setup, windSeed: seed ^ 0xABCD, through: 120)

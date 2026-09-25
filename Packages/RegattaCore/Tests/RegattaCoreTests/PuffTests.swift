@@ -307,7 +307,8 @@ enum PuffFixtures {
             #expect(text.contains(of))
             text = text.replacingOccurrences(of: of, with: with)
         }
-        let drawn = WindSetup(conditions: try ConditionsFile(data: Data(text.utf8)), pairing: .stub, raceSeed: RaceSeed(2))
+        let conditions = try ConditionsFile(data: Data(text.utf8))
+        let drawn = WindSetup(conditions: conditions, pairing: VenueFixtures.pairing(for: conditions), raceSeed: RaceSeed(2))
         let zoneRadius = Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length)
         let course = Course.standard(axis: drawn.meanDirection, zoneRadius: zoneRadius)
         let setup = drawn.with(raceArea: .placeholder(around: course))

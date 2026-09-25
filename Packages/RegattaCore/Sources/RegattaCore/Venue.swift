@@ -45,8 +45,8 @@ public struct Venue: DataFileContent, Equatable {
         public let position: Vec2
     }
 
-    /// One venue × conditions pairing (#10, #12).
-    public struct Pairing: Sendable, Equatable {
+    /// One venue × conditions pairing (#10, #12): what a race's `WindSetup` is drawn around.
+    public struct Pairing: Sendable, Hashable {
         /// The conditions file this pairing is authored for. Pinned to a version, since the pairing's
         /// anchor and grid were checked against that conditions entry's wind range.
         public let conditions: DataFileKey
@@ -64,7 +64,7 @@ public struct Venue: DataFileContent, Equatable {
 
     /// The direction of a persistent shift. Veer is clockwise (a right shift, looking upwind);
     /// back is anticlockwise. `either` lets the race seed choose (#10, #77). Ignored for conditions
-    /// with no persistent trend.
+    /// with no persistent trend. `WindSetup.trend` holds the result: veer is `.right`, back `.left`.
     public enum TrendDirection: String, Sendable, Equatable, Codable, CaseIterable {
         case veer
         case back
@@ -73,7 +73,7 @@ public struct Venue: DataFileContent, Equatable {
 
     /// Where the nodes of a venue grid lie. Node (column, row) is at
     /// `origin + column × cellSize × columnAxis + row × cellSize × rowAxis`.
-    public struct Grid: Sendable, Equatable {
+    public struct Grid: Sendable, Hashable {
         /// Node (0, 0), metres.
         public let origin: Vec2
         /// Distance between neighbouring nodes, metres.
@@ -97,12 +97,72 @@ public struct Venue: DataFileContent, Equatable {
         public func position(column: Int, row: Int) -> Vec2 {
             origin + columnAxis * (Double(column) * cellSize) + rowAxis * (Double(row) * cellSize)
         }
+
+        /// How far from a node, in cells, a point counts as on it: absorbs the rounding of a rotated
+        /// grid, so a node's own `position` lands exactly on it and an edge point stays inside.
+        static let nodeSnap = 1e-9
+
+        /// The cell a point lies in, and where in it: node (`column`, `row`) is the cell's corner nearest
+        /// the origin, and the fractions run 0...1 along `columnAxis` and `rowAxis` from it.
+        public struct Cell: Sendable, Hashable {
+            /// In 0...columns − 2 and 0...rows − 2, so the cell's far corner is always a node.
+            public let column: Int
+            public let row: Int
+            public let columnFraction: Double
+            public let rowFraction: Double
+        }
+
+        /// The cell `p` lies in, or nil beyond the outer nodes. A point on the edge is inside: on the far
+        /// edges it is in the last cell with fraction 1.
+        public func cell(containing p: Vec2) -> Cell? {
+            let offset = p - origin
+            guard let (column, columnFraction) = Self.split(offset.dot(columnAxis) / cellSize, nodes: columns),
+                  let (row, rowFraction) = Self.split(offset.dot(rowAxis) / cellSize, nodes: rows)
+            else { return nil }
+            return Cell(column: column, row: row, columnFraction: columnFraction, rowFraction: rowFraction)
+        }
+
+        /// Bilinear interpolation of per-node `values` (row-major, `index`) across `cell`. Exact at the
+        /// nodes, the far ones included.
+        public func bilinear(_ values: [Double], at cell: Cell) -> Double {
+            func lerp(_ a: Double, _ b: Double, _ t: Double) -> Double { a * (1 - t) + b * t }
+            let (c, r, u, v) = (cell.column, cell.row, cell.columnFraction, cell.rowFraction)
+            let near = lerp(values[index(column: c, row: r)], values[index(column: c + 1, row: r)], u)
+            let far = lerp(values[index(column: c, row: r + 1)], values[index(column: c + 1, row: r + 1)], u)
+            return lerp(near, far, v)
+        }
+
+        /// Splits a position along one axis, in cells from node 0, into the cell's lower node and the
+        /// fraction across it, for an axis of `nodes` nodes; nil beyond the outer nodes (or NaN).
+        private static func split(_ position: Double, nodes: Int) -> (Int, Double)? {
+            let nearest = position.rounded()
+            let x = abs(position - nearest) <= nodeSnap ? nearest : position
+            guard x >= 0, x <= Double(nodes - 1) else { return nil }
+            let lower = min(Int(x), nodes - 2)
+            return (lower, x - Double(lower))
+        }
+    }
+
+    /// How the venue turns and scales the wind at a point, for one pairing (#10).
+    public struct GeographicShift: Sendable, Hashable {
+        /// Change in wind direction, radians; positive veers (clockwise), as in `WindField`.
+        public let directionDelta: Double
+        /// Multiplier on wind speed.
+        public let speedFactor: Double
+
+        /// No shift: outside the geographic grid.
+        public static let neutral = GeographicShift(directionDelta: 0, speedFactor: 1)
+
+        public init(directionDelta: Double, speedFactor: Double) {
+            self.directionDelta = directionDelta
+            self.speedFactor = speedFactor
+        }
     }
 
     /// Geographic shift over the venue for one pairing (#10), with land shadow baked into the speed
-    /// factor. Values are per node, row-major (`grid.index`). Sampling, bilinear and neutral outside
-    /// the grid, is #77.
-    public struct GeographicGrid: Sendable, Equatable {
+    /// factor. Values are per node, row-major (`grid.index`). `sample` reads it anywhere; `WindField`
+    /// composes it into the wind in #81.
+    public struct GeographicGrid: Sendable, Hashable {
         public let grid: Grid
         /// Change in wind direction, radians; positive veers (clockwise), as in `WindField`.
         public let directionDeltas: [Double]
@@ -111,6 +171,15 @@ public struct Venue: DataFileContent, Equatable {
 
         public func directionDelta(column: Int, row: Int) -> Double { directionDeltas[grid.index(column: column, row: row)] }
         public func speedFactor(column: Int, row: Int) -> Double { speedFactors[grid.index(column: column, row: row)] }
+
+        /// The shift at `p`: bilinear between the four nodes around it, each value on its own (direction
+        /// deltas as plain numbers, which is fine at |Δ| < 180°), and `.neutral` beyond the outer nodes.
+        /// Pure: no state, no randomness.
+        public func sample(_ p: Vec2) -> GeographicShift {
+            guard let cell = grid.cell(containing: p) else { return .neutral }
+            return GeographicShift(directionDelta: grid.bilinear(directionDeltas, at: cell),
+                                   speedFactor: grid.bilinear(speedFactors, at: cell))
+        }
     }
 
     /// The venue's current (#11, ADR 0003): public, with no random part. `CurrentField` (#78) turns it

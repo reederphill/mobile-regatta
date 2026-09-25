@@ -1,35 +1,5 @@
 import Foundation
 
-/// What a venue says about one conditions entry it allows (#10, #12): the authored mean direction and
-/// trend direction the race's `WindSetup` is drawn around.
-///
-/// A stub until venue files carry pairings (#72) and #77 replaces it with the venue file's pairing,
-/// which adds the geographic-shift grid and the start-line anchor.
-public struct VenuePairing: Hashable, Sendable {
-    /// The authored direction of a persistent shift, for conditions that have one.
-    public enum Trend: Hashable, Sendable {
-        case left
-        case right
-        /// The race seed chooses (#10).
-        case either
-    }
-
-    /// Authored compass direction the wind blows from, radians. The race seed varies it by up to
-    /// `WindSetup.meanDirectionSpread` either way.
-    public let meanDirection: Double
-    /// Ignored for conditions with no trend.
-    public let trend: Trend
-
-    public init(meanDirection: Double, trend: Trend) {
-        self.meanDirection = meanDirection
-        self.trend = trend
-    }
-
-    /// Stand-in pairing until venues exist: wind from the north, square to today's `Course.standard`
-    /// (axis 0), with the trend chosen by the seed.
-    public static let stub = VenuePairing(meanDirection: 0, trend: .either)
-}
-
 /// The water a course's boats may sail in: a rectangle square to the course axis.
 /// A placeholder shape until course derivation (#80) lays it out and wires it into `WindSetup`.
 public struct RaceArea: Hashable, Sendable {
@@ -67,9 +37,10 @@ public struct RaceArea: Hashable, Sendable {
     }
 }
 
-/// Everything about a race's wind that is known before the gun: the conditions, the venue pairing, and
-/// what the public race seed draws from them (#10). Every client can derive it, so it is shown in
-/// the briefing (`forecast`) and may feed the course (#80). The secret moment-to-moment wind (shift,
+/// Everything about a race's wind that is known before the gun: the conditions, the venue's pairing for
+/// them (`Venue.pairing(for:)`: authored mean and trend direction, geographic grid), and what the public
+/// race seed draws from them (#10). Every client can derive it, so it is shown in the briefing
+/// (`forecast`) and may feed the course (#80). The secret moment-to-moment wind (shift,
 /// trend size and timing, build, puffs) comes from the wind seed's key chain instead (ADR 0001, #75).
 ///
 /// Drawn from the race seed on its own SplitMix64 stream (`seedStream`), so drawing it never moves any
@@ -93,14 +64,15 @@ public struct WindSetup: Hashable, Sendable {
     /// The conditions file the race is sailed in, and its content.
     public let conditionsRef: FileRef
     public let conditions: Conditions
-    public let pairing: VenuePairing
+    /// The venue's pairing for `conditions`.
+    public let pairing: Venue.Pairing
     /// Compass direction the wind blows from, radians in [−π, π): the pairing's authored direction
     /// turned by up to `meanDirectionSpread` either way. The course is laid square to it (#12).
     public let meanDirection: Double
     /// Base wind strength for the race, m/s, uniform in `conditions.strength`.
     public let baseStrength: Double
-    /// The persistent shift's direction, or nil if the conditions have no trend. Public (#10);
-    /// its size and timing are not.
+    /// The persistent shift's direction, or nil if the conditions have no trend: the pairing's veer
+    /// or back, or the seed's coin when it says either. Public (#10); its size and timing are not.
     public let trend: TrendDirection?
     /// The race area, once course derivation lays it out (#80); nil until then.
     public private(set) var raceArea: RaceArea?
@@ -110,7 +82,7 @@ public struct WindSetup: Hashable, Sendable {
     /// The stream is `SplitMix64(seed: raceSeed.value, stream: WindSetup.seedStream)`, drawn in a fixed
     /// order with one value per slot whether or not it is used: mean direction offset, base strength,
     /// trend coin. New draws go after these, so existing ones never move.
-    public init(conditions: ConditionsFile, pairing: VenuePairing, raceSeed: RaceSeed, raceArea: RaceArea? = nil) {
+    public init(conditions: ConditionsFile, pairing: Venue.Pairing, raceSeed: RaceSeed, raceArea: RaceArea? = nil) {
         var rng = SplitMix64(seed: raceSeed.value, stream: Self.seedStream)
         let offset = rng.range(-Self.meanDirectionSpread, Self.meanDirectionSpread)
         let strength = rng.range(conditions.content.strength.lowerBound, conditions.content.strength.upperBound)
@@ -124,9 +96,9 @@ public struct WindSetup: Hashable, Sendable {
         if conditions.content.trend == nil {
             trend = nil
         } else {
-            switch pairing.trend {
-            case .left: trend = .left
-            case .right: trend = .right
+            switch pairing.trendDirection {
+            case .back: trend = .left
+            case .veer: trend = .right
             case .either: trend = coin ? .right : .left
             }
         }
