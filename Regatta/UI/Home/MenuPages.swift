@@ -72,9 +72,10 @@ private struct PracticeSetupView: View {
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
         }
+        // UI tests check the page was pushed.
+        .accessibilityIdentifier("page-practiceSetup")
         .menuBackground()
         .navigationTitle("Practice")
-        .accessibilityIdentifier("page-practiceSetup")
     }
 }
 
@@ -98,10 +99,12 @@ private struct PlaceholderPage: View {
             }
             .padding(.vertical, 40)
             .readableColumn()
+            // UI tests check the page was pushed.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(id)
         }
         .menuBackground()
         .navigationTitle(title)
-        .accessibilityIdentifier(id)
     }
 }
 

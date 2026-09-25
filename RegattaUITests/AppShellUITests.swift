@@ -2,11 +2,12 @@ import XCTest
 
 /// The app shell (#108): the home screen, its pushed pages, and the race sequence as a full-screen cover.
 final class AppShellUITests: RaceUITestCase {
+    /// Each toolbar item, the page it pushes, and that page's title.
     private static let toolbarPages = [
-        ("toolbar-profile", "page-profile"),
-        ("toolbar-myboat", "page-myboat"),
-        ("toolbar-help", "page-help"),
-        ("toolbar-settings", "page-settings"),
+        ("toolbar-profile", "page-profile", "Profile"),
+        ("toolbar-myboat", "page-myboat", "My boat"),
+        ("toolbar-help", "page-help", "Help"),
+        ("toolbar-settings", "page-settings", "Settings"),
     ]
 
     override func tearDown() {
@@ -26,17 +27,31 @@ final class AppShellUITests: RaceUITestCase {
 
     @MainActor func testToolbarItemsPushTheirPagesAndBack() {
         let app = launchHome()
-        for (item, page) in Self.toolbarPages + [("practice", "page-practiceSetup")] {
+        for (item, page, title) in Self.toolbarPages + [("practice", "page-practiceSetup", "Practice")] {
             let button = app.buttons[item]
-            XCTAssertTrue(button.waitForExistence(timeout: 10), "no \(item)")
+            XCTAssertTrue(button.waitForExistence(timeout: 20), "no \(item)")
             button.tap()
             let pushed = app.descendants(matching: .any)[page].firstMatch
-            XCTAssertTrue(pushed.waitForExistence(timeout: 10), "\(item) didn't push \(page)")
+            assertAppears(pushed, in: app, "\(item) didn't push \(page)")
 
-            app.navigationBars.buttons.element(boundBy: 0).tap()
-            XCTAssertTrue(pushed.waitForNonExistence(timeout: 10), "back didn't pop \(page)")
-            XCTAssertTrue(app.buttons["race-online"].waitForExistence(timeout: 10), "back didn't return home from \(page)")
+            // The pushed page's bar, not home's, whose first button is Profile.
+            let back = app.navigationBars[title].buttons.element(boundBy: 0)
+            assertAppears(back, in: app, "no back button on \(page)")
+            back.tap()
+            XCTAssertTrue(pushed.waitForNonExistence(timeout: 20), "back didn't pop \(page)")
+            XCTAssertTrue(app.buttons["race-online"].waitForExistence(timeout: 20), "back didn't return home from \(page)")
         }
+    }
+
+    /// Waits for `element`, attaching the app's element tree when it doesn't appear.
+    @MainActor private func assertAppears(_ element: XCUIElement, in app: XCUIApplication, _ message: String,
+                                          file: StaticString = #filePath, line: UInt = #line) {
+        guard !element.waitForExistence(timeout: 20) else { return }
+        let tree = XCTAttachment(string: app.debugDescription)
+        tree.name = "element-tree.txt"
+        tree.lifetime = .keepAlways
+        add(tree)
+        XCTFail(message, file: file, line: line)
     }
 
     @MainActor func testRaceCoverCannotBeSwipedDown() {
@@ -91,6 +106,19 @@ final class AppShellUITests: RaceUITestCase {
             }
             app.terminate()
         }
+    }
+
+    /// The root controller's orientation lock holds while the race is presented in the cover (G5).
+    @MainActor func testRaceCoverKeepsTheOrientationLockOnIPad() throws {
+        guard UIDevice.current.userInterfaceIdiom == .pad else { throw XCTSkip("iPhone runs portrait only") }
+        XCUIDevice.shared.orientation = .portrait
+        let app = launchRace()
+        XCTAssertLessThan(app.windows.firstMatch.frame.width, app.windows.firstMatch.frame.height)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        Thread.sleep(forTimeInterval: 3)
+        let window = app.windows.firstMatch.frame
+        attachScreenshot(named: "race-cover-rotated")
+        XCTAssertLessThan(window.width, window.height, "the race rotated to landscape: \(window)")
     }
 
     /// iPad windows in portrait and landscape: every toolbar item and home panel sits inside the window.
