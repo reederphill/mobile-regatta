@@ -3,6 +3,12 @@ import SwiftUI
 struct MenuView: View {
     @Binding var settings: RaceSettings
     var onStart: () -> Void
+    /// "Race online (dev)" (#68): nil hides it, as a Release build does.
+    var onRaceOnline: (() -> Void)?
+    #if DEBUG
+    /// The dev race server, `host:port`.
+    @AppStorage(RaceServer.addressDefaultsKey) private var onlineHost = RaceServer.defaultAddress
+    #endif
 
     var body: some View {
         ZStack {
@@ -55,6 +61,24 @@ struct MenuView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Color(uiColor: Palette.mark))
                     .clipShape(.capsule)
+
+                    #if DEBUG
+                    if let onRaceOnline {
+                        VStack(alignment: .leading, spacing: 10) {
+                            TextField("Race server host:port", text: $onlineHost)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .keyboardType(.URL)
+                                .textFieldStyle(.roundedBorder)
+                            Button("Race online (dev)", action: onRaceOnline)
+                                .buttonStyle(.bordered)
+                                .frame(maxWidth: .infinity)
+                                .accessibilityIdentifier("race-online")
+                        }
+                        .padding(20)
+                        .background(.ultraThinMaterial, in: .rect(cornerRadius: 20))
+                    }
+                    #endif
 
                     HowToPlay()
                 }

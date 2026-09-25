@@ -56,6 +56,11 @@ jobs:
               - "ThirdParty/**"
               - "Packages/RegattaCore/Sources/**"
               - "Packages/RegattaCore/Package.*"
+              # The app races online with RegattaClient over RegattaProtocol (#68).
+              - "Packages/RegattaProtocol/Sources/**"
+              - "Packages/RegattaProtocol/Package.*"
+              - "Packages/RegattaClient/Sources/**"
+              - "Packages/RegattaClient/Package.*"
 
   linux:
     name: Golden and builds on the pinned Linux replay platform
@@ -196,4 +201,30 @@ jobs:
           path: |
             Regatta.xcresult
             Regatta-iPad.xcresult
+          if-no-files-found: ignore
+
+  # The online client against a real server (#68): the app's UI test above skips its online race without one.
+  e2e:
+    name: Online race end to end (app on the iOS Simulator, local RegattaServer)
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.server == 'true'
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      TEST_RUNNER_CI: "true"
+      TEST_RUNNER_GITHUB_ACTIONS: "true"
+      E2E_DESTINATION: platform=iOS Simulator,name=iPhone 17,OS=26.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: scripts/e2e.sh (a dev instant race with bots, raced to its close)
+        run: |
+          scripts/e2e.sh -retry-tests-on-failure -test-iterations 2 \
+            -derivedDataPath DerivedData -resultBundlePath E2E.xcresult
+      - name: Upload the result bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: E2E.xcresult
+          path: E2E.xcresult
           if-no-files-found: ignore
