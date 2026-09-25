@@ -31,6 +31,9 @@ final class RecordingTransport: SeatTransport {
 }
 
 /// A host on a virtual clock: seat 0 human, the rest bots.
+///
+/// The rig's seats send only what a test sends, not a real client's heartbeat every 200 ms, so unless
+/// `firstInputHold` is set the host waits for ever for a seat's first held input after an attach.
 struct Rig {
     let clock = VirtualClock()
     let host: RaceHost
@@ -43,7 +46,10 @@ struct Rig {
     /// Every time the all-gone hook fired.
     var allGones: [AllGone] { allGoneLog.fired }
 
-    init(humans: Int = 1, seats: Int = 4, startSequenceTicks: Int = 300, options: RaceHostOptions = RaceHostOptions()) async throws {
+    init(humans: Int = 1, seats: Int = 4, startSequenceTicks: Int = 300, options: RaceHostOptions = RaceHostOptions(),
+         firstInputHold: Bool = false) async throws {
+        var options = options
+        if !firstInputHold { options.firstInputHoldTicks = .max / 2 }
         let kinds: [SeatKind] = (0..<seats).map { $0 < humans ? .human : .bot }
         setup = try RaceSetup(raceSeed: RaceSeed(65), seats: kinds, laps: 1, startSequenceTicks: startSequenceTicks)
         let alerts = alerts
