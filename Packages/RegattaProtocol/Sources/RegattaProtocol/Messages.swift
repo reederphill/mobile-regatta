@@ -310,7 +310,8 @@ public struct Resync: Equatable, Sendable {
     /// The world at the frame's tick.
     public var seats: [WireSeat]
     /// Every wind key revealed so far (#95), in increasing windows. A receiver that imports needs them
-    /// without a gap from the window before the resync's tick (`WorldSnapshotError.missingWindKey`).
+    /// without a gap from the first window the wind at the resync's tick needs, which reaches back for
+    /// puffs still alive (`WindField.firstWindowNeeded`, `WorldSnapshotError.missingWindKey`).
     public var windKeys: [WindKey]
     public var eventState: EventState
 
