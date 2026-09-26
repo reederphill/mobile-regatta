@@ -572,9 +572,10 @@ extension RaceStart {
         w.u64(setup.raceSeed.value)
         try w.count(setup.laps, limit: RaceStart.maxLaps, "laps")
         try w.count(setup.startSequenceTicks, limit: RaceStart.maxStartSequenceTicks, "startSequenceTicks")
+        // Each file behind a presence flag, always set: a setup names all four (#81).
         for file in [setup.boatClass, setup.venue, setup.conditions, setup.rulesConfiguration] {
-            w.bool(file != nil)
-            try file?.encode(to: &w)
+            w.bool(true)
+            try file.encode(to: &w)
         }
         // The seat table: the bot flag, then the rest of the roster metadata.
         try w.count(roster.count, limit: WireLimit.seats, "roster")
@@ -595,8 +596,11 @@ extension RaceStart {
         guard rawLaps <= UInt64(RaceStart.maxLaps) else { throw WireError.invalidValue("laps") }
         guard rawSequence <= UInt64(RaceStart.maxStartSequenceTicks) else { throw WireError.invalidValue("startSequenceTicks") }
         let laps = Int(rawLaps), startSequenceTicks = Int(rawSequence)
-        var files: [FileRef?] = []
-        for _ in 0..<4 { files.append(try r.bool("file") ? try FileRef(from: &r) : nil) }
+        var files: [FileRef] = []
+        for _ in 0..<4 {
+            guard try r.bool("file") else { throw WireError.invalidValue("setup") }
+            files.append(try FileRef(from: &r))
+        }
         let n = try r.count(limit: WireLimit.seats, "roster")
         var kinds: [SeatKind] = []
         var roster: [RosterEntry] = []

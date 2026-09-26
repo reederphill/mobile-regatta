@@ -22,8 +22,10 @@
 - Report what passed before starting a slow step.
 - Reuse: `check.sh` records each passed test step keyed by the content it depends on (its package and those below it; for the app, its sources, tests, project and linked packages), shared by every worktree, and skips it (and its build) wherever that content recurs: a rebase or an unrelated commit reruns nothing. Validators and reviewers: `scripts/check.sh --status --rev <sha>` (exit 0 = everything the change reaches passed) and CI for the head SHA; don't rerun suites that passed.
 - No direct `xcodebuild` or `swift test` except a `--filter`/`-only-testing` rerun of a step that failed, through `scripts/heavy.sh`. Everything else goes through `check.sh`, so it's recorded.
-- UI tests (`RegattaUITests`, minutes each) run only in CI. Don't run them locally unless CI can't and the ticket's acceptance needs one.
-- Long runs: `run_in_background` and one wait until it finishes. No `sleep` polling loops. Pipe output through `tail`/`grep`; never dump a full build log.
+- UI tests (`RegattaUITests`, minutes each) run only in CI. Implementers never run them locally. The orchestrator may, only when CI can't and the ticket's acceptance needs one.
+- Long runs: run `check.sh` in the foreground with a 600000 ms timeout. If a run can outlast that, `run_in_background` and end your turn; the completion notification wakes you. Pipe output through `tail`/`grep`; never dump a full build log.
+- Never poll: no `until`/`while`/`for` loop with `sleep`. Never `pgrep -f check.sh`: it matches every agent's run, not yours.
+- `== waiting for check-build.lock` means another worktree holds the machine. Wait for your run; don't start a second one.
 
 ## Model routing
 

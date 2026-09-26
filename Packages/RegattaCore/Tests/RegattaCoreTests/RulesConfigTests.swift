@@ -95,14 +95,14 @@ import Testing
         func header(_ data: Data) throws -> RaceLog.Header {
             let file = try RulesConfigFile(data: data)
             let setup = try RaceSetup(raceSeed: RaceSeed(7), seats: [.human, .bot], rulesConfiguration: file.ref)
-            return RaceLog.Header(setup: setup, windSeed: WindSeed(9))
+            return RaceLog.Header(setup: setup, windSeed: WindSeed(9), tideStateAtGun: nil)
         }
         let original = try header(Self.bundledData())
         let retuned = try header(Self.tampered(#""finishWindowSeconds": 120"#, #""finishWindowSeconds": 150"#))
         #expect(try RulesConfigFile(data: Self.tampered(#""finishWindowSeconds": 120"#, #""finishWindowSeconds": 150"#))
             .content.raceFormat.finishWindow == 150)
-        let before = try #require(original.setup.rulesConfiguration)
-        let after = try #require(retuned.setup.rulesConfiguration)
+        let before = original.setup.rulesConfiguration
+        let after = retuned.setup.rulesConfiguration
         #expect(before == Race.defaultRulesConfiguration.ref)
         #expect(after.hash != before.hash)
 
@@ -127,7 +127,7 @@ import Testing
     /// The judge names rule 21.1 for a boat returning to start, 21.2 for one taking a penalty.
     @Test func judgeCallsRule21ForReturningAndPenalisedBoats() {
         let hull = Race.defaultBoatClass.hull
-        let course = Course.standard(zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(hullLength: hull.length))
+        let course = try! CourseLayoutTests.layout()
         var returning = Boat(id: 1, isPlayer: false, colorIndex: 1, position: Vec2(0, -10), heading: .pi / 2, speed: 3)
         returning.status = .ocs
         var penalised = Boat(id: 3, isPlayer: false, colorIndex: 3, position: Vec2(0, 100), heading: .pi / 2, speed: 3)

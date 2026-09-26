@@ -20,7 +20,8 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3,
                 _ place: (inout WorldSnapshot, Race) -> Void) throws -> Race {
     let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .human, count: seats), laps: 2,
                               startSequenceTicks: 60 * Race.tickRate)
-    let race = Race(setup: setup, windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1), current: current)
+    let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+                        mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)), current: current)
     for _ in 0..<10 { race.step() }
     var snapshot = race.exportSnapshot()
     place(&snapshot, race)

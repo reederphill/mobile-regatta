@@ -17,14 +17,14 @@ struct RaceView: View {
 
     var body: some View {
         RaceViewport { layout in
-            race
+            race(layout)
                 .onChange(of: layout.sceneSize, initial: true) { _, size in session.scene.size = size }
         }
     }
 
-    @ViewBuilder private var race: some View {
+    @ViewBuilder private func race(_ layout: RaceViewportPolicy.Layout) -> some View {
         if session.driver.isFrozen {
-            fixture
+            fixture(bottomInset: layout.safeAreaInsets.bottom)
         } else {
             live
         }
@@ -36,11 +36,14 @@ struct RaceView: View {
     }
 
     /// A frozen render fixture (#62): the scene alone, no HUD or controls, so a UI test's screenshot of
-    /// `render-fixture` is the render and nothing else.
-    private var fixture: some View {
+    /// `render-fixture` is the render and nothing else. Its accessibility value is `bottomInset`, the
+    /// safe-area inset at the bottom of the race rect in points: the home-indicator band, which the UI
+    /// tests leave out of the diff because the system dims and hides the indicator on its own timer.
+    private func fixture(bottomInset: CGFloat) -> some View {
         scene
             .accessibilityElement()
             .accessibilityLabel("Render fixture")
+            .accessibilityValue(String(Double(bottomInset)))
             .accessibilityIdentifier("render-fixture")
             .persistentSystemOverlays(.hidden)
     }

@@ -58,6 +58,8 @@ struct HUDView: View {
             Text(statusLine)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(hud.status == .ocs ? .red : .white.opacity(0.8))
+                // UI tests read the leg to see a rounding.
+                .accessibilityIdentifier("race-status")
         }
     }
 

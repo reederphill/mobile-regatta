@@ -58,6 +58,44 @@ import Testing
         #expect(PixelImage(pngData: png) == diff.image, "the diff attaches as a PNG")
     }
 
+    /// The home-indicator band differs (as when the system has dimmed the indicator in one screenshot):
+    /// ignored, the rest matches exactly, and the band counts neither as differing nor towards the total.
+    @Test func differencesInTheIgnoredBottomRowsDontCount() {
+        let reference = Self.sea(boatAt: 50, 50)
+        var actual = reference
+        for row in 190..<200 {
+            for column in 70..<130 { actual[column, row] = (255, 255, 255, 255) }
+        }
+        #expect(!ImageDiff(actual: actual, reference: reference).passes, "the band alone fails a full compare")
+
+        let diff = ImageDiff(actual: actual, reference: reference, tolerance: .exact, ignoringBottomRows: 10)
+        #expect(diff.differingPixels == 0)
+        #expect(diff.totalPixels == 200 * 190)
+        #expect(diff.passes, "\(diff.summary)")
+        #expect(diff.image[100, 195] != (255, 0, 0, 255), "the band isn't marked as differing")
+        #expect(diff.image[100, 195] != diff.image[100, 185], "the band shows as not compared")
+    }
+
+    /// Only the bottom rows are ignored: a difference just above the band still counts.
+    @Test func aDifferenceAboveTheIgnoredRowsStillCounts() {
+        let reference = Self.sea(boatAt: 50, 50)
+        var actual = reference
+        actual[100, 189] = (255, 255, 255, 255)
+        let diff = ImageDiff(actual: actual, reference: reference, tolerance: .exact, ignoringBottomRows: 10)
+        #expect(diff.differingPixels == 1)
+        #expect(diff.image[100, 189] == (255, 0, 0, 255))
+    }
+
+    /// The band in points becomes whole screenshot rows: iPhone 17's 34 pt inset on its 874 pt, 2622 px
+    /// screen is exactly 102 rows; a fractional band rounds out; no band, no rows.
+    @Test func theBandInPointsBecomesWholeRows() {
+        #expect(ImageDiff.rows(coveringBottom: 34, ofFrame: 874, imageRows: 2622) == 102)
+        #expect(ImageDiff.rows(coveringBottom: 20, ofFrame: 1180, imageRows: 2360) == 40)
+        #expect(ImageDiff.rows(coveringBottom: 10.2, ofFrame: 100, imageRows: 100) == 11)
+        #expect(ImageDiff.rows(coveringBottom: 0, ofFrame: 874, imageRows: 2622) == 0)
+        #expect(ImageDiff.rows(coveringBottom: 1000, ofFrame: 874, imageRows: 2622) == 2622)
+    }
+
     @Test func differentSizesFail() {
         let diff = ImageDiff(actual: PixelImage(width: 10, height: 10, fill: Self.water),
                              reference: PixelImage(width: 10, height: 11, fill: Self.water))

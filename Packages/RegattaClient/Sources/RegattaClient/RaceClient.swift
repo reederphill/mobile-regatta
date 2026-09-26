@@ -47,6 +47,8 @@ public final class RaceClient {
         public var resyncRequests = 0
         public var resyncsApplied = 0
         public var snapshotsRefused = 0
+        /// Snapshots skipped unimported because a newer one arrived in the same update.
+        public var snapshotsSuperseded = 0
         public var undecodableFrames = 0
     }
 
@@ -119,9 +121,26 @@ public final class RaceClient {
             stamper.clearPendingTaps()
             return
         }
+        var frames: [Frame] = []
         for bytes in transport.receive() {
             guard let frame = try? Frame(decoding: bytes) else {
                 stats.undecodableFrames += 1
+                continue
+            }
+            frames.append(frame)
+        }
+        // Only the newest snapshot of a batch is imported: each holds the whole fleet, and each import
+        // re-predicts to the client's tick. Importing every one of a backlog (after a stall) would cost a
+        // re-prediction apiece, and a client that falls behind that way never catches up.
+        var newestSnapshot: Int?
+        for (index, frame) in frames.enumerated() {
+            guard case .snapshot = frame.message else { continue }
+            if let newest = newestSnapshot, frames[newest].tick > frame.tick { continue }
+            newestSnapshot = index
+        }
+        for (index, frame) in frames.enumerated() {
+            if case .snapshot = frame.message, index != newestSnapshot {
+                stats.snapshotsSuperseded += 1
                 continue
             }
             receive(frame, now: now)

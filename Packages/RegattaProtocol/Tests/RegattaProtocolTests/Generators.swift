@@ -95,11 +95,10 @@ struct Gen {
 
     mutating func setup() -> RaceSetup {
         let seats: [SeatKind] = (0..<int(2...16)).map { _ in bool() ? .bot : .human }
-        func file(_ g: inout Gen) -> FileRef? { g.bool() ? g.fileRef() : nil }
         return try! RaceSetup(
             simulationVersion: string(1...40), raceSeed: RaceSeed(u64()), seats: seats, laps: int(1...RaceStart.maxLaps),
-            startSequenceTicks: int(1...RaceStart.maxStartSequenceTicks), boatClass: file(&self), venue: file(&self),
-            conditions: file(&self), rulesConfiguration: file(&self)
+            startSequenceTicks: int(1...RaceStart.maxStartSequenceTicks), boatClass: fileRef(), venue: fileRef(),
+            conditions: fileRef(), rulesConfiguration: fileRef()
         )
     }
 
