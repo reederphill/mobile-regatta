@@ -206,8 +206,19 @@ A venue whose current changes noticeably during a race. Other venues have steady
 ### Boats
 
 **Boat class**:
-A boat design with its own performance and handling. v1.0 has exactly one.
+A boat design with its own performance and handling. v1.0 has exactly one: the skiff.
 _Avoid_: boat type, model
+
+**Skiff**:
+v1.0's boat class: a fictional two-person 4.9 m high-performance dinghy with trapezes and an asymmetric spinnaker, modelled on the 49er.
+
+**Planing**:
+Sailing fast enough that the hull skims over the water instead of pushing through it. Downwind and on reaches a skiff is either on the plane or off it; once off, she has to head up to get back on.
+_Avoid_: foiling (a different thing)
+
+**Spinnaker**:
+The skiff's large asymmetric downwind sail. It goes up automatically once she bears away far enough and comes down as she heads up.
+_Avoid_: kite (fine as UI copy), gennaker
 
 **Tack** (starboard or port):
 The side opposite the boom. A boat changes tack only by tacking or gybing, never by just sailing by the lee.
