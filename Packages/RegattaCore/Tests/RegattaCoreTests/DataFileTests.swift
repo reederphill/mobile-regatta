@@ -2,7 +2,8 @@ import Foundation
 import Testing
 @testable import RegattaCore
 
-/// The bundled boat class races sail (`Race.defaultBoatClass`) and edited copies of its bytes.
+/// The bundled schema-2 boat class, ilca-dinghy@3 (races sailed it by default before #248), and edited
+/// copies of its bytes. `SkiffFixtures` is the schema-3 class races sail now.
 enum Fixtures {
     static let classID = "ilca-dinghy"
     static let version = 3
@@ -27,6 +28,33 @@ enum Fixtures {
     /// The bundled file with each `(of, with)` replacement applied, each of which must match.
     static func edited(_ replacements: [(of: String, with: String)], version: Int = version) throws -> Data {
         var text = try text(version: version)
+        for r in replacements {
+            #expect(text.contains(r.of), "fixture no longer contains \(r.of)")
+            text = text.replacingOccurrences(of: r.of, with: r.with)
+        }
+        return Data(text.utf8)
+    }
+
+    static func boatClass() throws -> BoatClass {
+        try BoatClassFile.bundled(id: classID, version: version).content
+    }
+}
+
+/// The bundled schema-3 boat class races sail by default (`Race.defaultBoatClass`, #248), and edited
+/// copies of its bytes.
+enum SkiffFixtures {
+    static let classID = "skiff"
+    static let version = 1
+    /// SHA-256 of `Resources/boat-classes/skiff@1.json`. A released file never changes (ADR 0004).
+    static let pinnedHash = "826fa149ace5a1d876829129216281725001f43c99c247e074582cd99f2ed6f4"
+
+    static func bytes() throws -> Data {
+        try #require(try BoatClassFile.bundledData(id: classID, version: version))
+    }
+
+    /// The bundled file with each `(of, with)` replacement applied, each of which must match.
+    static func edited(_ replacements: [(of: String, with: String)]) throws -> Data {
+        var text = String(decoding: try bytes(), as: UTF8.self)
         for r in replacements {
             #expect(text.contains(r.of), "fixture no longer contains \(r.of)")
             text = text.replacingOccurrences(of: r.of, with: r.with)
@@ -83,10 +111,10 @@ enum Fixtures {
         #expect(ContentHash(of: data).hex == Fixtures.pinnedHashes[version])
     }
 
-    @Test(arguments: [0, 1, 3, 99])
+    @Test(arguments: [0, 1, 4, 99])
     func wrongSchemaVersionThrows(schemaVersion: Int) throws {
         let data = try Fixtures.edited([(of: #""schemaVersion": 2,"#, with: #""schemaVersion": \#(schemaVersion),"#)])
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: schemaVersion, supported: [2])) {
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: schemaVersion, supported: [2, 3])) {
             try BoatClassFile(data: data)
         }
     }
@@ -97,25 +125,25 @@ enum Fixtures {
     @Test func schemaOneBoatClassIsRefused() throws {
         for version in [1, 2] {
             let data = try #require(try BoatClassFile.bundledData(id: Fixtures.classID, version: version))
-            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2])) {
+            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3])) {
                 try BoatClassFile(data: data)
             }
-            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2])) {
+            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3])) {
                 try BoatClassFile.bundled(id: Fixtures.classID, version: version)
             }
             let ref = FileRef(id: Fixtures.classID, version: version, hash: ContentHash(of: data))
             let setup = try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot], boatClass: ref)
-            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2])) {
+            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3])) {
                 try RaceFiles(resolving: setup)
             }
         }
         let headedOne = try Fixtures.edited([(of: #""schemaVersion": 2,"#, with: #""schemaVersion": 1,"#)])
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2])) {
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3])) {
             try BoatClassFile(data: headedOne)
         }
-        #expect(BoatClass.supportedSchemaVersions == [2])
-        #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: Fixtures.classID, version: 3)).ref,
-                "races sail ilca-dinghy@3 unless told otherwise")
+        #expect(BoatClass.supportedSchemaVersions == [2, 3])
+        #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version)).ref,
+                "races sail skiff@1 unless told otherwise (#248)")
     }
 
     @Test func missingHeaderIsMalformed() throws {
@@ -307,7 +335,7 @@ enum Fixtures {
     @Test func tunedRefRoundTripsInTheRaceLogHeader() throws {
         let tuned = try BoatClassFile(
             data: try Fixtures.edited([(of: #""boatSpeedFactor": 0.6"#, with: #""boatSpeedFactor": 0.7"#)]), tune: 4)
-        let bundled = RaceFiles.defaults.boatClass.ref
+        let bundled = try BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         #expect(String(decoding: try encoder.encode(tuned.ref), as: UTF8.self)
@@ -384,7 +412,9 @@ enum Fixtures {
         #expect(c.steering.minTurnRate == deg2rad(10))
         #expect(c.steering.rudderSlew > 0 && c.steering.rudderDrag >= 0 && c.steering.headToWindFallOffRate > 0)
         #expect(c.steering.autohelm == .init(upwindSnap: deg2rad(3), downwindSnap: deg2rad(5), gain: 0.1 * 180 / .pi,
-                                             deadRunMargin: deg2rad(3), byTheLeeMargin: deg2rad(3)))
+                                             deadRunMargin: deg2rad(3), byTheLeeMargin: deg2rad(3), grooveWindAverage: 0))
+        // Schema 2 (#248): no planing, no spinnaker, no graded by-the-lee loss, grooves in the wind right now.
+        #expect(c.planing == nil && c.spinnaker == nil && c.byTheLee == nil)
 
         #expect(c.windShadow.coneLength == 8 * length)
         #expect(c.windShadow.lossCloseIn == 0.25)
@@ -578,5 +608,87 @@ enum Fixtures {
         #expect(throws: DataFileError.malformed(kind: "boat class", reason: "not UTF-8")) {
             try BoatClassFile(data: utf16)
         }
+    }
+}
+
+/// #248: skiff@1, the schema-3 boat class. Schema 3 is schema 2 plus planing, the automatic spinnaker, the
+/// graded by-the-lee loss and the autohelm's averaged groove wind, every one of them required (ADR 0004).
+@Suite struct SkiffClassFileTests {
+    @Test func bundledSkiffIsPinnedAndSchemaThree() throws {
+        let data = try SkiffFixtures.bytes()
+        #expect(ContentHash(of: data).hex == SkiffFixtures.pinnedHash,
+                "a released file never changes (ADR 0004): ship the change as skiff@2")
+        let file = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version)
+        #expect(file.schemaVersion == 3 && file.id == "skiff" && file.version == 1)
+        #expect(file.content.name == "Skiff")
+        // Every value is a placeholder: every top-level block is listed.
+        for block in ["/hull", "/polar", "/momentum", "/steering", "/windShadow", "/contact", "/ease", "/planing", "/spinnaker", "/byTheLee"] {
+            #expect(file.header.placeholders.contains(block), "\(block) should be a placeholder")
+        }
+        // The ILCA files stay bundled for replays (ADR 0002): version 3 still loads beside it.
+        #expect(try BoatClassFile.bundled(id: Fixtures.classID, version: 3).schemaVersion == 2)
+    }
+
+    @Test func schemaThreeValuesAreConvertedToCodeUnits() throws {
+        let c = try SkiffFixtures.boatClass()
+        let knot = metresPerSecond(knots: 1)
+        #expect(c.hull.length == 4.9 && c.hull.beam == 1.8 && c.hull.outline.count == 5)
+        #expect(c.polar.twaAxis.count == 18 && c.polar.twaAxis[10] == deg2rad(120) && c.polar.twaAxis[15] == deg2rad(155))
+        #expect(c.polar.speeds[3][13] == metresPerSecond(knots: 10.1)) // 8 kn, 145°
+        #expect(c.momentum == .init(speedingUp: 2.8, slowingDown: 4, noGo: 4.8))
+        #expect(c.steering.topTurnRate == deg2rad(30) && c.steering.minTurnRate == deg2rad(5))
+        #expect(c.steering.autohelm.downwindSnap == deg2rad(8) && c.steering.autohelm.grooveWindAverage == 30)
+        #expect(c.windShadow.coneLength == 9 * 4.9)
+        let planing = try #require(c.planing)
+        #expect(planing == .init(fromTWA: deg2rad(65), offBelowTWA: deg2rad(55), onSpeed: metresPerSecond(knots: 8),
+                                 onMaxAWA: deg2rad(90), offSpeed: metresPerSecond(knots: 6),
+                                 offPlaneReferenceTWS: metresPerSecond(knots: 6), offPlaneGain: 0.035 / knot))
+        #expect(c.spinnaker == .init(hoistAboveTWA: deg2rad(115), dropBelowTWA: deg2rad(105), transitionTime: 4,
+                                     twoSailSpeedFactor: 0.65, twoSailFromTWA: deg2rad(90), twoSailFullTWA: deg2rad(110)))
+        #expect(c.byTheLee == .init(speedLossPerRadian: 0.02 * 180 / .pi, spinnakerCollapse: deg2rad(10)))
+        // Off the plane at 8 kn, 145°: the 6 kn column's 6.9 kn, 7% up for the 2 kn more wind.
+        let off = planing.offPlaneSpeed(twa: deg2rad(145), tws: metresPerSecond(knots: 8), polar: c.polar)
+        #expect(abs(off / knot - 6.9 * 1.07) < 1e-9)
+    }
+
+    /// Schema 3 has no defaults in code (ADR 0004): each block it adds is required.
+    @Test(arguments: ["planing", "spinnaker", "byTheLee", "grooveWindAverageSeconds"])
+    func aMissingSchemaThreeFieldIsRefused(key: String) throws {
+        var edits = [(of: "\"\(key)\":", with: "\"renamed\":")]
+        if key != "grooveWindAverageSeconds" { edits.append((of: "\"/\(key)\"", with: "\"/renamed\"")) }
+        let data = try SkiffFixtures.edited(edits)
+        #expect {
+            try BoatClassFile(data: data)
+        } throws: { error in
+            if case .malformed(kind: "boat class", reason: let reason) = error as? DataFileError { return reason.contains(key) }
+            return false
+        }
+    }
+
+    @Test(arguments: [
+        (#""offSpeedKnots": 6,"#, #""offSpeedKnots": 9,"#, "planing speeds"),
+        (#""offBelowTWADegrees": 55,"#, #""offBelowTWADegrees": 70,"#, "planing angles"),
+        (#""dropBelowTWADegrees": 105,"#, #""dropBelowTWADegrees": 120,"#, "spinnaker angles"),
+        (#""transitionSeconds": 4,"#, #""transitionSeconds": 9,"#, "spinnaker transition"),
+        (#""speedFactor": 0.65,"#, #""speedFactor": 1.5,"#, "two-sail speed factor"),
+        (#""grooveWindAverageSeconds": 30"#, #""grooveWindAverageSeconds": -1"#, "groove wind average"),
+        (#""spinnakerCollapseDegrees": 10"#, #""spinnakerCollapseDegrees": 100"#, "spinnaker collapse"),
+    ])
+    func schemaThreeValuesAreChecked(of: String, with: String, reason expected: String) throws {
+        let data = try SkiffFixtures.edited([(of: of, with: with)])
+        #expect {
+            try BoatClassFile(data: data)
+        } throws: { error in
+            if case .invalidContent(kind: "boat class", id: "skiff", reason: let reason) = error as? DataFileError {
+                return reason.contains(expected)
+            }
+            return false
+        }
+    }
+
+    /// Schema 2's content headed as schema 3 lacks the additions: refused, never sailed with made-up values.
+    @Test func schemaTwoContentHeadedThreeIsRefused() throws {
+        let data = try Fixtures.edited([(of: #""schemaVersion": 2,"#, with: #""schemaVersion": 3,"#)])
+        #expect(throws: (any Error).self) { try BoatClassFile(data: data) }
     }
 }

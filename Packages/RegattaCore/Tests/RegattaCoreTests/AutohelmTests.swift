@@ -5,9 +5,13 @@ import Testing
 /// everywhere on the water, from `wind(seconds)` since the sequence began, with no current. Seat 0 is far
 /// from every mark, seat 1 far from her; `place` sets seat 0 up in the first tick's wind, with the rudder
 /// centred and no autohelm yet, so the next step engages it on her placed angle, as a player letting go.
-func scriptedWindRace(wind: @escaping (_ seconds: Double) -> Wind, place: (inout Boat, BoatClass) -> Void) throws -> Race {
+/// The boats sail `boatClass`: by default ilca-dinghy@3, the schema-2 class #230's tests were written for.
+func scriptedWindRace(boatClass: FileRef? = nil, wind: @escaping (_ seconds: Double) -> Wind,
+                      place: (inout Boat, BoatClass) -> Void) throws -> Race {
     let sequence = 600 * Race.tickRate
-    let setup = try RaceSetup(raceSeed: RaceSeed(3), seats: [.human, .human], laps: 1, startSequenceTicks: sequence)
+    let boatClass = try boatClass ?? BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
+    let setup = try RaceSetup(raceSeed: RaceSeed(3), seats: [.human, .human], laps: 1, startSequenceTicks: sequence,
+                              boatClass: boatClass)
     let race = try Race(setup: setup, files: RaceFiles(resolving: setup), mode: .authoritative(windSeed: WindSeed(3)),
                         current: CurrentField(current: nil, tideStateAtGun: 0),
                         wind: { tick in
@@ -133,6 +137,55 @@ func steadyWind(knots: Double, from direction: Double = 0) -> (Double) -> Wind {
         let boat = race.boats[0]
         #expect(abs(degrees(boat.sailingAngle - upwindGroove(knots: 14))) <= 0.1)
         #expect(boat.autohelm == Autohelm(target: .groove(.upwind)))
+    }
+
+    /// #248 (#245, overriding part of #219): the skiff's grooves follow a ~30 s average of the wind
+    /// strength at the boat, not the wind right now. A 10 s puff barely moves the downwind groove, so
+    /// bearing away in it stays the player's call; a build that lasts a minute moves it all the way.
+    @Test func skiffGrooveFollowsAveragedWindStrength() throws {
+        let skiff = try SkiffFixtures.boatClass()
+        let ref = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version).ref
+        #expect(skiff.steering.autohelm.grooveWindAverage == 30)
+        func groove(_ knots: Double) -> Double {
+            Autohelm.grooveAngle(.downwind, tws: metresPerSecond(knots: knots), boatClass: skiff)
+        }
+        // 10 kn, a 13 kn puff from 30 s to 40 s, then 10 kn until it builds to 14 kn at 100 s and holds.
+        let knots = { (t: Double) -> Double in (30..<40).contains(t) ? 13 : t < 100 ? 10 : 14 }
+        let race = try scriptedWindRace(boatClass: ref, wind: { t in Wind(direction: 0, speed: metresPerSecond(knots: knots(t))) },
+                                        place: sailing(groove(10)))
+        #expect(race.boatClass.name == "Skiff")
+        steps(race, seconds: 25)
+        #expect(race.boats[0].autohelm == Autohelm(target: .groove(.downwind)))
+        let instantMove = abs(groove(13) - groove(10))
+        #expect(instantMove >= deg2rad(3.5), "the wind right now would move the groove \(degrees(instantMove))°")
+
+        // The puff, and the minute after it.
+        var worst = 0.0
+        steps(race, seconds: 70) { boat in
+            let reading = boat.autohelmReading(in: skiff)!
+            worst = max(worst, abs(reading.grooveAngle - groove(10)))
+        }
+        #expect(worst < instantMove / 3 && worst < deg2rad(1.5), "a 10 s puff moved the groove \(degrees(worst))°")
+
+        // A minute into the build the groove has followed it, and she sails it.
+        steps(race, seconds: 65)
+        let boat = race.boats[0]
+        let reading = try #require(boat.autohelmReading(in: skiff))
+        #expect(abs(degrees(reading.grooveAngle - groove(14))) < 1, "groove \(degrees(reading.grooveAngle))° in 14 kn")
+        #expect(abs(degrees(boat.sailingAngle - reading.grooveAngle)) < 1)
+        let followed = (boat.grooveWindSpeed - metresPerSecond(knots: 10)) / metresPerSecond(knots: 4)
+        #expect(followed > 0.85 && followed < 1, "the groove's wind followed \(followed) of the build")
+    }
+
+    /// A schema-2 class has no average: its grooves read the wind right now, exactly (#230's behaviour).
+    @Test func schemaTwoGroovesReadTheWindRightNow() throws {
+        #expect(dinghy.steering.autohelm.grooveWindAverage == 0)
+        let race = try scriptedWindRace(wind: { t in Wind(direction: 0, speed: metresPerSecond(knots: 6 + t / 10)) },
+                                        place: sailing(upwindGroove(knots: 6)))
+        steps(race, seconds: 20) { boat in
+            #expect(boat.averagedWindSpeed == boat.polarWindSpeed)
+            #expect(boat.grooveWindSpeed == boat.polarWindSpeed)
+        }
     }
 
     @Test func pinchHoldsUntilRudderMoves() throws {

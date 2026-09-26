@@ -1,5 +1,6 @@
 /// How one boat moves through one tick, from her boat class alone (ADR 0004): momentum, steering,
-/// rudder drag, head-to-wind fall-off, the ease, and the boom crossing on a tack or gybe. Pure: no events, no other boats, no rules.
+/// rudder drag, head-to-wind fall-off, the ease, the boom crossing on a tack or gybe, and for a class
+/// that has them (schema 3, #248) planing and the automatic spinnaker. Pure: no events, no other boats, no rules.
 /// `Race` calls it for every boat every tick; tests call it with a constant `Environment`.
 public enum BoatDynamics {
     /// The part of a boat the dynamics move.
@@ -13,13 +14,20 @@ public enum BoatDynamics {
         public var rudder: Double
         /// Which side the boom is on.
         public var boomSide: BoomSide
+        /// On the plane (`BoatClass.planing`); always false for a class that never planes.
+        public var isPlaning: Bool
+        /// The automatic spinnaker (`BoatClass.spinnaker`); always down for a class without one.
+        public var spinnaker: Spinnaker
 
-        public init(position: Vec2 = .zero, heading: Double, speed: Double, rudder: Double = 0, boomSide: BoomSide = .port) {
+        public init(position: Vec2 = .zero, heading: Double, speed: Double, rudder: Double = 0, boomSide: BoomSide = .port,
+                    isPlaning: Bool = false, spinnaker: Spinnaker = .down) {
             self.position = position
             self.heading = heading
             self.speed = speed
             self.rudder = rudder
             self.boomSide = boomSide
+            self.isPlaning = isPlaning
+            self.spinnaker = spinnaker
         }
     }
 
@@ -75,6 +83,9 @@ public enum BoatDynamics {
     /// - The boom crosses (`boomCrosses`) on the tick the bow passes head to wind (a tack), or when she
     ///   bears away by the lee past the polar's `byTheLeeLimit` (a gybe). By the lee the speed target is
     ///   the polar mirrored past dead downwind, less `byTheLeePenalty`.
+    /// - A class with a spinnaker moves it on her new true wind angle (`Spinnaker.next`), and a class that
+    ///   planes decides whether she is on the plane from it and her speed so far (`PlaningTuning.isPlaning`);
+    ///   the target is then `polarTarget`, which reads both.
     public static func advance(_ state: State, control: Control, env: Environment, boatClass: BoatClass, dt: Double) -> State {
         let steering = boatClass.steering
         let polar = boatClass.polar
@@ -100,11 +111,15 @@ public enum BoatDynamics {
         }
 
         let twa = abs(relativeWind)
-        let inNoGo = twa < noGoAngle(polar)
-        var target = control.sailing && !inNoGo ? polar.speed(twa: twa, tws: env.windSpeed) : 0
-        if BoomSide.isByTheLee(s.boomSide.sailingAngle(relativeWind: relativeWind)) {
-            target *= 1 - polar.byTheLeePenalty
+        if let kite = boatClass.spinnaker { s.spinnaker = s.spinnaker.next(twa: twa, dt: dt, tuning: kite) }
+        if let planing = boatClass.planing {
+            s.isPlaning = planing.isPlaning(was: s.isPlaning, twa: twa, speed: s.speed, tws: env.windSpeed)
         }
+        let inNoGo = twa < noGoAngle(polar)
+        var target = control.sailing && !inNoGo
+            ? polarTarget(relativeWind: relativeWind, boomSide: s.boomSide, tws: env.windSpeed,
+                          isPlaning: s.isPlaning, spinnaker: s.spinnaker, boatClass: boatClass)
+            : 0
         let timeConstant: Double
         if control.ease && control.sailing {
             target *= boatClass.ease.speedFraction
@@ -119,6 +134,34 @@ public enum BoatDynamics {
         s.speed = max(0, s.speed)
         s.position += Vec2.heading(s.heading) * s.speed * dt + env.current * dt
         return s
+    }
+
+    /// The speed the sail drives her towards with the wind `relativeWind` off the bow (radians, positive
+    /// over the starboard side) and her boom on `boomSide`, in `tws` (m/s), sheeted in, outside the no-go
+    /// zone. The polar at her true wind angle is the on-plane, spinnaker-up speed; a class that planes sails
+    /// `PlaningTuning.offPlaneSpeed` off the plane from its `fromTWA` aft, and a class with a spinnaker
+    /// sails its two-sail speed unless the spinnaker is up and drawing: it collapses more than the class's
+    /// `byTheLee.spinnakerCollapse` by the lee. By the lee the target is also less the polar's
+    /// `byTheLeePenalty` and the class's graded `byTheLee` loss.
+    public static func polarTarget(relativeWind: Double, boomSide: BoomSide, tws: Double, isPlaning: Bool,
+                                   spinnaker: Spinnaker, boatClass: BoatClass) -> Double {
+        let polar = boatClass.polar
+        let twa = abs(relativeWind)
+        let sailingAngle = boomSide.sailingAngle(relativeWind: relativeWind)
+        var target = polar.speed(twa: twa, tws: tws)
+        if let planing = boatClass.planing, !isPlaning, twa >= planing.fromTWA {
+            target = planing.offPlaneSpeed(twa: twa, tws: tws, polar: polar)
+        }
+        let byTheLee = BoomSide.isByTheLee(sailingAngle) ? Double.pi + sailingAngle : nil
+        if let kite = boatClass.spinnaker {
+            let collapsed = byTheLee.map { $0 > (boatClass.byTheLee?.spinnakerCollapse ?? .pi) } ?? false
+            if !spinnaker.isUp || collapsed { target *= kite.twoSailFactor(twa: twa) }
+        }
+        if let byTheLee {
+            target *= 1 - polar.byTheLeePenalty
+            if let graded = boatClass.byTheLee { target *= graded.speedFactor(byTheLee: byTheLee) }
+        }
+        return target
     }
 
     /// How the boom crosses.

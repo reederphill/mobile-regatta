@@ -59,8 +59,8 @@ public enum RaceSetupError: Error, Equatable, Sendable {
 /// the initialiser and the decoder both throw on an invalid setup.
 public struct RaceSetup: Hashable, Sendable {
     public static let fleetSizes = 2...16
-    /// Two laps by default (#8); the first race sails one (#23).
-    public static let defaultLaps = 2
+    /// Three laps by default (#245, overriding #8's two); the first race sails one (#23).
+    public static let defaultLaps = 3
     /// The default rules configuration's start sequence (60 s in `fleet-rules@1`), in ticks.
     public static let defaultStartSequenceTicks = RaceFiles.defaults.rulesConfiguration.content.raceFormat.startSequenceTicks
 

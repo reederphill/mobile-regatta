@@ -17,9 +17,11 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   WindSeedPool.swift      server-only pools of vetted wind seeds per venue × conditions × tide state
   Polar.swift             the prototype's boat speed by true wind angle (the race still sails it until #70)
   DataFile.swift          versioned data-file loader: header, schema check, SHA-256 content hash, FileRef
-  BoatClass.swift         boat class file schema: hull, polar, momentum, steering, shadow, contact, ease
+  BoatClass.swift         boat class file schema: hull, polar, momentum, steering, shadow, contact, ease; schema 3
+                          adds planing, the automatic spinnaker, by-the-lee loss and the averaged groove wind
   PolarTable.swift        polar by TWA × TWS, bilinear, with best upwind and downwind VMG derived at load
-  Resources/boat-classes/ boat class files, `<id>@<version>.json`
+  Sails.swift             the automatic spinnaker's states and the planing hysteresis (#248)
+  Resources/boat-classes/ boat class files, `<id>@<version>.json`; races sail `skiff@1` by default
   Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns; schema 2 adds the keyed wind's wobble and ramps
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast

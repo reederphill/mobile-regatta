@@ -11,10 +11,13 @@ import Foundation
 public struct BoatClass: DataFileContent {
     public static let kind = "boat class"
     public static let bundleDirectory = "boat-classes"
-    /// Schema 2 added the autohelm's steering values (#230). This build sails no schema-1 class: RegattaCore
-    /// holds no boat constants (ADR 0004), so it has nothing to fill them with. Logs sailed on one replay on
-    /// the simulation version that sailed them (ADR 0002).
-    public static let supportedSchemaVersions = [2]
+    /// Schema 2 added the autohelm's steering values (#230). Schema 3 (#248, the skiff) adds planing, the
+    /// automatic spinnaker, a graded by-the-lee penalty and the autohelm's averaged groove wind; a schema-2
+    /// class has none of them (`planing`, `spinnaker` and `byTheLee` are nil, and its grooves read the wind
+    /// at the boat right now), so it sails exactly as #230 sailed it. This build sails no schema-1 class:
+    /// RegattaCore holds no boat constants (ADR 0004), so it has nothing to fill the autohelm's values with.
+    /// Logs sailed on one replay on the simulation version that sailed them (ADR 0002).
+    public static let supportedSchemaVersions = [2, 3]
 
     /// Name shown to players.
     public var name: String
@@ -25,6 +28,14 @@ public struct BoatClass: DataFileContent {
     public var windShadow: WindShadow
     public var contact: Contact
     public var ease: Ease
+    /// How she gets on and off the plane (schema 3), or nil for a class that never planes: she sails the
+    /// polar as is.
+    public var planing: PlaningTuning?
+    /// Her automatic spinnaker (schema 3), or nil for a class without one: the polar is all she sails.
+    public var spinnaker: SpinnakerTuning?
+    /// The graded by-the-lee penalty and where the spinnaker collapses (schema 3), or nil: only the
+    /// polar's flat `byTheLeePenalty`.
+    public var byTheLee: ByTheLeeTuning?
 
     public struct Hull: Sendable, Equatable {
         /// Metres.
@@ -88,6 +99,73 @@ public struct BoatClass: DataFileContent {
         public var deadRunMargin: Double
         /// How far short of the by-the-lee limit it holds an angle by the lee. Radians.
         public var byTheLeeMargin: Double
+        /// The time constant, seconds, of the average of the wind strength at the boat that the grooves
+        /// follow (`Boat.averagedWindSpeed`, #245): a puff shorter than this barely moves the groove, a
+        /// build longer than it does. 0 (every schema-2 class) is no average: the grooves read the wind at
+        /// the boat right now.
+        public var grooveWindAverage: Double
+    }
+
+    /// How the boat gets on and off the plane (schema 3, #248). Downwind and reaching only: forward of
+    /// `fromTWA` she sails the polar as is. The polar is the on-plane speed; off the plane, from `fromTWA`
+    /// on, the target is `offPlaneSpeed(twa:tws:polar:)`. The thresholds overlap, so the same heading can
+    /// hold two speeds (#244 §4.4): knocked off the plane she heads up to get back on it.
+    public struct PlaningTuning: Sendable, Equatable {
+        /// She gets on the plane only at or past this true wind angle, radians.
+        public var fromTWA: Double
+        /// She drops off it forward of this true wind angle, radians (≤ `fromTWA`).
+        public var offBelowTWA: Double
+        /// She gets on the plane at this speed through the water or more, m/s...
+        public var onSpeed: Double
+        /// ...with the apparent wind no further aft than this, radians: the sails fed from forward.
+        public var onMaxAWA: Double
+        /// She drops off it below this speed through the water, m/s (≤ `onSpeed`).
+        public var offSpeed: Double
+        /// Off the plane she sails the polar's speeds at this true wind speed, m/s...
+        public var offPlaneReferenceTWS: Double
+        /// ...scaled by 1 + this × (TWS − `offPlaneReferenceTWS`), per m/s, and never faster than the polar.
+        public var offPlaneGain: Double
+
+        /// The off-the-plane speed at `twa` (radians) in `tws` (m/s): the reference column's speed at
+        /// `twa`, scaled by the wind strength, capped at the polar's (on-plane) speed.
+        public func offPlaneSpeed(twa: Double, tws: Double, polar: PolarTable) -> Double {
+            let scaled = polar.speed(twa: twa, tws: offPlaneReferenceTWS) * (1 + offPlaneGain * (tws - offPlaneReferenceTWS))
+            return min(polar.speed(twa: twa, tws: tws), max(0, scaled))
+        }
+    }
+
+    /// The automatic spinnaker (schema 3, #248): it goes up when she bears away past `hoistAboveTWA` and
+    /// comes down when she heads up past `dropBelowTWA`, taking `transitionTime` each way, during which
+    /// she sails at two-sail speed. The polar's rows from `twoSailFullTWA` aft assume it is up.
+    public struct SpinnakerTuning: Sendable, Equatable {
+        /// True wind angles, radians: hoisted past `hoistAboveTWA`, dropped forward of `dropBelowTWA`.
+        public var hoistAboveTWA: Double
+        public var dropBelowTWA: Double
+        /// Seconds a hoist or a drop takes.
+        public var transitionTime: Double
+        /// Without the spinnaker drawing she sails the polar × this from `twoSailFullTWA` aft...
+        public var twoSailSpeedFactor: Double
+        /// ...and the polar as is forward of `twoSailFromTWA` (radians), linear between.
+        public var twoSailFromTWA: Double
+        public var twoSailFullTWA: Double
+
+        /// The two-sail speed factor at `twa` (radians, 0...π).
+        public func twoSailFactor(twa: Double) -> Double {
+            if twa <= twoSailFromTWA { return 1 }
+            if twa >= twoSailFullTWA { return twoSailSpeedFactor }
+            return PolarTable.lerp(1, twoSailSpeedFactor, (twa - twoSailFromTWA) / (twoSailFullTWA - twoSailFromTWA))
+        }
+    }
+
+    /// Sailing by the lee (schema 3, #248), on top of the polar's flat `byTheLeePenalty`.
+    public struct ByTheLeeTuning: Sendable, Equatable {
+        /// Fraction of speed lost per radian by the lee (never below nothing).
+        public var speedLossPerRadian: Double
+        /// A hoisted spinnaker collapses more than this far by the lee, radians: it stops drawing.
+        public var spinnakerCollapse: Double
+
+        /// The speed factor `angle` radians by the lee.
+        public func speedFactor(byTheLee angle: Double) -> Double { max(0, 1 - speedLossPerRadian * angle) }
     }
 
     /// The disturbed air behind a boat's sails, and the backwind just to windward of them.
@@ -128,6 +206,11 @@ public struct BoatClass: DataFileContent {
         switch header.schemaVersion {
         case 2:
             self = try JSONDecoder().decode(BoatClassSchema2.self, from: fileData).boatClass(id: header.id)
+        case 3:
+            // Schema 3 is schema 2's fields with its additions: both read the same file.
+            var boatClass = try JSONDecoder().decode(BoatClassSchema2.self, from: fileData).boatClass(id: header.id)
+            try JSONDecoder().decode(BoatClassSchema3Additions.self, from: fileData).apply(to: &boatClass, id: header.id)
+            self = boatClass
         default:
             throw DataFileError.unsupportedSchemaVersion(
                 kind: Self.kind, found: header.schemaVersion, supported: Self.supportedSchemaVersions)
@@ -325,7 +408,8 @@ private struct BoatClassSchema2: Decodable {
                     downwindSnap: deg2rad(helm.downwindSnapDegrees),
                     gain: helm.gainRudderPerDegree * 180 / .pi,
                     deadRunMargin: deg2rad(helm.deadRunMarginDegrees),
-                    byTheLeeMargin: deg2rad(helm.byTheLeeMarginDegrees)
+                    byTheLeeMargin: deg2rad(helm.byTheLeeMarginDegrees),
+                    grooveWindAverage: 0
                 )
             ),
             windShadow: .init(
@@ -356,5 +440,118 @@ private struct BoatClassSchema2: Decodable {
             turning += atan2(turn, e1.dot(e2))
         }
         return abs(turning + 2 * .pi) < 1e-6
+    }
+}
+
+// MARK: - Schema 3
+
+/// What the boat class file's schema 3 adds to schema 2 (#248, the skiff), as written: knots and degrees.
+/// Every field is required: RegattaCore holds no boat constants to default one to (ADR 0004).
+private struct BoatClassSchema3Additions: Decodable {
+    struct Steering: Decodable {
+        struct Autohelm: Decodable {
+            let grooveWindAverageSeconds: Double
+        }
+
+        let autohelm: Autohelm
+    }
+
+    struct Planing: Decodable {
+        struct OffPlane: Decodable {
+            let referenceTWSKnots: Double
+            /// Fraction of the reference column's speed gained per knot of true wind above its own.
+            let gainPerKnot: Double
+        }
+
+        let fromTWADegrees: Double
+        let offBelowTWADegrees: Double
+        let onSpeedKnots: Double
+        let onMaxAWADegrees: Double
+        let offSpeedKnots: Double
+        let offPlane: OffPlane
+    }
+
+    struct Spinnaker: Decodable {
+        struct TwoSail: Decodable {
+            let speedFactor: Double
+            let fromTWADegrees: Double
+            let fullTWADegrees: Double
+        }
+
+        let hoistAboveTWADegrees: Double
+        let dropBelowTWADegrees: Double
+        let transitionSeconds: Double
+        let twoSail: TwoSail
+    }
+
+    struct ByTheLee: Decodable {
+        /// Fraction of speed lost per degree by the lee.
+        let speedLossPerDegree: Double
+        let spinnakerCollapseDegrees: Double
+    }
+
+    let steering: Steering
+    let planing: Planing
+    let spinnaker: Spinnaker
+    let byTheLee: ByTheLee
+
+    /// The longest hoist or drop the wire snapshot carries (`RegattaProtocol`: a byte of ticks).
+    static let maxTransitionSeconds = 8.0
+
+    func apply(to boatClass: inout BoatClass, id: String) throws {
+        func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
+            if !condition { throw DataFileError.invalidContent(kind: BoatClass.kind, id: id, reason: reason()) }
+        }
+        func positive(_ value: Double) -> Bool { value.isFinite && value > 0 }
+        func angle(_ degrees: Double) -> Bool { degrees >= 0 && degrees <= 180 }
+
+        let average = steering.autohelm.grooveWindAverageSeconds
+        try check(average.isFinite && average >= 0, "autohelm groove wind average must not be negative")
+
+        let p = planing
+        try check(angle(p.fromTWADegrees) && angle(p.offBelowTWADegrees) && p.offBelowTWADegrees <= p.fromTWADegrees,
+                  "planing angles must be 0...180°, dropping off the plane no further aft than it gets on")
+        try check(positive(p.onSpeedKnots) && positive(p.offSpeedKnots) && p.offSpeedKnots <= p.onSpeedKnots,
+                  "planing speeds must be positive, dropping off at no more than it gets on")
+        try check(p.onMaxAWADegrees > 0 && p.onMaxAWADegrees <= 180, "planing apparent wind angle must be in 0 exclusive ...180°")
+        try check(positive(p.offPlane.referenceTWSKnots) && p.offPlane.gainPerKnot.isFinite && p.offPlane.gainPerKnot >= 0,
+                  "off-plane reference wind must be positive and its gain not negative")
+
+        let k = spinnaker
+        try check(angle(k.hoistAboveTWADegrees) && angle(k.dropBelowTWADegrees) && k.dropBelowTWADegrees <= k.hoistAboveTWADegrees,
+                  "spinnaker angles must be 0...180°, dropping it no further aft than it goes up")
+        try check(positive(k.transitionSeconds) && k.transitionSeconds <= Self.maxTransitionSeconds,
+                  "spinnaker transition must be positive and at most \(Self.maxTransitionSeconds) s")
+        try check(k.twoSail.speedFactor >= 0 && k.twoSail.speedFactor <= 1, "two-sail speed factor must be 0...1")
+        try check(angle(k.twoSail.fromTWADegrees) && angle(k.twoSail.fullTWADegrees)
+                  && k.twoSail.fromTWADegrees < k.twoSail.fullTWADegrees,
+                  "two-sail angles must be 0...180°, the ramp's start forward of its end")
+
+        try check(byTheLee.speedLossPerDegree >= 0 && byTheLee.speedLossPerDegree <= 1, "by-the-lee speed loss must be 0...1 per degree")
+        try check(byTheLee.spinnakerCollapseDegrees >= 0 && byTheLee.spinnakerCollapseDegrees <= 90,
+                  "spinnaker collapse must be 0...90° by the lee")
+
+        boatClass.steering.autohelm.grooveWindAverage = average
+        boatClass.planing = .init(
+            fromTWA: deg2rad(p.fromTWADegrees),
+            offBelowTWA: deg2rad(p.offBelowTWADegrees),
+            onSpeed: metresPerSecond(knots: p.onSpeedKnots),
+            onMaxAWA: deg2rad(p.onMaxAWADegrees),
+            offSpeed: metresPerSecond(knots: p.offSpeedKnots),
+            offPlaneReferenceTWS: metresPerSecond(knots: p.offPlane.referenceTWSKnots),
+            offPlaneGain: p.offPlane.gainPerKnot / metresPerSecond(knots: 1)
+        )
+        boatClass.spinnaker = .init(
+            hoistAboveTWA: deg2rad(k.hoistAboveTWADegrees),
+            dropBelowTWA: deg2rad(k.dropBelowTWADegrees),
+            transitionTime: k.transitionSeconds,
+            twoSailSpeedFactor: k.twoSail.speedFactor,
+            twoSailFromTWA: deg2rad(k.twoSail.fromTWADegrees),
+            twoSailFullTWA: deg2rad(k.twoSail.fullTWADegrees)
+        )
+        boatClass.byTheLee = .init(
+            speedLossPerRadian: byTheLee.speedLossPerDegree * 180 / .pi,
+            spinnakerCollapse: deg2rad(byTheLee.spinnakerCollapseDegrees)
+        )
     }
 }
