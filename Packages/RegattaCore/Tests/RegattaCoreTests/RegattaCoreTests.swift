@@ -40,42 +40,46 @@ import Testing
         return b
     }
 
+    let hull = Race.defaultBoatClass.hull
+
     @Test func portKeepsClearOfStarboard() {
         let starboard = boat(1, at: .zero, heading: -45)  // wind over the starboard side
         let port = boat(2, at: Vec2(1, 0), heading: 45)
         #expect(starboard.tack == .starboard)
         #expect(port.tack == .port)
-        #expect(Rules.judge(starboard, port, course: course, hull: Race.defaultBoatClass.hull) == Verdict(rule: .portStarboard, offender: 2, victim: 1))
+        #expect(Rules.rightOfWay(starboard, port, overlapped: true, hull: hull) == RightOfWay(keepClear: 2, rule: .portStarboard))
     }
 
+    /// Rule 11: overlapped on the same tack, the boat on the other's windward side keeps clear, whichever
+    /// way round the pair is asked (#3 bug 1's case, further upwind but to leeward, is in `RightOfWayTests`).
     @Test func windwardKeepsClearOfLeeward() {
         let leeward = boat(1, at: .zero, heading: 90)
         let windward = boat(2, at: Vec2(0, 1.4), heading: 90)
-        #expect(Rules.judge(leeward, windward, course: course, hull: Race.defaultBoatClass.hull).offender == 2)
-        #expect(Rules.judge(leeward, windward, course: course, hull: Race.defaultBoatClass.hull).rule == .windwardLeeward)
+        let expected = RightOfWay(keepClear: 2, rule: .windwardLeeward)
+        #expect(Rules.rightOfWay(leeward, windward, overlapped: true, hull: hull) == expected)
+        #expect(Rules.rightOfWay(windward, leeward, overlapped: true, hull: hull) == expected)
     }
 
     @Test func clearAsternKeepsClear() {
         let ahead = boat(1, at: .zero, heading: 90)
         let astern = boat(2, at: Vec2(-4.5, 0), heading: 90)
-        #expect(Rules.judge(ahead, astern, course: course, hull: Race.defaultBoatClass.hull) == Verdict(rule: .clearAstern, offender: 2, victim: 1))
+        #expect(Rules.rightOfWay(ahead, astern, overlapped: false, hull: hull) == RightOfWay(keepClear: 2, rule: .clearAstern))
     }
 
     @Test func tackingBoatKeepsClear() {
         let steady = boat(1, at: .zero, heading: -45)
         var tacking = boat(2, at: Vec2(1, 0), heading: -45)
         tacking.isTacking = true
-        #expect(Rules.judge(steady, tacking, course: course, hull: Race.defaultBoatClass.hull).rule == .whileTacking)
-        #expect(Rules.judge(steady, tacking, course: course, hull: Race.defaultBoatClass.hull).offender == 2)
+        #expect(Rules.rightOfWay(steady, tacking, overlapped: true, hull: hull) == RightOfWay(keepClear: 2, rule: .whileTacking))
     }
 
     @Test func outsideBoatGivesMarkRoom() {
         let mark = course.elements[CourseLayout.windwardIndex].marks[0].position
         let inside = boat(1, at: mark + Vec2(3, -2), heading: -45)
         let outside = boat(2, at: mark + Vec2(5, -3), heading: -45)
-        let call = Rules.judge(inside, outside, course: course, hull: Race.defaultBoatClass.hull)
-        #expect(call.rule == .givingMarkRoom)
-        #expect(call.offender == 2)
+        let call = Rules.judge(inside, outside, overlapped: true, course: course, hull: hull)
+        #expect(call?.rule == .givingMarkRoom)
+        #expect(call?.offender == 2)
     }
 }
 
