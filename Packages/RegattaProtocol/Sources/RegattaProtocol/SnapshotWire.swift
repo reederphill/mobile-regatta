@@ -8,12 +8,14 @@ import RegattaCore
 /// |-------------------------|---------|---------------------------|-------------------------------|
 /// | position x, y           | int24   | 1/256 m (3.9 mm)          | ±32 768 m from the course origin |
 /// | heading, autohelm angle  | int16   | 1/65 536 turn (0.0055°)   | a full turn, −π ..< π         |
-/// | speed                   | uint16  | 1/1024 m/s                | 0 ..< 64 m/s                  |
+/// | speed, averaged wind    | uint16  | 1/1024 m/s                | 0 ..< 64 m/s                  |
+/// | spinnaker hoist or drop left | uint8 | a tick (1/30 s)        | 0 … 8.5 s                     |
 /// | rudder (actual)         | int16   | 1/32 767                  | −1 … 1                        |
 /// | penalty progress        | int16   | 1/1024 rad                | ±32 rad (5 turns)             |
 /// | held rudder             | int8    | exact                     | −127 … 127                    |
 /// | status, turns owed, rounding stage | bits | exact            | 3 bits each                   |
-/// | ease, autohelm, its groove and tap, tacking, boom side | bits | exact | 1 bit each          |
+/// | ease, autohelm, its groove and tap, tacking, boom side, planing, averaged wind | bits | exact | 1 bit each |
+/// | spinnaker               | bits    | exact                     | 2 bits                        |
 /// | leg index               | uint8   | exact                     | 0 … 255                       |
 ///
 /// Rounding is to nearest, so a field's error is at most half its step. A value outside its range
@@ -30,9 +32,11 @@ public enum SnapshotQuantisation {
     public static let speedStep = 1.0 / 1024
     public static let rudderStep = 1.0 / 32_767
     public static let penaltyProgressStep = 1.0 / 1024
+    /// A hoist or drop's time left, seconds: a tick.
+    public static let spinnakerStep = Race.dt
 
     /// Bytes per seat in a wire snapshot.
-    public static let bytesPerSeat = 20
+    public static let bytesPerSeat = 24
 
     static func quantise(_ value: Double, step: Double, in range: ClosedRange<Int>, _ field: String) throws -> Int {
         guard value.isFinite else { throw WireError.outOfRange(field) }
@@ -84,6 +88,64 @@ public struct WireAutohelm: Hashable, Sendable {
     }
 }
 
+/// The spinnaker on the wire (#248): its state, and a hoist or drop's time left in ticks (`SnapshotQuantisation.spinnakerStep`).
+public enum WireSpinnaker: Hashable, Sendable {
+    case down
+    case hoisting(UInt8)
+    case up
+    case dropping(UInt8)
+
+    /// Quantises `spinnaker`. Throws `WireError.outOfRange` for a time left the wire can't carry.
+    public init(_ spinnaker: Spinnaker) throws {
+        func ticks(_ remaining: Double) throws -> UInt8 {
+            UInt8(try SnapshotQuantisation.quantise(remaining, step: SnapshotQuantisation.spinnakerStep, in: 0...255, "spinnaker"))
+        }
+        switch spinnaker {
+        case .down: self = .down
+        case .hoisting(let remaining): self = .hoisting(try ticks(remaining))
+        case .up: self = .up
+        case .dropping(let remaining): self = .dropping(try ticks(remaining))
+        }
+    }
+
+    /// The spinnaker this stands for.
+    public var spinnaker: Spinnaker {
+        switch self {
+        case .down: .down
+        case .hoisting(let q): .hoisting(remaining: Double(q) * SnapshotQuantisation.spinnakerStep)
+        case .up: .up
+        case .dropping(let q): .dropping(remaining: Double(q) * SnapshotQuantisation.spinnakerStep)
+        }
+    }
+
+    var code: UInt8 {
+        switch self {
+        case .down: 0
+        case .hoisting: 1
+        case .up: 2
+        case .dropping: 3
+        }
+    }
+
+    var ticksLeft: UInt8 {
+        switch self {
+        case .hoisting(let q), .dropping(let q): q
+        case .down, .up: 0
+        }
+    }
+
+    /// From its 2-bit code and the time-left byte, which must be 0 when it is up or down.
+    init?(code: UInt8, ticksLeft: UInt8) {
+        switch code {
+        case 0 where ticksLeft == 0: self = .down
+        case 1: self = .hoisting(ticksLeft)
+        case 2 where ticksLeft == 0: self = .up
+        case 3: self = .dropping(ticksLeft)
+        default: return nil
+        }
+    }
+}
+
 /// One seat of a wire snapshot, in quantised units (`SnapshotQuantisation`). The same for a bot's
 /// seat as for a human's: the bot flag is roster metadata in `RaceStart`, never here (#18, #19).
 public struct WireSeat: Hashable, Sendable {
@@ -104,11 +166,17 @@ public struct WireSeat: Hashable, Sendable {
     /// 0…7.
     public var roundingStage: UInt8
     public var legIndex: UInt8
+    /// #248: on the plane, the spinnaker, and the average of the wind speed her grooves follow in
+    /// 1/1024 m/s (nil before the race first samples her wind). The client predicts all three (ADR 0007).
+    public var isPlaning: Bool
+    public var spinnaker: WireSpinnaker
+    public var averagedWindSpeed: UInt16?
 
     public init(
         x: Int32, y: Int32, heading: Int16, speed: UInt16, rudder: Int16, autohelm: WireAutohelm?, penaltyProgress: Int16,
         heldInput: BoatInput, isTacking: Bool, boomSide: BoomSide, status: BoatStatus, penaltyTurnsOwed: UInt8,
-        roundingStage: UInt8, legIndex: UInt8
+        roundingStage: UInt8, legIndex: UInt8, isPlaning: Bool = false, spinnaker: WireSpinnaker = .down,
+        averagedWindSpeed: UInt16? = nil
     ) {
         self.x = x
         self.y = y
@@ -124,6 +192,9 @@ public struct WireSeat: Hashable, Sendable {
         self.penaltyTurnsOwed = penaltyTurnsOwed
         self.roundingStage = roundingStage
         self.legIndex = legIndex
+        self.isPlaning = isPlaning
+        self.spinnaker = spinnaker
+        self.averagedWindSpeed = averagedWindSpeed
     }
 
     /// Quantises a seat of the world. Throws `WireError.outOfRange` for a value the wire can't carry.
@@ -148,6 +219,11 @@ public struct WireSeat: Hashable, Sendable {
         penaltyTurnsOwed = owed
         roundingStage = stage
         legIndex = leg
+        isPlaning = b.isPlaning
+        spinnaker = try WireSpinnaker(b.spinnaker)
+        averagedWindSpeed = try b.averagedWindSpeed.map {
+            UInt16(try Q.quantise($0, step: Q.speedStep, in: 0...65_535, "averagedWindSpeed"))
+        }
     }
 
     /// Overwrites the fields the wire carries; the rest of `seat` (`SnapshotFields.excluded`) stays.
@@ -165,16 +241,22 @@ public struct WireSeat: Hashable, Sendable {
         seat.boat.penaltyTurnsOwed = Int(penaltyTurnsOwed)
         seat.boat.roundingStage = Int(roundingStage)
         seat.boat.legIndex = Int(legIndex)
+        seat.boat.isPlaning = isPlaning
+        seat.boat.spinnaker = spinnaker.spinnaker
+        seat.boat.averagedWindSpeed = averagedWindSpeed.map { Double($0) * Q.speedStep }
         seat.heldInput = heldInput
     }
 
-    // Layout, 20 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autohelm angle int16
+    // Layout, 24 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autohelm angle int16
     // (0 for the groove or without an autohelm), penalty progress int16, held rudder int8, then two flag
-    // bytes and the leg index.
+    // bytes and the leg index; then (#248) a sails byte, the spinnaker's ticks left uint8 (0 unless it is
+    // going up or coming down) and the averaged wind uint16 (0 without one).
     //   flags:  bit 0 ease, bit 1 has autohelm, bit 2 tacking, bits 3–5 status, bit 6 boom to starboard,
     //           bit 7 the autohelm is sailing the tap
     //   counts: bits 0–2 penalty turns owed, bits 3–5 rounding stage, bit 6 the autohelm holds the groove,
     //           bit 7 that groove is the downwind one
+    //   sails:  bits 0–1 spinnaker (down, going up, up, coming down), bit 2 planing, bit 3 has an averaged
+    //           wind; bits 4–7 zero
     // Every autohelm bit is zero without an autohelm, and the downwind bit without the groove.
 
     func encode(to w: inout WireWriter) throws {
@@ -203,6 +285,12 @@ public struct WireSeat: Hashable, Sendable {
         }
         w.u8(counts)
         w.u8(legIndex)
+        var sails = spinnaker.code
+        if isPlaning { sails |= 1 << 2 }
+        if averagedWindSpeed != nil { sails |= 1 << 3 }
+        w.u8(sails)
+        w.u8(spinnaker.ticksLeft)
+        w.u16(averagedWindSpeed ?? 0)
     }
 
     init(from r: inout WireReader) throws {
@@ -219,6 +307,17 @@ public struct WireSeat: Hashable, Sendable {
         let flags = try r.u8()
         let counts = try r.u8()
         legIndex = try r.u8()
+        let sails = try r.u8()
+        let ticksLeft = try r.u8()
+        let averaged = try r.u16()
+        guard sails >> 4 == 0, let kite = WireSpinnaker(code: sails & 0b11, ticksLeft: ticksLeft) else {
+            throw WireError.invalidValue("spinnaker")
+        }
+        let hasAverage = sails & 1 << 3 != 0
+        guard hasAverage || averaged == 0 else { throw WireError.invalidValue("averagedWindSpeed") }
+        spinnaker = kite
+        isPlaning = sails & 1 << 2 != 0
+        averagedWindSpeed = hasAverage ? averaged : nil
         guard let status = BoatStatus(wireCode: flags >> 3 & 0b111) else { throw WireError.invalidValue("status") }
         let hasAutohelm = flags & 1 << 1 != 0, isTapping = flags & 1 << 7 != 0
         let isGroove = counts & 1 << 6 != 0, isDownwind = counts & 1 << 7 != 0
@@ -273,6 +372,7 @@ public enum SnapshotFields {
         "boat.position", "boat.heading", "boat.speed", "boat.rudder", "boat.autohelm",
         "boat.status", "boat.legIndex", "boat.roundingStage",
         "boat.penaltyTurnsOwed", "boat.penaltyProgress", "boat.isTacking", "boat.boomSide",
+        "boat.isPlaning", "boat.spinnaker", "boat.averagedWindSpeed",
         "heldInput.rudder", "heldInput.ease",
     ]
 

@@ -87,6 +87,11 @@ struct Gen {
             boat.finishTime = Double(int(0...30_000)) / 30
             boat.place = int(1...16)
         }
+        // #248, derived from the draws above, so the generator's stream (and every case after it) doesn't move.
+        boat.isPlaning = boat.isTacking != (boat.speed > 5)
+        let left = abs(boat.penaltyProgress) / 4 // 0 ..< 8 s
+        boat.spinnaker = [Spinnaker.down, .hoisting(remaining: left), .up, .dropping(remaining: left)][boat.legIndex % 4]
+        boat.averagedWindSpeed = boat.colorIndex == 0 ? nil : boat.windSpeed * boat.shadow
         return WorldSnapshot.Seat(boat: boat, heldInput: input())
     }
 
@@ -104,6 +109,14 @@ struct Gen {
                 status: status(), penaltyTurnsOwed: UInt8(int(0...7)), roundingStage: UInt8(int(0...7)),
                 legIndex: UInt8(int(0...255))
             )
+        }.map { seat in
+            // #248, derived from the draws above, so the generator's stream doesn't move.
+            var seat = seat
+            seat.isPlaning = seat.x & 1 == 1
+            let left = UInt8(truncatingIfNeeded: seat.y)
+            seat.spinnaker = [WireSpinnaker.down, .hoisting(left), .up, .dropping(left)][Int(seat.legIndex % 4)]
+            seat.averagedWindSpeed = seat.heading & 1 == 1 ? nil : seat.speed
+            return seat
         }
     }
 
