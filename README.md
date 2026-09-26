@@ -24,7 +24,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast
   Venue.swift             venue file schema: land, pairings with geographic grids, current (docs/venue-file.md)
-  Resources/venues/       venue files; `dev-venue@2` stands in until the real venues (#83)
+  Resources/venues/       venue files: the v1.0 venues `hollin-bay@1`, `saltings-reach@1`, `fellmere@1` (#83); races sail `dev-venue@2` until the practice setup (#131)
   CourseLayout.swift      the course derived from the files and race seed: marks, gate, lines, race area
   Course.swift            rounding rays and obstacles, shared by the course and the rules
   Boat.swift              boat state and hull shape
@@ -52,6 +52,8 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
     FleetRoster.swift       display metadata: which seats are bots, and their sailing names
   Sources/BotSuite/       the headless bot-race suite (#97): harness, matrix, per-seat metrics, per-tier gate, JSON report
   Sources/regatta-botsuite `swift run -c release regatta-botsuite [--json <path|->]`: sails matrix.json, exits 1 on a breach
+  Sources/VenueTools/     the offline venue checks (#83): geometry, sailability in a lull at peak current, overview maps
+  Sources/regatta-venue-png `swift run --package-path Packages/RegattaCore regatta-venue-png` from the repository root: an overview PNG per shipped venue pairing into docs/venues/
   Tests/Goldens.json      golden digests keyed by simulation version
   Tests/Fixtures/         the golden 16-seat scripted race log, and a wind seed pool for the loader
 Packages/RegattaProtocol/ The race wire protocol: messages, frames and a binary codec, no transport (#63)

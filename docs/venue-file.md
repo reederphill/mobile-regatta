@@ -10,12 +10,18 @@ Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/
 `Tests/RegattaCoreTests/Resources/venues/`. A released version never changes; a change ships as
 `<id>@<version + 1>.json`, and the venue's seed pools are re-vetted with it.
 
-- `dev-venue@1` (bundled): a stand-in for the app until the three real venues ship (#83). Open water,
-  a shore strip beyond each side of the race area, no current, a pairing for each of the four conditions
-  at version 1.
+- `hollin-bay@1`, `saltings-reach@1`, `fellmere@1` (bundled): the three v1.0 venues (#12, #36, #83),
+  for the app and the server. Hollin Bay is the open bay (Classic oscillating, Sea breeze; little shore
+  effect, no current), Saltings Reach the tidal estuary (Classic oscillating, Gusty offshore; a 2 kn
+  channel and shallows, #11), Fellmere the hill-ringed lake (Light and patchy, Gusty offshore; strong
+  geographic shifts and land shadow, no current). `docs/venues/` has an overview map of each pairing.
+- `dev-venue@1` (bundled): the stand-in venue before the real ones. Open water, a shore strip beyond
+  each side of the race area, no current, a pairing for each of the four conditions at version 1. The
+  app no longer uses it.
 - `dev-venue@2` (bundled): `dev-venue@1` with its pairings on the schema-2 conditions files; the venue
-  races use until race assembly reads `RaceSetup.venue` (#77, #81).
+  races use (`RaceFiles.defaults`) until the practice setup picks one of the real venues (#131).
 - `test-venue@1` (test resource): small hand-checkable grids, concave land, a tidal current with an eddy.
+- `land-in-race-area@1` (test resource): an island inside the race area, which the offline check fails.
 
 ## Frame and units
 
@@ -220,3 +226,23 @@ don't check this yet.) It throws `invalidContent` for a venue that breaks any of
 
 Land clear of the start line, marks and race area, and the estuary's channel inside it, are offline
 checks over the derived course (#83), not load-time validation.
+
+## Offline checks (#83)
+
+Every shipped pairing passes two checks, run by the tests (`Packages/RegattaCore/Sources/VenueTools`),
+never at race time. Each covers every seeded rotation of the mean direction (±10°, #77), and the
+longest course a race sails there (the longest beat for any strength in the conditions and one or two
+laps, with the line for 16 boats) or also the shortest:
+
+- **Geometry** (`VenueOfflineCheck`): the longest course's race area is clear of land and inside the
+  pairing's geographic grid (and the current grid); no mark or line end of the longest or shortest course
+  is within 50 m of land; at a venue with current, both race areas hold channel water (at least 80 % of
+  the deepest node) and shallows (wet, at most 40 %).
+- **Sailability** (`VenueSailability`, #14): in a 25 % lull on the conditions' lightest strength, at peak
+  flood and peak ebb, a close-hauled boat makes at least 1 kn upwind over the ground somewhere on the beat
+  and is swept backwards nowhere in the race area. Progress is the polar's best upwind VMG in the local
+  wind (after the geographic grid) plus the current along the local upwind direction.
+
+`regatta-venue-png [<directory>]`, run from the repository root, writes an overview map of each shipped
+pairing into `docs/venues/` (land, depth tint, the race area at the mean direction and ±10°, marks,
+landmarks); a new venue version regenerates them.

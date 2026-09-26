@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "RegattaBots", targets: ["RegattaBots"]),
         .executable(name: "regatta-replay", targets: ["regatta-replay"]),
         .executable(name: "regatta-botsuite", targets: ["regatta-botsuite"]),
+        .executable(name: "regatta-venue-png", targets: ["regatta-venue-png"]),
     ],
     dependencies: [
         // SHA-256 of data files on Linux (the race server); Apple platforms use CryptoKit.
@@ -31,10 +32,16 @@ let package = Package(
         // Bots sail seats through RegattaCore's public input API only (#60), on the server and the device.
         .target(name: "RegattaBots", dependencies: ["RegattaCore"]),
         .executableTarget(name: "regatta-replay", dependencies: ["RegattaCore"]),
-        // regatta-replay is a dependency so `swift test` builds it: the golden test runs it as its own process.
+        // The offline venue checks and overview maps (#83): run by the tests and `regatta-venue-png`, never
+        // at race time, so apart from RegattaCore.
+        .target(name: "VenueTools", dependencies: ["RegattaCore"]),
+        // A thin command line over VenueTools: writes docs/venues/.
+        .executableTarget(name: "regatta-venue-png", dependencies: ["VenueTools"]),
+        // regatta-replay and regatta-venue-png are dependencies so `swift test` builds them: the golden test
+        // and the venue PNG test run them as their own processes.
         .testTarget(
             name: "RegattaCoreTests",
-            dependencies: ["RegattaCore", "regatta-replay"],
+            dependencies: ["RegattaCore", "regatta-replay", "VenueTools", "regatta-venue-png"],
             // Fixture data files, byte for byte, loaded with `DataFile.bundled(id:version:in: .module)`.
             resources: [.copy("Resources/venues")]
         ),

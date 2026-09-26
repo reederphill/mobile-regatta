@@ -14,6 +14,12 @@ enum VenueFixtures {
         1: "5f114297c5191a38366f9b38a59460023e5e08dbe295f1af6f1e8ff19d8df958",
         2: "42154e3d263171997dcd444383b0dcf0d89a04fc2b31280b10a4a5f5af220785",
     ]
+    /// SHA-256 of the shipped venues' version 1 files (#83), by id.
+    static let shippedPinnedHashes = [
+        "hollin-bay": "e85d1079329e4f93064566c6839cd443beb806b41c6af1b3193b5db24d73eeb1",
+        "saltings-reach": "0257fd48f4866052a403d50c3445f9f10f4d6c9f94eb094ca2d862d0fd8004d1",
+        "fellmere": "bdca4a03d63fc99eed10ecec8810bf31ef73e352233fef5dbb1f5a6d91b68bb8",
+    ]
 
     static func testFile() throws -> VenueFile {
         try VenueFile.bundled(id: testID, version: 1, in: .module)
@@ -132,6 +138,33 @@ enum VenueFixtures {
         let race = Race(setup: try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot]), windSeed: WindSeed(2))
         #expect(race.windSetup.pairing == pairing)
         #expect(race.windSetup.conditionsRef == Race.defaultConditions.ref)
+    }
+
+    /// The three v1.0 venues (#12, #36), bundled for the app and the server, each named as shipped, each
+    /// pairing on the schema-2 conditions, and each landmark an asset `docs/assets-manifest.md` lists (#53).
+    @Test func bundledVenueDisplayNamesMatchTheShipNames() throws {
+        let files = try ["hollin-bay", "saltings-reach", "fellmere"].map { try VenueFile.bundled(id: $0, version: 1) }
+        #expect(files.map(\.content.displayName) == ["Hollin Bay", "Saltings Reach", "Fellmere"])
+        #expect(files.map { $0.content.pairings.map(\.conditions.description) } == [
+            ["classic-oscillating@2", "sea-breeze@2"],
+            ["classic-oscillating@2", "gusty-offshore@2"],
+            ["light-and-patchy@2", "gusty-offshore@2"],
+        ])
+        let root = URL(fileURLWithPath: #filePath)
+        let manifest = try String(
+            contentsOf: (0..<5).reduce(root) { url, _ in url.deletingLastPathComponent() }
+                .appendingPathComponent("docs/assets-manifest.md"),
+            encoding: .utf8)
+        for file in files {
+            #expect(file.header.placeholders.isEmpty, "\(file.id)")
+            #expect(!file.content.landmarks.isEmpty && !file.content.land.isEmpty, "\(file.id)")
+            for landmark in file.content.landmarks {
+                #expect(landmark.asset.hasPrefix("landmark-\(file.id)-"))
+                #expect(manifest.contains("`\(landmark.asset)`"), "\(landmark.asset) is not in the manifest")
+                #expect(file.content.isLand(landmark.position), "\(landmark.asset) is on the water")
+            }
+            #expect(file.ref.hash.hex == VenueFixtures.shippedPinnedHashes[file.id], "\(file.id)@1")
+        }
     }
 
     @Test func hashesArePinned() throws {

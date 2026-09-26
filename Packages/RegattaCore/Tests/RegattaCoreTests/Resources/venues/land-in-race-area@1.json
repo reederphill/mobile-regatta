@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "id": "land-in-race-area",
+  "version": 1,
+  "displayName": "Land In Race Area",
+  "notes": [
+    "Test fixture for the offline venue check (#83): an island 150-250 m up the beat, inside the race area. Not shipped in the app.",
+    "Otherwise the check passes: the grid covers the race area at every rotation, and the island keeps more than 50 m from every mark."
+  ],
+  "landmarks": [],
+  "land": [
+    { "outlineMetres": [[-50, 150], [50, 150], [50, 250], [-50, 250], [-50, 150]] }
+  ],
+  "pairings": [
+    {
+      "conditionsRef": { "id": "classic-oscillating", "version": 2 },
+      "meanDirectionDegrees": 0,
+      "trendDirection": "either",
+      "startLineCentreMetres": [0, 0],
+      "geographicGrid": {
+        "originMetres": [-800, -400],
+        "cellSizeMetres": 400,
+        "orientationDegrees": 0,
+        "columns": 5,
+        "rows": 4,
+        "directionDeltaDegrees": [
+          [0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0]
+        ],
+        "speedFactor": [
+          [1, 1, 1, 1, 1],
+          [1, 1, 1, 1, 1],
+          [1, 1, 1, 1, 1],
+          [1, 1, 1, 1, 1]
+        ]
+      }
+    }
+  ],
+  "current": { "hasCurrent": false }
+}

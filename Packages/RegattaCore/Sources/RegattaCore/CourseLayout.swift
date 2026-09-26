@@ -118,15 +118,27 @@ public struct CourseLayout: Sendable, Equatable {
         windSetup: WindSetup, land: [Venue.LandPolygon], fleetSize: Int, laps: Int, boatClass: BoatClass,
         rules: RulesConfig
     ) -> CourseLayout {
+        derive(
+            axis: windSetup.meanDirection, anchor: windSetup.pairing.startLineCentre,
+            beat: beat(laps: laps, tws: windSetup.baseStrength, boatClass: boatClass, rules: rules),
+            land: land, fleetSize: fleetSize, laps: laps, boatClass: boatClass, rules: rules
+        )
+    }
+
+    /// Lays out the course up `axis` (a compass bearing, radians) from the start-line centre `anchor`,
+    /// with a beat of `beat` metres: what `derive(windSetup:…)` does with the drawn setup's mean direction,
+    /// its pairing's anchor and `beat(laps:tws:boatClass:rules:)`. Offline tools lay courses out at chosen
+    /// directions and beats with it (the venue checks, #83).
+    public static func derive(
+        axis: Double, anchor: Vec2, beat: Double, land: [Venue.LandPolygon], fleetSize: Int, laps: Int,
+        boatClass: BoatClass, rules: RulesConfig
+    ) -> CourseLayout {
         precondition(laps >= 1, "a race sails at least one lap")
         let format = rules.raceFormat
         let hull = boatClass.hull.length
-        let axis = windSetup.meanDirection
         let up = Vec2.heading(axis)
         let right = up.rightPerp
-        let anchor = windSetup.pairing.startLineCentre
 
-        let beat = Self.beat(laps: laps, tws: windSetup.baseStrength, boatClass: boatClass, rules: rules)
         let lineLength = format.startLine.length(fleetSize: fleetSize, hullLength: hull)
         let line = Line(
             pin: Mark(name: "pin", position: anchor - right * (lineLength / 2), radius: pinRadius),
