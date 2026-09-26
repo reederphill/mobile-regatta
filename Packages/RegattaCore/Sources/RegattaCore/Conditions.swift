@@ -19,9 +19,11 @@ public struct Conditions: DataFileContent, Hashable {
     public static let bundleDirectory = "conditions"
     public static let supportedSchemaVersions = [1, 2]
 
-    /// Every conditions entry oscillates with a main period in 90–180 s, about one cycle per beat
-    /// (#10, ADR 0001). A file's own period range must lie inside this envelope, and wins inside it.
-    public static let shiftPeriodEnvelope: ClosedRange<Double> = 90...180
+    /// Every conditions entry oscillates with a main period in 60–180 s (ADR 0001). #221 made the shifts
+    /// faster, about 60–100 s from version 3 of each file (90–180 s before, #10); with 30 s knots, periods
+    /// below about 60 s can't be drawn cleanly, so 60 s is the floor (ADR 0001). A file's own period range
+    /// must lie inside this envelope, and wins inside it.
+    public static let shiftPeriodEnvelope: ClosedRange<Double> = 60...180
 
     /// Name shown to players, e.g. "Gusty offshore".
     public let name: String

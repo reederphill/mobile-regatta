@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "id": "classic-oscillating",
+  "version": 3,
+  "name": "Classic oscillating",
+  "placeholders": [
+    "/shift/periodSeconds",
+    "/shift/wobbleDegrees",
+    "/puffs",
+    "/puffs/fanDegrees"
+  ],
+  "notes": [
+    "Wind model #10: 9-14 kn, oscillation +/-8 deg, no persistent trend; medium puffs, some lulls. #221 overrides #10's period of about 120 s with 70-90 s (#221 says about 75 s): a beat takes about 150-170 s, so the shift now swings through about two cycles a beat.",
+    "Units: knots, degrees, seconds, metres; gains, losses, shares, coverage and drift as fractions.",
+    "Version 2 (schema 2, #75) is version 1 plus the keyed wind's wobble: wobbleDegrees is the peak of the smaller, faster wobble (#10) each 30 s window's key draws on top of the oscillation, vanishing at the window's knots. Strength is fixed for the race (#10), so there is no strength-channel tuning.",
+    "Version 3 (#221, #233) is version 2 with only three values changed: the period 70-90 s (was 110-130 s), the wobble 3 deg (was 1 deg), readable but never outlasting its 30 s window, and the puff fan 9 deg (was 6 deg), about 1.5 x, so a puff can decide which tack is favoured. The amplitude and every other puff column are unchanged.",
+    "Placeholders (JSON Pointers above) await tuning on the #232 sliders: the 70-90 s period, the 3 deg wobble and the 9 deg fan (#221), and the other puff columns, set from #10's words (medium, some lulls) and its shared ranges (60-150 m, puffs +20-35 %, lulls -15-25 %, drift 0.3-0.5 x wind)."
+  ],
+  "strength": { "minKnots": 9, "maxKnots": 14 },
+  "shift": {
+    "amplitudeDegrees": 8,
+    "periodSeconds": { "min": 70, "max": 90 },
+    "wobbleDegrees": 3
+  },
+  "trend": null,
+  "build": null,
+  "puffs": {
+    "coverage": 0.33,
+    "diameterMetres": { "min": 60, "max": 150 },
+    "lifetimeSeconds": { "min": 40, "max": 90 },
+    "driftFraction": { "min": 0.3, "max": 0.5 },
+    "fanDegrees": 9,
+    "puffGain": { "min": 0.22, "max": 0.30 },
+    "lullShare": 0.3,
+    "lullLoss": { "min": 0.15, "max": 0.20 }
+  }
+}

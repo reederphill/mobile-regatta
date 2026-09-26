@@ -15,6 +15,8 @@ Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/
   at version 1.
 - `dev-venue@2` (bundled): `dev-venue@1` with its pairings on the schema-2 conditions files; the venue
   races use until race assembly reads `RaceSetup.venue` (#77, #81).
+- `dev-venue@3` (bundled): `dev-venue@2` with its pairings on the version-3 conditions files, whose shifts
+  are faster, with a readable wobble and a wider puff fan (#221, #233). Nothing races it by default yet.
 - `test-venue@1` (test resource): small hand-checkable grids, concave land, a tidal current with an eddy.
 
 ## Frame and units
