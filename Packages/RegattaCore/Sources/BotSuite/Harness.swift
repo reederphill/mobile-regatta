@@ -145,19 +145,10 @@ struct RaceTally {
             if boat.status == .racing && !boat.isTakingPenalty && boat.twa < noGo && boat.speed < BotRaceHarness.ironsSpeed {
                 ironsTicks[seat] += 1
             }
-            if boat.isOnCourse && inset(boat.position) < BotRaceHarness.edgeMargin {
+            if boat.isOnCourse && area.inset(boat.position) < BotRaceHarness.edgeMargin {
                 edgeTicks[seat] += 1
             }
         }
-    }
-
-    /// Metres from `position` in to the race area's nearest edge; negative outside it.
-    private func inset(_ position: Vec2) -> Double {
-        let offset = position - area.centre
-        let up = Vec2.heading(area.axis)
-        let along = abs(offset.dot(up))
-        let across = abs(offset.dot(up.rightPerp))
-        return min(area.halfWidth - across, area.halfLength - along)
     }
 
     func metrics(seat: Int, of race: Race, tier: BotTier, skill: Double) -> SeatMetrics {

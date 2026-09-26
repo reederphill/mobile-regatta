@@ -47,7 +47,12 @@ import Glibc
 ///    the rules read the sailing wind, and the current carries every boat, ghosts too. The shadow cone
 ///    follows the caster's apparent wind, and a backwind zone reaches to windward of her (`ShadowCone`),
 ///    both under the class's stacking floor. The digest hashes the three winds and the current.
-public let simulationRevision = 10
+/// 11: race area boundary and land contact (#82), on 10. After obstacle contacts, every boat on the course
+///    is moved out of the venue's land in the race area and back inside its boundary (`RaceEdges.resolve`);
+///    heading into the edge she keeps her speed along it, the course's `edgeSpeedRetention` of it as the
+///    touch begins. No penalty; the touch is announced and recorded. The prototype placement is squeezed
+///    towards the line to keep every boat a hull length inside the area.
+public let simulationRevision = 11
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

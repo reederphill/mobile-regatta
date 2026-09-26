@@ -18,7 +18,8 @@ import Testing
     }
 
     static func layout(fleetSize: Int = 10, laps: Int = 2, rules: RulesConfig = rules) throws -> CourseLayout {
-        CourseLayout.derive(windSetup: try windSetup(), fleetSize: fleetSize, laps: laps, boatClass: boatClass, rules: rules)
+        CourseLayout.derive(windSetup: try windSetup(), land: [], fleetSize: fleetSize, laps: laps, boatClass: boatClass,
+                            rules: rules)
     }
 
     /// A point `across` metres to the right of the line centre (looking upwind) and `up` metres up the axis.
@@ -111,8 +112,10 @@ import Testing
         for id in Self.conditionsIDs {
             for seed: UInt64 in [1, 2, 99] {
                 let setup = try Self.windSetup(id, seed: seed)
-                let a = CourseLayout.derive(windSetup: setup, fleetSize: 12, laps: 2, boatClass: Self.boatClass, rules: Self.rules)
-                let b = CourseLayout.derive(windSetup: setup, fleetSize: 12, laps: 2, boatClass: Self.boatClass, rules: Self.rules)
+                let a = CourseLayout.derive(windSetup: setup, land: [], fleetSize: 12, laps: 2, boatClass: Self.boatClass,
+                                              rules: Self.rules)
+                let b = CourseLayout.derive(windSetup: setup, land: [], fleetSize: 12, laps: 2, boatClass: Self.boatClass,
+                                              rules: Self.rules)
                 #expect(a == b)
             }
         }
@@ -133,7 +136,8 @@ import Testing
             }
             for seed: UInt64 in 0..<50 {
                 let setup = try Self.windSetup(id, seed: seed)
-                let course = CourseLayout.derive(windSetup: setup, fleetSize: 10, laps: 2, boatClass: Self.boatClass, rules: Self.rules)
+                let course = CourseLayout.derive(windSetup: setup, land: [], fleetSize: 10, laps: 2, boatClass: Self.boatClass,
+                                                 rules: Self.rules)
                 #expect(course.beat >= 200 && course.beat <= 360)
                 #expect(Self.isClose(course.marksOfLeg(.round(0))[0].position,
                                      setup.pairing.startLineCentre + Vec2.heading(setup.meanDirection) * course.beat))

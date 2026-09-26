@@ -291,7 +291,7 @@ enum VenueFixtures {
     @Test func landIsConcaveAndWoundAnticlockwise() throws {
         let venue = try VenueFixtures.testVenue()
         for polygon in venue.land {
-            #expect(VenueSchema1.signedArea(polygon.points) > 0)
+            #expect(Collision.signedArea(polygon.points) > 0)
         }
         // Land 1 was written clockwise: turned round.
         #expect(venue.land[1].points == [Vec2(600, -200), Vec2(600, 600), Vec2(400, 600), Vec2(400, -200)])

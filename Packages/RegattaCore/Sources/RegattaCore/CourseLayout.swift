@@ -88,8 +88,11 @@ public struct CourseLayout: Sendable, Equatable {
     public let elements: [Element]
     /// Rounding order, from `RaceSetup.laps`: W → O → gate per lap but the last, which ends W → O → finish.
     public let legs: [Leg]
-    /// Boundary: boats sail inside it.
+    /// The drawn boundary: boats sail inside it.
     public let raceArea: RaceArea
+    /// The venue's land that reaches into `raceArea`, in file order (#82). The race area is the rectangle
+    /// less these polygons: there is no polygon difference, so a query asks both (`isInRaceArea(_:)`).
+    public let land: [Venue.LandPolygon]
     /// Boundary behaviour: the fraction of her speed along the edge a boat keeps on meeting it (#82).
     public let edgeSpeedRetention: Double
     /// Where boats are placed at the start of the sequence (#35).
@@ -105,12 +108,15 @@ public struct CourseLayout: Sendable, Equatable {
     /// - `windSetup`: the race's public wind setup, drawn from its race seed around the venue's pairing
     ///   for its conditions (#77): the axis is its seeded mean direction, the anchor its pairing's
     ///   start-line centre, and the beat is sized in its base strength.
+    /// - `land`: the venue's land (`Venue.land`), in the course's frame; the course keeps the polygons
+    ///   that reach into its race area.
     /// - `fleetSize`, `boatClass`: the line is `rules.raceFormat.startLine` for that many hulls.
     /// - `laps`: `RaceSetup.laps`, at least 1.
     ///
     /// Same inputs, identical course.
     public static func derive(
-        windSetup: WindSetup, fleetSize: Int, laps: Int, boatClass: BoatClass, rules: RulesConfig
+        windSetup: WindSetup, land: [Venue.LandPolygon], fleetSize: Int, laps: Int, boatClass: BoatClass,
+        rules: RulesConfig
     ) -> CourseLayout {
         precondition(laps >= 1, "a race sails at least one lap")
         let format = rules.raceFormat
@@ -157,7 +163,8 @@ public struct CourseLayout: Sendable, Equatable {
 
         return CourseLayout(
             axis: axis, beat: beat, startLine: line, finishLine: line, elements: elements, legs: legs,
-            raceArea: raceArea, edgeSpeedRetention: format.edgeSpeedRetention, placement: format.startRow,
+            raceArea: raceArea, land: land.filter(raceArea.overlaps), edgeSpeedRetention: format.edgeSpeedRetention,
+            placement: format.startRow,
             zoneRadius: rules.zoneRadius(hullLength: hull)
         )
     }
@@ -197,6 +204,17 @@ public struct CourseLayout: Sendable, Equatable {
         case .round(let index): elements[index].marks
         case .finish: [finishLine.pin, finishLine.committee]
         }
+    }
+
+    /// Whether `p` is in the race area: inside `raceArea` and on none of `land`.
+    public func isInRaceArea(_ p: Vec2) -> Bool {
+        raceArea.contains(p) && !land.contains { $0.contains(p) }
+    }
+
+    /// Where `hull` must move to stay in the race area, and which of its edges it touches
+    /// (`RaceEdges.resolve`): what the race does to every boat on the course each tick.
+    public func resolveEdges(hull: [Vec2]) -> RaceEdges.Resolution {
+        RaceEdges.resolve(hull: hull, area: raceArea, land: land)
     }
 
     /// Every mark on the course, each once: rule 31's obstacles.

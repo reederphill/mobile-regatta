@@ -77,6 +77,105 @@ public func crossing(from p0: Vec2, to p1: Vec2, over s: Segment) -> Int {
 }
 
 public enum Collision {
+    /// How a hull touches an obstruction: the move that clears it, and which way the obstruction faces.
+    public struct Contact: Sendable, Equatable {
+        /// The translation that moves the hull clear.
+        public var push: Vec2
+        /// Unit vector out of the obstruction, into the water.
+        public var normal: Vec2
+
+        public init(push: Vec2, normal: Vec2) {
+            self.push = push
+            self.normal = normal
+        }
+
+        public var depth: Double { push.length }
+    }
+
+    /// How the convex `hull` (either winding) reaches into `polygon`, a simple polygon that may be concave
+    /// (`Venue.LandPolygon.points`), or nil if it doesn't. The deeper of two cases (#82):
+    /// - a hull corner inside the polygon (even-odd), moved to the nearest point of its outline;
+    /// - a polygon corner inside the hull, the hull moved off it back along the outward normal of its
+    ///   nearest side.
+    ///
+    /// The deepest single corner decides, so a hull reaching into a corner of the polygon narrower than
+    /// itself may still touch the other side after the push: `RaceEdges.resolve` makes several passes.
+    public static func penetration(convex hull: [Vec2], simplePolygon polygon: [Vec2]) -> Contact? {
+        var best: Contact?
+        var bestDepth = 0.0
+        for v in hull where contains(simplePolygon: polygon, v) {
+            var nearest = v
+            var distance = Double.infinity
+            for i in polygon.indices {
+                let q = closestPoint(on: Segment(polygon[i], polygon[(i + 1) % polygon.count]), to: v)
+                let d = (q - v).length
+                if d < distance {
+                    distance = d
+                    nearest = q
+                }
+            }
+            if distance > bestDepth {
+                bestDepth = distance
+                best = Contact(push: nearest - v, normal: (nearest - v) / distance)
+            }
+        }
+        // A clockwise hull's outward normals are its edges' left perpendiculars.
+        let winding: Double = signedArea(hull) < 0 ? -1 : 1
+        for p in polygon where contains(hull, p) {
+            var distance = Double.infinity
+            var outward = Vec2.zero
+            for i in hull.indices {
+                let n = (hull[(i + 1) % hull.count] - hull[i]).rightPerp.normalized * winding
+                let d = (hull[i] - p).dot(n)
+                if d < distance {
+                    distance = d
+                    outward = n
+                }
+            }
+            if distance > bestDepth {
+                bestDepth = distance
+                best = Contact(push: -outward * distance, normal: -outward)
+            }
+        }
+        return best
+    }
+
+    /// Whether `p` is inside the simple polygon `polygon` (even-odd rule; either winding). Points exactly
+    /// on an edge may go either way.
+    public static func contains(simplePolygon polygon: [Vec2], _ p: Vec2) -> Bool {
+        var inside = false
+        var j = polygon.count - 1
+        for i in polygon.indices {
+            let a = polygon[i], b = polygon[j]
+            if (a.y > p.y) != (b.y > p.y) {
+                let x = a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x)
+                if p.x < x { inside.toggle() }
+            }
+            j = i
+        }
+        return inside
+    }
+
+    /// Whether segments `s` and `t` meet, ends and collinear overlaps included.
+    public static func intersects(_ s: Segment, _ t: Segment) -> Bool {
+        let d1 = (s.b - s.a).cross(t.a - s.a), d2 = (s.b - s.a).cross(t.b - s.a)
+        let d3 = (t.b - t.a).cross(s.a - t.a), d4 = (t.b - t.a).cross(s.b - t.a)
+        if ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0)) { return true }
+        func onSegment(_ p: Vec2, _ seg: Segment) -> Bool {
+            min(seg.a.x, seg.b.x) <= p.x && p.x <= max(seg.a.x, seg.b.x)
+                && min(seg.a.y, seg.b.y) <= p.y && p.y <= max(seg.a.y, seg.b.y)
+        }
+        return (d1 == 0 && onSegment(t.a, s)) || (d2 == 0 && onSegment(t.b, s))
+            || (d3 == 0 && onSegment(s.a, t)) || (d4 == 0 && onSegment(s.b, t))
+    }
+
+    /// The polygon's signed area, positive when it winds anticlockwise.
+    static func signedArea(_ polygon: [Vec2]) -> Double {
+        var sum = 0.0
+        for i in polygon.indices { sum += polygon[i].cross(polygon[(i + 1) % polygon.count]) }
+        return sum / 2
+    }
+
     /// Separating-axis test for two convex polygons. Returns the minimum translation
     /// that pushes `a` out of `b`, or nil if they don't overlap.
     public static func penetration(_ a: [Vec2], _ b: [Vec2]) -> Vec2? {

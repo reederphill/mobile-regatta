@@ -23,7 +23,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     public var ocsCount: Int
     /// Seconds on the water within `BotRaceHarness.edgeMargin` of the race area's edge, or outside it.
     public var edgeSeconds: Double
-    /// Obstruction contacts: none until #82 draws land and the boundary.
+    /// Obstruction contacts begun (#82): with land, and with the race area's boundary.
     public var landContacts: Int
     public var boundaryContacts: Int
 

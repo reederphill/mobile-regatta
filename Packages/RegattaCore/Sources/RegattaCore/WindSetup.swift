@@ -1,25 +1,5 @@
 import Foundation
 
-/// The water a course's boats may sail in: a rectangle square to the course axis.
-/// `CourseLayout.derive` lays it out (#80), and the race attaches it to its `WindSetup` (#81).
-public struct RaceArea: Hashable, Sendable {
-    /// Metres.
-    public let centre: Vec2
-    /// Compass bearing up the course, radians.
-    public let axis: Double
-    /// Metres from the centre to each side, across the axis.
-    public let halfWidth: Double
-    /// Metres from the centre to each end, along the axis.
-    public let halfLength: Double
-
-    public init(centre: Vec2, axis: Double, halfWidth: Double, halfLength: Double) {
-        self.centre = centre
-        self.axis = axis
-        self.halfWidth = halfWidth
-        self.halfLength = halfLength
-    }
-}
-
 /// Everything about a race's wind that is known before the gun: the conditions, the venue's pairing for
 /// them (`Venue.pairing(for:)`: authored mean and trend direction, geographic grid), and what the public
 /// race seed draws from them (#10). Every client can derive it, so it is shown in the briefing

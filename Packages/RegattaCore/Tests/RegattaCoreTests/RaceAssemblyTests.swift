@@ -99,8 +99,9 @@ import Testing
         let files = try RaceFiles(resolving: setup, from: catalog)
         let race = try Race(setup: setup, files: files, mode: .authoritative(windSeed: Self.windSeed))
         let drawn = WindSetup(conditions: files.conditions, pairing: files.pairing, raceSeed: setup.raceSeed)
-        #expect(race.course == CourseLayout.derive(windSetup: drawn, fleetSize: 4, laps: setup.laps,
-                                                   boatClass: files.boatClass.content, rules: files.rulesConfiguration.content))
+        #expect(race.course == CourseLayout.derive(windSetup: drawn, land: files.venue.content.land, fleetSize: 4,
+                                                   laps: setup.laps, boatClass: files.boatClass.content,
+                                                   rules: files.rulesConfiguration.content))
         #expect(race.windSetup == drawn.with(raceArea: race.course.raceArea))
         #expect(race.current == CurrentField(venue: files.venue.content, raceSeed: setup.raceSeed))
         #expect(race.tideStateAtGun == CurrentField.tideStateAtGun(for: files.venue.content, raceSeed: setup.raceSeed))

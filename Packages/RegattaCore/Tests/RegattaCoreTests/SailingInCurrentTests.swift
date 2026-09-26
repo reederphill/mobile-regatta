@@ -123,7 +123,8 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3,
     @Test func everyBoatMovesAtHerVelocityOverTheGround() throws {
         let race = try placedRace(seats: 4, current: steadyCurrent(knots: 1.5, towards: deg2rad(200))) { snapshot, race in
             let origin = snapshot.seats[0].boat.position
-            for seat in 0..<4 { snapshot.seats[seat].boat.position = origin + Vec2(Double(seat) * 60, 0) }
+            // Along the line, clear of the race area's edges (#82): the seats are free to move.
+            for seat in 0..<4 { snapshot.seats[seat].boat.position = origin + race.course.right * (Double(seat) * 40) }
             stopped(&snapshot.seats[0].boat) // stopped, before the start
             var sailing = snapshot.seats[1].boat // sailing close-hauled, before the start
             let best = race.boatClass.polar.bestUpwind(tws: sailing.windSpeed)

@@ -109,13 +109,32 @@ public struct Incident: Sendable, Equatable, Codable {
     }
 }
 
-/// Every incident of a race, by id and by the pair of boats in it. Arrays only (ADR 0002): the
-/// incidents in id order, and one entry per pair kept sorted by `SeatPair`, looked up by binary
-/// search, so nothing depends on hash order. Codable as its incidents alone; the pair entries are
-/// rebuilt on decoding.
+/// A boat touching land or the race area's boundary (#82): recorded, never a foul or a penalty.
+public struct ObstructionContact: Sendable, Equatable, Codable {
+    /// The tick the touch began on.
+    public let tick: Int
+    /// The boat's leg index then.
+    public let leg: Int
+    public let seat: Int
+    public let kind: ObstructionKind
+
+    public init(tick: Int, leg: Int, seat: Int, kind: ObstructionKind) {
+        self.tick = tick
+        self.leg = leg
+        self.seat = seat
+        self.kind = kind
+    }
+}
+
+/// Every incident of a race, by id and by the pair of boats in it, and every obstruction contact.
+/// Arrays only (ADR 0002): the incidents in id order, and one entry per pair kept sorted by `SeatPair`,
+/// looked up by binary search, so nothing depends on hash order. Codable as its incidents and
+/// obstruction contacts; the pair entries are rebuilt on decoding.
 public struct IncidentIndex: Sendable, Equatable, Codable {
     /// All incidents, `incidents[id]` being the one with that id.
     public private(set) var incidents: [Incident] = []
+    /// Every touch of land or the boundary, in the order they began: one boat each, so not an `Incident`.
+    public private(set) var obstructionContacts: [ObstructionContact] = []
     /// Sorted by `key`, one per pair that has had an incident.
     private var entries: [Entry] = []
 
@@ -151,6 +170,11 @@ public struct IncidentIndex: Sendable, Equatable, Codable {
             precondition(call.incidentId == incident.id, "incident \(incident.id)'s call names incident \(call.incidentId)")
         }
         incidents[incident.id] = incident
+    }
+
+    /// Records a boat's touch of land or the boundary, after every one before it.
+    public mutating func recordObstructionContact(_ contact: ObstructionContact) {
+        obstructionContacts.append(contact)
     }
 
     /// The incidents between `a` and `b`, oldest first.
@@ -195,7 +219,7 @@ public struct IncidentIndex: Sendable, Equatable, Codable {
         return at < entries.count && entries[at].key == key ? at : nil
     }
 
-    private enum CodingKeys: String, CodingKey { case incidents }
+    private enum CodingKeys: String, CodingKey { case incidents, obstructionContacts }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -207,10 +231,12 @@ public struct IncidentIndex: Sendable, Equatable, Codable {
             }
             add(incident)
         }
+        obstructionContacts = try c.decode([ObstructionContact].self, forKey: .obstructionContacts)
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(incidents, forKey: .incidents)
+        try c.encode(obstructionContacts, forKey: .obstructionContacts)
     }
 }

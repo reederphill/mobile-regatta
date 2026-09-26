@@ -220,6 +220,7 @@ struct LogFeeder {
         #expect(a.tick == b.tick)
         #expect(a.touchingBoats == b.touchingBoats)
         #expect(a.touchingObstacles == b.touchingObstacles)
+        #expect(a.touchingEdges == b.touchingEdges)
         #expect(a.foulMemory == b.foulMemory)
         #expect(a.incidents == b.incidents)
         #expect(a.firstFinishTime == b.firstFinishTime)
@@ -254,6 +255,20 @@ struct LogFeeder {
         var obstacle = good
         obstacle.touchingObstacles = [.init(seat: 0, obstacle: 99)]
         #expect(throws: WorldSnapshotError.invalidContact) { try Self.imported(obstacle) }
+        // Edge contacts: a seat outside the fleet, out of order, repeated.
+        for bad: [WorldSnapshot.EdgeContact] in [
+            [.init(seat: 16, kind: .land)],
+            [.init(seat: 1, kind: .boundary), .init(seat: 1, kind: .land)],
+            [.init(seat: 2, kind: .land), .init(seat: 1, kind: .land)],
+            [.init(seat: 1, kind: .land), .init(seat: 1, kind: .land)],
+        ] {
+            var edge = good
+            edge.touchingEdges = bad
+            #expect(throws: WorldSnapshotError.invalidContact) { try Self.imported(edge) }
+        }
+        var edges = good
+        edges.touchingEdges = [.init(seat: 1, kind: .land), .init(seat: 1, kind: .boundary), .init(seat: 4, kind: .land)]
+        _ = try Self.imported(edges)
 
         let lastLeg = race.course.legs.count - 1
         // Seats outside the fleet, a tick after the snapshot's, a leg the course doesn't have.
@@ -263,6 +278,15 @@ struct LogFeeder {
             incident.incidents.open(between: 2, and: 3, tick: good.tick, leg: lastLeg) // valid: the error names the next
             incident.incidents.open(between: a, and: b, tick: tick, leg: leg)
             #expect(throws: WorldSnapshotError.invalidIncident(id: 1)) { try Self.imported(incident) }
+        }
+
+        // Obstruction contacts: a seat outside the fleet, a tick after the snapshot's, a leg the course doesn't have.
+        let badContacts = [(16, good.tick, 0), (-1, good.tick, 0), (0, good.tick + 1, 0), (0, good.tick, lastLeg + 1)]
+        for (seat, tick, leg) in badContacts {
+            var contact = good
+            contact.incidents.recordObstructionContact(.init(tick: good.tick, leg: lastLeg, seat: 3, kind: .land))
+            contact.incidents.recordObstructionContact(.init(tick: tick, leg: leg, seat: seat, kind: .boundary))
+            #expect(throws: WorldSnapshotError.invalidObstructionContact(index: 1)) { try Self.imported(contact) }
         }
 
         var late = good
@@ -321,7 +345,8 @@ struct LogFeeder {
 @Suite struct WorldSnapshotCoverageTests {
     /// Race properties carried by `WorldSnapshot`.
     static let carried: Set<String> = [
-        "tick", "boats", "heldInputs", "boatContacts", "obstacleContacts", "lastFoul", "incidents", "firstFinishTime",
+        "tick", "boats", "heldInputs", "boatContacts", "obstacleContacts", "edgeContacts", "lastFoul", "incidents",
+        "firstFinishTime",
         "isOver",
         "overlaps", // as the pairs overlapped or changing
         "wind", // as its keys, `windKeys`; its setup and window grid are fixed for the race

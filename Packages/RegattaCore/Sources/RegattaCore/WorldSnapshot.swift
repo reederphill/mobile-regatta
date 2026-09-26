@@ -46,6 +46,17 @@ public struct WorldSnapshot: Sendable {
         }
     }
 
+    /// A seat touching an edge of the race area: land or the boundary (#82).
+    public struct EdgeContact: Hashable, Sendable {
+        public let seat: Int
+        public let kind: ObstructionKind
+
+        public init(seat: Int, kind: ObstructionKind) {
+            self.seat = seat
+            self.kind = kind
+        }
+    }
+
     /// When a pair was last called for a foul, in race seconds. Umpire memory: it stays where the race
     /// is judged and is never sent to clients (#18); a receiver keeps its own.
     public struct FoulMemory: Hashable, Sendable {
@@ -80,6 +91,9 @@ public struct WorldSnapshot: Sendable {
     public var touchingBoats: [SeatPair]
     /// Seats touching an obstacle at this tick, by seat then obstacle.
     public var touchingObstacles: [ObstacleContact]
+    /// Seats touching an edge at this tick, by seat then `ObstructionKind.allCases`: a touch slows a boat
+    /// most, and is recorded, when it begins.
+    public var touchingEdges: [EdgeContact]
     /// By pair.
     public var foulMemory: [FoulMemory]
     /// Every incident so far. Umpire memory like `foulMemory`: never sent to clients (#18, #96), and a
@@ -101,14 +115,15 @@ public struct WorldSnapshot: Sendable {
 
     public init(
         tick: Int, seats: [Seat], touchingBoats: [SeatPair] = [], touchingObstacles: [ObstacleContact] = [],
-        foulMemory: [FoulMemory] = [], incidents: IncidentIndex = IncidentIndex(), firstFinishTime: Double? = nil,
-        isOver: Bool = false, windKeys: WindKeyChain = WindKeyChain(),
+        touchingEdges: [EdgeContact] = [], foulMemory: [FoulMemory] = [], incidents: IncidentIndex = IncidentIndex(),
+        firstFinishTime: Double? = nil, isOver: Bool = false, windKeys: WindKeyChain = WindKeyChain(),
         overlaps: [OverlapMemory] = []
     ) {
         self.tick = tick
         self.seats = seats
         self.touchingBoats = touchingBoats
         self.touchingObstacles = touchingObstacles
+        self.touchingEdges = touchingEdges
         self.foulMemory = foulMemory
         self.incidents = incidents
         self.firstFinishTime = firstFinishTime
@@ -135,10 +150,14 @@ public enum WorldSnapshotError: Error, Equatable, Sendable {
     /// Key `window` is missing: the wind at the snapshot's tick needs it, or it is a gap between that
     /// and the last key the snapshot holds.
     case missingWindKey(Int)
-    /// A pair or contact naming a seat or obstacle the race doesn't have, or a pair with `a >= b`.
+    /// A pair or contact naming a seat or obstacle the race doesn't have, a pair with `a >= b`, or edge
+    /// contacts out of order or repeated.
     case invalidContact
     /// Incident `id` names a seat or leg the race doesn't have, or happened after the snapshot's tick.
     case invalidIncident(id: Int)
+    /// `incidents.obstructionContacts[index]` names a seat or leg the race doesn't have, or happened
+    /// after the snapshot's tick.
+    case invalidObstructionContact(index: Int)
     /// An overlap naming a seat the race doesn't have, a pair with `a >= b` or out of order, or a
     /// change count outside 0 ..< the last point of certainty.
     case invalidOverlap
