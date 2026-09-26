@@ -75,7 +75,7 @@ enum ReferencePolicy {
         case matched
         /// The render differed from the committed reference.
         case differed
-        /// This device has no committed reference.
+        /// This device has no committed reference, or one that doesn't decode as a PNG.
         case noReference
     }
 
