@@ -43,17 +43,21 @@ public struct SeatControllers: Sendable {
         set { seats[seat] = newValue }
     }
 
-    /// Lets every bot-sailed seat decide, if this is its decision tick.
+    /// Lets every bot-sailed seat decide, if this is its decision tick, in seat order. The deciding seats'
+    /// views are built together (`Race.seatViews(for:)`), sharing what they see alike: each is the view its
+    /// seat alone would get, since a decision is sent for the next tick and changes nothing any view shows.
     public mutating func drive(_ race: Race) {
-        for seat in seats.indices {
+        guard !race.isOver else { return }
+        let deciding = seats.indices.filter { seats[$0].driver?.decides(atTick: race.tick) ?? false }
+        for (seat, view) in zip(deciding, race.seatViews(for: deciding)) {
             switch seats[seat] {
             case .human:
                 continue
             case .bot(var driver):
-                driver.drive(race)
+                driver.drive(race, seeing: view)
                 seats[seat] = .bot(driver)
             case .dropped(var driver):
-                driver.drive(race)
+                driver.drive(race, seeing: view)
                 seats[seat] = .dropped(driver)
             }
         }

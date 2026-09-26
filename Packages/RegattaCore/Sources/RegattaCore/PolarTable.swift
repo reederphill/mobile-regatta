@@ -10,7 +10,7 @@ import Foundation
 /// Non-finite inputs: a NaN wind speed or wind angle, or an infinite wind angle, gives NaN results
 /// (never a trap or a clamp to a table value), so check inputs where they can be non-finite.
 /// An infinite wind speed is clamped like any out-of-range one: +∞ reads the last column, −∞ the 0 kn one.
-public struct PolarTable: Sendable {
+public struct PolarTable: Sendable, Equatable {
     /// Best VMG at one wind speed.
     public struct Optimum: Sendable, Equatable {
         /// True wind angle, radians, 0...π.

@@ -8,7 +8,7 @@ import Foundation
 ///
 /// Values are checked once, at load. The scalars are `var` so a test or a tuning tool can edit a copy;
 /// a race sails the file as loaded.
-public struct BoatClass: DataFileContent {
+public struct BoatClass: DataFileContent, Equatable {
     public static let kind = "boat class"
     public static let bundleDirectory = "boat-classes"
     /// Schema 2 added the autohelm's steering values (#230). Schema 3 (#248, the skiff) adds planing, the

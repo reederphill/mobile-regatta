@@ -157,13 +157,19 @@ public enum Rules {
         }
         /// Whether `a` is further astern of `b` than `b` of `a`; nil for a tie.
         func aIsAstern() -> Bool? {
-            let aAft = aftness(a.hull(outline: hull.outline), of: b, hullLength: hull.length)
-            let bAft = aftness(b.hull(outline: hull.outline), of: a, hullLength: hull.length)
+            let (aForward, bForward) = (a.forward, b.forward)
+            let aAft = aftness(at: a.position, forward: aForward, outline: hull.outline, of: b.position, forward: bForward,
+                               hullLength: hull.length)
+            let bAft = aftness(at: b.position, forward: bForward, outline: hull.outline, of: a.position, forward: aForward,
+                               hullLength: hull.length)
             return aAft == bAft ? nil : aAft < bAft
         }
-        /// > 0 when `b` is to starboard of `a` across their mean heading, < 0 to port.
-        let side = (b.position - a.position).dot((a.forward + b.forward).rightPerp)
-        let bToPort: Bool? = side == 0 ? nil : side < 0
+        /// Whether `b` is to port of `a` across their mean heading; nil exactly on it. Worked out only by the
+        /// branches that read it: `SeatView` asks every pair it shows.
+        func bToPort() -> Bool? {
+            let side = (b.position - a.position).dot((a.forward + b.forward).rightPerp)
+            return side == 0 ? nil : side < 0
+        }
 
         switch (a.isTacking, b.isTacking) {
         case (true, false): return keepClear(true, .whileTacking)
@@ -175,7 +181,7 @@ public enum Rules {
             let byAstern = !overlapped && (overlapTermsApply(a, b)
                 || isClearAstern(a, of: b, hull: hull) || isClearAstern(b, of: a, hull: hull))
             if byAstern, let astern = aIsAstern() { return keepClear(astern, .whileTacking) }
-            return keepClear(bToPort.map { !$0 }, .whileTacking)
+            return keepClear(bToPort().map { !$0 }, .whileTacking)
         case (false, false): break
         }
 
@@ -183,13 +189,14 @@ public enum Rules {
 
         guard overlapped else { return keepClear(aIsAstern(), .clearAstern) }
         // The same tack, so the same boom side: her leeward side.
-        let bToLeeward = bToPort.map { a.boomSide == .port ? $0 : !$0 }
+        let bToLeeward = bToPort().map { a.boomSide == .port ? $0 : !$0 }
         return keepClear(bToLeeward, .windwardLeeward)
     }
 
     /// `a` is clear astern of `b` when its whole hull is behind a line abeam of `b`'s stern.
     public static func isClearAstern(_ a: Boat, of b: Boat, hull: BoatClass.Hull) -> Bool {
-        aftness(a.hull(outline: hull.outline), of: b, hullLength: hull.length) < 0
+        aftness(at: a.position, forward: a.forward, outline: hull.outline, of: b.position, forward: b.forward,
+                hullLength: hull.length) < 0
     }
 
     /// The mark both boats are rounding, if both are inside its zone: at a gate, the first of its marks

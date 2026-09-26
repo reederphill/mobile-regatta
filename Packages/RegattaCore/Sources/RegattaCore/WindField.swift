@@ -115,8 +115,10 @@ public struct WindField: Hashable, Sendable {
     /// of life, at intensity 0. Empty with no race area.
     public func activePuffs(atTick tick: Int) -> [Puff] {
         guard puffPlan != nil, windows.window(containing: tick) >= 0 else { return [] }
+        let held = firstWindowNeeded(atTick: tick)...windows.window(containing: tick)
         var puffs: [Puff] = []
-        for window in firstWindowNeeded(atTick: tick)...windows.window(containing: tick) where window < puffSpawns.count {
+        puffs.reserveCapacity(held.reduce(0) { $0 + ($1 < puffSpawns.count ? puffSpawns[$1].count : 0) })
+        for window in held where window < puffSpawns.count {
             for spawn in puffSpawns[window] where spawn.isAlive(atTick: tick) {
                 puffs.append(spawn.puff(atTick: tick))
             }

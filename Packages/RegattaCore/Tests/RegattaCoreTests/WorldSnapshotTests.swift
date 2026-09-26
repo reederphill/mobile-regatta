@@ -358,6 +358,7 @@ struct LogFeeder {
         "setup": "fixed for the race; the importing race is built from the same setup",
         "windSeed": "secret key, never in a snapshot (ADR 0001); the importing race has its own wind",
         "course": "fixed for the race, derived from the setup",
+        "legTargets": "fixed for the race, derived from the course",
         "files": "fixed for the race: the class, venue, conditions and rules configuration the setup names (ADR 0004)",
         "current": "fixed for the race, derived from the venue and the public race seed",
         "tideStateAtGun": "fixed for the race, drawn from the venue and the public race seed (ADR 0003)",

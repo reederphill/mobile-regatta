@@ -32,6 +32,8 @@ public final class Race {
     public let windSeed: WindSeed?
     /// The course, derived from the files, the race seed's wind setup and the fleet size (#12, #80).
     public let course: CourseLayout
+    /// Each leg's target (`CourseLayout.targetPosition(for:)`), by leg index: what `progress(of:)` measures to.
+    private let legTargets: [Vec2]
     /// The class every boat sails: hull, polar and handling (ADR 0004).
     public var boatClass: BoatClass { files.boatClass.content }
     /// The water's own motion (#78, ADR 0003), which carries every boat (#79): the venue's current at the
@@ -143,6 +145,7 @@ public final class Race {
         let course = CourseLayout.derive(windSetup: drawn, fleetSize: setup.fleetSize, laps: setup.laps,
                                          boatClass: files.boatClass.content, rules: files.rulesConfiguration.content)
         self.course = course
+        legTargets = course.legs.map(course.targetPosition(for:))
         let windSetup = drawn.with(raceArea: course.raceArea)
         self.windSetup = windSetup
         self.current = current ?? CurrentField(venue: files.venue.content, raceSeed: setup.raceSeed)
@@ -393,6 +396,13 @@ public final class Race {
         }
     }
 
+    /// The ground wind at `p` now, as `groundWind(at:)`, or nil where a keys-only race doesn't hold the key
+    /// for now yet: for a reader outside the step (`SeatView`), which must not trap.
+    func heldGroundWind(at p: Vec2) -> GroundWind? {
+        if let scriptedWind { return scriptedWind(tick) }
+        return try? wind.sample(p, tick: tick)
+    }
+
     /// Adds the keys through the window holding the current tick, one window at a time: the race never
     /// holds a key before its window starts.
     private func makeWindKeys() {
@@ -506,6 +516,16 @@ public final class Race {
     /// overlap as of the last point of certainty. Nil if either is a ghost. For glyphs and bots.
     public func rightOfWay(_ a: Int, _ b: Int) -> RightOfWay? {
         Rules.rightOfWay(boats[a], boats[b], overlapped: overlaps.isOverlapped(a, b), hull: boatClass.hull)
+    }
+
+    /// `rightOfWay(seat, other)` for every seat in order, nil at `seat` itself: one seat's relation to the
+    /// whole fleet, as `SeatView` shows it, in one pass.
+    func rightsOfWay(of seat: Int) -> [RightOfWay?] {
+        let hull = boatClass.hull
+        let boat = boats[seat]
+        return boats.indices.map { other in
+            other == seat ? nil : Rules.rightOfWay(boat, boats[other], overlapped: overlaps.isOverlapped(seat, other), hull: hull)
+        }
     }
 
     private func resolveBoatContacts() {
@@ -654,13 +674,25 @@ public final class Race {
     /// Distance-based progress score used to rank boats still racing.
     public func progress(of b: Boat) -> Double {
         guard b.legIndex < course.legs.count else { return .infinity }
-        let target = course.targetPosition(for: course.legs[b.legIndex])
+        let target = legTargets[b.legIndex]
         return Double(b.legIndex) * 10_000 + Double(b.roundingStage) * 100 - (b.position - target).length
     }
 
     /// Boat indices from first to last.
     public func standings() -> [Int] {
         boats.indices.sorted { rankKey($0) < rankKey($1) }
+    }
+
+    /// Where `seat` stands, from 1: its place in `standings()`, found without sorting the fleet. Boats that
+    /// rank alike keep seat order, as the sort does.
+    public func place(of seat: Int) -> Int {
+        let key = rankKey(seat)
+        var place = 1
+        for i in boats.indices where i != seat {
+            let other = rankKey(i)
+            if other < key || (other == key && i < seat) { place += 1 }
+        }
+        return place
     }
 
     private func rankKey(_ i: Int) -> (Int, Double) {

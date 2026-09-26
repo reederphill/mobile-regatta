@@ -17,6 +17,21 @@ extension Rules {
         return foremost
     }
 
+    /// `aftness` of the hull (`outline`, in its frame) of a boat at `position` heading along `forward`, of a
+    /// boat at `bPosition` heading along `bForward`, without building the hull in world coordinates: the same
+    /// sums in the same order as `Boat.hull(outline:)` then `aftness`, so the same answer to the bit. For one
+    /// pair (`rightOfWay`, `isClearAstern`), which asks it often, with each heading's unit vector worked out once.
+    static func aftness(at position: Vec2, forward: Vec2, outline: [Vec2], of bPosition: Vec2, forward bForward: Vec2,
+                        hullLength: Double) -> Double {
+        let right = forward.rightPerp
+        let stern = bPosition - bForward * hullLength / 2
+        var foremost = -Double.infinity
+        for corner in outline {
+            foremost = max(foremost, (position + right * corner.x + forward * corner.y - stern).dot(bForward))
+        }
+        return foremost
+    }
+
     /// Whether `c` is between `a` and `b`: it projects strictly inside the segment joining them.
     static func isBetween(_ c: Vec2, _ a: Vec2, _ b: Vec2) -> Bool {
         let ab = b - a

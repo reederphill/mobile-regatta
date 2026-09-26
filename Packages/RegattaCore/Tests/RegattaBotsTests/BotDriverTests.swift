@@ -255,7 +255,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         #expect(race.boats[0].isTakingPenalty)
         var brain = BotBrain(style: BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, holdDepth: 20,
                                              timingSlack: 0, penaltyDirection: penaltyDirection))
-        return brain.decide(for: 0, in: race).input.rudder
+        return brain.decide(race.seatView(for: 0)).input.rudder
     }
 
     /// The #79 smoke breach: a bot that touched a mark spun hard over beside it on `isTakingPenalty`,
