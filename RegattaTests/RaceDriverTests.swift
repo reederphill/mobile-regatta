@@ -86,12 +86,15 @@ import RegattaCore
         #expect(driver.tick(0.1, within: .seconds(60)).count == 24, "a budget that isn't spent runs them all")
     }
 
-    /// The budget only changes when ticks run: the race it sails is the same, tick for tick.
+    /// The budget only changes when ticks run: the race it sails is the same, tick for tick. A spent
+    /// budget runs one tick a frame, so the budgeted race takes a frame per tick to get as far.
     @Test func aBudgetSailsTheSameRace() {
         let unbudgeted = PracticeDriver(config: RaceDriverTests.config, timescale: 8)
         let budgeted = PracticeDriver(config: RaceDriverTests.config, timescale: 8)
-        for _ in 0..<50 { unbudgeted.tick(0.1) }
-        while budgeted.currentFrame.tick < unbudgeted.currentFrame.tick { budgeted.tick(0.1, within: .zero) }
+        for _ in 0..<10 { unbudgeted.tick(0.1) }
+        let ticks = unbudgeted.currentFrame.tick - budgeted.currentFrame.tick
+        #expect(ticks == 240, "10 frames of 0.1 s at 8× are 240 ticks")
+        for _ in 0..<ticks { budgeted.tick(0.1, within: .zero) }
         #expect(budgeted.currentFrame.tick == unbudgeted.currentFrame.tick)
         #expect(budgeted.digest() == unbudgeted.digest())
     }

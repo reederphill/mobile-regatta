@@ -26,8 +26,9 @@ protocol RaceDriver: AnyObject {
     @discardableResult func tick(_ dt: Double) -> [TickFrame]
     /// `tick(dt)`, but it stops starting ticks once `budget` of wall-clock time has gone, so a frame
     /// always leaves the main thread time to draw and answer (a fast `-timescale` in a slow simulator
-    /// saturated it in the iOS 27 CI run). The ticks it doesn't run are dropped, not owed: the race falls behind real
-    /// time instead of catching up, and runs the same ticks in the same order, only later. Nil runs them all.
+    /// saturated it in the iOS 27 CI run). The ticks it doesn't run are dropped, not owed: the race
+    /// falls behind real time instead of catching up, and runs the same ticks in the same order, only
+    /// later. Nil runs them all.
     @discardableResult func tick(_ dt: Double, within budget: Duration?) -> [TickFrame]
 
     /// Your held input. Call it as often as you like: the driver latches the latest value and applies

@@ -164,8 +164,10 @@ jobs:
     if: needs.changes.outputs.app == 'true'
     # Pinned so the SDK and simulator runtime only change on purpose: Xcode 26.6, iOS 26.5.
     runs-on: macos-26
-    # About 10 min, 15 with the iPad: a cold boot of each simulator is 2-4 min of it. Room for retried UI tests.
-    timeout-minutes: 30
+    # About 10 min, 15 with the iPad: a cold boot of each simulator is 2-4 min of it. The rest is room for the
+    # two fast-timescale race tests (iPhone only) to hang on both tries, 2 × 2 × the 5 min allowance below =
+    # 20 min, and one more launch that fails at the allowance: 15 + 20 + 5 = 40.
+    timeout-minutes: 40
     env:
       # DEVELOPER_DIR rather than xcode-select: switching with xcode-select hid the simulators.
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
@@ -186,8 +188,9 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' -derivedDataPath DerivedData
       # A failed test runs once more (-retry-tests-on-failure -test-iterations 2): the simulator now and
       # then fails to launch or terminate the app between UI tests. A test that fails twice fails the job.
-      # Each test gets 5 min (the slowest takes about 2 on the iOS 27 image), so a hung test fails itself
-      # rather than running the job out of time.
+      # Each test gets 5 min, so a hung test fails itself rather than running the job out of time. The
+      # allowance is a ceiling on the whole test, so no test's own waits add up to more than 3.5 min
+      # (RaceUITestCase); the slowest passing test takes about 2 on the iOS 27 image.
       - name: xcodebuild test (unit + UI) on iPhone
         run: |
           xcodebuild test-without-building -project Regatta.xcodeproj -scheme Regatta \
