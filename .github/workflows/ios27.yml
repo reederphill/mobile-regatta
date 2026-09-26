@@ -34,7 +34,11 @@ jobs:
     # GitHub's Xcode 27 image (preview; macOS 27, arm64). Apps built with the iOS 27 SDK need the scene life
     # cycle and a launch screen, and UIRequiresFullScreen is ignored (#107).
     runs-on: xcode-27
-    timeout-minutes: 60
+    # A green run is 42-45 min: about 25 to the first test, then about 10 per device, one after the other.
+    # The rest is room for the two fast-timescale race tests (RaceAssembly at 8×, RaceFinish at 32×, the ones
+    # that keep the app's main thread busy) to hang on both tries on both devices, 2 × 2 × 2 × the 5 min
+    # allowance below = 40 min, and one more launch that fails at the allowance: 45 + 40 + 5 = 90.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - name: SDKs
@@ -66,12 +70,21 @@ jobs:
           xcrun simctl spawn 'iPhone 17' launchctl list | grep 'com.phillreeder.regatta' \
             || { echo "Regatta isn't running 15 s after launch" >&2; exit 1; }
           echo "Regatta is running on iOS 27."
+      # Each test gets 5 min, so a hang fails that test instead of the job: a UI test's element read once
+      # blocked for 21 min and the job ran out of time before the iPad started. The allowance is a ceiling on
+      # the whole test, so no test's own waits add up to more than 3.5 min (RaceUITestCase); the slowest
+      # passing test, a render fixture, takes about 2. A failed test runs once more, as in ci.yml: the
+      # simulator now and then fails to launch the app ("Failed to get background assertion"). A test that
+      # fails twice fails the job.
       - name: xcodebuild test (unit + UI) on iOS 27, iPhone and iPad
         run: |
           xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' \
             -destination 'platform=iOS Simulator,name=iPad Air 13-inch (M4),OS=27.0' \
             -disable-concurrent-destination-testing \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 300 \
+            -maximum-test-execution-time-allowance 300 \
+            -retry-tests-on-failure -test-iterations 2 \
             -derivedDataPath DerivedData -resultBundlePath Regatta-ios27.xcresult
       - name: Test failures
         if: failure()

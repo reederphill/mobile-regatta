@@ -32,6 +32,10 @@ final class GameScene: SKScene {
     private var puffNodes: [SKSpriteNode] = []
 
     private var lastUpdate: TimeInterval?
+    /// The most wall-clock time a frame spends starting ticks: half a 60 Hz frame. A frame is at most
+    /// 0.1 s of real time, so at `-timescale 32` it can owe about 100 ticks; unbudgeted, a slow simulator
+    /// spent every frame catching up and the main thread never idled to draw or answer UI tests.
+    static let tickBudget: Duration = .milliseconds(8)
     /// The race clock last drawn, so effects run on simulated time (`-timescale` included).
     private var lastRenderTime: Double?
     private var hudCountdown = 0.0
@@ -159,7 +163,7 @@ final class GameScene: SKScene {
         updateRudder(frameTime)
         // The driver latches it for the next tick. With `-demo` a bot sails your seat and ignores it.
         driver.submit(BoatInput(rudder: rudderInput))
-        driver.tick(frameTime)
+        driver.tick(frameTime, within: Self.tickBudget)
 
         Signpost.renderUpdate.measure { render(driver.renderWorld) }
         session.consume(driver.drainEvents())
