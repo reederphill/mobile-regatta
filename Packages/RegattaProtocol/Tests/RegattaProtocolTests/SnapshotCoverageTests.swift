@@ -86,7 +86,7 @@ struct SeatWithProbe: CustomReflectable {
     }
 
     /// #230: the autohelm's target, a held angle or a groove, and whether it is sailing the tap cross the
-    /// wire in the seat's 20 bytes, so a client predicts what a centred rudder does (ADR 0005, ADR 0007).
+    /// wire in the seat's bytes, so a client predicts what a centred rudder does (ADR 0005, ADR 0007).
     @Test func snapshotRoundTripCarriesTheAutohelmTarget() throws {
         #expect(SnapshotFields.wire.contains("boat.autohelm"))
         let helms: [Autohelm?] = [
@@ -120,6 +120,38 @@ struct SeatWithProbe: CustomReflectable {
             }
             #expect(received.boat.autohelm?.isTapping == helm?.isTapping)
         }
+    }
+
+    /// #248: planing, the spinnaker (with a hoist's or drop's time left, to the tick) and the averaged wind
+    /// the grooves follow cross the wire, so a client predicts the skiff's speed and its autohelm (ADR 0007).
+    @Test func snapshotRoundTripCarriesPlaningTheSpinnakerAndTheAveragedWind() throws {
+        for field in ["boat.isPlaning", "boat.spinnaker", "boat.averagedWindSpeed"] {
+            #expect(SnapshotFields.wire.contains(field))
+        }
+        let kites: [Spinnaker] = [.down, .hoisting(remaining: 3.99), .up, .dropping(remaining: 0.02), .hoisting(remaining: 0)]
+        for (n, kite) in kites.enumerated() {
+            var seat = Self.seat
+            seat.boat.isPlaning = n % 2 == 0
+            seat.boat.spinnaker = kite
+            seat.boat.averagedWindSpeed = n == 0 ? nil : 4.321 * Double(n)
+            let wire = try WireSeat(seat)
+            let bytes = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: [wire, wire]))).encoded()
+            #expect(bytes.count == Frame.headerSize + 1 + 1 + 2 * SnapshotQuantisation.bytesPerSeat)
+            guard case .snapshot(let decoded) = try Frame(decoding: bytes).message else {
+                Issue.record("not a snapshot")
+                continue
+            }
+            #expect(decoded.seats[0] == wire)
+            var received = Self.seat
+            received.boat.isPlaning = n % 2 != 0
+            received.boat.spinnaker = .dropping(remaining: 1) // whatever the receiver had
+            received.boat.averagedWindSpeed = 99
+            decoded.seats[0].apply(to: &received)
+            expectWithinSteps(seat, received)
+        }
+        var tooLong = Self.seat
+        tooLong.boat.spinnaker = .hoisting(remaining: 9)
+        #expect(throws: WireError.outOfRange("spinnaker")) { try WireSeat(tooLong) }
     }
 
     /// #79: a boat's three winds and the current at her are recomputed at the start of every step, so

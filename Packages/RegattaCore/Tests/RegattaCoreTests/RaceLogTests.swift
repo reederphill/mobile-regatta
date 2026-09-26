@@ -6,13 +6,15 @@ import Testing
 let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
 
 /// A race for tests: by default seat 0 is human and `opponents` bot seats follow. Nothing sails the
-/// bot seats here (RegattaBotsTests does): every seat only answers to the inputs a test sends.
+/// bot seats here (RegattaBotsTests does): every seat only answers to the inputs a test sends. The boats
+/// sail `boatClass`, by default `RaceFiles.defaults`' (skiff@1).
 func testRace(
-    opponents: Int = 7, seats: [SeatKind]? = nil, laps: Int = 2, prestartSeconds: Int = 60, seed: UInt64
+    opponents: Int = 7, seats: [SeatKind]? = nil, laps: Int = 2, prestartSeconds: Int = 60, seed: UInt64,
+    boatClass: FileRef = RaceFiles.defaults.boatClass.ref
 ) -> Race {
     let seats = seats ?? [.human] + Array(repeating: .bot, count: opponents)
     let setup = try! RaceSetup(raceSeed: RaceSeed(seed), seats: seats, laps: laps,
-                               startSequenceTicks: prestartSeconds * Race.tickRate)
+                               startSequenceTicks: prestartSeconds * Race.tickRate, boatClass: boatClass)
     return Race(setup: setup, windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1))
 }
 
@@ -114,9 +116,16 @@ enum ScriptedLog {
         for size in 2...16 {
             let setup = try RaceSetup(raceSeed: RaceSeed(1), seats: [.human] + Array(repeating: .bot, count: size - 1))
             #expect(setup.fleetSize == size)
-            #expect(setup.laps == 2)
+            #expect(setup.laps == RaceSetup.defaultLaps)
             #expect(setup.simulationVersion == simulationVersion)
         }
+        #expect(try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot], laps: 1).laps == 1)
+    }
+
+    /// #245: races sail three laps unless told otherwise (the first race's one lap, #23, is set explicitly).
+    @Test func defaultIsThreeLaps() throws {
+        #expect(RaceSetup.defaultLaps == 3)
+        #expect(try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot]).laps == 3)
         #expect(try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot], laps: 1).laps == 1)
     }
 

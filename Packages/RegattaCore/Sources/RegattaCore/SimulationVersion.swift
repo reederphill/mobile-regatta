@@ -53,7 +53,13 @@ import Glibc
 ///    rudder in proportion to the angle's error; the tap sails to the groove on the new tack. Boats sail
 ///    ilca-dinghy@3 (schema 2: the autohelm's values); schema-1 classes are refused. The digest hashes
 ///    the autohelm's target and tap in place of the tack autopilot's heading and boom side.
-public let simulationRevision = 11
+/// 12: the skiff (#248), on 11. Boats sail skiff@1 (schema 3) by default, three laps. A schema-3 class
+///    planes (on and off the plane with hysteresis on speed and apparent wind angle, an off-plane branch
+///    of the polar), hoists and drops an automatic spinnaker (two-sail speed without it and through a
+///    hoist or drop), loses speed by the degree by the lee (the spinnaker collapsing), and its autohelm's
+///    grooves follow a running average of the wind strength at the boat. Schema-2 classes (ilca-dinghy@3)
+///    sail as on 11. The digest hashes planing, the spinnaker and the averaged wind.
+public let simulationRevision = 12
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

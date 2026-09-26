@@ -19,9 +19,11 @@ func steadyCurrent(knots: Double, towards bearing: Double) -> CurrentField {
 /// `Race.init(setup:files:mode:current:wind:)` says. Every boat is let go where she's placed: her autohelm
 /// engages on the next step, on the angle she sails then (ADR 0007).
 func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: ((_ tick: Int) -> GroundWind)? = nil,
-                _ place: (inout WorldSnapshot, Race) -> Void) throws -> Race {
+                boatClass: FileRef? = nil, _ place: (inout WorldSnapshot, Race) -> Void) throws -> Race {
+    // ilca-dinghy@3 unless told otherwise: the schema-2 class these tests' expectations (`Fixtures.boatClass()`) come from.
+    let boatClass = try boatClass ?? BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
     let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .human, count: seats), laps: 2,
-                              startSequenceTicks: 60 * Race.tickRate)
+                              startSequenceTicks: 60 * Race.tickRate, boatClass: boatClass)
     let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
                         mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)), current: current,
                         wind: wind)

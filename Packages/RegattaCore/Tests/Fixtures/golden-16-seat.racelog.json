@@ -3,9 +3,9 @@
   "header" : {
     "setup" : {
       "boatClass" : {
-        "hash" : "0796b93570fb9723697162f3da4617b28ee0100f693116f1574a198c4c3bf792",
-        "id" : "ilca-dinghy",
-        "version" : 3
+        "hash" : "826fa149ace5a1d876829129216281725001f43c99c247e074582cd99f2ed6f4",
+        "id" : "skiff",
+        "version" : 1
       },
       "conditions" : {
         "hash" : "7b58f303eb7ff1b2262b4ff8990cd158ca85659e879fbe850c0d2dda4dac7d7e",

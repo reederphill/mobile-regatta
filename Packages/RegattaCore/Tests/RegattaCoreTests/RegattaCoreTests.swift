@@ -98,8 +98,10 @@ import Testing
 
     @Test func boatOverTheLineAtTheGunIsOCSAndMustReturn() {
         // Seat 1 is a second human who sends no inputs, so she sails straight on out of the way.
-        // 44 s: the class's turn rate costs a few seconds tacking onto port at the start of the run.
-        let race = testRace(seats: [.human, .human], prestartSeconds: 44, seed: 1)
+        // 44 s: the class's turn rate costs a few seconds tacking onto port at the start of the run. The
+        // timings are ilca-dinghy@3's: the skiff (#248) reaches much further over the line in 45 s.
+        let race = testRace(seats: [.human, .human], prestartSeconds: 44, seed: 1,
+                            boatClass: try! BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref)
         let early = sail(race, heading: deg2rad(-45), seconds: 45)
         #expect(early.contains(.ocsNotice(recipient: 0)))
         #expect(race.boats[0].status == .ocs)

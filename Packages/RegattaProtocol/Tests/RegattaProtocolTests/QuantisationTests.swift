@@ -27,6 +27,21 @@ let wireFieldBounds: [String: @Sendable (WorldSnapshot.Seat, WorldSnapshot.Seat)
     "boat.penaltyTurnsOwed": { $0.boat.penaltyTurnsOwed == $1.boat.penaltyTurnsOwed },
     "boat.isTacking": { $0.boat.isTacking == $1.boat.isTacking },
     "boat.boomSide": { $0.boat.boomSide == $1.boat.boomSide },
+    "boat.isPlaning": { $0.boat.isPlaning == $1.boat.isPlaning },
+    "boat.spinnaker": {
+        switch ($0.boat.spinnaker, $1.boat.spinnaker) {
+        case (.down, .down), (.up, .up): return true
+        case let (.hoisting(a), .hoisting(b)), let (.dropping(a), .dropping(b)): return abs(a - b) <= Q.spinnakerStep / 2 + 1e-12
+        default: return false
+        }
+    },
+    "boat.averagedWindSpeed": {
+        switch ($0.boat.averagedWindSpeed, $1.boat.averagedWindSpeed) {
+        case (nil, nil): return true
+        case let (a?, b?): return abs(a - b) <= Q.speedStep / 2
+        default: return false
+        }
+    },
     "heldInput.rudder": { $0.heldInput.rudder == $1.heldInput.rudder },
     "heldInput.ease": { $0.heldInput.ease == $1.heldInput.ease },
 ]
@@ -61,6 +76,8 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         #expect(32_767 * Q.penaltyProgressStep > 5 * 2 * .pi)
         #expect(Double(1 << 23) * Q.positionStep >= 32_768)
         #expect(65_535 * Q.speedStep > 60)
+        // #248: a hoist or drop to the tick, up to the longest a class may take.
+        #expect(Q.spinnakerStep == Race.dt && 255 * Q.spinnakerStep >= 8)
     }
 
     /// Every field of every seat of a real 16-boat race, at every 3rd tick, comes back within its step.

@@ -306,11 +306,11 @@ public final class Race {
         }
     }
 
-    /// Engages seat `i`'s autohelm on the angle she sails now, in the wind sampled this tick, and
-    /// announces a snap to the groove (#124).
+    /// Engages seat `i`'s autohelm on the angle she sails now, against the grooves in the wind they read
+    /// this tick (`Boat.grooveWindSpeed`), and announces a snap to the groove (#124).
     private func engageAutohelm(_ i: Int) {
         let b = boats[i]
-        let engaged = Autohelm.engage(sailingAngle: b.sailingAngle, tws: b.polarWindSpeed, boatClass: boatClass)
+        let engaged = Autohelm.engage(sailingAngle: b.sailingAngle, tws: b.grooveWindSpeed, boatClass: boatClass)
         boats[i].autohelm = engaged.autohelm
         if engaged.snapped { emit(.grooveSnap(seat: i)) }
     }
@@ -366,6 +366,7 @@ public final class Race {
 
         refreshWind()
         applyWindShadows()
+        averageGrooveWinds()
 
         applyInputs()
 
@@ -428,6 +429,13 @@ public final class Race {
         }
     }
 
+    /// Moves every boat's average of the wind speed her polar reads a tick on (`Boat.averagedWindSpeed`):
+    /// what her autohelm's grooves follow (#245), once the wind and shadows are sampled this tick.
+    private func averageGrooveWinds() {
+        let timeConstant = boatClass.steering.autohelm.grooveWindAverage
+        for i in boats.indices { boats[i].averageWind(dt: Race.dt, timeConstant: timeConstant) }
+    }
+
     /// The wind shadow and backwind `seat`'s boat casts now, along her apparent wind (#10), or nil for a
     /// ghost, which casts none, or an unknown seat.
     public func shadowCone(ofSeat seat: Int) -> ShadowCone? {
@@ -438,16 +446,18 @@ public final class Race {
     private func integrate(_ i: Int, _ dt: Double) {
         var b = boats[i]
         // The polar reads the sailing wind (#14); shadow slows it and never turns it (#10). The current
-        // carries every boat, ghosts too (#11).
+        // carries every boat, ghosts too (#11). The autohelm's grooves read the class's average of it (#245).
         let tws = b.polarWindSpeed
 
         if let helm = b.autohelm {
-            b.desiredRudder = helm.rudder(sailingAngle: b.sailingAngle, boomSide: b.boomSide, tws: tws, boatClass: boatClass)
+            b.desiredRudder = helm.rudder(sailingAngle: b.sailingAngle, boomSide: b.boomSide, tws: tws,
+                                          grooveTWS: b.grooveWindSpeed, boatClass: boatClass)
         }
 
         let before = b.heading
         let moved = BoatDynamics.advance(
-            BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide),
+            BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide,
+                               isPlaning: b.isPlaning, spinnaker: b.spinnaker),
             control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: b.isOnCourse),
             env: BoatDynamics.Environment(windDirection: b.sailingWind.direction, windSpeed: tws, current: b.current),
             boatClass: boatClass, dt: dt)
@@ -455,6 +465,8 @@ public final class Race {
         b.heading = moved.heading
         b.speed = moved.speed
         b.rudder = moved.rudder
+        b.isPlaning = moved.isPlaning
+        b.spinnaker = moved.spinnaker
         let crossing = moved.boomSide != b.boomSide
         b.boomSide = moved.boomSide
         let turn = wrapAngle(b.heading - before)
@@ -810,7 +822,8 @@ extension Race {
             ("sailingWind.direction", boat.sailingWind.direction), ("sailingWind.speed", boat.sailingWind.speed),
             ("apparentWind.direction", boat.apparentWind.direction), ("apparentWind.speed", boat.apparentWind.speed),
             ("current.x", boat.current.x), ("current.y", boat.current.y), ("shadow", boat.shadow),
-            ("finishTime", boat.finishTime),
+            ("finishTime", boat.finishTime), ("averagedWindSpeed", boat.averagedWindSpeed),
+            ("spinnaker", boat.spinnaker.remaining),
         ]
         if let bad = doubles.first(where: { !($0.1?.isFinite ?? true) }) { return bad.0 }
         guard course.legs.indices.contains(boat.legIndex) else { return "legIndex" }

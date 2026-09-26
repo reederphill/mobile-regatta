@@ -149,7 +149,7 @@ import Testing
         }
         let race = Race(setup: try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot]), windSeed: WindSeed(2))
         #expect(race.course.zoneRadius == 3 * race.boatClass.hull.length)
-        #expect(race.course.zoneRadius == 3 * 4.2)
+        #expect(race.course.zoneRadius == 3 * 4.9) // skiff@1's hull (#248)
     }
 
     @Test func unknownFieldsAndUnresolvedBuilderValuesAreRefused() throws {

@@ -31,9 +31,11 @@ import Testing
     // MARK: Line
 
     @Test func lineLengthIsPerBoatHullLengthsWithAMinimum() throws {
-        #expect(abs(try Self.layout(fleetSize: 10).startLine.length - 52.5) < 1e-9)
+        // 1.25 hull lengths a boat (skiff@1's 4.9 m hull, #248), and at least 42 m.
+        #expect(abs(try Self.layout(fleetSize: 10).startLine.length - 12.5 * Self.hull) < 1e-9)
         #expect(abs(try Self.layout(fleetSize: 2).startLine.length - 42) < 1e-9)
-        #expect(abs(try Self.layout(fleetSize: 16).startLine.length - 84) < 1e-9)
+        #expect(abs(try Self.layout(fleetSize: 16).startLine.length - 20 * Self.hull) < 1e-9)
+        #expect(Self.hull == 4.9)
     }
 
     @Test func lineIsSquareToTheAxisWithCommitteeToStarboard() throws {
@@ -60,7 +62,7 @@ import Testing
         #expect(gate.count == 2)
         let midpoint = (gate[0].position + gate[1].position) / 2
         #expect(Self.isClose(midpoint, course.startLine.centre + course.upwind * (course.beat / 6)))
-        #expect(abs((gate[0].position - gate[1].position).length - 42) < 1e-9)
+        #expect(abs((gate[0].position - gate[1].position).length - 10 * Self.hull) < 1e-9)
         // Looking downwind, the gate's left mark is on the upwind right.
         #expect((gate[0].position - midpoint).dot(course.right) > 0)
         // The gate marks' rule 18 zones don't intersect.
@@ -120,6 +122,22 @@ import Testing
 
     /// #8, #14: across every conditions file's strength range, at its ends and across seeds, the default
     /// two-lap beat stays in [200, 360] m. One lap sizes a longer beat, capped at 360 m.
+    /// #248 (#245): the skiff sails three laps under the same 360 m cap. The leader's race time is fixed, so
+    /// a three-lap beat is shorter than a two-lap one below the cap: about two minutes upwind at 12 kn,
+    /// and the cap binds from 14 kn.
+    @Test func threeLapSkiffBeatTakesAboutTwoMinutesAndIsCappedAt360Metres() throws {
+        let skiff = try BoatClassFile.bundled(id: "skiff", version: 1).content
+        #expect(Self.rules.raceFormat.beatSizing.maxMetres == 360)
+        let twelve = metresPerSecond(knots: 12)
+        let beat = CourseLayout.beat(laps: RaceSetup.defaultLaps, tws: twelve, boatClass: skiff, rules: Self.rules)
+        let seconds = beat / skiff.polar.bestUpwind(tws: twelve).vmg
+        #expect(beat > 330 && beat < 360, "\(beat) m at 12 kn")
+        #expect(seconds > 105 && seconds < 120, "\(seconds) s upwind at 12 kn")
+        for knots in [14.0, 16, 20] {
+            #expect(CourseLayout.beat(laps: 3, tws: metresPerSecond(knots: knots), boatClass: skiff, rules: Self.rules) == 360)
+        }
+    }
+
     @Test func beatStaysInRangeAcrossAllConditionsFiles() throws {
         for id in Self.conditionsIDs {
             let strength = try ConditionsFile.bundled(id: id, version: 2).content.strength

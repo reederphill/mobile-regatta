@@ -118,6 +118,27 @@ import Testing
         #expect(throws: WireError.invalidValue("autohelm")) { try Frame(decoding: grooveWithAngle) }
         #expect(throws: WireError.invalidValue("autohelm")) { try Frame(decoding: withAutohelm(18) { $0 |= 0x80 }) }
         #expect(throws: WireError.invalidValue("heldInput.rudder")) { try Frame(decoding: mutated(16) { $0 = 0x80 }) }
+
+        // #248: the sails byte (20): bits 4–7 are reserved, a spinnaker up or down has no time left (21),
+        // and without the averaged-wind flag (bit 3) its two bytes (22, 23) are zero.
+        var plain = seats
+        plain[0].spinnaker = .down
+        plain[0].averagedWindSpeed = nil
+        let sails = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: plain))).encoded()
+        func sailsMutated(_ offset: Int, _ change: (inout UInt8) -> Void) -> [UInt8] {
+            var bytes = sails
+            change(&bytes[seat0 + offset])
+            return bytes
+        }
+        _ = try Frame(decoding: sails)
+        #expect(throws: WireError.invalidValue("spinnaker")) { try Frame(decoding: sailsMutated(20) { $0 |= 0x10 }) }
+        #expect(throws: WireError.invalidValue("spinnaker")) { try Frame(decoding: sailsMutated(21) { $0 = 5 }) }
+        _ = try Frame(decoding: sailsMutated(20) { $0 |= 0b01 }) // going up...
+        var hoisting = sailsMutated(20) { $0 |= 0b01 }
+        hoisting[seat0 + 21] = 5
+        _ = try Frame(decoding: hoisting) // ...with 5 ticks left
+        #expect(throws: WireError.invalidValue("averagedWindSpeed")) { try Frame(decoding: sailsMutated(23) { $0 = 1 }) }
+        _ = try Frame(decoding: sailsMutated(20) { $0 |= 0b1000 }) // an averaged wind of 0
     }
 
     @Test func varintsMustBeShortestAndStringsValidUTF8() throws {
@@ -247,6 +268,9 @@ func relabel(_ boat: Boat, isPlayer: Bool) -> Boat {
     copy.penaltyProgress = boat.penaltyProgress
     copy.isTacking = boat.isTacking
     copy.boomSide = boat.boomSide
+    copy.isPlaning = boat.isPlaning
+    copy.spinnaker = boat.spinnaker
+    copy.averagedWindSpeed = boat.averagedWindSpeed
     copy.windOverGround = boat.windOverGround
     copy.sailingWind = boat.sailingWind
     copy.apparentWind = boat.apparentWind

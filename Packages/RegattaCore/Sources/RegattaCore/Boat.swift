@@ -74,6 +74,16 @@ public struct Boat: Identifiable, Sendable {
     public var penaltyProgress = 0.0
     /// Rule 13: past head to wind but not yet close-hauled.
     public var isTacking = false
+    /// On the plane (#248, `BoatClass.planing`): set by `BoatDynamics.advance`, never for a class that
+    /// doesn't plane. For drawing (#117, #121) as much as for her speed.
+    public var isPlaning = false
+    /// Her automatic spinnaker (#248, `BoatClass.spinnaker`): down, going up, up or coming down. Always
+    /// down for a class without one. For drawing (#120) as much as for her speed.
+    public var spinnaker = Spinnaker.down
+    /// The class's running average of the wind speed her polar reads (`polarWindSpeed`), m/s: what her
+    /// autohelm's grooves follow (#245, `grooveWindSpeed`). Nil until the race first samples her wind.
+    /// With no average (`AutohelmTuning.grooveWindAverage` 0, every schema-2 class) it is the wind right now.
+    public var averagedWindSpeed: Double?
 
     /// Wind over the ground at the boat (`BoatWinds`): what readouts show (#15).
     public var windOverGround = Wind.calm
@@ -113,6 +123,9 @@ public struct Boat: Identifiable, Sendable {
     }
     /// The wind speed her polar reads, m/s: the sailing wind's, slowed by any shadow (#10, #14).
     public var polarWindSpeed: Double { sailingWind.speed * shadow }
+    /// The wind speed her autohelm's grooves read, m/s: the class's average of `polarWindSpeed`
+    /// (`averagedWindSpeed`), or the wind right now before the race has sampled it.
+    public var grooveWindSpeed: Double { averagedWindSpeed ?? polarWindSpeed }
 
     /// Sailing wind direction relative to the bow; positive = wind over the starboard side.
     public var relativeWind: Double { wrapAngle(windDirection - heading) }
@@ -139,6 +152,28 @@ public struct Boat: Identifiable, Sendable {
     /// (CONTEXT.md). Decided by status alone; for now every status off the course (finished, dsq, dnf).
     /// #86 owns the final semantics (OCS at the close).
     public var isGhost: Bool { !isOnCourse }
+
+    /// How far she sails by the lee, radians, or nil when she isn't.
+    public var byTheLeeAngle: Double? { isByTheLee ? .pi + sailingAngle : nil }
+
+    /// Whether her spinnaker is up but collapsed: more than the class's `byTheLee.spinnakerCollapse` by the
+    /// lee (#248). It draws nothing, and she sails at two-sail speed (`BoatDynamics.polarTarget`).
+    public func isSpinnakerCollapsed(in boatClass: BoatClass) -> Bool {
+        guard spinnaker.isUp, let angle = byTheLeeAngle, let collapse = boatClass.byTheLee?.spinnakerCollapse else { return false }
+        return angle > collapse
+    }
+
+    /// Moves `averagedWindSpeed` on by `dt` seconds towards `polarWindSpeed`, the class's exponential
+    /// average with its `grooveWindAverage` time constant; with none, or before the first sample, it takes
+    /// the wind right now.
+    mutating func averageWind(dt: Double, timeConstant: Double) {
+        let now = polarWindSpeed
+        guard let average = averagedWindSpeed, timeConstant > 0 else {
+            averagedWindSpeed = now
+            return
+        }
+        averagedWindSpeed = average + (now - average) * min(1, dt / timeConstant)
+    }
 
     public var isTakingPenalty: Bool {
         penaltyTurnsOwed > 0 && abs(penaltyProgress) > deg2rad(30)

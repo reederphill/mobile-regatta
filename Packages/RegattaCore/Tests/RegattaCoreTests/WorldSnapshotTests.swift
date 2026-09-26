@@ -230,6 +230,30 @@ struct LogFeeder {
         #expect(a.seats.map { String(describing: $0.boat) } == b.seats.map { String(describing: $0.boat) })
     }
 
+    /// #248: planing, the spinnaker mid-hoist and the averaged groove wind are world state: an import
+    /// carries them, and a race that imports goes on exactly like the one that exported.
+    @Test func importCarriesPlaningTheSpinnakerAndTheAveragedWind() throws {
+        let original = Self.feeder.race(at: 600)
+        var snapshot = original.exportSnapshot()
+        snapshot.seats[4].boat.isPlaning = !snapshot.seats[4].boat.isPlaning
+        snapshot.seats[4].boat.spinnaker = .hoisting(remaining: 1.5)
+        snapshot.seats[4].boat.averagedWindSpeed = (snapshot.seats[4].boat.averagedWindSpeed ?? 4) + 1
+        try original.importSnapshot(snapshot)
+        let copy = try Self.imported(original.exportSnapshot())
+        #expect(copy.boats[4].spinnaker == .hoisting(remaining: 1.5))
+        #expect(copy.boats[4].averagedWindSpeed == snapshot.seats[4].boat.averagedWindSpeed)
+        #expect(copy.digest() == original.digest())
+        for _ in 0..<300 {
+            original.step()
+            copy.step()
+            #expect(copy.digest() == original.digest())
+        }
+        var changed = original.exportSnapshot()
+        changed.seats[4].boat.spinnaker = .dropping(remaining: 0.7)
+        let other = try Self.imported(changed)
+        #expect(other.digest() != original.digest(), "the spinnaker is in the digest")
+    }
+
     @Test func invalidSnapshotsAreRejected() throws {
         let race = Self.feeder.race(at: -1700)
         let good = race.exportSnapshot()
@@ -285,6 +309,8 @@ struct LogFeeder {
             ("penaltyProgress", { $0.penaltyProgress = .nan }),
             ("shadow", { $0.shadow = .nan }),
             ("finishTime", { $0.finishTime = .nan }),
+            ("averagedWindSpeed", { $0.averagedWindSpeed = .infinity }),
+            ("spinnaker", { $0.spinnaker = .hoisting(remaining: .nan) }),
         ]
         for (field, spoil) in badBoats {
             var bad = good
