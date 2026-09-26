@@ -108,7 +108,8 @@ enum VisionFilter: String, Codable, CaseIterable {
 ///
 /// The log is replayed with `requireMatchingVersion: false`: fixtures are fixed test logs that outlive a
 /// simulation revision, and the reference images, not the digest, pin what they draw. A revision that
-/// moves the boats shows up as a reference diff, and the references are re-recorded.
+/// moves the boats shows up as a reference diff, and CI's new render is adopted as the reference
+/// (`scripts/adopt-references.sh`, #215).
 final class FixtureDriver: RaceDriver {
     enum FixtureError: Error, Equatable {
         case freezeTickOutOfRange(freezeTick: Int, start: Int, finalTick: Int)

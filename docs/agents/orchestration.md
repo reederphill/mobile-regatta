@@ -24,7 +24,7 @@ Squash-merge without asking when all of these hold for the head SHA:
 - The acceptance check passes every item.
 - The review has no blockers (nits may stay unfixed; list them in the log).
 
-Ask the human only for: a blocker you'd leave unfixed, a scope change, a `needs:human` item, or a reference-image change you can't take from CI.
+Ask the human only for: a blocker you'd leave unfixed, a scope change, or a `needs:human` item. A reference-image change isn't one: since #215 it routes through CI, not a human re-record. The failing compare uploads `render-actuals`; adopt it with `scripts/adopt-references.sh <PR>`, look at it, commit, push (validation.md, Render references).
 
 ## Implementer brief
 
