@@ -132,6 +132,11 @@ public struct Boat: Identifiable, Sendable {
         status == .prestart || status == .ocs || status == .racing
     }
 
+    /// A boat that has stopped racing: still drawn, but with no rights or obligations under Part 2
+    /// (CONTEXT.md). Decided by status alone; for now every status off the course (finished, dsq, dnf).
+    /// #86 owns the final semantics (OCS at the close).
+    public var isGhost: Bool { !isOnCourse }
+
     public var isTakingPenalty: Bool {
         penaltyTurnsOwed > 0 && abs(penaltyProgress) > deg2rad(30)
     }

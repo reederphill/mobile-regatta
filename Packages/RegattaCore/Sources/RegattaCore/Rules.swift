@@ -87,9 +87,25 @@ public struct RuleCall: Sendable, Equatable, Codable {
     }
 }
 
+/// Which of two boats must keep clear, and the rule of Part 2 Section A (or rule 13) that says so.
+/// Bots read `rule` to pick their manoeuvre, glyphs (#15) to show it.
+public struct RightOfWay: Sendable, Equatable {
+    /// The seat (boat id) that must keep clear.
+    public let keepClear: Int
+    public let rule: RacingRule
+
+    public init(keepClear: Int, rule: RacingRule) {
+        self.keepClear = keepClear
+        self.rule = rule
+    }
+}
+
 public enum Rules {
-    /// Decides which of two boats in contact was required to keep clear. `hull` is their boat class's.
-    public static func judge(_ a: Boat, _ b: Boat, course: CourseLayout, hull: BoatClass.Hull) -> Verdict {
+    /// Decides which of two boats in contact was required to keep clear. `overlapped` is the pair's
+    /// overlap as of the last point of certainty (`OverlapTracker`); `hull` is their boat class's.
+    /// Nil if either is a ghost.
+    public static func judge(_ a: Boat, _ b: Boat, overlapped: Bool, course: CourseLayout, hull: BoatClass.Hull) -> Verdict? {
+        guard !a.isGhost, !b.isGhost else { return nil }
         func call(_ rule: RacingRule, _ offender: Boat, _ victim: Boat) -> Verdict {
             Verdict(rule: rule, offender: offender.id, victim: victim.id)
         }
@@ -102,36 +118,78 @@ public enum Rules {
             return aMustKeepClear ? call(rule21(a), a, b) : call(rule21(b), b, a)
         }
 
-        if a.isTacking != b.isTacking {
-            return a.isTacking ? call(.whileTacking, a, b) : call(.whileTacking, b, a)
-        }
+        guard let right = rightOfWay(a, b, overlapped: overlapped, hull: hull) else { return nil }
 
-        if a.tack != b.tack {
-            return a.tack == .port ? call(.portStarboard, a, b) : call(.portStarboard, b, a)
-        }
-
-        let aAstern = isClearAstern(a, of: b, hull: hull)
-        let bAstern = isClearAstern(b, of: a, hull: hull)
-
-        if !aAstern && !bAstern, let mark = sharedMarkInZone(a, b, course: course) {
+        if right.rule == .windwardLeeward || right.rule == .clearAstern,
+           !isClearAstern(a, of: b, hull: hull), !isClearAstern(b, of: a, hull: hull),
+           let mark = sharedMarkInZone(a, b, course: course) {
             let aDistance = (a.position - mark).length
             let bDistance = (b.position - mark).length
             return aDistance > bDistance ? call(.givingMarkRoom, a, b) : call(.givingMarkRoom, b, a)
         }
 
-        if aAstern { return call(.clearAstern, a, b) }
-        if bAstern { return call(.clearAstern, b, a) }
+        return right.keepClear == a.id ? call(right.rule, a, b) : call(right.rule, b, a)
+    }
 
-        let windward = Vec2.heading(a.windDirection)
-        return a.position.dot(windward) > b.position.dot(windward)
-            ? call(.windwardLeeward, a, b)
-            : call(.windwardLeeward, b, a)
+    /// Which of `a` and `b` must keep clear under rules 10–13, from the world state alone (no rule 18
+    /// state yet, #91). `overlapped` is the pair's overlap as of the last point of certainty
+    /// (`OverlapTracker`), so a flickering overlap never changes the answer; `hull` is their class's.
+    /// Nil if either is a ghost: a ghost has no rights or obligations.
+    ///
+    /// - 13: a boat tacking keeps clear. If both are, the one astern keeps clear, else the one on the
+    ///   other's port side.
+    /// - 10: on opposite tacks (by the boom, so never changed by sailing by the lee) port keeps clear.
+    /// - 11: overlapped on the same tack, the windward boat keeps clear: the one not on the other's
+    ///   leeward side, which is her boom side.
+    /// - 12: not overlapped on the same tack, the boat clear astern keeps clear.
+    ///
+    /// The side tests (leeward side, port side) use the line through both boats along their mean
+    /// heading, which agrees with each boat's own centreline whenever those two agree, and decides when
+    /// differing headings make them disagree. "Astern" is the boat whose hull reaches least far past a
+    /// line abeam of the other's stern (`aftness`): clear astern if she is behind it, and when both or
+    /// neither are (headings apart, or an overlap not yet certain), the one further back. An exact tie
+    /// makes the higher seat keep clear.
+    public static func rightOfWay(_ a: Boat, _ b: Boat, overlapped: Bool, hull: BoatClass.Hull) -> RightOfWay? {
+        guard !a.isGhost, !b.isGhost, a.id != b.id else { return nil }
+        func keepClear(_ aKeepsClear: Bool?, _ rule: RacingRule) -> RightOfWay {
+            let aKeeps = aKeepsClear ?? (a.id > b.id)
+            return RightOfWay(keepClear: aKeeps ? a.id : b.id, rule: rule)
+        }
+        /// Whether `a` is further astern of `b` than `b` of `a`; nil for a tie.
+        func aIsAstern() -> Bool? {
+            let aAft = aftness(a.hull(outline: hull.outline), of: b, hullLength: hull.length)
+            let bAft = aftness(b.hull(outline: hull.outline), of: a, hullLength: hull.length)
+            return aAft == bAft ? nil : aAft < bAft
+        }
+        /// > 0 when `b` is to starboard of `a` across their mean heading, < 0 to port.
+        let side = (b.position - a.position).dot((a.forward + b.forward).rightPerp)
+        let bToPort: Bool? = side == 0 ? nil : side < 0
+
+        switch (a.isTacking, b.isTacking) {
+        case (true, false): return keepClear(true, .whileTacking)
+        case (false, true): return keepClear(false, .whileTacking)
+        case (true, true):
+            // "The one on the other's port side, or the one astern": astern as for rule 12 when the
+            // overlap terms apply between them, otherwise in the ordinary sense, when either hull is
+            // behind a line abeam of the other's stern.
+            let byAstern = !overlapped && (overlapTermsApply(a, b)
+                || isClearAstern(a, of: b, hull: hull) || isClearAstern(b, of: a, hull: hull))
+            if byAstern, let astern = aIsAstern() { return keepClear(astern, .whileTacking) }
+            return keepClear(bToPort.map { !$0 }, .whileTacking)
+        case (false, false): break
+        }
+
+        if a.tack != b.tack { return keepClear(a.tack == .port, .portStarboard) }
+
+        guard overlapped else { return keepClear(aIsAstern(), .clearAstern) }
+        // The same tack, so the same boom side: her leeward side.
+        let bToLeeward = bToPort.map { a.boomSide == .port ? $0 : !$0 }
+        return keepClear(bToLeeward, .windwardLeeward)
     }
 
     /// `a` is clear astern of `b` when its whole hull is behind a line abeam of `b`'s stern.
     public static func isClearAstern(_ a: Boat, of b: Boat, hull: BoatClass.Hull) -> Bool {
-        let stern = b.position - b.forward * hull.length / 2
-        return a.hull(outline: hull.outline).allSatisfy { ($0 - stern).dot(b.forward) < 0 }
+        aftness(a.hull(outline: hull.outline), of: b, hullLength: hull.length) < 0
     }
 
     /// The mark both boats are rounding, if both are inside its zone: at a gate, the first of its marks

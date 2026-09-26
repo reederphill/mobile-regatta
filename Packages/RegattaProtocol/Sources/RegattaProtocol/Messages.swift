@@ -394,7 +394,7 @@ public struct Snapshot: Equatable, Sendable {
     /// race is over) from `events`, the server's event state as the client has it from `RaceStart` /
     /// `Resync` and the reliable events since (`EventState.record`). So a client whose own prediction
     /// ended the race, or finished a boat, takes the server's word at every snapshot. The other fields
-    /// the wire leaves out (`SnapshotFields.excluded`) and contact, foul and incident memory keep the
+    /// the wire leaves out (`SnapshotFields.excluded`) and contact, foul, overlap and incident memory keep the
     /// base's values: incidents are umpire memory, which stays on the server (#18, #96).
     public func applied(to base: WorldSnapshot, tick: Int, events: EventState) throws -> WorldSnapshot {
         var world = try merge(seats, into: base, tick: tick)

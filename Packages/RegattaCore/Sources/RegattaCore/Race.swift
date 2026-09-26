@@ -85,6 +85,8 @@ public final class Race {
     private var boatContacts = Set<Pair>()
     private var obstacleContacts = Set<Pair>()
     private var lastFoul: [Pair: Double] = [:]
+    /// Every pair's overlap as of the last point of certainty (#87), updated once a tick.
+    public private(set) var overlaps: OverlapTracker
     private var events: [RaceEvent] = []
     private var finishers = 0
     /// Inputs stamped for ticks not yet simulated, in the order they arrived.
@@ -173,6 +175,7 @@ public final class Race {
                               boomSide: .leeward(ofRelativeWind: wrapAngle(windSetup.meanDirection - heading))))
         }
         boats = fleet
+        overlaps = OverlapTracker(seats: fleet.count)
         heldInputs = Array(repeating: .neutral, count: fleet.count)
         makeWindKeys()
         if windKeys != nil || (try? wind.requireKeys(atTick: tick)) != nil { refreshWind() }
@@ -351,6 +354,9 @@ public final class Race {
 
         let previous = boats.map(\.position)
         for i in boats.indices { integrate(i, Race.dt) }
+        // Where the boats sailed to, before contacts push them apart: a call at a contact this tick
+        // reads this tick's certain overlap.
+        overlaps.update(boats, hull: boatClass.hull, margin: lastPointOfCertaintyTicks)
         resolveBoatContacts()
         resolveObstacleContacts()
         for i in boats.indices { updateProgress(i, from: previous[i]) }
@@ -463,12 +469,25 @@ public final class Race {
 
     // MARK: - Contact and rules
 
+    /// The last point of certainty in ticks (15 in fleet-rules@1).
+    private var lastPointOfCertaintyTicks: Int { RulesConfig.ticks(rules.incidents.lastPointOfCertainty) }
+
+    /// Whether seats `a` and `b` are overlapped as of their last point of certainty.
+    public func isOverlapped(_ a: Int, _ b: Int) -> Bool { overlaps.isOverlapped(a, b) }
+
+    /// Which of seats `a` and `b` must keep clear under rules 10–13 now (`Rules.rightOfWay`), with their
+    /// overlap as of the last point of certainty. Nil if either is a ghost. For glyphs and bots.
+    public func rightOfWay(_ a: Int, _ b: Int) -> RightOfWay? {
+        Rules.rightOfWay(boats[a], boats[b], overlapped: overlaps.isOverlapped(a, b), hull: boatClass.hull)
+    }
+
     private func resolveBoatContacts() {
         var touching = Set<Pair>()
         let outline = boatClass.hull.outline
         let hulls = boats.map { $0.hull(outline: outline) }
-        for i in boats.indices where boats[i].isOnCourse {
-            for j in (i + 1)..<boats.count where boats[j].isOnCourse {
+        // A ghost can't be touched.
+        for i in boats.indices where !boats[i].isGhost {
+            for j in (i + 1)..<boats.count where !boats[j].isGhost {
                 guard (boats[i].position - boats[j].position).length < boatClass.hull.length * 1.3,
                       let push = Collision.penetration(hulls[i], hulls[j])
                 else { continue }
@@ -478,9 +497,10 @@ public final class Race {
                 if !boatContacts.contains(pair) {
                     boats[i].speed = BoatDynamics.speed(after: .boat, speed: boats[i].speed, boatClass: boatClass)
                     boats[j].speed = BoatDynamics.speed(after: .boat, speed: boats[j].speed, boatClass: boatClass)
-                    if (lastFoul[pair] ?? -.infinity) + 5 < time {
+                    if (lastFoul[pair] ?? -.infinity) + 5 < time,
+                       let verdict = Rules.judge(boats[i], boats[j], overlapped: overlaps.isOverlapped(i, j),
+                                                 course: course, hull: boatClass.hull) {
                         lastFoul[pair] = time
-                        let verdict = Rules.judge(boats[i], boats[j], course: course, hull: boatClass.hull)
                         call(verdict)
                     }
                 }
@@ -653,7 +673,8 @@ extension Race {
             tick: tick,
             seats: boats.indices.map { WorldSnapshot.Seat(boat: boats[$0], heldInput: heldInputs[$0]) },
             touchingBoats: boatPairs, touchingObstacles: obstacles, foulMemory: fouls, incidents: incidents,
-            firstFinishTime: firstFinishTime, isOver: isOver, windKeys: wind.keys
+            firstFinishTime: firstFinishTime, isOver: isOver, windKeys: wind.keys,
+            overlaps: overlaps.memory
         )
     }
 
@@ -673,7 +694,7 @@ extension Race {
     ///
     /// Throws, leaving the race unchanged, for a snapshot it couldn't sail on from: another fleet
     /// size, a tick outside the sequence start … `WorldSnapshot.maxTick`, a non-finite value, a leg or
-    /// rounding stage the course doesn't have, a negative penalty count, a bad contact or incident, or
+    /// rounding stage the course doesn't have, a negative penalty count, a bad contact, overlap or incident, or
     /// a missing key from the first window the wind at the snapshot's tick needs
     /// (`WindField.firstWindowNeeded`: the window before the snapshot's, or further back for puffs that
     /// may still be alive) through the last key it holds.
@@ -703,6 +724,14 @@ extension Race {
                 || !course.legs.indices.contains($0.leg) || $0.tick > snapshot.tick
         }) {
             throw WorldSnapshotError.invalidIncident(id: bad.id)
+        }
+        let margin = lastPointOfCertaintyTicks
+        for (k, entry) in snapshot.overlaps.enumerated() {
+            let ascending = k == 0 || snapshot.overlaps[k - 1].pair.a < entry.pair.a
+                || (snapshot.overlaps[k - 1].pair.a == entry.pair.a && snapshot.overlaps[k - 1].pair.b < entry.pair.b)
+            guard validPair(entry.pair), ascending, (0..<max(margin, 1)).contains(entry.changeTicks) else {
+                throw WorldSnapshotError.invalidOverlap
+            }
         }
 
         let snapshotWind = WindField(setup: windSetup, windows: wind.windows, keys: snapshot.windKeys)
@@ -746,6 +775,7 @@ extension Race {
         var foulTimes: [Pair: Double] = [:]
         for memory in snapshot.foulMemory { foulTimes[Pair(a: memory.pair.a, b: memory.pair.b)] = memory.time }
         lastFoul = foulTimes
+        overlaps = OverlapTracker(seats: boats.count, memory: snapshot.overlaps)
         incidents = snapshot.incidents
         firstFinishTime = snapshot.firstFinishTime
         isOver = snapshot.isOver

@@ -231,7 +231,7 @@ struct BotBrain: Sendable {
     private func keepClear(_ b: Boat, _ race: Race, desired: Double) -> Double {
         let lookahead = 2.5 + 2 * skill
         let myVelocity = Vec2.heading(desired) * b.speed
-        for other in race.boats where other.id != b.id && other.isOnCourse {
+        for other in race.boats where other.id != b.id && !other.isGhost {
             let offset = other.position - b.position
             guard offset.length < 30 else { continue }
             let relativeVelocity = other.velocity - myVelocity
@@ -239,12 +239,11 @@ struct BotBrain: Sendable {
             let t = vv > 1e-6 ? (-offset.dot(relativeVelocity) / vv).clamped(to: 0...lookahead) : 0
             guard (offset + relativeVelocity * t).length < race.boatClass.hull.length * 1.3 else { continue }
 
-            let call = Rules.judge(b, other, course: race.course, hull: race.boatClass.hull)
-            guard call.offender == b.id else { continue }
+            guard let right = race.rightOfWay(b.id, other.id), right.keepClear == b.id else { continue }
 
             // Headings are set relative to the wind so evasive action never parks the boat in irons.
             let side: Double = b.tack == .port ? 1 : -1
-            switch call.rule {
+            switch right.rule {
             case .portStarboard:
                 return b.windDirection + side * deg2rad(85) // duck
             case .windwardLeeward, .whileTacking:
