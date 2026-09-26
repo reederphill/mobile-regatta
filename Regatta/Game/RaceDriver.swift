@@ -89,7 +89,7 @@ struct TickFrame {
         self.isOver = isOver
     }
 
-    private init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool) {
+    init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool) {
         self.tick = tick
         self.boats = boats
         self.standings = standings
@@ -173,13 +173,15 @@ enum Interpolation {
         wrapAngle(a + wrapAngle(b - a) * t)
     }
 
-    /// `to`, with its position, heading and wind direction eased back towards `from`. Everything else,
+    /// `to`, with its position, heading and winds' directions eased back towards `from`. Everything else,
     /// such as status and penalties, is the latest tick's.
     static func boat(from a: Boat, to b: Boat, _ t: Double) -> Boat {
         var boat = b
         boat.position = position(from: a.position, to: b.position, t)
         boat.heading = angle(from: a.heading, to: b.heading, t)
-        boat.windDirection = angle(from: a.windDirection, to: b.windDirection, t)
+        boat.windOverGround.direction = angle(from: a.windOverGround.direction, to: b.windOverGround.direction, t)
+        boat.sailingWind.direction = angle(from: a.sailingWind.direction, to: b.sailingWind.direction, t)
+        boat.apparentWind.direction = angle(from: a.apparentWind.direction, to: b.apparentWind.direction, t)
         return boat
     }
 }

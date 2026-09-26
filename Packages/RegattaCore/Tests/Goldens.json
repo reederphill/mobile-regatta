@@ -8,6 +8,7 @@
     "6/swift-6.3.3/glibc-2.39/x86_64": "0x0e5029f9639f1528",
     "7/swift-6.3.3/glibc-2.39/x86_64": "0xf9201dd1fa16201f",
     "8/swift-6.3.3/glibc-2.39/x86_64": "0x6ce2d38bd2f347a1",
-    "9/swift-6.3.3/glibc-2.39/x86_64": "0xdd3e68edf86a22e1"
+    "9/swift-6.3.3/glibc-2.39/x86_64": "0xdd3e68edf86a22e1",
+    "10/swift-6.3.3/glibc-2.39/x86_64": "0x2ab632273711ce9f"
   }
 }

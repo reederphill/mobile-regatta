@@ -34,8 +34,8 @@ public final class Race {
     public let course: CourseLayout
     /// The class every boat sails: hull, polar and handling (ADR 0004).
     public var boatClass: BoatClass { files.boatClass.content }
-    /// The venue's tidal current, its tide state at the gun drawn from the race seed (#78). Held, not yet
-    /// sailed in: boats feel it from #79.
+    /// The water's own motion (#78, ADR 0003), which carries every boat (#79): the venue's current at the
+    /// tide state at the gun the race seed draws.
     public let current: CurrentField
     /// The tide state at the gun the log records (ADR 0003), or nil at a venue with no current.
     public let tideStateAtGun: Double?
@@ -112,7 +112,13 @@ public final class Race {
     /// tick whose wind needs a key it doesn't hold; plain `step()` and `groundWind(at:)` trap there, as they
     /// would for a seeded race with a bug. If its keys don't cover the first tick, the boats' wind stays
     /// unset until the race imports a snapshot or steps.
-    public init(setup: RaceSetup, files: RaceFiles, mode: Mode) throws {
+    public convenience init(setup: RaceSetup, files: RaceFiles, mode: Mode) throws {
+        try self.init(setup: setup, files: files, mode: mode, current: nil)
+    }
+
+    /// A race sailing in `current` instead of its venue's (the log still records the venue's tide state
+    /// at the gun): for tests.
+    init(setup: RaceSetup, files: RaceFiles, mode: Mode, current: CurrentField?) throws {
         try files.check(against: setup)
         self.setup = setup
         self.files = files
@@ -134,7 +140,7 @@ public final class Race {
         self.course = course
         let windSetup = drawn.with(raceArea: course.raceArea)
         self.windSetup = windSetup
-        current = CurrentField(venue: files.venue.content, raceSeed: setup.raceSeed)
+        self.current = current ?? CurrentField(venue: files.venue.content, raceSeed: setup.raceSeed)
         tideStateAtGun = CurrentField.tideStateAtGun(for: files.venue.content, raceSeed: setup.raceSeed)
         let windows = WindWindows(startSequenceTicks: setup.startSequenceTicks)
         wind = WindField(setup: windSetup, windows: windows, keys: WindKeyChain(revealedWindKeys))
@@ -376,41 +382,39 @@ public final class Race {
         while windKeys!.nextWindow <= current { wind.add(windKeys!.next()) }
     }
 
+    /// Samples every boat's wind over the ground and current at her position, and resolves her three
+    /// winds (`BoatWinds`) from them and her velocity through the water.
     private func refreshWind() {
         for i in boats.indices {
-            let ground = groundWind(at: boats[i].position)
-            boats[i].windDirection = ground.direction
-            boats[i].windSpeed = ground.speed
+            let flow = current.sample(boats[i].position, tick: tick)
+            let winds = BoatWinds.resolve(ground: Wind(groundWind(at: boats[i].position)), current: flow,
+                                          velocityThroughWater: boats[i].velocity)
+            boats[i].current = flow
+            boats[i].windOverGround = winds.overGround
+            boats[i].sailingWind = winds.sailing
+            boats[i].apparentWind = winds.apparent
         }
     }
 
+    /// Every boat on the course takes the shadow and backwind of every other one on it (#10); a ghost
+    /// takes none and casts none.
     private func applyWindShadows() {
+        let cones = boats.indices.map(shadowCone(ofSeat:))
         for i in boats.indices {
             guard boats[i].isOnCourse else {
                 boats[i].shadow = 1
                 continue
             }
-            let cone = boatClass.windShadow
-            var factor = 1.0
-            for j in boats.indices where j != i && boats[j].isOnCourse {
-                let offset = boats[i].position - boats[j].position
-                let downwind = -Vec2.heading(boats[j].windDirection)
-                let along = offset.dot(downwind)
-                guard along > 0, along < cone.coneLength else { continue }
-                let width = Race.shadowHalfWidth(cone, at: along)
-                let lateral = abs(offset.cross(downwind))
-                guard lateral < width else { continue }
-                factor *= 1 - cone.lossCloseIn * (1 - along / cone.coneLength) * (1 - lateral / width)
-            }
-            boats[i].shadow = max(factor, cone.stackingFloor)
+            let others = cones.indices.compactMap { $0 == i ? nil : cones[$0] }
+            boats[i].shadow = ShadowCone.factor(at: boats[i].position, of: others, floor: boatClass.windShadow.stackingFloor)
         }
     }
 
-    /// Half-width of `cone` at `distance` downwind of the boat: from half its width at the boat to half
-    /// its width at its end, straight between.
-    public static func shadowHalfWidth(_ cone: BoatClass.WindShadow, at distance: Double) -> Double {
-        let t = (distance / cone.coneLength).clamped(to: 0...1)
-        return (cone.coneWidthAtBoat + (cone.coneWidthAtEnd - cone.coneWidthAtBoat) * t) / 2
+    /// The wind shadow and backwind `seat`'s boat casts now, along her apparent wind (#10), or nil for a
+    /// ghost, which casts none, or an unknown seat.
+    public func shadowCone(ofSeat seat: Int) -> ShadowCone? {
+        guard boats.indices.contains(seat), boats[seat].isOnCourse else { return nil }
+        return ShadowCone(caster: boats[seat], shadow: boatClass.windShadow)
     }
 
     private func integrate(_ i: Int, _ dt: Double) {
@@ -426,11 +430,13 @@ public final class Race {
         }
 
         let before = b.heading
-        let tws = b.windSpeed * b.shadow
+        // The polar reads the sailing wind (#14); shadow slows it and never turns it (#10). The current
+        // carries every boat, ghosts too (#11).
+        let tws = b.sailingWind.speed * b.shadow
         let moved = BoatDynamics.advance(
             BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide),
             control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: b.isOnCourse),
-            env: BoatDynamics.Environment(windDirection: b.windDirection, windSpeed: tws),
+            env: BoatDynamics.Environment(windDirection: b.sailingWind.direction, windSpeed: tws, current: b.current),
             boatClass: boatClass, dt: dt)
         b.position = moved.position
         b.heading = moved.heading
@@ -785,7 +791,10 @@ extension Race {
             ("position.x", boat.position.x), ("position.y", boat.position.y), ("heading", boat.heading),
             ("speed", boat.speed), ("rudder", boat.rudder), ("desiredRudder", boat.desiredRudder),
             ("autopilot", boat.autopilot?.heading), ("penaltyProgress", boat.penaltyProgress),
-            ("windDirection", boat.windDirection), ("windSpeed", boat.windSpeed), ("shadow", boat.shadow),
+            ("windOverGround.direction", boat.windOverGround.direction), ("windOverGround.speed", boat.windOverGround.speed),
+            ("sailingWind.direction", boat.sailingWind.direction), ("sailingWind.speed", boat.sailingWind.speed),
+            ("apparentWind.direction", boat.apparentWind.direction), ("apparentWind.speed", boat.apparentWind.speed),
+            ("current.x", boat.current.x), ("current.y", boat.current.y), ("shadow", boat.shadow),
             ("finishTime", boat.finishTime),
         ]
         if let bad = doubles.first(where: { !($0.1?.isFinite ?? true) }) { return bad.0 }

@@ -41,7 +41,13 @@ import Glibc
 ///    tacks both more than 90° from the wind, and a boat between) counted once it has held for the last
 ///    point of certainty (15 ticks) per pair, updated after the boats move and before contacts, and in the
 ///    digest. Ghosts have none.
-public let simulationRevision = 9
+/// 10: sailing in current (#79), on 9. Every boat has three winds (`BoatWinds`): over the ground, sailing
+///    (ground less the current at her position, the race's `CurrentField` from its venue and tide state
+///    at the gun) and apparent (sailing less her velocity through the water). The polar, her tack angle and
+///    the rules read the sailing wind, and the current carries every boat, ghosts too. The shadow cone
+///    follows the caster's apparent wind, and a backwind zone reaches to windward of her (`ShadowCone`),
+///    both under the class's stacking floor. The digest hashes the three winds and the current.
+public let simulationRevision = 10
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

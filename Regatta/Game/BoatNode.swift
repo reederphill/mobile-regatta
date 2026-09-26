@@ -81,7 +81,7 @@ final class BoatNode: SKNode {
 
         shadowCone.isHidden = !boat.isOnCourse
         shadowCone.position = point
-        shadowCone.zRotation = CGFloat(-(boat.windDirection + .pi))
+        shadowCone.zRotation = CGFloat(-(boat.apparentWind.direction + .pi)) // the cone follows her apparent wind (#10)
 
         alpha = boat.isOnCourse ? 1 : 0.45
     }

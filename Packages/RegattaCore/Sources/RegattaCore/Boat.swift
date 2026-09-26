@@ -74,10 +74,16 @@ public struct Boat: Identifiable, Sendable {
     /// Rule 13: past head to wind but not yet close-hauled.
     public var isTacking = false
 
-    /// Local true wind at the boat (direction is where it blows from).
-    public var windDirection = 0.0
-    public var windSpeed = 0.0
-    /// Multiplier from other boats' wind shadow, 1 = clean air.
+    /// Wind over the ground at the boat (`BoatWinds`): what readouts show (#15).
+    public var windOverGround = Wind.calm
+    /// The wind she sails in, over the water (`BoatWinds`): what the polar, her wind angle and her tack read (#14).
+    public var sailingWind = Wind.calm
+    /// The wind her sails feel (`BoatWinds`): what her wind shadow follows (#10).
+    public var apparentWind = Wind.calm
+    /// Current at the boat, m/s, the way the water moves: it carries her over the ground whatever she
+    /// does (#11). Sampled with the winds at the start of every step.
+    public var current = Vec2.zero
+    /// Multiplier from other boats' wind shadow and backwind on the sailing wind's speed, 1 = clean air.
     public var shadow = 1.0
 
     public var finishTime: Double?
@@ -94,7 +100,18 @@ public struct Boat: Identifiable, Sendable {
         self.boomSide = boomSide
     }
 
-    /// Wind direction relative to the bow; positive = wind over the starboard side.
+    /// Where the sailing wind blows from, radians.
+    public var windDirection: Double {
+        get { sailingWind.direction }
+        set { sailingWind.direction = newValue }
+    }
+    /// The sailing wind's speed, m/s, before any shadow.
+    public var windSpeed: Double {
+        get { sailingWind.speed }
+        set { sailingWind.speed = newValue }
+    }
+
+    /// Sailing wind direction relative to the bow; positive = wind over the starboard side.
     public var relativeWind: Double { wrapAngle(windDirection - heading) }
     public var twa: Double { abs(relativeWind) }
     /// The side opposite the boom.
@@ -104,7 +121,12 @@ public struct Boat: Identifiable, Sendable {
     /// Sailing downwind with the wind past dead astern on the boom's side, short of the gybe.
     public var isByTheLee: Bool { BoomSide.isByTheLee(sailingAngle) }
     public var forward: Vec2 { .heading(heading) }
+    /// Metres per second through the water: the same as `speed`, named for readouts (#15: the wake).
+    public var speedThroughWater: Double { speed }
+    /// Velocity through the water, m/s.
     public var velocity: Vec2 { forward * speed }
+    /// Velocity over the ground, m/s: through the water plus the current, always (#11).
+    public var velocityOverGround: Vec2 { velocity + current }
 
     public var isOnCourse: Bool {
         status == .prestart || status == .ocs || status == .racing

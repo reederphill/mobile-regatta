@@ -84,6 +84,17 @@ struct SeatWithProbe: CustomReflectable {
         #expect(SnapshotFields.wire.count == Set(SnapshotFields.wire).count)
         #expect(SnapshotFields.excluded.values.allSatisfy { !$0.isEmpty })
     }
+
+    /// #79: a boat's three winds and the current at her are recomputed at the start of every step, so
+    /// the wire leaves them out and a receiver keeps its own.
+    @Test func theBoatsWindsAndCurrentAreDerivedNotSent() {
+        let fields = Set(storedSeatFields(of: Self.seat))
+        for field in ["boat.windOverGround", "boat.sailingWind", "boat.apparentWind", "boat.current"] {
+            #expect(fields.contains(field))
+            #expect(!SnapshotFields.wire.contains(field))
+            #expect(SnapshotFields.excluded[field]?.hasPrefix("derived:") == true, "\(field)")
+        }
+    }
 }
 
 /// #18: a 16-boat snapshot is about 0.5 KB. 512 bytes is a hard ceiling, with room left for the rules
