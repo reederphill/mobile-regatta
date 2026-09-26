@@ -31,12 +31,17 @@ import Glibc
 ///    or past the class's by-the-lee limit, and by the lee she sails the mirrored polar less the class's
 ///    penalty. The tap steers to the same wind angle with the boom on the other side. Tacked and gybed
 ///    events. Boats sail ilca-dinghy@2 (turn rate curve, rudder drag and no-go time constant retuned).
-/// 8: right of way (#87): rules 10–13 with windward by side of boat (her boom side is her leeward side),
-///    both tacking (port side or astern keeps clear); overlap (incl. opposite tacks both more than 90°
-///    from the wind, and a boat between) counted once it has held for the last point of certainty (15
-///    ticks) per pair, updated after the boats move and before contacts, and in the digest. Ghosts have
-///    none.
-public let simulationRevision = 8
+/// 8: race assembly (#81). A race is built from the files its setup names (`RaceFiles`) and sails the
+///    derived `CourseLayout` (#80): windward, offset mark, leeward gate, the line on the pairing's start-line
+///    centre sized for the fleet, and its race area for the puffs. The prototype placement is laid square
+///    to that line. `WindField.sample` composes the pairing's geographic grid (#77). The log header records
+///    the files and the tide state at the gun.
+/// 9: right of way (#87), on the assembled race of 8: rules 10–13 with windward by side of boat (her boom
+///    side is her leeward side), both tacking (port side or astern keeps clear); overlap (incl. opposite
+///    tacks both more than 90° from the wind, and a boat between) counted once it has held for the last
+///    point of certainty (15 ticks) per pair, updated after the boats move and before contacts, and in the
+///    digest. Ghosts have none.
+public let simulationRevision = 9
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

@@ -40,7 +40,7 @@ public struct CurrentField: Sendable, Equatable {
     ///
     /// Drawn from the race seed on its own stream, `SplitMix64(seed: raceSeed.value, stream: seedStream)`,
     /// first value, so it never moves any other race-seed draw. A pure function of the logged race seed
-    /// and venue; the race log records it (#81).
+    /// and venue; the race log records it (`RaceLog.Header.tideStateAtGun`).
     public static func tideStateAtGun(for venue: Venue, raceSeed: RaceSeed) -> Double? {
         guard let range = venue.current?.allowedTideStatesAtGun else { return nil }
         var rng = SplitMix64(seed: raceSeed.value, stream: seedStream)

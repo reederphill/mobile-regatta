@@ -35,7 +35,7 @@ public struct WorldSnapshot: Sendable {
         }
     }
 
-    /// A seat touching an obstacle (`Course.obstacles[obstacle]`).
+    /// A seat touching an obstacle (`CourseLayout.obstacles[obstacle]`).
     public struct ObstacleContact: Hashable, Sendable {
         public let seat: Int
         public let obstacle: Int

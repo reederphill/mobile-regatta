@@ -2,8 +2,23 @@
   "finalTick" : 3000,
   "header" : {
     "setup" : {
+      "boatClass" : {
+        "hash" : "f5c8f1677a45f76c2ffe27914671ea0ce615614944f331027c506cafb6caa12d",
+        "id" : "ilca-dinghy",
+        "version" : 2
+      },
+      "conditions" : {
+        "hash" : "7b58f303eb7ff1b2262b4ff8990cd158ca85659e879fbe850c0d2dda4dac7d7e",
+        "id" : "classic-oscillating",
+        "version" : 2
+      },
       "laps" : 2,
       "raceSeed" : "0x00595eed00000001",
+      "rulesConfiguration" : {
+        "hash" : "11b0bf284f9466d66b47756bb3399cad5d1a71d53b3637dabb2b2d83e310ca13",
+        "id" : "fleet-rules",
+        "version" : 1
+      },
       "seats" : [
         "human",
         "bot",
@@ -23,7 +38,12 @@
         "bot"
       ],
       "simulationVersion" : "2/swift-6.3.3/glibc-2.39/x86_64",
-      "startSequenceTicks" : 1800
+      "startSequenceTicks" : 1800,
+      "venue" : {
+        "hash" : "42154e3d263171997dcd444383b0dcf0d89a04fc2b31280b10a4a5f5af220785",
+        "id" : "dev-venue",
+        "version" : 2
+      }
     },
     "windSeed" : "0xd1ce000000590002"
   },

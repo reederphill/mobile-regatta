@@ -104,7 +104,7 @@ public enum Rules {
     /// Decides which of two boats in contact was required to keep clear. `overlapped` is the pair's
     /// overlap as of the last point of certainty (`OverlapTracker`); `hull` is their boat class's.
     /// Nil if either is a ghost.
-    public static func judge(_ a: Boat, _ b: Boat, overlapped: Bool, course: Course, hull: BoatClass.Hull) -> Verdict? {
+    public static func judge(_ a: Boat, _ b: Boat, overlapped: Bool, course: CourseLayout, hull: BoatClass.Hull) -> Verdict? {
         guard !a.isGhost, !b.isGhost else { return nil }
         func call(_ rule: RacingRule, _ offender: Boat, _ victim: Boat) -> Verdict {
             Verdict(rule: rule, offender: offender.id, victim: victim.id)
@@ -192,18 +192,17 @@ public enum Rules {
         aftness(a.hull(outline: hull.outline), of: b, hullLength: hull.length) < 0
     }
 
-    /// The mark both boats are rounding, if both are inside its zone.
-    static func sharedMarkInZone(_ a: Boat, _ b: Boat, course: Course) -> Vec2? {
+    /// The mark both boats are rounding, if both are inside its zone: at a gate, the first of its marks
+    /// whose zone holds both.
+    static func sharedMarkInZone(_ a: Boat, _ b: Boat, course: CourseLayout) -> Vec2? {
         guard a.status == .racing, b.status == .racing,
               a.legIndex < course.legs.count, b.legIndex < course.legs.count,
               case .round(let ma) = course.legs[a.legIndex],
               case .round(let mb) = course.legs[b.legIndex],
               ma == mb
         else { return nil }
-        let mark = course.marks[ma].position
-        guard (a.position - mark).length < course.zoneRadius,
-              (b.position - mark).length < course.zoneRadius
-        else { return nil }
-        return mark
+        return course.elements[ma].marks.map(\.position).first { mark in
+            (a.position - mark).length < course.zoneRadius && (b.position - mark).length < course.zoneRadius
+        }
     }
 }

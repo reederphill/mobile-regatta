@@ -25,14 +25,17 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast
   Venue.swift             venue file schema: land, pairings with geographic grids, current (docs/venue-file.md)
   Resources/venues/       venue files; `dev-venue@2` stands in until the real venues (#83)
-  Course.swift            windward-leeward course, start/finish line, rounding gates
+  CourseLayout.swift      the course derived from the files and race seed: marks, gate, lines, race area
+  Course.swift            rounding rays and obstacles, shared by the course and the rules
   Boat.swift              boat state and hull shape
   Rules.swift             racing rules in 2025 numbering, who had to keep clear, rule calls
   RulesConfig.swift       rules configuration file schema: incidents, zone, race format (docs/rules-file.md)
   Resources/rules/        rules configuration files; `fleet-rules@1` is the v1.0 fleet race
   Incident.swift          incidents and the array-backed IncidentIndex, keyed by sorted seat pairs
   Race.swift              fixed-step race loop: per-seat inputs, start sequence, OCS, contacts, penalties, finish;
-                          keys-only (seedless) races for online prediction, whose tryStep() stops at a missing wind key
+                          authoritative or prediction mode (seedless, no umpire; tryStep() stops at a missing wind key)
+  RaceFiles.swift         resolves a setup's data-file refs (catalog, then bundle), hash checked; the bundled defaults
+  UmpireState.swift       the authoritative race's umpire memory (empty until the rules tickets)
   RaceSetup.swift         race setup (seats, laps, race seed, data-file refs) and the separate wind seed
   BoatInput.swift         held input (int8 rudder, ease) and taps (tack/gybe, protest)
   RaceLog.swift           race log: header, inputs as applied, seat events; stable JSON

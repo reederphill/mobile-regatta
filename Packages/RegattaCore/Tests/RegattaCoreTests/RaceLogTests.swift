@@ -298,9 +298,10 @@ enum ScriptedLog {
         let file = FileRef(id: "ilca-dinghy", version: 1, hash: ContentHash(of: Data("class".utf8)))
         let setup = try RaceSetup(raceSeed: RaceSeed(.max), seats: [.human, .bot], laps: 1, startSequenceTicks: 90,
                                   boatClass: file, venue: FileRef(id: "dev-venue", version: 1, hash: ContentHash(of: Data("venue".utf8))),
-                                  conditions: nil, rulesConfiguration: FileRef(id: "rules", version: 3, hash: ContentHash(of: Data("rules".utf8))))
+                                  conditions: FileRef(id: "breeze", version: 2, hash: ContentHash(of: Data("breeze".utf8))),
+                                  rulesConfiguration: FileRef(id: "rules", version: 3, hash: ContentHash(of: Data("rules".utf8))))
         let log = RaceLog(
-            header: .init(setup: setup, windSeed: WindSeed(0xFFFF_FFFF_FFFF_FFFE)),
+            header: .init(setup: setup, windSeed: WindSeed(0xFFFF_FFFF_FFFF_FFFE), tideStateAtGun: 4.712_388_980_384_69),
             inputs: [
                 InputRecord(tick: -89, seat: 0, kind: .held(BoatInput(rudder: Int8(-127), ease: true))),
                 InputRecord(tick: -89, seat: 0, kind: .tap(.tackGybe)),
@@ -325,6 +326,7 @@ enum ScriptedLog {
         #expect(text.contains(#""raceSeed" : "0xffffffffffffffff""#))
         #expect(text.contains(#""windSeed" : "0xfffffffffffffffe""#))
         #expect(text.contains(#""hash" : "\#(file.hash.hex)""#), "FileRef keeps #58's {id, version, hash} shape")
+        #expect(text.contains(#""tideStateAtGun" : 4.71238898038469"#))
     }
 
     /// The checked-in fixture is exactly what the script records.
@@ -361,7 +363,7 @@ enum ScriptedLog {
 
     @Test func replayRejectsMalformedLogs() throws {
         let setup = try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot], startSequenceTicks: 30)
-        let header = RaceLog.Header(setup: setup, windSeed: WindSeed(2))
+        let header = RaceLog.Header(setup: setup, windSeed: WindSeed(2), tideStateAtGun: nil)
         let outOfOrder = RaceLog(header: header, inputs: [
             InputRecord(tick: -10, seat: 0, kind: .held(BoatInput(rudder: 0.5))),
             InputRecord(tick: -20, seat: 0, kind: .held(.neutral)),

@@ -45,14 +45,21 @@ enum VenueFixtures {
         }
     }
 
-    /// A pairing for `conditions` for tests that aren't about the venue: the default venue's geographic
-    /// grid, with the mean and trend direction given. The defaults are what the #74 stub pairing was:
-    /// wind from the north, trend chosen by the seed.
+    /// A pairing for `conditions` for tests that aren't about the venue: a neutral geographic grid (the
+    /// sampled wind is the channels' and the puffs' alone), with the mean and trend direction given. The
+    /// defaults are what the #74 stub pairing was: wind from the north, trend chosen by the seed.
     static func pairing(for conditions: ConditionsFile, meanDirection: Double = 0,
                         trend: Venue.TrendDirection = .either) -> Venue.Pairing {
         Venue.Pairing(conditions: conditions.ref.key, meanDirection: meanDirection, trendDirection: trend,
-                      startLineCentre: .zero, geographicGrid: Race.defaultPairing.geographicGrid)
+                      startLineCentre: .zero, geographicGrid: neutralGrid)
     }
+
+    /// The default venue's grid with no bend and no shade anywhere.
+    static let neutralGrid: Venue.GeographicGrid = {
+        let grid = Race.defaultPairing.geographicGrid.grid
+        return Venue.GeographicGrid(grid: grid, directionDeltas: Array(repeating: 0, count: grid.nodeCount),
+                                    speedFactors: Array(repeating: 1, count: grid.nodeCount))
+    }()
 
     static let land0Ring = "[[-600, -200], [-400, -200], [-400, 100], [-500, 150], [-400, 200], [-400, 600], [-600, 600], [-600, -200]]"
 }

@@ -67,13 +67,15 @@ public struct WindField: Hashable, Sendable {
         puffSpawns[key.window] = puffPlan.spawns(of: key, windows: windows)
     }
 
-    /// The ground wind at `p` at `tick`: the fleet-wide channels, then the puffs and lulls alive at `p`.
+    /// The ground wind at `p` at `tick`: the fleet-wide channels, bent and shaded by the venue's geographic
+    /// grid at `p` (#77), then the puffs and lulls alive at `p`.
     /// Throws `missingKey(k)` if it needs a key the field doesn't hold: window k needs keys k − 1 and k,
     /// and with puffs every key back to `firstWindowNeeded(atTick:)`, whose puffs may still be alive.
     public func sample(_ p: Vec2, tick: Int) throws(WindFieldError) -> GroundWind {
         let c = try channels(atTick: tick)
-        let speed = Self.courseSpeed(setup, c)
-        let direction = setup.meanDirection + c.shift
+        let geographic = setup.pairing.geographicGrid.sample(p)
+        let speed = Self.courseSpeed(setup, c) * geographic.speedFactor
+        let direction = setup.meanDirection + c.shift + geographic.directionDelta
         guard let puffPlan else { return GroundWind(direction: wrapAngle(direction), speed: speed) }
         // Puffs act on top of the clamped channel: a puff may take the wind above the forecast range, as
         // a lull may below it (#10's strengths are relative to the wind around them).
