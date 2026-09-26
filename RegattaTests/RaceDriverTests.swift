@@ -38,6 +38,18 @@ import RegattaCore
         }
         #expect(abs(world.time - (driver.previousFrame.time + driver.currentFrame.time) / 2) < 1e-6)
     }
+
+    /// #230: the scene reads what each boat's autohelm holds (the angle or the groove, and how far off the
+    /// groove) from the render world, for the vane (#122).
+    @Test func renderWorldReadsEachSeatsAutohelm() {
+        let driver = PracticeDriver(config: RaceDriverTests.config)
+        driver.tick(2 / Double(Race.tickRate))
+        let world = driver.renderWorld
+        for seat in world.boats.indices {
+            #expect(world.autohelm(ofSeat: seat) == world.boats[seat].autohelmReading(in: world.boatClass))
+        }
+        #expect(world.autohelm(ofSeat: driver.myBoatIndex) != nil, "your rudder is centred: the autohelm holds her")
+    }
 }
 
 /// #79 (#15): the HUD's wind readouts show the wind over the ground, not the wind she sails in.
