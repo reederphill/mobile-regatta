@@ -70,18 +70,45 @@ public struct ContentHash: Hashable, Sendable, Codable, CustomStringConvertible 
 }
 
 /// Names one exact data file: what a race log records and what the server sends at race start.
+/// A tuned copy from the debug tuning panel (#229) keeps its base file's id and version, has its own
+/// hash, and carries a `tune` number; bundled files carry none (ADR 0004).
 public struct FileRef: Hashable, Sendable, Codable, CustomStringConvertible {
     public let id: String
     public let version: Int
     public let hash: ContentHash
+    /// Which tuned copy of `id@version` this is, or nil for a bundled file. Tuned copies sail practice
+    /// races only, so the wire refuses a ref that has one (#229).
+    public let tune: Int?
 
-    public init(id: String, version: Int, hash: ContentHash) {
+    public init(id: String, version: Int, hash: ContentHash, tune: Int? = nil) {
         self.id = id
         self.version = version
         self.hash = hash
+        self.tune = tune
     }
 
-    public var description: String { "\(id)@\(version) (\(hash))" }
+    public var description: String {
+        guard let tune else { return "\(id)@\(version) (\(hash))" }
+        return "\(id)@\(version) tune \(tune) (\(hash))"
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, version, hash, tune }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(id: c.decode(String.self, forKey: .id), version: c.decode(Int.self, forKey: .version),
+                      hash: c.decode(ContentHash.self, forKey: .hash), tune: c.decodeIfPresent(Int.self, forKey: .tune))
+    }
+
+    /// Leaves `tune` out when it's nil, so a bundled file's ref keeps #58's {id, version, hash} shape
+    /// and the logs and fixtures recorded before tuned copies existed read and write unchanged.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(version, forKey: .version)
+        try c.encode(hash, forKey: .hash)
+        try c.encodeIfPresent(tune, forKey: .tune)
+    }
 }
 
 /// Names a data file by id and version only, without its hash: how one data file refers to another
@@ -193,8 +220,10 @@ public struct DataFile<Content: DataFileContent>: Sendable {
     public var version: Int { header.version }
     public var schemaVersion: Int { header.schemaVersion }
 
-    /// Loads a file from its exact bytes.
-    public init(data: Data) throws {
+    /// Loads a file from its exact bytes. `tune` marks it as a tuned copy (#229): the debug tuning
+    /// panel's modified copy of a bundled file, which keeps that file's id and version in its header.
+    /// The hash is of the bytes alone, whatever the tune.
+    public init(data: Data, tune: Int? = nil) throws {
         let kind = Content.kind
         // Before anything parses the file, so every later check reads the same file on every platform:
         // UTF-8 only, nesting JSONDecoder accepts, and no key repeated in one object (JSONDecoder keeps
@@ -240,17 +269,18 @@ public struct DataFile<Content: DataFileContent>: Sendable {
             throw DataFileError.malformed(kind: kind, reason: "\(error)")
         }
         self.header = header
-        self.ref = FileRef(id: header.id, version: header.version, hash: ContentHash(of: data))
+        self.ref = FileRef(id: header.id, version: header.version, hash: ContentHash(of: data), tune: tune)
         self.content = content
     }
 
     /// Loads a file and checks that it is exactly the one `expected` names. The hash is checked
     /// before anything is parsed; bytes with the right hash but another id or version in their
-    /// header mean `expected` itself is wrong, and throw `invalidHeader`.
+    /// header mean `expected` itself is wrong, and throw `invalidHeader`. A tuned ref's bytes load as
+    /// that tuned copy, so the file's ref is `expected`.
     public init(data: Data, expecting expected: FileRef) throws {
         let hash = ContentHash(of: data)
         guard hash == expected.hash else { throw DataFileError.refMismatch(expected: expected, foundHash: hash) }
-        try self.init(data: data)
+        try self.init(data: data, tune: expected.tune)
         guard id == expected.id, version == expected.version else {
             throw DataFileError.invalidHeader(
                 kind: Content.kind, reason: "file \(ref) was expected to be \(expected.id)@\(expected.version)")
@@ -301,38 +331,39 @@ public struct DataFile<Content: DataFileContent>: Sendable {
 }
 
 /// Every loaded version of one kind of file, looked up by ref or by id and version.
-/// Holds an array, in load order, so nothing depends on hash order (ADR 0002).
+/// Holds an array, in load order, so nothing depends on hash order (ADR 0002). Tuned copies (#229)
+/// share their base file's id and version, so only their whole ref finds them: they never shadow it.
 public struct DataFileCatalog<Content: DataFileContent>: Sendable {
     public private(set) var files: [DataFile<Content>] = []
 
     public init() {}
 
-    /// Adds a file. Adding the same bytes again does nothing; a different file with the same id and
-    /// version throws, because a released version never changes (ADR 0004).
+    /// Adds a file. Adding the same file again does nothing. A different untuned file with the same id
+    /// and version throws, because a released version never changes (ADR 0004); a tuned copy (#229) of
+    /// that version is added beside it, told apart by its hash and tune.
     @discardableResult
     public mutating func add(_ file: DataFile<Content>) throws -> FileRef {
-        if let existing = self.file(id: file.id, version: file.version) {
-            guard existing.ref == file.ref else {
-                throw DataFileError.conflictingVersion(existing: existing.ref, new: file.ref)
-            }
-            return existing.ref
+        if let existing = self.file(file.ref) { return existing.ref }
+        if file.ref.tune == nil, let existing = self.file(id: file.id, version: file.version) {
+            throw DataFileError.conflictingVersion(existing: existing.ref, new: file.ref)
         }
         files.append(file)
         return file.ref
     }
 
-    /// The file with exactly this id, version and hash.
+    /// The file with exactly this ref: id, version and hash, and the tune if it's a tuned copy.
     public func file(_ ref: FileRef) -> DataFile<Content>? {
         files.first { $0.ref == ref }
     }
 
+    /// The untuned file with this id and version, never a tuned copy of it.
     public func file(id: String, version: Int) -> DataFile<Content>? {
-        files.first { $0.id == id && $0.version == version }
+        files.first { $0.id == id && $0.version == version && $0.ref.tune == nil }
     }
 
-    /// Loaded versions of `id`, ascending.
+    /// Versions of `id` with an untuned file loaded, ascending. Tuned copies add none.
     public func versions(of id: String) -> [Int] {
-        files.filter { $0.id == id }.map(\.version).sorted()
+        files.filter { $0.id == id && $0.ref.tune == nil }.map(\.version).sorted()
     }
 }
 

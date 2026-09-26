@@ -41,10 +41,11 @@ public struct RaceFiles: Sendable {
         self.pairing = pairing
     }
 
-    /// Resolves each file `setup` names: from `catalog` if it holds that id and version, else from this
-    /// build's bundled files. Throws `DataFileError.refMismatch` if the file found there has other bytes
-    /// than the ref's hash (checked before anything is parsed), `DataFileError.notBundled` if neither has
-    /// it, and `noPairing` if the venue can't host the conditions.
+    /// Resolves each file `setup` names: from `catalog` if it holds that exact ref (a tuned copy is found
+    /// only this way, #229) or an untuned file with that id and version, else from this build's bundled
+    /// files. Throws `DataFileError.refMismatch` if the file found there has other bytes than the ref's
+    /// hash (checked before anything is parsed), `DataFileError.notBundled` if neither has it, and
+    /// `noPairing` if the venue can't host the conditions.
     public init(resolving setup: RaceSetup, from catalog: RaceFileCatalog = RaceFileCatalog()) throws {
         let defaults = RaceFiles.defaults
         try self.init(
@@ -84,9 +85,13 @@ public struct RaceFiles: Sendable {
     private static func resolve<Content>(
         _ ref: FileRef, in catalog: DataFileCatalog<Content>, bundledDefault: DataFile<Content>
     ) throws -> DataFile<Content> {
+        // By id, version and hash in one lookup: a tuned copy (#229) shares its base file's id and
+        // version, so only the whole ref finds it, and it never stands in for the bundled file.
+        if let file = catalog.file(ref) { return file }
+        // An untuned file the catalog holds under this id and version replaces the bundled one, so a
+        // ref naming other bytes is refused rather than resolved from the bundle.
         if let file = catalog.file(id: ref.id, version: ref.version) {
-            guard file.ref.hash == ref.hash else { throw DataFileError.refMismatch(expected: ref, foundHash: file.ref.hash) }
-            return file
+            throw DataFileError.refMismatch(expected: ref, foundHash: file.ref.hash)
         }
         // The defaults are already loaded: most races sail them.
         if bundledDefault.ref == ref { return bundledDefault }

@@ -230,16 +230,113 @@ enum Fixtures {
         #expect(catalog.file(v1.ref)?.content.contact.boat == 0.6)
         #expect(catalog.file(id: Fixtures.classID, version: 2)?.content.contact.boat == 0.7)
         #expect(catalog.file(FileRef(id: v1.id, version: 1, hash: v2.ref.hash)) == nil)
+    }
 
-        // A released version never changes: a second, different "version 2" is refused.
-        let otherV2 = try BoatClassFile(data: Fixtures.edited([
+    /// A released version never changes (ADR 0004): a second, different untuned "version 2" is refused,
+    /// whatever tuned copies of that version the catalog holds.
+    @Test func untunedDuplicateVersionStillConflicts() throws {
+        let v2 = try BoatClassFile(data: Fixtures.edited([
+            (of: #""version": 3,"#, with: #""version": 2,"#),
+            (of: #""boatSpeedFactor": 0.6"#, with: #""boatSpeedFactor": 0.7"#),
+        ]))
+        let otherBytes = try Fixtures.edited([
             (of: #""version": 3,"#, with: #""version": 2,"#),
             (of: #""boatSpeedFactor": 0.6"#, with: #""boatSpeedFactor": 0.8"#),
-        ]))
+        ])
+        let otherV2 = try BoatClassFile(data: otherBytes)
+        var catalog = DataFileCatalog<BoatClass>()
+        try catalog.add(v2)
+        // The same bytes as a tuned copy sit beside version 2; untuned, they conflict with it.
+        try catalog.add(try BoatClassFile(data: otherBytes, tune: 1))
         #expect(throws: DataFileError.conflictingVersion(existing: v2.ref, new: otherV2.ref)) {
             try catalog.add(otherV2)
         }
         #expect(catalog.files.count == 2)
+        #expect(catalog.file(id: Fixtures.classID, version: 2)?.ref == v2.ref)
+    }
+
+    /// A tuned copy (#229) keeps its base file's id and version and is added beside it, told apart by
+    /// its hash and tune. Only its own ref finds it, so it never shadows the bundled file, in the
+    /// catalog or when a race resolves its files.
+    @Test func tunedCopyWithSameVersionIsAccepted() throws {
+        let bundled = try BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version)
+        let tunedBytes = try Fixtures.edited([(of: #""boatSpeedFactor": 0.6"#, with: #""boatSpeedFactor": 0.7"#)])
+        let tuned = try BoatClassFile(data: tunedBytes, tune: 1)
+        // The header's id and version, and the hash of the bytes alone.
+        #expect(tuned.ref == FileRef(id: bundled.id, version: bundled.version, hash: ContentHash(of: tunedBytes), tune: 1))
+        #expect(bundled.ref.tune == nil)
+        // Another copy of the same version, and one with the bundled bytes: each tuned copy is its own file.
+        let retuned = try BoatClassFile(
+            data: try Fixtures.edited([(of: #""boatSpeedFactor": 0.6"#, with: #""boatSpeedFactor": 0.8"#)]), tune: 2)
+        let untouched = try BoatClassFile(data: try Fixtures.bytes(), tune: 3)
+        #expect(untouched.ref.hash == bundled.ref.hash && untouched.ref != bundled.ref)
+
+        // The tuned copies first: finding the bundled file mustn't depend on the order they were added.
+        var catalog = DataFileCatalog<BoatClass>()
+        #expect(try catalog.add(tuned) == tuned.ref)
+        try catalog.add(retuned)
+        try catalog.add(untouched)
+        #expect(catalog.file(id: Fixtures.classID, version: Fixtures.version) == nil)
+        #expect(catalog.versions(of: Fixtures.classID).isEmpty)
+        #expect(try catalog.add(bundled) == bundled.ref)
+        #expect(try catalog.add(tuned) == tuned.ref) // the same copy again: no-op
+        #expect(catalog.files.count == 4)
+        #expect(catalog.versions(of: Fixtures.classID) == [Fixtures.version])
+        #expect(catalog.file(id: Fixtures.classID, version: Fixtures.version)?.ref == bundled.ref)
+        #expect(catalog.file(bundled.ref)?.content.contact.boat == 0.6)
+        #expect(catalog.file(tuned.ref)?.content.contact.boat == 0.7)
+        #expect(catalog.file(retuned.ref)?.content.contact.boat == 0.8)
+        #expect(catalog.file(untouched.ref)?.ref == untouched.ref)
+
+        // A race resolves each ref to exactly its own file, by id, version and hash at once.
+        var files = RaceFileCatalog()
+        files.boatClasses = catalog
+        for file in [bundled, tuned, retuned, untouched] {
+            let setup = try RaceSetup(raceSeed: RaceSeed(239), seats: [.human, .bot], boatClass: file.ref)
+            #expect(try RaceFiles(resolving: setup, from: files).boatClass.ref == file.ref)
+        }
+        // A tuned copy's bytes aren't in the bundle: without its file beside it, its ref doesn't resolve.
+        let setup = try RaceSetup(raceSeed: RaceSeed(239), seats: [.human, .bot], boatClass: tuned.ref)
+        #expect(throws: DataFileError.refMismatch(expected: tuned.ref, foundHash: bundled.ref.hash)) {
+            try RaceFiles(resolving: setup)
+        }
+    }
+
+    /// The race-log header records a tuned copy's ref with its tune, and the log replays with that copy
+    /// beside it (ADR 0004). An untuned ref leaves `tune` out, keeping #58's {id, version, hash} shape.
+    @Test func tunedRefRoundTripsInTheRaceLogHeader() throws {
+        let tuned = try BoatClassFile(
+            data: try Fixtures.edited([(of: #""boatSpeedFactor": 0.6"#, with: #""boatSpeedFactor": 0.7"#)]), tune: 4)
+        let bundled = RaceFiles.defaults.boatClass.ref
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        #expect(String(decoding: try encoder.encode(tuned.ref), as: UTF8.self)
+            == #"{"hash":"\#(tuned.ref.hash.hex)","id":"ilca-dinghy","tune":4,"version":3}"#)
+        #expect(String(decoding: try encoder.encode(bundled), as: UTF8.self)
+            == #"{"hash":"\#(bundled.hash.hex)","id":"ilca-dinghy","version":3}"#)
+
+        var catalog = RaceFileCatalog()
+        try catalog.boatClasses.add(tuned)
+        let setup = try RaceSetup(raceSeed: RaceSeed(239), seats: [.human, .bot], startSequenceTicks: 30, boatClass: tuned.ref)
+        let race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
+                            mode: .authoritative(windSeed: WindSeed(239)))
+        for _ in 0..<45 { race.step() }
+        let log = try #require(race.log)
+        #expect(log.header.setup.boatClass == tuned.ref)
+
+        let data = try log.jsonData()
+        let decoded = try RaceLog(jsonData: data)
+        #expect(decoded == log)
+        #expect(decoded.header.setup.boatClass.tune == 4)
+        // Only the boat class is tuned: the other three refs have no `tune` key.
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.components(separatedBy: #""tune""#).count == 2)
+        #expect(text.contains(#""tune" : 4"#))
+
+        #expect(try Replayer.digest(of: decoded, catalog: catalog) == race.digest())
+        #expect(throws: DataFileError.refMismatch(expected: tuned.ref, foundHash: bundled.hash)) {
+            try Replayer.replay(decoded)
+        }
     }
 
     @Test func placeholdersResolveAndCoverTheTuningList() throws {

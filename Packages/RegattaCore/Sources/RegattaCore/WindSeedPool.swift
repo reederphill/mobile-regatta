@@ -21,7 +21,9 @@ import Foundation
 /// ```
 ///
 /// The pool is keyed by venue id + version × conditions id + version × tide state: a new version of
-/// either file sails different water or wind, so its seeds need vetting again (#32, #106).
+/// either file sails different water or wind, so its seeds need vetting again (#32, #106). A tuned copy
+/// of a file (#229) keeps its base's id and version but never reaches a pool: tuned files sail practice
+/// races only, which draw random wind seeds, so the key needs no hash or tune.
 /// `tideStateDegrees` is the tide's phase at the gun, degrees in [0, 360), or null for a venue with no
 /// current. Seeds are "0x…" hex strings, like the race log's, and never repeat.
 public struct WindSeedPool: Hashable, Sendable {

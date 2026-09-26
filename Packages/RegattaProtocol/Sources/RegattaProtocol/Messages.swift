@@ -467,7 +467,10 @@ public struct RaceClosed: Equatable, Sendable {
 // MARK: - Codec
 
 extension FileRef {
+    /// Id, version and hash. A tuned copy's ref is refused: tuned files sail practice races only, never
+    /// online (#229), so the wire has no `tune` and a decoded ref never has one.
     func encode(to w: inout WireWriter) throws {
+        guard tune == nil else { throw WireError.outOfRange("file.tune") }
         try w.string(id, limit: WireLimit.string, "file.id")
         guard version >= 0 else { throw WireError.outOfRange("file.version") }
         w.varint(UInt64(version))
