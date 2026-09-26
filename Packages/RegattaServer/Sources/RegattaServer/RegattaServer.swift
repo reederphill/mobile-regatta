@@ -3,6 +3,7 @@ import Glibc
 #elseif canImport(Darwin)
 import Darwin
 #endif
+import Dispatch
 import Foundation
 import RegattaServerKit
 
@@ -10,7 +11,16 @@ import RegattaServerKit
 /// start, with exit status 78 (EX_CONFIG) and the reason on stderr, unless `ENV=dev`.
 @main
 enum RegattaServerMain {
-    static func main() async {
+    /// Synchronous on purpose. RegattaServerTests links this module (to start the real executable), and at
+    /// -O each module's async entry gets a specialised thunk named only after `async_Main`, not the module:
+    /// the linker keeps one, and when this module links first the test runner's `main` starts the server
+    /// instead of the tests (check.sh and CI build tests at -O). A sync `main` has no such thunk.
+    static func main() {
+        Task { await run() }
+        dispatchMain()
+    }
+
+    private static func run() async {
         let config: ServerConfig
         do {
             config = try ServerConfig.load(from: ProcessInfo.processInfo.environment)
