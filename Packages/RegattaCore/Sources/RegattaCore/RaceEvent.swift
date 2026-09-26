@@ -41,6 +41,16 @@ public struct RaceEvent: Sendable, Equatable {
         case raceClosed
         /// A protest tap, acknowledged. Recorded, never changes a result in v1.0.
         case protestRecorded(seat: Int, target: Int)
+
+        /// A decision of the umpire or race committee under the rules: a rule call, a recall, a
+        /// disqualification, a mark-room notice, a protest recorded. Only the authoritative race emits
+        /// them; a prediction never does (`Race.Mode`).
+        public var isRuleEvent: Bool {
+            switch self {
+            case .ruleCall, .ocsNotice, .disqualified, .markRoomNotice, .protestRecorded: true
+            default: false
+            }
+        }
     }
 
     public let tick: Int

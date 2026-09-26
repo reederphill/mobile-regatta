@@ -61,8 +61,8 @@ public struct RaceSetup: Hashable, Sendable {
     public static let fleetSizes = 2...16
     /// Two laps by default (#8); the first race sails one (#23).
     public static let defaultLaps = 2
-    /// The rules configuration's start sequence (60 s in `fleet-rules@1`), in ticks.
-    public static let defaultStartSequenceTicks = Race.defaultRulesConfiguration.content.raceFormat.startSequenceTicks
+    /// The default rules configuration's start sequence (60 s in `fleet-rules@1`), in ticks.
+    public static let defaultStartSequenceTicks = RaceFiles.defaults.rulesConfiguration.content.raceFormat.startSequenceTicks
 
     /// The simulation version this race runs on; a replay needs a build with the same one (ADR 0002).
     public let simulationVersion: String
@@ -72,11 +72,12 @@ public struct RaceSetup: Hashable, Sendable {
     public let startSequenceTicks: Int
     /// One entry per boat, indexed by seat. Seat ids are indices into this array and `Race.boats`.
     public let seats: [SeatKind]
-    // Data files the race is sailed with (ADR 0004). Carried but not yet read: #81 resolves them.
-    public let boatClass: FileRef?
-    public let venue: FileRef?
-    public let conditions: FileRef?
-    public let rulesConfiguration: FileRef?
+    // The data files the race is sailed with, by id, version and hash (ADR 0004): `RaceFiles(resolving:)`
+    // loads them. Every setup names all four, so a race log records them; they default to `RaceFiles.defaults`.
+    public let boatClass: FileRef
+    public let venue: FileRef
+    public let conditions: FileRef
+    public let rulesConfiguration: FileRef
 
     public var fleetSize: Int { seats.count }
 
@@ -86,10 +87,10 @@ public struct RaceSetup: Hashable, Sendable {
         seats: [SeatKind],
         laps: Int = RaceSetup.defaultLaps,
         startSequenceTicks: Int = RaceSetup.defaultStartSequenceTicks,
-        boatClass: FileRef? = nil,
-        venue: FileRef? = nil,
-        conditions: FileRef? = nil,
-        rulesConfiguration: FileRef? = nil
+        boatClass: FileRef = RaceFiles.defaults.boatClass.ref,
+        venue: FileRef = RaceFiles.defaults.venue.ref,
+        conditions: FileRef = RaceFiles.defaults.conditions.ref,
+        rulesConfiguration: FileRef = RaceFiles.defaults.rulesConfiguration.ref
     ) throws {
         guard RaceSetup.fleetSizes.contains(seats.count) else { throw RaceSetupError.fleetSize(seats.count) }
         guard laps >= 1 else { throw RaceSetupError.laps(laps) }
@@ -120,10 +121,10 @@ extension RaceSetup: Codable {
             seats: c.decode([SeatKind].self, forKey: .seats),
             laps: c.decode(Int.self, forKey: .laps),
             startSequenceTicks: c.decode(Int.self, forKey: .startSequenceTicks),
-            boatClass: c.decodeIfPresent(FileRef.self, forKey: .boatClass),
-            venue: c.decodeIfPresent(FileRef.self, forKey: .venue),
-            conditions: c.decodeIfPresent(FileRef.self, forKey: .conditions),
-            rulesConfiguration: c.decodeIfPresent(FileRef.self, forKey: .rulesConfiguration)
+            boatClass: c.decode(FileRef.self, forKey: .boatClass),
+            venue: c.decode(FileRef.self, forKey: .venue),
+            conditions: c.decode(FileRef.self, forKey: .conditions),
+            rulesConfiguration: c.decode(FileRef.self, forKey: .rulesConfiguration)
         )
     }
 
@@ -134,9 +135,9 @@ extension RaceSetup: Codable {
         try c.encode(laps, forKey: .laps)
         try c.encode(startSequenceTicks, forKey: .startSequenceTicks)
         try c.encode(seats, forKey: .seats)
-        try c.encodeIfPresent(boatClass, forKey: .boatClass)
-        try c.encodeIfPresent(venue, forKey: .venue)
-        try c.encodeIfPresent(conditions, forKey: .conditions)
-        try c.encodeIfPresent(rulesConfiguration, forKey: .rulesConfiguration)
+        try c.encode(boatClass, forKey: .boatClass)
+        try c.encode(venue, forKey: .venue)
+        try c.encode(conditions, forKey: .conditions)
+        try c.encode(rulesConfiguration, forKey: .rulesConfiguration)
     }
 }

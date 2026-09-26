@@ -37,12 +37,11 @@ nonisolated final class RaceJoin {
         send(.hello(Hello(clientBuild: clientBuild, files: Self.bundledFiles)), seq: 1)
     }
 
-    /// The data files this build races with (ADR 0004), sent in `Hello`. The server checks them once #81
-    /// resolves race data; until then it compares only the simulation revision.
+    /// The data files this build races with (ADR 0004), sent in `Hello`: the bundled defaults a race setup
+    /// names. The server doesn't check them yet; it compares only the simulation revision.
     static let bundledFiles: [FileRef] = {
-        var files = [Race.defaultConditions.ref, Race.defaultRulesConfiguration.ref]
-        if let boatClass = try? BoatClassFile.bundled(id: "ilca-dinghy", version: 1) { files.insert(boatClass.ref, at: 0) }
-        return files
+        let files = RaceFiles.defaults
+        return [files.boatClass.ref, files.venue.ref, files.conditions.ref, files.rulesConfiguration.ref]
     }()
 
     var isFinished: Bool {

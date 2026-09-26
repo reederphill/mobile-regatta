@@ -1,7 +1,7 @@
 import Foundation
 
 /// The water a course's boats may sail in: a rectangle square to the course axis.
-/// `CourseLayout.derive` lays out the real one (#80); race assembly (#81) wires it into `WindSetup`.
+/// `CourseLayout.derive` lays it out (#80), and the race attaches it to its `WindSetup` (#81).
 public struct RaceArea: Hashable, Sendable {
     /// Metres.
     public let centre: Vec2
@@ -17,23 +17,6 @@ public struct RaceArea: Hashable, Sendable {
         self.axis = axis
         self.halfWidth = halfWidth
         self.halfLength = halfLength
-    }
-
-    /// A placeholder area around `course` until the race sails `CourseLayout` (#81): square to
-    /// its axis, from 150 m behind the start line (the start sequence) to 100 m past the windward mark,
-    /// and half the beat plus 75 m either side of the axis (a beat's laylines, and room to overstand).
-    /// For `Course.standard`'s 450 m beat: 700 m long, 600 m wide. Only the course's public layout goes
-    /// into it, so it reveals nothing of the keyed wind (ADR 0001).
-    public static func placeholder(around course: Course) -> RaceArea {
-        let beat = course.marks.filter { $0.kind == .windward }
-            .map { ($0.position - course.lineCenter).dot(course.upwind) }.max() ?? 0
-        let behind = 150.0, beyond = 100.0
-        return RaceArea(
-            centre: course.lineCenter + course.upwind * ((beat + beyond - behind) / 2),
-            axis: course.axis,
-            halfWidth: beat / 2 + 75,
-            halfLength: (beat + beyond + behind) / 2
-        )
     }
 }
 

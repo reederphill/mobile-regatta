@@ -13,70 +13,51 @@ public final class Race {
     /// Seconds per tick.
     public static let dt = 1.0 / Double(tickRate)
 
+    /// How a race is keyed, and whether it is the record.
+    public enum Mode: Sendable {
+        /// The race of record: the server's, a practice race on the device, a replay. It holds the secret
+        /// wind seed (ADR 0001) and makes every key from it, keeps a `log`, and umpires (`UmpireState`).
+        case authoritative(windSeed: WindSeed)
+        /// How an online client predicts (#64, ADR 0005): no wind seed, only the revealed keys, which later
+        /// keys join through `addRevealedWindKey(_:)`. It has no `log` and no umpire, and never emits a rule
+        /// event (`RaceEvent.Kind.isRuleEvent`): rule calls come only from the server.
+        case prediction(revealedWindKeys: [WindKey])
+    }
+
     public let setup: RaceSetup
-    /// The secret wind seed (ADR 0001), or nil for a keys-only race (`init(setup:revealedWindKeys:)`),
-    /// which is how an online client predicts: it never holds the seed.
+    /// The data files the race is sailed with, exactly those `setup` names (ADR 0004).
+    public let files: RaceFiles
+    /// The secret wind seed (ADR 0001), or nil for a prediction (`Mode.prediction`), which is how an
+    /// online client predicts: it never holds the seed.
     public let windSeed: WindSeed?
-    public let course: Course
-    /// The class every boat sails: hull, polar and handling (ADR 0004). The bundled dinghy until race
-    /// assembly reads `RaceSetup.boatClass` (#81).
-    public let boatClass: BoatClass = Race.defaultBoatClass
+    /// The course, derived from the files, the race seed's wind setup and the fleet size (#12, #80).
+    public let course: CourseLayout
+    /// The class every boat sails: hull, polar and handling (ADR 0004).
+    public var boatClass: BoatClass { files.boatClass.content }
+    /// The venue's tidal current, its tide state at the gun drawn from the race seed (#78). Held, not yet
+    /// sailed in: boats feel it from #79.
+    public let current: CurrentField
+    /// The tide state at the gun the log records (ADR 0003), or nil at a venue with no current.
+    public let tideStateAtGun: Double?
+    /// The umpire's memory: the authoritative race's alone, nil for a prediction.
+    public let umpire: UmpireState?
 
-    public static let defaultBoatClass: BoatClass = {
-        do {
-            return try BoatClassFile.bundled(id: "ilca-dinghy", version: 2).content
-        } catch {
-            preconditionFailure("bundled boat class ilca-dinghy@2 failed to load: \(error)")
-        }
-    }()
-
-    /// The conditions every race sails until race assembly reads `RaceSetup.conditions` (#81).
-    /// Schema 2: the keyed wind needs its wobble and ramp tuning (#75).
-    public static let defaultConditions: ConditionsFile = {
-        do {
-            return try ConditionsFile.bundled(id: "classic-oscillating", version: 2)
-        } catch {
-            preconditionFailure("bundled conditions classic-oscillating@2 failed to load: \(error)")
-        }
-    }()
-
-    /// The venue every race sails at until race assembly reads `RaceSetup.venue` (#81). Its pairing for
-    /// `defaultConditions` is what the race's wind setup is drawn around (#77).
-    public static let defaultVenue: VenueFile = {
-        do {
-            return try VenueFile.bundled(id: "dev-venue", version: 2)
-        } catch {
-            preconditionFailure("bundled venue dev-venue@2 failed to load: \(error)")
-        }
-    }()
-
+    /// The bundled defaults (`RaceFiles.defaults`), for code that needs one of them without a race.
+    public static var defaultBoatClass: BoatClass { RaceFiles.defaults.boatClass.content }
+    public static var defaultConditions: ConditionsFile { RaceFiles.defaults.conditions }
+    public static var defaultVenue: VenueFile { RaceFiles.defaults.venue }
     /// `defaultVenue`'s pairing for `defaultConditions`.
-    public static let defaultPairing: Venue.Pairing = {
-        guard let pairing = defaultVenue.content.pairing(for: defaultConditions.ref.key) else {
-            preconditionFailure("\(defaultVenue.ref) has no pairing for \(defaultConditions.ref)")
-        }
-        return pairing
-    }()
+    public static var defaultPairing: Venue.Pairing { RaceFiles.defaults.pairing }
+    public static var defaultRulesConfiguration: RulesConfigFile { RaceFiles.defaults.rulesConfiguration }
 
-    /// The rules configuration every race sails until race assembly reads `RaceSetup.rulesConfiguration`
-    /// (#81). Its ref is what a race log records for it (ADR 0004).
-    public static let defaultRulesConfiguration: RulesConfigFile = {
-        do {
-            return try RulesConfigFile.bundled(id: "fleet-rules", version: 1)
-        } catch {
-            preconditionFailure("bundled rules configuration fleet-rules@1 failed to load: \(error)")
-        }
-    }()
-
-    /// The rules and race-format values this race uses (#73). So far the zone, the start sequence and
-    /// a rule call's penalty deadlines read it; the rest wait for the tickets that use them.
-    public let rules: RulesConfig = Race.defaultRulesConfiguration.content
+    /// The rules and race-format values this race uses (#73). So far the zone, the start sequence, the
+    /// course and a rule call's penalty deadlines read it; the rest wait for the tickets that use them.
+    public var rules: RulesConfig { files.rulesConfiguration.content }
     /// Every incident so far, by id and by pair of boats.
     public private(set) var incidents = IncidentIndex()
 
-    /// The public wind setup, drawn from the race seed: mean direction, base strength, trend direction;
-    /// with the placeholder race area around the course (`RaceArea.placeholder(around:)`) until race
-    /// assembly (#81) sails `CourseLayout` and attaches its derived area (#80).
+    /// The public wind setup, drawn from the race seed around the venue's pairing for the conditions:
+    /// mean direction, base strength, trend direction; with the course's race area, where puffs spawn.
     public let windSetup: WindSetup
     /// The keyed wind (ADR 0001), holding the keys through the current window and no further.
     public private(set) var wind: WindField
@@ -111,77 +92,104 @@ public final class Race {
     private var appliedInputs: [InputRecord] = []
     private var seatEvents: [SeatEvent] = []
 
-    /// Builds the race at the start of its sequence, tick −`setup.startSequenceTicks`.
+    /// Builds the race at the start of its sequence, tick −`setup.startSequenceTicks`, from `files`, which
+    /// must be exactly the ones `setup` names (`RaceFiles(resolving:)`); throws `RaceFilesError` if not.
     ///
-    /// The public wind setup (mean direction, base strength, trend direction) is drawn from the race
-    /// seed in `defaultConditions` with `defaultVenue`'s pairing for them, and the course is laid square to its
-    /// mean direction (#10). Everything that changes during the race comes from the key chain of
-    /// `windSeed` alone, never from the race seed (ADR 0001).
+    /// The public wind setup (mean direction, base strength, trend direction) is drawn from the race seed
+    /// in the conditions with the venue's pairing for them; the course is derived from it, the fleet size,
+    /// the laps, the class and the rules configuration (#12, #80), and its race area is where puffs spawn.
+    /// The current's tide state at the gun comes from the race seed and the venue (#78). Everything that
+    /// changes during the race comes from the key chain alone: the wind seed's, or the revealed keys for a
+    /// prediction, never from the race seed (ADR 0001).
+    ///
     /// The race runs no bots: every seat, bot or human, is sailed from outside through `apply` and
     /// `tap` (RegattaBots' seat controllers for bots, #60), so the log holds every input applied and
     /// a replay needs nothing but the log (ADR 0002). Names and the rest of the roster live outside too.
-    public convenience init(setup: RaceSetup, windSeed: WindSeed) {
-        self.init(setup: setup, windSeed: Optional(windSeed), revealedWindKeys: [])
-    }
-
-    /// A keys-only race: no wind seed, only the revealed `keys` (ADR 0001), which later keys join through
-    /// `addRevealedWindKey(_:)`. How an online client predicts (#64, ADR 0005). It has no `log`:
-    /// a prediction is never the record.
     ///
-    /// Step it with `tryStep()`, which throws `WindFieldError.missingKey` instead of entering a tick whose
-    /// wind needs a key it doesn't hold; plain `step()` and `groundWind(at:)` trap there, as they would
-    /// for a seeded race with a bug. If `keys` don't cover the first tick, the boats' wind stays unset
-    /// until the race imports a snapshot or steps.
-    public convenience init(setup: RaceSetup, revealedWindKeys keys: [WindKey]) {
-        self.init(setup: setup, windSeed: nil, revealedWindKeys: keys)
-    }
-
-    private init(setup: RaceSetup, windSeed: WindSeed?, revealedWindKeys: [WindKey]) {
+    /// A prediction steps with `tryStep()`, which throws `WindFieldError.missingKey` instead of entering a
+    /// tick whose wind needs a key it doesn't hold; plain `step()` and `groundWind(at:)` trap there, as they
+    /// would for a seeded race with a bug. If its keys don't cover the first tick, the boats' wind stays
+    /// unset until the race imports a snapshot or steps.
+    public init(setup: RaceSetup, files: RaceFiles, mode: Mode) throws {
+        try files.check(against: setup)
         self.setup = setup
-        self.windSeed = windSeed
+        self.files = files
+        let revealedWindKeys: [WindKey]
+        switch mode {
+        case .authoritative(let seed):
+            windSeed = seed
+            revealedWindKeys = []
+            umpire = UmpireState()
+        case .prediction(let keys):
+            windSeed = nil
+            revealedWindKeys = keys
+            umpire = nil
+        }
         var rng = SplitMix64(seed: setup.raceSeed.value)
-        let drawn = WindSetup(conditions: Race.defaultConditions, pairing: Race.defaultPairing, raceSeed: setup.raceSeed)
-        let course = Course.standard(laps: setup.laps, axis: drawn.meanDirection,
-                                     zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(
-                                        hullLength: Race.defaultBoatClass.hull.length))
+        let drawn = WindSetup(conditions: files.conditions, pairing: files.pairing, raceSeed: setup.raceSeed)
+        let course = CourseLayout.derive(windSetup: drawn, fleetSize: setup.fleetSize, laps: setup.laps,
+                                         boatClass: files.boatClass.content, rules: files.rulesConfiguration.content)
         self.course = course
-        // Puffs (#76) spawn in the race area, which `CourseLayout` derives (#80) and #81 wires in; until then a
-        // placeholder around the course, from public information only.
-        let windSetup = drawn.with(raceArea: .placeholder(around: course))
+        let windSetup = drawn.with(raceArea: course.raceArea)
         self.windSetup = windSetup
+        current = CurrentField(venue: files.venue.content, raceSeed: setup.raceSeed)
+        tideStateAtGun = CurrentField.tideStateAtGun(for: files.venue.content, raceSeed: setup.raceSeed)
         let windows = WindWindows(startSequenceTicks: setup.startSequenceTicks)
         wind = WindField(setup: windSetup, windows: windows, keys: WindKeyChain(revealedWindKeys))
         if let windSeed {
             do {
                 windKeys = try WindKeyGenerator(windSeed: windSeed, setup: windSetup, windows: windows)
             } catch {
-                preconditionFailure("default conditions can't be keyed: \(error)")
+                preconditionFailure("\(files.conditions.ref) can't be keyed: \(error)")
             }
         }
         tick = -setup.startSequenceTicks
 
-        // Prototype placement until the start row (#35): seat 0 mid-line, the rest scattered by the race seed.
+        // Prototype placement until the start row (#35), square to the line: seat 0 mid-line, the rest
+        // scattered below it by the race seed, reaching along it.
+        let centre = course.startLine.centre, up = course.upwind, right = course.right
+        func onWater(_ offset: Vec2) -> Vec2 { centre + right * offset.x + up * offset.y }
         var fleet: [Boat] = []
         for seat in setup.seats.indices {
             let kind = setup.seats[seat]
-            var position = Vec2(0, -55)
-            var heading = Double.pi / 2
+            var offset = Vec2(0, -55)
+            var heading = course.axis + Double.pi / 2
             if seat > 0 {
                 for _ in 0..<50 {
-                    position = Vec2(rng.range(-130, 130), rng.range(-100, -35))
-                    if fleet.allSatisfy({ ($0.position - position).length > 10 }) { break }
+                    offset = Vec2(rng.range(-130, 130), rng.range(-100, -35))
+                    if fleet.allSatisfy({ ($0.position - onWater(offset)).length > 10 }) { break }
                 }
-                heading = rng.bool() ? Double.pi / 2 : -Double.pi / 2
+                heading = course.axis + (rng.bool() ? Double.pi / 2 : -Double.pi / 2)
             }
             // The boom starts to leeward of the mean wind: the sampled wind may not be known yet (keys-only).
             fleet.append(Boat(id: seat, isPlayer: kind == .human, colorIndex: seat,
-                              position: position, heading: heading, speed: 2,
+                              position: onWater(offset), heading: heading, speed: 2,
                               boomSide: .leeward(ofRelativeWind: wrapAngle(windSetup.meanDirection - heading))))
         }
         boats = fleet
         heldInputs = Array(repeating: .neutral, count: fleet.count)
         makeWindKeys()
         if windKeys != nil || (try? wind.requireKeys(atTick: tick)) != nil { refreshWind() }
+    }
+
+    /// An authoritative race on the files `setup` names (`RaceFiles(resolving:)`). Traps if this build
+    /// can't resolve them: use `init(setup:files:mode:)` for a setup from outside.
+    public convenience init(setup: RaceSetup, windSeed: WindSeed) {
+        self.init(setup: setup, mode: .authoritative(windSeed: windSeed))
+    }
+
+    /// A prediction (`Mode.prediction`) on the files `setup` names, holding only the revealed `keys`.
+    /// Traps if this build can't resolve the files: use `init(setup:files:mode:)` for a setup from outside.
+    public convenience init(setup: RaceSetup, revealedWindKeys keys: [WindKey]) {
+        self.init(setup: setup, mode: .prediction(revealedWindKeys: keys))
+    }
+
+    private convenience init(setup: RaceSetup, mode: Mode) {
+        do {
+            try self.init(setup: setup, files: RaceFiles(resolving: setup), mode: mode)
+        } catch {
+            preconditionFailure("the race files \(setup) names failed to resolve: \(error)")
+        }
     }
 
     // MARK: - Input
@@ -224,7 +232,7 @@ public final class Race {
     /// keys-only race: it is a prediction, never the record (ADR 0005), and has no wind seed to log.
     public var log: RaceLog? {
         guard let windSeed else { return nil }
-        return RaceLog(header: .init(setup: setup, windSeed: windSeed), inputs: appliedInputs,
+        return RaceLog(header: .init(setup: setup, windSeed: windSeed, tideStateAtGun: tideStateAtGun), inputs: appliedInputs,
                 seatEvents: seatEvents, finalTick: tick)
     }
 
@@ -289,6 +297,8 @@ public final class Race {
     }
 
     private func emit(_ kind: RaceEvent.Kind) {
+        // A prediction has no umpire: its rule events would be guesses, and the server's are the calls.
+        if umpire == nil && kind.isRuleEvent { return }
         events.append(RaceEvent(tick: tick, kind: kind))
     }
 
@@ -524,7 +534,7 @@ public final class Race {
     // MARK: - Start, roundings, finish
 
     private func fireGun() {
-        for i in boats.indices where boats[i].status == .prestart && course.lineSide(boats[i].position) > 0 {
+        for i in boats.indices where boats[i].status == .prestart && course.startLine.side(boats[i].position) > 0 {
             boats[i].status = .ocs
             emit(.ocsNotice(recipient: i))
         }
@@ -533,7 +543,7 @@ public final class Race {
 
     private func updateProgress(_ i: Int, from p0: Vec2) {
         let p1 = boats[i].position
-        let lineCrossing = crossing(from: p0, to: p1, over: course.startLine)
+        let lineCrossing = crossing(from: p0, to: p1, over: course.startLine.segment)
 
         switch boats[i].status {
         case .prestart:
@@ -544,27 +554,20 @@ public final class Race {
                 emit(.started(seat: i))
             }
         case .ocs:
-            if course.lineSide(p1) < 0 {
+            if course.startLine.side(p1) < 0 {
                 boats[i].status = .prestart
                 emit(.cleared(seat: i))
             }
         case .racing:
-            switch course.legs[boats[i].legIndex] {
-            case .round(let m):
-                let gates = course.gates(forMark: m)
-                let stage = boats[i].roundingStage
-                if crossing(from: p0, to: p1, over: gates[stage]) == 1 {
-                    boats[i].roundingStage += 1
-                    if boats[i].roundingStage == gates.count {
-                        boats[i].legIndex += 1
-                        boats[i].roundingStage = 0
-                        emit(.rounded(seat: i, mark: course.marks[m].name))
-                    }
-                } else if stage > 0 && crossing(from: p0, to: p1, over: gates[stage - 1]) == -1 {
-                    boats[i].roundingStage -= 1
-                }
-            case .finish:
-                if lineCrossing == -1 { finish(i) }
+            let leg = course.legs[boats[i].legIndex]
+            var progress = CourseLayout.Progress(legIndex: boats[i].legIndex, stage: boats[i].roundingStage)
+            course.advance(&progress, from: p0, to: p1)
+            if progress.finished {
+                finish(i)
+            } else {
+                if progress.legIndex > boats[i].legIndex { emit(.rounded(seat: i, mark: course.name(of: leg))) }
+                boats[i].legIndex = progress.legIndex
+                boats[i].roundingStage = progress.stage
             }
         case .finished, .dsq, .dnf:
             break
@@ -612,7 +615,7 @@ public final class Race {
         switch b.status {
         case .finished: return (0, b.finishTime ?? 0)
         case .racing: return (1, -progress(of: b))
-        case .prestart, .ocs: return (2, (b.position - course.lineCenter).length)
+        case .prestart, .ocs: return (2, (b.position - course.startLine.centre).length)
         case .dsq, .dnf: return (3, Double(i))
         }
     }
@@ -759,7 +762,7 @@ extension Race {
         guard course.legs.indices.contains(boat.legIndex) else { return "legIndex" }
         let stages: Int
         switch course.legs[boat.legIndex] {
-        case .round(let mark): stages = course.gates(forMark: mark).count
+        case .round: stages = course.roundingStages(of: course.legs[boat.legIndex]).count
         case .finish: stages = 1 // a finishing boat has no rounding stages: always 0
         }
         guard (0..<stages).contains(boat.roundingStage) else { return "roundingStage" }

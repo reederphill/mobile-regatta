@@ -119,8 +119,9 @@ struct BotBrain: Sendable {
         }
     }
 
-    private func startPoint(_ c: Course) -> Vec2 {
-        c.pin + (c.committee - c.pin) * startSpot
+    private func startPoint(_ c: CourseLayout) -> Vec2 {
+        let line = c.startLine
+        return line.pin.position + (line.committee.position - line.pin.position) * startSpot
     }
 
     private mutating func prestartHeading(_ b: Boat, _ race: Race) -> Double {
@@ -138,7 +139,7 @@ struct BotBrain: Sendable {
         }
         // Too close to the line with time to kill: reach away along it rather than
         // luffing, because a luffing boat still coasts several lengths.
-        let depth = -c.lineSide(b.position)
+        let depth = -c.startLine.side(b.position)
         if depth < b.speed * 4 + 3 && depth / max(b.speed, 1) < timeLeft - 2 {
             return b.windDirection - deg2rad(110)
         }
@@ -147,25 +148,32 @@ struct BotBrain: Sendable {
         return navigate(b, to: spot - c.upwind * 2, race)
     }
 
-    /// The point to sail at for the current leg, offset so the mark is left to port.
-    private func waypoint(_ b: Boat, _ c: Course) -> Vec2 {
-        switch c.legs[b.legIndex] {
+    /// The point to sail at for the current leg: round each mark to port, approaching it along the
+    /// course (upwind to W, across from W to O); through the gate, then round the nearer of its marks.
+    private func waypoint(_ b: Boat, _ c: CourseLayout) -> Vec2 {
+        let leg = c.legs[b.legIndex]
+        switch leg {
         case .round(let index):
-            let mark = c.marks[index]
-            let u = c.upwind, r = c.right
-            let m = mark.position
-            switch (mark.kind, b.roundingStage) {
-            case (.windward, 0):
-                return detour(from: b.position, to: m + r * 6 + u * 4, around: m, via: m + r * 7 - u * 7)
-            case (.windward, _):
-                return m + u * 9 - r * 10
-            case (.leeward, 0):
-                return detour(from: b.position, to: m - r * 6 - u * 4, around: m, via: m - r * 7 + u * 7)
-            case (.leeward, _):
-                return m - u * 9 + r * 10
+            switch c.elements[index] {
+            case .mark(let mark, _):
+                let m = mark.position
+                let approach = index == CourseLayout.windwardIndex
+                    ? c.upwind : (m - c.elements[CourseLayout.windwardIndex].marks[0].position).normalized
+                let side = approach.rightPerp
+                if b.roundingStage == 0 {
+                    return detour(from: b.position, to: m + side * 6 + approach * 4, around: m,
+                                  via: m + side * 7 - approach * 7)
+                }
+                return m + approach * 9 - side * 10
+            case .gate(let left, let right):
+                let centre = c.targetPosition(for: leg)
+                if b.roundingStage == 0 { return centre - c.upwind * 6 }
+                let near = (left.position - b.position).length <= (right.position - b.position).length ? left : right
+                return near.position - c.upwind * 9 + (near.position - centre).normalized * 10
             }
         case .finish:
-            return c.pin + (c.committee - c.pin) * finishSpot - c.upwind * 12
+            let line = c.finishLine
+            return line.pin.position + (line.committee.position - line.pin.position) * finishSpot - c.upwind * 12
         }
     }
 

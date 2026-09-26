@@ -9,7 +9,7 @@ import RegattaCore
 protocol RaceDriver: AnyObject {
     /// Your seat. Every "you" in the scene, HUD and results reads it, never seat 0.
     var myBoatIndex: Int { get }
-    var course: Course { get }
+    var course: CourseLayout { get }
     var boatClass: BoatClass { get }
     /// Whether the race can stop while you pause: a practice race can, an online one can't.
     var isPausable: Bool { get }
@@ -108,7 +108,7 @@ struct TickFrame {
 /// What the scene draws for one display frame: the fleet between the last two ticks, and everything
 /// else from the latest. Read-only: nothing here can change the race.
 struct RenderWorld {
-    let course: Course
+    let course: CourseLayout
     let boatClass: BoatClass
     let myBoatIndex: Int
     /// The latest tick: statuses, standings, wind and puffs come from it.
@@ -118,7 +118,7 @@ struct RenderWorld {
     /// Race clock in seconds, between the two ticks.
     let time: Double
 
-    init(course: Course, boatClass: BoatClass, myBoatIndex: Int, previous: TickFrame, current: TickFrame, alpha: Double) {
+    init(course: CourseLayout, boatClass: BoatClass, myBoatIndex: Int, previous: TickFrame, current: TickFrame, alpha: Double) {
         self.course = course
         self.boatClass = boatClass
         self.myBoatIndex = myBoatIndex
