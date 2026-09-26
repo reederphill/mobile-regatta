@@ -35,7 +35,7 @@ struct HUDState {
     var penaltyTurns = 0
     var penaltyProgress = 0.0
     var boats: [MiniBoat] = []
-    var course: Course?
+    var course: CourseLayout?
 
     var isUpwind: Bool { twaDegrees < 90 }
 
@@ -71,13 +71,13 @@ struct HUDState {
         switch p.status {
         case .prestart where frame.time < 0:
             targetName = "Start line"
-            target = course.lineCenter
+            target = course.startLine.centre
         case .prestart:
             targetName = "Cross the start line"
-            target = course.lineCenter
+            target = course.startLine.centre
         case .ocs:
             targetName = "Return below the line"
-            target = course.lineCenter - course.upwind * 20
+            target = course.startLine.centre - course.upwind * 20
         case .racing:
             let leg = course.legs[p.legIndex]
             targetName = course.name(of: leg).capitalized

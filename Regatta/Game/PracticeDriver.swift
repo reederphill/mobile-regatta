@@ -9,7 +9,7 @@ import RegattaCore
 /// with `Replayer` to the same state without running a bot.
 final class PracticeDriver: RaceDriver {
     let myBoatIndex: Int
-    let course: Course
+    let course: CourseLayout
     let boatClass: BoatClass
     let isPausable = true
     /// Names and bot marks, kept outside the simulation (#60).
@@ -30,11 +30,16 @@ final class PracticeDriver: RaceDriver {
     private var queuedTaps: [BoatTap] = []
     private var events: [RaceEvent] = []
 
-    /// A practice race from the app's settings, with you in the setup's human seat. `timescale` runs
+    /// A practice race from the app's settings, with you in the setup's human seat, sailed on the bundled
+    /// default files (`RaceFiles.defaults`, dev-venue@2) until the practice setup (#131). `timescale` runs
     /// it that many times real time (`-timescale`).
     init(config: RaceConfig, timescale: Double = 1) {
         let setup = config.setup
-        race = Race(setup: setup, windSeed: WindSeed(config.windSeed))
+        do {
+            race = try Race(setup: setup, files: .defaults, mode: .authoritative(windSeed: WindSeed(config.windSeed)))
+        } catch {
+            preconditionFailure("a practice setup names the default files: \(error)")
+        }
         seats = config.seatControllers
         roster = config.roster
         myBoatIndex = setup.seats.firstIndex(of: .human) ?? 0

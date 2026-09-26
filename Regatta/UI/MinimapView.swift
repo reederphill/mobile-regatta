@@ -8,8 +8,9 @@ struct MinimapView: View {
     var body: some View {
         Canvas { context, size in
             guard let course = hud.course else { return }
-            let minX = course.pin.x - 60, maxX = course.committee.x + 60
-            let minY = course.pin.y - 110, maxY = course.marks[0].position.y + 40
+            let points = course.obstacles.map(\.position)
+            let minX = (points.map(\.x).min() ?? 0) - 60, maxX = (points.map(\.x).max() ?? 0) + 60
+            let minY = (points.map(\.y).min() ?? 0) - 110, maxY = (points.map(\.y).max() ?? 0) + 40
             let scale = min(size.width / (maxX - minX), size.height / (maxY - minY))
             let offsetX = (size.width - (maxX - minX) * scale) / 2
             let offsetY = (size.height - (maxY - minY) * scale) / 2
@@ -20,11 +21,11 @@ struct MinimapView: View {
             }
 
             var line = Path()
-            line.move(to: map(course.pin))
-            line.addLine(to: map(course.committee))
+            line.move(to: map(course.startLine.pin.position))
+            line.addLine(to: map(course.startLine.committee.position))
             context.stroke(line, with: .color(.white.opacity(0.6)), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
 
-            for mark in course.marks {
+            for mark in course.elements.flatMap(\.marks) {
                 let p = map(mark.position)
                 context.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(Color(uiColor: Palette.mark)))
             }

@@ -58,17 +58,24 @@ public struct SeatEvent: Hashable, Sendable {
 /// A race as it's stored: its keys and every input and seat event exactly as applied (ADR 0002).
 /// Replaying it with `Replayer` on the same simulation version reproduces the race bit for bit.
 public struct RaceLog: Codable, Hashable, Sendable {
+    /// Everything a replay needs besides the inputs (ADR 0002).
     public struct Header: Codable, Hashable, Sendable {
-        /// Carries the simulation version and the race seed.
+        /// Carries the simulation version, the race seed and the id, version and hash of the boat class,
+        /// venue, conditions and rules configuration the race was sailed with (ADR 0004).
         public var setup: RaceSetup
         public var windSeed: WindSeed
+        /// The tide state at the gun, radians in [0, 2π) (#11), or nil at a venue with no current. Drawn from the
+        /// race seed and the venue, and recorded with the race's keys (ADR 0003): a replay checks that it
+        /// draws the same.
+        public var tideStateAtGun: Double?
 
         public var simulationVersion: String { setup.simulationVersion }
         public var raceSeed: RaceSeed { setup.raceSeed }
 
-        public init(setup: RaceSetup, windSeed: WindSeed) {
+        public init(setup: RaceSetup, windSeed: WindSeed, tideStateAtGun: Double?) {
             self.setup = setup
             self.windSeed = windSeed
+            self.tideStateAtGun = tideStateAtGun
         }
     }
 

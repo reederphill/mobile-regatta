@@ -126,6 +126,27 @@ final class ManualTransport: RaceTransport {
         #expect(client.predicted.tick >= host.tick && client.predicted.tick <= host.tick + 31)
     }
 
+    /// PR #209's load run: a client that stalled imported every snapshot of the backlog, each with a
+    /// re-prediction, fell further behind and never reached the close. Now a batch imports only its newest.
+    @Test func aBacklogOfSnapshotsImportsOnlyTheNewest() throws {
+        var (host, generator) = try Self.host(seats: 8)
+        let revealed = generator.keys(through: 1)
+        let transport = ManualTransport()
+        let client = RaceClient(start: Self.start(host, keys: revealed), transport: transport)
+        var seq: UInt32 = 1
+        try transport.deliver(Frame(seq: seq, tick: host.tick, message: .pong(Pong(clientTime: 0, sinceTickMicros: 0))))
+        client.update(now: 0)
+        for _ in 0..<5 {
+            for _ in 0..<3 { host.step() }
+            seq += 1
+            try transport.deliver(Frame(seq: seq, tick: host.tick, message: .snapshot(Snapshot(world: host.exportSnapshot()))))
+        }
+        client.update(now: 16_667)
+        #expect(client.predicted.snapshotsImported == 1)
+        #expect(client.stats.snapshotsSuperseded == 4)
+        #expect(client.predicted.serverTick == host.tick)
+    }
+
     /// The same for a client built for a race under way.
     @Test func aClientJoiningUnderwayWaitsForTheResync() throws {
         var (host, generator) = try Self.host()

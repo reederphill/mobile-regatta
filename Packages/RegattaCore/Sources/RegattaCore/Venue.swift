@@ -160,8 +160,8 @@ public struct Venue: DataFileContent, Equatable {
     }
 
     /// Geographic shift over the venue for one pairing (#10), with land shadow baked into the speed
-    /// factor. Values are per node, row-major (`grid.index`). `sample` reads it anywhere; `WindField`
-    /// composes it into the wind in #81.
+    /// factor. Values are per node, row-major (`grid.index`). `sample` reads it anywhere; `WindField.sample`
+    /// composes it into the wind (#81).
     public struct GeographicGrid: Sendable, Hashable {
         public let grid: Grid
         /// Change in wind direction, radians; positive veers (clockwise), as in `WindField`.

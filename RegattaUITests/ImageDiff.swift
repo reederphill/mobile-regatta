@@ -97,6 +97,10 @@ struct DiffTolerance: Equatable {
 /// An actual image compared pixel by pixel with its reference.
 struct ImageDiff {
     let tolerance: DiffTolerance
+    /// Rows at the bottom of both images left out of the comparison: the home-indicator band, which the
+    /// system dims and hides on its own timer, so no two screenshots agree on it. They count neither as
+    /// differing nor towards `totalPixels`.
+    let ignoredBottomRows: Int
     /// The images differ in size: nothing lines up, so every pixel counts as differing.
     let sizeMismatch: Bool
     let differingPixels: Int
@@ -113,12 +117,16 @@ struct ImageDiff {
     var summary: String {
         if sizeMismatch { return "size mismatch" }
         let percent = (differingFraction * 100).formatted(.number.precision(.fractionLength(4)))
+        let ignored = ignoredBottomRows > 0 ? "; bottom \(ignoredBottomRows) rows not compared" : ""
         return "\(differingPixels) of \(totalPixels) pixels differ by more than \(tolerance.channel)/255 (\(percent)%, "
-            + "limit \((tolerance.maxDifferingFraction * 100).formatted(.number.precision(.fractionLength(4))))%)"
+            + "limit \((tolerance.maxDifferingFraction * 100).formatted(.number.precision(.fractionLength(4))))%\(ignored))"
     }
 
-    init(actual: PixelImage, reference: PixelImage, tolerance: DiffTolerance = .standard) {
+    /// The diff of `actual` against `reference`, leaving out their bottom `ignoringBottomRows` rows (see
+    /// `ignoredBottomRows`), which the diff image shows in pale blue.
+    init(actual: PixelImage, reference: PixelImage, tolerance: DiffTolerance = .standard, ignoringBottomRows: Int = 0) {
         self.tolerance = tolerance
+        ignoredBottomRows = min(max(0, ignoringBottomRows), actual.height)
         guard actual.width == reference.width, actual.height == reference.height else {
             sizeMismatch = true
             totalPixels = actual.width * actual.height
@@ -127,14 +135,19 @@ struct ImageDiff {
             return
         }
         sizeMismatch = false
-        let total = actual.width * actual.height
-        totalPixels = total
+        let compared = actual.width * (actual.height - ignoredBottomRows)
+        totalPixels = compared
         var diff = [UInt8](repeating: 255, count: actual.pixels.count)
+        for i in stride(from: compared * 4, to: diff.count, by: 4) {
+            diff[i] = 190
+            diff[i + 1] = 215
+            diff[i + 2] = 245
+        }
         var differing = 0
         let limit = Int(tolerance.channel)
         actual.pixels.withUnsafeBufferPointer { a in
             reference.pixels.withUnsafeBufferPointer { r in
-                for p in 0..<total {
+                for p in 0..<compared {
                     let i = p * 4
                     var worst = 0
                     for c in 0..<4 { worst = max(worst, abs(Int(a[i + c]) - Int(r[i + c]))) }
@@ -156,5 +169,16 @@ struct ImageDiff {
         }
         differingPixels = differing
         image = PixelImage(width: actual.width, height: actual.height, pixels: diff)
+    }
+}
+
+extension ImageDiff {
+    /// How many pixel rows at the bottom of a screenshot `imageRows` pixels tall cover a band `bandPoints`
+    /// tall, when the screenshot shows `framePoints` of height: the band rounded out to whole rows.
+    static func rows(coveringBottom bandPoints: Double, ofFrame framePoints: Double, imageRows: Int) -> Int {
+        guard bandPoints > 0, framePoints > 0, imageRows > 0 else { return 0 }
+        // Less a hair, so floating-point noise on an exact fit doesn't add a row.
+        let rows = bandPoints * Double(imageRows) / framePoints - 1e-6
+        return min(imageRows, Int(rows.rounded(.up)))
     }
 }

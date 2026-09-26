@@ -89,7 +89,7 @@ public struct RuleCall: Sendable, Equatable, Codable {
 
 public enum Rules {
     /// Decides which of two boats in contact was required to keep clear. `hull` is their boat class's.
-    public static func judge(_ a: Boat, _ b: Boat, course: Course, hull: BoatClass.Hull) -> Verdict {
+    public static func judge(_ a: Boat, _ b: Boat, course: CourseLayout, hull: BoatClass.Hull) -> Verdict {
         func call(_ rule: RacingRule, _ offender: Boat, _ victim: Boat) -> Verdict {
             Verdict(rule: rule, offender: offender.id, victim: victim.id)
         }
@@ -134,18 +134,17 @@ public enum Rules {
         return a.hull(outline: hull.outline).allSatisfy { ($0 - stern).dot(b.forward) < 0 }
     }
 
-    /// The mark both boats are rounding, if both are inside its zone.
-    static func sharedMarkInZone(_ a: Boat, _ b: Boat, course: Course) -> Vec2? {
+    /// The mark both boats are rounding, if both are inside its zone: at a gate, the first of its marks
+    /// whose zone holds both.
+    static func sharedMarkInZone(_ a: Boat, _ b: Boat, course: CourseLayout) -> Vec2? {
         guard a.status == .racing, b.status == .racing,
               a.legIndex < course.legs.count, b.legIndex < course.legs.count,
               case .round(let ma) = course.legs[a.legIndex],
               case .round(let mb) = course.legs[b.legIndex],
               ma == mb
         else { return nil }
-        let mark = course.marks[ma].position
-        guard (a.position - mark).length < course.zoneRadius,
-              (b.position - mark).length < course.zoneRadius
-        else { return nil }
-        return mark
+        return course.elements[ma].marks.map(\.position).first { mark in
+            (a.position - mark).length < course.zoneRadius && (b.position - mark).length < course.zoneRadius
+        }
     }
 }

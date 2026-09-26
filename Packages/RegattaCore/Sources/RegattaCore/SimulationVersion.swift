@@ -31,7 +31,12 @@ import Glibc
 ///    or past the class's by-the-lee limit, and by the lee she sails the mirrored polar less the class's
 ///    penalty. The tap steers to the same wind angle with the boom on the other side. Tacked and gybed
 ///    events. Boats sail ilca-dinghy@2 (turn rate curve, rudder drag and no-go time constant retuned).
-public let simulationRevision = 7
+/// 8: race assembly (#81). A race is built from the files its setup names (`RaceFiles`) and sails the
+///    derived `CourseLayout` (#80): windward, offset mark, leeward gate, the line on the pairing's start-line
+///    centre sized for the fleet, and its race area for the puffs. The prototype placement is laid square
+///    to that line. `WindField.sample` composes the pairing's geographic grid (#77). The log header records
+///    the files and the tide state at the gun.
+public let simulationRevision = 8
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

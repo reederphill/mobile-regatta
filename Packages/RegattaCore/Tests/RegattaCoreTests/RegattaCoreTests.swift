@@ -30,7 +30,7 @@ import Testing
 }
 
 @Suite struct RulesTests {
-    let course = Course.standard(zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length))
+    let course = try! CourseLayoutTests.layout()
 
     func boat(_ id: Int, at p: Vec2, heading degrees: Double, wind: Double = 0) -> Boat {
         var b = Boat(id: id, isPlayer: false, colorIndex: id, position: p, heading: deg2rad(degrees), speed: 3)
@@ -70,7 +70,7 @@ import Testing
     }
 
     @Test func outsideBoatGivesMarkRoom() {
-        let mark = course.marks[0].position
+        let mark = course.elements[CourseLayout.windwardIndex].marks[0].position
         let inside = boat(1, at: mark + Vec2(3, -2), heading: -45)
         let outside = boat(2, at: mark + Vec2(5, -3), heading: -45)
         let call = Rules.judge(inside, outside, course: course, hull: Race.defaultBoatClass.hull)
@@ -80,18 +80,6 @@ import Testing
 }
 
 @Suite struct RaceTests {
-    @Test func windwardMarkIsRoundedToPort() {
-        let course = Course.standard(zoneRadius: Race.defaultRulesConfiguration.content.zoneRadius(hullLength: Race.defaultBoatClass.hull.length))
-        let m = course.marks[0].position
-        let path = [m + Vec2(6, -10), m + Vec2(6, 5), m + Vec2(-8, 6)]
-        var stage = 0
-        let gates = course.gates(forMark: 0)
-        for k in 0..<(path.count - 1) where stage < gates.count {
-            if crossing(from: path[k], to: path[k + 1], over: gates[stage]) == 1 { stage += 1 }
-        }
-        #expect(stage == 2)
-    }
-
     /// Steers seat 0 toward `heading` with a simple proportional helm.
     func sail(_ race: Race, heading: Double, seconds: Double) -> [RaceEvent.Kind] {
         var events: [RaceEvent.Kind] = []
@@ -115,10 +103,19 @@ import Testing
         let back = sail(race, heading: .pi, seconds: 15)
         #expect(back.contains(.cleared(seat: 0)))
 
-        // The boat is now off the pin end: run deeper, then port tack brings it
-        // back up between the ends of the line.
-        _ = sail(race, heading: .pi, seconds: 10)
-        let start = sail(race, heading: deg2rad(45), seconds: 40)
+        // The boat is now off an end of the line: run deeper, as far below it as she is out to the side,
+        // then sail up at the line's centre, never closer than 45° to the axis, to cross between its ends.
+        let line = race.course.startLine
+        func across() -> Double { (race.boats[0].position - line.centre).dot(race.course.right) }
+        while -line.side(race.boats[0].position) < abs(across()) + 10 {
+            _ = sail(race, heading: race.course.axis + .pi, seconds: 1)
+        }
+        var start: [RaceEvent.Kind] = []
+        for _ in 0..<90 where race.boats[0].status == .prestart {
+            let toCentre = wrapAngle((line.centre - race.boats[0].position).bearing - race.course.axis)
+            let offAxis = toCentre < 0 ? min(toCentre, -deg2rad(45)) : max(toCentre, deg2rad(45))
+            start += sail(race, heading: race.course.axis + offAxis, seconds: 1)
+        }
         #expect(start.contains(.started(seat: 0)))
         #expect(race.boats[0].status == .racing)
     }
