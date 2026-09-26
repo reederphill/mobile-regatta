@@ -133,14 +133,19 @@ public struct RaceResult: Codable, Hashable, Sendable {
     public var raceSeconds: Double
     /// Stopped at `capSecondsAfterGun` before the race closed.
     public var capped: Bool
+    /// The tide state the race drew at the gun (#78), degrees through the cycle; absent at a venue
+    /// without current. The race seed draws it, so the cell's `tideStateDegrees` doesn't choose it.
+    public var tideStateAtGunDegrees: Double?
     public var seats: [SeatMetrics]
     public var fleet: FleetMetrics
     public var timings: TickTimings
 
-    init(cell: BotRaceCell, finalTick: Int, capped: Bool, seats: [SeatMetrics], timings: TickTimings) {
+    init(cell: BotRaceCell, finalTick: Int, capped: Bool, tideStateAtGun: Double?, seats: [SeatMetrics],
+         timings: TickTimings) {
         self.cell = cell
         raceSeconds = Double(finalTick) / Double(Race.tickRate)
         self.capped = capped
+        tideStateAtGunDegrees = tideStateAtGun.map { $0 * 180 / .pi }
         self.seats = seats
         fleet = FleetMetrics(seats)
         self.timings = timings

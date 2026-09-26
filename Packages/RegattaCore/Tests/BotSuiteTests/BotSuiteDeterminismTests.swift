@@ -20,6 +20,19 @@ import Testing
         #expect(other.races.map(\.seats) != first.races.map(\.seats), "another seed sails another race")
     }
 
+    /// Since #81 a race is assembled from the files its setup names, so the conditions axis sails other
+    /// wind: each cell's race is sailed with exactly the conditions it names.
+    @Test func conditionsAxisVariesTheRace() throws {
+        let cells = BotMatrix(seeds: [5], conditions: ["classic-oscillating@2", "gusty-offshore@2"], fleetSizes: [5]).cells
+        let races = try cells.map { cell in
+            let setup = try BotRaceHarness.raceSetup(for: cell)
+            return try Race(setup: setup, files: RaceFiles(resolving: setup),
+                            mode: .authoritative(windSeed: BotRaceHarness.windSeed(for: cell.seed)))
+        }
+        #expect(races.map { "\($0.files.conditions.ref.id)@\($0.files.conditions.ref.version)" } == cells.map(\.conditions))
+        #expect(races[0].windSetup.baseStrength != races[1].windSetup.baseStrength)
+    }
+
     /// Until #102, a tier is its skill band: the bot's own drawn style, its skill rescaled into the band
     /// and nothing else changed. `seeded` is today's bot.
     @Test func tiersRescaleSkillIntoTheirBands() throws {

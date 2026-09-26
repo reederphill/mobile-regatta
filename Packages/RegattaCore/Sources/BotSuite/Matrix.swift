@@ -56,9 +56,10 @@ public enum TierMix: String, Codable, CaseIterable, Hashable, Sendable {
 /// The races a suite run sails (#97): every combination of seed × venue × conditions × tide state ×
 /// fleet size × tier mix. Venues and conditions are data files named `id@version`.
 ///
-/// Venue, conditions and tide state go into each race's setup and report, but don't vary the race yet:
-/// `Race` sails `Race.defaultVenue` and `Race.defaultConditions` until race assembly reads the setup
-/// (#81), and has no tide until #79.
+/// Venue and conditions go into each race's setup, and the race is assembled from the files it names
+/// (#81): its wind, course and race area come from them. The tide state is recorded but doesn't vary the
+/// race: a race draws its tide state at the gun from its race seed and venue (#78), which the report
+/// gives as `tideStateAtGunDegrees`, and boats don't feel the current until #79.
 public struct BotMatrix: Codable, Hashable, Sendable {
     public var seeds: [UInt64]
     public var venues: [String]

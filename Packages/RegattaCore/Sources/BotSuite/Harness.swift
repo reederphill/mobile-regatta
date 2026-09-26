@@ -42,7 +42,9 @@ public enum BotRaceHarness {
 
     public static func run(_ cell: BotRaceCell) throws -> RaceResult {
         let setup = try raceSetup(for: cell)
-        let race = Race(setup: setup, windSeed: windSeed(for: cell.seed))
+        // Assembled as the server assembles a race (#81): the files the setup names, the race of record.
+        let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+                            mode: .authoritative(windSeed: windSeed(for: cell.seed)))
         let tiers = setup.seats.indices.map { cell.tierMix.tier(ofSeat: $0) }
         var controllers = SeatControllers(tiers.indices.map { .bot(tiers[$0].driver(seat: $0, raceSeed: setup.raceSeed)) })
         var tally = RaceTally(race: race)
@@ -61,7 +63,8 @@ public enum BotRaceHarness {
         let seats = tiers.indices.map { seat in
             tally.metrics(seat: seat, of: race, tier: tiers[seat], skill: controllers[seat].driver?.style.skill ?? 0)
         }
-        return RaceResult(cell: cell, finalTick: race.tick, capped: !race.isOver, seats: seats,
+        return RaceResult(cell: cell, finalTick: race.tick, capped: !race.isOver,
+                          tideStateAtGun: race.tideStateAtGun, seats: seats,
                           timings: TickTimings(samples: tickMs, cpuSeconds: threadCPUSeconds() - cpuStart))
     }
 
@@ -97,7 +100,7 @@ struct RaceTally {
 
     init(race: Race) {
         noGo = BoatDynamics.noGoAngle(race.boatClass.polar)
-        area = race.windSetup.raceArea ?? .placeholder(around: race.course)
+        area = race.course.raceArea
         let zeros = Array(repeating: 0, count: race.boats.count)
         ironsTicks = zeros
         edgeTicks = zeros
