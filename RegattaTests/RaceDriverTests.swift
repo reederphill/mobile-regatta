@@ -50,6 +50,35 @@ import RegattaCore
         }
         #expect(world.autohelm(ofSeat: driver.myBoatIndex) != nil, "your rudder is centred: the autohelm holds her")
     }
+
+    /// #248: the scene reads each boat's planing and spinnaker from the render world, the latest tick's,
+    /// for the wake and spray (#117, #121) and the spinnaker (#120).
+    @Test func renderWorldReadsEachSeatsSails() {
+        let driver = PracticeDriver(config: RaceDriverTests.config)
+        driver.tick(2 / Double(Race.tickRate))
+        let world = driver.renderWorld
+        #expect(world.boatClass.planing != nil && world.boatClass.spinnaker != nil, "races sail the skiff")
+        for seat in world.boats.indices {
+            let latest = driver.currentFrame.boats[seat]
+            #expect(world.sails(ofSeat: seat) == SailState(isPlaning: latest.isPlaning, spinnaker: latest.spinnaker,
+                                                         isSpinnakerCollapsed: latest.isSpinnakerCollapsed(in: world.boatClass)))
+        }
+        // Every state reaches the scene from the latest tick, whatever the tick before had.
+        let latest = driver.currentFrame
+        var boats = latest.boats
+        boats[1].isPlaning = true
+        boats[1].spinnaker = .hoisting(remaining: 2.5)
+        boats[2].spinnaker = .up
+        boats[2].boomSide = .port
+        boats[2].heading = wrapAngle(boats[2].windDirection + .pi - deg2rad(15)) // 15° by the lee: collapsed
+        boats[3].spinnaker = .dropping(remaining: 1)
+        let edited = TickFrame(tick: latest.tick, boats: boats, standings: latest.standings, wind: latest.wind, isOver: latest.isOver)
+        let drawn = RenderWorld(course: world.course, boatClass: world.boatClass, myBoatIndex: driver.myBoatIndex,
+                                previous: driver.previousFrame, current: edited, alpha: 0.5)
+        #expect(drawn.sails(ofSeat: 1) == SailState(isPlaning: true, spinnaker: .hoisting(remaining: 2.5), isSpinnakerCollapsed: false))
+        #expect(drawn.sails(ofSeat: 2).spinnaker == .up && drawn.sails(ofSeat: 2).isSpinnakerCollapsed)
+        #expect(drawn.sails(ofSeat: 3).spinnaker == .dropping(remaining: 1))
+    }
 }
 
 /// #79 (#15): the HUD's wind readouts show the wind over the ground, not the wind she sails in.

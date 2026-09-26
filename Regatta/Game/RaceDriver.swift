@@ -149,6 +149,15 @@ struct RenderWorld {
         boats[seat].autohelmReading(in: boatClass)
     }
 
+    /// What `seat`'s boat does with her sails (#248): whether she planes, for the wake and spray (#117,
+    /// #121), and her spinnaker (down, going up, up or coming down, and collapsed by the lee), for its
+    /// drawing (#120). All three are the latest tick's (`frame`): none of them interpolates.
+    func sails(ofSeat seat: Int) -> SailState {
+        let boat = frame.boats[seat]
+        return SailState(isPlaning: boat.isPlaning, spinnaker: boat.spinnaker,
+                         isSpinnakerCollapsed: boat.isSpinnakerCollapsed(in: boatClass))
+    }
+
     /// This world with each seat's boat drawn as `draw` says: the online driver's visual corrections (#68).
     func drawing(_ draw: (_ seat: Int, Boat) -> Boat) -> RenderWorld {
         var world = self
@@ -162,6 +171,13 @@ struct RenderWorld {
     }
 
     var puffs: [Puff] { frame.wind.activePuffs(atTick: frame.tick) }
+}
+
+/// A boat's sails as the scene draws them (`RenderWorld.sails(ofSeat:)`, #248).
+struct SailState: Equatable {
+    var isPlaning: Bool
+    var spinnaker: Spinnaker
+    var isSpinnakerCollapsed: Bool
 }
 
 /// Rendering between ticks (#18). Presentation only: none of it feeds back into a race.
