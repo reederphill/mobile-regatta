@@ -29,6 +29,12 @@ public struct CourseLayout: Sendable, Equatable {
         public func side(_ p: Vec2) -> Double {
             (committee.position - pin.position).normalized.cross(p - pin.position)
         }
+
+        /// How fast a velocity `v` carries a point towards the course side, m/s (`side`'s rate of change);
+        /// negative is towards the pre-start side.
+        public func courseSideRate(_ v: Vec2) -> Double {
+            (committee.position - pin.position).normalized.cross(v)
+        }
     }
 
     /// Something the course is sailed around, in order.
@@ -216,6 +222,36 @@ public struct CourseLayout: Sendable, Equatable {
         case .round(let index): elements[index].marks
         case .finish: [finishLine.pin, finishLine.committee]
         }
+    }
+
+    /// Stream tag for `SplitMix64(seed:stream:)` on the race seed, for the start row's order: ASCII "startrow".
+    public static let startRowStream: UInt64 = 0x7374_6172_7472_6F77
+
+    /// Where each of `n` seats is when the start sequence begins (#35), `result[seat]`: one row parallel to
+    /// the start line, `placement.depthLineLengths` line lengths below it, over a span of
+    /// `placement.spreadLineLengths` line lengths centred on the line's centre. Slot `k` is
+    /// `span × (k + ½) / n` along the span from its pin end, so neighbours are `span / n` apart. The seats
+    /// take the slots in the order the race seed shuffles on its own stream (`startRowStream`): our own
+    /// Fisher–Yates on `SplitMix64` (ADR 0002), seat `s` in slot `order[s]`.
+    public func startRow(fleetSize n: Int, raceSeed: RaceSeed) -> [Vec2] {
+        let length = startLine.length
+        let span = placement.spreadLineLengths * length
+        let rowCentre = startLine.centre - upwind * (placement.depthLineLengths * length)
+        var order = Array(0..<n)
+        var rng = SplitMix64(seed: raceSeed.value, stream: Self.startRowStream)
+        rng.shuffle(&order)
+        return order.map { k in rowCentre + right * (span * (Double(k) + 0.5) / Double(n) - span / 2) }
+    }
+
+    /// The start row's heading (#35): on starboard, `placement.trueWindAngle` off the axis (the mean wind),
+    /// towards the pin.
+    public var startRowHeading: Double { wrapAngle(axis - placement.trueWindAngle) }
+
+    /// Whether `boat` is returning to start (rule 21.1, #85): OCS (`BoatStatus.ocs`, on the course side at
+    /// the gun and not yet wholly back) and moving over the ground towards the pre-start side of the start
+    /// line or its extensions. Derived from what the boat carries, so a snapshot carries it too.
+    public func isReturning(_ boat: Boat) -> Bool {
+        boat.status == .ocs && startLine.courseSideRate(boat.velocityOverGround) < 0
     }
 
     /// Whether `p` is in the race area: inside `raceArea` and on none of `land`.

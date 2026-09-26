@@ -370,6 +370,31 @@ struct LogFeeder {
         "seatEvents": "the race log, not world state",
     ]
 
+    /// The start state (#85) travels in the snapshot: OCS and started are the boat's status, and returning
+    /// (`CourseLayout.isReturning`) is derived from it and her motion, so an import agrees on all three and
+    /// clears on the same tick.
+    @Test func startStateTravelsInTheSnapshot() throws {
+        // Running back down the axis at the line's centre, half a metre below it: her stern is over at the gun.
+        let original = try raceEdited { boat, race in
+            boat.heading = race.course.axis + .pi
+            boat.speed = 2
+            boat.position = race.course.startLine.centre - race.course.upwind * 0.5
+        }
+        original.step()
+        #expect(original.drainEvents().map(\.kind).contains(.ocsNotice(recipient: 0)))
+        let copy = testRace(seats: [.human, .human], prestartSeconds: 1, seed: 5)
+        try copy.importSnapshot(original.exportSnapshot())
+        for _ in 0..<60 {
+            #expect(copy.boats.map(\.status) == original.boats.map(\.status))
+            #expect(copy.boats.map(copy.course.isReturning) == original.boats.map(original.course.isReturning))
+            original.step()
+            copy.step()
+            #expect(copy.digest() == original.digest())
+            #expect(copy.drainEvents() == original.drainEvents())
+        }
+        #expect(original.boats[0].status == .prestart)
+    }
+
     @Test func everyStoredRacePropertyIsCarriedOrExcluded() {
         let race = testRace(opponents: 3, seed: 1)
         let stored = Mirror(reflecting: race).children.compactMap(\.label)

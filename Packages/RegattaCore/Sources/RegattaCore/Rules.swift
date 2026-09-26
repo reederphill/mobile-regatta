@@ -109,11 +109,12 @@ public enum Rules {
         func call(_ rule: RacingRule, _ offender: Boat, _ victim: Boat) -> Verdict {
             Verdict(rule: rule, offender: offender.id, victim: victim.id)
         }
-        /// Rule 21: a boat returning to start (21.1) or taking a penalty (21.2) keeps clear.
-        func rule21(_ boat: Boat) -> RacingRule { boat.status == .ocs ? .returningToStart : .takingAPenalty }
+        /// Rule 21: a boat returning to start (21.1, `CourseLayout.isReturning`: OCS and heading back, not an
+        /// OCS boat sailing on) or taking a penalty (21.2) keeps clear.
+        func rule21(_ boat: Boat) -> RacingRule { course.isReturning(boat) ? .returningToStart : .takingAPenalty }
 
-        let aMustKeepClear = a.isTakingPenalty || a.status == .ocs
-        let bMustKeepClear = b.isTakingPenalty || b.status == .ocs
+        let aMustKeepClear = a.isTakingPenalty || course.isReturning(a)
+        let bMustKeepClear = b.isTakingPenalty || course.isReturning(b)
         if aMustKeepClear != bMustKeepClear {
             return aMustKeepClear ? call(rule21(a), a, b) : call(rule21(b), b, a)
         }

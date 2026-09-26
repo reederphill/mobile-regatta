@@ -83,6 +83,17 @@ import Testing
     }
 }
 
+/// A two-human race with a 1 s start sequence, stepped to `tick` (by default the tick before the gun),
+/// then with seat 0 edited by `place`; seat 1 stays in her slot in the start row, sailing on.
+func raceEdited(atTick tick: Int = -1, seed: UInt64 = 5, _ place: (inout Boat, Race) -> Void) throws -> Race {
+    let race = testRace(seats: [.human, .human], prestartSeconds: 1, seed: seed)
+    while race.tick < tick { race.step() }
+    var snapshot = race.exportSnapshot()
+    place(&snapshot.seats[0].boat, race)
+    try race.importSnapshot(snapshot)
+    return race
+}
+
 @Suite struct RaceTests {
     /// Steers seat 0 toward `heading` with a simple proportional helm.
     func sail(_ race: Race, heading: Double, seconds: Double) -> [RaceEvent.Kind] {
@@ -96,19 +107,24 @@ import Testing
         return events
     }
 
+    /// Over at the gun (#85): recalled alone, cleared once her whole hull is back on the pre-start side,
+    /// then started by crossing the line.
     @Test func boatOverTheLineAtTheGunIsOCSAndMustReturn() {
-        // Seat 1 is a second human who sends no inputs, so she sails straight on out of the way.
-        // 44 s: the class's turn rate costs a few seconds tacking onto port at the start of the run.
+        // Both start in the row (#35). Seat 1 is a second human who sends no inputs, so she reaches on
+        // below the line, out of the way; seat 0 luffs from her slot and sails up over it before the gun.
         let race = testRace(seats: [.human, .human], prestartSeconds: 44, seed: 1)
         let early = sail(race, heading: deg2rad(-45), seconds: 45)
         #expect(early.contains(.ocsNotice(recipient: 0)))
+        #expect(!early.contains(.ocsNotice(recipient: 1)))
         #expect(race.boats[0].status == .ocs)
+        #expect(race.boats[1].status == .prestart)
 
         var back: [RaceEvent.Kind] = []
         for _ in 0..<40 where race.boats[0].status == .ocs { back += sail(race, heading: .pi, seconds: 1) }
         #expect(back.contains(.cleared(seat: 0)))
+        #expect(furthestOver(race) <= 0, "cleared with her whole hull on the pre-start side")
 
-        // The boat is now off an end of the line: run deeper, as far below it as she is out to the side but
+        // She may be off an end of the line: run deeper, as far below it as she is out to the side but
         // no closer than 10 m to the race area's edge (#82), then sail up at the line's centre, never closer
         // than 45° to the axis, to cross between its ends.
         let line = race.course.startLine
@@ -125,6 +141,150 @@ import Testing
         }
         #expect(start.contains(.started(seat: 0)))
         #expect(race.boats[0].status == .racing)
+    }
+
+    // MARK: - The start row (#35) and OCS by hull (#85)
+
+    /// `boat`'s slot in the start row, 0 at the pin end, from how far along the line she is.
+    func rowSlot(_ boat: Boat, in race: Race) -> Int {
+        let span = race.course.placement.spreadLineLengths * race.course.startLine.length
+        let along = (boat.position - race.course.startLine.centre).dot(race.course.right) + span / 2
+        return Int((along / span * Double(race.boats.count) - 0.5).rounded())
+    }
+
+    /// How far the bow and the stern reach from the centre along the boat, metres (the stern's negative).
+    let bow = Race.defaultBoatClass.hull.outline.map(\.y).max()!
+    let stern = Race.defaultBoatClass.hull.outline.map(\.y).min()!
+
+    /// The largest start-line side of any point of seat 0's hull: positive when some of it is over.
+    func furthestOver(_ race: Race, seat: Int = 0) -> Double {
+        race.boats[seat].hull(outline: race.boatClass.hull.outline).map(race.course.startLine.side).max()!
+    }
+
+    @Test func startRowPlacementMatchesFormula() {
+        let race = testRace(opponents: 9, seed: 7)
+        let n = race.boats.count, line = race.course.startLine, row = race.course.placement
+        #expect(n == 10)
+        #expect(race.time == -60)
+        let span = 1.5 * line.length
+        let polarSpeed = race.boatClass.polar.speed(twa: deg2rad(90), tws: race.windSetup.baseStrength)
+        #expect(row.trueWindAngle == deg2rad(90) && row.polarSpeedFraction == 1)
+        var along: [Double] = []
+        for b in race.boats {
+            #expect(abs(line.side(b.position) - (-0.5 * line.length)) < 1e-9)
+            along.append((b.position - line.centre).dot(race.course.right))
+            #expect(b.tack == .starboard)
+            // Reaching towards the pin: 90° off the mean wind, the axis less a right angle.
+            #expect(abs(wrapAngle(b.heading - (race.course.axis - .pi / 2))) < 1e-9)
+            #expect(abs(wrapAngle(race.windSetup.meanDirection - b.heading) - deg2rad(90)) < 1e-9)
+            #expect(abs(b.speed - polarSpeed) < 1e-9)
+        }
+        let slots = (0..<n).map { -span / 2 + span * (Double($0) + 0.5) / Double(n) }
+        for (a, s) in zip(along.sorted(), slots) { #expect(abs(a - s) < 1e-9) }
+    }
+
+    @Test func startRowOrderIsSeededShuffle() {
+        func order(_ seed: UInt64) -> [Int] {
+            let race = testRace(opponents: 9, seed: seed)
+            return race.boats.map { rowSlot($0, in: race) }
+        }
+        #expect(order(11) == order(11))
+        #expect(order(11) != order(12))
+        #expect(order(11).sorted() == Array(0..<10))
+        // Our own Fisher–Yates on the race seed's start-row stream, seat s in slot order[s] (ADR 0002).
+        var expected = Array(0..<10)
+        var rng = SplitMix64(seed: 11, stream: CourseLayout.startRowStream)
+        rng.shuffle(&expected)
+        #expect(order(11) == expected)
+    }
+
+    /// #35 "clear ahead and clear astern": every pair in the row is clear of the other, at every fleet size.
+    @Test func startRowSlotsNeverOverlap() {
+        let hull = Race.defaultBoatClass.hull
+        for n in RaceSetup.fleetSizes {
+            let race = testRace(opponents: n - 1, seed: UInt64(n))
+            #expect(race.time == -60)
+            for a in 0..<n {
+                for b in (a + 1)..<n {
+                    let (p, q) = (race.boats[a], race.boats[b])
+                    #expect(Collision.penetration(p.hull(outline: hull.outline), q.hull(outline: hull.outline)) == nil)
+                    #expect(Rules.isClearAstern(p, of: q, hull: hull) || Rules.isClearAstern(q, of: p, hull: hull),
+                            "\(n) boats: seats \(a) and \(b) overlap")
+                }
+            }
+        }
+    }
+
+    @Test func bowOverLineAtGunIsOCS() throws {
+        for over in [0.3, -0.3] {
+            // Pointing up the course at the line's centre, her bow `over` metres over it and her centre below.
+            let race = try raceEdited { boat, race in
+                boat.heading = race.course.axis
+                boat.position = race.course.startLine.centre + race.course.upwind * (over - bow)
+            }
+            #expect(abs(furthestOver(race) - over) < 1e-9)
+            #expect(race.course.startLine.side(race.boats[0].position) < 0)
+            race.step()
+            #expect(race.tick == 0)
+            let events = race.drainEvents().map(\.kind)
+            #expect(events.contains(.ocsNotice(recipient: 0)) == (over > 0))
+            #expect(!events.contains(.ocsNotice(recipient: 1)))
+            #expect(race.boats[0].status == (over > 0 ? .ocs : .prestart))
+            #expect(race.boats[1].status == .prestart)
+        }
+    }
+
+    /// Stern over and centre below, at the gun and on the way back: OCS until her whole hull is back.
+    @Test func sternOverLineAtGunIsOCS() throws {
+        // Running straight back down the axis at the line's centre, her stern 0.3 m over it.
+        let race = try raceEdited { boat, race in
+            boat.heading = race.course.axis + .pi
+            boat.speed = 2
+            boat.position = race.course.startLine.centre + race.course.upwind * (0.3 + stern)
+        }
+        #expect(abs(furthestOver(race) - 0.3) < 1e-9)
+        #expect(race.course.startLine.side(race.boats[0].position) < 0)
+        race.step()
+        #expect(race.drainEvents().map(\.kind).contains(.ocsNotice(recipient: 0)))
+        #expect(race.boats[0].status == .ocs)
+
+        var clearedAt: Int?
+        for _ in 0..<60 where clearedAt == nil {
+            #expect(race.course.isReturning(race.boats[0]))
+            race.step()
+            let events = race.drainEvents().map(\.kind)
+            if furthestOver(race) > 0 {
+                #expect(race.boats[0].status == .ocs, "centre below, stern still over at tick \(race.tick)")
+                #expect(!events.contains(.cleared(seat: 0)))
+            } else {
+                #expect(events.contains(.cleared(seat: 0)))
+                clearedAt = race.tick
+            }
+        }
+        #expect(clearedAt != nil)
+        #expect(race.boats[0].status == .prestart)
+        #expect(!race.course.isReturning(race.boats[0]))
+    }
+
+    @Test func bowCrossingLineStartsThatTick() throws {
+        // After the gun, sailing up the course with her bow 1 cm below the line: at its centre, and off
+        // the committee boat's end, where she crosses only the line's extension.
+        for across in [0.0, 1.0] {
+            let race = try raceEdited(atTick: 2) { boat, race in
+                let line = race.course.startLine
+                boat.heading = race.course.axis
+                boat.speed = 3
+                boat.position = line.centre + race.course.right * (across * (line.length / 2 + 5))
+                    + race.course.upwind * (-0.01 - bow)
+            }
+            #expect(race.boats[0].status == .prestart)
+            race.step()
+            let events = race.drainEvents().map(\.kind)
+            #expect(furthestOver(race) > 0)
+            #expect(race.course.startLine.side(race.boats[0].position) < 0)
+            #expect(events.contains(.started(seat: 0)) == (across == 0))
+            #expect(race.boats[0].status == (across == 0 ? .racing : .prestart))
+        }
     }
 
     @Test func autopilotTackMirrorsHeading() {

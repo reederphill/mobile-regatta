@@ -52,7 +52,14 @@ import Glibc
 ///    heading into the edge she keeps her speed along it, the course's `edgeSpeedRetention` of it as the
 ///    touch begins. No penalty; the touch is announced and recorded. The prototype placement is squeezed
 ///    towards the line to keep every boat a hull length inside the area.
-public let simulationRevision = 11
+/// 12: start row and OCS by hull (#85), on 11. The prototype placement is gone: every boat starts the
+///    sequence in one row half a line length below the line, in slots over 1.5 line lengths, the order
+///    shuffled from the race seed's own stream, on starboard reaching towards the pin at polar speed in
+///    the base strength. OCS, clearing and starting read every hull point, not the centre: OCS if any is
+///    on the course side at the gun, cleared once all are on the pre-start side, started when any crosses
+///    the line itself after the gun. Rule 21.1 applies to an OCS boat only while she moves towards the
+///    pre-start side (`CourseLayout.isReturning`).
+public let simulationRevision = 12
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

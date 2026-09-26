@@ -128,7 +128,8 @@ import Testing
     @Test func judgeCallsRule21ForReturningAndPenalisedBoats() {
         let hull = Race.defaultBoatClass.hull
         let course = try! CourseLayoutTests.layout()
-        var returning = Boat(id: 1, isPlayer: false, colorIndex: 1, position: Vec2(0, -10), heading: .pi / 2, speed: 3)
+        // OCS and sailing straight back down the axis: returning (#85).
+        var returning = Boat(id: 1, isPlayer: false, colorIndex: 1, position: Vec2(0, -10), heading: course.axis + .pi, speed: 3)
         returning.status = .ocs
         var penalised = Boat(id: 3, isPlayer: false, colorIndex: 3, position: Vec2(0, 100), heading: .pi / 2, speed: 3)
         penalised.status = .racing
@@ -137,6 +138,11 @@ import Testing
         var clean = Boat(id: 2, isPlayer: false, colorIndex: 2, position: Vec2(2, -10), heading: -.pi / 2, speed: 3)
         clean.status = .prestart
         #expect(Rules.judge(returning, clean, overlapped: true, course: course, hull: hull) == Verdict(rule: .returningToStart, offender: 1, victim: 2))
+        // OCS but sailing on up the course: not returning, so rule 21.1 doesn't apply to her yet.
+        var sailingOn = returning
+        sailingOn.heading = course.axis
+        #expect(!course.isReturning(sailingOn))
+        #expect(Rules.judge(sailingOn, clean, overlapped: true, course: course, hull: hull)?.rule != .returningToStart)
         clean.status = .racing
         clean.position = Vec2(2, 100)
         #expect(Rules.judge(clean, penalised, overlapped: true, course: course, hull: hull) == Verdict(rule: .takingAPenalty, offender: 3, victim: 2))

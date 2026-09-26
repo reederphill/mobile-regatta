@@ -36,7 +36,8 @@ public enum BoomSide: Sendable, Hashable {
 public enum BoatStatus: Sendable, Equatable {
     /// Before the gun, or after it but not yet started.
     case prestart
-    /// On the course side at the gun; must return below the line.
+    /// Some of her hull on the course side at the gun (#85, rule 29.1); must return until all of it is on
+    /// the pre-start side of the line or its extensions.
     case ocs
     case racing
     case finished

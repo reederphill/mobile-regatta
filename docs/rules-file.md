@@ -136,4 +136,5 @@ behaviour (for example, a 180 s finish window and no time limit).
 Course derivation (#80): `CourseLayout.derive` reads `startLine`, `leewardGate`, `offsetMark`,
 `raceArea`, `startRow`, `edgeSpeedRetention` and `beatSizing` to lay out the course, sizing the beat
 from the class polar in the race's base strength (the model is on `CourseLayout.beat`). The race
-sails it from #81; until then it sails `Course.standard`.
+sails it from #81; until then it sails `Course.standard`. From #85 the race places its boats with
+`startRow` (`CourseLayout.startRow`): slots in the row, a seeded order, the heading and the speed.
