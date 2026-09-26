@@ -143,8 +143,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: .build/check
-          key: check-${{ runner.os }}-${{ hashFiles('Packages/*/Package.resolved') }}
-          restore-keys: check-${{ runner.os }}-
+          # v2: one scratch directory per package, built at -O (scripts/check.sh).
+          key: check-v2-${{ runner.os }}-${{ hashFiles('Packages/*/Package.resolved') }}
+          restore-keys: check-v2-${{ runner.os }}-
       - name: Build, then test, the packages the change reaches (scripts/check.sh)
         run: |
           packages=""
