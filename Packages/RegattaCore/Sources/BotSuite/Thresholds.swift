@@ -1,4 +1,5 @@
 import Foundation
+import RegattaBots
 
 /// What one tier must meet over a run (#19): "the share of bots that finish; time stuck in irons;
 /// contact with marks; the share of contacts ending in fouls (near zero at National); getting stuck
@@ -41,23 +42,69 @@ public struct TierLimits: Codable, Hashable, Sendable {
     }
 }
 
-/// The suite's gate (#19, #27): limits per tier, keyed by `BotTier.rawValue`, and the worst race's p99
-/// tick. A tier with no limits isn't gated. "The exact limits are set at build time" (#19): the bundled
-/// `thresholds.json` starts loose, and tightens as the brains (#102) do.
+/// What a scripted profile must show over a run (#231), keyed in the thresholds by `BotProfile.rawValue`.
+/// Every limit is optional: a profile's tickets (#238, #234, #105) add theirs as keys here.
+public struct ProfileLimits: Codable, Hashable, Sendable {
+    /// The tactician's least mean win share over the baseline, across the races with both (ADR 0007).
+    public var minTacticianWinShare: Double?
+    /// The tactician's least median gain over the baseline per beat, hull lengths.
+    public var minTacticianGainLengthsPerBeat: Double?
+
+    public init(minTacticianWinShare: Double? = nil, minTacticianGainLengthsPerBeat: Double? = nil) {
+        self.minTacticianWinShare = minTacticianWinShare
+        self.minTacticianGainLengthsPerBeat = minTacticianGainLengthsPerBeat
+    }
+
+    /// Why `skillGap` misses these limits, each line starting with `profile`.
+    func breaches(_ profile: String, skillGap: SkillGapSummary?) -> [String] {
+        guard let gap = skillGap else { return [] }
+        var breaches: [String] = []
+        if let minimum = minTacticianWinShare, gap.tacticianWinShare < minimum {
+            breaches.append("\(profile): win share \(fixed(gap.tacticianWinShare)) < \(fixed(minimum))")
+        }
+        if let minimum = minTacticianGainLengthsPerBeat, gap.medianGainLengthsPerBeat < minimum {
+            breaches.append("\(profile): gain \(fixed(gap.medianGainLengthsPerBeat)) lengths/beat < \(fixed(minimum))")
+        }
+        return breaches
+    }
+}
+
+/// The suite's gate (#19, #27): limits per tier, keyed by `BotTier.rawValue`, per scripted profile, keyed by
+/// `BotProfile.rawValue` (#231), and the worst race's p99 tick. A tier or profile with no limits isn't gated,
+/// and a profile's limits gate only a run that sailed it. "The exact limits are set at build time" (#19):
+/// the bundled `thresholds.json` starts loose, and tightens as the brains (#102) do.
 public struct BotThresholds: Codable, Hashable, Sendable {
     public var tiers: [String: TierLimits]
+    /// Empty when a thresholds file has none.
+    public var profiles: [String: ProfileLimits]
     public var maxP99TickMs: Double
 
-    public init(tiers: [String: TierLimits], maxP99TickMs: Double) {
+    public init(tiers: [String: TierLimits], profiles: [String: ProfileLimits] = [:], maxP99TickMs: Double) {
         self.tiers = tiers
+        self.profiles = profiles
         self.maxP99TickMs = maxP99TickMs
     }
 
-    /// Why a run with these tier summaries and timings misses the thresholds; empty when it meets them.
-    public func breaches(tiers summaries: [String: TierSummary], timings: BotSuiteReport.RunTimings) -> [String] {
+    private enum CodingKeys: String, CodingKey {
+        case tiers, profiles, maxP99TickMs
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(tiers: try c.decode([String: TierLimits].self, forKey: .tiers),
+                  profiles: try c.decodeIfPresent([String: ProfileLimits].self, forKey: .profiles) ?? [:],
+                  maxP99TickMs: try c.decode(Double.self, forKey: .maxP99TickMs))
+    }
+
+    /// Why a run with these tier summaries, timings and skill gap misses the thresholds; empty when it meets them.
+    public func breaches(tiers summaries: [String: TierSummary], timings: BotSuiteReport.RunTimings,
+                         skillGap: SkillGapSummary? = nil) -> [String] {
         var breaches = BotTier.allCases.flatMap { tier -> [String] in
             guard let summary = summaries[tier.rawValue], let limits = tiers[tier.rawValue] else { return [] }
             return limits.breaches(tier.rawValue, summary)
+        }
+        for profile in BotProfile.allCases {
+            breaches += profiles[profile.rawValue]?.breaches(profile.rawValue, skillGap: skillGap) ?? []
         }
         if timings.maxP99Ms > maxP99TickMs {
             breaches.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms > \(fixed(maxP99TickMs, 3))")
@@ -69,6 +116,10 @@ public struct BotThresholds: Codable, Hashable, Sendable {
         let thresholds = try JSONDecoder().decode(BotThresholds.self, from: Data(contentsOf: url))
         let unknown = thresholds.tiers.keys.filter { BotTier(rawValue: $0) == nil }.sorted()
         guard unknown.isEmpty else { throw BotSuiteError.usage("thresholds: unknown tier \(unknown.joined(separator: ", "))") }
+        let unknownProfiles = thresholds.profiles.keys.filter { BotProfile(rawValue: $0) == nil }.sorted()
+        guard unknownProfiles.isEmpty else {
+            throw BotSuiteError.usage("thresholds: unknown profile \(unknownProfiles.joined(separator: ", "))")
+        }
         return thresholds
     }
 

@@ -20,17 +20,37 @@ public enum BotTier: String, Codable, CaseIterable, Hashable, Sendable {
     /// `BotStyle(rng:)`'s skill range, which a band rescales.
     static let drawnSkill = 0.35...1.0
 
-    /// The bot sailing `seat` at this tier. Its style is drawn from its own seed exactly as
-    /// `BotDriver(seat:raceSeed:)` draws it, then its skill is rescaled from the drawn range into the
-    /// tier's band, so a tier keeps the spread of its bots' skills and never touches the race's streams.
-    public func driver(seat: Int, raceSeed: RaceSeed) -> BotDriver {
-        guard let band = skillBand else { return BotDriver(seat: seat, raceSeed: raceSeed) }
+    /// The bot sailing `seat` at this tier, sailing `profile` if the matrix gives the seat one (#231). Its
+    /// style is drawn from its own seed exactly as `BotDriver(seat:raceSeed:)` draws it, then its skill is
+    /// rescaled from the drawn range into the tier's band, so a tier keeps the spread of its bots' skills and
+    /// never touches the race's streams.
+    public func driver(seat: Int, raceSeed: RaceSeed, profile: BotProfile? = nil) -> BotDriver {
         var rng = SplitMix64(seed: botSeed(raceSeed: raceSeed, seat: seat))
         var style = BotStyle(rng: &rng)
-        let drawn = BotTier.drawnSkill
-        let t = (style.skill - drawn.lowerBound) / (drawn.upperBound - drawn.lowerBound)
-        style.skill = min(max(band.lowerBound + t * (band.upperBound - band.lowerBound), band.lowerBound), band.upperBound)
-        return BotDriver(seat: seat, raceSeed: raceSeed, style: style)
+        if let band = skillBand {
+            let drawn = BotTier.drawnSkill
+            let t = (style.skill - drawn.lowerBound) / (drawn.upperBound - drawn.lowerBound)
+            style.skill = min(max(band.lowerBound + t * (band.upperBound - band.lowerBound), band.lowerBound), band.upperBound)
+        }
+        return BotDriver(seat: seat, raceSeed: raceSeed, style: style, profile: profile)
+    }
+}
+
+/// Which scripted profile, if any, sails each seat of a race (#231): the matrix's profile axis, as a tier
+/// mix is its tier axis. #238 and #234 add mixes for their profiles.
+public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
+    /// Every seat a live bot, sailing as its tier does: the seats the tier limits gate.
+    case live
+    /// The skill-gap scenario (ADR 0007): baseline and tactician seats by turns, the tactician on the odd
+    /// seats for an even seed and the even seats for an odd one, so neither profile keeps a seat's start.
+    case skillGap
+
+    /// The profile sailing `seat` in a race with race seed `seed`, or nil for a live bot.
+    public func profile(ofSeat seat: Int, seed: UInt64) -> BotProfile? {
+        switch self {
+        case .live: nil
+        case .skillGap: (seat + Int(seed % 2)).isMultiple(of: 2) ? .baseline : .tactician
+        }
     }
 }
 
@@ -54,7 +74,7 @@ public enum TierMix: String, Codable, CaseIterable, Hashable, Sendable {
 }
 
 /// The races a suite run sails (#97): every combination of seed × venue × conditions × tide state ×
-/// fleet size × tier mix. Venues and conditions are data files named `id@version`.
+/// fleet size × tier mix × profile mix (#231). Venues and conditions are data files named `id@version`.
 ///
 /// Venue and conditions go into each race's setup, and the race is assembled from the files it names
 /// (#81): its wind, course and race area come from them. The tide state is recorded but doesn't vary the
@@ -68,6 +88,8 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     public var tideStatesDegrees: [Double]
     public var fleetSizes: [Int]
     public var tierMixes: [TierMix]
+    /// Which seats sail a scripted profile (#231); `[.live]` when a matrix file has none.
+    public var profileMixes: [ProfileMix]
     public var laps: Int
     /// Seconds after the gun a race may sail before the harness stops it; its unfinished boats count
     /// as not finished.
@@ -75,31 +97,52 @@ public struct BotMatrix: Codable, Hashable, Sendable {
 
     public init(seeds: [UInt64], venues: [String] = ["dev-venue@2"], conditions: [String] = ["classic-oscillating@2"],
                 tideStatesDegrees: [Double] = [0], fleetSizes: [Int], tierMixes: [TierMix] = [.seeded],
-                laps: Int = RaceSetup.defaultLaps, capSecondsAfterGun: Int = BotMatrix.defaultCapSecondsAfterGun) {
+                profileMixes: [ProfileMix] = [.live], laps: Int = RaceSetup.defaultLaps,
+                capSecondsAfterGun: Int = BotMatrix.defaultCapSecondsAfterGun) {
         self.seeds = seeds
         self.venues = venues
         self.conditions = conditions
         self.tideStatesDegrees = tideStatesDegrees
         self.fleetSizes = fleetSizes
         self.tierMixes = tierMixes
+        self.profileMixes = profileMixes
         self.laps = laps
         self.capSecondsAfterGun = capSecondsAfterGun
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case seeds, venues, conditions, tideStatesDegrees, fleetSizes, tierMixes, profileMixes, laps, capSecondsAfterGun
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(seeds: try c.decode([UInt64].self, forKey: .seeds),
+                  venues: try c.decode([String].self, forKey: .venues),
+                  conditions: try c.decode([String].self, forKey: .conditions),
+                  tideStatesDegrees: try c.decode([Double].self, forKey: .tideStatesDegrees),
+                  fleetSizes: try c.decode([Int].self, forKey: .fleetSizes),
+                  tierMixes: try c.decode([TierMix].self, forKey: .tierMixes),
+                  profileMixes: try c.decodeIfPresent([ProfileMix].self, forKey: .profileMixes) ?? [.live],
+                  laps: try c.decode(Int.self, forKey: .laps),
+                  capSecondsAfterGun: try c.decode(Int.self, forKey: .capSecondsAfterGun))
     }
 
     /// As `botFleetCompletesARace` sails its fleet: well past a two-lap race and its finish window.
     public static let defaultCapSecondsAfterGun = 1_500
 
-    /// Every race of the matrix, seeds outermost and tier mixes innermost.
+    /// Every race of the matrix, seeds outermost and profile mixes innermost.
     public var cells: [BotRaceCell] {
         seeds.flatMap { seed in
             venues.flatMap { venue in
                 conditions.flatMap { conditions in
                     tideStatesDegrees.flatMap { tide in
                         fleetSizes.flatMap { fleetSize in
-                            tierMixes.map { mix in
-                                BotRaceCell(seed: seed, venue: venue, conditions: conditions, tideStateDegrees: tide,
-                                            fleetSize: fleetSize, tierMix: mix, laps: laps,
-                                            capSecondsAfterGun: capSecondsAfterGun)
+                            tierMixes.flatMap { mix in
+                                profileMixes.map { profiles in
+                                    BotRaceCell(seed: seed, venue: venue, conditions: conditions, tideStateDegrees: tide,
+                                                fleetSize: fleetSize, tierMix: mix, profileMix: profiles, laps: laps,
+                                                capSecondsAfterGun: capSecondsAfterGun)
+                                }
                             }
                         }
                     }
@@ -113,7 +156,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     public func validate() throws {
         for (axis, count) in [("seeds", seeds.count), ("venues", venues.count), ("conditions", conditions.count),
                               ("tideStatesDegrees", tideStatesDegrees.count), ("fleetSizes", fleetSizes.count),
-                              ("tierMixes", tierMixes.count)] where count == 0 {
+                              ("tierMixes", tierMixes.count), ("profileMixes", profileMixes.count)] where count == 0 {
             throw BotSuiteError.matrix("\(axis) is empty")
         }
         for size in fleetSizes where !RaceSetup.fleetSizes.contains(size) {
@@ -155,8 +198,12 @@ public struct BotRaceCell: Codable, Hashable, Sendable {
     public var tideStateDegrees: Double
     public var fleetSize: Int
     public var tierMix: TierMix
+    public var profileMix: ProfileMix
     public var laps: Int
     public var capSecondsAfterGun: Int
+
+    /// The profile sailing `seat`, or nil for a live bot.
+    public func profile(ofSeat seat: Int) -> BotProfile? { profileMix.profile(ofSeat: seat, seed: seed) }
 }
 
 /// `id@version`, as the matrix and report name a data file.

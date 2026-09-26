@@ -12,28 +12,35 @@ import Testing
         #expect(matrix.venues == ["dev-venue@2"])
         #expect(Set(matrix.conditions) == ["classic-oscillating@2", "gusty-offshore@2", "light-and-patchy@2", "sea-breeze@2"])
         #expect(Set(matrix.tierMixes) == Set(TierMix.allCases))
+        // #231: the live bots the tiers gate, and the skill-gap scenario.
+        #expect(Set(matrix.profileMixes) == Set(ProfileMix.allCases))
         #expect(!matrix.seeds.isEmpty && !matrix.tideStatesDegrees.isEmpty)
-        #expect(matrix.cells.count == matrix.seeds.count * 4 * matrix.tideStatesDegrees.count * 4 * TierMix.allCases.count)
+        #expect(matrix.cells.count == matrix.seeds.count * 4 * matrix.tideStatesDegrees.count * 4 * TierMix.allCases.count
+            * ProfileMix.allCases.count)
     }
 
     @Test func optionsOverrideTheMatrix() throws {
         let options = try BotSuiteOptions(arguments: ["--seeds", "2", "--fleet-size", "16", "--fleet-size", "2",
-                                                      "--tier-mix", "national", "--laps", "1", "--json", "-"])
+                                                      "--tier-mix", "national", "--profile-mix", "skillGap", "--laps", "1",
+                                                      "--json", "-"])
         let matrix = try options.matrix()
         #expect(matrix.seeds == [1, 2])
         #expect(matrix.fleetSizes == [16, 2])
         #expect(matrix.tierMixes == [.national])
+        #expect(matrix.profileMixes == [.skillGap])
         #expect(matrix.laps == 1)
         #expect(options.jsonPath == "-")
 
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--seeds"]) }
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--seeds", "0"]) }
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--tier-mix", "pro"]) }
+        #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--profile-mix", "blipTacker"]) }
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--fleet-size", "17"]).matrix() }
     }
 
     @Test func matrixRejectsAnEmptyAxisAndUnbundledFiles() {
         #expect(throws: BotSuiteError.self) { try BotMatrix(seeds: [], fleetSizes: [2]).validate() }
+        #expect(throws: BotSuiteError.self) { try BotMatrix(seeds: [1], fleetSizes: [2], profileMixes: []).validate() }
         #expect(throws: BotSuiteError.self) { try BotMatrix(seeds: [1], fleetSizes: [1]).validate() }
         #expect(throws: BotSuiteError.self) { try BotMatrix(seeds: [1], venues: ["dev-venue"], fleetSizes: [2]).validate() }
         #expect(throws: (any Error).self) { try BotMatrix(seeds: [1], conditions: ["doldrums@1"], fleetSizes: [2]).validate() }
