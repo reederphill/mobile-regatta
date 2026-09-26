@@ -11,11 +11,13 @@ let wireFieldBounds: [String: @Sendable (WorldSnapshot.Seat, WorldSnapshot.Seat)
     "boat.heading": { angleError($0.boat.heading, $1.boat.heading) <= Q.headingStep / 2 + 1e-12 },
     "boat.speed": { abs($0.boat.speed - $1.boat.speed) <= Q.speedStep / 2 },
     "boat.rudder": { abs($0.boat.rudder - $1.boat.rudder) <= Q.rudderStep / 2 + 1e-15 },
-    "boat.autopilot": {
-        switch ($0.boat.autopilot, $1.boat.autopilot) {
-        case (nil, nil): true
-        case let (a?, b?): angleError(a.heading, b.heading) <= Q.headingStep / 2 + 1e-12 && a.boomSide == b.boomSide
-        default: false
+    "boat.autohelm": {
+        switch ($0.boat.autohelm?.target, $1.boat.autohelm?.target) {
+        case (nil, nil): return true
+        case let (.angle(a)?, .angle(b)?):
+            return angleError(a, b) <= Q.headingStep / 2 + 1e-12 && $0.boat.autohelm?.isTapping == $1.boat.autohelm?.isTapping
+        case let (.groove(a)?, .groove(b)?): return a == b && $0.boat.autohelm?.isTapping == $1.boat.autohelm?.isTapping
+        default: return false
         }
     },
     "boat.penaltyProgress": { abs($0.boat.penaltyProgress - $1.boat.penaltyProgress) <= Q.penaltyProgressStep / 2 },

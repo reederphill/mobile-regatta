@@ -85,6 +85,43 @@ struct SeatWithProbe: CustomReflectable {
         #expect(SnapshotFields.excluded.values.allSatisfy { !$0.isEmpty })
     }
 
+    /// #230: the autohelm's target, a held angle or a groove, and whether it is sailing the tap cross the
+    /// wire in the seat's 20 bytes, so a client predicts what a centred rudder does (ADR 0005, ADR 0007).
+    @Test func snapshotRoundTripCarriesTheAutohelmTarget() throws {
+        #expect(SnapshotFields.wire.contains("boat.autohelm"))
+        let helms: [Autohelm?] = [
+            nil, Autohelm(target: .angle(deg2rad(37.5))), Autohelm(target: .angle(deg2rad(-170))), Autohelm(target: .angle(-.pi)),
+            Autohelm(target: .groove(.upwind)), Autohelm(target: .groove(.downwind)),
+            Autohelm(target: .groove(.upwind), isTapping: true), Autohelm(target: .groove(.downwind), isTapping: true),
+        ]
+        for helm in helms {
+            var seat = Self.seat
+            seat.boat.autohelm = helm
+            let wire = try WireSeat(seat)
+            let bytes = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: [wire, wire]))).encoded()
+            #expect(bytes.count == Frame.headerSize + 1 + 1 + 2 * SnapshotQuantisation.bytesPerSeat)
+            guard case .snapshot(let decoded) = try Frame(decoding: bytes).message else {
+                Issue.record("not a snapshot")
+                continue
+            }
+            #expect(decoded.seats[0] == wire)
+            var received = Self.seat
+            received.boat.autohelm = Autohelm(target: .groove(.upwind), isTapping: true) // whatever the receiver had
+            decoded.seats[0].apply(to: &received)
+            switch (helm?.target, received.boat.autohelm?.target) {
+            case (nil, nil):
+                break
+            case let (.angle(sent)?, .angle(got)?):
+                #expect(abs(wrapAngle(sent - got)) <= SnapshotQuantisation.headingStep / 2 + 1e-12, "\(String(describing: helm))")
+            case let (.groove(sent)?, .groove(got)?):
+                #expect(sent == got)
+            default:
+                Issue.record("sent \(String(describing: helm)), received \(String(describing: received.boat.autohelm))")
+            }
+            #expect(received.boat.autohelm?.isTapping == helm?.isTapping)
+        }
+    }
+
     /// #79: a boat's three winds and the current at her are recomputed at the start of every step, so
     /// the wire leaves them out and a receiver keeps its own.
     @Test func theBoatsWindsAndCurrentAreDerivedNotSent() {
