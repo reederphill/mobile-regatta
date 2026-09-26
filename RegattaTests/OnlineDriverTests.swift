@@ -181,7 +181,7 @@ import RegattaProtocol
         }
         #expect(hello.simulationVersion == RegattaCore.simulationVersion)
         #expect(hello.files == RaceJoin.bundledFiles)
-        #expect(Set(hello.files.map(\.id)) == ["ilca-dinghy", "classic-oscillating", "fleet-rules"])
+        #expect(Set(hello.files.map(\.id)) == ["ilca-dinghy", "dev-venue", "classic-oscillating", "fleet-rules"])
         #expect(sent.count == 1, "no JoinRace after UpdateRequired")
     }
 

@@ -115,7 +115,7 @@ final class FixtureDriver: RaceDriver {
     }
 
     let myBoatIndex: Int
-    let course: Course
+    let course: CourseLayout
     let boatClass: BoatClass
     let isPausable = false
     let isFrozen = true

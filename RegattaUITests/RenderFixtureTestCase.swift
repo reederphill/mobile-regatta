@@ -40,9 +40,27 @@ class RenderFixtureTestCase: RaceUITestCase {
         return ReferencePolicy.mode(flag: flag, isCI: isCI)
     }
 
-    /// Launches `-fixture <name>` and returns its render once two screenshots in a row agree, so the
-    /// launch animation is over and the frozen frame is on screen.
-    @MainActor func renderFixture(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws -> PixelImage {
+    /// A fixture's screenshot and the rows at its bottom that diffs leave out.
+    struct FixtureRender {
+        let image: PixelImage
+        /// The home-indicator band: the race rect's bottom safe-area inset, which the app reports as the
+        /// `render-fixture` element's value in points, in screenshot rows. The system dims and hides the
+        /// indicator on its own timer (`persistentSystemOverlays(.hidden)`), so its pixels depend on when the
+        /// screenshot lands and on the machine; every diff of a fixture ignores them.
+        let homeIndicatorRows: Int
+    }
+
+    /// The rows of a screenshot of `scene` under the home indicator, from the bottom inset the app reports.
+    @MainActor private func homeIndicatorRows(of scene: XCUIElement, imageRows: Int) throws -> Int {
+        guard let value = scene.value as? String, let inset = Double(value) else {
+            throw FixtureFailure(description: "render-fixture's value isn't its bottom inset in points: \(String(describing: scene.value))")
+        }
+        return ImageDiff.rows(coveringBottom: inset, ofFrame: Double(scene.frame.height), imageRows: imageRows)
+    }
+
+    /// Launches `-fixture <name>` and returns its render once two screenshots in a row agree outside the
+    /// home-indicator band, so the launch animation is over and the frozen frame is on screen.
+    @MainActor func renderFixture(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws -> FixtureRender {
         let app = XCUIApplication()
         if app.state != .notRunning { app.terminate() }
         app.launchArguments = ["-uitesting", "-fixture", name]
@@ -60,8 +78,9 @@ class RenderFixtureTestCase: RaceUITestCase {
         for _ in 0..<20 {
             let data = scene.screenshot().pngRepresentation
             let image = try XCTUnwrap(PixelImage(pngData: data), "screenshot isn't a PNG", file: file, line: line)
-            if let last, ImageDiff(actual: image, reference: last, tolerance: .exact).differingPixels == 0 {
-                return image
+            let rows = try homeIndicatorRows(of: scene, imageRows: image.height)
+            if let last, ImageDiff(actual: image, reference: last, tolerance: .exact, ignoringBottomRows: rows).differingPixels == 0 {
+                return FixtureRender(image: image, homeIndicatorRows: rows)
             }
             last = image
             Thread.sleep(forTimeInterval: 0.25)
@@ -69,11 +88,12 @@ class RenderFixtureTestCase: RaceUITestCase {
         throw FixtureFailure(description: "fixture \(name) never held still across two screenshots")
     }
 
-    /// Diffs `actual` with `reference`, attaching the actual, reference and diff PNGs when it fails.
+    /// Diffs `actual` with `reference` outside their bottom `ignoringBottomRows` rows, attaching the actual,
+    /// reference and diff PNGs when it fails.
     @discardableResult @MainActor
     func assertMatches(_ actual: PixelImage, _ reference: PixelImage, named name: String, tolerance: DiffTolerance = .standard,
-                       file: StaticString = #filePath, line: UInt = #line) -> ImageDiff {
-        let diff = ImageDiff(actual: actual, reference: reference, tolerance: tolerance)
+                       ignoringBottomRows: Int = 0, file: StaticString = #filePath, line: UInt = #line) -> ImageDiff {
+        let diff = ImageDiff(actual: actual, reference: reference, tolerance: tolerance, ignoringBottomRows: ignoringBottomRows)
         if !diff.passes {
             attachDiff(diff, actual: actual, reference: reference, named: name)
             XCTFail("\(name) differs from its reference: \(diff.summary)", file: file, line: line)
@@ -105,7 +125,8 @@ class RenderFixtureTestCase: RaceUITestCase {
             XCTFail("-recordReferences is refused in CI: record on a local simulator and commit the PNGs", file: file, line: line)
             return
         }
-        let actual = try renderFixture(name, file: file, line: line)
+        let render = try renderFixture(name, file: file, line: line)
+        let actual = render.image
         let url = Self.deviceReferences.appendingPathComponent("\(name).png")
 
         if mode == .record {
@@ -134,6 +155,7 @@ class RenderFixtureTestCase: RaceUITestCase {
             }
         }
         let reference = try XCTUnwrap(PixelImage(pngData: data), "\(url.path) isn't a PNG", file: file, line: line)
-        assertMatches(actual, reference, named: name, file: file, line: line)
+        // A reference recorded on any machine matches CI's render whatever state the home indicator was in.
+        assertMatches(actual, reference, named: name, ignoringBottomRows: render.homeIndicatorRows, file: file, line: line)
     }
 }

@@ -90,7 +90,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
             #expect(a.wind == b.wind)
             #expect(a.windSetup == b.windSetup)
             #expect(a.course.axis == b.course.axis)
-            for p in [Vec2.zero, a.course.pin, a.course.committee, a.course.marks[0].position] {
+            for p in [Vec2.zero] + a.course.obstacles.map(\.position) {
                 #expect(try a.wind.sample(p, tick: a.tick) == b.wind.sample(p, tick: b.tick))
             }
         }

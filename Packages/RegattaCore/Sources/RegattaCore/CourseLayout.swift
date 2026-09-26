@@ -6,8 +6,6 @@
 /// Boats start upwind to the windward mark W, reach to the offset mark O, run down through the leeward
 /// gate, and repeat; the last lap runs from O to the finish. The start and finish lines are separate
 /// objects, the same segment for this course type.
-///
-/// Not sailed yet: the race sails `Course.standard` until race assembly wires this in (#81).
 public struct CourseLayout: Sendable, Equatable {
     /// A mark: a buoy, or an end of the start or finish line.
     public struct Mark: Sendable, Equatable {

@@ -55,7 +55,8 @@ struct RaceConfig: Equatable {
         return rng.next()
     }
 
-    /// The menu keeps opponents in 1...15 and `-perf` sails 15, so the fleet is always a valid 2...16.
+    /// The menu keeps opponents in 1...15 and `-perf` sails 15, so the fleet is always a valid 2...16. It
+    /// names the bundled default files (`RaceFiles.defaults`) until the practice setup (#131).
     var setup: RaceSetup {
         try! RaceSetup(
             raceSeed: RaceSeed(seed),

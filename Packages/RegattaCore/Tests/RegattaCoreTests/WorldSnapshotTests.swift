@@ -133,7 +133,7 @@ struct LogFeeder {
         let race = Self.feeder.race(at: -1800)
         var aimed = race.exportSnapshot()
         let heading = Double.pi / 3
-        aimed.seats[0].boat.position = race.course.pin - Vec2.heading(heading) * 3.4
+        aimed.seats[0].boat.position = race.course.startLine.pin.position - Vec2.heading(heading) * 3.4
         aimed.seats[0].boat.heading = heading
         aimed.seats[0].boat.speed = 3
         try race.importSnapshot(aimed)
@@ -331,8 +331,10 @@ struct LogFeeder {
         "setup": "fixed for the race; the importing race is built from the same setup",
         "windSeed": "secret key, never in a snapshot (ADR 0001); the importing race has its own wind",
         "course": "fixed for the race, derived from the setup",
-        "boatClass": "fixed for the race: the class file (ADR 0004)",
-        "rules": "fixed for the race: the rules configuration file (ADR 0004)",
+        "files": "fixed for the race: the class, venue, conditions and rules configuration the setup names (ADR 0004)",
+        "current": "fixed for the race, derived from the venue and the public race seed",
+        "tideStateAtGun": "fixed for the race, drawn from the venue and the public race seed (ADR 0003)",
+        "umpire": "umpire memory, the authoritative race's own, never sent to clients; empty until the rules tickets",
         "windSetup": "fixed for the race, drawn from the public race seed",
         "windKeys": "the key generator: it holds the wind seed, never in a snapshot (ADR 0001); import moves it past the snapshot's keys",
         "finishers": "derived on import: the count of finished boats",
