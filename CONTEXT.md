@@ -65,6 +65,10 @@ _Avoid_: AI, CPU
 How well a bot sails: **Club**, **Regional** or **National**. Online, bots are matched to the fleet's ratings instead of using a fixed tier.
 _Avoid_: difficulty, level
 
+**Rival**:
+One of the 1–2 bots in a practice race whose skill is set from the player's recent practice results, so the player usually finishes near them. A rival races like any other bot and never targets the player. Practice only.
+_Avoid_: nemesis; "rival" for just any nearby boat
+
 **Mixed fleet**:
 A practice race whose bots are drawn from all three bot tiers. The default for practice.
 
