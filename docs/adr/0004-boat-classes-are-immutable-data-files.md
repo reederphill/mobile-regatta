@@ -16,4 +16,5 @@ Venues and the rules configuration are handled the same way (settled in [Version
 - Old versions of every file ship for as long as their race logs must replay.
 - Derived values (best upwind and downwind angles, course sizing) are computed from the files at load, never stored in them.
 - Behaviour that needs new code (spinnaker, foils, trim or pump inputs, a new course type) is a code change plus a new schema version, not just a new file.
+- Tuned copies from the debug tuning panel ([#229](https://github.com/reederphill/mobile-regatta/issues/229)) keep their base id and version and differ by hash plus an optional `tune` number in the file ref, which the race log records. They exist only in debug and internal TestFlight practice races, and a tuned log replays only with its generated files saved beside it.
 - A venue's seed pool isn't part of the versioned venue file: the log records the seed a race used, so changing the pool never affects a replay.

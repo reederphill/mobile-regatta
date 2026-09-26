@@ -235,6 +235,7 @@ The best-VMG angle to the wind for the wind strength at the boat, upwind or down
 
 **Pinch** / **foot**:
 Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). The autohelm holds either until the player changes it.
+_Avoid_: pinch for the two-finger zoom gesture; call that **pinch-zoom**
 
 **Livery**:
 How a player's boat looks: a livery design, the colours filling it, and a sail number. Cosmetic only, and every other player sees it.
