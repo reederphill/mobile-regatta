@@ -27,7 +27,12 @@ public enum BotRaceHarness {
         WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)
     }
 
-    /// `cell`'s setup: every seat a bot, the venue and conditions named by their bundled files.
+    /// The class the suite's bots sail: ilca-dinghy@3, named here rather than read from `RaceFiles.defaults`
+    /// (skiff@1 since #248), so the gate's thresholds keep measuring the brain they were set for. The suite
+    /// moves to the skiff in #231.
+    public static let boatClass = (id: "ilca-dinghy", version: 3)
+
+    /// `cell`'s setup: every seat a bot sailing `boatClass`, the venue and conditions named by their bundled files.
     public static func raceSetup(for cell: BotRaceCell) throws -> RaceSetup {
         let venue = try dataFileKey(cell.venue)
         let conditions = try dataFileKey(cell.conditions)
@@ -35,6 +40,7 @@ public enum BotRaceHarness {
             raceSeed: RaceSeed(cell.seed),
             seats: Array(repeating: .bot, count: cell.fleetSize),
             laps: cell.laps,
+            boatClass: BoatClassFile.bundled(id: boatClass.id, version: boatClass.version).ref,
             venue: VenueFile.bundled(id: venue.id, version: venue.version).ref,
             conditions: ConditionsFile.bundled(id: conditions.id, version: conditions.version).ref
         )
