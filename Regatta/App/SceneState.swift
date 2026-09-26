@@ -12,8 +12,9 @@ final class SceneState {
     /// Follows the scene's activation state, forwarded by `SceneDelegate`.
     var phase: ScenePhase = .inactive
 
-    /// Whether the race sequence (briefing, race, results) is on screen. The root view controller prefers a
-    /// locked interface orientation only while it is. Menus adapt to any window, so they don't lock (G5).
+    /// Whether the race sequence (briefing, race, results) is on screen, set by `AppModel.phase`. The root view
+    /// controller prefers a locked interface orientation only while it is. Menus adapt to any window, so they
+    /// don't lock (G5).
     var isRaceSequenceShowing = false {
         didSet {
             guard isRaceSequenceShowing != oldValue else { return }

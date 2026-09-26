@@ -14,9 +14,10 @@ import RegattaCore
 /// - `-scheme halves|tiller` overrides the device's steering scheme (#112).
 /// - `-camera course|boat` overrides the device's camera (#113).
 /// - `-online` starts an online race on the dev server's instant race at launch (#68, Debug builds).
-/// - `-onlineHost <host:port>` is the dev race server, instead of the menu's field.
+/// - `-onlineHost <host:port>` is the dev race server, instead of the Settings page's field (Debug builds).
 /// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override).
 /// - `-startSeconds <n>` gives an online dev race an `n`-second start sequence, 1…60.
+/// - `-appearance light|dark` overrides the system appearance, for UI tests of the menus in both (#108).
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -24,6 +25,10 @@ struct LaunchOptions: Equatable {
 
     enum CameraMode: String, CaseIterable {
         case course, boat
+    }
+
+    enum Appearance: String, CaseIterable {
+        case light, dark
     }
 
     /// Boats in the `-perf` race, the largest fleet.
@@ -42,6 +47,7 @@ struct LaunchOptions: Equatable {
     var onlineHost: String?
     var raceSeconds: Int?
     var startSeconds: Int?
+    var appearance: Appearance?
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
 
@@ -61,7 +67,7 @@ struct LaunchOptions: Equatable {
             case "-perf": perf = true
             case "-uitesting": uiTesting = true
             case "-online": online = true
-            case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds":
+            case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance":
                 guard let value = rest.first, !Self.flags.contains(value) else {
                     problems.append("\(argument) needs a value")
                     continue
@@ -75,7 +81,7 @@ struct LaunchOptions: Equatable {
     }
 
     private static let flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-online", "-seed", "-fixture", "-timescale",
-                                     "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds"]
+                                     "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance"]
 
     private mutating func apply(_ argument: String, _ value: String) {
         switch argument {
@@ -95,6 +101,8 @@ struct LaunchOptions: Equatable {
             if let n = Int(value), (1...3600).contains(n) { raceSeconds = n } else { reject(argument, value, "a whole number of seconds, 1…3600") }
         case "-startSeconds":
             if let n = Int(value), (1...60).contains(n) { startSeconds = n } else { reject(argument, value, "a whole number of seconds, 1…60") }
+        case "-appearance":
+            if let style = Appearance(rawValue: value) { appearance = style } else { reject(argument, value, "light or dark") }
         default:
             break
         }
