@@ -17,5 +17,5 @@ We did this because holding a compass heading turned every oscillation into a tr
 - A new simulation version (ADR 0002): what a centred rudder does changes, so every golden changes. Old logs replay on their own version.
 - The autohelm's target (an angle, or the groove) is boat state. It goes in the digest and in the snapshot in place of the tack autopilot, so clients predict it (ADR 0005).
 - Snap widths and the controller gain are tuning values, live-tunable as debug sliders before they're written into data.
-- A right-of-way boat whose autohelm follows a shift changes course without any input. How rule 16.1 and the escape simulation treat that is decided separately.
+- A right-of-way boat whose autohelm follows a shift changes course without any input. [#228](https://github.com/reederphill/mobile-regatta/issues/228) decided it: that is a course change like any other under 16.1, and the rules configuration's "changes course" threshold keeps small shift-following turns from counting.
 - The bot suite must show that a tactician bot clearly beats a groove-only bot, or the autohelm has flattened skill.
