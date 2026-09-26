@@ -22,8 +22,11 @@ enum ChromePalette {
     // placeholder: docs/palette.md.
     static let flagYellow = Color(uiColor: UIColor(rgb: 0xFFC72C))
 
+    /// UIKit resolves a dynamic colour on whatever thread asks for it, not only the main one. The trait closure
+    /// is `@Sendable` so it's nonisolated: under the app's default main-actor isolation a plain closure here is
+    /// main-actor isolated, and Swift 6 traps (`dispatch_assert_queue`) when it's called off the main thread.
     private static func dynamic(light: UInt32, dark: UInt32) -> Color {
-        Color(uiColor: UIColor { traits in UIColor(rgb: traits.userInterfaceStyle == .dark ? dark : light) })
+        Color(uiColor: UIColor { @Sendable traits in UIColor(rgb: traits.userInterfaceStyle == .dark ? dark : light) })
     }
 }
 
