@@ -9,9 +9,9 @@ enum WindFixtures {
     static let windows = WindWindows(startSequenceTicks: 60 * Race.tickRate)
     static let seeds: [UInt64] = (0..<200).map { UInt64($0) &* 0x9E37_79B9_7F4A_7C15 ^ 0xD1CE }
 
-    /// The setup for conditions `id`@2, with `pairing` or else `VenueFixtures.pairing(for:)`'s default.
-    static func setup(_ id: String, raceSeed: UInt64 = 1, pairing: Venue.Pairing? = nil) throws -> WindSetup {
-        let file = try ConditionsFile.bundled(id: id, version: 2)
+    /// The setup for conditions `id`@`version`, with `pairing` or else `VenueFixtures.pairing(for:)`'s default.
+    static func setup(_ id: String, version: Int = 2, raceSeed: UInt64 = 1, pairing: Venue.Pairing? = nil) throws -> WindSetup {
+        let file = try ConditionsFile.bundled(id: id, version: version)
         return WindSetup(conditions: file, pairing: pairing ?? VenueFixtures.pairing(for: file), raceSeed: RaceSeed(raceSeed))
     }
 
@@ -396,6 +396,62 @@ enum WindFixtures {
         #expect(shares.filter { $0 < 0.25 }.count > squeezed / 8 && shares.filter { $0 > 0.75 }.count > squeezed / 8)
     }
 
+    /// The oscillating shift's mean period over the 20 minutes from the gun, seconds, from the spacing of
+    /// its upward zero crossings, and the whole cycles that spans. The shift is sampled every 0.1 s, wobble
+    /// and all, less the trend's own curve between its knots. A crossing counts once the shift goes on past
+    /// the wobble's peak, so the wobble can't add crossings of its own near zero, and is timed where the
+    /// shift last crossed zero before that.
+    static func periodOverTwentyMinutes(_ setup: WindSetup, windSeed: UInt64) throws -> (seconds: Double, cycles: Int) {
+        let span = 20 * 60 * Race.tickRate
+        let w = WindFixtures.windows
+        let (field, parts) = try WindFixtures.parts(setup, windSeed: windSeed, through: w.window(containing: span))
+        let deadband = try #require(setup.conditions.keyedWind).wobble
+        var upward: [Double] = []
+        var previous: (t: Double, x: Double)?
+        var lastZero: Double?
+        var above: Bool?
+        for tick in stride(from: 0, through: span, by: 3) {
+            let k = w.window(containing: tick)
+            let s = Double(tick - w.start(of: k)) / Double(WindWindows.ticksPerWindow)
+            let x = try field.shift(atTick: tick) - WindField.hermite(parts[k - 1].trend, parts[k].trend, s).value
+            let t = Double(tick) / Double(Race.tickRate)
+            if let p = previous, (p.x < 0) != (x < 0) { lastZero = p.t + (t - p.t) * p.x / (p.x - x) }
+            previous = (t, x)
+            if x > deadband {
+                if above == false, let lastZero { upward.append(lastZero) }
+                above = true
+            } else if x < -deadband {
+                above = false
+            }
+        }
+        let cycles = upward.count - 1
+        try #require(cycles > 0)
+        return ((upward[cycles] - upward[0]) / Double(cycles), cycles)
+    }
+
+    /// #233 acceptance (#221): classic oscillating @3 swings with a period of 70–90 s, about two cycles a
+    /// beat, measured from the spacing of the shift's zero crossings over 20 minutes of racing.
+    @Test func v3ClassicOscillationPeriodIn70To90Seconds() throws {
+        for seed in WindFixtures.seeds.prefix(20) {
+            let setup = try WindFixtures.setup("classic-oscillating", version: 3, raceSeed: seed)
+            let measured = try Self.periodOverTwentyMinutes(setup, windSeed: seed)
+            #expect(measured.cycles >= 12, "seed \(seed): \(measured.cycles) cycles in 20 minutes")
+            #expect(measured.seconds >= 70 && measured.seconds <= 90, "seed \(seed): period \(measured.seconds) s")
+        }
+    }
+
+    /// #233 acceptance (#221): sea breeze @3 oscillates about its trend no faster than once a minute, the
+    /// shortest period the 30 s knots draw cleanly (ADR 0001), measured the same way over 20 minutes.
+    @Test func v3SeaBreezePeriodAtLeast60Seconds() throws {
+        for seed in WindFixtures.seeds.prefix(20) {
+            let setup = try WindFixtures.setup("sea-breeze", version: 3, raceSeed: seed)
+            #expect(setup.conditions.shift.period.lowerBound >= 60)
+            let measured = try Self.periodOverTwentyMinutes(setup, windSeed: seed)
+            #expect(measured.seconds >= 60, "seed \(seed): period \(measured.seconds) s")
+            // Not slower than the file's range either: every swing was counted.
+            #expect(measured.seconds <= setup.conditions.shift.period.upperBound, "seed \(seed): period \(measured.seconds) s")
+        }
+    }
 }
 
 @Suite struct RaceWindTests {

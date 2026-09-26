@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 2,
+  "id": "light-and-patchy",
+  "version": 3,
+  "name": "Light and patchy",
+  "placeholders": [
+    "/shift/periodSeconds",
+    "/shift/wobbleDegrees",
+    "/puffs",
+    "/puffs/fanDegrees"
+  ],
+  "notes": [
+    "Wind model #10: 6-9 kn, oscillation +/-10 deg, no persistent trend; sparse, strong (+35 %) puffs and many lulls. #221 overrides #10's 150-180 s period with about 100 s, the slowest of the four.",
+    "Units: knots, degrees, seconds, metres; gains, losses, shares, coverage and drift as fractions.",
+    "Version 2 (schema 2, #75) is version 1 plus the keyed wind's wobble: wobbleDegrees is the peak of the smaller, faster wobble (#10) each 30 s window's key draws on top of the oscillation, vanishing at the window's knots. Strength is fixed for the race (#10), so there is no strength-channel tuning.",
+    "Version 3 (#221, #233) is version 2 with only three values changed: the period 90-110 s (was 150-180 s), the wobble 2.5 deg (was 1 deg), readable but never outlasting its 30 s window, and the puff fan 7.5 deg (was 5 deg), about 1.5 x, so a puff can decide which tack is favoured. The amplitude and every other puff column are unchanged.",
+    "Placeholders (JSON Pointers above) await tuning on the #232 sliders: the 90-110 s period, the 2.5 deg wobble and the 7.5 deg fan (#221 says about 2-3 deg and 7-8 deg), and the other puff columns, set from #10's words (sparse, strong, many lulls) and its shared ranges (60-150 m, puffs +20-35 %, lulls -15-25 %, drift 0.3-0.5 x wind)."
+  ],
+  "strength": { "minKnots": 6, "maxKnots": 9 },
+  "shift": {
+    "amplitudeDegrees": 10,
+    "periodSeconds": { "min": 90, "max": 110 },
+    "wobbleDegrees": 2.5
+  },
+  "trend": null,
+  "build": null,
+  "puffs": {
+    "coverage": 0.27,
+    "diameterMetres": { "min": 60, "max": 150 },
+    "lifetimeSeconds": { "min": 40, "max": 90 },
+    "driftFraction": { "min": 0.3, "max": 0.5 },
+    "fanDegrees": 7.5,
+    "puffGain": { "min": 0.30, "max": 0.35 },
+    "lullShare": 0.5,
+    "lullLoss": { "min": 0.15, "max": 0.20 }
+  }
+}

@@ -9,10 +9,11 @@ enum VenueFixtures {
     /// SHA-256 of `Tests/RegattaCoreTests/Resources/venues/test-venue@1.json`. A released file never
     /// changes (ADR 0004): ship `test-venue@2.json` rather than editing version 1.
     static let testPinnedHash = "a6006f51d15b369557181ce4da8744b633df8c96eb3441fbc415ae20ccc1ab5f"
-    /// SHA-256 of `Resources/venues/dev-venue@1.json` and `@2.json`, by version.
+    /// SHA-256 of `Resources/venues/dev-venue@1.json`, `@2.json` and `@3.json`, by version.
     static let devPinnedHashes = [
         1: "5f114297c5191a38366f9b38a59460023e5e08dbe295f1af6f1e8ff19d8df958",
         2: "42154e3d263171997dcd444383b0dcf0d89a04fc2b31280b10a4a5f5af220785",
+        3: "1d1538b13fc37f3c182bbf51b8283152037b22bb8c69776a39503d6591803115",
     ]
 
     static func testFile() throws -> VenueFile {
@@ -82,7 +83,7 @@ enum VenueFixtures {
         #expect(venue.hasCurrent)
     }
 
-    @Test(arguments: [1, 2])
+    @Test(arguments: [1, 2, 3])
     func bundledDevVenueDecodes(version: Int) throws {
         let file = try VenueFile.bundled(id: VenueFixtures.devID, version: version)
         let venue = file.content
@@ -98,8 +99,9 @@ enum VenueFixtures {
         #expect(file.header.placeholders.contains("/pairings/0/geographicGrid"))
     }
 
-    /// Version 1 pairs the schema-1 conditions files, version 2 the schema-2 ones the keyed wind needs (#77).
-    @Test(arguments: [1, 2])
+    /// Version 1 pairs the schema-1 conditions files, version 2 the schema-2 ones the keyed wind needs (#77),
+    /// version 3 their version 3, with faster shifts (#221, #233).
+    @Test(arguments: [1, 2, 3])
     func devVenuePairingsNameBundledConditionsFiles(version: Int) throws {
         let venue = try VenueFile.bundled(id: VenueFixtures.devID, version: version).content
         #expect(venue.pairings.count == 4)
@@ -111,14 +113,16 @@ enum VenueFixtures {
         }
     }
 
-    @Test func devVenue2ChangesOnlyTheConditionsVersions() throws {
-        let v1 = try VenueFile.bundled(id: VenueFixtures.devID, version: 1).content
-        let v2 = try VenueFile.bundled(id: VenueFixtures.devID, version: 2).content
+    /// Each dev venue version after the first moves only its pairings' conditions versions (#77, #233).
+    @Test(arguments: [2, 3])
+    func devVenueChangesOnlyTheConditionsVersions(version: Int) throws {
+        let v1 = try VenueFile.bundled(id: VenueFixtures.devID, version: version - 1).content
+        let v2 = try VenueFile.bundled(id: VenueFixtures.devID, version: version).content
         #expect(v2.displayName == v1.displayName && v2.landmarks == v1.landmarks && v2.land == v1.land)
         #expect(v2.current == v1.current)
         #expect(v2.pairings.count == v1.pairings.count)
         for (a, b) in zip(v1.pairings, v2.pairings) {
-            #expect(b.conditions == DataFileKey(id: a.conditions.id, version: 2))
+            #expect(b.conditions == DataFileKey(id: a.conditions.id, version: version))
             #expect(b.meanDirection == a.meanDirection && b.trendDirection == a.trendDirection)
             #expect(b.startLineCentre == a.startLineCentre && b.geographicGrid == a.geographicGrid)
         }

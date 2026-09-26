@@ -18,6 +18,34 @@ enum ConditionsFixtures {
         try ConditionsFile.bundled(id: id, version: 1)
     }
 
+    /// Version 3 of each file (#221, #233): its SHA-256, pinned like versions 1 and 2 (ADR 0004), and
+    /// the three values it changes from version 2, in the file's units.
+    static let version3: [(id: String, hash: String, period: ClosedRange<Double>, wobbleDegrees: Double, fanDegrees: Double)] = [
+        ("light-and-patchy", "41119350f0a7ea1cff4df9e409fad59fbe6464be955e041a2b845d15fb0c1b08", 90...110, 2.5, 7.5),
+        ("classic-oscillating", "bb26ccaab3f1fa5e3e097d5cfe0dcf927e03ca8af9357e81e8828997e07fab10", 70...90, 3, 9),
+        ("sea-breeze", "1ebbcd7996db6a107b0a925b78112c7cdd78a28f8f43f6025776bc16e377698f", 60...65, 2, 6),
+        ("gusty-offshore", "f4b978ef381510dc5eb55ff17ddf8b3149b419cef8f13a263ab199ee76cf376c", 60...70, 4, 12),
+    ]
+
+    /// Every scalar in the bundled `id`@`version` file, by JSON Pointer, as `JSONSerialization` reads it.
+    static func leaves(_ id: String, version: Int) throws -> [String: String] {
+        let data = try #require(try ConditionsFile.bundledData(id: id, version: version))
+        var leaves: [String: String] = [:]
+        func walk(_ node: Any, _ pointer: String) {
+            if let members = node as? [String: Any] {
+                for (key, value) in members {
+                    walk(value, pointer + "/" + key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1"))
+                }
+            } else if let elements = node as? [Any] {
+                for (index, value) in elements.enumerated() { walk(value, "\(pointer)/\(index)") }
+            } else {
+                leaves[pointer] = "\(node)"
+            }
+        }
+        walk(try JSONSerialization.jsonObject(with: data), "")
+        return leaves
+    }
+
     /// The bundled file with each `(of, with)` replacement applied, each of which must match.
     static func edited(_ id: String, _ replacements: [(of: String, with: String)]) throws -> Data {
         var text = String(decoding: try #require(try ConditionsFile.bundledData(id: id, version: 1)), as: UTF8.self)
@@ -121,6 +149,50 @@ enum ConditionsFixtures {
             if case .malformed(kind: "conditions", reason: _) = error as? DataFileError { return true }
             return false
         }
+    }
+
+    /// #233 (#221): version 3 of each conditions file is version 2 with a faster oscillation, a readable
+    /// wobble and a wider puff fan, and nothing else. Each changed value is a placeholder awaiting the
+    /// #232 sliders, the notes cite #221, and both versions load side by side (ADR 0004).
+    @Test(arguments: ConditionsFixtures.version3.map(\.id))
+    func v3FilesDifferFromV2OnlyInPeriodWobbleAndFan(id: String) throws {
+        let expected = try #require(ConditionsFixtures.version3.first { $0.id == id })
+        let v2 = try ConditionsFile.bundled(id: id, version: 2)
+        let v3 = try ConditionsFile.bundled(id: id, version: 3)
+        #expect(v3.schemaVersion == 2 && v3.id == id && v3.version == 3)
+        #expect(v3.ref.hash.hex == expected.hash)
+
+        // Value by value through the whole file, only these move, beside the header's version,
+        // placeholders and notes.
+        let before = try ConditionsFixtures.leaves(id, version: 2), after = try ConditionsFixtures.leaves(id, version: 3)
+        let header = ["/version", "/placeholders", "/notes"]
+        let changed = Set(before.keys).union(after.keys)
+            .filter { before[$0] != after[$0] }
+            .filter { pointer in !header.contains { pointer == $0 || pointer.hasPrefix($0 + "/") } }
+        #expect(changed == ["/shift/periodSeconds/min", "/shift/periodSeconds/max", "/shift/wobbleDegrees", "/puffs/fanDegrees"])
+
+        // #221: every period is faster than any of version 2's but never below the 60 s the 30 s knots draw
+        // cleanly (ADR 0001), the wobble grows but stays under the amplitude, and the fan is about 1.5 ×.
+        let old = v2.content, new = v3.content
+        #expect(new.shift.period == expected.period)
+        #expect(new.shift.period.upperBound < old.shift.period.lowerBound && new.shift.period.lowerBound >= 60)
+        let oldWobble = try #require(old.keyedWind?.wobble), wobble = try #require(new.keyedWind?.wobble)
+        #expect(wobble == deg2rad(expected.wobbleDegrees) && wobble > oldWobble && wobble < new.shift.amplitude)
+        #expect(new.puffs.fan == deg2rad(expected.fanDegrees))
+        #expect(new.puffs.fan / old.puffs.fan > 1.4 && new.puffs.fan / old.puffs.fan < 1.6)
+
+        // Each changed value awaits tuning, as does everything version 2 left untuned.
+        let placeholders = v3.header.placeholders
+        for pointer in ["/shift/periodSeconds", "/shift/wobbleDegrees", "/puffs/fanDegrees"] {
+            #expect(placeholders.contains(pointer), "\(id)@3 doesn't list \(pointer) as a placeholder")
+        }
+        #expect(Set(v2.header.placeholders).isSubset(of: placeholders))
+        #expect(after.contains { $0.key.hasPrefix("/notes/") && $0.value.contains("#221") }, "\(id)@3's notes cite #221")
+
+        var catalog = DataFileCatalog<Conditions>()
+        try catalog.add(v2)
+        try catalog.add(v3)
+        #expect(catalog.versions(of: id) == [2, 3])
     }
 
     @Test func notBundledThrows() {
