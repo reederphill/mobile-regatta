@@ -61,6 +61,29 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3,
         }
     }
 
+    /// The race sails in the current of the venue its setup names (#81), at the tide state at the gun
+    /// the race seed draws, and a race built from the same setup to import a snapshot has the same one.
+    @Test func theRaceSailsInItsVenuesCurrent() throws {
+        let (setup, catalog) = try RaceAssemblyTests.tidalRace()
+        let files = try RaceFiles(resolving: setup, from: catalog)
+        let race = try Race(setup: setup, files: files, mode: .authoritative(windSeed: RaceAssemblyTests.windSeed))
+        #expect(race.current == CurrentField(venue: files.venue.content, raceSeed: setup.raceSeed))
+        #expect(race.current != Race(setup: try RaceAssemblyTests.setup(), windSeed: RaceAssemblyTests.windSeed).current)
+        for _ in 0..<10 { race.step() }
+        // Each boat feels the current where she was when the tick began.
+        let before = race.boats.map(\.position)
+        race.step()
+        for (boat, p) in zip(race.boats, before) {
+            #expect(boat.current == race.current.sample(p, tick: race.tick))
+        }
+        #expect(race.boats.contains { $0.current.length > 0 }, "the test venue's current reaches the fleet")
+
+        let copy = try Race(setup: setup, files: files, mode: .authoritative(windSeed: RaceAssemblyTests.windSeed))
+        try copy.importSnapshot(race.exportSnapshot())
+        #expect(copy.current == race.current)
+        #expect(copy.boats.map(\.current) == race.boats.map(\.current))
+    }
+
     @Test func ghostDriftsWithTheCurrentAndCastsNoShadow() throws {
         func race(ghost: Bool) throws -> Race {
             try placedRace(current: current) { snapshot, _ in
@@ -186,8 +209,9 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3,
 
     @Test func boatDriftingOntoAMarkOfTheLegTouchesIt() throws {
         let setupRace = try placedRace(current: current) { _, _ in }
-        guard case .round(let m) = setupRace.course.legs[0] else { Issue.record("leg 0 rounds no mark"); return }
-        let mark = setupRace.course.marks[m]
+        let leg = setupRace.course.legs[0]
+        guard case .round = leg else { Issue.record("leg 0 rounds no mark"); return }
+        let mark = setupRace.course.marksOfLeg(leg)[0]
         let east = Vec2(1, 0)
         let race = try placedRace(current: current) { snapshot, race in
             var boat = snapshot.seats[0].boat
