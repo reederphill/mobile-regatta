@@ -5,8 +5,26 @@ Rules for the implementation orchestrator working the build map (#37). State liv
 
 ## Session scope
 
-- One ticket per orchestrator session. Start by reading the orchestration log and `gh issue view <n>`; end by updating the log. Don't carry earlier tickets' history.
+- Start each ticket from the orchestration log and `gh issue view <n>`; end it by updating the log. Don't carry earlier tickets' history (in a loop, compact between tickets).
 - Read the map (#37) with `--jq` filters for the decisions a ticket cites, not the full body and comments.
+
+## Throughput
+
+The Mac has 8 GB of RAM: one heavy build or test run at a time. Parallel local work queues on the build lock, swaps, fills the disk, and makes the wall-clock tests fail.
+- One orchestrator per machine. Don't start a second orchestrator session while one is running.
+- One local slot: at most one implementer building or running `check.sh` at a time. Everything else waits in CI or review, which cost the machine nothing.
+- Pipeline: when a ticket's PR is pushed, claim the next ticket and start its implementer. The pushed PR's CI, review and acceptance check run alongside. At most two tickets in flight: one in the local slot, one in CI/review.
+- A fix round for the older PR takes the local slot next, ahead of a new ticket.
+- Push once per round. Every push restarts the whole CI run.
+
+## Merging
+
+Squash-merge without asking when all of these hold for the head SHA:
+- CI green on every job the change reaches.
+- The acceptance check passes every item.
+- The review has no blockers (nits may stay unfixed; list them in the log).
+
+Ask the human only for: a blocker you'd leave unfixed, a scope change, a `needs:human` item, or a reference-image change you can't take from CI.
 
 ## Implementer brief
 
