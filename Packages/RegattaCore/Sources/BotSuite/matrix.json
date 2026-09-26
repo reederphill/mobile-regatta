@@ -1,0 +1,10 @@
+{
+  "seeds": [1, 2, 3, 4],
+  "venues": ["dev-venue@2"],
+  "conditions": ["classic-oscillating@2", "gusty-offshore@2", "light-and-patchy@2", "sea-breeze@2"],
+  "tideStatesDegrees": [0],
+  "fleetSizes": [2, 5, 10, 16],
+  "tierMixes": ["seeded", "club", "regional", "national", "mixed"],
+  "laps": 2,
+  "capSecondsAfterGun": 1500
+}
