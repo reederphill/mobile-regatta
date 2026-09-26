@@ -46,6 +46,20 @@ struct Gen {
 
     mutating func status() -> BoatStatus { [.prestart, .ocs, .racing, .finished, .dsq, .dnf][int(0...5)] }
 
+    /// An autohelm holding an angle anywhere in a turn or either groove, sailing the tap or not.
+    mutating func autohelm() -> Autohelm {
+        let angle = double(-.pi, .pi)
+        let targets: [Autohelm.Target] = [.angle(angle), .groove(.upwind), .groove(.downwind)]
+        return Autohelm(target: targets[int(0...2)], isTapping: bool())
+    }
+
+    /// The same on the wire.
+    mutating func wireAutohelm() -> WireAutohelm {
+        let angle = Int16(truncatingIfNeeded: u16())
+        let targets: [WireAutohelm.Target] = [.angle(angle), .groove(.upwind), .groove(.downwind)]
+        return WireAutohelm(target: targets[int(0...2)], isTapping: bool())
+    }
+
     /// A seat with every field anywhere in its wire range.
     mutating func seat(_ id: Int) -> WorldSnapshot.Seat {
         _ = string() // was the boat's name (#60 moved names to the roster); kept so the cases don't move
@@ -54,7 +68,7 @@ struct Gen {
                         heading: double(-.pi, .pi), speed: double(0, 63.99))
         boat.rudder = double(-1, 1)
         boat.desiredRudder = double(-1, 1)
-        boat.autopilot = bool() ? Autopilot(heading: double(-.pi, .pi), boomSide: boomSide()) : nil
+        boat.autohelm = bool() ? autohelm() : nil
         boat.status = status()
         boat.legIndex = int(0...255)
         boat.roundingStage = int(0...7)
@@ -85,7 +99,7 @@ struct Gen {
             WireSeat(
                 x: Int32(int(-(1 << 23)...((1 << 23) - 1))), y: Int32(int(-(1 << 23)...((1 << 23) - 1))),
                 heading: Int16(truncatingIfNeeded: u16()), speed: u16(), rudder: Int16(int(-32_767...32_767)),
-                autopilot: bool() ? WireAutopilot(heading: Int16(truncatingIfNeeded: u16()), boomSide: boomSide()) : nil,
+                autohelm: bool() ? wireAutohelm() : nil,
                 penaltyProgress: Int16(truncatingIfNeeded: u16()), heldInput: input(), isTacking: bool(), boomSide: boomSide(),
                 status: status(), penaltyTurnsOwed: UInt8(int(0...7)), roundingStage: UInt8(int(0...7)),
                 legIndex: UInt8(int(0...255))
@@ -170,7 +184,8 @@ struct Gen {
         case 17: return .raceClosed
         case 18: return .protestRecorded(seat: seat, target: int(0...15))
         case 19: return .tacked(seat: seat)
-        default: return .gybed(seat: seat)
+        case 20: return .gybed(seat: seat)
+        default: return .grooveSnap(seat: seat)
         }
     }
 
@@ -243,10 +258,11 @@ func eventKindIndex(_ kind: RaceEvent.Kind) -> Int {
     case .protestRecorded: 18
     case .tacked: 19
     case .gybed: 20
+    case .grooveSnap: 21
     }
 }
 
-let eventKindCount = 21
+let eventKindCount = 22
 
 /// A fleet race with a bot sailing every seat, for real snapshots: starts, OCS, contacts, roundings, finishes.
 func botRace(seats: Int = 16, laps: Int = 1, prestartSeconds: Int = 30, seed: UInt64 = 63,

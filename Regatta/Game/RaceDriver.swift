@@ -143,6 +143,12 @@ struct RenderWorld {
 
     var me: Boat { boats[myBoatIndex] }
 
+    /// What `seat`'s autohelm holds (ADR 0007): the angle or the groove, and how far off the groove, in
+    /// the wind at her; nil while her rudder is held off centre. For the vane's tick and arc (#122).
+    func autohelm(ofSeat seat: Int) -> Autohelm.Reading? {
+        boats[seat].autohelmReading(in: boatClass)
+    }
+
     /// This world with each seat's boat drawn as `draw` says: the online driver's visual corrections (#68).
     func drawing(_ draw: (_ seat: Int, Boat) -> Boat) -> RenderWorld {
         var world = self

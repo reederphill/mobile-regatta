@@ -70,7 +70,7 @@ import Testing
             #expect(throws: WireError.unknownMessageType(UInt8(code))) { try Frame(decoding: [UInt8(code)] + Array(repeating: 0, count: 8)) }
         }
         let header: (MessageType) -> [UInt8] = { [$0.rawValue, 0, 0, 0, 0, 0, 0, 0, 0] }
-        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [22]) }
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [23]) }
         // Code 4 was the pre-#73 `foul`: retired, never reused.
         #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [4, 14, 0, 1]) }
         #expect(throws: WireError.invalidValue("tap")) { try Frame(decoding: header(.inputTap) + [2]) }
@@ -89,7 +89,7 @@ import Testing
     @Test func seatReservedBitsAndNonCanonicalValuesAreRejected() throws {
         var gen = Gen(seed: 0xB175)
         var seats = gen.wireSeats(2)
-        seats[0].autopilot = nil
+        seats[0].autohelm = nil
         let good = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: seats))).encoded()
         _ = try Frame(decoding: good)
         let seat0 = Frame.headerSize + 1 + 1 // header, no-ack flag, seat count
@@ -99,9 +99,24 @@ import Testing
             return bytes
         }
         #expect(throws: WireError.invalidValue("status")) { try Frame(decoding: mutated(17) { $0 = $0 & 0b1100_0111 | 6 << 3 }) }
-        #expect(throws: WireError.invalidValue("counts")) { try Frame(decoding: mutated(18) { $0 |= 0x80 }) }
-        #expect(throws: WireError.invalidValue("autopilot")) { try Frame(decoding: mutated(12) { $0 = 1 }) } // value without the flag
-        #expect(throws: WireError.invalidValue("autopilot")) { try Frame(decoding: mutated(17) { $0 |= 0x80 }) } // boom side without it
+        // Without the autohelm flag (flags bit 1), every autohelm field is zero: its angle, the tap (flags
+        // bit 7), the groove (counts bit 6) and which groove (counts bit 7).
+        #expect(throws: WireError.invalidValue("autohelm")) { try Frame(decoding: mutated(12) { $0 = 1 }) }
+        #expect(throws: WireError.invalidValue("autohelm")) { try Frame(decoding: mutated(17) { $0 |= 0x80 }) }
+        #expect(throws: WireError.invalidValue("autohelm")) { try Frame(decoding: mutated(18) { $0 |= 0x40 }) }
+        #expect(throws: WireError.invalidValue("autohelm")) { try Frame(decoding: mutated(18) { $0 |= 0x80 }) }
+        // With it, a groove carries no angle, and a held angle no groove direction.
+        func withAutohelm(_ offset: Int, _ change: @escaping (inout UInt8) -> Void) -> [UInt8] {
+            var bytes = mutated(17) { $0 |= 0b10 }
+            change(&bytes[seat0 + offset])
+            return bytes
+        }
+        _ = try Frame(decoding: withAutohelm(12) { $0 = 1 }) // a held angle
+        _ = try Frame(decoding: withAutohelm(18) { $0 |= 0xC0 }) // the downwind groove
+        var grooveWithAngle = withAutohelm(18) { $0 |= 0x40 }
+        grooveWithAngle[seat0 + 12] = 1
+        #expect(throws: WireError.invalidValue("autohelm")) { try Frame(decoding: grooveWithAngle) }
+        #expect(throws: WireError.invalidValue("autohelm")) { try Frame(decoding: withAutohelm(18) { $0 |= 0x80 }) }
         #expect(throws: WireError.invalidValue("heldInput.rudder")) { try Frame(decoding: mutated(16) { $0 = 0x80 }) }
     }
 
@@ -205,6 +220,8 @@ import Testing
                 #expect(audience == .seats([recipient]))
             case .markRoomNotice(let recipients):
                 #expect(audience == .seats(recipients))
+            case .grooveSnap(let seat):
+                #expect(audience == .seats([seat]))
             default:
                 #expect(audience == .everyone)
             }
@@ -222,7 +239,7 @@ func relabel(_ boat: Boat, isPlayer: Bool) -> Boat {
                     position: boat.position, heading: boat.heading, speed: boat.speed)
     copy.rudder = boat.rudder
     copy.desiredRudder = boat.desiredRudder
-    copy.autopilot = boat.autopilot
+    copy.autohelm = boat.autohelm
     copy.status = boat.status
     copy.legIndex = boat.legIndex
     copy.roundingStage = boat.roundingStage

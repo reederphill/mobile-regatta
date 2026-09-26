@@ -53,7 +53,8 @@ extension BoatInput: Codable {
 
 /// A one-off input, stamped with the tick it applies at (#18). Applied once, never held.
 public enum BoatTap: Hashable, Sendable {
-    /// Mirror the heading across the wind with a brief autopilot; any rudder input cancels it (#13).
+    /// Tack or gybe: the autohelm sails her through head to wind or the gybe to the groove on the new
+    /// tack (ADR 0007); any rudder input cancels it (#13).
     case tackGybe
     /// Protest another seat. Recorded, never changes a result in v1.0.
     case protest(target: Int)

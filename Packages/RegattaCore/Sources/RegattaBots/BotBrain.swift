@@ -92,13 +92,41 @@ struct BotBrain: Sendable {
         let keepingClear = heading != desired
         heading = avoidMarks(boat, race, desired: heading)
 
-        // The tap's autopilot is tacking or gybing the boat: hands off, since any rudder cancels it,
-        // unless the boat has to keep clear of someone.
-        if boat.autopilot != nil && !keepingClear { return BotDecision(input: .neutral) }
+        // The autohelm is sailing the tap through the tack or gybe: hands off, since any rudder cancels
+        // it, unless the boat has to keep clear of someone.
+        if boat.autohelm?.isTapping == true && !keepingClear { return BotDecision(input: .neutral) }
         if !keepingClear && wantsTackOrGybe(boat, to: heading, race) {
             return BotDecision(input: .neutral, tap: .tackGybe)
         }
-        return BotDecision(input: BoatInput(rudder: (wrapAngle(heading - boat.heading) / deg2rad(20)).clamped(to: -1...1)))
+        return BotDecision(input: helm(boat, to: heading, race))
+    }
+
+    /// Error under which a bot centres the rudder and lets the autohelm capture the angle she sails.
+    static let letGoError = deg2rad(2)
+    /// Error the autohelm may hold her off `heading` before the bot takes the rudder back: past the widest
+    /// snap to the groove, so a snap doesn't send her back to the rudder.
+    static let holdError = deg2rad(6)
+    /// The least rudder a bot holds inside the no-go zone: just off centre (`Autohelm.deadBand`), so the
+    /// autohelm stays off and doesn't bear her away to the groove.
+    static let noGoRudder = 0.06
+
+    /// The held input that sails `heading` under the autohelm (ADR 0007): the temporary adapter until #231
+    /// rebuilds the brain. Steers in proportion to the error, then centres the rudder so the autohelm
+    /// holds the wind angle she has reached (the groove, if she's close to it), and takes the rudder back
+    /// only once her heading has drifted `holdError` off. A heading inside the no-go zone (the pre-start
+    /// luff and wait) keeps a touch of rudder instead, towards the wind when there is no error to steer.
+    private func helm(_ b: Boat, to heading: Double, _ race: Race) -> BoatInput {
+        let error = wrapAngle(heading - b.heading)
+        let proportional = (error / deg2rad(20)).clamped(to: -1...1)
+        let relative = wrapAngle(b.windDirection - heading)
+        if abs(relative) < BoatDynamics.noGoAngle(race.boatClass.polar) {
+            guard abs(proportional) < Self.noGoRudder else { return BoatInput(rudder: proportional) }
+            // Turning to starboard (+) brings a wind over the starboard side (+) towards the bow.
+            let side = error != 0 ? error : relative
+            return BoatInput(rudder: side < 0 ? -Self.noGoRudder : Self.noGoRudder)
+        }
+        let band = b.autohelm != nil ? Self.holdError : Self.letGoError
+        return abs(error) < band ? .neutral : BoatInput(rudder: proportional)
     }
 
     /// Whether `heading` is the mirror of a close-hauled or running course on the other tack, which

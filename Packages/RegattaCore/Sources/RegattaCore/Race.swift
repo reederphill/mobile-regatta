@@ -66,6 +66,8 @@ public final class Race {
     /// race, which holds only the keys it is given (`addRevealedWindKey(_:)`) and never makes or guesses
     /// one: it steps with `tryStep()`, which refuses to enter a window it holds no key for.
     private var windKeys: WindKeyGenerator?
+    /// A test's wind over the ground by tick, in place of the keyed wind's (`init(setup:files:mode:current:wind:)`).
+    private let scriptedWind: ((_ tick: Int) -> GroundWind)?
     /// One boat per seat: `boats[seat]`.
     public private(set) var boats: [Boat]
     /// Each seat's held input, in force until the seat sends a different one.
@@ -117,11 +119,14 @@ public final class Race {
     }
 
     /// A race sailing in `current` instead of its venue's (the log still records the venue's tide state
-    /// at the gun): for tests.
-    init(setup: RaceSetup, files: RaceFiles, mode: Mode, current: CurrentField?) throws {
+    /// at the gun), and in `wind` instead of its keyed wind's over the ground, the same everywhere on the
+    /// water at each tick: for tests. The keys are made and held as ever.
+    init(setup: RaceSetup, files: RaceFiles, mode: Mode, current: CurrentField?,
+         wind scriptedWind: ((_ tick: Int) -> GroundWind)? = nil) throws {
         try files.check(against: setup)
         self.setup = setup
         self.files = files
+        self.scriptedWind = scriptedWind
         let revealedWindKeys: [WindKey]
         switch mode {
         case .authoritative(let seed):
@@ -274,11 +279,16 @@ public final class Race {
             appliedInputs.append(InputRecord(tick: tick, seat: seat, kind: .held(held[seat])))
         }
 
-        // Any real rudder input cancels an auto-tack (#13).
+        // A held rudder off centre steers, and lets go of the autohelm and any tap it is sailing (#13). A
+        // centred one leaves her to the autohelm, which captures her wind angle on the tick it centres (ADR 0007).
         for i in boats.indices {
             let rudder = heldInputs[i].rudderValue
-            if abs(rudder) > 0.05 { boats[i].autopilot = nil }
-            if boats[i].autopilot == nil { boats[i].desiredRudder = rudder }
+            if abs(rudder) > Autohelm.deadBand {
+                boats[i].autohelm = nil
+                boats[i].desiredRudder = rudder
+            } else if boats[i].autohelm == nil {
+                engageAutohelm(i)
+            }
         }
 
         for record in taps {
@@ -287,15 +297,22 @@ public final class Race {
             let i = record.seat
             switch tap {
             case .tackGybe:
-                // The same wind angle with the boom on the other side: a tack upwind, a gybe downwind.
+                // The autohelm sails her through head to wind or the gybe to the groove on the new tack.
                 let b = boats[i]
-                if b.isOnCourse {
-                    boats[i].autopilot = .tackOrGybe(heading: b.heading, boomSide: b.boomSide, windDirection: b.windDirection)
-                }
+                if b.isOnCourse { boats[i].autohelm = .tackOrGybe(sailingAngle: b.sailingAngle) }
             case .protest(let target):
                 emit(.protestRecorded(seat: i, target: target))
             }
         }
+    }
+
+    /// Engages seat `i`'s autohelm on the angle she sails now, in the wind sampled this tick, and
+    /// announces a snap to the groove (#124).
+    private func engageAutohelm(_ i: Int) {
+        let b = boats[i]
+        let engaged = Autohelm.engage(sailingAngle: b.sailingAngle, tws: b.polarWindSpeed, boatClass: boatClass)
+        boats[i].autohelm = engaged.autohelm
+        if engaged.snapped { emit(.grooveSnap(seat: i)) }
     }
 
     // MARK: - Simulation
@@ -367,6 +384,7 @@ public final class Race {
     /// keys-only one does once it has stepped or imported a snapshot, so this never fails; if it ever
     /// did, it traps rather than extrapolate (ADR 0001).
     public func groundWind(at p: Vec2) -> GroundWind {
+        if let scriptedWind { return scriptedWind(tick) }
         do {
             return try wind.sample(p, tick: tick)
         } catch {
@@ -419,20 +437,15 @@ public final class Race {
 
     private func integrate(_ i: Int, _ dt: Double) {
         var b = boats[i]
+        // The polar reads the sailing wind (#14); shadow slows it and never turns it (#10). The current
+        // carries every boat, ghosts too (#11).
+        let tws = b.polarWindSpeed
 
-        if let pilot = b.autopilot {
-            if let rudder = pilot.rudder(heading: b.heading, boomSide: b.boomSide, windDirection: b.windDirection) {
-                b.desiredRudder = rudder
-            } else {
-                b.autopilot = nil
-                b.desiredRudder = 0
-            }
+        if let helm = b.autohelm {
+            b.desiredRudder = helm.rudder(sailingAngle: b.sailingAngle, boomSide: b.boomSide, tws: tws, boatClass: boatClass)
         }
 
         let before = b.heading
-        // The polar reads the sailing wind (#14); shadow slows it and never turns it (#10). The current
-        // carries every boat, ghosts too (#11).
-        let tws = b.sailingWind.speed * b.shadow
         let moved = BoatDynamics.advance(
             BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide),
             control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: b.isOnCourse),
@@ -457,6 +470,8 @@ public final class Race {
 
         // Rule 13: from the boom crossing head to wind until close-hauled on the new tack.
         if crossing {
+            // The tap has crossed the boom: the autohelm holds the groove on the new tack.
+            b.autohelm?.isTapping = false
             b.isTacking = b.twa < .pi / 2
             emit(b.isTacking ? .tacked(seat: i) : .gybed(seat: i))
         }
@@ -790,7 +805,7 @@ extension Race {
         let doubles: [(String, Double?)] = [
             ("position.x", boat.position.x), ("position.y", boat.position.y), ("heading", boat.heading),
             ("speed", boat.speed), ("rudder", boat.rudder), ("desiredRudder", boat.desiredRudder),
-            ("autopilot", boat.autopilot?.heading), ("penaltyProgress", boat.penaltyProgress),
+            ("autohelm", boat.autohelm?.target.angle), ("penaltyProgress", boat.penaltyProgress),
             ("windOverGround.direction", boat.windOverGround.direction), ("windOverGround.speed", boat.windOverGround.speed),
             ("sailingWind.direction", boat.sailingWind.direction), ("sailingWind.speed", boat.sailingWind.speed),
             ("apparentWind.direction", boat.apparentWind.direction), ("apparentWind.speed", boat.apparentWind.speed),

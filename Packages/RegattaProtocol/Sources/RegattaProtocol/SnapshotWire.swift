@@ -7,13 +7,13 @@ import RegattaCore
 /// | Field                   | Wire    | Step                      | Range                         |
 /// |-------------------------|---------|---------------------------|-------------------------------|
 /// | position x, y           | int24   | 1/256 m (3.9 mm)          | ±32 768 m from the course origin |
-/// | heading, autopilot      | int16   | 1/65 536 turn (0.0055°)   | a full turn, −π ..< π         |
+/// | heading, autohelm angle  | int16   | 1/65 536 turn (0.0055°)   | a full turn, −π ..< π         |
 /// | speed                   | uint16  | 1/1024 m/s                | 0 ..< 64 m/s                  |
 /// | rudder (actual)         | int16   | 1/32 767                  | −1 … 1                        |
 /// | penalty progress        | int16   | 1/1024 rad                | ±32 rad (5 turns)             |
 /// | held rudder             | int8    | exact                     | −127 … 127                    |
 /// | status, turns owed, rounding stage | bits | exact            | 3 bits each                   |
-/// | ease, autopilot, tacking, boom sides | bits | exact          | 1 bit each                    |
+/// | ease, autohelm, its groove and tap, tacking, boom side | bits | exact | 1 bit each          |
 /// | leg index               | uint8   | exact                     | 0 … 255                       |
 ///
 /// Rounding is to nearest, so a field's error is at most half its step. A value outside its range
@@ -50,14 +50,37 @@ public enum SnapshotQuantisation {
     static func radians(_ q: Int16) -> Double { Double(q) * headingStep }
 }
 
-/// The tack/gybe autopilot on the wire: its heading in 1/65 536ths of a turn, and its boom side.
-public struct WireAutopilot: Hashable, Sendable {
-    public var heading: Int16
-    public var boomSide: BoomSide
+/// The autohelm on the wire (ADR 0007, #230): the sailing angle it holds in 1/65 536ths of a turn, or
+/// the groove it holds, and whether it is sailing the tack/gybe tap.
+public struct WireAutohelm: Hashable, Sendable {
+    public enum Target: Hashable, Sendable {
+        case angle(Int16)
+        case groove(Autohelm.Groove)
+    }
 
-    public init(heading: Int16, boomSide: BoomSide) {
-        self.heading = heading
-        self.boomSide = boomSide
+    public var target: Target
+    public var isTapping: Bool
+
+    public init(target: Target, isTapping: Bool) {
+        self.target = target
+        self.isTapping = isTapping
+    }
+
+    /// Quantises `autohelm`. Throws `WireError.outOfRange` for an angle that isn't finite.
+    public init(_ autohelm: Autohelm) throws {
+        switch autohelm.target {
+        case .angle(let angle): target = .angle(try SnapshotQuantisation.angle(angle, "autohelm"))
+        case .groove(let groove): target = .groove(groove)
+        }
+        isTapping = autohelm.isTapping
+    }
+
+    /// The autohelm this stands for.
+    public var autohelm: Autohelm {
+        switch target {
+        case .angle(let q): Autohelm(target: .angle(SnapshotQuantisation.radians(q)), isTapping: isTapping)
+        case .groove(let groove): Autohelm(target: .groove(groove), isTapping: isTapping)
+        }
     }
 }
 
@@ -70,7 +93,7 @@ public struct WireSeat: Hashable, Sendable {
     public var heading: Int16
     public var speed: UInt16
     public var rudder: Int16
-    public var autopilot: WireAutopilot?
+    public var autohelm: WireAutohelm?
     public var penaltyProgress: Int16
     public var heldInput: BoatInput
     public var isTacking: Bool
@@ -83,7 +106,7 @@ public struct WireSeat: Hashable, Sendable {
     public var legIndex: UInt8
 
     public init(
-        x: Int32, y: Int32, heading: Int16, speed: UInt16, rudder: Int16, autopilot: WireAutopilot?, penaltyProgress: Int16,
+        x: Int32, y: Int32, heading: Int16, speed: UInt16, rudder: Int16, autohelm: WireAutohelm?, penaltyProgress: Int16,
         heldInput: BoatInput, isTacking: Bool, boomSide: BoomSide, status: BoatStatus, penaltyTurnsOwed: UInt8,
         roundingStage: UInt8, legIndex: UInt8
     ) {
@@ -92,7 +115,7 @@ public struct WireSeat: Hashable, Sendable {
         self.heading = heading
         self.speed = speed
         self.rudder = rudder
-        self.autopilot = autopilot
+        self.autohelm = autohelm
         self.penaltyProgress = penaltyProgress
         self.heldInput = heldInput
         self.isTacking = isTacking
@@ -113,7 +136,7 @@ public struct WireSeat: Hashable, Sendable {
         heading = try Q.angle(b.heading, "heading")
         speed = UInt16(try Q.quantise(b.speed, step: Q.speedStep, in: 0...65_535, "speed"))
         rudder = Int16(try Q.quantise(b.rudder, step: Q.rudderStep, in: -32_767...32_767, "rudder"))
-        autopilot = try b.autopilot.map { WireAutopilot(heading: try Q.angle($0.heading, "autopilot"), boomSide: $0.boomSide) }
+        autohelm = try b.autohelm.map(WireAutohelm.init)
         penaltyProgress = Int16(try Q.quantise(b.penaltyProgress, step: Q.penaltyProgressStep, in: -32_768...32_767, "penaltyProgress"))
         heldInput = seat.heldInput
         isTacking = b.isTacking
@@ -134,7 +157,7 @@ public struct WireSeat: Hashable, Sendable {
         seat.boat.heading = Q.radians(heading)
         seat.boat.speed = Double(speed) * Q.speedStep
         seat.boat.rudder = Double(rudder) * Q.rudderStep
-        seat.boat.autopilot = autopilot.map { Autopilot(heading: Q.radians($0.heading), boomSide: $0.boomSide) }
+        seat.boat.autohelm = autohelm?.autohelm
         seat.boat.penaltyProgress = Double(penaltyProgress) * Q.penaltyProgressStep
         seat.boat.isTacking = isTacking
         seat.boat.boomSide = boomSide
@@ -145,11 +168,14 @@ public struct WireSeat: Hashable, Sendable {
         seat.heldInput = heldInput
     }
 
-    // Layout, 20 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autopilot int16
-    // (0 when absent), penalty progress int16, held rudder int8, then two flag bytes and the leg index.
-    //   flags:  bit 0 ease, bit 1 has autopilot, bit 2 tacking, bits 3–5 status, bit 6 boom to starboard,
-    //           bit 7 the autopilot's boom to starboard (zero without an autopilot)
-    //   counts: bits 0–2 penalty turns owed, bits 3–5 rounding stage, bits 6–7 zero
+    // Layout, 20 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autohelm angle int16
+    // (0 for the groove or without an autohelm), penalty progress int16, held rudder int8, then two flag
+    // bytes and the leg index.
+    //   flags:  bit 0 ease, bit 1 has autohelm, bit 2 tacking, bits 3–5 status, bit 6 boom to starboard,
+    //           bit 7 the autohelm is sailing the tap
+    //   counts: bits 0–2 penalty turns owed, bits 3–5 rounding stage, bit 6 the autohelm holds the groove,
+    //           bit 7 that groove is the downwind one
+    // Every autohelm bit is zero without an autohelm, and the downwind bit without the groove.
 
     func encode(to w: inout WireWriter) throws {
         guard penaltyTurnsOwed <= 7 else { throw WireError.outOfRange("penaltyTurnsOwed") }
@@ -160,17 +186,22 @@ public struct WireSeat: Hashable, Sendable {
         w.i16(heading)
         w.u16(speed)
         w.i16(rudder)
-        w.i16(autopilot?.heading ?? 0)
+        if case .angle(let angle) = autohelm?.target { w.i16(angle) } else { w.i16(0) }
         w.i16(penaltyProgress)
         w.i8(heldInput.rudder)
         var flags: UInt8 = heldInput.ease ? 1 : 0
-        if autopilot != nil { flags |= 1 << 1 }
+        if autohelm != nil { flags |= 1 << 1 }
         if isTacking { flags |= 1 << 2 }
         flags |= status.wireCode << 3
         if boomSide == .starboard { flags |= 1 << 6 }
-        if autopilot?.boomSide == .starboard { flags |= 1 << 7 }
+        if autohelm?.isTapping == true { flags |= 1 << 7 }
         w.u8(flags)
-        w.u8(penaltyTurnsOwed | roundingStage << 3)
+        var counts = penaltyTurnsOwed | roundingStage << 3
+        if case .groove(let groove) = autohelm?.target {
+            counts |= 1 << 6
+            if groove == .downwind { counts |= 1 << 7 }
+        }
+        w.u8(counts)
         w.u8(legIndex)
     }
 
@@ -181,19 +212,23 @@ public struct WireSeat: Hashable, Sendable {
         speed = try r.u16()
         rudder = try r.i16()
         guard rudder != Int16.min else { throw WireError.invalidValue("rudder") }
-        let pilot = try r.i16()
+        let angle = try r.i16()
         penaltyProgress = try r.i16()
         let held = try r.i8()
         guard held != Int8.min else { throw WireError.invalidValue("heldInput.rudder") }
         let flags = try r.u8()
         let counts = try r.u8()
         legIndex = try r.u8()
-        guard counts >> 6 == 0 else { throw WireError.invalidValue("counts") }
         guard let status = BoatStatus(wireCode: flags >> 3 & 0b111) else { throw WireError.invalidValue("status") }
-        let hasAutopilot = flags & 1 << 1 != 0
-        guard hasAutopilot || (pilot == 0 && flags & 1 << 7 == 0) else { throw WireError.invalidValue("autopilot") }
+        let hasAutohelm = flags & 1 << 1 != 0, isTapping = flags & 1 << 7 != 0
+        let isGroove = counts & 1 << 6 != 0, isDownwind = counts & 1 << 7 != 0
+        guard hasAutohelm || (angle == 0 && !isTapping && !isGroove), isGroove ? angle == 0 : !isDownwind else {
+            throw WireError.invalidValue("autohelm")
+        }
         heldInput = BoatInput(rudder: held, ease: flags & 1 != 0)
-        autopilot = hasAutopilot ? WireAutopilot(heading: pilot, boomSide: flags & 1 << 7 != 0 ? .starboard : .port) : nil
+        autohelm = hasAutohelm
+            ? WireAutohelm(target: isGroove ? .groove(isDownwind ? .downwind : .upwind) : .angle(angle), isTapping: isTapping)
+            : nil
         isTacking = flags & 1 << 2 != 0
         boomSide = flags & 1 << 6 != 0 ? .starboard : .port
         self.status = status
@@ -235,7 +270,7 @@ extension BoatStatus {
 public enum SnapshotFields {
     /// Carried by `WireSeat`, as paths into `WorldSnapshot.Seat`.
     public static let wire: [String] = [
-        "boat.position", "boat.heading", "boat.speed", "boat.rudder", "boat.autopilot",
+        "boat.position", "boat.heading", "boat.speed", "boat.rudder", "boat.autohelm",
         "boat.status", "boat.legIndex", "boat.roundingStage",
         "boat.penaltyTurnsOwed", "boat.penaltyProgress", "boat.isTacking", "boat.boomSide",
         "heldInput.rudder", "heldInput.ease",
@@ -247,7 +282,7 @@ public enum SnapshotFields {
         "boat.id": "the seat index: the seat's position in the snapshot",
         "boat.isPlayer": "the bot flag: roster metadata in RaceStart only, so bots look like humans on the wire (#18, #19)",
         "boat.colorIndex": "roster metadata, sent once in RaceStart's seat table",
-        "boat.desiredRudder": "derived: set from the held input or the autopilot every tick before it is read",
+        "boat.desiredRudder": "derived: set from the held input or the autohelm every tick before it is read",
         "boat.windOverGround": "derived: sampled from the wind at the start of every step",
         "boat.sailingWind": "derived: resolved from the wind and the current at the start of every step",
         "boat.apparentWind": "derived: resolved from the sailing wind and the boat's velocity at the start of every step",

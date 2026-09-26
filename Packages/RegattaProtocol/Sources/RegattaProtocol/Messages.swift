@@ -293,7 +293,7 @@ public struct EventState: Equatable, Sendable {
             isOver = true
         case .gun, .ocsNotice, .cleared, .started, .ruleCall, .markTouch, .obstructionContact, .contact, .penaltyStarted,
              .penaltyReset, .penaltyServed, .tacked, .gybed, .markRoomNotice, .becameGhost, .rounded, .firstFinish,
-             .protestRecorded:
+             .protestRecorded, .grooveSnap:
             // `firstFinish` is announced beside the finish that starts the window, which `finished` records.
             break
         }

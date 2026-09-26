@@ -35,29 +35,37 @@ import Testing
     struct Tap {
         /// Every tick's state, the first before the tap.
         var states: [BoatDynamics.State]
-        /// Seconds after the tap when the autopilot let go.
-        var letGo: Double?
+        /// Seconds after the tap when she came within 3° of the angle the autohelm holds on the new tack.
+        var settled: Double?
         var crossings: Int { zip(states, states.dropFirst()).filter { $0.boomSide != $1.boomSide }.count }
     }
 
-    /// One tack/gybe tap from `state`, steered as `Race` steers it: the autopilot until it lets go, then
-    /// a helm holding the autopilot's heading, for `seconds` in all.
-    func tap(_ state: BoatDynamics.State, knots: Double, seconds: Double = 20) -> Tap {
+    func sailingAngle(_ s: BoatDynamics.State) -> Double {
+        s.boomSide.sailingAngle(relativeWind: wrapAngle(windFrom - s.heading))
+    }
+
+    /// One tack/gybe tap from `state`, steered as `Race` steers it: the autohelm sails the tap until the
+    /// boom crosses, then holds the groove on the new tack, for `seconds` in all. `holdingEntryAngle`
+    /// holds the angle she tapped at instead, as a player letting go there would: the same angle on
+    /// both tacks, so the loss is the manoeuvre's alone (#71).
+    func tap(_ state: BoatDynamics.State, knots: Double, seconds: Double = 20, holdingEntryAngle: Bool = false) -> Tap {
         var s = state
-        var pilot: Autopilot? = .tackOrGybe(heading: s.heading, boomSide: s.boomSide, windDirection: windFrom)
-        let target = pilot!.heading
+        let tws = metresPerSecond(knots: knots)
+        let entry = sailingAngle(s)
+        var helm = Autohelm.tackOrGybe(sailingAngle: entry)
         var result = Tap(states: [s])
         for n in 0..<Int((seconds / dt).rounded()) {
-            var rudder = (wrapAngle(target - s.heading) / deg2rad(20)).clamped(to: -1...1)
-            if let p = pilot {
-                if let r = p.rudder(heading: s.heading, boomSide: s.boomSide, windDirection: windFrom) {
-                    rudder = r
-                } else {
-                    pilot = nil
-                    result.letGo = Double(n) * dt
-                }
+            let angle = sailingAngle(s)
+            if !helm.isTapping && result.settled == nil
+                && abs(wrapAngle(helm.aim(tws: tws, boatClass: dinghy) - angle)) < deg2rad(3) {
+                result.settled = Double(n) * dt
             }
-            s = step(s, rudder: rudder, knots: knots)
+            let side = s.boomSide
+            s = step(s, rudder: helm.rudder(sailingAngle: angle, boomSide: side, tws: tws, boatClass: dinghy), knots: knots)
+            if s.boomSide != side {
+                helm.isTapping = false
+                if holdingEntryAngle { helm.target = .angle(entry) }
+            }
             result.states.append(s)
         }
         return result
@@ -156,19 +164,19 @@ import Testing
         let run = tap(start, knots: 10)
         #expect(run.crossings == 1)
         #expect(run.states.last!.boomSide == .starboard)
-        let letGo = try #require(run.letGo)
-        #expect(letGo >= 2.5 && letGo <= 4, "let go after \(letGo) s")
+        let settled = try #require(run.settled)
+        #expect(settled >= 2.5 && settled <= 4, "settled in the groove after \(settled) s")
         let bottom = run.states.map(\.speed).min()! / start.speed
         #expect(bottom >= 0.4 && bottom <= 0.6, "bottomed out at \(bottom) of entry speed")
         let lost = hullLengthsLost(run, along: .heading(windFrom))
         #expect(lost >= 0.7 && lost <= 1.3, "lost \(lost) hull lengths")
     }
 
-    /// A gybe from a broad reach, 150°: at 16 kn she is planing (the polar gives 9.5 kn), at 10 kn not.
+    /// A gybe from a broad reach, 150°, back to 150°: at 16 kn she is planing (the polar gives 9.5 kn), at 10 kn not.
     @Test func gybeTapLosesAQuarterToHalfAHullLengthAndMoreOffThePlane() {
         let downwind = -Vec2.heading(windFrom)
-        let medium = tap(starboardTack(twa: deg2rad(150), knots: 10), knots: 10)
-        let planing = tap(starboardTack(twa: deg2rad(150), knots: 16), knots: 16)
+        let medium = tap(starboardTack(twa: deg2rad(150), knots: 10), knots: 10, holdingEntryAngle: true)
+        let planing = tap(starboardTack(twa: deg2rad(150), knots: 16), knots: 16, holdingEntryAngle: true)
         for run in [medium, planing] {
             #expect(run.crossings == 1)
             #expect(run.states.last!.boomSide == .starboard)
@@ -179,27 +187,18 @@ import Testing
         #expect(lostPlaning > lostMedium, "16 kn gybe lost \(lostPlaning) hull lengths, 10 kn \(lostMedium)")
     }
 
-    @Test func tapTargetsTheSameWindAngleWithTheBoomOnTheOtherSide() {
-        let beat = Autopilot.tackOrGybe(heading: deg2rad(-45), boomSide: .port, windDirection: windFrom)
-        #expect(abs(beat.heading - deg2rad(45)) < 1e-12 && beat.boomSide == .starboard)
-        let reach = Autopilot.tackOrGybe(heading: deg2rad(150), boomSide: .starboard, windDirection: windFrom)
-        #expect(abs(reach.heading - deg2rad(-150)) < 1e-12 && reach.boomSide == .port)
-        // 10° by the lee with the boom to port: the wind is already at 170° on the port side.
-        let lee = byTheLee(deg2rad(10), speed: 0)
-        let fromLee = Autopilot.tackOrGybe(heading: lee.heading, boomSide: .port, windDirection: windFrom)
-        #expect(abs(wrapAngle(fromLee.heading - lee.heading)) < 1e-12 && fromLee.boomSide == .starboard)
-    }
-
-    @Test func tapFromByTheLeeGybesAndSettlesOnTheSameWindAngle() {
+    /// 10° by the lee with the boom to port the wind is already over the port quarter: the tap gybes
+    /// (bearing away until the boom crosses), then holds the downwind groove on the new tack, not by the lee.
+    @Test func tapFromByTheLeeGybesAndSettlesInTheDownwindGroove() {
         let start = byTheLee(deg2rad(10), speed: dinghy.polar.speed(twa: deg2rad(170), tws: metresPerSecond(knots: 10)) * 0.98)
         let run = tap(start, knots: 10)
         #expect(run.crossings == 1)
-        #expect(run.letGo != nil)
+        #expect(run.settled != nil)
         let end = run.states.last!
         #expect(end.boomSide == .starboard)
-        let relativeWind = wrapAngle(windFrom - end.heading)
-        #expect(abs(abs(relativeWind) - deg2rad(170)) < deg2rad(3), "settled at \(rad2deg(abs(relativeWind)))°")
-        #expect(!BoomSide.isByTheLee(end.boomSide.sailingAngle(relativeWind: relativeWind)))
+        let groove = Autohelm.grooveAngle(.downwind, tws: metresPerSecond(knots: 10), boatClass: dinghy)
+        #expect(abs(sailingAngle(end) - groove) < deg2rad(1), "settled at \(rad2deg(sailingAngle(end)))°")
+        #expect(!BoomSide.isByTheLee(sailingAngle(end)))
     }
 
     // MARK: - In a race
@@ -214,6 +213,7 @@ import Testing
         boat.heading = wrapAngle(boat.windDirection - best.twa)
         boat.speed = best.speed
         boat.boomSide = .port
+        boat.autohelm = nil // let go close-hauled: the next step takes the groove
         snapshot.seats[0].boat = boat
         snapshot.seats[1].boat.position = boat.position + Vec2(300, 0)
         try race.importSnapshot(snapshot)

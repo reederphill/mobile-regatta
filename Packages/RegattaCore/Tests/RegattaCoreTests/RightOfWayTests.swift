@@ -121,6 +121,7 @@ private let hull = Race.defaultBoatClass.hull
             b.heading = heading
             b.speed = 3
             b.boomSide = .port
+            b.autohelm = nil // let go on the reach: the next step holds it
             b.position = seat == 0 ? lead.position : lead.position - Vec2.heading(heading) * 3 + Vec2.heading(heading).rightPerp * 3
             snapshot.seats[seat].boat = b
         }

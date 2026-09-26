@@ -47,7 +47,13 @@ import Glibc
 ///    the rules read the sailing wind, and the current carries every boat, ghosts too. The shadow cone
 ///    follows the caster's apparent wind, and a backwind zone reaches to windward of her (`ShadowCone`),
 ///    both under the class's stacking floor. The digest hashes the three winds and the current.
-public let simulationRevision = 10
+/// 11: the autohelm (#230, ADR 0007), on 10. A centred rudder no longer holds the heading: the autohelm
+///    captures her sailing angle on the tick the held rudder centres (every boat at the first tick), snaps
+///    to the groove within the class's snap widths and bears away to it from the no-go zone, and steers the
+///    rudder in proportion to the angle's error; the tap sails to the groove on the new tack. Boats sail
+///    ilca-dinghy@3 (schema 2: the autohelm's values); schema-1 classes are refused. The digest hashes
+///    the autohelm's target and tap in place of the tack autopilot's heading and boom side.
+public let simulationRevision = 11
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

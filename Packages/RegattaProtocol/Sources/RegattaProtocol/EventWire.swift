@@ -30,6 +30,9 @@ public enum EventAudience: Equatable, Sendable {
         case .protestRecorded(let seat, let target):
             // The acknowledgement goes to the protesting boat, and the protested boat is told (RRS 61.1).
             self = .seats([seat, target])
+        case .grooveSnap(let seat):
+            // The snap is felt by the boat that let go (#124), and nobody else.
+            self = .seats([seat])
         }
     }
 }
@@ -118,6 +121,9 @@ extension RaceEvent.Kind {
         case .gybed(let seat):
             w.u8(21)
             try w.index(seat, "seat")
+        case .grooveSnap(let seat):
+            w.u8(22)
+            try w.index(seat, "seat")
         }
     }
 
@@ -159,6 +165,7 @@ extension RaceEvent.Kind {
         case 19: self = .firstFinish(closeTick: try r.i32())
         case 20: self = .tacked(seat: try r.index())
         case 21: self = .gybed(seat: try r.index())
+        case 22: self = .grooveSnap(seat: try r.index())
         default: throw WireError.invalidValue("event")
         }
     }
