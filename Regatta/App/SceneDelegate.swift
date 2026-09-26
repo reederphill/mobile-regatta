@@ -47,7 +47,8 @@ struct AppRoot: View {
 final class RootHostingController: UIHostingController<AppRoot> {
     /// Locks the interface orientation while the window fills the screen. Follows
     /// `SceneState.isRaceSequenceShowing`, which `AppModel.phase` sets. It's a preference only: the system drops
-    /// it in a resized or shared window, where the race letterboxes instead.
+    /// it in a resized or shared window, where the race letterboxes instead. While the race cover is up UIKit can ask
+    /// the cover (`RaceCoverController`) instead, which prefers the lock too.
     var isOrientationLocked = false {
         didSet {
             guard isOrientationLocked != oldValue else { return }

@@ -33,7 +33,7 @@ struct RootView: View {
         } else {
             HomeView(model: model, onRaceOnline: raceOnline)
                 .onAppear(perform: autostartIfRequested)
-                .fullScreenCover(isPresented: isRaceSequenceShowing) { raceCover }
+                .raceCover(isPresented: model.phase == .raceSequence && model.race != nil) { raceCover }
                 // A stub until matchmaking; Debug builds join the dev server's instant race instead (#68).
                 .alert("Online racing is on its way", isPresented: $showsOnlineStub) {
                     Button("OK", role: .cancel) {}
@@ -43,13 +43,9 @@ struct RootView: View {
         }
     }
 
-    private var isRaceSequenceShowing: Binding<Bool> {
-        Binding(get: { model.phase == .raceSequence && model.race != nil },
-                set: { showing in if !showing { model.endRaceSequence() } })
-    }
-
     /// The race sequence keeps its fixed look whatever the system appearance: dark, with no status bar, and it
-    /// can't be swiped down. The cover is its own presentation, so it gets the scene's environment explicitly.
+    /// can't be swiped down (`RaceCoverController`, which also holds the iPad orientation lock). The cover is its
+    /// own presentation, so it gets the scene's environment explicitly.
     @ViewBuilder private var raceCover: some View {
         if let race = model.race {
             Group {
@@ -75,9 +71,7 @@ struct RootView: View {
             }
             .environment(\.sceneState, sceneState)
             .environment(\.screenSize, screenSize)
-            .preferredColorScheme(.dark)
-            .statusBarHidden()
-            .interactiveDismissDisabled()
+            .environment(\.colorScheme, .dark)
         }
     }
 
