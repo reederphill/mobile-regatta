@@ -32,7 +32,7 @@ public struct FNV1a: Sendable {
 
 public extension Race {
     /// Golden digest: FNV-1a over the tick, the bit pattern of every field of every boat, and each
-    /// seat's held input. Equal digests on the replay platform mean bit-for-bit equal races (ADR 0002).
+    /// seat's held input, then every pair's overlap as of the last point of certainty. Equal digests on the replay platform mean bit-for-bit equal races (ADR 0002).
     func digest() -> UInt64 {
         var h = FNV1a()
         h.combine(tick)
@@ -64,6 +64,7 @@ public extension Race {
             h.combine(b.finishTime)
             h.combine(b.place)
         }
+        overlaps.combine(into: &h)
         return h.value
     }
 }

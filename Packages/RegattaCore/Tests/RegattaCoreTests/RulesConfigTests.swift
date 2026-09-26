@@ -136,10 +136,10 @@ import Testing
         penalised.penaltyProgress = 1 // radians: past the 30° that counts as taking it
         var clean = Boat(id: 2, isPlayer: false, colorIndex: 2, position: Vec2(2, -10), heading: -.pi / 2, speed: 3)
         clean.status = .prestart
-        #expect(Rules.judge(returning, clean, course: course, hull: hull) == Verdict(rule: .returningToStart, offender: 1, victim: 2))
+        #expect(Rules.judge(returning, clean, overlapped: true, course: course, hull: hull) == Verdict(rule: .returningToStart, offender: 1, victim: 2))
         clean.status = .racing
         clean.position = Vec2(2, 100)
-        #expect(Rules.judge(clean, penalised, course: course, hull: hull) == Verdict(rule: .takingAPenalty, offender: 3, victim: 2))
+        #expect(Rules.judge(clean, penalised, overlapped: true, course: course, hull: hull) == Verdict(rule: .takingAPenalty, offender: 3, victim: 2))
     }
 
     @Test func zoneRadiusIsThreeClassHullLengths() throws {
@@ -251,7 +251,7 @@ import Testing
     /// so nothing in them can iterate one. Stricter than the package-wide iteration scan.
     @Test func rulesModelSourcesUseNoSetOrDictionary() throws {
         let names = ["RegattaCore/Incident.swift", "RegattaCore/Rules.swift", "RegattaCore/RaceEvent.swift",
-                     "RegattaCore/RulesConfig.swift"]
+                     "RegattaCore/RulesConfig.swift", "RegattaCore/Overlap.swift"]
         let files = try SourceScanTests.sources().filter { names.contains($0.name) }
         #expect(files.count == names.count)
         #expect(try SourceScanTests.unorderedNames(in: files) == [])

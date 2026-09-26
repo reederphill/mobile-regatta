@@ -36,7 +36,12 @@ import Glibc
 ///    centre sized for the fleet, and its race area for the puffs. The prototype placement is laid square
 ///    to that line. `WindField.sample` composes the pairing's geographic grid (#77). The log header records
 ///    the files and the tide state at the gun.
-public let simulationRevision = 8
+/// 9: right of way (#87), on the assembled race of 8: rules 10–13 with windward by side of boat (her boom
+///    side is her leeward side), both tacking (port side or astern keeps clear); overlap (incl. opposite
+///    tacks both more than 90° from the wind, and a boat between) counted once it has held for the last
+///    point of certainty (15 ticks) per pair, updated after the boats move and before contacts, and in the
+///    digest. Ghosts have none.
+public let simulationRevision = 9
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

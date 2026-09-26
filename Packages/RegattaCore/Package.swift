@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "RegattaCore", targets: ["RegattaCore"]),
         .library(name: "RegattaBots", targets: ["RegattaBots"]),
         .executable(name: "regatta-replay", targets: ["regatta-replay"]),
+        .executable(name: "regatta-botsuite", targets: ["regatta-botsuite"]),
     ],
     dependencies: [
         // SHA-256 of data files on Linux (the race server); Apple platforms use CryptoKit.
@@ -38,5 +39,17 @@ let package = Package(
             resources: [.copy("Resources/venues")]
         ),
         .testTarget(name: "RegattaBotsTests", dependencies: ["RegattaBots", "RegattaCore"]),
+        // The headless bot-race suite (#97): the harness, the matrix, per-seat metrics, the gate and the
+        // JSON report. Apart from RegattaBots: it reads the wall clock for tick times, which bots never do.
+        .target(
+            name: "BotSuite",
+            dependencies: ["RegattaCore", "RegattaBots"],
+            // The full matrix and the per-tier limits are data (#19: "The exact limits are set at build time").
+            resources: [.copy("matrix.json"), .copy("thresholds.json")]
+        ),
+        // A thin command line over BotSuite.
+        .executableTarget(name: "regatta-botsuite", dependencies: ["BotSuite"]),
+        // regatta-botsuite is a dependency so `swift test` builds it: the gate tests run it as its own process.
+        .testTarget(name: "BotSuiteTests", dependencies: ["BotSuite", "regatta-botsuite", "RegattaCore", "RegattaBots"]),
     ]
 )
