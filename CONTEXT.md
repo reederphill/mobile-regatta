@@ -222,6 +222,16 @@ Sailing downwind with the wind past dead astern on the same side as the boom, sh
 Letting the sheets out so the sail flaps and the boat slows, e.g. to hold position before the start.
 _Avoid_: luff (in the rules, luffing means turning toward the wind)
 
+**Autohelm**:
+What steers the boat whenever nobody is holding the rudder: it holds the angle to the true wind she had when the rudder was centred, snapping to the groove when close to it. It never tacks or gybes by itself, and it sails the tack/gybe tap.
+_Avoid_: autopilot, lock, helm (to helm is what a player does)
+
+**Groove**:
+The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. The autohelm snaps to it when let go close to it and follows it as the wind strength changes.
+
+**Pinch** / **foot**:
+Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). The autohelm holds either until the player changes it.
+
 **Livery**:
 How a player's boat looks: a livery design, the colours filling it, and a sail number. Cosmetic only, and every other player sees it.
 _Avoid_: skin
