@@ -50,24 +50,39 @@ public struct BotDecision: Hashable, Sendable {
     }
 }
 
-/// Helms a computer-controlled boat: pre-start timing, beating and running between
-/// laylines, playing shifts, mark roundings, penalty turns, and keeping clear when
-/// it is the give-way boat.
+/// Helms a computer-controlled boat on the autohelm (ADR 0007, #231): pre-start timing, beating and running
+/// between laylines, playing shifts, mark roundings, penalty turns, and keeping clear when it is the
+/// give-way boat.
+///
+/// It sails the way a player does. Each decision it picks an `Aim`, a wind angle on a tack (the groove,
+/// the groove with a pinch or foot, or a course to a mark as the wind angle it needs), steers to it and
+/// centres the rudder, and the autohelm holds it: no heading tracking between decisions. It takes the
+/// rudder back only when the aim changes, or the angle held has drifted past the aim's tolerance. Tacks
+/// and gybes are the tap's, never the rudder's. Keeping clear and staying off a mark are steered with
+/// the rudder while they last; then she centres on her aim again.
 ///
 /// It sees the race only through its seat's `SeatView` (#98): what a player in that seat sees now, never
 /// the race itself, a key or another boat's input (#19). It answers with a `BotDecision`, an int8 rudder
-/// plus the tack/gybe tap, exactly what a player can send. Its sailing is still the prototype's; the bot
-/// phase (#99–#104, #231) rebuilds it, gaining behaviour but never information: `BotSourceTests` keeps
-/// the race out of every `BotBrain*.swift` file.
+/// plus the tack/gybe tap, exactly what a player can send. What it plays beyond the groove (`Tactics`) is a
+/// live bot's, set by its skill, or a bot-suite profile's (`BotProfile`); the bot phase (#99–#104, #234)
+/// grows it, gaining behaviour but never information: `BotSourceTests` keeps the race out of every
+/// `BotBrain*.swift` file.
 struct BotBrain: Sendable {
     let style: BotStyle
+    /// What she plays beyond sailing the groove to the marks.
+    let tactics: Tactics
     var plannedTack: Tack = .starboard
     var lastTackTime = -1_000.0
+    /// When she last tapped: she lets a tap finish before another.
+    var lastTapTime = -1_000.0
     /// Hard over on penalty turns until none are owed (see `decide`).
     var servingPenalty = false
+    /// What she has made of her own wind and speed so far (`observe`).
+    var senses = Senses()
 
-    init(style: BotStyle) {
+    init(style: BotStyle, profile: BotProfile? = nil) {
         self.style = style
+        tactics = Tactics(profile: profile, skill: style.skill)
     }
 
     private var skill: Double { style.skill }
@@ -79,6 +94,7 @@ struct BotBrain: Sendable {
     /// The decision for `view`'s seat now.
     mutating func decide(_ view: SeatView) -> BotDecision {
         let boat = view.own
+        observe(boat, view)
         guard boat.isOnCourse else { return BotDecision(input: .neutral) }
         // Penalty turns start only clear of boats and of marks by three lengths, then go on whoever comes
         // near, unless they carry her within a length of a mark: she sails on and starts again clear. The
@@ -90,72 +106,146 @@ struct BotBrain: Sendable {
             servingPenalty = true
             return BotDecision(input: BoatInput(rudder: style.penaltyDirection))
         }
-        let desired = desiredHeading(boat, view)
-        var heading = keepClear(boat, view, desired: desired)
-        let keepingClear = heading != desired
-        heading = avoidMarks(boat, view, desired: heading)
-
-        // The autohelm is sailing the tap through the tack or gybe: hands off, since any rudder cancels
-        // it, unless the boat has to keep clear of someone.
-        if boat.autohelm?.isTapping == true && !keepingClear { return BotDecision(input: .neutral) }
-        if !keepingClear && wantsTackOrGybe(boat, to: heading, view) {
-            return BotDecision(input: .neutral, tap: .tackGybe)
+        let aim = plan(boat, view)
+        // The autohelm is sailing the tap through the tack or gybe: hands off. Any rudder would cancel it
+        // (#13) and leave her head to wind; it's over in a couple of seconds.
+        if boat.autohelm?.isTapping == true { return BotDecision(input: .neutral) }
+        let desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
+        // Keeping clear, and staying off a mark while she does: a mark doesn't move out of her way.
+        if let evasive = keepClear(boat, view, desired: desired) {
+            return BotDecision(input: steer(boat, toHeading: avoidMarks(boat, view, desired: evasive) ?? evasive, view))
         }
-        return BotDecision(input: helm(boat, to: heading, view))
+        if let evasive = avoidMarks(boat, view, desired: desired) {
+            return BotDecision(input: steer(boat, toHeading: evasive, view))
+        }
+        if aim.tack != boat.tack {
+            if canTap(boat, view) {
+                lastTapTime = view.time
+                return BotDecision(input: .neutral, tap: .tackGybe)
+            }
+            // Not yet (too slow to tack, or a mark too close to turn by): the same aim on her own tack.
+            var own = aim
+            own.tack = boat.tack
+            return BotDecision(input: helm(boat, to: own, view))
+        }
+        return BotDecision(input: helm(boat, to: aim, view))
     }
 
-    /// Error under which a bot centres the rudder and lets the autohelm capture the angle she sails.
-    static let letGoError = deg2rad(2)
-    /// Error the autohelm may hold her off `heading` before the bot takes the rudder back: past the widest
-    /// snap to the groove, so a snap doesn't send her back to the rudder.
-    static let holdError = deg2rad(6)
+    // MARK: - Helming
+
+    /// Error under which a bot centres the rudder on an aim that isn't a groove, and the autohelm
+    /// captures the angle she sails.
+    static let letGoError = deg2rad(1.5)
+    /// A groove aim is let go within this share of the class's snap width to it: close enough that the
+    /// autohelm snaps to it whatever her reckoning of the groove wind is off by.
+    static let grooveLetGo = 0.6
+    /// Error at which she steers with full rudder; less in proportion.
+    static let fullRudderError = deg2rad(15)
+    /// The least rudder she steers with: past the autohelm's `deadBand`, so the rudder is held.
+    static let leastRudder = 0.08
     /// The least rudder a bot holds inside the no-go zone: just off centre (`Autohelm.deadBand`), so the
     /// autohelm stays off and doesn't bear her away to the groove.
     static let noGoRudder = 0.06
+    /// Seconds after a tap before she taps again: long enough for the autohelm to sail it.
+    static let tapInterval = 3.0
+    /// She tacks (a tap with the wind forward of the beam) only at this share of her close-hauled speed or
+    /// more: slower, the tap leaves her head to wind. A gybe keeps her sails full, so it needs none.
+    static let tackingSpeed = 0.75
 
-    /// The held input that sails `heading` under the autohelm (ADR 0007): the temporary adapter until #231
-    /// rebuilds the brain. Steers in proportion to the error, then centres the rudder so the autohelm
-    /// holds the wind angle she has reached (the groove, if she's close to it), and takes the rudder back
-    /// only once her heading has drifted `holdError` off. A heading inside the no-go zone (the pre-start
-    /// luff and wait) keeps a touch of rudder instead, towards the wind when there is no error to steer.
-    private func helm(_ b: SeatView.OwnBoat, to heading: Double, _ view: SeatView) -> BoatInput {
-        let error = wrapAngle(heading - b.heading)
-        let proportional = (error / deg2rad(20)).clamped(to: -1...1)
-        let relative = wrapAngle(b.windDirection - heading)
-        if abs(relative) < BoatDynamics.noGoAngle(view.boatClass.polar) {
+    /// Hull lengths a mark must be clear of her for a tap: the tack or gybe sails itself, hands off.
+    static let tapMarkClearance = 2.0
+
+    /// Whether she can tap now: a tap done, no mark close enough for the turn to swing her onto, and for a
+    /// tack, the speed to carry her through it.
+    private func canTap(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard view.time - lastTapTime >= Self.tapInterval,
+              isClearOfMarks(b, view, lengths: Self.tapMarkClearance) else { return false }
+        guard abs(sailingAngle(b)) < .pi / 2 else { return true }
+        let closeHauled = view.boatClass.polar.bestUpwind(tws: b.windSpeed * b.shadow).speed
+        return b.speed >= closeHauled * Self.tackingSpeed
+    }
+
+    /// The held input that sails `aim` on her tack under the autohelm (ADR 0007). Once the autohelm holds
+    /// it (`holds`), the rudder stays centred until the aim moves. Otherwise she steers in proportion to the
+    /// error and centres close to it, so the autohelm captures the angle (and snaps a groove aim to the
+    /// groove); an autohelm holding something else is let go of first with a touch of rudder. An aim
+    /// inside the no-go zone (the pre-start luff and wait) keeps a touch of rudder instead, towards the
+    /// wind when there is no error to steer.
+    private func helm(_ b: SeatView.OwnBoat, to aim: Aim, _ view: SeatView) -> BoatInput {
+        let boatClass = view.boatClass
+        let error = wrapAngle(aim.angle - sailingAngle(b))
+        if aim.angle < BoatDynamics.noGoAngle(boatClass.polar) {
+            let windSign: Double = b.boomSide == .port ? 1 : -1
+            let proportional = (-windSign * error / Self.fullRudderError).clamped(to: -1...1)
             guard abs(proportional) < Self.noGoRudder else { return BoatInput(rudder: proportional) }
-            // Turning to starboard (+) brings a wind over the starboard side (+) towards the bow.
-            let side = error != 0 ? error : relative
+            // Towards the wind (her sailing angle falling) when there is no error to steer.
+            let side = error != 0 ? -windSign * error : windSign
             return BoatInput(rudder: side < 0 ? -Self.noGoRudder : Self.noGoRudder)
         }
-        let band = b.autohelm != nil ? Self.holdError : Self.letGoError
-        return abs(error) < band ? .neutral : BoatInput(rudder: proportional)
+        if let held = b.autohelm, Self.holds(held, aim, boatClass) { return .neutral }
+        let tuning = boatClass.steering.autohelm
+        let letGo = aim.groove.map { ($0 == .upwind ? tuning.upwindSnap : tuning.downwindSnap) * Self.grooveLetGo } ?? Self.letGoError
+        guard abs(error) > letGo else {
+            return b.autohelm == nil ? .neutral : rudder(b, error)
+        }
+        return rudder(b, error)
     }
 
-    /// Whether `heading` is the mirror of a close-hauled or running course on the other tack, which
-    /// the tack/gybe tap sails to as a player's would.
-    private func wantsTackOrGybe(_ b: SeatView.OwnBoat, to heading: Double, _ view: SeatView) -> Bool {
-        let target = wrapAngle(b.windDirection - heading)
-        guard BoomSide.leeward(ofRelativeWind: target) != b.boomSide, abs(wrapAngle(heading - b.heading)) > deg2rad(50) else { return false }
+    /// Whether the autohelm's `held` target sails `aim`: its groove, or an angle within the aim's tolerance.
+    /// A groove held within its snap width of the aim is as close as the autohelm lets her hold.
+    static func holds(_ held: Autohelm.Reading, _ aim: Aim, _ boatClass: BoatClass) -> Bool {
+        if let groove = aim.groove { return held.target.groove == groove }
+        let off = abs(wrapAngle(held.aim - aim.angle))
+        guard let groove = held.target.groove else { return off <= aim.tolerance }
+        let tuning = boatClass.steering.autohelm
+        return off <= max(aim.tolerance, groove == .upwind ? tuning.upwindSnap : tuning.downwindSnap)
+    }
+
+    /// Rudder that turns her sailing angle by `error` (radians): in proportion, at least `leastRudder`.
+    /// Turning to starboard (+) brings a wind over the starboard side towards the bow: her sailing angle
+    /// falls on starboard tack and rises on port.
+    private func rudder(_ b: SeatView.OwnBoat, _ error: Double) -> BoatInput {
+        let windSign: Double = b.boomSide == .port ? 1 : -1
+        let proportional = (-windSign * error / Self.fullRudderError).clamped(to: -1...1)
+        let least = proportional < 0 ? -Self.leastRudder : Self.leastRudder
+        return BoatInput(rudder: abs(proportional) < Self.leastRudder ? least : proportional)
+    }
+
+    /// Steers with the rudder for `heading`, keeping clear or off a mark: on her own tack, never through
+    /// head to wind or past the by-the-lee limit (tacks and gybes are the tap's). Centred once she's on it.
+    private func steer(_ b: SeatView.OwnBoat, toHeading heading: Double, _ view: SeatView) -> BoatInput {
         let polar = view.boatClass.polar
-        let upwind = polar.bestUpwind(tws: b.windSpeed).twa + deg2rad(15)
-        let downwind = polar.bestDownwind(tws: b.windSpeed).twa - deg2rad(15)
-        return (b.twa < upwind && abs(target) < upwind) || (b.twa > downwind && abs(target) > downwind)
+        var target = b.boomSide.sailingAngle(relativeWind: wrapAngle(b.windDirection - heading))
+        let closest = BoatDynamics.noGoAngle(polar) + deg2rad(5)
+        if target > -.pi / 2 && target < closest { target = closest }
+        let byTheLee = max(0, polar.byTheLeeLimit(tws: b.windSpeed) - deg2rad(5))
+        if target <= -.pi / 2 && .pi + target > byTheLee { target = byTheLee - .pi }
+        let error = wrapAngle(target - sailingAngle(b))
+        return abs(error) < Self.letGoError ? .neutral : rudder(b, error)
     }
 
-    private mutating func desiredHeading(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+    /// Her sailing angle (`BoomSide.sailingAngle`): her wind angle against her boom, as the autohelm reads it.
+    func sailingAngle(_ b: SeatView.OwnBoat) -> Double {
+        b.boomSide.sailingAngle(relativeWind: b.relativeWind)
+    }
+
+    // MARK: - Planning
+
+    /// Where she wants to sail now.
+    private mutating func plan(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
         let c = view.course
         switch b.status {
         case .prestart where view.time < 0:
-            return prestartHeading(b, view)
+            return prestartAim(b, view)
         case .prestart:
-            return lateStartHeading(b, view)
+            return lateStartAim(b, view)
         case .ocs:
             return navigate(b, to: startPoint(c) - c.upwind * 15, view)
         case .racing:
-            return navigate(b, to: waypoint(b, c), view)
+            if case .finish = c.legs[b.legIndex] { return finishAim(b, view) }
+            return navigate(b, to: waypoint(b, view), view)
         case .finished, .dsq, .dnf:
-            return b.heading
+            return Aim(heading: b.heading, b, tolerance: .pi)
         }
     }
 
@@ -163,7 +253,7 @@ struct BotBrain: Sendable {
     /// pre-start side, so one on the course side (she went past an end of the line) sails back below
     /// it as an OCS boat does, and one below it but beyond an end first sails in behind the line;
     /// otherwise she would loiter past the line, or keep hitting the end mark, and never start.
-    private mutating func lateStartHeading(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+    private mutating func lateStartAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
         let c = view.course
         let line = c.startLine
         if line.side(b.position) > 0 { return navigate(b, to: startPoint(c) - c.upwind * 15, view) }
@@ -180,7 +270,13 @@ struct BotBrain: Sendable {
         return line.pin.position + (line.committee.position - line.pin.position) * startSpot
     }
 
-    private mutating func prestartHeading(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+    /// Luffing and waiting, just inside the no-go zone, on whichever tack she is on: a tap this slow would
+    /// leave her head to wind.
+    static let luffAngle = deg2rad(28)
+    /// Reaching away along the line, on her tack.
+    static let reachAwayAngle = deg2rad(110)
+
+    private mutating func prestartAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
         let c = view.course
         let spot = startPoint(c)
         let timeLeft = -view.time
@@ -191,22 +287,24 @@ struct BotBrain: Sendable {
         if timeLeft > timeNeeded + 4 {
             let hold = spot - c.upwind * holdDepth
             if (hold - b.position).length > 12 { return navigate(b, to: hold, view) }
-            return b.windDirection - deg2rad(28) // luff and wait
+            return Aim(angle: Self.luffAngle, tack: b.tack) // luff and wait
         }
         // Too close to the line with time to kill: reach away along it rather than
         // luffing, because a luffing boat still coasts several lengths.
         let depth = -c.startLine.side(b.position)
         if depth < b.speed * 4 + 3 && depth / max(b.speed, 1) < timeLeft - 2 {
-            return b.windDirection - deg2rad(110)
+            return Aim(angle: Self.reachAwayAngle, tack: b.tack)
         }
         let eta = distance / max(b.speed, 1)
-        if eta < timeLeft - 3 { return b.windDirection - deg2rad(28) }
+        if eta < timeLeft - 3 { return Aim(angle: Self.luffAngle, tack: b.tack) }
         return navigate(b, to: spot - c.upwind * 2, view)
     }
 
     /// The point to sail at for the current leg: round each mark to port, approaching it along the
-    /// course (upwind to W, across from W to O); through the gate, then round the nearer of its marks.
-    private func waypoint(_ b: SeatView.OwnBoat, _ c: CourseLayout) -> Vec2 {
+    /// course (upwind to W on the starboard layline, across from W to O); through the gate, then round the
+    /// nearer of its marks.
+    private func waypoint(_ b: SeatView.OwnBoat, _ view: SeatView) -> Vec2 {
+        let c = view.course
         let leg = c.legs[b.legIndex]
         switch leg {
         case .round(let index):
@@ -216,6 +314,9 @@ struct BotBrain: Sendable {
                 let approach = index == CourseLayout.windwardIndex
                     ? c.upwind : (m - c.elements[CourseLayout.windwardIndex].marks[0].position).normalized
                 let side = approach.rightPerp
+                if b.roundingStage == 0 && index == CourseLayout.windwardIndex {
+                    return windwardApproach(b, view, fetch: m + side * 6 + approach * 4)
+                }
                 if b.roundingStage == 0 {
                     return detour(from: b.position, to: m + side * 6 + approach * 4, around: m,
                                   via: m + side * 7 - approach * 7)
@@ -233,49 +334,110 @@ struct BotBrain: Sendable {
         }
     }
 
+    /// Metres from her spot on the finish line inside which she sails straight for it, so she crosses the
+    /// line between its ends rather than gybing across an end.
+    static let finishApproach = 40.0
+
+    /// The finish: down to her spot on the line and through it. One that crossed beyond an end, below the
+    /// line but not finished, sails back up to the course side to cross it again.
+    private mutating func finishAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
+        let c = view.course
+        let line = c.finishLine
+        let spot = line.pin.position + (line.committee.position - line.pin.position) * finishSpot
+        if line.side(b.position) <= 0 { return navigate(b, to: spot + c.upwind * 15, view) }
+        let through = spot - c.upwind * 12
+        guard (spot - b.position).length < Self.finishApproach else { return navigate(b, to: through, view) }
+        plannedTack = b.tack
+        return Aim(heading: (through - b.position).bearing, b, tolerance: Self.reachTolerance)
+    }
+
+    /// Metres down the starboard layline from the windward mark's fetch point to where a boat that can't
+    /// fetch it yet sails first: far enough right of the mark that the port track there clears it.
+    static let laylineLead = 15.0
+
+    /// The point to beat to for the windward mark, rounded to port: `fetch`, beside and above it, on the
+    /// starboard layline. A boat that can't fetch it yet, and is below the layline's lead point, sails to that
+    /// point first, down the layline and right of the mark: a port track to the fetch point itself would run
+    /// over the mark, and a starboard one below the layline would pass under it.
+    private func windwardApproach(_ b: SeatView.OwnBoat, _ view: SeatView, fetch: Vec2) -> Vec2 {
+        let w = b.windDirection
+        let up = grooveAngle(.upwind, b, view)
+        if wrapAngle((fetch - b.position).bearing - w) <= -(up - Self.overstand) { return fetch }
+        let lead = fetch - Vec2.heading(w - up) * Self.laylineLead
+        return (lead - b.position).dot(view.course.upwind) > 0 ? lead : fetch
+    }
+
     /// `waypoint`, unless the straight line to it runs over `mark` — then `via` first.
     private func detour(from p: Vec2, to waypoint: Vec2, around mark: Vec2, via: Vec2) -> Vec2 {
         let closest = Collision.closestPoint(on: Segment(p, waypoint), to: mark)
         return (closest - mark).length < 4 ? via : waypoint
     }
 
-    private mutating func navigate(_ b: SeatView.OwnBoat, to target: Vec2, _ view: SeatView) -> Double {
+    /// The aim that sails her to `target`: the upwind groove on a tack inside the corridor to it, the
+    /// downwind groove on a gybe likewise, or straight there as a wind angle when it's a reach (the
+    /// laylines and the reach both expressed as the angle to the wind, ADR 0007). Her tactics choose the
+    /// tack inside the corridor, and may pinch or foot off the groove.
+    private mutating func navigate(_ b: SeatView.OwnBoat, to target: Vec2, _ view: SeatView) -> Aim {
         let toTarget = target - b.position
         let distance = toTarget.length
         let bearing = toTarget.bearing
         let w = b.windDirection
         let offWind = abs(wrapAngle(bearing - w))
-        let up = view.boatClass.polar.bestUpwind(tws: b.windSpeed).twa
-        let down = view.boatClass.polar.bestDownwind(tws: b.windSpeed).twa
+        let up = grooveAngle(.upwind, b, view)
+        let down = grooveAngle(.downwind, b, view)
         let lateral = (b.position - target).dot(Vec2.heading(w).rightPerp)
-        let corridor = max(20, distance * 0.35)
+        let corridor = max(20, distance * tactics.corridor)
 
         if offWind < up + deg2rad(2) {
+            // Where the target bears from her: to the right of the wind positive.
+            let relative = wrapAngle(bearing - w)
             var tack = plannedTack
             if lateral < -corridor {
                 tack = .port
             } else if lateral > corridor {
                 tack = .starboard
-            } else if view.time - lastTackTime > 15 && skill > 0.5 {
-                // Tack on headers.
-                let shift = wrapAngle(w - view.course.axis)
-                if tack == .starboard && shift < -deg2rad(4) { tack = .port }
-                if tack == .port && shift > deg2rad(4) { tack = .starboard }
+            } else if tack == .starboard && relative >= up + Self.overstand {
+                tack = .port // on the port layline
+            } else if tack == .port && relative <= -(up + Self.overstand) {
+                tack = .starboard // on the starboard layline
+            } else if distance > Self.tacticalRange {
+                tack = upwindTack(b, view, planned: tack)
             }
             setTack(tack, view)
-            return tack == .starboard ? w - up : w + up
+            return upwindAim(b, view, tack: tack, relative: relative, distance: distance)
         }
 
         if offWind > down - deg2rad(2) {
+            // Where the target bears from dead downwind: to the right looking downwind positive, as the
+            // port gybe's heading lies and against the starboard gybe's.
+            let fromDeadDownwind = wrapAngle(bearing - w - .pi)
             var gybe = plannedTack
-            if lateral < -corridor { gybe = .port } else if lateral > corridor { gybe = .starboard }
+            if lateral < -corridor {
+                gybe = .port
+            } else if lateral > corridor {
+                gybe = .starboard
+            } else if gybe == .starboard && fromDeadDownwind <= -(.pi - down + Self.overstand) {
+                gybe = .port // on the port layline
+            } else if gybe == .port && fromDeadDownwind >= .pi - down + Self.overstand {
+                gybe = .starboard // on the starboard layline
+            } else if distance > Self.tacticalRange {
+                gybe = downwindGybe(b, view, planned: gybe)
+            }
             setTack(gybe, view)
-            return gybe == .starboard ? w - down : w + down
+            return downwindAim(b, view, aim: .groove(.downwind, tack: gybe, angle: down))
         }
 
         plannedTack = b.tack
-        return bearing
+        return downwindAim(b, view, aim: Aim(heading: bearing, b, tolerance: Self.reachTolerance))
     }
+
+    /// How far the angle held on a reach may drift off the one her mark needs before she steers again.
+    static let reachTolerance = deg2rad(5)
+    /// How far past a layline she sails before tacking onto it: the tack's own loss.
+    static let overstand = deg2rad(1)
+    /// Metres from her mark inside which she tacks only on a layline or the corridor's edge: a header or
+    /// a puff this close would tack her below the layline, into the mark.
+    static let tacticalRange = 60.0
 
     private mutating func setTack(_ tack: Tack, _ view: SeatView) {
         guard tack != plannedTack else { return }
@@ -283,8 +445,8 @@ struct BotBrain: Sendable {
         lastTackTime = view.time
     }
 
-    /// Alters course if a collision is coming and this boat is the one that must keep clear.
-    private func keepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double {
+    /// A heading that keeps her clear if a collision is coming and she is the one that must keep clear.
+    private func keepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
         let lookahead = 2.5 + 2 * skill
         let myVelocity = Vec2.heading(desired) * b.speed
         for other in view.others where !other.isGhost {
@@ -309,11 +471,11 @@ struct BotBrain: Sendable {
                 return sailable(b.heading + (otherIsToStarboard ? -1 : 1) * deg2rad(35), wind: b.windDirection)
             }
         }
-        return desired
+        return nil
     }
 
-    /// Bears away from any mark the boat is about to sail into.
-    private func avoidMarks(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double {
+    /// A heading that bears her away from a mark she is about to sail into, if there is one.
+    private func avoidMarks(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
         let ahead = Vec2.heading(desired)
         for obstacle in view.course.obstacles {
             let offset = obstacle.position - b.position
@@ -324,7 +486,7 @@ struct BotBrain: Sendable {
             let markIsToStarboard = offset.dot(ahead.rightPerp) > 0
             return sailable(desired + (markIsToStarboard ? -1 : 1) * deg2rad(30), wind: b.windDirection)
         }
-        return desired
+        return nil
     }
 
     /// Nudges a heading out of the no-go zone, keeping it on the same side of the wind.
@@ -345,5 +507,50 @@ struct BotBrain: Sendable {
     private func isClearOfMarks(_ b: SeatView.OwnBoat, _ view: SeatView, lengths: Double) -> Bool {
         let room = view.boatClass.hull.length * lengths
         return view.course.obstacles.allSatisfy { ($0.position - b.position).length > $0.radius + room }
+    }
+}
+
+/// Where a bot wants to sail (#231): a sailing angle on a tack, which the autohelm holds once she has
+/// steered to it and centred the rudder. Everything is an angle to the wind (ADR 0007): the groove, a
+/// pinch or foot off it, and a course to a mark as the angle it needs now.
+struct Aim: Equatable {
+    var tack: Tack
+    /// Her sailing angle on `tack` (`BoomSide.sailingAngle`), radians, 0...π.
+    var angle: Double
+    /// The groove she wants: the autohelm snaps to it and follows it; nil for an angle it holds.
+    var groove: Autohelm.Groove?
+    /// How far the angle the autohelm holds may be off `angle` before she steers again.
+    var tolerance: Double
+
+    init(angle: Double, tack: Tack, tolerance: Double = deg2rad(1.5)) {
+        self.tack = tack
+        self.angle = angle
+        self.tolerance = tolerance
+    }
+
+    /// The groove on `tack`, at `angle` (her reckoning of it).
+    static func groove(_ groove: Autohelm.Groove, tack: Tack, angle: Double) -> Aim {
+        var aim = Aim(angle: angle, tack: tack)
+        aim.groove = groove
+        return aim
+    }
+
+    /// Sailing `heading` in the wind at `b` now. Within a few degrees of dead downwind she stays on her tack.
+    init(heading: Double, _ b: SeatView.OwnBoat, tolerance: Double) {
+        let relative = wrapAngle(b.windDirection - heading)
+        // Turning to starboard (+) brings a wind over the starboard side (+) towards the bow.
+        let tack: Tack = abs(relative) > .pi - deg2rad(3) ? b.tack : (relative >= 0 ? .starboard : .port)
+        self.init(angle: abs(relative), tack: tack, tolerance: tolerance)
+    }
+
+    /// Her compass heading on this aim in a wind blowing from `wind`.
+    func heading(wind: Double) -> Double {
+        tack == .starboard ? wind - angle : wind + angle
+    }
+
+    /// The same aim `offset` radians further off the wind (positive: foot, or deeper; negative: pinch,
+    /// or hotter), held as an angle.
+    func offset(by offset: Double, tolerance: Double = deg2rad(1.5)) -> Aim {
+        Aim(angle: (angle + offset).clamped(to: 0...(.pi)), tack: tack, tolerance: tolerance)
     }
 }
