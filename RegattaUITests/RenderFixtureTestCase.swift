@@ -97,12 +97,23 @@ class RenderFixtureTestCase: RaceUITestCase {
     @discardableResult @MainActor
     func assertMatches(_ actual: PixelImage, _ reference: PixelImage, named name: String, tolerance: DiffTolerance = .standard,
                        ignoringBottomRows: Int = 0, file: StaticString = #filePath, line: UInt = #line) -> ImageDiff {
-        let diff = ImageDiff(actual: actual, reference: reference, tolerance: tolerance, ignoringBottomRows: ignoringBottomRows)
-        if !diff.passes {
-            attachDiff(diff, actual: actual, reference: reference, named: name)
-            XCTFail("\(name) differs from its reference: \(diff.summary)", file: file, line: line)
-        }
+        let diff = compare(actual, reference, named: name, tolerance: tolerance, ignoringBottomRows: ignoringBottomRows)
+        if !diff.passes { XCTFail(Self.differsMessage(name, diff), file: file, line: line) }
         return diff
+    }
+
+    /// `assertMatches` without the failure: diffs and, when the diff fails, attaches the actual, reference and
+    /// diff PNGs, leaving the caller to fail the test once it has done whatever must come first.
+    @MainActor func compare(_ actual: PixelImage, _ reference: PixelImage, named name: String,
+                            tolerance: DiffTolerance = .standard, ignoringBottomRows: Int = 0) -> ImageDiff {
+        let diff = ImageDiff(actual: actual, reference: reference, tolerance: tolerance, ignoringBottomRows: ignoringBottomRows)
+        if !diff.passes { attachDiff(diff, actual: actual, reference: reference, named: name) }
+        return diff
+    }
+
+    /// The failure a diff that doesn't pass reports.
+    private static func differsMessage(_ name: String, _ diff: ImageDiff) -> String {
+        "\(name) differs from its reference: \(diff.summary)"
     }
 
     /// Attaches `<name>-actual.png`, `<name>-reference.png` and `<name>-diff.png` to the result bundle.
@@ -123,6 +134,11 @@ class RenderFixtureTestCase: RaceUITestCase {
     /// Renders fixture `name` and diffs it against this device's committed reference. With no reference
     /// for this device it attaches the render, then fails in CI and skips locally; while recording it
     /// writes the reference.
+    ///
+    /// Once the fixture has rendered, every path calls `saveActuals` before it fails, skips or throws:
+    /// `RaceUITestCase` sets `continueAfterFailure = false`, so an `XCTFail` (or a throwing `XCTUnwrap`)
+    /// ends the test on the spot and anything after it never runs. Failing first left no render for CI's
+    /// `render-actuals` upload (#215). Hence `compare` rather than `assertMatches` here.
     @MainActor func assertMatchesReference(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws {
         let mode = Self.referenceMode
         if mode == .refused {
@@ -160,12 +176,18 @@ class RenderFixtureTestCase: RaceUITestCase {
                 throw XCTSkip(message)
             }
         }
-        let reference = try XCTUnwrap(PixelImage(pngData: data), "\(url.path) isn't a PNG", file: file, line: line)
+        guard let reference = PixelImage(pngData: data) else {
+            // A committed reference that doesn't decode is as good as none: leave the render to replace it.
+            saveActuals(name, outcome: .noReference, render: actual, diff: nil, file: file, line: line)
+            XCTFail("\(url.path) isn't a PNG: in CI, adopt the render-actuals artifact with scripts/adopt-references.sh",
+                    file: file, line: line)
+            return
+        }
         // A reference recorded on any machine matches CI's render whatever state the home indicator was in.
-        let diff = assertMatches(actual, reference, named: name, ignoringBottomRows: render.homeIndicatorRows,
-                                 file: file, line: line)
+        let diff = compare(actual, reference, named: name, ignoringBottomRows: render.homeIndicatorRows)
         saveActuals(name, outcome: diff.passes ? .matched : .differed, render: actual, diff: diff.image,
                     file: file, line: line)
+        if !diff.passes { XCTFail(Self.differsMessage(name, diff), file: file, line: line) }
     }
 
     /// When CI names an actuals directory (`REFERENCE_ACTUALS_DIR`, #215), leaves a failing reference test's

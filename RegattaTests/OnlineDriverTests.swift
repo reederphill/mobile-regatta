@@ -41,12 +41,13 @@ import RegattaProtocol
     /// Every event the driver handed the session, and when.
     private(set) var shown: [(time: UInt64, event: RaceEvent)] = []
 
-    /// Seed 3's race, as the fake server sails it: a bot fouls another (port/starboard, 4 on 8) at tick
-    /// −209, three seconds into the ten-second sequence.
-    init(seed: UInt64 = 3, uplink: LinkFaults = .none, downlink: LinkFaults = .none) throws {
+    /// Seed 3's race, as the fake server sails it, in a ten-second sequence. With `collisionCourse`, seats 1
+    /// and 2 are set head to head below the fleet and seat 1 fouls seat 2 (port/starboard) about four
+    /// seconds in, whatever the bots do (`FakeRaceServer.setCollisionCourse`).
+    init(seed: UInt64 = 3, collisionCourse: Bool = false, uplink: LinkFaults = .none, downlink: LinkFaults = .none) throws {
         let clock = VirtualClock(now: 1_000_000)
         let link = FaultInjectingLink(clock: clock, uplink: uplink, downlink: downlink, seed: 1)
-        let server = try FakeRaceServer(seed: seed, transport: link.server, clock: clock)
+        let server = try FakeRaceServer(seed: seed, collisionCourse: collisionCourse, transport: link.server, clock: clock)
         let network = Network(link: link, server: server)
         let join = RaceJoin(connection: link.client, token: Self.token, clientBuild: "test", now: clock.now)
         while !join.isFinished {
@@ -91,10 +92,12 @@ import RegattaProtocol
 
     /// Injected delay (acceptance): with 300 ms on the way down, the prediction sails past the tick of the
     /// server's rule call well before the call arrives, and nothing is shown until it does, then exactly
-    /// the server's call.
+    /// the server's call. The call comes from two boats the fake server sets on a collision course, so it
+    /// doesn't hang on how the bots sail.
     @Test func injectedDelayShowsNoRuleCallBeforeTheServerEvent() throws {
         let delay: UInt64 = 300_000
-        let rig = try OnlineRig(uplink: LinkFaults(delay: 40_000, inOrder: true), downlink: LinkFaults(delay: delay, inOrder: true))
+        let rig = try OnlineRig(collisionCourse: true, uplink: LinkFaults(delay: 40_000, inOrder: true),
+                                downlink: LinkFaults(delay: delay, inOrder: true))
         var predictedTicks: [(time: UInt64, tick: Int)] = []
         var ruleMessagesBeforeTheCall = 0
         rig.run(for: 8_000_000) { now in
