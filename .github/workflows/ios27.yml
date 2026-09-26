@@ -77,6 +77,9 @@ jobs:
       # simulator now and then fails to launch the app ("Failed to get background assertion"). A test that
       # fails twice fails the job.
       - name: xcodebuild test (unit + UI) on iOS 27, iPhone and iPad
+        env:
+          # A failed reference compare leaves its render here, uploaded below as render-actuals (#215; ci.yml).
+          TEST_RUNNER_REFERENCE_ACTUALS_DIR: ${{ github.workspace }}/render-actuals
         run: |
           xcodebuild test -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=27.0' \
@@ -98,3 +101,13 @@ jobs:
             Regatta-ios27.xcresult
             launch-ios27.png
           if-no-files-found: ignore
+      # The references are pinned to ci.yml's iOS 26.5 run, which is what scripts/adopt-references.sh <PR>
+      # takes; this one is for a look at how iOS 27 draws (adopt it only with its run id, on purpose).
+      - name: Upload the renders that failed their reference compare (render-actuals)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-actuals
+          path: render-actuals
+          if-no-files-found: ignore
+          retention-days: 5

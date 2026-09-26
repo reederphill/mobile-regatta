@@ -7,7 +7,11 @@ import XCTest
 ///   `RenderFixture` in the app). The app reads them from this folder on the host, which the simulator can.
 /// - References are `References/<device>/<name>.png`, one folder per simulator device name, because
 ///   renders are only reproducible on one device and OS (Apple's libm and GPU, ADR 0002). CI pins both.
-/// - To record: run the UI tests with `-recordReferences` in the test runner's arguments, or with
+/// - A new or moved reference comes from CI (#215): CI sets `TEST_RUNNER_REFERENCE_ACTUALS_DIR`, a reference
+///   test whose compare fails (or that has no reference) leaves its render there as `<device>/<name>.png`,
+///   CI uploads the folder as the `render-actuals` artifact, and `scripts/adopt-references.sh` copies it into
+///   `References/`. See docs/agents/validation.md.
+/// - To record by hand: run the UI tests with `-recordReferences` in the test runner's arguments, or with
 ///   `TEST_RUNNER_RECORD_REFERENCES=1` in `xcodebuild`'s environment. Each reference test then rewrites its
 ///   reference and fails, so a recording run can't pass for a real one. Recording in CI (`CI` or
 ///   `GITHUB_ACTIONS`, passed in as `TEST_RUNNER_CI` / `TEST_RUNNER_GITHUB_ACTIONS`) is refused, and in CI a
@@ -122,7 +126,8 @@ class RenderFixtureTestCase: RaceUITestCase {
     @MainActor func assertMatchesReference(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws {
         let mode = Self.referenceMode
         if mode == .refused {
-            XCTFail("-recordReferences is refused in CI: record on a local simulator and commit the PNGs", file: file, line: line)
+            XCTFail("-recordReferences is refused in CI: a failing compare uploads CI's render as the render-actuals "
+                + "artifact; adopt it with scripts/adopt-references.sh", file: file, line: line)
             return
         }
         let render = try renderFixture(name, file: file, line: line)
@@ -144,8 +149,9 @@ class RenderFixtureTestCase: RaceUITestCase {
                 attachment.lifetime = .keepAlways
                 add(attachment)
             }
-            let message = "no reference for \(Self.deviceName) at \(url.path): record one with -recordReferences, "
-                + "or commit the attached \(name)-actual.png there"
+            saveActuals(name, outcome: .noReference, render: actual, diff: nil, file: file, line: line)
+            let message = "no reference for \(Self.deviceName) at \(url.path): in CI, adopt the render-actuals artifact "
+                + "with scripts/adopt-references.sh; locally, record one with -recordReferences"
             switch ReferencePolicy.missingReference(isCI: Self.isCI) {
             case .fail:
                 XCTFail(message, file: file, line: line)
@@ -156,6 +162,37 @@ class RenderFixtureTestCase: RaceUITestCase {
         }
         let reference = try XCTUnwrap(PixelImage(pngData: data), "\(url.path) isn't a PNG", file: file, line: line)
         // A reference recorded on any machine matches CI's render whatever state the home indicator was in.
-        assertMatches(actual, reference, named: name, ignoringBottomRows: render.homeIndicatorRows, file: file, line: line)
+        let diff = assertMatches(actual, reference, named: name, ignoringBottomRows: render.homeIndicatorRows,
+                                 file: file, line: line)
+        saveActuals(name, outcome: diff.passes ? .matched : .differed, render: actual, diff: diff.image,
+                    file: file, line: line)
+    }
+
+    /// When CI names an actuals directory (`REFERENCE_ACTUALS_DIR`, #215), leaves a failing reference test's
+    /// render and diff there for CI to upload as `render-actuals`, or clears what a failed earlier try left
+    /// once the test passes. Only `assertMatchesReference` calls this, so the fixture self-tests that call
+    /// `assertMatches` directly never write here.
+    @MainActor private func saveActuals(_ name: String, outcome: ReferencePolicy.CompareOutcome, render: PixelImage,
+                                        diff: PixelImage?, file: StaticString, line: UInt) {
+        let directory = ReferencePolicy.actualsDirectory(environment: ProcessInfo.processInfo.environment)
+        switch ReferencePolicy.actualsAction(outcome: outcome, directory: directory, device: Self.deviceName, name: name) {
+        case .nothing:
+            return
+        case let .remove(urls):
+            for url in urls where FileManager.default.fileExists(atPath: url.path) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        case let .write(renderURL, diffURL):
+            do {
+                try FileManager.default.createDirectory(at: renderURL.deletingLastPathComponent(),
+                                                        withIntermediateDirectories: true)
+                guard let png = render.pngData else { throw FixtureFailure(description: "the render has no PNG") }
+                try png.write(to: renderURL)
+                if let diffURL, let diffPNG = diff?.pngData { try diffPNG.write(to: diffURL) }
+            } catch {
+                XCTFail("couldn't leave \(name)'s render in \(renderURL.path) for render-actuals: \(error)",
+                        file: file, line: line)
+            }
+        }
     }
 }
