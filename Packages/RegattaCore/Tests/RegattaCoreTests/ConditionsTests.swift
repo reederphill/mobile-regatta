@@ -91,8 +91,8 @@ enum ConditionsFixtures {
     }
 
     @Test(arguments: [
-        // Outside the 90–180 s envelope (#10), either end.
-        (#""periodSeconds": { "min": 90, "max": 120 }"#, #""periodSeconds": { "min": 80, "max": 120 }"#),
+        // Outside the 60–180 s envelope (ADR 0001, #221), either end.
+        (#""periodSeconds": { "min": 90, "max": 120 }"#, #""periodSeconds": { "min": 50, "max": 120 }"#),
         (#""periodSeconds": { "min": 90, "max": 120 }"#, #""periodSeconds": { "min": 90, "max": 200 }"#),
         // Backwards ranges.
         (#""periodSeconds": { "min": 90, "max": 120 }"#, #""periodSeconds": { "min": 120, "max": 90 }"#),
