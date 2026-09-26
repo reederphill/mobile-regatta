@@ -11,7 +11,10 @@ import Foundation
 public struct BoatClass: DataFileContent {
     public static let kind = "boat class"
     public static let bundleDirectory = "boat-classes"
-    public static let supportedSchemaVersions = [1]
+    /// Schema 2 added the autohelm's steering values (#230). This build sails no schema-1 class: RegattaCore
+    /// holds no boat constants (ADR 0004), so it has nothing to fill them with. Logs sailed on one replay on
+    /// the simulation version that sailed them (ADR 0002).
+    public static let supportedSchemaVersions = [2]
 
     /// Name shown to players.
     public var name: String
@@ -56,6 +59,8 @@ public struct BoatClass: DataFileContent {
         public var rudderDrag: Double
         /// How fast the rudder moves, in full rudder (1.0) per second.
         public var rudderSlew: Double
+        /// How the autohelm steers (ADR 0007).
+        public var autohelm: AutohelmTuning
 
         /// Full-rudder turn rate at speed through the water `speed` (m/s), radians per second.
         public func turnRate(speed: Double) -> Double {
@@ -68,6 +73,21 @@ public struct BoatClass: DataFileContent {
             }
             return max(minTurnRate, topTurnRate * fraction)
         }
+    }
+
+    /// The autohelm's steering values (`Autohelm`, ADR 0007): tuning values, live-tunable as debug sliders
+    /// before they're written into a class file.
+    public struct AutohelmTuning: Sendable, Equatable {
+        /// Let go within this of the upwind groove, the autohelm takes the groove. Radians.
+        public var upwindSnap: Double
+        /// The same for the downwind groove. Radians.
+        public var downwindSnap: Double
+        /// Rudder (−1 … 1) it asks for per radian between the angle she sails and the one it holds.
+        public var gain: Double
+        /// How far short of dead downwind it sails a groove at 180° (the dead-run rule). Radians.
+        public var deadRunMargin: Double
+        /// How far short of the by-the-lee limit it holds an angle by the lee. Radians.
+        public var byTheLeeMargin: Double
     }
 
     /// The disturbed air behind a boat's sails, and the backwind just to windward of them.
@@ -106,8 +126,8 @@ public struct BoatClass: DataFileContent {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1:
-            self = try JSONDecoder().decode(BoatClassSchema1.self, from: fileData).boatClass(id: header.id)
+        case 2:
+            self = try JSONDecoder().decode(BoatClassSchema2.self, from: fileData).boatClass(id: header.id)
         default:
             throw DataFileError.unsupportedSchemaVersion(
                 kind: Self.kind, found: header.schemaVersion, supported: Self.supportedSchemaVersions)
@@ -131,10 +151,11 @@ public struct BoatClass: DataFileContent {
 
 public typealias BoatClassFile = DataFile<BoatClass>
 
-// MARK: - Schema 1
+// MARK: - Schema 2
 
-/// The boat class file, schema version 1, as written: knots, degrees, seconds, hull lengths.
-private struct BoatClassSchema1: Decodable {
+/// The boat class file, schema version 2, as written: knots, degrees, seconds, hull lengths. Schema 1 without
+/// `steering.autohelm`.
+private struct BoatClassSchema2: Decodable {
     struct Hull: Decodable {
         let lengthMetres: Double
         let beamMetres: Double
@@ -172,12 +193,23 @@ private struct BoatClassSchema1: Decodable {
             let fraction: Double
         }
 
+        /// Schema 2 (#230).
+        struct Autohelm: Decodable {
+            let upwindSnapDegrees: Double
+            let downwindSnapDegrees: Double
+            /// Rudder (−1 … 1) per degree of error.
+            let gainRudderPerDegree: Double
+            let deadRunMarginDegrees: Double
+            let byTheLeeMarginDegrees: Double
+        }
+
         let topTurnRateDegreesPerSecond: Double
         let minTurnRateDegreesPerSecond: Double
         let turnRateCurve: [CurvePoint]
         let headToWindFallOffDegreesPerSecond: Double
         let rudderDragPerSecond: Double
         let rudderSlewPerSecond: Double
+        let autohelm: Autohelm
     }
 
     struct WindShadow: Decodable {
@@ -259,6 +291,10 @@ private struct BoatClassSchema1: Decodable {
                   "turn rates must be positive, with min ≤ top")
         try check(steering.headToWindFallOffDegreesPerSecond >= 0 && steering.rudderDragPerSecond >= 0
                   && positive(steering.rudderSlewPerSecond), "steering rates must not be negative")
+        let helm = steering.autohelm
+        try check([helm.upwindSnapDegrees, helm.downwindSnapDegrees, helm.deadRunMarginDegrees, helm.byTheLeeMarginDegrees]
+                    .allSatisfy { $0 >= 0 && $0 < 90 }, "autohelm snap widths and margins must be 0..<90°")
+        try check(positive(helm.gainRudderPerDegree), "autohelm gain must be positive")
 
         try check(positive(windShadow.coneLengthHullLengths) && positive(windShadow.coneWidthAtBoatHullLengths)
                   && positive(windShadow.coneWidthAtEndHullLengths), "shadow cone sizes must be positive")
@@ -283,7 +319,14 @@ private struct BoatClassSchema1: Decodable {
                 turnRateCurveFractions: steering.turnRateCurve.map(\.fraction),
                 headToWindFallOffRate: deg2rad(steering.headToWindFallOffDegreesPerSecond),
                 rudderDrag: steering.rudderDragPerSecond,
-                rudderSlew: steering.rudderSlewPerSecond
+                rudderSlew: steering.rudderSlewPerSecond,
+                autohelm: .init(
+                    upwindSnap: deg2rad(helm.upwindSnapDegrees),
+                    downwindSnap: deg2rad(helm.downwindSnapDegrees),
+                    gain: helm.gainRudderPerDegree * 180 / .pi,
+                    deadRunMargin: deg2rad(helm.deadRunMarginDegrees),
+                    byTheLeeMargin: deg2rad(helm.byTheLeeMarginDegrees)
+                )
             ),
             windShadow: .init(
                 coneLength: windShadow.coneLengthHullLengths * length,

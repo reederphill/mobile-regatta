@@ -57,12 +57,13 @@ public struct Boat: Identifiable, Sendable {
     public var speed: Double
     /// Actual rudder, -1 (hard to port) … +1 (hard to starboard).
     public var rudder = 0.0
-    /// Rudder the helm is asking for.
+    /// Rudder the helm is asking for: the held input's off centre, else the autohelm's.
     public var desiredRudder = 0.0
     /// Which side the boom is on; her tack is the other side.
     public var boomSide: BoomSide
-    /// When set, the tack/gybe tap is steering the boat (#13).
-    public var autopilot: Autopilot?
+    /// What steers her while the held rudder is centred (ADR 0007): the wind angle or groove it holds,
+    /// and the tack/gybe tap it may be sailing (#13). Nil while the rudder is held off centre.
+    public var autohelm: Autohelm?
 
     public var status: BoatStatus = .prestart
     public var legIndex = 0
@@ -110,6 +111,8 @@ public struct Boat: Identifiable, Sendable {
         get { sailingWind.speed }
         set { sailingWind.speed = newValue }
     }
+    /// The wind speed her polar reads, m/s: the sailing wind's, slowed by any shadow (#10, #14).
+    public var polarWindSpeed: Double { sailingWind.speed * shadow }
 
     /// Sailing wind direction relative to the bow; positive = wind over the starboard side.
     public var relativeWind: Double { wrapAngle(windDirection - heading) }

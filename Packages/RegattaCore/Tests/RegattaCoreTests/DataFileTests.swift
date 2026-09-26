@@ -5,12 +5,15 @@ import Testing
 /// The bundled boat class races sail (`Race.defaultBoatClass`) and edited copies of its bytes.
 enum Fixtures {
     static let classID = "ilca-dinghy"
-    static let version = 2
+    static let version = 3
     /// SHA-256 of each bundled `Resources/boat-classes/ilca-dinghy@<version>.json`. A released file
     /// never changes (ADR 0004): if one fails, ship the change as the next version instead of editing it.
+    /// Versions 1 and 2 are schema 1, which this build refuses: they stay bundled for the builds that
+    /// replay the logs sailed on them (ADR 0002).
     static let pinnedHashes = [
         1: "8eb6e20398d859edafec53ef904227672dd5ef081d1611fcb2e89d7e9da5849d",
         2: "f5c8f1677a45f76c2ffe27914671ea0ce615614944f331027c506cafb6caa12d",
+        3: "0796b93570fb9723697162f3da4617b28ee0100f693116f1574a198c4c3bf792",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -61,7 +64,7 @@ enum Fixtures {
 @Suite struct DataFileLoaderTests {
     @Test func bundledBoatClassDecodes() throws {
         let file = try BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version)
-        #expect(file.schemaVersion == 1)
+        #expect(file.schemaVersion == 2)
         #expect(file.id == "ilca-dinghy")
         #expect(file.version == Fixtures.version)
         #expect(file.ref.id == "ilca-dinghy" && file.ref.version == Fixtures.version)
@@ -76,21 +79,47 @@ enum Fixtures {
 
     @Test(arguments: Fixtures.pinnedHashes.keys.sorted())
     func hashOfBundledFileIsPinned(version: Int) throws {
-        let file = try BoatClassFile.bundled(id: Fixtures.classID, version: version)
-        #expect(file.ref.hash.hex == Fixtures.pinnedHashes[version])
-        #expect(file.ref.hash == ContentHash(of: try #require(try BoatClassFile.bundledData(id: Fixtures.classID, version: version))))
+        let data = try #require(try BoatClassFile.bundledData(id: Fixtures.classID, version: version))
+        #expect(ContentHash(of: data).hex == Fixtures.pinnedHashes[version])
     }
 
-    @Test(arguments: [0, 2, 99])
+    @Test(arguments: [0, 1, 3, 99])
     func wrongSchemaVersionThrows(schemaVersion: Int) throws {
-        let data = try Fixtures.edited([(of: #""schemaVersion": 1,"#, with: #""schemaVersion": \#(schemaVersion),"#)])
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: schemaVersion, supported: [1])) {
+        let data = try Fixtures.edited([(of: #""schemaVersion": 2,"#, with: #""schemaVersion": \#(schemaVersion),"#)])
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: schemaVersion, supported: [2])) {
             try BoatClassFile(data: data)
         }
     }
 
+    /// #230: schema 1 has no autohelm values and RegattaCore holds no boat constants to fill them with
+    /// (ADR 0004), so this build refuses a schema-1 class: the bundled versions 1 and 2, a race that
+    /// names one, and version 3's own content headed as schema 1.
+    @Test func schemaOneBoatClassIsRefused() throws {
+        for version in [1, 2] {
+            let data = try #require(try BoatClassFile.bundledData(id: Fixtures.classID, version: version))
+            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2])) {
+                try BoatClassFile(data: data)
+            }
+            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2])) {
+                try BoatClassFile.bundled(id: Fixtures.classID, version: version)
+            }
+            let ref = FileRef(id: Fixtures.classID, version: version, hash: ContentHash(of: data))
+            let setup = try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot], boatClass: ref)
+            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2])) {
+                try RaceFiles(resolving: setup)
+            }
+        }
+        let headedOne = try Fixtures.edited([(of: #""schemaVersion": 2,"#, with: #""schemaVersion": 1,"#)])
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2])) {
+            try BoatClassFile(data: headedOne)
+        }
+        #expect(BoatClass.supportedSchemaVersions == [2])
+        #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: Fixtures.classID, version: 3)).ref,
+                "races sail ilca-dinghy@3 unless told otherwise")
+    }
+
     @Test func missingHeaderIsMalformed() throws {
-        let data = try Fixtures.edited([(of: #""schemaVersion": 1,"#, with: "")])
+        let data = try Fixtures.edited([(of: #""schemaVersion": 2,"#, with: "")])
         #expect {
             try BoatClassFile(data: data)
         } throws: { error in
@@ -103,7 +132,7 @@ enum Fixtures {
     @Test(arguments: [
         (#""name": "Dinghy","#, #""name": "Dinghy", "name": "Other","#, "/name"),
         (#""beamMetres": 1.5,"#, #""beamMetres": 1.5, "beamMetres": 2,"#, "/hull/beamMetres"),
-        (#""schemaVersion": 1,"#, #""schemaVersion": 1, "schemaVersion": 2,"#, "/schemaVersion"),
+        (#""schemaVersion": 2,"#, #""schemaVersion": 2, "schemaVersion": 1,"#, "/schemaVersion"),
     ])
     func duplicateKeyIsMalformed(of: String, with: String, pointer: String) throws {
         // Refused before anything parses the file, whatever the kind: parsers disagree on which copy wins.
@@ -181,11 +210,12 @@ enum Fixtures {
     }
 
     @Test func multipleVersionsLoadSideBySide() throws {
-        let v1 = try BoatClassFile.bundled(id: Fixtures.classID, version: 1)
+        // Version 3 as bundled, and "versions" 1 and 2 of its content: any two versions of a class.
+        let v1 = try BoatClassFile(data: Fixtures.edited([(of: #""version": 3,"#, with: #""version": 1,"#)]))
         let v2 = try BoatClassFile(data: Fixtures.edited([
-            (of: #""version": 1,"#, with: #""version": 2,"#),
+            (of: #""version": 3,"#, with: #""version": 2,"#),
             (of: #""boatSpeedFactor": 0.6"#, with: #""boatSpeedFactor": 0.7"#),
-        ], version: 1))
+        ]))
         #expect(v2.version == 2 && v2.id == v1.id)
         #expect(v2.ref.hash != v1.ref.hash)
         #expect(v1.content.contact.boat == 0.6)
@@ -203,9 +233,9 @@ enum Fixtures {
 
         // A released version never changes: a second, different "version 2" is refused.
         let otherV2 = try BoatClassFile(data: Fixtures.edited([
-            (of: #""version": 1,"#, with: #""version": 2,"#),
+            (of: #""version": 3,"#, with: #""version": 2,"#),
             (of: #""boatSpeedFactor": 0.6"#, with: #""boatSpeedFactor": 0.8"#),
-        ], version: 1))
+        ]))
         #expect(throws: DataFileError.conflictingVersion(existing: v2.ref, new: otherV2.ref)) {
             try catalog.add(otherV2)
         }
@@ -224,6 +254,10 @@ enum Fixtures {
         }
         for pointer in ["/steering/rudderSlewPerSecond", "/windShadow/backwind", "/windShadow/stackingFloor"] {
             #expect(placeholders.contains(pointer), "\(pointer) should be marked as a placeholder")
+        }
+        // #230: every autohelm value is a placeholder until it's tuned as a debug slider (ADR 0007).
+        for field in ["upwindSnapDegrees", "downwindSnapDegrees", "gainRudderPerDegree", "deadRunMarginDegrees", "byTheLeeMarginDegrees"] {
+            #expect(placeholders.contains("/steering/autohelm/" + field), "\(field) should be marked as a placeholder")
         }
     }
 
@@ -252,6 +286,8 @@ enum Fixtures {
         #expect(c.steering.topTurnRate == deg2rad(30))
         #expect(c.steering.minTurnRate == deg2rad(10))
         #expect(c.steering.rudderSlew > 0 && c.steering.rudderDrag >= 0 && c.steering.headToWindFallOffRate > 0)
+        #expect(c.steering.autohelm == .init(upwindSnap: deg2rad(3), downwindSnap: deg2rad(5), gain: 0.1 * 180 / .pi,
+                                             deadRunMargin: deg2rad(3), byTheLeeMargin: deg2rad(3)))
 
         #expect(c.windShadow.coneLength == 8 * length)
         #expect(c.windShadow.lossCloseIn == 0.25)
@@ -262,6 +298,25 @@ enum Fixtures {
 
         #expect(c.contact == .init(boat: 0.6, mark: 0.5))
         #expect(c.ease.speedFraction > 0 && c.ease.speedFraction < 1 && c.ease.timeConstant > 0)
+    }
+
+    /// #230: the autohelm's values are checked at load like the rest of the steering.
+    @Test(arguments: [
+        (#""gainRudderPerDegree": 0.1"#, #""gainRudderPerDegree": 0"#),
+        (#""upwindSnapDegrees": 3"#, #""upwindSnapDegrees": -1"#),
+        (#""downwindSnapDegrees": 5"#, #""downwindSnapDegrees": 90"#),
+        (#""deadRunMarginDegrees": 3"#, #""deadRunMarginDegrees": 95"#),
+    ])
+    func autohelmValuesAreChecked(of: String, with: String) throws {
+        let data = try Fixtures.edited([(of: of, with: with)])
+        #expect {
+            try BoatClassFile(data: data)
+        } throws: { error in
+            if case .invalidContent(kind: "boat class", id: "ilca-dinghy", reason: let reason) = error as? DataFileError {
+                return reason.contains("autohelm")
+            }
+            return false
+        }
     }
 
     static let outline = "[[0, 2.1], [0.75, 0.21], [0.63, -2.1], [-0.63, -2.1], [-0.75, 0.21]]"

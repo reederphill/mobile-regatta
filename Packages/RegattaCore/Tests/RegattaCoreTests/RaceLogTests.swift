@@ -86,7 +86,7 @@ enum ScriptedLog {
                 let roll = rng.int(in: 0..<20)
                 var rudder = roll < 10 ? 0 : roll < 16 ? rng.int(in: -20...20) : roll < 19 ? rng.int(in: -80...80) : (rng.bool() ? 127 : -127)
                 let ease = rng.int(in: 0..<10) < (t < 0 ? 3 : 1)
-                if tacks { rudder = 0 } // hands off while the tack autopilot runs
+                if tacks { rudder = 0 } // hands off while the autohelm sails the tap
                 race.apply(BoatInput(rudder: Int8(rudder), ease: ease), seat: seat, atTick: t)
                 if tacks { race.tap(.tackGybe, seat: seat, atTick: t) }
                 nextChange[seat] = step + rng.int(in: 20...150)
@@ -199,11 +199,12 @@ enum ScriptedLog {
         for _ in 0..<9 { race.step() }
         #expect(race.tick == t - 1)
         #expect(race.heldInputs[0] == .neutral)
-        #expect(race.boats[0].desiredRudder == 0)
+        #expect(race.boats[0].autohelm != nil, "the rudder centred: the autohelm steers")
 
         race.step()
         #expect(race.heldInputs[0] == input)
         #expect(race.boats[0].desiredRudder == 1)
+        #expect(race.boats[0].autohelm == nil)
 
         for _ in 0..<30 { race.step() }
         #expect(race.heldInputs[0] == input, "held until the seat sends another")
@@ -236,35 +237,23 @@ enum ScriptedLog {
         #expect(race.tap(.tackGybe, seat: 0, atTick: t) == t)
         #expect(race.tap(.protest(target: 1), seat: 0, atTick: t) == t)
 
-        var autopilotStarts: [Int] = []
+        var tapStarts: [Int] = []
         var protests: [RaceEvent] = []
-        var engaged = false
+        var tapping = false
         for _ in 0..<(Race.tickRate * 10) {
             race.step()
-            let now = race.boats[0].autopilot != nil
-            if now && !engaged { autopilotStarts.append(race.tick) }
-            engaged = now
+            let now = race.boats[0].autohelm?.isTapping == true
+            if now && !tapping { tapStarts.append(race.tick) }
+            tapping = now
             protests += race.drainEvents().filter { $0.kind == .protestRecorded(seat: 0, target: 1) }
         }
-        #expect(autopilotStarts == [t])
-        #expect(!engaged, "the tack finished and wasn't started again")
+        #expect(tapStarts == [t])
+        #expect(!tapping, "the tack finished and wasn't started again")
         #expect(protests == [RaceEvent(tick: t, kind: .protestRecorded(seat: 0, target: 1))])
         #expect(try #require(race.log).inputs == [
             InputRecord(tick: t, seat: 0, kind: .tap(.tackGybe)),
             InputRecord(tick: t, seat: 0, kind: .tap(.protest(target: 1))),
         ])
-    }
-
-    @Test func rudderInputCancelsTheTackAutopilot() {
-        let race = testRace(seats: [.human, .human], seed: 3)
-        let t = race.tick + 1
-        race.tap(.tackGybe, seat: 0, atTick: t)
-        race.apply(BoatInput(rudder: 0.5), seat: 0, atTick: t + 5)
-        for _ in 0..<5 { race.step() }
-        #expect(race.boats[0].autopilot != nil)
-        race.step()
-        #expect(race.boats[0].autopilot == nil)
-        #expect(race.boats[0].desiredRudder == BoatInput(rudder: 0.5).rudderValue)
     }
 
     @Test func badInputsAreRejected() {

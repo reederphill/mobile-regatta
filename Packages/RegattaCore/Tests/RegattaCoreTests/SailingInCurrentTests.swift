@@ -15,15 +15,19 @@ func steadyCurrent(knots: Double, towards bearing: Double) -> CurrentField {
 }
 
 /// A race of `seats` humans in `current`, stepped 10 ticks into its sequence so every boat has her
-/// winds, then with its world edited by `place`.
-func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3,
+/// winds, then with its world edited by `place`. `wind` replaces the keyed wind over the ground, as
+/// `Race.init(setup:files:mode:current:wind:)` says. Every boat is let go where she's placed: her autohelm
+/// engages on the next step, on the angle she sails then (ADR 0007).
+func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: ((_ tick: Int) -> GroundWind)? = nil,
                 _ place: (inout WorldSnapshot, Race) -> Void) throws -> Race {
     let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .human, count: seats), laps: 2,
                               startSequenceTicks: 60 * Race.tickRate)
     let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
-                        mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)), current: current)
+                        mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)), current: current,
+                        wind: wind)
     for _ in 0..<10 { race.step() }
     var snapshot = race.exportSnapshot()
+    for seat in snapshot.seats.indices { snapshot.seats[seat].boat.autohelm = nil }
     place(&snapshot, race)
     try race.importSnapshot(snapshot)
     return race
@@ -35,18 +39,20 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3,
     /// 2 kn towards the east.
     let current = steadyCurrent(knots: 2, towards: .pi / 2)
 
-    /// Stopped head to wind: she falls off slowly, and inside the no-go zone her speed stays 0.
-    func stopped(_ boat: inout Boat) {
-        boat.speed = 0
-        boat.heading = boat.windDirection
-        boat.rudder = 0
-        boat.desiredRudder = 0
-        boat.boomSide = .port
+    /// Stopped head to wind, holding a touch of rudder towards the wind so the autohelm stays off and
+    /// doesn't bear her away (ADR 0007): she falls off slowly, and inside the no-go zone her speed stays 0.
+    func stopped(_ seat: inout WorldSnapshot.Seat) {
+        seat.boat.speed = 0
+        seat.boat.heading = seat.boat.windDirection
+        seat.boat.rudder = 0
+        seat.boat.desiredRudder = 0
+        seat.boat.boomSide = .port
+        seat.heldInput = BoatInput(rudder: Int8(8))
     }
 
     @Test func stoppedBoatMovesExactlyByTheCurrentEachTick() throws {
         let race = try placedRace(current: current) { snapshot, _ in
-            stopped(&snapshot.seats[0].boat)
+            stopped(&snapshot.seats[0])
             snapshot.seats[1].boat.position = snapshot.seats[0].boat.position + Vec2(0, -300)
         }
         for _ in 0..<(2 * Race.tickRate) {
@@ -87,8 +93,8 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3,
     @Test func ghostDriftsWithTheCurrentAndCastsNoShadow() throws {
         func race(ghost: Bool) throws -> Race {
             try placedRace(current: current) { snapshot, _ in
+                stopped(&snapshot.seats[0])
                 var caster = snapshot.seats[0].boat
-                stopped(&caster)
                 if ghost {
                     caster.status = .finished
                     caster.place = 1
@@ -124,7 +130,7 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3,
         let race = try placedRace(seats: 4, current: steadyCurrent(knots: 1.5, towards: deg2rad(200))) { snapshot, race in
             let origin = snapshot.seats[0].boat.position
             for seat in 0..<4 { snapshot.seats[seat].boat.position = origin + Vec2(Double(seat) * 60, 0) }
-            stopped(&snapshot.seats[0].boat) // stopped, before the start
+            stopped(&snapshot.seats[0]) // stopped, before the start
             var sailing = snapshot.seats[1].boat // sailing close-hauled, before the start
             let best = race.boatClass.polar.bestUpwind(tws: sailing.windSpeed)
             sailing.heading = wrapAngle(sailing.windDirection - best.twa)
@@ -214,8 +220,8 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3,
         let mark = setupRace.course.marksOfLeg(leg)[0]
         let east = Vec2(1, 0)
         let race = try placedRace(current: current) { snapshot, race in
+            stopped(&snapshot.seats[0])
             var boat = snapshot.seats[0].boat
-            stopped(&boat)
             boat.status = .racing
             boat.legIndex = 0
             // Just up-current of the mark: her side 30 cm off it.

@@ -99,6 +99,9 @@ import Testing
                                 position: leeward.position + Vec2.heading(apparent.direction) * 0.6 * shadow.backwindLength,
                                 heading: leeward.heading, speed: leeward.speed, boomSide: .port)
                 windward.sailingWind = leeward.sailingWind
+                // Her autohelm holds the angle she's placed on, not the groove, which moves with the wind
+                // strength her backwind leaves her: the same course in both races, so only the speed differs.
+                windward.autohelm = Autohelm(target: .angle(leeward.sailingAngle))
                 if !together { leeward.position += Vec2(400, 0) }
                 snapshot.seats[0].boat = leeward
                 snapshot.seats[1].boat = windward
@@ -130,9 +133,11 @@ import Testing
     }
 
     @Test func boatInShadowKeepsTheWindDirection() throws {
-        // A reaching caster with a reaching boat two lengths down her cone; the same boat alone.
+        // A reaching caster with a reaching boat two lengths down her cone; the same boat alone. In a wind
+        // the same everywhere, so the autohelm holds both on their course exactly (ADR 0007).
+        let steady = GroundWind(direction: 0, speed: metresPerSecond(knots: 10))
         func race(together: Bool) throws -> Race {
-            try placedRace(current: noCurrent) { snapshot, _ in
+            try placedRace(current: noCurrent, wind: { _ in steady }) { snapshot, _ in
                 var caster = snapshot.seats[0].boat
                 caster.heading = wrapAngle(caster.windDirection - .pi / 2)
                 caster.speed = dinghy.polar.speed(twa: .pi / 2, tws: caster.windSpeed)
@@ -158,7 +163,8 @@ import Testing
                 #expect(shaded.sailingWind == clear.sailingWind)
                 #expect(shaded.windOverGround == clear.windOverGround)
             }
-            // Shadow slows her; it never turns the wind she steers by.
+            // Shadow slows her; it never turns the wind she steers by, so her autohelm holds the same course.
+            #expect(shaded.sailingWind.direction == clear.sailingWind.direction)
             #expect(shaded.heading == clear.heading)
         }
         #expect(together.boats[1].speed < alone.boats[1].speed)

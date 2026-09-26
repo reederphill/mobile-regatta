@@ -31,8 +31,8 @@ public struct FNV1a: Sendable {
 }
 
 public extension Race {
-    /// Golden digest: FNV-1a over the tick, the bit pattern of every field of every boat, and each
-    /// seat's held input, then every pair's overlap as of the last point of certainty. Equal digests on the replay platform mean bit-for-bit equal races (ADR 0002).
+    /// Golden digest: FNV-1a over the tick, the bit pattern of every field of every boat (her autohelm's
+    /// target and tap included), and each seat's held input, then every pair's overlap as of the last point of certainty. Equal digests on the replay platform mean bit-for-bit equal races (ADR 0002).
     func digest() -> UInt64 {
         var h = FNV1a()
         h.combine(tick)
@@ -49,8 +49,9 @@ public extension Race {
             h.combine(b.speed)
             h.combine(b.rudder)
             h.combine(b.desiredRudder)
-            h.combine(b.autopilot?.heading)
-            h.combine(b.autopilot?.boomSide.digestCode)
+            h.combine(b.autohelm?.target.digestCode)
+            h.combine(b.autohelm?.target.angle)
+            h.combine(b.autohelm?.isTapping ?? false)
             h.combine(b.boomSide.digestCode)
             h.combine(b.status.digestCode)
             h.combine(b.legIndex)
@@ -85,6 +86,17 @@ extension BoatStatus {
         case .finished: 3
         case .dsq: 4
         case .dnf: 5
+        }
+    }
+}
+
+extension Autohelm.Target {
+    /// Stable codes for the digest, independent of the enum's declaration order.
+    var digestCode: Int {
+        switch self {
+        case .angle: 0
+        case .groove(.upwind): 1
+        case .groove(.downwind): 2
         }
     }
 }

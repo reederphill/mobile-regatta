@@ -281,7 +281,7 @@ struct LogFeeder {
             ("position.x", { $0.position.x = .nan }),
             ("heading", { $0.heading = .infinity }),
             ("speed", { $0.speed = .nan }),
-            ("autopilot", { $0.autopilot = Autopilot(heading: -.infinity, boomSide: .port) }),
+            ("autohelm", { $0.autohelm = Autohelm(target: .angle(-.infinity)) }),
             ("penaltyProgress", { $0.penaltyProgress = .nan }),
             ("shadow", { $0.shadow = .nan }),
             ("finishTime", { $0.finishTime = .nan }),
@@ -343,6 +343,7 @@ struct LogFeeder {
         "events": "undrained output, not state; import drops them",
         "appliedInputs": "the race log, not world state",
         "seatEvents": "the race log, not world state",
+        "scriptedWind": "a test's wind in place of the keyed wind, fixed at construction like the setup (`Race.init(setup:files:mode:current:wind:)`)",
     ]
 
     @Test func everyStoredRacePropertyIsCarriedOrExcluded() {

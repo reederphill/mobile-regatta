@@ -124,7 +124,7 @@ import Testing
         #expect(race.boats[0].status == .racing)
     }
 
-    @Test func autopilotTackMirrorsHeading() {
+    @Test func tapTakesTheBoatOntoTheOtherTack() {
         let race = testRace(seats: [.human, .human], seed: 3)
         let before = race.boats[0]
         race.tap(.tackGybe, seat: 0, atTick: race.tick + 1)
