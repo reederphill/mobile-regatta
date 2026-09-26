@@ -239,3 +239,33 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         #expect(one[1].sailingName == FleetRoster.sailingNames[Int(seed % UInt64(FleetRoster.sailingNames.count))])
     }
 }
+
+@Suite struct BotPenaltyTurnTests {
+    /// Seat 0 at `offset` from the windward mark, owing a turn with 60° of it already turned (her
+    /// rounding counts towards it), the other boat far off: the rudder her brain answers with, given
+    /// the side she turns penalties to.
+    func rudder(atOffset offset: Vec2, penaltyDirection: Double) throws -> Int8 {
+        let race = botRace(seats: [.bot, .bot], seed: 5)
+        var snapshot = race.exportSnapshot()
+        snapshot.seats[0].boat.position = race.course.obstacles[CourseLayout.windwardIndex].position + offset
+        snapshot.seats[0].boat.status = .racing
+        snapshot.seats[0].boat.penaltyTurnsOwed = 1
+        snapshot.seats[0].boat.penaltyProgress = deg2rad(60)
+        try race.importSnapshot(snapshot)
+        #expect(race.boats[0].isTakingPenalty)
+        var brain = BotBrain(style: BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, holdDepth: 20,
+                                             timingSlack: 0, penaltyDirection: penaltyDirection))
+        return brain.decide(for: 0, in: race).input.rudder
+    }
+
+    /// The #79 smoke breach: a bot that touched a mark spun hard over beside it on `isTakingPenalty`,
+    /// touching it again and owing another turn each time round (up to 15 mark contacts a race). Beside
+    /// the mark she sails (the same rudder whichever side she turns penalties to); clear, she turns.
+    @Test func aBotOwingATurnBesideAMarkSailsClearBeforeTurning() throws {
+        let beside = Vec2(3, -3)
+        #expect(try rudder(atOffset: beside, penaltyDirection: 1) == rudder(atOffset: beside, penaltyDirection: -1))
+        let clear = Vec2(30, -30)
+        #expect(try rudder(atOffset: clear, penaltyDirection: 1) == BoatInput(rudder: 1.0).rudder)
+        #expect(try rudder(atOffset: clear, penaltyDirection: -1) == BoatInput(rudder: -1.0).rudder)
+    }
+}

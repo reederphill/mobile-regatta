@@ -61,6 +61,8 @@ struct BotBrain: Sendable {
     let style: BotStyle
     var plannedTack: Tack = .starboard
     var lastTackTime = -1_000.0
+    /// Hard over on penalty turns until none are owed (see `decide`).
+    var servingPenalty = false
 
     init(style: BotStyle) {
         self.style = style
@@ -75,7 +77,14 @@ struct BotBrain: Sendable {
     mutating func decide(for i: Int, in race: Race) -> BotDecision {
         let boat = race.boats[i]
         guard boat.isOnCourse else { return BotDecision(input: .neutral) }
-        if boat.penaltyTurnsOwed > 0 && (boat.isTakingPenalty || isClearOfTraffic(boat, race)) {
+        // Penalty turns start only clear of boats and of marks by three lengths, then go on whoever comes
+        // near, unless they carry her within a length of a mark: she sails on and starts again clear. The
+        // sim counts every turn since the boat came to owe one, a rounding included, so going by
+        // `isTakingPenalty` spun a boat that had just touched a mark hard over against it, touching it
+        // again (and owing another turn) on every turn.
+        servingPenalty = servingPenalty && boat.penaltyTurnsOwed > 0 && isClearOfMarks(boat, race, lengths: 1)
+        if boat.penaltyTurnsOwed > 0 && (servingPenalty || (isClearOfTraffic(boat, race) && isClearOfMarks(boat, race, lengths: 3))) {
+            servingPenalty = true
             return BotDecision(input: BoatInput(rudder: style.penaltyDirection))
         }
         let desired = desiredHeading(boat, race)
@@ -297,5 +306,13 @@ struct BotBrain: Sendable {
 
     private func isClearOfTraffic(_ b: Boat, _ race: Race) -> Bool {
         race.boats.allSatisfy { $0.id == b.id || !$0.isOnCourse || ($0.position - b.position).length > 7 }
+    }
+
+    /// Whether every mark is more than `lengths` hull lengths clear of the boat. Penalty turns sweep a
+    /// circle about two lengths across; three lengths of room to start them keeps that circle off the
+    /// mark. No allowance for current: #100 owns navigating in it.
+    private func isClearOfMarks(_ b: Boat, _ race: Race, lengths: Double) -> Bool {
+        let room = race.boatClass.hull.length * lengths
+        return race.course.obstacles.allSatisfy { ($0.position - b.position).length > $0.radius + room }
     }
 }
