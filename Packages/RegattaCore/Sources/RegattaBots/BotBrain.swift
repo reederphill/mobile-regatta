@@ -109,7 +109,7 @@ struct BotBrain: Sendable {
         case .prestart where race.time < 0:
             return prestartHeading(b, race)
         case .prestart:
-            return navigate(b, to: startPoint(c) + c.upwind * 20, race)
+            return lateStartHeading(b, race)
         case .ocs:
             return navigate(b, to: startPoint(c) - c.upwind * 15, race)
         case .racing:
@@ -117,6 +117,22 @@ struct BotBrain: Sendable {
         case .finished, .dsq, .dnf:
             return b.heading
         }
+    }
+
+    /// After the gun, not yet started. A boat starts only by crossing the line itself from the
+    /// pre-start side, so one on the course side (she went past an end of the line) sails back below
+    /// it as an OCS boat does, and one below it but beyond an end first sails in behind the line;
+    /// otherwise she would loiter past the line, or keep hitting the end mark, and never start.
+    private mutating func lateStartHeading(_ b: Boat, _ race: Race) -> Double {
+        let c = race.course
+        let line = c.startLine
+        if line.side(b.position) > 0 { return navigate(b, to: startPoint(c) - c.upwind * 15, race) }
+        let along = (b.position - line.pin.position).dot((line.committee.position - line.pin.position).normalized)
+        let clearOfEnds = race.boatClass.hull.length
+        if along < clearOfEnds || along > line.length - clearOfEnds {
+            return navigate(b, to: startPoint(c) - c.upwind * 5, race)
+        }
+        return navigate(b, to: startPoint(c) + c.upwind * 20, race)
     }
 
     private func startPoint(_ c: CourseLayout) -> Vec2 {

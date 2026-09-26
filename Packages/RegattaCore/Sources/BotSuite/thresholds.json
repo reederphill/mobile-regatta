@@ -1,9 +1,9 @@
 {
   "maxP99TickMs": 10,
   "tiers": {
-    "club": { "minFinishShare": 0.6, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 3, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 },
-    "regional": { "minFinishShare": 0.6, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 3, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 },
-    "national": { "minFinishShare": 0.6, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 3, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 },
-    "seeded": { "minFinishShare": 0.6, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 3, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 }
+    "club": { "minFinishShare": 0.75, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 2, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 },
+    "regional": { "minFinishShare": 0.75, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 2, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 },
+    "national": { "minFinishShare": 0.75, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 2, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 },
+    "seeded": { "minFinishShare": 0.75, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 2, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 }
   }
 }
