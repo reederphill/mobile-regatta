@@ -62,9 +62,17 @@ struct RootView: View {
                         .id(ObjectIdentifier(launch))
                 }
             }
-            // UI tests swipe on it and check it stays.
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("race-cover")
+            // UI tests swipe on it and check it stays. A full-size element behind the race, not a container
+            // around it: a container folds into the race view's own single element (`race-viewport`) and takes
+            // over its identifier, and the viewport UI tests look the race rect up by it.
+            .background {
+                Color.clear
+                    .ignoresSafeArea()
+                    .accessibilityElement()
+                    .accessibilityLabel("Race")
+                    .accessibilityIdentifier("race-cover")
+                    .accessibilitySortPriority(-1)
+            }
             .environment(\.sceneState, sceneState)
             .environment(\.screenSize, screenSize)
             .preferredColorScheme(.dark)

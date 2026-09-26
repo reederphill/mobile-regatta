@@ -30,39 +30,41 @@ struct MenuPageView: View {
 }
 
 /// A practice race's setup, then Start. The setup is kept for the next race.
+///
+/// A scroll view and a column, like the other pages, rather than a `Form`: an identifier on a `Form` doesn't
+/// reach the accessibility tree, and UI tests find the page by its column's `page-practiceSetup`.
 private struct PracticeSetupView: View {
     @Bindable var model: AppModel
 
     var body: some View {
-        Form {
-            Section {
-                Stepper(value: $model.settings.opponents, in: 1...15) {
-                    LabeledContent {
-                        Text("\(model.settings.opponents)").font(MenuFont.number(.body))
-                    } label: {
-                        Text("Opponents").font(MenuFont.body())
+        ScrollView {
+            VStack(spacing: 20) {
+                VStack(spacing: 0) {
+                    Stepper(value: $model.settings.opponents, in: 1...15) {
+                        HStack {
+                            Text("Opponents").font(MenuFont.body())
+                            Spacer(minLength: 12)
+                            Text("\(model.settings.opponents)").font(MenuFont.number(.body))
+                        }
+                    }
+                    .padding(16)
+                    Divider()
+                    row("Laps") {
+                        Picker("Laps", selection: $model.settings.laps) {
+                            ForEach(1...3, id: \.self) { Text("\($0)").tag($0) }
+                        }
+                    }
+                    Divider()
+                    row("Start sequence") {
+                        Picker("Start sequence", selection: $model.settings.prestartSeconds) {
+                            Text("30s").tag(30.0)
+                            Text("60s").tag(60.0)
+                            Text("90s").tag(90.0)
+                        }
                     }
                 }
-                LabeledContent("Laps") {
-                    Picker("Laps", selection: $model.settings.laps) {
-                        ForEach(1...3, id: \.self) { Text("\($0)").tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                }
-                LabeledContent("Start sequence") {
-                    Picker("Start sequence", selection: $model.settings.prestartSeconds) {
-                        Text("30s").tag(30.0)
-                        Text("60s").tag(60.0)
-                        Text("90s").tag(90.0)
-                    }
-                    .pickerStyle(.segmented)
-                    .fixedSize()
-                }
-            }
-            .listRowBackground(ChromePalette.surface)
+                .background(ChromePalette.surface, in: .rect(cornerRadius: 16))
 
-            Section {
                 Button(action: model.startPractice) {
                     Text("Start race")
                         .font(MenuFont.heading(.title3))
@@ -73,13 +75,26 @@ private struct PracticeSetupView: View {
                 .controlSize(.large)
                 .accessibilityIdentifier("practice-start")
             }
-            .listRowBackground(Color.clear)
-            .listRowInsets(EdgeInsets())
+            .padding(.vertical, 20)
+            .readableColumn()
+            // UI tests check the page was pushed.
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("page-practiceSetup")
         }
-        // UI tests check the page was pushed.
-        .accessibilityIdentifier("page-practiceSetup")
         .menuBackground()
         .navigationTitle("Practice")
+    }
+
+    /// A setup row: its label, then a segmented picker.
+    private func row(_ label: String, @ViewBuilder picker: () -> some View) -> some View {
+        HStack {
+            Text(label).font(MenuFont.body())
+            Spacer(minLength: 12)
+            picker()
+                .pickerStyle(.segmented)
+                .fixedSize()
+        }
+        .padding(16)
     }
 }
 
