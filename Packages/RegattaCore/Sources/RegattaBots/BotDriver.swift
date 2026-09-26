@@ -56,13 +56,22 @@ public struct BotDriver: Sendable {
         (tick + phase).isMultiple(of: BotDriver.decisionInterval)
     }
 
-    /// Call once per tick, before `race.step()`. On a decision tick, reads the race as it stands
-    /// and sends its decision for the next tick; otherwise the last decision stays held.
-    /// Returns the decision it sent, if any.
+    /// Call once per tick, before `race.step()`. On a decision tick, hands its brain what the seat sees
+    /// now (`Race.seatView(for:)`, #98), never the race, and sends the decision for the next tick;
+    /// otherwise the last decision stays held. Returns the decision it sent, if any.
     @discardableResult
     public mutating func drive(_ race: Race) -> BotDecision? {
         guard !race.isOver, decides(atTick: race.tick) else { return nil }
-        let decision = brain.decide(for: seat, in: race)
+        return drive(race, seeing: race.seatView(for: seat))
+    }
+
+    /// Decides on `view`, the seat's view of `race` now (a decision tick of a race not over), and sends the
+    /// decision for the next tick: `drive(_:)` with the view built by the caller, as `SeatControllers` builds
+    /// the fleet's together.
+    @discardableResult
+    mutating func drive(_ race: Race, seeing view: SeatView) -> BotDecision {
+        precondition(view.seat == seat && view.tick == race.tick, "seat \(seat) at tick \(race.tick) given the view of seat \(view.seat) at tick \(view.tick)")
+        let decision = brain.decide(view)
         decisions += 1
         let next = race.tick + 1
         race.apply(decision.input, seat: seat, atTick: next)

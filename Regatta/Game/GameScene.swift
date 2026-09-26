@@ -266,35 +266,20 @@ final class GameScene: SKScene {
         }
     }
 
+    /// Your laylines, from the formula a bot sees them by (`Laylines`, `SeatView.laylines`).
     private func updateLaylines(_ world: RenderWorld) {
         let player = world.me
         let course = world.course
-        let leg = player.status == .racing ? course.legs[player.legIndex] : (player.isOnCourse ? course.legs[0] : .finish)
-        guard case .round(let index) = leg else {
-            laylines.path = nil
-            return
-        }
-        let mark = course.targetPosition(for: leg)
-        guard let ground = world.groundWind(at: mark) else {
-            laylines.path = nil
-            return
-        }
-        let w = ground.direction
-        let polar = world.boatClass.polar
-        let angle: Double
-        switch index {
-        case CourseLayout.windwardIndex: angle = polar.bestUpwind(tws: ground.speed).twa
-        case CourseLayout.gateIndex: angle = polar.bestDownwind(tws: ground.speed).twa
-        default:
-            // The reach to the offset mark is laid across the wind: a boat fetches it, so it has no laylines.
+        let leg = course.legSailed(status: player.status, legIndex: player.legIndex)
+        guard let lines = Laylines(for: leg, in: course, polar: world.boatClass.polar, wind: world.groundWind(at:)) else {
             laylines.path = nil
             return
         }
         let path = CGMutablePath()
-        for heading in [w - angle, w + angle] {
+        for heading in [lines.starboardHeading, lines.portHeading] {
             // The layline is the track that arrives at the mark on this heading.
-            path.move(to: point(mark))
-            path.addLine(to: point(mark - Vec2.heading(heading) * 350))
+            path.move(to: point(lines.mark))
+            path.addLine(to: point(lines.mark - Vec2.heading(heading) * 350))
         }
         laylines.path = path.copy(dashingWithPhase: 0, lengths: [10, 10])
     }
