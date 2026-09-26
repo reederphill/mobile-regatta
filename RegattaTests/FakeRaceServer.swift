@@ -15,6 +15,7 @@ import RegattaProtocol
 /// - Answers pings; sends a snapshot every 3rd tick with the input feedback; every event on the reliable
 ///   stream (all of them reach every seat but the notices), and wind key k at tick `windowStart(k) − 30`.
 /// - Answers `RequestResync` with a `Resync`.
+/// - With `collisionCourse`, sets two seats nobody helms head to head, for a foul at a known time.
 ///
 /// It records when it sent each event, and every client input it applied.
 nonisolated final class FakeRaceServer {
@@ -46,16 +47,39 @@ nonisolated final class FakeRaceServer {
     private(set) var resyncsSent = 0
     private(set) var joins = 0
 
-    init(seats: Int = 10, seed: UInt64, startSequenceTicks: Int = 300, transport: RaceTransport, clock: VirtualClock) throws {
-        let kinds: [SeatKind] = (0..<seats).map { $0 == 0 ? .human : .bot }
+    /// Seat 0 is the client's and the rest are bots, but with `collisionCourse` seats 1 and 2 are human seats
+    /// nobody helms, set on a collision course (`setCollisionCourse`).
+    init(seats: Int = 10, seed: UInt64, startSequenceTicks: Int = 300, collisionCourse: Bool = false,
+         transport: RaceTransport, clock: VirtualClock) throws {
+        let kinds: [SeatKind] = (0..<seats).map { $0 == 0 || (collisionCourse && $0 <= 2) ? .human : .bot }
         let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: kinds, laps: 1, startSequenceTicks: startSequenceTicks)
-        race = Race(setup: setup, windSeed: WindSeed(seed &* 7))
-        bots = SeatControllers(race.boats.indices.map { $0 == 0 ? .human : .bot(BotDriver(seat: $0, raceSeed: setup.raceSeed)) })
+        let race = Race(setup: setup, windSeed: WindSeed(seed &* 7))
+        if collisionCourse { try Self.setCollisionCourse(race) }
+        self.race = race
+        bots = SeatControllers(setup: setup)
         self.transport = transport
         self.clock = clock
         startedAt = clock.now
         keys = try WindKeyGenerator(windSeed: race.windSeed!, setup: race.windSetup, windows: race.wind.windows)
         revealKeys(send: false)
+    }
+
+    /// Moves seats 1 and 2 before the first tick: 24 m apart abreast, 150 m below the start line and the
+    /// fleet, reaching straight at each other, 1 on port and 2 on starboard. Nobody helms them, so their
+    /// autohelms hold their wind angles and they stay head to head through any shift. Seat 1 fouls seat 2
+    /// (port/starboard) about four seconds into the sequence, whatever the bots do. The client's
+    /// prediction, sailed from the setup, picks up where they are from the first snapshot.
+    private static func setCollisionCourse(_ race: Race) throws {
+        var world = race.exportSnapshot()
+        let course = race.course
+        let meet = course.startLine.centre - course.upwind * 150
+        for (seat, side) in [(1, -1.0), (2, 1.0)] {
+            let heading = (course.right * -side).bearing
+            world.seats[seat].boat.position = meet + course.right * (side * 12)
+            world.seats[seat].boat.heading = heading
+            world.seats[seat].boat.boomSide = .leeward(ofRelativeWind: wrapAngle(race.windSetup.meanDirection - heading))
+        }
+        try race.importSnapshot(world)
     }
 
     /// A new connection from the client, which will say `Hello` on it.
