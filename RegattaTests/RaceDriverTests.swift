@@ -75,6 +75,26 @@ import RegattaCore
         #expect(clock.advance(by: 0) == 0)
         #expect(clock.advance(by: -1) == 0)
     }
+
+    /// A spent budget still runs one tick, and the ticks it skipped are dropped, not owed to the next frame.
+    @Test func aSpentBudgetRunsOneTickAndDropsTheRest() {
+        let driver = PracticeDriver(config: RaceDriverTests.config, timescale: 8)
+        let start = driver.currentFrame.tick
+        #expect(driver.tick(0.1, within: .zero).count == 1, "0.1 s at 8× owes 24 ticks")
+        #expect(driver.tick(1.0 / 240, within: .zero).count == 1, "one tick's worth runs one tick, no backlog")
+        #expect(driver.currentFrame.tick == start + 2)
+        #expect(driver.tick(0.1, within: .seconds(60)).count == 24, "a budget that isn't spent runs them all")
+    }
+
+    /// The budget only changes when ticks run: the race it sails is the same, tick for tick.
+    @Test func aBudgetSailsTheSameRace() {
+        let unbudgeted = PracticeDriver(config: RaceDriverTests.config, timescale: 8)
+        let budgeted = PracticeDriver(config: RaceDriverTests.config, timescale: 8)
+        for _ in 0..<50 { unbudgeted.tick(0.1) }
+        while budgeted.currentFrame.tick < unbudgeted.currentFrame.tick { budgeted.tick(0.1, within: .zero) }
+        #expect(budgeted.currentFrame.tick == unbudgeted.currentFrame.tick)
+        #expect(budgeted.digest() == unbudgeted.digest())
+    }
 }
 
 @MainActor @Suite struct PracticeDriverTests {

@@ -24,6 +24,11 @@ protocol RaceDriver: AnyObject {
     /// Runs the fixed ticks that `dt` seconds of real time cover, and returns their frames in order
     /// (none if `dt` doesn't reach the next tick).
     @discardableResult func tick(_ dt: Double) -> [TickFrame]
+    /// `tick(dt)`, but it stops starting ticks once `budget` of wall-clock time has gone, so a frame
+    /// always leaves the main thread time to draw and answer (a fast `-timescale` in a slow simulator
+    /// saturated it in the iOS 27 CI run). The ticks it doesn't run are dropped, not owed: the race falls behind real
+    /// time instead of catching up, and runs the same ticks in the same order, only later. Nil runs them all.
+    @discardableResult func tick(_ dt: Double, within budget: Duration?) -> [TickFrame]
 
     /// Your held input. Call it as often as you like: the driver latches the latest value and applies
     /// it once per tick, from the next tick. Ignored while a bot sails your seat (`-demo`).
@@ -45,6 +50,9 @@ protocol RaceDriver: AnyObject {
 
 extension RaceDriver {
     var isFrozen: Bool { false }
+
+    /// A driver that keeps real time (online) or runs no ticks (a fixture) runs them all.
+    @discardableResult func tick(_ dt: Double, within budget: Duration?) -> [TickFrame] { tick(dt) }
 
     /// Interpolates the fleet from `previousFrame` to `currentFrame` by `alpha`.
     var renderWorld: RenderWorld {

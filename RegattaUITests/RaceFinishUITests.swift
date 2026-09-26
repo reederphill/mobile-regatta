@@ -4,7 +4,8 @@ import XCTest
 final class RaceFinishUITests: RaceUITestCase {
     /// Nobody steers your boat, so the race ends at the time limit after the bots finish: about 20 min of race,
     /// 40 s at 32×. The wait allows a slow CI runner. A tick costs about 0.15 ms in a Debug build and a frame
-    /// runs at most 0.1 s of real time, so 32× is at most about 100 ticks a frame.
+    /// runs at most 0.1 s of real time, so 32× is at most about 100 ticks a frame, and at most 8 ms of them
+    /// (`GameScene.tickBudget`): a slower simulator runs the race slower than 32×, never a frame longer.
     @MainActor func testPracticeRaceReachesTheFinish() throws {
         let app = launchRace(["-timescale", "32"])
         let results = app.staticTexts["race-results"]

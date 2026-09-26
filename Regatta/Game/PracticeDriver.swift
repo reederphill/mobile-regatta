@@ -63,14 +63,20 @@ final class PracticeDriver: RaceDriver {
     func digest() -> UInt64 { race.digest() }
 
     @discardableResult
-    func tick(_ dt: Double) -> [TickFrame] {
+    func tick(_ dt: Double) -> [TickFrame] { tick(dt, within: nil) }
+
+    @discardableResult
+    func tick(_ dt: Double, within budget: Duration?) -> [TickFrame] {
         // A finished race stands still: no ticks, and `alpha` holds at the last one.
         guard !race.isOver else { return [] }
         let due = clock.advance(by: dt)
+        let deadline = budget.map { ContinuousClock.now + $0 }
         var frames: [TickFrame] = []
         for _ in 0..<due {
             frames.append(step())
             if race.isOver { break }
+            // Past the budget the rest of `due` is dropped: at least one tick runs, so the race advances.
+            if let deadline, ContinuousClock.now >= deadline { break }
         }
         return frames
     }
