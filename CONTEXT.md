@@ -30,6 +30,12 @@ _Avoid_: spin, 720, 360 (except as UI shorthand)
 Breaking a rule of Part 2 of the RRS with respect to another boat.
 _Avoid_: collision (contact is not itself a foul)
 
+**Incident**:
+What triggers a ruling between two boats: contact, or a near miss. One incident per pair until they separate by 2 hull lengths.
+
+**Near miss**:
+No contact, but sweeping an overlapped right-of-way boat's hull ±10° over 0.5 s would hit. It triggers a ruling as contact does.
+
 **Last point of certainty**:
 The last moment at which it was certain whether two boats were overlapped, or whether a boat was in a mark's zone. A change counts only once it has held for a short margin.
 _Avoid_: overlap timer

@@ -84,7 +84,13 @@ import Glibc
 ///    never-started one from the close, `Race.isGhost(seat:)`); `dnf` is gone, and a boat still racing at the
 ///    close keeps `racing`. The results score finishers, then by distance to finish round the remaining
 ///    marks, DSQ, OCS and RET, and standings rank boats racing by that distance, with no stage bonus.
-public let simulationRevision = 15
+/// 16: incidents (#88), on 15. A ruling is triggered by contact or by a near miss: an overlapped pair where
+///    the right-of-way boat, swept ±10° from her heading and sailed on in a straight line for 0.5 s while
+///    the other holds her course (fleet-rules' `incidents.nearMissSweep`), would hit. Near misses are the
+///    authoritative race's alone. One incident per pair until their hulls are more than 2 hull lengths
+///    apart (`incidents.separation`), held in the umpire's memory; the 5 s foul memory the world carried is
+///    gone. Contacts are announced (`contact`). Rule 21 still overrides Section A.
+public let simulationRevision = 16
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

@@ -74,11 +74,11 @@ import RegattaCore
 
     /// Types that carry another boat's input, the umpire's records and memory, names, the keys or the
     /// whole world: a view holds none of them, however deep.
-    static let forbiddenTypes = #"\b(?:Race|Boat|BoatInput|BoatTap|InputRecord|RaceLog|WorldSnapshot|Seat|FoulMemory|Incident|IncidentIndex|UmpireState|OverlapTracker|FleetRoster|WindField|WindKeyChain|WindKey|WindSeed)\b"#
+    static let forbiddenTypes = #"\b(?:Race|Boat|BoatInput|BoatTap|InputRecord|RaceLog|WorldSnapshot|Seat|Incident|IncidentIndex|UmpireState|OverlapTracker|FleetRoster|WindField|WindKeyChain|WindKey|WindSeed)\b"#
     /// Field names for the same, anywhere in a view.
     static let forbiddenLabels: Set = [
         "heldInput", "heldInputs", "input", "desiredRudder", "incidents", "incident", "incidentId", "umpire",
-        "fouls", "foulMemory", "lastFoul", "rule18", "exonerated", "overlaps", "keys", "windKeys", "windSeed",
+        "fouls", "openIncidents", "rule18", "exonerated", "overlaps", "keys", "windKeys", "windSeed",
         "sailingName", "handle", "isPlayer", "isBot", "roster",
     ]
 

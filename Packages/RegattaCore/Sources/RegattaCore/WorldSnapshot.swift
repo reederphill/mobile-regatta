@@ -1,14 +1,16 @@
 /// The whole predictable world at one tick (ADR 0005): every stored field of every boat, each seat's
 /// held input, and the race-level memory the step reads. `Race.importSnapshot(_:)` of
-/// `Race.exportSnapshot()` continues bit for bit like the race it came from, given the same inputs.
+/// `Race.exportSnapshot()` continues bit for bit like the race it came from, given the same inputs,
+/// while neither race's umpire holds an incident open.
 ///
 /// It is lossless and in memory only: the wire carries a quantised subset (`RegattaProtocol`), which
 /// a receiver merges into its own snapshot. The wind is in it only as the keys held (`windKeys`): the
 /// wind is a function of the race clock and the keys (ADR 0001), and keys are public once revealed.
-/// Two things are never in it:
+/// Three things are never in it:
 /// - the wind seed, which never leaves the race's key generator (ADR 0001);
 /// - anything about who sails a seat: bot brains run only where the race is hosted, and a boat's
-///   future is its held input, bot or human (#18, #19).
+///   future is its held input, bot or human (#18, #19);
+/// - the umpire's memory (`UmpireState`), the authoritative race's own (#88): which incidents are open.
 ///
 /// Later core tickets that add state to `Boat` or to a seat extend this and the wire field list;
 /// the coverage tests in both packages fail until they do.
@@ -57,20 +59,8 @@ public struct WorldSnapshot: Sendable {
         }
     }
 
-    /// When a pair was last called for a foul, in race seconds. Umpire memory: it stays where the race
-    /// is judged and is never sent to clients (#18); a receiver keeps its own.
-    public struct FoulMemory: Hashable, Sendable {
-        public let pair: SeatPair
-        public let time: Double
-
-        public init(pair: SeatPair, time: Double) {
-            self.pair = pair
-            self.time = time
-        }
-    }
-
     /// A pair's overlap as of the last point of certainty, and the ticks in a row its hulls have shown
-    /// otherwise (`OverlapTracker`, #87). Like foul memory, never sent to clients: a receiver keeps its own.
+    /// otherwise (`OverlapTracker`, #87). Never sent to clients: a receiver keeps its own.
     public struct OverlapMemory: Hashable, Sendable {
         public let pair: SeatPair
         public let isOverlapped: Bool
@@ -94,11 +84,10 @@ public struct WorldSnapshot: Sendable {
     /// Seats touching an edge at this tick, by seat then `ObstructionKind.allCases`: a touch slows a boat
     /// most, and is recorded, when it begins.
     public var touchingEdges: [EdgeContact]
-    /// By pair.
-    public var foulMemory: [FoulMemory]
-    /// Every incident so far. Umpire memory like `foulMemory`: never sent to clients (#18, #96), and a
-    /// receiver keeps its own. Rule calls carry their incident's id, so a race that imports goes on
-    /// numbering from here, and the rules read past incidents (#88, #94).
+    /// Every incident so far: never sent to clients (#18, #96), and a receiver keeps its own. Rule calls
+    /// carry their incident's id, so a race that imports goes on numbering from here, and the rules read
+    /// past incidents (#94). Which incidents are still open is the umpire's memory (`UmpireState`, #88),
+    /// never the world's.
     public var incidents: IncidentIndex
     public var firstFinishTime: Double?
     public var isOver: Bool
@@ -119,7 +108,7 @@ public struct WorldSnapshot: Sendable {
 
     public init(
         tick: Int, seats: [Seat], touchingBoats: [SeatPair] = [], touchingObstacles: [ObstacleContact] = [],
-        touchingEdges: [EdgeContact] = [], foulMemory: [FoulMemory] = [], incidents: IncidentIndex = IncidentIndex(),
+        touchingEdges: [EdgeContact] = [], incidents: IncidentIndex = IncidentIndex(),
         firstFinishTime: Double? = nil, isOver: Bool = false, results: RaceResults? = nil,
         windKeys: WindKeyChain = WindKeyChain(), overlaps: [OverlapMemory] = []
     ) {
@@ -128,7 +117,6 @@ public struct WorldSnapshot: Sendable {
         self.touchingBoats = touchingBoats
         self.touchingObstacles = touchingObstacles
         self.touchingEdges = touchingEdges
-        self.foulMemory = foulMemory
         self.incidents = incidents
         self.firstFinishTime = firstFinishTime
         self.isOver = isOver

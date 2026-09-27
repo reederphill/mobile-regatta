@@ -101,16 +101,18 @@ public struct RightOfWay: Sendable, Equatable {
 }
 
 public enum Rules {
-    /// Decides which of two boats in contact was required to keep clear. `overlapped` is the pair's
-    /// overlap as of the last point of certainty (`OverlapTracker`); `hull` is their boat class's.
-    /// Nil if either is a ghost.
+    /// Decides which of two boats in an incident, a contact or a near miss (`Race`, #88), was required to
+    /// keep clear: rule 21 over Section A, then the mark-room shortcut (until #91), then rules 10–13
+    /// (`rightOfWay`). `overlapped` is the pair's overlap as of the last point of certainty
+    /// (`OverlapTracker`); `hull` is their boat class's. Nil if either is a ghost.
     public static func judge(_ a: Boat, _ b: Boat, overlapped: Bool, course: CourseLayout, hull: BoatClass.Hull) -> Verdict? {
         guard !a.isGhost, !b.isGhost else { return nil }
         func call(_ rule: RacingRule, _ offender: Boat, _ victim: Boat) -> Verdict {
             Verdict(rule: rule, offender: offender.id, victim: victim.id)
         }
         /// Rule 21: a boat returning to start (21.1, `CourseLayout.isReturning`: OCS and sailing back, not an
-        /// OCS boat sailing on) or taking a penalty (21.2) keeps clear.
+        /// OCS boat sailing on) or taking a penalty (21.2, once 30° into her turn: `Boat.isTakingPenalty`;
+        /// until then she keeps her rights) keeps clear.
         func rule21(_ boat: Boat) -> RacingRule { course.isReturning(boat) ? .returningToStart : .takingAPenalty }
 
         let aMustKeepClear = a.isTakingPenalty || course.isReturning(a)

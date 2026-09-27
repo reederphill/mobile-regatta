@@ -259,8 +259,8 @@ public struct EventState: Equatable, Sendable {
     /// Makes `world`'s race-level state the server's: every boat's place and finish time (nil for boats
     /// not in `finishes`), the first finish and whether the race is over. Results the world holds are
     /// dropped while the server's race isn't over: a prediction that closed ahead of the server scored
-    /// itself, and its results are never the race's (the server's come in `raceClosed`). Contact, foul
-    /// and incident memory are left alone. Throws for a finish naming a seat `world` doesn't have.
+    /// itself, and its results are never the race's (the server's come in `raceClosed`). Contact and
+    /// incident memory are left alone. Throws for a finish naming a seat `world` doesn't have.
     public func apply(to world: inout WorldSnapshot) throws {
         guard finishes.allSatisfy({ world.seats.indices.contains($0.seat) }) else {
             throw WireError.invalidValue("finishes.seat")
@@ -335,7 +335,7 @@ public struct Resync: Equatable, Sendable {
 
     /// The world at `tick` (the frame's tick), built on `base`, the receiver's own snapshot (a freshly
     /// built race's, on a rejoin): the wire seats, finishes and the race's end from the event state, and
-    /// the revealed wind keys. Contact, foul and incident memory stay as the base has them, less the
+    /// the revealed wind keys. Contact and incident memory stay as the base has them, less the
     /// obstruction contacts it began after `tick` (`merge`).
     public func world(base: WorldSnapshot, tick: Int) throws -> WorldSnapshot {
         var world = try merge(seats, into: base, tick: tick)
@@ -395,7 +395,7 @@ public struct Snapshot: Equatable, Sendable {
     /// race is over) from `events`, the server's event state as the client has it from `RaceStart` /
     /// `Resync` and the reliable events since (`EventState.record`). So a client whose own prediction
     /// ended the race, or finished a boat, takes the server's word at every snapshot. The other fields
-    /// the wire leaves out (`SnapshotFields.excluded`) and contact, foul, overlap and incident memory keep the
+    /// the wire leaves out (`SnapshotFields.excluded`) and contact, overlap and incident memory keep the
     /// base's values: incidents are umpire memory, which stays on the server (#18, #96). The base's
     /// obstruction contacts that began after `tick` are dropped (`merge`): the client sails those ticks again.
     public func applied(to base: WorldSnapshot, tick: Int, events: EventState) throws -> WorldSnapshot {

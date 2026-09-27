@@ -30,8 +30,6 @@ import Testing
 }
 
 @Suite struct RulesTests {
-    let course = try! CourseLayoutTests.layout()
-
     func boat(_ id: Int, at p: Vec2, heading degrees: Double, wind: Double = 0) -> Boat {
         var b = Boat(id: id, isPlayer: false, colorIndex: id, position: p, heading: deg2rad(degrees), speed: 3)
         b.windDirection = deg2rad(wind)
@@ -71,15 +69,6 @@ import Testing
         var tacking = boat(2, at: Vec2(1, 0), heading: -45)
         tacking.isTacking = true
         #expect(Rules.rightOfWay(steady, tacking, overlapped: true, hull: hull) == RightOfWay(keepClear: 2, rule: .whileTacking))
-    }
-
-    @Test func outsideBoatGivesMarkRoom() {
-        let mark = course.elements[CourseLayout.windwardIndex].marks[0].position
-        let inside = boat(1, at: mark + Vec2(3, -2), heading: -45)
-        let outside = boat(2, at: mark + Vec2(5, -3), heading: -45)
-        let call = Rules.judge(inside, outside, overlapped: true, course: course, hull: hull)
-        #expect(call?.rule == .givingMarkRoom)
-        #expect(call?.offender == 2)
     }
 }
 

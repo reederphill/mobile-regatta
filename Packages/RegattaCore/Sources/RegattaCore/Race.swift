@@ -43,8 +43,9 @@ public final class Race {
     public let current: CurrentField
     /// The tide state at the gun the log records (ADR 0003), or nil at a venue with no current.
     public let tideStateAtGun: Double?
-    /// The umpire's memory: the authoritative race's alone, nil for a prediction.
-    public let umpire: UmpireState?
+    /// The umpire's memory: the authoritative race's alone, nil for a prediction. Never in a snapshot:
+    /// a test that compares a race with one importing its world hands this on too (`WorldSnapshotTests`).
+    public internal(set) var umpire: UmpireState?
 
     /// The bundled defaults (`RaceFiles.defaults`), for code that needs one of them without a race.
     public static var defaultBoatClass: BoatClass { RaceFiles.defaults.boatClass.content }
@@ -100,7 +101,6 @@ public final class Race {
     private var obstacleContacts = Set<Pair>()
     /// Seats touching an edge of the race area, by kind.
     private var edgeContacts = Set<WorldSnapshot.EdgeContact>()
-    private var lastFoul: [Pair: Double] = [:]
     /// Every pair's overlap as of the last point of certainty (#87), updated once a tick.
     public private(set) var overlaps: OverlapTracker
     private var events: [RaceEvent] = []
@@ -389,6 +389,7 @@ public final class Race {
         // reads this tick's certain overlap.
         overlaps.update(boats, hull: boatClass.hull, margin: lastPointOfCertaintyTicks)
         resolveBoatContacts()
+        callNearMisses()
         resolveObstacleContacts()
         resolveEdgeContacts()
         for i in boats.indices { updateProgress(i, from: previous[i]) }
@@ -539,26 +540,37 @@ public final class Race {
         }
     }
 
+    /// Boats touching: a contact costs both boats speed and is announced (`RaceEvent.Kind.contact`) on the
+    /// tick it begins, and opens an incident unless the pair has one open (`call`). The pushes part them.
+    /// A pair not touching whose open incident the umpire holds closes it once their hulls are more than
+    /// the rules configuration's `incidents.separation` apart. A ghost can't be touched.
     private func resolveBoatContacts() {
         var touching = Set<Pair>()
-        let outline = boatClass.hull.outline
-        let hulls = boats.map { $0.hull(outline: outline) }
-        // A ghost can't be touched.
+        let hull = boatClass.hull
+        let hulls = boats.map { $0.hull(outline: hull.outline) }
+        let separation = rules.incidents.separation.metres(hullLength: hull.length)
         for i in boats.indices where !boats[i].isGhost {
             for j in (i + 1)..<boats.count where !boats[j].isGhost {
-                guard (boats[i].position - boats[j].position).length < boatClass.hull.length * 1.3,
-                      let push = Collision.penetration(hulls[i], hulls[j])
-                else { continue }
+                let apart = (boats[i].position - boats[j].position).length
+                guard apart < hull.length * 1.3, let push = Collision.penetration(hulls[i], hulls[j]) else {
+                    // The hulls are no further apart than the centres, so only a pair whose centres are past
+                    // the separation can have separated.
+                    if apart > separation, isIncidentOpen(i, j),
+                       Collision.distance(convex: hulls[i], simplePolygon: hulls[j]) > separation {
+                        umpire?.close(SeatPair(i, j))
+                    }
+                    continue
+                }
 
                 let pair = Pair(a: i, b: j)
                 touching.insert(pair)
                 if !boatContacts.contains(pair) {
                     boats[i].speed = BoatDynamics.speed(after: .boat, speed: boats[i].speed, boatClass: boatClass)
                     boats[j].speed = BoatDynamics.speed(after: .boat, speed: boats[j].speed, boatClass: boatClass)
-                    if (lastFoul[pair] ?? -.infinity) + 5 < time,
+                    emit(.contact(SeatPair(i, j)))
+                    if !isIncidentOpen(i, j),
                        let verdict = Rules.judge(boats[i], boats[j], overlapped: overlaps.isOverlapped(i, j),
-                                                 course: course, hull: boatClass.hull) {
-                        lastFoul[pair] = time
+                                                 course: course, hull: hull) {
                         call(verdict)
                     }
                 }
@@ -568,6 +580,30 @@ public final class Race {
         }
         boatContacts = touching
     }
+
+    /// Near misses (#9): an overlapped pair not touching and with no incident open, where the right-of-way
+    /// boat's sweep would hit the boat that must keep clear (`RulesConfig.NearMissSweep.hits`), opens an
+    /// incident just as a contact does (`call`), with no `contact` event. The authoritative race's alone:
+    /// a client never shows a call the server hasn't made (ADR 0005), so a prediction needn't spend the
+    /// sweep on one.
+    private func callNearMisses() {
+        guard umpire != nil else { return }
+        let hull = boatClass.hull
+        let sweep = rules.incidents.nearMissSweep
+        for i in boats.indices where !boats[i].isGhost {
+            for j in (i + 1)..<boats.count where !boats[j].isGhost && overlaps.isOverlapped(i, j) {
+                guard sweep.canReach(boats[i], boats[j], hull: hull), !boatContacts.contains(Pair(a: i, b: j)),
+                      !isIncidentOpen(i, j),
+                      let verdict = Rules.judge(boats[i], boats[j], overlapped: true, course: course, hull: hull),
+                      sweep.hits(boats[verdict.victim], boats[verdict.offender], hull: hull)
+                else { continue }
+                call(verdict)
+            }
+        }
+    }
+
+    /// Whether the umpire holds an incident open between seats `a` and `b`. Never, in a prediction.
+    private func isIncidentOpen(_ a: Int, _ b: Int) -> Bool { umpire?.openIncident(SeatPair(a, b)) != nil }
 
     private func resolveObstacleContacts() {
         var touching = Set<Pair>()
@@ -630,6 +666,8 @@ public final class Race {
 
     /// Opens an incident for `verdict`, decides it with a rule call, penalises the offender and
     /// announces the call. The deadlines come from the rules configuration; nothing enforces them yet.
+    /// The umpire holds the incident open until the pair separates (`resolveBoatContacts`): one incident
+    /// per pair (#9). A prediction has no umpire, so every contact it sails opens one.
     private func call(_ verdict: Verdict) {
         let leg = boats[verdict.offender].legIndex
         var incident = incidents.open(between: verdict.offender, and: verdict.victim, tick: tick, leg: leg)
@@ -641,6 +679,7 @@ public final class Race {
             completeDeadlineTick: tick + RulesConfig.ticks(penalty.complete))
         incident.outcome = .called(call)
         incidents.update(incident)
+        umpire?.open(incident.id, for: incident.parties)
         penalize(verdict.offender, turns: Race.foulTurns)
         emit(.ruleCall(call))
     }
@@ -1004,12 +1043,9 @@ extension Race {
     /// like this race. Pairs are listed by seat and obstacle index, never by iterating a set.
     public func exportSnapshot() -> WorldSnapshot {
         var boatPairs: [WorldSnapshot.SeatPair] = []
-        var fouls: [WorldSnapshot.FoulMemory] = []
         for a in boats.indices {
-            for b in boats.indices where b > a {
-                let pair = Pair(a: a, b: b)
-                if boatContacts.contains(pair) { boatPairs.append(.init(a, b)) }
-                if let time = lastFoul[pair] { fouls.append(.init(pair: .init(a, b), time: time)) }
+            for b in boats.indices where b > a && boatContacts.contains(Pair(a: a, b: b)) {
+                boatPairs.append(.init(a, b))
             }
         }
         var obstacles: [WorldSnapshot.ObstacleContact] = []
@@ -1025,7 +1061,7 @@ extension Race {
         return WorldSnapshot(
             tick: tick,
             seats: boats.indices.map { WorldSnapshot.Seat(boat: boats[$0], heldInput: heldInputs[$0]) },
-            touchingBoats: boatPairs, touchingObstacles: obstacles, touchingEdges: edges, foulMemory: fouls,
+            touchingBoats: boatPairs, touchingObstacles: obstacles, touchingEdges: edges,
             incidents: incidents,
             firstFinishTime: firstFinishTime, isOver: isOver, results: results, windKeys: wind.keys,
             overlaps: overlaps.memory
@@ -1033,8 +1069,11 @@ extension Race {
     }
 
     /// Replaces the world with `snapshot`, so stepping on continues from its tick (ADR 0005). The race
-    /// keeps what isn't world state: its setup, course and wind seed. Bots run outside the race (#60),
-    /// and their memory isn't in a snapshot, so bots driving a restored race won't make the same decisions.
+    /// keeps what isn't world state: its setup, course and wind seed, and its umpire's memory (#88), less
+    /// any open incident the snapshot's incidents don't end on for its pair. So a race that imports another
+    /// race's snapshot holds no incident open, and can call a pair the other wouldn't until they separate.
+    /// Bots run outside the race (#60), and their memory isn't in a snapshot, so bots driving a restored
+    /// race won't make the same decisions.
     /// Inputs queued but not yet applied and undrained events are dropped. `log` is left as it was and
     /// no longer describes the race: a race that imports is a prediction, never the record. The
     /// authoritative host never imports a snapshot a client could have supplied (ADR 0005).
@@ -1064,13 +1103,10 @@ extension Race {
         for (seat, entry) in snapshot.seats.enumerated() {
             if let field = invalidField(of: entry.boat) { throw WorldSnapshotError.invalidBoat(seat: seat, field: field) }
         }
-        guard snapshot.firstFinishTime?.isFinite ?? true, snapshot.foulMemory.allSatisfy({ $0.time.isFinite }) else {
-            throw WorldSnapshotError.invalidTime
-        }
+        guard snapshot.firstFinishTime?.isFinite ?? true else { throw WorldSnapshotError.invalidTime }
         let seatRange = boats.indices
         let validPair = { (p: WorldSnapshot.SeatPair) in seatRange.contains(p.a) && seatRange.contains(p.b) && p.a < p.b }
         guard snapshot.touchingBoats.allSatisfy(validPair),
-              snapshot.foulMemory.allSatisfy({ validPair($0.pair) }),
               snapshot.touchingObstacles.allSatisfy({ seatRange.contains($0.seat) && course.obstacles.indices.contains($0.obstacle) })
         else { throw WorldSnapshotError.invalidContact }
         let kinds = ObstructionKind.allCases
@@ -1144,11 +1180,9 @@ extension Race {
         boatContacts = Set(snapshot.touchingBoats.map { Pair(a: $0.a, b: $0.b) })
         obstacleContacts = Set(snapshot.touchingObstacles.map { Pair(a: $0.seat, b: $0.obstacle) })
         edgeContacts = Set(snapshot.touchingEdges)
-        var foulTimes: [Pair: Double] = [:]
-        for memory in snapshot.foulMemory { foulTimes[Pair(a: memory.pair.a, b: memory.pair.b)] = memory.time }
-        lastFoul = foulTimes
         overlaps = OverlapTracker(seats: boats.count, memory: snapshot.overlaps)
         incidents = snapshot.incidents
+        umpire?.keepOpenIncidents(in: incidents)
         firstFinishTime = snapshot.firstFinishTime
         isOver = snapshot.isOver
         results = snapshot.results
