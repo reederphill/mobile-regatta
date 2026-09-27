@@ -66,7 +66,16 @@ import Glibc
 ///    clear of it. No penalty; the touch is announced and recorded. The autohelm has no special case
 ///    there. The prototype placement is squeezed towards the line to keep every boat a hull length
 ///    inside the area.
-public let simulationRevision = 13
+/// 14: start row and OCS by hull (#85), on 13. The prototype placement is gone: every boat starts the
+///    sequence in one row half a line length below the line, in slots over 1.5 line lengths, the order
+///    shuffled from the race seed's own stream ("startrow"), on starboard reaching towards the pin at polar
+///    speed in the base strength, her rudder centred so the autohelm holds the reach (#219). The row is
+///    squeezed towards the line only where the race area or its land needs it (#82's squeeze, moved onto
+///    the row). OCS, clearing and starting read every hull point, not the centre: OCS if any is on the
+///    course side at the gun, cleared once all are on the pre-start side, started when any crosses the line
+///    itself after the gun. Rule 21.1 applies to an OCS boat only while she moves towards the pre-start
+///    side (`CourseLayout.isReturning`).
+public let simulationRevision = 14
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

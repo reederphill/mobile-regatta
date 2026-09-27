@@ -53,7 +53,8 @@ public final class Race {
     public static var defaultRulesConfiguration: RulesConfigFile { RaceFiles.defaults.rulesConfiguration }
 
     /// The rules and race-format values this race uses (#73). So far the zone, the start sequence, the
-    /// course and a rule call's penalty deadlines read it; the rest wait for the tickets that use them.
+    /// course, the start row and a rule call's penalty deadlines read it; the rest wait for the tickets that
+    /// use them.
     public var rules: RulesConfig { files.rulesConfiguration.content }
     /// Every incident so far, by id and by pair of boats.
     public private(set) var incidents = IncidentIndex()
@@ -142,7 +143,6 @@ public final class Race {
             revealedWindKeys = keys
             umpire = nil
         }
-        var rng = SplitMix64(seed: setup.raceSeed.value)
         let drawn = WindSetup(conditions: files.conditions, pairing: files.pairing, raceSeed: setup.raceSeed)
         let course = CourseLayout.derive(windSetup: drawn, land: files.venue.content.land, fleetSize: setup.fleetSize,
                                          laps: setup.laps, boatClass: files.boatClass.content,
@@ -164,44 +164,20 @@ public final class Race {
         }
         tick = -setup.startSequenceTicks
 
-        // Prototype placement until the start row (#35), square to the line: seat 0 mid-line, the rest
-        // scattered below it by the race seed, reaching along it. The draws are squeezed towards the line
-        // to keep every boat at least a hull length inside the race area (#82), which reaches only a line
-        // length below it; and then, as a whole, a twentieth at a time, until the scatter is a hull length
-        // off the land in it too. (A line with land within a hull length of its middle leaves no such
-        // scatter: then the tightest.)
-        let centre = course.startLine.centre, up = course.upwind, right = course.right
-        let hullLength = files.boatClass.content.hull.length
-        let area = course.raceArea
-        let below = area.halfLength + (centre - area.centre).dot(up)
-        let across = area.halfWidth - abs((centre - area.centre).dot(right))
-        let insideBoundary = Vec2(min(1, (across - hullLength) / 130), min(1, (below - hullLength) / 100))
-        func placed(_ offset: Vec2, _ squeeze: Vec2) -> Vec2 {
-            centre + right * (offset.x * squeeze.x) + up * (offset.y * squeeze.y)
-        }
-        let scatter: [Vec2] = [Vec2(-130, -100), Vec2(130, -100), Vec2(130, -35), Vec2(-130, -35)]
-        func isOffLand(_ squeeze: Vec2) -> Bool {
-            course.landClearance(of: scatter.map { placed($0, squeeze) }) >= hullLength
-        }
-        let squeezes: [Vec2] = (0..<20).map { insideBoundary * (1 - Double($0) / 20) }
-        let squeeze = squeezes.first(where: isOffLand) ?? squeezes[squeezes.count - 1]
-        func onWater(_ offset: Vec2) -> Vec2 { placed(offset, squeeze) }
-        var fleet: [Boat] = []
-        for seat in setup.seats.indices {
-            let kind = setup.seats[seat]
-            var offset = Vec2(0, -55)
-            var heading = course.axis + Double.pi / 2
-            if seat > 0 {
-                for _ in 0..<50 {
-                    offset = Vec2(rng.range(-130, 130), rng.range(-100, -35))
-                    if fleet.allSatisfy({ ($0.position - onWater(offset)).length > 10 }) { break }
-                }
-                heading = course.axis + (rng.bool() ? Double.pi / 2 : -Double.pi / 2)
-            }
-            // The boom starts to leeward of the mean wind: the sampled wind may not be known yet (keys-only).
-            fleet.append(Boat(id: seat, isPlayer: kind == .human, colorIndex: seat,
-                              position: onWater(offset), heading: heading, speed: 2,
-                              boomSide: .leeward(ofRelativeWind: wrapAngle(windSetup.meanDirection - heading))))
+        // The start row (#35): every boat in her slot (squeezed only where the race area needs it, #82), on
+        // starboard, reaching towards the pin at the row's true wind angle and fraction of polar speed in the
+        // race's base strength. The public wind setup, not the wind at her: a prediction may not hold the
+        // first window's key yet (ADR 0001). Boom to port: starboard tack. Her rudder is centred, so her
+        // autohelm engages on the first step at the wind angle she has then, and holds the reach until
+        // she steers (#219, ADR 0007).
+        let boatClass = files.boatClass.content
+        let row = course.startRow(fleetSize: setup.fleetSize, raceSeed: setup.raceSeed, hullLength: boatClass.hull.length)
+        let rowHeading = course.startRowHeading
+        let rowSpeed = course.placement.polarSpeedFraction
+            * boatClass.polar.speed(twa: course.placement.trueWindAngle, tws: windSetup.baseStrength)
+        let fleet = setup.seats.indices.map { seat in
+            Boat(id: seat, isPlayer: setup.seats[seat] == .human, colorIndex: seat, position: row[seat],
+                 heading: rowHeading, speed: rowSpeed, boomSide: .port)
         }
         boats = fleet
         overlaps = OverlapTracker(seats: fleet.count)
@@ -394,7 +370,7 @@ public final class Race {
 
         applyInputs()
 
-        let previous = boats.map(\.position)
+        let previous = boats
         for i in boats.indices { integrate(i, Race.dt) }
         // Where the boats sailed to, before contacts push them apart: a call at a contact this tick
         // reads this tick's certain overlap.
@@ -663,35 +639,49 @@ public final class Race {
 
     // MARK: - Start, roundings, finish
 
+    /// OCS (#9, rule 29.1): any point of her hull on the course side of the line or its extensions at the gun.
     private func fireGun() {
-        for i in boats.indices where boats[i].status == .prestart && course.startLine.side(boats[i].position) > 0 {
+        for i in boats.indices where boats[i].status == .prestart && isOverStartLine(boats[i]) {
             boats[i].status = .ocs
             emit(.ocsNotice(recipient: i))
         }
         emit(.gun)
     }
 
-    private func updateProgress(_ i: Int, from p0: Vec2) {
-        let p1 = boats[i].position
-        let lineCrossing = crossing(from: p0, to: p1, over: course.startLine.segment)
+    /// Whether any point of `boat`'s hull is on the course side of the start line or its extensions.
+    private func isOverStartLine(_ boat: Boat) -> Bool {
+        boat.hull(outline: boatClass.hull.outline).contains { course.startLine.side($0) > 0 }
+    }
 
+    /// Whether any point of the hull crossed the start line itself, not an extension, from the pre-start
+    /// side, on the move from `before` to `after`.
+    private func crossesStartLine(from before: Boat, to after: Boat) -> Bool {
+        let outline = boatClass.hull.outline
+        return zip(before.hull(outline: outline), after.hull(outline: outline)).contains {
+            crossing(from: $0, to: $1, over: course.startLine.segment) == 1
+        }
+    }
+
+    /// Advances seat `i`'s start and rounding progress over this tick's move from `before`.
+    private func updateProgress(_ i: Int, from before: Boat) {
         switch boats[i].status {
         case .prestart:
-            if time >= 0 && lineCrossing == 1 {
+            if time >= 0 && crossesStartLine(from: before, to: boats[i]) {
                 boats[i].status = .racing
                 boats[i].legIndex = 0
                 boats[i].roundingStage = 0
                 emit(.started(seat: i))
             }
         case .ocs:
-            if course.startLine.side(p1) < 0 {
+            // Cleared once her whole hull is back on the pre-start side of the line or its extensions.
+            if !isOverStartLine(boats[i]) {
                 boats[i].status = .prestart
                 emit(.cleared(seat: i))
             }
         case .racing:
             let leg = course.legs[boats[i].legIndex]
             var progress = CourseLayout.Progress(legIndex: boats[i].legIndex, stage: boats[i].roundingStage)
-            course.advance(&progress, from: p0, to: p1)
+            course.advance(&progress, from: before.position, to: boats[i].position)
             if progress.finished {
                 finish(i)
             } else {

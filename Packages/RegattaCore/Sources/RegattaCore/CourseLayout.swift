@@ -29,6 +29,12 @@ public struct CourseLayout: Sendable, Equatable {
         public func side(_ p: Vec2) -> Double {
             (committee.position - pin.position).normalized.cross(p - pin.position)
         }
+
+        /// How fast a velocity `v` carries a point towards the course side, m/s: `side`'s rate of change.
+        /// Negative is towards the pre-start side.
+        public func courseSideRate(_ v: Vec2) -> Double {
+            (committee.position - pin.position).normalized.cross(v)
+        }
     }
 
     /// Something the course is sailed around, in order.
@@ -204,6 +210,84 @@ public struct CourseLayout: Sendable, Equatable {
         case .round(let index): elements[index].marks
         case .finish: [finishLine.pin, finishLine.committee]
         }
+    }
+
+    /// Stream tag for `SplitMix64(seed:stream:)` on the race seed, for the start row's order: ASCII "startrow".
+    public static let startRowStream: UInt64 = 0x7374_6172_7472_6F77
+
+    /// The closest a squeeze of the start row (`startRowSlots`) brings neighbours, centre to centre, in hull
+    /// lengths: clear ahead and clear astern (#35) with a quarter of a hull between them.
+    public static let startRowMinimumSpacing = 1.25
+
+    /// The start row's `n` slots (#35), from the pin end: one row parallel to the start line,
+    /// `placement.depthLineLengths` line lengths below it, over `placement.spreadLineLengths` line lengths
+    /// centred on the line's centre. Slot `k` is `span × (k + ½) / n` along the span from its pin end, so
+    /// neighbours are `span / n` apart.
+    ///
+    /// The row is squeezed towards the line's centre only where the water needs it (#82), for boats of hull
+    /// `hullLength` metres: its depth and its spread each as far as keeps every slot a hull length inside the
+    /// race area; then the whole row, a twentieth at a time, until every boat in it is half a hull length off
+    /// the land in the race area (every slot a hull length off it), its spread never so far that neighbours
+    /// come closer than `startRowMinimumSpacing`. A row that no squeeze takes off the land takes the tightest.
+    /// With the bundled rules configuration the race area has room for the row by construction (it reaches
+    /// a line length below the line), and the bundled venues have no land near their lines: neither moves it.
+    public func startRowSlots(fleetSize n: Int, hullLength: Double) -> [Vec2] {
+        precondition(n >= 1, "a start row holds at least one boat")
+        let length = startLine.length
+        let centre = startLine.centre
+        let depth = placement.depthLineLengths * length
+        let span = placement.spreadLineLengths * length
+        let along = (0..<n).map { span * (Double($0) + 0.5) / Double(n) - span / 2 }
+        // Room from the line's centre, less a hull length, to the race area's bottom and its nearer side.
+        let below = raceArea.halfLength + (centre - raceArea.centre).dot(upwind) - hullLength
+        let across = raceArea.halfWidth - abs((centre - raceArea.centre).dot(right)) - hullLength
+        let outermost = along.map(abs).max()!
+        let depthInside = (below / depth).clamped(to: 0...1)
+        let spreadInside = outermost > 0 ? (across / outermost).clamped(to: 0...1) : 1
+        let tightestSpread = n > 1 ? min(1, Self.startRowMinimumSpacing * hullLength / (spreadInside * span / Double(n))) : 1
+        func row(_ squeeze: Double) -> [Vec2] {
+            let down = depth * depthInside * squeeze
+            let spread = spreadInside * max(squeeze, tightestSpread)
+            return along.map { centre - upwind * down + right * ($0 * spread) }
+        }
+        func isOffLand(_ slots: [Vec2]) -> Bool {
+            let (pinEnd, committeeEnd) = (slots[0], slots[slots.count - 1])
+            let halfHull = hullLength / 2
+            let box = [pinEnd - right * halfHull - upwind * halfHull, committeeEnd + right * halfHull - upwind * halfHull,
+                       committeeEnd + right * halfHull + upwind * halfHull, pinEnd - right * halfHull + upwind * halfHull]
+            return landClearance(of: box) >= halfHull
+        }
+        let rows = (0..<20).map { row(1 - Double($0) / 20) }
+        return rows.first(where: isOffLand) ?? rows[rows.count - 1]
+    }
+
+    /// The start row's order (#35): seat `s` takes slot `result[s]` of `startRowSlots`. The race seed
+    /// shuffles it on its own stream (`startRowStream`), with our own Fisher–Yates on `SplitMix64` (ADR 0002),
+    /// so it moves no other draw from the race seed.
+    public static func startRowOrder(fleetSize n: Int, raceSeed: RaceSeed) -> [Int] {
+        var order = Array(0..<n)
+        var rng = SplitMix64(seed: raceSeed.value, stream: startRowStream)
+        rng.shuffle(&order)
+        return order
+    }
+
+    /// Where each of `n` seats is when the start sequence begins (#35), `result[seat]`: her slot in the start
+    /// row (`startRowSlots`) in the race seed's order (`startRowOrder`).
+    public func startRow(fleetSize n: Int, raceSeed: RaceSeed, hullLength: Double) -> [Vec2] {
+        let slots = startRowSlots(fleetSize: n, hullLength: hullLength)
+        return Self.startRowOrder(fleetSize: n, raceSeed: raceSeed).map { slots[$0] }
+    }
+
+    /// The start row's heading (#35): on starboard, `placement.trueWindAngle` off the axis (the mean wind),
+    /// towards the pin.
+    public var startRowHeading: Double { wrapAngle(axis - placement.trueWindAngle) }
+
+    /// Whether `boat` is returning to start (rule 21.1, #85): OCS (`BoatStatus.ocs`: some of her hull on the
+    /// course side at the gun, and not yet all of it back) and moving over the ground towards the pre-start
+    /// side of the start line or its extensions. An OCS boat sailing on is not returning. Derived from what
+    /// the boat carries, so a snapshot carries it too.
+    public func isReturning(_ boat: Boat) -> Bool {
+        boat.status == .ocs && startLine.courseSideRate(boat.velocityOverGround) < 0
     }
 
     /// Whether `p` is in the race area: inside `raceArea` and on none of `land`.

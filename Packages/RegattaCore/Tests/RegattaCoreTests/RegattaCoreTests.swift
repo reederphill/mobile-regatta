@@ -96,21 +96,28 @@ import Testing
         return events
     }
 
+    /// Over at the gun (#85): recalled alone, cleared once her whole hull is back on the pre-start side,
+    /// then started by crossing the line.
     @Test func boatOverTheLineAtTheGunIsOCSAndMustReturn() {
-        // Seat 1 is a second human who sends no inputs, so she sails straight on out of the way.
-        // 44 s: the class's turn rate costs a few seconds tacking onto port at the start of the run. The
-        // timings are ilca-dinghy@3's: the skiff (#248) reaches much further over the line in 45 s.
-        let race = testRace(seats: [.human, .human], prestartSeconds: 44, seed: 1,
-                            boatClass: try! BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref)
-        let early = sail(race, heading: deg2rad(-45), seconds: 45)
+        // Both start in the row (#35), half a line length below the line. Seat 1 is a second human who sends
+        // no inputs, so her autohelm reaches her on below the line, out of the way; seat 0 luffs from her slot
+        // to close-hauled on starboard and sails up over the line before the gun (20 s: the skiff crosses
+        // the row's depth in well under half that).
+        let race = testRace(seats: [.human, .human], prestartSeconds: 20, seed: 1)
+        let early = sail(race, heading: race.course.axis - deg2rad(45), seconds: 21)
         #expect(early.contains(.ocsNotice(recipient: 0)))
+        #expect(!early.contains(.ocsNotice(recipient: 1)))
         #expect(race.boats[0].status == .ocs)
+        #expect(race.boats[1].status == .prestart)
 
         var back: [RaceEvent.Kind] = []
-        for _ in 0..<40 where race.boats[0].status == .ocs { back += sail(race, heading: .pi, seconds: 1) }
+        for _ in 0..<40 where race.boats[0].status == .ocs {
+            back += sail(race, heading: race.course.axis + .pi, seconds: 1)
+        }
         #expect(back.contains(.cleared(seat: 0)))
+        #expect(furthestOver(race) <= 0, "cleared with her whole hull on the pre-start side")
 
-        // The boat is now off an end of the line: run deeper, as far below it as she is out to the side but
+        // She may be off an end of the line: run deeper, as far below it as she is out to the side but
         // no closer than 10 m to the race area's edge (#82), then sail up at the line's centre, never closer
         // than 45° to the axis, to cross between its ends.
         let line = race.course.startLine
