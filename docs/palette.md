@@ -25,6 +25,7 @@ Sources: #22 (art direction), #29 (safe palette), G7 (#37), #53 (values). Consum
 - `charcoal` exception: fails contrast (min |ΔL| 0.05); readable via the hull outline (#29). Accepted in #53.
 - sky blue vs chevron blue (#29, #118): OKLab ΔE 0.26 measured; threshold 0.15 (tuning)
 - ripple texture (#116): |ΔL| from water < 0.12 (must stay fainter than puff/lull)
+- code (#111): `HueRule` (reserved set, tunings; `Regatta/Game/HueRule.swift`); validated set `PaletteValidation.raceSceneAndHUD` = `ChartPalette` + interim `Palette.boats`; test `PaletteTests`
 
 ## CuePalette
 

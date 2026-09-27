@@ -334,6 +334,9 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
   (#62), steering schemes (#112) and camera (#113).
 - `-online` starts an online dev race at launch (Debug builds), on `-onlineHost <host:port>` or the menu's
   host; `-startSeconds <n>` (1…60) and `-raceSeconds <n>` ask the dev server for a short sequence and race.
+- `-vision deut|prot|trit|grey|sun` (or `deuteranopia`, `protanopia`, `tritanopia`, `greyscale`, `washout`,
+  `none`) puts a colour-vision filter over a race, scene and HUD alike (Debug builds, #111), to check every
+  cue still reads. The render fixtures diff the scene through each (`RegattaUITests/Fixtures/prestart-*.json`).
 
 ### Profiling
 
