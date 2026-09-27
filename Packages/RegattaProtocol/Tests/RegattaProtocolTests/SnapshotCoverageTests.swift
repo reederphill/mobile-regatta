@@ -97,7 +97,7 @@ struct SeatWithProbe: CustomReflectable {
         for helm in helms {
             var seat = Self.seat
             seat.boat.autohelm = helm
-            let wire = try WireSeat(seat)
+            let wire = try WireSeat(seat, tick: 0)
             let bytes = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: [wire, wire]))).encoded()
             #expect(bytes.count == Frame.headerSize + 1 + 1 + 2 * SnapshotQuantisation.bytesPerSeat)
             guard case .snapshot(let decoded) = try Frame(decoding: bytes).message else {
@@ -107,7 +107,7 @@ struct SeatWithProbe: CustomReflectable {
             #expect(decoded.seats[0] == wire)
             var received = Self.seat
             received.boat.autohelm = Autohelm(target: .groove(.upwind), isTapping: true) // whatever the receiver had
-            decoded.seats[0].apply(to: &received)
+            decoded.seats[0].apply(to: &received, tick: 0)
             switch (helm?.target, received.boat.autohelm?.target) {
             case (nil, nil):
                 break
@@ -134,7 +134,7 @@ struct SeatWithProbe: CustomReflectable {
             seat.boat.isPlaning = n % 2 == 0
             seat.boat.spinnaker = kite
             seat.boat.averagedWindSpeed = n == 0 ? nil : 4.321 * Double(n)
-            let wire = try WireSeat(seat)
+            let wire = try WireSeat(seat, tick: 0)
             let bytes = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: [wire, wire]))).encoded()
             #expect(bytes.count == Frame.headerSize + 1 + 1 + 2 * SnapshotQuantisation.bytesPerSeat)
             guard case .snapshot(let decoded) = try Frame(decoding: bytes).message else {
@@ -146,12 +146,44 @@ struct SeatWithProbe: CustomReflectable {
             received.boat.isPlaning = n % 2 != 0
             received.boat.spinnaker = .dropping(remaining: 1) // whatever the receiver had
             received.boat.averagedWindSpeed = 99
-            decoded.seats[0].apply(to: &received)
+            decoded.seats[0].apply(to: &received, tick: 0)
             expectWithinSteps(seat, received)
         }
         var tooLong = Self.seat
         tooLong.boat.spinnaker = .hoisting(remaining: 9)
-        #expect(throws: WireError.outOfRange("spinnaker")) { try WireSeat(tooLong) }
+        #expect(throws: WireError.outOfRange("spinnaker")) { try WireSeat(tooLong, tick: 0) }
+    }
+
+    /// #89: the turns owed (up to 127) and the current turn's clock cross the wire, the clock as ticks before
+    /// the snapshot's tick, so a client that joins or resyncs mid-penalty predicts the turn's deadlines. The
+    /// queued turns' calls stay the receiver's own, trimmed to the turns owed.
+    @Test func snapshotRoundTripCarriesTheTurnsOwedAndThePenaltyClock() throws {
+        #expect(SnapshotFields.wire.contains("boat.penaltyClockTick"))
+        #expect(SnapshotFields.excluded["boat.queuedPenaltyCallTicks"] != nil)
+        let tick = 5_000
+        for (owed, clock) in [(0, nil), (1, 5_000), (3, 4_700), (127, 5_000 - 65_535)] as [(Int, Int?)] {
+            var seat = Self.seat
+            seat.boat.penaltyTurnsOwed = owed
+            seat.boat.penaltyProgress = owed == 0 ? 0 : 2.5
+            seat.boat.penaltyClockTick = clock
+            let wire = try WireSeat(seat, tick: tick)
+            #expect(Int(wire.penaltyClock) == clock.map { tick - $0 } ?? 0)
+            let bytes = try Frame(seq: 0, tick: tick, message: .snapshot(Snapshot(seats: [wire, wire]))).encoded()
+            #expect(bytes.count == Frame.headerSize + 1 + 1 + 2 * SnapshotQuantisation.bytesPerSeat)
+            guard case .snapshot(let decoded) = try Frame(decoding: bytes).message else {
+                Issue.record("not a snapshot")
+                continue
+            }
+            #expect(decoded.seats[0] == wire)
+            var received = Self.seat
+            received.boat.penaltyTurnsOwed = 2
+            received.boat.penaltyClockTick = 10
+            received.boat.queuedPenaltyCallTicks = [4_600, 4_900, 5_100] // the last after the snapshot: its own prediction
+            decoded.seats[0].apply(to: &received, tick: tick)
+            expectWithinSteps(seat, received)
+            #expect(received.boat.penaltyClockTick == clock)
+            #expect(received.boat.queuedPenaltyCallTicks == [[], [], [4_600, 4_900], [4_600, 4_900]][[0, 1, 3, 127].firstIndex(of: owed)!])
+        }
     }
 
     /// #79: a boat's three winds and the current at her are recomputed at the start of every step, so

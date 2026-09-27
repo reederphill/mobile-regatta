@@ -251,6 +251,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         snapshot.seats[0].boat.status = .racing
         snapshot.seats[0].boat.penaltyTurnsOwed = 1
         snapshot.seats[0].boat.penaltyProgress = deg2rad(60)
+        snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
         try race.importSnapshot(snapshot)
         #expect(race.boats[0].isTakingPenalty)
         var brain = BotBrain(style: BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, holdDepth: 20,

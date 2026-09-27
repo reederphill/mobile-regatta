@@ -134,11 +134,14 @@ import Testing
         #expect(throws: WireError.invalidValue("autohelm")) { try Frame(decoding: withAutohelm(18) { $0 |= 0x80 }) }
         #expect(throws: WireError.invalidValue("heldInput.rudder")) { try Frame(decoding: mutated(16) { $0 = 0x80 }) }
 
-        // #248: the sails byte (20): bits 4–7 are reserved, a spinnaker up or down has no time left (21),
-        // and without the averaged-wind flag (bit 3) its two bytes (22, 23) are zero.
+        // #248: the sails byte (20): a spinnaker up or down has no time left (21), and without the
+        // averaged-wind flag (bit 3) its two bytes (22, 23) are zero. #89: its bits 4–7 are the turns owed's
+        // high bits, and with no turn owed the penalty clock (24, 25) is zero.
         var plain = seats
         plain[0].spinnaker = .down
         plain[0].averagedWindSpeed = nil
+        plain[0].penaltyTurnsOwed = 0
+        plain[0].penaltyClock = 0
         let sails = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: plain))).encoded()
         func sailsMutated(_ offset: Int, _ change: (inout UInt8) -> Void) -> [UInt8] {
             var bytes = sails
@@ -146,7 +149,14 @@ import Testing
             return bytes
         }
         _ = try Frame(decoding: sails)
-        #expect(throws: WireError.invalidValue("spinnaker")) { try Frame(decoding: sailsMutated(20) { $0 |= 0x10 }) }
+        #expect(throws: WireError.invalidValue("penaltyClock")) { try Frame(decoding: sailsMutated(25) { $0 = 1 }) }
+        let owing = sailsMutated(20) { $0 |= 0x10 }
+        guard case .snapshot(let decoded) = try Frame(decoding: owing).message else { Issue.record("not a snapshot"); return }
+        #expect(decoded.seats[0].penaltyTurnsOwed == 8)
+        var clocked = owing
+        clocked[seat0 + 24] = 7
+        guard case .snapshot(let withClock) = try Frame(decoding: clocked).message else { Issue.record("not a snapshot"); return }
+        #expect(withClock.seats[0].penaltyTurnsOwed == 8 && withClock.seats[0].penaltyClock == 7)
         #expect(throws: WireError.invalidValue("spinnaker")) { try Frame(decoding: sailsMutated(21) { $0 = 5 }) }
         _ = try Frame(decoding: sailsMutated(20) { $0 |= 0b01 }) // going up...
         var hoisting = sailsMutated(20) { $0 |= 0b01 }
@@ -192,8 +202,22 @@ import Testing
         world.seats[0].boat.speed = .nan
         #expect(throws: WireError.outOfRange("speed")) { try Snapshot(world: world) }
         world = gen.world(seats: 2)
-        world.seats[0].boat.penaltyTurnsOwed = 8
+        world.seats[0].boat.penaltyTurnsOwed = 128
+        world.seats[0].boat.penaltyClockTick = world.tick
         #expect(throws: WireError.outOfRange("penaltyTurnsOwed")) { try Snapshot(world: world) }
+        // #89: a turn owed has a clock, at most 65 535 ticks before the snapshot's tick and never after it.
+        world.seats[0].boat.penaltyTurnsOwed = 127
+        _ = try Snapshot(world: world)
+        world.seats[0].boat.penaltyClockTick = nil
+        #expect(throws: WireError.outOfRange("penaltyClockTick")) { try Snapshot(world: world) }
+        world.seats[0].boat.penaltyClockTick = world.tick - 65_536
+        #expect(throws: WireError.outOfRange("penaltyClockTick")) { try Snapshot(world: world) }
+        world.seats[0].boat.penaltyClockTick = world.tick + 1
+        #expect(throws: WireError.outOfRange("penaltyClockTick")) { try Snapshot(world: world) }
+        seats = gen.wireSeats(2)
+        seats[0].penaltyTurnsOwed = 0
+        seats[0].penaltyClock = 1
+        #expect(throws: WireError.outOfRange("penaltyClock")) { try encode(.snapshot(Snapshot(seats: seats))) }
         world = gen.world(seats: 2)
         world.seats[0].boat.legIndex = 256
         #expect(throws: WireError.outOfRange("legIndex")) { try Snapshot(world: world) }
@@ -281,6 +305,8 @@ func relabel(_ boat: Boat, isPlayer: Bool) -> Boat {
     copy.roundingStage = boat.roundingStage
     copy.penaltyTurnsOwed = boat.penaltyTurnsOwed
     copy.penaltyProgress = boat.penaltyProgress
+    copy.penaltyClockTick = boat.penaltyClockTick
+    copy.queuedPenaltyCallTicks = boat.queuedPenaltyCallTicks
     copy.isTacking = boat.isTacking
     copy.boomSide = boat.boomSide
     copy.isPlaning = boat.isPlaning

@@ -56,8 +56,8 @@ public final class Race {
     public static var defaultRulesConfiguration: RulesConfigFile { RaceFiles.defaults.rulesConfiguration }
 
     /// The rules and race-format values this race uses (#73). So far the zone, the start sequence, the
-    /// course, the start row, a rule call's penalty deadlines and the close (the finish window and the time
-    /// limit, `closeTick`) read it; the rest wait for the tickets that use them.
+    /// course, the start row, the penalty turns' deadlines and their stacking (#89) and the close (the finish
+    /// window and the time limit, `closeTick`) read it; the rest wait for the tickets that use them.
     public var rules: RulesConfig { files.rulesConfiguration.content }
     /// Every incident so far, by id and by pair of boats.
     public private(set) var incidents = IncidentIndex()
@@ -385,6 +385,7 @@ public final class Race {
 
         let previous = boats
         for i in boats.indices { integrate(i, Race.dt) }
+        enforcePenaltyDeadlines()
         // Where the boats sailed to, before contacts push them apart: a call at a contact this tick
         // reads this tick's certain overlap.
         overlaps.update(boats, hull: boatClass.hull, margin: lastPointOfCertaintyTicks)
@@ -470,6 +471,9 @@ public final class Race {
         // The polar reads the sailing wind (#14); shadow slows it and never turns it (#10). The current
         // carries every boat, ghosts too (#11). The autohelm's grooves read the class's average of it (#245).
         let tws = b.polarWindSpeed
+        // The player steers this tick with the rudder held off centre, or through the tap the autohelm is
+        // sailing for her (#219): what a penalty turn reads (`turnPenalty`).
+        let playerDriven = b.autohelm?.isTapping ?? true
 
         if let helm = b.autohelm {
             b.desiredRudder = helm.rudder(sailingAngle: b.sailingAngle, boomSide: b.boomSide, tws: tws,
@@ -493,14 +497,7 @@ public final class Race {
         b.boomSide = moved.boomSide
         let turn = wrapAngle(b.heading - before)
 
-        if b.penaltyTurnsOwed > 0 {
-            b.penaltyProgress += turn
-            if abs(b.penaltyProgress) >= 2 * .pi * Double(b.penaltyTurnsOwed) {
-                b.penaltyTurnsOwed = 0
-                b.penaltyProgress = 0
-                emit(.penaltyServed(seat: i))
-            }
-        }
+        if b.penaltyTurnsOwed > 0 { turnPenalty(&b, seat: i, turn: turn, playerDriven: playerDriven) }
 
         // Rule 13: from the boom crossing head to wind until close-hauled on the new tack.
         if crossing {
@@ -617,7 +614,7 @@ public final class Race {
                 touching.insert(pair)
                 if !obstacleContacts.contains(pair) {
                     boats[i].speed = BoatDynamics.speed(after: .mark, speed: boats[i].speed, boatClass: boatClass)
-                    penalize(i, turns: 1)
+                    penalize(i)
                     emit(.markTouch(seat: i, mark: obstacle.name))
                 }
                 boats[i].position += push
@@ -661,32 +658,144 @@ public final class Race {
         edgeContacts = touching
     }
 
-    /// Turns a foul costs today, until the penalty rules move to the single penalty turn.
-    private static let foulTurns = 2
-
-    /// Opens an incident for `verdict`, decides it with a rule call, penalises the offender and
-    /// announces the call. The deadlines come from the rules configuration; nothing enforces them yet.
+    /// Opens an incident for `verdict`, decides it with a rule call, penalises the offender one turn
+    /// (`penalize`) and announces the call, with the turn's deadlines when its clock is fixed at the call.
     /// The umpire holds the incident open until the pair separates (`resolveBoatContacts`): one incident
     /// per pair (#9). A prediction has no umpire, so every contact it sails opens one.
     private func call(_ verdict: Verdict) {
         let leg = boats[verdict.offender].legIndex
         var incident = incidents.open(between: verdict.offender, and: verdict.victim, tick: tick, leg: leg)
         let penalty = rules.raceFormat.penalty
+        let clock = penalize(verdict.offender)
         let call = RuleCall(
             incidentId: incident.id, tick: tick, rule: verdict.rule, offender: verdict.offender, victim: verdict.victim,
-            leg: leg, turnsOwed: Race.foulTurns,
-            startDeadlineTick: tick + RulesConfig.ticks(penalty.start),
-            completeDeadlineTick: tick + RulesConfig.ticks(penalty.complete))
+            leg: leg, turnsOwed: 1,
+            startDeadlineTick: clock.map { $0 + RulesConfig.ticks(penalty.start) },
+            completeDeadlineTick: clock.map { $0 + RulesConfig.ticks(penalty.complete) })
         incident.outcome = .called(call)
         incidents.update(incident)
         umpire?.open(incident.id, for: incident.parties)
-        penalize(verdict.offender, turns: Race.foulTurns)
         emit(.ruleCall(call))
     }
 
-    private func penalize(_ i: Int, turns: Int) {
-        if boats[i].penaltyTurnsOwed == 0 { boats[i].penaltyProgress = 0 }
-        boats[i].penaltyTurnsOwed = min(boats[i].penaltyTurnsOwed + turns, 4)
+    // MARK: - Penalty turns
+
+    /// The most of a full turn the autohelm can leave on a penalty turn's progress (#219): just short of it,
+    /// so only a tick the player drives completes the turn.
+    static let heldPenaltyProgress = (2 * Double.pi).nextDown
+
+    /// Seat `i` owes one more penalty turn, called now (#9, #89): a foul's (`call`) or a mark touch's (rule 31).
+    /// Owed turns add up with no cap and are served in order. With none owed it is the current turn at once,
+    /// and its clock starts now; otherwise it queues behind the turns she owes, and its clock starts when it
+    /// becomes current (`startNextPenaltyClock`). Returns the turn's clock tick when it is fixed now, for the
+    /// rule call's deadlines: always under `fromCall` stacking, and under `sequential` only when she owed none.
+    /// Internal for tests, which call it as a call on the current tick would.
+    @discardableResult
+    func penalize(_ i: Int) -> Int? {
+        if boats[i].penaltyTurnsOwed == 0 {
+            boats[i].penaltyTurnsOwed = 1
+            boats[i].penaltyProgress = 0
+            boats[i].penaltyClockTick = tick
+            return tick
+        }
+        boats[i].penaltyTurnsOwed += 1
+        boats[i].queuedPenaltyCallTicks.append(tick)
+        switch rules.raceFormat.penalty.stackedPenaltyDeadlines {
+        case .sequential: return nil
+        case .fromCall: return tick
+        }
+    }
+
+    /// Moves seat `i`'s current penalty turn on by this tick's heading change `turn`, radians (#9, #89). A turn
+    /// is 360° one way, so it includes a tack and a gybe. Its direction is set by the first turning the player
+    /// drives after it becomes current; a tick the player drives against it gives the turn up, its progress
+    /// back to 0 (`penaltyReset`); a full turn serves it (`penaltyServed`), what she turned past it carrying
+    /// into the next owed turn, whose clock then starts. Crossing the rules' `startedTurn` (30°) is announced
+    /// (`penaltyStarted`).
+    ///
+    /// The player drives a tick with the rudder held off centre, or through the tack/gybe tap the autohelm is
+    /// sailing for her (`playerDriven`). Letting go mid-turn hands her to the autohelm (#219), which never
+    /// tacks or gybes by itself. The 360° is counted from her heading whoever steers, but a tick of the
+    /// autohelm holding her (its bear-away to the groove after a let-go head to wind included) can neither
+    /// undo the turn nor complete it: it moves the progress in the turn's direction, never back past its start
+    /// and never onto the full turn (`heldPenaltyProgress`), so the next tick the player drives turning on
+    /// completes it. Before the player has set a direction the autohelm's turning counts for nothing.
+    private func turnPenalty(_ b: inout Boat, seat i: Int, turn: Double, playerDriven: Bool) {
+        let before = b.penaltyProgress
+        let direction: Double = before > 0 ? 1 : before < 0 ? -1 : 0
+        var progress: Double
+        if playerDriven {
+            if direction * turn < 0 {
+                b.penaltyProgress = 0
+                emit(.penaltyReset(seat: i))
+                return
+            }
+            progress = before + turn
+        } else {
+            guard direction != 0 else { return }
+            progress = direction * min(max(direction * (before + turn), 0), Race.heldPenaltyProgress)
+        }
+        let startedTurn = rules.raceFormat.penalty.startedTurn
+        if abs(before) < startedTurn && abs(progress) >= startedTurn { emit(.penaltyStarted(seat: i)) }
+        if abs(progress) >= 2 * .pi {
+            progress -= (progress < 0 ? -2 : 2) * .pi
+            b.penaltyTurnsOwed -= 1
+            emit(.penaltyServed(seat: i))
+            if b.penaltyTurnsOwed == 0 {
+                progress = 0
+                b.penaltyClockTick = nil
+                b.queuedPenaltyCallTicks = []
+            } else {
+                startNextPenaltyClock(&b)
+            }
+        }
+        b.penaltyProgress = progress
+    }
+
+    /// Starts the clock of the owed turn that has just become current, now, as the rules' stacking says (G4):
+    /// under `sequential` at the later of its call and now, the previous turn's completion; under `fromCall`
+    /// at its call. A queued turn whose call the boat doesn't hold (`Boat.queuedPenaltyCallTicks`) starts now.
+    private func startNextPenaltyClock(_ b: inout Boat) {
+        let call = b.queuedPenaltyCallTicks.isEmpty ? nil : b.queuedPenaltyCallTicks.removeFirst()
+        switch rules.raceFormat.penalty.stackedPenaltyDeadlines {
+        case .sequential: b.penaltyClockTick = max(call ?? tick, tick)
+        case .fromCall: b.penaltyClockTick = call ?? tick
+        }
+    }
+
+    /// Disqualifies every boat that misses a penalty deadline on this tick (#9, #89), a ghost from this tick
+    /// (#30): her current turn not started (turned the rules' `startedTurn`) at its start deadline
+    /// (`missedStart`), or not completed by its complete deadline (`missedComplete`); under `fromCall` stacking
+    /// also a turn still queued at its own start deadline (`missedStart`). The turning this tick counts first.
+    /// The authoritative race's alone: a disqualification is a rule event (ADR 0005), so a client shows it when
+    /// the server sends it.
+    private func enforcePenaltyDeadlines() {
+        guard umpire != nil else { return }
+        let penalty = rules.raceFormat.penalty
+        let start = RulesConfig.ticks(penalty.start), complete = RulesConfig.ticks(penalty.complete)
+        for i in boats.indices where !boats[i].isGhost && boats[i].penaltyTurnsOwed > 0 {
+            let boat = boats[i]
+            guard let clock = boat.penaltyClockTick else { continue }
+            if tick >= clock + complete {
+                disqualify(i, reason: Race.missedComplete)
+            } else if tick == clock + start && abs(boat.penaltyProgress) < penalty.startedTurn {
+                disqualify(i, reason: Race.missedStart)
+            } else if penalty.stackedPenaltyDeadlines == .fromCall, let queued = boat.queuedPenaltyCallTicks.first,
+                      tick >= queued + start {
+                disqualify(i, reason: Race.missedStart)
+            }
+        }
+    }
+
+    /// `RaceEvent.Kind.disqualified`'s reason for a penalty turn not started by its start deadline (#89).
+    public static let missedStart = "missedStart"
+    /// `RaceEvent.Kind.disqualified`'s reason for a penalty turn not completed by its complete deadline (#89).
+    public static let missedComplete = "missedComplete"
+
+    /// Seat `seat`'s owed penalty turns as the HUD shows them (G4, #114), or nil while she owes none.
+    public func owedPenalty(ofSeat seat: Int) -> OwedPenalty? {
+        guard boats.indices.contains(seat) else { return nil }
+        return OwedPenalty(boats[seat], penalty: rules.raceFormat.penalty)
     }
 
     // MARK: - Start, roundings, finish
@@ -735,7 +844,9 @@ public final class Race {
             var progress = CourseLayout.Progress(legIndex: boats[i].legIndex, stage: boats[i].roundingStage)
             course.advance(&progress, from: before.position, to: boats[i].position)
             if progress.finished {
-                finish(i)
+                // Owing a penalty turn she doesn't finish (#89): she takes it on the course side and crosses
+                // again. Nothing moves on, so that crossing is checked the same way.
+                if boats[i].penaltyTurnsOwed == 0 { finish(i) }
             } else {
                 if progress.legIndex > boats[i].legIndex { emit(.rounded(seat: i, mark: course.name(of: leg))) }
                 boats[i].legIndex = progress.legIndex
@@ -746,13 +857,9 @@ public final class Race {
         }
     }
 
-    /// Seat `i` crossed the finish line: she finishes, or with a penalty unserved she is disqualified. Either
-    /// way she is a ghost from this tick (#30). The first finish opens the finish window (#8).
+    /// Seat `i` crossed the finish line owing no penalty turn: she finishes, a ghost from this tick (#30). The
+    /// first finish opens the finish window (#8).
     private func finish(_ i: Int) {
-        if boats[i].penaltyTurnsOwed > 0 {
-            disqualify(i, reason: "finished without taking a penalty")
-            return
-        }
         finishers += 1
         boats[i].status = .finished
         boats[i].place = finishers
@@ -765,11 +872,15 @@ public final class Race {
         emit(.becameGhost(seat: i))
     }
 
-    /// Disqualifies seat `i` now: DSQ, and a ghost from the call (#30). Today only as she finishes with a
-    /// penalty unserved; #89 calls it at a missed penalty deadline. A DSQ doesn't open the finish window:
-    /// only a finisher does (#8).
+    /// Disqualifies seat `i` now: DSQ, and a ghost from the call (#30), owing no more penalty turns. Called at
+    /// a missed penalty deadline (`enforcePenaltyDeadlines`, #89). A DSQ doesn't open the finish window: only a
+    /// finisher does (#8).
     private func disqualify(_ i: Int, reason: String) {
         boats[i].status = .dsq
+        boats[i].penaltyTurnsOwed = 0
+        boats[i].penaltyProgress = 0
+        boats[i].penaltyClockTick = nil
+        boats[i].queuedPenaltyCallTicks = []
         emit(.disqualified(seat: i, reason: reason))
         emit(.becameGhost(seat: i))
     }
@@ -1087,7 +1198,8 @@ extension Race {
     ///
     /// Throws, leaving the race unchanged, for a snapshot it couldn't sail on from: another fleet
     /// size, a tick outside the sequence start … `WorldSnapshot.maxTick`, a non-finite value, a leg or
-    /// rounding stage the course doesn't have, a negative penalty count, a bad contact, overlap, incident or
+    /// rounding stage the course doesn't have, a negative penalty count or penalty clocks that don't match it
+    /// (`Boat.penaltyClockTick`, `queuedPenaltyCallTicks`), a bad contact, overlap, incident or
     /// obstruction contact, results for a race not over or not one row for each seat, or a missing key from the first window the wind at the snapshot's tick needs
     /// (`WindField.firstWindowNeeded`: the window before the snapshot's, or further back for puffs that
     /// may still be alive) through the last key it holds.
@@ -1101,7 +1213,9 @@ extension Race {
         guard snapshot.tick >= -setup.startSequenceTicks else { throw WorldSnapshotError.tickBeforeStart(snapshot.tick) }
         guard snapshot.tick <= WorldSnapshot.maxTick else { throw WorldSnapshotError.tickTooLate(snapshot.tick) }
         for (seat, entry) in snapshot.seats.enumerated() {
-            if let field = invalidField(of: entry.boat) { throw WorldSnapshotError.invalidBoat(seat: seat, field: field) }
+            if let field = invalidField(of: entry.boat, tick: snapshot.tick) {
+                throw WorldSnapshotError.invalidBoat(seat: seat, field: field)
+            }
         }
         guard snapshot.firstFinishTime?.isFinite ?? true else { throw WorldSnapshotError.invalidTime }
         let seatRange = boats.indices
@@ -1192,8 +1306,8 @@ extension Race {
         events.removeAll()
     }
 
-    /// The first field of `boat` the race couldn't step from, or nil.
-    private func invalidField(of boat: Boat) -> String? {
+    /// The first field of `boat` the race couldn't step from at `tick`, or nil.
+    private func invalidField(of boat: Boat, tick: Int) -> String? {
         let doubles: [(String, Double?)] = [
             ("position.x", boat.position.x), ("position.y", boat.position.y), ("heading", boat.heading),
             ("speed", boat.speed), ("rudder", boat.rudder), ("desiredRudder", boat.desiredRudder),
@@ -1214,6 +1328,17 @@ extension Race {
         }
         guard (0..<stages).contains(boat.roundingStage) else { return "roundingStage" }
         guard boat.penaltyTurnsOwed >= 0 else { return "penaltyTurnsOwed" }
+        // A clock and queued calls exactly while she owes a turn, none after the tick, the queue in call order.
+        let ticks = -setup.startSequenceTicks...tick
+        if boat.penaltyTurnsOwed == 0 {
+            guard boat.penaltyClockTick == nil else { return "penaltyClockTick" }
+        } else {
+            guard let clock = boat.penaltyClockTick, ticks.contains(clock) else { return "penaltyClockTick" }
+        }
+        let queue = boat.queuedPenaltyCallTicks
+        guard queue.count < max(boat.penaltyTurnsOwed, 1), queue.allSatisfy(ticks.contains),
+              zip(queue, queue.dropFirst()).allSatisfy({ $0 <= $1 })
+        else { return "queuedPenaltyCallTicks" }
         return nil
     }
 }

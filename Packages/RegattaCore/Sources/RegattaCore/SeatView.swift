@@ -32,7 +32,8 @@ public struct SeatView: Sendable, Equatable {
     public let own: OwnBoat
     /// Every other seat's boat, in seat order.
     public let others: [OtherBoat]
-    /// The rule calls on show: each from its call until its offender's completion deadline.
+    /// The rule calls on show: each from its call for the rules' penalty completion window (30 s), which is
+    /// its offender's completion deadline whenever the call fixed one (`RuleCall.completeDeadlineTick`).
     public let ruleCallLines: [RuleCallLine]
 
     /// The puffs and lulls on the water now, as drawn, in window and spawn order.
@@ -115,8 +116,9 @@ public struct SeatView: Sendable, Equatable {
             tick = race.tick
             time = race.time
             finishWindowRemaining = race.firstFinishTime == nil ? nil : Double(race.closeTick - race.tick) / Double(Race.tickRate)
+            let shown = RulesConfig.ticks(race.rules.raceFormat.penalty.complete)
             ruleCallLines = race.incidents.incidents.compactMap { incident in
-                guard case .called(let call) = incident.outcome, call.completeDeadlineTick >= race.tick else { return nil }
+                guard case .called(let call) = incident.outcome, call.tick + shown >= race.tick else { return nil }
                 return RuleCallLine(offender: call.offender, victim: call.victim, rule: call.rule, tick: call.tick)
             }
             let wind = race.wind

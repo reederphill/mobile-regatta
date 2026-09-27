@@ -146,6 +146,7 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: (
             snapshot.seats[2].boat.speed = 2 // turning a penalty, hard over
             snapshot.seats[2].boat.status = .racing
             snapshot.seats[2].boat.penaltyTurnsOwed = 1
+            snapshot.seats[2].boat.penaltyClockTick = snapshot.tick
             snapshot.seats[2].heldInput = BoatInput(rudder: Int8(127))
             snapshot.seats[3].boat.status = .finished // a ghost
             snapshot.seats[3].boat.place = 1

@@ -90,7 +90,17 @@ import Glibc
 ///    authoritative race's alone. One incident per pair until their hulls are more than 2 hull lengths
 ///    apart (`incidents.separation`), held in the umpire's memory; the 5 s foul memory the world carried is
 ///    gone. Contacts are announced (`contact`). Rule 21 still overrides Section A.
-public let simulationRevision = 16
+/// 17: penalty turns (#89), on 16. A call (a foul, or a mark touch under rule 31) costs one turn, not a foul's
+///    two; owed turns add up with no cap (the cap of 4 is gone) and are served in order. Each turn is 360° one
+///    way: `penaltyProgress` is the current turn's, a turn back gives it up, a full turn serves it and the
+///    excess carries on. Each turn has a clock (`Boat.penaltyClockTick`): started 30° by 15 s and completed by
+///    30 s after it, or DSQ and a ghost at that tick (`missedStart`, `missedComplete`), in the authoritative
+///    race. The rules file's `stackedPenaltyDeadlines` says when a queued turn's clock starts: `sequential`
+///    (fleet-rules@3, the default: at the later of its call and the previous turn's completion) or `fromCall`
+///    (schema 1 and 2 files, fleet-rules@1 and @2). Only a tick the player steers (rudder off centre, or the
+///    tap) completes or gives up a turn; the autohelm holding her moves it neither back past its start nor
+///    onto the full turn. Crossing the finish line owing a turn no longer disqualifies: she doesn't finish.
+public let simulationRevision = 17
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

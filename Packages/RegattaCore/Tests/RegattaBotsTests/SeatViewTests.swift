@@ -172,8 +172,9 @@ import RegattaCore
                 #expect(view.finishWindowRemaining == race.firstFinishTime.map { _ in Double(race.closeTick - race.tick) / 30 })
                 checked += 1
             }
+            let window = RulesConfig.ticks(race.rules.raceFormat.penalty.complete)
             let shown = race.incidents.incidents.compactMap { incident -> RuleCall? in
-                if case .called(let call) = incident.outcome, call.completeDeadlineTick >= race.tick { call } else { nil }
+                if case .called(let call) = incident.outcome, call.tick + window >= race.tick { call } else { nil }
             }
             #expect(race.seatView(for: 0).ruleCallLines.map(\.tick) == shown.map(\.tick))
         }

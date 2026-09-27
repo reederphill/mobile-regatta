@@ -25,6 +25,7 @@ let wireFieldBounds: [String: @Sendable (WorldSnapshot.Seat, WorldSnapshot.Seat)
     "boat.legIndex": { $0.boat.legIndex == $1.boat.legIndex },
     "boat.roundingStage": { $0.boat.roundingStage == $1.boat.roundingStage },
     "boat.penaltyTurnsOwed": { $0.boat.penaltyTurnsOwed == $1.boat.penaltyTurnsOwed },
+    "boat.penaltyClockTick": { $0.boat.penaltyClockTick == $1.boat.penaltyClockTick },
     "boat.isTacking": { $0.boat.isTacking == $1.boat.isTacking },
     "boat.boomSide": { $0.boat.boomSide == $1.boat.boomSide },
     "boat.isPlaning": { $0.boat.isPlaning == $1.boat.isPlaning },
@@ -72,8 +73,10 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         #expect(Q.speedStep <= 0.001)                // < 1 mm/s
         #expect(Q.rudderStep * 127 < 0.01)           // far finer than a held input's int8 step
         #expect(Q.penaltyProgressStep < 0.001)
-        // Ranges: 5 penalty turns, the whole course area, a planing dinghy.
+        // Ranges: a penalty turn's progress (under a full turn, #89) many times over, the clock of a turn that
+        // must be completed 30 s after it, the whole course area, a planing dinghy.
         #expect(32_767 * Q.penaltyProgressStep > 5 * 2 * .pi)
+        #expect(Int(UInt16.max) > 30 * 60 * Race.tickRate)
         #expect(Double(1 << 23) * Q.positionStep >= 32_768)
         #expect(65_535 * Q.speedStep > 60)
         // #248: a hoist or drop to the tick, up to the longest a class may take.
@@ -102,8 +105,11 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
     /// incident memory) stays as the receiver has it.
     @Test func applyingKeepsTheReceiversExcludedFields() throws {
         var gen = Gen(seed: 0xE8C1)
-        let sender = gen.world(seats: 8)
+        var sender = gen.world(seats: 8)
         var receiver = gen.world(seats: 8)
+        // Sent at the tick it is applied at, which its penalty clocks run back from (#89).
+        for i in sender.seats.indices { sender.seats[i].boat.penaltyClockTick? += 77 - sender.tick }
+        sender.tick = 77
         receiver.firstFinishTime = 12
         receiver.isOver = true
         receiver.touchingBoats = [.init(1, 2)]
