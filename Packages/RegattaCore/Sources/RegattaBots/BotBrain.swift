@@ -11,20 +11,17 @@ public struct BotStyle: Hashable, Sendable {
     public var startSpot: Double
     /// Where on the line to finish, 0 = pin, 1 = committee boat.
     public var finishSpot: Double
-    /// Metres below the start spot to hold before the approach.
-    public var holdDepth: Double
-    /// Seconds added to the approach; negative values make the bot early (and risk OCS).
+    /// Seconds she adds to her time at the line, as far as her skill lets it show (#99, `BotBrain.startArrival`):
+    /// negative makes her earlier, though she never means to be over at the gun.
     public var timingSlack: Double
     /// Hard over to this side (−1 port, 1 starboard) for penalty turns in open water; near a mark she turns
     /// away from it (#89).
     public var penaltyDirection: Double
 
-    public init(skill: Double, startSpot: Double, finishSpot: Double, holdDepth: Double,
-                timingSlack: Double, penaltyDirection: Double) {
+    public init(skill: Double, startSpot: Double, finishSpot: Double, timingSlack: Double, penaltyDirection: Double) {
         self.skill = skill
         self.startSpot = startSpot
         self.finishSpot = finishSpot
-        self.holdDepth = holdDepth
         self.timingSlack = timingSlack
         self.penaltyDirection = penaltyDirection
     }
@@ -34,7 +31,9 @@ public struct BotStyle: Hashable, Sendable {
         skill = rng.range(0.35, 1)
         startSpot = rng.range(0.1, 0.9)
         finishSpot = rng.range(0.6, 0.85)
-        holdDepth = rng.range(18, 35)
+        // The prototype's hold depth, which the start sets from the time left since #99: still drawn, so the
+        // draws after it stay put.
+        _ = rng.range(18, 35)
         timingSlack = rng.range(-2.5, 5) * (1.3 - skill)
         penaltyDirection = rng.bool() ? 1 : -1
     }
@@ -88,10 +87,7 @@ struct BotBrain: Sendable {
     }
 
     private var skill: Double { style.skill }
-    private var startSpot: Double { style.startSpot }
     private var finishSpot: Double { style.finishSpot }
-    private var holdDepth: Double { style.holdDepth }
-    private var timingSlack: Double { style.timingSlack }
 
     /// The decision for `view`'s seat now.
     mutating func decide(_ view: SeatView) -> BotDecision {
@@ -99,25 +95,42 @@ struct BotBrain: Sendable {
         observe(boat, view)
         guard boat.isOnCourse else { return BotDecision(input: .neutral) }
         if let input = penaltyInput(boat, view) { return BotDecision(input: input) }
-        let aim = plan(boat, view)
+        var aim = plan(boat, view)
+        // Tacked before her start, she bears away to close-hauled before she holds any closer to the wind: until
+        // she's there, rule 13 has her keep clear of every boat (#99).
+        let closeHauled = Self.closeHauled(boat.windSpeed * boat.shadow, view) + deg2rad(2)
+        let starting = boat.status == .prestart || boat.status == .ocs
+        if starting, senses.tacking, aim.tack == boat.tack, aim.groove == nil, aim.angle < closeHauled {
+            aim = Aim(angle: closeHauled, tack: aim.tack, ease: aim.ease)
+        }
         // The autohelm is sailing the tap through the tack or gybe: hands off. Any rudder would cancel it
         // (#13) and leave her head to wind; it's over in a couple of seconds.
         if boat.autohelm?.isTapping == true { return BotDecision(input: .neutral) }
         let desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
         if let heading = evasiveHeading(boat, view, desired: desired) {
-            return BotDecision(input: steer(boat, toHeading: heading, view))
+            let ease = aim.ease && aim.tack == boat.tack || easesKeepingClear(boat, view, heading: heading)
+            return BotDecision(input: steer(boat, toHeading: heading, view).eased(ease))
         }
         if aim.tack != boat.tack {
             if canTap(boat, view) {
                 lastTapTime = view.time
                 return BotDecision(input: .neutral, tap: .tackGybe)
             }
-            // Not yet (too slow to tack, or a mark too close to turn by): the same aim on her own tack.
+            // Not yet (too slow to tack, or a mark too close to turn by): the same aim on her own tack. Before
+            // her start (#99) she sails her own tack's groove sheeted in instead: the speed to tack, rather than
+            // a gybe to leeward the race area below the line may not have room for; but running by an end of the
+            // line, she runs on clear of its mark to gybe.
             var own = aim
             own.tack = boat.tack
+            if boat.status == .prestart || boat.status == .ocs {
+                let running = sailingAngle(boat) >= .pi / 2
+                own = running && !isClearOfMarks(boat, view, lengths: Self.tapMarkClearance)
+                    ? Aim(angle: max(sailingAngle(boat), Self.returnAngle), tack: boat.tack)
+                    : .groove(.upwind, tack: boat.tack, angle: grooveAngle(.upwind, boat, view))
+            }
             return BotDecision(input: helm(boat, to: own, view))
         }
-        return BotDecision(input: helm(boat, to: aim, view))
+        return BotDecision(input: helm(boat, to: aim, view).eased(aim.ease))
     }
 
     // MARK: - Penalty turns
@@ -149,7 +162,8 @@ struct BotBrain: Sendable {
         }
         if let turn = penaltyTurn { return BoatInput(rudder: turn) }
         let mark = nearestMark(b, view)
-        if let mark, mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance,
+        let crowded = (b.status == .prestart || b.status == .ocs) && isCrowded(b, view)
+        if crowded || mark.map({ $0.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance }) == true,
            owed.startDeadlineTick - view.tick > RulesConfig.ticks(Self.penaltyStartMargin) {
             return nil
         }
@@ -157,6 +171,17 @@ struct BotBrain: Sendable {
         let turn = mark.map { $0.offset.dot(b.forward.rightPerp) > 0 ? -1.0 : 1.0 } ?? style.penaltyDirection
         penaltyTurn = turn
         return BoatInput(rudder: turn)
+    }
+
+    /// Hull lengths of water around her, before her start, she waits for before a penalty turn (#99): the
+    /// crowd below the line holds, waits and crosses on every course, and a boat turning a penalty keeps clear
+    /// of all of it (rule 21.2).
+    static let penaltyBoatClearance = 2.5
+
+    /// Whether another boat is within `penaltyBoatClearance` hull lengths of her.
+    private func isCrowded(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        let room = view.boatClass.hull.length * Self.penaltyBoatClearance
+        return view.others.contains { !$0.isGhost && ($0.position - b.position).length < room }
     }
 
     /// The mark nearest her, within `penaltyMarkClearance` hull lengths and a turn's circle more: the way to
@@ -218,8 +243,9 @@ struct BotBrain: Sendable {
     /// it (`holds`), the rudder stays centred until the aim moves. Otherwise she steers in proportion to the
     /// error and centres close to it, so the autohelm captures the angle (and snaps a groove aim to the
     /// groove); an autohelm holding something else is let go of first with a touch of rudder. An aim
-    /// inside the no-go zone (the pre-start luff and wait) keeps a touch of rudder instead, towards the
-    /// wind when there is no error to steer.
+    /// inside the no-go zone keeps a touch of rudder instead, towards the wind when there is no error to
+    /// steer: letting go there would hand her to the autohelm, which bears away to the groove (#219). No aim
+    /// today is one: she holds before her start with Ease, outside the no-go zone (#99).
     private func helm(_ b: SeatView.OwnBoat, to aim: Aim, _ view: SeatView) -> BoatInput {
         let boatClass = view.boatClass
         let error = wrapAngle(aim.angle - sailingAngle(b))
@@ -284,74 +310,16 @@ struct BotBrain: Sendable {
     private mutating func plan(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
         let c = view.course
         switch b.status {
-        case .prestart where view.time < 0:
-            return prestartAim(b, view)
         case .prestart:
-            return lateStartAim(b, view)
+            return startAim(b, view)
         case .ocs:
-            return navigate(b, to: startPoint(c) - c.upwind * 15, view)
+            return returnAim(b, view)
         case .racing:
             if case .finish = c.legs[b.legIndex] { return finishAim(b, view) }
             return navigate(b, to: waypoint(b, view), view)
         case .finished, .dsq:
             return Aim(heading: b.heading, b, tolerance: .pi)
         }
-    }
-
-    /// After the gun, not yet started. A boat starts only by crossing the line itself from the
-    /// pre-start side, so one on the course side (she went past an end of the line) sails back below
-    /// it as an OCS boat does, and one below it but beyond an end first sails in behind the line;
-    /// otherwise she would loiter past the line, or keep hitting the end mark, and never start.
-    private mutating func lateStartAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
-        let c = view.course
-        let line = c.startLine
-        if line.side(b.position) > 0 { return navigate(b, to: startPoint(c) - c.upwind * 15, view) }
-        let along = (b.position - line.pin.position).dot((line.committee.position - line.pin.position).normalized)
-        let clearOfEnds = view.boatClass.hull.length
-        if along < clearOfEnds || along > line.length - clearOfEnds {
-            return navigate(b, to: startPoint(c) - c.upwind * 5, view)
-        }
-        return navigate(b, to: startPoint(c) + c.upwind * 20, view)
-    }
-
-    private func startPoint(_ c: CourseLayout) -> Vec2 {
-        let line = c.startLine
-        return line.pin.position + (line.committee.position - line.pin.position) * startSpot
-    }
-
-    /// Hull lengths of race area her pre-start hold leaves below it (#82): room to luff, wait and turn.
-    static let holdRoom = 4.0
-    /// Luffing and waiting, just inside the no-go zone, on whichever tack she is on: a tap this slow would
-    /// leave her head to wind.
-    static let luffAngle = deg2rad(28)
-    /// Reaching away along the line, on her tack.
-    static let reachAwayAngle = deg2rad(110)
-
-    private mutating func prestartAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
-        let c = view.course
-        let spot = startPoint(c)
-        let timeLeft = -view.time
-        let distance = (spot - b.position).length
-        let beatSpeed = view.boatClass.polar.bestUpwind(tws: b.windSpeed).speed
-        let timeNeeded = distance / max(beatSpeed, 0.5) * 1.25 + 5 + timingSlack
-
-        if timeLeft > timeNeeded + 4 {
-            // No deeper than leaves her room to turn inside the race area, which reaches only a line's
-            // length or so below the line (#82).
-            let room = c.raceArea.halfLength + (spot - c.raceArea.centre).dot(c.upwind)
-            let hold = spot - c.upwind * min(holdDepth, max(0, room - view.boatClass.hull.length * Self.holdRoom))
-            if (hold - b.position).length > 12 { return navigate(b, to: hold, view) }
-            return Aim(angle: Self.luffAngle, tack: b.tack) // luff and wait
-        }
-        // Too close to the line with time to kill: reach away along it rather than
-        // luffing, because a luffing boat still coasts several lengths.
-        let depth = -c.startLine.side(b.position)
-        if depth < b.speed * 4 + 3 && depth / max(b.speed, 1) < timeLeft - 2 {
-            return Aim(angle: Self.reachAwayAngle, tack: b.tack)
-        }
-        let eta = distance / max(b.speed, 1)
-        if eta < timeLeft - 3 { return Aim(angle: Self.luffAngle, tack: b.tack) }
-        return navigate(b, to: spot - c.upwind * 2, view)
     }
 
     /// The point to sail at for the current leg: round each mark to port, approaching it along the
@@ -447,7 +415,7 @@ struct BotBrain: Sendable {
     /// downwind groove on a gybe likewise, or straight there as a wind angle when it's a reach (the
     /// laylines and the reach both expressed as the angle to the wind, ADR 0007). Her tactics choose the
     /// tack inside the corridor, and may pinch or foot off the groove.
-    private mutating func navigate(_ b: SeatView.OwnBoat, to target: Vec2, _ view: SeatView) -> Aim {
+    mutating func navigate(_ b: SeatView.OwnBoat, to target: Vec2, _ view: SeatView) -> Aim {
         let toTarget = target - b.position
         let distance = toTarget.length
         let bearing = toTarget.bearing
@@ -509,7 +477,7 @@ struct BotBrain: Sendable {
     /// a puff this close would tack her below the layline, into the mark.
     static let tacticalRange = 60.0
 
-    private mutating func setTack(_ tack: Tack, _ view: SeatView) {
+    mutating func setTack(_ tack: Tack, _ view: SeatView) {
         guard tack != plannedTack else { return }
         plannedTack = tack
         lastTackTime = view.time
@@ -525,9 +493,23 @@ struct BotBrain: Sendable {
         return avoidEdges(b, view, desired: evasive ?? desired) ?? evasive
     }
 
-    /// A heading that keeps her clear if a collision is coming and she is the one that must keep clear.
+    /// A heading that keeps her clear if a collision is coming and she is the one that must keep clear. Before
+    /// her start (#99) she keeps clear on port by the water (`startKeepClear`), and on starboard as she would
+    /// racing unless that would take her over the line early.
     private func keepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
         let lookahead = 2.5 + 2 * skill
+        guard b.status == .prestart || b.status == .ocs else {
+            return ruleKeepClear(b, view, desired: desired, lookahead: lookahead)
+        }
+        if b.tack == .port { return startKeepClear(b, view, desired: desired, lookahead: lookahead) }
+        guard let heading = ruleKeepClear(b, view, desired: desired, lookahead: lookahead) else { return nil }
+        guard crossesEarly(b, view, heading: heading) else { return heading }
+        return startKeepClear(b, view, desired: desired, lookahead: lookahead) ?? heading
+    }
+
+    /// The heading the rule she must keep clear under has her steer, if a collision is coming: ducking, luffing,
+    /// finishing a tack, or turning away.
+    private func ruleKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Double? {
         let myVelocity = Vec2.heading(desired) * b.speed
         for other in view.others where !other.isGhost {
             let offset = other.position - b.position
@@ -541,9 +523,19 @@ struct BotBrain: Sendable {
 
             // Headings are set relative to the wind so evasive action never parks the boat in irons.
             let side: Double = b.tack == .port ? 1 : -1
+            // Before her start (#99) boats hold, wait and reach below the line on every course, not only
+            // close-hauled: she ducks further than she is sailing already, finishes a tack to close-hauled rather
+            // than stay tacking (rule 13), and luffs from as close as she's holding.
+            let starting = b.status == .prestart || b.status == .ocs
             switch right.rule {
             case .portStarboard:
-                return b.windDirection + side * deg2rad(85) // duck
+                let duck = starting ? min(max(deg2rad(85), b.twa + deg2rad(30)), deg2rad(150)) : deg2rad(85)
+                return b.windDirection + side * duck
+            case .whileTacking where starting:
+                return b.windDirection + side * (Self.closeHauled(b.windSpeed * b.shadow, view) + deg2rad(10))
+            case .windwardLeeward where starting:
+                let noGo = BoatDynamics.noGoAngle(view.boatClass.polar)
+                return b.windDirection + side * max(noGo + deg2rad(2), min(deg2rad(38), b.twa - deg2rad(10)))
             case .windwardLeeward, .whileTacking:
                 return b.windDirection + side * deg2rad(38) // luff
             default:
@@ -581,9 +573,13 @@ struct BotBrain: Sendable {
         func isClear(_ heading: Double) -> Bool { view.course.isInRaceArea(b.position + Vec2.heading(heading) * ahead) }
         guard !isClear(desired) else { return nil }
         let towardsWind: Double = wrapAngle(b.windDirection - desired) >= 0 ? 1 : -1
+        // Only a heading on her own tack: `steer` never takes her through head to wind or past dead downwind,
+        // so one beyond would leave her pinned where she is, bow on to the edge (#99, a takeover run into it).
+        let ownSide: Double = b.tack == .starboard ? 1 : -1
         for step in 1...18 {
             for side in [towardsWind, -towardsWind] {
                 let heading = desired + side * Double(step) * deg2rad(10)
+                guard wrapAngle(b.windDirection - heading) * ownSide > 0 else { continue }
                 if isClear(heading) { return sailable(heading, wind: b.windDirection) }
             }
         }
@@ -607,7 +603,8 @@ struct BotBrain: Sendable {
 
 /// Where a bot wants to sail (#231): a sailing angle on a tack, which the autohelm holds once she has
 /// steered to it and centred the rudder. Everything is an angle to the wind (ADR 0007): the groove, a
-/// pinch or foot off it, and a course to a mark as the angle it needs now.
+/// pinch or foot off it, and a course to a mark as the angle it needs now. Before her start she may sail
+/// it with Ease (#99), sheets let out to slow her.
 struct Aim: Equatable {
     var tack: Tack
     /// Her sailing angle on `tack` (`BoomSide.sailingAngle`), radians, 0...π.
@@ -616,11 +613,14 @@ struct Aim: Equatable {
     var groove: Autohelm.Groove?
     /// How far the angle the autohelm holds may be off `angle` before she steers again.
     var tolerance: Double
+    /// Sheets let out (`BoatInput.ease`): she sails the angle at the class's eased fraction of her speed.
+    var ease = false
 
-    init(angle: Double, tack: Tack, tolerance: Double = deg2rad(1.5)) {
+    init(angle: Double, tack: Tack, tolerance: Double = deg2rad(1.5), ease: Bool = false) {
         self.tack = tack
         self.angle = angle
         self.tolerance = tolerance
+        self.ease = ease
     }
 
     /// The groove on `tack`, at `angle` (her reckoning of it).
@@ -647,5 +647,12 @@ struct Aim: Equatable {
     /// or hotter), held as an angle.
     func offset(by offset: Double, tolerance: Double = deg2rad(1.5)) -> Aim {
         Aim(angle: (angle + offset).clamped(to: 0...(.pi)), tack: tack, tolerance: tolerance)
+    }
+}
+
+extension BoatInput {
+    /// The same rudder with the sheets let out, or not.
+    func eased(_ ease: Bool) -> BoatInput {
+        ease == self.ease ? self : BoatInput(rudder: rudder, ease: ease)
     }
 }

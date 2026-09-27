@@ -78,6 +78,11 @@ struct Senses: Sendable, Equatable {
     var direction: Double?
     /// How fast it is turning, radians per second, positive veering.
     var directionRate = 0.0
+    /// Her boom's side at her last decision.
+    var boomSide: BoomSide?
+    /// Whether she is tacking as rule 13 has it (#99): from her boom crossing head to wind until she is
+    /// close-hauled on the new tack. Until then she keeps clear of every boat.
+    var tacking = false
 }
 
 extension BotBrain {
@@ -100,6 +105,9 @@ extension BotBrain {
         if let planing = view.boatClass.planing {
             senses.planing = b.isOnCourse && planing.isPlaning(was: senses.planing, twa: b.twa, speed: b.speed, tws: tws)
         }
+        if let side = senses.boomSide, side != b.boomSide { senses.tacking = b.twa < .pi / 2 }
+        if senses.tacking && b.twa >= Self.closeHauled(tws, view) { senses.tacking = false }
+        senses.boomSide = b.boomSide
         if let direction = senses.direction, dt > 0 {
             let next = wrapAngle(direction + wrapAngle(b.windDirection - direction) * min(1, dt / Self.directionSmoothing))
             let rate = wrapAngle(next - direction) / dt
@@ -108,6 +116,12 @@ extension BotBrain {
         } else {
             senses.direction = b.windDirection
         }
+    }
+
+    /// The sailing angle at which a boat that has tacked is close-hauled, and no longer tacking (rule 13): a
+    /// little below the upwind groove in `tws`.
+    static func closeHauled(_ tws: Double, _ view: SeatView) -> Double {
+        view.boatClass.polar.bestUpwind(tws: tws).twa - deg2rad(5)
     }
 
     /// Her reckoning of `groove`'s sailing angle: at the wind strength her grooves read.

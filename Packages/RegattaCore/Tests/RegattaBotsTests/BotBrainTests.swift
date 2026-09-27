@@ -32,7 +32,7 @@ import RegattaCore
     @Test func botCentresRudderOnTarget() throws {
         let race = try Self.beatingRace(seed: 5, offGroove: deg2rad(20))
         // Skill 0.4: a bot that doesn't tack on headers, so nothing changes her aim, the starboard groove.
-        let style = BotStyle(skill: 0.4, startSpot: 0.5, finishSpot: 0.7, holdDepth: 20, timingSlack: 0, penaltyDirection: 1)
+        let style = BotStyle(skill: 0.4, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
         var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style)
         var decisions: [BotDecision] = []
         var headings: [(tick: Int, heading: Double)] = []
@@ -62,7 +62,7 @@ import RegattaCore
     /// autohelm takes it over (ADR 0007).
     @Test func botLetsTheAutohelmSnapToTheGroove() throws {
         let race = try Self.beatingRace(seed: 6, offGroove: deg2rad(2))
-        let style = BotStyle(skill: 0.4, startSpot: 0.5, finishSpot: 0.7, holdDepth: 20, timingSlack: 0, penaltyDirection: 1)
+        let style = BotStyle(skill: 0.4, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
         var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style)
         for _ in 0..<(10 * Race.tickRate) {
             driver.drive(race)
@@ -101,8 +101,7 @@ import RegattaCore
             try race.importSnapshot(snapshot)
             let view = race.seatView(for: 0)
             #expect(view.own.tack == .port && view.others[0].rightOfWay?.keepClear == 0)
-            let brain = BotBrain(style: BotStyle(skill: 0.5, startSpot: 0.5, finishSpot: 0.7, holdDepth: 20,
-                                                 timingSlack: 0, penaltyDirection: 1))
+            let brain = BotBrain(style: BotStyle(skill: 0.5, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1))
             return (brain.evasiveHeading(view.own, view, desired: view.own.heading), view.own.windDirection + deg2rad(85), view)
         }
         /// Whether sailing `heading` keeps her in the race area as far ahead as a bot looks for its edge.

@@ -265,8 +265,8 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         }
         try race.importSnapshot(snapshot)
         #expect(race.boats[0].isTakingPenalty)
-        var brain = BotBrain(style: BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, holdDepth: 20,
-                                             timingSlack: 0, penaltyDirection: penaltyDirection))
+        var brain = BotBrain(style: BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0,
+                                             penaltyDirection: penaltyDirection))
         return (brain.decide(race.seatView(for: 0)).input.rudder, race)
     }
 
