@@ -51,15 +51,15 @@ public struct BotDecision: Hashable, Sendable {
 }
 
 /// Helms a computer-controlled boat on the autohelm (ADR 0007, #231): pre-start timing, beating and running
-/// between laylines, playing shifts, mark roundings, penalty turns, and keeping clear when it is the
-/// give-way boat.
+/// between laylines, playing shifts, mark roundings, penalty turns, keeping clear when it is the
+/// give-way boat, and keeping off the race area's edge (#82).
 ///
 /// It sails the way a player does. Each decision it picks an `Aim`, a wind angle on a tack (the groove,
 /// the groove with a pinch or foot, or a course to a mark as the wind angle it needs), steers to it and
 /// centres the rudder, and the autohelm holds it: no heading tracking between decisions. It takes the
 /// rudder back only when the aim changes, or the angle held has drifted past the aim's tolerance. Tacks
-/// and gybes are the tap's, never the rudder's. Keeping clear and staying off a mark are steered with
-/// the rudder while they last; then she centres on her aim again.
+/// and gybes are the tap's, never the rudder's. Keeping clear and staying off a mark or the race area's
+/// edge are steered with the rudder while they last; then she centres on her aim again.
 ///
 /// It sees the race only through its seat's `SeatView` (#98): what a player in that seat sees now, never
 /// the race itself, a key or another boat's input (#19). It answers with a `BotDecision`, an int8 rudder
@@ -118,6 +118,9 @@ struct BotBrain: Sendable {
         if let evasive = avoidMarks(boat, view, desired: desired) {
             return BotDecision(input: steer(boat, toHeading: evasive, view))
         }
+        if let evasive = avoidEdges(boat, view, desired: desired) {
+            return BotDecision(input: steer(boat, toHeading: evasive, view))
+        }
         if aim.tack != boat.tack {
             if canTap(boat, view) {
                 lastTapTime = view.time
@@ -154,13 +157,21 @@ struct BotBrain: Sendable {
 
     /// Hull lengths a mark must be clear of her for a tap: the tack or gybe sails itself, hands off.
     static let tapMarkClearance = 2.0
+    /// Race area a gybe needs downwind of her (#82): it bears her away through dead downwind before the
+    /// boom crosses and she heads up again, carrying her this many hull lengths, and this many seconds at
+    /// her speed, to leeward.
+    static let gybeRoom = (hullLengths: 2.0, seconds: 4.0)
 
     /// Whether she can tap now: a tap done, no mark close enough for the turn to swing her onto, and for a
-    /// tack, the speed to carry her through it.
+    /// tack, the speed to carry her through it; for a gybe, room to leeward inside the race area.
     private func canTap(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         guard view.time - lastTapTime >= Self.tapInterval,
               isClearOfMarks(b, view, lengths: Self.tapMarkClearance) else { return false }
-        guard abs(sailingAngle(b)) < .pi / 2 else { return true }
+        guard abs(sailingAngle(b)) < .pi / 2 else {
+            let room = view.boatClass.hull.length * Self.gybeRoom.hullLengths + b.speed * Self.gybeRoom.seconds
+            let leeward = -Vec2.heading(b.windDirection) * room
+            return view.course.isInRaceArea(b.position + leeward)
+        }
         let closeHauled = view.boatClass.polar.bestUpwind(tws: b.windSpeed * b.shadow).speed
         return b.speed >= closeHauled * Self.tackingSpeed
     }
@@ -270,6 +281,8 @@ struct BotBrain: Sendable {
         return line.pin.position + (line.committee.position - line.pin.position) * startSpot
     }
 
+    /// Hull lengths of race area her pre-start hold leaves below it (#82): room to luff, wait and turn.
+    static let holdRoom = 4.0
     /// Luffing and waiting, just inside the no-go zone, on whichever tack she is on: a tap this slow would
     /// leave her head to wind.
     static let luffAngle = deg2rad(28)
@@ -285,7 +298,10 @@ struct BotBrain: Sendable {
         let timeNeeded = distance / max(beatSpeed, 0.5) * 1.25 + 5 + timingSlack
 
         if timeLeft > timeNeeded + 4 {
-            let hold = spot - c.upwind * holdDepth
+            // No deeper than leaves her room to turn inside the race area, which reaches only a line's
+            // length or so below the line (#82).
+            let room = c.raceArea.halfLength + (spot - c.raceArea.centre).dot(c.upwind)
+            let hold = spot - c.upwind * min(holdDepth, max(0, room - view.boatClass.hull.length * Self.holdRoom))
             if (hold - b.position).length > 12 { return navigate(b, to: hold, view) }
             return Aim(angle: Self.luffAngle, tack: b.tack) // luff and wait
         }
@@ -501,6 +517,27 @@ struct BotBrain: Sendable {
             guard abs(offset.cross(ahead)) < obstacle.radius + view.boatClass.hull.beam + Self.markClearance else { continue }
             let markIsToStarboard = offset.dot(ahead.rightPerp) > 0
             return sailable(desired + (markIsToStarboard ? -1 : 1) * deg2rad(30), wind: b.windDirection)
+        }
+        return nil
+    }
+
+    /// Seconds of sailing ahead she looks for the race area's edge.
+    static let edgeLookahead = 3.0
+
+    /// A heading that turns her off the race area's edge (#82: its boundary and the land in it) when she
+    /// is about to sail into it: the nearest to `desired`, towards the wind first, whose point a few
+    /// seconds' sailing and a hull length ahead is in the race area. The edge costs her speed, never a
+    /// penalty, but a boat pinned against it bow on turns away only at her class's slowest rate.
+    private func avoidEdges(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
+        let ahead = max(b.speed, 1) * Self.edgeLookahead + view.boatClass.hull.length
+        func isClear(_ heading: Double) -> Bool { view.course.isInRaceArea(b.position + Vec2.heading(heading) * ahead) }
+        guard !isClear(desired) else { return nil }
+        let towardsWind: Double = wrapAngle(b.windDirection - desired) >= 0 ? 1 : -1
+        for step in 1...18 {
+            for side in [towardsWind, -towardsWind] {
+                let heading = desired + side * Double(step) * deg2rad(10)
+                if isClear(heading) { return sailable(heading, wind: b.windDirection) }
+            }
         }
         return nil
     }
