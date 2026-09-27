@@ -30,13 +30,13 @@ import Testing
     /// hull reaching `reach` metres past the side (negative: inside it). Her rudder is centred, so her
     /// autohelm takes her sailing angle on the first step. The wind blows abeam from her port side (a
     /// beam reach, clear of both grooves' snaps), turned by `shift(tick)`. Seat 1 is out of the way on
-    /// the line.
-    static func raceAtTheSide(angle: Double, speed: Double = 3, reach: Double = 0.05,
+    /// the line. The race is at `venue` if one is given (`venue(land:)`).
+    static func raceAtTheSide(angle: Double, speed: Double = 3, reach: Double = 0.05, venue: VenueFile? = nil,
                               shift: @escaping (_ tick: Int) -> Double = { _ in 0 }) throws -> Race {
         let course = try course()
         let heading = course.axis + .pi / 2 + angle
         let wind = { (tick: Int) in GroundWind(direction: wrapAngle(heading - .pi / 2 + shift(tick)), speed: windSpeed) }
-        return try placedRace(current: still, seed: seed, wind: wind, boatClass: boatClass) { snapshot, race in
+        return try placedRace(current: still, seed: seed, wind: wind, boatClass: boatClass, venue: venue) { snapshot, race in
             let area = race.course.raceArea
             let right = race.course.right
             let side = area.centre + right * area.halfWidth
@@ -62,6 +62,25 @@ import Testing
 
     static func isTouching(_ race: Race, _ kind: ObstructionKind = .boundary) -> Bool {
         race.exportSnapshot().touchingEdges.contains(.init(seat: 0, kind: kind))
+    }
+
+    /// The default venue (dev-venue@2), as `edge-venue@1`, with `land` for its land: each polygon's
+    /// corners in order, in the venue's frame (the course's).
+    static func venue(land: [[Vec2]]) throws -> VenueFile {
+        let bytes = try #require(try VenueFile.bundledData(id: "dev-venue", version: 2))
+        var json = try #require(try JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        json["id"] = "edge-venue"
+        json["version"] = 1
+        json["land"] = land.map { corners in ["outlineMetres": (corners + [corners[0]]).map { [$0.x, $0.y] }] }
+        return try VenueFile(data: JSONSerialization.data(withJSONObject: json, options: .sortedKeys))
+    }
+
+    /// Metres from `p` to `polygon`: 0 on it.
+    static func clearance(_ p: Vec2, from polygon: [Vec2]) -> Double {
+        if Collision.contains(simplePolygon: polygon, p) { return 0 }
+        return polygon.indices.map { i in
+            (Collision.closestPoint(on: Segment(polygon[i], polygon[(i + 1) % polygon.count]), to: p) - p).length
+        }.min()!
     }
 
     // MARK: Acceptance
@@ -202,10 +221,59 @@ import Testing
             let moved = hull.map { $0 + resolution.push }
             #expect(reach(moved, past: upper) < 1e-9 && reach(moved, past: lower) < 1e-9, "heading \(heading)")
             #expect((Collision.penetration(convex: moved, simplePolygon: land.points)?.depth ?? 0) < 1e-9)
-            #expect(resolution.touches.map(\.kind) == [.land])
+            #expect(resolution.touches == [.land])
             // Out of the notch, the way it opens.
-            #expect(resolution.touches[0].normal.x > 0.8)
+            #expect(resolution.normal.x > 0.8)
+            #expect(abs(resolution.normal.dot(resolution.push.normalized) - 1) < 1e-12)
         }
+    }
+
+    /// Land and the boundary touched in the same tick are one edge: she loses her speed to them once,
+    /// against the way her hull is pushed out of both, not once to each in turn.
+    @Test func landAndBoundaryTouchedTogetherTakeHerSpeedOnce() throws {
+        // 30° off straight into the side, towards the leeward end, into the corner the side makes with a
+        // shore to leeward of her: her hull reaches 0.05 m past the side and past the shore's face.
+        let angle = Double.pi / 6
+        let open = try Self.raceAtTheSide(angle: angle)
+        let area = open.course.raceArea, right = open.course.right, up = open.course.upwind
+        let side = area.centre + right * area.halfWidth
+        let face = open.boats[0].hull(outline: Self.outline).map { ($0 - side).dot(up) }.min()! + 0.05
+        func at(_ inward: Double, _ along: Double) -> Vec2 { side - right * inward + up * along }
+        let shore = [at(20, face - 60), at(-50, face - 60), at(-50, face), at(20, face)]
+        let venue = try Self.venue(land: [shore])
+        // Her twin, 40 m further in, is clear of both.
+        let race = try Self.raceAtTheSide(angle: angle, venue: venue)
+        let twin = try Self.raceAtTheSide(angle: angle, reach: -40, venue: venue)
+        _ = race.drainEvents()
+        race.step()
+        twin.step()
+        #expect(Self.isTouching(race, .land) && Self.isTouching(race, .boundary))
+        #expect(twin.exportSnapshot().touchingEdges.isEmpty)
+        let events = race.drainEvents().map(\.kind)
+        #expect(events.contains(.obstructionContact(seat: 0, kind: .land)))
+        #expect(events.contains(.obstructionContact(seat: 0, kind: .boundary)))
+        #expect(race.incidents.obstructionContacts.map(\.kind) == [.land, .boundary])
+
+        // Where her own step took her hull: her twin's, 40.05 m further out, into both.
+        let boat = race.boats[0], free = twin.boats[0]
+        #expect(boat.heading == free.heading)
+        let stepped = free.hull(outline: Self.outline).map { $0 + right * 40.05 }
+        let resolution = race.course.resolveEdges(hull: stepped)
+        #expect(resolution.touches == [.land, .boundary])
+        #expect((boat.position - (free.position + right * 40.05 + resolution.push)).length < 1e-9)
+        // The one edge faces out of the corner, between the side and the shore.
+        #expect(resolution.normal.dot(-right) > 0.1 && resolution.normal.dot(up) > 0.1)
+        // Her speed along that one edge, and the course's retention of it once.
+        let retention = race.course.edgeSpeedRetention
+        let once = retention * abs(boat.forward.dot(resolution.normal.rightPerp)) * free.speed
+        #expect(abs(boat.speed - once) < 1e-9)
+        // Not the side's retention of her speed along it, and then the shore's of what was left.
+        let twice = retention * abs(boat.forward.dot(right)) * retention * abs(boat.forward.dot(up)) * free.speed
+        #expect(abs(boat.speed - twice) > 1e-3)
+        #expect(Self.reachPastTheSides(race) < 1e-9)
+        #expect(Collision.distance(convex: boat.hull(outline: Self.outline), simplePolygon: race.course.land[0].points)
+                < RaceEdges.touchMargin)
+        #expect(Collision.penetration(convex: boat.hull(outline: Self.outline), simplePolygon: race.course.land[0].points) == nil)
     }
 
     @Test func centredRudderHoldsWindAngleIntoTheEdgeAndSlows() throws {
@@ -268,6 +336,12 @@ import Testing
         let corner = Venue.LandPolygon(points: [Vec2(100.05, 0), Vec2(120, -10), Vec2(120, 10)])
         #expect(abs(Collision.distance(convex: hull(0), simplePolygon: corner.points) - 0.05) < 1e-9)
         #expect(Collision.distance(convex: hull(-0.2), simplePolygon: land.points) == 0)
+        // A strip of land across a square, neither's corner in the other: they meet.
+        let square = [Vec2(-10, -10), Vec2(10, -10), Vec2(10, 10), Vec2(-10, 10)]
+        let strip = [Vec2(-20, -1), Vec2(20, -1), Vec2(20, 1), Vec2(-20, 1)]
+        #expect(Collision.penetration(convex: square, simplePolygon: strip) == nil)
+        #expect(Collision.distance(convex: square, simplePolygon: strip) == 0)
+        #expect(Collision.distance(convex: square, simplePolygon: strip.map { $0 + Vec2(0, 13) }) == 2)
     }
 
     // MARK: Placement and the race area's queries
@@ -286,6 +360,45 @@ import Testing
                 #expect(race.exportSnapshot().touchingEdges.isEmpty)
             }
         }
+    }
+
+    /// Land near the line: a shore reaching to 20 m below it under the pin end's half of the scatter, and
+    /// a rock in the middle of the other half. Every boat still starts a hull length off both, as off the
+    /// boundary, where the same draws without the land put some of the fleet on it or against it.
+    @Test func everyBoatStartsAHullLengthOffLandNearTheLine() throws {
+        var wouldHaveTouched = 0
+        for seats in [2, 8, 16] {
+            for seed: UInt64 in 1...6 {
+                let open = testRace(opponents: seats - 1, seed: seed)
+                let c = open.course
+                func at(_ across: Double, _ below: Double) -> Vec2 { c.startLine.centre + c.right * across - c.upwind * below }
+                let land = [[at(-400, 300), at(-90, 300), at(-90, 20), at(-400, 20)],
+                            [at(20, 95), at(40, 95), at(40, 75), at(20, 75)]]
+                var catalog = RaceFileCatalog()
+                let venue = try catalog.venues.add(Self.venue(land: land))
+                let setup = try RaceSetup(raceSeed: open.setup.raceSeed, seats: open.setup.seats, laps: open.setup.laps,
+                                          startSequenceTicks: open.setup.startSequenceTicks, venue: venue)
+                let race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
+                                    mode: .authoritative(windSeed: WindSeed(seed)))
+                // The rock is in the area only where it reaches that far below the line (a big fleet's).
+                #expect(!race.course.land.isEmpty)
+                #expect(race.course.startLine == c.startLine)
+                let hullLength = race.boatClass.hull.length
+                for (boat, openBoat) in zip(race.boats, open.boats) {
+                    for polygon in land {
+                        #expect(Self.clearance(boat.position, from: polygon) >= hullLength - 1e-9,
+                                "\(seats) seats, seed \(seed), seat \(boat.id)")
+                    }
+                    #expect(race.course.raceArea.inset(boat.position) >= hullLength - 1e-9)
+                    if land.contains(where: { Self.clearance(openBoat.position, from: $0) < hullLength }) {
+                        wouldHaveTouched += 1
+                    }
+                }
+                race.step()
+                #expect(race.exportSnapshot().touchingEdges.isEmpty, "\(seats) seats, seed \(seed)")
+            }
+        }
+        #expect(wouldHaveTouched > 10)
     }
 
     @Test func raceAreaIsTheRectangleLessTheLandInIt() throws {

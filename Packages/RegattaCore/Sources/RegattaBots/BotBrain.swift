@@ -111,15 +111,8 @@ struct BotBrain: Sendable {
         // (#13) and leave her head to wind; it's over in a couple of seconds.
         if boat.autohelm?.isTapping == true { return BotDecision(input: .neutral) }
         let desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
-        // Keeping clear, and staying off a mark while she does: a mark doesn't move out of her way.
-        if let evasive = keepClear(boat, view, desired: desired) {
-            return BotDecision(input: steer(boat, toHeading: avoidMarks(boat, view, desired: evasive) ?? evasive, view))
-        }
-        if let evasive = avoidMarks(boat, view, desired: desired) {
-            return BotDecision(input: steer(boat, toHeading: evasive, view))
-        }
-        if let evasive = avoidEdges(boat, view, desired: desired) {
-            return BotDecision(input: steer(boat, toHeading: evasive, view))
+        if let heading = evasiveHeading(boat, view, desired: desired) {
+            return BotDecision(input: steer(boat, toHeading: heading, view))
         }
         if aim.tack != boat.tack {
             if canTap(boat, view) {
@@ -475,6 +468,16 @@ struct BotBrain: Sendable {
         guard tack != plannedTack else { return }
         plannedTack = tack
         lastTackTime = view.time
+    }
+
+    /// The heading she steers for instead of `desired` while she must, or nil: keeping clear of a boat,
+    /// and staying off a mark while she does or by itself, since a mark doesn't move out of her way. Nor
+    /// does the race area's edge (#82): whichever of these she steers for, she turns off the edge only if
+    /// that heading would sail her into it.
+    func evasiveHeading(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
+        let evasive = keepClear(b, view, desired: desired).map { avoidMarks(b, view, desired: $0) ?? $0 }
+            ?? avoidMarks(b, view, desired: desired)
+        return avoidEdges(b, view, desired: evasive ?? desired) ?? evasive
     }
 
     /// A heading that keeps her clear if a collision is coming and she is the one that must keep clear.

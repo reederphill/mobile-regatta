@@ -211,6 +211,12 @@ public struct CourseLayout: Sendable, Equatable {
         raceArea.contains(p) && !land.contains { $0.contains(p) }
     }
 
+    /// Metres from the convex `polygon` to the nearest of `land`: 0 if it reaches any, infinity if there
+    /// is none (`Collision.distance(convex:simplePolygon:)`).
+    public func landClearance(of polygon: [Vec2]) -> Double {
+        land.map { Collision.distance(convex: polygon, simplePolygon: $0.points) }.min() ?? .infinity
+    }
+
     /// Where `hull` must move to stay in the race area, and which of its edges it touches
     /// (`RaceEdges.resolve`): what the race does to every boat on the course each tick.
     public func resolveEdges(hull: [Vec2]) -> RaceEdges.Resolution {

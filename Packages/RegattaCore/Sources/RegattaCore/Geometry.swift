@@ -141,9 +141,16 @@ public enum Collision {
     }
 
     /// How far apart the convex `hull` and the simple polygon `polygon` are: the least distance from a
-    /// corner of either to a side of the other, or 0 when they overlap.
+    /// corner of either to a side of the other, or 0 when they overlap, a corner of one in the other or
+    /// sides crossing (a strip of land across the hull, neither's corner in the other).
     public static func distance(convex hull: [Vec2], simplePolygon polygon: [Vec2]) -> Double {
         if penetration(convex: hull, simplePolygon: polygon) != nil { return 0 }
+        for i in hull.indices {
+            let side = Segment(hull[i], hull[(i + 1) % hull.count])
+            for j in polygon.indices where intersects(side, Segment(polygon[j], polygon[(j + 1) % polygon.count])) {
+                return 0
+            }
+        }
         func least(from points: [Vec2], to sides: [Vec2]) -> Double {
             var least = Double.infinity
             for p in points {

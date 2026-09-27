@@ -167,14 +167,25 @@ public final class Race {
         // Prototype placement until the start row (#35), square to the line: seat 0 mid-line, the rest
         // scattered below it by the race seed, reaching along it. The draws are squeezed towards the line
         // to keep every boat at least a hull length inside the race area (#82), which reaches only a line
-        // length below it.
+        // length below it; and then, as a whole, a twentieth at a time, until the scatter is a hull length
+        // off the land in it too. (A line with land within a hull length of its middle leaves no such
+        // scatter: then the tightest.)
         let centre = course.startLine.centre, up = course.upwind, right = course.right
         let hullLength = files.boatClass.content.hull.length
         let area = course.raceArea
         let below = area.halfLength + (centre - area.centre).dot(up)
         let across = area.halfWidth - abs((centre - area.centre).dot(right))
-        let squeeze = Vec2(min(1, (across - hullLength) / 130), min(1, (below - hullLength) / 100))
-        func onWater(_ offset: Vec2) -> Vec2 { centre + right * (offset.x * squeeze.x) + up * (offset.y * squeeze.y) }
+        let insideBoundary = Vec2(min(1, (across - hullLength) / 130), min(1, (below - hullLength) / 100))
+        func placed(_ offset: Vec2, _ squeeze: Vec2) -> Vec2 {
+            centre + right * (offset.x * squeeze.x) + up * (offset.y * squeeze.y)
+        }
+        let scatter: [Vec2] = [Vec2(-130, -100), Vec2(130, -100), Vec2(130, -35), Vec2(-130, -35)]
+        func isOffLand(_ squeeze: Vec2) -> Bool {
+            course.landClearance(of: scatter.map { placed($0, squeeze) }) >= hullLength
+        }
+        let squeezes: [Vec2] = (0..<20).map { insideBoundary * (1 - Double($0) / 20) }
+        let squeeze = squeezes.first(where: isOffLand) ?? squeezes[squeezes.count - 1]
+        func onWater(_ offset: Vec2) -> Vec2 { placed(offset, squeeze) }
         var fleet: [Boat] = []
         for seat in setup.seats.indices {
             let kind = setup.seats[seat]
@@ -592,30 +603,29 @@ public final class Race {
 
     /// Keeps every boat on the course in the race area (#12, #82): out of the land and inside the
     /// boundary (`CourseLayout.resolveEdges`). Heading into an edge she keeps only her speed along it, and
-    /// on the tick a touch begins only the course's `edgeSpeedRetention` of that (`RaceEdges.speed`); her
-    /// heading and rudder are her own, so she can steer away. A touch lasts until she is more than
-    /// `RaceEdges.touchMargin` clear of that edge. A touch is no foul: it costs no penalty, and when it
-    /// begins it is announced and recorded (`IncidentIndex.obstructionContacts`). Only Section A of the
-    /// rules applies near land (#12), so no rule 19. A ghost sails through.
+    /// on the tick a touch begins only the course's `edgeSpeedRetention` of that (`RaceEdges.speed`); land
+    /// and boundary touched in one tick are one edge, facing the way her hull is pushed, so she loses her
+    /// speed to them once. Her heading and rudder are her own, so she can steer away. A touch lasts until
+    /// she is more than `RaceEdges.touchMargin` clear of that edge. A touch is no foul: it costs no
+    /// penalty, and when it begins it is announced and recorded (`IncidentIndex.obstructionContacts`).
+    /// Only Section A of the rules applies near land (#12), so no rule 19. A ghost sails through.
     private func resolveEdgeContacts() {
         var touching = Set<WorldSnapshot.EdgeContact>()
         let outline = boatClass.hull.outline
         for i in boats.indices where boats[i].isOnCourse {
             let resolution = course.resolveEdges(hull: boats[i].hull(outline: outline))
-            if !resolution.touches.isEmpty { boats[i].position += resolution.push }
-            for touch in resolution.touches {
-                let contact = WorldSnapshot.EdgeContact(seat: i, kind: touch.kind)
-                touching.insert(contact)
-                let begins = !edgeContacts.contains(contact)
-                boats[i].speed = RaceEdges.speed(boats[i].speed, forward: boats[i].forward, normal: touch.normal,
-                                                 begins: begins, retention: course.edgeSpeedRetention)
-                if begins {
-                    incidents.recordObstructionContact(
-                        ObstructionContact(tick: tick, leg: boats[i].legIndex, seat: i, kind: touch.kind))
-                    emit(.obstructionContact(seat: i, kind: touch.kind))
-                }
+            let beginning = resolution.touches.filter { !edgeContacts.contains(.init(seat: i, kind: $0)) }
+            if !resolution.touches.isEmpty {
+                boats[i].position += resolution.push
+                boats[i].speed = RaceEdges.speed(boats[i].speed, forward: boats[i].forward, normal: resolution.normal,
+                                                 begins: !beginning.isEmpty, retention: course.edgeSpeedRetention)
             }
-            for kind in ObstructionKind.allCases where !resolution.touches.contains(where: { $0.kind == kind }) {
+            for kind in resolution.touches { touching.insert(WorldSnapshot.EdgeContact(seat: i, kind: kind)) }
+            for kind in beginning {
+                incidents.recordObstructionContact(ObstructionContact(tick: tick, leg: boats[i].legIndex, seat: i, kind: kind))
+                emit(.obstructionContact(seat: i, kind: kind))
+            }
+            for kind in ObstructionKind.allCases where !resolution.touches.contains(kind) {
                 let contact = WorldSnapshot.EdgeContact(seat: i, kind: kind)
                 if edgeContacts.contains(contact),
                    course.isNear(kind, hull: boats[i].hull(outline: outline), within: RaceEdges.touchMargin) {

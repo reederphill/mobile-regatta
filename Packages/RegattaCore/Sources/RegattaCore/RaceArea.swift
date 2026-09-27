@@ -85,19 +85,16 @@ public enum RaceEdges {
     /// sides meeting more steeply than this are a slot, not a corner, and the push stays square.
     static let maxSlide = 4.0
 
-    /// One kind of edge a hull touched.
-    public struct Touch: Sendable, Equatable {
-        public let kind: ObstructionKind
-        /// Unit vector out of the edge, into the water: the direction of this kind's contacts' pushes
-        /// added up, before any slide.
-        public let normal: Vec2
-    }
-
     public struct Resolution: Sendable, Equatable {
         /// The translation that clears the hull: every contact's push, added up.
         public let push: Vec2
-        /// Each kind touched, in `ObstructionKind.allCases` order; empty if the hull was clear.
-        public let touches: [Touch]
+        /// Unit vector out of every edge touched together, into the water: `push`'s direction, or the
+        /// first contact's normal if the pushes cancel out (opposite sides of a slot); zero if the hull
+        /// was clear. A boat touching the land and the boundary at once meets them as one edge facing
+        /// this way (`speed`), as her hull is pushed.
+        public let normal: Vec2
+        /// Each kind of edge touched, in `ObstructionKind.allCases` order; empty if the hull was clear.
+        public let touches: [ObstructionKind]
     }
 
     /// Moves `hull` out of the edges of the race area: back inside `area`'s sides, then out of each of
@@ -110,17 +107,16 @@ public enum RaceEdges {
         let kinds = ObstructionKind.allCases
         var hull = hull
         var total = Vec2.zero
-        var pushes = [Vec2](repeating: .zero, count: kinds.count)
-        var firstNormals = [Vec2?](repeating: nil, count: kinds.count)
+        var touched = [Bool](repeating: false, count: kinds.count)
+        var firstNormal: Vec2?
         var previous: Vec2?
         func apply(_ contact: Collision.Contact, _ kind: ObstructionKind) {
             let push = slide(contact.push, along: previous)
             previous = contact.normal
             for i in hull.indices { hull[i] += push }
             total += push
-            let k = kinds.firstIndex(of: kind)!
-            pushes[k] += contact.push
-            if firstNormals[k] == nil { firstNormals[k] = contact.normal }
+            touched[kinds.firstIndex(of: kind)!] = true
+            if firstNormal == nil { firstNormal = contact.normal }
         }
         for _ in 0..<maxPasses {
             var clear = true
@@ -136,12 +132,9 @@ public enum RaceEdges {
             }
             if clear { break }
         }
-        let touches = kinds.indices.compactMap { k -> Touch? in
-            guard let first = firstNormals[k] else { return nil }
-            // Opposite sides of a slot cancel out: fall back to the first side met.
-            return Touch(kind: kinds[k], normal: pushes[k].length > 1e-9 ? pushes[k].normalized : first)
-        }
-        return Resolution(push: total, touches: touches)
+        guard let firstNormal else { return Resolution(push: .zero, normal: .zero, touches: []) }
+        return Resolution(push: total, normal: total.length > 1e-9 ? total.normalized : firstNormal,
+                          touches: kinds.indices.filter { touched[$0] }.map { kinds[$0] })
     }
 
     /// `push`, turned to slide along the surface facing `previous` when it would drive the hull back into
@@ -170,7 +163,9 @@ public enum RaceEdges {
         }
     }
 
-    /// A boat's speed after touching an edge that faces `normal`, from her speed `speed` going in. While
+    /// A boat's speed after touching an edge that faces `normal` (`Resolution.normal`: the land and the
+    /// boundary touched together are one edge, so she loses her speed to them once), from her speed
+    /// `speed` going in. While
     /// she heads into it (`forward · normal < 0`) she keeps only her speed along it,
     /// `|forward · tangent| × speed`, and on the tick the touch begins only `retention` of that
     /// (`CourseLayout.edgeSpeedRetention`): bow on she stops, and held there she stays stopped. Heading
