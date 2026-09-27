@@ -4,13 +4,14 @@ import Testing
 
 /// The rules configuration file (#73): its values, its hash, and where the race reads it.
 @Suite struct RulesConfigTests {
-    static func bundledData() throws -> Data {
-        try #require(try RulesConfigFile.bundledData(id: "fleet-rules", version: 1))
+    /// The bundled bytes of fleet-rules@`version`: by default the default file, @2.
+    static func bundledData(version: Int = 2) throws -> Data {
+        try #require(try RulesConfigFile.bundledData(id: "fleet-rules", version: version))
     }
 
-    /// The bundled bytes with `old` replaced by `new` exactly once.
-    static func tampered(_ old: String, _ new: String) throws -> Data {
-        let text = try #require(String(data: try bundledData(), encoding: .utf8))
+    /// The bundled bytes of fleet-rules@`version` with `old` replaced by `new` exactly once.
+    static func tampered(_ old: String, _ new: String, version: Int = 2) throws -> Data {
+        let text = try #require(String(data: try bundledData(version: version), encoding: .utf8))
         #expect(text.components(separatedBy: old).count == 2, "\(old) must appear exactly once")
         return Data(text.replacingOccurrences(of: old, with: new).utf8)
     }
@@ -86,8 +87,63 @@ import Testing
         #expect(format.raceArea == .init(acrossAxisBeatFraction: 0.75, belowLineLineLengths: 1, aboveWindwardBeatFraction: 0.25))
         #expect(format.startRow == .init(depthLineLengths: 0.5, spreadLineLengths: 1.5, trueWindAngle: deg2rad(90),
                                          polarSpeedFraction: 1))
+        #expect(format.startRow.minimumSpacing == nil, "schema 1: no spacing floor")
         #expect(format.edgeSpeedRetention == 0.3)
         #expect(format.beatSizing == .init(leaderSeconds: 480, maxMetres: 360, calibrationFactor: 1))
+    }
+
+    /// fleet-rules@2 (schema 2, #85) is @1 with the start row's spacing floor, 1.25 hull lengths, listed as a
+    /// placeholder: every other value the same. It is the default; @1 still loads, with no floor.
+    @Test func version2IsVersion1WithTheStartRowSpacingFloor() throws {
+        let v1 = try RulesConfigFile.bundled(id: "fleet-rules", version: 1)
+        let v2 = try RulesConfigFile.bundled(id: "fleet-rules", version: 2)
+        #expect(v1.header.schemaVersion == 1 && v2.header.schemaVersion == 2)
+        #expect(v2.ref == RaceFiles.defaults.rulesConfiguration.ref && v2.ref == Race.defaultRulesConfiguration.ref)
+        #expect(v1.content.raceFormat.startRow.minimumSpacing == nil)
+        #expect(v2.content.raceFormat.startRow.minimumSpacing == HullLengths(1.25))
+        let spacing = "/raceFormat/startRow/minimumSpacingHullLengths"
+        #expect(v2.header.placeholders.contains(spacing) && !v1.header.placeholders.contains(spacing))
+        #expect(v2.header.placeholders.filter { $0 != spacing } == v1.header.placeholders)
+
+        var format = v1.content.raceFormat
+        format.startRow.minimumSpacing = HullLengths(1.25)
+        #expect(v2.content.raceFormat == format)
+        #expect(v2.content.incidents == v1.content.incidents && v2.content.zone == v1.content.zone)
+        #expect(v2.content.markRoomGiven == v1.content.markRoomGiven && v2.content.onABeat == v1.content.onABeat)
+        #expect(v2.content.builderValues == v1.content.builderValues)
+    }
+
+    /// The spacing floor is schema 2's: required there and positive, refused in a schema-1 file.
+    @Test func startRowSpacingFloorNeedsSchema2() throws {
+        let kind = RulesConfig.kind
+        let field = #""minimumSpacingHullLengths": 1.25"#
+        #expect(try RulesConfigFile(data: Self.tampered(field, #""minimumSpacingHullLengths": 2"#))
+            .content.raceFormat.startRow.minimumSpacing == HullLengths(2))
+        for bad in ["0", "-1"] {
+            #expect(throws: DataFileError.invalidContent(
+                kind: kind, id: "fleet-rules", reason: "raceFormat.startRow.minimumSpacingHullLengths must be positive")) {
+                try RulesConfigFile(data: Self.tampered(field, #""minimumSpacingHullLengths": "# + bad))
+            }
+        }
+        // Schema 2 without it (and without its placeholder, which would point at nothing).
+        var text = try #require(String(data: try Self.tampered(",\n      " + field, ""), encoding: .utf8))
+        text = text.replacingOccurrences(of: "\n    \"/raceFormat/startRow/minimumSpacingHullLengths\",", with: "")
+        #expect(!text.contains(#""minimumSpacingHullLengths""#) && !text.contains(#"/minimumSpacingHullLengths""#))
+        #expect(throws: DataFileError.malformed(kind: kind, reason: "schema 2 needs raceFormat.startRow.minimumSpacingHullLengths")) {
+            try RulesConfigFile(data: Data(text.utf8))
+        }
+        // Schema 1 with it: @1 given the field, or @2 claiming schema 1.
+        let needsSchema2 = DataFileError.invalidContent(
+            kind: kind, id: "fleet-rules", reason: "raceFormat.startRow.minimumSpacingHullLengths needs schema 2")
+        #expect(throws: needsSchema2) {
+            try RulesConfigFile(data: Self.tampered(#""polarSpeedFraction": 1"#, #""polarSpeedFraction": 1, "# + field, version: 1))
+        }
+        #expect(throws: needsSchema2) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 2"#, #""schemaVersion": 1"#))
+        }
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 3, supported: [1, 2])) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 2"#, #""schemaVersion": 3"#))
+        }
     }
 
     /// Changing one race-format value makes a different file, and the race log header records it.
@@ -128,8 +184,10 @@ import Testing
     @Test func judgeCallsRule21ForReturningAndPenalisedBoats() {
         let hull = Race.defaultBoatClass.hull
         let course = try! CourseLayoutTests.layout()
-        var returning = Boat(id: 1, isPlayer: false, colorIndex: 1, position: Vec2(0, -10), heading: .pi / 2, speed: 3)
+        // OCS and sailing straight back down the axis: returning (#85).
+        var returning = Boat(id: 1, isPlayer: false, colorIndex: 1, position: Vec2(0, -10), heading: course.axis + .pi, speed: 3)
         returning.status = .ocs
+        #expect(course.isReturning(returning))
         var penalised = Boat(id: 3, isPlayer: false, colorIndex: 3, position: Vec2(0, 100), heading: .pi / 2, speed: 3)
         penalised.status = .racing
         penalised.penaltyTurnsOwed = 1
@@ -137,6 +195,14 @@ import Testing
         var clean = Boat(id: 2, isPlayer: false, colorIndex: 2, position: Vec2(2, -10), heading: -.pi / 2, speed: 3)
         clean.status = .prestart
         #expect(Rules.judge(returning, clean, overlapped: true, course: course, hull: hull) == Verdict(rule: .returningToStart, offender: 1, victim: 2))
+        // OCS but sailing on up the course, or along the line: not returning, so rule 21.1 doesn't make her
+        // keep clear (#9: only while she sails back towards the line).
+        for heading in [course.axis, course.axis + .pi / 2] {
+            var sailingOn = returning
+            sailingOn.heading = heading
+            #expect(!course.isReturning(sailingOn))
+            #expect(Rules.judge(sailingOn, clean, overlapped: true, course: course, hull: hull)?.rule != .returningToStart)
+        }
         clean.status = .racing
         clean.position = Vec2(2, 100)
         #expect(Rules.judge(clean, penalised, overlapped: true, course: course, hull: hull) == Verdict(rule: .takingAPenalty, offender: 3, victim: 2))

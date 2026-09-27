@@ -1,4 +1,4 @@
-# Rules configuration file, schema version 1
+# Rules configuration file, schema versions 1 and 2
 
 The rules configuration is an immutable, versioned data file (ADR 0004, #32, #73), loaded by
 `DataFile<RulesConfig>` (`RulesConfigFile`) through the same loader as boat classes and venues. It holds
@@ -8,16 +8,22 @@ simulation version. A race log records the file's ref (id, version, SHA-256 of i
 ships a new version and never changes how an old race replays. Old versions ship for as long as their
 race logs must replay.
 
-The code is `Packages/RegattaCore/Sources/RegattaCore/RulesConfig.swift`: `RulesConfigSchema1` is the
-file as written, and `RulesConfig` is the loaded value (angles in radians; durations stay in seconds,
-`RulesConfig.ticks(_:)` converts them). The race-format values are a section of this file, not a sibling
-file, so one ref covers both.
+The code is `Packages/RegattaCore/Sources/RegattaCore/RulesConfig.swift`: `RulesConfigSchema` is the
+file as written (both schemas), and `RulesConfig` is the loaded value (angles in radians; durations stay
+in seconds, `RulesConfig.ticks(_:)` converts them). The race-format values are a section of this file,
+not a sibling file, so one ref covers both.
 
 Files are `<id>@<version>.json` in `Sources/RegattaCore/Resources/rules/`. A released version never
 changes; a change ships as `<id>@<version + 1>.json`.
 
-- `fleet-rules@1` (bundled): the v1.0 fleet race. `Race.defaultRulesConfiguration` until race assembly
-  reads `RaceSetup.rulesConfiguration` (#81).
+- `fleet-rules@1` (bundled, schema 1): the v1.0 fleet race. Kept so its race logs replay.
+- `fleet-rules@2` (bundled, schema 2): version 1 plus `startRow.minimumSpacingHullLengths` (#85). The
+  default (`RaceFiles.defaults`, `Race.defaultRulesConfiguration`).
+
+Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths`, the start row's spacing floor:
+required in schema 2, refused in schema 1. A schema-1 file has no floor (`RulesConfig.StartRow.minimumSpacing`
+is nil), so a start row squeezed off land narrows its spread with its depth, as #82 squeezed its placement.
+The tables' `v1` column gives version 1's values; version 2's are the same, plus that floor.
 
 ## Units
 
@@ -36,7 +42,8 @@ changes; a change ships as `<id>@<version + 1>.json`.
   mark-room-given and "on a beat" tests. Each must resolve (the loader checks). They are ordinary data:
   changing one is a new version like any other value.
 - `placeholders` (the header field every data file has) lists values awaiting tuning: the start row
-  (#35), the edge speed retention (#82) and the beat-sizing calibration factor (#80, #105).
+  (#35, and from version 2 its spacing floor, #85), the edge speed retention (#82) and the beat-sizing
+  calibration factor (#80, #105).
 
 The loader refuses unknown fields and `null`s (as for venues), duplicate keys, and any value outside
 the ranges below.
@@ -45,7 +52,7 @@ the ranges below.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schemaVersion`, `id`, `version` | header | As for every data file. `schemaVersion` is 1. |
+| `schemaVersion`, `id`, `version` | header | As for every data file. `schemaVersion` is 1 or 2. |
 | `placeholders` | [JSON Pointer] | Optional. Values awaiting tuning; each must resolve. |
 | `builderValues` | [JSON Pointer] | Values the builder chose; each must resolve. |
 | `notes` | [string] | Optional free text; ignored by the loader. |
@@ -121,6 +128,7 @@ A boat is on a beat when her true wind angle is at most `maxTrueWindAngleDegrees
 | `startRow.spreadLineLengths` | × line | 1.5 | *Placeholder.* … spread over this width, centred on the line … |
 | `startRow.trueWindAngleDegrees` | degrees | 90 | … on starboard, reaching at this true wind angle … |
 | `startRow.polarSpeedFraction` | (0, 1] | 1 | *Placeholder.* … at this fraction of polar speed. |
+| `startRow.minimumSpacingHullLengths` | L > 0; schema 2 | — (v2: 1.25) | *Placeholder.* A row squeezed off land (#82) never brings neighbours closer than this, centre to centre: clear ahead and clear astern (#35) with a quarter of a hull between them (#85). Absent in schema 1: no floor. |
 | `edgeSpeedRetention` | [0, 1] | 0.3 | *Placeholder.* Fraction of her speed along the edge a boat keeps on meeting land or the boundary (#82). |
 | `beatSizing.leaderSeconds` | s > 0 | 480 | The beat is sized for a leader's race of about this long (#8) … |
 | `beatSizing.maxMetres` | m | 360 | … and at most this (#14) … |
@@ -136,4 +144,8 @@ behaviour (for example, a 180 s finish window and no time limit).
 Course derivation (#80): `CourseLayout.derive` reads `startLine`, `leewardGate`, `offsetMark`,
 `raceArea`, `startRow`, `edgeSpeedRetention` and `beatSizing` to lay out the course, sizing the beat
 from the class polar in the race's base strength (the model is on `CourseLayout.beat`). The race
-sails it from #81; until then it sails `Course.standard`.
+sails it from #81; until then it sails `Course.standard`. From #85 the race places its boats with
+`startRow` (`CourseLayout.startRow`): slots in the row, a seeded order, the heading and the speed. The
+row is squeezed towards the line only where it would put a boat within a hull length of the race area's
+boundary or its land, its neighbours never closer than `startRow.minimumSpacingHullLengths` (none with a
+schema-1 file).

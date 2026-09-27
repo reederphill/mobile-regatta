@@ -362,36 +362,55 @@ import Testing
         }
     }
 
-    /// Land near the line: a shore reaching to 20 m below it under the pin end's half of the scatter, and
-    /// a rock in the middle of the other half. Every boat still starts a hull length off both, as off the
-    /// boundary, where the same draws without the land put some of the fleet on it or against it.
+    /// Land near the line, where the start row (#35, #85) would be: a shore under the pin end's half of
+    /// the row reaching to 0.3 line lengths below the line, and a rock in the row under the other half.
+    /// Every boat still starts a hull length off both, as off the boundary, in a row squeezed up towards
+    /// the line, still parallel to it and still clear ahead and astern; the same row without the land puts
+    /// some of the fleet on it or against it.
     @Test func everyBoatStartsAHullLengthOffLandNearTheLine() throws {
         var wouldHaveTouched = 0
         for seats in [2, 8, 16] {
             for seed: UInt64 in 1...6 {
                 let open = testRace(opponents: seats - 1, seed: seed)
                 let c = open.course
-                func at(_ across: Double, _ below: Double) -> Vec2 { c.startLine.centre + c.right * across - c.upwind * below }
-                let land = [[at(-400, 300), at(-90, 300), at(-90, 20), at(-400, 20)],
-                            [at(20, 95), at(40, 95), at(40, 75), at(20, 75)]]
+                let length = c.startLine.length
+                func at(_ across: Double, _ below: Double) -> Vec2 {
+                    c.startLine.centre + c.right * (across * length) - c.upwind * (below * length)
+                }
+                let land = [[at(-8, 6), at(-0.1, 6), at(-0.1, 0.3), at(-8, 0.3)],
+                            [at(0.2, 0.55), at(0.3, 0.55), at(0.3, 0.45), at(0.2, 0.45)]]
                 var catalog = RaceFileCatalog()
                 let venue = try catalog.venues.add(Self.venue(land: land))
                 let setup = try RaceSetup(raceSeed: open.setup.raceSeed, seats: open.setup.seats, laps: open.setup.laps,
                                           startSequenceTicks: open.setup.startSequenceTicks, venue: venue)
                 let race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
                                     mode: .authoritative(windSeed: WindSeed(seed)))
-                // The rock is in the area only where it reaches that far below the line (a big fleet's).
-                #expect(!race.course.land.isEmpty)
+                #expect(race.course.land.count == 2)
                 #expect(race.course.startLine == c.startLine)
-                let hullLength = race.boatClass.hull.length
+                let hull = race.boatClass.hull
                 for (boat, openBoat) in zip(race.boats, open.boats) {
                     for polygon in land {
-                        #expect(Self.clearance(boat.position, from: polygon) >= hullLength - 1e-9,
+                        #expect(Self.clearance(boat.position, from: polygon) >= hull.length - 1e-9,
                                 "\(seats) seats, seed \(seed), seat \(boat.id)")
                     }
-                    #expect(race.course.raceArea.inset(boat.position) >= hullLength - 1e-9)
-                    if land.contains(where: { Self.clearance(openBoat.position, from: $0) < hullLength }) {
+                    #expect(race.course.raceArea.inset(boat.position) >= hull.length - 1e-9)
+                    if land.contains(where: { Self.clearance(openBoat.position, from: $0) < hull.length }) {
                         wouldHaveTouched += 1
+                    }
+                    // Still one row parallel to the line, in the same order, on the same heading.
+                    #expect(abs(c.startLine.side(boat.position) - c.startLine.side(race.boats[0].position)) < 1e-9)
+                    #expect(c.startLine.side(boat.position) >= c.startLine.side(openBoat.position) - 1e-9)
+                    #expect(boat.heading == openBoat.heading && boat.speed == openBoat.speed)
+                }
+                for a in race.boats.indices {
+                    for b in race.boats.indices where b > a {
+                        let (p, q) = (race.boats[a], race.boats[b])
+                        #expect(Rules.isClearAstern(p, of: q, hull: hull) || Rules.isClearAstern(q, of: p, hull: hull))
+                        let alongP = (p.position - c.startLine.centre).dot(c.right)
+                        let alongQ = (q.position - c.startLine.centre).dot(c.right)
+                        let openAlongP = (open.boats[a].position - c.startLine.centre).dot(c.right)
+                        let openAlongQ = (open.boats[b].position - c.startLine.centre).dot(c.right)
+                        #expect((alongP < alongQ) == (openAlongP < openAlongQ))
                     }
                 }
                 race.step()
