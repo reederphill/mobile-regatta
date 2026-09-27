@@ -54,6 +54,9 @@ struct RaceView: View {
         }
     }
 
+    // Ignoring sibling order, SpriteKit draws sprites that share a z in an order of its own, which can change
+    // from launch to launch: sprites that overlap need a z each, or a render fixture isn't repeatable (#62,
+    // `WaterNode.drawOrderStep`).
     private var scene: some View {
         SpriteView(scene: session.scene, preferredFramesPerSecond: 120, options: [.ignoresSiblingOrder], debugOptions: debugOptions)
             .ignoresSafeArea()
