@@ -86,14 +86,6 @@ final class WaterNode: SKNode {
     /// The size a streak tile's texture is drawn for: `style.rippleSpacing` scales it from here.
     private static let tileSize = 96.0
 
-    /// Every sprite the water draws has a z of its own: its pool slot's, this far apart within its layer. The
-    /// view ignores sibling order (`RaceView`), and sprites that share a z draw in an order of SpriteKit's
-    /// choosing, which can change from one launch to the next: overlapping streak tiles in four textures did,
-    /// so a frozen render fixture drew a few pixels a level apart launch to launch (#62). A layer holds 10,000
-    /// slots below the next one's z; a view takes a few hundred tiles. SpriteKit sorts z as a Float: at the
-    /// water's z (about −10) a step is still ~100 of its ulps.
-    static let drawOrderStep: CGFloat = 1e-4
-
     init(pointsPerMeter: Double, style: WaterStyle = .standard) {
         self.pointsPerMeter = pointsPerMeter
         self.style = style
@@ -197,9 +189,10 @@ final class WaterNode: SKNode {
     }
 
     private func makeTile() -> Tile {
-        // A z each, from its slot: a frame gives the slots out in lattice order, so the same view draws its
-        // tiles in the same order whatever the pool held before. The caps all draw over the streaks.
-        let z = CGFloat(tileNodes.count) * Self.drawOrderStep
+        // A z each, from its slot (`DrawOrder`; a view takes a few hundred): a frame gives the slots out in
+        // lattice order, so the same view draws its tiles in the same order whatever the pool held before. The
+        // caps all draw over the streaks.
+        let z = DrawOrder.z(tileNodes.count)
         let streak = SKSpriteNode(texture: streakTextures[0], size: CGSize(width: Self.tileSize, height: Self.tileSize))
         streak.color = ChartPalette.lull.uiColor
         streak.colorBlendFactor = 1
@@ -220,8 +213,8 @@ final class WaterNode: SKNode {
         while puffNodes.count < puffs.count {
             let node = SKSpriteNode(texture: puffTexture)
             node.colorBlendFactor = 1
-            // A z each keeps overlapping puffs and lulls in one order (`drawOrderStep`).
-            node.zPosition = CGFloat(puffNodes.count) * Self.drawOrderStep
+            // A z each keeps overlapping puffs and lulls in one order (`DrawOrder`).
+            node.zPosition = DrawOrder.z(puffNodes.count)
             puffLayer.addChild(node)
             puffNodes.append(node)
         }
@@ -254,8 +247,8 @@ final class WaterNode: SKNode {
             let node = SKSpriteNode(texture: tintTexture)
             node.color = ChartPalette.puff.uiColor
             node.colorBlendFactor = 1
-            // Overlapping marks in one order (`drawOrderStep`).
-            node.zPosition = CGFloat(tintNodes.count) * Self.drawOrderStep
+            // Overlapping marks in one order (`DrawOrder`).
+            node.zPosition = DrawOrder.z(tintNodes.count)
             edgeTint.addChild(node)
             tintNodes.append(node)
         }
@@ -321,7 +314,7 @@ final class WaterNode: SKNode {
     }
 
     /// The ripple tile's `variants`, 192 pixels square each, side by side in one sheet: every streak draws from
-    /// the one texture, so the tiles batch into one draw in the z order they're given (`drawOrderStep`).
+    /// the one texture, so the tiles batch into one draw in the z order they're given (`DrawOrder`).
     private static func streakTextures(variants: Int) -> [SKTexture] {
         let alphas = (0..<variants).map(streakAlpha(variant:))
         let sheet = texture(pixels: 192, count: variants) { k, u, v in alphas[k](u, v) }

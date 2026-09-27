@@ -99,12 +99,17 @@ final class GameScene: SKScene {
         laylines.zPosition = 2
         boatLayer.zPosition = 3
         [water, effectsLayer, courseLayer, laylines, boatLayer].forEach(world.addChild)
+        // Every node in the layers has a z of its own too (`DrawOrder`). Named, so a test can say which is which.
+        let layers: [(SKNode, String)] = [(water, "water"), (effectsLayer, "effects"), (courseLayer, "course"),
+                                          (laylines, "laylines"), (boatLayer, "fleet")]
+        for (layer, name) in layers { layer.name = name }
         addChild(world)
 
         addChild(cam)
         camera = cam
         // The upwind edge tint sits at the view's edges, over the water and under everything else.
         water.edgeTint.zPosition = -5
+        water.edgeTint.name = "edge tint"
         cam.addChild(water.edgeTint)
         cam.setScale(1 / zoom)
         cam.position = point(driver.renderWorld.me.position)
@@ -138,11 +143,13 @@ final class GameScene: SKScene {
         committee.strokeColor = UIColor(white: 0.55, alpha: 1)
         committee.lineWidth = 1.5
         committee.position = point(course.startLine.committee.position)
+        // The flag is the course layer's own node, not the committee boat's child, so it takes a z of its own.
         let flag = SKShapeNode(rect: CGRect(x: -3, y: -3, width: 10, height: 7))
         flag.fillColor = CuePalette.orange.uiColor
         flag.lineWidth = 0
-        committee.addChild(flag)
+        flag.position = committee.position
         courseLayer.addChild(committee)
+        courseLayer.addChild(flag)
 
         let line = CGMutablePath()
         line.move(to: point(course.startLine.pin.position))
@@ -150,6 +157,12 @@ final class GameScene: SKScene {
         startLine.path = line.copy(dashingWithPhase: 0, lengths: [8, 6])
         startLine.lineWidth = 2
         courseLayer.addChild(startLine)
+
+        // A z each (`DrawOrder`), in the order built: the start line crosses the pin and the committee boat, and
+        // draws over them.
+        for (slot, node) in courseLayer.children.enumerated() {
+            node.zPosition = DrawOrder.z(slot)
+        }
     }
 
     private func buoy(at position: Vec2, radius: Double, color: UIColor) -> SKNode {
