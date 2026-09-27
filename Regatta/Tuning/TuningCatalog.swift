@@ -117,7 +117,9 @@ struct TuningGroup: Identifiable {
 /// the render values.
 enum TuningCatalog {
     /// `grooveColumns`: each driving polar column of the boat class being tuned, and its wind speed in knots.
-    static func groups(grooveColumns: [(column: Int, knots: Double)]) -> [TuningGroup] {
+    /// `fullSteeragePoint`: the index of its turn-rate curve's last point, from whose speed she turns at the top
+    /// rate; nil if it has none.
+    static func groups(grooveColumns: [(column: Int, knots: Double)], fullSteeragePoint: Int?) -> [TuningGroup] {
         [
             TuningGroup(
                 id: "conditions", title: "Conditions",
@@ -153,7 +155,7 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "handling", title: "Handling",
-                note: "Momentum and turning (#220): how heavy the boat feels.",
+                note: "Momentum and turning (#220): how heavy the boat feels. Rudder drag and the speed she steers fully from decide what a tack costs: slower than that she turns slower, so she stays longer in the no-go.",
                 applies: .nextRace,
                 sliders: [
                     TuningSlider(.boatClass, "/momentum/speedingUpSeconds", "Speeding up", unit: " s", 0.5...10, step: 0.1),
@@ -162,7 +164,11 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/steering/topTurnRateDegreesPerSecond", "Top turn rate", unit: "°/s", 5...60, step: 1),
                     TuningSlider(.boatClass, "/steering/minTurnRateDegreesPerSecond", "Least turn rate", unit: "°/s", 1...30, step: 0.5),
                     TuningSlider(.boatClass, "/steering/rudderSlewPerSecond", "Rudder slew", unit: " /s", 1...20, step: 0.5),
-                ]),
+                    TuningSlider(.boatClass, "/steering/rudderDragPerSecond", "Rudder drag", unit: " /s", 0...0.4, step: 0.005),
+                ] + (fullSteeragePoint.map {
+                    [TuningSlider(.boatClass, "/steering/turnRateCurve/\($0)/speedKnots", "Full steering from", unit: " kn",
+                                  0.5...10, step: 0.5)]
+                } ?? [])),
             TuningGroup(
                 id: "shadow", title: "Wind shadow",
                 note: "What sailing in another boat's shadow costs, and how far it reaches (hull lengths).",

@@ -125,9 +125,18 @@ final class TuningModel {
         return columns
     }
 
+    /// The index of the boat class's last turn-rate curve point, from whose speed she turns at the top rate: the
+    /// full-steering slider. Nil if the curve has no points.
+    var fullSteeragePoint: Int? {
+        guard let data = baseData(.boatClass) else { return nil }
+        var point = 0
+        while TunedCopy.number(at: "/steering/turnRateCurve/\(point)/speedKnots", in: data) != nil { point += 1 }
+        return point > 0 ? point - 1 : nil
+    }
+
     var groups: [TuningGroup] {
         if let groupsCache, groupsCache.boatClass == tuning.boatClass { return groupsCache.groups }
-        let groups = TuningCatalog.groups(grooveColumns: grooveColumns)
+        let groups = TuningCatalog.groups(grooveColumns: grooveColumns, fullSteeragePoint: fullSteeragePoint)
         groupsCache = (tuning.boatClass, groups)
         return groups
     }

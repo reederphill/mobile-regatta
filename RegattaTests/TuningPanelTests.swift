@@ -31,8 +31,9 @@ import RegattaCore
         #expect(model.problems.isEmpty)
     }
 
-    /// Every data slider names a number in the bundled defaults, so none is a dead slider, and the skiff has a
-    /// groove slider per driving polar column (4 to 25 kn).
+    /// Every data slider names a number in the bundled defaults, so none is a dead slider, the skiff has a
+    /// groove slider per driving polar column (4 to 25 kn), and the full-steering slider moves her turn-rate
+    /// curve's last point (6 kn).
     @Test func everyDataSliderNamesANumberInItsFile() {
         let (model, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -43,6 +44,9 @@ import RegattaCore
             if let file { #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider") }
         }
         #expect(model.grooveColumns.map(\.knots) == [4, 6, 8, 10, 12, 14, 16, 20, 25])
+        #expect(model.fullSteeragePoint == 1)
+        let fullSteering = sliders.first { $0.id == "boatClass:/steering/turnRateCurve/1/speedKnots" }
+        #expect(fullSteering.flatMap(model.fileValue) == 6)
         #expect(Set(sliders.map(\.id)).count == sliders.count)
     }
 
