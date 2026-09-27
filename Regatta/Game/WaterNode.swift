@@ -17,8 +17,12 @@ struct WaterWorld {
 }
 
 extension WaterWorld {
+    /// The ripple samples the wind at every tile, every frame: through one sampler for the frame's tick, which
+    /// places the live puffs once, rather than `world.groundWind(at:)`, which places them again at every tile.
+    /// The same wind, bit for bit; in a Debug build the per-tile sampling was over half the frame (#232).
     init(_ world: RenderWorld) {
-        self.init(wind: world.groundWind(at:), courseWind: world.courseWind, puffs: world.puffs,
+        let sampler = world.windSampler
+        self.init(wind: { sampler?.sample($0) }, courseWind: world.courseWind, puffs: world.puffs,
                   conditions: world.conditions, time: world.time)
     }
 }

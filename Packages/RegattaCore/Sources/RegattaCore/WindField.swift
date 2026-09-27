@@ -154,11 +154,35 @@ public struct WindField: Hashable, Sendable {
                 fan += effect.fan
             }
         }
-        let puffs = setup.conditions.puffs
+        return Self.puffEffect(gain: gain, fan: fan, plan)
+    }
+
+    /// The puffs' summed speed change `gain` and fan share `fan` at a point as a speed factor and a direction
+    /// change, capped as `puffEffect(at:tick:_:)` says. `plan.puffs` is the setup's conditions' puffs.
+    static func puffEffect(gain: Double, fan: Double, _ plan: PuffPlan) -> (factor: Double, turn: Double) {
+        let puffs = plan.puffs
         let factor = (1 + gain).clamped(to: (1 - puffs.lullLoss.upperBound)...(1 + puffs.gain.upperBound))
         // No spawn is stronger than `strongest`, so with it 0 (no gain and no loss) every fan share is 0.
         let turn = plan.strongest > 0 ? (puffs.fan * fan / plan.strongest).clamped(to: -puffs.fan...puffs.fan) : 0
         return (factor, turn)
+    }
+
+    /// The wind at `tick`, to sample at many places: `sample(_:tick:)`'s answer at every point, bit for bit,
+    /// with the tick's channels worked out and its live puffs placed once rather than at every point. For the
+    /// water, which samples it at every ripple tile, every frame (#116). Throws what `sample(_:tick:)` would.
+    public func sampler(atTick tick: Int) throws(WindFieldError) -> WindSampler {
+        let c = try channels(atTick: tick)
+        var puffs: [Puff] = []
+        if puffPlan != nil {
+            for window in firstWindowNeeded(atTick: tick)...windows.window(containing: tick) {
+                guard keys[window] != nil else { throw .missingKey(window) }
+                for spawn in puffSpawns[window] where spawn.isAlive(atTick: tick) {
+                    puffs.append(spawn.puff(atTick: tick))
+                }
+            }
+        }
+        return WindSampler(geographicGrid: setup.pairing.geographicGrid, courseSpeed: Self.courseSpeed(setup, c),
+                           direction: setup.meanDirection + c.shift, puffPlan: puffPlan, puffs: puffs)
     }
 
     /// Both channels and their slopes, per second, at `tick`.
@@ -223,6 +247,160 @@ public struct WindField: Hashable, Sendable {
         let wiggle = 2 * sine * sine * cosine / wigglePeak
         let wiggleSlope = 2 * (2 * sine * cosine * cosine - sine * sine * sine) * .pi / wigglePeak
         return (w.hump * hump + w.wiggle * wiggle, (w.hump * humpSlope + w.wiggle * wiggleSlope) / WindWindows.seconds)
+    }
+}
+
+/// The wind at one tick, ready to sample at many places (`WindField.sampler(atTick:)`): what
+/// `WindField.sample(_:tick:)` gives at every point, bit for bit, the same sums in the same order, but with the
+/// tick's channels worked out and its live puffs placed once, and each point checking only the puffs binned
+/// near it. A puff it skips does nothing at that point (`Puff.effect` is exactly zero there), and adding zero
+/// changes no sum.
+public struct WindSampler: Sendable {
+    let geographicGrid: Venue.GeographicGrid
+    /// The strength channel as a speed (`WindField.courseSpeed`).
+    let courseSpeed: Double
+    /// The mean direction turned by the shift.
+    let direction: Double
+    /// Nil with no race area, so no puffs.
+    let puffPlan: PuffPlan?
+    /// The puffs and lulls alive, in window and spawn order: the order `WindField.puffEffect` sums them in.
+    let puffs: [Puff]
+    let cells: PuffCells
+
+    init(geographicGrid: Venue.GeographicGrid, courseSpeed: Double, direction: Double, puffPlan: PuffPlan?, puffs: [Puff]) {
+        self.geographicGrid = geographicGrid
+        self.courseSpeed = courseSpeed
+        self.direction = direction
+        self.puffPlan = puffPlan
+        self.puffs = puffs
+        cells = PuffCells(puffs)
+    }
+
+    /// The ground wind at `p`.
+    public func sample(_ p: Vec2) -> GroundWind {
+        let geographic = geographicGrid.sample(p)
+        let speed = courseSpeed * geographic.speedFactor
+        let direction = direction + geographic.directionDelta
+        guard let puffPlan else { return GroundWind(direction: wrapAngle(direction), speed: speed) }
+        var gain = 0.0, fan = 0.0
+        for i in cells.puffs(near: p) {
+            let puff = puffs[i]
+            // `Puff.effect`'s offset, a component at a time: at a radius or more along either axis, the point is
+            // outside the puff.
+            guard abs(p.x - puff.center.x) < puff.radius, abs(p.y - puff.center.y) < puff.radius else { continue }
+            let effect = puff.effect(at: p, across: puffPlan.acrossDownwind)
+            gain += effect.speed
+            fan += effect.fan
+        }
+        let puffs = WindField.puffEffect(gain: gain, fan: fan, puffPlan)
+        return GroundWind(direction: wrapAngle(direction + puffs.turn), speed: speed * puffs.factor)
+    }
+}
+
+/// Puffs binned into square cells over the water they reach: each cell lists, in their order, the puffs whose
+/// disk's bounding square, padded by `pad`, overlaps it. A point gets its cell's list, so it can skip every other
+/// puff: none of them reaches it.
+struct PuffCells: Sendable {
+    /// Metres each disk is padded by: far more than any rounding in the metres a course spans, so rounding
+    /// can't leave a puff out of the cell of a point it reaches.
+    static let pad = 1.0
+    /// Past this many cells a side, the cells grow instead.
+    static let maxPerSide = 64
+
+    let lowerX: Double, lowerY: Double
+    /// A cell's side, metres: at least the widest padded disk, so a disk overlaps at most 2 × 2 cells.
+    let size: Double
+    let columns: Int, rows: Int
+    /// Cell k (row-major) lists `members[start[k]..<start[k + 1]]`.
+    let start: [Int]
+    let members: [Int]
+
+    // Written with plain loops and comparisons: the water builds one every frame, in Debug builds too, where
+    // generic helpers (`min`, `max`, ranges) cost many times what they do optimised.
+    init(_ puffs: [Puff]) {
+        // The box around every padded bounding square.
+        var lowerX = Double.infinity, lowerY = Double.infinity, upperX = -Double.infinity, upperY = -Double.infinity
+        var widest = 0.0
+        for puff in puffs {
+            let reach = puff.radius + Self.pad, center = puff.center
+            let (x, y) = (center.x, center.y)
+            if x - reach < lowerX { lowerX = x - reach }
+            if y - reach < lowerY { lowerY = y - reach }
+            if x + reach > upperX { upperX = x + reach }
+            if y + reach > upperY { upperY = y + reach }
+            if 2 * reach > widest { widest = 2 * reach }
+        }
+        guard lowerX <= upperX, lowerY <= upperY else {
+            (self.lowerX, self.lowerY, size, columns, rows, start, members) = (0, 0, 1, 0, 0, [0], [])
+            return
+        }
+        let size = Swift.max(widest, (upperX - lowerX) / Double(Self.maxPerSide), (upperY - lowerY) / Double(Self.maxPerSide))
+        let columns = Swift.min(Int((upperX - lowerX) / size) + 1, Self.maxPerSide + 1)
+        let rows = Swift.min(Int((upperY - lowerY) / size) + 1, Self.maxPerSide + 1)
+        // The cells each padded square overlaps, counted, then filled in puff order, so each cell's list keeps
+        // that order.
+        var spans: [Span] = []
+        spans.reserveCapacity(puffs.count)
+        var start = [Int](repeating: 0, count: columns * rows + 1)
+        for puff in puffs {
+            let reach = puff.radius + Self.pad, center = puff.center
+            let (x, y) = (center.x, center.y)
+            let span = Span(column0: Self.cell(x - reach, lowerX, size, columns), column1: Self.cell(x + reach, lowerX, size, columns),
+                            row0: Self.cell(y - reach, lowerY, size, rows), row1: Self.cell(y + reach, lowerY, size, rows))
+            spans.append(span)
+            var row = span.row0
+            while row <= span.row1 {
+                var column = span.column0
+                while column <= span.column1 {
+                    start[row * columns + column + 1] += 1
+                    column += 1
+                }
+                row += 1
+            }
+        }
+        var k = 0
+        while k < columns * rows {
+            start[k + 1] += start[k]
+            k += 1
+        }
+        var next = start
+        var members = [Int](repeating: 0, count: start[columns * rows])
+        var i = 0
+        while i < spans.count {
+            let span = spans[i]
+            var row = span.row0
+            while row <= span.row1 {
+                var column = span.column0
+                while column <= span.column1 {
+                    members[next[row * columns + column]] = i
+                    next[row * columns + column] += 1
+                    column += 1
+                }
+                row += 1
+            }
+            i += 1
+        }
+        (self.lowerX, self.lowerY, self.size, self.columns, self.rows, self.start, self.members)
+            = (lowerX, lowerY, size, columns, rows, start, members)
+    }
+
+    /// The cells a puff's padded bounding square overlaps: columns `column0...column1`, rows `row0...row1`.
+    private struct Span {
+        var column0: Int, column1: Int, row0: Int, row1: Int
+    }
+
+    /// The cell, of `count` from `lower`, that `x` is in, clamped to them.
+    private static func cell(_ x: Double, _ lower: Double, _ size: Double, _ count: Int) -> Int {
+        let k = Int(((x - lower) / size).rounded(.down))
+        return k < 0 ? 0 : k >= count ? count - 1 : k
+    }
+
+    /// The puffs that may reach `p`, by index, in order.
+    func puffs(near p: Vec2) -> ArraySlice<Int> {
+        let u = (p.x - lowerX) / size, v = (p.y - lowerY) / size
+        guard u >= 0, v >= 0, u < Double(columns), v < Double(rows) else { return [] }
+        let k = Int(v) * columns + Int(u)
+        return members[start[k]..<start[k + 1]]
     }
 }
 

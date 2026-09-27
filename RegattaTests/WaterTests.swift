@@ -251,6 +251,36 @@ import RegattaCore
         #expect(!world.puffs.isEmpty)
     }
 
+    /// The race's water samples the wind through one sampler for the tick (`RenderWorld.windSampler`), which
+    /// places the puffs once and bins them, not through `groundWind(at:)` at every tile: in a Debug build that
+    /// was over half the frame, and the iOS 27 simulator's main thread didn't keep up at 8× (#232). It draws the
+    /// same water, sprite for sprite, at every zoom, drifting or settled.
+    @Test func waterSampledOnceATickDrawsTheSameWater() throws {
+        let race = try Self.race("gusty-offshore", to: -300)
+        let world = Self.world(of: race)
+        let sampled = WaterWorld(world)
+        var direct = sampled
+        direct.wind = world.groundWind(at:)
+        let me = race.boats[0].position
+        var inPuffs = 0
+        for scale in [1.25, 1 / 0.45, 6] as [CGFloat] {
+            for dy in stride(from: -300.0, through: 300, by: 100) {
+                let view = Self.view(centeredOn: me + Vec2(dy / 2, dy), scale: scale)
+                let fast = WaterNode(pointsPerMeter: 8), slow = WaterNode(pointsPerMeter: 8)
+                for dt in [0, 0.5] {
+                    fast.update(sampled, view: view, dt: dt)
+                    slow.update(direct, view: view, dt: dt)
+                    #expect(fast.streaks == slow.streaks)
+                    #expect(DrawnSprite.all(under: fast) == DrawnSprite.all(under: slow), "scale \(scale), dy \(dy), dt \(dt)")
+                }
+                inPuffs += fast.streaks.filter { streak in
+                    world.puffs.contains { ($0.center - streak.position).length < $0.radius }
+                }.count
+            }
+        }
+        #expect(inPuffs > 20, "\(inPuffs) streaks in a puff")
+    }
+
     /// The puffs still read through every colour-vision and viewing filter (#22, #111): the faintest visible puff
     /// and lull stay further from the water than the ripple is, in filtered lightness.
     @Test func puffsStillReadThroughEveryVisionFilter() {
