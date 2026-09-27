@@ -3,13 +3,19 @@ import XCTest
 
 /// Render fixtures (#62): a race log replayed to a freeze tick, screenshot, and diffed pixel by pixel.
 final class RenderFixtureUITests: RenderFixtureTestCase {
-    /// The same fixture launched twice draws exactly the same pixels outside the home-indicator band.
+    /// The same fixture launched twice draws exactly the same pixels outside the home-indicator band. That's
+    /// also the control for the vision fixtures' edge check: across two launches, no patch of the unfiltered
+    /// render moves, so every one counts as unfiltered.
     @MainActor func testFixtureRendersIdenticallyTwice() throws {
         let first = try renderFixture("prestart")
         let second = try renderFixture("prestart")
         let diff = assertMatches(second.image, first.image, named: "prestart-twice", tolerance: .exact,
                                  ignoringBottomRows: first.homeIndicatorRows)
         XCTAssertFalse(diff.sizeMismatch)
+        let control = try XCTUnwrap(FilterCoverage(filtered: second.image, unfiltered: first.image,
+                                                   ignoringBottomRows: max(first.homeIndicatorRows,
+                                                                           second.homeIndicatorRows)))
+        XCTAssertEqual(control.unfiltered, control.patches, control.summary)
     }
 
     /// One pixel changed past the colour tolerance is under the differing-pixel limit, so it passes.
@@ -39,55 +45,89 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
 
     /// The committed reference for this device (References/<device>/prestart.png).
     @MainActor func testPrestartMatchesItsReference() throws {
-        try assertMatchesIPhoneReference("prestart")
+        try skipOnIPad()
+        try assertMatchesReference("prestart")
     }
 
     // The same fixture through each colour-vision filter (#22, #111): with the unfiltered one above, a reference
-    // diff in all six modes. One test each, so every filter's render reaches render-actuals when it moves: a
-    // failure ends its test (`continueAfterFailure = false`).
+    // diff in all six modes, each render first checked to the edges of the frame. One test each, so every
+    // filter's render reaches render-actuals when it moves: a failed compare ends its test
+    // (`continueAfterFailure = false`).
 
     @MainActor func testPrestartUnderDeuteranopiaMatchesItsReference() throws {
-        try assertMatchesIPhoneReference("prestart-deuteranopia")
+        try assertVisionFixtureMatchesItsReference("deuteranopia")
     }
 
     @MainActor func testPrestartUnderProtanopiaMatchesItsReference() throws {
-        try assertMatchesIPhoneReference("prestart-protanopia")
+        try assertVisionFixtureMatchesItsReference("protanopia")
     }
 
     @MainActor func testPrestartUnderTritanopiaMatchesItsReference() throws {
-        try assertMatchesIPhoneReference("prestart-tritanopia")
+        try assertVisionFixtureMatchesItsReference("tritanopia")
     }
 
     @MainActor func testPrestartInGreyscaleMatchesItsReference() throws {
-        try assertMatchesIPhoneReference("prestart-greyscale")
+        try assertVisionFixtureMatchesItsReference("greyscale")
     }
 
     @MainActor func testPrestartInSunlightWashoutMatchesItsReference() throws {
-        try assertMatchesIPhoneReference("prestart-washout")
+        try assertVisionFixtureMatchesItsReference("washout")
     }
 
-    /// Each filter reaches every edge of the render (#111): around the frame, each corner and edge patch of the
-    /// filtered render has moved from the unfiltered one. The scene's own `SKScene.filter` covered only a top-left
-    /// part of the camera's view, leaving the right and bottom bands unfiltered. No reference, so iPad runs it too.
-    @MainActor func testEveryVisionFilterReachesTheEdgesOfTheRender() throws {
-        let plain = try renderFixture("prestart")
-        var failures: [String] = []
-        for vision in ["deuteranopia", "protanopia", "tritanopia", "greyscale", "washout"] {
-            let render = try renderFixture("prestart-\(vision)")
-            let coverage = try XCTUnwrap(FilterCoverage(filtered: render.image, unfiltered: plain.image,
-                                                        ignoringBottomRows: max(render.homeIndicatorRows,
-                                                                                plain.homeIndicatorRows)),
-                                         "prestart-\(vision) isn't the unfiltered render's size")
-            guard !coverage.unfiltered.isEmpty else { continue }
-            failures.append("\(vision) leaves \(coverage.unfiltered.map(\.name)) unfiltered (\(coverage.summary))")
-            if let png = render.image.pngData {
-                let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
-                attachment.name = "prestart-\(vision)-coverage.png"
-                attachment.lifetime = .keepAlways
-                add(attachment)
-            }
+    /// Fixture `prestart-<vision>`: its render reaches every edge of the frame through the filter
+    /// (`assertFilterReachesEveryEdge`), then matches its reference.
+    ///
+    /// Launches: the filtered fixture once, and the unfiltered one only if no vision test in this run has
+    /// launched it yet (`unfilteredPrestart`), so two at most in a test and six across the five. The iPad skips
+    /// before any launch, as a reference test; `RaceViewVisionTests` checks the letterboxed race view's filter.
+    @MainActor private func assertVisionFixtureMatchesItsReference(_ vision: String, file: StaticString = #filePath,
+                                                                    line: UInt = #line) throws {
+        try skipOnIPad()
+        let name = "prestart-\(vision)"
+        let plain = try unfilteredPrestart(file: file, line: line)
+        let render = try renderFixture(name, file: file, line: line)
+        assertFilterReachesEveryEdge(render, unfiltered: plain, named: name, file: file, line: line)
+        try assertMatchesReference(name, render: render, file: file, line: line)
+    }
+
+    /// The unfiltered prestart render, kept for the rest of the run once a vision test has launched it. Fixture
+    /// renders are the same in every launch (`testFixtureRendersIdenticallyTwice`).
+    @MainActor private static var unfilteredPrestartRender: FixtureRender?
+
+    @MainActor private func unfilteredPrestart(file: StaticString, line: UInt) throws -> FixtureRender {
+        if let render = Self.unfilteredPrestartRender { return render }
+        let render = try renderFixture("prestart", file: file, line: line)
+        Self.unfilteredPrestartRender = render
+        return render
+    }
+
+    /// The filter reaches every edge of the render (#111): around the frame, each corner and edge patch of the
+    /// filtered render has moved from the unfiltered one (`FilterCoverage`). The scene's own `SKScene.filter`
+    /// covered only a top-left part of the camera's view, leaving the right and bottom bands unfiltered, and a
+    /// reference adopted from such a render would match it.
+    ///
+    /// A failure here doesn't end the test, so the reference compare after it still leaves a moved render for
+    /// render-actuals (`assertMatchesReference(_:render:)`), and one run reports both.
+    @MainActor private func assertFilterReachesEveryEdge(_ render: FixtureRender, unfiltered plain: FixtureRender,
+                                                         named name: String, file: StaticString, line: UInt) {
+        let failure: String
+        if let coverage = FilterCoverage(filtered: render.image, unfiltered: plain.image,
+                                         ignoringBottomRows: max(render.homeIndicatorRows, plain.homeIndicatorRows)) {
+            guard !coverage.unfiltered.isEmpty else { return }
+            failure = "\(name) leaves \(coverage.unfiltered.map(\.name)) unfiltered (\(coverage.summary))"
+        } else {
+            failure = "\(name) isn't the unfiltered render's size"
         }
-        XCTAssertTrue(failures.isEmpty, failures.joined(separator: "; "))
+        if let png = render.image.pngData {
+            let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+            attachment.name = "\(name)-coverage.png"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        let continues = continueAfterFailure
+        continueAfterFailure = true
+        defer { continueAfterFailure = continues }
+        XCTFail(failure, file: file, line: line)
     }
 
     // The water (#116): puffs, lulls, ripple and whitecaps in two conditions, and the upwind edge tint (#224).
@@ -109,8 +149,7 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
     /// one CI run rather than one per run.
     @MainActor private func assertAllMatchIPhoneReferences(_ names: [String], file: StaticString = #filePath,
                                                            line: UInt = #line) throws {
-        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad,
-                      "render references are recorded on iPhone 17 only; the iPad run doesn't compare them")
+        try skipOnIPad()
         continueAfterFailure = true
         defer { continueAfterFailure = false }
         for name in names {
@@ -118,12 +157,17 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         }
     }
 
-    /// `assertMatchesReference` on iPhone. References are recorded on iPhone only; the iPad run skips here on
-    /// purpose. Anywhere else, a missing reference fails in CI rather than skipping.
+    /// `assertMatchesReference` on iPhone (see `skipOnIPad`).
     @MainActor private func assertMatchesIPhoneReference(_ name: String, file: StaticString = #filePath,
                                                          line: UInt = #line) throws {
+        try skipOnIPad()
+        try assertMatchesReference(name, file: file, line: line)
+    }
+
+    /// References are recorded on iPhone only; the iPad run skips a reference test on purpose. Anywhere else, a
+    /// missing reference fails in CI rather than skipping.
+    @MainActor private func skipOnIPad() throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad,
                       "render references are recorded on iPhone 17 only; the iPad run doesn't compare them")
-        try assertMatchesReference(name, file: file, line: line)
     }
 }

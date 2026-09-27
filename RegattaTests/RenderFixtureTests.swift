@@ -191,9 +191,9 @@ import UIKit
         }
     }
 
-    /// Every filter moves the water tones well past `FilterCoverage.minimumShift`, so the UI test that checks a
-    /// filtered render's edges against the unfiltered one (`testEveryVisionFilterReachesTheEdgesOfTheRender`)
-    /// sees each filter wherever it reaches.
+    /// Every filter moves the water tones well past `FilterCoverage.minimumShift`, so the vision fixtures' UI tests,
+    /// which check a filtered render's edges against the unfiltered one (`RenderFixtureUITests`'
+    /// `assertFilterReachesEveryEdge`), see each filter wherever it reaches.
     @Test func everyFilterMovesTheWaterPastTheCoverageThreshold() {
         for filter in VisionFilter.allCases where filter != .none {
             for tone in [ChartPalette.water, ChartPalette.puff, ChartPalette.lull] {
