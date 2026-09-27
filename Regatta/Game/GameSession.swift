@@ -145,7 +145,7 @@ final class GameSession {
         case .started(let b) where b == me:
             post("You're away.", .good)
         case .ruleCall(let call) where call.offender == me:
-            post("Rule \(call.rule.rawValue) — \(call.rule.title). Your foul on \(name(call.victim)): spin a 720°.", .alert, seconds: 6)
+            post("Rule \(call.rule.rawValue) — \(call.rule.title). Your foul on \(name(call.victim)): spin a 360°.", .alert, seconds: 6)
             notification.notificationOccurred(.error)
         case .ruleCall(let call) where call.victim == me:
             post("Rule \(call.rule.rawValue) — \(call.rule.title). \(name(call.offender)) fouled you and must spin.", .good, seconds: 5)

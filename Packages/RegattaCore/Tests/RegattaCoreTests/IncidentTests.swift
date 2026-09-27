@@ -78,6 +78,8 @@ enum IncidentFixture {
                 boat.isTacking = false
                 boat.penaltyTurnsOwed = 0
                 boat.penaltyProgress = 0
+                boat.penaltyClockTick = nil
+                boat.queuedPenaltyCallTicks = []
                 if seat == 1 {
                     boat.position = at + Vec2.heading(heading).rightPerp * abeam
                     boat.heading = heading - converging

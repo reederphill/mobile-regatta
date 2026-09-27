@@ -32,7 +32,7 @@ public struct FNV1a: Sendable {
 
 public extension Race {
     /// Golden digest: FNV-1a over the tick, the bit pattern of every field of every boat (her autohelm's
-    /// target and tap, planing, spinnaker and averaged groove wind included), and each seat's held input, then every pair's overlap as of the last point of certainty. Equal digests on the replay platform mean bit-for-bit equal races (ADR 0002).
+    /// target and tap, planing, spinnaker, averaged groove wind and penalty clocks included), and each seat's held input, then every pair's overlap as of the last point of certainty. Equal digests on the replay platform mean bit-for-bit equal races (ADR 0002).
     func digest() -> UInt64 {
         var h = FNV1a()
         h.combine(tick)
@@ -58,6 +58,9 @@ public extension Race {
             h.combine(b.roundingStage)
             h.combine(b.penaltyTurnsOwed)
             h.combine(b.penaltyProgress)
+            h.combine(b.penaltyClockTick)
+            h.combine(b.queuedPenaltyCallTicks.count)
+            for call in b.queuedPenaltyCallTicks { h.combine(call) }
             h.combine(b.isTacking)
             h.combine(b.isPlaning)
             h.combine(b.spinnaker.digestCode)

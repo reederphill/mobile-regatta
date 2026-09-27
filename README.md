@@ -21,7 +21,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
                           adds planing, the automatic spinnaker, by-the-lee loss and the averaged groove wind
   PolarTable.swift        polar by TWA × TWS, bilinear, with best upwind and downwind VMG derived at load
   Sails.swift             the automatic spinnaker's states and the planing hysteresis (#248)
-  Resources/boat-classes/ boat class files, `<id>@<version>.json`; races sail `skiff@1` by default
+  Resources/boat-classes/ boat class files, `<id>@<version>.json`; races sail `skiff@2` by default
   Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns; schema 2 adds the keyed wind's wobble and ramps
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast
@@ -32,7 +32,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Boat.swift              boat state and hull shape
   Rules.swift             racing rules in 2025 numbering, who had to keep clear, rule calls
   RulesConfig.swift       rules configuration file schema: incidents, zone, race format (docs/rules-file.md)
-  Resources/rules/        rules configuration files; `fleet-rules@2` (the default) is the v1.0 fleet race
+  Resources/rules/        rules configuration files; `fleet-rules@3` (the default) is the v1.0 fleet race
   Incident.swift          incidents and the array-backed IncidentIndex, keyed by sorted seat pairs
   Race.swift              fixed-step race loop: per-seat inputs, start sequence, OCS, contacts, penalties, finish;
                           authoritative or prediction mode (seedless, no umpire; tryStep() stops at a missing wind key)
@@ -377,5 +377,7 @@ is, each frame (`WaterTests.waterUpdateStaysCheap` prints its cost).
   is below the line, then start. While you sail back, keep clear of everyone else.
 - Round the windward mark and leeward mark to port, then finish by crossing the line downwind.
 - Dark water is a puff and pale water is a lull. The faint cone behind each boat is its wind shadow.
-- Fouling another boat costs a 720°, and touching a mark costs a 360°. Turn circles to serve it.
-  Finishing with a penalty unserved is a DSQ.
+- Fouling another boat or touching a mark costs one penalty turn: a 360° one way, a tack and a gybe. Start
+  it within 20 s and finish it within 40 s or you're disqualified; owe more than one and each gets its own
+  20 s and 40 s once the one before is done. You can't finish while you owe one: take it on the course side
+  and cross again.

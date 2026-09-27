@@ -14,13 +14,17 @@ func jump(_ race: Race, to tick: Int, _ edit: (inout WorldSnapshot) -> Void = { 
     try race.importSnapshot(snapshot)
 }
 
-/// `boat` racing on the finish leg with no penalty owed, her centre a few centimetres on the course side of
-/// the finish line's centre and sailing straight down the course: she crosses the line on the next step.
-func placeToFinish(_ boat: inout Boat, in race: Race, penaltyTurnsOwed: Int = 0) {
+/// `boat` racing on the finish leg, owing `penaltyTurnsOwed` turns (the current one's clock started at
+/// `penaltyClockTick`, none queued), her centre a few centimetres on the course side of the finish line's
+/// centre and sailing straight down the course: she crosses the line on the next step.
+func placeToFinish(_ boat: inout Boat, in race: Race, penaltyTurnsOwed: Int = 0, penaltyClockTick: Int? = nil) {
     boat.status = .racing
     boat.legIndex = race.course.legs.count - 1
     boat.roundingStage = 0
     boat.penaltyTurnsOwed = penaltyTurnsOwed
+    boat.penaltyProgress = 0
+    boat.penaltyClockTick = penaltyTurnsOwed > 0 ? penaltyClockTick : nil
+    boat.queuedPenaltyCallTicks = []
     boat.position = race.course.finishLine.centre + race.course.upwind * 0.05
     boat.heading = wrapAngle(race.course.axis + .pi)
     boat.speed = 4
@@ -60,13 +64,17 @@ func placeRacing(_ boat: inout Boat, leg: Int, at position: Vec2) {
         open.step()
         #expect(open.tick == Self.limit, "a closed race never steps")
 
-        // A DSQ at the line doesn't open the window: only a finisher does (#8).
+        // A DSQ doesn't open the window: only a finisher does (#8). Here she crosses the line on the tick her
+        // penalty turn's complete deadline passes (#89): owing it she doesn't finish, and she is disqualified.
         let dsq = testRace(seats: [.human, .human], prestartSeconds: 1, seed: 7)
-        try jump(dsq, to: 2_999) { placeToFinish(&$0.seats[0].boat, in: dsq, penaltyTurnsOwed: 2) }
+        let clock = 3_000 - RulesConfig.ticks(dsq.rules.raceFormat.penalty.complete)
+        try jump(dsq, to: 2_999) { placeToFinish(&$0.seats[0].boat, in: dsq, penaltyTurnsOwed: 1, penaltyClockTick: clock) }
         dsq.step()
         #expect(dsq.boats[0].status == .dsq && dsq.firstFinishTime == nil && dsq.closeTick == Self.limit)
-        #expect(dsq.drainEvents().map(\.kind).suffix(2) == [.disqualified(seat: 0, reason: "finished without taking a penalty"),
-                                                           .becameGhost(seat: 0)])
+        let kinds = dsq.drainEvents().map(\.kind)
+        let disqualified = try #require(kinds.firstIndex(of: .disqualified(seat: 0, reason: Race.missedComplete)))
+        #expect(kinds[disqualified + 1] == .becameGhost(seat: 0))
+        #expect(!kinds.contains { if case .finished = $0 { true } else { false } })
 
         // The first finish at t closes the race at min(t + 120 s, 960 s), and a boat crossing on that tick
         // still finishes.

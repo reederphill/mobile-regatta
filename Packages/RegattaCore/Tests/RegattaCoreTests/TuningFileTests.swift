@@ -59,7 +59,7 @@ import Testing
     /// untuned: the same bytes, hash and ref, with no `tune`, so its race is a bundled race.
     @Test func untunedSavedTuningProducesBundledFileHash() throws {
         let conditions = try Self.bytes(Conditions.self, Self.conditionsKey)
-        let skiff = try Self.bytes(BoatClass.self, DataFileKey(id: "skiff", version: 1))
+        let skiff = try Self.bytes(BoatClass.self, RaceFiles.defaults.boatClass.ref.key)
         let rules = try Self.bytes(RulesConfig.self, RaceFiles.defaults.rulesConfiguration.ref.key)
         let own: [String: Double] = ["/shift/periodSeconds/min": 70, "/shift/wobbleDegrees": 3, "/puffs/fanDegrees": 9.0,
                                      "/puffs/lullLoss/max": 0.2, "/shift/amplitudeDegrees": 8]
@@ -124,7 +124,8 @@ import Testing
         let (read, savedCatalog) = try RaceLogFolder.read(folder)
         #expect(read == log)
         #expect(try Replayer.digest(of: read, catalog: savedCatalog) == race.digest())
-        #expect(throws: DataFileError.refMismatch(expected: boatClass.ref, foundHash: RaceFiles.defaults.boatClass.ref.hash)) {
+        let bundledSkiff = try BoatClassFile.bundled(id: "skiff", version: 1).ref.hash
+        #expect(throws: DataFileError.refMismatch(expected: boatClass.ref, foundHash: bundledSkiff)) {
             try Replayer.replay(read)
         }
 
@@ -222,7 +223,7 @@ import Testing
         #expect(conditions.contains(Self.conditionsKey))
         #expect(conditions.count == 12)
         #expect(BoatClassFile.bundledKeys().contains(DataFileKey(id: "skiff", version: 1)))
-        #expect(RulesConfigFile.bundledKeys() == [DataFileKey(id: "fleet-rules", version: 1), DataFileKey(id: "fleet-rules", version: 2)])
+        #expect(RulesConfigFile.bundledKeys() == [1, 2, 3].map { DataFileKey(id: "fleet-rules", version: $0) })
         #expect(VenueFile.bundledKeys().map(\.version) == [1, 2, 3])
         for key in conditions {
             #expect(try ConditionsFile.bundledData(id: key.id, version: key.version) != nil, "\(key)")

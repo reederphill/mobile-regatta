@@ -32,7 +32,8 @@ public struct SeatView: Sendable, Equatable {
     public let own: OwnBoat
     /// Every other seat's boat, in seat order.
     public let others: [OtherBoat]
-    /// The rule calls on show: each from its call until its offender's completion deadline.
+    /// The rule calls on show: each from its call for the rules' penalty completion window (30 s), which is
+    /// its offender's completion deadline whenever the call fixed one (`RuleCall.completeDeadlineTick`).
     public let ruleCallLines: [RuleCallLine]
 
     /// The puffs and lulls on the water now, as drawn, in window and spawn order.
@@ -73,7 +74,7 @@ public struct SeatView: Sendable, Equatable {
         fleetSize = boats.count
         finishWindowRemaining = shared.finishWindowRemaining
 
-        own = OwnBoat(boat, ease: race.heldInputs[seat].ease, boatClass: boatClass)
+        own = OwnBoat(boat, ease: race.heldInputs[seat].ease, boatClass: boatClass, penalty: race.rules.raceFormat.penalty)
         let rights = race.rightsOfWay(of: seat)
         var others: [OtherBoat] = []
         others.reserveCapacity(boats.count - 1)
@@ -115,8 +116,9 @@ public struct SeatView: Sendable, Equatable {
             tick = race.tick
             time = race.time
             finishWindowRemaining = race.firstFinishTime == nil ? nil : Double(race.closeTick - race.tick) / Double(Race.tickRate)
+            let shown = RulesConfig.ticks(race.rules.raceFormat.penalty.complete)
             ruleCallLines = race.incidents.incidents.compactMap { incident in
-                guard case .called(let call) = incident.outcome, call.completeDeadlineTick >= race.tick else { return nil }
+                guard case .called(let call) = incident.outcome, call.tick + shown >= race.tick else { return nil }
                 return RuleCallLine(offender: call.offender, victim: call.victim, rule: call.rule, tick: call.tick)
             }
             let wind = race.wind
@@ -158,6 +160,9 @@ public struct SeatView: Sendable, Equatable {
         public let roundingStage: Int
         /// Penalty turns she owes, as the HUD counts them (#9).
         public let penaltyTurnsOwed: Int
+        /// Her owed penalty turns as the HUD shows them (G4, #89): how many, and the current turn's deadlines
+        /// and progress (`Race.owedPenalty(ofSeat:)`); nil while she owes none.
+        public let penalty: OwedPenalty?
         /// The wind over the ground at her, before her wind shadow: what the wind readouts show (#15).
         public let windOverGround: Wind
         /// The wind she sails in, over the water (the ground wind less the current): what her wind angle
@@ -166,7 +171,7 @@ public struct SeatView: Sendable, Equatable {
         /// Her wind shadow's multiplier on the sailing wind's speed, 1 in clean air: the HUD's shadow cue (#10).
         public let shadow: Double
 
-        init(_ boat: Boat, ease: Bool, boatClass: BoatClass) {
+        init(_ boat: Boat, ease: Bool, boatClass: BoatClass, penalty: RulesConfig.Penalty) {
             position = boat.position
             heading = boat.heading
             speed = boat.speed
@@ -179,6 +184,7 @@ public struct SeatView: Sendable, Equatable {
             legIndex = boat.legIndex
             roundingStage = boat.roundingStage
             penaltyTurnsOwed = boat.penaltyTurnsOwed
+            self.penalty = OwedPenalty(boat, penalty: penalty)
             windOverGround = boat.windOverGround
             sailingWind = boat.sailingWind
             shadow = boat.shadow

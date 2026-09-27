@@ -32,7 +32,7 @@ import Testing
     // MARK: Line
 
     @Test func lineLengthIsPerBoatHullLengthsWithAMinimum() throws {
-        // 1.25 hull lengths a boat (skiff@1's 4.9 m hull, #248), and at least 42 m.
+        // 1.25 hull lengths a boat (the skiff's 4.9 m hull, #248), and at least 42 m.
         #expect(abs(try Self.layout(fleetSize: 10).startLine.length - 12.5 * Self.hull) < 1e-9)
         #expect(abs(try Self.layout(fleetSize: 2).startLine.length - 42) < 1e-9)
         #expect(abs(try Self.layout(fleetSize: 16).startLine.length - 20 * Self.hull) < 1e-9)

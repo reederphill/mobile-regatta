@@ -11,9 +11,11 @@ import RegattaCore
 /// | speed, averaged wind    | uint16  | 1/1024 m/s                | 0 ..< 64 m/s                  |
 /// | spinnaker hoist or drop left | uint8 | a tick (1/30 s)        | 0 … 8.5 s                     |
 /// | rudder (actual)         | int16   | 1/32 767                  | −1 … 1                        |
-/// | penalty progress        | int16   | 1/1024 rad                | ±32 rad (5 turns)             |
+/// | penalty progress        | int16   | 1/1024 rad                | ±32 rad (the current turn's: under 2π) |
+/// | penalty clock           | uint16  | a tick                    | 0 … 65 535 ticks before the snapshot's |
 /// | held rudder             | int8    | exact                     | −127 … 127                    |
-/// | status, turns owed, rounding stage | bits | exact            | 3 bits each                   |
+/// | status, rounding stage  | bits    | exact                     | 3 bits each                   |
+/// | penalty turns owed      | bits    | exact                     | 7 bits: 0 … 127               |
 /// | ease, autohelm, its groove and tap, tacking, boom side, planing, averaged wind | bits | exact | 1 bit each |
 /// | spinnaker               | bits    | exact                     | 2 bits                        |
 /// | leg index               | uint8   | exact                     | 0 … 255                       |
@@ -22,9 +24,11 @@ import RegattaCore
 /// can't be sent: encoding throws `WireError.outOfRange` rather than clamping it.
 ///
 /// None of the ranges can be reached in a valid race: boats can't leave the race area, which a venue
-/// keeps well inside ±32 km of the course origin, speeds stay far below 64 m/s, and penalty turns are
-/// capped at 4. So an out-of-range throw on the host (#65) is a simulation bug, never a player's
-/// doing: the host logs it, skips that snapshot and keeps the race running, and clients keep
+/// keeps well inside ±32 km of the course origin, speeds stay far below 64 m/s, and penalty turns have no
+/// cap (#89) but a boat can't owe 127: each turn's start deadline disqualifies her 20 s after its clock
+/// starts (fleet-rules@3; 15 s before it), and a clock is at most 40 s old before its turn is completed or she
+/// is. So an out-of-range throw
+/// on the host (#65) is a simulation bug, never a player's doing: the host logs it, skips that snapshot and keeps the race running, and clients keep
 /// predicting until the next snapshot that encodes. It never clamps, which would hide the bug.
 public enum SnapshotQuantisation {
     public static let positionStep = 1.0 / 256
@@ -36,7 +40,7 @@ public enum SnapshotQuantisation {
     public static let spinnakerStep = Race.dt
 
     /// Bytes per seat in a wire snapshot.
-    public static let bytesPerSeat = 24
+    public static let bytesPerSeat = 26
 
     static func quantise(_ value: Double, step: Double, in range: ClosedRange<Int>, _ field: String) throws -> Int {
         guard value.isFinite else { throw WireError.outOfRange(field) }
@@ -157,11 +161,15 @@ public struct WireSeat: Hashable, Sendable {
     public var rudder: Int16
     public var autohelm: WireAutohelm?
     public var penaltyProgress: Int16
+    /// #89: ticks since the current penalty turn's clock started (`Boat.penaltyClockTick`), before the
+    /// snapshot's tick; 0 while she owes none. A client that joins or resyncs mid-penalty predicts the turn's
+    /// deadlines from it.
+    public var penaltyClock: UInt16
     public var heldInput: BoatInput
     public var isTacking: Bool
     public var boomSide: BoomSide
     public var status: BoatStatus
-    /// 0…7.
+    /// 0…127.
     public var penaltyTurnsOwed: UInt8
     /// 0…7.
     public var roundingStage: UInt8
@@ -176,7 +184,7 @@ public struct WireSeat: Hashable, Sendable {
         x: Int32, y: Int32, heading: Int16, speed: UInt16, rudder: Int16, autohelm: WireAutohelm?, penaltyProgress: Int16,
         heldInput: BoatInput, isTacking: Bool, boomSide: BoomSide, status: BoatStatus, penaltyTurnsOwed: UInt8,
         roundingStage: UInt8, legIndex: UInt8, isPlaning: Bool = false, spinnaker: WireSpinnaker = .down,
-        averagedWindSpeed: UInt16? = nil
+        averagedWindSpeed: UInt16? = nil, penaltyClock: UInt16 = 0
     ) {
         self.x = x
         self.y = y
@@ -185,6 +193,7 @@ public struct WireSeat: Hashable, Sendable {
         self.rudder = rudder
         self.autohelm = autohelm
         self.penaltyProgress = penaltyProgress
+        self.penaltyClock = penaltyClock
         self.heldInput = heldInput
         self.isTacking = isTacking
         self.boomSide = boomSide
@@ -197,8 +206,9 @@ public struct WireSeat: Hashable, Sendable {
         self.averagedWindSpeed = averagedWindSpeed
     }
 
-    /// Quantises a seat of the world. Throws `WireError.outOfRange` for a value the wire can't carry.
-    public init(_ seat: WorldSnapshot.Seat) throws {
+    /// Quantises a seat of the world at `tick`, the snapshot's (the penalty clock goes relative to it). Throws
+    /// `WireError.outOfRange` for a value the wire can't carry.
+    public init(_ seat: WorldSnapshot.Seat, tick: Int) throws {
         typealias Q = SnapshotQuantisation
         let b = seat.boat
         let int24 = -(1 << 23)...((1 << 23) - 1)
@@ -213,7 +223,15 @@ public struct WireSeat: Hashable, Sendable {
         isTacking = b.isTacking
         boomSide = b.boomSide
         status = b.status
-        guard let owed = UInt8(exactly: b.penaltyTurnsOwed), owed <= 7 else { throw WireError.outOfRange("penaltyTurnsOwed") }
+        guard let owed = UInt8(exactly: b.penaltyTurnsOwed), owed <= 127 else { throw WireError.outOfRange("penaltyTurnsOwed") }
+        if owed > 0 {
+            guard let clock = b.penaltyClockTick, let since = UInt16(exactly: tick - clock) else {
+                throw WireError.outOfRange("penaltyClockTick")
+            }
+            penaltyClock = since
+        } else {
+            penaltyClock = 0
+        }
         guard let stage = UInt8(exactly: b.roundingStage), stage <= 7 else { throw WireError.outOfRange("roundingStage") }
         guard let leg = UInt8(exactly: b.legIndex) else { throw WireError.outOfRange("legIndex") }
         penaltyTurnsOwed = owed
@@ -226,8 +244,11 @@ public struct WireSeat: Hashable, Sendable {
         }
     }
 
-    /// Overwrites the fields the wire carries; the rest of `seat` (`SnapshotFields.excluded`) stays.
-    public func apply(to seat: inout WorldSnapshot.Seat) {
+    /// Overwrites the fields the wire carries, at `tick` (the snapshot's); the rest of `seat`
+    /// (`SnapshotFields.excluded`) stays, but for the queued penalty calls, trimmed to what the owed turns
+    /// can hold: the receiver's own after `tick` (its prediction ahead of the server) and its oldest (served
+    /// turns) dropped.
+    public func apply(to seat: inout WorldSnapshot.Seat, tick: Int) {
         typealias Q = SnapshotQuantisation
         seat.boat.position = Vec2(Double(x) * Q.positionStep, Double(y) * Q.positionStep)
         seat.boat.heading = Q.radians(heading)
@@ -239,6 +260,10 @@ public struct WireSeat: Hashable, Sendable {
         seat.boat.boomSide = boomSide
         seat.boat.status = status
         seat.boat.penaltyTurnsOwed = Int(penaltyTurnsOwed)
+        seat.boat.penaltyClockTick = penaltyTurnsOwed > 0 ? tick - Int(penaltyClock) : nil
+        var queued = seat.boat.queuedPenaltyCallTicks.filter { $0 <= tick }
+        queued.removeFirst(max(0, queued.count - max(0, Int(penaltyTurnsOwed) - 1)))
+        seat.boat.queuedPenaltyCallTicks = queued
         seat.boat.roundingStage = Int(roundingStage)
         seat.boat.legIndex = Int(legIndex)
         seat.boat.isPlaning = isPlaning
@@ -247,20 +272,22 @@ public struct WireSeat: Hashable, Sendable {
         seat.heldInput = heldInput
     }
 
-    // Layout, 24 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autohelm angle int16
+    // Layout, 26 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autohelm angle int16
     // (0 for the groove or without an autohelm), penalty progress int16, held rudder int8, then two flag
     // bytes and the leg index; then (#248) a sails byte, the spinnaker's ticks left uint8 (0 unless it is
-    // going up or coming down) and the averaged wind uint16 (0 without one).
+    // going up or coming down) and the averaged wind uint16 (0 without one); then (#89) the penalty clock
+    // uint16 (0 while no turn is owed).
     //   flags:  bit 0 ease, bit 1 has autohelm, bit 2 tacking, bits 3–5 status, bit 6 boom to starboard,
     //           bit 7 the autohelm is sailing the tap
-    //   counts: bits 0–2 penalty turns owed, bits 3–5 rounding stage, bit 6 the autohelm holds the groove,
-    //           bit 7 that groove is the downwind one
+    //   counts: bits 0–2 penalty turns owed (its low 3 bits), bits 3–5 rounding stage, bit 6 the autohelm
+    //           holds the groove, bit 7 that groove is the downwind one
     //   sails:  bits 0–1 spinnaker (down, going up, up, coming down), bit 2 planing, bit 3 has an averaged
-    //           wind; bits 4–7 zero
+    //           wind; bits 4–7 penalty turns owed (its high 4 bits, #89)
     // Every autohelm bit is zero without an autohelm, and the downwind bit without the groove.
 
     func encode(to w: inout WireWriter) throws {
-        guard penaltyTurnsOwed <= 7 else { throw WireError.outOfRange("penaltyTurnsOwed") }
+        guard penaltyTurnsOwed <= 127 else { throw WireError.outOfRange("penaltyTurnsOwed") }
+        guard penaltyTurnsOwed > 0 || penaltyClock == 0 else { throw WireError.outOfRange("penaltyClock") }
         guard roundingStage <= 7 else { throw WireError.outOfRange("roundingStage") }
         guard rudder != Int16.min else { throw WireError.outOfRange("rudder") } // −1 is −32 767
         try w.i24(x, "position.x")
@@ -278,19 +305,20 @@ public struct WireSeat: Hashable, Sendable {
         if boomSide == .starboard { flags |= 1 << 6 }
         if autohelm?.isTapping == true { flags |= 1 << 7 }
         w.u8(flags)
-        var counts = penaltyTurnsOwed | roundingStage << 3
+        var counts = penaltyTurnsOwed & 0b111 | roundingStage << 3
         if case .groove(let groove) = autohelm?.target {
             counts |= 1 << 6
             if groove == .downwind { counts |= 1 << 7 }
         }
         w.u8(counts)
         w.u8(legIndex)
-        var sails = spinnaker.code
+        var sails = spinnaker.code | (penaltyTurnsOwed >> 3) << 4
         if isPlaning { sails |= 1 << 2 }
         if averagedWindSpeed != nil { sails |= 1 << 3 }
         w.u8(sails)
         w.u8(spinnaker.ticksLeft)
         w.u16(averagedWindSpeed ?? 0)
+        w.u16(penaltyClock)
     }
 
     init(from r: inout WireReader) throws {
@@ -310,7 +338,8 @@ public struct WireSeat: Hashable, Sendable {
         let sails = try r.u8()
         let ticksLeft = try r.u8()
         let averaged = try r.u16()
-        guard sails >> 4 == 0, let kite = WireSpinnaker(code: sails & 0b11, ticksLeft: ticksLeft) else {
+        penaltyClock = try r.u16()
+        guard let kite = WireSpinnaker(code: sails & 0b11, ticksLeft: ticksLeft) else {
             throw WireError.invalidValue("spinnaker")
         }
         let hasAverage = sails & 1 << 3 != 0
@@ -331,7 +360,8 @@ public struct WireSeat: Hashable, Sendable {
         isTacking = flags & 1 << 2 != 0
         boomSide = flags & 1 << 6 != 0 ? .starboard : .port
         self.status = status
-        penaltyTurnsOwed = counts & 0b111
+        penaltyTurnsOwed = counts & 0b111 | (sails >> 4) << 3
+        guard penaltyTurnsOwed > 0 || penaltyClock == 0 else { throw WireError.invalidValue("penaltyClock") }
         roundingStage = counts >> 3 & 0b111
     }
 }
@@ -369,7 +399,7 @@ public enum SnapshotFields {
     public static let wire: [String] = [
         "boat.position", "boat.heading", "boat.speed", "boat.rudder", "boat.autohelm",
         "boat.status", "boat.legIndex", "boat.roundingStage",
-        "boat.penaltyTurnsOwed", "boat.penaltyProgress", "boat.isTacking", "boat.boomSide",
+        "boat.penaltyTurnsOwed", "boat.penaltyProgress", "boat.penaltyClockTick", "boat.isTacking", "boat.boomSide",
         "boat.isPlaning", "boat.spinnaker", "boat.averagedWindSpeed",
         "heldInput.rudder", "heldInput.ease",
     ]
@@ -388,13 +418,14 @@ public enum SnapshotFields {
         "boat.shadow": "derived: recomputed from the fleet at the start of every step",
         "boat.finishTime": "event state (`EventState`, from Resync and the reliable `finished` event), applied with every snapshot",
         "boat.place": "event state (`EventState`, from Resync and the reliable `finished` event), applied with every snapshot",
+        "boat.queuedPenaltyCallTicks": "a queued penalty turn's call tick starts its clock only under `fromCall` stacking (rules schema 1 and 2); under `sequential`, every hosted race's, its clock starts when it becomes current. The wire carries the current turn's clock (`boat.penaltyClockTick`); the receiver keeps its own queue, trimmed to the turns owed (`WireSeat.apply`) (#89)",
     ]
 }
 
 /// The quantised seats of a world.
 func wireSeats(of world: WorldSnapshot) throws -> [WireSeat] {
     guard world.seats.count <= WireLimit.seats else { throw WireError.tooLong("seats") }
-    return try world.seats.map(WireSeat.init)
+    return try world.seats.map { try WireSeat($0, tick: world.tick) }
 }
 
 /// `base` with `seats` merged in at `tick`. Race-level state stays as the base has it, but for the
@@ -407,7 +438,7 @@ func merge(_ seats: [WireSeat], into base: WorldSnapshot, tick: Int) throws -> W
     var world = base
     world.tick = tick
     world.incidents.forgetObstructionContacts(after: tick)
-    for i in seats.indices { seats[i].apply(to: &world.seats[i]) }
+    for i in seats.indices { seats[i].apply(to: &world.seats[i], tick: tick) }
     return world
 }
 

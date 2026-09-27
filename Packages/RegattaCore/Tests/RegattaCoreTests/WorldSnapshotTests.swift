@@ -331,6 +331,16 @@ struct LogFeeder {
             ("roundingStage", { $0.roundingStage = -1 }),
             ("roundingStage", { $0.legIndex = finishLeg; $0.roundingStage = 1 }),
             ("penaltyTurnsOwed", { $0.penaltyTurnsOwed = -1 }),
+            // #89: a clock exactly while a turn is owed, not after the snapshot's tick; queued calls fewer than
+            // the turns owed, in order, and not after the tick either.
+            ("penaltyClockTick", { $0.penaltyTurnsOwed = 1; $0.penaltyClockTick = nil }),
+            ("penaltyClockTick", { $0.penaltyTurnsOwed = 0; $0.penaltyClockTick = good.tick }),
+            ("penaltyClockTick", { $0.penaltyTurnsOwed = 1; $0.penaltyClockTick = good.tick + 1 }),
+            ("penaltyClockTick", { $0.penaltyTurnsOwed = 1; $0.penaltyClockTick = -race.setup.startSequenceTicks - 1 }),
+            ("queuedPenaltyCallTicks", { $0.queuedPenaltyCallTicks = [good.tick] }),
+            ("queuedPenaltyCallTicks", { $0.penaltyTurnsOwed = 2; $0.penaltyClockTick = good.tick; $0.queuedPenaltyCallTicks = [good.tick - 2, good.tick - 1] }),
+            ("queuedPenaltyCallTicks", { $0.penaltyTurnsOwed = 3; $0.penaltyClockTick = good.tick; $0.queuedPenaltyCallTicks = [good.tick - 1, good.tick - 2] }),
+            ("queuedPenaltyCallTicks", { $0.penaltyTurnsOwed = 2; $0.penaltyClockTick = good.tick; $0.queuedPenaltyCallTicks = [good.tick + 1] }),
             ("position.x", { $0.position.x = .nan }),
             ("heading", { $0.heading = .infinity }),
             ("speed", { $0.speed = .nan }),

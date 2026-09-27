@@ -43,8 +43,7 @@ public enum BoatStatus: Sendable, Equatable {
     case racing
     /// Crossed the finish line (#86: a ghost from that tick).
     case finished
-    /// Disqualified: today at the finish with a penalty unserved; #89 moves it to the missed deadline. A ghost
-    /// from the call (#86).
+    /// Disqualified: at a penalty turn's missed deadline (#89). A ghost from the call (#86).
     case dsq
 }
 
@@ -72,9 +71,21 @@ public struct Boat: Identifiable, Sendable {
     public var legIndex = 0
     public var roundingStage = 0
 
+    /// Penalty turns she owes (#9, #89): one a call, a foul's or a mark touch's (rule 31). They add up with no
+    /// cap and are served in order: the first is the current turn, the rest are queued behind it.
     public var penaltyTurnsOwed = 0
-    /// Signed radians turned since the current penalty was incurred.
+    /// Signed radians turned in the current penalty turn, positive to starboard. A turn goes one way only, so
+    /// the sign is its direction; 0 before she has turned it either way. A full turn (2π) serves it, and any
+    /// turning past that carries into the next one (`Race`).
     public var penaltyProgress = 0.0
+    /// The tick the current penalty turn's clock started: its start and complete deadlines run from here
+    /// (`Race.owedPenalty(ofSeat:)`). Nil while she owes none.
+    public var penaltyClockTick: Int?
+    /// The call tick of each owed turn queued behind the current one, oldest first: under `fromCall` stacking
+    /// a queued turn's clock starts at its call (`RulesConfig.StackedPenaltyDeadlines`). At most
+    /// `penaltyTurnsOwed − 1` of them; a queued turn with none listed (a wire snapshot's, which carries only
+    /// the current turn's clock) starts its clock when it becomes current.
+    public var queuedPenaltyCallTicks: [Int] = []
     /// Rule 13: past head to wind but not yet close-hauled.
     public var isTacking = false
     /// On the plane (#248, `BoatClass.planing`): set by `BoatDynamics.advance`, never for a class that

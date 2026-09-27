@@ -4,13 +4,13 @@ import Testing
 
 /// The rules configuration file (#73): its values, its hash, and where the race reads it.
 @Suite struct RulesConfigTests {
-    /// The bundled bytes of fleet-rules@`version`: by default the default file, @2.
-    static func bundledData(version: Int = 2) throws -> Data {
+    /// The bundled bytes of fleet-rules@`version`: by default the default file, @3.
+    static func bundledData(version: Int = 3) throws -> Data {
         try #require(try RulesConfigFile.bundledData(id: "fleet-rules", version: version))
     }
 
     /// The bundled bytes of fleet-rules@`version` with `old` replaced by `new` exactly once.
-    static func tampered(_ old: String, _ new: String, version: Int = 2) throws -> Data {
+    static func tampered(_ old: String, _ new: String, version: Int = 3) throws -> Data {
         let text = try #require(String(data: try bundledData(version: version), encoding: .utf8))
         #expect(text.components(separatedBy: old).count == 2, "\(old) must appear exactly once")
         return Data(text.replacingOccurrences(of: old, with: new).utf8)
@@ -88,17 +88,17 @@ import Testing
         #expect(format.startRow == .init(depthLineLengths: 0.5, spreadLineLengths: 1.5, trueWindAngle: deg2rad(90),
                                          polarSpeedFraction: 1))
         #expect(format.startRow.minimumSpacing == nil, "schema 1: no spacing floor")
+        #expect(format.penalty.stackedPenaltyDeadlines == .fromCall, "before schema 3: each turn's clock from its call")
         #expect(format.edgeSpeedRetention == 0.3)
         #expect(format.beatSizing == .init(leaderSeconds: 480, maxMetres: 360, calibrationFactor: 1))
     }
 
     /// fleet-rules@2 (schema 2, #85) is @1 with the start row's spacing floor, 1.25 hull lengths, listed as a
-    /// placeholder: every other value the same. It is the default; @1 still loads, with no floor.
+    /// placeholder: every other value the same. @1 still loads, with no floor.
     @Test func version2IsVersion1WithTheStartRowSpacingFloor() throws {
         let v1 = try RulesConfigFile.bundled(id: "fleet-rules", version: 1)
         let v2 = try RulesConfigFile.bundled(id: "fleet-rules", version: 2)
         #expect(v1.header.schemaVersion == 1 && v2.header.schemaVersion == 2)
-        #expect(v2.ref == RaceFiles.defaults.rulesConfiguration.ref && v2.ref == Race.defaultRulesConfiguration.ref)
         #expect(v1.content.raceFormat.startRow.minimumSpacing == nil)
         #expect(v2.content.raceFormat.startRow.minimumSpacing == HullLengths(1.25))
         let spacing = "/raceFormat/startRow/minimumSpacingHullLengths"
@@ -117,16 +117,16 @@ import Testing
     @Test func startRowSpacingFloorNeedsSchema2() throws {
         let kind = RulesConfig.kind
         let field = #""minimumSpacingHullLengths": 1.25"#
-        #expect(try RulesConfigFile(data: Self.tampered(field, #""minimumSpacingHullLengths": 2"#))
+        #expect(try RulesConfigFile(data: Self.tampered(field, #""minimumSpacingHullLengths": 2"#, version: 2))
             .content.raceFormat.startRow.minimumSpacing == HullLengths(2))
         for bad in ["0", "-1"] {
             #expect(throws: DataFileError.invalidContent(
                 kind: kind, id: "fleet-rules", reason: "raceFormat.startRow.minimumSpacingHullLengths must be positive")) {
-                try RulesConfigFile(data: Self.tampered(field, #""minimumSpacingHullLengths": "# + bad))
+                try RulesConfigFile(data: Self.tampered(field, #""minimumSpacingHullLengths": "# + bad, version: 2))
             }
         }
         // Schema 2 without it (and without its placeholder, which would point at nothing).
-        var text = try #require(String(data: try Self.tampered(",\n      " + field, ""), encoding: .utf8))
+        var text = try #require(String(data: try Self.tampered(",\n      " + field, "", version: 2), encoding: .utf8))
         text = text.replacingOccurrences(of: "\n    \"/raceFormat/startRow/minimumSpacingHullLengths\",", with: "")
         #expect(!text.contains(#""minimumSpacingHullLengths""#) && !text.contains(#"/minimumSpacingHullLengths""#))
         #expect(throws: DataFileError.malformed(kind: kind, reason: "schema 2 needs raceFormat.startRow.minimumSpacingHullLengths")) {
@@ -139,10 +139,62 @@ import Testing
             try RulesConfigFile(data: Self.tampered(#""polarSpeedFraction": 1"#, #""polarSpeedFraction": 1, "# + field, version: 1))
         }
         #expect(throws: needsSchema2) {
-            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 2"#, #""schemaVersion": 1"#))
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 2"#, #""schemaVersion": 1"#, version: 2))
         }
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 3, supported: [1, 2])) {
-            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 2"#, #""schemaVersion": 3"#))
+    }
+
+    /// fleet-rules@3 (schema 3, #89) is @2 with sequential penalty deadlines (G4), loosened a little from #9's
+    /// 15 s and 30 s to 20 s and 40 s (the owner): every other value the same. It is the default; @1 and @2 still
+    /// load, with #9's deadlines and each turn's clock from its own call, as they meant.
+    @Test func version3IsVersion2WithLooserSequentialPenaltyDeadlines() throws {
+        let v1 = try RulesConfigFile.bundled(id: "fleet-rules", version: 1)
+        let v2 = try RulesConfigFile.bundled(id: "fleet-rules", version: 2)
+        let v3 = try RulesConfigFile.bundled(id: "fleet-rules", version: 3)
+        #expect(v3.header.schemaVersion == 3)
+        #expect(v3.ref == RaceFiles.defaults.rulesConfiguration.ref && v3.ref == Race.defaultRulesConfiguration.ref)
+        #expect(v1.content.raceFormat.penalty.stackedPenaltyDeadlines == .fromCall)
+        #expect(v2.content.raceFormat.penalty.stackedPenaltyDeadlines == .fromCall)
+        #expect(v3.content.raceFormat.penalty.stackedPenaltyDeadlines == .sequential)
+        #expect(v3.header.placeholders == v2.header.placeholders)
+
+        for old in [v1, v2] { #expect(old.content.raceFormat.penalty.start == 15 && old.content.raceFormat.penalty.complete == 30) }
+        #expect(v3.content.raceFormat.penalty.start == 20 && v3.content.raceFormat.penalty.complete == 40)
+
+        var format = v2.content.raceFormat
+        format.penalty.stackedPenaltyDeadlines = .sequential
+        format.penalty.start = 20
+        format.penalty.complete = 40
+        #expect(v3.content.raceFormat == format)
+        #expect(v3.content.incidents == v2.content.incidents && v3.content.zone == v2.content.zone)
+        #expect(v3.content.markRoomGiven == v2.content.markRoomGiven && v3.content.onABeat == v2.content.onABeat)
+        #expect(v3.content.builderValues == v2.content.builderValues)
+    }
+
+    /// The stacking of penalty deadlines is schema 3's: required there and one of its values, refused before it.
+    @Test func stackedPenaltyDeadlinesNeedsSchema3() throws {
+        let kind = RulesConfig.kind
+        let field = #""stackedPenaltyDeadlines": "sequential""#
+        #expect(try RulesConfigFile(data: Self.tampered(field, #""stackedPenaltyDeadlines": "fromCall""#))
+            .content.raceFormat.penalty.stackedPenaltyDeadlines == .fromCall)
+        #expect(throws: DataFileError.invalidContent(
+            kind: kind, id: "fleet-rules", reason: "raceFormat.penalty.stackedPenaltyDeadlines must be one of sequential, fromCall")) {
+            try RulesConfigFile(data: Self.tampered(field, #""stackedPenaltyDeadlines": "stacked""#))
+        }
+        // Schema 3 without it.
+        #expect(throws: DataFileError.malformed(kind: kind, reason: "schema 3 needs raceFormat.penalty.stackedPenaltyDeadlines")) {
+            try RulesConfigFile(data: Self.tampered(",\n      " + field, ""))
+        }
+        // Before schema 3 with it: @2 given the field, or @3 claiming schema 2.
+        let needsSchema3 = DataFileError.invalidContent(
+            kind: kind, id: "fleet-rules", reason: "raceFormat.penalty.stackedPenaltyDeadlines needs schema 3")
+        #expect(throws: needsSchema3) {
+            try RulesConfigFile(data: Self.tampered(#""startedTurnDegrees": 30"#, #""startedTurnDegrees": 30, "# + field, version: 2))
+        }
+        #expect(throws: needsSchema3) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 3"#, #""schemaVersion": 2"#))
+        }
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 4, supported: [1, 2, 3])) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 3"#, #""schemaVersion": 4"#))
         }
     }
 
@@ -215,7 +267,7 @@ import Testing
         }
         let race = Race(setup: try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot]), windSeed: WindSeed(2))
         #expect(race.course.zoneRadius == 3 * race.boatClass.hull.length)
-        #expect(race.course.zoneRadius == 3 * 4.9) // skiff@1's hull (#248)
+        #expect(race.course.zoneRadius == 3 * 4.9) // the skiff's hull (#248)
     }
 
     @Test func unknownFieldsAndUnresolvedBuilderValuesAreRefused() throws {
@@ -234,7 +286,8 @@ import Testing
         }
     }
 
-    /// The race's first rule call opens an incident that links back to it, with deadlines from the file.
+    /// The race's first rule call opens an incident that links back to it, with deadlines from the file: the
+    /// fixture's fleet-rules@1 (schema 1: `fromCall`) fixes every call's clock at the call. A call costs one turn.
     @Test func ruleCallsOpenLinkedIncidents() throws {
         let feeder = LogFeeder(log: try ScriptedLog.fixture())
         let race = Race(setup: feeder.log.header.setup, windSeed: feeder.log.header.windSeed)
@@ -257,7 +310,7 @@ import Testing
             #expect(incident.outcome == .called(call))
             #expect(call.startDeadlineTick == call.tick + 15 * Race.tickRate)
             #expect(call.completeDeadlineTick == call.tick + 30 * Race.tickRate)
-            #expect(call.turnsOwed == 2)
+            #expect(call.turnsOwed == 1)
         }
     }
 }

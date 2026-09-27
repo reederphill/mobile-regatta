@@ -24,7 +24,9 @@ public struct RulesConfig: DataFileContent {
     public static let bundleDirectory = "rules"
     /// Schema 2 (#85) adds the start row's spacing floor (`StartRow.minimumSpacing`). A schema-1 file has none
     /// (nil): a squeezed start row narrows its spread with its depth, as #82 squeezed its placement.
-    public static let supportedSchemaVersions = [1, 2]
+    /// Schema 3 (#89) adds how stacked penalty turns take their deadlines (`Penalty.stackedPenaltyDeadlines`);
+    /// a schema-1 or -2 file means `fromCall`.
+    public static let supportedSchemaVersions = [1, 2, 3]
 
     public var incidents: Incidents
     /// The rule 18 zone.
@@ -126,13 +128,29 @@ public struct RulesConfig: DataFileContent {
         public var startSequenceTicks: Int { RulesConfig.ticks(startSequence) }
     }
 
+    /// A penalty turn's deadlines (#9, #89): each owed turn has a clock, and must be started (turned
+    /// `startedTurn`) `start` seconds after it and completed `complete` seconds after it, or she is
+    /// disqualified. When the clock starts is `stackedPenaltyDeadlines`'s.
     public struct Penalty: Sendable, Equatable {
-        /// Seconds after the call by which the penalty must be started.
+        /// Seconds after the turn's clock starts by which it must be started.
         public var start: Double
-        /// Seconds after the call by which it must be completed.
+        /// Seconds after the turn's clock starts by which it must be completed.
         public var complete: Double
         /// Radians a boat must have turned for her penalty to count as started.
         public var startedTurn: Double
+        /// When each owed turn's clock starts (schema 3; a schema-1 or -2 file means `fromCall`).
+        public var stackedPenaltyDeadlines: StackedPenaltyDeadlines
+    }
+
+    /// When an owed penalty turn's clock starts, for a boat owing more than one (G4, #89). Owed turns are
+    /// served in order either way; a turn's clock is fixed when it becomes the current one.
+    public enum StackedPenaltyDeadlines: String, Sendable, Equatable, CaseIterable {
+        /// At its own call or when the turn before it is completed, whichever is later (G4, the default):
+        /// a turn queued behind another gets its full start and complete windows once that one is done.
+        case sequential
+        /// At its own call, however many turns are owed ahead of it: what a rules file before schema 3 meant,
+        /// the option G4 turned down.
+        case fromCall
     }
 
     /// The start line is `perBoat` × fleet size long, and at least `minimumMetres`.
@@ -198,7 +216,7 @@ public struct RulesConfig: DataFileContent {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2:
+        case 1, 2, 3:
             // Duplicate keys were already refused by `DataFile`, so every parse below reads the same file.
             let document = try JSONDecoder().decode(RulesConfigSchema.self, from: fileData)
             try document.rejectUnknownFields(in: fileData)
@@ -222,11 +240,12 @@ public struct RulesConfig: DataFileContent {
 
 public typealias RulesConfigFile = DataFile<RulesConfig>
 
-// MARK: - Schemas 1 and 2
+// MARK: - Schemas 1, 2 and 3
 
-/// The rules configuration file, schema versions 1 and 2, as written. Documented in `docs/rules-file.md`.
-/// Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths` (#85): required in schema 2,
-/// refused in schema 1.
+/// The rules configuration file, schema versions 1, 2 and 3, as written. Documented in `docs/rules-file.md`.
+/// Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths` (#85): required in schema 2
+/// and later, refused in schema 1. Schema 3 is schema 2 plus `raceFormat.penalty.stackedPenaltyDeadlines`
+/// (#89): required in schema 3, refused before it.
 struct RulesConfigSchema: Decodable {
     let schemaVersion: Int
     let id: String
@@ -308,8 +327,12 @@ struct RulesConfigSchema: Decodable {
             let startSeconds: Double
             let completeSeconds: Double
             let startedTurnDegrees: Double
+            /// Schema 3.
+            let stackedPenaltyDeadlines: String?
 
-            enum CodingKeys: String, CodingKey, CaseIterable { case startSeconds, completeSeconds, startedTurnDegrees }
+            enum CodingKeys: String, CodingKey, CaseIterable {
+                case startSeconds, completeSeconds, startedTurnDegrees, stackedPenaltyDeadlines
+            }
         }
 
         struct StartLine: Decodable {
@@ -382,9 +405,9 @@ struct RulesConfigSchema: Decodable {
         }
     }
 
-    /// Throws `malformed` naming the first field neither schema has, or that is `null`: a released file can't
-    /// be fixed, so it mustn't ship with a field nothing reads. (`rulesConfig` refuses schema 2's field in a
-    /// schema-1 file.)
+    /// Throws `malformed` naming the first field no schema has, or that is `null`: a released file can't
+    /// be fixed, so it mustn't ship with a field nothing reads. (`rulesConfig` refuses a later schema's field
+    /// in an earlier schema's file.)
     func rejectUnknownFields(in data: Data) throws {
         let document = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
         if let pointer = Self.fields.firstUnknownField(in: document, at: "") {
@@ -393,7 +416,7 @@ struct RulesConfigSchema: Decodable {
         }
     }
 
-    /// Every field schemas 1 and 2 have, from each type's `CodingKeys`, so it can't drift from the decoder.
+    /// Every field schemas 1 to 3 have, from each type's `CodingKeys`, so it can't drift from the decoder.
     static let fields: FieldTree = .object(CodingKeys.self, [
         .incidents: .object(Incidents.CodingKeys.self, [
             .nearMissSweep: .object(NearMissSweep.CodingKeys.self),
@@ -414,7 +437,7 @@ struct RulesConfigSchema: Decodable {
     ])
 
     /// Validates the file and converts it to code units. Throws `DataFileError.invalidContent`, or `malformed`
-    /// for a schema-2 file without schema 2's field.
+    /// for a schema-2 or -3 file without a field its schema requires.
     func rulesConfig(id: String, schemaVersion: Int, fileData: Data) throws -> RulesConfig {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
             if !condition { throw DataFileError.invalidContent(kind: RulesConfig.kind, id: id, reason: reason()) }
@@ -478,6 +501,22 @@ struct RulesConfigSchema: Decodable {
         try check(format.penalty.completeSeconds >= format.penalty.startSeconds,
                   "raceFormat.penalty.completeSeconds must not be before startSeconds")
         let startedTurn = try angle(format.penalty.startedTurnDegrees, "raceFormat.penalty.startedTurnDegrees", max: 360)
+        // Schema 3's stacking of penalty deadlines: required in schema 3, refused before it, where it is `fromCall`.
+        var stacking = RulesConfig.StackedPenaltyDeadlines.fromCall
+        if schemaVersion >= 3 {
+            guard let value = format.penalty.stackedPenaltyDeadlines else {
+                throw DataFileError.malformed(
+                    kind: RulesConfig.kind, reason: "schema \(schemaVersion) needs raceFormat.penalty.stackedPenaltyDeadlines")
+            }
+            guard let parsed = RulesConfig.StackedPenaltyDeadlines(rawValue: value) else {
+                throw DataFileError.invalidContent(
+                    kind: RulesConfig.kind, id: id, reason: "raceFormat.penalty.stackedPenaltyDeadlines must be one of "
+                        + RulesConfig.StackedPenaltyDeadlines.allCases.map(\.rawValue).joined(separator: ", "))
+            }
+            stacking = parsed
+        } else {
+            try check(format.penalty.stackedPenaltyDeadlines == nil, "raceFormat.penalty.stackedPenaltyDeadlines needs schema 3")
+        }
         try duration(format.protestWindowSeconds, "raceFormat.protestWindowSeconds")
         try duration(format.finishWindowSeconds, "raceFormat.finishWindowSeconds")
         try duration(format.timeLimitSeconds, "raceFormat.timeLimitSeconds")
@@ -528,7 +567,7 @@ struct RulesConfigSchema: Decodable {
             raceFormat: .init(
                 startSequence: format.startSequenceSeconds,
                 penalty: .init(start: format.penalty.startSeconds, complete: format.penalty.completeSeconds,
-                               startedTurn: startedTurn),
+                               startedTurn: startedTurn, stackedPenaltyDeadlines: stacking),
                 protestWindow: format.protestWindowSeconds,
                 finishWindow: format.finishWindowSeconds,
                 timeLimit: format.timeLimitSeconds,

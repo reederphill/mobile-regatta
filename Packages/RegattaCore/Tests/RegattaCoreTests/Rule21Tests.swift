@@ -58,6 +58,7 @@ import Testing
             { snapshot in
                 snapshot.seats[0].boat.penaltyTurnsOwed = 1
                 snapshot.seats[0].boat.penaltyProgress = progress
+                snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
             }
         }
         let starting = try Self.call(offWind: .pi / 2, edit: penalised(progress: deg2rad(20)))

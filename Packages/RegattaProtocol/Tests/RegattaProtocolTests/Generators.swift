@@ -100,11 +100,20 @@ struct Gen {
         let left = abs(boat.penaltyProgress) / 4 // 0 ..< 8 s
         boat.spinnaker = [Spinnaker.down, .hoisting(remaining: left), .up, .dropping(remaining: left)][boat.legIndex % 4]
         boat.averagedWindSpeed = boat.colorIndex == 0 ? nil : boat.windSpeed * boat.shadow
+        // #89, derived likewise: up to 127 turns owed, and the current turn's clock up to 65 535 ticks before
+        // tick 0 (`world(seats:)` moves it to before the world's tick).
+        if boat.penaltyTurnsOwed > 0 {
+            boat.penaltyTurnsOwed += boat.colorIndex << 3
+            boat.penaltyClockTick = -Int(abs(boat.penaltyProgress) * 2000)
+        }
         return WorldSnapshot.Seat(boat: boat, heldInput: input())
     }
 
     mutating func world(seats: Int) -> WorldSnapshot {
-        WorldSnapshot(tick: tick(), seats: (0..<seats).map { seat($0) })
+        var world = WorldSnapshot(tick: tick(), seats: (0..<seats).map { seat($0) })
+        // #89: each penalty clock before the world's tick, as the wire needs.
+        for i in world.seats.indices { world.seats[i].boat.penaltyClockTick? += world.tick }
+        return world
     }
 
     mutating func wireSeats(_ n: Int) -> [WireSeat] {
@@ -124,6 +133,11 @@ struct Gen {
             let left = UInt8(truncatingIfNeeded: seat.y)
             seat.spinnaker = [WireSpinnaker.down, .hoisting(left), .up, .dropping(left)][Int(seat.legIndex % 4)]
             seat.averagedWindSpeed = seat.heading & 1 == 1 ? nil : seat.speed
+            // #89, derived likewise: up to 127 turns owed, and a clock only with a turn owed.
+            if seat.penaltyTurnsOwed > 0 {
+                seat.penaltyTurnsOwed |= (UInt8(truncatingIfNeeded: seat.rudder) & 0b1111) << 3
+                seat.penaltyClock = UInt16(truncatingIfNeeded: seat.x)
+            }
             return seat
         }
     }
@@ -185,9 +199,14 @@ struct Gen {
         case 4:
             let rule = RacingRule.allCases[int(0...(RacingRule.allCases.count - 1))]
             let at = tick()
-            return .ruleCall(RuleCall(
+            let call = RuleCall(
                 incidentId: int(0...65_535), tick: at, rule: rule, offender: seat, victim: int(0...15),
-                leg: int(0...255), turnsOwed: int(0...255), startDeadlineTick: tick(), completeDeadlineTick: tick()))
+                leg: int(0...255), turnsOwed: int(0...255), startDeadlineTick: tick(), completeDeadlineTick: tick())
+            // #89: a call queued behind an earlier owed turn fixes no deadlines. Derived, so the stream doesn't move.
+            guard at & 1 == 1 else { return .ruleCall(call) }
+            return .ruleCall(RuleCall(
+                incidentId: call.incidentId, tick: at, rule: rule, offender: seat, victim: call.victim, leg: call.leg,
+                turnsOwed: call.turnsOwed, startDeadlineTick: nil, completeDeadlineTick: nil))
         case 5: return .markTouch(seat: seat, mark: string())
         case 6: return .obstructionContact(seat: seat, kind: bool() ? .land : .boundary)
         case 7:

@@ -89,8 +89,17 @@ extension RaceEvent.Kind {
             try w.index(call.victim, "victim")
             try w.index(call.leg, "leg")
             try w.index(call.turnsOwed, "turnsOwed")
-            try w.i32(call.startDeadlineTick, "startDeadlineTick")
-            try w.i32(call.completeDeadlineTick, "completeDeadlineTick")
+            // #89: a flag, then the deadline pair when the call fixed its turn's clock.
+            switch (call.startDeadlineTick, call.completeDeadlineTick) {
+            case let (start?, complete?):
+                w.u8(1)
+                try w.i32(start, "startDeadlineTick")
+                try w.i32(complete, "completeDeadlineTick")
+            case (nil, nil):
+                w.u8(0)
+            default:
+                throw WireError.outOfRange("deadlines")
+            }
         case .obstructionContact(let seat, let kind):
             w.u8(13)
             try w.index(seat, "seat")
@@ -146,10 +155,16 @@ extension RaceEvent.Kind {
             let incidentId = Int(try r.u16())
             let tick = try r.i32()
             guard let rule = RacingRule(wireCode: try r.u8()) else { throw WireError.invalidValue("rule") }
+            let offender = try r.index(), victim = try r.index(), leg = try r.index(), turnsOwed = try r.index()
+            var deadlines: (start: Int, complete: Int)?
+            switch try r.u8() {
+            case 0: deadlines = nil
+            case 1: deadlines = (try r.i32(), try r.i32())
+            default: throw WireError.invalidValue("deadlines")
+            }
             self = .ruleCall(RuleCall(
-                incidentId: incidentId, tick: tick, rule: rule, offender: try r.index(), victim: try r.index(),
-                leg: try r.index(), turnsOwed: try r.index(), startDeadlineTick: try r.i32(),
-                completeDeadlineTick: try r.i32()))
+                incidentId: incidentId, tick: tick, rule: rule, offender: offender, victim: victim, leg: leg,
+                turnsOwed: turnsOwed, startDeadlineTick: deadlines?.start, completeDeadlineTick: deadlines?.complete))
         case 13:
             let seat = try r.index()
             guard let kind = ObstructionKind(wireCode: try r.u8()) else { throw WireError.invalidValue("obstruction") }

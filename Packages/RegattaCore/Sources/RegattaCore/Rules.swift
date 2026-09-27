@@ -67,14 +67,18 @@ public struct RuleCall: Sendable, Equatable, Codable {
     public let victim: Int
     /// The offender's leg index at the call.
     public let leg: Int
+    /// The penalty turns the call adds to what she owes: one (#89).
     public let turnsOwed: Int
-    /// The tick by which the offender must have started her penalty.
-    public let startDeadlineTick: Int
-    /// The tick by which she must have completed it.
-    public let completeDeadlineTick: Int
+    /// The tick by which the offender must have started her penalty turn, when its clock is fixed at the call:
+    /// always under `fromCall` stacking, and under `sequential` when she owed nothing before it. Nil when the
+    /// turn queues behind an earlier owed one, whose completion starts its clock. The boat's penalty state is
+    /// the source of truth (`Race.owedPenalty(ofSeat:)`).
+    public let startDeadlineTick: Int?
+    /// The tick by which she must have completed it; nil exactly when `startDeadlineTick` is.
+    public let completeDeadlineTick: Int?
 
     public init(incidentId: Int, tick: Int, rule: RacingRule, offender: Int, victim: Int, leg: Int,
-                turnsOwed: Int, startDeadlineTick: Int, completeDeadlineTick: Int) {
+                turnsOwed: Int, startDeadlineTick: Int?, completeDeadlineTick: Int?) {
         self.incidentId = incidentId
         self.tick = tick
         self.rule = rule
