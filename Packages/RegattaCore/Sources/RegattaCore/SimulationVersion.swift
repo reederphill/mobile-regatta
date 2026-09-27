@@ -71,10 +71,11 @@ import Glibc
 ///    shuffled from the race seed's own stream ("startrow"), on starboard reaching towards the pin at polar
 ///    speed in the base strength, her rudder centred so the autohelm holds the reach (#219). The row is
 ///    squeezed towards the line only where the race area or its land needs it (#82's squeeze, moved onto
-///    the row). OCS, clearing and starting read every hull point, not the centre: OCS if any is on the
-///    course side at the gun, cleared once all are on the pre-start side, started when any crosses the line
-///    itself after the gun. Rule 21.1 applies to an OCS boat only while she moves towards the pre-start
-///    side (`CourseLayout.isReturning`).
+///    the row), its neighbours never closer than the rules file's start-row spacing floor (fleet-rules@2,
+///    the default from #85; a schema-1 rules file has none). OCS, clearing and starting read every hull
+///    point, not the centre: OCS if any is on the course side at the gun, cleared once all are on the
+///    pre-start side, started when any crosses the line itself after the gun. Rule 21.1 applies to an OCS
+///    boat only while she moves towards the pre-start side (`CourseLayout.isReturning`).
 public let simulationRevision = 14
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`

@@ -32,7 +32,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Boat.swift              boat state and hull shape
   Rules.swift             racing rules in 2025 numbering, who had to keep clear, rule calls
   RulesConfig.swift       rules configuration file schema: incidents, zone, race format (docs/rules-file.md)
-  Resources/rules/        rules configuration files; `fleet-rules@1` is the v1.0 fleet race
+  Resources/rules/        rules configuration files; `fleet-rules@2` (the default) is the v1.0 fleet race
   Incident.swift          incidents and the array-backed IncidentIndex, keyed by sorted seat pairs
   Race.swift              fixed-step race loop: per-seat inputs, start sequence, OCS, contacts, penalties, finish;
                           authoritative or prediction mode (seedless, no umpire; tryStep() stops at a missing wind key)

@@ -22,7 +22,9 @@ public struct HullLengths: Sendable, Equatable {
 public struct RulesConfig: DataFileContent {
     public static let kind = "rules configuration"
     public static let bundleDirectory = "rules"
-    public static let supportedSchemaVersions = [1]
+    /// Schema 2 (#85) adds the start row's spacing floor (`StartRow.minimumSpacing`). A schema-1 file has none
+    /// (nil): a squeezed start row narrows its spread with its depth, as #82 squeezed its placement.
+    public static let supportedSchemaVersions = [1, 2]
 
     public var incidents: Incidents
     /// The rule 18 zone.
@@ -172,6 +174,10 @@ public struct RulesConfig: DataFileContent {
         /// Radians.
         public var trueWindAngle: Double
         public var polarSpeedFraction: Double
+        /// The closest a squeeze of the row (`CourseLayout.startRowSlots`) brings neighbours, centre to centre
+        /// (schema 2, #85): clear ahead and clear astern (#35) with room between. Nil in a schema-1 file: no
+        /// floor.
+        public var minimumSpacing: HullLengths?
     }
 
     /// The beat is sized so the leader sails the race in about `leaderSeconds`, at most `maxMetres`,
@@ -192,11 +198,11 @@ public struct RulesConfig: DataFileContent {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1:
+        case 1, 2:
             // Duplicate keys were already refused by `DataFile`, so every parse below reads the same file.
-            let document = try JSONDecoder().decode(RulesConfigSchema1.self, from: fileData)
+            let document = try JSONDecoder().decode(RulesConfigSchema.self, from: fileData)
             try document.rejectUnknownFields(in: fileData)
-            self = try document.rulesConfig(id: header.id, fileData: fileData)
+            self = try document.rulesConfig(id: header.id, schemaVersion: header.schemaVersion, fileData: fileData)
         default:
             throw DataFileError.unsupportedSchemaVersion(
                 kind: Self.kind, found: header.schemaVersion, supported: Self.supportedSchemaVersions)
@@ -216,10 +222,12 @@ public struct RulesConfig: DataFileContent {
 
 public typealias RulesConfigFile = DataFile<RulesConfig>
 
-// MARK: - Schema 1
+// MARK: - Schemas 1 and 2
 
-/// The rules configuration file, schema version 1, as written. Documented in `docs/rules-file.md`.
-struct RulesConfigSchema1: Decodable {
+/// The rules configuration file, schema versions 1 and 2, as written. Documented in `docs/rules-file.md`.
+/// Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths` (#85): required in schema 2,
+/// refused in schema 1.
+struct RulesConfigSchema: Decodable {
     let schemaVersion: Int
     let id: String
     let version: Int
@@ -339,9 +347,11 @@ struct RulesConfigSchema1: Decodable {
             let spreadLineLengths: Double
             let trueWindAngleDegrees: Double
             let polarSpeedFraction: Double
+            /// Schema 2.
+            let minimumSpacingHullLengths: Double?
 
             enum CodingKeys: String, CodingKey, CaseIterable {
-                case depthLineLengths, spreadLineLengths, trueWindAngleDegrees, polarSpeedFraction
+                case depthLineLengths, spreadLineLengths, trueWindAngleDegrees, polarSpeedFraction, minimumSpacingHullLengths
             }
         }
 
@@ -372,8 +382,9 @@ struct RulesConfigSchema1: Decodable {
         }
     }
 
-    /// Throws `malformed` naming the first field schema 1 doesn't have, or that is `null`: a released
-    /// file can't be fixed, so it mustn't ship with a field nothing reads.
+    /// Throws `malformed` naming the first field neither schema has, or that is `null`: a released file can't
+    /// be fixed, so it mustn't ship with a field nothing reads. (`rulesConfig` refuses schema 2's field in a
+    /// schema-1 file.)
     func rejectUnknownFields(in data: Data) throws {
         let document = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
         if let pointer = Self.fields.firstUnknownField(in: document, at: "") {
@@ -382,7 +393,7 @@ struct RulesConfigSchema1: Decodable {
         }
     }
 
-    /// Every field schema 1 has, from each type's `CodingKeys`, so it can't drift from the decoder.
+    /// Every field schemas 1 and 2 have, from each type's `CodingKeys`, so it can't drift from the decoder.
     static let fields: FieldTree = .object(CodingKeys.self, [
         .incidents: .object(Incidents.CodingKeys.self, [
             .nearMissSweep: .object(NearMissSweep.CodingKeys.self),
@@ -402,8 +413,9 @@ struct RulesConfigSchema1: Decodable {
         ]),
     ])
 
-    /// Validates the file and converts it to code units. Throws `DataFileError.invalidContent`.
-    func rulesConfig(id: String, fileData: Data) throws -> RulesConfig {
+    /// Validates the file and converts it to code units. Throws `DataFileError.invalidContent`, or `malformed`
+    /// for a schema-2 file without schema 2's field.
+    func rulesConfig(id: String, schemaVersion: Int, fileData: Data) throws -> RulesConfig {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
             if !condition { throw DataFileError.invalidContent(kind: RulesConfig.kind, id: id, reason: reason()) }
         }
@@ -483,6 +495,19 @@ struct RulesConfigSchema1: Decodable {
         let rowAngle = try angle(format.startRow.trueWindAngleDegrees, "raceFormat.startRow.trueWindAngleDegrees", max: 180)
         try check(format.startRow.polarSpeedFraction.isFinite && format.startRow.polarSpeedFraction > 0
                   && format.startRow.polarSpeedFraction <= 1, "raceFormat.startRow.polarSpeedFraction must be in (0, 1]")
+        // Schema 2's start-row spacing floor: required in schema 2, refused in schema 1.
+        var rowSpacing: HullLengths?
+        if schemaVersion >= 2 {
+            guard let spacing = format.startRow.minimumSpacingHullLengths else {
+                throw DataFileError.malformed(
+                    kind: RulesConfig.kind, reason: "schema \(schemaVersion) needs raceFormat.startRow.minimumSpacingHullLengths")
+            }
+            try positive(spacing, "raceFormat.startRow.minimumSpacingHullLengths")
+            rowSpacing = HullLengths(spacing)
+        } else {
+            try check(format.startRow.minimumSpacingHullLengths == nil,
+                      "raceFormat.startRow.minimumSpacingHullLengths needs schema 2")
+        }
         try fraction(format.edgeSpeedRetention, "raceFormat.edgeSpeedRetention")
         try positive(format.beatSizing.leaderSeconds, "raceFormat.beatSizing.leaderSeconds")
         try positive(format.beatSizing.maxMetres, "raceFormat.beatSizing.maxMetres")
@@ -517,7 +542,8 @@ struct RulesConfigSchema1: Decodable {
                                 aboveWindwardBeatFraction: format.raceArea.aboveWindwardBeatFraction),
                 startRow: .init(depthLineLengths: format.startRow.depthLineLengths,
                                 spreadLineLengths: format.startRow.spreadLineLengths,
-                                trueWindAngle: rowAngle, polarSpeedFraction: format.startRow.polarSpeedFraction),
+                                trueWindAngle: rowAngle, polarSpeedFraction: format.startRow.polarSpeedFraction,
+                                minimumSpacing: rowSpacing),
                 edgeSpeedRetention: format.edgeSpeedRetention,
                 beatSizing: .init(leaderSeconds: format.beatSizing.leaderSeconds, maxMetres: format.beatSizing.maxMetres,
                                   calibrationFactor: format.beatSizing.calibrationFactor)),

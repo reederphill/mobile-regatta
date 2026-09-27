@@ -215,10 +215,6 @@ public struct CourseLayout: Sendable, Equatable {
     /// Stream tag for `SplitMix64(seed:stream:)` on the race seed, for the start row's order: ASCII "startrow".
     public static let startRowStream: UInt64 = 0x7374_6172_7472_6F77
 
-    /// The closest a squeeze of the start row (`startRowSlots`) brings neighbours, centre to centre, in hull
-    /// lengths: clear ahead and clear astern (#35) with a quarter of a hull between them.
-    public static let startRowMinimumSpacing = 1.25
-
     /// The start row's `n` slots (#35), from the pin end: one row parallel to the start line,
     /// `placement.depthLineLengths` line lengths below it, over `placement.spreadLineLengths` line lengths
     /// centred on the line's centre. Slot `k` is `span × (k + ½) / n` along the span from its pin end, so
@@ -228,7 +224,8 @@ public struct CourseLayout: Sendable, Equatable {
     /// `hullLength` metres: its depth and its spread each as far as keeps every slot a hull length inside the
     /// race area; then the whole row, a twentieth at a time, until every boat in it is half a hull length off
     /// the land in the race area (every slot a hull length off it), its spread never so far that neighbours
-    /// come closer than `startRowMinimumSpacing`. A row that no squeeze takes off the land takes the tightest.
+    /// come closer than `placement.minimumSpacing` (the rules file's; a schema-1 file has no floor, so the
+    /// spread narrows with the depth). A row that no squeeze takes off the land takes the tightest.
     /// With the bundled rules configuration the race area has room for the row by construction (it reaches
     /// a line length below the line), and the bundled venues have no land near their lines: neither moves it.
     public func startRowSlots(fleetSize n: Int, hullLength: Double) -> [Vec2] {
@@ -244,7 +241,9 @@ public struct CourseLayout: Sendable, Equatable {
         let outermost = along.map(abs).max()!
         let depthInside = (below / depth).clamped(to: 0...1)
         let spreadInside = outermost > 0 ? (across / outermost).clamped(to: 0...1) : 1
-        let tightestSpread = n > 1 ? min(1, Self.startRowMinimumSpacing * hullLength / (spreadInside * span / Double(n))) : 1
+        let tightestSpread = placement.minimumSpacing.map { spacing in
+            n > 1 ? min(1, spacing.metres(hullLength: hullLength) / (spreadInside * span / Double(n))) : 1
+        } ?? 0
         func row(_ squeeze: Double) -> [Vec2] {
             let down = depth * depthInside * squeeze
             let spread = spreadInside * max(squeeze, tightestSpread)

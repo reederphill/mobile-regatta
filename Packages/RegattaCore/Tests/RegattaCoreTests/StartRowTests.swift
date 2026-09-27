@@ -108,6 +108,47 @@ func placeOverLine(_ boat: inout Boat, by over: Double, in race: Race) {
         }
     }
 
+    /// A row squeezed off land (#82) keeps neighbours no closer than the rules file's spacing floor
+    /// (`startRow.minimumSpacingHullLengths`: fleet-rules@2's 1.25 hull lengths, #85); a schema-1 file
+    /// (fleet-rules@1) has none, so its row narrows with its depth. Land under the line's centre that no
+    /// squeeze clears leaves every file the tightest row: a twentieth of the depth.
+    @Test func squeezedRowKeepsTheRulesFilesSpacing() throws {
+        let hull = CourseLayoutTests.hull, n = 16
+        let windSetup = try CourseLayoutTests.windSetup()
+        func squeezed(_ rules: RulesConfig) -> (spacing: Double, unsqueezed: Double) {
+            let open = CourseLayout.derive(windSetup: windSetup, land: [], fleetSize: n, laps: 2,
+                                           boatClass: CourseLayoutTests.boatClass, rules: rules)
+            let length = open.startLine.length
+            func at(_ across: Double, _ below: Double) -> Vec2 {
+                CourseLayoutTests.at(open, across: across * length, up: -below * length)
+            }
+            let land = Venue.LandPolygon(points: [at(-0.05, 0.6), at(0.05, 0.6), at(0.05, 0.01), at(-0.05, 0.01)])
+            let course = CourseLayout.derive(windSetup: windSetup, land: [land], fleetSize: n, laps: 2,
+                                             boatClass: CourseLayoutTests.boatClass, rules: rules)
+            #expect(course.land == [land] && course.startLine == open.startLine)
+            let slots = course.startRowSlots(fleetSize: n, hullLength: hull)
+            #expect(slots.allSatisfy { abs(-course.startLine.side($0) - 0.05 * 0.5 * length) < 1e-9 })
+            let unsqueezed = open.startRowSlots(fleetSize: n, hullLength: hull)
+            return ((slots[1] - slots[0]).length, (unsqueezed[1] - unsqueezed[0]).length)
+        }
+
+        let v2 = Race.defaultRulesConfiguration.content
+        #expect(v2.raceFormat.startRow.minimumSpacing == HullLengths(1.25))
+        let floored = squeezed(v2)
+        #expect(floored.unsqueezed > 1.25 * hull)
+        #expect(abs(floored.spacing - 1.25 * hull) < 1e-9)
+
+        var wider = v2
+        wider.raceFormat.startRow.minimumSpacing = HullLengths(1.5)
+        #expect(abs(squeezed(wider).spacing - 1.5 * hull) < 1e-9)
+
+        let v1 = try RulesConfigFile.bundled(id: "fleet-rules", version: 1).content
+        let unfloored = squeezed(v1)
+        #expect(abs(unfloored.unsqueezed - floored.unsqueezed) < 1e-9)
+        #expect(abs(unfloored.spacing - 0.05 * unfloored.unsqueezed) < 1e-9)
+        #expect(unfloored.spacing < hull)
+    }
+
     /// #219 ruling: every boat starts with her rudder centred, so on the first step her autohelm engages at
     /// her placement wind angle and holds the reach, with nobody steering. In a steady wind from the mean
     /// direction and still water, that angle is exactly the row's.

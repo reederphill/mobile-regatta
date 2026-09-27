@@ -35,9 +35,13 @@ enum ScriptedLog {
         try RaceLog(jsonData: Data(contentsOf: fixtureURL))
     }
 
+    /// The fixture's own rules configuration, whatever the default moves to: fleet-rules@1, which it was
+    /// recorded with (the default is @2 from #85).
+    static var rulesConfiguration: FileRef { try! RulesConfigFile.bundled(id: "fleet-rules", version: 1).ref }
+
     static func setup() throws -> RaceSetup {
         try RaceSetup(simulationVersion: recordedVersion, raceSeed: RaceSeed(0x0059_5EED_0000_0001), seats: seats,
-                      laps: 2, startSequenceTicks: startSequenceTicks)
+                      laps: 2, startSequenceTicks: startSequenceTicks, rulesConfiguration: rulesConfiguration)
     }
 
     static var seatEvents: [SeatEvent] {
