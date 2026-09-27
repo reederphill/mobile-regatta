@@ -27,7 +27,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast
   Venue.swift             venue file schema: land, pairings with geographic grids, current (docs/venue-file.md)
   Resources/venues/       venue files; `dev-venue@2` stands in until the real venues (#83)
-  CourseLayout.swift      the course derived from the files and race seed: marks, gate, lines, race area
+  CourseLayout.swift      the course derived from the files and race seed: marks, gate, lines, race area, start row
   Course.swift            rounding rays and obstacles, shared by the course and the rules
   Boat.swift              boat state and hull shape
   Rules.swift             racing rules in 2025 numbering, who had to keep clear, rule calls
@@ -372,7 +372,9 @@ is, each frame (`WaterTests.waterUpdateStaysCheap` prints its cost).
 
 - Hold the **left** or **right** half of the screen to steer. Short taps make small corrections.
 - **Tack / Gybe** swings you through the wind onto the mirror-image angle.
-- Be below the line at the gun. If you're over (OCS), dip back below the line, then start.
+- You start in a row below the line, reaching towards the pin on the autohelm until you steer.
+- Keep all of your hull below the line at the gun. If any of it is over (OCS), sail back until all of it
+  is below the line, then start. While you sail back, keep clear of everyone else.
 - Round the windward mark and leeward mark to port, then finish by crossing the line downwind.
 - Dark water is a puff and pale water is a lull. The faint cone behind each boat is its wind shadow.
 - Fouling another boat costs a 720°, and touching a mark costs a 360°. Turn circles to serve it.
