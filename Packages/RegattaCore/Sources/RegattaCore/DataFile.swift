@@ -321,6 +321,29 @@ public struct DataFile<Content: DataFileContent>: Sendable {
         return try Data(contentsOf: url)
     }
 
+    /// Every file of this kind this build ships, by id and version, sorted: what the debug tuning panel
+    /// (#232) offers to tune.
+    public static func bundledKeys() -> [DataFileKey] {
+        bundledKeys(in: .module)
+    }
+
+    /// Every `<id>@<version>.json` in `bundle`'s `Content.bundleDirectory`, sorted by id, then version.
+    public static func bundledKeys(in bundle: Bundle) -> [DataFileKey] {
+        var urls = bundle.urls(forResourcesWithExtension: "json", subdirectory: Content.bundleDirectory) ?? []
+        if urls.isEmpty, let folder = bundle.resourceURL?.appendingPathComponent(Content.bundleDirectory, isDirectory: true) {
+            // Listed from the folder where a bundle's resource lookup doesn't list a subdirectory.
+            urls = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.pathExtension == "json" }
+        }
+        return urls.compactMap { url -> DataFileKey? in
+            let name = url.deletingPathExtension().lastPathComponent
+            guard let at = name.lastIndex(of: "@"), let version = Int(name[name.index(after: at)...]) else { return nil }
+            let id = String(name[..<at])
+            return isValidID(id) ? DataFileKey(id: id, version: version) : nil
+        }
+        .sorted { ($0.id, $0.version) < ($1.id, $1.version) }
+    }
+
     /// Lowercase ASCII letters, digits and hyphens, at least one. Safe to use in a resource name.
     static func isValidID(_ id: String) -> Bool {
         !id.isEmpty && id.utf8.allSatisfy { c in
