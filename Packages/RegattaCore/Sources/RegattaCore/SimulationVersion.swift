@@ -103,7 +103,14 @@ import Glibc
 ///    onto the full turn. Crossing the finish line owing a turn no longer disqualifies: she doesn't finish.
 ///    Boats sail skiff@2 by default, skiff@1 turning quicker (36°/s from 1.5 kn, a 10°/s floor, rudder drag
 ///    0.4 a second): a hard-over 360 in open water takes about 10 s, not 14–22 s.
-public let simulationRevision = 17
+/// 18: rule 18 mark-room (#91), on 17. The overlap terms apply on opposite tacks between boats rule 18 applies
+///    between (`Rules.markRoomApplies`: racing to the same mark, the nearer of a gate's two or of the finish
+///    line's ends, some of either's hull within the zone's 3 hull lengths of it, and not on opposite tacks both
+///    on a beat), so the digested overlaps change at marks. `Rules.judge` loses the mark-room shortcut (nearer
+///    the mark at contact, both in the zone): mark-room is not right of way, and rules 21 and 10–13 decide every
+///    call. The umpire keeps rule 18's records (18.2(a)–(c), 18.3) and announces each (`markRoomNotice`); no
+///    call reads them yet (#93).
+public let simulationRevision = 18
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

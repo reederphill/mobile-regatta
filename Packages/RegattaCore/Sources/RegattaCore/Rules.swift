@@ -106,9 +106,11 @@ public struct RightOfWay: Sendable, Equatable {
 
 public enum Rules {
     /// Decides which of two boats in an incident, a contact or a near miss (`Race`, #88), was required to
-    /// keep clear: rule 21 over Section A, then the mark-room shortcut (until #91), then rules 10–13
-    /// (`rightOfWay`). `overlapped` is the pair's overlap as of the last point of certainty
-    /// (`OverlapTracker`); `hull` is their boat class's. Nil if either is a ghost.
+    /// keep clear: rule 21 over Section A, then rules 10–13 (`rightOfWay`). Mark-room is not right of way
+    /// (#91, Case 25): the rule 18 records (`UmpireState.markRoom(_:)`) never change who keeps clear, and a
+    /// breach of them (18.2(d)) or exoneration by them (43.1(b)) is #93's. `overlapped` is the pair's overlap
+    /// as of the last point of certainty (`OverlapTracker`); `hull` is their boat class's. Nil if either is a
+    /// ghost.
     public static func judge(_ a: Boat, _ b: Boat, overlapped: Bool, course: CourseLayout, hull: BoatClass.Hull) -> Verdict? {
         guard !a.isGhost, !b.isGhost else { return nil }
         func call(_ rule: RacingRule, _ offender: Boat, _ victim: Boat) -> Verdict {
@@ -126,20 +128,11 @@ public enum Rules {
         }
 
         guard let right = rightOfWay(a, b, overlapped: overlapped, hull: hull) else { return nil }
-
-        if right.rule == .windwardLeeward || right.rule == .clearAstern,
-           !isClearAstern(a, of: b, hull: hull), !isClearAstern(b, of: a, hull: hull),
-           let mark = sharedMarkInZone(a, b, course: course) {
-            let aDistance = (a.position - mark).length
-            let bDistance = (b.position - mark).length
-            return aDistance > bDistance ? call(.givingMarkRoom, a, b) : call(.givingMarkRoom, b, a)
-        }
-
         return right.keepClear == a.id ? call(right.rule, a, b) : call(right.rule, b, a)
     }
 
-    /// Which of `a` and `b` must keep clear under rules 10–13, from the world state alone (no rule 18
-    /// state yet, #91). `overlapped` is the pair's overlap as of the last point of certainty
+    /// Which of `a` and `b` must keep clear under rules 10–13, from the world state alone: mark-room is not
+    /// right of way (Case 25, #91). `overlapped` is the pair's overlap as of the last point of certainty
     /// (`OverlapTracker`), so a flickering overlap never changes the answer; `hull` is their class's.
     /// Nil if either is a ghost: a ghost has no rights or obligations.
     ///
@@ -204,19 +197,5 @@ public enum Rules {
     public static func isClearAstern(_ a: Boat, of b: Boat, hull: BoatClass.Hull) -> Bool {
         aftness(at: a.position, forward: a.forward, outline: hull.outline, of: b.position, forward: b.forward,
                 hullLength: hull.length) < 0
-    }
-
-    /// The mark both boats are rounding, if both are inside its zone: at a gate, the first of its marks
-    /// whose zone holds both.
-    static func sharedMarkInZone(_ a: Boat, _ b: Boat, course: CourseLayout) -> Vec2? {
-        guard a.status == .racing, b.status == .racing,
-              a.legIndex < course.legs.count, b.legIndex < course.legs.count,
-              case .round(let ma) = course.legs[a.legIndex],
-              case .round(let mb) = course.legs[b.legIndex],
-              ma == mb
-        else { return nil }
-        return course.elements[ma].marks.map(\.position).first { mark in
-            (a.position - mark).length < course.zoneRadius && (b.position - mark).length < course.zoneRadius
-        }
     }
 }

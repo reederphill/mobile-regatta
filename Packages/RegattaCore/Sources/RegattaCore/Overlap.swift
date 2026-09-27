@@ -1,11 +1,13 @@
 /// Clear astern, clear ahead and overlap (RRS definitions, #9): two boats overlap when neither is clear
 /// astern of the other, or when a boat between them overlaps both. The terms always apply on the same
 /// tack; on opposite tacks only when both are sailing more than 90° from the true wind, or rule 18
-/// applies between them (#91 adds that clause).
+/// applies between them (#91, `Rules.markRoomApplies`).
 extension Rules {
-    /// Whether the overlap terms apply between `a` and `b` (see above; no rule 18 clause yet).
-    public static func overlapTermsApply(_ a: Boat, _ b: Boat) -> Bool {
-        a.tack == b.tack || (a.twa > .pi / 2 && b.twa > .pi / 2)
+    /// Whether the overlap terms apply between `a` and `b` (see above), `markRoomApplies` saying whether rule
+    /// 18 applies between them (`Rules.markRoomApplies`; the both-tacking branch of `rightOfWay`, which has no
+    /// course, leaves it out).
+    public static func overlapTermsApply(_ a: Boat, _ b: Boat, markRoomApplies: Bool = false) -> Bool {
+        a.tack == b.tack || (a.twa > .pi / 2 && b.twa > .pi / 2) || markRoomApplies
     }
 
     /// How far the foremost point of `aHull` (world coordinates) is ahead of a line abeam of `b`'s stern,
@@ -40,19 +42,22 @@ extension Rules {
     }
 
     /// Every pair's overlap as the hulls show it now, including through boats between them, by
-    /// `OverlapTracker.index`. Ghosts overlap nobody and are never between.
+    /// `OverlapTracker.index`. Ghosts overlap nobody and are never between. `markRoomApplies`, by the same
+    /// index, says which pairs rule 18 applies between (`Rules.markRoomApplies`): on opposite tacks the terms
+    /// apply to those too. Nil for none.
     ///
     /// A boat is between two others when her centre projects strictly between theirs on the line joining
     /// them. Chains close: the test repeats until no pair changes, so boats overlap through any number
     /// of boats between them, each between the pair it joins. Seat order throughout, so it is deterministic.
-    public static func geometricOverlaps(_ boats: [Boat], hull: BoatClass.Hull) -> [Bool] {
+    public static func geometricOverlaps(_ boats: [Boat], hull: BoatClass.Hull, markRoomApplies: [Bool]? = nil) -> [Bool] {
         let n = boats.count
         let hulls = boats.map { $0.hull(outline: hull.outline) }
         var applies = [Bool](repeating: false, count: OverlapTracker.pairCount(seats: n))
         var overlapped = applies
         for a in 0..<n where !boats[a].isGhost {
-            for b in (a + 1)..<n where !boats[b].isGhost && overlapTermsApply(boats[a], boats[b]) {
+            for b in (a + 1)..<n where !boats[b].isGhost {
                 let p = OverlapTracker.index(a, b, seats: n)
+                guard overlapTermsApply(boats[a], boats[b], markRoomApplies: markRoomApplies?[p] ?? false) else { continue }
                 applies[p] = true
                 overlapped[p] = aftness(hulls[a], of: boats[b], hullLength: hull.length) >= 0
                     && aftness(hulls[b], of: boats[a], hullLength: hull.length) >= 0
@@ -120,12 +125,12 @@ public struct OverlapTracker: Sendable, Equatable {
         a == b ? 0 : ticksChanging[index(a, b)]
     }
 
-    /// One tick: each pair's overlap as its hulls show it now (`Rules.geometricOverlaps`) counts once it
-    /// has held for `margin` ticks in a row. A pair with a ghost forgets its overlap at once: a ghost has
-    /// no rights or obligations.
-    public mutating func update(_ boats: [Boat], hull: BoatClass.Hull, margin: Int) {
+    /// One tick: each pair's overlap as its hulls show it now (`Rules.geometricOverlaps`, the terms applying
+    /// on opposite tacks to the pairs `markRoomApplies` names) counts once it has held for `margin` ticks in a
+    /// row. A pair with a ghost forgets its overlap at once: a ghost has no rights or obligations.
+    public mutating func update(_ boats: [Boat], hull: BoatClass.Hull, margin: Int, markRoomApplies: [Bool]? = nil) {
         precondition(boats.count == seats, "the tracker has \(seats) seats, not \(boats.count)")
-        let now = Rules.geometricOverlaps(boats, hull: hull)
+        let now = Rules.geometricOverlaps(boats, hull: hull, markRoomApplies: markRoomApplies)
         for a in 0..<seats {
             for b in (a + 1)..<seats {
                 let p = Self.index(a, b, seats: seats)

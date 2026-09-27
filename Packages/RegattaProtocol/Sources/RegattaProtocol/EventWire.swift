@@ -5,7 +5,7 @@ import RegattaCore
 public enum EventAudience: Equatable, Sendable {
     case everyone
     /// Only these seats' clients: a targeted event, such as the recall notice (#85, #9) or a mark-room
-    /// notice (#96, #15).
+    /// notice (#91, #15).
     case seats([Int])
 
     public func includes(seat: Int) -> Bool {
@@ -25,8 +25,9 @@ public enum EventAudience: Equatable, Sendable {
         case .ocsNotice(let recipient):
             // The individual recall (rule 29.1) is told to the boat that was over, and only to her.
             self = .seats([recipient])
-        case .markRoomNotice(let recipients):
-            self = .seats(recipients)
+        case .markRoomNotice(let boat, let entitledOver, _):
+            // A new rule 18 record is told to its two boats, and only to them (#91, #15).
+            self = .seats([boat, entitledOver])
         case .protestRecorded(let seat, let target):
             // The acknowledgement goes to the protesting boat, and the protested boat is told (RRS 61.1).
             self = .seats([seat, target])
@@ -40,8 +41,9 @@ public enum EventAudience: Equatable, Sendable {
 // Each kind's code is fixed for good: a new case takes the next free code (#63: later cases extend
 // the codec), and a retired code is never reused. Code 4 was the pre-#73 `foul` (rule, offender,
 // victim); a rule call is code 12. Code 11 was `raceClosed` without results; with them (#86) it is
-// code 23. Seats, places, legs and turns are one byte; ticks are int32; mark names and reasons are
-// strings.
+// code 23. Code 17 was `markRoomNotice` with a list of recipients, never sent; with the entitled boat,
+// the boat she is entitled over and the mark (#91) it is code 24. Seats, places, legs and turns are one
+// byte; ticks are int32; mark names and reasons are strings.
 
 extension RaceEvent.Kind {
     func encode(to w: inout WireWriter) throws {
@@ -114,10 +116,11 @@ extension RaceEvent.Kind {
         case .penaltyReset(let seat):
             w.u8(16)
             try w.index(seat, "seat")
-        case .markRoomNotice(let recipients):
-            w.u8(17)
-            try w.count(recipients.count, limit: WireLimit.seats, "recipients")
-            for seat in recipients { try w.index(seat, "recipients") }
+        case .markRoomNotice(let boat, let entitledOver, let mark):
+            w.u8(24)
+            try w.index(boat, "boat")
+            try w.index(entitledOver, "entitledOver")
+            try w.string(mark, limit: WireLimit.string, "mark")
         case .becameGhost(let seat):
             w.u8(18)
             try w.index(seat, "seat")
@@ -175,15 +178,15 @@ extension RaceEvent.Kind {
             self = .contact(SeatPair(low, high))
         case 15: self = .penaltyStarted(seat: try r.index())
         case 16: self = .penaltyReset(seat: try r.index())
-        case 17:
-            let n = try r.count(limit: WireLimit.seats, "recipients")
-            self = .markRoomNotice(recipients: try (0..<n).map { _ in try r.index() })
         case 18: self = .becameGhost(seat: try r.index())
         case 19: self = .firstFinish(closeTick: try r.i32())
         case 20: self = .tacked(seat: try r.index())
         case 21: self = .gybed(seat: try r.index())
         case 22: self = .grooveSnap(seat: try r.index())
         case 23: self = .raceClosed(results: try RaceResults(from: &r))
+        case 24:
+            self = .markRoomNotice(boat: try r.index(), entitledOver: try r.index(),
+                                   mark: try r.string(limit: WireLimit.string, "mark"))
         default: throw WireError.invalidValue("event")
         }
     }
