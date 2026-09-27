@@ -61,8 +61,10 @@ struct HUDView: View {
             Text(statusLine)
                 .font(.caption.weight(hud.status == .ocs ? .heavy : .semibold))
                 .foregroundStyle(.white.opacity(hud.status == .ocs ? 1 : 0.8))
-                // UI tests read the leg to see a rounding.
+                // UI tests read the leg (label) to see a rounding, and how far the race has run (value, whole
+                // seconds from the gun) to tell a slow simulator from a race that never rounded, in one snapshot.
                 .accessibilityIdentifier("race-status")
+                .accessibilityValue(String(Int(hud.clock.rounded(.down))))
         }
     }
 
