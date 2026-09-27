@@ -31,13 +31,14 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Course.swift            rounding rays and obstacles, shared by the course and the rules
   Boat.swift              boat state and hull shape
   Rules.swift             racing rules in 2025 numbering, who had to keep clear, rule calls
+  MarkRoom.swift          rule 18: each boat's mark zone, when rule 18 applies, the inside boat, fetching, the record
   RulesConfig.swift       rules configuration file schema: incidents, zone, race format (docs/rules-file.md)
   Resources/rules/        rules configuration files; `fleet-rules@3` (the default) is the v1.0 fleet race
   Incident.swift          incidents and the array-backed IncidentIndex, keyed by sorted seat pairs
   Race.swift              fixed-step race loop: per-seat inputs, start sequence, OCS, contacts, penalties, finish;
                           authoritative or prediction mode (seedless, no umpire; tryStep() stops at a missing wind key)
   RaceFiles.swift         resolves a setup's data-file refs (catalog, then bundle), hash checked; the bundled defaults
-  UmpireState.swift       the authoritative race's umpire memory (empty until the rules tickets)
+  UmpireState.swift       the authoritative race's umpire memory: open incidents, rule 18 records and zone presence
   RaceSetup.swift         race setup (seats, laps, race seed, data-file refs) and the separate wind seed
   BoatInput.swift         held input (int8 rudder, ease) and taps (tack/gybe, protest)
   RaceLog.swift           race log: header, inputs as applied, seat events; stable JSON
