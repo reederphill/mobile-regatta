@@ -20,6 +20,7 @@ import RegattaCore
 /// - `-appearance light|dark` overrides the system appearance, for UI tests of the menus in both (#108).
 /// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
 ///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
+/// - `-tuning` opens the debug tuning panel at launch (#232). Debug builds only: other builds don't know it.
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -51,6 +52,9 @@ struct LaunchOptions: Equatable {
     var startSeconds: Int?
     var appearance: Appearance?
     var vision: VisionFilter?
+    #if DEBUG
+    var tuning = false
+    #endif
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
 
@@ -70,6 +74,9 @@ struct LaunchOptions: Equatable {
             case "-perf": perf = true
             case "-uitesting": uiTesting = true
             case "-online": online = true
+            #if DEBUG
+            case "-tuning": tuning = true
+            #endif
             case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance",
                  "-vision":
                 guard let value = rest.first, !Self.flags.contains(value) else {
@@ -84,8 +91,14 @@ struct LaunchOptions: Equatable {
         }
     }
 
-    private static let flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-online", "-seed", "-fixture", "-timescale",
-                                     "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance", "-vision"]
+    private static let flags: Set<String> = {
+        var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-online", "-seed", "-fixture", "-timescale",
+                          "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance", "-vision"]
+        #if DEBUG
+        flags.insert("-tuning")
+        #endif
+        return flags
+    }()
 
     /// `-vision`'s short names (#111). Each filter's raw value is accepted as well.
     static let visionShortNames: [String: VisionFilter] = [

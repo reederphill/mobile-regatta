@@ -113,6 +113,14 @@ _Avoid_: quick race, private race
 An offline race against bots. Unrated, and needs no account.
 _Avoid_: single player, training
 
+**Tuned copy**:
+A copy of a bundled boat class, conditions or rules configuration file with some values changed by the debug tuning panel, made at a practice race's start in Debug builds only. It keeps its file's id and version, has its own hash and a tune number, and its race's log replays only with it saved beside the log.
+_Avoid_: override, variant, tweak
+
+**Saved tuning**:
+A named set of the debug tuning panel's values, kept on the device, which exports as the next version of each file it changes.
+_Avoid_: preset (conditions avoid that word too), profile
+
 **First race**:
 The fixed practice race a new player is dropped into on first launch, before the home screen. It can be skipped.
 _Avoid_: tutorial (that's a later, separate thing)

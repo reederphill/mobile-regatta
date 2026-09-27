@@ -256,6 +256,51 @@ enum PuffFixtures {
         }
     }
 
+    /// The water samples the wind at a few hundred places a frame through a sampler for the tick (#116): it
+    /// gives `sample(_:tick:)`'s wind bit for bit, inside puffs, at their edges and clear of them, with a race
+    /// area and without, and needs the same keys.
+    @Test func aSamplerForATickSamplesTheWindBitForBit() throws {
+        let setup = try PuffFixtures.setup("gusty-offshore", raceSeed: 9)
+        let (field, _) = try WindFixtures.field(setup, windSeed: 9, through: 40)
+        let (plain, _) = try WindFixtures.field(try WindFixtures.setup("gusty-offshore", raceSeed: 9), windSeed: 9, through: 40)
+        let area = try #require(setup.raceArea)
+        var rng = SplitMix64(seed: 116)
+        var puffed = 0, edges = 0
+        for _ in 0..<40 {
+            let tick = rng.int(in: Self.w.start(of: 1)..<Self.w.start(of: 41))
+            let sampler = try field.sampler(atTick: tick), plainSampler = try plain.sampler(atTick: tick)
+            let puffs = field.activePuffs(atTick: tick)
+            // Anywhere on the water, and on each live puff's edge and centre.
+            var points = (0..<150).map { _ in
+                area.centre + Vec2(rng.range(-1.2, 1.2) * area.halfWidth, rng.range(-1.2, 1.2) * area.halfLength)
+            }
+            for puff in puffs {
+                points += [puff.center, puff.center + Vec2(puff.radius, 0), puff.center - Vec2(0, puff.radius),
+                           puff.center + Vec2.heading(rng.range(-.pi, .pi)) * puff.radius]
+            }
+            for p in points {
+                let wind = try field.sample(p, tick: tick), fast = sampler.sample(p)
+                #expect(fast.direction.bitPattern == wind.direction.bitPattern && fast.speed.bitPattern == wind.speed.bitPattern,
+                        "at \(p), tick \(tick): \(fast) vs \(wind)")
+                let bare = try plain.sample(p, tick: tick), plainFast = plainSampler.sample(p)
+                #expect(plainFast.direction.bitPattern == bare.direction.bitPattern && plainFast.speed.bitPattern == bare.speed.bitPattern)
+                if wind.speed != (try field.courseAverageSpeed(atTick: tick)) { puffed += 1 }
+                if puffs.contains(where: { abs(($0.center - p).length - $0.radius) < 1e-6 }) { edges += 1 }
+            }
+        }
+        #expect(puffed > 1000 && edges > 100, "\(puffed) samples in a puff, \(edges) on an edge")
+
+        let k = 12, tick = Self.w.start(of: k)
+        for window in (k - 3)...k {
+            var keys = field.keys
+            keys.remove(window: window)
+            let dropped = WindField(setup: setup, windows: Self.w, keys: keys)
+            #expect(throws: WindFieldError.missingKey(window)) { try dropped.sampler(atTick: tick) }
+        }
+        let early = Self.w.start(of: 0) - 1
+        #expect(throws: WindFieldError.beforeOrigin(tick: early)) { try field.sampler(atTick: early) }
+    }
+
     /// A puff alive at a tick may come from a window up to ⌈longest life / 30 s⌉ back, so the wind there
     /// needs every key from that window on, and says which one it lacks rather than guess (ADR 0001).
     @Test func samplingNeedsTheKeysOfEveryPuffThatMayStillBeAlive() throws {

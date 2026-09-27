@@ -18,6 +18,9 @@ struct HomeView: View {
                     }
                     raceOnline
                     practice
+                    #if DEBUG
+                    tuning
+                    #endif
                     if let lastRace = model.lastRace {
                         LastRaceRow(lastRace: lastRace)
                     }
@@ -75,6 +78,25 @@ struct HomeView: View {
         .controlSize(.large)
         .accessibilityIdentifier("practice")
     }
+
+    #if DEBUG
+    /// The debug tuning panel (#232), Debug builds only, marked TUNED while anything differs from the files.
+    private var tuning: some View {
+        Button {
+            model.path.append(.tuning)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "slider.horizontal.3").accessibilityHidden(true)
+                Text("Tuning").font(MenuFont.heading(.headline))
+                if model.tuning.tuning.isTuned { TunedBadge(onChrome: true) }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.bordered)
+        .accessibilityIdentifier("tuning")
+    }
+    #endif
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {

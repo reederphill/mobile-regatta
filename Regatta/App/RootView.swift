@@ -72,11 +72,15 @@ struct RootView: View {
             .environment(\.sceneState, sceneState)
             .environment(\.screenSize, screenSize)
             .environment(\.colorScheme, .dark)
+            #if DEBUG
+            .environment(model.tuning)
+            #endif
         }
     }
 
     /// Development launch arguments (`LaunchOptions`): `-autostart`, `-demo`, `-perf`, `-fixture` and `-online` open
-    /// on the race sequence. The cover appears without its animation, so a render fixture's frame is the same as ever.
+    /// on the race sequence, and `-tuning` on the tuning panel (Debug builds). The cover appears without its animation,
+    /// so a render fixture's frame is the same as ever.
     private func autostartIfRequested() {
         guard !checkedLaunchArguments else { return }
         checkedLaunchArguments = true
@@ -92,8 +96,11 @@ struct RootView: View {
             } else if launchOptions.online {
                 startOnlineRace()
             } else if let config = launchOptions.launchRaceConfig(from: model.settings) {
-                model.startRaceSequence(GameSession(config: config, timescale: launchOptions.timescale))
+                model.startRaceSequence(model.practiceSession(config: config))
             }
+            #if DEBUG
+            if launchOptions.tuning { model.path = [.tuning] }
+            #endif
         }
     }
 

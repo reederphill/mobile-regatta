@@ -337,6 +337,27 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
 - `-vision deut|prot|trit|grey|sun` (or `deuteranopia`, `protanopia`, `tritanopia`, `greyscale`, `washout`,
   `none`) puts a colour-vision filter over the whole race view, scene, HUD and letterbox alike (Debug builds,
   #111), to check every cue still reads. The render fixtures diff the scene through each (`RegattaUITests/Fixtures/prestart-*.json`).
+- `-tuning` opens the debug tuning panel at launch (Debug builds, #232; see below).
+
+### Debug tuning panel
+
+Debug builds only (`#if DEBUG`; the Release config the scheme archives with has no panel): Home's **Tuning**
+row, `-tuning`, or **Tuning** in a practice race's pause menu. Grouped sliders for the real-vs-fun values, each
+with its value and its file's, and a reset per group:
+
+- **Data values** (conditions, upwind grooves, autohelm, handling, wind shadow, race format) apply at the next
+  practice race start as *tuned copies*: the bundled file's bytes with the new numbers written in, keeping its
+  id and version, with their own hash and a `tune` number in the ref (ADR 0004, #229). Bots sail them too;
+  online races never do (the wire refuses a tuned ref).
+- **Render values** (water, camera) apply live, even over the paused race, and are never logged.
+- Values persist until reset. **Saved tunings** keep named sets; **Export** shares each tuned file as its next
+  version, ready for `Packages/RegattaCore/Sources/RegattaCore/Resources`, with the changed values listed under
+  `placeholders`.
+
+Everything lives in the app's Application Support/Tuning folder: `current.json`, `saved/`, every tuned copy
+raced in `files/<kind>/<id>@<version>+tune<n>.json` (never rewritten), and the 20 newest tuned practice races
+in `races/<date>-<seed>/`, each its `race.racelog.json` with its tuned copies beside it. Share one from the
+panel's **Tuned races** and replay it with `swift run --package-path Packages/RegattaCore regatta-replay <folder>`.
 
 ### Profiling
 

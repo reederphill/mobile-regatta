@@ -16,6 +16,10 @@ final class AppModel {
     /// Pages pushed on the home screen.
     enum Page: Hashable {
         case practiceSetup, myBoat, profile, help, settings
+        #if DEBUG
+        /// The debug tuning panel (#232): Debug builds only.
+        case tuning
+        #endif
     }
 
     /// Sheets are only for small, brief things (#25).
@@ -67,12 +71,20 @@ final class AppModel {
     var lastRace: LastRace?
 
     let launchOptions: LaunchOptions
+    #if DEBUG
+    /// The debug tuning panel's values (#232): the files the next practice race sails and the look it's drawn
+    /// with. Kept on the device, except in UI tests, which sail the bundled files as bundled.
+    let tuning: TuningModel
+    #endif
     @ObservationIgnored private let sceneState: SceneState
 
     /// `sceneState` locks the orientation while the race sequence shows (G5).
     init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current) {
         self.sceneState = sceneState
         self.launchOptions = launchOptions
+        #if DEBUG
+        tuning = TuningModel(store: launchOptions.uiTesting ? .inMemory : .standard)
+        #endif
         sceneState.isRaceSequenceShowing = false
     }
 
@@ -86,6 +98,7 @@ final class AppModel {
     /// practice race, a restart, a launch argument or an online race. The pushed pages stay under the cover, so
     /// quitting a practice race returns to its setup.
     func startRaceSequence(_ race: Race) {
+        archiveRace()
         sheet = nil
         self.race = race
         phase = .raceSequence
@@ -98,12 +111,34 @@ final class AppModel {
 
     /// A practice race on the current settings.
     func startPractice() {
-        startRaceSequence(GameSession(config: launchOptions.raceConfig(from: settings), timescale: launchOptions.timescale))
+        startRaceSequence(practiceSession(config: launchOptions.raceConfig(from: settings)))
+    }
+
+    /// A practice race on `config`, sailed on the tuning panel's files and drawn with its look in a Debug build
+    /// (#232): tuned values apply at the next race start, never during one.
+    func practiceSession(config: RaceConfig) -> GameSession {
+        #if DEBUG
+        var config = config
+        config.files = tuning.practiceFiles()
+        let session = GameSession(config: config, timescale: launchOptions.timescale)
+        tuning.attach(session, files: config.files)
+        return session
+        #else
+        return GameSession(config: config, timescale: launchOptions.timescale)
+        #endif
     }
 
     /// Quits the race sequence back to the menus.
     func endRaceSequence() {
+        archiveRace()
         phase = .home
         race = nil
+    }
+
+    /// Keeps a practice race sailed on tuned copies, with them beside its log, as it leaves (#232, ADR 0004).
+    private func archiveRace() {
+        #if DEBUG
+        if let session { tuning.archive(session) }
+        #endif
     }
 }

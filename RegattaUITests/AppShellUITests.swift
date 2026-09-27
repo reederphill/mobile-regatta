@@ -27,7 +27,8 @@ final class AppShellUITests: RaceUITestCase {
 
     @MainActor func testToolbarItemsPushTheirPagesAndBack() {
         let app = launchHome()
-        for (item, page, title) in Self.toolbarPages + [("practice", "page-practiceSetup", "Practice")] {
+        // Home's Tuning row is the debug tuning panel (#232): UI tests run Debug builds, which have it.
+        for (item, page, title) in Self.toolbarPages + [("practice", "page-practiceSetup", "Practice"), ("tuning", "page-tuning", "Tuning")] {
             let button = app.buttons[item]
             XCTAssertTrue(button.waitForExistence(timeout: 20), "no \(item)")
             button.tap()
@@ -52,6 +53,17 @@ final class AppShellUITests: RaceUITestCase {
         tree.lifetime = .keepAlways
         add(tree)
         XCTFail(message, file: file, line: line)
+    }
+
+    /// `-tuning` opens the debug tuning panel at launch (#232), untuned: UI tests sail the bundled files.
+    @MainActor func testTuningLaunchOptionOpensThePanel() {
+        let app = XCUIApplication()
+        if app.state != .notRunning { app.terminate() }
+        app.launchArguments = ["-uitesting", "-tuning"]
+        app.launch()
+        assertAppears(app.descendants(matching: .any)["page-tuning"].firstMatch, in: app, "-tuning didn't open the tuning panel")
+        assertAppears(app.descendants(matching: .any)["tuning-group-conditions"].firstMatch, in: app, "no conditions sliders")
+        XCTAssertFalse(app.descendants(matching: .any)["tuned-badge"].firstMatch.exists, "a UI test run is tuned")
     }
 
     @MainActor func testRaceCoverCannotBeSwipedDown() {

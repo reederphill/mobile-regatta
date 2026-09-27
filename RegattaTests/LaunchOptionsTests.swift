@@ -156,4 +156,17 @@ import RegattaCore
         #expect(config.botSailsYourBoat)
         #expect(PracticeDriver(config: config).currentFrame.boats.count == 16)
     }
+
+    #if DEBUG
+    /// `-tuning` opens the debug tuning panel (#232): a flag of its own, never another option's value, and
+    /// Debug builds only (a Release build skips it as an unknown argument).
+    @Test func tuningOpensTheTuningPanel() {
+        #expect(parse("-tuning").tuning)
+        #expect(!parse().tuning)
+        #expect(!parse("-tuning").startsRace)
+        let valueless = parse("-seed", "-tuning")
+        #expect(valueless.tuning)
+        #expect(valueless.problems == ["-seed needs a value"])
+    }
+    #endif
 }

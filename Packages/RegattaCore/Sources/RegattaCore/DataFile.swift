@@ -321,6 +321,38 @@ public struct DataFile<Content: DataFileContent>: Sendable {
         return try Data(contentsOf: url)
     }
 
+    /// Every file of this kind this build ships, by id and version, sorted: what the debug tuning panel
+    /// (#232) offers to tune.
+    public static func bundledKeys() -> [DataFileKey] {
+        bundledKeys(in: .module)
+    }
+
+    /// Every `<id>@<version>.json` in `bundle`'s `Content.bundleDirectory`, sorted by id, then version.
+    ///
+    /// The folder is listed with `FileManager` on every platform: `Bundle.urls(forResourcesWithExtension:subdirectory:)`
+    /// gives `[URL]` on Apple platforms and `[NSURL]` in Linux's Foundation. It is the folder `bundledData` reads
+    /// from: the bundle's resources folder, or failing that where the bundle's resource lookup finds it.
+    public static func bundledKeys(in bundle: Bundle) -> [DataFileKey] {
+        let manager = FileManager.default
+        func isFolder(_ url: URL) -> Bool {
+            var isDirectory: ObjCBool = false
+            return manager.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }
+        let candidates = [
+            bundle.resourceURL?.appendingPathComponent(Content.bundleDirectory, isDirectory: true),
+            bundle.url(forResource: Content.bundleDirectory, withExtension: nil),
+        ]
+        guard let folder = candidates.lazy.compactMap({ $0 }).first(where: isFolder),
+              let urls = try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
+        return urls.filter { $0.pathExtension == "json" }.compactMap { url -> DataFileKey? in
+            let name = url.deletingPathExtension().lastPathComponent
+            guard let at = name.lastIndex(of: "@"), let version = Int(name[name.index(after: at)...]) else { return nil }
+            let id = String(name[..<at])
+            return isValidID(id) ? DataFileKey(id: id, version: version) : nil
+        }
+        .sorted { ($0.id, $0.version) < ($1.id, $1.version) }
+    }
+
     /// Lowercase ASCII letters, digits and hyphens, at least one. Safe to use in a resource name.
     static func isValidID(_ id: String) -> Bool {
         !id.isEmpty && id.utf8.allSatisfy { c in

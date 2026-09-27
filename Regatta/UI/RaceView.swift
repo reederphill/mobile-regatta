@@ -6,6 +6,11 @@ struct RaceView: View {
     let session: GameSession
     var onRestart: () -> Void
     var onExit: () -> Void
+    #if DEBUG
+    /// The debug tuning panel (#232), over a paused practice race: its render values show live behind it.
+    @Environment(TuningModel.self) private var tuning: TuningModel?
+    @State private var showsTuning = false
+    #endif
 
     private var debugOptions: SpriteView.DebugOptions {
         #if DEBUG
@@ -23,6 +28,22 @@ struct RaceView: View {
         // One colour-vision filter over everything the race draws, live or a fixture: the scene at any camera
         // scale, the HUD and overlays, and the letterbox (#111).
         .vision(session.vision)
+        #if DEBUG
+        .sheet(isPresented: $showsTuning) {
+            if let tuning {
+                NavigationStack {
+                    TuningView(model: tuning)
+                        .toolbar {
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Done") { showsTuning = false }
+                            }
+                        }
+                }
+                .tint(ChromePalette.tint)
+                .presentationDetents([.medium, .large])
+            }
+        }
+        #endif
     }
 
     @ViewBuilder private func race(_ layout: RaceViewportPolicy.Layout) -> some View {
@@ -61,13 +82,31 @@ struct RaceView: View {
             HUDView(hud: session.hud, messages: session.messages)
                 .allowsHitTesting(false)
 
+            #if DEBUG
+            if session.isTuned {
+                // Its own overlay (#232), under the minimap, clear of the clock and the controls.
+                VStack {
+                    HStack {
+                        Spacer()
+                        TunedBadge()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 142)
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+            }
+            #endif
+
             controls
 
-            if session.isPaused {
+            // The tuning panel hides the pause menu, so the water shows undimmed behind it.
+            if session.isPaused && !showsTuningPanel {
                 PauseMenu(
                     onResume: { session.setPaused(false) },
                     onRestart: onRestart,
-                    onExit: onExit
+                    onExit: onExit,
+                    onTuning: tuningAction
                 )
             }
 
@@ -75,6 +114,24 @@ struct RaceView: View {
                 ResultsView(rows: session.results, onRestart: onRestart, onExit: onExit)
             }
         }
+    }
+
+    private var showsTuningPanel: Bool {
+        #if DEBUG
+        showsTuning
+        #else
+        false
+        #endif
+    }
+
+    /// Opens the tuning panel over the paused race: Debug builds, practice races, and not in UI tests.
+    private var tuningAction: (() -> Void)? {
+        #if DEBUG
+        guard tuning != nil, session.driver.isPausable, !LaunchOptions.current.uiTesting else { return nil }
+        return { showsTuning = true }
+        #else
+        return nil
+        #endif
     }
 
     private var controls: some View {
@@ -146,6 +203,8 @@ private struct PauseMenu: View {
     var onResume: () -> Void
     var onRestart: () -> Void
     var onExit: () -> Void
+    /// The debug tuning panel (#232), when the race offers it.
+    var onTuning: (() -> Void)?
 
     var body: some View {
         ZStack {
@@ -154,6 +213,11 @@ private struct PauseMenu: View {
                 Text("Paused").font(.title.bold())
                 Button("Resume", action: onResume).buttonStyle(.borderedProminent)
                 Button("Restart race", action: onRestart).buttonStyle(.bordered)
+                if let onTuning {
+                    Button("Tuning", action: onTuning)
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("pause-tuning")
+                }
                 Button("Quit to menu", role: .destructive, action: onExit).buttonStyle(.bordered)
             }
             .controlSize(.large)
