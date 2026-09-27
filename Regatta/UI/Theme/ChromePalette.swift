@@ -1,9 +1,10 @@
 import SwiftUI
 import UIKit
 
-/// Menu colours: home, pushed pages, sheets and (later) the results screen. The race scene and HUD use
-/// `Palette` and its reserved-colour table; menus never do, and take every colour from here (G7,
-/// `docs/palette.md` "ChromePalette"). Each token follows the system light or dark appearance.
+/// Menu colours: home, pushed pages, sheets and the results screen. The race scene and HUD use `CuePalette`
+/// and `ChartPalette`, held to the reserved-colour hue rule (`HueRule`); menus aren't (G7), and take every colour
+/// from here except depictions of on-water elements (`docs/palette.md` "ChromePalette"). Each token follows the
+/// system light or dark appearance.
 enum ChromePalette {
     // placeholder: the hexes in docs/palette.md, until #169 applies the #53 design.
     static let background = dynamic(light: 0xDCEBF5, dark: 0x0B1F33)
@@ -49,13 +50,5 @@ enum MenuFont {
     /// Body text: SF.
     static func body(_ style: Font.TextStyle = .body) -> Font {
         .system(style)
-    }
-}
-
-private extension UIColor {
-    /// Nonisolated: the dynamic colours' trait closures call it off the main actor.
-    nonisolated convenience init(rgb: UInt32) {
-        self.init(red: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255,
-                  blue: CGFloat(rgb & 0xFF) / 255, alpha: 1)
     }
 }

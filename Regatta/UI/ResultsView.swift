@@ -44,7 +44,7 @@ struct ResultsView: View {
                     Button("Menu", action: onExit).buttonStyle(.bordered)
                     Button("Race again", action: onRestart)
                         .buttonStyle(.borderedProminent)
-                        .tint(Color(uiColor: Palette.mark))
+                        .tint(ChromePalette.tint)
                 }
                 .controlSize(.large)
             }

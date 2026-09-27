@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import RegattaBots
 import RegattaCore
+import SwiftUI
 @testable import Regatta
 
 /// Render fixtures (#62): the committed fixtures load and replay, and a fixture race stands still.
@@ -84,6 +85,18 @@ import RegattaCore
         #expect(session.scene.filter == nil && !session.scene.shouldEnableEffects)
     }
 
+    /// The reference diffs cover every filter (#111): each has a fixture, the prestart one seen through it.
+    @Test func everyVisionFilterHasAPrestartFixture() throws {
+        let (prestart, _) = try RenderFixture.load(named: "prestart", in: Self.fixtures)
+        for vision in VisionFilter.allCases {
+            let name = vision == .none ? "prestart" : "prestart-\(vision.rawValue)"
+            let (fixture, _) = try RenderFixture.load(named: name, in: Self.fixtures)
+            var expected = prestart
+            expected.vision = vision
+            #expect(fixture == expected, "\(name)")
+        }
+    }
+
     @Test func fixtureFieldsDecodeEveryCameraAndVision() throws {
         for camera in LaunchOptions.CameraMode.allCases {
             for vision in VisionFilter.allCases {
@@ -128,6 +141,20 @@ import RegattaCore
         let out = VisionFilter.greyscale.apply([1, 0, 0])
         #expect(Self.close(out, [0.2126, 0.2126, 0.2126]))
     }
+
+    #if DEBUG
+    /// The HUD's SwiftUI matrix (`View.vision`, a Debug harness) is the scene's `CIColorMatrix` one: the same
+    /// rows and bias.
+    @Test func swiftUIMatrixIsTheSceneMatrix() {
+        for filter in VisionFilter.allCases {
+            let m = filter.colorMatrix, b = Float(filter.bias)
+            let rows: [[Float]] = [[m.m11, m.m12, m.m13, m.m14, m.m15], [m.m21, m.m22, m.m23, m.m24, m.m25],
+                                   [m.m31, m.m32, m.m33, m.m34, m.m35], [m.m41, m.m42, m.m43, m.m44, m.m45]]
+            let expected = filter.matrix.map { $0.map(Float.init) + [0, b] } + [[0, 0, 0, 1, 0]]
+            #expect(rows == expected, "\(filter)")
+        }
+    }
+    #endif
 
     @Test func washoutHalvesContrastTowardsWhite() {
         #expect(Self.close(VisionFilter.washout.apply([0, 0, 0]), [0.45, 0.45, 0.45]))

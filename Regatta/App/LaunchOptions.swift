@@ -18,6 +18,8 @@ import RegattaCore
 /// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override).
 /// - `-startSeconds <n>` gives an online dev race an `n`-second start sequence, 1…60.
 /// - `-appearance light|dark` overrides the system appearance, for UI tests of the menus in both (#108).
+/// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race, scene and HUD alike
+///   (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -48,6 +50,7 @@ struct LaunchOptions: Equatable {
     var raceSeconds: Int?
     var startSeconds: Int?
     var appearance: Appearance?
+    var vision: VisionFilter?
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
 
@@ -67,7 +70,8 @@ struct LaunchOptions: Equatable {
             case "-perf": perf = true
             case "-uitesting": uiTesting = true
             case "-online": online = true
-            case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance":
+            case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance",
+                 "-vision":
                 guard let value = rest.first, !Self.flags.contains(value) else {
                     problems.append("\(argument) needs a value")
                     continue
@@ -81,7 +85,12 @@ struct LaunchOptions: Equatable {
     }
 
     private static let flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-online", "-seed", "-fixture", "-timescale",
-                                     "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance"]
+                                     "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance", "-vision"]
+
+    /// `-vision`'s short names (#111). Each filter's raw value is accepted as well.
+    static let visionShortNames: [String: VisionFilter] = [
+        "deut": .deuteranopia, "prot": .protanopia, "trit": .tritanopia, "grey": .greyscale, "sun": .washout,
+    ]
 
     private mutating func apply(_ argument: String, _ value: String) {
         switch argument {
@@ -103,6 +112,12 @@ struct LaunchOptions: Equatable {
             if let n = Int(value), (1...60).contains(n) { startSeconds = n } else { reject(argument, value, "a whole number of seconds, 1…60") }
         case "-appearance":
             if let style = Appearance(rawValue: value) { appearance = style } else { reject(argument, value, "light or dark") }
+        case "-vision":
+            if let filter = Self.visionShortNames[value] ?? VisionFilter(rawValue: value) {
+                vision = filter
+            } else {
+                reject(argument, value, "deut, prot, trit, grey, sun or none")
+            }
         default:
             break
         }
@@ -115,6 +130,16 @@ struct LaunchOptions: Equatable {
     /// Whether the Debug FPS, node and draw-count overlay shows. UI tests and render fixtures hide it,
     /// so their screenshots are deterministic.
     var showsDebugStats: Bool { !uiTesting && fixture == nil }
+
+    /// The colour-vision filter over a live race: `-vision`'s, in Debug builds only (#111). A render fixture
+    /// names its own.
+    var raceVision: VisionFilter {
+        #if DEBUG
+        vision ?? .none
+        #else
+        .none
+        #endif
+    }
 
     /// Whether launch skips the menu and starts a race.
     var startsRace: Bool { autostart || demo || perf }

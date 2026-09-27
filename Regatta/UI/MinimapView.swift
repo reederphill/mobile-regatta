@@ -27,7 +27,7 @@ struct MinimapView: View {
 
             for mark in course.elements.flatMap(\.marks) {
                 let p = map(mark.position)
-                context.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(Color(uiColor: Palette.mark)))
+                context.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)), with: .color(CuePalette.orange.color))
             }
 
             for boat in hud.boats where !boat.isPlayer {

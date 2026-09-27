@@ -75,6 +75,8 @@ final class GameSession {
         self.roster = roster
         scene = GameScene(driver: driver, roster: roster)
         scene.session = self
+        // `-vision` (Debug); a fixture sets its own after this.
+        scene.vision = LaunchOptions.current.raceVision
         hud = HUDState(world: driver.renderWorld)
         post("Hold the left or right side of the screen to steer. Be below the line at the gun.", .info, seconds: 6)
     }

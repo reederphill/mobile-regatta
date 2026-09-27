@@ -48,26 +48,32 @@ struct RaceView: View {
             .persistentSystemOverlays(.hidden)
     }
 
+    /// The race with the HUD, controls and overlays over it. The scene draws its own colour-vision filter
+    /// (`GameScene.vision`); the SwiftUI over it takes the same one here, so a `-vision` race reads through one
+    /// filter throughout (#111).
     private var live: some View {
         ZStack {
             scene
 
-            HUDView(hud: session.hud, messages: session.messages)
-                .allowsHitTesting(false)
+            Group {
+                HUDView(hud: session.hud, messages: session.messages)
+                    .allowsHitTesting(false)
 
-            controls
+                controls
 
-            if session.isPaused {
-                PauseMenu(
-                    onResume: { session.setPaused(false) },
-                    onRestart: onRestart,
-                    onExit: onExit
-                )
+                if session.isPaused {
+                    PauseMenu(
+                        onResume: { session.setPaused(false) },
+                        onRestart: onRestart,
+                        onExit: onExit
+                    )
+                }
+
+                if session.playerDone {
+                    ResultsView(rows: session.results, onRestart: onRestart, onExit: onExit)
+                }
             }
-
-            if session.playerDone {
-                ResultsView(rows: session.results, onRestart: onRestart, onExit: onExit)
-            }
+            .vision(session.scene.vision)
         }
     }
 
@@ -105,7 +111,9 @@ struct RaceView: View {
                         .font(.headline.weight(.heavy))
                         .tracking(1.5)
                         .frame(width: 120, height: 56)
-                        .background(Color(uiColor: Palette.mark), in: .capsule)
+                        // HUD chrome is white on translucent black: orange is the active leg's alone (#22).
+                        .background(.black.opacity(0.5), in: .capsule)
+                        .overlay(Capsule().strokeBorder(.white, lineWidth: 2))
                         .foregroundStyle(.white)
                         .shadow(radius: 6, y: 3)
                 }

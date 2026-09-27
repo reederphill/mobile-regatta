@@ -37,12 +37,41 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         XCTAssertTrue(pngs.allSatisfy { ($0?.count ?? 0) > 0 }, "an attached PNG is empty")
     }
 
-    /// The committed reference for this device (References/<device>/prestart.png). References are
-    /// recorded on iPhone only; the iPad run skips here on purpose. Anywhere else, a missing reference
-    /// fails in CI rather than skipping.
+    /// The committed reference for this device (References/<device>/prestart.png).
     @MainActor func testPrestartMatchesItsReference() throws {
+        try assertMatchesIPhoneReference("prestart")
+    }
+
+    // The same fixture through each colour-vision filter (#22, #111): with the unfiltered one above, a reference
+    // diff in all six modes. One test each, so every filter's render reaches render-actuals when it moves: a
+    // failure ends its test (`continueAfterFailure = false`).
+
+    @MainActor func testPrestartUnderDeuteranopiaMatchesItsReference() throws {
+        try assertMatchesIPhoneReference("prestart-deuteranopia")
+    }
+
+    @MainActor func testPrestartUnderProtanopiaMatchesItsReference() throws {
+        try assertMatchesIPhoneReference("prestart-protanopia")
+    }
+
+    @MainActor func testPrestartUnderTritanopiaMatchesItsReference() throws {
+        try assertMatchesIPhoneReference("prestart-tritanopia")
+    }
+
+    @MainActor func testPrestartInGreyscaleMatchesItsReference() throws {
+        try assertMatchesIPhoneReference("prestart-greyscale")
+    }
+
+    @MainActor func testPrestartInSunlightWashoutMatchesItsReference() throws {
+        try assertMatchesIPhoneReference("prestart-washout")
+    }
+
+    /// `assertMatchesReference` on iPhone. References are recorded on iPhone only; the iPad run skips here on
+    /// purpose. Anywhere else, a missing reference fails in CI rather than skipping.
+    @MainActor private func assertMatchesIPhoneReference(_ name: String, file: StaticString = #filePath,
+                                                         line: UInt = #line) throws {
         try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad,
                       "render references are recorded on iPhone 17 only; the iPad run doesn't compare them")
-        try assertMatchesReference("prestart")
+        try assertMatchesReference(name, file: file, line: line)
     }
 }
