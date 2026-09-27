@@ -16,6 +16,15 @@ final class BoatNode: SKNode {
     private var wakePoints: [CGPoint] = []
     private var wakeTimer = 0.0
 
+    /// The z's a boat's parts draw at, each boat a `DrawOrder` slot above the last by seat: in the effects layer
+    /// every shadow cone under every wake, and in the fleet's every hull under every name, every name under every
+    /// badge and every badge under every sail. Your boat draws over all of the fleet's.
+    private enum Layer {
+        static let cone: CGFloat = 0, wake: CGFloat = 0.5
+        static let fleet: CGFloat = 5, mine: CGFloat = 10
+        static let hull: CGFloat = 0, name: CGFloat = 0.25, badge: CGFloat = 0.5, sail: CGFloat = 1
+    }
+
     /// `isMine` marks your boat (the driver's `myBoatIndex`): outlined, named larger and drawn on top.
     init(boat: Boat, name: String, isMine: Bool, color: UIColor, boatClass: BoatClass, pointsPerMeter ppm: CGFloat) {
         self.ppm = ppm
@@ -27,11 +36,12 @@ final class BoatNode: SKNode {
         let hull = SKSpriteNode(texture: isMine ? art.playerHull : art.hull)
         hull.color = color
         hull.colorBlendFactor = 1
+        hull.zPosition = Layer.hull
 
         sail = SKSpriteNode(texture: art.sail)
         sail.anchorPoint = art.sailAnchor
         sail.position = CGPoint(x: 0, y: length * 0.16)
-        sail.zPosition = 1
+        sail.zPosition = Layer.sail
 
         shadowCone = SKSpriteNode(texture: art.cone)
         shadowCone.anchorPoint = CGPoint(x: 0.5, y: 0)
@@ -50,6 +60,7 @@ final class BoatNode: SKNode {
         label.fontColor = UIColor.white.withAlphaComponent(isMine ? 1 : 0.75)
         label.position = CGPoint(x: 0, y: length * 0.75)
         label.verticalAlignmentMode = .center
+        label.zPosition = Layer.name
         addChild(label)
 
         badge.fontSize = 11
@@ -58,6 +69,7 @@ final class BoatNode: SKNode {
         badge.position = CGPoint(x: 0, y: -length * 0.8)
         badge.verticalAlignmentMode = .center
         badge.isHidden = true
+        badge.zPosition = Layer.badge
         addChild(badge)
 
         wake.strokeColor = UIColor.white.withAlphaComponent(0.22)
@@ -65,7 +77,12 @@ final class BoatNode: SKNode {
         wake.lineCap = .round
         wake.lineJoin = .round
 
-        zPosition = isMine ? 10 : 5
+        // A z each, from the seat (`DrawOrder`): the start row (#85) puts the fleet's cones, wakes, hulls, names
+        // and sails over each other.
+        let seat = DrawOrder.z(boat.id)
+        shadowCone.zPosition = Layer.cone + seat
+        wake.zPosition = Layer.wake + seat
+        zPosition = (isMine ? Layer.mine : Layer.fleet) + seat
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
