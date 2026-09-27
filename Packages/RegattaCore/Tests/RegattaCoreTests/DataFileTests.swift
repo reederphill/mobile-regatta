@@ -40,21 +40,26 @@ enum Fixtures {
     }
 }
 
-/// The bundled schema-3 boat class races sail by default (`Race.defaultBoatClass`, #248), and edited
-/// copies of its bytes.
+/// The bundled schema-3 boat class races sail by default (`Race.defaultBoatClass`, #248): skiff@2 since #89,
+/// and edited copies of its bytes.
 enum SkiffFixtures {
     static let classID = "skiff"
-    static let version = 1
-    /// SHA-256 of `Resources/boat-classes/skiff@1.json`. A released file never changes (ADR 0004).
-    static let pinnedHash = "826fa149ace5a1d876829129216281725001f43c99c247e074582cd99f2ed6f4"
+    static let version = 2
+    /// SHA-256 of each bundled `Resources/boat-classes/skiff@<version>.json`. A released file never changes
+    /// (ADR 0004): if one fails, ship the change as the next version instead of editing it. Version 1 stays
+    /// bundled for the logs sailed on it (ADR 0002).
+    static let pinnedHashes = [
+        1: "826fa149ace5a1d876829129216281725001f43c99c247e074582cd99f2ed6f4",
+        2: "32e5162d6caf3e32280ca754c1381e1012e4db4ef04252bf278b96dd796f5cd1",
+    ]
 
-    static func bytes() throws -> Data {
+    static func bytes(version: Int = version) throws -> Data {
         try #require(try BoatClassFile.bundledData(id: classID, version: version))
     }
 
     /// The bundled file with each `(of, with)` replacement applied, each of which must match.
-    static func edited(_ replacements: [(of: String, with: String)]) throws -> Data {
-        var text = String(decoding: try bytes(), as: UTF8.self)
+    static func edited(_ replacements: [(of: String, with: String)], version: Int = version) throws -> Data {
+        var text = String(decoding: try bytes(version: version), as: UTF8.self)
         for r in replacements {
             #expect(text.contains(r.of), "fixture no longer contains \(r.of)")
             text = text.replacingOccurrences(of: r.of, with: r.with)
@@ -62,7 +67,7 @@ enum SkiffFixtures {
         return Data(text.utf8)
     }
 
-    static func boatClass() throws -> BoatClass {
+    static func boatClass(version: Int = version) throws -> BoatClass {
         try BoatClassFile.bundled(id: classID, version: version).content
     }
 }
@@ -143,7 +148,7 @@ enum SkiffFixtures {
         }
         #expect(BoatClass.supportedSchemaVersions == [2, 3])
         #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version)).ref,
-                "races sail skiff@1 unless told otherwise (#248)")
+                "races sail skiff@2 unless told otherwise (#248, #89)")
     }
 
     @Test func missingHeaderIsMalformed() throws {
@@ -611,15 +616,16 @@ enum SkiffFixtures {
     }
 }
 
-/// #248: skiff@1, the schema-3 boat class. Schema 3 is schema 2 plus planing, the automatic spinnaker, the
+/// #248: the skiff, the schema-3 boat class. Schema 3 is schema 2 plus planing, the automatic spinnaker, the
 /// graded by-the-lee loss and the autohelm's averaged groove wind, every one of them required (ADR 0004).
 @Suite struct SkiffClassFileTests {
-    @Test func bundledSkiffIsPinnedAndSchemaThree() throws {
-        let data = try SkiffFixtures.bytes()
-        #expect(ContentHash(of: data).hex == SkiffFixtures.pinnedHash,
-                "a released file never changes (ADR 0004): ship the change as skiff@2")
-        let file = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version)
-        #expect(file.schemaVersion == 3 && file.id == "skiff" && file.version == 1)
+    @Test(arguments: SkiffFixtures.pinnedHashes.keys.sorted())
+    func bundledSkiffIsPinnedAndSchemaThree(version: Int) throws {
+        let data = try SkiffFixtures.bytes(version: version)
+        #expect(ContentHash(of: data).hex == SkiffFixtures.pinnedHashes[version],
+                "a released file never changes (ADR 0004): ship the change as the next version")
+        let file = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: version)
+        #expect(file.schemaVersion == 3 && file.id == "skiff" && file.version == version)
         #expect(file.content.name == "Skiff")
         // Every value is a placeholder: every top-level block is listed.
         for block in ["/hull", "/polar", "/momentum", "/steering", "/windShadow", "/contact", "/ease", "/planing", "/spinnaker", "/byTheLee"] {
@@ -629,6 +635,26 @@ enum SkiffFixtures {
         #expect(try BoatClassFile.bundled(id: Fixtures.classID, version: 3).schemaVersion == 2)
     }
 
+    /// #89 (the owner): skiff@2 is skiff@1 turning quicker, so a hard-over 360 takes about 10 s, not 14–22 s
+    /// (`PenaltyTurnTests.skiffCleanTurnTakesAboutTenSeconds`): a 36°/s top turn rate (30), reached from 1.5 kn
+    /// (6) with a 10°/s floor (5), and twice the rudder drag (0.4 a second at full rudder), which keeps a tack
+    /// and a gybe close to their costs (`SkiffTests`). Every other value is version 1's.
+    @Test func version2IsVersion1TurningQuicker() throws {
+        let v1 = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: 1)
+        let v2 = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: 2)
+        #expect(v2.header.placeholders == v1.header.placeholders)
+        let (a, b) = (v1.content, v2.content)
+        #expect(b.name == a.name && b.hull == a.hull && b.polar == a.polar && b.momentum == a.momentum)
+        #expect(b.windShadow == a.windShadow && b.contact == a.contact && b.ease == a.ease)
+        #expect(b.planing == a.planing && b.spinnaker == a.spinnaker && b.byTheLee == a.byTheLee)
+        #expect(b.steering.autohelm == a.steering.autohelm && b.steering.rudderSlew == a.steering.rudderSlew)
+        #expect(b.steering.headToWindFallOffRate == a.steering.headToWindFallOffRate)
+        #expect(a.steering.topTurnRate == deg2rad(30) && a.steering.minTurnRate == deg2rad(5) && a.steering.rudderDrag == 0.2)
+        #expect(a.steering.turnRateCurveSpeeds == [0, metresPerSecond(knots: 6)] && a.steering.turnRateCurveFractions == [0, 1])
+        #expect(b.steering.topTurnRate == deg2rad(36) && b.steering.minTurnRate == deg2rad(10) && b.steering.rudderDrag == 0.4)
+        #expect(b.steering.turnRateCurveSpeeds == [0, metresPerSecond(knots: 1.5)] && b.steering.turnRateCurveFractions == [0, 1])
+    }
+
     @Test func schemaThreeValuesAreConvertedToCodeUnits() throws {
         let c = try SkiffFixtures.boatClass()
         let knot = metresPerSecond(knots: 1)
@@ -636,7 +662,7 @@ enum SkiffFixtures {
         #expect(c.polar.twaAxis.count == 18 && c.polar.twaAxis[10] == deg2rad(120) && c.polar.twaAxis[15] == deg2rad(155))
         #expect(c.polar.speeds[3][13] == metresPerSecond(knots: 10.1)) // 8 kn, 145°
         #expect(c.momentum == .init(speedingUp: 2.8, slowingDown: 4, noGo: 4.8))
-        #expect(c.steering.topTurnRate == deg2rad(30) && c.steering.minTurnRate == deg2rad(5))
+        #expect(c.steering.topTurnRate == deg2rad(36) && c.steering.minTurnRate == deg2rad(10))
         #expect(c.steering.autohelm.downwindSnap == deg2rad(8) && c.steering.autohelm.grooveWindAverage == 30)
         #expect(c.windShadow.coneLength == 9 * 4.9)
         let planing = try #require(c.planing)

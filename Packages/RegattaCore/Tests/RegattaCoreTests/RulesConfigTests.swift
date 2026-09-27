@@ -143,9 +143,10 @@ import Testing
         }
     }
 
-    /// fleet-rules@3 (schema 3, #89) is @2 with sequential penalty deadlines (G4): every other value the same.
-    /// It is the default; @1 and @2 still load, with each turn's clock from its own call, as they meant.
-    @Test func version3IsVersion2WithSequentialPenaltyDeadlines() throws {
+    /// fleet-rules@3 (schema 3, #89) is @2 with sequential penalty deadlines (G4), loosened a little from #9's
+    /// 15 s and 30 s to 20 s and 40 s (the owner): every other value the same. It is the default; @1 and @2 still
+    /// load, with #9's deadlines and each turn's clock from its own call, as they meant.
+    @Test func version3IsVersion2WithLooserSequentialPenaltyDeadlines() throws {
         let v1 = try RulesConfigFile.bundled(id: "fleet-rules", version: 1)
         let v2 = try RulesConfigFile.bundled(id: "fleet-rules", version: 2)
         let v3 = try RulesConfigFile.bundled(id: "fleet-rules", version: 3)
@@ -156,8 +157,13 @@ import Testing
         #expect(v3.content.raceFormat.penalty.stackedPenaltyDeadlines == .sequential)
         #expect(v3.header.placeholders == v2.header.placeholders)
 
+        for old in [v1, v2] { #expect(old.content.raceFormat.penalty.start == 15 && old.content.raceFormat.penalty.complete == 30) }
+        #expect(v3.content.raceFormat.penalty.start == 20 && v3.content.raceFormat.penalty.complete == 40)
+
         var format = v2.content.raceFormat
         format.penalty.stackedPenaltyDeadlines = .sequential
+        format.penalty.start = 20
+        format.penalty.complete = 40
         #expect(v3.content.raceFormat == format)
         #expect(v3.content.incidents == v2.content.incidents && v3.content.zone == v2.content.zone)
         #expect(v3.content.markRoomGiven == v2.content.markRoomGiven && v3.content.onABeat == v2.content.onABeat)
@@ -261,7 +267,7 @@ import Testing
         }
         let race = Race(setup: try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot]), windSeed: WindSeed(2))
         #expect(race.course.zoneRadius == 3 * race.boatClass.hull.length)
-        #expect(race.course.zoneRadius == 3 * 4.9) // skiff@1's hull (#248)
+        #expect(race.course.zoneRadius == 3 * 4.9) // the skiff's hull (#248)
     }
 
     @Test func unknownFieldsAndUnresolvedBuilderValuesAreRefused() throws {

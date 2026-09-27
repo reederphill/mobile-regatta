@@ -20,7 +20,8 @@ changes; a change ships as `<id>@<version + 1>.json`.
 - `fleet-rules@2` (bundled, schema 2): version 1 plus `startRow.minimumSpacingHullLengths` (#85). Kept so
   its race logs replay.
 - `fleet-rules@3` (bundled, schema 3): version 2 plus `penalty.stackedPenaltyDeadlines`, `sequential` (#89,
-  G4). The default (`RaceFiles.defaults`, `Race.defaultRulesConfiguration`).
+  G4), with the penalty deadlines loosened a little, to 20 s and 40 s (#9's 15 s and 30 s; the owner, #89).
+  The default (`RaceFiles.defaults`, `Race.defaultRulesConfiguration`).
 
 Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths`, the start row's spacing floor:
 required in schema 2, refused in schema 1. A schema-1 file has no floor (`RulesConfig.StartRow.minimumSpacing`
@@ -29,7 +30,7 @@ Schema 3 is schema 2 plus `raceFormat.penalty.stackedPenaltyDeadlines`: required
 before it. A schema-1 or -2 file means `fromCall`, which is what it meant: each penalty turn's deadlines from
 its own call.
 The tables' `v1` column gives version 1's values; version 2's are the same, plus that floor, and version
-3's the same again, plus `sequential` stacking.
+3's the same again, plus `sequential` stacking and its looser penalty deadlines (marked v3).
 
 ## Units
 
@@ -130,10 +131,10 @@ A boat is on a beat when her true wind angle is at most `maxTrueWindAngleDegrees
 | Field | Unit | v1 | Meaning |
 |---|---|---|---|
 | `startSequenceSeconds` | s | 60 | Sequence start to gun. `RaceSetup.defaultStartSequenceTicks`. |
-| `penalty.startSeconds` | s | 15 | Each owed penalty turn must be started this long after its clock starts, or she is disqualified (`missedStart`) … |
-| `penalty.completeSeconds` | s ≥ start | 30 | … and completed this long after it (`missedComplete`). |
+| `penalty.startSeconds` | s | 15 (v3: 20) | Each owed penalty turn must be started this long after its clock starts, or she is disqualified (`missedStart`) … |
+| `penalty.completeSeconds` | s ≥ start | 30 (v3: 40) | … and completed this long after it (`missedComplete`). v3 loosens #9's 15 s and 30 s a little (the owner, #89). |
 | `penalty.startedTurnDegrees` | degrees, (0, 360] | 30 | Turned this far, the turn counts as started. |
-| `penalty.stackedPenaltyDeadlines` | `sequential` or `fromCall`; schema 3 | — (v3: `sequential`) | When an owed turn's clock starts (#89, G4). Owed turns are served in order, each a call's one turn. `sequential`: at the later of its call and the completion of the turn before it, so a turn queued behind another gets its full 15 s and 30 s once that one is done. `fromCall`: at its own call, however many turns are owed ahead of it. Absent before schema 3: `fromCall`. |
+| `penalty.stackedPenaltyDeadlines` | `sequential` or `fromCall`; schema 3 | — (v3: `sequential`) | When an owed turn's clock starts (#89, G4). Owed turns are served in order, each a call's one turn. `sequential`: at the later of its call and the completion of the turn before it, so a turn queued behind another gets its full start and complete windows once that one is done. `fromCall`: at its own call, however many turns are owed ahead of it. Absent before schema 3: `fromCall`. |
 | `protestWindowSeconds` | s | 15 | After an incident, a protest can be lodged for this long. |
 | `finishWindowSeconds` | s | 120 | After the first finish, the rest can finish for this long. |
 | `timeLimitSeconds` | s | 960 | After the gun, the race ends whatever happens. |
@@ -161,9 +162,10 @@ The simulation behaviour is unchanged by #73: the zone (3 L) and the start seque
 the file, and each rule call's penalty deadlines come from `penalty`. From #89 they are enforced, per owed
 turn: a boat owing turns serves them in order, 360° one way each, and one that hasn't started her current
 turn (turned `startedTurnDegrees`) at its start deadline, or completed it by its complete deadline, is
-disqualified and a ghost at that tick. Two calls 5 s apart (at t and t + 5 s), the first turn completed at
-c: the first turn's deadlines are t + 15 s and t + 30 s either way; the second's are c + 15 s and c + 30 s
-under `sequential`, and t + 20 s and t + 35 s under `fromCall`. The other values are loaded,
+disqualified and a ghost at that tick. Under fleet-rules@3 (20 s and 40 s), two calls 5 s apart
+(at t and t + 5 s), the first turn completed at c: the first turn's deadlines are t + 20 s and t + 40 s
+either way; the second's are c + 20 s and c + 40 s under `sequential`, and t + 25 s and t + 45 s under
+`fromCall`. The other values are loaded,
 checked and exposed for the tickets that use them (#80–#96); until then the race keeps its old
 behaviour. From #86 the race closes at `finishWindowSeconds` after the first finish, capped by
 `timeLimitSeconds` after the gun (`Race.closeTick`).

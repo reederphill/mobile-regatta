@@ -1,10 +1,11 @@
 import Testing
 @testable import RegattaCore
 
-/// #248 acceptance: skiff@1, the schema-3 class races sail by default. Its polar is #244's seed table
-/// (docs/research/49er-skiff-polars-and-handling.md §8); it planes, hoists and drops an automatic
-/// spinnaker, and pays heavily by the lee. The dynamics tests sail in a constant wind from the north
-/// with no current, steered as `Race` steers (the autohelm and its tap), like `BoomTests`.
+/// #248 acceptance: the skiff, the schema-3 class races sail by default (skiff@2 since #89, which turns
+/// quicker). Its polar is #244's seed table (docs/research/49er-skiff-polars-and-handling.md §8); it planes,
+/// hoists and drops an automatic spinnaker, and pays heavily by the lee. The dynamics tests sail in a
+/// constant wind from the north with no current, steered as `Race` steers (the autohelm and its tap), like
+/// `BoomTests`.
 @Suite struct SkiffTests {
     let skiff: BoatClass
     let dt = Race.dt
@@ -263,16 +264,18 @@ import Testing
 
     // MARK: - Manoeuvres
 
-    /// A tack from close-hauled to close-hauled costs about two hull lengths (#244 §6.1: ~10 m medium air).
+    /// A tack from close-hauled to close-hauled costs about two hull lengths (#244 §6.1: ~10 m medium air). #89
+    /// moved its floor from 8 m to 7: skiff@2 turns a 360 in about 10 s at 36°/s, so it tacks through the wind
+    /// quicker than skiff@1's 30°/s and loses less (7.7 m at 10 kn, 8.4 m at 12), for all its doubled rudder drag.
     @Test(arguments: [10.0, 12])
-    func tackCosts8To12Metres(knots: Double) {
+    func tackCosts7To12Metres(knots: Double) {
         let beat = skiff.polar.bestUpwind(tws: tws(knots))
         let run = tap(starboard(twa: beat.twa, speed: beat.speed), knots: knots)
         #expect(zip(run, run.dropFirst()).filter { $0.boomSide != $1.boomSide }.count == 1)
         #expect(run.last!.boomSide == .starboard)
         #expect(abs(rad2deg(sailingAngle(run.last!) - beat.twa)) < 0.5, "settled close-hauled on the new tack")
         let lost = metresLost(run, along: .heading(windFrom))
-        #expect(lost >= 8 && lost <= 12, "\(knots) kn tack lost \(lost) m")
+        #expect(lost >= 7 && lost <= 12, "\(knots) kn tack lost \(lost) m")
     }
 
     /// A gybe from the groove to the groove, on the plane with the spinnaker up, costs about 8 m and

@@ -27,8 +27,8 @@ public enum BotRaceHarness {
         WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)
     }
 
-    /// `cell`'s setup: every seat a bot sailing the default class (`RaceFiles.defaults`: skiff@1 since #248,
-    /// which the suite sails since #231), the venue and conditions named by their bundled files.
+    /// `cell`'s setup: every seat a bot sailing the default class (`RaceFiles.defaults`: the skiff since #248,
+    /// which the suite sails since #231; skiff@2 since #89), the venue and conditions named by their bundled files.
     public static func raceSetup(for cell: BotRaceCell) throws -> RaceSetup {
         let venue = try dataFileKey(cell.venue)
         let conditions = try dataFileKey(cell.conditions)

@@ -25,8 +25,9 @@ import RegattaCore
 ///
 /// None of the ranges can be reached in a valid race: boats can't leave the race area, which a venue
 /// keeps well inside ±32 km of the course origin, speeds stay far below 64 m/s, and penalty turns have no
-/// cap (#89) but a boat can't owe 127: each turn's start deadline disqualifies her 15 s after its clock
-/// starts, and a clock is at most 30 s old before its turn is completed or she is. So an out-of-range throw
+/// cap (#89) but a boat can't owe 127: each turn's start deadline disqualifies her 20 s after its clock
+/// starts (fleet-rules@3; 15 s before it), and a clock is at most 40 s old before its turn is completed or she
+/// is. So an out-of-range throw
 /// on the host (#65) is a simulation bug, never a player's doing: the host logs it, skips that snapshot and keeps the race running, and clients keep
 /// predicting until the next snapshot that encodes. It never clamps, which would hide the bug.
 public enum SnapshotQuantisation {

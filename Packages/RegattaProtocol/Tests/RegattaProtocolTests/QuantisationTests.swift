@@ -74,7 +74,7 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         #expect(Q.rudderStep * 127 < 0.01)           // far finer than a held input's int8 step
         #expect(Q.penaltyProgressStep < 0.001)
         // Ranges: a penalty turn's progress (under a full turn, #89) many times over, the clock of a turn that
-        // must be completed 30 s after it, the whole course area, a planing dinghy.
+        // must be completed 40 s after it (fleet-rules@3), the whole course area, a planing dinghy.
         #expect(32_767 * Q.penaltyProgressStep > 5 * 2 * .pi)
         #expect(Int(UInt16.max) > 30 * 60 * Race.tickRate)
         #expect(Double(1 << 23) * Q.positionStep >= 32_768)

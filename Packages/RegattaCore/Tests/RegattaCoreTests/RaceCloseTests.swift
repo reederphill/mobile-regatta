@@ -67,7 +67,8 @@ func placeRacing(_ boat: inout Boat, leg: Int, at position: Vec2) {
         // A DSQ doesn't open the window: only a finisher does (#8). Here she crosses the line on the tick her
         // penalty turn's complete deadline passes (#89): owing it she doesn't finish, and she is disqualified.
         let dsq = testRace(seats: [.human, .human], prestartSeconds: 1, seed: 7)
-        try jump(dsq, to: 2_999) { placeToFinish(&$0.seats[0].boat, in: dsq, penaltyTurnsOwed: 1, penaltyClockTick: 3_000 - 900) }
+        let clock = 3_000 - RulesConfig.ticks(dsq.rules.raceFormat.penalty.complete)
+        try jump(dsq, to: 2_999) { placeToFinish(&$0.seats[0].boat, in: dsq, penaltyTurnsOwed: 1, penaltyClockTick: clock) }
         dsq.step()
         #expect(dsq.boats[0].status == .dsq && dsq.firstFinishTime == nil && dsq.closeTick == Self.limit)
         let kinds = dsq.drainEvents().map(\.kind)

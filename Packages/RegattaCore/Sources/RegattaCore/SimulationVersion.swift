@@ -93,13 +93,16 @@ import Glibc
 /// 17: penalty turns (#89), on 16. A call (a foul, or a mark touch under rule 31) costs one turn, not a foul's
 ///    two; owed turns add up with no cap (the cap of 4 is gone) and are served in order. Each turn is 360° one
 ///    way: `penaltyProgress` is the current turn's, a turn back gives it up, a full turn serves it and the
-///    excess carries on. Each turn has a clock (`Boat.penaltyClockTick`): started 30° by 15 s and completed by
-///    30 s after it, or DSQ and a ghost at that tick (`missedStart`, `missedComplete`), in the authoritative
-///    race. The rules file's `stackedPenaltyDeadlines` says when a queued turn's clock starts: `sequential`
-///    (fleet-rules@3, the default: at the later of its call and the previous turn's completion) or `fromCall`
+///    excess carries on. Each turn has a clock (`Boat.penaltyClockTick`): started 30° by the rules' start
+///    deadline and completed by their complete deadline after it (fleet-rules@3, the default: 20 s and 40 s;
+///    15 s and 30 s in @1 and @2), or DSQ and a ghost at that tick (`missedStart`, `missedComplete`), in the
+///    authoritative race. The rules file's `stackedPenaltyDeadlines` says when a queued turn's clock starts:
+///    `sequential` (fleet-rules@3: at the later of its call and the previous turn's completion) or `fromCall`
 ///    (schema 1 and 2 files, fleet-rules@1 and @2). Only a tick the player steers (rudder off centre, or the
 ///    tap) completes or gives up a turn; the autohelm holding her moves it neither back past its start nor
 ///    onto the full turn. Crossing the finish line owing a turn no longer disqualifies: she doesn't finish.
+///    Boats sail skiff@2 by default, skiff@1 turning quicker (36°/s from 1.5 kn, a 10°/s floor, rudder drag
+///    0.4 a second): a hard-over 360 in open water takes about 10 s, not 14–22 s.
 public let simulationRevision = 17
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`

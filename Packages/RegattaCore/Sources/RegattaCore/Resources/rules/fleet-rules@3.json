@@ -26,7 +26,7 @@
     "builderValues (JSON Pointers above) are the values the spec leaves to the builder: the near-miss sweep geometry, the escape simulation's candidates, start tick and 'initially' window, and the mark-room-given and 'on a beat' tests.",
     "placeholders await tuning: the start row (#35), edge speed retention (#82) and the beat-sizing calibration factor (#80, #105).",
     "Version 2 is version 1 plus raceFormat.startRow.minimumSpacingHullLengths (schema 2, #85): the closest a squeeze of the start row off land (#82) brings neighbours, centre to centre, so they stay clear ahead and clear astern (#35) with a quarter of a hull between them. A placeholder, like the rest of the start row.",
-    "Version 3 is version 2 plus raceFormat.penalty.stackedPenaltyDeadlines (schema 3, #89): sequential (G4). Owed penalty turns are served in order, and each turn's 15 s and 30 s run from its own call or from when the turn before it is completed, whichever is later. A file before schema 3 means fromCall: each turn's clock runs from its own call."
+    "Version 3 is version 2 plus raceFormat.penalty.stackedPenaltyDeadlines (schema 3, #89): sequential (G4). Owed penalty turns are served in order, and each turn's deadlines run from its own call or from when the turn before it is completed, whichever is later. A file before schema 3 means fromCall: each turn's clock runs from its own call. Its penalty deadlines are also looser than #9's 15 s and 30 s (the owner, 2026-09-27): started by 20 s and completed by 40 s."
   ],
   "incidents": {
     "nearMissSweep": {
@@ -62,8 +62,8 @@
   "raceFormat": {
     "startSequenceSeconds": 60,
     "penalty": {
-      "startSeconds": 15,
-      "completeSeconds": 30,
+      "startSeconds": 20,
+      "completeSeconds": 40,
       "startedTurnDegrees": 30,
       "stackedPenaltyDeadlines": "sequential"
     },

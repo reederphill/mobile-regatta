@@ -74,7 +74,7 @@ public struct SeatView: Sendable, Equatable {
         fleetSize = boats.count
         finishWindowRemaining = shared.finishWindowRemaining
 
-        own = OwnBoat(boat, ease: race.heldInputs[seat].ease, boatClass: boatClass)
+        own = OwnBoat(boat, ease: race.heldInputs[seat].ease, boatClass: boatClass, penalty: race.rules.raceFormat.penalty)
         let rights = race.rightsOfWay(of: seat)
         var others: [OtherBoat] = []
         others.reserveCapacity(boats.count - 1)
@@ -160,6 +160,9 @@ public struct SeatView: Sendable, Equatable {
         public let roundingStage: Int
         /// Penalty turns she owes, as the HUD counts them (#9).
         public let penaltyTurnsOwed: Int
+        /// Her owed penalty turns as the HUD shows them (G4, #89): how many, and the current turn's deadlines
+        /// and progress (`Race.owedPenalty(ofSeat:)`); nil while she owes none.
+        public let penalty: OwedPenalty?
         /// The wind over the ground at her, before her wind shadow: what the wind readouts show (#15).
         public let windOverGround: Wind
         /// The wind she sails in, over the water (the ground wind less the current): what her wind angle
@@ -168,7 +171,7 @@ public struct SeatView: Sendable, Equatable {
         /// Her wind shadow's multiplier on the sailing wind's speed, 1 in clean air: the HUD's shadow cue (#10).
         public let shadow: Double
 
-        init(_ boat: Boat, ease: Bool, boatClass: BoatClass) {
+        init(_ boat: Boat, ease: Bool, boatClass: BoatClass, penalty: RulesConfig.Penalty) {
             position = boat.position
             heading = boat.heading
             speed = boat.speed
@@ -181,6 +184,7 @@ public struct SeatView: Sendable, Equatable {
             legIndex = boat.legIndex
             roundingStage = boat.roundingStage
             penaltyTurnsOwed = boat.penaltyTurnsOwed
+            self.penalty = OwedPenalty(boat, penalty: penalty)
             windOverGround = boat.windOverGround
             sailingWind = boat.sailingWind
             shadow = boat.shadow

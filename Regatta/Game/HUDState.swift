@@ -65,7 +65,8 @@ struct HUDState {
         legNumber = min(p.legIndex + 1, legCount)
         penaltyTurns = p.penaltyTurnsOwed
         if p.penaltyTurnsOwed > 0 {
-            penaltyProgress = abs(p.penaltyProgress) / (2 * .pi * Double(p.penaltyTurnsOwed))
+            // The current turn's share of its 360° (#89): `penaltyProgress` is that turn's alone.
+            penaltyProgress = abs(p.penaltyProgress) / (2 * .pi)
         }
 
         let target: Vec2

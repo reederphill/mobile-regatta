@@ -21,7 +21,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
                           adds planing, the automatic spinnaker, by-the-lee loss and the averaged groove wind
   PolarTable.swift        polar by TWA × TWS, bilinear, with best upwind and downwind VMG derived at load
   Sails.swift             the automatic spinnaker's states and the planing hysteresis (#248)
-  Resources/boat-classes/ boat class files, `<id>@<version>.json`; races sail `skiff@1` by default
+  Resources/boat-classes/ boat class files, `<id>@<version>.json`; races sail `skiff@2` by default
   Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns; schema 2 adds the keyed wind's wobble and ramps
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast
@@ -378,6 +378,6 @@ is, each frame (`WaterTests.waterUpdateStaysCheap` prints its cost).
 - Round the windward mark and leeward mark to port, then finish by crossing the line downwind.
 - Dark water is a puff and pale water is a lull. The faint cone behind each boat is its wind shadow.
 - Fouling another boat or touching a mark costs one penalty turn: a 360° one way, a tack and a gybe. Start
-  it within 15 s and finish it within 30 s or you're disqualified; owe more than one and each gets its own
-  15 s and 30 s once the one before is done. You can't finish while you owe one: take it on the course side
+  it within 20 s and finish it within 40 s or you're disqualified; owe more than one and each gets its own
+  20 s and 40 s once the one before is done. You can't finish while you owe one: take it on the course side
   and cross again.

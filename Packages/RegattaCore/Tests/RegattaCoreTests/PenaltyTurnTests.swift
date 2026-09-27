@@ -15,11 +15,15 @@ func openWaterPenaltyRules(_ stacking: RulesConfig.StackedPenaltyDeadlines) -> R
     return try! RulesConfigFile(data: Data(text.utf8))
 }
 
-/// #89 acceptance: penalty turns (#9, G4, #219). One turn a call, 360° one way, started 30° by 15 s and
-/// completed by 30 s after its clock starts, or DSQ and a ghost at that tick.
+/// #89 acceptance: penalty turns (#9, G4, #219). One turn a call, 360° one way, started 30° by the rules'
+/// start deadline and completed by their complete deadline after its clock starts (fleet-rules@3: 20 s and
+/// 40 s, the owner's loosening of #9's 15 s and 30 s), or DSQ and a ghost at that tick.
 @Suite struct PenaltyTurnTests {
-    static let start = 15 * Race.tickRate
-    static let complete = 30 * Race.tickRate
+    /// The penalty the races sail under: fleet-rules@3's, whatever its stacking.
+    static let penalty = openWaterPenaltyRules(.sequential).content.raceFormat.penalty
+    /// Ticks from a turn's clock to its start deadline, and to its complete deadline.
+    static let start = RulesConfig.ticks(penalty.start)
+    static let complete = RulesConfig.ticks(penalty.complete)
     static let fullTurn = 2 * Double.pi
     /// A full turn at the dinghy's top turn rate (30°/s) takes 12 s, and the rudder a fifth of a second to go
     /// hard over (`rudderSlewPerSecond` 5): she can serve a turn no sooner than 12 s after the call, and
@@ -28,11 +32,12 @@ func openWaterPenaltyRules(_ stacking: RulesConfig.StackedPenaltyDeadlines) -> R
     static let flatOut = twelveSeconds + Race.tickRate / 5
 
     /// A two-boat race in open water (`scriptedWindRace`) under fleet-rules@3 with `stacking`, in `wind`
-    /// (10 kn from the north by default): seat 0 on starboard tack (boom to port) close reaching at 60° at
-    /// the polar's speed, far from every mark and edge. One step in, her autohelm holds that angle.
-    func race(_ stacking: RulesConfig.StackedPenaltyDeadlines = .sequential,
+    /// (10 kn from the north by default), sailing `boatClass` (by default ilca-dinghy@3): seat 0 on starboard
+    /// tack (boom to port) close reaching at 60° at the polar's speed, far from every mark and edge. One step
+    /// in, her autohelm holds that angle.
+    func race(_ stacking: RulesConfig.StackedPenaltyDeadlines = .sequential, boatClass: FileRef? = nil,
               wind: @escaping (Double) -> Wind = steadyWind(knots: 10)) throws -> Race {
-        let race = try scriptedWindRace(rules: openWaterPenaltyRules(stacking), wind: wind) { boat, boatClass in
+        let race = try scriptedWindRace(boatClass: boatClass, rules: openWaterPenaltyRules(stacking), wind: wind) { boat, boatClass in
             let angle = deg2rad(60)
             boat.boomSide = .port
             boat.heading = wrapAngle(boat.windDirection - angle)
@@ -77,7 +82,7 @@ func openWaterPenaltyRules(_ stacking: RulesConfig.StackedPenaltyDeadlines) -> R
 
     // MARK: - Deadlines
 
-    @Test func noTurningBy15sIsDSQAndGhost() throws {
+    @Test func noTurningByTheStartDeadlineIsDSQAndGhost() throws {
         let race = try race()
         let call = race.tick
         #expect(race.penalize(0) == call)
@@ -99,7 +104,7 @@ func openWaterPenaltyRules(_ stacking: RulesConfig.StackedPenaltyDeadlines) -> R
         #expect(race.owedPenalty(ofSeat: 0) == nil)
     }
 
-    @Test func startedButIncompleteBy30sIsDSQ() throws {
+    @Test func startedButIncompleteByTheCompleteDeadlineIsDSQ() throws {
         let race = try race()
         let call = race.tick
         race.penalize(0)
@@ -166,6 +171,27 @@ func openWaterPenaltyRules(_ stacking: RulesConfig.StackedPenaltyDeadlines) -> R
         let boat = race.boats[0]
         #expect(boat.penaltyTurnsOwed == 0 && boat.penaltyProgress == 0 && boat.penaltyClockTick == nil)
         #expect(race.owedPenalty(ofSeat: 0) == nil && !boat.isGhost)
+    }
+
+    /// The owner (#89): a skiff's 360 shouldn't take 14–22 s, as skiff@1's did. On skiff@2, the default, a
+    /// clean turn, the rudder hard over from the call in open water, is served in about 10 s, and within 11 s,
+    /// at 8, 12 and 16 kn, whichever way round she turns it.
+    @Test(arguments: [8.0, 12, 16])
+    func skiffCleanTurnTakesAboutTenSeconds(knots: Double) throws {
+        let skiff = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version).ref
+        #expect(skiff == RaceFiles.defaults.boatClass.ref && skiff.version == 2)
+        for rudder in [1.0, -1.0] {
+            let race = try race(boatClass: skiff, wind: steadyWind(knots: knots))
+            let call = race.tick
+            race.penalize(0)
+            helm(race, rudder)
+            let log = steps(race, limit: 11 * Race.tickRate, until: { _, kinds in Self.served(kinds) })
+            let done = try #require(log.last)
+            let seconds = Double(done.tick - call) / Double(Race.tickRate)
+            #expect(Self.served(done.kinds), "\(knots) kn, rudder \(rudder): not served in 11 s")
+            #expect(seconds >= 9 && seconds <= 11, "\(knots) kn, rudder \(rudder): served in \(seconds) s")
+            #expect(!log.contains { $0.kinds.contains(.penaltyReset(seat: 0)) || Self.disqualified($0.kinds) })
+        }
     }
 
     // MARK: - Owed turns
@@ -250,7 +276,7 @@ func openWaterPenaltyRules(_ stacking: RulesConfig.StackedPenaltyDeadlines) -> R
     }
 
     /// Two calls 5 s apart, the first turn served turning flat out from the second (in about 12 s). Under `sequential` (G4, the
-    /// default) the second turn's 15 s and 30 s run from when the first was completed; under `fromCall`, from its
+    /// default) the second turn's deadlines run from when the first was completed; under `fromCall`, from its
     /// own call (`docs/rules-file.md`). Either way the first turn's run from its call, and the second call fixes
     /// its turn's clock (a rule call's deadlines) only under `fromCall`.
     @Test func stackedDeadlinesFollowTheConfig() throws {

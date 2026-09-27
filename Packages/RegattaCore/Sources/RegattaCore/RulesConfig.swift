@@ -146,7 +146,7 @@ public struct RulesConfig: DataFileContent {
     /// served in order either way; a turn's clock is fixed when it becomes the current one.
     public enum StackedPenaltyDeadlines: String, Sendable, Equatable, CaseIterable {
         /// At its own call or when the turn before it is completed, whichever is later (G4, the default):
-        /// a turn queued behind another gets its full 15 s and 30 s once that one is done.
+        /// a turn queued behind another gets its full start and complete windows once that one is done.
         case sequential
         /// At its own call, however many turns are owed ahead of it: what a rules file before schema 3 meant,
         /// the option G4 turned down.

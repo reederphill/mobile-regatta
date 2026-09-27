@@ -241,22 +241,33 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
 }
 
 @Suite struct BotPenaltyTurnTests {
-    /// Seat 0 at `offset` from the windward mark, owing a turn with 60° of it already turned (her
-    /// rounding counts towards it), the other boat far off: the rudder her brain answers with, given
-    /// the side she turns penalties to.
-    func rudder(atOffset offset: Vec2, penaltyDirection: Double) throws -> Int8 {
+    /// The bot's rudder hard over to `direction` (−1 port, 1 starboard), as a held input.
+    static func hardOver(_ direction: Double) -> Int8 { BoatInput(rudder: direction).rudder }
+
+    /// Seat 0 at `offset` from the windward mark, 20 s into the sequence, owing a turn with 60° of it already
+    /// turned (her rounding counts towards it) whose clock started `since` seconds ago, and seat 1 at `other`
+    /// from her (far off unless given): the rudder her brain answers with, given the side she turns penalties
+    /// to, and the race.
+    func decide(atOffset offset: Vec2, penaltyDirection: Double, since: Double = 0,
+                other: Vec2? = nil) throws -> (rudder: Int8, race: Race) {
         let race = botRace(seats: [.bot, .bot], seed: 5)
+        for _ in 0..<(20 * Race.tickRate) { race.step() }
         var snapshot = race.exportSnapshot()
-        snapshot.seats[0].boat.position = race.course.obstacles[CourseLayout.windwardIndex].position + offset
+        let position = race.course.obstacles[CourseLayout.windwardIndex].position + offset
+        snapshot.seats[0].boat.position = position
         snapshot.seats[0].boat.status = .racing
         snapshot.seats[0].boat.penaltyTurnsOwed = 1
         snapshot.seats[0].boat.penaltyProgress = deg2rad(60)
-        snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+        snapshot.seats[0].boat.penaltyClockTick = snapshot.tick - Int(since * Double(Race.tickRate))
+        if let other {
+            snapshot.seats[1].boat.position = position + other
+            snapshot.seats[1].boat.status = .racing
+        }
         try race.importSnapshot(snapshot)
         #expect(race.boats[0].isTakingPenalty)
         var brain = BotBrain(style: BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, holdDepth: 20,
                                              timingSlack: 0, penaltyDirection: penaltyDirection))
-        return brain.decide(race.seatView(for: 0)).input.rudder
+        return (brain.decide(race.seatView(for: 0)).input.rudder, race)
     }
 
     /// The #79 smoke breach: a bot that touched a mark spun hard over beside it on `isTakingPenalty`,
@@ -264,9 +275,73 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     /// the mark she sails (the same rudder whichever side she turns penalties to); clear, she turns.
     @Test func aBotOwingATurnBesideAMarkSailsClearBeforeTurning() throws {
         let beside = Vec2(3, -3)
-        #expect(try rudder(atOffset: beside, penaltyDirection: 1) == rudder(atOffset: beside, penaltyDirection: -1))
+        #expect(try decide(atOffset: beside, penaltyDirection: 1).rudder == decide(atOffset: beside, penaltyDirection: -1).rudder)
         let clear = Vec2(30, -30)
-        #expect(try rudder(atOffset: clear, penaltyDirection: 1) == BoatInput(rudder: 1.0).rudder)
-        #expect(try rudder(atOffset: clear, penaltyDirection: -1) == BoatInput(rudder: -1.0).rudder)
+        #expect(try decide(atOffset: clear, penaltyDirection: 1).rudder == Self.hardOver(1))
+        #expect(try decide(atOffset: clear, penaltyDirection: -1).rudder == Self.hardOver(-1))
+    }
+
+    /// #89: she starts her turn at once whoever is near. Waiting for clear water in the pre-start crowd
+    /// missed the start deadline: 11 of the smoke's 30 boats were disqualified.
+    @Test func aBotStartsItsTurnAtOnceWhateverBoatsAreNear() throws {
+        let clear = Vec2(30, -30)
+        for direction in [1.0, -1.0] {
+            let (rudder, race) = try decide(atOffset: clear, penaltyDirection: direction, other: Vec2(3, 4))
+            #expect((race.boats[1].position - race.boats[0].position).length == 5)
+            #expect(rudder == Self.hardOver(direction))
+        }
+    }
+
+    /// #89: beside a mark she sails on to get clear of it, but never past her turn's start deadline:
+    /// `penaltyStartMargin` before it she turns wherever she is, away from the mark, whichever side she
+    /// turns penalties to.
+    @Test func besideAMarkABotStillStartsItsTurnBeforeTheStartDeadline() throws {
+        let beside = Vec2(3, -3)
+        let start = RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.start
+        let late = start - BotBrain.penaltyStartMargin
+        let (rudder, race) = try decide(atOffset: beside, penaltyDirection: 1, since: late)
+        #expect(try decide(atOffset: beside, penaltyDirection: -1, since: late).rudder == rudder)
+        let boat = race.boats[0]
+        let mark = race.course.obstacles[CourseLayout.windwardIndex].position
+        let markIsToStarboard = (mark - boat.position).dot(boat.forward.rightPerp) > 0
+        #expect(rudder == Self.hardOver(markIsToStarboard ? -1 : 1), "hard over away from the mark")
+        // A moment earlier she was still sailing on.
+        #expect(try decide(atOffset: beside, penaltyDirection: 1, since: late - 1).rudder
+                == decide(atOffset: beside, penaltyDirection: -1, since: late - 1).rudder)
+    }
+
+    /// #89: a bot owing two turns in open water serves both inside their deadlines, hard over the same way
+    /// from the moment she starts until she owes none: through head to wind and on into the second turn,
+    /// never giving one up.
+    @Test func aBotServesOwedTurnsHardOverOneWayInsideTheDeadlines() throws {
+        let race = botRace(seats: [.bot, .bot], seed: 5)
+        var controllers = allBots(race)
+        sail(race, &controllers, ticks: race.setup.startSequenceTicks + 60 * Race.tickRate)
+        var snapshot = race.exportSnapshot()
+        let open = race.course.startLine.centre + race.course.upwind * 150 + race.course.right * 60
+        snapshot.seats[0].boat.position = open
+        snapshot.seats[0].boat.penaltyTurnsOwed = 2
+        snapshot.seats[0].boat.penaltyProgress = 0
+        snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+        snapshot.seats[0].boat.queuedPenaltyCallTicks = [snapshot.tick]
+        snapshot.seats[0].heldInput = .neutral
+        snapshot.seats[1].boat.position = open + race.course.right * 200
+        try race.importSnapshot(snapshot)
+        _ = race.drainEvents()
+        #expect(race.boats[0].status == .racing && race.boats[0].penaltyTurnsOwed == 2)
+
+        var kinds: [RaceEvent.Kind] = []
+        var held: Set<Int8> = []
+        let complete = RulesConfig.ticks(race.rules.raceFormat.penalty.complete)
+        sail(race, &controllers, ticks: 2 * complete) { race in
+            kinds += race.drainEvents().map(\.kind)
+            let rudder = race.heldInputs[0].rudder
+            if race.boats[0].penaltyTurnsOwed > 0 && (!held.isEmpty || abs(Int(rudder)) == 127) { held.insert(rudder) }
+        }
+        #expect(kinds.filter { $0 == .penaltyServed(seat: 0) }.count == 2)
+        #expect(!kinds.contains(.penaltyReset(seat: 0)))
+        #expect(!kinds.contains { if case .disqualified(seat: 0, _) = $0 { true } else { false } })
+        #expect(race.boats[0].penaltyTurnsOwed == 0 && race.boats[0].status == .racing)
+        #expect(held.count == 1 && held.allSatisfy { abs(Int($0)) == 127 }, "\(held)")
     }
 }

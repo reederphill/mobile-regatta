@@ -153,6 +153,7 @@ import RegattaCore
                 #expect(view.own.windOverGround == boat.windOverGround && view.own.sailingWind == boat.sailingWind)
                 #expect(view.own.ease == race.heldInputs[seat].ease)
                 #expect(view.own.autohelm == boat.autohelmReading(in: race.boatClass))
+                #expect(view.own.penalty == race.owedPenalty(ofSeat: seat))
                 for other in view.others {
                     #expect(other.rightOfWay == race.rightOfWay(seat, other.seat))
                     #expect(other.velocity == race.boats[other.seat].velocity && other.isGhost == race.isGhost(seat: other.seat))
