@@ -1,3 +1,4 @@
+import Foundation
 import RegattaBots
 import RegattaCore
 
@@ -14,6 +15,8 @@ final class PracticeDriver: RaceDriver {
     let isPausable = true
     /// Names and bot marks, kept outside the simulation (#60).
     let roster: FleetRoster
+    /// The bytes of the tuned copies the race sails (#232), by ref: saved beside its log so it replays.
+    let tunedFiles: [FileRef: Data]
 
     private(set) var previousFrame: TickFrame
     private(set) var currentFrame: TickFrame
@@ -30,16 +33,18 @@ final class PracticeDriver: RaceDriver {
     private var queuedTaps: [BoatTap] = []
     private var events: [RaceEvent] = []
 
-    /// A practice race from the app's settings, with you in the setup's human seat, sailed on the bundled
-    /// default files (`RaceFiles.defaults`, dev-venue@2) until the practice setup (#131). `timescale` runs
-    /// it that many times real time (`-timescale`).
+    /// A practice race from the app's settings, with you in the setup's human seat, sailed on the config's
+    /// files: the bundled defaults (`RaceFiles.defaults`), or the tuning panel's, whose tuned copies resolve from
+    /// the config's catalog (#232). `timescale` runs it that many times real time (`-timescale`).
     init(config: RaceConfig, timescale: Double = 1) {
         let setup = config.setup
         do {
-            race = try Race(setup: setup, files: .defaults, mode: .authoritative(windSeed: WindSeed(config.windSeed)))
+            race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: config.files.catalog),
+                            mode: .authoritative(windSeed: WindSeed(config.windSeed)))
         } catch {
-            preconditionFailure("a practice setup names the default files: \(error)")
+            preconditionFailure("a practice setup names files it can resolve: \(error)")
         }
+        tunedFiles = config.files.tunedFiles
         seats = config.seatControllers
         roster = config.roster
         myBoatIndex = setup.seats.firstIndex(of: .human) ?? 0

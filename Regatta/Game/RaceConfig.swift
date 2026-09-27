@@ -1,3 +1,4 @@
+import Foundation
 import RegattaBots
 import RegattaCore
 
@@ -23,8 +24,36 @@ extension FleetRoster {
     }
 }
 
-/// A practice race as the app starts it: you in seat 0 and `opponents` bots, the race seed, and the
-/// wind seed the device holds for practice (ADR 0001; online, the server keeps it).
+/// The data files a practice race is sailed on (ADR 0004): the bundled defaults, or the debug tuning panel's
+/// choice (#232), whose tuned copies (#229) resolve from `catalog` and are saved beside the race's log with
+/// `tunedFiles`' bytes so it replays. Two are equal when they name the same files.
+struct PracticeFiles: Equatable {
+    var boatClass: FileRef
+    var venue: FileRef
+    var conditions: FileRef
+    var rulesConfiguration: FileRef
+    /// Where the race's tuned copies resolve from, ahead of this build's bundled files.
+    var catalog = RaceFileCatalog()
+    /// Each tuned copy's exact bytes, by its ref: what the race's log is saved with (`RaceLogFolder`).
+    var tunedFiles: [FileRef: Data] = [:]
+
+    /// The bundled files a `RaceSetup` names unless told otherwise (`RaceFiles.defaults`).
+    static var defaults: PracticeFiles {
+        let files = RaceFiles.defaults
+        return PracticeFiles(boatClass: files.boatClass.ref, venue: files.venue.ref, conditions: files.conditions.ref,
+                             rulesConfiguration: files.rulesConfiguration.ref)
+    }
+
+    /// Whether any file is a tuned copy.
+    var isTuned: Bool { [boatClass, venue, conditions, rulesConfiguration].contains { $0.tune != nil } }
+
+    static func == (a: PracticeFiles, b: PracticeFiles) -> Bool {
+        (a.boatClass, a.venue, a.conditions, a.rulesConfiguration) == (b.boatClass, b.venue, b.conditions, b.rulesConfiguration)
+    }
+}
+
+/// A practice race as the app starts it: you in seat 0 and `opponents` bots, the race seed, the wind seed the
+/// device holds for practice (ADR 0001; online, the server keeps it), and the files it's sailed on.
 struct RaceConfig: Equatable {
     var opponents = 7
     var laps = RaceSetup.defaultLaps
@@ -36,6 +65,8 @@ struct RaceConfig: Equatable {
     var windSeed: UInt64
     /// A bot controller sails your seat too (`-demo`, `-perf`).
     var botSailsYourBoat = false
+    /// The bundled defaults, or the tuning panel's files (#232, Debug builds). Bots sail them too (#19).
+    var files = PracticeFiles.defaults
 
     init(opponents: Int = 7, laps: Int = RaceSetup.defaultLaps, prestartSeconds: Double = 60,
          seed: UInt64, windSeed: UInt64, botSailsYourBoat: Bool = false) {
@@ -56,13 +87,17 @@ struct RaceConfig: Equatable {
     }
 
     /// The menu keeps opponents in 1...15 and `-perf` sails 15, so the fleet is always a valid 2...16. It
-    /// names the bundled default files (`RaceFiles.defaults`) until the practice setup (#131).
+    /// names `files`: the bundled defaults (`RaceFiles.defaults`) unless the tuning panel chose others (#232).
     var setup: RaceSetup {
         try! RaceSetup(
             raceSeed: RaceSeed(seed),
             seats: [.human] + Array(repeating: .bot, count: opponents),
             laps: laps,
-            startSequenceTicks: Int((prestartSeconds * Double(Race.tickRate)).rounded())
+            startSequenceTicks: Int((prestartSeconds * Double(Race.tickRate)).rounded()),
+            boatClass: files.boatClass,
+            venue: files.venue,
+            conditions: files.conditions,
+            rulesConfiguration: files.rulesConfiguration
         )
     }
 

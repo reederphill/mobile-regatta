@@ -25,6 +25,10 @@ struct MenuPageView: View {
                 DevRaceServerField()
                 #endif
             }
+        #if DEBUG
+        case .tuning:
+            TuningView(model: model.tuning)
+        #endif
         }
     }
 }

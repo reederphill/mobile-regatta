@@ -7,18 +7,32 @@ import RegattaCore
 /// two ticks (`RenderWorld`). The scene never holds a `Race`.
 final class GameScene: SKScene {
     static let pointsPerMeter: CGFloat = 8
-    /// The boat camera's zoom until you pinch.
-    static let defaultZoom: CGFloat = 0.8
+    /// The boat camera's zoom until you pinch, unless the tuning panel (#232) sets another.
+    static let defaultZoom = CGFloat(CameraStyle.standard.defaultZoom)
 
     let driver: any RaceDriver
     let roster: FleetRoster
     weak var session: GameSession?
     /// Follow your boat, or frame the whole course. Render fixtures set it (#62); the device setting is #113.
     var cameraMode: LaunchOptions.CameraMode = .boat
-    /// The water's look: the debug tuning panel's (#232) seam, live.
+    /// The water's look: the debug tuning panel's (#232) seam, live, even on a paused race.
     var waterStyle: WaterStyle {
         get { water.style }
-        set { water.style = newValue }
+        set {
+            water.style = newValue
+            needsPausedRender = true
+        }
+    }
+    /// The camera's framing: the debug tuning panel's (#232) seam, live, even on a paused race. A new default zoom
+    /// replaces your pinch.
+    var cameraStyle = CameraStyle.standard {
+        didSet {
+            if cameraStyle.defaultZoom != oldValue.defaultZoom {
+                zoom = CGFloat(cameraStyle.defaultZoom)
+                cam.setScale(1 / zoom)
+            }
+            needsPausedRender = true
+        }
     }
     /// The water's tier: the thermal ladder's (#127) seam. Puff shading and the edge tint draw in every tier.
     var waterQuality: WaterQuality {
@@ -46,6 +60,8 @@ final class GameScene: SKScene {
     private var hudCountdown = 0.0
     private var laylineCountdown = 0.0
     private var zoom = GameScene.defaultZoom
+    /// A render-only value changed while the race is paused: draw the standing world once more with it.
+    private var needsPausedRender = false
 
     private var portTouches = Set<UITouch>()
     private var starboardTouches = Set<UITouch>()
@@ -167,7 +183,15 @@ final class GameScene: SKScene {
         }
         let frameTime = min(currentTime - (lastUpdate ?? currentTime), 0.1)
         lastUpdate = currentTime
-        guard let session, !session.isPaused else { return }
+        guard let session else { return }
+        guard !session.isPaused else {
+            // The tuning panel's render-only values show over a paused race (#232). Nothing steps: no time passes.
+            if needsPausedRender {
+                needsPausedRender = false
+                render(driver.renderWorld)
+            }
+            return
+        }
 
         updateRudder(frameTime)
         // The driver latches it for the next tick. With `-demo` a bot sails your seat and ignores it.
@@ -197,8 +221,8 @@ final class GameScene: SKScene {
         let player = world.me
         switch cameraMode {
         case .boat:
-            let target = point(player.position + player.velocity * 2)
-            let k = settled ? 1 : CGFloat(1 - exp(-dt * 3))
+            let target = point(player.position + player.velocity * cameraStyle.lookAheadSeconds)
+            let k = settled ? 1 : CGFloat(1 - exp(-dt * cameraStyle.followRate))
             cam.position = CGPoint(x: cam.position.x + (target.x - cam.position.x) * k,
                                    y: cam.position.y + (target.y - cam.position.y) * k)
         case .course:
@@ -222,19 +246,20 @@ final class GameScene: SKScene {
 
     /// Puts the whole course, marks, pin and committee boat, in view with a margin.
     private func frameCourse(_ course: CourseLayout) {
-        guard let framing = Self.courseFraming(course, sceneSize: size, zoom: zoom) else { return }
+        guard let framing = Self.courseFraming(course, sceneSize: size, zoom: zoom, margin: CGFloat(cameraStyle.courseMargin))
+        else { return }
         cam.position = framing.center
         cam.setScale(framing.scale)
     }
 
     /// The course camera over `course` in a scene of `sceneSize`: centred on the course, scaled to show the whole
     /// of it (marks, pin and committee boat) with a margin, and never closer than `zoom`.
-    static func courseFraming(_ course: CourseLayout, sceneSize: CGSize, zoom: CGFloat) -> (center: CGPoint, scale: CGFloat)? {
+    static func courseFraming(_ course: CourseLayout, sceneSize: CGSize, zoom: CGFloat,
+                              margin: CGFloat = CGFloat(CameraStyle.standard.courseMargin)) -> (center: CGPoint, scale: CGFloat)? {
         let points = course.obstacles.map(\.position)
         let xs = points.map { CGFloat($0.x) * pointsPerMeter }, ys = points.map { CGFloat($0.y) * pointsPerMeter }
         guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
               sceneSize.width > 0, sceneSize.height > 0 else { return nil }
-        let margin: CGFloat = 1.2
         return (CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2),
                 max((maxX - minX) / sceneSize.width, (maxY - minY) / sceneSize.height, 1 / zoom) * margin)
     }

@@ -43,6 +43,10 @@ final class GameSession {
     /// right and bottom edges went unfiltered.
     var vision: VisionFilter
 
+    /// The race sails tuned copies of its files, or is drawn with tuned render values: the TUNED badge (#232,
+    /// Debug builds).
+    var isTuned = false
+
     var hud = HUDState()
     var messages: [RaceMessage] = []
     var results: [ResultRow] = []
