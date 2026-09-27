@@ -215,13 +215,19 @@ import Testing
         #expect(TunedCopy.upwindAngleSpeeds(twaDegrees: rows, speedKnots: calm, to: 40) == calm)
     }
 
-    /// The files the panel can tune are the bundle's, listed by id and version.
-    @Test func bundledKeysListTheBundle() {
+    /// The files the panel can tune are the bundle's, listed by id and version, each one `bundledData` reads;
+    /// another bundle lists its own folder, or nothing where it has none.
+    @Test func bundledKeysListTheBundle() throws {
         let conditions = ConditionsFile.bundledKeys()
         #expect(conditions.contains(Self.conditionsKey))
         #expect(conditions.count == 12)
         #expect(BoatClassFile.bundledKeys().contains(DataFileKey(id: "skiff", version: 1)))
         #expect(RulesConfigFile.bundledKeys() == [DataFileKey(id: "fleet-rules", version: 1)])
         #expect(VenueFile.bundledKeys().map(\.version) == [1, 2, 3])
+        for key in conditions {
+            #expect(try ConditionsFile.bundledData(id: key.id, version: key.version) != nil, "\(key)")
+        }
+        #expect(VenueFile.bundledKeys(in: .module) == [DataFileKey(id: "test-venue", version: 1)])
+        #expect(BoatClassFile.bundledKeys(in: .module).isEmpty)
     }
 }

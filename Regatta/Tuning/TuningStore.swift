@@ -181,12 +181,28 @@ struct TuningStore {
         }
         let tune = highest + 1
         // Written whole beside it, then moved into place: a move never replaces a file that's there, so a tuned
-        // copy, once written, is never rewritten.
+        // copy, once written, is never rewritten. An app stopped between the two leaves the staged file hidden;
+        // `removeStagedCopies` clears it at the next launch.
         let staged = folder.appendingPathComponent(".\(prefix)\(tune)-\(UUID().uuidString).json")
         try data.write(to: staged, options: .atomic)
         defer { try? manager.removeItem(at: staged) }
         try manager.moveItem(at: staged, to: folder.appendingPathComponent("\(prefix)\(tune).json"))
         return tune
+    }
+
+    /// Removes the hidden staged copies `tune(for:)` left in `files/<kind folder>/` when the app stopped between
+    /// writing one and moving it into place. Run before any tuned copy is written (the panel's model does at
+    /// launch): a staged copy is only ever in flight inside `tune(for:)`.
+    func removeStagedCopies() {
+        guard let files = root?.appendingPathComponent("files", isDirectory: true),
+              let kinds = try? manager.contentsOfDirectory(at: files, includingPropertiesForKeys: nil) else { return }
+        for kind in kinds {
+            for url in (try? manager.contentsOfDirectory(at: kind, includingPropertiesForKeys: nil)) ?? [] {
+                let name = url.lastPathComponent
+                guard name.hasPrefix("."), name.contains("+tune"), url.pathExtension == "json" else { continue }
+                try? manager.removeItem(at: url)
+            }
+        }
     }
 
     // MARK: Races

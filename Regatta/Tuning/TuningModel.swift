@@ -48,6 +48,7 @@ final class TuningModel {
 
     init(store: TuningStore) {
         self.store = store
+        store.removeStagedCopies()
         tuning = store.loadCurrent() ?? Tuning()
         savedTunings = store.savedTunings()
         races = store.races()
