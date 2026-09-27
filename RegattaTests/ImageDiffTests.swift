@@ -140,6 +140,14 @@ import Testing
                 "\(coverage.summary)")
     }
 
+    /// With no filter, nothing moves, so every patch counts as unfiltered: the check can fail.
+    @Test func noFilterLeavesEveryPatchUnfiltered() throws {
+        let plain = Self.sea(boatAt: 90, 80)
+        let coverage = try #require(FilterCoverage(filtered: plain, unfiltered: plain))
+        #expect(coverage.patches.count == 8)
+        #expect(coverage.unfiltered == coverage.patches, "\(coverage.summary)")
+    }
+
     /// The bottom patches sit above the home-indicator band, which a render's diff leaves out.
     @Test func coverageLeavesTheBottomBandOut() throws {
         let plain = Self.sea(boatAt: 90, 80)

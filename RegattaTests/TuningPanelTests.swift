@@ -99,6 +99,16 @@ import RegattaCore
         #expect(first.tune == 1 && second.tune == 2 && first.hash != second.hash)
         model.set(wobble, to: 2)
         #expect(model.practiceFiles().conditions == first)
+
+        // A copy staged but never moved into place (the app stopped between the two) is cleared at the next
+        // launch; the copies in place stay.
+        let folder = root.appendingPathComponent("files/\(Conditions.bundleDirectory)", isDirectory: true)
+        let name = "\(first.id)@\(first.version)+tune"
+        let staged = folder.appendingPathComponent(".\(name)3-\(UUID().uuidString).json")
+        try Data("{}".utf8).write(to: staged)
+        _ = TuningModel(store: model.store)
+        #expect(!FileManager.default.fileExists(atPath: staged.path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted() == ["\(name)1.json", "\(name)2.json"])
     }
 
     /// Values persist until reset, and a slider set back to its file's value is dropped.

@@ -328,14 +328,23 @@ public struct DataFile<Content: DataFileContent>: Sendable {
     }
 
     /// Every `<id>@<version>.json` in `bundle`'s `Content.bundleDirectory`, sorted by id, then version.
+    ///
+    /// The folder is listed with `FileManager` on every platform: `Bundle.urls(forResourcesWithExtension:subdirectory:)`
+    /// gives `[URL]` on Apple platforms and `[NSURL]` in Linux's Foundation. It is the folder `bundledData` reads
+    /// from: the bundle's resources folder, or failing that where the bundle's resource lookup finds it.
     public static func bundledKeys(in bundle: Bundle) -> [DataFileKey] {
-        var urls = bundle.urls(forResourcesWithExtension: "json", subdirectory: Content.bundleDirectory) ?? []
-        if urls.isEmpty, let folder = bundle.resourceURL?.appendingPathComponent(Content.bundleDirectory, isDirectory: true) {
-            // Listed from the folder where a bundle's resource lookup doesn't list a subdirectory.
-            urls = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? [])
-                .filter { $0.pathExtension == "json" }
+        let manager = FileManager.default
+        func isFolder(_ url: URL) -> Bool {
+            var isDirectory: ObjCBool = false
+            return manager.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
         }
-        return urls.compactMap { url -> DataFileKey? in
+        let candidates = [
+            bundle.resourceURL?.appendingPathComponent(Content.bundleDirectory, isDirectory: true),
+            bundle.url(forResource: Content.bundleDirectory, withExtension: nil),
+        ]
+        guard let folder = candidates.lazy.compactMap({ $0 }).first(where: isFolder),
+              let urls = try? manager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return [] }
+        return urls.filter { $0.pathExtension == "json" }.compactMap { url -> DataFileKey? in
             let name = url.deletingPathExtension().lastPathComponent
             guard let at = name.lastIndex(of: "@"), let version = Int(name[name.index(after: at)...]) else { return nil }
             let id = String(name[..<at])
