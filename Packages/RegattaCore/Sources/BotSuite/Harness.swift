@@ -100,9 +100,9 @@ struct RaceTally {
     private var foulsAsOffender: [Int]
     private var disqualifications: [Int]
     private var ocsNotices: [Int]
-    /// Each seat's boat contacts, oldest first: the id of the incident each one opened, if any.
+    /// Each seat's boat contacts, oldest first: the id of the incident each one belongs to (the one it
+    /// opened, or the pair's still open), if any.
     private var contacts: [[Int?]]
-    private var incidentsSeen = 0
     /// Which legs are beats: those rounding the windward mark.
     private let isBeat: [Bool]
     private let upwind: Vec2
@@ -135,9 +135,6 @@ struct RaceTally {
 
     /// Call once after each `race.step()`, with the events it emitted.
     mutating func record(_ race: Race, events: [RaceEvent]) {
-        let opened = (incidentsSeen..<race.incidents.count).compactMap { race.incidents[$0] }
-        incidentsSeen = race.incidents.count
-        var claimed: [Int] = []
         for event in events {
             switch event.kind {
             case .ocsNotice(let seat): ocsNotices[seat] += 1
@@ -148,19 +145,14 @@ struct RaceTally {
             case .disqualified(let seat, _): disqualifications[seat] += 1
             case .tacked(let seat) where !race.boats[seat].isTakingPenalty: legTacks[seat] += 1
             case .contact(let pair):
-                let id = opened.first { $0.parties == pair && !claimed.contains($0.id) }?.id
-                if let id { claimed.append(id) }
+                // A contact opens an incident for the pair, or touches again inside the one still open
+                // (#88: one per pair until they separate): either way the pair's latest. A near miss opens
+                // one with no contact, so it counts in `foulsAsOffender` only.
+                let id = race.incidents.latest(between: pair.low, and: pair.high)?.id
                 contacts[pair.low].append(id)
                 contacts[pair.high].append(id)
             default: break
             }
-        }
-        // Until #88 emits `contact`, the race opens an incident only when two boats touch (and not within
-        // 5 s of the pair's last call), so each incident no contact event claims is a contact. #88 adds
-        // near-miss incidents: this fallback goes when it lands.
-        for incident in opened where !claimed.contains(incident.id) {
-            contacts[incident.parties.low].append(incident.id)
-            contacts[incident.parties.high].append(incident.id)
         }
         for (seat, boat) in race.boats.enumerated() {
             if boat.status == .racing && !boat.isTakingPenalty && boat.twa < noGo && boat.speed < BotRaceHarness.ironsSpeed {

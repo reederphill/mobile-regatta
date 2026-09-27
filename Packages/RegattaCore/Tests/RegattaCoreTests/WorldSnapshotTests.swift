@@ -37,8 +37,11 @@ struct LogFeeder {
     }
 
     /// Steps both races `steps` ticks on the log's inputs, expecting equal digests and events every tick.
+    /// The copy takes the original's umpire memory first: which incidents are open is never world state
+    /// (#88), so without it the copy could call a pair the original, still inside their incident, doesn't.
     static func expectSameFuture(_ original: Race, _ copy: Race, steps: Int, feeder: LogFeeder = feeder,
                                  sourceLocation: SourceLocation = #_sourceLocation) {
+        copy.umpire = original.umpire
         #expect(copy.digest() == original.digest(), "differs at import, tick \(original.tick)", sourceLocation: sourceLocation)
         for _ in 0..<steps {
             feeder.step(original)
@@ -71,7 +74,7 @@ struct LogFeeder {
         while race.tick < Self.log.finalTick {
             Self.feeder.step(race)
             let snapshot = race.exportSnapshot()
-            if !snapshot.touchingBoats.isEmpty && !snapshot.foulMemory.isEmpty { found = snapshot; break }
+            if !snapshot.touchingBoats.isEmpty { found = snapshot; break }
         }
         let snapshot = try #require(found, "the golden race has no boat contact")
         _ = race.drainEvents()
@@ -80,7 +83,6 @@ struct LogFeeder {
         // Dropping the contact memory changes the future: the contact would count as new again.
         var forgetful = snapshot
         forgetful.touchingBoats = []
-        forgetful.foulMemory = []
         let original = try Self.imported(snapshot)
         let copy = try Self.imported(forgetful)
         Self.feeder.step(original)
@@ -89,8 +91,9 @@ struct LogFeeder {
     }
 
     /// A rule call carries its incident's id, so a race imported after incidents goes on numbering from
-    /// where the original was, not from 0. The golden race calls one foul, so the test sails on 10 s past
-    /// it (clear of the 5 s foul memory) and puts the two boats back as they were the tick before it.
+    /// where the original was, not from 0. The test sails on 10 s past the golden race's first call and puts
+    /// the two boats back as they were the tick before it, overlap and all, in a race that imports that: its
+    /// umpire holds no incident open (`UmpireState` is never in a snapshot), so the pair is called again.
     @Test func importAfterIncidentsNumbersTheNextCallOn() throws {
         let race = Self.feeder.race(at: -1800)
         var firstCall: RuleCall?
@@ -100,14 +103,15 @@ struct LogFeeder {
         }
         let call = try #require(firstCall, "the golden race has no rule call")
         let before = Self.feeder.race(at: call.tick - 1).exportSnapshot()
-        let original = Self.feeder.race(at: call.tick + 10 * Race.tickRate)
-        var aimed = original.exportSnapshot()
+        var aimed = Self.feeder.race(at: call.tick + 10 * Race.tickRate).exportSnapshot()
         let incidentsBefore = aimed.incidents.count
         #expect(incidentsBefore > 0)
+        let pair = WorldSnapshot.SeatPair(min(call.offender, call.victim), max(call.offender, call.victim))
         for seat in [call.offender, call.victim] { aimed.seats[seat] = before.seats[seat] }
-        aimed.touchingBoats.removeAll { $0 == .init(min(call.offender, call.victim), max(call.offender, call.victim)) }
-        try original.importSnapshot(aimed)
-        _ = original.drainEvents()
+        aimed.touchingBoats.removeAll { $0 == pair }
+        aimed.overlaps = (aimed.overlaps.filter { $0.pair != pair } + before.overlaps.filter { $0.pair == pair })
+            .sorted { ($0.pair.a, $0.pair.b) < ($1.pair.a, $1.pair.b) }
+        let original = try Self.imported(aimed)
         let copy = try Self.imported(original.exportSnapshot())
 
         Self.feeder.step(original)
@@ -222,7 +226,6 @@ struct LogFeeder {
         #expect(a.touchingBoats == b.touchingBoats)
         #expect(a.touchingObstacles == b.touchingObstacles)
         #expect(a.touchingEdges == b.touchingEdges)
-        #expect(a.foulMemory == b.foulMemory)
         #expect(a.incidents == b.incidents)
         #expect(a.firstFinishTime == b.firstFinishTime)
         #expect(a.isOver == b.isOver)
@@ -242,6 +245,7 @@ struct LogFeeder {
         snapshot.seats[4].boat.averagedWindSpeed = (snapshot.seats[4].boat.averagedWindSpeed ?? 4) + 1
         try original.importSnapshot(snapshot)
         let copy = try Self.imported(original.exportSnapshot())
+        copy.umpire = original.umpire // not world state (#88)
         #expect(copy.boats[4].spinnaker == .hoisting(remaining: 1.5))
         #expect(copy.boats[4].averagedWindSpeed == snapshot.seats[4].boat.averagedWindSpeed)
         #expect(copy.digest() == original.digest())
@@ -349,9 +353,6 @@ struct LogFeeder {
         var badTime = good
         badTime.firstFinishTime = .nan
         #expect(throws: WorldSnapshotError.invalidTime) { try Self.imported(badTime) }
-        badTime = good
-        badTime.foulMemory = [.init(pair: .init(0, 1), time: .infinity)]
-        #expect(throws: WorldSnapshotError.invalidTime) { try Self.imported(badTime) }
 
         // A rejected import leaves the race as it was, and it sails on.
         let digest = race.digest()
@@ -372,7 +373,7 @@ struct LogFeeder {
 @Suite struct WorldSnapshotCoverageTests {
     /// Race properties carried by `WorldSnapshot`.
     static let carried: Set<String> = [
-        "tick", "boats", "heldInputs", "boatContacts", "obstacleContacts", "edgeContacts", "lastFoul", "incidents",
+        "tick", "boats", "heldInputs", "boatContacts", "obstacleContacts", "edgeContacts", "incidents",
         "firstFinishTime",
         "isOver",
         "results", // a closed race can't score itself again: the seat events it reads aren't world state
@@ -391,7 +392,7 @@ struct LogFeeder {
         "files": "fixed for the race: the class, venue, conditions and rules configuration the setup names (ADR 0004)",
         "current": "fixed for the race, derived from the venue and the public race seed",
         "tideStateAtGun": "fixed for the race, drawn from the venue and the public race seed (ADR 0003)",
-        "umpire": "umpire memory, the authoritative race's own, never sent to clients; empty until the rules tickets",
+        "umpire": "umpire memory (which incidents are open, #88), the authoritative race's own, never sent to clients or in a snapshot",
         "windSetup": "fixed for the race, drawn from the public race seed",
         "windKeys": "the key generator: it holds the wind seed, never in a snapshot (ADR 0001); import moves it past the snapshot's keys",
         "finishers": "derived on import: the count of finished boats",

@@ -79,6 +79,20 @@ the ranges below.
 | `separationHullLengths` | L | 2 | Contacts between the same two boats closer together than this are one incident. |
 | `lastPointOfCertaintySeconds` | s | 0.5 | A change in overlap or zone state counts only once it has held this long (#18). |
 
+A ruling is triggered by contact or by a near miss (#9, #88). **The near-miss sweep** (builder geometry,
+`RulesConfig.NearMissSweep.hits`): for a pair overlapped as of the last point of certainty, not touching and
+with no incident open, the right-of-way boat (the other must keep clear, `Rules.judge`) is tried on each of
+`headingSamples` headings evenly spaced across ±`headingDegrees` of her own, at her speed through the water
+plus the current. On each, both boats sail on in straight lines at those velocities over the ground (the
+keep-clear boat on her own heading and velocity), checked every `stepTicks` ticks from the first through
+`seconds`. Any check with the hulls overlapping, or closer than `clearanceHullLengths`, is a near miss. No
+turning, no speed change, no dynamics along the way (#92's escape simulation is the dynamic one). Only the
+authoritative race sweeps: a prediction never calls a near miss.
+
+**Incidents** are one per pair: the umpire (`UmpireState`) holds a pair's incident open from the contact or
+near miss that opened it until their hulls are more than `separationHullLengths` apart; a touch or near miss
+before then is part of the same incident and draws no second call.
+
 ### Zone
 
 | Field | Unit | v1 | Meaning |

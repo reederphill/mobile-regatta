@@ -98,8 +98,8 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
     }
 
     /// A merge overwrites the wire fields from the snapshot and race-level state (finishes, first finish,
-    /// the race's end) from the server's event state. The rest (roster, derived fields, contact, foul
-    /// and incident memory) stays as the receiver has it.
+    /// the race's end) from the server's event state. The rest (roster, derived fields, contact and
+    /// incident memory) stays as the receiver has it.
     @Test func applyingKeepsTheReceiversExcludedFields() throws {
         var gen = Gen(seed: 0xE8C1)
         let sender = gen.world(seats: 8)
@@ -107,7 +107,6 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         receiver.firstFinishTime = 12
         receiver.isOver = true
         receiver.touchingBoats = [.init(1, 2)]
-        receiver.foulMemory = [.init(pair: .init(1, 2), time: 11)]
         receiver.incidents.open(between: 1, and: 2, tick: 330, leg: 1)
         receiver.touchingEdges = [.init(seat: 4, kind: .boundary)]
         let before = ObstructionContact(tick: 77, leg: 1, seat: 4, kind: .boundary)
@@ -117,7 +116,7 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         let merged = try Snapshot(world: sender).applied(to: receiver, tick: 77, events: events)
         #expect(merged.tick == 77)
         #expect(merged.firstFinishTime == 20 && !merged.isOver)
-        #expect(merged.touchingBoats == [.init(1, 2)] && merged.foulMemory == receiver.foulMemory)
+        #expect(merged.touchingBoats == [.init(1, 2)])
         #expect(merged.touchingEdges == receiver.touchingEdges)
         #expect(merged.incidents.incidents == receiver.incidents.incidents)
         // The receiver's obstruction contacts after the snapshot's tick are its own prediction ahead of the
