@@ -18,8 +18,8 @@ import RegattaCore
 /// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override).
 /// - `-startSeconds <n>` gives an online dev race an `n`-second start sequence, 1…60.
 /// - `-appearance light|dark` overrides the system appearance, for UI tests of the menus in both (#108).
-/// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race, scene and HUD alike
-///   (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
+/// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
+///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -92,6 +92,10 @@ struct LaunchOptions: Equatable {
         "deut": .deuteranopia, "prot": .protanopia, "trit": .tritanopia, "grey": .greyscale, "sun": .washout,
     ]
 
+    /// What `-vision` takes, for its rejection: the short names, then every filter's own.
+    static let visionNames = "deut, prot, trit, grey, sun, none, deuteranopia, protanopia, tritanopia, "
+        + "greyscale or washout"
+
     private mutating func apply(_ argument: String, _ value: String) {
         switch argument {
         case "-seed":
@@ -116,7 +120,7 @@ struct LaunchOptions: Equatable {
             if let filter = Self.visionShortNames[value] ?? VisionFilter(rawValue: value) {
                 vision = filter
             } else {
-                reject(argument, value, "deut, prot, trit, grey, sun or none")
+                reject(argument, value, Self.visionNames)
             }
         default:
             break

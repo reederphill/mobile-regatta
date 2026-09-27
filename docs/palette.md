@@ -107,5 +107,5 @@ Cue-to-cue hue separation: vermillion–orange 29°, orange–yellow 28°, chevr
 | `water` | `ChartPalette.water` |
 | `gust` | `ChartPalette.puff` |
 | `mark` (`#FF7A1A`, vermillion hue) | `CuePalette.orange` on water; `ChromePalette.tint` in menus |
-| `startLine` | `CuePalette.yellow` |
+| `startLine` | `CuePalette.orange` on water (the pin, and the line before the gun: its ends are marks, #15); the HUD clock stays `CuePalette.yellow` |
 | `boats` | removed (#119 liveries) |
