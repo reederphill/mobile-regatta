@@ -303,19 +303,7 @@ public struct Venue: DataFileContent, Equatable {
         public let points: [Vec2]
 
         /// Whether `p` is inside (even-odd rule). Points exactly on an edge may go either way.
-        public func contains(_ p: Vec2) -> Bool {
-            var inside = false
-            var j = points.count - 1
-            for i in points.indices {
-                let a = points[i], b = points[j]
-                if (a.y > p.y) != (b.y > p.y) {
-                    let x = a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x)
-                    if p.x < x { inside.toggle() }
-                }
-                j = i
-            }
-            return inside
-        }
+        public func contains(_ p: Vec2) -> Bool { Collision.contains(simplePolygon: points, p) }
     }
 
     public init(fileData: Data, header: DataFileHeader) throws {
@@ -497,7 +485,7 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
                         "land \(k) is not closed: its last point must repeat its first, with at least 3 corners")
             ring.removeLast()
             if let problem = Self.simplePolygonProblem(ring) { throw v.invalid("land \(k) \(problem)") }
-            if Self.signedArea(ring) < 0 { ring.reverse() }
+            if Collision.signedArea(ring) < 0 { ring.reverse() }
             land.append(.init(points: ring))
         }
 
@@ -542,38 +530,19 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
         guard n >= 3 else { return "needs at least 3 corners" }
         for i in 0..<n where points[i] == points[(i + 1) % n] { return "repeats corner \(i)" }
         func orientation(_ a: Vec2, _ b: Vec2, _ c: Vec2) -> Double { (b - a).cross(c - a) }
-        func onSegment(_ a: Vec2, _ b: Vec2, _ p: Vec2) -> Bool {
-            min(a.x, b.x) <= p.x && p.x <= max(a.x, b.x) && min(a.y, b.y) <= p.y && p.y <= max(a.y, b.y)
-        }
-        func intersect(_ a: Vec2, _ b: Vec2, _ c: Vec2, _ d: Vec2) -> Bool {
-            let o1 = orientation(a, b, c), o2 = orientation(a, b, d)
-            let o3 = orientation(c, d, a), o4 = orientation(c, d, b)
-            if ((o1 > 0 && o2 < 0) || (o1 < 0 && o2 > 0)) && ((o3 > 0 && o4 < 0) || (o3 < 0 && o4 > 0)) { return true }
-            return (o1 == 0 && onSegment(a, b, c)) || (o2 == 0 && onSegment(a, b, d))
-                || (o3 == 0 && onSegment(c, d, a)) || (o4 == 0 && onSegment(c, d, b))
-        }
         for i in 0..<n {
             let a = points[i], b = points[(i + 1) % n]
             // Neighbouring edge b → c must not double back over a → b.
             let c = points[(i + 2) % n]
             if orientation(a, b, c) == 0 && (a - b).dot(c - b) > 0 { return "doubles back on itself at corner \((i + 1) % n)" }
             for j in stride(from: i + 2, to: n, by: 1) where !(i == 0 && j == n - 1) {
-                if intersect(a, b, points[j], points[(j + 1) % n]) {
+                if Collision.intersects(Segment(a, b), Segment(points[j], points[(j + 1) % n])) {
                     return "is self-intersecting: edge \(i) meets edge \(j)"
                 }
             }
         }
-        guard signedArea(points) != 0 else { return "has no area" }
+        guard Collision.signedArea(points) != 0 else { return "has no area" }
         return nil
-    }
-
-    /// Shoelace area; positive when the ring runs anticlockwise (x east, y north).
-    static func signedArea(_ points: [Vec2]) -> Double {
-        var twice = 0.0
-        for i in points.indices {
-            twice += points[i].cross(points[(i + 1) % points.count])
-        }
-        return twice / 2
     }
 }
 

@@ -209,12 +209,15 @@ import Testing
         var second = index[1]!
         second.outcome = .noCall
         index.update(second)
+        index.recordObstructionContact(ObstructionContact(tick: 410, leg: 1, seat: 6, kind: .boundary))
+        index.recordObstructionContact(ObstructionContact(tick: 412, leg: 1, seat: 2, kind: .land))
         return index
     }
 
     @Test func pairKeysAreSortedAndLookupsWorkEitherWayRound() {
         let index = Self.sample()
         #expect(index.count == 3)
+        #expect(index.obstructionContacts.map(\.seat) == [6, 2])
         #expect(index.pairs == [SeatPair(0, 7), SeatPair(2, 5)])
         #expect(SeatPair(5, 2) == SeatPair(2, 5) && SeatPair(5, 2).low == 2)
         #expect(index.incidents(between: 5, and: 2).map(\.id) == [0, 2])
@@ -233,6 +236,7 @@ import Testing
         let data = try encoder.encode(index)
         let decoded = try JSONDecoder().decode(IncidentIndex.self, from: data)
         #expect(decoded == index)
+        #expect(decoded.obstructionContacts == index.obstructionContacts)
         #expect(decoded.pairs == index.pairs)
         #expect(decoded.incidents(between: 2, and: 5) == index.incidents(between: 2, and: 5))
         #expect(try encoder.encode(decoded) == data)

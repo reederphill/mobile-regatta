@@ -10,7 +10,7 @@ enum PuffFixtures {
     }
 
     static func withRaceArea(_ drawn: WindSetup) -> WindSetup {
-        let course = CourseLayout.derive(windSetup: drawn, fleetSize: 10, laps: RaceSetup.defaultLaps,
+        let course = CourseLayout.derive(windSetup: drawn, land: [], fleetSize: 10, laps: RaceSetup.defaultLaps,
                                          boatClass: Race.defaultBoatClass, rules: Race.defaultRulesConfiguration.content)
         return drawn.with(raceArea: course.raceArea)
     }

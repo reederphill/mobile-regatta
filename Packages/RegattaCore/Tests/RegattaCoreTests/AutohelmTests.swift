@@ -1,18 +1,36 @@
+import Foundation
 import Testing
 @testable import RegattaCore
 
+/// fleet-rules@1 with a race area kilometres across (#82): open water, for races sailed far from every
+/// mark and every edge of the race area.
+let openWaterRules: RulesConfigFile = {
+    var text = String(decoding: try! RulesConfigFile.bundledData(id: "fleet-rules", version: 1)!, as: UTF8.self)
+    for (key, bundled, open) in [("acrossAxisBeatFraction", "0.75", "20"), ("belowLineLineLengths", "1", "30"),
+                                 ("aboveWindwardBeatFraction", "0.25", "5")] {
+        let old = #""\#(key)": \#(bundled)"#
+        precondition(text.components(separatedBy: old).count == 2, "fleet-rules@1's \(key) has moved")
+        text = text.replacingOccurrences(of: old, with: #""\#(key)": \#(open)"#)
+    }
+    return try! RulesConfigFile(data: Data(text.utf8))
+}()
+
 /// A race of two humans in a wind a test scripts (`Race.init(setup:files:mode:current:wind:)`): the same
-/// everywhere on the water, from `wind(seconds)` since the sequence began, with no current. Seat 0 is far
-/// from every mark, seat 1 far from her; `place` sets seat 0 up in the first tick's wind, with the rudder
-/// centred and no autohelm yet, so the next step engages it on her placed angle, as a player letting go.
-/// The boats sail `boatClass`: by default ilca-dinghy@3, the schema-2 class #230's tests were written for.
+/// everywhere on the water, from `wind(seconds)` since the sequence began, with no current, and in open
+/// water (`openWaterRules`). Seat 0 is far from every mark and every edge, seat 1 far from her; `place`
+/// sets seat 0 up in the first tick's wind, with the rudder centred and no autohelm yet, so the next step
+/// engages it on her placed angle, as a player letting go. The boats sail `boatClass`: by default
+/// ilca-dinghy@3, the schema-2 class #230's tests were written for.
 func scriptedWindRace(boatClass: FileRef? = nil, wind: @escaping (_ seconds: Double) -> Wind,
                       place: (inout Boat, BoatClass) -> Void) throws -> Race {
     let sequence = 600 * Race.tickRate
     let boatClass = try boatClass ?? BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
+    var catalog = RaceFileCatalog()
+    try catalog.rulesConfigurations.add(openWaterRules)
     let setup = try RaceSetup(raceSeed: RaceSeed(3), seats: [.human, .human], laps: 1, startSequenceTicks: sequence,
-                              boatClass: boatClass)
-    let race = try Race(setup: setup, files: RaceFiles(resolving: setup), mode: .authoritative(windSeed: WindSeed(3)),
+                              boatClass: boatClass, rulesConfiguration: openWaterRules.ref)
+    let race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
+                        mode: .authoritative(windSeed: WindSeed(3)),
                         current: CurrentField(current: nil, tideStateAtGun: 0),
                         wind: { tick in
                             let w = wind(Double(tick + sequence) / Double(Race.tickRate))
@@ -20,7 +38,7 @@ func scriptedWindRace(boatClass: FileRef? = nil, wind: @escaping (_ seconds: Dou
                         })
     race.step()
     var snapshot = race.exportSnapshot()
-    let away = race.course.startLine.centre + race.course.right * 3_000
+    let away = race.course.startLine.centre + race.course.right * 1_500
     var boat = snapshot.seats[0].boat
     boat.position = away
     boat.rudder = 0
@@ -29,7 +47,7 @@ func scriptedWindRace(boatClass: FileRef? = nil, wind: @escaping (_ seconds: Dou
     place(&boat, race.boatClass)
     snapshot.seats[0].boat = boat
     snapshot.seats[0].heldInput = .neutral
-    snapshot.seats[1].boat.position = away + race.course.right * 3_000
+    snapshot.seats[1].boat.position = away + race.course.right * 1_500
     try race.importSnapshot(snapshot)
     return race
 }

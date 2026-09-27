@@ -59,7 +59,14 @@ import Glibc
 ///    hoist or drop), loses speed by the degree by the lee (the spinnaker collapsing), and its autohelm's
 ///    grooves follow a running average of the wind strength at the boat. Schema-2 classes (ilca-dinghy@3)
 ///    sail as on 11. The digest hashes planing, the spinnaker and the averaged wind.
-public let simulationRevision = 12
+/// 13: race area boundary and land contact (#82), on 12. After obstacle contacts, every boat on the
+///    course is moved out of the venue's land in the race area and back inside its boundary
+///    (`RaceEdges.resolve`); heading into the edge she keeps her speed along it, the course's
+///    `edgeSpeedRetention` of it as the touch begins, which lasts until she is `RaceEdges.touchMargin`
+///    clear of it. No penalty; the touch is announced and recorded. The autohelm has no special case
+///    there. The prototype placement is squeezed towards the line to keep every boat a hull length
+///    inside the area.
+public let simulationRevision = 13
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
