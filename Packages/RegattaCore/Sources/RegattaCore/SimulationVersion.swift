@@ -110,7 +110,14 @@ import Glibc
 ///    the mark at contact, both in the zone): mark-room is not right of way, and rules 21 and 10–13 decide every
 ///    call. The umpire keeps rule 18's records (18.2(a)–(c), 18.3) and announces each (`markRoomNotice`); no
 ///    call reads them yet (#93).
-public let simulationRevision = 18
+/// 19: the escape simulation (#92), on 18. Under a schema-4 rules file (fleet-rules@4, the default) the umpire
+///    records every boat over the last few seconds, and an incident whose right-of-way boat acquired right of
+///    way within `initially` (2 s), not by the other's own action, or turned faster than `changesCourse`
+///    (12°/s) in the last 2 s, is judged by sailing the keep-clear boat on through each candidate input for the
+///    2 s horizon against the other's track: with no escape, rule 15 or 16.1 (16.1 only if holding her course
+///    would have left one) is called on the right-of-way boat and the other is exonerated (43.1(b), on the
+///    incident). Schema-1 to -3 files run none: their races sail as on 18.
+public let simulationRevision = 19
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

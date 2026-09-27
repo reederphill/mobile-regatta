@@ -11,26 +11,64 @@ extension RulesConfig.NearMissSweep {
     /// or closer than `clearance`, at any check. Neither boat turns or changes speed along the way: no
     /// dynamics, so it's cheap enough to ask every tick.
     public func hits(_ rightOfWay: Boat, _ keepClear: Boat, hull: BoatClass.Hull) -> Bool {
+        guard canReach(rightOfWay, keepClear, hull: hull) else { return false }
+        return hits(swept(rightOfWay, hull: hull), keepClear, hull: hull)
+    }
+
+    /// The right-of-way boat's hull at every check of the sweep, heading offset by heading offset: what `hits`
+    /// tries the keep-clear boat against, worked out once for a boat it is asked of against many (the escape
+    /// simulation's candidates, #92).
+    struct Swept {
+        /// By heading offset (`headingOffsets`), then by check: none if `seconds` is shorter than `stepTicks`.
+        let hulls: [[[Vec2]]]
+        /// Each hull's centre, likewise.
+        let centres: [[Vec2]]
+        /// Seconds from now of each check.
+        let times: [Double]
+    }
+
+    /// `rightOfWay`'s `Swept` hulls.
+    func swept(_ rightOfWay: Boat, hull: BoatClass.Hull) -> Swept {
         let ticks = RulesConfig.ticks(seconds)
-        guard ticks >= stepTicks, canReach(rightOfWay, keepClear, hull: hull) else { return false }
+        guard ticks >= stepTicks else { return Swept(hulls: [], centres: [], times: []) }
         let outline = hull.outline
-        let clearance = clearance.metres(hullLength: hull.length)
         let times = stride(from: stepTicks, through: ticks, by: stepTicks).map { Double($0) * Race.dt }
-        // The keep-clear boat's hull at each check: the same whichever heading the other is tried on.
-        let keepClearHulls = times.map { t in
-            var ahead = keepClear
-            ahead.position += keepClear.velocityOverGround * t
-            return ahead.hull(outline: outline)
-        }
+        var hulls: [[[Vec2]]] = [], centres: [[Vec2]] = []
         for offset in headingOffsets {
             var swept = rightOfWay
             swept.heading = rightOfWay.heading + offset
             let velocity = swept.velocityOverGround
-            for (k, t) in times.enumerated() {
-                swept.position = rightOfWay.position + velocity * t
-                let sweptHull = swept.hull(outline: outline)
-                if Collision.penetration(sweptHull, keepClearHulls[k]) != nil { return true }
-                if clearance > 0, Collision.distance(convex: sweptHull, simplePolygon: keepClearHulls[k]) < clearance {
+            let at = times.map { rightOfWay.position + velocity * $0 }
+            centres.append(at)
+            hulls.append(at.map { position in
+                swept.position = position
+                return swept.hull(outline: outline)
+            })
+        }
+        return Swept(hulls: hulls, centres: centres, times: times)
+    }
+
+    /// `hits` against the right-of-way boat's `swept` hulls, for a pair `canReach` has let through.
+    func hits(_ swept: Swept, _ keepClear: Boat, hull: BoatClass.Hull) -> Bool {
+        guard !swept.times.isEmpty else { return false }
+        let outline = hull.outline
+        let clearance = clearance.metres(hullLength: hull.length)
+        // Hulls whose centres are further apart than this can neither touch nor come within the clearance.
+        let reach = 2 * outline.reduce(0) { max($0, $1.length) } + clearance
+        // The keep-clear boat's hull at each check, the same whichever heading the other is tried on: built the
+        // first time a swept hull comes within reach of it.
+        let keepClearCentres = swept.times.map { keepClear.position + keepClear.velocityOverGround * $0 }
+        var keepClearHulls = [[Vec2]?](repeating: nil, count: keepClearCentres.count)
+        for (h, heading) in swept.hulls.enumerated() {
+            for (k, sweptHull) in heading.enumerated() where (swept.centres[h][k] - keepClearCentres[k]).length <= reach {
+                if keepClearHulls[k] == nil {
+                    var ahead = keepClear
+                    ahead.position = keepClearCentres[k]
+                    keepClearHulls[k] = ahead.hull(outline: outline)
+                }
+                let keepClearHull = keepClearHulls[k]!
+                if Collision.penetration(sweptHull, keepClearHull) != nil { return true }
+                if clearance > 0, Collision.distance(convex: sweptHull, simplePolygon: keepClearHull) < clearance {
                     return true
                 }
             }

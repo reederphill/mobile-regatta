@@ -120,6 +120,9 @@ public struct OverlapTracker: Sendable, Equatable {
         a != b && overlapped[index(a, b)]
     }
 
+    /// Every pair's overlap as of the last point of certainty, by `index(_:_:seats:)`: what the umpire records (#92).
+    var certainOverlaps: [Bool] { overlapped }
+
     /// Ticks in a row the hulls of `a` and `b` have shown the state `isOverlapped` doesn't yet report.
     public func changeTicks(_ a: Int, _ b: Int) -> Int {
         a == b ? 0 : ticksChanging[index(a, b)]
