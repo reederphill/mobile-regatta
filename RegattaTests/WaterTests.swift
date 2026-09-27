@@ -1,0 +1,276 @@
+import CoreGraphics
+import Foundation
+import Testing
+import RegattaCore
+@testable import Regatta
+
+/// The water (#116): the ripple fainter than any visible puff or lull, whitecaps by the conditions' mean wind
+/// alone, streaks along the local wind (puff fans included), and the upwind edge tint.
+@MainActor @Suite struct WaterTests {
+    /// Every bundled conditions file: the four conditions (#10) at each version.
+    static let conditions: [ConditionsFile] = ["light-and-patchy", "classic-oscillating", "sea-breeze", "gusty-offshore"]
+        .flatMap { id in (1...3).compactMap { try? ConditionsFile.bundled(id: id, version: $0) } }
+
+    /// iPhone 17's scene at the default zoom (0.8): what the boat camera shows.
+    static func view(centeredOn center: Vec2, scale: CGFloat = 1.25) -> WaterView {
+        WaterView(center: CGPoint(x: center.x * 8, y: center.y * 8), sceneSize: CGSize(width: 402, height: 874), scale: scale)
+    }
+
+    /// A race on dev-venue@3 in `conditions`@3 (the fun-pass files, #233), run with no one steering to `tick`.
+    static func race(_ conditions: String, to tick: Int, seed: UInt64 = 1) throws -> Race {
+        let venue = try VenueFile.bundled(id: "dev-venue", version: 3)
+        let file = try ConditionsFile.bundled(id: conditions, version: 3)
+        let defaults = RaceFiles.defaults
+        let files = try RaceFiles(boatClass: defaults.boatClass, venue: venue, conditions: file,
+                                  rulesConfiguration: defaults.rulesConfiguration)
+        let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: [.human, .bot], venue: venue.ref, conditions: file.ref)
+        let race = try Race(setup: setup, files: files, mode: .authoritative(windSeed: WindSeed(seed &* 7919)))
+        while race.tick < tick { race.step() }
+        return race
+    }
+
+    static func world(of race: Race) -> RenderWorld {
+        let frame = TickFrame(race: race)
+        return RenderWorld(course: race.course, boatClass: race.boatClass, myBoatIndex: 0, previous: frame, current: frame, alpha: 1)
+    }
+
+    // MARK: - Acceptance
+
+    /// The ripple is always fainter than a puff or lull (#22): its lightness change on open water is under the
+    /// faintest any visible puff or lull makes at its peak (the conditions' weakest puff and weakest lull), in
+    /// every conditions file, and under `docs/palette.md`'s 0.12.
+    @Test func rippleContrastBelowPuffContrast() throws {
+        let style = WaterStyle.standard
+        let ripple = WaterTone.rippleDelta(style: style)
+        #expect(ripple > 0.02, "the ripple should still show: ΔL \(ripple)")
+        #expect(abs(ripple) < ChartPalette.toneDelta)
+        #expect(Set(Self.conditions.map(\.id)).count == 4)
+        for file in Self.conditions {
+            let faintest = WaterTone.faintestPeakDelta(of: file.content, style: style)
+            #expect(abs(ripple) < faintest, "\(file.id)@\(file.version): ripple ΔL \(ripple) vs faintest puff or lull \(faintest)")
+        }
+        // A full-tone puff and lull are the palette's own tokens: ±0.12.
+        #expect(abs(WaterTone.puffDelta(intensity: style.fullTonePuffGain, style: style) + ChartPalette.toneDelta) < 0.01)
+        #expect(abs(WaterTone.puffDelta(intensity: -style.fullToneLullLoss, style: style) - ChartPalette.toneDelta) < 0.01)
+    }
+
+    /// Whitecaps are mood (#22): their share of the water comes from the conditions' mean wind alone. Any patch
+    /// of water carries the same share, and the same view draws the same whitecaps whatever the wind where they
+    /// are, puff or lull.
+    @Test func whitecapDensityIndependentOfPosition() throws {
+        let style = WaterStyle.standard
+        let shares = Self.conditions.filter { $0.version == 3 }.map { Whitecaps.share(in: $0.content, style: style) }
+        // Light and patchy (6-9 kn) has none; the rest rise with their mean wind, gusty offshore (14-20 kn) most.
+        #expect(shares.first == 0)
+        #expect(shares == shares.sorted() && Set(shares).count == shares.count, "\(shares)")
+
+        let origins = [(0, 0), (4000, -2500), (-12_345, 678), (31, 9999)]
+        for share in shares where share > 0 {
+            for (x, y) in origins {
+                var hits = 0
+                for i in x..<x + 60 {
+                    for j in y..<y + 60 where Whitecaps.breaks(at: .init(i: i, j: j), cycle: 3, share: share) { hits += 1 }
+                }
+                let fraction = Double(hits) / 3600
+                #expect(abs(fraction - share) < 0.03, "share \(share) at (\(x), \(y)): \(fraction)")
+            }
+        }
+
+        let gusty = try ConditionsFile.bundled(id: "gusty-offshore", version: 3).content
+        let view = Self.view(centeredOn: Vec2(20, -40))
+        func whitecaps(windSpeed: Double) -> [RippleLattice.Index] {
+            let water = WaterNode(pointsPerMeter: 8)
+            let wind = GroundWind(direction: 0.1, speed: windSpeed)
+            water.update(WaterWorld(wind: { _ in wind }, courseWind: GroundWind(direction: 0.1, speed: 8), puffs: [],
+                                    conditions: gusty, time: 12.5), view: view, dt: 0)
+            return water.whitecaps
+        }
+        let underPuff = whitecaps(windSpeed: 12), underLull = whitecaps(windSpeed: 5)
+        #expect(!underPuff.isEmpty)
+        #expect(underPuff == underLull)
+    }
+
+    /// A streak lies along the wind where it is (#224): inside a puff, turned by the puff's fan, veered on the
+    /// puff's right-hand side looking downwind and backed on its left; outside every puff, on the fleet-wide
+    /// wind (the mean direction turned by the shift) as the venue bends it.
+    @Test func streakInsidePuffAngledByPuffFan() throws {
+        // A strong puff clear of every other, so its fan alone turns the wind inside it.
+        let race = try Self.race("gusty-offshore", to: -1200)
+        var found: Puff?
+        while found == nil, race.tick < 1800 {
+            for _ in 0..<60 { race.step() }
+            let alive = race.wind.activePuffs(atTick: race.tick)
+            found = alive.filter { $0.intensity > 0.15 }.first { puff in
+                alive.allSatisfy { $0.center == puff.center || ($0.center - puff.center).length > $0.radius + puff.radius }
+            }
+        }
+        let puff = try #require(found, "no puff clear of the others")
+        let world = Self.world(of: race)
+        let wind = race.wind
+        let puffs = world.puffs
+        let water = WaterNode(pointsPerMeter: 8)
+        water.update(WaterWorld(world), view: Self.view(centeredOn: puff.center), dt: 0)
+        #expect(!water.streaks.isEmpty)
+
+        let shift = try wind.shift(atTick: race.tick)
+        let downwind = -Vec2.heading(wind.setup.meanDirection)
+        var veered = 0, backed = 0, outside = 0
+        for streak in water.streaks {
+            let local = try #require(world.groundWind(at: streak.position))
+            #expect(streak.windDirection == local.direction, "a streak isn't on the wind where it is")
+            let venue = wind.setup.pairing.geographicGrid.sample(streak.position).directionDelta
+            let fan = wrapAngle(local.direction - (wind.setup.meanDirection + shift + venue))
+            let within = puffs.filter { ($0.center - streak.position).length < $0.radius }
+            if within.isEmpty {
+                #expect(abs(fan) < 1e-9, "a streak outside every puff is turned \(rad2deg(fan))°")
+                outside += 1
+                continue
+            }
+            // Only this puff, well off its centre line: its fan alone turns the streak.
+            guard within.count == 1, within[0].center == puff.center else { continue }
+            let across = (streak.position - puff.center).dot(downwind.rightPerp) / puff.radius
+            guard abs(across) > 0.2, (streak.position - puff.center).length < 0.8 * puff.radius else { continue }
+            if across > 0 {
+                #expect(fan > deg2rad(0.2), "right of the puff: \(rad2deg(fan))°")
+                veered += 1
+            } else {
+                #expect(fan < -deg2rad(0.2), "left of the puff: \(rad2deg(fan))°")
+                backed += 1
+            }
+        }
+        #expect(veered > 0 && backed > 0, "streaks veered \(veered), backed \(backed) inside the puff")
+        #expect(outside > 0 || puffs.count > 3, "no streak outside a puff to compare")
+    }
+
+    // MARK: - The rest of #116
+
+    /// A puff fades in from its key (ADR 0001): no tone at spawn, its intensity's tone at mid-life.
+    @Test func puffToneFadesInFromSpawn() {
+        let style = WaterStyle.standard
+        var puff = Puff(center: .zero, radius: 50, strength: 0.3, age: 0, lifetime: 60)
+        #expect(WaterTone.puffOverlay(intensity: puff.intensity, style: style).alpha == 0)
+        puff.age = 5
+        let early = WaterTone.puffOverlay(intensity: puff.intensity, style: style).alpha
+        puff.age = 30
+        let peak = WaterTone.puffOverlay(intensity: puff.intensity, style: style)
+        #expect(early > 0 && early < peak.alpha)
+        #expect(peak.token == ChartPalette.puff && abs(peak.alpha - 1) < 1e-9)
+        let lull = WaterTone.puffOverlay(intensity: -0.1, style: style)
+        #expect(lull.token == ChartPalette.lull && abs(lull.alpha - 0.5) < 1e-9)
+    }
+
+    /// A puff beyond the view, drifting in, tints the upwind edge where it will cross, fading with distance;
+    /// a lull, a puff drifting away, one in view and one beyond reach tint nothing.
+    @Test func edgeTintMarksTheUpwindEdgeWhereAPuffDriftsIn() throws {
+        let style = WaterStyle.standard
+        let half = Vec2(30, 60)
+        func puff(at center: Vec2, strength: Double = 0.3, drift: Vec2 = Vec2(0, -2)) -> Puff {
+            Puff(center: center, radius: 40, strength: strength, age: 30, lifetime: 60, velocity: drift)
+        }
+        let north = try #require(EdgeTint.mark(for: puff(at: Vec2(10, 120)), center: .zero, half: half, style: style))
+        #expect(north.edge == .top)
+        #expect(north.point == Vec2(10, 60))
+        #expect(north.width == 80)
+        #expect(abs(north.alpha - style.edgeTintStrength * (1 - 20 / style.edgeTintReach)) < 1e-9)
+        let slanting = try #require(EdgeTint.mark(for: puff(at: Vec2(-70, 90), drift: Vec2(1, -1)), center: .zero, half: half, style: style))
+        #expect(slanting.edge == .left || slanting.edge == .top)
+        #expect(EdgeTint.mark(for: puff(at: Vec2(10, 120), strength: -0.2), center: .zero, half: half, style: style) == nil)
+        #expect(EdgeTint.mark(for: puff(at: Vec2(10, 120), drift: Vec2(0, 2)), center: .zero, half: half, style: style) == nil)
+        #expect(EdgeTint.mark(for: puff(at: Vec2(10, 20)), center: .zero, half: half, style: style) == nil)
+        #expect(EdgeTint.mark(for: puff(at: Vec2(10, 60 + 40 + style.edgeTintReach + 1)), center: .zero, half: half, style: style) == nil)
+        // Passing by the side, it never comes in; slanting in across the side edge, it isn't upwind.
+        #expect(EdgeTint.mark(for: puff(at: Vec2(100, 120)), center: .zero, half: half, style: style) == nil)
+        #expect(EdgeTint.mark(for: puff(at: Vec2(-80, 0), drift: Vec2(0.3, -2)), center: .zero, half: half, style: style) == nil)
+    }
+
+    /// The cheap tier (#127) freezes the ripple and thins the whitecaps; the puff shading and the edge tint are
+    /// race cues, drawn the same in every tier (#27).
+    @Test func cheapTierKeepsTheRaceCues() throws {
+        let race = try Self.race("gusty-offshore", to: -600)
+        let world = WaterWorld(Self.world(of: race))
+        let me = race.boats[0].position
+        let full = WaterNode(pointsPerMeter: 8), cheap = WaterNode(pointsPerMeter: 8)
+        cheap.quality = .cheap
+        var shownTint = false
+        for dy in stride(from: -200.0, through: 200, by: 25) {
+            let view = Self.view(centeredOn: me + Vec2(0, dy))
+            full.update(world, view: view, dt: 0)
+            cheap.update(world, view: view, dt: 0)
+            #expect(full.tintMarks == cheap.tintMarks)
+            shownTint = shownTint || !full.tintMarks.isEmpty
+        }
+        #expect(shownTint, "no view had a puff beyond its upwind edge")
+        let conditions = world.conditions
+        #expect(Whitecaps.share(in: conditions, style: .standard, quality: .cheap)
+            == Whitecaps.share(in: conditions, style: .standard) * WaterStyle.standard.cheapWhitecapShare)
+
+        // The full tier drifts the ripple downwind at its share of the conditions' mean wind; the cheap one holds it.
+        let view = Self.view(centeredOn: me)
+        full.update(world, view: view, dt: 2)
+        cheap.update(world, view: view, dt: 2)
+        #expect(cheap.drift == .zero)
+        let course = try #require(world.courseWind)
+        let expected = -Vec2.heading(course.direction) * (WaterStyle.standard.rippleDrift * Whitecaps.meanWind(of: conditions) * 8 * 2)
+        #expect(abs(Double(full.drift.x) - expected.x) < 1e-6 && abs(Double(full.drift.y) - expected.y) < 1e-6)
+        // Every cheap streak lies on the course wind.
+        #expect(cheap.streaks.allSatisfy { $0.windDirection == course.direction })
+    }
+
+    /// The puffs still read through every colour-vision and viewing filter (#22, #111): the faintest visible puff
+    /// and lull stay further from the water than the ripple is, in filtered lightness.
+    @Test func puffsStillReadThroughEveryVisionFilter() {
+        let style = WaterStyle.standard
+        let faintestPuff = WaterTone.puffOverlay(intensity: 0.2, style: style)
+        let faintestLull = WaterTone.puffOverlay(intensity: -0.15, style: style)
+        for vision in VisionFilter.allCases {
+            func lightness(_ rgb: [Double]) -> Double { OKLCH(srgb: vision.apply(rgb)).L }
+            let water = lightness(ChartPalette.water.components)
+            let ripple = abs(lightness(WaterTone.blend(ChartPalette.lull, alpha: style.rippleAlpha)) - water)
+            let puff = abs(lightness(WaterTone.blend(faintestPuff.token, alpha: faintestPuff.alpha)) - water)
+            let lull = abs(lightness(WaterTone.blend(faintestLull.token, alpha: faintestLull.alpha)) - water)
+            #expect(puff > ripple && lull > ripple, "\(vision): puff \(puff), lull \(lull), ripple \(ripple)")
+        }
+    }
+
+    /// Every look the water has is data (#229, #232): the style round-trips through JSON, and a scene takes a new
+    /// one live.
+    @Test func waterStyleIsData() throws {
+        var style = WaterStyle.standard
+        style.edgeTintStrength = 0.4
+        style.catspaw = 0.1
+        let decoded = try JSONDecoder().decode(WaterStyle.self, from: JSONEncoder().encode(style))
+        #expect(decoded == style)
+        let session = try GameSession(fixture: RenderFixture(log: "prestart.racelog.json", freezeTick: -1500, camera: .boat, vision: .none),
+                                      log: RenderFixture.load(named: "prestart", in: RenderFixtureTests.fixtures).log)
+        session.scene.waterStyle = style
+        #expect(session.scene.waterStyle == style)
+        session.scene.waterQuality = .cheap
+        #expect(session.scene.waterQuality == .cheap)
+    }
+
+    /// The water's frame cost (#27): the full tier samples the wind at every ripple tile, every frame. Timed over
+    /// a busy gusty view at the default zoom and pinched all the way out, and printed. Held to a loose budget
+    /// only in an optimised build (check.sh's): CI's unoptimised Debug build just reports it.
+    @Test func waterUpdateStaysCheap() throws {
+        let race = try Self.race("gusty-offshore", to: -300)
+        let world = WaterWorld(Self.world(of: race))
+        let me = race.boats[0].position
+        for scale: CGFloat in [1.25, 1 / 0.45] {
+            let water = WaterNode(pointsPerMeter: 8)
+            let view = Self.view(centeredOn: me, scale: scale)
+            water.update(world, view: view, dt: 0)
+            let frames = 60
+            let clock = ContinuousClock()
+            let elapsed = clock.measure {
+                for _ in 0..<frames { water.update(world, view: view, dt: 1.0 / 60) }
+            }
+            let perFrame = elapsed / frames
+            let ms = Double(perFrame.components.attoseconds) / 1e15 + Double(perFrame.components.seconds) * 1000
+            print("WaterTests: water update at scale \(scale): \(String(format: "%.3f", ms)) ms/frame, "
+                + "\(water.streaks.count) tiles sampled, \(world.puffs.count) puffs alive")
+            if !_isDebugAssertConfiguration() {
+                #expect(ms < 4, "water update \(ms) ms/frame at scale \(scale)")
+            }
+        }
+    }
+}

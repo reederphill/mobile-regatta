@@ -9,6 +9,9 @@ nonisolated enum Signpost {
     case botBrains
     /// Moving the SpriteKit nodes and camera for one frame.
     case renderUpdate
+    /// The water's part of it (#116): the ripple tiles, each sampling the wind where it is, the puffs and the
+    /// edge tint.
+    case waterUpdate
     /// Taking the SwiftUI HUD snapshot.
     case hudRefresh
 
@@ -19,6 +22,7 @@ nonisolated enum Signpost {
         case .simStep: "Sim step"
         case .botBrains: "Bot brains"
         case .renderUpdate: "Render update"
+        case .waterUpdate: "Water update"
         case .hudRefresh: "HUD refresh"
         }
     }

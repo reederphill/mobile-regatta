@@ -41,8 +41,10 @@ nonisolated enum ChartPalette {
     static let land = PaletteToken("land", 0x9DB08E)
     /// Low-chroma sand.
     static let shallows = PaletteToken("shallows", 0xCDC8B4)
+    /// Whitecaps (#116): a cool near-white, too grey for the hue rule, drawn part-transparent over the water.
+    static let foam = PaletteToken("foam", 0xE3EEF2)
 
-    static let all = [water, puff, lull, land, shallows]
+    static let all = [water, puff, lull, land, shallows, foam]
 }
 
 /// The prototype's boat colours, until liveries (#119) delete them.
