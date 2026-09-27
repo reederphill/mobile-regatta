@@ -133,8 +133,8 @@ enum EscapeFixture {
         #expect(race.boats[1].penaltyTurnsOwed == 1 && race.boats[0].penaltyTurnsOwed == 0)
     }
 
-    /// The same tack two hull lengths ahead and further to leeward: the starboard boat sails into her four
-    /// seconds after it, with time to have kept clear. Rule 11 on the windward boat, no one exonerated.
+    /// The same tack two hull lengths ahead and further to leeward: four seconds after it the starboard boat's
+    /// near-miss sweep reaches her (the call is a near miss, not contact), with time to have kept clear. Rule 11 on the windward boat, no one exonerated.
     @Test func tackWithTimeToRespondIsRule11() throws {
         let race = try F.race()
         try E.tack(race, ahead: 2.4, leeward: 2.5)
