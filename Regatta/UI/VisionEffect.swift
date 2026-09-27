@@ -1,28 +1,23 @@
 import SwiftUI
 
 extension View {
-    /// `filter` over this view's pixels: the matrix `GameScene` puts over the scene, for the SwiftUI drawn over it
-    /// (HUD, controls, pause and results), so a race launched with `-vision` reads through one filter (#111). A
-    /// Debug harness: in Release, and for `.none`, the view is unchanged.
+    /// `filter` over this view's pixels, platform views included (#111). `RaceView` puts it over the whole race,
+    /// so the SpriteKit scene at any camera scale, the HUD and overlays over it, and the letterbox read through
+    /// one matrix, live (`-vision`, Debug builds) and in render fixtures alike. For `.none` the view is unchanged.
     @ViewBuilder func vision(_ filter: VisionFilter) -> some View {
-        #if DEBUG
         if filter == .none {
             self
         } else {
             self._colorMatrix(filter.colorMatrix)
         }
-        #else
-        self
-        #endif
     }
 }
 
-#if DEBUG
 extension VisionFilter {
     /// The filter as SwiftUI's colour matrix: row i gives output channel i from (r, g, b, a) plus the bias in
     /// column 5. SwiftUI's public per-pixel colour route is `colorEffect`, a Metal shader, and the build doesn't
     /// compile Metal (it needs Xcode's separate Metal toolchain); `_colorMatrix` is SwiftUI's own colour-matrix
-    /// effect, underscored but public, and only this Debug harness uses it.
+    /// effect, underscored but public, and only this test harness uses it.
     var colorMatrix: _ColorMatrix {
         let m = matrix.map { $0.map(Float.init) }, bias = Float(self.bias)
         var out = _ColorMatrix()
@@ -32,4 +27,3 @@ extension VisionFilter {
         return out
     }
 }
-#endif

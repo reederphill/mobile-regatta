@@ -37,6 +37,11 @@ final class GameSession {
     let scene: GameScene
     /// Names and bot marks, kept outside the simulation (#60).
     let roster: FleetRoster
+    /// The colour-vision filter `RaceView` draws the race through: scene, HUD and letterbox under one matrix
+    /// (#22, #111). `-vision`'s in Debug builds, or a render fixture's. Never the scene's own `SKScene.filter`:
+    /// SpriteKit filters a scene over its frame, which a scaled or moved camera doesn't follow, so the view's
+    /// right and bottom edges went unfiltered.
+    var vision: VisionFilter
 
     var hud = HUDState()
     var messages: [RaceMessage] = []
@@ -67,16 +72,16 @@ final class GameSession {
         let driver = try FixtureDriver(log: log, freezeTick: fixture.freezeTick)
         self.init(driver: driver, roster: driver.roster)
         scene.cameraMode = fixture.camera
-        scene.vision = fixture.vision
+        vision = fixture.vision
     }
 
     init(driver: any RaceDriver, roster: FleetRoster) {
         self.driver = driver
         self.roster = roster
+        // `-vision` (Debug); a fixture sets its own after this.
+        vision = LaunchOptions.current.raceVision
         scene = GameScene(driver: driver, roster: roster)
         scene.session = self
-        // `-vision` (Debug); a fixture sets its own after this.
-        scene.vision = LaunchOptions.current.raceVision
         hud = HUDState(world: driver.renderWorld)
         post("Hold the left or right side of the screen to steer. Be below the line at the gun.", .info, seconds: 6)
     }

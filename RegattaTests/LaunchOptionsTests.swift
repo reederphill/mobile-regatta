@@ -81,7 +81,11 @@ import RegattaCore
         }
         let bad = parse("-vision", "sepia")
         #expect(bad.vision == nil)
-        #expect(bad.problems == ["-vision sepia: expected deut, prot, trit, grey, sun or none"])
+        #expect(bad.problems == ["-vision sepia: expected deut, prot, trit, grey, sun, none, deuteranopia, protanopia, "
+            + "tritanopia, greyscale or washout"])
+        // The rejection names everything `-vision` takes, and takes everything it names.
+        let named = LaunchOptions.visionNames.replacingOccurrences(of: " or ", with: ", ").components(separatedBy: ", ")
+        #expect(Set(named) == Set(short.keys).union(VisionFilter.allCases.map(\.rawValue)))
         let missing = parse("-vision", "-autostart")
         #expect(missing.vision == nil && missing.autostart)
         #expect(missing.problems == ["-vision needs a value"])

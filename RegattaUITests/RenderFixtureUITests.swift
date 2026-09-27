@@ -66,6 +66,30 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         try assertMatchesIPhoneReference("prestart-washout")
     }
 
+    /// Each filter reaches every edge of the render (#111): around the frame, each corner and edge patch of the
+    /// filtered render has moved from the unfiltered one. The scene's own `SKScene.filter` covered only a top-left
+    /// part of the camera's view, leaving the right and bottom bands unfiltered. No reference, so iPad runs it too.
+    @MainActor func testEveryVisionFilterReachesTheEdgesOfTheRender() throws {
+        let plain = try renderFixture("prestart")
+        var failures: [String] = []
+        for vision in ["deuteranopia", "protanopia", "tritanopia", "greyscale", "washout"] {
+            let render = try renderFixture("prestart-\(vision)")
+            let coverage = try XCTUnwrap(FilterCoverage(filtered: render.image, unfiltered: plain.image,
+                                                        ignoringBottomRows: max(render.homeIndicatorRows,
+                                                                                plain.homeIndicatorRows)),
+                                         "prestart-\(vision) isn't the unfiltered render's size")
+            guard !coverage.unfiltered.isEmpty else { continue }
+            failures.append("\(vision) leaves \(coverage.unfiltered.map(\.name)) unfiltered (\(coverage.summary))")
+            if let png = render.image.pngData {
+                let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+                attachment.name = "prestart-\(vision)-coverage.png"
+                attachment.lifetime = .keepAlways
+                add(attachment)
+            }
+        }
+        XCTAssertTrue(failures.isEmpty, failures.joined(separator: "; "))
+    }
+
     // The water (#116): puffs, lulls, ripple and whitecaps in two conditions, and the upwind edge tint (#224).
 
     /// Light and patchy (no whitecaps, sparse strong puffs, many lulls) against gusty offshore (whitecaps, puffs

@@ -1,4 +1,3 @@
-import CoreImage
 import SpriteKit
 import RegattaBots
 import RegattaCore
@@ -14,10 +13,6 @@ final class GameScene: SKScene {
     weak var session: GameSession?
     /// Follow your boat, or frame the whole course. Render fixtures set it (#62); the device setting is #113.
     var cameraMode: LaunchOptions.CameraMode = .boat
-    /// A colour-vision filter over the whole scene, for render fixtures (#22, #62).
-    var vision: VisionFilter = .none {
-        didSet { applyVision() }
-    }
     /// The water's look: the debug tuning panel's (#232) seam, live.
     var waterStyle: WaterStyle {
         get { water.style }
@@ -232,24 +227,6 @@ final class GameScene: SKScene {
         cam.position = CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
         let margin: CGFloat = 1.2
         cam.setScale(max((maxX - minX) / size.width, (maxY - minY) / size.height, 1 / zoom) * margin)
-    }
-
-    private func applyVision() {
-        guard vision != .none else {
-            filter = nil
-            shouldEnableEffects = false
-            return
-        }
-        let m = vision.matrix, bias = CGFloat(vision.bias)
-        func row(_ i: Int) -> CIVector { CIVector(x: CGFloat(m[i][0]), y: CGFloat(m[i][1]), z: CGFloat(m[i][2]), w: 0) }
-        let matrix = CIFilter(name: "CIColorMatrix")
-        matrix?.setValue(row(0), forKey: "inputRVector")
-        matrix?.setValue(row(1), forKey: "inputGVector")
-        matrix?.setValue(row(2), forKey: "inputBVector")
-        matrix?.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
-        matrix?.setValue(CIVector(x: bias, y: bias, z: bias, w: 0), forKey: "inputBiasVector")
-        filter = matrix
-        shouldEnableEffects = true
     }
 
     /// Your laylines, from the formula a bot sees them by (`Laylines`, `SeatView.laylines`).

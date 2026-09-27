@@ -20,6 +20,9 @@ struct RaceView: View {
             race(layout)
                 .onChange(of: layout.sceneSize, initial: true) { _, size in session.scene.size = size }
         }
+        // One colour-vision filter over everything the race draws, live or a fixture: the scene at any camera
+        // scale, the HUD and overlays, and the letterbox (#111).
+        .vision(session.vision)
     }
 
     @ViewBuilder private func race(_ layout: RaceViewportPolicy.Layout) -> some View {
@@ -48,32 +51,26 @@ struct RaceView: View {
             .persistentSystemOverlays(.hidden)
     }
 
-    /// The race with the HUD, controls and overlays over it. The scene draws its own colour-vision filter
-    /// (`GameScene.vision`); the SwiftUI over it takes the same one here, so a `-vision` race reads through one
-    /// filter throughout (#111).
     private var live: some View {
         ZStack {
             scene
 
-            Group {
-                HUDView(hud: session.hud, messages: session.messages)
-                    .allowsHitTesting(false)
+            HUDView(hud: session.hud, messages: session.messages)
+                .allowsHitTesting(false)
 
-                controls
+            controls
 
-                if session.isPaused {
-                    PauseMenu(
-                        onResume: { session.setPaused(false) },
-                        onRestart: onRestart,
-                        onExit: onExit
-                    )
-                }
-
-                if session.playerDone {
-                    ResultsView(rows: session.results, onRestart: onRestart, onExit: onExit)
-                }
+            if session.isPaused {
+                PauseMenu(
+                    onResume: { session.setPaused(false) },
+                    onRestart: onRestart,
+                    onExit: onExit
+                )
             }
-            .vision(session.scene.vision)
+
+            if session.playerDone {
+                ResultsView(rows: session.results, onRestart: onRestart, onExit: onExit)
+            }
         }
     }
 
