@@ -315,7 +315,10 @@ struct BotBrain: Sendable {
                     ? c.upwind : (m - c.elements[CourseLayout.windwardIndex].marks[0].position).normalized
                 let side = approach.rightPerp
                 if b.roundingStage == 0 && index == CourseLayout.windwardIndex {
-                    return windwardApproach(b, view, fetch: m + side * 6 + approach * 4)
+                    let room = mark.radius + view.boatClass.hull.beam + Self.markClearance + Self.layMargin
+                    return Self.windwardApproach(from: b.position, tack: b.tack, mark: m, room: room,
+                                                 fetch: m + side * 6 + approach * 4, wind: b.windDirection,
+                                                 groove: grooveAngle(.upwind, b, view), upwind: c.upwind)
                 }
                 if b.roundingStage == 0 {
                     return detour(from: b.position, to: m + side * 6 + approach * 4, around: m,
@@ -354,17 +357,30 @@ struct BotBrain: Sendable {
     /// Metres down the starboard layline from the windward mark's fetch point to where a boat that can't
     /// fetch it yet sails first: far enough right of the mark that the port track there clears it.
     static let laylineLead = 15.0
+    /// Metres her track keeps off a mark beyond its radius and her beam (`avoidMarks`).
+    static let markClearance = 1.0
+    /// Metres more than that by which a starboard boat's close-hauled course must clear the windward mark
+    /// for her to hold on and round it: room for a small header on the way in.
+    static let layMargin = 0.5
 
-    /// The point to beat to for the windward mark, rounded to port: `fetch`, beside and above it, on the
-    /// starboard layline. A boat that can't fetch it yet, and is below the layline's lead point, sails to that
-    /// point first, down the layline and right of the mark: a port track to the fetch point itself would run
-    /// over the mark, and a starboard one below the layline would pass under it.
-    private func windwardApproach(_ b: SeatView.OwnBoat, _ view: SeatView, fetch: Vec2) -> Vec2 {
-        let w = b.windDirection
-        let up = grooveAngle(.upwind, b, view)
-        if wrapAngle((fetch - b.position).bearing - w) <= -(up - Self.overstand) { return fetch }
-        let lead = fetch - Vec2.heading(w - up) * Self.laylineLead
-        return (lead - b.position).dot(view.course.upwind) > 0 ? lead : fetch
+    /// The point to beat to for the windward mark at `mark`, rounded to port: `fetch`, beside and above it,
+    /// on the starboard layline. A boat that can't fetch it yet, and is below the layline's lead point, sails
+    /// to that point first, down the layline and right of the mark: a port track to the fetch point itself
+    /// would run over the mark, and a starboard one below the layline would pass under it. A boat on
+    /// starboard whose close-hauled course clears the mark itself by `room` metres or more holds on to the
+    /// fetch point and rounds: close in, the lead point is abeam of her, and sailing for it would be a tack,
+    /// a reach and a tack back (#231). `tack` is her tack, `wind` the wind's direction, `groove` her upwind
+    /// groove angle to it, `upwind` the course's upwind direction.
+    static func windwardApproach(from position: Vec2, tack: Tack, mark: Vec2, room: Double, fetch: Vec2,
+                                 wind w: Double, groove up: Double, upwind: Vec2) -> Vec2 {
+        if wrapAngle((fetch - position).bearing - w) <= -(up - overstand) { return fetch }
+        let closeHauled = Vec2.heading(w - up)
+        let toMark = mark - position
+        // The mark to port of her starboard course (negative to starboard), metres.
+        let clears = -toMark.dot(closeHauled.rightPerp)
+        if tack == .starboard && toMark.dot(closeHauled) > 0 && clears >= room { return fetch }
+        let lead = fetch - closeHauled * laylineLead
+        return (lead - position).dot(upwind) > 0 ? lead : fetch
     }
 
     /// `waypoint`, unless the straight line to it runs over `mark` — then `via` first.
@@ -482,7 +498,7 @@ struct BotBrain: Sendable {
             guard offset.length < 20 else { continue }
             let along = offset.dot(ahead)
             guard along > 0, along < max(b.speed, 1) * 3 + 3 else { continue }
-            guard abs(offset.cross(ahead)) < obstacle.radius + view.boatClass.hull.beam + 1 else { continue }
+            guard abs(offset.cross(ahead)) < obstacle.radius + view.boatClass.hull.beam + Self.markClearance else { continue }
             let markIsToStarboard = offset.dot(ahead.rightPerp) > 0
             return sailable(desired + (markIsToStarboard ? -1 : 1) * deg2rad(30), wind: b.windDirection)
         }
