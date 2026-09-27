@@ -108,4 +108,59 @@ import Testing
         let png = try #require(image.pngData)
         #expect(PixelImage(pngData: png) == image)
     }
+
+    /// `image` with the pixels in `columns` × `rows` pushed through a stand-in filter (red up, blue down).
+    static func filtered(_ image: PixelImage, columns: Range<Int>, rows: Range<Int>) -> PixelImage {
+        var out = image
+        for y in rows {
+            for x in columns {
+                let p = image[x, y]
+                out[x, y] = (p.r &+ 30, p.g, p.b &- 25, p.a)
+            }
+        }
+        return out
+    }
+
+    /// A filter over the whole frame moves every patch around its edge (#111).
+    @Test func aFilterOverTheWholeFrameReachesEveryEdge() throws {
+        let plain = Self.sea(boatAt: 90, 80)
+        let coverage = try #require(FilterCoverage(filtered: Self.filtered(plain, columns: 0..<200, rows: 0..<200),
+                                                   unfiltered: plain))
+        #expect(coverage.patches.count == 8)
+        #expect(coverage.unfiltered.isEmpty, "\(coverage.summary)")
+    }
+
+    /// The scene's own filter over the camera's scaled view (#111): it covered a top-left rectangle about 79% × 80%
+    /// of the frame, so the right and bottom patches didn't move.
+    @Test func aFilterOverTheTopLeftOfTheFrameMissesTheRightAndBottom() throws {
+        let plain = Self.sea(boatAt: 90, 80)
+        let coverage = try #require(FilterCoverage(filtered: Self.filtered(plain, columns: 0..<158, rows: 0..<160),
+                                                   unfiltered: plain))
+        #expect(Set(coverage.unfiltered.map(\.name)) == ["top-right", "right", "bottom-left", "bottom", "bottom-right"],
+                "\(coverage.summary)")
+    }
+
+    /// With no filter, nothing moves, so every patch counts as unfiltered: the check can fail.
+    @Test func noFilterLeavesEveryPatchUnfiltered() throws {
+        let plain = Self.sea(boatAt: 90, 80)
+        let coverage = try #require(FilterCoverage(filtered: plain, unfiltered: plain))
+        #expect(coverage.patches.count == 8)
+        #expect(coverage.unfiltered == coverage.patches, "\(coverage.summary)")
+    }
+
+    /// The bottom patches sit above the home-indicator band, which a render's diff leaves out.
+    @Test func coverageLeavesTheBottomBandOut() throws {
+        let plain = Self.sea(boatAt: 90, 80)
+        // Filtered everywhere but the bottom 50 rows, which stand for the band.
+        let filtered = Self.filtered(plain, columns: 0..<200, rows: 0..<150)
+        #expect(try #require(FilterCoverage(filtered: filtered, unfiltered: plain)).unfiltered.count == 3)
+        let coverage = try #require(FilterCoverage(filtered: filtered, unfiltered: plain, ignoringBottomRows: 50))
+        #expect(coverage.unfiltered.isEmpty, "\(coverage.summary)")
+        #expect(coverage.patches.allSatisfy { $0.y + $0.size <= 150 })
+    }
+
+    @Test func coverageNeedsTwoRendersOfOneSize() {
+        #expect(FilterCoverage(filtered: PixelImage(width: 200, height: 200, fill: Self.water),
+                               unfiltered: PixelImage(width: 200, height: 199, fill: Self.water)) == nil)
+    }
 }

@@ -1,32 +1,87 @@
 import SwiftUI
 import UIKit
 
-enum Palette {
-    static let water = UIColor(red: 0.09, green: 0.30, blue: 0.44, alpha: 1)
-    static let gust = UIColor(red: 0.02, green: 0.11, blue: 0.24, alpha: 1)
-    static let mark = UIColor(red: 1.0, green: 0.48, blue: 0.1, alpha: 1)
-    static let startLine = UIColor(red: 1.0, green: 0.86, blue: 0.3, alpha: 1)
+/// The race scene's and HUD's cue colours (#22, `docs/palette.md` "CuePalette"). Each hue belongs to one cue,
+/// and nothing else on the water or in the HUD may come near it (`HueRule`). One fixed daylight look, no dark
+/// mode. Menus take `ChromePalette` instead (G7), except where they depict on-water elements.
+nonisolated enum CuePalette {
+    /// The wind vane.
+    static let vermillion = PaletteToken("vermillion", 0xD55E00)
+    /// The active leg: current marks, zone, rounding arrow, next-mark edge arrow, rule-call line, penalty arc.
+    /// It reads amber: truer oranges come within 20° of vermillion.
+    static let orange = PaletteToken("orange", 0xE69F00)
+    /// The give-way chevron.
+    // placeholder: docs/palette.md's working value, until #169 applies #53's final chevron blue.
+    static let chevronBlue = PaletteToken("chevronBlue", 0x3F51E0)
+    /// Laylines, and the HUD's start clock (#30 reuses it).
+    static let yellow = PaletteToken("yellow", 0xF0E442)
+    /// Inactive marks.
+    static let inactiveGrey = PaletteToken("inactiveGrey", 0x9AA0A6)
+    /// The player's glow and wakes; the alpha is set where it's drawn.
+    static let cueWhite = PaletteToken("cueWhite", 0xFFFFFF)
 
-    /// Index 0 is the player.
-    static let boats: [UIColor] = [
-        UIColor(red: 1.00, green: 0.84, blue: 0.20, alpha: 1),
-        UIColor(red: 0.93, green: 0.30, blue: 0.30, alpha: 1),
-        UIColor(red: 0.35, green: 0.78, blue: 0.95, alpha: 1),
-        UIColor(red: 0.55, green: 0.88, blue: 0.45, alpha: 1),
-        UIColor(red: 0.82, green: 0.52, blue: 0.95, alpha: 1),
-        UIColor(red: 1.00, green: 0.60, blue: 0.35, alpha: 1),
-        UIColor(red: 0.95, green: 0.95, blue: 0.95, alpha: 1),
-        UIColor(red: 0.40, green: 0.55, blue: 1.00, alpha: 1),
-        UIColor(red: 0.95, green: 0.45, blue: 0.70, alpha: 1),
-        UIColor(red: 0.30, green: 0.85, blue: 0.75, alpha: 1),
-        UIColor(red: 0.75, green: 0.70, blue: 0.45, alpha: 1),
-        UIColor(red: 0.60, green: 0.60, blue: 0.65, alpha: 1),
-        UIColor(red: 0.95, green: 0.75, blue: 0.75, alpha: 1),
-        UIColor(red: 0.50, green: 0.35, blue: 0.85, alpha: 1),
-        UIColor(red: 0.85, green: 0.95, blue: 0.40, alpha: 1),
-        UIColor(red: 0.25, green: 0.60, blue: 0.40, alpha: 1),
+    /// The hues nothing else may come near. Grey and white have no hue to reserve.
+    static let reserved = [vermillion, orange, yellow, chevronBlue]
+    static let all = reserved + [inactiveGrey, cueWhite]
+}
+
+/// Water and land (#22, `docs/palette.md` "ChartPalette"), held to the hue rule: blue-teal water and sage land,
+/// clear of every cue hue.
+nonisolated enum ChartPalette {
+    /// Puffs are this much OKLCH lightness darker than the water, lulls this much lighter. tuning: 0.12.
+    static let toneDelta = 0.12
+
+    /// One base for every venue.
+    static let water = PaletteToken("water", 0x174D70)
+    /// A puff: water darkened by `toneDelta` (the delta is the spec; the hex is derived from it).
+    static let puff = PaletteToken("puff", 0x002D4D)
+    /// A lull: water lightened by `toneDelta`.
+    static let lull = PaletteToken("lull", 0x3C6F94)
+    /// Sage: tan came within 20° of orange and yellow.
+    static let land = PaletteToken("land", 0x9DB08E)
+    /// Low-chroma sand.
+    static let shallows = PaletteToken("shallows", 0xCDC8B4)
+
+    static let all = [water, puff, lull, land, shallows]
+}
+
+/// The prototype's boat colours, until liveries (#119) delete them.
+nonisolated enum Palette {
+    /// Index 0 is the player. The prototype's sixteen less the five the hue rule rejects (#111): its two
+    /// yellows, the yellow-green, the pale orange (by vermillion) and the blue by the chevron's.
+    static let boats: [PaletteToken] = [
+        PaletteToken("boat red", 0xED4D4D),
+        PaletteToken("boat sky blue", 0x59C7F2),
+        PaletteToken("boat green", 0x8CE073),
+        PaletteToken("boat lilac", 0xD185F2),
+        PaletteToken("boat white", 0xF2F2F2),
+        PaletteToken("boat pink", 0xF273B3),
+        PaletteToken("boat teal", 0x4DD9BF),
+        PaletteToken("boat grey", 0x9999A6),
+        PaletteToken("boat pale pink", 0xF2BFBF),
+        PaletteToken("boat violet", 0x8059D9),
+        PaletteToken("boat dark green", 0x409966),
     ]
 
-    static func boat(_ index: Int) -> UIColor { boats[index % boats.count] }
+    static func boat(_ index: Int) -> UIColor { boats[index % boats.count].uiColor }
     static func boatColor(_ index: Int) -> Color { Color(uiColor: boat(index)) }
+}
+
+/// The colours the hue rule holds the app to. G7: the race scene and HUD only; the menus (`ChromePalette`)
+/// aren't validated. The cues are the rule's reference set, not part of it.
+nonisolated enum PaletteValidation {
+    static let raceSceneAndHUD: [PaletteToken] = ChartPalette.all + Palette.boats
+}
+
+nonisolated extension PaletteToken {
+    var uiColor: UIColor { UIColor(rgb: rgb) }
+    var color: Color { Color(uiColor: uiColor) }
+}
+
+extension UIColor {
+    /// Nonisolated: `ChromePalette`'s dynamic colours call it from trait closures, off the main actor.
+    nonisolated convenience init(rgb: UInt32) {
+        self.init(red: CGFloat((rgb >> 16) & 0xFF) / 255, green: CGFloat((rgb >> 8) & 0xFF) / 255,
+                  blue: CGFloat(rgb & 0xFF) / 255, alpha: 1)
+    }
 }
