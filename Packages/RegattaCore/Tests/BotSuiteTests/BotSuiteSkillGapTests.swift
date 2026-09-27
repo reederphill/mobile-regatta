@@ -75,9 +75,10 @@ import Testing
 
     @Test func bundledThresholdsGateTheTactician() throws {
         let thresholds = try BotThresholds.bundled()
-        #expect(thresholds.profiles["tactician"] == ProfileLimits(minTacticianWinShare: 0.75, minTacticianGainLengthsPerBeat: 3))
+        #expect(thresholds.profiles["tactician"]?.minTacticianWinShare == 0.75)
+        #expect(thresholds.profiles["tactician"]?.minTacticianGainLengthsPerBeat == 3)
         var unknown = unmissableThresholds()
-        unknown.profiles["blipTacker"] = ProfileLimits()
+        unknown.profiles["coverer"] = ProfileLimits()
         let path = try fixture(unknown, named: "unknown-profile")
         #expect(throws: BotSuiteError.self) { try BotThresholds.load(from: URL(fileURLWithPath: path)) }
         // A thresholds file from before #231 has no profiles, and gates none.

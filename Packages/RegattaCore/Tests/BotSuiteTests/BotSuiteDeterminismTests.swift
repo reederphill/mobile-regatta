@@ -23,7 +23,7 @@ import Testing
     /// Since #81 a race is assembled from the files its setup names, so the conditions axis sails other
     /// wind: each cell's race is sailed with exactly the conditions it names.
     @Test func conditionsAxisVariesTheRace() throws {
-        let cells = BotMatrix(seeds: [5], conditions: ["classic-oscillating@2", "gusty-offshore@2"], fleetSizes: [5]).cells
+        let cells = BotMatrix(seeds: [5], conditions: ["classic-oscillating@3", "gusty-offshore@3"], fleetSizes: [5]).cells
         let races = try cells.map { cell in
             let setup = try BotRaceHarness.raceSetup(for: cell)
             return try Race(setup: setup, files: RaceFiles(resolving: setup),

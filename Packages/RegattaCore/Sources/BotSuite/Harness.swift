@@ -108,6 +108,8 @@ struct RaceTally {
     private let upwind: Vec2
     /// Where each racing seat entered the leg she's sailing: the leg, the tick and her position.
     private var legEntries: [(leg: Int, tick: Int, position: Vec2)?]
+    /// Each seat's tacks since she entered that leg (#238), penalty turns aside.
+    private var legTacks: [Int]
     /// Each seat's beats sailed, in order.
     private var beats: [[BeatSplit]]
 
@@ -127,6 +129,7 @@ struct RaceTally {
         isBeat = race.course.legs.map { $0 == .round(CourseLayout.windwardIndex) }
         upwind = race.course.upwind
         legEntries = Array(repeating: nil, count: race.boats.count)
+        legTacks = zeros
         beats = Array(repeating: [], count: race.boats.count)
     }
 
@@ -143,6 +146,7 @@ struct RaceTally {
             case .obstructionContact(let seat, .land): landContacts[seat] += 1
             case .obstructionContact(let seat, .boundary): boundaryContacts[seat] += 1
             case .disqualified(let seat, _): disqualifications[seat] += 1
+            case .tacked(let seat) where !race.boats[seat].isTakingPenalty: legTacks[seat] += 1
             case .contact(let pair):
                 let id = opened.first { $0.parties == pair && !claimed.contains($0.id) }?.id
                 if let id { claimed.append(id) }
@@ -169,7 +173,8 @@ struct RaceTally {
         }
     }
 
-    /// A beat ends when she moves on from it, and a leg begins as she starts or rounds into it.
+    /// A beat ends when she moves on from it, and a leg begins as she starts or rounds into it. Her tacks
+    /// count from the leg's beginning, so none she made before her start does.
     private mutating func recordLeg(_ seat: Int, _ boat: Boat, tick: Int) {
         guard boat.status == .racing || boat.status == .finished else { return }
         let entry = legEntries[seat]
@@ -177,9 +182,10 @@ struct RaceTally {
         guard entry?.leg != leg else { return }
         if let entry, isBeat[entry.leg] {
             beats[seat].append(BeatSplit(seconds: Double(tick - entry.tick) / Double(Race.tickRate),
-                                         metres: (boat.position - entry.position).dot(upwind)))
+                                         metres: (boat.position - entry.position).dot(upwind), tacks: legTacks[seat]))
         }
         legEntries[seat] = (leg, tick, boat.position)
+        legTacks[seat] = 0
     }
 
     /// Metres from `position` in to the race area's nearest edge; negative outside it.

@@ -80,11 +80,14 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     }
 }
 
-/// One beat a seat sailed (#231): how long it took her, and how far she made good up the course over it.
+/// One beat a seat sailed (#231): how long it took her, how far she made good up the course over it, and how
+/// often she tacked on it (#238).
 public struct BeatSplit: Codable, Hashable, Sendable {
     public var seconds: Double
     /// Metres along the course axis from where she began the beat to where she rounded out of it.
     public var metres: Double
+    /// Her tacks from the beat's beginning to her rounding out of it; penalty turns aside.
+    public var tacks: Int = 0
 }
 
 /// Tick times over one race, milliseconds: the bots' decisions and the race step together; and the race's
@@ -155,6 +158,8 @@ public struct RaceResult: Codable, Hashable, Sendable {
     public var fleet: FleetMetrics
     /// The baseline against the tactician (#231), in a race that has both; nil otherwise.
     public var skillGap: RaceSkillGap?
+    /// How the profiles sailed the shifts (#238), in a race of the fun-pass mix; nil otherwise.
+    public var funPass: RaceFunPass?
     public var timings: TickTimings
 
     /// `ranks`: each seat's place in the race's order at the end (`Race.place(of:)`), finished or not.
@@ -167,8 +172,38 @@ public struct RaceResult: Codable, Hashable, Sendable {
         self.seats = seats
         fleet = FleetMetrics(seats)
         skillGap = RaceSkillGap(seats: seats, ranks: ranks, hullLength: hullLength)
+        funPass = cell.profileMix == .funPass ? RaceFunPass(seats: seats, ranks: ranks) : nil
         self.timings = timings
     }
+}
+
+/// The scripted profiles of `seats` in the race's order at the end (`ranks`, each seat's place), first place
+/// first: finishers, then the rest by rank. Live seats are left out.
+func profileOrder(_ seats: [SeatMetrics], ranks: [Int]) -> [BotProfile] {
+    seats.indices.filter { seats[$0].profile != nil }.sorted { ranks[$0] < ranks[$1] }.compactMap { seats[$0].profile }
+}
+
+/// Whether `profile` beat `other` in a race whose profiles finished in `order`, both among them: 1 when its
+/// seats' mean place in `order` is ahead of the other's seats', 0 when behind, ½ for a tie.
+func win(_ profile: BotProfile, over other: BotProfile, in order: [BotProfile]) -> Double {
+    let meanPlace = { (profile: BotProfile) -> Double in
+        let places = order.indices.filter { order[$0] == profile }
+        return Double(places.reduce(0, +)) / Double(places.count)
+    }
+    let (a, b) = (meanPlace(profile), meanPlace(other))
+    return a < b ? 1 : a > b ? 0 : 0.5
+}
+
+/// Each profile's tacks over the beats `seats` completed, and those beats, keyed by `BotProfile.rawValue`;
+/// only the profiles that completed a beat.
+func beatTacks(_ seats: [SeatMetrics]) -> [String: (tacks: Int, beats: Int)] {
+    var tallies: [String: (tacks: Int, beats: Int)] = [:]
+    for seat in seats where !seat.beats.isEmpty {
+        guard let profile = seat.profile?.rawValue else { continue }
+        let tally = tallies[profile] ?? (0, 0)
+        tallies[profile] = (tally.tacks + seat.beats.reduce(0) { $0 + $1.tacks }, tally.beats + seat.beats.count)
+    }
+    return tallies
 }
 
 /// How a race's tactician seats did against its baseline seats (#231, ADR 0007: "a tactician bot clearly
@@ -192,14 +227,8 @@ public struct RaceSkillGap: Codable, Hashable, Sendable {
         let tacticians = seats.filter { $0.profile == .tactician }
         let baselines = seats.filter { $0.profile == .baseline }
         guard !tacticians.isEmpty, !baselines.isEmpty else { return nil }
-        let order = seats.indices.filter { seats[$0].profile != nil }.sorted { ranks[$0] < ranks[$1] }.compactMap { seats[$0].profile }
-        self.order = order
-        let meanPlace = { (profile: BotProfile) -> Double in
-            let places = order.indices.filter { order[$0] == profile }
-            return Double(places.reduce(0, +)) / Double(places.count)
-        }
-        let (t, b) = (meanPlace(.tactician), meanPlace(.baseline))
-        tacticianWin = t < b ? 1 : t > b ? 0 : 0.5
+        order = profileOrder(seats, ranks: ranks)
+        tacticianWin = win(.tactician, over: .baseline, in: order)
         let wins = tacticians.reduce(0) { total, t in total + baselines.filter { ranks[t.seat] < ranks[$0.seat] }.count }
         tacticianPairShare = share(wins, of: tacticians.count * baselines.count)
         let beatCount = seats.map(\.beats.count).max() ?? 0
@@ -212,6 +241,54 @@ public struct RaceSkillGap: Codable, Hashable, Sendable {
             let baselineSpeed = b.reduce(0) { $0 + $1.metres } / Double(b.count) / max(baselineSeconds, 1)
             return (baselineSeconds - seconds(t)) * baselineSpeed / hullLength
         }
+    }
+}
+
+/// How a fun-pass race's profiles sailed its shifts (#221, #238: "the tactician averages ≥ 4 tacks per beat;
+/// a blip-tacker profile (tacks on every header > 3°) loses to the tactician").
+public struct RaceFunPass: Codable, Hashable, Sendable {
+    /// The profiles in the race's order at the end, first place first: finishers, then the rest by rank.
+    public var order: [BotProfile]
+    /// Each profile's tacks per beat over the beats its seats completed, keyed by `BotProfile.rawValue`; only
+    /// the profiles that completed one.
+    public var tacksPerBeat: [String: Double]
+    /// Whether the tactician beat the blip-tacker: 1 when its seats' mean place in `order` is ahead of the
+    /// blip-tacker seats', 0 when behind, ½ for a tie; nil for a race without both (a two-boat fleet).
+    public var tacticianBeatsBlipTacker: Double?
+
+    init(seats: [SeatMetrics], ranks: [Int]) {
+        order = profileOrder(seats, ranks: ranks)
+        tacksPerBeat = beatTacks(seats).mapValues { Double($0.tacks) / Double($0.beats) }
+        tacticianBeatsBlipTacker = order.contains(.tactician) && order.contains(.blipTacker)
+            ? win(.tactician, over: .blipTacker, in: order) : nil
+    }
+}
+
+/// The fun pass over a run (#238): what `minTacticianTacksPerBeat` and `minTacticianBeatsBlipTackerShare` hold.
+public struct FunPassSummary: Codable, Hashable, Sendable {
+    /// Races of the fun-pass mix.
+    public var races: Int
+    /// Each profile's tacks per beat: its seats' tacks over the beats they completed, every fun-pass race's
+    /// together, keyed by `BotProfile.rawValue`; only the profiles that completed a beat.
+    public var tacksPerBeat: [String: Double]
+    /// The beats behind each of those.
+    public var beats: [String: Int]
+    /// Races with both the tactician and the blip-tacker.
+    public var blipTackerRaces: Int
+    /// The share of those the tactician won (`RaceFunPass.tacticianBeatsBlipTacker`); nil when there were none.
+    public var tacticianBeatsBlipTackerShare: Double?
+
+    /// Nil when no race was of the fun-pass mix.
+    init?(_ races: [RaceResult]) {
+        let races = races.filter { $0.funPass != nil }
+        guard !races.isEmpty else { return nil }
+        self.races = races.count
+        let tallies = beatTacks(races.flatMap(\.seats))
+        tacksPerBeat = tallies.mapValues { Double($0.tacks) / Double($0.beats) }
+        beats = tallies.mapValues(\.beats)
+        let wins = races.compactMap(\.funPass?.tacticianBeatsBlipTacker)
+        blipTackerRaces = wins.count
+        tacticianBeatsBlipTackerShare = wins.isEmpty ? nil : wins.reduce(0, +) / Double(wins.count)
     }
 }
 
@@ -277,8 +354,8 @@ public struct TierSummary: Codable, Hashable, Sendable {
     }
 }
 
-/// A suite run's report (#97): the matrix, every race, each tier's and profile's summary, the skill gap, and
-/// the gate's verdict.
+/// A suite run's report (#97): the matrix, every race, each tier's and profile's summary, the skill gap, the
+/// fun pass (#238), and the gate's verdict.
 public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var simulationVersion: String
     public var matrix: BotMatrix
@@ -290,6 +367,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var profiles: [String: TierSummary]
     /// The tactician against the baseline over the races that had both; nil when none did.
     public var skillGap: SkillGapSummary?
+    /// The fun-pass scenario (#238) over its races; nil when none sailed.
+    public var funPass: FunPassSummary?
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -316,9 +395,10 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
             return ofProfile.isEmpty ? nil : (profile.rawValue, TierSummary(ofProfile))
         })
         skillGap = SkillGapSummary(races.compactMap(\.skillGap))
+        funPass = FunPassSummary(races)
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
-        breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap)
+        breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass)
         passed = breaches.isEmpty
     }
 
@@ -347,6 +427,16 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
             lines.append("skill gap: tactician won \(fixed(gap.tacticianWinShare)) of \(gap.races) races "
                 + "(\(fixed(gap.tacticianPairShare)) of pairs), median gain \(fixed(gap.medianGainLengthsPerBeat)) "
                 + "lengths/beat over \(gap.beats) beats")
+        }
+        if let pass = funPass {
+            let tacks = BotProfile.allCases.compactMap { profile in
+                pass.tacksPerBeat[profile.rawValue].map { "\(profile.rawValue) \(fixed($0))" }
+            }
+            var line = "fun pass: \(pass.races) races, tacks/beat \(tacks.joined(separator: ", "))"
+            if let share = pass.tacticianBeatsBlipTackerShare {
+                line += "; tactician beat the blip-tacker in \(fixed(share)) of \(pass.blipTackerRaces) races"
+            }
+            lines.append(line)
         }
         lines.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms, max \(fixed(timings.maxMs, 3)) ms")
         lines.append(passed ? "gate: pass" : "gate: FAIL")

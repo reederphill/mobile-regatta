@@ -37,20 +37,40 @@ public enum BotTier: String, Codable, CaseIterable, Hashable, Sendable {
 }
 
 /// Which scripted profile, if any, sails each seat of a race (#231): the matrix's profile axis, as a tier
-/// mix is its tier axis. #238 and #234 add mixes for their profiles.
+/// mix is its tier axis. #234 adds mixes for its profiles.
 public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// Every seat a live bot, sailing as its tier does: the seats the tier limits gate.
     case live
     /// The skill-gap scenario (ADR 0007): baseline and tactician seats by turns, the tactician on the odd
     /// seats for an even seed and the even seats for an odd one, so neither profile keeps a seat's start.
     case skillGap
+    /// The fun-pass scenario (#221, #238), sailed in classic oscillating conditions only: baseline, tactician
+    /// and blip-tacker seats by turns, starting one seat further along for each seed. #221's proof that the
+    /// shifts are worth playing: the tactician tacks often, and beats the boat that tacks on every blip.
+    case funPass
 
     /// The profile sailing `seat` in a race with race seed `seed`, or nil for a live bot.
     public func profile(ofSeat seat: Int, seed: UInt64) -> BotProfile? {
         switch self {
         case .live: nil
         case .skillGap: (seat + Int(seed % 2)).isMultiple(of: 2) ? .baseline : .tactician
+        case .funPass: [BotProfile.baseline, .tactician, .blipTacker][(seat + Int(seed % 3)) % 3]
         }
+    }
+
+    /// The conditions file the mix is sailed in, by id, whatever its version; nil for any the matrix names.
+    /// The fun pass's numbers (#221) are for an oscillating breeze: a matrix sails it in no other conditions.
+    public var conditionsID: String? {
+        switch self {
+        case .live, .skillGap: nil
+        case .funPass: "classic-oscillating"
+        }
+    }
+
+    /// Whether the mix is sailed in `conditions`, a data file named `id@version`.
+    public func sails(in conditions: String) -> Bool {
+        guard let id = conditionsID else { return true }
+        return (try? dataFileKey(conditions))?.id == id
     }
 }
 
@@ -74,7 +94,8 @@ public enum TierMix: String, Codable, CaseIterable, Hashable, Sendable {
 }
 
 /// The races a suite run sails (#97): every combination of seed × venue × conditions × tide state ×
-/// fleet size × tier mix × profile mix (#231). Venues and conditions are data files named `id@version`.
+/// fleet size × tier mix × profile mix (#231), but for a profile mix pinned to other conditions
+/// (`ProfileMix.conditionsID`). Venues and conditions are data files named `id@version`.
 ///
 /// Venue and conditions go into each race's setup, and the race is assembled from the files it names
 /// (#81): its wind, course and race area come from them. The tide state is recorded but doesn't vary the
@@ -95,7 +116,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     /// as not finished.
     public var capSecondsAfterGun: Int
 
-    public init(seeds: [UInt64], venues: [String] = ["dev-venue@2"], conditions: [String] = ["classic-oscillating@2"],
+    public init(seeds: [UInt64], venues: [String] = ["dev-venue@3"], conditions: [String] = ["classic-oscillating@3"],
                 tideStatesDegrees: [Double] = [0], fleetSizes: [Int], tierMixes: [TierMix] = [.seeded],
                 profileMixes: [ProfileMix] = [.live], laps: Int = RaceSetup.defaultLaps,
                 capSecondsAfterGun: Int = BotMatrix.defaultCapSecondsAfterGun) {
@@ -138,7 +159,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                     tideStatesDegrees.flatMap { tide in
                         fleetSizes.flatMap { fleetSize in
                             tierMixes.flatMap { mix in
-                                profileMixes.map { profiles in
+                                profileMixes.filter { $0.sails(in: conditions) }.map { profiles in
                                     BotRaceCell(seed: seed, venue: venue, conditions: conditions, tideStateDegrees: tide,
                                                 fleetSize: fleetSize, tierMix: mix, profileMix: profiles, laps: laps,
                                                 capSecondsAfterGun: capSecondsAfterGun)
@@ -152,7 +173,8 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     }
 
     /// Throws unless every axis has a value, every fleet size is one a race can have, every data file
-    /// is bundled, and every venue has a pairing for every conditions.
+    /// is bundled, every venue has a pairing for every conditions, and every profile mix has conditions to
+    /// sail in.
     public func validate() throws {
         for (axis, count) in [("seeds", seeds.count), ("venues", venues.count), ("conditions", conditions.count),
                               ("tideStatesDegrees", tideStatesDegrees.count), ("fleetSizes", fleetSizes.count),
@@ -174,6 +196,10 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                     throw BotSuiteError.matrix("\(venue) has no pairing for \(conditions)")
                 }
             }
+        }
+        for mix in profileMixes {
+            guard let id = mix.conditionsID, !conditions.contains(where: mix.sails(in:)) else { continue }
+            throw BotSuiteError.matrix("\(mix.rawValue) sails only in \(id) conditions, which the matrix doesn't name")
         }
     }
 

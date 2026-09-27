@@ -41,6 +41,9 @@ struct Tactics: Sendable, Equatable {
             self.init(headerThreshold: deg2rad(4), tackInterval: 20, anticipation: 6, corridor: 0.8,
                       downwindShiftThreshold: deg2rad(5), replanes: true, heatsUpInLulls: true, pinchesToFetch: true,
                       seeksPuffs: true, seeksClearAir: true, covers: true)
+        case .blipTacker:
+            // The baseline with a hair trigger: a 3° blip tacks her as a real header does.
+            self.init(headerThreshold: deg2rad(3), tackInterval: 15)
         }
     }
 
