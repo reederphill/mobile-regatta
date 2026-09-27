@@ -4,13 +4,13 @@ import Testing
 
 /// The rules configuration file (#73): its values, its hash, and where the race reads it.
 @Suite struct RulesConfigTests {
-    /// The bundled bytes of fleet-rules@`version`: by default the default file, @3.
-    static func bundledData(version: Int = 3) throws -> Data {
+    /// The bundled bytes of fleet-rules@`version`: by default the default file, @4.
+    static func bundledData(version: Int = 4) throws -> Data {
         try #require(try RulesConfigFile.bundledData(id: "fleet-rules", version: version))
     }
 
     /// The bundled bytes of fleet-rules@`version` with `old` replaced by `new` exactly once.
-    static func tampered(_ old: String, _ new: String, version: Int = 3) throws -> Data {
+    static func tampered(_ old: String, _ new: String, version: Int = 4) throws -> Data {
         let text = try #require(String(data: try bundledData(version: version), encoding: .utf8))
         #expect(text.components(separatedBy: old).count == 2, "\(old) must appear exactly once")
         return Data(text.replacingOccurrences(of: old, with: new).utf8)
@@ -144,14 +144,13 @@ import Testing
     }
 
     /// fleet-rules@3 (schema 3, #89) is @2 with sequential penalty deadlines (G4), loosened a little from #9's
-    /// 15 s and 30 s to 20 s and 40 s (the owner): every other value the same. It is the default; @1 and @2 still
-    /// load, with #9's deadlines and each turn's clock from its own call, as they meant.
+    /// 15 s and 30 s to 20 s and 40 s (the owner): every other value the same. It was the default until #92; @1
+    /// and @2 still load, with #9's deadlines and each turn's clock from its own call, as they meant.
     @Test func version3IsVersion2WithLooserSequentialPenaltyDeadlines() throws {
         let v1 = try RulesConfigFile.bundled(id: "fleet-rules", version: 1)
         let v2 = try RulesConfigFile.bundled(id: "fleet-rules", version: 2)
         let v3 = try RulesConfigFile.bundled(id: "fleet-rules", version: 3)
         #expect(v3.header.schemaVersion == 3)
-        #expect(v3.ref == RaceFiles.defaults.rulesConfiguration.ref && v3.ref == Race.defaultRulesConfiguration.ref)
         #expect(v1.content.raceFormat.penalty.stackedPenaltyDeadlines == .fromCall)
         #expect(v2.content.raceFormat.penalty.stackedPenaltyDeadlines == .fromCall)
         #expect(v3.content.raceFormat.penalty.stackedPenaltyDeadlines == .sequential)
@@ -182,7 +181,7 @@ import Testing
         }
         // Schema 3 without it.
         #expect(throws: DataFileError.malformed(kind: kind, reason: "schema 3 needs raceFormat.penalty.stackedPenaltyDeadlines")) {
-            try RulesConfigFile(data: Self.tampered(",\n      " + field, ""))
+            try RulesConfigFile(data: Self.tampered(",\n      " + field, "", version: 3))
         }
         // Before schema 3 with it: @2 given the field, or @3 claiming schema 2.
         let needsSchema3 = DataFileError.invalidContent(
@@ -191,10 +190,66 @@ import Testing
             try RulesConfigFile(data: Self.tampered(#""startedTurnDegrees": 30"#, #""startedTurnDegrees": 30, "# + field, version: 2))
         }
         #expect(throws: needsSchema3) {
-            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 3"#, #""schemaVersion": 2"#))
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 3"#, #""schemaVersion": 2"#, version: 3))
         }
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 4, supported: [1, 2, 3])) {
-            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 3"#, #""schemaVersion": 4"#))
+    }
+
+    /// fleet-rules@4 (schema 4, #92) is @3 with the escape simulation's "changes course" rate, 12°/s, listed as a
+    /// builder value: every other value the same. It is the default. @1 to @3 still load, with none: their
+    /// races run no escape simulation, and never call rules 15 or 16.1, as before #92.
+    @Test func version4IsVersion3WithTheChangesCourseRate() throws {
+        let v3 = try RulesConfigFile.bundled(id: "fleet-rules", version: 3)
+        let v4 = try RulesConfigFile.bundled(id: "fleet-rules", version: 4)
+        #expect(v4.header.schemaVersion == 4)
+        #expect(v4.ref == RaceFiles.defaults.rulesConfiguration.ref && v4.ref == Race.defaultRulesConfiguration.ref)
+        for version in 1...3 {
+            #expect(try RulesConfigFile.bundled(id: "fleet-rules", version: version).content.incidents.escape.changesCourse == nil)
+        }
+        #expect(v4.content.incidents.escape.changesCourse == deg2rad(12))
+        #expect(v4.header.placeholders == v3.header.placeholders)
+        let rate = "/incidents/escape/changesCourseDegreesPerSecond"
+        #expect(v4.content.builderValues.contains(rate) && v4.content.builderValues.filter { $0 != rate } == v3.content.builderValues)
+
+        var incidents = v3.content.incidents
+        incidents.escape.changesCourse = deg2rad(12)
+        #expect(v4.content.incidents == incidents)
+        #expect(v4.content.raceFormat == v3.content.raceFormat && v4.content.zone == v3.content.zone)
+        #expect(v4.content.markRoomGiven == v3.content.markRoomGiven && v4.content.onABeat == v3.content.onABeat)
+        // The umpire records the boats long enough for a 2 s horizon a tick after a course change, and to
+        // see right of way acquired 2 s ago against the tick before.
+        #expect(v4.content.incidents.escape.recordedTicks == 62)
+    }
+
+    /// The "changes course" rate is schema 4's: required there and positive, refused before it.
+    @Test func changesCourseRateNeedsSchema4() throws {
+        let kind = RulesConfig.kind
+        let field = #""changesCourseDegreesPerSecond": 12"#
+        #expect(try RulesConfigFile(data: Self.tampered(field, #""changesCourseDegreesPerSecond": 20"#))
+            .content.incidents.escape.changesCourse == deg2rad(20))
+        for bad in ["0", "-3"] {
+            #expect(throws: DataFileError.invalidContent(
+                kind: kind, id: "fleet-rules", reason: "incidents.escape.changesCourseDegreesPerSecond must be positive")) {
+                try RulesConfigFile(data: Self.tampered(field, #""changesCourseDegreesPerSecond": "# + bad))
+            }
+        }
+        // Schema 4 without it (and without its builder value, which would point at nothing).
+        var text = try #require(String(data: try Self.tampered(",\n      " + field, ""), encoding: .utf8))
+        text = text.replacingOccurrences(of: "\n    \"/incidents/escape/changesCourseDegreesPerSecond\",", with: "")
+        #expect(!text.contains(#""changesCourseDegreesPerSecond""#) && !text.contains(#"/changesCourseDegreesPerSecond""#))
+        #expect(throws: DataFileError.malformed(kind: kind, reason: "schema 4 needs incidents.escape.changesCourseDegreesPerSecond")) {
+            try RulesConfigFile(data: Data(text.utf8))
+        }
+        // Before schema 4 with it: @3 given the field, or @4 claiming schema 3.
+        let needsSchema4 = DataFileError.invalidContent(
+            kind: kind, id: "fleet-rules", reason: "incidents.escape.changesCourseDegreesPerSecond needs schema 4")
+        #expect(throws: needsSchema4) {
+            try RulesConfigFile(data: Self.tampered(#""initiallySeconds": 2"#, #""initiallySeconds": 2, "# + field, version: 3))
+        }
+        #expect(throws: needsSchema4) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 4"#, #""schemaVersion": 3"#))
+        }
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 5, supported: [1, 2, 3, 4])) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 4"#, #""schemaVersion": 5"#))
         }
     }
 

@@ -26,7 +26,9 @@ public struct RulesConfig: DataFileContent {
     /// (nil): a squeezed start row narrows its spread with its depth, as #82 squeezed its placement.
     /// Schema 3 (#89) adds how stacked penalty turns take their deadlines (`Penalty.stackedPenaltyDeadlines`);
     /// a schema-1 or -2 file means `fromCall`.
-    public static let supportedSchemaVersions = [1, 2, 3]
+    /// Schema 4 (#92) adds the escape simulation's "changes course" test (`Escape.changesCourse`); a schema-1 to
+    /// -3 file has none (nil), and its races run no escape simulation: rules 15 and 16.1 are never called.
+    public static let supportedSchemaVersions = [1, 2, 3, 4]
 
     public var incidents: Incidents
     /// The rule 18 zone.
@@ -82,6 +84,18 @@ public struct RulesConfig: DataFileContent {
         /// Seconds after a boat acquires right of way during which she must initially give the other
         /// room to keep clear (rules 15 and 16.1). Builder value.
         public var initially: Double
+        /// The right-of-way boat changes course (rule 16.1) on a tick her heading turns faster than this,
+        /// radians a second (schema 4, #92): above the autohelm following shifts and puffs, below a luff.
+        /// Builder value. Nil in a schema-1 to -3 file: no escape simulation runs, so rules 15 and 16.1 are
+        /// never called (`EscapeSimulation`).
+        public var changesCourse: Double?
+
+        /// Ticks the umpire records each boat for (`UmpireState`): enough for a simulation from the tick
+        /// after the first it looks back to, a course change `horizon` and `startTickOffset` before the
+        /// incident or right of way acquired `initially` before it, and the tick before that to compare.
+        public var recordedTicks: Int {
+            max(RulesConfig.ticks(horizon) + startTickOffset + 1, RulesConfig.ticks(initially) + 2)
+        }
     }
 
     public struct Zone: Sendable, Equatable {
@@ -216,7 +230,7 @@ public struct RulesConfig: DataFileContent {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2, 3:
+        case 1, 2, 3, 4:
             // Duplicate keys were already refused by `DataFile`, so every parse below reads the same file.
             let document = try JSONDecoder().decode(RulesConfigSchema.self, from: fileData)
             try document.rejectUnknownFields(in: fileData)
@@ -240,12 +254,13 @@ public struct RulesConfig: DataFileContent {
 
 public typealias RulesConfigFile = DataFile<RulesConfig>
 
-// MARK: - Schemas 1, 2 and 3
+// MARK: - Schemas 1 to 4
 
-/// The rules configuration file, schema versions 1, 2 and 3, as written. Documented in `docs/rules-file.md`.
+/// The rules configuration file, schema versions 1 to 4, as written. Documented in `docs/rules-file.md`.
 /// Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths` (#85): required in schema 2
 /// and later, refused in schema 1. Schema 3 is schema 2 plus `raceFormat.penalty.stackedPenaltyDeadlines`
-/// (#89): required in schema 3, refused before it.
+/// (#89): required in schema 3 and later, refused before it. Schema 4 is schema 3 plus
+/// `incidents.escape.changesCourseDegreesPerSecond` (#92): required in schema 4, refused before it.
 struct RulesConfigSchema: Decodable {
     let schemaVersion: Int
     let id: String
@@ -298,8 +313,12 @@ struct RulesConfigSchema: Decodable {
         let candidates: Candidates
         let startTickOffset: Int
         let initiallySeconds: Double
+        /// Schema 4.
+        let changesCourseDegreesPerSecond: Double?
 
-        enum CodingKeys: String, CodingKey, CaseIterable { case horizonSeconds, candidates, startTickOffset, initiallySeconds }
+        enum CodingKeys: String, CodingKey, CaseIterable {
+            case horizonSeconds, candidates, startTickOffset, initiallySeconds, changesCourseDegreesPerSecond
+        }
     }
 
     struct Zone: Decodable {
@@ -416,7 +435,7 @@ struct RulesConfigSchema: Decodable {
         }
     }
 
-    /// Every field schemas 1 to 3 have, from each type's `CodingKeys`, so it can't drift from the decoder.
+    /// Every field schemas 1 to 4 have, from each type's `CodingKeys`, so it can't drift from the decoder.
     static let fields: FieldTree = .object(CodingKeys.self, [
         .incidents: .object(Incidents.CodingKeys.self, [
             .nearMissSweep: .object(NearMissSweep.CodingKeys.self),
@@ -437,7 +456,7 @@ struct RulesConfigSchema: Decodable {
     ])
 
     /// Validates the file and converts it to code units. Throws `DataFileError.invalidContent`, or `malformed`
-    /// for a schema-2 or -3 file without a field its schema requires.
+    /// for a schema-2, -3 or -4 file without a field its schema requires.
     func rulesConfig(id: String, schemaVersion: Int, fileData: Data) throws -> RulesConfig {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
             if !condition { throw DataFileError.invalidContent(kind: RulesConfig.kind, id: id, reason: reason()) }
@@ -501,7 +520,21 @@ struct RulesConfigSchema: Decodable {
         try check(format.penalty.completeSeconds >= format.penalty.startSeconds,
                   "raceFormat.penalty.completeSeconds must not be before startSeconds")
         let startedTurn = try angle(format.penalty.startedTurnDegrees, "raceFormat.penalty.startedTurnDegrees", max: 360)
-        // Schema 3's stacking of penalty deadlines: required in schema 3, refused before it, where it is `fromCall`.
+        // Schema 4's "changes course" test: required in schema 4, refused before it, where there is none.
+        var changesCourse: Double?
+        if schemaVersion >= 4 {
+            guard let rate = escape.changesCourseDegreesPerSecond else {
+                throw DataFileError.malformed(
+                    kind: RulesConfig.kind, reason: "schema \(schemaVersion) needs incidents.escape.changesCourseDegreesPerSecond")
+            }
+            try positive(rate, "incidents.escape.changesCourseDegreesPerSecond")
+            changesCourse = deg2rad(rate)
+        } else {
+            try check(escape.changesCourseDegreesPerSecond == nil, "incidents.escape.changesCourseDegreesPerSecond needs schema 4")
+        }
+
+        // Schema 3's stacking of penalty deadlines: required in schema 3 and later, refused before it, where it
+        // is `fromCall`.
         var stacking = RulesConfig.StackedPenaltyDeadlines.fromCall
         if schemaVersion >= 3 {
             guard let value = format.penalty.stackedPenaltyDeadlines else {
@@ -557,7 +590,8 @@ struct RulesConfigSchema: Decodable {
                 nearMissSweep: .init(heading: sweepHeading, seconds: sweep.seconds, headingSamples: sweep.headingSamples,
                                      stepTicks: sweep.stepTicks, clearance: HullLengths(sweep.clearanceHullLengths)),
                 escape: .init(horizon: escape.horizonSeconds, candidates: candidates,
-                              startTickOffset: escape.startTickOffset, initially: escape.initiallySeconds),
+                              startTickOffset: escape.startTickOffset, initially: escape.initiallySeconds,
+                              changesCourse: changesCourse),
                 separation: HullLengths(incidents.separationHullLengths),
                 lastPointOfCertainty: incidents.lastPointOfCertaintySeconds),
             zone: .init(radius: HullLengths(zone.radiusHullLengths)),
