@@ -5,7 +5,7 @@ import Testing
 @Suite struct BotSuiteGateTests {
     private func seat(_ tier: BotTier, finished: Bool = true, irons: Double = 0, marks: Int = 0, contacts: Int = 0,
                       fouls: Int = 0, edge: Double = 0) -> SeatMetrics {
-        SeatMetrics(seat: 0, tier: tier, skill: 0.5, status: finished ? "finished" : "dnf", finished: finished,
+        SeatMetrics(seat: 0, tier: tier, skill: 0.5, status: finished ? "finished" : "racing", finished: finished,
                     place: finished ? 1 : nil, ironsSeconds: irons, markContacts: marks, boatContacts: contacts,
                     contactsEndingInFouls: fouls, contactsToFoulsShare: share(fouls, of: contacts), foulsAsOffender: 0,
                     dsqMissedPenalty: 0, ocsCount: 0, edgeSeconds: edge, landContacts: 0, boundaryContacts: 0)

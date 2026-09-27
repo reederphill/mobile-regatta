@@ -41,10 +41,11 @@ public enum BoatStatus: Sendable, Equatable {
     /// it: `CourseLayout.isReturning`.
     case ocs
     case racing
+    /// Crossed the finish line (#86: a ghost from that tick).
     case finished
-    /// Finished with an unserved penalty.
+    /// Disqualified: today at the finish with a penalty unserved; #89 moves it to the missed deadline. A ghost
+    /// from the call (#86).
     case dsq
-    case dnf
 }
 
 public struct Boat: Identifiable, Sendable {
@@ -146,14 +147,19 @@ public struct Boat: Identifiable, Sendable {
     /// Velocity over the ground, m/s: through the water plus the current, always (#11).
     public var velocityOverGround: Vec2 { velocity + current }
 
-    public var isOnCourse: Bool {
-        status == .prestart || status == .ocs || status == .racing
-    }
+    /// Still racing, or still able to: before the gun, OCS, not yet started or racing. Exactly `!isGhost`,
+    /// kept for the app and the bots, which ask it that way round.
+    public var isOnCourse: Bool { !isGhost }
 
-    /// A boat that has stopped racing: still drawn, but with no rights or obligations under Part 2
-    /// (CONTEXT.md). Decided by status alone; for now every status off the course (finished, dsq, dnf).
-    /// #86 owns the final semantics (OCS at the close).
-    public var isGhost: Bool { !isOnCourse }
+    /// A boat that has stopped racing (CONTEXT.md, "Ghost"; #30, #86): finished, from the tick she crosses
+    /// the line, or DSQ, from the call. She casts and takes no wind shadow or backwind, can't be touched and
+    /// has no rights or obligations under the rules, but the current still carries her (#11). Decided by
+    /// status alone, and what the step's checks read.
+    ///
+    /// An OCS boat, or one that never started, becomes a ghost only at the close, since she can return and
+    /// start until then (#30). Nothing steps after the close, so the boat can't see it and the race says it:
+    /// `Race.isGhost(seat:)`, which is what a display reads. No field, wire bit or digest input of its own.
+    public var isGhost: Bool { status == .finished || status == .dsq }
 
     /// How far she sails by the lee, radians, or nil when she isn't.
     public var byTheLeeAngle: Double? { isByTheLee ? .pi + sailingAngle : nil }

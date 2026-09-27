@@ -486,7 +486,8 @@ public actor RaceHost {
         let outcome = RaceOutcome(standings: race.standings(), digest: race.digest(), log: log)
         self.outcome = outcome
         flushReliable()
-        // Results schema is #86's: `.none` until then.
+        // The results reach clients in the `raceClosed` event (#86); the message's own results stream is
+        // #148's: `.none` until then.
         for seat in seats.indices { send(.raceClosed(RaceClosed(results: .none)), to: seat) }
         return outcome
     }

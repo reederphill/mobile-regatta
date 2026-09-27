@@ -248,7 +248,7 @@ struct BotBrain: Sendable {
         case .racing:
             if case .finish = c.legs[b.legIndex] { return finishAim(b, view) }
             return navigate(b, to: waypoint(b, view), view)
-        case .finished, .dsq, .dnf:
+        case .finished, .dsq:
             return Aim(heading: b.heading, b, tolerance: .pi)
         }
     }

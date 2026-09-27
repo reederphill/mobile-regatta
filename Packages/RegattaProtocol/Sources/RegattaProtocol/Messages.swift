@@ -230,8 +230,8 @@ public struct EventState: Equatable, Sendable {
     public var finishes: [Finish]
     public var firstFinishTick: Int?
     public var isOver: Bool
-    /// Client-visible rules and incident state. Placeholder until the rules tickets (#73+, #86, #96)
-    /// define schema 1: `.none`. Never umpire memory, which stays on the server (#18, #96).
+    /// Client-visible rules and incident state. Placeholder until the rules tickets (#96) define
+    /// schema 1: `.none`. Never umpire memory, which stays on the server (#18, #96).
     public var rules: VersionedPayload
 
     public init(nextEventSeq: UInt32, finishes: [Finish] = [], firstFinishTick: Int? = nil, isOver: Bool = false,
@@ -257,8 +257,10 @@ public struct EventState: Equatable, Sendable {
     }
 
     /// Makes `world`'s race-level state the server's: every boat's place and finish time (nil for boats
-    /// not in `finishes`), the first finish and whether the race is over. Contact, foul and incident
-    /// memory are left alone. Throws for a finish naming a seat `world` doesn't have.
+    /// not in `finishes`), the first finish and whether the race is over. Results the world holds are
+    /// dropped while the server's race isn't over: a prediction that closed ahead of the server scored
+    /// itself, and its results are never the race's (the server's come in `raceClosed`). Contact, foul
+    /// and incident memory are left alone. Throws for a finish naming a seat `world` doesn't have.
     public func apply(to world: inout WorldSnapshot) throws {
         guard finishes.allSatisfy({ world.seats.indices.contains($0.seat) }) else {
             throw WireError.invalidValue("finishes.seat")
@@ -273,6 +275,7 @@ public struct EventState: Equatable, Sendable {
         }
         world.firstFinishTime = firstFinishTick.map(EventState.time)
         world.isOver = isOver
+        if !isOver { world.results = nil }
     }
 
     /// Brings the state up to date with a reliable event from the server, received in order: how a
@@ -285,16 +288,13 @@ public struct EventState: Equatable, Sendable {
             finishes.append(Finish(seat: seat, place: place, tick: event.tick))
             finishes.sort { $0.seat < $1.seat } // by seat, as `init(world:)` lists them
             firstFinishTick = min(firstFinishTick ?? event.tick, event.tick)
-        case .disqualified:
-            // Today a boat is disqualified only as she crosses the finish line with a penalty unserved,
-            // which also starts the finish window (`Race.firstFinishTime`).
-            firstFinishTick = min(firstFinishTick ?? event.tick, event.tick)
         case .raceClosed:
             isOver = true
         case .gun, .ocsNotice, .cleared, .started, .ruleCall, .markTouch, .obstructionContact, .contact, .penaltyStarted,
-             .penaltyReset, .penaltyServed, .tacked, .gybed, .markRoomNotice, .becameGhost, .rounded, .firstFinish,
-             .protestRecorded, .grooveSnap:
+             .penaltyReset, .penaltyServed, .tacked, .gybed, .disqualified, .markRoomNotice, .becameGhost, .rounded,
+             .firstFinish, .protestRecorded, .grooveSnap:
             // `firstFinish` is announced beside the finish that starts the window, which `finished` records.
+            // A DSQ doesn't start it (#86): only a finisher does.
             break
         }
     }
@@ -460,7 +460,8 @@ public struct RaceCancelled: Equatable, Sendable {
 
 /// Server → client: the race is over and scored.
 public struct RaceClosed: Equatable, Sendable {
-    /// The results. Placeholder until #86 defines result codes and schema 1: `.none`.
+    /// The results as the race's stream keeps them. Placeholder until the results stream (#148) defines
+    /// schema 1: `.none`. The results themselves reach clients in the `raceClosed` event (#86).
     public var results: VersionedPayload
 
     public init(results: VersionedPayload) { self.results = results }

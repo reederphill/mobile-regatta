@@ -89,7 +89,7 @@ extension BoatStatus {
         case .racing: 2
         case .finished: 3
         case .dsq: 4
-        case .dnf: 5
+        // 5 was `dnf`, removed by #86 (a boat still racing at the close keeps `racing`): retired, never reused.
         }
     }
 }

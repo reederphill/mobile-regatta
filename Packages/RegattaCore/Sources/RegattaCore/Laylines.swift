@@ -46,7 +46,7 @@ extension CourseLayout {
         switch status {
         case .racing: legs[legIndex]
         case .prestart, .ocs: legs[0]
-        case .finished, .dsq, .dnf: .finish
+        case .finished, .dsq: .finish
         }
     }
 }

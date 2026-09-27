@@ -10,7 +10,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     /// The scripted profile she sailed (#231), or nil for a live bot.
     public var profile: BotProfile? = nil
     public var skill: Double
-    /// The boat's status at the end: prestart, ocs, racing, finished, dsq or dnf.
+    /// The boat's status at the end: prestart, ocs, racing, finished or dsq.
     public var status: String
     public var finished: Bool
     public var place: Int?
@@ -75,7 +75,6 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case .racing: "racing"
         case .finished: "finished"
         case .dsq: "dsq"
-        case .dnf: "dnf"
         }
     }
 }

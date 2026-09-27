@@ -163,8 +163,9 @@ final class OnlineDriver: RaceDriver {
 
     private func keepConnected(now: UInt64) {
         if client.status == .finished {
-            if !isClosed && !events.contains(where: { $0.kind == .raceClosed }) {
-                events.append(RaceEvent(tick: client.predicted.tick, kind: .raceClosed))
+            if !isClosed && !events.contains(where: { if case .raceClosed = $0.kind { true } else { false } }) {
+                // The results online are #163's: the close alone, for now.
+                events.append(RaceEvent(tick: client.predicted.tick, kind: .raceClosed(results: .empty)))
             }
             isClosed = true
         }

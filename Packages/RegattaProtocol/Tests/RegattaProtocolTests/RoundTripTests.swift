@@ -70,9 +70,22 @@ import Testing
             #expect(throws: WireError.unknownMessageType(UInt8(code))) { try Frame(decoding: [UInt8(code)] + Array(repeating: 0, count: 8)) }
         }
         let header: (MessageType) -> [UInt8] = { [$0.rawValue, 0, 0, 0, 0, 0, 0, 0, 0] }
-        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [23]) }
-        // Code 4 was the pre-#73 `foul`: retired, never reused.
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [24]) }
+        // Code 4 was the pre-#73 `foul`, and 11 the pre-#86 `raceClosed` without results: retired, never reused.
         #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [4, 14, 0, 1]) }
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [11]) }
+        // Race closed: rated, one row (seat, place, code); result codes 0 ... 4, and a finish tick only for code 0.
+        _ = try Frame(decoding: header(.event) + [23, 1, 1, 3, 1, 1])
+        #expect(throws: WireError.invalidValue("resultCode")) { try Frame(decoding: header(.event) + [23, 1, 1, 3, 1, 5]) }
+        #expect(throws: WireError.invalidValue("rated")) { try Frame(decoding: header(.event) + [23, 2, 0]) }
+        #expect(throws: WireError.outOfRange("finishTick")) {
+            try Frame(seq: 0, tick: 0, message: .event(.raceClosed(results: RaceResults(
+                rows: [SeatResult(seat: 0, place: 1, code: .ret, finishTick: 30)], rated: false)))).encoded()
+        }
+        #expect(throws: WireError.outOfRange("finishTick")) {
+            try Frame(seq: 0, tick: 0, message: .event(.raceClosed(results: RaceResults(
+                rows: [SeatResult(seat: 0, place: 1, code: .finished)], rated: false)))).encoded()
+        }
         #expect(throws: WireError.invalidValue("tap")) { try Frame(decoding: header(.inputTap) + [2]) }
         #expect(throws: WireError.invalidValue("ease")) { try Frame(decoding: header(.inputHeld) + [0, 2]) }
         #expect(throws: WireError.invalidValue("rudder")) { try Frame(decoding: header(.inputHeld) + [0x80, 0]) }
@@ -99,6 +112,8 @@ import Testing
             return bytes
         }
         #expect(throws: WireError.invalidValue("status")) { try Frame(decoding: mutated(17) { $0 = $0 & 0b1100_0111 | 6 << 3 }) }
+        // Status 5 was `dnf`, removed by #86: retired, never reused.
+        #expect(throws: WireError.invalidValue("status")) { try Frame(decoding: mutated(17) { $0 = $0 & 0b1100_0111 | 5 << 3 }) }
         // Without the autohelm flag (flags bit 1), every autohelm field is zero: its angle, the tap (flags
         // bit 7), the groove (counts bit 6) and which groove (counts bit 7).
         #expect(throws: WireError.invalidValue("autohelm")) { try Frame(decoding: mutated(12) { $0 = 1 }) }

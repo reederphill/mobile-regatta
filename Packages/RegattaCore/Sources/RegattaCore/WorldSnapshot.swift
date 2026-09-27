@@ -102,6 +102,10 @@ public struct WorldSnapshot: Sendable {
     public var incidents: IncidentIndex
     public var firstFinishTime: Double?
     public var isOver: Bool
+    /// The results, once the race has closed (`Race.results`): one row for each seat. A closed race can't
+    /// score itself again, since the seat events it reads are the log's, not the world's. Not on the wire:
+    /// a client's come in the `raceClosed` event, and its own prediction's are never the result.
+    public var results: RaceResults?
     /// The wind keys held (ADR 0001): a race holds every key through the window of `tick`. Importing
     /// needs every key from the window before `tick`'s through the last one held, without a gap, and
     /// they must be this race's.
@@ -116,8 +120,8 @@ public struct WorldSnapshot: Sendable {
     public init(
         tick: Int, seats: [Seat], touchingBoats: [SeatPair] = [], touchingObstacles: [ObstacleContact] = [],
         touchingEdges: [EdgeContact] = [], foulMemory: [FoulMemory] = [], incidents: IncidentIndex = IncidentIndex(),
-        firstFinishTime: Double? = nil, isOver: Bool = false, windKeys: WindKeyChain = WindKeyChain(),
-        overlaps: [OverlapMemory] = []
+        firstFinishTime: Double? = nil, isOver: Bool = false, results: RaceResults? = nil,
+        windKeys: WindKeyChain = WindKeyChain(), overlaps: [OverlapMemory] = []
     ) {
         self.tick = tick
         self.seats = seats
@@ -128,6 +132,7 @@ public struct WorldSnapshot: Sendable {
         self.incidents = incidents
         self.firstFinishTime = firstFinishTime
         self.isOver = isOver
+        self.results = results
         self.windKeys = windKeys
         self.overlaps = overlaps
     }
@@ -161,4 +166,6 @@ public enum WorldSnapshotError: Error, Equatable, Sendable {
     /// An overlap naming a seat the race doesn't have, a pair with `a >= b` or out of order, or a
     /// change count outside 0 ..< the last point of certainty.
     case invalidOverlap
+    /// Results for a race that isn't over, or that aren't exactly one row for each seat.
+    case invalidResults
 }

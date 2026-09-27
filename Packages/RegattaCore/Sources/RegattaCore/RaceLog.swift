@@ -79,6 +79,20 @@ public struct RaceLog: Codable, Hashable, Sendable {
         }
     }
 
+    /// The race closed at once because every human had gone (`Race.closeAllGone`, #86): when, and the leave
+    /// order it was given. Server policy decides when (#66, #148), so the log keeps the decision.
+    public struct AllGoneClose: Codable, Hashable, Sendable {
+        /// The tick it closed at: the log's `finalTick`.
+        public var tick: Int
+        /// The human seats in the order they went, first gone first (`Race.closeAllGone`).
+        public var leaveOrder: [Int]
+
+        public init(tick: Int, leaveOrder: [Int]) {
+            self.tick = tick
+            self.leaveOrder = leaveOrder
+        }
+    }
+
     public var header: Header
     /// In the order applied: by tick, and within a tick held inputs by seat, then taps as they came.
     public var inputs: [InputRecord]
@@ -86,12 +100,17 @@ public struct RaceLog: Codable, Hashable, Sendable {
     public var seatEvents: [SeatEvent]
     /// The race's tick when the log was taken. A replay steps the race to exactly this tick.
     public var finalTick: Int
+    /// Set when the race closed because every human had gone: a replay closes it the same way after its
+    /// final tick's seat events. Absent from the JSON when nil, so older logs read and write unchanged.
+    public var allGoneClose: AllGoneClose?
 
-    public init(header: Header, inputs: [InputRecord] = [], seatEvents: [SeatEvent] = [], finalTick: Int) {
+    public init(header: Header, inputs: [InputRecord] = [], seatEvents: [SeatEvent] = [], finalTick: Int,
+                allGoneClose: AllGoneClose? = nil) {
         self.header = header
         self.inputs = inputs
         self.seatEvents = seatEvents
         self.finalTick = finalTick
+        self.allGoneClose = allGoneClose
     }
 
     /// Stable JSON: sorted keys, so the same log always encodes to the same bytes.

@@ -205,14 +205,12 @@ final class GameSession {
             case .dsq:
                 place = "DSQ"
                 detail = "Unserved penalty"
-            case .dnf:
-                place = "DNF"
-                detail = "Did not finish"
             case .racing:
+                // Once the race has closed, a boat still racing is placed by distance to finish (#86).
                 place = "\(rank + 1)"
-                detail = "Racing · leg \(b.legIndex + 1)"
+                detail = frame.isOver ? "By distance" : "Racing · leg \(b.legIndex + 1)"
             case .prestart, .ocs:
-                place = "\(rank + 1)"
+                place = frame.isOver ? "OCS" : "\(rank + 1)"
                 detail = "Not started"
             }
             return ResultRow(id: b.id, place: place, name: roster.name(of: i, playerSeat: me), detail: detail,

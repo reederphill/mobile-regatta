@@ -39,8 +39,9 @@ public enum EventAudience: Equatable, Sendable {
 
 // Each kind's code is fixed for good: a new case takes the next free code (#63: later cases extend
 // the codec), and a retired code is never reused. Code 4 was the pre-#73 `foul` (rule, offender,
-// victim); a rule call is code 12. Seats, places, legs and turns are one byte; ticks are int32;
-// mark names and reasons are strings.
+// victim); a rule call is code 12. Code 11 was `raceClosed` without results; with them (#86) it is
+// code 23. Seats, places, legs and turns are one byte; ticks are int32; mark names and reasons are
+// strings.
 
 extension RaceEvent.Kind {
     func encode(to w: inout WireWriter) throws {
@@ -78,7 +79,6 @@ extension RaceEvent.Kind {
             w.u8(10)
             try w.index(seat, "seat")
             try w.index(target, "target")
-        case .raceClosed: w.u8(11)
         case .ruleCall(let call):
             w.u8(12)
             guard let incidentId = UInt16(exactly: call.incidentId) else { throw WireError.outOfRange("incidentId") }
@@ -124,6 +124,9 @@ extension RaceEvent.Kind {
         case .grooveSnap(let seat):
             w.u8(22)
             try w.index(seat, "seat")
+        case .raceClosed(let results):
+            w.u8(23)
+            try results.encode(to: &w)
         }
     }
 
@@ -139,7 +142,6 @@ extension RaceEvent.Kind {
         case 8: self = .finished(seat: try r.index(), place: try r.index())
         case 9: self = .disqualified(seat: try r.index(), reason: try r.string(limit: WireLimit.string, "reason"))
         case 10: self = .protestRecorded(seat: try r.index(), target: try r.index())
-        case 11: self = .raceClosed
         case 12:
             let incidentId = Int(try r.u16())
             let tick = try r.i32()
@@ -166,6 +168,7 @@ extension RaceEvent.Kind {
         case 20: self = .tacked(seat: try r.index())
         case 21: self = .gybed(seat: try r.index())
         case 22: self = .grooveSnap(seat: try r.index())
+        case 23: self = .raceClosed(results: try RaceResults(from: &r))
         default: throw WireError.invalidValue("event")
         }
     }
@@ -212,5 +215,51 @@ extension ObstructionKind {
     init?(wireCode: UInt8) {
         guard let kind = ObstructionKind.allCases.first(where: { $0.wireCode == wireCode }) else { return nil }
         self = kind
+    }
+}
+
+// The results of a closed race (#86): whether it is rated, then each row in display order: the seat, its
+// place, its result code, and its finish tick for a finisher only. Result codes are fixed for good like
+// event codes.
+
+extension RaceResults {
+    func encode(to w: inout WireWriter) throws {
+        w.bool(rated)
+        try w.count(rows.count, limit: WireLimit.seats, "results")
+        for row in rows {
+            try w.index(row.seat, "seat")
+            try w.index(row.place, "place")
+            w.u8(row.code.wireCode)
+            guard (row.code == .finished) == (row.finishTick != nil) else { throw WireError.outOfRange("finishTick") }
+            if let tick = row.finishTick { try w.i32(tick, "finishTick") }
+        }
+    }
+
+    init(from r: inout WireReader) throws {
+        let rated = try r.bool("rated")
+        let n = try r.count(limit: WireLimit.seats, "results")
+        let rows = try (0..<n).map { _ in
+            let seat = try r.index(), place = try r.index()
+            guard let code = ResultCode(wireCode: try r.u8()) else { throw WireError.invalidValue("resultCode") }
+            return SeatResult(seat: seat, place: place, code: code, finishTick: code == .finished ? try r.i32() : nil)
+        }
+        self.init(rows: rows, rated: rated)
+    }
+}
+
+extension ResultCode {
+    var wireCode: UInt8 {
+        switch self {
+        case .finished: 0
+        case .byDistance: 1
+        case .dsq: 2
+        case .ocs: 3
+        case .ret: 4
+        }
+    }
+
+    init?(wireCode: UInt8) {
+        guard let code = ResultCode.allCases.first(where: { $0.wireCode == wireCode }) else { return nil }
+        self = code
     }
 }

@@ -14,9 +14,10 @@ import RegattaCore
         #expect(driver.tick(0.5).count == 60)
     }
 
-    /// `-demo` attaches a bot controller to your seat, and it sails the whole race through the input API.
+    /// `-demo` attaches a bot controller to your seat, and it sails the whole race through the input API. Seed 2:
+    /// on seed 1 your bot is still racing when the 2 min finish window closes (#86), placed by distance.
     @Test func demoSailsAFullRace() throws {
-        let options = LaunchOptions(arguments: ["/path/to/Regatta", "-demo", "-seed", "1"])
+        let options = LaunchOptions(arguments: ["/path/to/Regatta", "-demo", "-seed", "2"])
         let session = GameSession(config: try #require(options.launchRaceConfig(from: RaceSettings())))
         let driver = try #require(session.driver as? PracticeDriver)
         var seconds = 0

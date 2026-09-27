@@ -223,7 +223,7 @@ import RegattaProtocol
         #expect(rig.driver.connection == .closed)
         #expect(rig.driver.currentFrame.isOver)
         #expect(rig.session.playerDone)
-        #expect(rig.shown.filter { $0.event.kind == .raceClosed }.count == 1)
+        #expect(rig.shown.filter { if case .raceClosed = $0.event.kind { true } else { false } }.count == 1)
         #expect(rig.network.attempts == 0)
         #expect(!rig.driver.tap(.tackGybe))
     }

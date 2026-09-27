@@ -76,7 +76,15 @@ import Glibc
 ///    point, not the centre: OCS if any is on the course side at the gun, cleared once all are on the
 ///    pre-start side, started when any crosses the line itself after the gun. Rule 21.1 applies to an OCS
 ///    boat only while she moves towards the pre-start side (`CourseLayout.isReturning`).
-public let simulationRevision = 14
+/// 15: race close, ghosts and scoring (#86), on 14. The race closes at the finish window after the first
+///    finish, capped by the time limit after the gun, both from the race format (120 s and 960 s; it was
+///    180 s after the first finish, with no limit), a boat crossing on the close tick still finishing; or at
+///    once when no boat is racing or able to, or every human has gone (`Race.closeAllGone`). Only a finisher
+///    opens the window: a DSQ at the line no longer does. A ghost is a finished or DSQ boat (an OCS or
+///    never-started one from the close, `Race.isGhost(seat:)`); `dnf` is gone, and a boat still racing at the
+///    close keeps `racing`. The results score finishers, then by distance to finish round the remaining
+///    marks, DSQ, OCS and RET, and standings rank boats racing by that distance, with no stage bonus.
+public let simulationRevision = 15
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
