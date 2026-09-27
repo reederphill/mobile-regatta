@@ -7,24 +7,34 @@ import RegattaCore
 /// two ticks (`RenderWorld`). The scene never holds a `Race`.
 final class GameScene: SKScene {
     static let pointsPerMeter: CGFloat = 8
+    /// The boat camera's zoom until you pinch.
+    static let defaultZoom: CGFloat = 0.8
 
     let driver: any RaceDriver
     let roster: FleetRoster
     weak var session: GameSession?
     /// Follow your boat, or frame the whole course. Render fixtures set it (#62); the device setting is #113.
     var cameraMode: LaunchOptions.CameraMode = .boat
+    /// The water's look: the debug tuning panel's (#232) seam, live.
+    var waterStyle: WaterStyle {
+        get { water.style }
+        set { water.style = newValue }
+    }
+    /// The water's tier: the thermal ladder's (#127) seam. Puff shading and the edge tint draw in every tier.
+    var waterQuality: WaterQuality {
+        get { water.quality }
+        set { water.quality = newValue }
+    }
 
     private let world = SKNode()
     private let cam = SKCameraNode()
-    private let water = WaterNode()
+    private let water = WaterNode(pointsPerMeter: Double(GameScene.pointsPerMeter))
     private let effectsLayer = SKNode()
     private let courseLayer = SKNode()
     private let boatLayer = SKNode()
     private let laylines = SKShapeNode()
     private let startLine = SKShapeNode()
-    private let puffTexture = GameScene.makePuffTexture()
     private var boatNodes: [BoatNode] = []
-    private var puffNodes: [SKSpriteNode] = []
 
     private var lastUpdate: TimeInterval?
     /// The most wall-clock time a frame spends starting ticks: half a 60 Hz frame. A frame is at most
@@ -35,7 +45,7 @@ final class GameScene: SKScene {
     private var lastRenderTime: Double?
     private var hudCountdown = 0.0
     private var laylineCountdown = 0.0
-    private var zoom: CGFloat = 0.8
+    private var zoom = GameScene.defaultZoom
 
     private var portTouches = Set<UITouch>()
     private var starboardTouches = Set<UITouch>()
@@ -77,6 +87,9 @@ final class GameScene: SKScene {
 
         addChild(cam)
         camera = cam
+        // The upwind edge tint sits at the view's edges, over the water and under everything else.
+        water.edgeTint.zPosition = -5
+        cam.addChild(water.edgeTint)
         cam.setScale(1 / zoom)
         cam.position = point(driver.renderWorld.me.position)
 
@@ -192,10 +205,8 @@ final class GameScene: SKScene {
             frameCourse(world.course)
         }
 
-        if let wind = world.groundWind(at: player.position) {
-            water.update(center: cam.position, windDirection: wind.direction)
-        }
-        updatePuffs(world)
+        let view = WaterView(center: cam.position, sceneSize: size, scale: cam.xScale)
+        Signpost.waterUpdate.measure { water.update(WaterWorld(world), view: view, dt: dt) }
 
         // Before the gun the line is where you're going: the active leg's orange.
         startLine.strokeColor = world.time < 0
@@ -211,38 +222,21 @@ final class GameScene: SKScene {
 
     /// Puts the whole course, marks, pin and committee boat, in view with a margin.
     private func frameCourse(_ course: CourseLayout) {
-        let points = course.obstacles.map(\.position)
-        let xs = points.map { CGFloat($0.x) * ppm }, ys = points.map { CGFloat($0.y) * ppm }
-        guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
-              size.width > 0, size.height > 0 else { return }
-        cam.position = CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
-        let margin: CGFloat = 1.2
-        cam.setScale(max((maxX - minX) / size.width, (maxY - minY) / size.height, 1 / zoom) * margin)
+        guard let framing = Self.courseFraming(course, sceneSize: size, zoom: zoom) else { return }
+        cam.position = framing.center
+        cam.setScale(framing.scale)
     }
 
-    private func updatePuffs(_ world: RenderWorld) {
-        let puffs = world.puffs
-        while puffNodes.count < puffs.count {
-            let node = SKSpriteNode(texture: puffTexture)
-            node.colorBlendFactor = 1
-            node.zPosition = -1
-            effectsLayer.addChild(node)
-            puffNodes.append(node)
-        }
-        for (i, node) in puffNodes.enumerated() {
-            guard i < puffs.count else {
-                node.isHidden = true
-                continue
-            }
-            let puff = puffs[i]
-            let intensity = puff.intensity
-            node.isHidden = false
-            node.position = point(puff.center)
-            let diameter = CGFloat(puff.radius * 2) * ppm
-            node.size = CGSize(width: diameter, height: diameter)
-            node.color = intensity >= 0 ? ChartPalette.puff.uiColor : .white
-            node.alpha = CGFloat(min(abs(intensity) * (intensity >= 0 ? 2.2 : 1.0), 0.55))
-        }
+    /// The course camera over `course` in a scene of `sceneSize`: centred on the course, scaled to show the whole
+    /// of it (marks, pin and committee boat) with a margin, and never closer than `zoom`.
+    static func courseFraming(_ course: CourseLayout, sceneSize: CGSize, zoom: CGFloat) -> (center: CGPoint, scale: CGFloat)? {
+        let points = course.obstacles.map(\.position)
+        let xs = points.map { CGFloat($0.x) * pointsPerMeter }, ys = points.map { CGFloat($0.y) * pointsPerMeter }
+        guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
+              sceneSize.width > 0, sceneSize.height > 0 else { return nil }
+        let margin: CGFloat = 1.2
+        return (CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2),
+                max((maxX - minX) / sceneSize.width, (maxY - minY) / sceneSize.height, 1 / zoom) * margin)
     }
 
     /// Your laylines, from the formula a bot sees them by (`Laylines`, `SeatView.laylines`).
@@ -314,18 +308,5 @@ final class GameScene: SKScene {
         starboardTouches.removeAll()
         rudderInput = 0
         lastUpdate = nil
-    }
-
-    // MARK: - Textures
-
-    private static func makePuffTexture() -> SKTexture {
-        let size = CGSize(width: 128, height: 128)
-        let image = UIGraphicsImageRenderer(size: size).image { context in
-            let colors = [UIColor.white.cgColor, UIColor.white.withAlphaComponent(0).cgColor] as CFArray
-            guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) else { return }
-            let center = CGPoint(x: 64, y: 64)
-            context.cgContext.drawRadialGradient(gradient, startCenter: center, startRadius: 0, endCenter: center, endRadius: 64, options: [])
-        }
-        return SKTexture(image: image)
     }
 }

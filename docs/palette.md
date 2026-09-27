@@ -8,7 +8,7 @@ Sources: #22 (art direction), #29 (safe palette), G7 (#37), #53 (values). Consum
 | Layer | Scope | Hue-validated (#111) |
 |---|---|---|
 | `CuePalette` | race scene + HUD cues; defines the reserved hues | reference set |
-| `ChartPalette` | water, puff, lull, land, shallows | yes |
+| `ChartPalette` | water, puff, lull, land, shallows, foam | yes |
 | Safe palette | livery swatches (#118) | yes + water contrast |
 | `ChromePalette` | menus, sheets, results, lobby | no (G7) |
 
@@ -20,11 +20,11 @@ Sources: #22 (art direction), #29 (safe palette), G7 (#37), #53 (values). Consum
 - colour space: OKLCH / OKLab
 - reserved hues: vermillion, orange, yellow, chevron blue (`CuePalette` below)
 - hue rule: every validated token ≥ 20° OKLCH hue from each reserved hue (tuning: 20°)
-- chroma floor: tokens with OKLCH C < 0.06 are exempt from the hue rule (hue undefined at low chroma: white, charcoal, greys, off-white, land, shallows)
+- chroma floor: tokens with OKLCH C < 0.06 are exempt from the hue rule (hue undefined at low chroma: white, charcoal, greys, off-white, land, shallows, foam)
 - swatch contrast: |ΔL| ≥ 0.20 (OKLCH L) against water, puff and lull, for every swatch except `charcoal`
 - `charcoal` exception: fails contrast (min |ΔL| 0.05); readable via the hull outline (#29). Accepted in #53.
 - sky blue vs chevron blue (#29, #118): OKLab ΔE 0.26 measured; threshold 0.15 (tuning)
-- ripple texture (#116): |ΔL| from water < 0.12 (must stay fainter than puff/lull)
+- ripple texture (#116): |ΔL| from water < 0.12 and below the faintest puff/lull at its peak in every conditions file (`WaterTests`); ripple streaks are `lull` at `WaterStyle.rippleAlpha` (ΔL ≈ +0.05); puffs and lulls draw `puff`/`lull` at an alpha of their intensity over `WaterStyle.fullTonePuffGain`/`fullToneLullLoss`
 - code (#111): `HueRule` (reserved set, tunings; `Regatta/Game/HueRule.swift`); validated set `PaletteValidation.raceSceneAndHUD` = `ChartPalette` + interim `Palette.boats`; test `PaletteTests`
 
 ## CuePalette
@@ -53,6 +53,7 @@ Cue-to-cue hue separation: vermillion–orange 29°, orange–yellow 28°, chevr
 | `lull` | `#3C6F94` | 0.52 / 0.080 / 242 | water ΔL +0.12 |
 | `land` | `#9DB08E` | 0.73 / 0.052 / 131 | sage; tan rejected (13–15° from orange/yellow) |
 | `shallows` | `#CDC8B4` | 0.83 / 0.028 / 95 | low-chroma sand; exempt via chroma floor |
+| `foam` | `#E3EEF2` | 0.94 / 0.013 / 221 | whitecaps (#116), drawn part-transparent; exempt via chroma floor |
 
 - puff/lull delta: ±0.12 (tuning). At the prototype's 0.17, sky blue fails swatch contrast against lull.
 - Relief shading (Fellmere hills): drawn in code on `land` (#115); no asset.

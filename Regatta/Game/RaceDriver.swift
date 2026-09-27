@@ -171,6 +171,19 @@ struct RenderWorld {
     }
 
     var puffs: [Puff] { frame.wind.activePuffs(atTick: frame.tick) }
+
+    /// The fleet-wide wind at the latest tick: the mean direction turned by the shift, at the course average
+    /// speed, with no puff and no venue bend. What puffs are shaded against (#15) and the ripple drifts on
+    /// (#116). Nil if the race doesn't hold its key yet (online).
+    var courseWind: GroundWind? {
+        let wind = frame.wind
+        guard let shift = try? wind.shift(atTick: frame.tick),
+              let speed = try? wind.courseAverageSpeed(atTick: frame.tick) else { return nil }
+        return GroundWind(direction: wrapAngle(wind.setup.meanDirection + shift), speed: speed)
+    }
+
+    /// The conditions the race is sailed in.
+    var conditions: Conditions { frame.wind.setup.conditions }
 }
 
 /// A boat's sails as the scene draws them (`RenderWorld.sails(ofSeat:)`, #248).

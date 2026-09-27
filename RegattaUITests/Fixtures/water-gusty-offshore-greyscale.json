@@ -1,0 +1,6 @@
+{
+  "log" : "water-gusty-offshore.racelog.json",
+  "freezeTick" : 30,
+  "camera" : "boat",
+  "vision" : "greyscale"
+}

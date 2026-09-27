@@ -344,6 +344,8 @@ The app emits `os_signpost` intervals on the Points of Interest track: **Sim ste
 **Render update** and **HUD refresh**. Profile the Regatta scheme in Instruments with `-perf` and compare
 them against the budgets in #27 (sim + prediction < 3 ms, bots < 2 ms). **Bot brains** is the seat
 controllers deciding before each tick, outside `Race.step()`, so **Sim step** is the simulation alone.
+**Water update**, inside **Render update**, is the water (#116): every ripple tile samples the wind where it
+is, each frame (`WaterTests.waterUpdateStaysCheap` prints its cost).
 
 ## Playing
 
