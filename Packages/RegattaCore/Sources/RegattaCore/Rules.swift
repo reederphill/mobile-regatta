@@ -44,16 +44,21 @@ public enum RacingRule: String, Sendable, CaseIterable, Codable {
     }
 }
 
-/// Who broke which rule against whom, as `Rules.judge` decides it.
+/// Who broke which rule against whom, as `Rules.judge` decides it, and who is exonerated (rule 43.1).
 public struct Verdict: Sendable, Equatable {
     public let rule: RacingRule
     public let offender: Int
     public let victim: Int
+    /// Seats exonerated for a rule they broke in the incident, in ascending order: under rules 15 and 16.1
+    /// the victim, who failed to keep clear only because she wasn't given room (43.1(b), #92). The race
+    /// records them on the incident (`Incident.exonerated`) and calls no rule against them.
+    public let exonerated: [Int]
 
-    public init(rule: RacingRule, offender: Int, victim: Int) {
+    public init(rule: RacingRule, offender: Int, victim: Int, exonerated: [Int] = []) {
         self.rule = rule
         self.offender = offender
         self.victim = victim
+        self.exonerated = exonerated.sorted()
     }
 }
 
@@ -105,13 +110,25 @@ public struct RightOfWay: Sendable, Equatable {
 }
 
 public enum Rules {
-    /// Decides which of two boats in an incident, a contact or a near miss (`Race`, #88), was required to
-    /// keep clear: rule 21 over Section A, then rules 10–13 (`rightOfWay`). Mark-room is not right of way
-    /// (#91, Case 25): the rule 18 records (`UmpireState.markRoom(_:)`) never change who keeps clear, and a
-    /// breach of them (18.2(d)) or exoneration by them (43.1(b)) is #93's. `overlapped` is the pair's overlap
-    /// as of the last point of certainty (`OverlapTracker`); `hull` is their boat class's. Nil if either is a
-    /// ghost.
-    public static func judge(_ a: Boat, _ b: Boat, overlapped: Bool, course: CourseLayout, hull: BoatClass.Hull) -> Verdict? {
+    /// Decides an incident between two boats, a contact or a near miss (`Race`, #88): who was required to keep
+    /// clear (`obligation`: rule 21 over Section A, rules 10–13), then, given the umpire's recorded track
+    /// (`escape`), whether the right-of-way boat took her room: rule 15 or 16.1 on the right-of-way boat
+    /// instead, the other exonerated (43.1(b), #92, `EscapeSimulation.verdict`). With no track (a prediction,
+    /// or a rules configuration before schema 4), the obligation's call. A pure function of its arguments.
+    /// Mark-room is not right of way (#91, Case 25): the rule 18 records (`UmpireState.markRoom(_:)`) never
+    /// change who keeps clear, and a breach of them (18.2(d)) or exoneration by them is #93's. `overlapped` is
+    /// the pair's overlap as of the last point of certainty (`OverlapTracker`); `hull` is their boat class's.
+    /// Nil if either is a ghost.
+    public static func judge(_ a: Boat, _ b: Boat, overlapped: Bool, course: CourseLayout, hull: BoatClass.Hull,
+                             escape: EscapeSimulation? = nil) -> Verdict? {
+        guard let obligation = obligation(a, b, overlapped: overlapped, course: course, hull: hull) else { return nil }
+        return escape?.verdict(obligation, course: course) ?? obligation
+    }
+
+    /// Which of two boats had to keep clear of the other, as a call on her: rule 21 over Section A, then
+    /// rules 10–13 (`rightOfWay`). Nil if either is a ghost. What `judge` starts from, and what the near-miss
+    /// sweep reads to know which boat's course to sweep.
+    public static func obligation(_ a: Boat, _ b: Boat, overlapped: Bool, course: CourseLayout, hull: BoatClass.Hull) -> Verdict? {
         guard !a.isGhost, !b.isGhost else { return nil }
         func call(_ rule: RacingRule, _ offender: Boat, _ victim: Boat) -> Verdict {
             Verdict(rule: rule, offender: offender.id, victim: victim.id)

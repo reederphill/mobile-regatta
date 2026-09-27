@@ -395,6 +395,8 @@ public final class Race {
         let markRoomApplies = markRoomAppliesByPair(zones)
         overlaps.update(boats, hull: boatClass.hull, margin: lastPointOfCertaintyTicks, markRoomApplies: markRoomApplies)
         updateMarkRoom(previous: previous, hulls: hulls, zones: zones, markRoomApplies: markRoomApplies)
+        // The umpire records the boats as the calls below judge them (#92).
+        recordTrack()
         resolveBoatContacts()
         callNearMisses()
         resolveObstacleContacts()
@@ -573,7 +575,7 @@ public final class Race {
                     emit(.contact(SeatPair(i, j)))
                     if !isIncidentOpen(i, j),
                        let verdict = Rules.judge(boats[i], boats[j], overlapped: overlaps.isOverlapped(i, j),
-                                                 course: course, hull: hull) {
+                                                 course: course, hull: hull, escape: escapeSimulation(i, j)) {
                         call(verdict)
                     }
                 }
@@ -586,9 +588,10 @@ public final class Race {
 
     /// Near misses (#9): an overlapped pair not touching and with no incident open, where the right-of-way
     /// boat's sweep would hit the boat that must keep clear (`RulesConfig.NearMissSweep.hits`), opens an
-    /// incident just as a contact does (`call`), with no `contact` event. The authoritative race's alone:
-    /// a client never shows a call the server hasn't made (ADR 0005), so a prediction needn't spend the
-    /// sweep on one.
+    /// incident just as a contact does (`call`), with no `contact` event, and is judged as `Rules.judge`
+    /// judges one: the obligation the sweep read, then the escape simulation over it (#92). The
+    /// authoritative race's alone: a client never shows a call the server hasn't made (ADR 0005), so a
+    /// prediction needn't spend the sweep on one.
     private func callNearMisses() {
         guard umpire != nil else { return }
         let hull = boatClass.hull
@@ -597,12 +600,30 @@ public final class Race {
             for j in (i + 1)..<boats.count where !boats[j].isGhost && overlaps.isOverlapped(i, j) {
                 guard sweep.canReach(boats[i], boats[j], hull: hull), !boatContacts.contains(Pair(a: i, b: j)),
                       !isIncidentOpen(i, j),
-                      let verdict = Rules.judge(boats[i], boats[j], overlapped: true, course: course, hull: hull),
-                      sweep.hits(boats[verdict.victim], boats[verdict.offender], hull: hull)
+                      let obligation = Rules.obligation(boats[i], boats[j], overlapped: true, course: course, hull: hull),
+                      sweep.hits(boats[obligation.victim], boats[obligation.offender], hull: hull)
                 else { continue }
-                call(verdict)
+                call(escapeSimulation(i, j)?.verdict(obligation, course: course) ?? obligation)
             }
         }
+    }
+
+    /// The umpire's recorded track (#92): every boat and every pair's certain overlap this tick, for the escape
+    /// simulation. The authoritative race's alone, under a rules configuration that has one (schema 4): a
+    /// prediction never judges room (ADR 0005), so it needn't spend the memory.
+    private func recordTrack() {
+        guard umpire != nil else { return }
+        let escape = rules.incidents.escape
+        guard escape.changesCourse != nil else { return }
+        umpire?.record(tick: tick, boats: boats, inputs: heldInputs, overlaps: overlaps.certainOverlaps,
+                        keeping: escape.recordedTicks)
+    }
+
+    /// The escape simulation for seats `a` and `b` on the umpire's recorded track, or nil in a prediction or
+    /// under a rules configuration without one.
+    private func escapeSimulation(_ a: Int, _ b: Int) -> EscapeSimulation? {
+        guard let track = umpire?.track(a, b) else { return nil }
+        return EscapeSimulation(track: track, rules: rules, boatClass: boatClass)
     }
 
     /// Whether rule 18 applies between each pair now (`Rules.markRoomApplies`), by `OverlapTracker.index`,
@@ -690,13 +711,15 @@ public final class Race {
         edgeContacts = touching
     }
 
-    /// Opens an incident for `verdict`, decides it with a rule call, penalises the offender one turn
-    /// (`penalize`) and announces the call, with the turn's deadlines when its clock is fixed at the call.
+    /// Opens an incident for `verdict`, records whom it exonerates (rule 43.1: the incident's `exonerated`,
+    /// never a call or an event of their own, #92), decides it with a rule call, penalises the offender one
+    /// turn (`penalize`) and announces the call, with the turn's deadlines when its clock is fixed at the call.
     /// The umpire holds the incident open until the pair separates (`resolveBoatContacts`): one incident
     /// per pair (#9). A prediction has no umpire, so every contact it sails opens one.
     private func call(_ verdict: Verdict) {
         let leg = boats[verdict.offender].legIndex
         var incident = incidents.open(between: verdict.offender, and: verdict.victim, tick: tick, leg: leg)
+        for seat in verdict.exonerated { incident.exonerate(seat) }
         let penalty = rules.raceFormat.penalty
         let clock = penalize(verdict.offender)
         let call = RuleCall(
@@ -1333,6 +1356,7 @@ extension Race {
         overlaps = OverlapTracker(seats: boats.count, memory: snapshot.overlaps)
         incidents = snapshot.incidents
         umpire?.keepOpenIncidents(in: incidents)
+        umpire?.forgetTrack()
         firstFinishTime = snapshot.firstFinishTime
         isOver = snapshot.isOver
         results = snapshot.results

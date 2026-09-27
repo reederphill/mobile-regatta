@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 4,
+  "id": "fleet-rules",
+  "version": 4,
+  "placeholders": [
+    "/raceFormat/startRow/depthLineLengths",
+    "/raceFormat/startRow/spreadLineLengths",
+    "/raceFormat/startRow/polarSpeedFraction",
+    "/raceFormat/startRow/minimumSpacingHullLengths",
+    "/raceFormat/edgeSpeedRetention",
+    "/raceFormat/beatSizing/calibrationFactor"
+  ],
+  "builderValues": [
+    "/incidents/nearMissSweep/headingSamples",
+    "/incidents/nearMissSweep/stepTicks",
+    "/incidents/nearMissSweep/clearanceHullLengths",
+    "/incidents/escape/candidates",
+    "/incidents/escape/startTickOffset",
+    "/incidents/escape/initiallySeconds",
+    "/incidents/escape/changesCourseDegreesPerSecond",
+    "/markRoomGiven",
+    "/onABeat"
+  ],
+  "notes": [
+    "The rules configuration for a v1.0 fleet race (#73): every replay-affecting rules and race-format value, recorded in each race log by ref (ADR 0004).",
+    "Rules in 2025 RRS numbering. Units: seconds, degrees, ticks; sizes in hull lengths of the race's boat class, line lengths or fractions of the beat. Schema: docs/rules-file.md.",
+    "builderValues (JSON Pointers above) are the values the spec leaves to the builder: the near-miss sweep geometry, the escape simulation's candidates, start tick, 'initially' window and 'changes course' rate, and the mark-room-given and 'on a beat' tests.",
+    "placeholders await tuning: the start row (#35), edge speed retention (#82) and the beat-sizing calibration factor (#80, #105).",
+    "Version 2 is version 1 plus raceFormat.startRow.minimumSpacingHullLengths (schema 2, #85): the closest a squeeze of the start row off land (#82) brings neighbours, centre to centre, so they stay clear ahead and clear astern (#35) with a quarter of a hull between them. A placeholder, like the rest of the start row.",
+    "Version 3 is version 2 plus raceFormat.penalty.stackedPenaltyDeadlines (schema 3, #89): sequential (G4). Owed penalty turns are served in order, and each turn's deadlines run from its own call or from when the turn before it is completed, whichever is later. A file before schema 3 means fromCall: each turn's clock runs from its own call. Its penalty deadlines are also looser than #9's 15 s and 30 s (the owner, 2026-09-27): started by 20 s and completed by 40 s.",
+    "Version 4 is version 3 plus incidents.escape.changesCourseDegreesPerSecond (schema 4, #92): 12. The escape simulation judges room under rules 15 and 16.1, and the right-of-way boat changes course (16.1) on a tick her heading turns faster than this. The autohelm following shifts and puffs turns a boat sailing clean at most about 5.7 deg/s (gusty-offshore@3, the fastest of the four conditions files, 16 boats for 10 minutes on 4 seeds; #228), and stalled at an edge at the class's 10 deg/s floor; a luff is 30-36 deg/s. A file before schema 4 has none: no escape simulation, and rules 15 and 16.1 are never called."
+  ],
+  "incidents": {
+    "nearMissSweep": {
+      "headingDegrees": 10,
+      "seconds": 0.5,
+      "headingSamples": 5,
+      "stepTicks": 1,
+      "clearanceHullLengths": 0
+    },
+    "escape": {
+      "horizonSeconds": 2,
+      "candidates": {
+        "rudder": [-1, -0.5, 0, 0.5, 1],
+        "ease": [false, true]
+      },
+      "startTickOffset": 1,
+      "initiallySeconds": 2,
+      "changesCourseDegreesPerSecond": 12
+    },
+    "separationHullLengths": 2,
+    "lastPointOfCertaintySeconds": 0.5
+  },
+  "zone": {
+    "radiusHullLengths": 3
+  },
+  "markRoomGiven": {
+    "roundingDistanceHullLengths": 1,
+    "clearanceHullLengths": 0.25
+  },
+  "onABeat": {
+    "maxTrueWindAngleDegrees": 60,
+    "windwardLegOnly": true
+  },
+  "raceFormat": {
+    "startSequenceSeconds": 60,
+    "penalty": {
+      "startSeconds": 20,
+      "completeSeconds": 40,
+      "startedTurnDegrees": 30,
+      "stackedPenaltyDeadlines": "sequential"
+    },
+    "protestWindowSeconds": 15,
+    "finishWindowSeconds": 120,
+    "timeLimitSeconds": 960,
+    "startLine": {
+      "hullLengthsPerBoat": 1.25,
+      "minimumMetres": 42
+    },
+    "leewardGate": {
+      "aboveLineBeatDivisor": 6,
+      "widthHullLengths": 10
+    },
+    "offsetMark": {
+      "toPortHullLengths": 12
+    },
+    "raceArea": {
+      "acrossAxisBeatFraction": 0.75,
+      "belowLineLineLengths": 1,
+      "aboveWindwardBeatFraction": 0.25
+    },
+    "startRow": {
+      "depthLineLengths": 0.5,
+      "spreadLineLengths": 1.5,
+      "trueWindAngleDegrees": 90,
+      "polarSpeedFraction": 1,
+      "minimumSpacingHullLengths": 1.25
+    },
+    "edgeSpeedRetention": 0.3,
+    "beatSizing": {
+      "leaderSeconds": 480,
+      "maxMetres": 360,
+      "calibrationFactor": 1
+    }
+  }
+}

@@ -3,8 +3,9 @@
 ///
 /// Its incident memory (#88): each pair's open incident, one per pair until the boats separate by the rules
 /// configuration's `incidents.separation`. Its rule 18 memory (#91): each pair's record at the mark they are
-/// both racing to, and each boat's presence in that mark's zone. The rules tickets move the rest of theirs
-/// here: the escape buffer and protest matching.
+/// both racing to, and each boat's presence in that mark's zone. Its recorded track (#92): every boat over the
+/// last few seconds, what the escape simulation reads (`EscapeSimulation`). The rules tickets move the rest of
+/// theirs here: protest matching.
 public struct UmpireState: Sendable, Equatable {
     /// Each pair's open incident, by id: opened by a contact or a near miss, closed when the pair
     /// separates. Looked up by pair, never iterated (ADR 0002).
@@ -16,8 +17,27 @@ public struct UmpireState: Sendable, Equatable {
     /// Each racing boat's presence in the zone of the mark she is racing to (`ZonePresence`), by seat. Looked
     /// up by seat, never iterated (ADR 0002).
     private var zonePresence: [Int: ZonePresence] = [:]
+    /// Every boat and every pair's overlap over the last `RulesConfig.Escape.recordedTicks` ticks (#92): fixed-size
+    /// ring buffers, filled in seat order, read by pair. Kept apart from the rule 18 memory: room to keep clear
+    /// is judged from the boats alone.
+    private var recorder = EscapeRecorder()
 
     public init() {}
+
+    // MARK: - Recorded track (#92)
+
+    /// Records tick `tick`: each boat as she is now with her held input's ease (`inputs`, by seat) and each
+    /// pair's overlap as of the last point of certainty (`overlaps`, by `OverlapTracker.index`), keeping the
+    /// last `ticks` ticks.
+    mutating func record(tick: Int, boats: [Boat], inputs: [BoatInput], overlaps: [Bool], keeping ticks: Int) {
+        recorder.record(tick: tick, boats: boats, inputs: inputs, overlaps: overlaps, capacity: ticks)
+    }
+
+    /// Seats `a` and `b`'s recorded track, oldest first through the newest tick recorded; nil before any.
+    public func track(_ a: Int, _ b: Int) -> PairTrack? { recorder.track(a, b) }
+
+    /// Forgets the recorded track: after an import (`Race.importSnapshot`) the boats' past isn't the one it holds.
+    mutating func forgetTrack() { recorder = EscapeRecorder() }
 
     /// The id of the incident open between `pair`'s boats, if they haven't separated since it opened.
     func openIncident(_ pair: SeatPair) -> Int? { openIncidents[pair] }

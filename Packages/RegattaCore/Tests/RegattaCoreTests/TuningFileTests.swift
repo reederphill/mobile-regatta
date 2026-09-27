@@ -223,7 +223,7 @@ import Testing
         #expect(conditions.contains(Self.conditionsKey))
         #expect(conditions.count == 12)
         #expect(BoatClassFile.bundledKeys().contains(DataFileKey(id: "skiff", version: 1)))
-        #expect(RulesConfigFile.bundledKeys() == [1, 2, 3].map { DataFileKey(id: "fleet-rules", version: $0) })
+        #expect(RulesConfigFile.bundledKeys() == [1, 2, 3, 4].map { DataFileKey(id: "fleet-rules", version: $0) })
         #expect(VenueFile.bundledKeys().map(\.version) == [1, 2, 3])
         for key in conditions {
             #expect(try ConditionsFile.bundledData(id: key.id, version: key.version) != nil, "\(key)")

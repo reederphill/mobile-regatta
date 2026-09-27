@@ -1,4 +1,4 @@
-# Rules configuration file, schema versions 1, 2 and 3
+# Rules configuration file, schema versions 1 to 4
 
 The rules configuration is an immutable, versioned data file (ADR 0004, #32, #73), loaded by
 `DataFile<RulesConfig>` (`RulesConfigFile`) through the same loader as boat classes and venues. It holds
@@ -21,16 +21,22 @@ changes; a change ships as `<id>@<version + 1>.json`.
   its race logs replay.
 - `fleet-rules@3` (bundled, schema 3): version 2 plus `penalty.stackedPenaltyDeadlines`, `sequential` (#89,
   G4), with the penalty deadlines loosened a little, to 20 s and 40 s (#9's 15 s and 30 s; the owner, #89).
-  The default (`RaceFiles.defaults`, `Race.defaultRulesConfiguration`).
+  Kept so its race logs replay.
+- `fleet-rules@4` (bundled, schema 4): version 3 plus `escape.changesCourseDegreesPerSecond`, 12 (#92). The
+  default (`RaceFiles.defaults`, `Race.defaultRulesConfiguration`).
 
 Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths`, the start row's spacing floor:
 required in schema 2, refused in schema 1. A schema-1 file has no floor (`RulesConfig.StartRow.minimumSpacing`
 is nil), so a start row squeezed off land narrows its spread with its depth, as #82 squeezed its placement.
-Schema 3 is schema 2 plus `raceFormat.penalty.stackedPenaltyDeadlines`: required in schema 3, refused
-before it. A schema-1 or -2 file means `fromCall`, which is what it meant: each penalty turn's deadlines from
-its own call.
-The tables' `v1` column gives version 1's values; version 2's are the same, plus that floor, and version
-3's the same again, plus `sequential` stacking and its looser penalty deadlines (marked v3).
+Schema 3 is schema 2 plus `raceFormat.penalty.stackedPenaltyDeadlines`: required in schema 3 and later,
+refused before it. A schema-1 or -2 file means `fromCall`, which is what it meant: each penalty turn's
+deadlines from its own call.
+Schema 4 is schema 3 plus `incidents.escape.changesCourseDegreesPerSecond`: required in schema 4, refused
+before it. A schema-1 to -3 file has none (`RulesConfig.Escape.changesCourse` is nil), and its races run no
+escape simulation: rules 15 and 16.1 are never called, which is what they did.
+The tables' `v1` column gives version 1's values; version 2's are the same, plus that floor, version
+3's the same again, plus `sequential` stacking and its looser penalty deadlines (marked v3), and version 4's
+the same again, plus the "changes course" rate (marked v4).
 
 ## Units
 
@@ -45,9 +51,9 @@ The tables' `v1` column gives version 1's values; version 2's are the same, plus
 ## Builder values and placeholders
 
 - `builderValues` lists, as JSON Pointers, the values the spec leaves to the builder: the near-miss sweep
-  geometry, the escape simulation's candidate set, start tick and "initially" window, and the
-  mark-room-given and "on a beat" tests. Each must resolve (the loader checks). They are ordinary data:
-  changing one is a new version like any other value.
+  geometry, the escape simulation's candidate set, start tick, "initially" window and (from version 4)
+  "changes course" rate, and the mark-room-given and "on a beat" tests. Each must resolve (the loader
+  checks). They are ordinary data: changing one is a new version like any other value.
 - `placeholders` (the header field every data file has) lists values awaiting tuning: the start row
   (#35, and from version 2 its spacing floor, #85), the edge speed retention (#82) and the beat-sizing
   calibration factor (#80, #105).
@@ -59,7 +65,7 @@ the ranges below.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schemaVersion`, `id`, `version` | header | As for every data file. `schemaVersion` is 1, 2 or 3. |
+| `schemaVersion`, `id`, `version` | header | As for every data file. `schemaVersion` is 1 to 4. |
 | `placeholders` | [JSON Pointer] | Optional. Values awaiting tuning; each must resolve. |
 | `builderValues` | [JSON Pointer] | Values the builder chose; each must resolve. |
 | `notes` | [string] | Optional free text; ignored by the loader. |
@@ -83,6 +89,7 @@ the ranges below.
 | `escape.candidates.ease` | [bool] | false, true | *Builder value.* Ease settings tried. The candidate set is every rudder with every ease, rudder outermost, in file order. |
 | `escape.startTickOffset` | ticks ≥ 0 | 1 | *Builder value.* The simulation starts this many ticks after the obligation began (its last point of certainty): the first tick the keep-clear boat can answer. |
 | `escape.initiallySeconds` | s | 2 | *Builder value.* The "initially" window of rules 15 and 16.1: how long after acquiring right of way a boat must give the other room to keep clear. |
+| `escape.changesCourseDegreesPerSecond` | degrees/s > 0; schema 4 | — (v4: 12) | *Builder value.* The right-of-way boat changes course (rule 16.1) on a tick her heading turns faster than this. A rate, not an angle, so one value sits between the autohelm following shifts and a luff however long the encounter has run (#228): see below. Absent before schema 4: no escape simulation. |
 | `separationHullLengths` | L | 2 | Contacts between the same two boats closer together than this are one incident. |
 | `lastPointOfCertaintySeconds` | s | 0.5 | A change in overlap or zone state counts only once it has held this long (#18). |
 
@@ -99,6 +106,36 @@ authoritative race sweeps: a prediction never calls a near miss.
 **Incidents** are one per pair: the umpire (`UmpireState`) holds a pair's incident open from the contact or
 near miss that opened it until their hulls are more than `separationHullLengths` apart; a touch or near miss
 before then is part of the same incident and draws no second call.
+
+**The escape simulation** (#9, #92, `EscapeSimulation`; schema 4): *room* under rules 15 and 16.1 is judged
+by whether the boat that had to keep clear could have. The umpire records every boat each tick (her dynamics
+state, how she was steering, and the wind and current the race sampled at her) and each pair's overlap as of
+the last point of certainty, over the last `max(horizon + startTickOffset + 1, initially + 2)` ticks (62
+in version 4). An incident's call starts from who had to keep clear (rule 21, then rules 10–13); then, on
+that track:
+
+- *Rule 15*: the right-of-way boat acquired right of way (the first tick of the run through now on which the
+  other has had to keep clear) within `initiallySeconds`, not because of the other boat's own actions (her
+  tack or gybe, starting to tack, to take a penalty or to return), and the other can't escape from
+  `startTickOffset` ticks after it.
+- *Rule 16.1*: the right-of-way boat's heading turned faster than `changesCourseDegreesPerSecond` on a tick
+  since she had right of way, no earlier than `horizonSeconds` and `startTickOffset` before now (a course
+  change still going on then counts from there); the other can't escape from `startTickOffset` ticks after the
+  first such tick, but could have had the right-of-way boat held her course (straight on at her velocity over
+  the ground from the tick before). Otherwise the keep-clear boat was failing to keep clear anyway.
+- *Escaping*: the keep-clear boat is sailed on through `BoatDynamics` by each candidate in file order, each
+  held for `horizonSeconds`, a centred rudder being her autohelm, in the wind and current she recorded each
+  tick (the last tick's past now). The right-of-way boat follows her recorded track, then sails on as she was
+  steering. A candidate escapes if, on every tick, the hulls don't touch and the right-of-way boat's near-miss
+  sweep wouldn't hit her. The first that escapes decides; none escaping means room wasn't given.
+
+With no escape the right-of-way boat is called for rule 15 or 16.1, and the keep-clear boat is exonerated
+(43.1(b)) on the incident (`Incident.exonerated`): the call's `ruleCall` event names the offender as ever, and no
+call is made against the exonerated boat. An autohelm turn following a shift is a course change like any
+other (#228). Version 4's 12°/s sits above the fastest shift-following measured with the autohelm holding
+16 boats clear of the edges for 10 minutes on four seeds in each conditions file (@3): at most about 5.7°/s,
+in gusty-offshore, with a boat stalled at an edge turning at the class's 10°/s floor; a luff is 30–36°/s.
+Only the authoritative race records the track and runs the simulation: a prediction calls the obligation.
 
 ### Zone
 
@@ -178,7 +215,8 @@ they are racing to first and whether they were overlapped (as of the last point 
 and so which is entitled to mark-room, until mark-room has been given, the entitled boat passes head to wind or
 leaves the zone (out for the last point of certainty), or both have left the mark astern. The overlap terms
 apply on opposite tacks while rule 18 applies between the boats. No rules-file value was added: schemas 1–3
-all carry these.
+all carry these. From #92, under a schema-4 file, the escape simulation (above) reads the escape values, the
+near-miss sweep and the new "changes course" rate, and calls rules 15 and 16.1.
 
 Course derivation (#80): `CourseLayout.derive` reads `startLine`, `leewardGate`, `offsetMark`,
 `raceArea`, `startRow`, `edgeSpeedRetention` and `beatSizing` to lay out the course, sizing the beat

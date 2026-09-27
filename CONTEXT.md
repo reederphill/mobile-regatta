@@ -36,6 +36,18 @@ What triggers a ruling between two boats: contact, or a near miss. One incident 
 **Near miss**:
 No contact, but sweeping an overlapped right-of-way boat's hull ±10° over 0.5 s would hit. It triggers a ruling as contact does.
 
+**Room** (to keep clear):
+What a right-of-way boat that has just acquired right of way (rule 15) or changes course (16.1) must give the other boat. Judged by the escape simulation.
+_Avoid_: space, time to react
+
+**Escape simulation**:
+The umpire's test of room: the keep-clear boat's candidate inputs sailed on with the real boat dynamics for 2 s against the right-of-way boat's recorded track. If none keeps her clear, room wasn't given.
+_Avoid_: avoidance check, track projection
+
+**Exoneration**:
+A boat that broke a rule of Part 2 isn't penalised for it, because she was compelled to (43.1(a)) or was denied the room she was entitled to (43.1(b)). Recorded on the incident; the rule call names the boat that broke the rule.
+_Avoid_: acquittal, cleared
+
 **Last point of certainty**:
 The last moment at which it was certain whether two boats were overlapped, or whether a boat was in a mark's zone. A change counts only once it has held for a short margin.
 _Avoid_: overlap timer
