@@ -170,6 +170,10 @@ struct RenderWorld {
         try? frame.wind.sample(p, tick: frame.tick)
     }
 
+    /// The ground wind at the latest tick, to sample at many places: `groundWind(at:)` at each, bit for bit, for
+    /// a fraction of the cost (the water's ripple tiles, #116). Nil if the race doesn't hold its key yet (online).
+    var windSampler: WindSampler? { try? frame.wind.sampler(atTick: frame.tick) }
+
     var puffs: [Puff] { frame.wind.activePuffs(atTick: frame.tick) }
 
     /// The fleet-wide wind at the latest tick: the mean direction turned by the shift, at the course average
