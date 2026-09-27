@@ -1,4 +1,3 @@
-import CoreImage
 import SpriteKit
 import RegattaBots
 import RegattaCore
@@ -14,10 +13,6 @@ final class GameScene: SKScene {
     weak var session: GameSession?
     /// Follow your boat, or frame the whole course. Render fixtures set it (#62); the device setting is #113.
     var cameraMode: LaunchOptions.CameraMode = .boat
-    /// A colour-vision filter over the whole scene, for render fixtures (#22, #62).
-    var vision: VisionFilter = .none {
-        didSet { applyVision() }
-    }
 
     private let world = SKNode()
     private let cam = SKCameraNode()
@@ -54,7 +49,7 @@ final class GameScene: SKScene {
         super.init(size: CGSize(width: 390, height: 844))
         scaleMode = .aspectFit
         anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        backgroundColor = Palette.water
+        backgroundColor = ChartPalette.water.uiColor
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -102,11 +97,12 @@ final class GameScene: SKScene {
             zone.lineWidth = 1
             zone.position = point(mark.position)
             courseLayer.addChild(zone)
-            courseLayer.addChild(buoy(at: mark.position, radius: mark.radius, color: Palette.mark))
+            courseLayer.addChild(buoy(at: mark.position, radius: mark.radius, color: CuePalette.orange.uiColor))
         }
 
+        // The line's ends are marks (#15), so the pin is a mark's orange, not yellow: yellow is the laylines' (#22).
         let pin = course.startLine.pin
-        courseLayer.addChild(buoy(at: pin.position, radius: pin.radius, color: Palette.startLine))
+        courseLayer.addChild(buoy(at: pin.position, radius: pin.radius, color: CuePalette.orange.uiColor))
 
         let committee = SKShapeNode(ellipseOf: CGSize(width: 4.6 * ppm, height: 5.2 * ppm))
         committee.fillColor = UIColor(white: 0.95, alpha: 1)
@@ -114,7 +110,7 @@ final class GameScene: SKScene {
         committee.lineWidth = 1.5
         committee.position = point(course.startLine.committee.position)
         let flag = SKShapeNode(rect: CGRect(x: -3, y: -3, width: 10, height: 7))
-        flag.fillColor = Palette.mark
+        flag.fillColor = CuePalette.orange.uiColor
         flag.lineWidth = 0
         committee.addChild(flag)
         courseLayer.addChild(committee)
@@ -201,8 +197,9 @@ final class GameScene: SKScene {
         }
         updatePuffs(world)
 
+        // Before the gun the line is where you're going: the active leg's orange.
         startLine.strokeColor = world.time < 0
-            ? Palette.startLine.withAlphaComponent(0.9)
+            ? CuePalette.orange.uiColor.withAlphaComponent(0.9)
             : UIColor.white.withAlphaComponent(0.4)
 
         laylineCountdown -= dt
@@ -221,24 +218,6 @@ final class GameScene: SKScene {
         cam.position = CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
         let margin: CGFloat = 1.2
         cam.setScale(max((maxX - minX) / size.width, (maxY - minY) / size.height, 1 / zoom) * margin)
-    }
-
-    private func applyVision() {
-        guard vision != .none else {
-            filter = nil
-            shouldEnableEffects = false
-            return
-        }
-        let m = vision.matrix, bias = CGFloat(vision.bias)
-        func row(_ i: Int) -> CIVector { CIVector(x: CGFloat(m[i][0]), y: CGFloat(m[i][1]), z: CGFloat(m[i][2]), w: 0) }
-        let matrix = CIFilter(name: "CIColorMatrix")
-        matrix?.setValue(row(0), forKey: "inputRVector")
-        matrix?.setValue(row(1), forKey: "inputGVector")
-        matrix?.setValue(row(2), forKey: "inputBVector")
-        matrix?.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
-        matrix?.setValue(CIVector(x: bias, y: bias, z: bias, w: 0), forKey: "inputBiasVector")
-        filter = matrix
-        shouldEnableEffects = true
     }
 
     private func updatePuffs(_ world: RenderWorld) {
@@ -261,7 +240,7 @@ final class GameScene: SKScene {
             node.position = point(puff.center)
             let diameter = CGFloat(puff.radius * 2) * ppm
             node.size = CGSize(width: diameter, height: diameter)
-            node.color = intensity >= 0 ? Palette.gust : .white
+            node.color = intensity >= 0 ? ChartPalette.puff.uiColor : .white
             node.alpha = CGFloat(min(abs(intensity) * (intensity >= 0 ? 2.2 : 1.0), 0.55))
         }
     }

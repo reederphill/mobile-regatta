@@ -60,8 +60,8 @@ struct RenderFixture: Codable, Equatable {
 
 extension LaunchOptions.CameraMode: Codable {}
 
-/// A colour-vision or viewing-condition filter over the whole scene (#22, #15), so a fixture can check that
-/// every tone still reads. Each is a colour matrix on sRGB components, applied with `CIColorMatrix`:
+/// A colour-vision or viewing-condition filter over the whole race view (#22, #15), so a fixture can check that
+/// every tone still reads. Each is a colour matrix on sRGB components, applied by `View.vision`:
 /// `out = matrix · (r, g, b) + bias`.
 ///
 /// - The three dichromacies are Machado, Oliveira and Fernandes (2009), severity 1.0.

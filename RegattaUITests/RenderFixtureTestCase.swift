@@ -131,22 +131,29 @@ class RenderFixtureTestCase: RaceUITestCase {
         return attachments
     }
 
-    /// Renders fixture `name` and diffs it against this device's committed reference. With no reference
+    /// Renders fixture `name` and diffs it against this device's committed reference
+    /// (`assertMatchesReference(_:render:)`).
+    @MainActor func assertMatchesReference(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        try assertMatchesReference(name, render: renderFixture(name, file: file, line: line), file: file, line: line)
+    }
+
+    /// Diffs `render`, fixture `name`'s, against this device's committed reference. With no reference
     /// for this device it attaches the render, then fails in CI and skips locally; while recording it
     /// writes the reference.
     ///
-    /// Once the fixture has rendered, every path calls `saveActuals` before it fails, skips or throws:
-    /// `RaceUITestCase` sets `continueAfterFailure = false`, so an `XCTFail` (or a throwing `XCTUnwrap`)
-    /// ends the test on the spot and anything after it never runs. Failing first left no render for CI's
-    /// `render-actuals` upload (#215). Hence `compare` rather than `assertMatches` here.
-    @MainActor func assertMatchesReference(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws {
+    /// Past the refusal of a recording run in CI, every path calls `saveActuals` before it fails, skips or
+    /// throws: `RaceUITestCase` sets `continueAfterFailure = false`, so an `XCTFail` (or a throwing
+    /// `XCTUnwrap`) ends the test on the spot and anything after it never runs. Failing first left no render
+    /// for CI's `render-actuals` upload (#215). Hence `compare` rather than `assertMatches` here, and a caller
+    /// that checks the render some other way first records that failure without ending the test.
+    @MainActor func assertMatchesReference(_ name: String, render: FixtureRender, file: StaticString = #filePath,
+                                           line: UInt = #line) throws {
         let mode = Self.referenceMode
         if mode == .refused {
             XCTFail("-recordReferences is refused in CI: a failing compare uploads CI's render as the render-actuals "
                 + "artifact; adopt it with scripts/adopt-references.sh", file: file, line: line)
             return
         }
-        let render = try renderFixture(name, file: file, line: line)
         let actual = render.image
         let url = Self.deviceReferences.appendingPathComponent("\(name).png")
 

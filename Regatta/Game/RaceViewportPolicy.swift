@@ -74,7 +74,7 @@ struct RaceViewport<Content: View>: View {
                                 height: proxy.size.height + insets.top + insets.bottom)
             let layout = policy.layout(window: window, safeAreaInsets: insets, screen: screenSize)
             ZStack(alignment: .topLeading) {
-                Color(uiColor: Palette.water)
+                ChartPalette.water.color
                 content(layout)
                     .safeAreaPadding(layout.safeAreaInsets)
                     .frame(width: layout.raceRect.width, height: layout.raceRect.height)

@@ -53,7 +53,8 @@ final class BoatNode: SKNode {
         addChild(label)
 
         badge.fontSize = 11
-        badge.fontColor = UIColor(red: 1, green: 0.35, blue: 0.3, alpha: 1)
+        // White, not red: nothing may depend on red and green (#5, #15). #117 replaces the badge.
+        badge.fontColor = .white
         badge.position = CGPoint(x: 0, y: -length * 0.8)
         badge.verticalAlignmentMode = .center
         badge.isHidden = true

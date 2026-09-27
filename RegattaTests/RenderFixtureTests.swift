@@ -2,6 +2,9 @@ import Foundation
 import Testing
 import RegattaBots
 import RegattaCore
+import SpriteKit
+import SwiftUI
+import UIKit
 @testable import Regatta
 
 /// Render fixtures (#62): the committed fixtures load and replay, and a fixture race stands still.
@@ -79,9 +82,21 @@ import RegattaCore
         let session = try GameSession(fixture: fixture, log: loaded.log)
         #expect(session.driver.isFrozen)
         #expect(session.scene.cameraMode == .course)
-        #expect(session.scene.filter != nil && session.scene.shouldEnableEffects)
-        session.scene.vision = .none
+        #expect(session.vision == .deuteranopia)
+        // The race view draws the filter, not the scene (`RaceViewVisionTests`).
         #expect(session.scene.filter == nil && !session.scene.shouldEnableEffects)
+    }
+
+    /// The reference diffs cover every filter (#111): each has a fixture, the prestart one seen through it.
+    @Test func everyVisionFilterHasAPrestartFixture() throws {
+        let (prestart, _) = try RenderFixture.load(named: "prestart", in: Self.fixtures)
+        for vision in VisionFilter.allCases {
+            let name = vision == .none ? "prestart" : "prestart-\(vision.rawValue)"
+            let (fixture, _) = try RenderFixture.load(named: name, in: Self.fixtures)
+            var expected = prestart
+            expected.vision = vision
+            #expect(fixture == expected, "\(name)")
+        }
     }
 
     @Test func fixtureFieldsDecodeEveryCameraAndVision() throws {
@@ -129,8 +144,135 @@ import RegattaCore
         #expect(Self.close(out, [0.2126, 0.2126, 0.2126]))
     }
 
+    /// The race view's SwiftUI matrix (`View.vision`) is the filter's own: the same rows and bias, alpha kept.
+    @Test func swiftUIMatrixIsTheFiltersMatrix() {
+        for filter in VisionFilter.allCases {
+            let m = filter.colorMatrix, b = Float(filter.bias)
+            let rows: [[Float]] = [[m.m11, m.m12, m.m13, m.m14, m.m15], [m.m21, m.m22, m.m23, m.m24, m.m25],
+                                   [m.m31, m.m32, m.m33, m.m34, m.m35], [m.m41, m.m42, m.m43, m.m44, m.m45]]
+            let expected = filter.matrix.map { $0.map(Float.init) + [0, b] } + [[0, 0, 0, 1, 0]]
+            #expect(rows == expected, "\(filter)")
+        }
+    }
+
+    /// Every filter moves the water tones well past `FilterCoverage.minimumShift`, so the vision fixtures' UI tests,
+    /// which check a filtered render's edges against the unfiltered one (`RenderFixtureUITests`'
+    /// `assertFilterReachesEveryEdge`), see each filter wherever it reaches.
+    @Test func everyFilterMovesTheWaterPastTheCoverageThreshold() {
+        for filter in VisionFilter.allCases where filter != .none {
+            for tone in [ChartPalette.water, ChartPalette.puff, ChartPalette.lull] {
+                let shift = zip(filter.apply(tone.components), tone.components).map { abs($0 - $1) * 255 }.max() ?? 0
+                #expect(shift >= 2 * FilterCoverage.minimumShift, "\(filter) moves \(tone) only \(shift)")
+            }
+        }
+    }
+
     @Test func washoutHalvesContrastTowardsWhite() {
         #expect(Self.close(VisionFilter.washout.apply([0, 0, 0]), [0.45, 0.45, 0.45]))
         #expect(Self.close(VisionFilter.washout.apply([1, 1, 1]), [0.95, 0.95, 0.95]))
+    }
+}
+
+/// The colour-vision filter covers everything the race view draws (#111). It was the scene's own `SKScene.filter`,
+/// which SpriteKit applies over the scene's frame; the camera is scaled and moved, so the render's right and bottom
+/// bands went unfiltered. Now it is SwiftUI's colour matrix over the whole race view, and the scene has none.
+@MainActor @Suite(.serialized) struct RaceViewVisionTests {
+    /// The race view hosted in a landscape window, so the portrait race is letterboxed, on the prestart fixture's
+    /// scaled and offset boat camera. Through a filter, the SpriteKit view's layer sits under a layer carrying it
+    /// (Core Animation filters a layer and everything under it, so the whole scene is filtered whatever its
+    /// camera), and no layer outside a filtered one shows the unfiltered water (SwiftUI filters the letterbox's
+    /// plain colour itself). Without a filter, no layer carries one and the letterbox is the water.
+    @Test func theFilterCoversTheSceneAndTheLetterbox() throws {
+        for vision in VisionFilter.allCases {
+            let loaded = try RenderFixture.load(named: "prestart", in: RenderFixtureTests.fixtures)
+            var fixture = loaded.fixture
+            fixture.vision = vision
+            let session = try GameSession(fixture: fixture, log: loaded.log)
+
+            let windowScene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+            let window = UIWindow(windowScene: windowScene)
+            window.frame = CGRect(x: 0, y: 0, width: 874, height: 402)
+            window.rootViewController = UIHostingController(
+                rootView: RaceView(session: session, onRestart: {}, onExit: {})
+                    .environment(\.screenSize, CGSize(width: 402, height: 874))
+            )
+            window.makeKeyAndVisible()
+            defer { window.isHidden = true }
+
+            let skView = try #require(settle(window) { Self.subviews(of: SKView.self, in: window).first { $0.scene != nil } },
+                                      "\(vision): no SpriteKit view showing the scene")
+            // A few more frames, for SwiftUI to commit whatever follows the scene's first.
+            for _ in 0..<4 {
+                window.layoutIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            }
+            let sceneRect = skView.convert(skView.bounds, to: window)
+            #expect(sceneRect.width < window.bounds.width - 100, "\(vision): not letterboxed: \(sceneRect)")
+            #expect(session.scene.camera.map { $0.xScale != 1 && $0.position != .zero } == true,
+                    "\(vision): the camera isn't scaled and moved")
+            #expect(session.scene.filter == nil && !session.scene.shouldEnableEffects, "\(vision): the scene filters itself")
+
+            let tree = Self.tree(window.layer, in: window.layer)
+            let filtering = Self.layers(from: skView.layer, upTo: window.layer).filter(Self.filters)
+            #expect(filtering.count == (vision == .none ? 0 : 1), "\(vision): layers over the scene filtering it: \(tree)")
+
+            let water = Self.layers(outsideFiltersIn: window.layer).filter { layer in
+                layer.convert(layer.bounds, to: window.layer).insetBy(dx: -0.5, dy: -0.5).contains(window.bounds)
+                    && layer.backgroundColor.map(Self.isUnfilteredWater) == true
+            }
+            if vision == .none {
+                #expect(!water.isEmpty, "the letterbox's water isn't a layer's background: \(tree)")
+            } else {
+                #expect(water.isEmpty, "\(vision): the letterbox shows the unfiltered water: \(tree)")
+            }
+        }
+    }
+
+    private static func filters(_ layer: CALayer) -> Bool { !(layer.filters ?? []).isEmpty }
+
+    /// Whether `colour` is `ChartPalette.water`, in sRGB to within a level.
+    private static func isUnfilteredWater(_ colour: CGColor) -> Bool {
+        guard let srgb = CGColorSpace(name: CGColorSpace.sRGB),
+              let components = colour.converted(to: srgb, intent: .defaultIntent, options: nil)?.components,
+              components.count >= 3 else { return false }
+        return zip(components, ChartPalette.water.components).allSatisfy { abs(Double($0) - $1) <= 1.5 / 255 }
+    }
+
+    /// `layer` and its superlayers, up to and including `top`.
+    private static func layers(from layer: CALayer, upTo top: CALayer) -> [CALayer] {
+        var chain = [layer]
+        while let last = chain.last, last !== top, let parent = last.superlayer { chain.append(parent) }
+        return chain
+    }
+
+    /// `layer` and every layer under it that no filter reaches: a filtering layer's subtree is left out.
+    private static func layers(outsideFiltersIn layer: CALayer) -> [CALayer] {
+        guard !filters(layer), !layer.isHidden else { return [] }
+        return [layer] + (layer.sublayers ?? []).flatMap { layers(outsideFiltersIn: $0) }
+    }
+
+    /// The layer tree under `layer`, one per line, for a failure message.
+    private static func tree(_ layer: CALayer, in top: CALayer, depth: Int = 0) -> String {
+        var line = "\n" + String(repeating: "  ", count: depth) + "\(type(of: layer)) \(layer.convert(layer.bounds, to: top).integral)"
+        if filters(layer) { line += " filters \(layer.filters ?? [])" }
+        if layer.masksToBounds { line += " masks" }
+        if layer.contents != nil { line += " contents" }
+        if let colour = layer.backgroundColor, colour.alpha > 0 { line += " background \(colour.components ?? [])" }
+        if layer.isHidden { line += " hidden" }
+        return line + (layer.sublayers ?? []).map { tree($0, in: top, depth: depth + 1) }.joined()
+    }
+
+    private static func subviews<V: UIView>(of type: V.Type, in view: UIView) -> [V] {
+        view.subviews.flatMap { ($0 as? V).map { [$0] } ?? [] + subviews(of: type, in: $0) }
+    }
+
+    /// Lays the window out and spins the main run loop, for up to about two seconds, until `found` finds something.
+    private func settle<T>(_ window: UIWindow, until found: () -> T?) -> T? {
+        for _ in 0..<40 {
+            window.layoutIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            if let value = found() { return value }
+        }
+        return found()
     }
 }

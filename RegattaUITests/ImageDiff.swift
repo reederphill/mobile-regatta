@@ -182,3 +182,61 @@ extension ImageDiff {
         return min(imageRows, Int(rows.rounded(.up)))
     }
 }
+
+/// Whether a filter over a render reaches its edges (#111): the render through a colour-vision filter against the
+/// same fixture unfiltered, patch by patch around the frame. The filter was once the SpriteKit scene's own, which
+/// covers the scene's frame and not the camera's view, so the render's right and bottom bands went unfiltered; a
+/// filter over the whole view moves the mean colour of every patch.
+struct FilterCoverage {
+    struct Patch: Equatable {
+        /// Where the patch is, such as `bottom-right`.
+        let name: String
+        let x: Int, y: Int, size: Int
+        /// How far the patch's mean colour moved, in its most-moved channel, out of 255.
+        let shift: Double
+    }
+
+    /// The least a patch's mean colour moves under a filter, out of 255. Every filter moves the water tones by twice
+    /// this or more in some channel (`VisionFilterTests`), and two renders of one frame match exactly.
+    static let minimumShift = 6.0
+
+    /// The four corners and the four edges' middles, each `size` pixels square and `inset` from the edges, the
+    /// bottom ones above the bottom `ignoringBottomRows` rows (the home-indicator band).
+    let patches: [Patch]
+
+    /// The patches the filter didn't reach.
+    var unfiltered: [Patch] { patches.filter { $0.shift < Self.minimumShift } }
+
+    var summary: String {
+        patches.map { "\($0.name) \($0.shift.formatted(.number.precision(.fractionLength(1))))" }.joined(separator: ", ")
+    }
+
+    init?(filtered: PixelImage, unfiltered: PixelImage, ignoringBottomRows: Int = 0, size: Int = 32, inset: Int = 12) {
+        let width = filtered.width, height = filtered.height - max(0, ignoringBottomRows)
+        guard filtered.width == unfiltered.width, filtered.height == unfiltered.height,
+              width >= 2 * (size + inset), height >= 2 * (size + inset) else { return nil }
+        let left = inset, right = width - inset - size, centreX = (width - size) / 2
+        let top = inset, bottom = height - inset - size, middleY = (height - size) / 2
+        let places = [("top-left", left, top), ("top", centreX, top), ("top-right", right, top),
+                      ("left", left, middleY), ("right", right, middleY),
+                      ("bottom-left", left, bottom), ("bottom", centreX, bottom), ("bottom-right", right, bottom)]
+        patches = places.map { name, x, y in
+            let a = Self.mean(filtered, x, y, size), b = Self.mean(unfiltered, x, y, size)
+            return Patch(name: name, x: x, y: y, size: size, shift: zip(a, b).map { abs($0 - $1) }.max() ?? 0)
+        }
+    }
+
+    /// The mean r, g and b of the `size`-pixel square at (`x`, `y`).
+    private static func mean(_ image: PixelImage, _ x: Int, _ y: Int, _ size: Int) -> [Double] {
+        var sum = [0.0, 0.0, 0.0]
+        for row in y..<(y + size) {
+            for column in x..<(x + size) {
+                let pixel = image[column, row]
+                sum[0] += Double(pixel.r)
+                sum[1] += Double(pixel.g)
+                sum[2] += Double(pixel.b)
+            }
+        }
+        return sum.map { $0 / Double(size * size) }
+    }
+}

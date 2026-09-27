@@ -60,6 +60,37 @@ import RegattaCore
         #expect(bad.problems == ["-appearance sepia: expected light or dark"])
     }
 
+    /// `-vision` (#111): the short names, and each filter's own; a race launched with one draws through it.
+    @Test func parsesTheVisionFilter() {
+        #expect(parse().vision == nil)
+        #expect(parse().raceVision == .none)
+        let short: [String: VisionFilter] = ["deut": .deuteranopia, "prot": .protanopia, "trit": .tritanopia,
+                                             "grey": .greyscale, "sun": .washout]
+        #expect(LaunchOptions.visionShortNames == short)
+        for (name, filter) in short {
+            #expect(parse("-vision", name).vision == filter, "-vision \(name)")
+        }
+        for filter in VisionFilter.allCases {
+            let options = parse("-vision", filter.rawValue, "-autostart")
+            #expect(options.vision == filter, "-vision \(filter.rawValue)")
+            #if DEBUG
+            #expect(options.raceVision == filter, "Debug builds draw a race through -vision \(filter.rawValue)")
+            #endif
+            #expect(options.autostart)
+            #expect(options.problems.isEmpty)
+        }
+        let bad = parse("-vision", "sepia")
+        #expect(bad.vision == nil)
+        #expect(bad.problems == ["-vision sepia: expected deut, prot, trit, grey, sun, none, deuteranopia, protanopia, "
+            + "tritanopia, greyscale or washout"])
+        // The rejection names everything `-vision` takes, and takes everything it names.
+        let named = LaunchOptions.visionNames.replacingOccurrences(of: " or ", with: ", ").components(separatedBy: ", ")
+        #expect(Set(named) == Set(short.keys).union(VisionFilter.allCases.map(\.rawValue)))
+        let missing = parse("-vision", "-autostart")
+        #expect(missing.vision == nil && missing.autostart)
+        #expect(missing.problems == ["-vision needs a value"])
+    }
+
     @Test func aMissingValueDoesNotSwallowTheNextFlag() {
         let options = parse("-seed", "-autostart", "-fixture")
         #expect(options.seed == nil)

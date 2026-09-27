@@ -57,7 +57,7 @@ struct OnlineLaunchView: View {
 
     private func panel(@ViewBuilder _ content: () -> some View) -> some View {
         ZStack {
-            Color(uiColor: Palette.water).ignoresSafeArea()
+            ChartPalette.water.color.ignoresSafeArea()
             VStack(spacing: 16, content: content)
                 .foregroundStyle(.white)
                 .padding(28)

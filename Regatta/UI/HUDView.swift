@@ -1,6 +1,9 @@
 import SwiftUI
 import RegattaCore
 
+/// The race HUD. Its colours are held to the reserved-colour rule (#22, G7): the start clock is the cue yellow,
+/// and everything else is white on translucent black. Nothing reads by red or green (#5, #15): a notice's tone
+/// shows as a symbol.
 struct HUDView: View {
     let hud: HUDState
     let messages: [RaceMessage]
@@ -35,7 +38,7 @@ struct HUDView: View {
             if hud.clock < 0 && hud.clock > -10 {
                 Text("\(Int(ceil(-hud.clock)))")
                     .font(.system(size: 64, weight: .black, design: .rounded))
-                    .foregroundStyle(Color(uiColor: Palette.startLine))
+                    .foregroundStyle(CuePalette.yellow.color)
                     .shadow(radius: 8)
                     .contentTransition(.numericText(countsDown: true))
             }
@@ -51,13 +54,13 @@ struct HUDView: View {
         VStack(alignment: .leading, spacing: 0) {
             Text(formatClock(hud.clock))
                 .font(.system(size: 30, weight: .heavy, design: .rounded).monospacedDigit())
-                .foregroundStyle(hud.clock < 0 ? Color(uiColor: Palette.startLine) : .white)
+                .foregroundStyle(hud.clock < 0 ? CuePalette.yellow.color : .white)
                 // UI tests read the tick to see the race advance at sub-second resolution.
                 .accessibilityIdentifier("race-clock")
                 .accessibilityValue(String(hud.tick))
             Text(statusLine)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(hud.status == .ocs ? .red : .white.opacity(0.8))
+                .font(.caption.weight(hud.status == .ocs ? .heavy : .semibold))
+                .foregroundStyle(.white.opacity(hud.status == .ocs ? 1 : 0.8))
                 // UI tests read the leg (label) to see a rounding, and how far the race has run (value, whole
                 // seconds from the gun) to tell a slow simulator from a race that never rounded, in one snapshot.
                 .accessibilityIdentifier("race-status")
@@ -80,7 +83,7 @@ struct HUDView: View {
         HStack(spacing: 6) {
             Image(systemName: "location.north.fill")
                 .rotationEffect(.radians(hud.targetBearing))
-                .foregroundStyle(Color(uiColor: Palette.mark))
+                .foregroundStyle(.white)
             Text("\(hud.targetName) · \(Int(hud.targetDistance)) m")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white)
@@ -131,13 +134,14 @@ private struct WindGauge: View {
             Image(systemName: "arrow.down")
                 .font(.title3.weight(.bold))
                 .rotationEffect(.radians(direction))
-                .foregroundStyle(inShadow ? .orange : .white)
+                // Dimmed in dirty air: less wind reaches you. Orange is the active leg's alone (#22).
+                .foregroundStyle(.white.opacity(inShadow ? 0.45 : 1))
             VStack(alignment: .leading, spacing: 1) {
                 Text(String(format: "%.0f kn", knots))
                     .font(.system(.subheadline, design: .rounded).weight(.bold).monospacedDigit())
                 Text(shiftText)
-                    .font(.caption2)
-                    .foregroundStyle(inShadow ? .orange : .white.opacity(0.6))
+                    .font(.caption2.weight(inShadow ? .bold : .regular))
+                    .foregroundStyle(.white.opacity(inShadow ? 1 : 0.6))
             }
         }
         .foregroundStyle(.white)
@@ -167,7 +171,8 @@ private struct PenaltyBanner: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(Color.red.opacity(0.8), in: .rect(cornerRadius: 12))
+        .background(.black.opacity(0.6), in: .rect(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.7), lineWidth: 1.5))
     }
 }
 
@@ -175,21 +180,32 @@ private struct MessageBubble: View {
     let message: RaceMessage
 
     var body: some View {
-        Text(message.text)
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.white)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(background, in: .rect(cornerRadius: 10))
-            .transition(.move(edge: .top).combined(with: .opacity))
+        HStack(spacing: 6) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .accessibilityHidden(true)
+            }
+            Text(message.text)
+                .multilineTextAlignment(.center)
+        }
+        .font(.footnote.weight(.semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(background, in: .rect(cornerRadius: 10))
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    /// The tone, by shape rather than red or green (#5, #15).
+    private var symbol: String? {
+        switch message.tone {
+        case .info: nil
+        case .good: "checkmark.circle.fill"
+        case .alert: "exclamationmark.triangle.fill"
+        }
     }
 
     private var background: Color {
-        switch message.tone {
-        case .info: .black.opacity(0.45)
-        case .good: Color(red: 0.1, green: 0.5, blue: 0.3).opacity(0.85)
-        case .alert: Color(red: 0.75, green: 0.15, blue: 0.15).opacity(0.9)
-        }
+        .black.opacity(message.tone == .alert ? 0.7 : 0.45)
     }
 }

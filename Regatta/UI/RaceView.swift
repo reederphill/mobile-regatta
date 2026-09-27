@@ -20,6 +20,9 @@ struct RaceView: View {
             race(layout)
                 .onChange(of: layout.sceneSize, initial: true) { _, size in session.scene.size = size }
         }
+        // One colour-vision filter over everything the race draws, live or a fixture: the scene at any camera
+        // scale, the HUD and overlays, and the letterbox (#111).
+        .vision(session.vision)
     }
 
     @ViewBuilder private func race(_ layout: RaceViewportPolicy.Layout) -> some View {
@@ -105,7 +108,9 @@ struct RaceView: View {
                         .font(.headline.weight(.heavy))
                         .tracking(1.5)
                         .frame(width: 120, height: 56)
-                        .background(Color(uiColor: Palette.mark), in: .capsule)
+                        // HUD chrome is white on translucent black: orange is the active leg's alone (#22).
+                        .background(.black.opacity(0.5), in: .capsule)
+                        .overlay(Capsule().strokeBorder(.white, lineWidth: 2))
                         .foregroundStyle(.white)
                         .shadow(radius: 6, y: 3)
                 }
