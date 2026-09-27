@@ -362,4 +362,69 @@ func openWaterPenaltyRules(_ stacking: RulesConfig.StackedPenaltyDeadlines) -> R
         #expect(again.heldInputs[0].rudderValue > Autohelm.deadBand, "completed on a tick she steered")
         #expect(again.boats[0].penaltyTurnsOwed == 0)
     }
+
+    /// Started by hand past 30° and let go, a wind shift has the autohelm turn her back under 30° of net
+    /// turning before the start deadline: she has still started the turn, so the start deadline passes, and
+    /// the turn still waits for her to complete it by hand. Given up by hand instead (turning back against
+    /// it) and not turned 30° again, the turn is not started at its start deadline.
+    @Test func autohelmDipBelowStartedTurnAfterStartingIsNotMissedStart() throws {
+        /// The wind's direction, which the test shifts once she is on the autohelm.
+        final class Shift { var direction = 0.0 }
+        let shift = Shift()
+        let race = try race(wind: { _ in Wind(direction: shift.direction, speed: metresPerSecond(knots: 10)) })
+        let call = race.tick
+        race.penalize(0)
+        // Her net turning since the call, whoever steered.
+        var turned = 0.0
+        var heading = race.boats[0].heading
+        func track(_ race: Race) {
+            turned += wrapAngle(race.boats[0].heading - heading)
+            heading = race.boats[0].heading
+        }
+
+        // Bearing away by hand just past 30°, then letting go: the autohelm holds her there.
+        helm(race, -1)
+        let log = steps(race, limit: Self.start, until: { race, _ in abs(race.boats[0].penaltyProgress) >= deg2rad(31) },
+                        each: { race, _ in track(race) })
+        #expect(log.contains { $0.kinds.contains(.penaltyStarted(seat: 0)) })
+        let direction: Double = race.boats[0].penaltyProgress > 0 ? 1 : -1
+        helm(race, 0)
+        steps(race, limit: 2 * Race.tickRate, each: { race, _ in track(race) })
+        #expect(race.boats[0].autohelm != nil && race.boats[0].penaltyProgress * direction >= Self.penalty.startedTurn)
+
+        // The wind shifts 20° against her turn: holding her wind angle, the autohelm turns her back that far.
+        shift.direction = -direction * deg2rad(20)
+        steps(race, limit: call + Self.start - 1 - race.tick, each: { race, kinds in
+            track(race)
+            #expect(!Self.disqualified(kinds) && !kinds.contains(.penaltyReset(seat: 0)) && !Self.served(kinds))
+        })
+        #expect(race.tick == call + Self.start - 1)
+        #expect(turned * direction < Self.penalty.startedTurn, "turned back under 30°: \(rad2deg(turned * direction))°")
+        #expect(race.boats[0].penaltyProgress * direction == Self.penalty.startedTurn)
+        #expect(race.owedPenalty(ofSeat: 0)?.isStarted == true)
+        let kinds = step(race)
+        #expect(race.tick == call + Self.start && !Self.disqualified(kinds) && !race.boats[0].isGhost)
+        #expect(race.boats[0].penaltyTurnsOwed == 1)
+
+        // Steering on by hand completes it, within its complete deadline.
+        helm(race, -1)
+        let done = steps(race, limit: call + Self.complete - race.tick, until: { _, kinds in Self.served(kinds) })
+        #expect(done.last.map { Self.served($0.kinds) } == true)
+        #expect(!done.contains { Self.disqualified($0.kinds) } && race.boats[0].penaltyTurnsOwed == 0)
+
+        // Given up by hand before the start deadline and not turned 30° again: missed start.
+        let again = try self.race()
+        let againCall = again.tick
+        again.penalize(0)
+        helm(again, -1)
+        steps(again, limit: Self.start) { race, _ in abs(race.boats[0].penaltyProgress) >= deg2rad(31) }
+        helm(again, 1)
+        let reset = steps(again, limit: Race.tickRate, until: { _, kinds in kinds.contains(.penaltyReset(seat: 0)) })
+        #expect(reset.last?.kinds.contains(.penaltyReset(seat: 0)) == true)
+        helm(again, 0)
+        steps(again, limit: againCall + Self.start - 1 - again.tick, each: { _, kinds in #expect(!Self.disqualified(kinds)) })
+        #expect(again.tick == againCall + Self.start - 1 && again.owedPenalty(ofSeat: 0)?.isStarted == false)
+        let missed = step(again)
+        #expect(missed.contains(.disqualified(seat: 0, reason: Race.missedStart)) && again.boats[0].isGhost)
+    }
 }

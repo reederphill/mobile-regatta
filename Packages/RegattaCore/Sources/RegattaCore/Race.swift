@@ -717,12 +717,15 @@ public final class Race {
     /// sailing for her (`playerDriven`). Letting go mid-turn hands her to the autohelm (#219), which never
     /// tacks or gybes by itself. The 360° is counted from her heading whoever steers, but a tick of the
     /// autohelm holding her (its bear-away to the groove after a let-go head to wind included) can neither
-    /// undo the turn nor complete it: it moves the progress in the turn's direction, never back past its start
-    /// and never onto the full turn (`heldPenaltyProgress`), so the next tick the player drives turning on
-    /// completes it. Before the player has set a direction the autohelm's turning counts for nothing.
+    /// undo the turn nor complete it: it moves the progress in the turn's direction, never back past its start,
+    /// nor back under `startedTurn` once she has turned that far (started stays started until she gives the
+    /// turn up or serves it, so the start deadline reads it off the progress), and never onto the full turn
+    /// (`heldPenaltyProgress`), so the next tick the player drives turning on completes it. Before the player
+    /// has set a direction the autohelm's turning counts for nothing.
     private func turnPenalty(_ b: inout Boat, seat i: Int, turn: Double, playerDriven: Bool) {
         let before = b.penaltyProgress
         let direction: Double = before > 0 ? 1 : before < 0 ? -1 : 0
+        let startedTurn = rules.raceFormat.penalty.startedTurn
         var progress: Double
         if playerDriven {
             if direction * turn < 0 {
@@ -733,9 +736,9 @@ public final class Race {
             progress = before + turn
         } else {
             guard direction != 0 else { return }
-            progress = direction * min(max(direction * (before + turn), 0), Race.heldPenaltyProgress)
+            let floor = abs(before) >= startedTurn ? startedTurn : 0
+            progress = direction * min(max(direction * (before + turn), floor), Race.heldPenaltyProgress)
         }
-        let startedTurn = rules.raceFormat.penalty.startedTurn
         if abs(before) < startedTurn && abs(progress) >= startedTurn { emit(.penaltyStarted(seat: i)) }
         if abs(progress) >= 2 * .pi {
             progress -= (progress < 0 ? -2 : 2) * .pi
