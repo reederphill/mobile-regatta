@@ -30,8 +30,9 @@ public struct RaceEvent: Sendable, Equatable {
         /// The boom crossed downwind.
         case gybed(seat: Int)
         case disqualified(seat: Int, reason: String)
-        /// The boats that must be told about mark-room at a rounding (#96).
-        case markRoomNotice(recipients: [Int])
+        /// A new rule 18 record (#91, `MarkRoomRecord`): `boat` is entitled to mark-room at `mark` (its name)
+        /// from `entitledOver`, who must give it. Told to those two boats only (#15), and never right of way.
+        case markRoomNotice(boat: Int, entitledOver: Int, mark: String)
         /// The boat has stopped racing and is now a ghost (#30, `Race.isGhost(seat:)`): as she finishes, at the
         /// DSQ call, or, still OCS or never started, at the close, just before `raceClosed`.
         case becameGhost(seat: Int)

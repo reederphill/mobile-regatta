@@ -109,7 +109,10 @@ before then is part of the same incident and draws no second call.
 ### MarkRoomGiven (builder value)
 
 Mark-room was given when the boat entitled to it could pass the mark within `roundingDistanceHullLengths`
-of it with at least `clearanceHullLengths` between hulls.
+of it with at least `clearanceHullLengths` between hulls. From #91: on a tick when she has passed the mark
+(crossed the first rounding stage of the leg, or left the leg) with her hull within `roundingDistanceHullLengths`
+of it and at least `clearanceHullLengths` from the other boat's hull, mark-room has been given, and rule 18 no
+longer applies between the two at that mark.
 
 | Field | Unit | v1 |
 |---|---|---|
@@ -119,7 +122,8 @@ of it with at least `clearanceHullLengths` between hulls.
 ### OnABeat (builder value)
 
 A boat is on a beat when her true wind angle is at most `maxTrueWindAngleDegrees` and, if
-`windwardLegOnly`, her leg ends at a windward mark.
+`windwardLegOnly`, her leg ends at a windward mark. From #91, rule 18 doesn't apply between two boats on
+opposite tacks when both are on a beat (18.1(a)).
 
 | Field | Unit | v1 |
 |---|---|---|
@@ -168,7 +172,13 @@ either way; the second's are c + 20 s and c + 40 s under `sequential`, and t + 2
 `fromCall`. The other values are loaded,
 checked and exposed for the tickets that use them (#80–#96); until then the race keeps its old
 behaviour. From #86 the race closes at `finishWindowSeconds` after the first finish, capped by
-`timeLimitSeconds` after the gun (`Race.closeTick`).
+`timeLimitSeconds` after the gun (`Race.closeTick`). From #91 rule 18 reads the zone, `markRoomGiven`,
+`onABeat` and the last point of certainty: the umpire records, per pair, who reached the zone of the mark
+they are racing to first and whether they were overlapped (as of the last point of certainty) at that moment,
+and so which is entitled to mark-room, until mark-room has been given, the entitled boat passes head to wind or
+leaves the zone (out for the last point of certainty), or both have left the mark astern. The overlap terms
+apply on opposite tacks while rule 18 applies between the boats. No rules-file value was added: schemas 1–3
+all carry these.
 
 Course derivation (#80): `CourseLayout.derive` reads `startLine`, `leewardGate`, `offsetMark`,
 `raceArea`, `startRow`, `edgeSpeedRetention` and `beatSizing` to lay out the course, sizing the beat

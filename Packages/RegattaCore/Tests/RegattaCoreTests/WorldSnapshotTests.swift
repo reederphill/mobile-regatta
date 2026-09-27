@@ -402,7 +402,7 @@ struct LogFeeder {
         "files": "fixed for the race: the class, venue, conditions and rules configuration the setup names (ADR 0004)",
         "current": "fixed for the race, derived from the venue and the public race seed",
         "tideStateAtGun": "fixed for the race, drawn from the venue and the public race seed (ADR 0003)",
-        "umpire": "umpire memory (which incidents are open, #88), the authoritative race's own, never sent to clients or in a snapshot",
+        "umpire": "umpire memory (which incidents are open, #88; rule 18 records and zone presence, #91), the authoritative race's own, never sent to clients or in a snapshot",
         "windSetup": "fixed for the race, drawn from the public race seed",
         "windKeys": "the key generator: it holds the wind seed, never in a snapshot (ADR 0001); import moves it past the snapshot's keys",
         "finishers": "derived on import: the count of finished boats",

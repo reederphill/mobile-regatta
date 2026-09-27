@@ -216,7 +216,9 @@ struct Gen {
         case 9: return .penaltyReset(seat: seat)
         case 10: return .penaltyServed(seat: seat)
         case 11: return .disqualified(seat: seat, reason: string())
-        case 12: return .markRoomNotice(recipients: (0..<int(0...4)).map { _ in int(0...15) })
+        case 12:
+            let other = int(0...14)
+            return .markRoomNotice(boat: seat, entitledOver: other >= seat ? other + 1 : other, mark: string())
         case 13: return .becameGhost(seat: seat)
         case 14: return .rounded(seat: seat, mark: string())
         case 15: return .finished(seat: seat, place: int(1...16))

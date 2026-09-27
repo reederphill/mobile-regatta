@@ -70,10 +70,12 @@ import Testing
             #expect(throws: WireError.unknownMessageType(UInt8(code))) { try Frame(decoding: [UInt8(code)] + Array(repeating: 0, count: 8)) }
         }
         let header: (MessageType) -> [UInt8] = { [$0.rawValue, 0, 0, 0, 0, 0, 0, 0, 0] }
-        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [24]) }
-        // Code 4 was the pre-#73 `foul`, and 11 the pre-#86 `raceClosed` without results: retired, never reused.
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [25]) }
+        // Code 4 was the pre-#73 `foul`, 11 the pre-#86 `raceClosed` without results and 17 the pre-#91
+        // `markRoomNotice` with a recipient list: retired, never reused.
         #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [4, 14, 0, 1]) }
         #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [11]) }
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [17, 2, 0, 1]) }
         // Race closed: rated, one row (seat, place, code); result codes 0 ... 4, and a finish tick only for code 0.
         _ = try Frame(decoding: header(.event) + [23, 1, 1, 3, 1, 1])
         #expect(throws: WireError.invalidValue("resultCode")) { try Frame(decoding: header(.event) + [23, 1, 1, 3, 1, 5]) }
@@ -278,8 +280,9 @@ import Testing
                 #expect(!EventAudience.seats([seat, target]).includes(seat: 16))
             case .ocsNotice(let recipient):
                 #expect(audience == .seats([recipient]))
-            case .markRoomNotice(let recipients):
-                #expect(audience == .seats(recipients))
+            case .markRoomNotice(let boat, let entitledOver, _):
+                #expect(audience == .seats([boat, entitledOver]))
+                #expect(!audience.includes(seat: (0..<16).first { $0 != boat && $0 != entitledOver }!))
             case .grooveSnap(let seat):
                 #expect(audience == .seats([seat]))
             default:

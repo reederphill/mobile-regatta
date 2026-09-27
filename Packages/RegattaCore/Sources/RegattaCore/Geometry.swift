@@ -243,6 +243,16 @@ public enum Collision {
         return (closest - center) / max(closestDistance, 1e-9) * (radius - closestDistance)
     }
 
+    /// Metres from the point `p` to the convex `polygon`: 0 if `p` is inside it, else to its nearest side.
+    public static func distance(convex polygon: [Vec2], to p: Vec2) -> Double {
+        if contains(polygon, p) { return 0 }
+        var least = Double.infinity
+        for i in polygon.indices {
+            least = min(least, (closestPoint(on: Segment(polygon[i], polygon[(i + 1) % polygon.count]), to: p) - p).length)
+        }
+        return least
+    }
+
     public static func contains(_ polygon: [Vec2], _ p: Vec2) -> Bool {
         var sign = 0.0
         for i in polygon.indices {

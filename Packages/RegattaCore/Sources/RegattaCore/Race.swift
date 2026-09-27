@@ -55,9 +55,10 @@ public final class Race {
     public static var defaultPairing: Venue.Pairing { RaceFiles.defaults.pairing }
     public static var defaultRulesConfiguration: RulesConfigFile { RaceFiles.defaults.rulesConfiguration }
 
-    /// The rules and race-format values this race uses (#73). So far the zone, the start sequence, the
-    /// course, the start row, the penalty turns' deadlines and their stacking (#89) and the close (the finish
-    /// window and the time limit, `closeTick`) read it; the rest wait for the tickets that use them.
+    /// The rules and race-format values this race uses (#73). So far rule 18 (the zone, the mark-room-given
+    /// and on-a-beat tests, #91), the incidents, the start sequence, the course, the start row, the penalty
+    /// turns' deadlines and their stacking (#89) and the close (the finish window and the time limit,
+    /// `closeTick`) read it; the rest wait for the tickets that use them.
     public var rules: RulesConfig { files.rulesConfiguration.content }
     /// Every incident so far, by id and by pair of boats.
     public private(set) var incidents = IncidentIndex()
@@ -387,8 +388,13 @@ public final class Race {
         for i in boats.indices { integrate(i, Race.dt) }
         enforcePenaltyDeadlines()
         // Where the boats sailed to, before contacts push them apart: a call at a contact this tick
-        // reads this tick's certain overlap.
-        overlaps.update(boats, hull: boatClass.hull, margin: lastPointOfCertaintyTicks)
+        // reads this tick's certain overlap. Rule 18's zones first: the overlap terms apply on opposite
+        // tacks between boats rule 18 applies between (#91), and its records read the updated overlaps.
+        let hulls = boats.map { $0.hull(outline: boatClass.hull.outline) }
+        let zones = boats.indices.map { course.markZone(of: boats[$0], hull: hulls[$0]) }
+        let markRoomApplies = markRoomAppliesByPair(zones)
+        overlaps.update(boats, hull: boatClass.hull, margin: lastPointOfCertaintyTicks, markRoomApplies: markRoomApplies)
+        updateMarkRoom(previous: previous, hulls: hulls, zones: zones, markRoomApplies: markRoomApplies)
         resolveBoatContacts()
         callNearMisses()
         resolveObstacleContacts()
@@ -597,6 +603,32 @@ public final class Race {
                 call(verdict)
             }
         }
+    }
+
+    /// Whether rule 18 applies between each pair now (`Rules.markRoomApplies`), by `OverlapTracker.index`,
+    /// from each seat's `MarkZone`: world state alone, so a prediction's overlaps are the server's.
+    private func markRoomAppliesByPair(_ zones: [MarkZone?]) -> [Bool] {
+        let n = boats.count
+        var applies = [Bool](repeating: false, count: OverlapTracker.pairCount(seats: n))
+        for a in 0..<n where zones[a] != nil {
+            for b in (a + 1)..<n where zones[b] != nil {
+                applies[OverlapTracker.index(a, b, seats: n)] = Rules.markRoomApplies(
+                    boats[a], boats[b], zones: zones[a], zones[b], course: course, onABeat: rules.onABeat)
+            }
+        }
+        return applies
+    }
+
+    /// Rule 18 (#91): the umpire's records of who is entitled to mark-room from whom
+    /// (`UmpireState.updateMarkRoom`), each new one announced to its two boats (`markRoomNotice`). The
+    /// authoritative race's alone: a client never shows a notice the server hasn't sent (ADR 0005). Mark-room
+    /// is not right of way: no call reads the records yet (18.2(d) and 43.1(b) are #93's).
+    private func updateMarkRoom(previous: [Boat], hulls: [[Vec2]], zones: [MarkZone?], markRoomApplies: [Bool]) {
+        guard umpire != nil else { return }
+        let notices = umpire?.updateMarkRoom(MarkRoomTick(
+            tick: tick, boats: boats, previous: previous, hulls: hulls, zones: zones, markRoomApplies: markRoomApplies,
+            overlaps: overlaps, course: course, rules: rules, boatClass: boatClass)) ?? []
+        for notice in notices { emit(notice) }
     }
 
     /// Whether the umpire holds an incident open between seats `a` and `b`. Never, in a prediction.
@@ -1186,6 +1218,7 @@ extension Race {
     /// keeps what isn't world state: its setup, course and wind seed, and its umpire's memory (#88), less
     /// any open incident the snapshot's incidents don't end on for its pair. So a race that imports another
     /// race's snapshot holds no incident open, and can call a pair the other wouldn't until they separate.
+    /// Its rule 18 records (#91) carry on, tested against the new world from the next step.
     /// Bots run outside the race (#60), and their memory isn't in a snapshot, so bots driving a restored
     /// race won't make the same decisions.
     /// Inputs queued but not yet applied and undrained events are dropped. `log` is left as it was and
