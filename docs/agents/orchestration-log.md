@@ -43,6 +43,7 @@ Each parked ticket is labelled `needs:human`, unassigned, and has the question a
 | #85 | The start row's minimum spacing (1.25 hull lengths) was a code constant (`CourseLayout.startRowMinimumSpacing`); ADR 0004 lists "start row" among versioned race-format data. | Rules data: rules schema 2 adds `raceFormat.startRow.minimumSpacingHullLengths`; `fleet-rules@2` = @1 + 1.25; defaults on @2; schema 1 means no floor; @1 unchanged. |
 | #85 | Bot OCS notices roughly double (443 → 941) once OCS is judged by hull: bots time their centre ~2 m below the line and coast, so the bow is over at the gun. | Not this ticket's defect (the review agreed): a pre-existing bot timing trait that correct hull OCS exposes; finish shares unchanged, no threshold breaks. A bow-timing fix cost finish share; worth a bot ticket (#99 start sequence). |
 | wrap-up | The owner said "wrap up" on 2026-09-26 23:37. | Finished every in-flight PR through merge (#257, #258, #259, #261) and started nothing new. |
+| #232 | Should the Debug-only tuning panel ship in internal TestFlight builds (needs an "Internal" build configuration; ADR 0004 said "debug and internal TestFlight")? | **You (2026-09-27):** Debug-only for now; ADR 0004 amended to say Debug builds. Revisit after #49 (Apple Developer Program). |
 
 ## Completed
 
