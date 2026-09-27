@@ -17,14 +17,17 @@ func steadyCurrent(knots: Double, towards bearing: Double) -> CurrentField {
 /// A race of `seats` humans in `current`, stepped 10 ticks into its sequence so every boat has her
 /// winds, then with its world edited by `place`. `wind` replaces the keyed wind over the ground, as
 /// `Race.init(setup:files:mode:current:wind:)` says. Every boat is let go where she's placed: her autohelm
-/// engages on the next step, on the angle she sails then (ADR 0007).
+/// engages on the next step, on the angle she sails then (ADR 0007). The race is at `venue` if one is given.
 func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: ((_ tick: Int) -> GroundWind)? = nil,
-                boatClass: FileRef? = nil, _ place: (inout WorldSnapshot, Race) -> Void) throws -> Race {
+                boatClass: FileRef? = nil, venue: VenueFile? = nil,
+                _ place: (inout WorldSnapshot, Race) -> Void) throws -> Race {
     // ilca-dinghy@3 unless told otherwise: the schema-2 class these tests' expectations (`Fixtures.boatClass()`) come from.
     let boatClass = try boatClass ?? BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
+    var catalog = RaceFileCatalog()
+    let venue = try venue.map { try catalog.venues.add($0) } ?? RaceFiles.defaults.venue.ref
     let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .human, count: seats), laps: 2,
-                              startSequenceTicks: 60 * Race.tickRate, boatClass: boatClass)
-    let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+                              startSequenceTicks: 60 * Race.tickRate, boatClass: boatClass, venue: venue)
+    let race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
                         mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)), current: current,
                         wind: wind)
     for _ in 0..<10 { race.step() }
@@ -131,7 +134,8 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: (
     @Test func everyBoatMovesAtHerVelocityOverTheGround() throws {
         let race = try placedRace(seats: 4, current: steadyCurrent(knots: 1.5, towards: deg2rad(200))) { snapshot, race in
             let origin = snapshot.seats[0].boat.position
-            for seat in 0..<4 { snapshot.seats[seat].boat.position = origin + Vec2(Double(seat) * 60, 0) }
+            // Along the line, clear of the race area's edges (#82): the seats are free to move.
+            for seat in 0..<4 { snapshot.seats[seat].boat.position = origin + race.course.right * (Double(seat) * 40) }
             stopped(&snapshot.seats[0]) // stopped, before the start
             var sailing = snapshot.seats[1].boat // sailing close-hauled, before the start
             let best = race.boatClass.polar.bestUpwind(tws: sailing.windSpeed)

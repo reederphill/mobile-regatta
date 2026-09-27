@@ -88,6 +88,8 @@ public final class Race {
 
     private var boatContacts = Set<Pair>()
     private var obstacleContacts = Set<Pair>()
+    /// Seats touching an edge of the race area, by kind.
+    private var edgeContacts = Set<WorldSnapshot.EdgeContact>()
     private var lastFoul: [Pair: Double] = [:]
     /// Every pair's overlap as of the last point of certainty (#87), updated once a tick.
     public private(set) var overlaps: OverlapTracker
@@ -142,8 +144,9 @@ public final class Race {
         }
         var rng = SplitMix64(seed: setup.raceSeed.value)
         let drawn = WindSetup(conditions: files.conditions, pairing: files.pairing, raceSeed: setup.raceSeed)
-        let course = CourseLayout.derive(windSetup: drawn, fleetSize: setup.fleetSize, laps: setup.laps,
-                                         boatClass: files.boatClass.content, rules: files.rulesConfiguration.content)
+        let course = CourseLayout.derive(windSetup: drawn, land: files.venue.content.land, fleetSize: setup.fleetSize,
+                                         laps: setup.laps, boatClass: files.boatClass.content,
+                                         rules: files.rulesConfiguration.content)
         self.course = course
         legTargets = course.legs.map(course.targetPosition(for:))
         let windSetup = drawn.with(raceArea: course.raceArea)
@@ -162,9 +165,27 @@ public final class Race {
         tick = -setup.startSequenceTicks
 
         // Prototype placement until the start row (#35), square to the line: seat 0 mid-line, the rest
-        // scattered below it by the race seed, reaching along it.
+        // scattered below it by the race seed, reaching along it. The draws are squeezed towards the line
+        // to keep every boat at least a hull length inside the race area (#82), which reaches only a line
+        // length below it; and then, as a whole, a twentieth at a time, until the scatter is a hull length
+        // off the land in it too. (A line with land within a hull length of its middle leaves no such
+        // scatter: then the tightest.)
         let centre = course.startLine.centre, up = course.upwind, right = course.right
-        func onWater(_ offset: Vec2) -> Vec2 { centre + right * offset.x + up * offset.y }
+        let hullLength = files.boatClass.content.hull.length
+        let area = course.raceArea
+        let below = area.halfLength + (centre - area.centre).dot(up)
+        let across = area.halfWidth - abs((centre - area.centre).dot(right))
+        let insideBoundary = Vec2(min(1, (across - hullLength) / 130), min(1, (below - hullLength) / 100))
+        func placed(_ offset: Vec2, _ squeeze: Vec2) -> Vec2 {
+            centre + right * (offset.x * squeeze.x) + up * (offset.y * squeeze.y)
+        }
+        let scatter: [Vec2] = [Vec2(-130, -100), Vec2(130, -100), Vec2(130, -35), Vec2(-130, -35)]
+        func isOffLand(_ squeeze: Vec2) -> Bool {
+            course.landClearance(of: scatter.map { placed($0, squeeze) }) >= hullLength
+        }
+        let squeezes: [Vec2] = (0..<20).map { insideBoundary * (1 - Double($0) / 20) }
+        let squeeze = squeezes.first(where: isOffLand) ?? squeezes[squeezes.count - 1]
+        func onWater(_ offset: Vec2) -> Vec2 { placed(offset, squeeze) }
         var fleet: [Boat] = []
         for seat in setup.seats.indices {
             let kind = setup.seats[seat]
@@ -380,6 +401,7 @@ public final class Race {
         overlaps.update(boats, hull: boatClass.hull, margin: lastPointOfCertaintyTicks)
         resolveBoatContacts()
         resolveObstacleContacts()
+        resolveEdgeContacts()
         for i in boats.indices { updateProgress(i, from: previous[i]) }
         checkForEnd()
     }
@@ -579,6 +601,41 @@ public final class Race {
         obstacleContacts = touching
     }
 
+    /// Keeps every boat on the course in the race area (#12, #82): out of the land and inside the
+    /// boundary (`CourseLayout.resolveEdges`). Heading into an edge she keeps only her speed along it, and
+    /// on the tick a touch begins only the course's `edgeSpeedRetention` of that (`RaceEdges.speed`); land
+    /// and boundary touched in one tick are one edge, facing the way her hull is pushed, so she loses her
+    /// speed to them once. Her heading and rudder are her own, so she can steer away. A touch lasts until
+    /// she is more than `RaceEdges.touchMargin` clear of that edge. A touch is no foul: it costs no
+    /// penalty, and when it begins it is announced and recorded (`IncidentIndex.obstructionContacts`).
+    /// Only Section A of the rules applies near land (#12), so no rule 19. A ghost sails through.
+    private func resolveEdgeContacts() {
+        var touching = Set<WorldSnapshot.EdgeContact>()
+        let outline = boatClass.hull.outline
+        for i in boats.indices where boats[i].isOnCourse {
+            let resolution = course.resolveEdges(hull: boats[i].hull(outline: outline))
+            let beginning = resolution.touches.filter { !edgeContacts.contains(.init(seat: i, kind: $0)) }
+            if !resolution.touches.isEmpty {
+                boats[i].position += resolution.push
+                boats[i].speed = RaceEdges.speed(boats[i].speed, forward: boats[i].forward, normal: resolution.normal,
+                                                 begins: !beginning.isEmpty, retention: course.edgeSpeedRetention)
+            }
+            for kind in resolution.touches { touching.insert(WorldSnapshot.EdgeContact(seat: i, kind: kind)) }
+            for kind in beginning {
+                incidents.recordObstructionContact(ObstructionContact(tick: tick, leg: boats[i].legIndex, seat: i, kind: kind))
+                emit(.obstructionContact(seat: i, kind: kind))
+            }
+            for kind in ObstructionKind.allCases where !resolution.touches.contains(kind) {
+                let contact = WorldSnapshot.EdgeContact(seat: i, kind: kind)
+                if edgeContacts.contains(contact),
+                   course.isNear(kind, hull: boats[i].hull(outline: outline), within: RaceEdges.touchMargin) {
+                    touching.insert(contact)
+                }
+            }
+        }
+        edgeContacts = touching
+    }
+
     /// Turns a foul costs today, until the penalty rules move to the single penalty turn.
     private static let foulTurns = 2
 
@@ -728,10 +785,14 @@ extension Race {
                 obstacles.append(.init(seat: seat, obstacle: k))
             }
         }
+        let edges = boats.indices.flatMap { seat in
+            ObstructionKind.allCases.map { WorldSnapshot.EdgeContact(seat: seat, kind: $0) }.filter(edgeContacts.contains)
+        }
         return WorldSnapshot(
             tick: tick,
             seats: boats.indices.map { WorldSnapshot.Seat(boat: boats[$0], heldInput: heldInputs[$0]) },
-            touchingBoats: boatPairs, touchingObstacles: obstacles, foulMemory: fouls, incidents: incidents,
+            touchingBoats: boatPairs, touchingObstacles: obstacles, touchingEdges: edges, foulMemory: fouls,
+            incidents: incidents,
             firstFinishTime: firstFinishTime, isOver: isOver, windKeys: wind.keys,
             overlaps: overlaps.memory
         )
@@ -753,8 +814,8 @@ extension Race {
     ///
     /// Throws, leaving the race unchanged, for a snapshot it couldn't sail on from: another fleet
     /// size, a tick outside the sequence start … `WorldSnapshot.maxTick`, a non-finite value, a leg or
-    /// rounding stage the course doesn't have, a negative penalty count, a bad contact, overlap or incident, or
-    /// a missing key from the first window the wind at the snapshot's tick needs
+    /// rounding stage the course doesn't have, a negative penalty count, a bad contact, overlap, incident or
+    /// obstruction contact, or a missing key from the first window the wind at the snapshot's tick needs
     /// (`WindField.firstWindowNeeded`: the window before the snapshot's, or further back for puffs that
     /// may still be alive) through the last key it holds.
     public func importSnapshot(_ snapshot: WorldSnapshot) throws {
@@ -778,11 +839,21 @@ extension Race {
               snapshot.foulMemory.allSatisfy({ validPair($0.pair) }),
               snapshot.touchingObstacles.allSatisfy({ seatRange.contains($0.seat) && course.obstacles.indices.contains($0.obstacle) })
         else { throw WorldSnapshotError.invalidContact }
+        let kinds = ObstructionKind.allCases
+        let edgeOrder = { (e: WorldSnapshot.EdgeContact) in e.seat * kinds.count + kinds.firstIndex(of: e.kind)! }
+        guard snapshot.touchingEdges.allSatisfy({ seatRange.contains($0.seat) }),
+              zip(snapshot.touchingEdges, snapshot.touchingEdges.dropFirst()).allSatisfy({ edgeOrder($0) < edgeOrder($1) })
+        else { throw WorldSnapshotError.invalidContact }
         if let bad = snapshot.incidents.incidents.first(where: {
             !seatRange.contains($0.parties.low) || !seatRange.contains($0.parties.high)
                 || !course.legs.indices.contains($0.leg) || $0.tick > snapshot.tick
         }) {
             throw WorldSnapshotError.invalidIncident(id: bad.id)
+        }
+        if let bad = snapshot.incidents.obstructionContacts.firstIndex(where: {
+            !seatRange.contains($0.seat) || !course.legs.indices.contains($0.leg) || $0.tick > snapshot.tick
+        }) {
+            throw WorldSnapshotError.invalidObstructionContact(index: bad)
         }
         let margin = lastPointOfCertaintyTicks
         for (k, entry) in snapshot.overlaps.enumerated() {
@@ -831,6 +902,7 @@ extension Race {
         heldInputs = snapshot.seats.map(\.heldInput)
         boatContacts = Set(snapshot.touchingBoats.map { Pair(a: $0.a, b: $0.b) })
         obstacleContacts = Set(snapshot.touchingObstacles.map { Pair(a: $0.seat, b: $0.obstacle) })
+        edgeContacts = Set(snapshot.touchingEdges)
         var foulTimes: [Pair: Double] = [:]
         for memory in snapshot.foulMemory { foulTimes[Pair(a: memory.pair.a, b: memory.pair.b)] = memory.time }
         lastFoul = foulTimes

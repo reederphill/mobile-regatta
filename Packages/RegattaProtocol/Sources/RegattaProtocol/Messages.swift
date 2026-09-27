@@ -335,7 +335,8 @@ public struct Resync: Equatable, Sendable {
 
     /// The world at `tick` (the frame's tick), built on `base`, the receiver's own snapshot (a freshly
     /// built race's, on a rejoin): the wire seats, finishes and the race's end from the event state, and
-    /// the revealed wind keys. Contact, foul and incident memory stay as the base has them.
+    /// the revealed wind keys. Contact, foul and incident memory stay as the base has them, less the
+    /// obstruction contacts it began after `tick` (`merge`).
     public func world(base: WorldSnapshot, tick: Int) throws -> WorldSnapshot {
         var world = try merge(seats, into: base, tick: tick)
         try eventState.apply(to: &world)
@@ -395,7 +396,8 @@ public struct Snapshot: Equatable, Sendable {
     /// `Resync` and the reliable events since (`EventState.record`). So a client whose own prediction
     /// ended the race, or finished a boat, takes the server's word at every snapshot. The other fields
     /// the wire leaves out (`SnapshotFields.excluded`) and contact, foul, overlap and incident memory keep the
-    /// base's values: incidents are umpire memory, which stays on the server (#18, #96).
+    /// base's values: incidents are umpire memory, which stays on the server (#18, #96). The base's
+    /// obstruction contacts that began after `tick` are dropped (`merge`): the client sails those ticks again.
     public func applied(to base: WorldSnapshot, tick: Int, events: EventState) throws -> WorldSnapshot {
         var world = try merge(seats, into: base, tick: tick)
         try events.apply(to: &world)

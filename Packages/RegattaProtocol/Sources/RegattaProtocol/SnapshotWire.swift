@@ -399,13 +399,16 @@ func wireSeats(of world: WorldSnapshot) throws -> [WireSeat] {
     return try world.seats.map(WireSeat.init)
 }
 
-/// `base` with `seats` merged in at `tick`. Race-level state stays as the base has it.
+/// `base` with `seats` merged in at `tick`. Race-level state stays as the base has it, but for the
+/// obstruction contacts it began after `tick` (#82): the receiver's own prediction ahead of the server,
+/// which it sails again from here (and a snapshot can't hold contacts from after its tick).
 func merge(_ seats: [WireSeat], into base: WorldSnapshot, tick: Int) throws -> WorldSnapshot {
     guard seats.count == base.seats.count else {
         throw WorldSnapshotError.seatCount(expected: base.seats.count, found: seats.count)
     }
     var world = base
     world.tick = tick
+    world.incidents.forgetObstructionContacts(after: tick)
     for i in seats.indices { seats[i].apply(to: &world.seats[i]) }
     return world
 }
