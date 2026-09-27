@@ -72,8 +72,9 @@ public struct UmpireState: Sendable, Equatable {
     /// - 18.3: a boat that passes head to wind from port to starboard in the zone of a mark left to port loses
     ///   18.2 against a boat on starboard fetching it (`Rules.isFetchingOnStarboard`: sailing the groove, she
     ///   would pass to windward of it): the pair's record ends, and 18.2 no longer applies between them. If that
-    ///   boat has been on starboard since entering the zone, the tacker owes her mark-room once she has an
-    ///   inside overlap.
+    ///   boat has been on starboard since entering the zone, the tacker owes her mark-room once that boat is
+    ///   overlapped inside the tacker (RRS 18.3(b): "if the other boat becomes overlapped inside her"). A tacker
+    ///   that ends up inside is owed nothing: 18.2 no longer applies between them.
     mutating func updateMarkRoom(_ tick: MarkRoomTick) -> [RaceEvent.Kind] {
         let margin = RulesConfig.ticks(tick.rules.incidents.lastPointOfCertainty)
         updateZonePresence(tick, margin: margin)
@@ -185,7 +186,7 @@ struct MarkRoomPair: Sendable, Equatable {
     struct TackInZone: Sendable, Equatable {
         let tacker: Int
         /// The other boat had been on starboard since entering the zone: the tacker owes her mark-room once
-        /// she has an inside overlap.
+        /// that boat is overlapped inside the tacker (18.3(b)). No record when the tacker is the inside boat.
         let protectsOther: Bool
     }
 
