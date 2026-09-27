@@ -77,17 +77,20 @@ public struct UmpireState: Sendable, Equatable {
     mutating func updateMarkRoom(_ tick: MarkRoomTick) -> [RaceEvent.Kind] {
         let margin = RulesConfig.ticks(tick.rules.incidents.lastPointOfCertainty)
         updateZonePresence(tick, margin: margin)
-        let presence = zonePresence
+        // By seat, and whether any pair holds a record yet: most pairs, most ticks, are nowhere near a zone.
+        let presence = tick.boats.indices.map { zonePresence[$0] }
+        let anyPair = !markRoomPairs.isEmpty
         var notices: [RaceEvent.Kind] = []
         let n = tick.boats.count
         for a in 0..<n {
             for b in (a + 1)..<n {
                 let pair = SeatPair(a, b)
                 var began: MarkRoomPair.Owed?
-                if var state = markRoomPairs[pair] {
+                if anyPair, var state = markRoomPairs[pair] {
                     let holds = state.advance(a, b, tick, margin: margin, presence: { presence[$0] }, began: &began)
                     markRoomPairs[pair] = holds ? state : nil
-                } else if let state = MarkRoomPair.begin(a, b, tick, presence: { presence[$0] }) {
+                } else if presence[a] != nil || presence[b] != nil,
+                          let state = MarkRoomPair.begin(a, b, tick, presence: { presence[$0] }) {
                     markRoomPairs[pair] = state
                     began = state.owed
                 }
