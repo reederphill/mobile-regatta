@@ -97,6 +97,42 @@ import SwiftUI
         }
     }
 
+    /// The water fixtures (#116) sail the fun-pass files (#233: dev-venue@3 and the conditions' @3) and freeze
+    /// where the water has something to show from the boat camera: a puff and a lull in view, or, for the edge
+    /// tint, a puff drifting in beyond the upwind (top) edge. Each greyscale twin is the same frame.
+    @Test func waterFixturesShowWhatTheyAreFor() throws {
+        let venue = try VenueFile.bundled(id: "dev-venue", version: 3).ref
+        for (name, conditions) in [("water-light-and-patchy", "light-and-patchy"), ("water-gusty-offshore", "gusty-offshore"),
+                                   ("edge-tint", "gusty-offshore")] {
+            let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            #expect(fixture.camera == .boat && fixture.vision == VisionFilter.none, "\(name)")
+            let setup = log.header.setup
+            let file = try ConditionsFile.bundled(id: conditions, version: 3)
+            #expect(setup.venue == venue, "\(name)")
+            #expect(setup.conditions == file.ref, "\(name)")
+            let world = try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
+            // The boat camera at the default zoom on iPhone 17 (402 x 874 points, scale 1/0.8), in metres.
+            let me = world.me
+            let center = me.position + me.velocity * 2
+            let half = Vec2(402, 874) * 1.25 / 2 / Double(GameScene.pointsPerMeter)
+            let inView = world.puffs.filter { puff in
+                let outside = Vec2(max(abs(puff.center.x - center.x) - half.x, 0), max(abs(puff.center.y - center.y) - half.y, 0))
+                return outside.length < puff.radius && abs(puff.intensity) > 0.1
+            }
+            if name == "edge-tint" {
+                let marks = EdgeTint.marks(for: world.puffs, center: center, half: half, style: .standard)
+                #expect(marks.contains { $0.edge == .top && $0.alpha > 0.5 }, "\(marks)")
+            } else {
+                #expect(inView.contains { $0.intensity > 0 } && inView.contains { $0.intensity < 0 },
+                        "\(name): \(inView.map(\.intensity))")
+                let (grey, _) = try RenderFixture.load(named: "\(name)-greyscale", in: Self.fixtures)
+                var expected = fixture
+                expected.vision = .greyscale
+                #expect(grey == expected)
+            }
+        }
+    }
+
     @Test func fixtureFieldsDecodeEveryCameraAndVision() throws {
         for camera in LaunchOptions.CameraMode.allCases {
             for vision in VisionFilter.allCases {
