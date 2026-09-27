@@ -90,20 +90,25 @@ import RegattaCore
 
     /// Beating to the windward mark (rounded to port), a boat below the starboard layline aims first at the
     /// lead point down that layline, right of the mark, not straight at the fetch point: a port track there
-    /// would run over the mark. On the layline she aims at the fetch point itself.
+    /// would run over the mark. On the layline she aims at the fetch point itself, and so does a boat on
+    /// starboard close in whose course clears the mark by the room she needs: she holds on and rounds,
+    /// rather than tack out to a lead point abeam of her and tack back.
     @Test func belowTheLaylineSheAimsAtItsLeadPoint() {
         let mark = Vec2(0, 0)
         let upwind = Vec2.heading(0)
         let fetch = mark + upwind.rightPerp * 6 + upwind * 4
         let wind = 0.0
         let groove = deg2rad(42)
-        func approach(from position: Vec2) -> Vec2 {
-            BotBrain.windwardApproach(from: position, fetch: fetch, wind: wind, groove: groove, upwind: upwind)
+        let room = 4.5
+        func approach(from position: Vec2, on tack: Tack) -> Vec2 {
+            BotBrain.windwardApproach(from: position, tack: tack, mark: mark, room: room, fetch: fetch, wind: wind,
+                                      groove: groove, upwind: upwind)
         }
         let starboardCloseHauled = Vec2.heading(wind - groove)
 
-        // Straight below the mark, well short of the starboard layline.
-        let lead = approach(from: mark - upwind * 300)
+        // Straight below the mark, well short of the starboard layline, on either tack.
+        let lead = approach(from: mark - upwind * 300, on: .port)
+        #expect(approach(from: mark - upwind * 300, on: .starboard) == lead)
         #expect(lead != fetch, "she doesn't sail straight at the fetch point")
         #expect(((lead - fetch).length - BotBrain.laylineLead).magnitude < 1e-9, "\(BotBrain.laylineLead) m from it")
         #expect((lead - mark).dot(upwind.rightPerp) > 6, "right of the mark and the fetch point")
@@ -112,7 +117,19 @@ import RegattaCore
                 "on the starboard layline: close-hauled on starboard from it fetches the mark")
 
         // On the starboard layline, below the lead point: the fetch point.
-        #expect(approach(from: fetch - starboardCloseHauled * 200) == fetch)
+        #expect(approach(from: fetch - starboardCloseHauled * 200, on: .starboard) == fetch)
+
+        // Close in, just below the lead point and inside the layline, the lead point is almost abeam. On
+        // starboard with her course clearing the mark by `room` or more, she holds on for the fetch point; on
+        // port, or on a starboard course that would pass the mark closer, she sails for the lead point.
+        let inside = lead - starboardCloseHauled * 1.5
+        let lays = inside - starboardCloseHauled.rightPerp * 1.5
+        let short = inside - starboardCloseHauled.rightPerp * 4
+        #expect(-(mark - lays).dot(starboardCloseHauled.rightPerp) > room)
+        #expect(-(mark - short).dot(starboardCloseHauled.rightPerp) < room)
+        #expect(approach(from: lays, on: .starboard) == fetch, "she lays the mark: she holds on and rounds")
+        #expect(approach(from: lays, on: .port) == lead)
+        #expect(approach(from: short, on: .starboard) == lead, "her course passes too close to the mark")
     }
 
     /// Off the plane in a breeze, the skiff heads up until she can plane, well above the downwind groove;
