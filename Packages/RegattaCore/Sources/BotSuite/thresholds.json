@@ -7,6 +7,6 @@
     "seeded": { "minFinishShare": 0.75, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 2, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 }
   },
   "profiles": {
-    "tactician": { "minTacticianWinShare": 0.75, "minTacticianGainLengthsPerBeat": 3 }
+    "tactician": { "minTacticianWinShare": 0.75, "minTacticianGainLengthsPerBeat": 3, "minTacticianTacksPerBeat": 4, "minTacticianBeatsBlipTackerShare": 0.75 }
   }
 }

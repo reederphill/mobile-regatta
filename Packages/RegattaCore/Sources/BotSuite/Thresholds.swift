@@ -49,29 +49,47 @@ public struct ProfileLimits: Codable, Hashable, Sendable {
     public var minTacticianWinShare: Double?
     /// The tactician's least median gain over the baseline per beat, hull lengths.
     public var minTacticianGainLengthsPerBeat: Double?
+    /// The tactician's least tacks per beat in the fun-pass scenario (#221: "the tactician averages ≥ 4
+    /// tacks per beat"), over the beats her seats completed.
+    public var minTacticianTacksPerBeat: Double?
+    /// The least share of the fun-pass races with both in which the tactician beats the blip-tacker (#221).
+    public var minTacticianBeatsBlipTackerShare: Double?
 
-    public init(minTacticianWinShare: Double? = nil, minTacticianGainLengthsPerBeat: Double? = nil) {
+    public init(minTacticianWinShare: Double? = nil, minTacticianGainLengthsPerBeat: Double? = nil,
+                minTacticianTacksPerBeat: Double? = nil, minTacticianBeatsBlipTackerShare: Double? = nil) {
         self.minTacticianWinShare = minTacticianWinShare
         self.minTacticianGainLengthsPerBeat = minTacticianGainLengthsPerBeat
+        self.minTacticianTacksPerBeat = minTacticianTacksPerBeat
+        self.minTacticianBeatsBlipTackerShare = minTacticianBeatsBlipTackerShare
     }
 
-    /// Why `skillGap` misses these limits, each line starting with `profile`.
-    func breaches(_ profile: String, skillGap: SkillGapSummary?) -> [String] {
-        guard let gap = skillGap else { return [] }
+    /// Why `skillGap` and `funPass` miss these limits, each line starting with `profile`. A limit gates only
+    /// what the run sailed: none without a skill gap or a fun pass, and none on a fun pass without its numbers.
+    func breaches(_ profile: String, skillGap: SkillGapSummary?, funPass: FunPassSummary? = nil) -> [String] {
         var breaches: [String] = []
-        if let minimum = minTacticianWinShare, gap.tacticianWinShare < minimum {
-            breaches.append("\(profile): win share \(fixed(gap.tacticianWinShare)) < \(fixed(minimum))")
+        if let gap = skillGap {
+            if let minimum = minTacticianWinShare, gap.tacticianWinShare < minimum {
+                breaches.append("\(profile): win share \(fixed(gap.tacticianWinShare)) < \(fixed(minimum))")
+            }
+            if let minimum = minTacticianGainLengthsPerBeat, gap.medianGainLengthsPerBeat < minimum {
+                breaches.append("\(profile): gain \(fixed(gap.medianGainLengthsPerBeat)) lengths/beat < \(fixed(minimum))")
+            }
         }
-        if let minimum = minTacticianGainLengthsPerBeat, gap.medianGainLengthsPerBeat < minimum {
-            breaches.append("\(profile): gain \(fixed(gap.medianGainLengthsPerBeat)) lengths/beat < \(fixed(minimum))")
+        if let minimum = minTacticianTacksPerBeat, let tacks = funPass?.tacksPerBeat[BotProfile.tactician.rawValue],
+           tacks < minimum {
+            breaches.append("\(profile): tacks \(fixed(tacks))/beat < \(fixed(minimum))")
+        }
+        if let minimum = minTacticianBeatsBlipTackerShare, let share = funPass?.tacticianBeatsBlipTackerShare,
+           share < minimum {
+            breaches.append("\(profile): beat the blip-tacker \(fixed(share)) < \(fixed(minimum))")
         }
         return breaches
     }
 }
 
 /// The suite's gate (#19, #27): limits per tier, keyed by `BotTier.rawValue`, per scripted profile, keyed by
-/// `BotProfile.rawValue` (#231), and the worst race's p99 tick. A tier or profile with no limits isn't gated,
-/// and a profile's limits gate only a run that sailed it. "The exact limits are set at build time" (#19):
+/// `BotProfile.rawValue` (#231, #238), and the worst race's p99 tick. A tier or profile with no limits isn't
+/// gated, and a profile's limits gate only a run that sailed it. "The exact limits are set at build time" (#19):
 /// the bundled `thresholds.json` starts loose, and tightens as the brains (#102) do.
 public struct BotThresholds: Codable, Hashable, Sendable {
     public var tiers: [String: TierLimits]
@@ -96,15 +114,16 @@ public struct BotThresholds: Codable, Hashable, Sendable {
                   maxP99TickMs: try c.decode(Double.self, forKey: .maxP99TickMs))
     }
 
-    /// Why a run with these tier summaries, timings and skill gap misses the thresholds; empty when it meets them.
+    /// Why a run with these tier summaries, timings, skill gap and fun pass misses the thresholds; empty when
+    /// it meets them.
     public func breaches(tiers summaries: [String: TierSummary], timings: BotSuiteReport.RunTimings,
-                         skillGap: SkillGapSummary? = nil) -> [String] {
+                         skillGap: SkillGapSummary? = nil, funPass: FunPassSummary? = nil) -> [String] {
         var breaches = BotTier.allCases.flatMap { tier -> [String] in
             guard let summary = summaries[tier.rawValue], let limits = tiers[tier.rawValue] else { return [] }
             return limits.breaches(tier.rawValue, summary)
         }
         for profile in BotProfile.allCases {
-            breaches += profiles[profile.rawValue]?.breaches(profile.rawValue, skillGap: skillGap) ?? []
+            breaches += profiles[profile.rawValue]?.breaches(profile.rawValue, skillGap: skillGap, funPass: funPass) ?? []
         }
         if timings.maxP99Ms > maxP99TickMs {
             breaches.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms > \(fixed(maxP99TickMs, 3))")

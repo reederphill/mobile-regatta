@@ -4,30 +4,34 @@ import RegattaCore
 import Testing
 
 @Suite struct BotSuiteCommandTests {
-    /// #19: the full matrix covers every set of conditions, fleet sizes from 2 to 16, and every tier mix.
+    /// #19: the full matrix covers every set of conditions, fleet sizes from 2 to 16, and every tier mix;
+    /// since #238, the conditions at version 3 (#221, #233) and their venue.
     @Test func bundledMatrixCoversTheSuiteAxes() throws {
         let matrix = try BotMatrix.bundled()
         try matrix.validate()
         #expect(matrix.fleetSizes == [2, 5, 10, 16])
-        #expect(matrix.venues == ["dev-venue@2"])
-        #expect(Set(matrix.conditions) == ["classic-oscillating@2", "gusty-offshore@2", "light-and-patchy@2", "sea-breeze@2"])
+        #expect(matrix.venues == ["dev-venue@3"])
+        #expect(Set(matrix.conditions) == ["classic-oscillating@3", "gusty-offshore@3", "light-and-patchy@3", "sea-breeze@3"])
         #expect(Set(matrix.tierMixes) == Set(TierMix.allCases))
-        // #231: the live bots the tiers gate, and the skill-gap scenario.
+        // #231: the live bots the tiers gate, and the skill-gap scenario; #238: the fun pass, in classic
+        // oscillating conditions only.
         #expect(Set(matrix.profileMixes) == Set(ProfileMix.allCases))
         #expect(!matrix.seeds.isEmpty && !matrix.tideStatesDegrees.isEmpty)
-        #expect(matrix.cells.count == matrix.seeds.count * 4 * matrix.tideStatesDegrees.count * 4 * TierMix.allCases.count
-            * ProfileMix.allCases.count)
+        let perConditions = matrix.seeds.count * matrix.tideStatesDegrees.count * 4 * TierMix.allCases.count
+        #expect(matrix.cells.count == perConditions * (4 * 2 + 1))
+        #expect(Set(matrix.cells.filter { $0.profileMix == .funPass }.map(\.conditions)) == ["classic-oscillating@3"])
     }
 
     @Test func optionsOverrideTheMatrix() throws {
         let options = try BotSuiteOptions(arguments: ["--seeds", "2", "--fleet-size", "16", "--fleet-size", "2",
-                                                      "--tier-mix", "national", "--profile-mix", "skillGap", "--laps", "1",
+                                                      "--tier-mix", "national", "--profile-mix", "skillGap",
+                                                      "--profile-mix", "funPass", "--laps", "1",
                                                       "--json", "-"])
         let matrix = try options.matrix()
         #expect(matrix.seeds == [1, 2])
         #expect(matrix.fleetSizes == [16, 2])
         #expect(matrix.tierMixes == [.national])
-        #expect(matrix.profileMixes == [.skillGap])
+        #expect(matrix.profileMixes == [.skillGap, .funPass])
         #expect(matrix.laps == 1)
         #expect(options.jsonPath == "-")
 
@@ -44,6 +48,12 @@ import Testing
         #expect(throws: BotSuiteError.self) { try BotMatrix(seeds: [1], fleetSizes: [1]).validate() }
         #expect(throws: BotSuiteError.self) { try BotMatrix(seeds: [1], venues: ["dev-venue"], fleetSizes: [2]).validate() }
         #expect(throws: (any Error).self) { try BotMatrix(seeds: [1], conditions: ["doldrums@1"], fleetSizes: [2]).validate() }
+        // dev-venue@3 pairs with the version 3 conditions only (#233).
+        #expect(throws: BotSuiteError.self) { try BotMatrix(seeds: [1], conditions: ["classic-oscillating@2"], fleetSizes: [2]).validate() }
+        // #238: the fun pass sails only in classic oscillating conditions.
+        #expect(throws: BotSuiteError.self) {
+            try BotMatrix(seeds: [1], conditions: ["gusty-offshore@3"], fleetSizes: [2], profileMixes: [.funPass]).validate()
+        }
     }
 
     #if os(macOS) || os(Linux)

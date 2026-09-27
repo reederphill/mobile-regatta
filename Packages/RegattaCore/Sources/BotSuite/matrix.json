@@ -1,11 +1,11 @@
 {
   "seeds": [1, 2, 3, 4],
-  "venues": ["dev-venue@2"],
-  "conditions": ["classic-oscillating@2", "gusty-offshore@2", "light-and-patchy@2", "sea-breeze@2"],
+  "venues": ["dev-venue@3"],
+  "conditions": ["classic-oscillating@3", "gusty-offshore@3", "light-and-patchy@3", "sea-breeze@3"],
   "tideStatesDegrees": [0],
   "fleetSizes": [2, 5, 10, 16],
   "tierMixes": ["seeded", "club", "regional", "national", "mixed"],
-  "profileMixes": ["live", "skillGap"],
+  "profileMixes": ["live", "skillGap", "funPass"],
   "laps": 2,
   "capSecondsAfterGun": 1500
 }

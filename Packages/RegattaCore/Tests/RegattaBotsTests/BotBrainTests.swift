@@ -82,6 +82,11 @@ import RegattaCore
         #expect(tactician.replanes && tactician.heatsUpInLulls && tactician.pinchesToFetch)
         #expect(tactician.seeksPuffs && tactician.seeksClearAir && tactician.covers)
         #expect(tactician.corridor > baseline.corridor)
+        // #238: the blip-tacker is the baseline tacking on every header past 3°, the wobble's size (#221).
+        var blipTacker = Tactics(profile: .blipTacker, skill: 0.9)
+        #expect(blipTacker.headerThreshold == deg2rad(3))
+        blipTacker.headerThreshold = baseline.headerThreshold
+        #expect(blipTacker == baseline)
         // A profile's play doesn't come from the bot's skill; a live bot's does.
         #expect(Tactics(profile: .baseline, skill: 0.1) == baseline)
         #expect(Tactics(profile: nil, skill: 0.4).headerThreshold == nil)

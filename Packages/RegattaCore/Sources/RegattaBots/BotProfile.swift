@@ -11,4 +11,7 @@ public enum BotProfile: String, Codable, CaseIterable, Hashable, Sendable {
     /// plane again, sails towards the puffs drawn on the water, tacks out of dirty air, covers the boat close
     /// behind her, and tacks on smaller headers, leading them by how fast the wind is turning.
     case tactician
+    /// The baseline, but tacking on every header past 3° (#221, #238): a blip, the wobble that never outlasts
+    /// its 30 s window, as readily as a real shift. Tacking on a blip is a mistake: the tactician should beat her.
+    case blipTacker
 }
