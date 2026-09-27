@@ -7,6 +7,8 @@ import RegattaCore
 /// two ticks (`RenderWorld`). The scene never holds a `Race`.
 final class GameScene: SKScene {
     static let pointsPerMeter: CGFloat = 8
+    /// The boat camera's zoom until you pinch.
+    static let defaultZoom: CGFloat = 0.8
 
     let driver: any RaceDriver
     let roster: FleetRoster
@@ -43,7 +45,7 @@ final class GameScene: SKScene {
     private var lastRenderTime: Double?
     private var hudCountdown = 0.0
     private var laylineCountdown = 0.0
-    private var zoom: CGFloat = 0.8
+    private var zoom = GameScene.defaultZoom
 
     private var portTouches = Set<UITouch>()
     private var starboardTouches = Set<UITouch>()
@@ -220,13 +222,21 @@ final class GameScene: SKScene {
 
     /// Puts the whole course, marks, pin and committee boat, in view with a margin.
     private func frameCourse(_ course: CourseLayout) {
+        guard let framing = Self.courseFraming(course, sceneSize: size, zoom: zoom) else { return }
+        cam.position = framing.center
+        cam.setScale(framing.scale)
+    }
+
+    /// The course camera over `course` in a scene of `sceneSize`: centred on the course, scaled to show the whole
+    /// of it (marks, pin and committee boat) with a margin, and never closer than `zoom`.
+    static func courseFraming(_ course: CourseLayout, sceneSize: CGSize, zoom: CGFloat) -> (center: CGPoint, scale: CGFloat)? {
         let points = course.obstacles.map(\.position)
-        let xs = points.map { CGFloat($0.x) * ppm }, ys = points.map { CGFloat($0.y) * ppm }
+        let xs = points.map { CGFloat($0.x) * pointsPerMeter }, ys = points.map { CGFloat($0.y) * pointsPerMeter }
         guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
-              size.width > 0, size.height > 0 else { return }
-        cam.position = CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2)
+              sceneSize.width > 0, sceneSize.height > 0 else { return nil }
         let margin: CGFloat = 1.2
-        cam.setScale(max((maxX - minX) / size.width, (maxY - minY) / size.height, 1 / zoom) * margin)
+        return (CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2),
+                max((maxX - minX) / sceneSize.width, (maxY - minY) / sceneSize.height, 1 / zoom) * margin)
     }
 
     /// Your laylines, from the formula a bot sees them by (`Laylines`, `SeatView.laylines`).

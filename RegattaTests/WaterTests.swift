@@ -249,15 +249,33 @@ import RegattaCore
     }
 
     /// The water's frame cost (#27): the full tier samples the wind at every ripple tile, every frame. Timed over
-    /// a busy gusty view at the default zoom and pinched all the way out, and printed. Held to a loose budget
-    /// only in an optimised build (check.sh's): CI's unoptimised Debug build just reports it.
+    /// a busy gusty view at the default zoom, pinched all the way out, and on the course camera, and printed. Held
+    /// to a loose budget only in an optimised build (check.sh's): CI's unoptimised Debug build just reports it.
+    /// Whatever the scale, the tiles stay about a screen's worth: the course camera is past
+    /// `RippleLattice.finestScale`, where the lattice spreads out rather than covering the course tile by tile,
+    /// and so is a view far further out, as a bigger course's would be.
     @Test func waterUpdateStaysCheap() throws {
         let race = try Self.race("gusty-offshore", to: -300)
         let world = WaterWorld(Self.world(of: race))
         let me = race.boats[0].position
-        for scale: CGFloat in [1.25, 1 / 0.45] {
+        let sceneSize = CGSize(width: 402, height: 874)
+        let course = try #require(GameScene.courseFraming(race.course, sceneSize: sceneSize, zoom: GameScene.defaultZoom))
+        #expect(Double(course.scale) > RippleLattice.finestScale, "course camera scale \(course.scale)")
+        #expect(RippleLattice.forView(style: .standard, cameraScale: Double(course.scale)).tileScale > 1)
+
+        // The most tiles any view can take: a view at the finest scale over the finest lattice (a coarser scale
+        // spreads the lattice at least as much), with a tile to spare all round and rounding at each end.
+        let spacing = WaterStyle.standard.rippleSpacing, finest = RippleLattice.finestScale
+        let bound = (Int(Double(sceneSize.width) * finest / spacing) + 5)
+            * (Int(Double(sceneSize.height) * finest / (spacing * 0.8)) + 5)
+        let courseView = WaterView(center: course.center, sceneSize: sceneSize, scale: course.scale)
+        let unspread = RippleLattice(spacing: spacing).indices(covering: courseView.rect, drift: .zero)
+        #expect(unspread.columns.count * unspread.rows.count > bound,
+                "unspread, the course camera would cover more than the bound of the finest lattice")
+        let farOut = WaterView(center: course.center, sceneSize: sceneSize, scale: CGFloat(finest * 8))
+
+        for view in [Self.view(centeredOn: me), Self.view(centeredOn: me, scale: 1 / 0.45), courseView, farOut] {
             let water = WaterNode(pointsPerMeter: 8)
-            let view = Self.view(centeredOn: me, scale: scale)
             water.update(world, view: view, dt: 0)
             let frames = 60
             let clock = ContinuousClock()
@@ -266,10 +284,12 @@ import RegattaCore
             }
             let perFrame = elapsed / frames
             let ms = Double(perFrame.components.attoseconds) / 1e15 + Double(perFrame.components.seconds) * 1000
-            print("WaterTests: water update at scale \(scale): \(String(format: "%.3f", ms)) ms/frame, "
-                + "\(water.streaks.count) tiles sampled, \(world.puffs.count) puffs alive")
+            print("WaterTests: water update at scale \(view.scale): \(String(format: "%.3f", ms)) ms/frame, "
+                + "\(water.streaks.count) tiles sampled (at most \(bound)), \(world.puffs.count) puffs alive")
+            #expect(!water.streaks.isEmpty && water.streaks.count <= bound,
+                    "\(water.streaks.count) tiles at scale \(view.scale), bound \(bound)")
             if !_isDebugAssertConfiguration() {
-                #expect(ms < 4, "water update \(ms) ms/frame at scale \(scale)")
+                #expect(ms < 4, "water update \(ms) ms/frame at scale \(view.scale)")
             }
         }
     }
