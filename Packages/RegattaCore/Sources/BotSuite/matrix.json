@@ -5,6 +5,7 @@
   "tideStatesDegrees": [0],
   "fleetSizes": [2, 5, 10, 16],
   "tierMixes": ["seeded", "club", "regional", "national", "mixed"],
+  "profileMixes": ["live", "skillGap"],
   "laps": 2,
   "capSecondsAfterGun": 1500
 }

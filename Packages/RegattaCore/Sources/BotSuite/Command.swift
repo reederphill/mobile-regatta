@@ -12,6 +12,8 @@ public struct BotSuiteOptions: Hashable, Sendable {
     public var fleetSizes: [Int] = []
     /// Only these tier mixes, instead of the matrix's; all when empty.
     public var tierMixes: [TierMix] = []
+    /// Only these profile mixes (#231), instead of the matrix's; all when empty.
+    public var profileMixes: [ProfileMix] = []
     public var laps: Int?
     /// Where to write the JSON report; `-` for stdout (the text report then goes to stderr).
     public var jsonPath: String?
@@ -26,6 +28,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
           --seeds <n>            sail seeds 1...n instead of the matrix's
           --fleet-size <n>       sail only this fleet size (repeatable)
           --tier-mix <mix>       sail only this tier mix: seeded, club, regional, national, mixed (repeatable)
+          --profile-mix <mix>    sail only this profile mix: live, skillGap (repeatable)
           --laps <n>             laps per race instead of the matrix's
           --json <path|->        write the JSON report there (- for stdout)
         Exits 1 when the run misses the thresholds, 2 on a usage or setup error.
@@ -53,6 +56,10 @@ public struct BotSuiteOptions: Hashable, Sendable {
                 let text = try value(flag)
                 guard let mix = TierMix(rawValue: text) else { throw BotSuiteError.usage("--tier-mix: unknown mix \(text)") }
                 tierMixes.append(mix)
+            case "--profile-mix":
+                let text = try value(flag)
+                guard let mix = ProfileMix(rawValue: text) else { throw BotSuiteError.usage("--profile-mix: unknown mix \(text)") }
+                profileMixes.append(mix)
             case "--laps": laps = try number(flag)
             case "--json": jsonPath = try value(flag)
             case "-h", "--help": help = true
@@ -68,6 +75,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
         if let seedCount { matrix.seeds = (1...seedCount).map(UInt64.init) }
         if !fleetSizes.isEmpty { matrix.fleetSizes = fleetSizes }
         if !tierMixes.isEmpty { matrix.tierMixes = tierMixes }
+        if !profileMixes.isEmpty { matrix.profileMixes = profileMixes }
         if let laps { matrix.laps = laps }
         try matrix.validate()
         return matrix

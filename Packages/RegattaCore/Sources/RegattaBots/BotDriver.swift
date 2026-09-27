@@ -25,6 +25,8 @@ public struct BotDriver: Sendable {
     /// `botSeed(raceSeed:seat:)`; the style and sailing name are drawn from it.
     public let seed: UInt64
     public var style: BotStyle { brain.style }
+    /// The bot suite's scripted profile she sails (#231), or nil for a live bot.
+    public let profile: BotProfile?
     /// Which of the three ticks this seat decides on.
     public let phase: Int
     /// Decisions made so far.
@@ -39,16 +41,18 @@ public struct BotDriver: Sendable {
         self.init(seat: seat, seed: seed, style: BotStyle(rng: &rng))
     }
 
-    /// The bot for `seat` with a given style, e.g. a retuned one.
-    public init(seat: Int, raceSeed: RaceSeed, style: BotStyle) {
-        self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style)
+    /// The bot for `seat` with a given style, e.g. a retuned one, sailing `profile` if the bot suite gives
+    /// her one (#231).
+    public init(seat: Int, raceSeed: RaceSeed, style: BotStyle, profile: BotProfile? = nil) {
+        self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, profile: profile)
     }
 
-    private init(seat: Int, seed: UInt64, style: BotStyle) {
+    private init(seat: Int, seed: UInt64, style: BotStyle, profile: BotProfile? = nil) {
         self.seat = seat
         self.seed = seed
+        self.profile = profile
         phase = seat % BotDriver.decisionInterval
-        brain = BotBrain(style: style)
+        brain = BotBrain(style: style, profile: profile)
     }
 
     /// Whether the driver decides when the race is at `tick`.

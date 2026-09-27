@@ -27,12 +27,8 @@ public enum BotRaceHarness {
         WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)
     }
 
-    /// The class the suite's bots sail: ilca-dinghy@3, named here rather than read from `RaceFiles.defaults`
-    /// (skiff@1 since #248), so the gate's thresholds keep measuring the brain they were set for. The suite
-    /// moves to the skiff in #231.
-    public static let boatClass = (id: "ilca-dinghy", version: 3)
-
-    /// `cell`'s setup: every seat a bot sailing `boatClass`, the venue and conditions named by their bundled files.
+    /// `cell`'s setup: every seat a bot sailing the default class (`RaceFiles.defaults`: skiff@1 since #248,
+    /// which the suite sails since #231), the venue and conditions named by their bundled files.
     public static func raceSetup(for cell: BotRaceCell) throws -> RaceSetup {
         let venue = try dataFileKey(cell.venue)
         let conditions = try dataFileKey(cell.conditions)
@@ -40,7 +36,6 @@ public enum BotRaceHarness {
             raceSeed: RaceSeed(cell.seed),
             seats: Array(repeating: .bot, count: cell.fleetSize),
             laps: cell.laps,
-            boatClass: BoatClassFile.bundled(id: boatClass.id, version: boatClass.version).ref,
             venue: VenueFile.bundled(id: venue.id, version: venue.version).ref,
             conditions: ConditionsFile.bundled(id: conditions.id, version: conditions.version).ref
         )
@@ -52,7 +47,10 @@ public enum BotRaceHarness {
         let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
                             mode: .authoritative(windSeed: windSeed(for: cell.seed)))
         let tiers = setup.seats.indices.map { cell.tierMix.tier(ofSeat: $0) }
-        var controllers = SeatControllers(tiers.indices.map { .bot(tiers[$0].driver(seat: $0, raceSeed: setup.raceSeed)) })
+        let profiles = setup.seats.indices.map { cell.profile(ofSeat: $0) }
+        var controllers = SeatControllers(tiers.indices.map {
+            .bot(tiers[$0].driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
+        })
         var tally = RaceTally(race: race)
         let lastTick = cell.capSecondsAfterGun * Race.tickRate
         var tickMs: [Double] = []
@@ -67,10 +65,12 @@ public enum BotRaceHarness {
             tally.record(race, events: race.drainEvents())
         }
         let seats = tiers.indices.map { seat in
-            tally.metrics(seat: seat, of: race, tier: tiers[seat], skill: controllers[seat].driver?.style.skill ?? 0)
+            tally.metrics(seat: seat, of: race, tier: tiers[seat], profile: profiles[seat],
+                          skill: controllers[seat].driver?.style.skill ?? 0)
         }
         return RaceResult(cell: cell, finalTick: race.tick, capped: !race.isOver,
                           tideStateAtGun: race.tideStateAtGun, seats: seats,
+                          ranks: race.boats.indices.map(race.place(of:)), hullLength: race.boatClass.hull.length,
                           timings: TickTimings(samples: tickMs, cpuSeconds: threadCPUSeconds() - cpuStart))
     }
 
@@ -103,6 +103,13 @@ struct RaceTally {
     /// Each seat's boat contacts, oldest first: the id of the incident each one opened, if any.
     private var contacts: [[Int?]]
     private var incidentsSeen = 0
+    /// Which legs are beats: those rounding the windward mark.
+    private let isBeat: [Bool]
+    private let upwind: Vec2
+    /// Where each racing seat entered the leg she's sailing: the leg, the tick and her position.
+    private var legEntries: [(leg: Int, tick: Int, position: Vec2)?]
+    /// Each seat's beats sailed, in order.
+    private var beats: [[BeatSplit]]
 
     init(race: Race) {
         noGo = BoatDynamics.noGoAngle(race.boatClass.polar)
@@ -117,6 +124,10 @@ struct RaceTally {
         disqualifications = zeros
         ocsNotices = zeros
         contacts = Array(repeating: [], count: race.boats.count)
+        isBeat = race.course.legs.map { $0 == .round(CourseLayout.windwardIndex) }
+        upwind = race.course.upwind
+        legEntries = Array(repeating: nil, count: race.boats.count)
+        beats = Array(repeating: [], count: race.boats.count)
     }
 
     /// Call once after each `race.step()`, with the events it emitted.
@@ -154,7 +165,21 @@ struct RaceTally {
             if boat.isOnCourse && inset(boat.position) < BotRaceHarness.edgeMargin {
                 edgeTicks[seat] += 1
             }
+            recordLeg(seat, boat, tick: race.tick)
         }
+    }
+
+    /// A beat ends when she moves on from it, and a leg begins as she starts or rounds into it.
+    private mutating func recordLeg(_ seat: Int, _ boat: Boat, tick: Int) {
+        guard boat.status == .racing || boat.status == .finished else { return }
+        let entry = legEntries[seat]
+        let leg = boat.status == .finished ? isBeat.count : boat.legIndex
+        guard entry?.leg != leg else { return }
+        if let entry, isBeat[entry.leg] {
+            beats[seat].append(BeatSplit(seconds: Double(tick - entry.tick) / Double(Race.tickRate),
+                                         metres: (boat.position - entry.position).dot(upwind)))
+        }
+        legEntries[seat] = (leg, tick, boat.position)
     }
 
     /// Metres from `position` in to the race area's nearest edge; negative outside it.
@@ -166,7 +191,7 @@ struct RaceTally {
         return min(area.halfWidth - across, area.halfLength - along)
     }
 
-    func metrics(seat: Int, of race: Race, tier: BotTier, skill: Double) -> SeatMetrics {
+    func metrics(seat: Int, of race: Race, tier: BotTier, profile: BotProfile?, skill: Double) -> SeatMetrics {
         let boat = race.boats[seat]
         let fouls = contacts[seat].filter { id in
             guard let id, case .called = race.incidents[id]?.outcome else { return false }
@@ -174,7 +199,7 @@ struct RaceTally {
         }.count
         let seconds = { (ticks: Int) in Double(ticks) / Double(Race.tickRate) }
         return SeatMetrics(
-            seat: seat, tier: tier, skill: skill, status: SeatMetrics.name(boat.status),
+            seat: seat, tier: tier, profile: profile, skill: skill, status: SeatMetrics.name(boat.status),
             finished: boat.status == .finished, place: boat.place,
             ironsSeconds: seconds(ironsTicks[seat]),
             markContacts: markContacts[seat],
@@ -186,7 +211,8 @@ struct RaceTally {
             ocsCount: ocsNotices[seat],
             edgeSeconds: seconds(edgeTicks[seat]),
             landContacts: landContacts[seat],
-            boundaryContacts: boundaryContacts[seat]
+            boundaryContacts: boundaryContacts[seat],
+            beats: beats[seat]
         )
     }
 }

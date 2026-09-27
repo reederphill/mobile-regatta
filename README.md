@@ -50,9 +50,11 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Sources/RegattaBots/    bots, outside the simulation: they sail seats through the input API (#60)
     SeatController.swift    who sails each seat (human, bot, dropped), swappable at any tick
     BotDriver.swift         10 Hz decisions applied next tick; the bot's own seed, hash(race seed, seat, "bot")
-    BotBrain.swift          AI helms: start timing, laylines, shifts, roundings, keeping clear
+    BotBrain.swift          AI helms on the autohelm (#231): steer to a wind angle, centre, tap to tack; start timing, laylines, roundings, keeping clear
+    BotBrain+Tactics.swift  what a bot plays off the groove: shifts, planing, puffs, clear air, covering (live bots by skill, or a profile)
+    BotProfile.swift        the bot suite's scripted profiles: baseline (groove only) and tactician (#231)
     FleetRoster.swift       display metadata: which seats are bots, and their sailing names
-  Sources/BotSuite/       the headless bot-race suite (#97): harness, matrix, per-seat metrics, per-tier gate, JSON report
+  Sources/BotSuite/       the headless bot-race suite (#97): harness, matrix, per-seat metrics, per-tier gate, the skill-gap gate (#231), JSON report
   Sources/regatta-botsuite `swift run -c release regatta-botsuite [--json <path|->]`: sails matrix.json, exits 1 on a breach
   Tests/Goldens.json      golden digests keyed by simulation version
   Tests/Fixtures/         the golden 16-seat scripted race log, and a wind seed pool for the loader

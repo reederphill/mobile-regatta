@@ -242,14 +242,20 @@ import RegattaCore
         #expect(driver.log.inputs.contains(InputRecord(tick: next, seat: driver.myBoatIndex, kind: .tap(.tackGybe))))
     }
 
-    /// Under `-demo` a bot sails your seat: your input and taps don't reach the race.
+    /// Under `-demo` a bot sails your seat: your input and taps don't reach the race. The bot steers and taps
+    /// that seat itself (#231), so the proof is the same race sailed without them: input for input the same
+    /// log, and the same state. (`inputIsLatchedPerTick` and `tapGoesInAtTheNextTick` show they do reach a
+    /// seat you sail.)
     @Test func aBotSailedSeatIgnoresYourInput() {
-        let driver = PracticeDriver(config: RaceConfig(opponents: 3, seed: 1, windSeed: 2, botSailsYourBoat: true))
+        let config = RaceConfig(opponents: 3, seed: 1, windSeed: 2, botSailsYourBoat: true)
+        let driver = PracticeDriver(config: config)
+        let untouched = PracticeDriver(config: config)
         driver.submit(BoatInput(rudder: 1.0))
         #expect(!driver.tap(.tackGybe))
-        driver.tick(1.0 / Double(Race.tickRate))
-        #expect(!driver.log.inputs.contains { $0.seat == driver.myBoatIndex && $0.kind == .held(BoatInput(rudder: 1.0)) })
-        #expect(!driver.log.inputs.contains { $0.seat == driver.myBoatIndex && $0.kind == .tap(.tackGybe) })
+        for race in [driver, untouched] { race.tick(1) }
+        #expect(driver.log.inputs.contains { $0.seat == driver.myBoatIndex }, "the bot sails your seat")
+        #expect(driver.log == untouched.log)
+        #expect(driver.digest() == untouched.digest())
     }
 
     @Test func myBoatIsTheSetupsHumanSeat() {
