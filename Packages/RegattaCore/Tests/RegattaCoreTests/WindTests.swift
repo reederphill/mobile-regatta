@@ -484,10 +484,29 @@ enum WindFixtures {
         #expect(race.course.axis == race.windSetup.meanDirection, "the course is square to the mean direction")
     }
 
-    /// A long race keeps making keys: well past the 16-minute time limit, the wind never runs out.
-    @Test func raceWindNeverRunsOut() {
+    /// The wind never runs out: well past the 16-minute time limit (40 minutes after the gun) the key chain
+    /// goes on, and a race there makes the next window's key as its clock enters it. A race closes at the
+    /// limit (#86), so the clock is taken there by a snapshot, not stepped there: imported not yet over, on
+    /// the last tick of a window, the race steps once into the next window, makes its key, samples the wind
+    /// there, and closes.
+    @Test func raceWindNeverRunsOut() throws {
         let race = testRace(opponents: 1, prestartSeconds: 60, seed: 21)
-        for _ in 0..<(40 * 60 * Race.tickRate) where !race.isOver { race.step() }
-        #expect(race.wind.keys.endWindow == race.wind.windows.window(containing: race.tick) + 1)
+        let windows = race.wind.windows
+        let window = windows.window(containing: 40 * 60 * Race.tickRate)
+        let late = windows.start(of: window + 1) - 1
+        #expect(late > race.closeTick, "past the time limit")
+        var generator = try WindKeyGenerator(windSeed: try #require(race.windSeed), setup: race.windSetup, windows: windows)
+        let keys = WindKeyChain(generator.keys(through: window))
+
+        var snapshot = race.exportSnapshot()
+        snapshot.tick = late
+        snapshot.windKeys = keys
+        try race.importSnapshot(snapshot)
+        #expect(!race.isOver)
+        race.step()
+        #expect(race.tick == late + 1 && race.isOver)
+        #expect(race.wind.keys.endWindow == window + 2, "made the key of the window the clock entered")
+        #expect(race.wind.keys.endWindow == windows.window(containing: race.tick) + 1)
+        #expect(race.boats.allSatisfy { $0.windSpeed.isFinite && $0.windSpeed > 0 })
     }
 }

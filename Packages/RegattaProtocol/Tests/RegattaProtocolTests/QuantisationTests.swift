@@ -159,14 +159,18 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         var wrong = server.exportSnapshot()
         wrong.isOver = true
         wrong.firstFinishTime = 1
+        // Its own close scored the race too (#86): never the race's results.
+        wrong.results = RaceResults(rows: wrong.seats.indices.map { SeatResult(seat: $0, place: $0 + 1, code: .byDistance) },
+                                    rated: false)
         let client = Race(setup: server.setup, windSeed: try #require(server.windSeed))
         try client.importSnapshot(wrong)
         #expect(client.apply(.neutral, seat: 0, atTick: client.tick + 1) == nil) // frozen
+        #expect(client.results != nil)
 
         sail(3)
         let snapshot = try Snapshot(world: server.exportSnapshot())
         try client.importSnapshot(snapshot.applied(to: client.exportSnapshot(), tick: server.tick, events: events))
-        #expect(!client.isOver && client.firstFinishTime == nil)
+        #expect(!client.isOver && client.firstFinishTime == nil && client.results == nil)
         #expect(client.apply(.neutral, seat: 0, atTick: client.tick + 1) != nil)
         let tick = client.tick
         client.step()

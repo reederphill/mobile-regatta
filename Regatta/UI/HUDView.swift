@@ -75,7 +75,6 @@ struct HUDView: View {
         case .racing: "\(ordinal(hud.place)) of \(hud.fleet) · leg \(hud.legNumber)/\(hud.legCount)"
         case .finished: "Finished \(ordinal(hud.place))"
         case .dsq: "Disqualified"
-        case .dnf: "Did not finish"
         }
     }
 

@@ -54,7 +54,8 @@ struct LogFeeder {
     }
 
     /// The acceptance test: import(export(s)) then N steps == stepping s N steps, by digest, across the
-    /// sequence, the gun, starts, OCS returns, roundings and the finish of the golden 16-seat race.
+    /// sequence, the gun, starts, OCS returns and roundings of the golden 16-seat race (its log ends 100 s
+    /// after the gun, before anyone finishes).
     @Test(arguments: [-1800, -1799, -900, -1, 0, 1, 450, 1101, 1500, 2400])
     func importOfExportSteppedNTimesMatchesTheOriginal(tick: Int) throws {
         let original = Self.feeder.race(at: tick)
@@ -374,6 +375,7 @@ struct LogFeeder {
         "tick", "boats", "heldInputs", "boatContacts", "obstacleContacts", "edgeContacts", "lastFoul", "incidents",
         "firstFinishTime",
         "isOver",
+        "results", // a closed race can't score itself again: the seat events it reads aren't world state
         "overlaps", // as the pairs overlapped or changing
         "wind", // as its keys, `windKeys`; its setup and window grid are fixed for the race
     ]
@@ -384,6 +386,8 @@ struct LogFeeder {
         "windSeed": "secret key, never in a snapshot (ADR 0001); the importing race has its own wind",
         "course": "fixed for the race, derived from the setup",
         "legTargets": "fixed for the race, derived from the course",
+        "remainingAfterTarget": "fixed for the race, derived from the course",
+        "allGoneClose": "the race log, not world state; the results it made are carried (`results`)",
         "files": "fixed for the race: the class, venue, conditions and rules configuration the setup names (ADR 0004)",
         "current": "fixed for the race, derived from the venue and the public race seed",
         "tideStateAtGun": "fixed for the race, drawn from the venue and the public race seed (ADR 0003)",

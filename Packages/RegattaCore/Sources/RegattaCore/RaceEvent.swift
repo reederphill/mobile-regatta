@@ -32,13 +32,15 @@ public struct RaceEvent: Sendable, Equatable {
         case disqualified(seat: Int, reason: String)
         /// The boats that must be told about mark-room at a rounding (#96).
         case markRoomNotice(recipients: [Int])
-        /// The boat has stopped racing and is now a ghost.
+        /// The boat has stopped racing and is now a ghost (#30, `Race.isGhost(seat:)`): as she finishes, at the
+        /// DSQ call, or, still OCS or never started, at the close, just before `raceClosed`.
         case becameGhost(seat: Int)
         case rounded(seat: Int, mark: String)
         case finished(seat: Int, place: Int)
-        /// The first boat finished; the finish window closes at `closeTick`.
+        /// The first boat finished; the finish window closes at `closeTick` (`Race.closeTick`, #8).
         case firstFinish(closeTick: Int)
-        case raceClosed
+        /// The race closed and is scored (`Race.results`).
+        case raceClosed(results: RaceResults)
         /// A protest tap, acknowledged. Recorded, never changes a result in v1.0.
         case protestRecorded(seat: Int, target: Int)
         /// The seat let go of the rudder within a snap width of the groove, and her autohelm took it (#230, #124).

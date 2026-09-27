@@ -19,7 +19,7 @@ The countdown before the gun, during which boats manoeuvre below the start line.
 _Avoid_: pre-race, lobby countdown
 
 **OCS** (On Course Side):
-A boat with any part of her hull on the course side of the start line at the gun. She must return until her whole hull is on the pre-start side before starting. A boat that never comes back is scored OCS, behind every boat placed by distance to finish.
+A boat with any part of her hull on the course side of the start line at the gun. She must return until her whole hull is on the pre-start side before starting. A boat that never comes back is scored OCS, and so is a boat that never started: behind every boat placed by distance to finish and every DSQ, and ahead of RET.
 _Avoid_: false start, early
 
 **Penalty turn**:
@@ -50,11 +50,11 @@ How far a boat still has to sail, round its remaining marks, to finish. Places b
 _Avoid_: distance to the line (the finish line is also the start line)
 
 **RET** (retired):
-A boat whose player is gone when the race ends. She's placed behind every boat still racing, including those placed by distance to finish. When several are RET, the player who left latest ranks highest.
+A boat whose player is gone when the race ends. She's placed behind every boat still racing, including those placed by distance to finish. When several are RET they tie for last, unless the race ended because every human had gone: then the player who left latest ranks highest.
 _Avoid_: DNF, quit, abandoned
 
 **Ghost**:
-A boat that has stopped racing (finished, disqualified, or OCS at the close). Still drawn, but it casts no wind shadow, can't be touched and has no rights or obligations.
+A boat that has stopped racing: finished, from the moment she crosses the line; disqualified, from the call; or OCS at the close, a boat that never started included. Still drawn, and still carried by the current, but it casts no wind shadow or backwind, can't be touched and has no rights or obligations.
 _Avoid_: spectator, dead boat
 
 **Bot**:

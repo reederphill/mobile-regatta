@@ -139,7 +139,8 @@ A boat is on a beat when her true wind angle is at most `maxTrueWindAngleDegrees
 The simulation behaviour is unchanged by #73: the zone (3 L) and the start sequence (60 s) are read from
 the file, and each rule call's penalty deadlines come from `penalty`. The other values are loaded,
 checked and exposed for the tickets that use them (#80–#96); until then the race keeps its old
-behaviour (for example, a 180 s finish window and no time limit).
+behaviour. From #86 the race closes at `finishWindowSeconds` after the first finish, capped by
+`timeLimitSeconds` after the gun (`Race.closeTick`).
 
 Course derivation (#80): `CourseLayout.derive` reads `startLine`, `leewardGate`, `offsetMark`,
 `raceArea`, `startRow`, `edgeSpeedRetention` and `beatSizing` to lay out the course, sizing the beat

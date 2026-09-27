@@ -83,7 +83,7 @@ struct HUDState {
             let leg = course.legs[p.legIndex]
             targetName = course.name(of: leg).capitalized
             target = course.targetPosition(for: leg)
-        case .finished, .dsq, .dnf:
+        case .finished, .dsq:
             targetName = "Finished"
             target = p.position
         }

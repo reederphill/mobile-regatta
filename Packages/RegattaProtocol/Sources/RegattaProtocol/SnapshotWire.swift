@@ -337,7 +337,7 @@ public struct WireSeat: Hashable, Sendable {
 }
 
 extension BoatStatus {
-    /// Stable wire codes, independent of declaration order.
+    /// Stable wire codes, independent of declaration order. 5 was `dnf`, removed by #86: retired, never reused.
     var wireCode: UInt8 {
         switch self {
         case .prestart: 0
@@ -345,7 +345,6 @@ extension BoatStatus {
         case .racing: 2
         case .finished: 3
         case .dsq: 4
-        case .dnf: 5
         }
     }
 
@@ -356,7 +355,6 @@ extension BoatStatus {
         case 2: self = .racing
         case 3: self = .finished
         case 4: self = .dsq
-        case 5: self = .dnf
         default: return nil
         }
     }

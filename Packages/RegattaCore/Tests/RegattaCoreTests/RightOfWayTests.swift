@@ -86,7 +86,7 @@ private let hull = Race.defaultBoatClass.hull
         let starboard = boat(1, at: .zero, heading: -45)
         var ghost = boat(2, at: Vec2(1, 0), heading: 45)
         #expect(Rules.rightOfWay(starboard, ghost, overlapped: true, hull: hull) != nil)
-        for status in [BoatStatus.finished, .dsq, .dnf] {
+        for status in [BoatStatus.finished, .dsq] {
             ghost.status = status
             #expect(ghost.isGhost)
             #expect(Rules.rightOfWay(starboard, ghost, overlapped: true, hull: hull) == nil)

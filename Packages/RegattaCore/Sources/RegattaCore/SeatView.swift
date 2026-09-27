@@ -24,8 +24,8 @@ public struct SeatView: Sendable, Equatable {
     /// Where she stands in the fleet, from 1 (`Race.place(of:)`).
     public let place: Int
     public let fleetSize: Int
-    /// Seconds left for boats still racing to finish once the first has (`Race.timeLimitAfterFirstFinish`);
-    /// nil until a boat finishes.
+    /// Seconds until the race closes (`Race.closeTick`: the finish window after the first finish, capped by
+    /// the time limit), once a boat has finished; nil until then.
     public let finishWindowRemaining: Double?
 
     /// Her own boat.
@@ -78,7 +78,7 @@ public struct SeatView: Sendable, Equatable {
         var others: [OtherBoat] = []
         others.reserveCapacity(boats.count - 1)
         for other in boats.indices where other != seat {
-            others.append(OtherBoat(boats[other], rightOfWay: rights[other]))
+            others.append(OtherBoat(boats[other], isGhost: race.isGhost(seat: other), rightOfWay: rights[other]))
         }
         self.others = others
         ruleCallLines = shared.ruleCallLines
@@ -114,7 +114,7 @@ public struct SeatView: Sendable, Equatable {
         init(race: Race) {
             tick = race.tick
             time = race.time
-            finishWindowRemaining = race.firstFinishTime.map { $0 + Race.timeLimitAfterFirstFinish - race.time }
+            finishWindowRemaining = race.firstFinishTime == nil ? nil : Double(race.closeTick - race.tick) / Double(Race.tickRate)
             ruleCallLines = race.incidents.incidents.compactMap { incident in
                 guard case .called(let call) = incident.outcome, call.completeDeadlineTick >= race.tick else { return nil }
                 return RuleCallLine(offender: call.offender, victim: call.victim, rule: call.rule, tick: call.tick)
@@ -209,19 +209,20 @@ public struct SeatView: Sendable, Equatable {
         public let speed: Double
         /// Which side her boom is on; her tack is the other side.
         public let boomSide: BoomSide
-        /// Stopped racing (CONTEXT.md, "Ghost"): drawn faded, with no shadow and no rights or obligations.
+        /// Stopped racing (CONTEXT.md, "Ghost"; `Race.isGhost(seat:)`): drawn faded, with no shadow and no
+        /// rights or obligations.
         public let isGhost: Bool
         /// Which of her and this view's seat must keep clear now under rules 10–13 (`Race.rightOfWay`), as
         /// the right-of-way glyphs show it (#123); nil if either is a ghost.
         public let rightOfWay: RightOfWay?
 
-        init(_ boat: Boat, rightOfWay: RightOfWay?) {
+        init(_ boat: Boat, isGhost: Bool, rightOfWay: RightOfWay?) {
             seat = boat.id
             position = boat.position
             heading = boat.heading
             speed = boat.speed
             boomSide = boat.boomSide
-            isGhost = boat.isGhost
+            self.isGhost = isGhost
             self.rightOfWay = rightOfWay
         }
 

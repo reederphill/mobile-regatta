@@ -44,7 +44,15 @@ struct Gen {
 
     mutating func boomSide() -> BoomSide { bool() ? .starboard : .port }
 
-    mutating func status() -> BoatStatus { [.prestart, .ocs, .racing, .finished, .dsq, .dnf][int(0...5)] }
+    mutating func status() -> BoatStatus { [.prestart, .ocs, .racing, .finished, .dsq][int(0...4)] }
+
+    /// Results with every field drawn from its whole range: a finish tick for each finisher and no other.
+    mutating func results() -> RaceResults {
+        RaceResults(rows: (0..<int(0...16)).map { _ in
+            let code = ResultCode.allCases[int(0...(ResultCode.allCases.count - 1))]
+            return SeatResult(seat: int(0...255), place: int(0...255), code: code, finishTick: code == .finished ? tick() : nil)
+        }, rated: bool())
+    }
 
     /// An autohelm holding an angle anywhere in a turn or either groove, sailing the tap or not.
     mutating func autohelm() -> Autohelm {
@@ -194,7 +202,7 @@ struct Gen {
         case 14: return .rounded(seat: seat, mark: string())
         case 15: return .finished(seat: seat, place: int(1...16))
         case 16: return .firstFinish(closeTick: tick())
-        case 17: return .raceClosed
+        case 17: return .raceClosed(results: results())
         case 18: return .protestRecorded(seat: seat, target: int(0...15))
         case 19: return .tacked(seat: seat)
         case 20: return .gybed(seat: seat)

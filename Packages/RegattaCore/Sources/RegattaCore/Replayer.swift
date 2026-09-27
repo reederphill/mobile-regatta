@@ -12,11 +12,16 @@ public enum ReplayError: Error, Equatable, Sendable {
     case raceOverEarly(atTick: Int)
     /// The race drew another tide state at the gun than the log records (ADR 0003).
     case tideStateAtGun(log: Double?, race: Double?)
+    /// The race refused the log's all-gone close (`Race.closeAllGone`): it was already over, the close
+    /// isn't at the final tick, or its leave order names a seat that isn't human or names one twice.
+    case rejectedAllGoneClose(atTick: Int)
 }
 
 /// Re-simulates a race from its log (ADR 0002): builds the authoritative race from the header's setup,
 /// the data files it names and its wind seed, feeds every input and seat event at its tick, and steps to
-/// the log's final tick. It never runs a bot brain: bots' inputs are in the log like everyone else's.
+/// the log's final tick, then closes it as every human went if the log says it did (`allGoneClose`), as
+/// the host does, after that tick's seat events. It never runs a bot brain: bots' inputs are in the log
+/// like everyone else's.
 public enum Replayer {
     /// The replayed race at the log's final tick.
     ///
@@ -76,6 +81,11 @@ public enum Replayer {
         }
         if nextInput < log.inputs.count { throw ReplayError.outOfOrderInput(index: nextInput) }
         if nextSeatEvent < log.seatEvents.count { throw ReplayError.outOfOrderSeatEvent(index: nextSeatEvent) }
+        if let close = log.allGoneClose {
+            guard race.closeAllGone(atTick: close.tick, leaveOrder: close.leaveOrder) else {
+                throw ReplayError.rejectedAllGoneClose(atTick: close.tick)
+            }
+        }
         return race
     }
 

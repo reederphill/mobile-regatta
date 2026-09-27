@@ -6,8 +6,6 @@ import Foundation
 /// never reads the wall clock, and never iterates a `Set` or `Dictionary` — their order depends on
 /// a per-process hash seed. Look them up by key; iterate arrays. `DeterminismTests` scans for all three.
 public final class Race {
-    public static let timeLimitAfterFirstFinish = 180.0
-
     /// Simulation ticks per second. A server that falls behind catches up with several ticks, never a longer one.
     public static let tickRate = 30
     /// Seconds per tick.
@@ -32,8 +30,12 @@ public final class Race {
     public let windSeed: WindSeed?
     /// The course, derived from the files, the race seed's wind setup and the fleet size (#12, #80).
     public let course: CourseLayout
-    /// Each leg's target (`CourseLayout.targetPosition(for:)`), by leg index: what `progress(of:)` measures to.
+    /// Each leg's target (`CourseLayout.targetPosition(for:)`), by leg index: what `distanceToFinish(of:)`
+    /// measures to on a rounding leg.
     private let legTargets: [Vec2]
+    /// For each rounding leg, by leg index, the metres from its target on through every later leg's target to
+    /// the nearest point of the finish line (`distanceToFinish(of:)`); 0 for the finish leg.
+    private let remainingAfterTarget: [Double]
     /// The class every boat sails: hull, polar and handling (ADR 0004).
     public var boatClass: BoatClass { files.boatClass.content }
     /// The water's own motion (#78, ADR 0003), which carries every boat (#79): the venue's current at the
@@ -53,8 +55,8 @@ public final class Race {
     public static var defaultRulesConfiguration: RulesConfigFile { RaceFiles.defaults.rulesConfiguration }
 
     /// The rules and race-format values this race uses (#73). So far the zone, the start sequence, the
-    /// course, the start row and a rule call's penalty deadlines read it; the rest wait for the tickets that
-    /// use them.
+    /// course, the start row, a rule call's penalty deadlines and the close (the finish window and the time
+    /// limit, `closeTick`) read it; the rest wait for the tickets that use them.
     public var rules: RulesConfig { files.rulesConfiguration.content }
     /// Every incident so far, by id and by pair of boats.
     public private(set) var incidents = IncidentIndex()
@@ -79,8 +81,15 @@ public final class Race {
     public private(set) var tick: Int
     /// Race clock in seconds, derived from `tick` so it never accumulates rounding.
     public var time: Double { Double(tick) / Double(Race.tickRate) }
+    /// Whether the race has closed (`closeTick`, `closeAllGone`). A closed race never steps again and takes
+    /// no more input or seat events.
     public private(set) var isOver = false
+    /// When the first boat finished, race seconds: it opens the finish window (#8). A DSQ at the line doesn't.
     public private(set) var firstFinishTime: Double?
+    /// The results, fixed as the race closes; nil until then (#86).
+    public private(set) var results: RaceResults?
+    /// The all-gone close, for the log (`RaceLog.allGoneClose`).
+    private var allGoneClose: RaceLog.AllGoneClose?
 
     private struct Pair: Hashable {
         let a: Int
@@ -148,7 +157,9 @@ public final class Race {
                                          laps: setup.laps, boatClass: files.boatClass.content,
                                          rules: files.rulesConfiguration.content)
         self.course = course
-        legTargets = course.legs.map(course.targetPosition(for:))
+        let targets = course.legs.map(course.targetPosition(for:))
+        legTargets = targets
+        remainingAfterTarget = Race.remainingAfterTargets(targets, legs: course.legs, finish: course.finishLine.segment)
         let windSetup = drawn.with(raceArea: course.raceArea)
         self.windSetup = windSetup
         self.current = current ?? CurrentField(venue: files.venue.content, raceSeed: setup.raceSeed)
@@ -233,10 +244,12 @@ public final class Race {
         return at
     }
 
-    /// Records a change in who is at `seat`, stamped with the current tick. Returns nil for an unknown seat.
+    /// Records a change in who is at `seat`, stamped with the current tick. Returns nil for an unknown seat
+    /// or a closed race: the results are fixed and the log ends at the close, so a replay reads every seat
+    /// event before it closes, as the race did.
     @discardableResult
     public func record(_ kind: SeatEvent.Kind, seat: Int) -> SeatEvent? {
-        guard boats.indices.contains(seat) else { return nil }
+        guard boats.indices.contains(seat), !isOver else { return nil }
         let event = SeatEvent(tick: tick, seat: seat, kind: kind)
         seatEvents.append(event)
         return event
@@ -247,7 +260,7 @@ public final class Race {
     public var log: RaceLog? {
         guard let windSeed else { return nil }
         return RaceLog(header: .init(setup: setup, windSeed: windSeed, tideStateAtGun: tideStateAtGun), inputs: appliedInputs,
-                seatEvents: seatEvents, finalTick: tick)
+                seatEvents: seatEvents, finalTick: tick, allGoneClose: allGoneClose)
     }
 
     private func acceptsInput(from seat: Int) -> Bool {
@@ -299,7 +312,7 @@ public final class Race {
             case .tackGybe:
                 // The autohelm sails her through head to wind or the gybe to the groove on the new tack.
                 let b = boats[i]
-                if b.isOnCourse { boats[i].autohelm = .tackOrGybe(sailingAngle: b.sailingAngle) }
+                if !b.isGhost { boats[i].autohelm = .tackOrGybe(sailingAngle: b.sailingAngle) }
             case .protest(let target):
                 emit(.protestRecorded(seat: i, target: target))
             }
@@ -424,11 +437,11 @@ public final class Race {
     }
 
     /// Every boat on the course takes the shadow and backwind of every other one on it (#10); a ghost
-    /// takes none and casts none.
+    /// takes none and casts none (#30).
     private func applyWindShadows() {
         let cones = boats.indices.map(shadowCone(ofSeat:))
         for i in boats.indices {
-            guard boats[i].isOnCourse else {
+            guard !boats[i].isGhost else {
                 boats[i].shadow = 1
                 continue
             }
@@ -447,7 +460,7 @@ public final class Race {
     /// The wind shadow and backwind `seat`'s boat casts now, along her apparent wind (#10), or nil for a
     /// ghost, which casts none, or an unknown seat.
     public func shadowCone(ofSeat seat: Int) -> ShadowCone? {
-        guard boats.indices.contains(seat), boats[seat].isOnCourse else { return nil }
+        guard boats.indices.contains(seat), !boats[seat].isGhost else { return nil }
         return ShadowCone(caster: boats[seat], shadow: boatClass.windShadow)
     }
 
@@ -466,7 +479,7 @@ public final class Race {
         let moved = BoatDynamics.advance(
             BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide,
                                isPlaning: b.isPlaning, spinnaker: b.spinnaker),
-            control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: b.isOnCourse),
+            control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: !b.isGhost),
             env: BoatDynamics.Environment(windDirection: b.sailingWind.direction, windSpeed: tws, current: b.current),
             boatClass: boatClass, dt: dt)
         b.position = moved.position
@@ -559,7 +572,7 @@ public final class Race {
     private func resolveObstacleContacts() {
         var touching = Set<Pair>()
         let obstacles = course.obstacles
-        for i in boats.indices where boats[i].isOnCourse {
+        for i in boats.indices where !boats[i].isGhost {
             for (k, obstacle) in obstacles.enumerated() {
                 guard (boats[i].position - obstacle.position).length < boatClass.hull.length + obstacle.radius,
                       let push = Collision.penetration(polygon: boats[i].hull(outline: boatClass.hull.outline), circle: obstacle.position, radius: obstacle.radius)
@@ -588,7 +601,7 @@ public final class Race {
     private func resolveEdgeContacts() {
         var touching = Set<WorldSnapshot.EdgeContact>()
         let outline = boatClass.hull.outline
-        for i in boats.indices where boats[i].isOnCourse {
+        for i in boats.indices where !boats[i].isGhost {
             let resolution = course.resolveEdges(hull: boats[i].hull(outline: outline))
             let beginning = resolution.touches.filter { !edgeContacts.contains(.init(seat: i, kind: $0)) }
             if !resolution.touches.isEmpty {
@@ -689,16 +702,16 @@ public final class Race {
                 boats[i].legIndex = progress.legIndex
                 boats[i].roundingStage = progress.stage
             }
-        case .finished, .dsq, .dnf:
+        case .finished, .dsq:
             break
         }
     }
 
+    /// Seat `i` crossed the finish line: she finishes, or with a penalty unserved she is disqualified. Either
+    /// way she is a ghost from this tick (#30). The first finish opens the finish window (#8).
     private func finish(_ i: Int) {
-        firstFinishTime = firstFinishTime ?? time
         if boats[i].penaltyTurnsOwed > 0 {
-            boats[i].status = .dsq
-            emit(.disqualified(seat: i, reason: "finished without taking a penalty"))
+            disqualify(i, reason: "finished without taking a penalty")
             return
         }
         finishers += 1
@@ -706,49 +719,280 @@ public final class Race {
         boats[i].place = finishers
         boats[i].finishTime = time
         emit(.finished(seat: i, place: finishers))
+        if firstFinishTime == nil {
+            firstFinishTime = time
+            emit(.firstFinish(closeTick: closeTick))
+        }
+        emit(.becameGhost(seat: i))
     }
 
+    /// Disqualifies seat `i` now: DSQ, and a ghost from the call (#30). Today only as she finishes with a
+    /// penalty unserved; #89 calls it at a missed penalty deadline. A DSQ doesn't open the finish window:
+    /// only a finisher does (#8).
+    private func disqualify(_ i: Int, reason: String) {
+        boats[i].status = .dsq
+        emit(.disqualified(seat: i, reason: reason))
+        emit(.becameGhost(seat: i))
+    }
+
+    // MARK: - Close
+
+    /// The race tick of a race time, which is always a whole number of ticks.
+    static func tick(of time: Double) -> Int { Int((time * Double(tickRate)).rounded()) }
+
+    /// The tick the first boat finished on, or nil while nobody has.
+    public var firstFinishTick: Int? { firstFinishTime.map(Race.tick(of:)) }
+
+    /// The time limit in ticks after the gun (the race format's `timeLimit`: 960 s).
+    private var timeLimitTicks: Int { RulesConfig.ticks(rules.raceFormat.timeLimit) }
+    /// The finish window in ticks after the first finish (the race format's `finishWindow`: 120 s).
+    private var finishWindowTicks: Int { RulesConfig.ticks(rules.raceFormat.finishWindow) }
+
+    /// The tick the race closes on (#8): `min(firstFinish + finishWindow, timeLimit)` after the first finish,
+    /// the time limit while nobody has finished. Both come from the race format in the rules configuration
+    /// (#73: 120 s and 960 s in fleet-rules@1 and @2). A boat crossing the line on this tick still finishes.
+    /// It closes sooner once no boat is still racing or able to (every one finished or DSQ), or when every
+    /// human has gone (`closeAllGone`). The yellow countdown reads it (#114).
+    public var closeTick: Int {
+        let limit = timeLimitTicks
+        return firstFinishTick.map { min($0 + finishWindowTicks, limit) } ?? limit
+    }
+
+    /// When the race is expected to close, for the matchmaker (#16, #147). Pure and deterministic, from the
+    /// race as it stands:
+    /// - closed: the tick it closed on (`tick`);
+    /// - after the first finish: `closeTick`;
+    /// - before it: `min(timeLimit, projectedFirstFinish + finishWindow)`, with
+    ///   `projectedFirstFinish = max(tick, 0) + ticks(leaderRemaining / designPace)`, where `leaderRemaining`
+    ///   is the least `distanceToFinish(of:)` of a boat racing, or `courseLength` while none is, and
+    ///   `designPace = courseLength / beatSizing.leaderSeconds`: the pace the course is sized for
+    ///   (`CourseLayout.beat`).
+    ///
+    /// The pace is the course's own length over the leader's design time, so it cancels the calibration
+    /// factor and the beat's cap: before anyone has started the estimate is always the gun plus
+    /// `leaderSeconds` (480 s) plus the finish window, even where the cap (`beatSizing.maxMetres`) makes the
+    /// course quicker to sail than that.
+    public var expectedCloseTick: Int {
+        if isOver { return tick }
+        if firstFinishTime != nil { return closeTick }
+        let whole = courseLength
+        let leaderRemaining = boats.filter { $0.status == .racing }.map(distanceToFinish(of:)).min() ?? whole
+        let designPace = whole / rules.raceFormat.beatSizing.leaderSeconds
+        let projected = max(tick, 0) + RulesConfig.ticks(leaderRemaining / designPace)
+        return min(timeLimitTicks, projected + finishWindowTicks)
+    }
+
+    /// Whether `seat`'s boat is a ghost now, as a display shows it (#30, #86): `Boat.isGhost` (finished or
+    /// DSQ), and once the race has closed also a boat still OCS or never started, which could have returned
+    /// and started until then. It reads only each seat's status and `isOver`, which every client holds
+    /// (ADR 0005), so nothing is stored or sent for it. The step's checks read `Boat.isGhost`: nothing
+    /// steps after the close.
+    public func isGhost(seat: Int) -> Bool {
+        let boat = boats[seat]
+        return boat.isGhost || (isOver && (boat.status == .ocs || boat.status == .prestart))
+    }
+
+    /// Closes the race at once because every human has gone (#30, G3), at `atTick`, which must be now: the
+    /// host decides when (#66's trigger; #148 wires it), after this tick's step and seat events.
+    /// `leaveOrder` is the human seats in the order they went, first gone first (`AllGone.leaveOrder`).
+    ///
+    /// Scored as a normal close but for the RETs: each seat in `leaveOrder` that hasn't finished or been
+    /// disqualified is RET, placed one by one in reverse leave order, the latest gone highest (G3: by when
+    /// each went, not by `atTick`); any other human gone at the close is RET too, tied behind them. A seat
+    /// given away before the gun (`SeatEvent.Kind.leftBeforeGun`) is a fleet bot's (#16) and scored as one.
+    /// Bots still racing are placed by distance, and a human who finished keeps the finish.
+    ///
+    /// Returns false, changing nothing, if the race is over, `atTick` isn't `tick`, or `leaveOrder` names a
+    /// seat that isn't one of the race's human seats, or names one twice. The log records the close
+    /// (`RaceLog.allGoneClose`), and a replay closes the same way.
+    @discardableResult
+    public func closeAllGone(atTick: Int, leaveOrder: [Int]) -> Bool {
+        guard !isOver, atTick == tick else { return false }
+        var listed = Array(repeating: false, count: boats.count)
+        for seat in leaveOrder {
+            guard boats.indices.contains(seat), setup.seats[seat] == .human, !listed[seat] else { return false }
+            listed[seat] = true
+        }
+        allGoneClose = RaceLog.AllGoneClose(tick: atTick, leaveOrder: leaveOrder)
+        close(allGoneOrder: leaveOrder)
+        return true
+    }
+
+    /// Closes the race at `closeTick`, after this tick's finishes, or as soon as no boat is still racing or
+    /// able to (every one finished or DSQ).
     private func checkForEnd() {
-        let timedOut = firstFinishTime.map { time > $0 + Race.timeLimitAfterFirstFinish } ?? false
-        guard timedOut || !boats.contains(where: \.isOnCourse) else { return }
-        for i in boats.indices where boats[i].isOnCourse { boats[i].status = .dnf }
+        guard tick >= closeTick || boats.allSatisfy(\.isGhost) else { return }
+        close(allGoneOrder: nil)
+    }
+
+    /// Scores the race and closes it: the results, then `becameGhost` for every boat still OCS or never
+    /// started (a ghost from the close, `isGhost(seat:)`), then `raceClosed` with the results.
+    private func close(allGoneOrder: [Int]?) {
+        let scored = score(allGoneOrder: allGoneOrder)
+        let ghostsAtClose = boats.indices.filter { boats[$0].status == .ocs || boats[$0].status == .prestart }
+        results = scored
         isOver = true
-        emit(.raceClosed)
+        for seat in ghostsAtClose { emit(.becameGhost(seat: seat)) }
+        emit(.raceClosed(results: scored))
+    }
+
+    /// Who is at a seat, from the seat events (#16, #30, G3).
+    private struct Presence {
+        /// A human seat nobody gave away before the gun (a fleet bot takes a seat left then, #16).
+        var isHuman: Bool
+        /// Whether its last joining, rejoining, drop or leaving at or before the gun was a joining or a
+        /// rejoining: the human was there at the gun.
+        var wasAtGun = false
+        /// Whether its last joining, rejoining, drop or leaving was a drop or a leaving. A disconnection
+        /// doesn't count until the input hold runs out and the seat drops (G3). A seat nobody ever
+        /// attached to drops too (#195).
+        var isGone = false
+    }
+
+    private func presence() -> [Presence] {
+        var seats = setup.seats.map { Presence(isHuman: $0 == .human) }
+        for event in seatEvents {
+            switch event.kind {
+            case .leftBeforeGun:
+                seats[event.seat].isHuman = false
+            case .joined, .rejoined:
+                seats[event.seat].isGone = false
+                if event.tick <= 0 { seats[event.seat].wasAtGun = true }
+            case .dropped, .left:
+                seats[event.seat].isGone = true
+                if event.tick <= 0 { seats[event.seat].wasAtGun = false }
+            case .disconnected, .botTookOver:
+                break
+            }
+        }
+        return seats
+    }
+
+    /// The results as the race stands (`RaceResults`): finishers by finish, boats racing by distance to
+    /// finish, then DSQ, OCS (never started included) and RET. A human seat gone at the close whose boat
+    /// hasn't finished or been disqualified is RET (#16), and so is each such seat in an all-gone close's
+    /// `allGoneOrder` (`closeAllGone`). Rated if at least 2 humans were at the gun (#30).
+    private func score(allGoneOrder: [Int]?) -> RaceResults {
+        let presence = presence()
+        var isRET = boats.indices.map { presence[$0].isHuman && presence[$0].isGone && !boats[$0].isGhost }
+        var placedRETs: [Int] = []
+        for seat in (allGoneOrder ?? []).reversed() where presence[seat].isHuman && !boats[seat].isGhost {
+            isRET[seat] = true
+            placedRETs.append(seat)
+        }
+
+        var rows: [SeatResult] = []
+        rows.reserveCapacity(boats.count)
+        /// Each seat its own place, in order.
+        func placeEach(_ seats: [Int], _ code: ResultCode) {
+            for seat in seats {
+                let finishTick = code == .finished ? boats[seat].finishTime.map(Race.tick(of:)) : nil
+                rows.append(SeatResult(seat: seat, place: rows.count + 1, code: code, finishTick: finishTick))
+            }
+        }
+        /// The seats tied on one place, in seat order.
+        func tie(_ seats: [Int], _ code: ResultCode) {
+            let place = rows.count + 1
+            for seat in seats { rows.append(SeatResult(seat: seat, place: place, code: code)) }
+        }
+
+        let finishers = boats.indices.filter { boats[$0].status == .finished }.sorted {
+            let a = boats[$0], b = boats[$1]
+            return (a.finishTime ?? 0, a.place ?? 0, $0) < (b.finishTime ?? 0, b.place ?? 0, $1)
+        }
+        placeEach(finishers, .finished)
+        let racing = boats.indices.filter { boats[$0].status == .racing && !isRET[$0] }
+        let distances = racing.map { distanceToFinish(of: boats[$0]) }
+        placeEach(racing.indices.sorted { (distances[$0], racing[$0]) < (distances[$1], racing[$1]) }.map { racing[$0] },
+                  .byDistance)
+        tie(boats.indices.filter { boats[$0].status == .dsq }, .dsq)
+        tie(boats.indices.filter { (boats[$0].status == .ocs || boats[$0].status == .prestart) && !isRET[$0] }, .ocs)
+        placeEach(placedRETs, .ret)
+        tie(boats.indices.filter { isRET[$0] && !placedRETs.contains($0) }, .ret)
+
+        let atGun = presence.filter { $0.isHuman && $0.wasAtGun }.count
+        return RaceResults(rows: rows, rated: atGun >= 2)
     }
 
     // MARK: - Standings
 
-    /// Distance-based progress score used to rank boats still racing.
-    public func progress(of b: Boat) -> Double {
-        guard b.legIndex < course.legs.count else { return .infinity }
-        let target = legTargets[b.legIndex]
-        return Double(b.legIndex) * 10_000 + Double(b.roundingStage) * 100 - (b.position - target).length
+    /// Metres `boat` still has to sail to finish, round her remaining marks (#8): what places a boat still
+    /// racing when the race closes, and ranks the boats racing until then.
+    ///
+    /// Racing on a rounding leg, it is the straight line to the leg's target (`CourseLayout.targetPosition`:
+    /// the mark, or a gate's midpoint), then on through every later leg's target to the nearest point of the
+    /// finish line; on the finish leg, the straight line to the nearest point of the finish line. A pure
+    /// distance, with no allowance for the rounding stages she has crossed: two boats rounding the same mark
+    /// rank by how far each is from its target, a wobble of metres close to the mark. Not yet started (in
+    /// the sequence, late or OCS) she has `courseLength` still to sail from the start line's centre, plus her
+    /// distance to it. A boat that has finished or been disqualified has 0.
+    public func distanceToFinish(of boat: Boat) -> Double {
+        switch boat.status {
+        case .racing:
+            guard course.legs.indices.contains(boat.legIndex) else { return .infinity }
+            guard case .round = course.legs[boat.legIndex] else {
+                return (boat.position - Collision.closestPoint(on: course.finishLine.segment, to: boat.position)).length
+            }
+            return (boat.position - legTargets[boat.legIndex]).length + remainingAfterTarget[boat.legIndex]
+        case .prestart, .ocs:
+            return (boat.position - course.startLine.centre).length + courseLength
+        case .finished, .dsq:
+            return 0
+        }
     }
 
-    /// Boat indices from first to last.
+    /// The whole course, metres, as `distanceToFinish(of:)` measures it: from the start line's centre to the
+    /// first leg's target, and on round the rest to the finish line.
+    public var courseLength: Double {
+        guard case .round = course.legs[0] else {
+            return (course.startLine.centre - Collision.closestPoint(on: course.finishLine.segment, to: course.startLine.centre)).length
+        }
+        return (legTargets[0] - course.startLine.centre).length + remainingAfterTarget[0]
+    }
+
+    /// `remainingAfterTarget` for a course's `legs` and their `targets`: each rounding leg's target on through
+    /// every later rounding leg's target to the nearest point of `finish`, summed back from the last.
+    private static func remainingAfterTargets(_ targets: [Vec2], legs: [CourseLayout.Leg], finish: Segment) -> [Double] {
+        var remaining = Array(repeating: 0.0, count: legs.count)
+        for k in legs.indices.reversed() {
+            guard case .round = legs[k] else { continue }
+            let next = k + 1
+            if next < legs.count, case .round = legs[next] {
+                remaining[k] = (targets[k] - targets[next]).length + remaining[next]
+            } else {
+                remaining[k] = (targets[k] - Collision.closestPoint(on: finish, to: targets[k])).length
+            }
+        }
+        return remaining
+    }
+
+    /// Seats from first to last. Once the race has closed, the results' display order (`results`). Until
+    /// then as the results would rank the fleet now, leaving out who has gone (RET): finishers by finish,
+    /// boats racing by distance to finish, DSQ, then boats not yet started by their distance to the start
+    /// line's centre.
     public func standings() -> [Int] {
-        boats.indices.sorted { rankKey($0) < rankKey($1) }
+        if let results { return results.order }
+        return boats.indices.sorted { rankKey($0) < rankKey($1) }
     }
 
-    /// Where `seat` stands, from 1: its place in `standings()`, found without sorting the fleet. Boats that
-    /// rank alike keep seat order, as the sort does.
+    /// Where `seat` stands, from 1: its place in `standings()`, found without sorting the fleet. Unique: the
+    /// scored places, ties and all, are the results' (`SeatResult.place`).
     public func place(of seat: Int) -> Int {
+        if let results, let index = results.rows.firstIndex(where: { $0.seat == seat }) { return index + 1 }
         let key = rankKey(seat)
         var place = 1
-        for i in boats.indices where i != seat {
-            let other = rankKey(i)
-            if other < key || (other == key && i < seat) { place += 1 }
-        }
+        for i in boats.indices where i != seat && rankKey(i) < key { place += 1 }
         return place
     }
 
-    private func rankKey(_ i: Int) -> (Int, Double) {
+    /// Unique for each seat: its group, its measure within it, and the finish place or the seat to break ties.
+    private func rankKey(_ i: Int) -> (Int, Double, Int) {
         let b = boats[i]
         switch b.status {
-        case .finished: return (0, b.finishTime ?? 0)
-        case .racing: return (1, -progress(of: b))
-        case .prestart, .ocs: return (2, (b.position - course.startLine.centre).length)
-        case .dsq, .dnf: return (3, Double(i))
+        case .finished: return (0, b.finishTime ?? 0, b.place ?? i)
+        case .racing: return (1, distanceToFinish(of: b), i)
+        case .dsq: return (2, 0, i)
+        case .prestart, .ocs: return (3, (b.position - course.startLine.centre).length, i)
         }
     }
 }
@@ -783,7 +1027,7 @@ extension Race {
             seats: boats.indices.map { WorldSnapshot.Seat(boat: boats[$0], heldInput: heldInputs[$0]) },
             touchingBoats: boatPairs, touchingObstacles: obstacles, touchingEdges: edges, foulMemory: fouls,
             incidents: incidents,
-            firstFinishTime: firstFinishTime, isOver: isOver, windKeys: wind.keys,
+            firstFinishTime: firstFinishTime, isOver: isOver, results: results, windKeys: wind.keys,
             overlaps: overlaps.memory
         )
     }
@@ -805,7 +1049,7 @@ extension Race {
     /// Throws, leaving the race unchanged, for a snapshot it couldn't sail on from: another fleet
     /// size, a tick outside the sequence start … `WorldSnapshot.maxTick`, a non-finite value, a leg or
     /// rounding stage the course doesn't have, a negative penalty count, a bad contact, overlap, incident or
-    /// obstruction contact, or a missing key from the first window the wind at the snapshot's tick needs
+    /// obstruction contact, results for a race not over or not one row for each seat, or a missing key from the first window the wind at the snapshot's tick needs
     /// (`WindField.firstWindowNeeded`: the window before the snapshot's, or further back for puffs that
     /// may still be alive) through the last key it holds.
     public func importSnapshot(_ snapshot: WorldSnapshot) throws {
@@ -844,6 +1088,13 @@ extension Race {
             !seatRange.contains($0.seat) || !course.legs.indices.contains($0.leg) || $0.tick > snapshot.tick
         }) {
             throw WorldSnapshotError.invalidObstructionContact(index: bad)
+        }
+        if let results = snapshot.results {
+            var rowCount = Array(repeating: 0, count: boats.count)
+            for row in results.rows where seatRange.contains(row.seat) { rowCount[row.seat] += 1 }
+            guard snapshot.isOver, results.rows.count == boats.count, rowCount.allSatisfy({ $0 == 1 }) else {
+                throw WorldSnapshotError.invalidResults
+            }
         }
         let margin = lastPointOfCertaintyTicks
         for (k, entry) in snapshot.overlaps.enumerated() {
@@ -900,6 +1151,7 @@ extension Race {
         incidents = snapshot.incidents
         firstFinishTime = snapshot.firstFinishTime
         isOver = snapshot.isOver
+        results = snapshot.results
         // Places count up from the boats already finished.
         finishers = boats.filter { $0.status == .finished }.count
         pending.removeAll()

@@ -166,8 +166,9 @@ import RegattaCore
 
 @MainActor @Suite struct PracticeDriverTests {
     /// A bot sails every seat (`-demo`), so the race runs headless to its finish; its log replays to the same world.
+    /// Seed 2: on seed 1 your bot is still racing when the 2 min finish window closes (#86), placed by distance.
     @Test func runsHeadlessToTheFinishAndReplaysToTheSameDigest() throws {
-        let config = RaceConfig(opponents: 7, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1), botSailsYourBoat: true)
+        let config = RaceConfig(opponents: 7, seed: 2, windSeed: RaceConfig.windSeed(pinnedTo: 2), botSailsYourBoat: true)
         let driver = PracticeDriver(config: config)
         var seconds = 0
         while !driver.currentFrame.isOver && seconds < 1_500 {
@@ -176,7 +177,7 @@ import RegattaCore
         }
         #expect(driver.currentFrame.isOver)
         #expect(driver.currentFrame.boats[driver.myBoatIndex].status == .finished)
-        #expect(driver.drainEvents().contains { $0.kind == .raceClosed })
+        #expect(driver.drainEvents().contains { if case .raceClosed = $0.kind { true } else { false } })
 
         let log = driver.log
         #expect(log.inputs.contains { $0.seat == driver.myBoatIndex }, "the bot's inputs went through the input API")

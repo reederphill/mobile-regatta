@@ -155,7 +155,7 @@ import RegattaCore
                 #expect(view.own.autohelm == boat.autohelmReading(in: race.boatClass))
                 for other in view.others {
                     #expect(other.rightOfWay == race.rightOfWay(seat, other.seat))
-                    #expect(other.velocity == race.boats[other.seat].velocity && other.isGhost == race.boats[other.seat].isGhost)
+                    #expect(other.velocity == race.boats[other.seat].velocity && other.isGhost == race.isGhost(seat: other.seat))
                 }
                 #expect(view.shadowCones == race.boats.indices.compactMap(race.shadowCone(ofSeat:)))
                 let leg = race.course.legSailed(status: boat.status, legIndex: boat.legIndex)
@@ -169,7 +169,7 @@ import RegattaCore
                 } else {
                     #expect(leg == .finish || leg == .round(CourseLayout.offsetIndex))
                 }
-                #expect(view.finishWindowRemaining == race.firstFinishTime.map { $0 + Race.timeLimitAfterFirstFinish - race.time })
+                #expect(view.finishWindowRemaining == race.firstFinishTime.map { _ in Double(race.closeTick - race.tick) / 30 })
                 checked += 1
             }
             let shown = race.incidents.incidents.compactMap { incident -> RuleCall? in
