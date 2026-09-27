@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SpriteKit
 import Testing
 import RegattaCore
 @testable import Regatta
@@ -216,6 +217,40 @@ import RegattaCore
         #expect(cheap.streaks.allSatisfy { $0.windDirection == course.direction })
     }
 
+    /// A frozen render fixture draws the same pixels on every launch (#62). The view ignores sibling order, so
+    /// sprites sharing a z draw in an order of SpriteKit's choosing, which can change between launches: the
+    /// streak tiles, in four textures at one z, did, moving a few overlapping pixels a level. So every sprite the
+    /// water draws has a z of its own, and the same world through the same view draws the same sprites: on a
+    /// fresh node, on one whose pools grew on a wider view first, and again when redrawn settled (dt 0).
+    @Test func waterDrawsTheSameEveryTime() throws {
+        let race = try Self.race("gusty-offshore", to: -600)
+        let world = WaterWorld(Self.world(of: race))
+        let me = race.boats[0].position
+        var caps = 0, tints = 0, streaks = 0
+        for dy in stride(from: -200.0, through: 200, by: 25) {
+            let view = Self.view(centeredOn: me + Vec2(0, dy))
+            let fresh = WaterNode(pointsPerMeter: 8), used = WaterNode(pointsPerMeter: 8)
+            used.update(world, view: Self.view(centeredOn: me, scale: 1 / 0.45), dt: 0)
+            fresh.update(world, view: view, dt: 0)
+            used.update(world, view: view, dt: 0)
+            let water = DrawnSprite.all(under: fresh), tint = DrawnSprite.all(under: fresh.edgeTint)
+            #expect(water == DrawnSprite.all(under: used), "the pools' history moved the water")
+            #expect(tint == DrawnSprite.all(under: used.edgeTint), "the pools' history moved the edge tint")
+            fresh.update(world, view: view, dt: 0)
+            #expect(DrawnSprite.all(under: fresh) == water, "redrawn settled, the water moved")
+            #expect(DrawnSprite.all(under: fresh.edgeTint) == tint, "redrawn settled, the edge tint moved")
+            for (name, drawn) in [("water", water), ("edge tint", tint)] {
+                let zs = drawn.map(\.z)
+                #expect(Set(zs).count == zs.count, "\(zs.count - Set(zs).count) \(name) sprites share a z")
+            }
+            caps += fresh.whitecaps.count
+            tints += fresh.tintMarks.count
+            streaks += fresh.streaks.count
+        }
+        #expect(caps > 0 && tints > 0 && streaks > 0, "whitecaps \(caps), tint marks \(tints), streaks \(streaks)")
+        #expect(!world.puffs.isEmpty)
+    }
+
     /// The puffs still read through every colour-vision and viewing filter (#22, #111): the faintest visible puff
     /// and lull stay further from the water than the ripple is, in filtered lightness.
     @Test func puffsStillReadThroughEveryVisionFilter() {
@@ -291,6 +326,39 @@ import RegattaCore
             if !_isDebugAssertConfiguration() {
                 #expect(ms < 4, "water update \(ms) ms/frame at scale \(view.scale)")
             }
+        }
+    }
+}
+
+/// A sprite as the water draws it: everything its pixels depend on, its z summed down from the node it's under.
+private struct DrawnSprite: Equatable {
+    var z: CGFloat
+    var position: CGPoint
+    var rotation: CGFloat
+    var scale: CGSize
+    var size: CGSize
+    var alpha: CGFloat
+    var color: [CGFloat]
+    var texture: ObjectIdentifier?
+    var textureRect: CGRect?
+
+    /// The visible sprites under `node`, in z order.
+    @MainActor static func all(under node: SKNode) -> [DrawnSprite] {
+        visible(under: node, z: 0).sorted { $0.z < $1.z }
+    }
+
+    @MainActor private static func visible(under node: SKNode, z: CGFloat) -> [DrawnSprite] {
+        node.children.filter { !$0.isHidden }.flatMap { child -> [DrawnSprite] in
+            let z = z + child.zPosition
+            var drawn = visible(under: child, z: z)
+            if let sprite = child as? SKSpriteNode {
+                drawn.append(DrawnSprite(z: z, position: sprite.position, rotation: sprite.zRotation,
+                                         scale: CGSize(width: sprite.xScale, height: sprite.yScale), size: sprite.size,
+                                         alpha: sprite.alpha, color: sprite.color.cgColor.components ?? [],
+                                         texture: sprite.texture.map(ObjectIdentifier.init),
+                                         textureRect: sprite.texture?.textureRect()))
+            }
+            return drawn
         }
     }
 }

@@ -82,6 +82,14 @@ final class WaterNode: SKNode {
     /// The size a streak tile's texture is drawn for: `style.rippleSpacing` scales it from here.
     private static let tileSize = 96.0
 
+    /// Every sprite the water draws has a z of its own: its pool slot's, this far apart within its layer. The
+    /// view ignores sibling order (`RaceView`), and sprites that share a z draw in an order of SpriteKit's
+    /// choosing, which can change from one launch to the next: overlapping streak tiles in four textures did,
+    /// so a frozen render fixture drew a few pixels a level apart launch to launch (#62). A layer holds 10,000
+    /// slots below the next one's z; a view takes a few hundred tiles. SpriteKit sorts z as a Float: at the
+    /// water's z (about −10) a step is still ~100 of its ulps.
+    static let drawOrderStep: CGFloat = 1e-4
+
     init(pointsPerMeter: Double, style: WaterStyle = .standard) {
         self.pointsPerMeter = pointsPerMeter
         self.style = style
@@ -185,13 +193,17 @@ final class WaterNode: SKNode {
     }
 
     private func makeTile() -> Tile {
+        // A z each, from its slot: a frame gives the slots out in lattice order, so the same view draws its
+        // tiles in the same order whatever the pool held before. The caps all draw over the streaks.
+        let z = CGFloat(tileNodes.count) * Self.drawOrderStep
         let streak = SKSpriteNode(texture: streakTextures[0], size: CGSize(width: Self.tileSize, height: Self.tileSize))
         streak.color = ChartPalette.lull.uiColor
         streak.colorBlendFactor = 1
+        streak.zPosition = z
         let cap = SKSpriteNode(texture: whitecapTexture, size: CGSize(width: 20, height: 20))
         cap.color = ChartPalette.foam.uiColor
         cap.colorBlendFactor = 1
-        cap.zPosition = 1
+        cap.zPosition = 1 + z
         cap.isHidden = true
         rippleLayer.addChild(streak)
         rippleLayer.addChild(cap)
@@ -204,8 +216,8 @@ final class WaterNode: SKNode {
         while puffNodes.count < puffs.count {
             let node = SKSpriteNode(texture: puffTexture)
             node.colorBlendFactor = 1
-            // The view ignores sibling order: a z each keeps overlapping puffs and lulls in one order.
-            node.zPosition = CGFloat(puffNodes.count) * 0.001
+            // A z each keeps overlapping puffs and lulls in one order (`drawOrderStep`).
+            node.zPosition = CGFloat(puffNodes.count) * Self.drawOrderStep
             puffLayer.addChild(node)
             puffNodes.append(node)
         }
@@ -238,6 +250,8 @@ final class WaterNode: SKNode {
             let node = SKSpriteNode(texture: tintTexture)
             node.color = ChartPalette.puff.uiColor
             node.colorBlendFactor = 1
+            // Overlapping marks in one order (`drawOrderStep`).
+            node.zPosition = CGFloat(tintNodes.count) * Self.drawOrderStep
             edgeTint.addChild(node)
             tintNodes.append(node)
         }
@@ -263,7 +277,7 @@ final class WaterNode: SKNode {
     // Made once and shared by every scene: they only depend on the style's catspaw, and a race (or a test)
     // shouldn't pay for them again.
     private static let sharedLullTexture = lullTexture()
-    private static let sharedStreakTextures = (0..<4).map { streakTexture(variant: $0) }
+    private static let sharedStreakTextures = streakTextures(variants: 4)
     private static let sharedWhitecapTexture = whitecapTexture()
     private static let standardPuffTexture = puffTexture(catspaw: WaterStyle.standard.catspaw)
 
@@ -302,10 +316,19 @@ final class WaterNode: SKNode {
         }
     }
 
+    /// The ripple tile's `variants`, 192 pixels square each, side by side in one sheet: every streak draws from
+    /// the one texture, so the tiles batch into one draw in the z order they're given (`drawOrderStep`).
+    private static func streakTextures(variants: Int) -> [SKTexture] {
+        let alphas = (0..<variants).map(streakAlpha(variant:))
+        let sheet = texture(pixels: 192, count: variants) { k, u, v in alphas[k](u, v) }
+        let width = 1 / CGFloat(variants)
+        return (0..<variants).map { SKTexture(rect: CGRect(x: CGFloat($0) * width, y: 0, width: width, height: 1), in: sheet) }
+    }
+
     /// A ripple tile (#22): one or two long lanes of soft, broken streaks along the wind (up), like the lanes
-    /// wind draws on water: long, tapered and gapped, so they don't read as rain. Laid out by `variant`, in a 192-pixel
-    /// texture drawn at `tileSize` points.
-    private static func streakTexture(variant: Int) -> SKTexture {
+    /// wind draws on water: long, tapered and gapped, so they don't read as rain. Laid out by `variant`, as the
+    /// alpha at u and v in −1…1 across a tile drawn at `tileSize` points.
+    private static func streakAlpha(variant: Int) -> (Double, Double) -> Double {
         struct Dash {
             var x: Double, y0: Double, y1: Double, width: Double, strength: Double
         }
@@ -328,7 +351,7 @@ final class WaterNode: SKNode {
                 k += 1
             }
         }
-        return texture(pixels: 192) { u, v in
+        return { u, v in
             let px = (u + 1) / 2 * tileSize, py = (v + 1) / 2 * tileSize
             var alpha = 0.0
             for dash in dashes where py > dash.y0 && py < dash.y1 {
@@ -342,27 +365,38 @@ final class WaterNode: SKNode {
 
     /// A white texture of `pixels` square whose alpha is `alpha(u, v)`, with u and v in −1…1 across it.
     private static func texture(pixels: Int, alpha: (Double, Double) -> Double) -> SKTexture {
-        var bytes = [UInt8](repeating: 0, count: pixels * pixels * 4)
-        for y in 0..<pixels {
-            for x in 0..<pixels {
-                let u = (Double(x) + 0.5) / Double(pixels) * 2 - 1
-                let v = (Double(y) + 0.5) / Double(pixels) * 2 - 1
-                let a = UInt8((alpha(u, v).clamped(to: 0...1) * 255).rounded())
-                let k = (y * pixels + x) * 4
-                // Premultiplied white.
-                bytes[k] = a
-                bytes[k + 1] = a
-                bytes[k + 2] = a
-                bytes[k + 3] = a
+        texture(pixels: pixels, count: 1) { _, u, v in alpha(u, v) }
+    }
+
+    /// A white texture of `count` squares of `pixels` side by side, the kth's alpha `alpha(k, u, v)` with u and v
+    /// in −1…1 across it. In a sheet of more than one, each square's outermost columns are left clear, so
+    /// filtering at one's edge never picks up its neighbour.
+    private static func texture(pixels: Int, count: Int, alpha: (Int, Double, Double) -> Double) -> SKTexture {
+        let width = pixels * count
+        var bytes = [UInt8](repeating: 0, count: width * pixels * 4)
+        for square in 0..<count {
+            for y in 0..<pixels {
+                for x in 0..<pixels {
+                    if count > 1, x == 0 || x == pixels - 1 { continue }
+                    let u = (Double(x) + 0.5) / Double(pixels) * 2 - 1
+                    let v = (Double(y) + 0.5) / Double(pixels) * 2 - 1
+                    let a = UInt8((alpha(square, u, v).clamped(to: 0...1) * 255).rounded())
+                    let k = (y * width + square * pixels + x) * 4
+                    // Premultiplied white.
+                    bytes[k] = a
+                    bytes[k + 1] = a
+                    bytes[k + 2] = a
+                    bytes[k + 3] = a
+                }
             }
         }
         let provider = CGDataProvider(data: Data(bytes) as CFData)
         let space = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
         guard let provider, let image = CGImage(
-            width: pixels, height: pixels, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: pixels * 4, space: space,
+            width: width, height: pixels, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4, space: space,
             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue), provider: provider,
             decode: nil, shouldInterpolate: true, intent: .defaultIntent
-        ) else { preconditionFailure("couldn't make a \(pixels)-pixel water texture") }
+        ) else { preconditionFailure("couldn't make a \(width)×\(pixels)-pixel water texture") }
         return SKTexture(cgImage: image)
     }
 
