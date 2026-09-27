@@ -35,16 +35,18 @@ import RegattaCore
         #expect(session.results.filter(\.isPlayer).map(\.id) == [me])
     }
 
-    /// Under `-demo` the tack button doesn't reach the bot-sailed seat; in a normal race it does.
+    /// Under `-demo` the tack button doesn't reach the bot-sailed seat; in a normal race it does. The bot taps
+    /// that seat itself (#231), so under `-demo` the proof is the same race without the press: the same log.
     @Test func tackButtonOnlyReachesAHumanSeat() throws {
-        let demo = GameSession(config: RaceConfig(opponents: 3, seed: 1, windSeed: 2, botSailsYourBoat: true))
+        let demoConfig = RaceConfig(opponents: 3, seed: 1, windSeed: 2, botSailsYourBoat: true)
+        let (demo, unpressed) = (GameSession(config: demoConfig), GameSession(config: demoConfig))
         let normal = GameSession(config: Self.config)
-        for session in [demo, normal] {
-            session.tackOrGybe()
-            session.driver.tick(Race.dt)
-        }
-        let (demoLog, normalLog) = (try #require(demo.driver as? PracticeDriver).log, try #require(normal.driver as? PracticeDriver).log)
-        #expect(!demoLog.inputs.contains { $0.seat == 0 && $0.kind == .tap(.tackGybe) })
+        for session in [demo, normal] { session.tackOrGybe() }
+        for session in [demo, unpressed, normal] { session.driver.tick(Race.dt) }
+        func log(_ session: GameSession) throws -> RaceLog { try #require(session.driver as? PracticeDriver).log }
+        let (demoLog, unpressedLog, normalLog) = (try log(demo), try log(unpressed), try log(normal))
+        #expect(demoLog.inputs.contains { $0.seat == 0 }, "the bot sails your seat")
+        #expect(demoLog == unpressedLog)
         #expect(normalLog.inputs.contains { $0.seat == 0 && $0.kind == .tap(.tackGybe) })
     }
 
