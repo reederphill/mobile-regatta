@@ -169,7 +169,7 @@ import RegattaCore
         let (model, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
         let fan = try slider("conditions:/puffs/fanDegrees", in: model)
-        let edge = try slider("water.edgeTintStrength", in: model)
+        let edge = try slider("water.catspaw", in: model)
         model.set(fan, to: 8.3) // to its step: 8.5
         model.set(edge, to: 0.5)
         #expect(model.value(fan) == 8.5 && model.isChanged(fan))

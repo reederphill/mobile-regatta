@@ -130,7 +130,7 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         XCTFail(failure, file: file, line: line)
     }
 
-    // The water (#116): puffs, lulls, ripple and whitecaps in two conditions, and the upwind edge tint (#224).
+    // The water (#116): puffs, lulls, ripple and whitecaps in two conditions.
 
     /// Light and patchy (no whitecaps, sparse strong puffs, many lulls) against gusty offshore (whitecaps, puffs
     /// everywhere), both on the fun-pass @3 files, each also in greyscale, where the puffs must still read.
@@ -139,14 +139,9 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
                                             "water-light-and-patchy-greyscale", "water-gusty-offshore-greyscale"])
     }
 
-    /// A puff just beyond the top of the view, drifting in: the upwind edge darkens where it will come in.
-    @MainActor func testEdgeTintMatchesItsReference() throws {
-        try assertMatchesIPhoneReference("edge-tint")
-    }
-
-    /// `assertMatchesIPhoneReference` for several fixtures in one test: each renders and compares before any
-    /// failure ends the test, so every render that moved (or has no reference yet) reaches render-actuals in
-    /// one CI run rather than one per run.
+    /// `assertMatchesReference` on iPhone (see `skipOnIPad`) for several fixtures in one test: each renders and
+    /// compares before any failure ends the test, so every render that moved (or has no reference yet) reaches
+    /// render-actuals in one CI run rather than one per run.
     @MainActor private func assertAllMatchIPhoneReferences(_ names: [String], file: StaticString = #filePath,
                                                            line: UInt = #line) throws {
         try skipOnIPad()
@@ -155,13 +150,6 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         for name in names {
             try assertMatchesReference(name, file: file, line: line)
         }
-    }
-
-    /// `assertMatchesReference` on iPhone (see `skipOnIPad`).
-    @MainActor private func assertMatchesIPhoneReference(_ name: String, file: StaticString = #filePath,
-                                                         line: UInt = #line) throws {
-        try skipOnIPad()
-        try assertMatchesReference(name, file: file, line: line)
     }
 
     /// References are recorded on iPhone only; the iPad run skips a reference test on purpose. Anywhere else, a

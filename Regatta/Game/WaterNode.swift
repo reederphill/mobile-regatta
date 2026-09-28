@@ -46,8 +46,7 @@ struct WaterView: Equatable {
 /// The water (#116, #22): puffs darker and lulls lighter than the course average, with a catspaw texture on
 /// puffs; a faint ripple of streaks, each lying along the wind where it is (puff fans and the fleet-wide shift
 /// included) and all drifting downwind at a speed set by the conditions' mean wind; whitecaps as many as that
-/// mean wind makes, wherever they are; and, in the camera's frame, the upwind edge tint where a puff lies
-/// beyond the view. Everything it draws is set by `style` (#232 tunes it) and `quality` (#127 lowers it).
+/// mean wind makes, wherever they are. Everything it draws is set by `style` (#232 tunes it) and `quality` (#127 lowers it).
 final class WaterNode: SKNode {
     /// A ripple streak as last drawn: where it is (metres) and the wind direction it lies along.
     struct Streak: Equatable {
@@ -59,8 +58,6 @@ final class WaterNode: SKNode {
         didSet { if style.catspaw != oldValue.catspaw { puffTexture = Self.puffTexture(for: style) } }
     }
     var quality = WaterQuality.full
-    /// The upwind edge tint, drawn in the camera's frame: the scene adds it to its camera.
-    let edgeTint = SKNode()
 
     /// How far the ripple has drifted downwind, world points.
     private(set) var drift = CGPoint.zero
@@ -68,20 +65,16 @@ final class WaterNode: SKNode {
     private(set) var streaks: [Streak] = []
     /// The tiles carrying a breaking whitecap last frame.
     private(set) var whitecaps: [RippleLattice.Index] = []
-    /// The tint marks drawn last frame.
-    private(set) var tintMarks: [EdgeTint.Mark] = []
 
     private let pointsPerMeter: Double
     private let puffLayer = SKNode()
     private let rippleLayer = SKNode()
     private var puffTexture: SKTexture
     private let lullTexture = WaterNode.sharedLullTexture
-    private let tintTexture = WaterNode.sharedLullTexture
     private let streakTextures = WaterNode.sharedStreakTextures
     private let whitecapTexture = WaterNode.sharedWhitecapTexture
     private var puffNodes: [SKSpriteNode] = []
     private var tileNodes: [Tile] = []
-    private var tintNodes: [SKSpriteNode] = []
 
     /// The size a streak tile's texture is drawn for: `style.rippleSpacing` scales it from here.
     private static let tileSize = 96.0
@@ -103,7 +96,6 @@ final class WaterNode: SKNode {
     func update(_ world: WaterWorld, view: WaterView, dt: Double) {
         updateRipple(world, view: view, dt: dt)
         updatePuffs(world.puffs)
-        updateEdgeTint(world.puffs, view: view)
     }
 
     // MARK: - Ripple and whitecaps
@@ -236,39 +228,6 @@ final class WaterNode: SKNode {
         }
     }
 
-    // MARK: - Upwind edge tint
-
-    private func updateEdgeTint(_ puffs: [Puff], view: WaterView) {
-        let center = Vec2(Double(view.center.x), Double(view.center.y)) / pointsPerMeter
-        let rect = view.rect
-        let half = Vec2(Double(rect.width), Double(rect.height)) / 2 / pointsPerMeter
-        tintMarks = EdgeTint.marks(for: puffs, center: center, half: half, style: style)
-        while tintNodes.count < tintMarks.count {
-            let node = SKSpriteNode(texture: tintTexture)
-            node.color = ChartPalette.puff.uiColor
-            node.colorBlendFactor = 1
-            // Overlapping marks in one order (`DrawOrder`).
-            node.zPosition = DrawOrder.z(tintNodes.count)
-            edgeTint.addChild(node)
-            tintNodes.append(node)
-        }
-        // Metres to the camera's frame, which draws at scene points whatever the camera's scale.
-        let k = pointsPerMeter / Double(view.scale)
-        for (i, node) in tintNodes.enumerated() {
-            guard i < tintMarks.count else {
-                node.isHidden = true
-                continue
-            }
-            let mark = tintMarks[i]
-            node.isHidden = false
-            node.alpha = CGFloat(mark.alpha)
-            node.position = CGPoint(x: mark.point.x * k, y: mark.point.y * k)
-            // Centred on the edge, so the half inside the view shows: long along the edge.
-            node.size = CGSize(width: max(mark.width * k, style.edgeTintDepth), height: style.edgeTintDepth * 2)
-            node.zRotation = mark.edge == .left || mark.edge == .right ? .pi / 2 : 0
-        }
-    }
-
     // MARK: - Textures
 
     // Made once and shared by every scene: they only depend on the style's catspaw, and a race (or a test)
@@ -288,7 +247,7 @@ final class WaterNode: SKNode {
         return d2 < 1 ? (1 - d2) * (1 - d2) : 0
     }
 
-    /// A lull's texture, and the tint's: smooth, glassy water.
+    /// A lull's texture: smooth, glassy water.
     private static func lullTexture() -> SKTexture {
         texture(pixels: 128) { u, v in profile(u, v) }
     }
