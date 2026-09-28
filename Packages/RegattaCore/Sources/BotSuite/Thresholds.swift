@@ -4,25 +4,21 @@ import RegattaBots
 /// What one tier must meet over a run (#19): "the share of bots that finish; time stuck in irons;
 /// contact with marks; the share of contacts ending in fouls (near zero at National); getting stuck
 /// against the edge of the race area". Since every contact ends in a call, the fouls are gated as a share of
-/// encounters too (#101, the owner, 2026-09-27: `maxEncountersToFoulsShare`).
+/// encounters too, over the all-National live fleets rather than per tier (#101: `ConductLimits`).
 public struct TierLimits: Codable, Hashable, Sendable {
     public var minFinishShare: Double
     public var maxMeanIronsSeconds: Double
     public var maxMeanMarkContacts: Double
     public var maxContactsToFoulsShare: Double
     public var maxMeanEdgeSeconds: Double
-    /// The most of the tier's encounters that may end in a rule call (`TierSummary.encountersToFoulsShare`, #101);
-    /// nil gates none, as in a thresholds file from before #101.
-    public var maxEncountersToFoulsShare: Double?
 
     public init(minFinishShare: Double, maxMeanIronsSeconds: Double, maxMeanMarkContacts: Double,
-                maxContactsToFoulsShare: Double, maxMeanEdgeSeconds: Double, maxEncountersToFoulsShare: Double? = nil) {
+                maxContactsToFoulsShare: Double, maxMeanEdgeSeconds: Double) {
         self.minFinishShare = minFinishShare
         self.maxMeanIronsSeconds = maxMeanIronsSeconds
         self.maxMeanMarkContacts = maxMeanMarkContacts
         self.maxContactsToFoulsShare = maxContactsToFoulsShare
         self.maxMeanEdgeSeconds = maxMeanEdgeSeconds
-        self.maxEncountersToFoulsShare = maxEncountersToFoulsShare
     }
 
     /// Why `summary` misses these limits, each line starting with `tier`.
@@ -42,9 +38,6 @@ public struct TierLimits: Codable, Hashable, Sendable {
         }
         if summary.meanEdgeSeconds > maxMeanEdgeSeconds {
             breaches.append("\(tier): edge \(fixed(summary.meanEdgeSeconds)) s/boat > \(fixed(maxMeanEdgeSeconds))")
-        }
-        if let maximum = maxEncountersToFoulsShare, summary.encountersToFoulsShare > maximum {
-            breaches.append("\(tier): encounters to fouls \(fixed(summary.encountersToFoulsShare, 3)) > \(fixed(maximum, 3))")
         }
         return breaches
     }
@@ -176,10 +169,35 @@ public struct NavigationLimits: Codable, Hashable, Sendable {
     }
 }
 
+/// What conduct under the rules must show over a run (#101), over the same all-National live fleets as navigation
+/// (`ConductSummary`): #19's "the share of contacts ending in fouls (near zero at National)", taken as a share of
+/// encounters since every contact ends in a call (the owner, 2026-09-27). Gated on those fleets alone, as navigation
+/// is, not in a tier's limits (the owner, 2026-09-28): a run of a few mixed-tier races, like the smoke, is too small to
+/// decide it. Every limit is optional; they gate only a run that sailed such a fleet.
+public struct ConductLimits: Codable, Hashable, Sendable {
+    /// The most of their encounters that may end in a rule call.
+    public var maxEncountersToFoulsShare: Double?
+
+    public init(maxEncountersToFoulsShare: Double? = nil) {
+        self.maxEncountersToFoulsShare = maxEncountersToFoulsShare
+    }
+
+    /// Why `summary` misses these limits, each line starting with `conduct`; none without a summary.
+    func breaches(_ summary: ConductSummary?) -> [String] {
+        guard let summary else { return [] }
+        var breaches: [String] = []
+        if let maximum = maxEncountersToFoulsShare, summary.encountersToFoulsShare > maximum {
+            breaches.append("conduct: encounters to fouls \(fixed(summary.encountersToFoulsShare, 3)) > \(fixed(maximum, 3))")
+        }
+        return breaches
+    }
+}
+
 /// The suite's gate (#19, #27): limits per tier, keyed by `BotTier.rawValue`, per scripted profile, keyed by
-/// `BotProfile.rawValue` (#231, #238), the start's (#99), navigation's (#100), and the worst race's p99 tick. A tier or
-/// profile with no limits isn't gated, and a profile's, the start's or navigation's limits gate only a run that sailed it. "The exact limits are
-/// set at build time" (#19): the bundled `thresholds.json` starts loose, and tightens as the brains (#102) do.
+/// `BotProfile.rawValue` (#231, #238), the start's (#99), navigation's (#100), conduct's (#101), and the worst race's p99
+/// tick. A tier or profile with no limits isn't gated, and a profile's, the start's, navigation's or conduct's limits gate
+/// only a run that sailed it. "The exact limits are set at build time" (#19): the bundled `thresholds.json` starts
+/// loose, and tightens as the brains (#102) do.
 public struct BotThresholds: Codable, Hashable, Sendable {
     public var tiers: [String: TierLimits]
     /// Empty when a thresholds file has none.
@@ -188,19 +206,22 @@ public struct BotThresholds: Codable, Hashable, Sendable {
     public var start: StartLimits?
     /// Navigation's limits (#100); nil when a thresholds file has none.
     public var navigation: NavigationLimits?
+    /// Conduct's limits (#101); nil when a thresholds file has none.
+    public var conduct: ConductLimits?
     public var maxP99TickMs: Double
 
     public init(tiers: [String: TierLimits], profiles: [String: ProfileLimits] = [:], start: StartLimits? = nil,
-                navigation: NavigationLimits? = nil, maxP99TickMs: Double) {
+                navigation: NavigationLimits? = nil, conduct: ConductLimits? = nil, maxP99TickMs: Double) {
         self.tiers = tiers
         self.profiles = profiles
         self.start = start
         self.navigation = navigation
+        self.conduct = conduct
         self.maxP99TickMs = maxP99TickMs
     }
 
     private enum CodingKeys: String, CodingKey {
-        case tiers, profiles, start, navigation, maxP99TickMs
+        case tiers, profiles, start, navigation, conduct, maxP99TickMs
     }
 
     public init(from decoder: Decoder) throws {
@@ -209,14 +230,16 @@ public struct BotThresholds: Codable, Hashable, Sendable {
                   profiles: try c.decodeIfPresent([String: ProfileLimits].self, forKey: .profiles) ?? [:],
                   start: try c.decodeIfPresent(StartLimits.self, forKey: .start),
                   navigation: try c.decodeIfPresent(NavigationLimits.self, forKey: .navigation),
+                  conduct: try c.decodeIfPresent(ConductLimits.self, forKey: .conduct),
                   maxP99TickMs: try c.decode(Double.self, forKey: .maxP99TickMs))
     }
 
-    /// Why a run with these tier summaries, timings, skill gap, fun pass, start and navigation misses the thresholds;
-    /// empty when it meets them.
+    /// Why a run with these tier summaries, timings, skill gap, fun pass, start, navigation and conduct misses the
+    /// thresholds; empty when it meets them.
     public func breaches(tiers summaries: [String: TierSummary], timings: BotSuiteReport.RunTimings,
                          skillGap: SkillGapSummary? = nil, funPass: FunPassSummary? = nil,
-                         start: StartSummary? = nil, navigation: NavigationSummary? = nil) -> [String] {
+                         start: StartSummary? = nil, navigation: NavigationSummary? = nil,
+                         conduct: ConductSummary? = nil) -> [String] {
         var breaches = BotTier.allCases.flatMap { tier -> [String] in
             guard let summary = summaries[tier.rawValue], let limits = tiers[tier.rawValue] else { return [] }
             return limits.breaches(tier.rawValue, summary)
@@ -226,6 +249,7 @@ public struct BotThresholds: Codable, Hashable, Sendable {
         }
         breaches += self.start?.breaches(start) ?? []
         breaches += self.navigation?.breaches(navigation) ?? []
+        breaches += self.conduct?.breaches(conduct) ?? []
         if timings.maxP99Ms > maxP99TickMs {
             breaches.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms > \(fixed(maxP99TickMs, 3))")
         }

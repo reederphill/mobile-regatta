@@ -3,67 +3,108 @@ import Foundation
 import RegattaCore
 import Testing
 
-/// #101: the bots' conduct under the rules over the suite's fleets, gated on encounters ending in fouls (the owner,
-/// 2026-09-27). Every contact ends in a rule call (#100's run: contacts 1.00 fouls), so the share of contacts ending
-/// in fouls can't show conduct; the share of encounters can. An encounter is a pair coming within 2 hull lengths of
-/// each other while rules 10–13 name one of them to keep clear, counted once until they separate past that again (the
-/// separation that closes #88's incidents); it ends in a foul when a rule call is made between the pair during it.
+/// #101: the bots' conduct under the rules over the suite's all-National live fleets, gated on encounters ending in
+/// fouls (the owner, 2026-09-27). Every contact ends in a rule call (#100's run: contacts 1.00 fouls), so the share of
+/// contacts ending in fouls can't show conduct; the share of encounters can. An encounter is a pair coming within 2 hull
+/// lengths of each other while rules 10–13 name one of them to keep clear, counted once until they separate past that
+/// again (the separation that closes #88's incidents); it ends in a foul when a rule call is made between the pair
+/// during it. The gate holds it over the same fleets as navigation (#100), not in a tier's limits (the owner,
+/// 2026-09-28): the smoke's three mixed-tier races are too few to decide it.
 ///
-/// The fleets are too many full races for `swift test`: the numbers are the CLI's full run over the bundled matrix,
+/// The fleets are too many full races for `swift test`: the numbers are the CLI's full navigation run,
 ///
-///     scripts/heavy.sh swift run -c release --package-path Packages/RegattaCore regatta-botsuite
+///     scripts/heavy.sh swift run -c release --package-path Packages/RegattaCore regatta-botsuite \
+///         --tier-mix national --profile-mix live
 ///
-/// (or `--tier-mix national` for the National fleets alone), which exits 1 when the National tier's share is over its
-/// limit. These tests hold that gate and the counting to the acceptance.
+/// which exits 1 when their share is over the limit. These tests hold that gate and the counting to the acceptance.
 @Suite struct BotConductSuiteTests {
-    private func seat(_ tier: BotTier, encounters: Int, fouls: Int) -> SeatMetrics {
-        SeatMetrics(seat: 0, tier: tier, skill: 0.9, status: "finished", finished: true, place: 1, ironsSeconds: 0,
-                    markContacts: 0, boatContacts: fouls, contactsEndingInFouls: fouls, contactsToFoulsShare: share(fouls, of: fouls),
-                    foulsAsOffender: 0, dsqMissedPenalty: 0, ocsCount: 0, edgeSeconds: 0, landContacts: 0, boundaryContacts: 0,
-                    encounters: encounters, encountersEndingInFouls: fouls,
-                    encountersToFoulsShare: share(fouls, of: encounters))
+    private func seat(_ seat: Int, encounters: Int, fouls: Int) -> SeatMetrics {
+        SeatMetrics(seat: seat, tier: .national, skill: 0.9, status: "finished", finished: true, place: seat + 1,
+                    ironsSeconds: 0, markContacts: 0, boatContacts: fouls, contactsEndingInFouls: fouls,
+                    contactsToFoulsShare: share(fouls, of: fouls), foulsAsOffender: 0, dsqMissedPenalty: 0, ocsCount: 0,
+                    edgeSeconds: 0, landContacts: 0, boundaryContacts: 0, encounters: encounters,
+                    encountersEndingInFouls: fouls, encountersToFoulsShare: share(fouls, of: encounters))
     }
 
-    /// #101 acceptance: at most 2 % of National bots' encounters end in a rule call. The bundled thresholds gate the
-    /// National tier on it (a new limit; its contacts-to-fouls limit stays as it was, never loosened), the full run
-    /// sails National bots, and the gate counts every National seat's encounters together: a run at 2 % passes, one
-    /// over it fails on that limit alone.
+    /// A race's result with `seats`, of an all-National live fleet unless `mix` or `profiles` says otherwise.
+    private func result(_ seats: [SeatMetrics], mix: TierMix = .national, profiles: ProfileMix = .live) -> RaceResult {
+        let cell = BotRaceCell(seed: 1, venue: "dev-venue@3", conditions: "classic-oscillating@3", tideStateDegrees: 0,
+                               fleetSize: seats.count, tierMix: mix, profileMix: profiles, laps: 2,
+                               capSecondsAfterGun: BotMatrix.defaultCapSecondsAfterGun)
+        return RaceResult(cell: cell, finalTick: 0, capped: false, tideStateAtGun: nil, seats: seats,
+                          ranks: seats.indices.map { $0 + 1 }, hullLength: 5, timings: TickTimings(samples: [], cpuSeconds: 0))
+    }
+
+    /// #101 acceptance: at most 2 % of the National bots' encounters end in a rule call, over the all-National live
+    /// fleets. The bundled thresholds' `conduct` block holds it (a new limit; the tiers' contacts-to-fouls limits stay as
+    /// they were, never loosened), the full navigation run sails those fleets, and the gate counts every one of their
+    /// seats' encounters together: a run at 2 % passes, one over it fails on that limit alone, and a run that sailed no
+    /// such fleet, like the smoke, isn't gated on it at all. A thresholds file from before #101 has no `conduct` block,
+    /// and gates none.
     @Test func nationalEncountersToFoulsAtMost2Percent() throws {
-        let thresholds = try BotThresholds.bundled()
-        let national = try #require(thresholds.tiers[BotTier.national.rawValue])
-        #expect(national.maxEncountersToFoulsShare == 0.02)
-        #expect(national.maxContactsToFoulsShare == 1, "contacts to fouls: as it was")
-        for tier in BotTier.allCases where tier != .national {
-            #expect(thresholds.tiers[tier.rawValue]?.maxEncountersToFoulsShare == nil, "\(tier): #102's to set")
+        var bundled = try BotThresholds.bundled()
+        let limits = try #require(bundled.conduct)
+        #expect(limits == ConductLimits(maxEncountersToFoulsShare: 0.02))
+        for tier in BotTier.allCases {
+            #expect(bundled.tiers[tier.rawValue]?.maxContactsToFoulsShare == 1, "\(tier): contacts to fouls as it was")
         }
-        let matrix = try BotMatrix.bundled()
-        #expect(matrix.tierMixes.contains(.national), "the full run sails National fleets")
+        let fullRun = try BotSuiteOptions(arguments: BotNavigationSuiteTests.fullRun).matrix()
+        #expect(!fullRun.cells.isEmpty && fullRun.cells.allSatisfy(\.isAllNationalLive), "the full run sails the fleets")
 
-        // The National limit alone, every other one out of reach.
-        var gate = unmissableThresholds()
-        gate.tiers[BotTier.national.rawValue]?.maxEncountersToFoulsShare = national.maxEncountersToFoulsShare
-        let calm = BotSuiteReport.RunTimings(maxP99Ms: 1, maxMs: 1)
-        func breaches(_ seats: [SeatMetrics]) -> [String] {
-            let tiers = Dictionary(grouping: seats, by: { $0.tier.rawValue }).mapValues(TierSummary.init)
-            return gate.breaches(tiers: tiers, timings: calm)
+        // The conduct limit alone.
+        let gate = BotThresholds(tiers: [:], conduct: limits, maxP99TickMs: .greatestFiniteMagnitude)
+        func breaches(_ races: [RaceResult]) -> [String] {
+            BotSuiteReport(matrix: fullRun, thresholds: gate, races: races).breaches
         }
-        // 1 in 50 of the tier's encounters, over several seats.
-        let atTheLimit = [seat(.national, encounters: 20, fouls: 1), seat(.national, encounters: 30, fouls: 0)]
-        #expect(TierSummary(atTheLimit).encounters == 50 && TierSummary(atTheLimit).encountersEndingInFouls == 1)
-        #expect(TierSummary(atTheLimit).encountersToFoulsShare == 0.02)
+        // 1 in 50 of their encounters, over several seats and races.
+        let atTheLimit = [result([seat(0, encounters: 20, fouls: 1), seat(1, encounters: 10, fouls: 0)]),
+                          result([seat(0, encounters: 20, fouls: 0)])]
+        let summary = try #require(ConductSummary(atTheLimit))
+        #expect(summary.races == 2 && summary.seats == 3)
+        #expect(summary.encounters == 50 && summary.encountersEndingInFouls == 1)
+        #expect(summary.encountersToFoulsShare == 0.02)
         #expect(breaches(atTheLimit).isEmpty, "the limit is inclusive")
-        let over = [seat(.national, encounters: 500, fouls: 11), seat(.national, encounters: 500, fouls: 10)]
-        #expect(breaches(over) == ["national: encounters to fouls 0.021 > 0.020"])
-        // Another tier's fouls are its own.
-        #expect(breaches(atTheLimit + [seat(.club, encounters: 10, fouls: 5)]).isEmpty)
-        #expect(breaches([seat(.national, encounters: 0, fouls: 0)]).isEmpty, "no encounters, no share")
+        let over = [result([seat(0, encounters: 500, fouls: 11)]), result([seat(0, encounters: 500, fouls: 10)])]
+        #expect(breaches(over) == ["conduct: encounters to fouls 0.021 > 0.020"])
+        #expect(breaches([result([seat(0, encounters: 0, fouls: 0)])]).isEmpty, "no encounters, no share")
+        // Only the all-National live fleets count.
+        let fouled = [seat(0, encounters: 10, fouls: 5), seat(1, encounters: 10, fouls: 5)]
+        let others = [result(fouled, mix: .mixed), result(fouled, mix: .seeded), result(fouled, profiles: .skillGap)]
+        #expect(ConductSummary(others) == nil)
+        #expect(breaches(others).isEmpty, "no all-National live fleet sailed")
+        #expect(ConductSummary(atTheLimit + others) == summary)
 
-        // A thresholds file from before #101 gates none.
-        let old = try JSONDecoder().decode(TierLimits.self, from: Data(#"""
-            {"minFinishShare": 0.75, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 2, "maxContactsToFoulsShare": 1,
-             "maxMeanEdgeSeconds": 30}
+        // The bundled thresholds: the smoke's run (`BotSuiteSmokeTests`, three mixed-tier races) passes however its
+        // National seats' encounters end, since no tier's limits hold them; the same seats in an all-National live
+        // fleet breach the conduct limit, and only that.
+        bundled.maxP99TickMs = .greatestFiniteMagnitude
+        let smoke = BotMatrix(seeds: [1, 2, 3], fleetSizes: [10], tierMixes: [.mixed], laps: 1)
+        #expect(smoke.cells.allSatisfy { !$0.isAllNationalLive })
+        let smokeReport = BotSuiteReport(matrix: smoke, thresholds: bundled, races: [result(fouled, mix: .mixed)])
+        #expect(smokeReport.tiers[BotTier.national.rawValue]?.encountersToFoulsShare == 0.5)
+        #expect(smokeReport.conduct == nil)
+        #expect(smokeReport.passed, "\(smokeReport.breaches)")
+        let fleetReport = BotSuiteReport(matrix: fullRun, thresholds: bundled, races: [result(fouled)])
+        #expect(fleetReport.breaches == ["conduct: encounters to fouls 0.500 > 0.020"])
+        #expect(fleetReport.lines.contains("conduct: 1 all-National races, 2 boats, encounters 20, 10 ending in fouls (0.500)"))
+
+        // A thresholds file from before #101, as main shipped it: no conduct limits, so none gated.
+        let old = try JSONDecoder().decode(BotThresholds.self, from: Data(#"""
+            {
+              "maxP99TickMs": 10,
+              "tiers": {
+                "national": { "minFinishShare": 0.75, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 2,
+                              "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 }
+              },
+              "navigation": { "minFinishShare": 0.98, "maxDSQMissedPenalty": 0, "maxEdgeShare": 0.02,
+                              "maxMarkContactsPerBoat": 0.2 }
+            }
             """#.utf8))
-        #expect(old.maxEncountersToFoulsShare == nil)
+        #expect(old.conduct == nil)
+        #expect(old.tiers[BotTier.national.rawValue] == bundled.tiers[BotTier.national.rawValue])
+        #expect(old.navigation == bundled.navigation)
+        let calm = BotSuiteReport.RunTimings(maxP99Ms: 1, maxMs: 1)
+        #expect(old.breaches(tiers: [:], timings: calm, conduct: ConductSummary(over)).isEmpty)
     }
 
     /// Two boats sailing on, nobody at the helm (seat 0 at `position0`, seat 1 at `position1`), after the gun: each
@@ -140,5 +181,36 @@ import Testing
         // Far apart: none.
         let apart = try race([(centre, starboard), (centre + abeam * 20, starboard)])
         #expect(tally(apart, seconds: 3).metrics.map(\.encounters) == [0, 0])
+
+        // The gate's summary takes the counts as the harness made them, both races' seats together.
+        let seats = fouled.metrics + clean.metrics
+        let summary = try #require(ConductSummary([result(fouled.metrics), result(clean.metrics)]))
+        #expect(summary.races == 2 && summary.seats == 4)
+        #expect(summary.encounters == seats.reduce(0) { $0 + $1.encounters })
+        #expect(summary.encountersEndingInFouls == seats.reduce(0) { $0 + $1.encountersEndingInFouls })
+        #expect(summary.encountersEndingInFouls >= 2 && summary.encountersEndingInFouls < summary.encounters)
+        #expect(summary.encountersToFoulsShare == share(summary.encountersEndingInFouls, of: summary.encounters))
     }
+
+    #if os(macOS) || os(Linux)
+    /// The CLI gives conduct for an all-National live fleet: in its JSON report, and as a line of its text one.
+    @Test func reportGivesConduct() throws {
+        let matrix = BotMatrix(seeds: [1], fleetSizes: [2], tierMixes: [.national], laps: 1, capSecondsAfterGun: 60)
+        let json = FileManager.default.temporaryDirectory.appendingPathComponent("botsuite-conduct-\(UUID().uuidString).json")
+        let run = try botsuite(["--matrix", try fixture(matrix, named: "conduct-matrix"),
+                                "--thresholds", try fixture(unmissableThresholds(), named: "unmissable"), "--json", json.path])
+        #expect(run.status == 0)
+        let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: json)) as? [String: Any])
+        let conduct = try #require(object["conduct"] as? [String: Any])
+        for key in ["races", "seats", "encounters", "encountersEndingInFouls", "encountersToFoulsShare"] {
+            #expect(conduct[key] != nil, "conduct has no \(key)")
+        }
+        let report = try JSONDecoder().decode(BotSuiteReport.self, from: Data(contentsOf: json))
+        let summary = try #require(report.conduct)
+        #expect(summary.races == 1 && summary.seats == 2)
+        let race = try #require(report.races.first)
+        #expect(summary.encounters == race.seats.reduce(0) { $0 + $1.encounters })
+        #expect(run.stdout.contains("conduct: 1 all-National races, 2 boats, encounters \(summary.encounters), "))
+    }
+    #endif
 }
