@@ -14,11 +14,13 @@ import Foundation
 ///
 /// Schema 2 adds the keyed wind's tuning (`keyedWind`): the wobble and the timing of the trend and
 /// build. Schema 1 files still load, but only schema 2 and later can be sailed. Schema 3 adds the pressure field
-/// (`pressureField`, #286, ADR 0008): the pressure side and pressure lanes.
+/// (`pressureField`, #286, ADR 0008): the pressure side and pressure lanes. Schema 4 adds how much the venue's
+/// geography steers them (#287): the range each race scales the venue's side tendency by, and the share of lanes
+/// that form at the venue's lane spots.
 public struct Conditions: DataFileContent, Hashable {
     public static let kind = "conditions"
     public static let bundleDirectory = "conditions"
-    public static let supportedSchemaVersions = [1, 2, 3]
+    public static let supportedSchemaVersions = [1, 2, 3, 4]
 
     /// Every conditions entry oscillates with a main period in 60–180 s (ADR 0001). #221 made the shifts
     /// faster, about 60–100 s from version 3 of each file (90–180 s before, #10); with 30 s knots, periods
@@ -124,6 +126,13 @@ public struct Conditions: DataFileContent, Hashable {
             /// Direction change at full `strength`, radians: veering where the pressure side makes the wind
             /// stronger, backing where it makes it weaker.
             public let bend: Double
+            /// The range each race draws its multiplier on the venue's side tendency from (#287): below 0 the
+            /// tendency is reversed that race, near 0 absent, above 1 stronger than authored. Schema 4; a schema-3
+            /// file reads `defaultTendencyScale`.
+            public let tendencyScale: ClosedRange<Double>
+
+            /// The placeholder tendency scale (#287): usually present, sometimes absent, occasionally reversed.
+            public static let defaultTendencyScale: ClosedRange<Double> = -0.5...1.5
         }
 
         /// Pressure lanes: soft bands of stronger wind lying along the wind, drifting slowly sideways.
@@ -141,12 +150,18 @@ public struct Conditions: DataFileContent, Hashable {
             /// Largest direction change at a lane's edges, radians: veering on its right-hand edge (looking
             /// downwind), backing on its left.
             public let bend: Double
+            /// The share of lanes that form at the venue's lane spots when it has any (#287); the rest form anywhere
+            /// across the course. Schema 4; a schema-3 file reads `defaultSpotShare`.
+            public let spotShare: Double
+
+            /// The placeholder spot share (#287): lanes form mostly, not always, at the venue's spots.
+            public static let defaultSpotShare = 0.7
         }
     }
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2, 3:
+        case 1, 2, 3, 4:
             self = try JSONDecoder().decode(ConditionsSchema.self, from: fileData)
                 .conditions(id: header.id, schemaVersion: header.schemaVersion)
         default:
@@ -172,10 +187,11 @@ public typealias ConditionsFile = DataFile<Conditions>
 
 // MARK: - Schemas 1 to 3
 
-/// The conditions file, schema versions 1 to 3, as written: knots, degrees, seconds, metres, fractions.
+/// The conditions file, schema versions 1 to 4, as written: knots, degrees, seconds, metres, fractions.
 /// Schema 2 is schema 1 plus `shift.wobbleDegrees`, `trend.rampFraction`, `build.overSeconds` and
 /// `build.rampFraction` (#75): required from schema 2, refused in schema 1. Schema 3 is schema 2 plus
-/// `pressureField` (#286): required in schema 3, refused before it.
+/// `pressureField` (#286): required from schema 3, refused before it. Schema 4 is schema 3 plus
+/// `pressureField.side.tendencyScale` and `pressureField.lanes.spotShare` (#287): required in schema 4, refused before.
 private struct ConditionsSchema: Decodable {
     /// `{ "min": a, "max": b }`, in the unit its key names.
     struct Range: Decodable {
@@ -229,6 +245,8 @@ private struct ConditionsSchema: Decodable {
             let strength: Double
             let persistenceSeconds: Double
             let bendDegrees: Double
+            /// Schema 4.
+            let tendencyScale: Range?
         }
 
         struct Lanes: Decodable {
@@ -238,6 +256,8 @@ private struct ConditionsSchema: Decodable {
             let lifetimeSeconds: Range
             let driftMetresPerSecond: Double
             let bendDegrees: Double
+            /// Schema 4.
+            let spotShare: Double?
         }
 
         let side: Side
@@ -353,15 +373,31 @@ private struct ConditionsSchema: Decodable {
             try check(lanes.count.isFinite && lanes.count >= 0 && lanes.count <= 8, "pressure lane count must be 0…8")
             try check(lanes.driftMetresPerSecond.isFinite && lanes.driftMetresPerSecond >= 0 && lanes.driftMetresPerSecond <= 5,
                       "pressure lane drift must be 0…5 m/s")
+            // Schema 4's geography columns (#287): required in schema 4, refused before it.
+            var tendencyScale = Conditions.PressureField.Side.defaultTendencyScale
+            var spotShare = Conditions.PressureField.Lanes.defaultSpotShare
+            if schemaVersion >= 4 {
+                guard let scale = side.tendencyScale, let share = lanes.spotShare else {
+                    throw DataFileError.malformed(
+                        kind: Conditions.kind,
+                        reason: "schema \(schemaVersion) needs pressureField.side.tendencyScale and pressureField.lanes.spotShare")
+                }
+                tendencyScale = try bounds(scale, in: -2...3, "pressure side tendency scale")
+                try check(fraction.contains(share), "pressure lane spot share must be 0…1")
+                spotShare = share
+            } else {
+                try check(side.tendencyScale == nil && lanes.spotShare == nil,
+                          "pressureField.side.tendencyScale and pressureField.lanes.spotShare need schema 4")
+            }
             parsedPressureField = .init(
                 side: .init(strength: side.strength, persistence: side.persistenceSeconds,
-                            bend: try degrees(side.bendDegrees, "pressure side bend")),
+                            bend: try degrees(side.bendDegrees, "pressure side bend"), tendencyScale: tendencyScale),
                 lanes: .init(count: lanes.count,
                              strength: try bounds(lanes.strength, in: pressure, "pressure lane strength"),
                              width: try bounds(lanes.widthMetres, in: 1...10_000, "pressure lane width"),
                              lifetime: try bounds(lanes.lifetimeSeconds, in: 1...3600, "pressure lane lifetime"),
                              drift: lanes.driftMetresPerSecond,
-                             bend: try degrees(lanes.bendDegrees, "pressure lane bend")))
+                             bend: try degrees(lanes.bendDegrees, "pressure lane bend"), spotShare: spotShare))
         } else {
             try check(pressureField == nil, "pressureField needs schema 3")
         }

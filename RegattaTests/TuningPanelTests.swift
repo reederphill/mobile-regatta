@@ -38,7 +38,7 @@ import RegattaCore
         let (model, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
         let sliders = model.groups.flatMap(\.sliders)
-        // The pressure field's sliders name numbers only in schema-3 conditions (`pressureFieldIsTunable`).
+        // The pressure field's sliders name numbers only in schema-3 and -4 conditions (`pressureFieldIsTunable`).
         for slider in sliders where !Self.isPressureField(slider) {
             let file = model.fileValue(slider)
             #expect(file != nil, "\(slider.id) names nothing in its file")
@@ -119,9 +119,9 @@ import RegattaCore
 
     private static func isPressureField(_ slider: TuningSlider) -> Bool { slider.id.hasPrefix("conditions:/pressureField/") }
 
-    /// #286: each of the pressure field's columns has a slider, which names its number in a version-4 (schema 3)
-    /// conditions file, and is "not in this file" before; set, the tuned copy carries it, loads, and the practice
-    /// race sails it at the venue that pairs the version-4 files.
+    /// #286, #287: each of the pressure field's columns has a slider, which names its number in a version-5 (schema 4)
+    /// conditions file, and is "not in this file" before the pressure field; set, the tuned copy carries it, loads,
+    /// and the practice race sails it at the venue that pairs the version-5 files.
     @Test func pressureFieldIsTunable() throws {
         let (model, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -130,12 +130,13 @@ import RegattaCore
             "side/strength", "side/persistenceSeconds", "side/bendDegrees", "lanes/count", "lanes/strength/min",
             "lanes/strength/max", "lanes/widthMetres/min", "lanes/widthMetres/max", "lanes/lifetimeSeconds/min",
             "lanes/lifetimeSeconds/max", "lanes/driftMetresPerSecond", "lanes/bendDegrees",
+            "side/tendencyScale/min", "side/tendencyScale/max", "lanes/spotShare",
         ].map { "conditions:/pressureField/\($0)" }))
         #expect(model.groups.first { $0.id == "conditions" }?.sliders.contains(where: Self.isPressureField) == true)
         // The default conditions (schema 2) have no pressure field.
         for slider in pressure { #expect(model.fileValue(slider) == nil, "\(slider.id) in a schema-2 file") }
 
-        let key = DataFileKey(id: "classic-oscillating", version: 4)
+        let key = DataFileKey(id: "classic-oscillating", version: 5)
         #expect(model.options(.conditions).contains(key))
         model.setBase(.conditions, key)
         var tuned: [String: Double] = [:]
@@ -152,12 +153,14 @@ import RegattaCore
 
         let files = model.practiceFiles()
         #expect(files.conditions.key == key && files.conditions.tune == 1)
-        #expect(files.venue.key == DataFileKey(id: "dev-venue", version: 4))
+        #expect(files.venue.key == DataFileKey(id: "dev-venue", version: 5))
         let data = try #require(files.tunedFiles[files.conditions])
         for (pointer, value) in tuned { #expect(TunedCopy.number(at: pointer, in: data) == value, "\(pointer)") }
         let field = try #require(try ConditionsFile(data: data).content.pressureField)
         #expect(field.side.persistence == tuned["/pressureField/side/persistenceSeconds"])
         #expect(field.lanes.count == tuned["/pressureField/lanes/count"])
+        #expect(field.side.tendencyScale.lowerBound == tuned["/pressureField/side/tendencyScale/min"])
+        #expect(field.lanes.spotShare == tuned["/pressureField/lanes/spotShare"])
         let setup = try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot], boatClass: files.boatClass, venue: files.venue,
                                   conditions: files.conditions, rulesConfiguration: files.rulesConfiguration)
         let race = try RaceFiles(resolving: setup, from: files.catalog)

@@ -1,10 +1,12 @@
-# Venue file, schema version 1
+# Venue file, schema versions 1 and 2
 
 A venue is an immutable, versioned data file (ADR 0004, #32), loaded by `DataFile<Venue>` (`VenueFile`)
 through the same loader as boat classes (README, *Data files*). This page is the schema: every field,
 its units, how the loader validates it, and how the current model (#78) reads the depth grid.
-The code is `Packages/RegattaCore/Sources/RegattaCore/Venue.swift`: `VenueSchema1` is the file as
-written (`Codable`, so tools can write files too), and `Venue` is the loaded value in code units.
+The code is `Packages/RegattaCore/Sources/RegattaCore/Venue.swift`: `VenueSchema1` and `VenueSchema2` are the
+file as written (`Codable`, so tools can write files too), and `Venue` is the loaded value in code units.
+Schema 2 (#287, ADR 0008) is schema 1 with the venue's geography given a real say in the pressure: see
+*Schema 2* below. Everything this page says of schema 1 holds for schema 2 except where that section says.
 
 Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/venues/`, test fixtures in
 `Tests/RegattaCoreTests/Resources/venues/`. A released version never changes; a change ships as
@@ -20,6 +22,10 @@ Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/
 - `dev-venue@4` (bundled): `dev-venue@3` with its pairings on the version-4 conditions files (schema 3),
   which add the pressure field (#286, ADR 0008). Each pairing's across-the-wind coordinate, which the
   pressure field is laid across, is derived from its geographic grid at load (`Venue.AcrossWind`).
+- `dev-venue@5` (bundled, schema 2): `dev-venue@4` on the version-5 conditions files (schema 4), with its
+  geography authored to be seen in play (#287): more pressure and a lane spot in a band off the west
+  headland, a shadow band under the east shore, and a mild left-side tendency. The bot suite's matrix
+  sails it; the default race doesn't.
 - `test-venue@1` (test resource): small hand-checkable grids, concave land, a tidal current with an eddy.
 
 ## Frame and units
@@ -200,6 +206,36 @@ flips to the other side, turning the other way, when the tide turns.
 | `peakKnots` | number | Speed at the core radius at peak tide, > 0 and at most the venue's `peakKnots`. |
 | `floodRotation` | `"clockwise"` or `"anticlockwise"` | Sense while flooding; the ebb eddy turns the other way. |
 
+## Schema 2 (#287, ADR 0008)
+
+Schema 2 gives each pairing's geography a real say in the pressure field, so each venue feels different and
+local knowledge pays off. It is schema 1 (`"schemaVersion": 2`) with three changes, all static and public,
+like the current (ADR 0003):
+
+| Where | Field | Type | Meaning |
+|---|---|---|---|
+| Pairing | `sideTendency` | number, within ±0.5 | The side the pressure usually favours here, and how strongly: a speed change at the race area's sides, as a fraction, signed like the pressure side (positive: more pressure on the right-hand side looking downwind, which is the left of the course looking upwind). 0 for none. |
+| Geographic grid | `speedChange` (in place of `speedFactor`) | [[number]], each > −1 | Signed speed change at the node, as a fraction of the wind: positive faster (off a headland, down a channel), negative slower (shadow under high shore). The wind's speed there is multiplied by `1 + speedChange`, before the pressure field (#286). |
+| Geographic grid | `lanePreference` | [[number]], each 0…1 | Where pressure lanes like to form: 0 no preference, higher more. |
+
+How the pressure field reads them (`PressurePlan`, `LaneSpots`):
+
+- **Lane spots.** Every node with a lane preference is a spot at its across-the-wind coordinate
+  (`Venue.AcrossWind`), weighted by its preference; a lane is a band along the wind, so a spot anywhere up or
+  down the course draws it to the same place across. Each lane a key spawns forms at a spot, picked by weight
+  and within half a cell of it, with the chance the conditions' `pressureField.lanes.spotShare` gives (schema-4
+  conditions; 0.7 for schema 3), and anywhere across the course otherwise, as before. It then drifts as any lane
+  does. Only nodes within the lanes' reach across the course count.
+- **Side tendency.** Each race scales it by a multiplier window 0's key draws in the conditions'
+  `pressureField.side.tendencyScale` (schema-4 conditions; −0.5…1.5 for schema 3), revealed just before the start
+  like every key (ADR 0001), and adds the result to every window's pressure side target. So the side leans the
+  venue's way in most races, but in some the tendency is absent or reversed, and the keys still move the side
+  per window. A venue with a tendency needs window 0's key at every tick (`WindField.firstWindowNeeded`).
+
+**Old schemas.** A schema-1 file's `speedFactor` is its signed speed change read as `speedFactor − 1`, so its
+shadow is a negative change; the factor is used as written, never re-derived, so schema-1 venues sail exactly as
+before. A schema-1 pairing has no lane spots and no side tendency, and its pressure field draws nothing more.
+
 ## Validation
 
 The loader throws `DataFileError.malformed` for a missing field, a wrong type, an unknown enum value
@@ -220,7 +256,8 @@ don't check this yet.) It throws `invalidContent` for a venue that breaks any of
   of at least 1; each start line centre is on water.
 - Bearings are in [0, 360); grid `cellSizeMetres` > 0; grids have at least 2 × 2 nodes.
 - **Grid dimensions are consistent**: every value array has exactly `rows` rows of `columns` finite numbers.
-- Geographic `directionDeltaDegrees` in (-180, 180) and `speedFactor` > 0.
+- Geographic `directionDeltaDegrees` in (-180, 180) and `speedFactor` > 0 (schema 1); in schema 2,
+  `speedChange` > −1, `lanePreference` in 0…1 and `sideTendency` within ±0.5.
 - The current rules in the tables above.
 
 Land clear of the start line, marks and race area, and the estuary's channel inside it, are offline

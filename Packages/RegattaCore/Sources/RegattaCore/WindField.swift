@@ -126,10 +126,12 @@ public struct WindField: Hashable, Sendable {
 
     /// The first window whose key the wind at `tick` (from the origin on) needs: the one before its own
     /// (its starting knot), or with puffs the first whose puffs may still be alive (`PuffPlan.lookback`), or
-    /// with a pressure field the first its side or lanes read (`PressurePlan.lookback`), never below 0. Every
-    /// key from it through `tick`'s window is needed.
+    /// with a pressure field the first its side or lanes read (`PressurePlan.lookback`), or window 0 at a venue with
+    /// a side tendency, whose multiplier window 0's key draws (#287), never below 0. Every key from it through
+    /// `tick`'s window is needed.
     public func firstWindowNeeded(atTick tick: Int) -> Int {
-        max(0, windows.window(containing: tick) - max(1, puffPlan?.lookback ?? 0, pressurePlan?.lookback ?? 0))
+        if pressurePlan?.readsFirstKey == true { return 0 }
+        return max(0, windows.window(containing: tick) - max(1, puffPlan?.lookback ?? 0, pressurePlan?.lookback ?? 0))
     }
 
     /// Puffs and lulls alive at `tick`, for rendering and bots: those of the held keys from
