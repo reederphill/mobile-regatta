@@ -123,7 +123,7 @@ enum TuningCatalog {
         [
             TuningGroup(
                 id: "conditions", title: "Conditions",
-                note: "The wind's oscillation and puffs (#221, #220). Period, wobble and fan decide how often the favoured tack changes.",
+                note: "The wind's oscillation, puffs and pressure field (#221, #220, #286). Period, wobble, fan and lane bend decide how often the favoured tack changes; the pressure side and lanes, where the pressure is.",
                 applies: .nextRace,
                 sliders: [
                     TuningSlider(.conditions, "/shift/periodSeconds/min", "Period, shortest", unit: " s", 60...180, step: 5),
@@ -133,6 +133,25 @@ enum TuningCatalog {
                     TuningSlider(.conditions, "/puffs/fanDegrees", "Puff fan", unit: "°", 0...30, step: 0.5),
                     TuningSlider(.conditions, "/puffs/lullLoss/min", "Lull loss, least", 0...0.6, step: 0.01),
                     TuningSlider(.conditions, "/puffs/lullLoss/max", "Lull loss, most", 0...0.6, step: 0.01),
+                    // The pressure field (#286), in schema-3 conditions (version 4 on): "Not in this file" before.
+                    TuningSlider(.conditions, "/pressureField/side/strength", "Pressure side strength", 0...0.3, step: 0.01),
+                    TuningSlider(.conditions, "/pressureField/side/persistenceSeconds", "Pressure side persistence", unit: " s",
+                                 60...1200, step: 30),
+                    TuningSlider(.conditions, "/pressureField/side/bendDegrees", "Pressure side bend", unit: "°", 0...10, step: 0.5),
+                    TuningSlider(.conditions, "/pressureField/lanes/count", "Pressure lanes", 0...6, step: 0.5),
+                    TuningSlider(.conditions, "/pressureField/lanes/strength/min", "Lane strength, least", 0...0.3, step: 0.01),
+                    TuningSlider(.conditions, "/pressureField/lanes/strength/max", "Lane strength, most", 0...0.3, step: 0.01),
+                    TuningSlider(.conditions, "/pressureField/lanes/widthMetres/min", "Lane width, narrowest", unit: " m",
+                                 50...800, step: 10),
+                    TuningSlider(.conditions, "/pressureField/lanes/widthMetres/max", "Lane width, widest", unit: " m",
+                                 50...800, step: 10),
+                    TuningSlider(.conditions, "/pressureField/lanes/lifetimeSeconds/min", "Lane life, shortest", unit: " s",
+                                 30...600, step: 10),
+                    TuningSlider(.conditions, "/pressureField/lanes/lifetimeSeconds/max", "Lane life, longest", unit: " s",
+                                 30...600, step: 10),
+                    TuningSlider(.conditions, "/pressureField/lanes/driftMetresPerSecond", "Lane drift", unit: " m/s", 0...2,
+                                 step: 0.05),
+                    TuningSlider(.conditions, "/pressureField/lanes/bendDegrees", "Lane edge bend", unit: "°", 0...20, step: 0.5),
                 ]),
             TuningGroup(
                 id: "grooves", title: "Upwind grooves",

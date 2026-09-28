@@ -123,7 +123,13 @@ import Glibc
 ///    from that tick with the escape candidates, as she does from an earlier change's tick; with an escape,
 ///    16.1 on the right-of-way boat and the other exonerated. The golden sails fleet-rules@1, which runs no
 ///    escape simulation.
-public let simulationRevision = 20
+/// 21: the pressure field (#286, ADR 0008), on 20. Schema-3 conditions files (the version-4 files, which
+///    dev-venue@4 pairs) add a stateless pressure side and pressure lanes, keyed per 30 s window from each key's
+///    `puffSeed` on their own streams and laid across the pairing's across-the-wind coordinate (`Venue.AcrossWind`,
+///    derived at load from its geographic grid): `WindField.sample` scales the speed and bends the direction by
+///    them after the geographic grid and before the puffs, and needs keys further back (`PressurePlan.lookback`).
+///    Schema-1 and -2 files have no pressure field: their races sail as on 20.
+public let simulationRevision = 21
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

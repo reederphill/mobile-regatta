@@ -258,7 +258,7 @@ enum PuffFixtures {
 
     /// The water samples the wind at a few hundred places a frame through a sampler for the tick (#116): it
     /// gives `sample(_:tick:)`'s wind bit for bit, inside puffs, at their edges and clear of them, with a race
-    /// area and without, and needs the same keys.
+    /// area and without, with the pressure field (#286) and without, and needs the same keys.
     @Test func aSamplerForATickSamplesTheWindBitForBit() throws {
         let setup = try PuffFixtures.setup("gusty-offshore", raceSeed: 9)
         let (field, _) = try WindFixtures.field(setup, windSeed: 9, through: 40)
@@ -289,6 +289,43 @@ enum PuffFixtures {
             }
         }
         #expect(puffed > 1000 && edges > 100, "\(puffed) samples in a puff, \(edges) on an edge")
+
+        // With the pressure field (#286), flat and on dev-venue@4's bent grid, in its lanes and at their edges too.
+        for pairing in [nil, try PressureFixtures.devPairing("gusty-offshore"), try PressureFixtures.bentPairing("gusty-offshore")] {
+            let pressured = try PressureFixtures.setup("gusty-offshore", raceSeed: 9, pairing: pairing)
+            let (field, _) = try WindFixtures.field(pressured, windSeed: 9, through: 40)
+            let plan = try #require(field.pressurePlan)
+            let area = try #require(pressured.raceArea)
+            var inLanes = 0
+            for _ in 0..<30 {
+                let tick = rng.int(in: Self.w.start(of: 1)..<Self.w.start(of: 41))
+                let sampler = try field.sampler(atTick: tick)
+                var points = (0..<100).map { _ in
+                    area.centre + Vec2(rng.range(-1.2, 1.2) * area.halfWidth, rng.range(-1.2, 1.2) * area.halfLength)
+                }
+                // Across each live lane's middle and edges, on the race area's centre line upwind.
+                for lane in try field.pressureState(atTick: tick, plan).lanes {
+                    for d in [-1.0, -0.5, 0, 0.5, 1] {
+                        let target = lane.centre + d * lane.halfWidth
+                        var lo = -3 * area.halfWidth, hi = 3 * area.halfWidth
+                        for _ in 0..<50 {
+                            let mid = (lo + hi) / 2
+                            if plan.coordinate(at: PressureFixtures.point(area, across: mid, along: 0)) < target { lo = mid } else { hi = mid }
+                        }
+                        points.append(PressureFixtures.point(area, across: lo, along: 0))
+                    }
+                }
+                for p in points {
+                    let wind = try field.sample(p, tick: tick), fast = sampler.sample(p)
+                    #expect(fast.direction.bitPattern == wind.direction.bitPattern && fast.speed.bitPattern == wind.speed.bitPattern,
+                            "pressure field at \(p), tick \(tick): \(fast) vs \(wind)")
+                    if try field.pressureState(atTick: tick, plan).lanes.contains(where: {
+                        abs(plan.coordinate(at: p) - $0.centre) < $0.halfWidth
+                    }) { inLanes += 1 }
+                }
+            }
+            #expect(inLanes > 300, "\(inLanes) samples in a lane")
+        }
 
         let k = 12, tick = Self.w.start(of: k)
         for window in (k - 3)...k {

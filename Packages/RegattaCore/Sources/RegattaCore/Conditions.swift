@@ -13,11 +13,12 @@ import Foundation
 /// draws from them is in `WindSetup`.
 ///
 /// Schema 2 adds the keyed wind's tuning (`keyedWind`): the wobble and the timing of the trend and
-/// build. Schema 1 files still load, but only schema 2 can be sailed.
+/// build. Schema 1 files still load, but only schema 2 and later can be sailed. Schema 3 adds the pressure field
+/// (`pressureField`, #286, ADR 0008): the pressure side and pressure lanes.
 public struct Conditions: DataFileContent, Hashable {
     public static let kind = "conditions"
     public static let bundleDirectory = "conditions"
-    public static let supportedSchemaVersions = [1, 2]
+    public static let supportedSchemaVersions = [1, 2, 3]
 
     /// Every conditions entry oscillates with a main period in 60–180 s (ADR 0001). #221 made the shifts
     /// faster, about 60–100 s from version 3 of each file (90–180 s before, #10); with 30 s knots, periods
@@ -38,6 +39,9 @@ public struct Conditions: DataFileContent, Hashable {
     /// What the keyed wind (#75) reads beyond schema 1, or nil for a schema 1 file, which predates it.
     /// `WindKeyGenerator` refuses conditions without it.
     public let keyedWind: KeyedWind?
+    /// The pressure field's layers (#286, ADR 0008), or nil for a schema 1 or 2 file, whose wind has none and
+    /// sails as it always has.
+    public let pressureField: PressureField?
 
     /// The oscillating shift about the mean direction.
     public struct Shift: Hashable, Sendable {
@@ -103,9 +107,46 @@ public struct Conditions: DataFileContent, Hashable {
         public let buildRamp: ClosedRange<Double>?
     }
 
+    /// The pressure field (#286, ADR 0008): how much stronger or weaker the wind is than the course average at a
+    /// place, from two keyed layers laid across the venue's across-the-wind coordinate (`Venue.AcrossWind`).
+    /// Every value is a placeholder awaiting tuning on the #232 sliders.
+    public struct PressureField: Hashable, Sendable {
+        public let side: Side
+        public let lanes: Lanes
+
+        /// The pressure side: a slope in speed across the course, one side stronger, the other weaker.
+        public struct Side: Hashable, Sendable {
+            /// The largest speed change at the race area's sides, as a fraction (0.12 = 12 % stronger on the
+            /// pressure side's edge and 12 % weaker on the other's). Each redraw takes half to all of it.
+            public let strength: Double
+            /// Mean seconds between redraws of the pressure side (its size and which side): how long a side holds.
+            public let persistence: Double
+            /// Direction change at full `strength`, radians: veering where the pressure side makes the wind
+            /// stronger, backing where it makes it weaker.
+            public let bend: Double
+        }
+
+        /// Pressure lanes: soft bands of stronger wind lying along the wind, drifting slowly sideways.
+        public struct Lanes: Hashable, Sendable {
+            /// Mean number of lanes alive at once.
+            public let count: Double
+            /// A lane's peak gain down its middle, as a fraction of wind speed.
+            public let strength: ClosedRange<Double>
+            /// A lane's width across the wind, metres.
+            public let width: ClosedRange<Double>
+            /// Seconds from forming to gone, fading in and out.
+            public let lifetime: ClosedRange<Double>
+            /// Fastest sideways drift, metres per second across the wind; each window's key redraws it.
+            public let drift: Double
+            /// Largest direction change at a lane's edges, radians: veering on its right-hand edge (looking
+            /// downwind), backing on its left.
+            public let bend: Double
+        }
+    }
+
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2:
+        case 1, 2, 3:
             self = try JSONDecoder().decode(ConditionsSchema.self, from: fileData)
                 .conditions(id: header.id, schemaVersion: header.schemaVersion)
         default:
@@ -115,7 +156,7 @@ public struct Conditions: DataFileContent, Hashable {
     }
 
     fileprivate init(name: String, strength: ClosedRange<Double>, shift: Shift, trend: Trend?, build: Build?, puffs: Puffs,
-                     keyedWind: KeyedWind?) {
+                     keyedWind: KeyedWind?, pressureField: PressureField?) {
         self.name = name
         self.strength = strength
         self.shift = shift
@@ -123,16 +164,18 @@ public struct Conditions: DataFileContent, Hashable {
         self.build = build
         self.puffs = puffs
         self.keyedWind = keyedWind
+        self.pressureField = pressureField
     }
 }
 
 public typealias ConditionsFile = DataFile<Conditions>
 
-// MARK: - Schemas 1 and 2
+// MARK: - Schemas 1 to 3
 
-/// The conditions file, schema versions 1 and 2, as written: knots, degrees, seconds, metres, fractions.
+/// The conditions file, schema versions 1 to 3, as written: knots, degrees, seconds, metres, fractions.
 /// Schema 2 is schema 1 plus `shift.wobbleDegrees`, `trend.rampFraction`, `build.overSeconds` and
-/// `build.rampFraction` (#75): required in schema 2, refused in schema 1.
+/// `build.rampFraction` (#75): required from schema 2, refused in schema 1. Schema 3 is schema 2 plus
+/// `pressureField` (#286): required in schema 3, refused before it.
 private struct ConditionsSchema: Decodable {
     /// `{ "min": a, "max": b }`, in the unit its key names.
     struct Range: Decodable {
@@ -180,12 +223,35 @@ private struct ConditionsSchema: Decodable {
         let lullLoss: Range
     }
 
+    /// Schema 3.
+    struct PressureField: Decodable {
+        struct Side: Decodable {
+            let strength: Double
+            let persistenceSeconds: Double
+            let bendDegrees: Double
+        }
+
+        struct Lanes: Decodable {
+            let count: Double
+            let strength: Range
+            let widthMetres: Range
+            let lifetimeSeconds: Range
+            let driftMetresPerSecond: Double
+            let bendDegrees: Double
+        }
+
+        let side: Side
+        let lanes: Lanes
+    }
+
     let name: String
     let strength: Strength
     let shift: Shift
     let trend: Trend?
     let build: Build?
     let puffs: Puffs
+    /// Schema 3.
+    let pressureField: PressureField?
 
     func conditions(id: String, schemaVersion: Int) throws -> Conditions {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
@@ -267,6 +333,39 @@ private struct ConditionsSchema: Decodable {
                       "shift.wobbleDegrees, trend.rampFraction, build.overSeconds and build.rampFraction need schema 2")
         }
 
+        // Schema 3's pressure field: required in schema 3, refused before it.
+        var parsedPressureField: Conditions.PressureField?
+        if schemaVersion >= 3 {
+            guard let pressureField else {
+                throw DataFileError.malformed(kind: Conditions.kind, reason: "schema \(schemaVersion) needs pressureField")
+            }
+            let side = pressureField.side, lanes = pressureField.lanes
+            func degrees(_ value: Double, _ what: String) throws -> Double {
+                try check(value.isFinite && value >= 0 && value < 45, "\(what) must be 0…45°")
+                return deg2rad(value)
+            }
+            // A pressure field of 50 % or more could stop the wind.
+            let pressure: ClosedRange<Double> = 0...0.5
+            try check(pressure.contains(side.strength), "pressure side strength must be 0…0.5")
+            try check(side.persistenceSeconds.isFinite && side.persistenceSeconds >= WindWindows.seconds
+                        && side.persistenceSeconds <= 3600,
+                      "pressure side persistence must be \(WindWindows.seconds)…3600 s")
+            try check(lanes.count.isFinite && lanes.count >= 0 && lanes.count <= 8, "pressure lane count must be 0…8")
+            try check(lanes.driftMetresPerSecond.isFinite && lanes.driftMetresPerSecond >= 0 && lanes.driftMetresPerSecond <= 5,
+                      "pressure lane drift must be 0…5 m/s")
+            parsedPressureField = .init(
+                side: .init(strength: side.strength, persistence: side.persistenceSeconds,
+                            bend: try degrees(side.bendDegrees, "pressure side bend")),
+                lanes: .init(count: lanes.count,
+                             strength: try bounds(lanes.strength, in: pressure, "pressure lane strength"),
+                             width: try bounds(lanes.widthMetres, in: 1...10_000, "pressure lane width"),
+                             lifetime: try bounds(lanes.lifetimeSeconds, in: 1...3600, "pressure lane lifetime"),
+                             drift: lanes.driftMetresPerSecond,
+                             bend: try degrees(lanes.bendDegrees, "pressure lane bend")))
+        } else {
+            try check(pressureField == nil, "pressureField needs schema 3")
+        }
+
         return Conditions(
             name: name,
             strength: metresPerSecond(knots: knots.lowerBound)...metresPerSecond(knots: knots.upperBound),
@@ -274,7 +373,8 @@ private struct ConditionsSchema: Decodable {
             trend: parsedTrend,
             build: parsedBuild,
             puffs: parsedPuffs,
-            keyedWind: keyedWind
+            keyedWind: keyedWind,
+            pressureField: parsedPressureField
         )
     }
 }
