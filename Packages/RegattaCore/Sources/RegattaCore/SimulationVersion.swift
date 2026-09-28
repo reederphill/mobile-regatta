@@ -117,7 +117,13 @@ import Glibc
 ///    2 s horizon against the other's track: with no escape, rule 15 or 16.1 (16.1 only if holding her course
 ///    would have left one) is called on the right-of-way boat and the other is exonerated (43.1(b), on the
 ///    incident). Schema-1 to -3 files run none: their races sail as on 18.
-public let simulationRevision = 19
+/// 20: rule 16.1 on the incident's tick (#273), on 19. A course change first seen in the step to the incident
+///    no longer falls through to the Section A call for want of a tick to answer in: had the right-of-way boat
+///    held her course from the tick before, the keep-clear boat, clear of it on the incident's tick, answers
+///    from that tick with the escape candidates, as she does from an earlier change's tick; with an escape,
+///    16.1 on the right-of-way boat and the other exonerated. The golden sails fleet-rules@1, which runs no
+///    escape simulation.
+public let simulationRevision = 20
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
