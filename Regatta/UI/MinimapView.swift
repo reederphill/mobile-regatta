@@ -1,7 +1,7 @@
 import SwiftUI
 import RegattaCore
 
-/// Whole-course overview: the wind (`MinimapWind`), marks, start line and every boat. It is a small chart of the
+/// Whole-course overview: the puffs and lulls, marks, start line and every boat. It is a small chart of the
 /// water, on the water's own colour, so a puff reads darker and a lull lighter just as they do on the water (#224:
 /// the wind off screen shows here, not at the view's edges).
 struct MinimapView: View {
@@ -22,14 +22,22 @@ struct MinimapView: View {
                         y: size.height - offsetY - (p.y.clamped(to: minY...maxY) - minY) * scale)
             }
 
-            // The wind, under everything else: one field over the whole chart, a pixel every two points, drawn
-            // smoothly stretched. The chart's world rect, beyond the course's padded bounds where the aspect leaves
-            // room, so a puff beyond the course lies partly or wholly off the chart.
-            let world = CGRect(x: CGFloat(minX) - offsetX / scale, y: CGFloat(minY) - offsetY / scale,
-                               width: size.width / scale, height: size.height / scale)
-            if let wind = MinimapWind.image(puffs: hud.puffs, world: world, width: Int((size.width / 2).rounded(.up)),
-                                            height: Int((size.height / 2).rounded(.up)), style: .standard) {
-                context.draw(Image(decorative: wind, scale: 1).interpolation(.high), in: CGRect(origin: .zero, size: size))
+            // Under everything else, each in its tone and falling off to its rim like its shading on the water.
+            // Not clamped: one beyond the course lies partly or wholly off the chart.
+            for puff in hud.puffs {
+                let overlay = WaterTone.puffOverlay(intensity: puff.intensity, style: .standard)
+                guard overlay.alpha > 0 else { continue }
+                let center = CGPoint(x: offsetX + (puff.center.x - minX) * scale,
+                                     y: size.height - offsetY - (puff.center.y - minY) * scale)
+                let r = puff.radius * scale
+                let color = overlay.token.color
+                let gradient = Gradient(stops: [
+                    .init(color: color.opacity(overlay.alpha), location: 0),
+                    .init(color: color.opacity(overlay.alpha * 0.56), location: 0.5),
+                    .init(color: color.opacity(0), location: 1),
+                ])
+                context.fill(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: 2 * r, height: 2 * r)),
+                             with: .radialGradient(gradient, center: center, startRadius: 0, endRadius: r))
             }
 
             var line = Path()

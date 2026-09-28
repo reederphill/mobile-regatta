@@ -255,8 +255,7 @@ final class WaterNode: SKNode {
     /// A puff's texture: the profile, roughened by catspaws, patches of ruffled water where gusts land.
     private static func puffTexture(catspaw: Double) -> SKTexture {
         texture(pixels: 256) { u, v in
-            let noise = 0.65 * WaterHash.valueNoise(u * 16, v * 16, salt: 0x4341_5431)
-                + 0.35 * WaterHash.valueNoise(u * 40, v * 40, salt: 0x4341_5432)
+            let noise = 0.65 * valueNoise(u * 16, v * 16, salt: 0x4341_5431) + 0.35 * valueNoise(u * 40, v * 40, salt: 0x4341_5432)
             return profile(u, v) * (1 + catspaw * (2 * noise - 1))
         }
     }
@@ -266,7 +265,7 @@ final class WaterNode: SKNode {
     private static func whitecapTexture() -> SKTexture {
         texture(pixels: 64) { u, v in
             // Texture rows run down the image; the streak tiles' up (downwind) is its top, v = −1.
-            let ragged = 0.8 + 0.2 * WaterHash.valueNoise(u * 5, 0, salt: 0x4652_4F54)
+            let ragged = 0.8 + 0.2 * valueNoise(u * 5, 0, salt: 0x4652_4F54)
             let d2 = (u * u) / (ragged * ragged) + (v + 0.05) * (v + 0.05) * 16
             guard d2 < 1 else { return 0 }
             return (1 - d2) * (0.75 + 0.25 * min(1, max(0, -v * 5)))
@@ -355,5 +354,17 @@ final class WaterNode: SKNode {
             decode: nil, shouldInterpolate: true, intent: .defaultIntent
         ) else { preconditionFailure("couldn't make a \(width)×\(pixels)-pixel water texture") }
         return SKTexture(cgImage: image)
+    }
+
+    /// Smooth value noise, 0…1, on a unit lattice.
+    private static func valueNoise(_ x: Double, _ y: Double, salt: UInt64) -> Double {
+        let x0 = x.rounded(.down), y0 = y.rounded(.down)
+        let fx = x - x0, fy = y - y0
+        let sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy)
+        let i = Int(x0), j = Int(y0)
+        func at(_ di: Int, _ dj: Int) -> Double { WaterHash.unit(i + di, j + dj, 0, salt: salt) }
+        let top = at(0, 0) + (at(1, 0) - at(0, 0)) * sx
+        let bottom = at(0, 1) + (at(1, 1) - at(0, 1)) * sx
+        return top + (bottom - top) * sy
     }
 }

@@ -176,18 +176,6 @@ nonisolated enum WaterHash {
         return Double(x >> 11) / Double(UInt64(1) << 53)
     }
 
-    /// Smooth value noise, 0…1, on a unit lattice.
-    static func valueNoise(_ x: Double, _ y: Double, salt: UInt64) -> Double {
-        let x0 = x.rounded(.down), y0 = y.rounded(.down)
-        let fx = x - x0, fy = y - y0
-        let sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy)
-        let i = Int(x0), j = Int(y0)
-        func at(_ di: Int, _ dj: Int) -> Double { unit(i + di, j + dj, 0, salt: salt) }
-        let top = at(0, 0) + (at(1, 0) - at(0, 0)) * sx
-        let bottom = at(0, 1) + (at(1, 1) - at(0, 1)) * sx
-        return top + (bottom - top) * sy
-    }
-
     /// SplitMix64's finaliser.
     private static func mix(_ value: UInt64) -> UInt64 {
         var z = value &+ 0x9E37_79B9_7F4A_7C15
