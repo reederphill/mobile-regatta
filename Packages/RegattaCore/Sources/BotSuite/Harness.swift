@@ -96,6 +96,8 @@ struct RaceTally {
     /// Ticks before the gun in irons (#99), as `ironsTicks` counts them racing.
     private var preGunIronsTicks: [Int]
     private var edgeTicks: [Int]
+    /// Ticks on the water (`Boat.isOnCourse`), which `edgeTicks` counts among (#100).
+    private var onCourseTicks: [Int]
     private var markContacts: [Int]
     private var landContacts: [Int]
     private var boundaryContacts: [Int]
@@ -128,6 +130,7 @@ struct RaceTally {
         ironsTicks = zeros
         preGunIronsTicks = zeros
         edgeTicks = zeros
+        onCourseTicks = zeros
         markContacts = zeros
         landContacts = zeros
         boundaryContacts = zeros
@@ -173,8 +176,9 @@ struct RaceTally {
                 if boat.status == .racing { ironsTicks[seat] += 1 }
                 if boat.status == .prestart && race.tick < 0 { preGunIronsTicks[seat] += 1 }
             }
-            if boat.isOnCourse && area.inset(boat.position) < BotRaceHarness.edgeMargin {
-                edgeTicks[seat] += 1
+            if boat.isOnCourse {
+                onCourseTicks[seat] += 1
+                if area.inset(boat.position) < BotRaceHarness.edgeMargin { edgeTicks[seat] += 1 }
             }
             recordLeg(seat, boat, tick: race.tick)
         }
@@ -222,7 +226,8 @@ struct RaceTally {
             startSeconds: starts[seat].map { seconds($0.tick) },
             startLineSpot: starts[seat]?.spot,
             rowSpot: rowSpots[seat],
-            startSpot: style?.startSpot ?? 0.5
+            startSpot: style?.startSpot ?? 0.5,
+            onCourseSeconds: seconds(onCourseTicks[seat])
         )
     }
 }

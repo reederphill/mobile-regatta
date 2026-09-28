@@ -46,19 +46,22 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     public var rowSpot: Double = 0.5
     /// Where on the line her style means her to start (`BotStyle.startSpot`), on the same scale.
     public var startSpot: Double = 0.5
+    /// Seconds on the water (`Boat.isOnCourse`: before her start, OCS or racing), the time `edgeSeconds` is counted
+    /// over (#100): what the navigation gate's edge share is a share of.
+    public var onCourseSeconds: Double = 0
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
         "contactsToFoulsShare", "foulsAsOffender", "dsqMissedPenalty", "ocsCount", "edgeSeconds",
         "landContacts", "boundaryContacts", "beats", "preGunIronsSeconds", "startSeconds", "startLineSpot",
-        "rowSpot", "startSpot",
+        "rowSpot", "startSpot", "onCourseSeconds",
     ]
 
     private enum CodingKeys: String, CodingKey {
         case seat, tier, profile, skill, status, finished, place, ironsSeconds, markContacts, boatContacts
         case contactsEndingInFouls, contactsToFoulsShare, foulsAsOffender, dsqMissedPenalty, ocsCount
         case edgeSeconds, landContacts, boundaryContacts, beats
-        case preGunIronsSeconds, startSeconds, startLineSpot, rowSpot, startSpot
+        case preGunIronsSeconds, startSeconds, startLineSpot, rowSpot, startSpot, onCourseSeconds
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -87,6 +90,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(startLineSpot, forKey: .startLineSpot)
         try c.encode(rowSpot, forKey: .rowSpot)
         try c.encode(startSpot, forKey: .startSpot)
+        try c.encode(onCourseSeconds, forKey: .onCourseSeconds)
     }
 
     /// Whether her style means her to start in the line's pin third (#99).
@@ -393,6 +397,42 @@ public struct StartSummary: Codable, Hashable, Sendable {
     }
 }
 
+/// Navigation over a run (#100), over its all-National fleets of live bots (`TierMix.national`, `ProfileMix.live`) of
+/// every size, at every venue and in every conditions they sailed: what the thresholds' `navigation` limits hold. Whether
+/// the best bots sail the course cleanly: finish, turn every penalty inside its deadlines, keep off the race area's
+/// edge, and keep off the marks.
+public struct NavigationSummary: Codable, Hashable, Sendable {
+    /// Races of all-National live fleets.
+    public var races: Int
+    public var seats: Int
+    /// The venue × conditions pairings they sailed, each `venue × conditions` (data files as `id@version`), sorted.
+    public var pairings: [String]
+    /// The share of those seats that finished.
+    public var finishShare: Double
+    /// Their disqualifications for a penalty turn not started or completed in time (`SeatMetrics.dsqMissedPenalty`).
+    public var dsqMissedPenalty: Int
+    /// The share of their time on the water spent at the race area's edge: every seat's `edgeSeconds` over every
+    /// seat's `onCourseSeconds`.
+    public var edgeShare: Double
+    /// Mark contacts per boat per race: every seat's `markContacts` over the seats.
+    public var markContactsPerBoat: Double
+
+    /// Nil when no race was of an all-National live fleet.
+    init?(_ races: [RaceResult]) {
+        let races = races.filter { $0.cell.tierMix == .national && $0.cell.profileMix == .live }
+        guard !races.isEmpty else { return nil }
+        let seats = races.flatMap(\.seats)
+        self.races = races.count
+        self.seats = seats.count
+        pairings = Set(races.map { "\($0.cell.venue) × \($0.cell.conditions)" }).sorted()
+        finishShare = share(seats.filter(\.finished).count, of: seats.count)
+        dsqMissedPenalty = seats.reduce(0) { $0 + $1.dsqMissedPenalty }
+        let onCourse = seats.reduce(0) { $0 + $1.onCourseSeconds }
+        edgeShare = onCourse > 0 ? seats.reduce(0) { $0 + $1.edgeSeconds } / onCourse : 0
+        markContactsPerBoat = Double(seats.reduce(0) { $0 + $1.markContacts }) / Double(max(seats.count, 1))
+    }
+}
+
 /// One tier's seats over the whole run: what the thresholds hold it to.
 public struct TierSummary: Codable, Hashable, Sendable {
     public var seats: Int
@@ -431,7 +471,7 @@ public struct TierSummary: Codable, Hashable, Sendable {
 }
 
 /// A suite run's report (#97): the matrix, every race, each tier's and profile's summary, the skill gap, the
-/// fun pass (#238), the start (#99), and the gate's verdict.
+/// fun pass (#238), the start (#99), navigation (#100), and the gate's verdict.
 public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var simulationVersion: String
     public var matrix: BotMatrix
@@ -447,6 +487,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var funPass: FunPassSummary?
     /// The start (#99) over the all-National live ten-boat fleets; nil when none sailed.
     public var start: StartSummary?
+    /// Navigation (#100) over the all-National live fleets; nil when none sailed.
+    public var navigation: NavigationSummary?
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -475,9 +517,11 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         skillGap = SkillGapSummary(races.compactMap(\.skillGap))
         funPass = FunPassSummary(races)
         start = StartSummary(races)
+        navigation = NavigationSummary(races)
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
-        breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start)
+        breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start,
+                                       navigation: navigation)
         passed = breaches.isEmpty
     }
 
@@ -522,6 +566,12 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 + "(mean \(fixed(start.meanStartSeconds)) s after the gun), pre-gun irons \(fixed(start.meanPreGunIronsSeconds)) s/boat, "
                 + "pin third \(start.pinThirdShare.map { fixed($0) } ?? "-") of \(start.pinStyleFromCommitteeSeats) pin-style boats "
                 + "from committee slots")
+        }
+        if let navigation {
+            lines.append("navigation: \(navigation.races) all-National races, \(navigation.seats) boats over "
+                + "\(navigation.pairings.count) venue × conditions pairings, finished \(fixed(navigation.finishShare, 3)), "
+                + "dsq \(navigation.dsqMissedPenalty), edge \(fixed(navigation.edgeShare, 4)) of the time, "
+                + "marks \(fixed(navigation.markContactsPerBoat, 3))/boat/race")
         }
         lines.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms, max \(fixed(timings.maxMs, 3)) ms")
         lines.append(passed ? "gate: pass" : "gate: FAIL")
