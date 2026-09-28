@@ -201,9 +201,9 @@ enum EscapeFixture {
 
     /// #273: the windward boat sails half a degree higher than the leeward boat, 0.28 m off and opening, clear of
     /// the leeward boat's sweep. The leeward boat luffs hard, and her sweep reaches the windward boat on the very
-    /// tick her turn first counts as a course change: the windward boat has no tick to answer in. Held, the
-    /// leeward boat's course left the windward boat clear, so the luff took her room: rule 16.1 on the leeward
-    /// boat, the windward boat exonerated.
+    /// tick her turn first counts as a course change: the windward boat has no tick to answer in before it. Held,
+    /// the leeward boat's course left the windward boat clear then and room to stay clear after, so the luff took
+    /// her room: rule 16.1 on the leeward boat, the windward boat exonerated.
     @Test func sameTickLuffIntoTheKeepClearBoatIs16_1() throws {
         let changesCourse = try #require(try F.race().rules.incidents.escape.changesCourse)
         let (gap, converging, after) = (0.276, deg2rad(-0.5), 10)
@@ -218,15 +218,14 @@ enum EscapeFixture {
         #expect(race.boats[0].penaltyTurnsOwed == 1 && race.boats[1].penaltyTurnsOwed == 0)
     }
 
-    /// #273: the windward boat bears down on the leeward boat, 4° towards her. The leeward boat luffs, and her
-    /// sweep reaches the windward boat on the very tick her turn first counts as a course change; but holding her
-    /// course, the leeward boat's sweep hits the windward boat anyway a few ticks later, well inside the escape
-    /// horizon. The windward boat was failing to keep clear, and the luff took nothing from her: the Section A
-    /// call stands, rule 11 on the windward boat, no one exonerated.
+    /// #273: the windward boat bears down on the leeward boat, 6° towards her, 1.2 m off. The leeward boat luffs
+    /// hard, and her sweep reaches the windward boat on the very tick her turn first counts as a course change;
+    /// but holding her course, the leeward boat's sweep hits the windward boat anyway two ticks later, too soon for
+    /// any escape from the incident's tick. The windward boat was failing to keep clear, and the luff took nothing
+    /// from her: the Section A call stands, rule 11 on the windward boat, no one exonerated.
     @Test func sameTickLuffIntoABoatAlreadyFailingToKeepClearIsTheObligation() throws {
-        let escape = try F.race().rules.incidents.escape
-        let changesCourse = try #require(escape.changesCourse), horizon = RulesConfig.ticks(escape.horizon)
-        let (gap, converging, after) = (0.8, deg2rad(4), 53)
+        let changesCourse = try #require(try F.race().rules.incidents.escape.changesCourse)
+        let (gap, converging, after) = (1.2, deg2rad(6), 66)
 
         let (race, rate, luffed) = try luff(gap: gap, converging: converging, after: after, rudder: 1)
         let outcome = try #require(luffed)
@@ -238,7 +237,32 @@ enum EscapeFixture {
         let held = try #require(try luff(gap: gap, converging: converging, after: after, rudder: 0).outcome,
                                 "holding her course, the windward boat is swept anyway")
         #expect(held.call.rule == .windwardLeeward && held.call.offender == 1 && held.call.victim == 0)
-        #expect(held.tick > outcome.tick && held.tick - outcome.tick <= horizon, "\(held.tick - outcome.tick) ticks later")
+        #expect(held.tick - outcome.tick == 2, "\(held.tick - outcome.tick) ticks later")
+    }
+
+    /// #273: no edge in the timing. The windward boat bears down on the leeward boat, 6° towards her, 1.22 m off,
+    /// and the leeward boat luffs hard: after 66 ticks' approach her sweep reaches the windward boat a tick after
+    /// her turn first counts as a course change, after 67 on that very tick. Either way the windward boat answers
+    /// from the tick the change is first seen, against the leeward boat's held course, and an escape candidate
+    /// gets her clear: rule 16.1 on the leeward boat both times, the windward boat exonerated. She did have to
+    /// answer: sailing on as she was, the held course sweeps her.
+    @Test func sameTickAndOneTickEarlierLuffsGetTheSameCall() throws {
+        let changesCourse = try #require(try F.race().rules.incidents.escape.changesCourse)
+        let (gap, converging) = (1.22, deg2rad(6))
+        for (after, early) in [(66, 1), (67, 0)] {
+            let (race, rate, luffed) = try luff(gap: gap, converging: converging, after: after, rudder: 1)
+            let outcome = try #require(luffed)
+            #expect(rate.firstTick(above: changesCourse) == outcome.tick - early,
+                    "after \(after): the course change is first seen \(early) ticks before the incident's")
+            #expect(outcome.call.rule == .changingCourse && outcome.call.offender == 0 && outcome.call.victim == 1,
+                    "after \(after)")
+            #expect(outcome.exonerated == [1])
+            #expect(race.boats[0].penaltyTurnsOwed == 1 && race.boats[1].penaltyTurnsOwed == 0)
+        }
+
+        let held = try #require(try luff(gap: gap, converging: converging, after: 67, rudder: 0).outcome,
+                                "holding her course, the windward boat is swept")
+        #expect(held.call.rule == .windwardLeeward && held.call.offender == 1 && held.call.victim == 0)
     }
 
     /// ADR 0002: the same world and umpire memory, sailed on 100 times, make the same call, the same incident
