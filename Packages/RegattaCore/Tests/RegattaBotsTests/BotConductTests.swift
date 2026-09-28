@@ -9,6 +9,9 @@ import RegattaCore
 @Suite struct BotConductTests {
     /// A skill-1 bot: the most skilled there is.
     static let skill1 = BotStyle(skill: 1, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
+    /// Skills from none to the most: each tier band's ends and centre (#102's bands, Club 0.35…0.6, Regional …0.8,
+    /// National …1), and below Club.
+    static let everySkill = [0.0, 0.35, 0.475, 0.6, 0.7, 0.8, 0.9, 1.0]
 
     /// One boat's place in an encounter: where she is, her heading and speed, what her autohelm holds (her wind
     /// angle held as she sails it, unless given), and her status.
@@ -80,14 +83,16 @@ import RegattaCore
     }
 
     /// A bot at the helm of `seat`, deciding at 10 Hz on its `SeatView` as `BotDriver` does, with the tack she means to
-    /// sail set.
+    /// sail set: at `skill` with its weaknesses (#103), or with `weaknesses` if given; her own draws from her seat.
     struct Pilot {
         let seat: Int
         var brain: BotBrain
 
-        init(seat: Int, plannedTack: Tack?, race: Race) {
+        init(seat: Int, plannedTack: Tack?, race: Race, skill: Double = 1, weaknesses: BotWeaknesses? = nil) {
             self.seat = seat
-            brain = BotBrain(style: BotConductTests.skill1)
+            var style = BotConductTests.skill1
+            style.skill = skill
+            brain = BotBrain(style: style, seed: UInt64(seat + 1), weaknesses: weaknesses)
             brain.plannedTack = plannedTack ?? race.boats[seat].tack
         }
 
@@ -101,10 +106,13 @@ import RegattaCore
         }
     }
 
-    /// Sails `race` with both seats' bots for `seconds`: every event, and `each` after every step.
-    static func sail(_ race: Race, seconds: Double, planned: [Tack?] = [nil, nil],
-                     each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
-        var pilots = [0, 1].map { Pilot(seat: $0, plannedTack: planned[$0], race: race) }
+    /// Sails `race` with both seats' bots for `seconds`, at `skill` (skill 1 unless given) or with `weaknesses` (each
+    /// seat's, if given): every event, and `each` after every step.
+    static func sail(_ race: Race, seconds: Double, planned: [Tack?] = [nil, nil], skill: Double = 1,
+                     weaknesses: [BotWeaknesses?] = [nil, nil], each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
+        var pilots = [0, 1].map {
+            Pilot(seat: $0, plannedTack: planned[$0], race: race, skill: skill, weaknesses: weaknesses[$0])
+        }
         var kinds: [RaceEvent.Kind] = []
         for _ in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
             for i in pilots.indices { _ = pilots[i].drive(race) }
@@ -340,8 +348,12 @@ import RegattaCore
     /// brings that boat's closest approach over the horizon, sailing on, closer than it was on her heading before it,
     /// and inside `clearance` hull lengths. Checked tick by tick through the scripted encounters where one bot has
     /// right of way over the other, in whatever the wind does, but for a bot sailing within the mark-room she is
-    /// entitled to from the other (rule 18.2: the room the other must give her, #93).
-    @Test func rightOfWayBotNeverRuddersTowardAKeepClearBoat() throws {
+    /// entitled to from the other (rule 18.2: the room the other must give her, #93), or for a bot owing a penalty turn,
+    /// who keeps clear of every boat as she turns it (rule 21.2, #100). At every skill (#103): both bots sail with their
+    /// skill's weaknesses, misjudging encounters as it has them, and still neither ever turns towards a boat that must
+    /// keep clear of her.
+    @Test(arguments: BotConductTests.everySkill)
+    func rightOfWayBotNeverRuddersTowardAKeepClearBoat(skill: Double) throws {
         let clearance = 1.5
         var violations: [String] = []
         var checked = 0
@@ -353,7 +365,7 @@ import RegattaCore
             let changesCourse = try #require(escape.changesCourse)
             let length = race.boatClass.hull.length
             var headings = race.boats.map(\.heading)
-            _ = Self.sail(race, seconds: encounter.seconds, planned: encounter.planned) { race in
+            _ = Self.sail(race, seconds: encounter.seconds, planned: encounter.planned, skill: skill) { race in
                 defer { headings = race.boats.map(\.heading) }
                 for seat in 0..<2 where race.boats[seat].status == .racing {
                     let other = 1 - seat
@@ -362,6 +374,10 @@ import RegattaCore
                     // her: that's the room the other must give (#93 exonerates her).
                     let view = race.seatView(for: seat)
                     guard !view.own.markRoom.contains(where: { $0.entitled == seat && $0.owing == other }) else { continue }
+                    // Owing a penalty turn she turns it hard over (#89, #100), keeping clear of every boat under rule
+                    // 21.2 rather than holding rights: below Club's centre a bot sometimes owes one here, from a mark
+                    // she touched or an encounter she misjudged (#103).
+                    guard race.boats[seat].penaltyTurnsOwed == 0 else { continue }
                     checked += 1
                     let boat = race.boats[seat]
                     let rudder = race.heldInputs[seat].rudder
@@ -372,7 +388,7 @@ import RegattaCore
                     let now = Self.closestApproach(boat, heading: boat.heading, race.boats[other], horizon: escape.horizon)
                     let before = Self.closestApproach(boat, heading: headings[seat], race.boats[other], horizon: escape.horizon)
                     if now < length * clearance && now < before {
-                        violations.append("\(encounter.name): tick \(race.tick) seat \(seat) turned \(rad2deg(turned))° "
+                        violations.append("skill \(skill) \(encounter.name): tick \(race.tick) seat \(seat) turned \(rad2deg(turned))° "
                             + "with rudder \(rudder) towards seat \(other) (\(before) → \(now) m)")
                     }
                 }
@@ -381,5 +397,98 @@ import RegattaCore
         #expect(checked > 1_000, "right of way held in the encounters")
         #expect(courseChanges > 0, "the right-of-way bots changed course by the rudder somewhere")
         #expect(violations.isEmpty, "\(violations.prefix(20).joined(separator: "\n"))")
+    }
+
+    // MARK: - Misjudging (#103)
+
+    /// #103: the chance a bot misjudges an encounter falls with her skill, continuously, from certain at skill 0 to none
+    /// from National's band up (placeholders): Club's centre misjudges more than Regional's, and National's none.
+    @Test func ruleMisjudgeRateFallsWithSkillToNoneAtNational() {
+        let skills = stride(from: 0.0, through: 1.0, by: 0.01).map { $0 }
+        let rates = skills.map { BotWeaknesses(skill: $0).ruleMisjudgeRate }
+        for (a, b) in zip(rates, rates.dropFirst()) { #expect(b <= a) }
+        for (a, b) in zip(rates, rates.dropFirst()) { #expect(a - b < 0.03, "continuous in skill") }
+        #expect(rates.first == 1)
+        #expect(rates.allSatisfy { $0 >= 0 && $0 <= 1 })
+        let national = BotTier.national.skillBand
+        #expect(zip(skills, rates).allSatisfy { !national.contains($0) || $1 == 0 }, "none in National's band")
+        func centre(_ tier: BotTier) -> Double { BotWeaknesses(skill: tier.skill(at: 0.5)).ruleMisjudgeRate }
+        #expect(centre(.club) > centre(.regional) && centre(.regional) > 0 && centre(.national) == 0,
+                "club \(centre(.club)), regional \(centre(.regional))")
+        #expect(BotWeaknesses.none(skill: 0).ruleMisjudgeRate == 0, "a bot-suite profile misjudges nothing")
+        #expect(BotWeaknesses.misjudgeScope == [.portStarboard, .windwardLeeward, .clearAstern, .givingMarkRoom])
+    }
+
+    /// #103: how far ahead she looks keeping clear grows with her skill, 2.5 s at 0 to 4.5 s at 1, #99's and #101's
+    /// lookahead as it was, for a live bot and a bot-suite profile alike; her brain looks that far.
+    @Test func keepClearLookaheadGrowsWithSkill() {
+        for skill in stride(from: 0.0, through: 1.0, by: 0.05) {
+            let lookahead = BotWeaknesses(skill: skill).keepClearLookahead
+            #expect(abs(lookahead - (2.5 + 2 * skill)) < 1e-12)
+            #expect(BotWeaknesses.none(skill: skill).keepClearLookahead == lookahead)
+            var style = Self.skill1
+            style.skill = skill
+            #expect(BotBrain(style: style).keepClearLookahead == lookahead)
+            #expect(BotBrain(style: style, profile: .baseline).keepClearLookahead == lookahead)
+        }
+    }
+
+    /// Skill-1 weaknesses (none), but misjudging every encounter in scope at `rate`.
+    static func misjudging(_ rate: Double) -> BotWeaknesses {
+        var weaknesses = BotWeaknesses(skill: 1)
+        weaknesses.ruleMisjudgeRate = rate
+        return weaknesses
+    }
+
+    /// #103, #19 "they foul only by misjudging": a port boat that misjudges the encounter believes she holds her rights
+    /// and sails on into the starboard boat, and is called under rule 10; judging it right, she ducks and nobody is
+    /// called. The starboard boat holds her course throughout.
+    @Test func misjudgingPortBoatSailsOnAndIsCalled() throws {
+        let encounter = Self.portStarboard(seed: 11, early: 0, running: false)
+        let judged = Self.sail(try encounter.race(), seconds: encounter.seconds, planned: encounter.planned,
+                               weaknesses: [nil, Self.misjudging(0)])
+        #expect(Self.calls(judged).isEmpty)
+        let misjudged = Self.sail(try encounter.race(), seconds: encounter.seconds, planned: encounter.planned,
+                                  weaknesses: [nil, Self.misjudging(1)])
+        let calls = Self.calls(misjudged)
+        #expect(calls.first == "10 on 1", "\(calls)")
+        #expect(!calls.contains { $0.hasSuffix("on 0") }, "\(calls)")
+    }
+
+    /// #103: she judges an encounter once, keeps that judgement while the other boat is near and forgets it once it is
+    /// beyond `keepClearRange`; a bot that can't misjudge draws nothing, and before her start nobody judges anything.
+    @Test func encountersAreJudgedOnceAndOnlyWhenMisjudgingIsPossible() throws {
+        let encounter = Self.portStarboard(seed: 11, early: 0, running: false)
+        let race = try encounter.race()
+        // Sailing on, nobody at the helm, until they are near each other.
+        for _ in 0..<(3 * Race.tickRate) { race.step() }
+        let port = race.seatView(for: 1)
+        #expect((port.others[0].position - port.own.position).length < BotBrain.keepClearRange)
+        var brain = BotBrain(style: Self.skill1, seed: 7, weaknesses: Self.misjudging(1))
+        brain.plannedTack = .port
+        _ = brain.decide(port)
+        #expect(brain.misjudged == [0: true])
+        let drawn = brain.rng
+        _ = brain.decide(port)
+        #expect(brain.misjudged == [0: true])
+        var once = brain.rng, then = drawn
+        #expect(once.next() == then.next(), "judged once an encounter")
+        var never = BotBrain(style: Self.skill1, seed: 7, weaknesses: Self.misjudging(0))
+        never.plannedTack = .port
+        var untouched = never.rng
+        _ = never.decide(port)
+        #expect(never.misjudged.isEmpty)
+        #expect(never.rng.next() == untouched.next(), "no draw")
+        // Beyond `keepClearRange`, she forgets it.
+        var far = try encounter.race().exportSnapshot()
+        far.seats[0].boat.position = far.seats[1].boat.position + Vec2(x: 0, y: BotBrain.keepClearRange * 2)
+        let apart = try encounter.race()
+        try apart.importSnapshot(far)
+        _ = brain.decide(apart.seatView(for: 1))
+        #expect(brain.misjudged.isEmpty)
+        // The starboard boat owes the port boat nothing: nothing to judge.
+        var starboard = BotBrain(style: Self.skill1, seed: 7, weaknesses: Self.misjudging(1))
+        _ = starboard.decide(race.seatView(for: 0))
+        #expect(starboard.misjudged.isEmpty)
     }
 }
