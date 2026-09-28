@@ -29,7 +29,8 @@ let package = Package(
             ]
         ),
         // Bots sail seats through RegattaCore's public input API only (#60), on the server and the device.
-        .target(name: "RegattaBots", dependencies: ["RegattaCore"]),
+        // The bot-tier file (#102): each tier's skill band and a Mixed fleet's shares, versioned, byte for byte.
+        .target(name: "RegattaBots", dependencies: ["RegattaCore"], resources: [.copy("bot-tiers@1.json")]),
         .executableTarget(name: "regatta-replay", dependencies: ["RegattaCore"]),
         // regatta-replay is a dependency so `swift test` builds it: the golden test runs it as its own process.
         .testTarget(

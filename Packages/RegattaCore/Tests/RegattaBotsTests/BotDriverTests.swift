@@ -1,5 +1,5 @@
 import Testing
-import RegattaCore
+@testable import RegattaCore
 @testable import RegattaBots
 
 /// A race for bot tests: `seats` (by default seat 0 human and seven bots) and the wind seed derived
@@ -178,6 +178,10 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         _ = botRace.drainEvents()
         let copy = Race(setup: botRace.setup, windSeed: try #require(botRace.windSeed))
         try copy.importSnapshot(botRace.exportSnapshot())
+        // The umpire's memory is the authoritative race's own, never in a snapshot (#88): a snapshot continues bit
+        // for bit only while no incident is open, and a fleet may have one open at any tick. The copy takes it too,
+        // so what it follows the bot race on is the inputs alone.
+        copy.umpire = botRace.umpire
         #expect(copy.digest() == botRace.digest())
         for _ in 0..<600 {
             sail(botRace, &bots, ticks: 1)

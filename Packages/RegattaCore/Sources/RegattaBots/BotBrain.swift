@@ -1,41 +1,64 @@
 import RegattaCore
 
-/// A bot's hidden, seeded style (#19): where it starts, how early it risks being, how it serves
-/// penalties, and a skill value. Drawn from the bot's own seed (`BotDriver.seed`), never from the
-/// race's streams, so changing a style never moves placement or wind. Tuning it needs no simulation
-/// version bump: the race log holds the inputs a bot applied, and replays never run brains (ADR 0002).
+/// A bot's hidden, seeded style (#19, #102): where on the line she starts, which side of the course she favours,
+/// how much risk she takes at the start, how willing she is to tack and how she engages the boats around her, and
+/// the skill she sails at. No named personalities: every field is its own draw. The style is drawn from the bot's own
+/// seed (`BotDriver.seed`), never from the race's streams, so changing a style never moves placement or wind; the
+/// skill is an input (a tier's band, or a rating), never drawn here. Tuning it needs no simulation version bump:
+/// the race log holds the inputs a bot applied, and replays never run brains (ADR 0002).
 public struct BotStyle: Hashable, Sendable {
-    /// 0…1. Today it gates shift-playing and sets the keep-clear look-ahead; #102 grows it into the tiers.
+    /// 0…1: what her weaknesses are (`BotWeaknesses(skill:)`). A tier's band (`BotTier`) or a rating sets it.
     public var skill: Double
-    /// Where on the line to start, 0 = pin, 1 = committee boat.
+    /// Her line end: where on the line to start, 0 = pin, 1 = committee boat.
     public var startSpot: Double
     /// Where on the line to finish, 0 = pin, 1 = committee boat.
     public var finishSpot: Double
-    /// Seconds she adds to her time at the line, as far as her skill lets it show (#99, `BotBrain.startArrival`):
-    /// negative makes her earlier, though she never means to be over at the gun.
+    /// Her start risk: seconds she adds to her time at the line, as far as her start timing error shows it
+    /// (`BotWeaknesses.startTiming`, `BotBrain.startArrival`): negative makes her earlier, though she never means to
+    /// be over at the gun.
     public var timingSlack: Double
     /// Hard over to this side (−1 port, 1 starboard) for penalty turns in open water; near a mark she turns
     /// away from it (#89).
     public var penaltyDirection: Double
+    /// The side of the course she favours, −1 the left (looking upwind) … 1 the right: she sails her beats' and
+    /// runs' corridor (`Tactics.corridor`) shifted that way by up to half its width.
+    public var favouredSide: Double
+    /// How willing she is to tack, 0…1: the willing tack on smaller shifts, sooner after the last tack.
+    public var tackWillingness: Double
+    /// How she engages the boats around her, 0 sailing her own race … 1 combative (#223): fleet tactics (#234) read it.
+    public var engagement: Double
+    /// −1…1: which way, and how far, she misreads the start line's bias (`BotWeaknesses.lineBiasMisread`).
+    public var lineBiasDraw: Double
 
-    public init(skill: Double, startSpot: Double, finishSpot: Double, timingSlack: Double, penaltyDirection: Double) {
+    public init(skill: Double, startSpot: Double, finishSpot: Double, timingSlack: Double, penaltyDirection: Double,
+                favouredSide: Double = 0, tackWillingness: Double = 0.5, engagement: Double = 0.5, lineBiasDraw: Double = 0) {
         self.skill = skill
         self.startSpot = startSpot
         self.finishSpot = finishSpot
         self.timingSlack = timingSlack
         self.penaltyDirection = penaltyDirection
+        self.favouredSide = favouredSide
+        self.tackWillingness = tackWillingness
+        self.engagement = engagement
+        self.lineBiasDraw = lineBiasDraw
     }
 
-    /// The prototype brain's draws, in its order.
-    public init(rng: inout SplitMix64) {
-        skill = rng.range(0.35, 1)
+    /// A style drawn from `rng` (the bot's own seed), sailing at `skill`.
+    public init(skill: Double, rng: inout SplitMix64) {
+        self.skill = skill
+        // The draws before #102 keep their places, so a seed's line end, finish spot, start risk and penalty turn
+        // are what they were: the skill the prototype drew here (now the tier's draw, `BotTier.skillDraw`) and its
+        // hold depth are consumed, not used.
+        _ = rng.unit()
         startSpot = rng.range(0.1, 0.9)
         finishSpot = rng.range(0.6, 0.85)
-        // The prototype's hold depth, which the start sets from the time left since #99: still drawn, so the
-        // draws after it stay put.
         _ = rng.range(18, 35)
-        timingSlack = rng.range(-2.5, 5) * (1.3 - skill)
+        timingSlack = rng.range(-2.5, 5)
         penaltyDirection = rng.bool() ? 1 : -1
+        favouredSide = rng.range(-1, 1)
+        tackWillingness = rng.unit()
+        engagement = rng.unit()
+        lineBiasDraw = rng.range(-1, 1)
     }
 }
 
@@ -82,12 +105,31 @@ struct BotBrain: Sendable {
     /// She gave a penalty turn up to keep clear (rule 21.2, `penaltyInput`) and turns it the other way, since she
     /// last owed none.
     var penaltyGivenUp = false
+    /// Radians into her current penalty turn when she last looked (`OwedPenalty.progress`): a drop means she has
+    /// just served one and the next is starting (`penaltyInput`).
+    var penaltyProgress = 0.0
     /// What she has made of her own wind and speed so far (`observe`).
     var senses = Senses()
+    /// What her skill costs her (#102): a live bot's, from her skill; a bot-suite profile's, none.
+    let weaknesses: BotWeaknesses
+    /// Her own draws as she sails (#102): her misjudged laylines and groove choices. From her own seed, on a stream
+    /// of its own, never the race's.
+    var rng: SplitMix64
+    /// Her layline misjudgement for the leg she's on (`BotWeaknesses.laylineMisjudge`): the leg, and radians past
+    /// the layline she tacks or gybes onto it (negative: short of it).
+    var laylineError: (leg: Int, error: Double)?
+    /// Her groove choice (`BotWeaknesses.angleMissRate`): radians off the groove she sails, past its snap (0: in
+    /// it), until the race clock reaches `until`.
+    var grooveMiss = (offset: 0.0, until: -Double.infinity)
 
-    init(style: BotStyle, profile: BotProfile? = nil) {
+    /// The stream of her seed her own draws come from.
+    static let brainStream: UInt64 = 0x6272_6169_6e64_7277 // "braindrw"
+
+    init(style: BotStyle, profile: BotProfile? = nil, seed: UInt64 = 0, weaknesses: BotWeaknesses? = nil) {
         self.style = style
-        tactics = Tactics(profile: profile, skill: style.skill)
+        self.weaknesses = weaknesses ?? (profile == nil ? BotWeaknesses(skill: style.skill) : .none(skill: style.skill))
+        tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
+        rng = SplitMix64(seed: seed, stream: Self.brainStream)
     }
 
     private var skill: Double { style.skill }
@@ -113,7 +155,7 @@ struct BotBrain: Sendable {
         let desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
         if let heading = evasiveHeading(boat, view, desired: desired) {
             let ease = aim.ease && aim.tack == boat.tack || easesKeepingClear(boat, view, heading: heading)
-            return BotDecision(input: steer(boat, toHeading: heading, view).eased(ease))
+            return BotDecision(input: clearingQuarter(boat, view, steer(boat, toHeading: heading, view).eased(ease)))
         }
         if aim.tack != boat.tack {
             if canTap(boat, view) {
@@ -132,9 +174,9 @@ struct BotBrain: Sendable {
                     ? Aim(angle: max(sailingAngle(boat), Self.returnAngle), tack: boat.tack)
                     : .groove(.upwind, tack: boat.tack, angle: grooveAngle(.upwind, boat, view))
             }
-            return BotDecision(input: holdingCourse(boat, view, helm(boat, to: own, view)))
+            return BotDecision(input: clearingQuarter(boat, view, holdingCourse(boat, view, helm(boat, to: own, view))))
         }
-        return BotDecision(input: holdingCourse(boat, view, helm(boat, to: aim, view).eased(aim.ease)))
+        return BotDecision(input: clearingQuarter(boat, view, holdingCourse(boat, view, helm(boat, to: aim, view).eased(aim.ease))))
     }
 
     // MARK: - Penalty turns
@@ -178,7 +220,18 @@ struct BotBrain: Sendable {
         guard let owed = b.penalty else {
             penaltyTurn = nil
             penaltyGivenUp = false
+            penaltyProgress = 0
             return nil
+        }
+        // Between one turn and the next she owes, with a mark close aboard: she stops turning and sails clear of it
+        // before the next, as she would before her first (`startPenaltyTurn`). Turning on there sweeps the same
+        // circle, and a circle that touched the mark touches it again, owing another turn each time round (#102).
+        let servedOne = owed.progress < penaltyProgress - .pi
+        penaltyProgress = owed.progress
+        if servedOne, penaltyTurn != nil, let mark = nearestMark(b, view),
+           mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance, canPutOffTurn(owed, view) {
+            penaltyTurn = nil
+            penaltyGivenUp = false
         }
         let keepClear = owed.isStarted && b.status == .racing ? penaltyKeepClear(b, view) : nil
         guard let turn = penaltyTurn ?? startPenaltyTurn(b, view, owed) else {
@@ -413,7 +466,8 @@ struct BotBrain: Sendable {
                     let room = mark.radius + view.boatClass.hull.beam + Self.markClearance + Self.layMargin
                     return Self.windwardApproach(from: b.position, tack: b.tack, mark: m, room: room,
                                                  fetch: m + side * 6 + approach * 4, wind: b.windDirection,
-                                                 groove: grooveAngle(.upwind, b, view), upwind: c.upwind)
+                                                 groove: grooveAngle(.upwind, b, view), upwind: c.upwind,
+                                                 overstand: Self.overstand + (laylineError.map { $0.leg == b.legIndex ? $0.error : 0 } ?? 0))
                 }
                 if b.roundingStage == 0 {
                     return detour(from: b.position, to: m + side * 6 + approach * 4, around: m,
@@ -467,7 +521,7 @@ struct BotBrain: Sendable {
     /// a reach and a tack back (#231). `tack` is her tack, `wind` the wind's direction, `groove` her upwind
     /// groove angle to it, `upwind` the course's upwind direction.
     static func windwardApproach(from position: Vec2, tack: Tack, mark: Vec2, room: Double, fetch: Vec2,
-                                 wind w: Double, groove up: Double, upwind: Vec2) -> Vec2 {
+                                 wind w: Double, groove up: Double, upwind: Vec2, overstand: Double = overstand) -> Vec2 {
         if wrapAngle((fetch - position).bearing - w) <= -(up - overstand) { return fetch }
         let closeHauled = Vec2.heading(w - up)
         let toMark = mark - position
@@ -488,7 +542,10 @@ struct BotBrain: Sendable {
     /// downwind groove on a gybe likewise, or straight there as a wind angle when it's a reach (the
     /// laylines and the reach both expressed as the angle to the wind, ADR 0007). Her tactics choose the
     /// tack inside the corridor, and may pinch or foot off the groove.
-    mutating func navigate(_ b: SeatView.OwnBoat, to target: Vec2, _ view: SeatView) -> Aim {
+    mutating func navigate(_ b: SeatView.OwnBoat, to mark: Vec2, _ view: SeatView) -> Aim {
+        // Upstream of it by the set she allows for (#102): none at Club, the forecast's at National.
+        let target = mark - currentAllowance(b, view, to: mark) * secondsToSail(b, to: mark)
+        let overstand = laylineOverstand(b)
         let toTarget = target - b.position
         let distance = toTarget.length
         let bearing = toTarget.bearing
@@ -496,8 +553,12 @@ struct BotBrain: Sendable {
         let offWind = abs(wrapAngle(bearing - w))
         let up = grooveAngle(.upwind, b, view)
         let down = grooveAngle(.downwind, b, view)
-        let lateral = (b.position - target).dot(Vec2.heading(w).rightPerp)
         let corridor = max(20, distance * tactics.corridor)
+        // Her favoured side shifts the corridor on the leg, not at its end: it fades out over her last
+        // `tacticalRange` or so, so the corridor closes on her mark and never has her tack onto a board that
+        // sails her below its layline, into it.
+        let bias = tactics.corridorBias * min(max(distance / Self.tacticalRange - 1, 0), 1)
+        let lateral = (b.position - target).dot(Vec2.heading(w).rightPerp) - bias * corridor
 
         if offWind < up + deg2rad(2) {
             // Where the target bears from her: to the right of the wind positive.
@@ -507,15 +568,16 @@ struct BotBrain: Sendable {
                 tack = .port
             } else if lateral > corridor {
                 tack = .starboard
-            } else if tack == .starboard && relative >= up + Self.overstand {
+            } else if tack == .starboard && relative >= up + overstand {
                 tack = .port // on the port layline
-            } else if tack == .port && relative <= -(up + Self.overstand) {
+            } else if tack == .port && relative <= -(up + overstand) {
                 tack = .starboard // on the starboard layline
             } else if distance > Self.tacticalRange {
                 tack = upwindTack(b, view, planned: tack)
             }
             setTack(tack, view)
-            return upwindAim(b, view, tack: tack, relative: relative, distance: distance)
+            let aim = upwindAim(b, view, tack: tack, relative: relative, distance: distance)
+            return distance > Self.tacticalRange ? missingGroove(aim, b, view) : aim
         }
 
         if offWind > down - deg2rad(2) {
@@ -527,15 +589,16 @@ struct BotBrain: Sendable {
                 gybe = .port
             } else if lateral > corridor {
                 gybe = .starboard
-            } else if gybe == .starboard && fromDeadDownwind <= -(.pi - down + Self.overstand) {
+            } else if gybe == .starboard && fromDeadDownwind <= -(.pi - down + overstand) {
                 gybe = .port // on the port layline
-            } else if gybe == .port && fromDeadDownwind >= .pi - down + Self.overstand {
+            } else if gybe == .port && fromDeadDownwind >= .pi - down + overstand {
                 gybe = .starboard // on the starboard layline
             } else if distance > Self.tacticalRange {
                 gybe = downwindGybe(b, view, planned: gybe)
             }
             setTack(gybe, view)
-            return downwindAim(b, view, aim: .groove(.downwind, tack: gybe, angle: down))
+            let aim = Aim.groove(.downwind, tack: gybe, angle: down)
+            return downwindAim(b, view, aim: distance > Self.tacticalRange ? missingGroove(aim, b, view) : aim)
         }
 
         plannedTack = b.tack
@@ -656,10 +719,46 @@ struct BotBrain: Sendable {
             guard along > 0, along < max(b.speed, 1) * 3 + 3 else { continue }
             guard abs(offset.cross(ahead)) < obstacle.radius + view.boatClass.hull.beam + Self.markClearance else { continue }
             let markIsToStarboard = offset.dot(ahead.rightPerp) > 0
-            return sailable(desired + (markIsToStarboard ? -1 : 1) * deg2rad(30), wind: b.windDirection)
+            let turned = desired + (markIsToStarboard ? -1 : 1) * deg2rad(30)
+            let away = sailable(turned, wind: b.windDirection)
+            // Close-hauled with the mark to leeward, away from it is into the wind: she shoots it, luffing into the
+            // no-go zone on her way (#102's fix loop), rather than holding her groove into it.
+            guard abs(wrapAngle(away - turned)) > 1e-9,
+                  abs(offset.cross(.heading(away))) < obstacle.radius + view.boatClass.hull.beam + Self.markClearance
+            else { return away }
+            let side: Double = wrapAngle(b.windDirection - desired) >= 0 ? 1 : -1
+            return b.windDirection - side * Self.shootAngle
         }
         return nil
     }
+
+    /// `input`, unless its rudder would swing her stern into a mark on her quarter (#102's fix loop): a boat pivots
+    /// about her middle, so turning away from a mark alongside her aft swings her quarter onto it, and each touch
+    /// costs her a turn; slowed by it, she touched it again every time she turned off it. While it is there she turns,
+    /// gently, the other way, her bow away from it, until it is past her stern. Only once she has started: before
+    /// the gun the line's ends are the marks she works about, and turning off her plan there can carry her over
+    /// the line (#99's takeover).
+    func clearingQuarter(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput) -> BoatInput {
+        guard b.status != .prestart, b.status != .ocs else { return input }
+        let rudder = input.rudderValue
+        guard abs(rudder) > Autohelm.deadBand else { return input }
+        let hull = view.boatClass.hull
+        for obstacle in view.course.obstacles {
+            let offset = obstacle.position - b.position
+            let along = offset.dot(b.forward)
+            guard along < 0, along > -(hull.length / 2 + obstacle.radius + Self.markClearance) else { continue }
+            let lateral = offset.dot(b.forward.rightPerp)
+            guard abs(lateral) < obstacle.radius + hull.beam / 2 + Self.markClearance else { continue }
+            // Rudder to starboard (+) swings her stern to port (−), and the other way about.
+            guard (rudder > 0) == (lateral < 0) else { continue }
+            return BoatInput(rudder: (lateral > 0 ? 1 : -1) * Self.leastRudder, ease: input.ease)
+        }
+        return input
+    }
+
+    /// Radians off the wind she luffs to, shooting a mark close to leeward of her groove (`avoidMarks`): inside the
+    /// no-go zone, on her own tack, carrying her way past it.
+    static let shootAngle = deg2rad(15)
 
     /// Seconds of sailing ahead she looks for the race area's edge.
     static let edgeLookahead = 3.0

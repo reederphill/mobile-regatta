@@ -4,7 +4,7 @@
   "conditions": ["classic-oscillating@3", "gusty-offshore@3", "light-and-patchy@3", "sea-breeze@3"],
   "tideStatesDegrees": [0],
   "fleetSizes": [2, 5, 10, 16],
-  "tierMixes": ["seeded", "club", "regional", "national", "mixed"],
+  "tierMixes": ["club", "regional", "national", "mixed"],
   "profileMixes": ["live", "skillGap", "funPass"],
   "laps": 2,
   "capSecondsAfterGun": 1500

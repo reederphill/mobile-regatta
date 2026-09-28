@@ -1,8 +1,8 @@
 import RegattaCore
 
 /// What a bot plays beyond sailing the groove to the marks (#231): when she tacks or gybes, and when she
-/// leaves the groove. Set by a bot-suite profile (`BotProfile`), or for a live bot by its skill until #102
-/// grows the tiers and #234 the fleet tactics.
+/// leaves the groove. Set by a bot-suite profile (`BotProfile`), or for a live bot by her skill's weaknesses and her
+/// style (#102) until #234 adds the fleet tactics.
 struct Tactics: Sendable, Equatable {
     /// She tacks on a header past this, radians, against the course axis; nil: never on a header.
     var headerThreshold: Double?
@@ -14,6 +14,9 @@ struct Tactics: Sendable, Equatable {
     /// it: the corridor. The baseline's narrow one funnels her in with a tack or gybe each time it halves; a
     /// wide one leaves the turns to the laylines and the shifts.
     var corridor: Double
+    /// Her favoured side (`BotStyle.favouredSide`, a live bot's): the corridor shifted that way by this share of
+    /// its width, −0.5 (left, looking upwind) … 0.5 (right).
+    var corridorBias = 0.0
     /// Downwind, she gybes on a shift past this that swings her away from her mark, radians; nil: never.
     var downwindShiftThreshold: Double?
     /// Off the plane, she heads up to plane again, then bears away to the groove.
@@ -29,11 +32,26 @@ struct Tactics: Sendable, Equatable {
     /// Upwind, she tacks with the nearest boat close behind her, to stay between it and the mark.
     var covers: Bool
 
-    init(profile: BotProfile?, skill: Double) {
+    /// Metres ahead she notices puffs and lulls (`BotWeaknesses.puffPerception`), when she seeks them.
+    var puffRange = BotWeaknesses.fullPuffPerception
+    /// How well she times cover and lee-bow, 0…1 (`BotWeaknesses.tacticalQuality`, #223): she covers a boat within
+    /// this share of `BotBrain.coverRange` (and more of it the better she is); #234's fleet tactics read it too.
+    var tacticalQuality = 1.0
+
+    init(profile: BotProfile?, skill: Double, style: BotStyle? = nil, weaknesses: BotWeaknesses? = nil) {
         switch profile {
         case nil:
-            // Today's bot: shifts from skill 0.5 up (#19), and she planes as a player would.
-            self.init(headerThreshold: skill > 0.5 ? deg2rad(4) : nil, tackInterval: 15, replanes: true)
+            // A live bot (#102): she plays the shifts, on smaller ones the more skilled and the more willing to tack
+            // she is (her style), and the puffs she notices (`BotWeaknesses.puffPerception`); she planes as a
+            // player would.
+            let weaknesses = weaknesses ?? BotWeaknesses(skill: skill)
+            let willingness = style?.tackWillingness ?? 0.5
+            let threshold = deg2rad(3 + 2 * (1 - willingness) + 12 * max(0, 0.75 - skill))
+            self.init(headerThreshold: threshold, tackInterval: 15 * (1.3 - 0.6 * willingness), replanes: true,
+                      seeksPuffs: weaknesses.puffPerception > 0)
+            puffRange = weaknesses.puffPerception
+            corridorBias = 0.5 * (style?.favouredSide ?? 0)
+            tacticalQuality = weaknesses.tacticalQuality
         case .baseline:
             // The groove only: headers past a threshold, the corridor, and nothing off the groove.
             self.init(headerThreshold: deg2rad(5), tackInterval: 15)
@@ -83,6 +101,14 @@ struct Senses: Sendable, Equatable {
     /// Whether she is tacking as rule 13 has it (#99): from her boom crossing head to wind until she is
     /// close-hauled on the new tack. Until then she keeps clear of every boat.
     var tacking = false
+    /// The observation delay line (`BotWeaknesses.reactionDelay`, #102): the wind directions she has seen at her
+    /// boat, oldest first, back to the one she reads now, that many seconds ago.
+    var windHistory: [WindSample] = []
+
+    struct WindSample: Sendable, Equatable {
+        var time: Double
+        var direction: Double
+    }
 }
 
 extension BotBrain {
@@ -108,13 +134,19 @@ extension BotBrain {
         if let side = senses.boomSide, side != b.boomSide { senses.tacking = b.twa < .pi / 2 }
         if senses.tacking && b.twa >= Self.closeHauled(tws, view) { senses.tacking = false }
         senses.boomSide = b.boomSide
+        // What she reads of the wind's direction: as it was `reactionDelay` seconds ago.
+        senses.windHistory.append(Senses.WindSample(time: view.time, direction: b.windDirection))
+        while senses.windHistory.count > 1 && senses.windHistory[1].time <= view.time - weaknesses.reactionDelay {
+            senses.windHistory.removeFirst()
+        }
+        let seen = senses.windHistory[0].direction
         if let direction = senses.direction, dt > 0 {
-            let next = wrapAngle(direction + wrapAngle(b.windDirection - direction) * min(1, dt / Self.directionSmoothing))
+            let next = wrapAngle(direction + wrapAngle(seen - direction) * min(1, dt / Self.directionSmoothing))
             let rate = wrapAngle(next - direction) / dt
             senses.directionRate += (rate - senses.directionRate) * min(1, dt / Self.rateSmoothing)
             senses.direction = next
         } else {
-            senses.direction = b.windDirection
+            senses.direction = seen
         }
     }
 
@@ -169,7 +201,7 @@ extension BotBrain {
         func tone(_ tack: Tack) -> Double {
             let ahead = Vec2.heading(Aim(angle: up, tack: tack).heading(wind: b.windDirection))
             var total = 0.0
-            for distance in Self.puffLookAhead {
+            for distance in Self.puffLookAhead where distance <= tactics.puffRange {
                 let point = b.position + ahead * distance
                 let seconds = distance / speed
                 for puff in view.puffs {
@@ -193,7 +225,7 @@ extension BotBrain {
         for other in view.others where !other.isGhost {
             let offset = other.position - b.position
             let distance = offset.length
-            guard distance < length * Self.coverRange, abs(wrapAngle(b.windDirection - other.heading)) < .pi / 3 else { continue }
+            guard distance < length * Self.coverRange * (0.5 + 0.5 * tactics.tacticalQuality), abs(wrapAngle(b.windDirection - other.heading)) < .pi / 3 else { continue }
             let behind = -offset.dot(up)
             guard behind > length, abs(offset.dot(up.rightPerp)) > length * 2 else { continue }
             if distance < nearest?.distance ?? .infinity { nearest = (other, distance) }

@@ -27,7 +27,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
           --thresholds <path>    thresholds JSON file (default: the bundled thresholds.json)
           --seeds <n>            sail seeds 1...n instead of the matrix's
           --fleet-size <n>       sail only this fleet size (repeatable)
-          --tier-mix <mix>       sail only this tier mix: seeded, club, regional, national, mixed (repeatable)
+          --tier-mix <mix>       sail only this tier mix: club, regional, national, mixed (repeatable)
           --profile-mix <mix>    sail only this profile mix: live, skillGap, funPass (repeatable)
           --laps <n>             laps per race instead of the matrix's
           --json <path|->        write the JSON report there (- for stdout)

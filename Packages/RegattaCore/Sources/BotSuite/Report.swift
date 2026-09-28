@@ -362,7 +362,7 @@ public struct SkillGapSummary: Codable, Hashable, Sendable {
 /// The start over a run (#99), over its all-National fleets of `fleetSize` live bots (`TierMix.national`,
 /// `ProfileMix.live`), the fleets #99's acceptance names: what the thresholds' `start` limits hold. How cleanly and
 /// on time the best bots start, and whether the pin-style ones seeded at the committee end of the row work down
-/// the line to its pin third. Other fleet sizes aren't gated on their start yet: #102 tunes the tiers.
+/// the line to its pin third. Other fleet sizes and tiers aren't gated on their start yet (#105).
 public struct StartSummary: Codable, Hashable, Sendable {
     /// Races of all-National live fleets of `fleetSize`.
     public var races: Int

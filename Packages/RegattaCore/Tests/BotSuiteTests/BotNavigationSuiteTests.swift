@@ -1,4 +1,5 @@
 @testable import BotSuite
+import RegattaBots
 import Foundation
 import RegattaCore
 import Testing

@@ -34,11 +34,11 @@ public struct BotDriver: Sendable {
 
     private var brain: BotBrain
 
-    /// The bot for `seat` in the race with `raceSeed`, its style drawn from its own seed.
+    /// The bot for `seat` in the race with `raceSeed`, a Mixed fleet's (CONTEXT.md **Mixed fleet**, the default
+    /// for practice): her tier drawn from her own seed by the bot-tier file's shares (`BotTier.mixedFleetDraw`),
+    /// her skill inside its band and her style from the same seed.
     public init(seat: Int, raceSeed: RaceSeed) {
-        let seed = botSeed(raceSeed: raceSeed, seat: seat)
-        var rng = SplitMix64(seed: seed)
-        self.init(seat: seat, seed: seed, style: BotStyle(rng: &rng))
+        self.init(seat: seat, raceSeed: raceSeed, skill: BotTier.mixedFleetDraw(seed: botSeed(raceSeed: raceSeed, seat: seat)).skill)
     }
 
     /// The bot for `seat` with a given style, e.g. a retuned one, sailing `profile` if the bot suite gives
@@ -47,12 +47,18 @@ public struct BotDriver: Sendable {
         self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, profile: profile)
     }
 
-    private init(seat: Int, seed: UInt64, style: BotStyle, profile: BotProfile? = nil) {
+    /// The bot for `seat` with a given style and `weaknesses` in place of her skill's (`BotWeaknesses`): for tests
+    /// of a mechanism her weaknesses would blur.
+    init(seat: Int, raceSeed: RaceSeed, style: BotStyle, weaknesses: BotWeaknesses) {
+        self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, weaknesses: weaknesses)
+    }
+
+    private init(seat: Int, seed: UInt64, style: BotStyle, profile: BotProfile? = nil, weaknesses: BotWeaknesses? = nil) {
         self.seat = seat
         self.seed = seed
         self.profile = profile
         phase = seat % BotDriver.decisionInterval
-        brain = BotBrain(style: style, profile: profile)
+        brain = BotBrain(style: style, profile: profile, seed: seed, weaknesses: weaknesses)
     }
 
     /// Whether the driver decides when the race is at `tick`.

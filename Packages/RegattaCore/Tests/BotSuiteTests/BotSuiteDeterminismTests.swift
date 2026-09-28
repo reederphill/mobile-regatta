@@ -33,29 +33,34 @@ import Testing
         #expect(races[0].windSetup.baseStrength != races[1].windSetup.baseStrength)
     }
 
-    /// Until #102, a tier is its skill band: the bot's own drawn style, its skill rescaled into the band
-    /// and nothing else changed. `seeded` is today's bot.
-    @Test func tiersRescaleSkillIntoTheirBands() throws {
+    /// Since #102 a tier is its skill band and nothing else (the orchestrator's ruling: weaknesses are continuous
+    /// in skill, `BotWeaknesses`): a tier's bot is the bot of a skill inside its band, drawn from her own seed, with
+    /// her style drawn from the same seed as any other bot's. A Mixed fleet (the app's default bot) draws each
+    /// seat's tier and its skill in it from one draw of its seed.
+    @Test func tiersAreSkillBands() throws {
         for raceSeed in (1...4).map(RaceSeed.init) {
             for seat in 0..<16 {
-                let seeded = BotDriver(seat: seat, raceSeed: raceSeed)
-                #expect(BotTier.seeded.driver(seat: seat, raceSeed: raceSeed).style == seeded.style)
-                for tier in [BotTier.club, .regional, .national] {
+                let seed = botSeed(raceSeed: raceSeed, seat: seat)
+                let drawn = BotTier.mixedFleetDraw(seed: seed)
+                #expect(drawn.tier.skillBand.contains(drawn.skill))
+                #expect(BotDriver(seat: seat, raceSeed: raceSeed).style.skill == drawn.skill)
+                #expect(TierMix.mixed.driver(seat: seat, raceSeed: raceSeed).style == BotDriver(seat: seat, raceSeed: raceSeed).style)
+                for tier in BotTier.allCases {
                     let driver = tier.driver(seat: seat, raceSeed: raceSeed)
-                    let band = try #require(tier.skillBand)
-                    #expect(band.contains(driver.style.skill), "\(tier) seat \(seat) skill \(driver.style.skill)")
-                    var style = driver.style
-                    style.skill = seeded.style.skill
-                    #expect(style == seeded.style, "a tier changes only the skill")
-                    #expect(driver.seed == seeded.seed)
+                    #expect(tier.skillBand.contains(driver.style.skill), "\(tier) seat \(seat) skill \(driver.style.skill)")
+                    var rng = SplitMix64(seed: seed)
+                    #expect(driver.style == BotStyle(skill: driver.style.skill, rng: &rng), "a tier changes only the skill")
+                    #expect(driver.seed == seed)
                 }
             }
         }
     }
 
-    @Test func mixedRoundRobinsTheTiersBySeat() {
-        #expect((0..<6).map { TierMix.mixed.tier(ofSeat: $0) } == [.club, .regional, .national, .club, .regional, .national])
-        #expect(TierMix.seeded.tier(ofSeat: 4) == .seeded)
-        #expect(TierMix.national.tier(ofSeat: 0) == .national)
+    @Test func mixedDrawsEachSeatsTierFromItsSeed() {
+        let raceSeed = RaceSeed(3)
+        let tiers = (0..<16).map { TierMix.mixed.tier(ofSeat: $0, raceSeed: raceSeed) }
+        #expect(tiers == (0..<16).map { BotTier.mixedFleetDraw(seed: botSeed(raceSeed: raceSeed, seat: $0)).tier })
+        #expect(TierMix.club.tier(ofSeat: 4, raceSeed: raceSeed) == .club)
+        #expect(TierMix.national.tier(ofSeat: 0, raceSeed: raceSeed) == .national)
     }
 }
