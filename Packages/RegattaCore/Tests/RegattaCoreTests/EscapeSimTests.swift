@@ -79,26 +79,34 @@ enum EscapeFixture {
         return (offset.dot(starboard.forward) / race.boatClass.hull.length, -offset.dot(starboard.forward.rightPerp))
     }
 
-    /// Seat 0 on a beam reach on starboard with seat 1 to windward of her, parallel, `gap` metres between the
-    /// hulls, both on their autohelms for a second with no call; then seat 0 holds `rudder` (towards the wind)
-    /// from the next tick. Returns the tick the rudder is applied at.
-    static func luff(_ race: Race, gap: Double, rudder: Double) throws -> Int {
+    /// Seat 0 on a beam reach on starboard with seat 1 to windward of her, `gap` metres between the hulls, seat 1
+    /// turned `converging` radians towards her (parallel by default, away if negative), both on their autohelms
+    /// for `ticks` steps (a second by default) with no call; then seat 0 holds `rudder` (towards the wind) from
+    /// the next tick. Returns the tick the rudder is applied at.
+    static func luff(_ race: Race, gap: Double, converging: Double = 0, rudder: Double,
+                     after ticks: Int = Race.tickRate) throws -> Int {
         try F.place(race, tick: 300, at: F.midBeat(race), heading: F.starboard(race, offWind: .pi / 2),
-                    abeam: F.abeam(gap: gap, converging: 0, hull: race.boatClass.hull))
-        #expect(sailToCall(race, within: Race.tickRate) == nil, "sailing \(gap) m apart is no foul")
+                    abeam: F.abeam(gap: gap, converging: converging, hull: race.boatClass.hull), converging: converging)
+        #expect(sailToCall(race, within: ticks) == nil, "sailing \(gap) m apart is no foul")
         let at = race.tick + 1
         _ = race.apply(BoatInput(rudder: rudder), seat: 0, atTick: at)
         return at
     }
 
-    /// The fastest seat 0 has turned through one step `watch` saw, radians a second.
+    /// How fast seat 0 turned through each step `watch` saw, radians a second.
     final class TurnRate {
         private var heading: Double?
-        private(set) var fastest = 0.0
+        private var rates: [(tick: Int, rate: Double)] = []
+
+        /// The fastest.
+        var fastest: Double { rates.map(\.rate).max() ?? 0 }
+
+        /// The first tick she turned faster than `rate` through the step to it, if any.
+        func firstTick(above rate: Double) -> Int? { rates.first { $0.rate > rate }?.tick }
 
         func watch(_ race: Race) {
             let now = race.boats[0].heading
-            if let heading { fastest = max(fastest, abs(wrapAngle(now - heading)) * Double(Race.tickRate)) }
+            if let heading { rates.append((race.tick, abs(wrapAngle(now - heading)) * Double(Race.tickRate))) }
             heading = now
         }
     }
@@ -178,6 +186,59 @@ enum EscapeFixture {
         #expect(outcome.call.rule == .windwardLeeward && outcome.call.offender == 1 && outcome.call.victim == 0)
         #expect(outcome.exonerated.isEmpty)
         #expect(race.boats[1].penaltyTurnsOwed == 1 && race.boats[0].penaltyTurnsOwed == 0)
+    }
+
+    /// Seat 0 luffing hard (or, `rudder` 0, holding her course) after `E.luff`'s placing, sailed to a call: how
+    /// fast she turned through each step from the luff, and the call, if any, within 3 s.
+    private func luff(gap: Double, converging: Double, after ticks: Int,
+                      rudder: Double) throws -> (race: Race, rate: E.TurnRate, outcome: E.Outcome?) {
+        let race = try F.race()
+        _ = try E.luff(race, gap: gap, converging: converging, rudder: rudder, after: ticks)
+        let rate = E.TurnRate()
+        rate.watch(race)
+        return (race, rate, E.sailToCall(race, within: 3 * Race.tickRate, watch: rate.watch))
+    }
+
+    /// #273: the windward boat sails half a degree higher than the leeward boat, 0.28 m off and opening, clear of
+    /// the leeward boat's sweep. The leeward boat luffs hard, and her sweep reaches the windward boat on the very
+    /// tick her turn first counts as a course change: the windward boat has no tick to answer in. Held, the
+    /// leeward boat's course left the windward boat clear, so the luff took her room: rule 16.1 on the leeward
+    /// boat, the windward boat exonerated.
+    @Test func sameTickLuffIntoTheKeepClearBoatIs16_1() throws {
+        let changesCourse = try #require(try F.race().rules.incidents.escape.changesCourse)
+        let (gap, converging, after) = (0.276, deg2rad(-0.5), 10)
+        let held = try luff(gap: gap, converging: converging, after: after, rudder: 0)
+        #expect(held.outcome == nil, "holding her course, no incident")
+
+        let (race, rate, luffed) = try luff(gap: gap, converging: converging, after: after, rudder: 1)
+        let outcome = try #require(luffed)
+        #expect(rate.firstTick(above: changesCourse) == outcome.tick, "the course change is first seen on the incident's tick")
+        #expect(outcome.call.rule == .changingCourse && outcome.call.offender == 0 && outcome.call.victim == 1)
+        #expect(outcome.exonerated == [1])
+        #expect(race.boats[0].penaltyTurnsOwed == 1 && race.boats[1].penaltyTurnsOwed == 0)
+    }
+
+    /// #273: the windward boat bears down on the leeward boat, 4° towards her. The leeward boat luffs, and her
+    /// sweep reaches the windward boat on the very tick her turn first counts as a course change; but holding her
+    /// course, the leeward boat's sweep hits the windward boat anyway a few ticks later, well inside the escape
+    /// horizon. The windward boat was failing to keep clear, and the luff took nothing from her: the Section A
+    /// call stands, rule 11 on the windward boat, no one exonerated.
+    @Test func sameTickLuffIntoABoatAlreadyFailingToKeepClearIsTheObligation() throws {
+        let escape = try F.race().rules.incidents.escape
+        let changesCourse = try #require(escape.changesCourse), horizon = RulesConfig.ticks(escape.horizon)
+        let (gap, converging, after) = (0.8, deg2rad(4), 53)
+
+        let (race, rate, luffed) = try luff(gap: gap, converging: converging, after: after, rudder: 1)
+        let outcome = try #require(luffed)
+        #expect(rate.firstTick(above: changesCourse) == outcome.tick, "the course change is first seen on the incident's tick")
+        #expect(outcome.call.rule == .windwardLeeward && outcome.call.offender == 1 && outcome.call.victim == 0)
+        #expect(outcome.exonerated.isEmpty)
+        #expect(race.boats[1].penaltyTurnsOwed == 1 && race.boats[0].penaltyTurnsOwed == 0)
+
+        let held = try #require(try luff(gap: gap, converging: converging, after: after, rudder: 0).outcome,
+                                "holding her course, the windward boat is swept anyway")
+        #expect(held.call.rule == .windwardLeeward && held.call.offender == 1 && held.call.victim == 0)
+        #expect(held.tick > outcome.tick && held.tick - outcome.tick <= horizon, "\(held.tick - outcome.tick) ticks later")
     }
 
     /// ADR 0002: the same world and umpire memory, sailed on 100 times, make the same call, the same incident

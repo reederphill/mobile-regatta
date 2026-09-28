@@ -139,7 +139,8 @@ public struct EscapeSimulation: Sendable {
     /// - Rule 16.1: the right-of-way boat's heading turns faster than `changesCourse` on a tick since she
     ///   had right of way, late enough that the simulation from the first such tick plus the offset reaches
     ///   now; no escape from there against her track, and an escape had she held her course from the tick
-    ///   before it. Without that, the keep-clear boat was failing to keep clear anyway, and her course change
+    ///   before it (first seen in the step to now, no tick to answer in: clear on her own track had she held
+    ///   it). Without that, the keep-clear boat was failing to keep clear anyway, and her course change
     ///   (avoiding contact, say) took nothing from her.
     func verdict(_ obligation: Verdict, course: CourseLayout) -> Verdict {
         let keepClear = obligation.offender, rightOfWay = obligation.victim
@@ -212,18 +213,30 @@ public struct EscapeSimulation: Sendable {
 
     /// Whether any candidate sails `seat` clear of `other` on every tick of the horizon after tick `start`,
     /// from her recorded state then: `other` on her `path`, or had she held her course from tick `heldFrom`.
-    /// False if `start` isn't before now: she had no tick to answer in.
+    /// If `start` isn't before now, she had no tick to answer in: against `other`'s path, no escape; against
+    /// her held course, whether `seat` on her own `path` stays clear of it now and over the horizon after
+    /// (#273): a course change first seen in the step to the incident took her room if holding it would have.
     private func canEscape(_ seat: Int, from start: Int, of other: Int, heldFrom: Int? = nil) -> Bool {
         let last = track.count - 1
-        guard start >= 0, start < last else { return false }
-        let ticks = (start + 1)...(start + RulesConfig.ticks(escape.horizon))
+        let answers = start < last
+        guard start >= 0, answers || heldFrom != nil else { return false }
+        let horizon = RulesConfig.ticks(escape.horizon)
+        let ticks = answers ? (start + 1)...(start + horizon) : last...(last + horizon)
         let outline = boatClass.hull.outline
         let others = heldFrom.map { path(of: other, heldFrom: $0, over: ticks) } ?? path(of: other, over: ticks)
         let otherHulls = others.map { $0.hull(outline: outline) }
+        // The other's sweep on each tick, worked out the first time `seat` comes within its reach.
+        var swept = [RulesConfig.NearMissSweep.Swept?](repeating: nil, count: others.count)
+        // Kept clear on the `n`th of `ticks` as the umpire calls it: no contact, and no hit by the other's sweep.
+        func isClear(_ boat: Boat, on n: Int) -> Bool {
+            if Collision.penetration(boat.hull(outline: outline), otherHulls[n]) != nil { return false }
+            guard sweep.canReach(others[n], boat, hull: boatClass.hull) else { return true }
+            if swept[n] == nil { swept[n] = sweep.swept(others[n], hull: boatClass.hull) }
+            return !sweep.hits(swept[n]!, boat, hull: boatClass.hull)
+        }
+        guard answers else { return path(of: seat, over: ticks).enumerated().allSatisfy { isClear($1, on: $0) } }
         let from = track.boat(seat, start)
         let environments = ticks.map { track.recorded(seat, min($0, last)) }
-        // The other's sweep on each tick, worked out the first time a candidate comes within its reach.
-        var swept = [RulesConfig.NearMissSweep.Swept?](repeating: nil, count: others.count)
         return escape.candidates.contains { candidate in
             var boat = from
             let rudder = candidate.rudderValue
@@ -239,10 +252,7 @@ public struct EscapeSimulation: Sendable {
             }
             for n in environments.indices {
                 sail(&boat, ease: candidate.ease, in: environments[n])
-                if Collision.penetration(boat.hull(outline: outline), otherHulls[n]) != nil { return false }
-                guard sweep.canReach(others[n], boat, hull: boatClass.hull) else { continue }
-                if swept[n] == nil { swept[n] = sweep.swept(others[n], hull: boatClass.hull) }
-                if sweep.hits(swept[n]!, boat, hull: boatClass.hull) { return false }
+                if !isClear(boat, on: n) { return false }
             }
             return true
         }
