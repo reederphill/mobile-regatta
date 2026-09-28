@@ -128,9 +128,49 @@ public struct StartLimits: Codable, Hashable, Sendable {
     }
 }
 
+/// What navigation must show over a run (#100), over its all-National live fleets (`NavigationSummary`): #100's
+/// acceptance, in the units the summary counts. Every limit is optional; they gate only a run that sailed such a fleet.
+public struct NavigationLimits: Codable, Hashable, Sendable {
+    /// The least share of their seats that must finish.
+    public var minFinishShare: Double?
+    /// The most disqualifications for a missed penalty deadline, all seats together.
+    public var maxDSQMissedPenalty: Int?
+    /// The most of their time on the water they may spend at the race area's edge.
+    public var maxEdgeShare: Double?
+    /// The most mark contacts per boat per race.
+    public var maxMarkContactsPerBoat: Double?
+
+    public init(minFinishShare: Double? = nil, maxDSQMissedPenalty: Int? = nil, maxEdgeShare: Double? = nil,
+                maxMarkContactsPerBoat: Double? = nil) {
+        self.minFinishShare = minFinishShare
+        self.maxDSQMissedPenalty = maxDSQMissedPenalty
+        self.maxEdgeShare = maxEdgeShare
+        self.maxMarkContactsPerBoat = maxMarkContactsPerBoat
+    }
+
+    /// Why `summary` misses these limits, each line starting with `navigation`; none without a summary.
+    func breaches(_ summary: NavigationSummary?) -> [String] {
+        guard let summary else { return [] }
+        var breaches: [String] = []
+        if let minimum = minFinishShare, summary.finishShare < minimum {
+            breaches.append("navigation: finish share \(fixed(summary.finishShare, 3)) < \(fixed(minimum, 3))")
+        }
+        if let maximum = maxDSQMissedPenalty, summary.dsqMissedPenalty > maximum {
+            breaches.append("navigation: dsq for a missed penalty \(summary.dsqMissedPenalty) > \(maximum)")
+        }
+        if let maximum = maxEdgeShare, summary.edgeShare > maximum {
+            breaches.append("navigation: edge \(fixed(summary.edgeShare, 4)) of the time > \(fixed(maximum, 4))")
+        }
+        if let maximum = maxMarkContactsPerBoat, summary.markContactsPerBoat > maximum {
+            breaches.append("navigation: mark contacts \(fixed(summary.markContactsPerBoat, 3))/boat/race > \(fixed(maximum, 3))")
+        }
+        return breaches
+    }
+}
+
 /// The suite's gate (#19, #27): limits per tier, keyed by `BotTier.rawValue`, per scripted profile, keyed by
-/// `BotProfile.rawValue` (#231, #238), the start's (#99), and the worst race's p99 tick. A tier or profile with no
-/// limits isn't gated, and a profile's or the start's limits gate only a run that sailed it. "The exact limits are
+/// `BotProfile.rawValue` (#231, #238), the start's (#99), navigation's (#100), and the worst race's p99 tick. A tier or
+/// profile with no limits isn't gated, and a profile's, the start's or navigation's limits gate only a run that sailed it. "The exact limits are
 /// set at build time" (#19): the bundled `thresholds.json` starts loose, and tightens as the brains (#102) do.
 public struct BotThresholds: Codable, Hashable, Sendable {
     public var tiers: [String: TierLimits]
@@ -138,18 +178,21 @@ public struct BotThresholds: Codable, Hashable, Sendable {
     public var profiles: [String: ProfileLimits]
     /// The start's limits (#99); nil when a thresholds file has none.
     public var start: StartLimits?
+    /// Navigation's limits (#100); nil when a thresholds file has none.
+    public var navigation: NavigationLimits?
     public var maxP99TickMs: Double
 
     public init(tiers: [String: TierLimits], profiles: [String: ProfileLimits] = [:], start: StartLimits? = nil,
-                maxP99TickMs: Double) {
+                navigation: NavigationLimits? = nil, maxP99TickMs: Double) {
         self.tiers = tiers
         self.profiles = profiles
         self.start = start
+        self.navigation = navigation
         self.maxP99TickMs = maxP99TickMs
     }
 
     private enum CodingKeys: String, CodingKey {
-        case tiers, profiles, start, maxP99TickMs
+        case tiers, profiles, start, navigation, maxP99TickMs
     }
 
     public init(from decoder: Decoder) throws {
@@ -157,14 +200,15 @@ public struct BotThresholds: Codable, Hashable, Sendable {
         self.init(tiers: try c.decode([String: TierLimits].self, forKey: .tiers),
                   profiles: try c.decodeIfPresent([String: ProfileLimits].self, forKey: .profiles) ?? [:],
                   start: try c.decodeIfPresent(StartLimits.self, forKey: .start),
+                  navigation: try c.decodeIfPresent(NavigationLimits.self, forKey: .navigation),
                   maxP99TickMs: try c.decode(Double.self, forKey: .maxP99TickMs))
     }
 
-    /// Why a run with these tier summaries, timings, skill gap, fun pass and start misses the thresholds; empty
-    /// when it meets them.
+    /// Why a run with these tier summaries, timings, skill gap, fun pass, start and navigation misses the thresholds;
+    /// empty when it meets them.
     public func breaches(tiers summaries: [String: TierSummary], timings: BotSuiteReport.RunTimings,
                          skillGap: SkillGapSummary? = nil, funPass: FunPassSummary? = nil,
-                         start: StartSummary? = nil) -> [String] {
+                         start: StartSummary? = nil, navigation: NavigationSummary? = nil) -> [String] {
         var breaches = BotTier.allCases.flatMap { tier -> [String] in
             guard let summary = summaries[tier.rawValue], let limits = tiers[tier.rawValue] else { return [] }
             return limits.breaches(tier.rawValue, summary)
@@ -173,6 +217,7 @@ public struct BotThresholds: Codable, Hashable, Sendable {
             breaches += profiles[profile.rawValue]?.breaches(profile.rawValue, skillGap: skillGap, funPass: funPass) ?? []
         }
         breaches += self.start?.breaches(start) ?? []
+        breaches += self.navigation?.breaches(navigation) ?? []
         if timings.maxP99Ms > maxP99TickMs {
             breaches.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms > \(fixed(maxP99TickMs, 3))")
         }
