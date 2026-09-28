@@ -1,4 +1,5 @@
 import BotSuite
+import RegattaBots
 import Foundation
 import RegattaCore
 import Testing
@@ -90,7 +91,7 @@ import Testing
         let result = try #require(report.races.first)
         #expect(result.cell.fleetSize == 16)
         #expect(result.seats.map(\.seat) == Array(0..<16))
-        #expect(result.seats.map(\.tier) == (0..<16).map { TierMix.mixed.tier(ofSeat: $0) })
+        #expect(result.seats.map(\.tier) == (0..<16).map { TierMix.mixed.tier(ofSeat: $0, raceSeed: RaceSeed(7)) })
         #expect(!result.capped)
         #expect(result.fleet.finished > 0)
         #expect(result.seats.allSatisfy { $0.finished == ($0.place != nil) || $0.status == "dsq" })

@@ -68,7 +68,12 @@ import RegattaCore
     @Test func anOCSBotReturnsKeepingClearAndStarts() throws {
         for seed: UInt64 in 1...12 {
             let race = Self.startRace(seats: Array(repeating: .bot, count: 3), seed: seed)
-            var controllers = allBots(race)
+            // The return alone: bots whose line-bias misreads (#102) don't move the fleet about the line from where
+            // the scenario was written for.
+            var controllers = SeatControllers(race.boats.indices.map { seat in
+                let style = BotDriver(seat: seat, raceSeed: race.setup.raceSeed).style
+                return .bot(BotDriver(seat: seat, raceSeed: race.setup.raceSeed, style: style, weaknesses: .none(skill: style.skill)))
+            })
             sail(race, &controllers, ticks: 59 * Race.tickRate)
             // A second before the gun, put a boat that owes no penalty a metre and a half over the line where she
             // is, close-hauled on starboard.

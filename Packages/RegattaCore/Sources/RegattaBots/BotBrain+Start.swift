@@ -82,10 +82,19 @@ extension BotBrain {
     static let timingStep = 0.1
 
     /// Her spot on the start line, from her style: 0 the pin, 1 the committee boat.
+    /// She sets up for it as she reads the line (#102): her line-bias misread (`BotWeaknesses.lineBiasMisread`) has
+    /// her reckon one end favoured when it isn't, and she moves her spot that way along the line, by
+    /// `lineBiasShift` of it for each degree of misread: away from the spot her style chose, into the crowd at
+    /// the end she wrongly favours.
     func startPoint(_ c: CourseLayout) -> Vec2 {
         let line = c.startLine
-        return line.pin.position + (line.committee.position - line.pin.position) * style.startSpot
+        let misread = weaknesses.lineBiasMisread * style.lineBiasDraw
+        let spot = min(max(style.startSpot + Self.lineBiasShift * rad2deg(misread), 0.05), 0.95)
+        return line.pin.position + (line.committee.position - line.pin.position) * (misread == 0 ? style.startSpot : spot)
     }
+
+    /// The share of the line she moves her spot for each degree she misreads its bias by.
+    static let lineBiasShift = 0.04
 
     /// Her hold angle: `holdMargin` outside the no-go zone.
     static func holdAngle(_ view: SeatView) -> Double {
@@ -93,9 +102,10 @@ extension BotBrain {
     }
 
     /// Seconds from now her bow should reach the start line: `startLead` after the gun, and her style's
-    /// `timingSlack` later still, less as her skill tells; never before the gun.
+    /// `timingSlack` (her start risk) later still, as far as her start timing error shows it
+    /// (`BotWeaknesses.startTiming`); never before the gun.
     func startArrival(_ view: SeatView) -> Double {
-        -view.time + max(Self.earliestLead, Self.startLead + style.timingSlack * (1 - style.skill))
+        -view.time + max(Self.earliestLead, Self.startLead + style.timingSlack * weaknesses.startTiming)
     }
 
     /// Before her start: before the gun, or after it and not started yet.

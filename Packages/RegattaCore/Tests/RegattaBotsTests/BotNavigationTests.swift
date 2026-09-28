@@ -76,7 +76,8 @@ import RegattaCore
         let start = race.exportSnapshot()
         // Skill 0.4: a bot that doesn't tack on headers, so the corridor alone turns her.
         let style = BotStyle(skill: 0.4, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
-        var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style)
+        var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style,
+                               weaknesses: .none(skill: style.skill)) // the mechanism alone, no misjudged grooves (#102)
         var decisions: [(tick: Int, decision: BotDecision)] = []
         var trace = [Sample(race)]
         for _ in 0..<(20 * Race.tickRate) {

@@ -46,10 +46,10 @@ public enum BotRaceHarness {
         // Assembled as the server assembles a race (#81): the files the setup names, the race of record.
         let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
                             mode: .authoritative(windSeed: windSeed(for: cell.seed)))
-        let tiers = setup.seats.indices.map { cell.tierMix.tier(ofSeat: $0) }
+        let tiers = setup.seats.indices.map { cell.tierMix.tier(ofSeat: $0, raceSeed: setup.raceSeed) }
         let profiles = setup.seats.indices.map { cell.profile(ofSeat: $0) }
         var controllers = SeatControllers(tiers.indices.map {
-            .bot(tiers[$0].driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
+            .bot(cell.tierMix.driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
         })
         var tally = RaceTally(race: race)
         let lastTick = cell.capSecondsAfterGun * Race.tickRate

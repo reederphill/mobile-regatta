@@ -33,7 +33,8 @@ import RegattaCore
         let race = try Self.beatingRace(seed: 5, offGroove: deg2rad(20))
         // Skill 0.4: a bot that doesn't tack on headers, so nothing changes her aim, the starboard groove.
         let style = BotStyle(skill: 0.4, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
-        var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style)
+        var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style,
+                               weaknesses: .none(skill: style.skill)) // the mechanism alone, no misjudged grooves (#102)
         var decisions: [BotDecision] = []
         var headings: [(tick: Int, heading: Double)] = []
         for _ in 0..<(25 * Race.tickRate) {
@@ -63,7 +64,8 @@ import RegattaCore
     @Test func botLetsTheAutohelmSnapToTheGroove() throws {
         let race = try Self.beatingRace(seed: 6, offGroove: deg2rad(2))
         let style = BotStyle(skill: 0.4, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
-        var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style)
+        var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style,
+                               weaknesses: .none(skill: style.skill)) // the mechanism alone, no misjudged grooves (#102)
         for _ in 0..<(10 * Race.tickRate) {
             driver.drive(race)
             race.step()
@@ -140,7 +142,7 @@ import RegattaCore
     }
 
     /// The bot suite's profiles (#231): the baseline sails the groove only; the tactician leaves it.
-    @Test func profilesSetWhatTheBotPlays() {
+    @Test func profilesSetWhatTheBotPlays() throws {
         let baseline = Tactics(profile: .baseline, skill: 0.9)
         let tactician = Tactics(profile: .tactician, skill: 0.1)
         #expect(!baseline.replanes && !baseline.heatsUpInLulls && !baseline.pinchesToFetch)
@@ -156,8 +158,10 @@ import RegattaCore
         #expect(blipTacker == baseline)
         // A profile's play doesn't come from the bot's skill; a live bot's does.
         #expect(Tactics(profile: .baseline, skill: 0.1) == baseline)
-        #expect(Tactics(profile: nil, skill: 0.4).headerThreshold == nil)
-        #expect(Tactics(profile: nil, skill: 0.9).headerThreshold != nil)
+        // #102: a live bot plays shifts at any skill, the smaller ones the more skilled she is.
+        let club = try #require(Tactics(profile: nil, skill: 0.4).headerThreshold)
+        let national = try #require(Tactics(profile: nil, skill: 0.9).headerThreshold)
+        #expect(national < club)
     }
 
     /// Beating to the windward mark (rounded to port), a boat below the starboard layline aims first at the

@@ -1,4 +1,5 @@
 import BotSuite
+import RegattaBots
 import Foundation
 import Testing
 

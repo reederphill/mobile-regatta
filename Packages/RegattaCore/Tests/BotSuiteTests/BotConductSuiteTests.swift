@@ -1,4 +1,5 @@
 @testable import BotSuite
+import RegattaBots
 import Foundation
 import RegattaCore
 import Testing
@@ -69,7 +70,7 @@ import Testing
         #expect(breaches([result([seat(0, encounters: 0, fouls: 0)])]).isEmpty, "no encounters, no share")
         // Only the all-National live fleets count.
         let fouled = [seat(0, encounters: 10, fouls: 5), seat(1, encounters: 10, fouls: 5)]
-        let others = [result(fouled, mix: .mixed), result(fouled, mix: .seeded), result(fouled, profiles: .skillGap)]
+        let others = [result(fouled, mix: .mixed), result(fouled, mix: .club), result(fouled, profiles: .skillGap)]
         #expect(ConductSummary(others) == nil)
         #expect(breaches(others).isEmpty, "no all-National live fleet sailed")
         #expect(ConductSummary(atTheLimit + others) == summary)

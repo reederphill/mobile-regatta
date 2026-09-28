@@ -2,37 +2,12 @@ import Foundation
 import RegattaBots
 import RegattaCore
 
-/// How well a bot sails (#19, CONTEXT.md **Bot tier**), plus `seeded`: today's bot, its skill drawn over
-/// `BotStyle`'s whole range. Until #102 gives each tier its own tuning, a tier is a skill band.
-public enum BotTier: String, Codable, CaseIterable, Hashable, Sendable {
-    case club, regional, national, seeded
-
-    /// The skill a tier's bots sail at, until #102; nil for `seeded`.
-    public var skillBand: ClosedRange<Double>? {
-        switch self {
-        case .club: 0.35...0.6
-        case .regional: 0.6...0.8
-        case .national: 0.8...1
-        case .seeded: nil
-        }
-    }
-
-    /// `BotStyle(rng:)`'s skill range, which a band rescales.
-    static let drawnSkill = 0.35...1.0
-
-    /// The bot sailing `seat` at this tier, sailing `profile` if the matrix gives the seat one (#231). Its
-    /// style is drawn from its own seed exactly as `BotDriver(seat:raceSeed:)` draws it, then its skill is
-    /// rescaled from the drawn range into the tier's band, so a tier keeps the spread of its bots' skills and
-    /// never touches the race's streams.
+extension BotTier {
+    /// The bot sailing `seat` at this tier (`BotDriver(seat:raceSeed:tier:profile:)`, RegattaBots' mapping), sailing
+    /// `profile` if the matrix gives the seat one (#231). Her skill is drawn inside the tier's band from her own seed,
+    /// so a tier keeps the spread of its bots' skills and never touches the race's streams.
     public func driver(seat: Int, raceSeed: RaceSeed, profile: BotProfile? = nil) -> BotDriver {
-        var rng = SplitMix64(seed: botSeed(raceSeed: raceSeed, seat: seat))
-        var style = BotStyle(rng: &rng)
-        if let band = skillBand {
-            let drawn = BotTier.drawnSkill
-            let t = (style.skill - drawn.lowerBound) / (drawn.upperBound - drawn.lowerBound)
-            style.skill = min(max(band.lowerBound + t * (band.upperBound - band.lowerBound), band.lowerBound), band.upperBound)
-        }
-        return BotDriver(seat: seat, raceSeed: raceSeed, style: style, profile: profile)
+        BotDriver(seat: seat, raceSeed: raceSeed, tier: self, profile: profile)
     }
 }
 
@@ -76,20 +51,28 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
 
 /// Which tier sails each seat of a race.
 public enum TierMix: String, Codable, CaseIterable, Hashable, Sendable {
-    /// Today's bots (`BotTier.seeded`) in every seat.
-    case seeded
     case club, regional, national
-    /// Club, Regional and National round-robin by seat.
+    /// A Mixed fleet (CONTEXT.md **Mixed fleet**), as the app's bots are (`BotDriver(seat:raceSeed:)`): each seat's
+    /// tier drawn from its bot's own seed by the bot-tier file's shares (`BotTier.mixedFleetDraw`).
     case mixed
 
-    public func tier(ofSeat seat: Int) -> BotTier {
+    /// The tier sailing `seat` of the race with `raceSeed`.
+    public func tier(ofSeat seat: Int, raceSeed: RaceSeed) -> BotTier {
         switch self {
-        case .seeded: .seeded
         case .club: .club
         case .regional: .regional
         case .national: .national
-        case .mixed: [BotTier.club, .regional, .national][seat % 3]
+        case .mixed: BotTier.mixedFleetDraw(seed: botSeed(raceSeed: raceSeed, seat: seat)).tier
         }
+    }
+
+    /// The live bot sailing `seat` of the race with `raceSeed`, sailing `profile` if the matrix gives the seat one:
+    /// its tier's (`BotTier.driver`), or in a Mixed fleet exactly the app's (`BotDriver(seat:raceSeed:)`), her
+    /// tier and her skill in it both from the draw.
+    public func driver(seat: Int, raceSeed: RaceSeed, profile: BotProfile? = nil) -> BotDriver {
+        guard self == .mixed else { return tier(ofSeat: seat, raceSeed: raceSeed).driver(seat: seat, raceSeed: raceSeed, profile: profile) }
+        let skill = BotTier.mixedFleetDraw(seed: botSeed(raceSeed: raceSeed, seat: seat)).skill
+        return BotDriver(seat: seat, raceSeed: raceSeed, skill: skill, profile: profile)
     }
 }
 
@@ -117,7 +100,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     public var capSecondsAfterGun: Int
 
     public init(seeds: [UInt64], venues: [String] = ["dev-venue@3"], conditions: [String] = ["classic-oscillating@3"],
-                tideStatesDegrees: [Double] = [0], fleetSizes: [Int], tierMixes: [TierMix] = [.seeded],
+                tideStatesDegrees: [Double] = [0], fleetSizes: [Int], tierMixes: [TierMix] = [.mixed],
                 profileMixes: [ProfileMix] = [.live], laps: Int = RaceSetup.defaultLaps,
                 capSecondsAfterGun: Int = BotMatrix.defaultCapSecondsAfterGun) {
         self.seeds = seeds
