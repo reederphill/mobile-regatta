@@ -32,16 +32,25 @@ The orchestrator writes a brief of about 2K tokens; the implementer doesn't re-d
 - The ticket's Build and Acceptance lists (quoted).
 - The files and types to touch, and the merged tickets it builds on (one line each).
 - The map decisions and ADR paragraphs that apply, quoted. Not "read ADR 0002"; quote the lines.
-- `docs/agents/validation.md` by reference.
+- What the change may move (digests, bot behaviour, render references), for the tester. Validation itself is the tester's call; `docs/agents/validation.md` by reference.
 
 Implementer reading rules: `grep -n` / `sed -n <range>p` or the codebase-memory graph, not `cat` of whole files. Never read transcripts or tool-output files from other agents.
 
+## The ticket loop (owner, 2026-09-27)
+
+A ticket's local-slot work is a loop of separate agents, each fresh:
+
+1. **Implementer: implementation coding only.** It writes the code and the acceptance tests, compiles what it touched with its tests (`scripts/heavy.sh swift build --build-tests …`), and runs only its own new or changed tests (`scripts/heavy.sh swift test --filter …`, failing first where it can). No `check.sh`, no suites, no bot matrix. It commits locally (no push) and writes an implementation note: what changed, acceptance → test, what it expects to move.
+2. **Tester: decides and runs the minimal validation.** It writes a test plan first: what could break, the checks that cover it, what it deliberately doesn't run and why. Then it runs the plan (`check.sh` at least once on the final code, the recorded gate the acceptance check reads; digest comparisons for sim changes; the bot matrix only when bot behaviour or rule-call rates should move). Every failure is rerun once and checked against the base: only a failure the change causes is a regression. It never edits code, and it reports verdict, findings and repro commands.
+3. **Fixer: fresh per round.** It gets the tester's regressions and repros, fixes, compiles, confirms each repro, and commits locally. The tester then re-tests only what the fix could affect.
+4. The loop runs until the tester passes, up to 3 rounds; after that it goes to the orchestrator with the history.
+5. **Publisher:** squashes WIP commits, pushes once, and opens the PR (acceptance → test map, the tester's validation, sim revision, deviations). Review, CI and the acceptance check then run as before. Their findings re-enter the loop as a fixer round, then tester, then a push onto the PR.
+
 ## Agent lifetime
 
-- The implementer stops after it pushes the PR with the acceptance → test map in the body. It doesn't wait on CI.
-- The orchestrator waits on CI with one background `gh run watch <id> --exit-status` (or the PR monitor), not a polling loop.
-- Review fixes: a fresh implementer with the PR number, the findings, and the brief. Don't `SendMessage` more rounds into the original implementer.
-- Context budget (owner, 2026-09-27): no implementer runs past ~400K tokens of context (about 150 tool calls). Near it, the agent commits its work in progress locally (no push onto an open PR), writes a handoff note (done, next, check.sh state, gotchas) and returns; a fresh agent continues from the note in the same worktree.
+- No agent waits on CI. The orchestrator waits with one background `gh run watch <id> --exit-status` (or the PR monitor), not a polling loop.
+- Every round is a fresh agent. Don't `SendMessage` more rounds into an earlier one.
+- Context budget (owner, 2026-09-27): no agent runs past ~400K tokens of context (about 150 tool calls). Near it, the agent commits its work in progress locally (no push onto an open PR), writes a handoff note (done, next, gotchas, exact next command) and returns; a fresh agent continues from the note in the same worktree.
 
 ## Roles
 

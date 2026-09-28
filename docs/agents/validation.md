@@ -24,7 +24,7 @@
 - Timeouts: scripts enforce their own (`CHECK_STEP_TIMEOUT_MINUTES`, `LINUX_TEST_TIMEOUT_MINUTES`). Shell calls: never block without a timeout.
 - Report what passed before starting a slow step.
 - Reuse: `check.sh` records each passed test step keyed by the content it depends on (its package and those below it; for the app, its sources, tests, project and linked packages), shared by every worktree, and skips it (and its build) wherever that content recurs: a rebase or an unrelated commit reruns nothing. Validators and reviewers: `scripts/check.sh --status --rev <sha>` (exit 0 = everything the change reaches passed) and CI for the head SHA; don't rerun suites that passed.
-- No direct `xcodebuild` or `swift test` except a `--filter`/`-only-testing` rerun of a step that failed, through `scripts/heavy.sh`. Everything else goes through `check.sh`, so it's recorded.
+- Implementers and fixers compile (`scripts/heavy.sh swift build --build-tests`, or `xcodebuild build` for the app) and run only their own new or changed tests (`--filter`, through `scripts/heavy.sh`); they don't run `check.sh`. The tester runs the gate (`check.sh`, recorded) and any targeted runs its plan calls for. No direct `xcodebuild` / `swift test` outside `scripts/heavy.sh`.
 - UI tests (`RegattaUITests`, minutes each) run only in CI. Implementers never run them locally. The orchestrator may, only when CI can't and the ticket's acceptance needs one. A reference image comes from CI's `render-actuals` too, never a local recording (Render references, above).
 - Long runs: run `check.sh` in the foreground with a 600000 ms timeout. If a run can outlast that, `run_in_background` and end your turn; the completion notification wakes you. Pipe output through `tail`/`grep`; never dump a full build log.
 - Never poll: no `until`/`while`/`for` loop with `sleep`. Never `pgrep -f check.sh`: it matches every agent's run, not yours.
@@ -34,6 +34,7 @@
 
 | role | model | input |
 |------|-------|-------|
+| tester (scopes and runs validation) | Sonnet, high effort | brief, diff, implementation note |
 | review, validation (judgment) | Sonnet | diff, ticket, acceptance list |
 | acceptance check (mechanical) | Haiku | diff, ticket, acceptance list |
 
