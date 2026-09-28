@@ -48,6 +48,14 @@ _Avoid_: avoidance check, track projection
 A boat that broke a rule of Part 2 isn't penalised for it, because she was compelled to (43.1(a)) or was denied the room she was entitled to (43.1(b)). Recorded on the incident; the rule call names the boat that broke the rule.
 _Avoid_: acquittal, cleared
 
+**Hold course**:
+What a right-of-way boat does to keep her rights: rudder centred, the autohelm holding her wind angle. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated.
+_Avoid_: hold heading, stand on
+
+**Defend lane**:
+A right-of-way boat keeping the water she's sailing in rather than giving it up to a boat that must keep clear of her: she holds course, and luffs only within the room rule 16.1 leaves the other boat.
+_Avoid_: hunting (steering at a boat to force a foul, which bots never do)
+
 **Zone**:
 The water within 3 hull lengths of a mark; the rules configuration sets the size. A boat is in it once any part of her hull is, and rule 18 applies between two boats racing to the same mark only while at least one of them is in its zone.
 
