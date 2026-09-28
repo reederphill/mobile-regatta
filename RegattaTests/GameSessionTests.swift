@@ -66,4 +66,20 @@ import RegattaCore
         session.setPaused(false)
         #expect(!session.isPaused)
     }
+
+    /// Holding Ease reaches the seat's held input and the log; pausing lets it go, since the pause menu steals
+    /// the hold (#13).
+    @Test func easeButtonReachesTheSeat() throws {
+        let session = GameSession(config: Self.config)
+        #expect(!session.scene.heldInput.ease)
+        session.isEasing = true
+        #expect(session.scene.heldInput == BoatInput(rudder: 0 as Int8, ease: true))
+        session.driver.submit(session.scene.heldInput)
+        session.driver.tick(Race.dt)
+        let log = try #require(session.driver as? PracticeDriver).log
+        #expect(log.inputs.contains { $0.seat == 0 && $0.kind == .held(BoatInput(rudder: 0 as Int8, ease: true)) })
+        session.setPaused(true)
+        #expect(!session.isEasing)
+        #expect(!session.scene.heldInput.ease)
+    }
 }

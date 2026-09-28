@@ -159,7 +159,11 @@ struct RaceView: View {
             Spacer()
 
             HStack(alignment: .bottom) {
-                SteerHint(systemImage: "chevron.left", label: "Port")
+                VStack(spacing: 16) {
+                    SteerHint(systemImage: "chevron.left", label: "Port")
+                    EaseButton(isEasing: Binding(get: { session.isEasing }, set: { session.isEasing = $0 }))
+                        .disabled(!session.hud.status.isRacingOrStarting)
+                }
                 Spacer()
                 Button {
                     session.tackOrGybe()
@@ -181,6 +185,34 @@ struct RaceView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 16)
         }
+    }
+}
+
+/// Hold to ease the sheets: the boat slows without changing course (#13). A hold, not a tap, so it
+/// reads its own touch rather than a `Button`'s.
+private struct EaseButton: View {
+    @Binding var isEasing: Bool
+
+    var body: some View {
+        Text("EASE")
+            .font(.subheadline.weight(.heavy))
+            .tracking(1.2)
+            .frame(width: 76, height: 48)
+            .background(.black.opacity(isEasing ? 0.75 : 0.5), in: .capsule)
+            .overlay(Capsule().strokeBorder(.white, lineWidth: isEasing ? 3 : 2))
+            .foregroundStyle(.white)
+            .shadow(radius: 6, y: 3)
+            .scaleEffect(isEasing ? 0.94 : 1)
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in if !isEasing { isEasing = true } }
+                    .onEnded { _ in isEasing = false }
+            )
+            .accessibilityElement()
+            .accessibilityLabel("Ease")
+            .accessibilityHint("Hold to let the sheets out and slow down")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("race-ease")
     }
 }
 

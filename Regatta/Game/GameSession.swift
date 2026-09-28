@@ -52,6 +52,8 @@ final class GameSession {
     var results: [ResultRow] = []
     var isPaused = false
     var playerDone = false
+    /// The Ease button is held: the sheets go out and the boat slows without turning (#13).
+    var isEasing = false
 
     @ObservationIgnored private var lastCountdownSecond = Int.max
     @ObservationIgnored private var toldUpdateRequired = false
@@ -99,6 +101,8 @@ final class GameSession {
     /// Pauses a race that can pause; one that can't (online) keeps running.
     func setPaused(_ paused: Bool) {
         isPaused = paused && driver.isPausable
+        // The pause menu steals the hold, so the button may never see it end.
+        isEasing = false
         scene.resetInput()
     }
 

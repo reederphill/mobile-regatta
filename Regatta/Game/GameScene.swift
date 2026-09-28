@@ -208,7 +208,7 @@ final class GameScene: SKScene {
 
         updateRudder(frameTime)
         // The driver latches it for the next tick. With `-demo` a bot sails your seat and ignores it.
-        driver.submit(BoatInput(rudder: rudderInput))
+        driver.submit(heldInput)
         driver.tick(frameTime, within: Self.tickBudget)
 
         Signpost.renderUpdate.measure { render(driver.renderWorld) }
@@ -296,6 +296,9 @@ final class GameScene: SKScene {
     }
 
     // MARK: - Input
+
+    /// What the seat holds this frame: the rudder from the touches, and Ease from the button.
+    var heldInput: BoatInput { BoatInput(rudder: rudderInput, ease: session?.isEasing ?? false) }
 
     private func updateRudder(_ dt: Double) {
         let target = (starboardTouches.isEmpty ? 0.0 : 1.0) - (portTouches.isEmpty ? 0.0 : 1.0)
