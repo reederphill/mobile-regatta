@@ -60,6 +60,91 @@ public struct Venue: DataFileContent, Equatable {
         public let startLineCentre: Vec2
         /// The venue's geographic shift for this pairing, land shadow baked in.
         public let geographicGrid: GeographicGrid
+        /// The across-the-wind coordinate (#286, ADR 0008), derived from `geographicGrid` and `meanDirection`
+        /// at load, never stored in the file (ADR 0004): what the pressure field is laid across.
+        public let acrossWind: AcrossWind
+
+        init(conditions: DataFileKey, meanDirection: Double, trendDirection: TrendDirection, startLineCentre: Vec2,
+             geographicGrid: GeographicGrid) {
+            self.conditions = conditions
+            self.meanDirection = meanDirection
+            self.trendDirection = trendDirection
+            self.startLineCentre = startLineCentre
+            self.geographicGrid = geographicGrid
+            acrossWind = AcrossWind(geographicGrid, meanDirection: meanDirection)
+        }
+    }
+
+    /// A pairing's across-the-wind coordinate (#286, ADR 0008): metres across the wind, to the right looking
+    /// downwind, whose level lines are streamlines of the mean wind bent by the geographic grid. Anything laid
+    /// along a level line (a pressure lane) curves where the shore bends the wind; with a flat grid, or beyond
+    /// the grid's reach, it is the plain distance across the mean wind. Static and public, like the grid.
+    ///
+    /// Derived once at load: from each grid node, the streamline through it is traced upwind, against the pairing's
+    /// mean direction bent by the grid, to where it enters the grid; `offsets` holds how far across the mean wind
+    /// it has been carried since. The coordinate is the distance across, less that offset: the same all along a
+    /// streamline. A race's mean direction is the pairing's turned by its seed (`WindSetup.meanDirection`), so the
+    /// distance across is taken across the race's mean, and the grid's offsets bend it.
+    public struct AcrossWind: Sendable, Hashable {
+        public let grid: Grid
+        /// Per node, row-major (`grid.index`): metres across the pairing's mean wind the streamline through the
+        /// node has been carried since it entered the grid, positive to the right looking downwind. All zero
+        /// for a flat grid.
+        public let offsets: [Double]
+
+        /// Metres per step of the upwind trace: a quarter cell.
+        static let stepsPerCell = 4.0
+
+        init(_ geographic: GeographicGrid, meanDirection: Double) {
+            let grid = geographic.grid
+            self.grid = grid
+            guard geographic.directionDeltas.contains(where: { $0 != 0 }) else {
+                offsets = Array(repeating: 0, count: grid.nodeCount)
+                return
+            }
+            let step = grid.cellSize / Self.stepsPerCell
+            // Long enough to leave the grid along any streamline that isn't turned back on itself.
+            let maxSteps = 4 * Int(Self.stepsPerCell) * (grid.columns + grid.rows)
+            func delta(_ q: Vec2) -> Double? {
+                grid.cell(containing: q).map { grid.bilinear(geographic.directionDeltas, at: $0) }
+            }
+            var offsets = [Double](repeating: 0, count: grid.nodeCount)
+            for row in 0..<grid.rows {
+                for column in 0..<grid.columns {
+                    // Upwind is the bearing the bent wind blows from; each step upwind carries the streamline
+                    // sin δ of the step across the mean wind (the across component of `.heading(mean + δ)`),
+                    // midpoint rule, so a flat grid carries it exactly nothing.
+                    var q = grid.position(column: column, row: row)
+                    var carried = 0.0
+                    for _ in 0..<maxSteps {
+                        guard let start = delta(q) else { break }
+                        let mid = delta(q + Vec2.heading(meanDirection + start) * (step / 2)) ?? 0
+                        q = q + Vec2.heading(meanDirection + mid) * step
+                        carried += sin(mid) * step
+                    }
+                    offsets[grid.index(column: column, row: row)] = carried
+                }
+            }
+            self.offsets = offsets
+        }
+
+        /// The coordinate at `p`, metres, for a race whose mean wind blows from `meanDirection`: the distance
+        /// across that mean from the venue's origin, to the right looking downwind, less the grid's offset at
+        /// `p` (the nearest point of the grid beyond it). Pure.
+        public func coordinate(at p: Vec2, meanDirection: Double) -> Double {
+            p.dot(Self.across(meanDirection)) - offset(at: p)
+        }
+
+        /// The unit vector across the wind blowing from `meanDirection`: to the right, looking downwind.
+        public static func across(_ meanDirection: Double) -> Vec2 {
+            (-Vec2.heading(meanDirection)).rightPerp
+        }
+
+        /// The offset at `p`: bilinear between the nodes around it, or around the nearest point of the grid,
+        /// so a streamline keeps its offset once past the grid.
+        public func offset(at p: Vec2) -> Double {
+            grid.bilinear(offsets, at: grid.nearestCell(to: p))
+        }
     }
 
     /// The direction of a persistent shift. Veer is clockwise (a right shift, looking upwind);
@@ -130,6 +215,21 @@ public struct Venue: DataFileContent, Equatable {
             let near = lerp(values[index(column: c, row: r)], values[index(column: c + 1, row: r)], u)
             let far = lerp(values[index(column: c, row: r + 1)], values[index(column: c + 1, row: r + 1)], u)
             return lerp(near, far, v)
+        }
+
+        /// The cell `p` lies in, or for a point beyond the outer nodes the cell of the nearest point on the grid's
+        /// edge.
+        public func nearestCell(to p: Vec2) -> Cell {
+            let offset = p - origin
+            func clamped(_ position: Double, nodes: Int) -> (Int, Double) {
+                let x = position.isNaN ? 0 : position.clamped(to: 0...Double(nodes - 1))
+                let lower = min(Int(x), nodes - 2)
+                return (lower, x - Double(lower))
+            }
+            if let cell = cell(containing: p) { return cell }
+            let (column, columnFraction) = clamped(offset.dot(columnAxis) / cellSize, nodes: columns)
+            let (row, rowFraction) = clamped(offset.dot(rowAxis) / cellSize, nodes: rows)
+            return Cell(column: column, row: row, columnFraction: columnFraction, rowFraction: rowFraction)
         }
 
         /// Splits a position along one axis, in cells from node 0, into the cell's lower node and the
