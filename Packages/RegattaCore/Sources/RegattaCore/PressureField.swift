@@ -288,6 +288,16 @@ struct PressureLane: Hashable, Sendable {
     }
 }
 
+/// What `WindField` caches per window so `pressureState` only blends knots (#288): the window's pressure side target
+/// from the keys' own draws (`keyedSideTarget`, before the race's tendency), and the knots of each lane its key
+/// spawns (`laneKnotList`), in draw order.
+struct PressureKnots: Hashable, Sendable {
+    var sideTarget = 0.0
+    var lanes: [[WindKnot]] = []
+
+    static let none = PressureKnots()
+}
+
 /// The pressure field at one tick: its side's slope and the lanes alive, ready to apply at any point.
 struct PressureState: Hashable, Sendable {
     let side: Double
@@ -303,15 +313,21 @@ extension WindField {
         guard k >= 0 else { throw .beforeOrigin(tick: tick) }
         for window in firstWindowNeeded(atTick: tick)...k where keys[window] == nil { throw .missingKey(window) }
         let fraction = Double(tick - windows.start(of: k)) / Double(WindWindows.ticksPerWindow)
-        // Each target once, newest first: knot k reads the first `ramp + 1`, knot k − 1 the rest from the second.
+        // Each target once, newest first: knot k reads the first `ramp + 1`, knot k − 1 the rest from the second. The
+        // cache holds each window's target from the keys' own draws; the race's tendency goes on as `sideTarget` adds it.
         let ramp = PressurePlan.sideRampWindows
-        let targets = (0...(ramp + 1)).map { sideTarget(k - $0, plan) }
+        let tendency = plan.readsFirstKey ? pressureDraws(ofWindow: 0).tendency : nil
+        let targets = (0...(ramp + 1)).map { i in
+            let keyed = k - i >= 0 ? pressureKnots[k - i].sideTarget : 0
+            return tendency.map { keyed + $0 } ?? keyed
+        }
         let side = Self.hermite(Self.sideKnot(targets[1...]), Self.sideKnot(targets[...]), fraction).value
 
         var lanes: [PressureLane] = []
         for window in max(0, k - plan.laneLookback)...k {
-            for spawn in pressureDraws(ofWindow: window).lanes where spawn.isAlive(atTick: tick) {
-                let knots = laneKnots(spawn, k, plan)
+            let knotLists = pressureKnots[window].lanes
+            for (spawn, list) in zip(pressureDraws(ofWindow: window).lanes, knotLists) where spawn.isAlive(atTick: tick) {
+                let knots = Self.laneKnots(list, spawn, k)
                 let position = Self.hermite(knots.from, knots.to, fraction)
                 lanes.append(PressureLane(centre: position.value, drift: position.slope, halfWidth: spawn.halfWidth,
                                           intensity: spawn.intensity(atTick: tick)))
@@ -328,8 +344,8 @@ extension WindField {
         return plan.readsFirstKey ? keyed + pressureDraws(ofWindow: 0).tendency : keyed
     }
 
-    /// The side target from the windows' own draws alone: #286's.
-    private func keyedSideTarget(_ j: Int, _ plan: PressurePlan) -> Double {
+    /// The side target from the windows' own draws alone: #286's. What `pressureKnots` caches per window.
+    func keyedSideTarget(_ j: Int, _ plan: PressurePlan) -> Double {
         var window = j
         while window >= max(0, j - plan.sideLookback + 1) {
             if let side = pressureDraws(ofWindow: window).side { return side }
@@ -361,6 +377,27 @@ extension WindField {
     /// from its start, each later key's drift, and the position moved by the mean of the drifts either side.
     func laneKnot(_ spawn: PressureLaneSpawn, _ j: Int, _ plan: PressurePlan) -> WindKnot {
         laneKnots(spawn, j, plan).to
+    }
+
+    /// Lane `spawn`'s knots as `laneKnots` replays them, for the cache: its start, then the knot ending each window
+    /// from its own through the last it may be alive in (`laneLookback` after it), stopping at the first key not held.
+    func laneKnotList(_ spawn: PressureLaneSpawn, _ plan: PressurePlan) -> [WindKnot] {
+        var position = spawn.start, drift = spawn.startDrift
+        var knots = [WindKnot(value: position, slope: drift)]
+        for window in spawn.window...(spawn.window + plan.laneLookback) {
+            guard let key = keys[window] else { break }
+            let next = plan.drift(of: spawn, key: key)
+            position += WindWindows.seconds * (drift + next) / 2
+            drift = next
+            knots.append(WindKnot(value: position, slope: drift))
+        }
+        return knots
+    }
+
+    /// `laneKnots(spawn, k, _)` from the cached `list` (`laneKnotList`), bit for bit.
+    static func laneKnots(_ list: [WindKnot], _ spawn: PressureLaneSpawn, _ k: Int) -> (from: WindKnot, to: WindKnot) {
+        let i = k - spawn.window
+        return (i < list.count ? list[i] : list[0], list[min(i + 1, list.count - 1)])
     }
 
     /// Lane `spawn`'s knots ending windows `k − 1` and `k`, in one pass: `laneKnot` of each.

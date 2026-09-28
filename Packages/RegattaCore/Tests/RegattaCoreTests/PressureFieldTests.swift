@@ -152,6 +152,53 @@ enum PressureFixtures {
         #expect(checkedLanes > 100, "\(checkedLanes) lanes across a knot")
     }
 
+    /// #288: `pressureState` blends the knots `WindField` caches as keys arrive, bit for bit what working them out
+    /// afresh at the tick gives (`sideTarget`, `sideKnot`, `laneKnots`): in the version-4 and -5 files, flat and at
+    /// their dev venues (dev-venue@5 with a side tendency and lane spots), with keys added in order or shuffled.
+    @Test func cachedKnotsGiveTheSameStateBitForBit() throws {
+        var lanes = 0
+        for id in WindFixtures.ids {
+            let setups = [
+                try PressureFixtures.setup(id, raceSeed: 5),
+                try PressureFixtures.setup(id, raceSeed: 5, pairing: try PressureFixtures.devPairing(id)),
+                try GeographyFixtures.setup(id, raceSeed: 5),
+            ]
+            for setup in setups {
+                let (field, _) = try WindFixtures.field(setup, windSeed: 288, through: 45)
+                let plan = try #require(field.pressurePlan)
+                var shuffled = field.keys.keys
+                var rng = SplitMix64(seed: 288)
+                rng.shuffle(&shuffled)
+                var added = WindField(setup: setup, windows: Self.w)
+                for key in shuffled { added.add(key) }
+                #expect(added == field)
+                for tick in stride(from: Self.w.start(of: 1), to: Self.w.start(of: 46), by: 37) {
+                    let k = Self.w.window(containing: tick)
+                    let fraction = Double(tick - Self.w.start(of: k)) / Double(WindWindows.ticksPerWindow)
+                    let side = WindField.hermite(field.sideKnot(k - 1, plan), field.sideKnot(k, plan), fraction).value
+                    var expected: [PressureLane] = []
+                    for window in max(0, k - plan.laneLookback)...k {
+                        for spawn in field.pressureDraws(ofWindow: window).lanes where spawn.isAlive(atTick: tick) {
+                            let knots = field.laneKnots(spawn, k, plan)
+                            let position = WindField.hermite(knots.from, knots.to, fraction)
+                            expected.append(PressureLane(centre: position.value, drift: position.slope, halfWidth: spawn.halfWidth,
+                                                         intensity: spawn.intensity(atTick: tick)))
+                        }
+                    }
+                    let state = try field.pressureState(atTick: tick, plan)
+                    #expect(state.side.bitPattern == side.bitPattern, "\(id) side at tick \(tick)")
+                    #expect(state.lanes.count == expected.count)
+                    for (a, b) in zip(state.lanes, expected) {
+                        #expect(a.centre.bitPattern == b.centre.bitPattern && a.drift.bitPattern == b.drift.bitPattern
+                                && a.intensity.bitPattern == b.intensity.bitPattern, "\(id) lane at tick \(tick)")
+                    }
+                    lanes += expected.count
+                }
+            }
+        }
+        #expect(lanes > 1000, "\(lanes) lanes checked")
+    }
+
     /// Over a leg (4 min), the difference in mean speed between the race area's two sides exceeds 5 % of the course
     /// speed most of the time; and the pressure side changes within a 20-minute race in some seeds, not all.
     @Test func pressureSidePersistsAndChanges() throws {

@@ -49,6 +49,10 @@ public struct WindField: Hashable, Sendable {
     let pressurePlan: PressurePlan?
     /// `pressure[k]`: what key k draws for the pressure field, made when the key is added like `puffSpawns`.
     private var pressure: [PressureDraws] = []
+    /// `pressureKnots[k]`: window k's pressure side target from the keys' own draws, and the knots of the lanes key k
+    /// spawns, made when the keys they read are added so sampling only blends them (#288). A function of the keys
+    /// and setup like `pressure`: adding a key redoes every entry that reads it.
+    private(set) var pressureKnots: [PressureKnots] = []
 
     public init(setup: WindSetup, windows: WindWindows, keys: WindKeyChain = WindKeyChain()) {
         self.setup = setup
@@ -69,16 +73,31 @@ public struct WindField: Hashable, Sendable {
 
     private mutating func spawnPuffs(of key: WindKey) {
         if let pressurePlan {
-            if key.window >= pressure.count {
-                pressure += Array(repeating: .none, count: key.window - pressure.count + 1)
+            let held = pressure.count
+            if key.window >= held {
+                pressure += Array(repeating: .none, count: key.window - held + 1)
+                pressureKnots += Array(repeating: .none, count: key.window - held + 1)
             }
             pressure[key.window] = pressurePlan.draws(of: key, windows: windows)
+            cacheKnots(reading: key.window, since: held, pressurePlan)
         }
         guard let puffPlan else { return }
         if key.window >= puffSpawns.count {
             puffSpawns += Array(repeating: [], count: key.window - puffSpawns.count + 1)
         }
         puffSpawns[key.window] = puffPlan.spawns(of: key, windows: windows)
+    }
+
+    /// Redoes the cached knots that read key `window` (just added), and fills windows `since` on, new to the cache: the
+    /// side targets of the `sideLookback` windows from it, and the knots of lanes spawned up to `laneLookback` windows
+    /// before it. Each is worked out as `keyedSideTarget` and `laneKnots` would at any tick.
+    private mutating func cacheKnots(reading window: Int, since: Int, _ plan: PressurePlan) {
+        for j in min(since, window)..<min(pressure.count, window + plan.sideLookback) {
+            pressureKnots[j].sideTarget = keyedSideTarget(j, plan)
+        }
+        for spawnWindow in max(0, window - plan.laneLookback)...window {
+            pressureKnots[spawnWindow].lanes = pressure[spawnWindow].lanes.map { laneKnotList($0, plan) }
+        }
     }
 
     /// The ground wind at `p` at `tick`: the fleet-wide channels, bent and shaded by the venue's geographic
