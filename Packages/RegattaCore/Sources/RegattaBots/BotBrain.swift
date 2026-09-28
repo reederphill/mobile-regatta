@@ -588,7 +588,7 @@ struct BotBrain: Sendable {
     }
 
     /// Seconds ahead she looks for a collision she must keep clear of: further, the more skilled she is.
-    private var keepClearLookahead: Double { 2.5 + 2 * skill }
+    var keepClearLookahead: Double { 2.5 + 2 * skill }
 
     /// The heading the rule she must keep clear under has her steer, if a collision is coming: ducking, luffing,
     /// finishing a tack, or turning away. Racing, her give-way manoeuvre for each relation is `racingKeepClear`'s
