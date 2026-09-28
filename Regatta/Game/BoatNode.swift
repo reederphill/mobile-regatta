@@ -22,10 +22,11 @@ final class BoatNode: SKNode {
     private enum Layer {
         static let cone: CGFloat = 0, wake: CGFloat = 0.5
         static let fleet: CGFloat = 5, mine: CGFloat = 10
-        static let hull: CGFloat = 0, name: CGFloat = 0.25, badge: CGFloat = 0.5, sail: CGFloat = 1
+        static let hull: CGFloat = 0, outline: CGFloat = 0.1, name: CGFloat = 0.25, badge: CGFloat = 0.5, sail: CGFloat = 1
     }
 
-    /// `isMine` marks your boat (the driver's `myBoatIndex`): outlined, named larger and drawn on top.
+    /// `isMine` marks your boat (the driver's `myBoatIndex`): outlined in white inside her hull's edge, named larger
+    /// and drawn on top. Every hull is the same size.
     init(boat: Boat, name: String, isMine: Bool, color: UIColor, boatClass: BoatClass, pointsPerMeter ppm: CGFloat) {
         self.ppm = ppm
         let length = CGFloat(boatClass.hull.length) * ppm
@@ -33,10 +34,13 @@ final class BoatNode: SKNode {
         // Hulls, sails and shadow cones are sprites sharing a few textures so
         // SpriteKit can batch the whole fleet into a handful of draw calls.
         let art = BoatArt.shared(boatClass: boatClass, pointsPerMeter: ppm)
-        let hull = SKSpriteNode(texture: isMine ? art.playerHull : art.hull)
+        let hull = SKSpriteNode(texture: art.hull)
         hull.color = color
         hull.colorBlendFactor = 1
         hull.zPosition = Layer.hull
+        // Its own sprite, untinted: in the hull's texture the tint turned the white to her colour.
+        let outline = isMine ? SKSpriteNode(texture: art.outline) : nil
+        outline?.zPosition = Layer.outline
 
         sail = SKSpriteNode(texture: art.sail)
         sail.anchorPoint = art.sailAnchor
@@ -52,6 +56,7 @@ final class BoatNode: SKNode {
         super.init()
 
         body.addChild(hull)
+        if let outline { body.addChild(outline) }
         body.addChild(sail)
         addChild(body)
 
@@ -155,7 +160,8 @@ final class BoatNode: SKNode {
 /// Pre-rendered boat textures, drawn in white so each sprite can be tinted.
 private struct BoatArt {
     let hull: SKTexture
-    let playerHull: SKTexture
+    /// Your boat's white outline, drawn over her hull.
+    let outline: SKTexture
     let sail: SKTexture
     let sailAnchor: CGPoint
     let cone: SKTexture
@@ -173,8 +179,8 @@ private struct BoatArt {
     private init(boatClass: BoatClass, ppm: CGFloat) {
         let length = CGFloat(boatClass.hull.length) * ppm
         let beam = CGFloat(boatClass.hull.beam) * ppm
-        hull = BoatArt.hullTexture(length: length, beam: beam, outlined: false)
-        playerHull = BoatArt.hullTexture(length: length, beam: beam, outlined: true)
+        hull = BoatArt.hullTexture(length: length, beam: beam)
+        outline = BoatArt.outlineTexture(length: length, beam: beam)
         (sail, sailAnchor) = BoatArt.sailTexture(length: length * 0.62, bulge: beam * 0.45, mastRadius: max(1.5, beam * 0.1))
         cone = BoatArt.coneTexture(boatClass.windShadow, ppm: ppm)
     }
@@ -193,7 +199,8 @@ private struct BoatArt {
         return SKTexture(image: image)
     }
 
-    private static func hullTexture(length l: CGFloat, beam b: CGFloat, outlined: Bool) -> SKTexture {
+    /// The hull's outline, `length` × `beam`, bow up.
+    private static func hullPath(length l: CGFloat, beam b: CGFloat) -> CGPath {
         let path = CGMutablePath()
         path.move(to: CGPoint(x: 0, y: l / 2))
         path.addQuadCurve(to: CGPoint(x: b / 2, y: -l * 0.1), control: CGPoint(x: b / 2, y: l * 0.32))
@@ -202,9 +209,29 @@ private struct BoatArt {
         path.addLine(to: CGPoint(x: -b / 2, y: -l * 0.1))
         path.addQuadCurve(to: CGPoint(x: 0, y: l / 2), control: CGPoint(x: -b / 2, y: l * 0.32))
         path.closeSubpath()
+        return path
+    }
 
-        let bounds = CGRect(x: -b / 2 - 2, y: -l / 2 - 2, width: b + 4, height: l + 4)
-        return texture(bounds: bounds) { cg in
+    /// The hull's texture and her outline's share these bounds, so the two sprites line up.
+    private static func hullBounds(length l: CGFloat, beam b: CGFloat) -> CGRect {
+        CGRect(x: -b / 2 - 2, y: -l / 2 - 2, width: b + 4, height: l + 4)
+    }
+
+    /// Strokes `path`'s rim `width` wide inside its edge, never outside it: the path is the silhouette.
+    private static func strokeInside(_ path: CGPath, width: CGFloat, color: UIColor, in cg: CGContext) {
+        cg.saveGState()
+        cg.addPath(path)
+        cg.clip()
+        cg.addPath(path)
+        cg.setStrokeColor(color.cgColor)
+        cg.setLineWidth(width * 2)
+        cg.strokePath()
+        cg.restoreGState()
+    }
+
+    private static func hullTexture(length l: CGFloat, beam b: CGFloat) -> SKTexture {
+        let path = hullPath(length: l, beam: b)
+        return texture(bounds: hullBounds(length: l, beam: b)) { cg in
             cg.addPath(path)
             cg.setFillColor(UIColor.white.cgColor)
             cg.fillPath()
@@ -214,10 +241,14 @@ private struct BoatArt {
             cg.addPath(cockpit)
             cg.setFillColor(UIColor(white: 0.7, alpha: 1).cgColor)
             cg.fillPath()
-            cg.addPath(path)
-            cg.setStrokeColor(outlined ? UIColor.white.cgColor : UIColor(white: 0.55, alpha: 1).cgColor)
-            cg.setLineWidth(outlined ? 2 : 1)
-            cg.strokePath()
+            strokeInside(path, width: 1, color: UIColor(white: 0.55, alpha: 1), in: cg)
+        }
+    }
+
+    private static func outlineTexture(length l: CGFloat, beam b: CGFloat) -> SKTexture {
+        let path = hullPath(length: l, beam: b)
+        return texture(bounds: hullBounds(length: l, beam: b)) { cg in
+            strokeInside(path, width: 1.5, color: .white, in: cg)
         }
     }
 
