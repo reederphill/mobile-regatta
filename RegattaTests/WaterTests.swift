@@ -160,6 +160,19 @@ import RegattaCore
         #expect(lull.token == ChartPalette.lull && abs(lull.alpha - 0.5) < 1e-9)
     }
 
+    /// The minimap shows the wind off screen as well as on (#224): the HUD carries every puff and lull alive,
+    /// each where it is, its size and its tone.
+    @Test func hudCarriesThePuffsForTheMinimap() throws {
+        let race = try Self.race("gusty-offshore", to: -600)
+        let world = Self.world(of: race)
+        let hud = HUDState(world: world)
+        #expect(!hud.puffs.isEmpty)
+        #expect(hud.puffs.map(\.center) == world.puffs.map(\.center))
+        #expect(hud.puffs.map(\.radius) == world.puffs.map(\.radius))
+        #expect(hud.puffs.map(\.intensity) == world.puffs.map(\.intensity))
+        #expect(hud.puffs.contains { $0.intensity > 0 } && hud.puffs.contains { $0.intensity < 0 })
+    }
+
     /// The cheap tier (#127) freezes the ripple and thins the whitecaps; the puff shading is a race cue, drawn the
     /// same in every tier (#27).
     @Test func cheapTierKeepsTheRaceCues() throws {
