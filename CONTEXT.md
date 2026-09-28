@@ -48,6 +48,17 @@ _Avoid_: avoidance check, track projection
 A boat that broke a rule of Part 2 isn't penalised for it, because she was compelled to (43.1(a)) or was denied the room she was entitled to (43.1(b)). Recorded on the incident; the rule call names the boat that broke the rule.
 _Avoid_: acquittal, cleared
 
+**Zone**:
+The water within 3 hull lengths of a mark; the rules configuration sets the size. A boat is in it once any part of her hull is, and rule 18 applies between two boats racing to the same mark only while at least one of them is in its zone.
+
+**Mark-room**:
+The room one boat owes another to sail to a mark, round or pass it, and leave it astern (rule 18). It isn't right of way (Case 25): rules 10–13 still decide which boat keeps clear, and an inside windward boat still keeps clear under rule 11.
+_Avoid_: mark room; right of way; room on its own (that's what a right-of-way boat gives under rules 15 and 16.1)
+
+**Entitled boat**:
+The boat owed mark-room: the inside boat if the two were overlapped as the first of them reached the zone, otherwise the one that reached it first; with no such record, the inside of two overlapped boats (18.2(c)). A record made at the zone holds even if the overlap later changes, until mark-room has been given or she leaves the zone or passes head to wind. A boat that tacks from port to starboard in the zone of a mark left to port is owed no mark-room by a starboard boat fetching it (18.3 in the 2025 rules, where it's the starboard boat that must be fetching, not the tacker).
+_Avoid_: right-of-way boat (mark-room isn't right of way); inside boat (a boat clear astern that reaches the zone first is entitled, Case 2)
+
 **Last point of certainty**:
 The last moment at which it was certain whether two boats were overlapped, or whether a boat was in a mark's zone. A change counts only once it has held for a short margin.
 _Avoid_: overlap timer
