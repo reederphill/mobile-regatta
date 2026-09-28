@@ -17,6 +17,11 @@ import RegattaCore
 //   has right of way. A turn her autohelm makes following a shift isn't hers.
 // - She taps a tack or gybe only clear of every boat (`tapIsClear`): a boat tacking keeps clear (rule 13), and one
 //   that acquires right of way by it gives room (rule 15).
+// - Misjudging (#103, #19: "they foul only by misjudging"): meeting a boat she must keep clear of under a rule in
+//   `BotWeaknesses.misjudgeScope`, she may misjudge the encounter, by her skill's `ruleMisjudgeRate`, drawn once an
+//   encounter (`judgeEncounters`): she believes she holds her rights and sails on, as she would were she the
+//   right-of-way boat, so fails to keep clear. A misjudgement only ever leaves out her give-way manoeuvre: it never
+//   turns her towards a boat, and her hold-course under 16.1 is as ever. None from National's band up.
 // - Ghosts have no rights or obligations: she ignores them. She never steers at a boat to force a foul, and never
 //   protests: a `BotDecision` has no protest tap.
 //
@@ -48,6 +53,38 @@ extension BotBrain {
     static let tapClearance = 1.3
     /// Radians between the headings she tries for the least turn that keeps her clear (`clearingHeading`).
     static let clearingStep = deg2rad(5)
+
+    // MARK: - Misjudging
+
+    /// Draws her judgement of each boat she meets racing that she must keep clear of under a rule in
+    /// `BotWeaknesses.misjudgeScope` (#103): once an encounter, the first decision she owes that boat keep-clear
+    /// within `keepClearRange`, kept until that boat is beyond it again, so she doesn't swing between judgements
+    /// through one encounter. From her own stream (`rng`), and only if she can misjudge at all, so a bot that
+    /// misjudges nothing draws nothing. Before her start, or not racing, she judges nothing (#99, #280).
+    mutating func judgeEncounters(_ b: SeatView.OwnBoat, _ view: SeatView) {
+        guard b.status == .racing, weaknesses.ruleMisjudgeRate > 0 else {
+            if !misjudged.isEmpty { misjudged = [:] }
+            return
+        }
+        // Rebuilt from the boats in range, in seat-view order, never by iterating the dictionary (ADR 0002).
+        let inRange = view.others.filter {
+            !$0.isGhost && ($0.position - b.position).length < Self.keepClearRange
+        }
+        var judged: [Int: Bool] = [:]
+        for other in inRange {
+            if let judgement = misjudged[other.seat] {
+                judged[other.seat] = judgement
+            } else if let rule = keepClearRule(b, view, other), BotWeaknesses.misjudgeScope.contains(rule) {
+                judged[other.seat] = rng.unit() < weaknesses.ruleMisjudgeRate
+            }
+        }
+        misjudged = judged
+    }
+
+    /// Whether she misjudges her encounter with `other`, keeping clear of her under `rule` (`judgeEncounters`).
+    func misjudges(_ other: SeatView.OtherBoat, _ rule: RacingRule) -> Bool {
+        misjudged[other.seat] == true && BotWeaknesses.misjudgeScope.contains(rule)
+    }
 
     // MARK: - Giving way
 

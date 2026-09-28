@@ -121,6 +121,10 @@ struct BotBrain: Sendable {
     /// Her groove choice (`BotWeaknesses.angleMissRate`): radians off the groove she sails, past its snap (0: in
     /// it), until the race clock reaches `until`.
     var grooveMiss = (offset: 0.0, until: -Double.infinity)
+    /// Her judgement of each boat she has met racing and must keep clear of (#103, `judgeEncounters`), by its seat:
+    /// true if she misjudges that encounter and believes she holds her rights. Kept while that boat is within
+    /// `keepClearRange` of her.
+    var misjudged: [Int: Bool] = [:]
 
     /// The stream of her seed her own draws come from.
     static let brainStream: UInt64 = 0x6272_6169_6e64_7277 // "braindrw"
@@ -140,6 +144,7 @@ struct BotBrain: Sendable {
         let boat = view.own
         observe(boat, view)
         guard boat.isOnCourse else { return BotDecision(input: .neutral) }
+        judgeEncounters(boat, view)
         if let input = penaltyInput(boat, view) { return BotDecision(input: input) }
         var aim = plan(boat, view)
         // Tacked before her start, she bears away to close-hauled before she holds any closer to the wind: until
@@ -650,8 +655,9 @@ struct BotBrain: Sendable {
         return startKeepClear(b, view, desired: desired, lookahead: lookahead) ?? heading
     }
 
-    /// Seconds ahead she looks for a collision she must keep clear of: further, the more skilled she is.
-    var keepClearLookahead: Double { 2.5 + 2 * skill }
+    /// Seconds ahead she looks for a collision she must keep clear of: further, the more skilled she is
+    /// (`BotWeaknesses.keepClearLookahead`, #103).
+    var keepClearLookahead: Double { weaknesses.keepClearLookahead }
 
     /// The heading the rule she must keep clear under has her steer, if a collision is coming: ducking, luffing,
     /// finishing a tack, or turning away. Racing, her give-way manoeuvre for each relation is `racingKeepClear`'s
@@ -660,7 +666,7 @@ struct BotBrain: Sendable {
     private func ruleKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Double? {
         for other in view.others where !other.isGhost {
             if b.status == .racing {
-                guard let rule = keepClearRule(b, view, other),
+                guard let rule = keepClearRule(b, view, other), !misjudges(other, rule),
                       isAboutToHit(other, b, view, desired: desired, lookahead: lookahead) else { continue }
                 return racingKeepClear(b, view, from: other, rule: rule, desired: desired, lookahead: lookahead)
             }
