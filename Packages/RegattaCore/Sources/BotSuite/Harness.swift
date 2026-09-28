@@ -66,7 +66,7 @@ public enum BotRaceHarness {
         }
         let seats = tiers.indices.map { seat in
             tally.metrics(seat: seat, of: race, tier: tiers[seat], profile: profiles[seat],
-                          skill: controllers[seat].driver?.style.skill ?? 0)
+                          style: controllers[seat].driver?.style)
         }
         return RaceResult(cell: cell, finalTick: race.tick, capped: !race.isOver,
                           tideStateAtGun: race.tideStateAtGun, seats: seats,
@@ -93,6 +93,8 @@ struct RaceTally {
     private let noGo: Double
     private let area: RaceArea
     private var ironsTicks: [Int]
+    /// Ticks before the gun in irons (#99), as `ironsTicks` counts them racing.
+    private var preGunIronsTicks: [Int]
     private var edgeTicks: [Int]
     private var markContacts: [Int]
     private var landContacts: [Int]
@@ -112,12 +114,19 @@ struct RaceTally {
     private var legTacks: [Int]
     /// Each seat's beats sailed, in order.
     private var beats: [[BeatSplit]]
+    private let startLine: CourseLayout.Line
+    /// Where along the start line each seat's start-row slot lies (#35): `lineSpot` of where she began.
+    private let rowSpots: [Double]
+    /// Each seat's start (#85), once she has made it: the tick she crossed the line from the pre-start
+    /// side after the gun, and where along it she was.
+    private var starts: [(tick: Int, spot: Double)?]
 
     init(race: Race) {
         noGo = BoatDynamics.noGoAngle(race.boatClass.polar)
         area = race.course.raceArea
         let zeros = Array(repeating: 0, count: race.boats.count)
         ironsTicks = zeros
+        preGunIronsTicks = zeros
         edgeTicks = zeros
         markContacts = zeros
         landContacts = zeros
@@ -131,6 +140,10 @@ struct RaceTally {
         legEntries = Array(repeating: nil, count: race.boats.count)
         legTacks = zeros
         beats = Array(repeating: [], count: race.boats.count)
+        let line = race.course.startLine
+        startLine = line
+        rowSpots = race.boats.map { lineSpot($0.position, on: line) }
+        starts = Array(repeating: nil, count: race.boats.count)
     }
 
     /// Call once after each `race.step()`, with the events it emitted.
@@ -144,6 +157,7 @@ struct RaceTally {
             case .obstructionContact(let seat, .boundary): boundaryContacts[seat] += 1
             case .disqualified(let seat, _): disqualifications[seat] += 1
             case .tacked(let seat) where !race.boats[seat].isTakingPenalty: legTacks[seat] += 1
+            case .started(let seat): starts[seat] = (race.tick, lineSpot(race.boats[seat].position, on: startLine))
             case .contact(let pair):
                 // A contact opens an incident for the pair, or touches again inside the one still open
                 // (#88: one per pair until they separate): either way the pair's latest. A near miss opens
@@ -155,8 +169,9 @@ struct RaceTally {
             }
         }
         for (seat, boat) in race.boats.enumerated() {
-            if boat.status == .racing && !boat.isTakingPenalty && boat.twa < noGo && boat.speed < BotRaceHarness.ironsSpeed {
-                ironsTicks[seat] += 1
+            if !boat.isTakingPenalty && boat.twa < noGo && boat.speed < BotRaceHarness.ironsSpeed {
+                if boat.status == .racing { ironsTicks[seat] += 1 }
+                if boat.status == .prestart && race.tick < 0 { preGunIronsTicks[seat] += 1 }
             }
             if boat.isOnCourse && area.inset(boat.position) < BotRaceHarness.edgeMargin {
                 edgeTicks[seat] += 1
@@ -180,7 +195,8 @@ struct RaceTally {
         legTacks[seat] = 0
     }
 
-    func metrics(seat: Int, of race: Race, tier: BotTier, profile: BotProfile?, skill: Double) -> SeatMetrics {
+    /// `style` is the style of the bot sailing the seat; nil for none.
+    func metrics(seat: Int, of race: Race, tier: BotTier, profile: BotProfile?, style: BotStyle?) -> SeatMetrics {
         let boat = race.boats[seat]
         let fouls = contacts[seat].filter { id in
             guard let id, case .called = race.incidents[id]?.outcome else { return false }
@@ -188,7 +204,7 @@ struct RaceTally {
         }.count
         let seconds = { (ticks: Int) in Double(ticks) / Double(Race.tickRate) }
         return SeatMetrics(
-            seat: seat, tier: tier, profile: profile, skill: skill, status: SeatMetrics.name(boat.status),
+            seat: seat, tier: tier, profile: profile, skill: style?.skill ?? 0, status: SeatMetrics.name(boat.status),
             finished: boat.status == .finished, place: boat.place,
             ironsSeconds: seconds(ironsTicks[seat]),
             markContacts: markContacts[seat],
@@ -201,9 +217,21 @@ struct RaceTally {
             edgeSeconds: seconds(edgeTicks[seat]),
             landContacts: landContacts[seat],
             boundaryContacts: boundaryContacts[seat],
-            beats: beats[seat]
+            beats: beats[seat],
+            preGunIronsSeconds: seconds(preGunIronsTicks[seat]),
+            startSeconds: starts[seat].map { seconds($0.tick) },
+            startLineSpot: starts[seat]?.spot,
+            rowSpot: rowSpots[seat],
+            startSpot: style?.startSpot ?? 0.5
         )
     }
+}
+
+/// Where along `line` the point `p` lies, as a share of its length from the pin (0) to the committee boat
+/// (1): below 0 past the pin end, above 1 past the committee boat.
+func lineSpot(_ p: Vec2, on line: CourseLayout.Line) -> Double {
+    let along = line.committee.position - line.pin.position
+    return (p - line.pin.position).dot(along.normalized) / along.length
 }
 
 /// `part / whole`, or 0 when `whole` is 0, so a report never holds a NaN.

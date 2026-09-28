@@ -87,37 +87,84 @@ public struct ProfileLimits: Codable, Hashable, Sendable {
     }
 }
 
+/// What the start must show over a run (#99), over its all-National live ten-boat fleets (`StartSummary`). Every
+/// limit is optional; they gate only a run that sailed such a fleet.
+public struct StartLimits: Codable, Hashable, Sendable {
+    /// The most of their seats that may be OCS at the gun.
+    public var maxOCSShare: Double?
+    /// The least of them that must start within `StartSummary.onTimeSeconds` of the gun.
+    public var minOnTimeShare: Double?
+    /// The most seconds in irons before the gun per seat, on average (`SeatMetrics.preGunIronsSeconds`).
+    public var maxMeanPreGunIronsSeconds: Double?
+    /// The least share of their pin-style seats from committee slots that must start in the line's pin third.
+    public var minPinThirdShare: Double?
+
+    public init(maxOCSShare: Double? = nil, minOnTimeShare: Double? = nil, maxMeanPreGunIronsSeconds: Double? = nil,
+                minPinThirdShare: Double? = nil) {
+        self.maxOCSShare = maxOCSShare
+        self.minOnTimeShare = minOnTimeShare
+        self.maxMeanPreGunIronsSeconds = maxMeanPreGunIronsSeconds
+        self.minPinThirdShare = minPinThirdShare
+    }
+
+    /// Why `summary` misses these limits, each line starting with `start`; none without a summary, and no
+    /// pin-third breach without a pin-style seat from a committee slot.
+    func breaches(_ summary: StartSummary?) -> [String] {
+        guard let summary else { return [] }
+        var breaches: [String] = []
+        if let maximum = maxOCSShare, summary.ocsShare > maximum {
+            breaches.append("start: OCS \(fixed(summary.ocsShare)) > \(fixed(maximum))")
+        }
+        if let minimum = minOnTimeShare, summary.onTimeShare < minimum {
+            breaches.append("start: on time \(fixed(summary.onTimeShare)) < \(fixed(minimum))")
+        }
+        if let maximum = maxMeanPreGunIronsSeconds, summary.meanPreGunIronsSeconds > maximum {
+            breaches.append("start: pre-gun irons \(fixed(summary.meanPreGunIronsSeconds)) s/boat > \(fixed(maximum))")
+        }
+        if let minimum = minPinThirdShare, let share = summary.pinThirdShare, share < minimum {
+            breaches.append("start: pin third \(fixed(share)) < \(fixed(minimum))")
+        }
+        return breaches
+    }
+}
+
 /// The suite's gate (#19, #27): limits per tier, keyed by `BotTier.rawValue`, per scripted profile, keyed by
-/// `BotProfile.rawValue` (#231, #238), and the worst race's p99 tick. A tier or profile with no limits isn't
-/// gated, and a profile's limits gate only a run that sailed it. "The exact limits are set at build time" (#19):
-/// the bundled `thresholds.json` starts loose, and tightens as the brains (#102) do.
+/// `BotProfile.rawValue` (#231, #238), the start's (#99), and the worst race's p99 tick. A tier or profile with no
+/// limits isn't gated, and a profile's or the start's limits gate only a run that sailed it. "The exact limits are
+/// set at build time" (#19): the bundled `thresholds.json` starts loose, and tightens as the brains (#102) do.
 public struct BotThresholds: Codable, Hashable, Sendable {
     public var tiers: [String: TierLimits]
     /// Empty when a thresholds file has none.
     public var profiles: [String: ProfileLimits]
+    /// The start's limits (#99); nil when a thresholds file has none.
+    public var start: StartLimits?
     public var maxP99TickMs: Double
 
-    public init(tiers: [String: TierLimits], profiles: [String: ProfileLimits] = [:], maxP99TickMs: Double) {
+    public init(tiers: [String: TierLimits], profiles: [String: ProfileLimits] = [:], start: StartLimits? = nil,
+                maxP99TickMs: Double) {
         self.tiers = tiers
         self.profiles = profiles
+        self.start = start
         self.maxP99TickMs = maxP99TickMs
     }
 
     private enum CodingKeys: String, CodingKey {
-        case tiers, profiles, maxP99TickMs
+        case tiers, profiles, start, maxP99TickMs
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(tiers: try c.decode([String: TierLimits].self, forKey: .tiers),
                   profiles: try c.decodeIfPresent([String: ProfileLimits].self, forKey: .profiles) ?? [:],
+                  start: try c.decodeIfPresent(StartLimits.self, forKey: .start),
                   maxP99TickMs: try c.decode(Double.self, forKey: .maxP99TickMs))
     }
 
-    /// Why a run with these tier summaries, timings, skill gap and fun pass misses the thresholds; empty when
-    /// it meets them.
+    /// Why a run with these tier summaries, timings, skill gap, fun pass and start misses the thresholds; empty
+    /// when it meets them.
     public func breaches(tiers summaries: [String: TierSummary], timings: BotSuiteReport.RunTimings,
-                         skillGap: SkillGapSummary? = nil, funPass: FunPassSummary? = nil) -> [String] {
+                         skillGap: SkillGapSummary? = nil, funPass: FunPassSummary? = nil,
+                         start: StartSummary? = nil) -> [String] {
         var breaches = BotTier.allCases.flatMap { tier -> [String] in
             guard let summary = summaries[tier.rawValue], let limits = tiers[tier.rawValue] else { return [] }
             return limits.breaches(tier.rawValue, summary)
@@ -125,6 +172,7 @@ public struct BotThresholds: Codable, Hashable, Sendable {
         for profile in BotProfile.allCases {
             breaches += profiles[profile.rawValue]?.breaches(profile.rawValue, skillGap: skillGap, funPass: funPass) ?? []
         }
+        breaches += self.start?.breaches(start) ?? []
         if timings.maxP99Ms > maxP99TickMs {
             breaches.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms > \(fixed(maxP99TickMs, 3))")
         }

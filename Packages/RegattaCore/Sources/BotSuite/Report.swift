@@ -32,17 +32,33 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     public var boundaryContacts: Int
     /// Each beat she sailed, in order (#231): from her start or rounding into it until she rounds out of it.
     public var beats: [BeatSplit] = []
+    /// Seconds before the gun inside the no-go zone and slower than `BotRaceHarness.ironsSpeed`, not taking a
+    /// penalty (#99): stalled head to wind, as `ironsSeconds` counts it racing. A hold with Ease outside the
+    /// no-go zone is slow, but it isn't irons.
+    public var preGunIronsSeconds: Double = 0
+    /// Seconds after the gun she started, crossing the line from the pre-start side (#85); nil if she never did.
+    public var startSeconds: Double? = nil
+    /// Where along the start line she started, as a share of it from the pin (0) to the committee boat (1);
+    /// nil if she never did.
+    public var startLineSpot: Double? = nil
+    /// Where along the start line her start-row slot lies (#35), on the same scale: the row reaches past
+    /// both ends.
+    public var rowSpot: Double = 0.5
+    /// Where on the line her style means her to start (`BotStyle.startSpot`), on the same scale.
+    public var startSpot: Double = 0.5
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
         "contactsToFoulsShare", "foulsAsOffender", "dsqMissedPenalty", "ocsCount", "edgeSeconds",
-        "landContacts", "boundaryContacts", "beats",
+        "landContacts", "boundaryContacts", "beats", "preGunIronsSeconds", "startSeconds", "startLineSpot",
+        "rowSpot", "startSpot",
     ]
 
     private enum CodingKeys: String, CodingKey {
         case seat, tier, profile, skill, status, finished, place, ironsSeconds, markContacts, boatContacts
         case contactsEndingInFouls, contactsToFoulsShare, foulsAsOffender, dsqMissedPenalty, ocsCount
         case edgeSeconds, landContacts, boundaryContacts, beats
+        case preGunIronsSeconds, startSeconds, startLineSpot, rowSpot, startSpot
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -66,7 +82,19 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(landContacts, forKey: .landContacts)
         try c.encode(boundaryContacts, forKey: .boundaryContacts)
         try c.encode(beats, forKey: .beats)
+        try c.encode(preGunIronsSeconds, forKey: .preGunIronsSeconds)
+        try c.encode(startSeconds, forKey: .startSeconds)
+        try c.encode(startLineSpot, forKey: .startLineSpot)
+        try c.encode(rowSpot, forKey: .rowSpot)
+        try c.encode(startSpot, forKey: .startSpot)
     }
+
+    /// Whether her style means her to start in the line's pin third (#99).
+    public var isPinStyle: Bool { startSpot < 1.0 / 3 }
+    /// Whether her start-row slot is off the line's committee third, or past its committee end (#99).
+    public var isFromCommitteeSlot: Bool { rowSpot > 2.0 / 3 }
+    /// Whether she started in the line's pin third (#99).
+    public var startedInPinThird: Bool { startLineSpot.map { $0 < 1.0 / 3 } ?? false }
 
     static func name(_ status: BoatStatus) -> String {
         switch status {
@@ -316,6 +344,55 @@ public struct SkillGapSummary: Codable, Hashable, Sendable {
     }
 }
 
+/// The start over a run (#99), over its all-National fleets of `fleetSize` live bots (`TierMix.national`,
+/// `ProfileMix.live`), the fleets #99's acceptance names: what the thresholds' `start` limits hold. How cleanly and
+/// on time the best bots start, and whether the pin-style ones seeded at the committee end of the row work down
+/// the line to its pin third. Other fleet sizes aren't gated on their start yet: #102 tunes the tiers.
+public struct StartSummary: Codable, Hashable, Sendable {
+    /// Races of all-National live fleets of `fleetSize`.
+    public var races: Int
+    public var seats: Int
+    /// The share of those seats OCS at the gun.
+    public var ocsShare: Double
+    /// The share of those seats that started within `onTimeSeconds` of the gun.
+    public var onTimeShare: Double
+    /// Seconds after the gun the seats that started took to, on average; 0 when none did.
+    public var meanStartSeconds: Double
+    /// Seconds in irons before the gun per seat (`SeatMetrics.preGunIronsSeconds`), on average and at most.
+    public var meanPreGunIronsSeconds: Double
+    public var maxPreGunIronsSeconds: Double
+    /// Pin-style seats from committee slots: their style's spot in the line's pin third, their start-row slot
+    /// off its committee third or past its end (`SeatMetrics.isPinStyle`, `isFromCommitteeSlot`).
+    public var pinStyleFromCommitteeSeats: Int
+    /// The share of those that started in the line's pin third; nil when there were none.
+    public var pinThirdShare: Double?
+
+    /// Seconds after the gun within which a start is on time (#99).
+    public static let onTimeSeconds = 3.0
+    /// The fleets it's taken over: ten boats.
+    public static let fleetSize = 10
+
+    /// Nil when no race was of an all-National live fleet of `fleetSize`.
+    init?(_ races: [RaceResult]) {
+        let races = races.filter {
+            $0.cell.tierMix == .national && $0.cell.profileMix == .live && $0.cell.fleetSize == StartSummary.fleetSize
+        }
+        guard !races.isEmpty else { return nil }
+        let seats = races.flatMap(\.seats)
+        self.races = races.count
+        self.seats = seats.count
+        ocsShare = share(seats.filter { $0.ocsCount > 0 }.count, of: seats.count)
+        let starts = seats.compactMap(\.startSeconds)
+        onTimeShare = share(starts.filter { $0 <= StartSummary.onTimeSeconds }.count, of: seats.count)
+        meanStartSeconds = starts.isEmpty ? 0 : starts.reduce(0, +) / Double(starts.count)
+        meanPreGunIronsSeconds = seats.reduce(0) { $0 + $1.preGunIronsSeconds } / Double(max(seats.count, 1))
+        maxPreGunIronsSeconds = seats.map(\.preGunIronsSeconds).max() ?? 0
+        let pinStyle = seats.filter { $0.isPinStyle && $0.isFromCommitteeSlot }
+        pinStyleFromCommitteeSeats = pinStyle.count
+        pinThirdShare = pinStyle.isEmpty ? nil : share(pinStyle.filter(\.startedInPinThird).count, of: pinStyle.count)
+    }
+}
+
 /// One tier's seats over the whole run: what the thresholds hold it to.
 public struct TierSummary: Codable, Hashable, Sendable {
     public var seats: Int
@@ -354,7 +431,7 @@ public struct TierSummary: Codable, Hashable, Sendable {
 }
 
 /// A suite run's report (#97): the matrix, every race, each tier's and profile's summary, the skill gap, the
-/// fun pass (#238), and the gate's verdict.
+/// fun pass (#238), the start (#99), and the gate's verdict.
 public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var simulationVersion: String
     public var matrix: BotMatrix
@@ -368,6 +445,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var skillGap: SkillGapSummary?
     /// The fun-pass scenario (#238) over its races; nil when none sailed.
     public var funPass: FunPassSummary?
+    /// The start (#99) over the all-National live ten-boat fleets; nil when none sailed.
+    public var start: StartSummary?
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -395,9 +474,10 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         })
         skillGap = SkillGapSummary(races.compactMap(\.skillGap))
         funPass = FunPassSummary(races)
+        start = StartSummary(races)
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
-        breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass)
+        breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start)
         passed = breaches.isEmpty
     }
 
@@ -436,6 +516,12 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 line += "; tactician beat the blip-tacker in \(fixed(share)) of \(pass.blipTackerRaces) races"
             }
             lines.append(line)
+        }
+        if let start {
+            lines.append("start: \(start.races) all-National \(StartSummary.fleetSize)-boat races, ocs \(fixed(start.ocsShare)), on time \(fixed(start.onTimeShare)) "
+                + "(mean \(fixed(start.meanStartSeconds)) s after the gun), pre-gun irons \(fixed(start.meanPreGunIronsSeconds)) s/boat, "
+                + "pin third \(start.pinThirdShare.map { fixed($0) } ?? "-") of \(start.pinStyleFromCommitteeSeats) pin-style boats "
+                + "from committee slots")
         }
         lines.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms, max \(fixed(timings.maxMs, 3)) ms")
         lines.append(passed ? "gate: pass" : "gate: FAIL")
