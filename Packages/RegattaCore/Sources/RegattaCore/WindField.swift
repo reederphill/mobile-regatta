@@ -44,12 +44,20 @@ public struct WindField: Hashable, Sendable {
     /// reads them. Empty for a window whose key isn't held. A function of the keys and setup, so two
     /// fields with the same keys hold the same spawns, whatever order the keys came in.
     private var puffSpawns: [[PuffSpawn]] = []
+    /// How keys make the pressure field (#286), from the public setup; nil with no race area or for conditions
+    /// before schema 3, whose wind has none and samples as it always has.
+    let pressurePlan: PressurePlan?
+    /// `pressure[k]`: what key k draws for the pressure field, made when the key is added like `puffSpawns`.
+    private var pressure: [PressureDraws] = []
 
     public init(setup: WindSetup, windows: WindWindows, keys: WindKeyChain = WindKeyChain()) {
         self.setup = setup
         self.windows = windows
         self.keys = keys
         puffPlan = setup.raceArea.map { PuffPlan(setup: setup, area: $0) }
+        pressurePlan = setup.raceArea.flatMap { area in
+            setup.conditions.pressureField.map { PressurePlan(setup: setup, area: area, field: $0) }
+        }
         for key in keys.keys { spawnPuffs(of: key) }
     }
 
@@ -60,6 +68,12 @@ public struct WindField: Hashable, Sendable {
     }
 
     private mutating func spawnPuffs(of key: WindKey) {
+        if let pressurePlan {
+            if key.window >= pressure.count {
+                pressure += Array(repeating: .none, count: key.window - pressure.count + 1)
+            }
+            pressure[key.window] = pressurePlan.draws(of: key, windows: windows)
+        }
         guard let puffPlan else { return }
         if key.window >= puffSpawns.count {
             puffSpawns += Array(repeating: [], count: key.window - puffSpawns.count + 1)
@@ -68,14 +82,21 @@ public struct WindField: Hashable, Sendable {
     }
 
     /// The ground wind at `p` at `tick`: the fleet-wide channels, bent and shaded by the venue's geographic
-    /// grid at `p` (#77), then the puffs and lulls alive at `p`.
+    /// grid at `p` (#77), then the pressure field at `p` (#286, schema 3 conditions), then the puffs and lulls
+    /// alive at `p`.
     /// Throws `missingKey(k)` if it needs a key the field doesn't hold: window k needs keys k − 1 and k,
-    /// and with puffs every key back to `firstWindowNeeded(atTick:)`, whose puffs may still be alive.
+    /// and with puffs or a pressure field every key back to `firstWindowNeeded(atTick:)`.
     public func sample(_ p: Vec2, tick: Int) throws(WindFieldError) -> GroundWind {
         let c = try channels(atTick: tick)
         let geographic = setup.pairing.geographicGrid.sample(p)
-        let speed = Self.courseSpeed(setup, c) * geographic.speedFactor
-        let direction = setup.meanDirection + c.shift + geographic.directionDelta
+        var speed = Self.courseSpeed(setup, c) * geographic.speedFactor
+        var direction = setup.meanDirection + c.shift + geographic.directionDelta
+        if let pressurePlan {
+            let state = try pressureState(atTick: tick, pressurePlan)
+            let pressure = pressurePlan.effect(at: pressurePlan.coordinate(at: p), side: state.side, lanes: state.lanes)
+            speed = speed * pressure.factor
+            direction = direction + pressure.turn
+        }
         guard let puffPlan else { return GroundWind(direction: wrapAngle(direction), speed: speed) }
         // Puffs act on top of the clamped channel: a puff may take the wind above the forecast range, as
         // a lull may below it (#10's strengths are relative to the wind around them).
@@ -104,10 +125,11 @@ public struct WindField: Hashable, Sendable {
     }
 
     /// The first window whose key the wind at `tick` (from the origin on) needs: the one before its own
-    /// (its starting knot), or with puffs the first whose puffs may still be alive (`PuffPlan.lookback`),
-    /// never below 0. Every key from it through `tick`'s window is needed.
+    /// (its starting knot), or with puffs the first whose puffs may still be alive (`PuffPlan.lookback`), or
+    /// with a pressure field the first its side or lanes read (`PressurePlan.lookback`), never below 0. Every
+    /// key from it through `tick`'s window is needed.
     public func firstWindowNeeded(atTick tick: Int) -> Int {
-        max(0, windows.window(containing: tick) - max(1, puffPlan?.lookback ?? 0))
+        max(0, windows.window(containing: tick) - max(1, puffPlan?.lookback ?? 0, pressurePlan?.lookback ?? 0))
     }
 
     /// Puffs and lulls alive at `tick`, for rendering and bots: those of the held keys from
@@ -129,6 +151,11 @@ public struct WindField: Hashable, Sendable {
     /// The puffs and lulls key `window` spawns, in draw order; empty if it isn't held or there's no race area.
     func spawns(ofWindow window: Int) -> [PuffSpawn] {
         puffSpawns.indices.contains(window) ? puffSpawns[window] : []
+    }
+
+    /// What key `window` draws for the pressure field; nothing if it isn't held or there's no pressure field.
+    func pressureDraws(ofWindow window: Int) -> PressureDraws {
+        pressure.indices.contains(window) ? pressure[window] : .none
     }
 
     // MARK: - Evaluation
@@ -181,8 +208,9 @@ public struct WindField: Hashable, Sendable {
                 }
             }
         }
+        let pressure = try pressurePlan.map { plan throws(WindFieldError) in (plan, try pressureState(atTick: tick, plan)) }
         return WindSampler(geographicGrid: setup.pairing.geographicGrid, courseSpeed: Self.courseSpeed(setup, c),
-                           direction: setup.meanDirection + c.shift, puffPlan: puffPlan, puffs: puffs)
+                           direction: setup.meanDirection + c.shift, pressure: pressure, puffPlan: puffPlan, puffs: puffs)
     }
 
     /// Both channels and their slopes, per second, at `tick`.
@@ -261,16 +289,20 @@ public struct WindSampler: Sendable {
     let courseSpeed: Double
     /// The mean direction turned by the shift.
     let direction: Double
+    /// The pressure field's plan and its state at the tick; nil with none.
+    let pressure: (plan: PressurePlan, state: PressureState)?
     /// Nil with no race area, so no puffs.
     let puffPlan: PuffPlan?
     /// The puffs and lulls alive, in window and spawn order: the order `WindField.puffEffect` sums them in.
     let puffs: [Puff]
     let cells: PuffCells
 
-    init(geographicGrid: Venue.GeographicGrid, courseSpeed: Double, direction: Double, puffPlan: PuffPlan?, puffs: [Puff]) {
+    init(geographicGrid: Venue.GeographicGrid, courseSpeed: Double, direction: Double,
+         pressure: (plan: PressurePlan, state: PressureState)?, puffPlan: PuffPlan?, puffs: [Puff]) {
         self.geographicGrid = geographicGrid
         self.courseSpeed = courseSpeed
         self.direction = direction
+        self.pressure = pressure
         self.puffPlan = puffPlan
         self.puffs = puffs
         cells = PuffCells(puffs)
@@ -279,8 +311,13 @@ public struct WindSampler: Sendable {
     /// The ground wind at `p`.
     public func sample(_ p: Vec2) -> GroundWind {
         let geographic = geographicGrid.sample(p)
-        let speed = courseSpeed * geographic.speedFactor
-        let direction = direction + geographic.directionDelta
+        var speed = courseSpeed * geographic.speedFactor
+        var direction = direction + geographic.directionDelta
+        if let (plan, state) = pressure {
+            let pressure = plan.effect(at: plan.coordinate(at: p), side: state.side, lanes: state.lanes)
+            speed = speed * pressure.factor
+            direction = direction + pressure.turn
+        }
         guard let puffPlan else { return GroundWind(direction: wrapAngle(direction), speed: speed) }
         var gain = 0.0, fan = 0.0
         for i in cells.puffs(near: p) {
