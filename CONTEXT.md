@@ -220,8 +220,20 @@ _Avoid_: permanent shift
 **Geographic shift**:
 A wind shift fixed in place by the venue's shoreline, felt by any boat that sails there.
 
+**Pressure**:
+How much stronger or weaker the wind is than the course average at a place. Shaped by the pressure side, pressure lanes and the venue's geography (ADR 0008).
+_Avoid_: density, wind strength (for the local difference)
+
+**Pressure side**:
+The side of the course with more pressure at the moment. It holds for most of a leg and can change within a race.
+_Avoid_: favoured side (that can mean the shift)
+
+**Pressure lane**:
+A long band of pressure lying along the wind, curving with the venue's geography and drifting slowly sideways. The wind veers on one edge and backs on the other.
+_Avoid_: gust lane, streak
+
 **Puff**:
-A patch of stronger wind moving down the course. A patch of weaker wind is a **lull**.
+A small, short-lived patch of stronger wind moving down the course, found mostly in pressure. A patch of weaker wind is a **lull**.
 _Avoid_: gust (for a moving patch)
 
 **Wind shadow**:
