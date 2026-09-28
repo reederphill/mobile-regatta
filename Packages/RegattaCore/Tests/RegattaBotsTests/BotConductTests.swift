@@ -1,0 +1,385 @@
+import Foundation
+import Testing
+import RegattaCore
+@testable import RegattaBots
+
+/// #101: a bot's conduct under the rules. Two bots at skill 1 meet in every relation the rules give them (#19: "they
+/// foul only by misjudging"; a skill-1 bot misjudges nothing a scripted encounter sets her), and as the right-of-way
+/// boat a bot holds her course (#228), never ruddering a turn towards a boat that must keep clear of her.
+@Suite struct BotConductTests {
+    /// A skill-1 bot: the most skilled there is.
+    static let skill1 = BotStyle(skill: 1, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
+
+    /// One boat's place in an encounter: where she is, her heading and speed, what her autohelm holds (her wind
+    /// angle held as she sails it, unless given), and her status.
+    struct Placement {
+        var position: Vec2
+        var heading: Double
+        var speed: Double
+        var status: BoatStatus = .racing
+        var autohelm: Autohelm.Target?
+        /// The leg she is sailing; the water's by default.
+        var legIndex: Int?
+    }
+
+    /// Two bots after the gun on seed `seed`'s race, both seats bots, nothing placed yet: open water on the course,
+    /// a third of the way up the beat for boats beating to the windward mark, or two thirds for boats running down to
+    /// the gate (`running`); the wind there, and the best upwind and downwind in it.
+    struct Water {
+        let race: Race
+        let wind: Double
+        let up: PolarTable.Optimum
+        let down: PolarTable.Optimum
+        let centre: Vec2
+        let length: Double
+        /// The leg boats sail there: to the windward mark, or running, to the gate.
+        let leg: Int
+
+        init(seed: UInt64, running: Bool = false) {
+            race = botRace(seats: [.bot, .bot], seed: seed)
+            for _ in 0..<(race.setup.startSequenceTicks + Race.tickRate) { race.step() }
+            let c = race.course
+            centre = c.startLine.centre + c.upwind * (c.beat * (running ? 0.7 : 0.35))
+            leg = running ? 2 : 0
+            let wind = race.groundWind(at: centre)
+            self.wind = wind.direction
+            up = race.boatClass.polar.bestUpwind(tws: wind.speed)
+            down = race.boatClass.polar.bestDownwind(tws: wind.speed)
+            length = race.boatClass.hull.length
+        }
+
+        /// Her heading on `tack` at wind angle `angle`.
+        func heading(_ tack: Tack, _ angle: Double) -> Double { tack == .starboard ? wind - angle : wind + angle }
+        func beat(_ tack: Tack) -> Double { heading(tack, up.twa) }
+        func run(_ tack: Tack) -> Double { heading(tack, down.twa) }
+    }
+
+    /// Places seat 0 and seat 1 in `water`'s race as `placements` say: each boat's boom on her tack's side, the rudder
+    /// centred, the autohelm holding her wind angle (or what the placement gives), no penalty owed.
+    static func place(_ water: Water, _ placements: [Placement], edit: (inout WorldSnapshot) -> Void = { _ in }) throws -> Race {
+        let race = water.race
+        var snapshot = race.exportSnapshot()
+        for (seat, placement) in placements.enumerated() {
+            let relative = wrapAngle(water.wind - placement.heading)
+            snapshot.seats[seat].boat.position = placement.position
+            snapshot.seats[seat].boat.heading = placement.heading
+            snapshot.seats[seat].boat.speed = placement.speed
+            snapshot.seats[seat].boat.boomSide = relative >= 0 ? .port : .starboard
+            snapshot.seats[seat].boat.status = placement.status
+            snapshot.seats[seat].boat.legIndex = placement.legIndex ?? water.leg
+            snapshot.seats[seat].boat.roundingStage = 0
+            snapshot.seats[seat].boat.autohelm = Autohelm(target: placement.autohelm ?? .angle(abs(relative)))
+            snapshot.seats[seat].boat.rudder = 0
+            snapshot.seats[seat].boat.isTacking = false
+            snapshot.seats[seat].heldInput = .neutral
+        }
+        edit(&snapshot)
+        try race.importSnapshot(snapshot)
+        _ = race.drainEvents()
+        return race
+    }
+
+    /// A bot at the helm of `seat`, deciding at 10 Hz on its `SeatView` as `BotDriver` does, with the tack she means to
+    /// sail set.
+    struct Pilot {
+        let seat: Int
+        var brain: BotBrain
+
+        init(seat: Int, plannedTack: Tack?, race: Race) {
+            self.seat = seat
+            brain = BotBrain(style: BotConductTests.skill1)
+            brain.plannedTack = plannedTack ?? race.boats[seat].tack
+        }
+
+        /// Decides on a decision tick; returns the decision sent.
+        mutating func drive(_ race: Race) -> BotDecision? {
+            guard (race.tick + seat).isMultiple(of: BotDriver.decisionInterval) else { return nil }
+            let decision = brain.decide(race.seatView(for: seat))
+            race.apply(decision.input, seat: seat, atTick: race.tick + 1)
+            if let tap = decision.tap { race.tap(tap, seat: seat, atTick: race.tick + 1) }
+            return decision
+        }
+    }
+
+    /// Sails `race` with both seats' bots for `seconds`: every event, and `each` after every step.
+    static func sail(_ race: Race, seconds: Double, planned: [Tack?] = [nil, nil],
+                     each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
+        var pilots = [0, 1].map { Pilot(seat: $0, plannedTack: planned[$0], race: race) }
+        var kinds: [RaceEvent.Kind] = []
+        for _ in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
+            for i in pilots.indices { _ = pilots[i].drive(race) }
+            race.step()
+            each(race)
+            kinds += race.drainEvents().map(\.kind)
+        }
+        return kinds
+    }
+
+    /// The rule calls in `kinds`, as "rule on offender".
+    static func calls(_ kinds: [RaceEvent.Kind]) -> [String] {
+        kinds.compactMap { if case .ruleCall(let call) = $0 { "\(call.rule.rawValue) on \(call.offender)" } else { nil } }
+    }
+
+    /// Every scripted encounter: its name, and the race it begins, with the tacks the two bots mean to sail.
+    typealias Encounter = (name: String, race: () throws -> Race, planned: [Tack?], seconds: Double)
+
+    /// Port and starboard beating or running into each other, the port boat arriving `early` seconds before the
+    /// starboard one at the crossing (negative: after).
+    static func portStarboard(seed: UInt64, early: Double, running: Bool) -> Encounter {
+        ("port/starboard \(running ? "running" : "beating") early \(early) s (seed \(seed))", {
+            let water = Water(seed: seed, running: running)
+            let speed = running ? water.down.speed : water.up.speed
+            let starboard = running ? water.run(.starboard) : water.beat(.starboard)
+            let port = running ? water.run(.port) : water.beat(.port)
+            let meet = 7.0
+            return try place(water, [
+                Placement(position: water.centre - Vec2.heading(starboard) * speed * meet, heading: starboard, speed: speed),
+                Placement(position: water.centre - Vec2.heading(port) * speed * (meet - early), heading: port, speed: speed),
+            ])
+        }, [.starboard, .port], 25)
+    }
+
+    /// Overlapped on starboard, seat 1 `abeam` hull lengths to windward of seat 0 and `ahead` hull lengths ahead,
+    /// bearing away `converging` radians towards her; or seat 1 clear astern and to leeward, faster, sailing into an
+    /// overlap to leeward of seat 0 (`fromAstern`).
+    static func windwardLeeward(seed: UInt64, running: Bool, abeam: Double, ahead: Double, converging: Double,
+                                fromAstern: Bool = false) -> Encounter {
+        ("windward/leeward \(running ? "running" : "beating") abeam \(abeam) ahead \(ahead)\(fromAstern ? " from astern" : "") (seed \(seed))", {
+            let water = Water(seed: seed, running: running)
+            let speed = running ? water.down.speed : water.up.speed
+            let heading = running ? water.run(.starboard) : water.beat(.starboard)
+            let forward = Vec2.heading(heading)
+            // On starboard her windward side is her starboard side.
+            let windward = forward.rightPerp
+            let leeward = Placement(position: water.centre, heading: heading, speed: speed)
+            let other: Placement
+            if fromAstern {
+                other = Placement(position: water.centre - windward * water.length * abeam - forward * water.length * ahead,
+                                  heading: heading, speed: speed * 1.35)
+            } else {
+                // Bearing away on starboard turns her to port, towards the leeward boat.
+                other = Placement(position: water.centre + windward * water.length * abeam + forward * water.length * ahead,
+                                  heading: heading - converging, speed: speed)
+            }
+            return try place(water, [leeward, other])
+        }, [.starboard, .starboard], 25)
+    }
+
+    /// Seat 0 clear astern of seat 1 on the same tack by `astern` hull lengths, `across` hull lengths to one side,
+    /// sailing at her speed while seat 1 sails slowly: she catches her up.
+    static func clearAstern(seed: UInt64, running: Bool, tack: Tack, astern: Double, across: Double) -> Encounter {
+        ("clear astern \(running ? "running" : "beating") on \(tack) astern \(astern) across \(across) (seed \(seed))", {
+            let water = Water(seed: seed, running: running)
+            let speed = running ? water.down.speed : water.up.speed
+            let heading = running ? water.run(tack) : water.beat(tack)
+            let forward = Vec2.heading(heading)
+            return try place(water, [
+                Placement(position: water.centre - forward * water.length * astern + forward.rightPerp * water.length * across,
+                          heading: heading, speed: speed),
+                Placement(position: water.centre, heading: heading, speed: speed * 0.35),
+            ])
+        }, [tack, tack], 25)
+    }
+
+    /// Seat 0 beating on port, meaning to tack (her planned tack starboard), with seat 1 on starboard `astern` hull
+    /// lengths behind and `windward` hull lengths to windward of where her tack would put her: tacking at once would
+    /// tack her into seat 1's water.
+    static func tackInto(seed: UInt64, astern: Double, windward: Double) -> Encounter {
+        ("tack into astern \(astern) windward \(windward) (seed \(seed))", {
+            let water = Water(seed: seed)
+            let tacked = Vec2.heading(water.beat(.starboard))
+            let position = water.centre + tacked * water.length * astern - tacked.rightPerp * water.length * windward
+            return try place(water, [
+                Placement(position: water.centre, heading: water.beat(.port), speed: water.up.speed),
+                Placement(position: position, heading: water.beat(.starboard), speed: water.up.speed),
+            ])
+        }, [.starboard, .starboard], 25)
+    }
+
+    /// Both beating on starboard up the layline to the windward mark, overlapped as they reach its zone: seat 0 inside
+    /// (to leeward, nearer the mark), seat 1 `abeam` hull lengths outside and `ahead` hull lengths ahead; or up to the
+    /// offset mark on a reach from the windward mark, seat 1 to one side (`offset`, positive to windward).
+    static func markRoom(seed: UInt64, abeam: Double, ahead: Double, offsetMark: Bool = false) -> Encounter {
+        ("mark-room at the \(offsetMark ? "offset" : "windward") mark abeam \(abeam) ahead \(ahead) (seed \(seed))", {
+            let water = Water(seed: seed)
+            let c = water.race.course
+            let heading: Double, position: Vec2, speed: Double
+            if offsetMark {
+                let mark = c.elements[CourseLayout.offsetIndex].marks[0].position
+                heading = (-c.right).bearing
+                position = mark + c.right * (c.zoneRadius + water.length * 6) + c.upwind * water.length * 1.5
+                speed = water.up.speed * 1.3
+            } else {
+                let mark = c.elements[CourseLayout.windwardIndex].marks[0].position
+                heading = water.beat(.starboard)
+                let fetch = mark + c.right * 6 + c.upwind * 4
+                position = fetch - Vec2.heading(heading) * (c.zoneRadius + water.length * 8)
+                speed = water.up.speed
+            }
+            let forward = Vec2.heading(heading)
+            let outside = position + forward.rightPerp * water.length * abeam + forward * water.length * ahead
+            let leg = offsetMark ? 1 : 0
+            return try place(water, [
+                Placement(position: position, heading: heading, speed: speed, legIndex: leg),
+                Placement(position: outside, heading: heading, speed: speed, legIndex: leg),
+            ])
+        }, [.starboard, .starboard], 30)
+    }
+
+    /// Seat 0 60° into a penalty turn to starboard in open water, reaching on starboard, hard over (#100's 21.2
+    /// encounter); seat 1 reaching back past her on port, `ahead` hull lengths ahead and `across` to her starboard.
+    static func penalised(seed: UInt64, ahead: Double, across: Double) -> Encounter {
+        ("penalised boat ahead \(ahead) across \(across) (seed \(seed))", {
+            let water = Water(seed: seed)
+            let heading = water.wind - .pi / 2
+            let forward = Vec2.heading(heading)
+            return try place(water, [
+                Placement(position: water.centre, heading: heading, speed: 4),
+                Placement(position: water.centre + forward * water.length * ahead + forward.rightPerp * water.length * across,
+                          heading: heading + .pi, speed: 4),
+            ]) { snapshot in
+                snapshot.seats[0].boat.autohelm = nil
+                snapshot.seats[0].boat.rudder = 1
+                snapshot.seats[0].heldInput = BoatInput(rudder: 1.0)
+                snapshot.seats[0].boat.penaltyTurnsOwed = 1
+                snapshot.seats[0].boat.penaltyProgress = deg2rad(60)
+                snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+            }
+        }, [nil, nil], 35)
+    }
+
+    /// Seat 0 OCS just after the gun, a hull length over the line and returning (rule 21.1), `along` hull lengths
+    /// along the line from seat 1, who is below it, beating up to start.
+    static func ocsReturner(seed: UInt64, along: Double) -> Encounter {
+        ("OCS returner along \(along) (seed \(seed))", {
+            let water = Water(seed: seed)
+            let line = water.race.course.startLine
+            let across = (line.committee.position - line.pin.position).normalized
+            let up = water.race.course.upwind
+            let spot = line.centre + across * water.length * along
+            return try place(water, [
+                Placement(position: spot + up * water.length, heading: water.run(.starboard), speed: water.down.speed * 0.6,
+                          status: .ocs),
+                Placement(position: line.centre - up * water.length * 4, heading: water.beat(.starboard),
+                          speed: water.up.speed, status: .prestart),
+            ])
+        }, [nil, nil], 30)
+    }
+
+    /// Every scripted encounter, with variations.
+    static var encounters: [Encounter] {
+        var all: [Encounter] = []
+        for early in [-1.5, -0.75, 0, 0.75, 1.5] { all.append(portStarboard(seed: 11, early: early, running: false)) }
+        for early in [-1.0, 0, 1.0] { all.append(portStarboard(seed: 12, early: early, running: true)) }
+        for ahead in [-0.5, 0, 0.5] {
+            all.append(windwardLeeward(seed: 13, running: false, abeam: 1.2, ahead: ahead, converging: deg2rad(15)))
+            all.append(windwardLeeward(seed: 14, running: true, abeam: 1.2, ahead: ahead, converging: deg2rad(12)))
+        }
+        all.append(windwardLeeward(seed: 15, running: true, abeam: 1.0, ahead: 2, converging: 0, fromAstern: true))
+        all.append(windwardLeeward(seed: 15, running: false, abeam: 1.0, ahead: 1.5, converging: 0, fromAstern: true))
+        for across in [0, 0.3] {
+            all.append(clearAstern(seed: 16, running: false, tack: .starboard, astern: 2.5, across: across))
+            all.append(clearAstern(seed: 17, running: true, tack: .port, astern: 2.5, across: across))
+        }
+        for (astern, windward) in [(2.0, 1.0), (3.0, 1.5), (4.0, 0.5)] {
+            all.append(tackInto(seed: 18, astern: astern, windward: windward))
+        }
+        for (abeam, ahead) in [(1.2, 0.0), (1.2, 0.6), (1.5, -0.6)] { all.append(markRoom(seed: 19, abeam: abeam, ahead: ahead)) }
+        for abeam in [1.2, -1.2] { all.append(markRoom(seed: 20, abeam: abeam, ahead: 0, offsetMark: true)) }
+        for (ahead, across) in [(14.0 / 4.9, 7.0 / 4.9), (2.0, 0.5), (4.0, 1.0)] {
+            all.append(penalised(seed: 5, ahead: ahead, across: across))
+        }
+        for along in [-1.0, 0, 1.0] { all.append(ocsReturner(seed: 21, along: along)) }
+        return all
+    }
+
+    /// #101 acceptance: two skill-1 bots meet in every relation the rules give them (port and starboard, overlapped
+    /// to windward and leeward, clear astern, a tack into another boat's water, mark-room inside and outside, a
+    /// boat turning a penalty and one returning OCS), each in several variations, and no rule call is made on
+    /// either: each keeps clear when she must and holds her course when she needn't. Neither ever protests.
+    @Test func scriptedEncountersZeroFoulsAtSkill1() throws {
+        var failures: [String] = []
+        var markRoomNotices = 0
+        var closest = Double.infinity
+        for encounter in Self.encounters {
+            let race = try encounter.race()
+            var nearest = Double.infinity
+            let kinds = Self.sail(race, seconds: encounter.seconds, planned: encounter.planned) { race in
+                nearest = min(nearest, (race.boats[0].position - race.boats[1].position).length)
+            }
+            closest = min(closest, nearest)
+            let calls = Self.calls(kinds)
+            if !calls.isEmpty { failures.append("\(encounter.name): \(calls)") }
+            if kinds.contains(where: { if case .protestRecorded = $0 { true } else { false } }) {
+                failures.append("\(encounter.name): protested")
+            }
+            if !kinds.isEmpty, kinds.contains(where: { if case .markRoomNotice = $0 { true } else { false } }) {
+                markRoomNotices += 1
+            }
+            #expect(nearest < race.boatClass.hull.length * 4, "\(encounter.name): they never met (\(nearest) m)")
+        }
+        #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
+        #expect(markRoomNotices >= 3, "the mark-room encounters made rule 18 records")
+    }
+
+    /// The closest `other` comes to `boat` over `horizon` seconds were `boat` sailing `heading` at her speed, `other`
+    /// sailing on at hers: both in straight lines, in the same water. Metres between centres.
+    static func closestApproach(_ boat: Boat, heading: Double, _ other: Boat, horizon: Double) -> Double {
+        let offset = other.position - boat.position
+        let relative = other.velocity - Vec2.heading(heading) * boat.speed
+        let vv = relative.lengthSquared
+        let t = vv > 1e-9 ? (-offset.dot(relative) / vv).clamped(to: 0...horizon) : 0
+        return (offset + relative * t).length
+    }
+
+    /// #101 acceptance, the owner's invariant (2026-09-26): as the right-of-way boat a bot never initiates a course
+    /// change towards a boat that must keep clear of her inside her escape horizon. A course change is her heading
+    /// turning faster than the rules' "changes course" rate (16.1, `RulesConfig.Escape.changesCourse`), initiated by
+    /// her when her rudder is held off centre that way: a turn her autohelm makes with the rudder centred, following
+    /// a shift, isn't hers (#228). Towards a boat inside the escape horizon (`RulesConfig.Escape.horizon`): the turn
+    /// brings that boat's closest approach over the horizon, sailing on, closer than it was on her heading before it,
+    /// and inside `clearance` hull lengths. Checked tick by tick through the scripted encounters where one bot has
+    /// right of way over the other, in whatever the wind does, but for a bot sailing within the mark-room she is
+    /// entitled to from the other (rule 18.2: the room the other must give her, #93).
+    @Test func rightOfWayBotNeverRuddersTowardAKeepClearBoat() throws {
+        let clearance = 1.5
+        var violations: [String] = []
+        var checked = 0
+        var courseChanges = 0
+        let encounters = Self.encounters.filter { !$0.name.hasPrefix("penalised") && !$0.name.hasPrefix("OCS") }
+        for encounter in encounters {
+            let race = try encounter.race()
+            let escape = race.rules.incidents.escape
+            let changesCourse = try #require(escape.changesCourse)
+            let length = race.boatClass.hull.length
+            var headings = race.boats.map(\.heading)
+            _ = Self.sail(race, seconds: encounter.seconds, planned: encounter.planned) { race in
+                defer { headings = race.boats.map(\.heading) }
+                for seat in 0..<2 where race.boats[seat].status == .racing {
+                    let other = 1 - seat
+                    guard let right = race.rightOfWay(seat, other), right.keepClear == other else { continue }
+                    // Sailing within the mark-room she is entitled to from that boat (18.2), she turns as the mark has
+                    // her: that's the room the other must give (#93 exonerates her).
+                    let view = race.seatView(for: seat)
+                    guard !view.own.markRoom.contains(where: { $0.entitled == seat && $0.owing == other }) else { continue }
+                    checked += 1
+                    let boat = race.boats[seat]
+                    let rudder = race.heldInputs[seat].rudder
+                    let turned = wrapAngle(boat.heading - headings[seat])
+                    guard rudder != 0, (turned > 0) == (rudder > 0),
+                          abs(turned) * Double(Race.tickRate) > changesCourse else { continue }
+                    courseChanges += 1
+                    let now = Self.closestApproach(boat, heading: boat.heading, race.boats[other], horizon: escape.horizon)
+                    let before = Self.closestApproach(boat, heading: headings[seat], race.boats[other], horizon: escape.horizon)
+                    if now < length * clearance && now < before {
+                        violations.append("\(encounter.name): tick \(race.tick) seat \(seat) turned \(rad2deg(turned))° "
+                            + "with rudder \(rudder) towards seat \(other) (\(before) → \(now) m)")
+                    }
+                }
+            }
+        }
+        #expect(checked > 1_000, "right of way held in the encounters")
+        #expect(courseChanges > 0, "the right-of-way bots changed course by the rudder somewhere")
+        #expect(violations.isEmpty, "\(violations.prefix(20).joined(separator: "\n"))")
+    }
+}

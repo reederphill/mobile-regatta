@@ -73,9 +73,10 @@ import RegattaCore
     }
 
     /// #82: the race area's edge is folded into keeping clear, as a mark is. Seat 0, close-hauled on port,
-    /// must keep clear of seat 1 on starboard, crossing ahead of her in two seconds. In open water she
-    /// ducks; with the race area's side a little to leeward, the duck would sail her into it, so she turns
-    /// off it to the nearest heading that stays in the area. Nowhere near the edge, she ducks as ever.
+    /// must keep clear of seat 1 on starboard, crossing ahead of her in four seconds. In open water she
+    /// ducks, bearing away by the least turn that passes astern of seat 1 (`racingKeepClear`, #101); with the
+    /// race area's side a little to leeward, the duck would sail her into it, so she turns off it to the
+    /// nearest heading that stays in the area. Nowhere near the edge, she ducks as ever.
     @Test func keepingClearNearTheEdgeTurnsOffIt() throws {
         func evasive(inFromTheSide inward: Double) throws -> (heading: Double?, duck: Double, view: SeatView) {
             let race = botRace(seats: [.bot, .human], seed: 7)
@@ -94,16 +95,21 @@ import RegattaCore
             snapshot.seats[0].boat.position = position
             snapshot.seats[0].boat.heading = wind + deg2rad(45)
             snapshot.seats[0].boat.boomSide = .starboard
-            // Where she'll be in 2 s, seat 1 will be too.
-            snapshot.seats[1].boat.position = position + (port - starboard) * 2
+            // Where she'll be in 4 s, seat 1 will be too.
+            snapshot.seats[1].boat.position = position + (port - starboard) * 4
             snapshot.seats[1].boat.heading = wind - deg2rad(45)
             snapshot.seats[1].boat.boomSide = .port
             try race.importSnapshot(snapshot)
             let view = race.seatView(for: 0)
             #expect(view.own.tack == .port && view.others[0].rightOfWay?.keepClear == 0)
             let brain = BotBrain(style: BotStyle(skill: 0.5, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1))
-            return (brain.evasiveHeading(view.own, view, desired: view.own.heading), view.own.windDirection + deg2rad(85), view)
+            // Her give-way manoeuvre under rule 10, the edge aside.
+            let duck = brain.racingKeepClear(view.own, view, from: view.others[0], rule: .portStarboard,
+                                             desired: view.own.heading, lookahead: brain.keepClearLookahead)
+            return (brain.evasiveHeading(view.own, view, desired: view.own.heading), duck, view)
         }
+        /// Her sailing angle on `heading`, off the wind.
+        func offWind(_ heading: Double, _ view: SeatView) -> Double { wrapAngle(heading - view.own.windDirection) }
         /// Whether sailing `heading` keeps her in the race area as far ahead as a bot looks for its edge.
         func staysIn(_ heading: Double, _ view: SeatView) -> Bool {
             let ahead = max(view.own.speed, 1) * BotBrain.edgeLookahead + view.boatClass.hull.length
@@ -112,15 +118,25 @@ import RegattaCore
 
         let open = try evasive(inFromTheSide: 150)
         #expect(open.heading == open.duck, "in open water she ducks")
+        #expect(offWind(open.duck, open.view) > offWind(open.view.own.heading, open.view) + deg2rad(20),
+                "the duck bears her away")
 
         let near = try evasive(inFromTheSide: 12)
         #expect(staysIn(near.view.own.heading, near.view), "her own course stays in the area")
         #expect(!staysIn(near.duck, near.view), "the duck would sail her into the side")
         let heading = try #require(near.heading)
         #expect(staysIn(heading, near.view))
-        // Turned off the edge from the duck, towards the wind, but never into the no-go zone.
-        let offWind = wrapAngle(heading - near.view.own.windDirection)
-        #expect(offWind < deg2rad(85) && offWind >= deg2rad(38) - 1e-9)
+        // Turned off the edge from the duck to the nearest heading, of the 10° steps she tries either way, that stays
+        // in; on her own tack, and never into the no-go zone.
+        let angle = offWind(heading, near.view), step = deg2rad(10)
+        #expect(angle >= deg2rad(38) - 1e-9 && angle <= .pi)
+        let steps = Int((abs(angle - offWind(near.duck, near.view)) / step).rounded())
+        #expect(steps >= 1)
+        for nearer in 0..<steps {
+            for way in [-1.0, 1.0] {
+                #expect(!staysIn(near.duck + way * Double(nearer) * step, near.view), "a nearer heading stays in")
+            }
+        }
     }
 
     /// The bot suite's profiles (#231): the baseline sails the groove only; the tactician leaves it.

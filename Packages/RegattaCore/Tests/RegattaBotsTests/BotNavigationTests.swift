@@ -220,4 +220,44 @@ import RegattaCore
         #expect(!kinds.contains { if case .disqualified = $0 { true } else { false } })
         #expect(race.boats[0].penaltyTurnsOwed == 0 && race.boats[0].status == .racing)
     }
+
+    /// #100's review nit, #101: a penalised bot close to her turn's complete deadline turns on rather than give the turn
+    /// up to keep clear (`canGiveUpTurn`: never inside `penaltyCompleteMargin` of it). The encounter of
+    /// `penaltyTurningBotKeepsClearUnder21_2`, seat 1 coming back past her on the side she turns to, with the turn's
+    /// clock started long enough ago that its complete deadline is 12 s off: she holds her turn hard over, gives nothing
+    /// up, and serves it inside the deadline. With the deadline far off she gives it up, as ever.
+    @Test func penaltyTurnNearItsDeadlineIsNotGivenUp() throws {
+        let style = BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
+        let hardOver = BoatInput(rudder: 1.0)
+        func sail(completeIn seconds: Double) throws -> (kinds: [RaceEvent.Kind], inputs: [BoatInput], race: Race) {
+            let race = try Self.penaltyRace(turned: deg2rad(60), ahead: 14, across: 7)
+            let complete = race.rules.raceFormat.penalty.complete
+            var snapshot = race.exportSnapshot()
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick - RulesConfig.ticks(complete - seconds)
+            try race.importSnapshot(snapshot)
+            _ = race.drainEvents()
+            let owed = try #require(race.owedPenalty(ofSeat: 0))
+            #expect(owed.isStarted && owed.completeDeadlineTick - race.tick == RulesConfig.ticks(seconds))
+            var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style)
+            var kinds: [RaceEvent.Kind] = []
+            var inputs: [BoatInput] = []
+            for _ in 0..<RulesConfig.ticks(seconds + 1) {
+                let owing = race.boats[0].penaltyTurnsOwed > 0 && !kinds.contains(.penaltyServed(seat: 0))
+                if let decision = driver.drive(race), owing { inputs.append(decision.input) }
+                race.step()
+                kinds += race.drainEvents().map(\.kind)
+            }
+            return (kinds, inputs, race)
+        }
+
+        let late = try sail(completeIn: 12)
+        #expect(BotBrain.penaltyCompleteMargin > 12)
+        #expect(!late.kinds.contains(.penaltyReset(seat: 0)), "she gave her turn up with 12 s to its deadline")
+        #expect(!late.inputs.isEmpty && late.inputs.allSatisfy { $0 == hardOver }, "\(late.inputs.map(\.rudder))")
+        #expect(late.kinds.contains(.penaltyServed(seat: 0)), "she served her turn")
+        #expect(!late.kinds.contains { if case .disqualified = $0 { true } else { false } })
+
+        let early = try sail(completeIn: 30)
+        #expect(early.kinds.contains(.penaltyReset(seat: 0)), "with 30 s to go she gives it up to keep clear")
+    }
 }

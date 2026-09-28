@@ -49,12 +49,19 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     /// Seconds on the water (`Boat.isOnCourse`: before her start, OCS or racing), the time `edgeSeconds` is counted
     /// over (#100): what the navigation gate's edge share is a share of.
     public var onCourseSeconds: Double = 0
+    /// Her encounters (#101, the owner's 2026-09-27 definition): each time she and another boat came within 2 hull
+    /// lengths of each other while rules 10–13 named one of them to keep clear, counted once until they separated
+    /// past that again.
+    public var encounters: Int = 0
+    /// Of `encounters`, those during which a rule call was made between the two, on either boat.
+    public var encountersEndingInFouls: Int = 0
+    public var encountersToFoulsShare: Double = 0
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
         "contactsToFoulsShare", "foulsAsOffender", "dsqMissedPenalty", "ocsCount", "edgeSeconds",
         "landContacts", "boundaryContacts", "beats", "preGunIronsSeconds", "startSeconds", "startLineSpot",
-        "rowSpot", "startSpot", "onCourseSeconds",
+        "rowSpot", "startSpot", "onCourseSeconds", "encounters", "encountersEndingInFouls", "encountersToFoulsShare",
     ]
 
     private enum CodingKeys: String, CodingKey {
@@ -62,6 +69,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case contactsEndingInFouls, contactsToFoulsShare, foulsAsOffender, dsqMissedPenalty, ocsCount
         case edgeSeconds, landContacts, boundaryContacts, beats
         case preGunIronsSeconds, startSeconds, startLineSpot, rowSpot, startSpot, onCourseSeconds
+        case encounters, encountersEndingInFouls, encountersToFoulsShare
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -91,6 +99,9 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(rowSpot, forKey: .rowSpot)
         try c.encode(startSpot, forKey: .startSpot)
         try c.encode(onCourseSeconds, forKey: .onCourseSeconds)
+        try c.encode(encounters, forKey: .encounters)
+        try c.encode(encountersEndingInFouls, forKey: .encountersEndingInFouls)
+        try c.encode(encountersToFoulsShare, forKey: .encountersToFoulsShare)
     }
 
     /// Whether her style means her to start in the line's pin third (#99).
@@ -419,7 +430,7 @@ public struct NavigationSummary: Codable, Hashable, Sendable {
 
     /// Nil when no race was of an all-National live fleet.
     init?(_ races: [RaceResult]) {
-        let races = races.filter { $0.cell.tierMix == .national && $0.cell.profileMix == .live }
+        let races = races.filter(\.cell.isAllNationalLive)
         guard !races.isEmpty else { return nil }
         let seats = races.flatMap(\.seats)
         self.races = races.count
@@ -431,6 +442,38 @@ public struct NavigationSummary: Codable, Hashable, Sendable {
         edgeShare = onCourse > 0 ? seats.reduce(0) { $0 + $1.edgeSeconds } / onCourse : 0
         markContactsPerBoat = Double(seats.reduce(0) { $0 + $1.markContacts }) / Double(max(seats.count, 1))
     }
+}
+
+/// Conduct under the rules over a run (#101), over the same all-National live fleets as navigation: what the
+/// thresholds' `conduct` limits hold. Whether the best bots keep clear, and hold their rights, without a rule call: the
+/// share of their encounters (`SeatMetrics.encounters`) that ended in one.
+public struct ConductSummary: Codable, Hashable, Sendable {
+    /// Races of all-National live fleets.
+    public var races: Int
+    public var seats: Int
+    /// Their seats' encounters: an encounter between two of them counts for each.
+    public var encounters: Int
+    /// Of `encounters`, those during which a rule call was made between the two.
+    public var encountersEndingInFouls: Int
+    public var encountersToFoulsShare: Double
+
+    /// Nil when no race was of an all-National live fleet.
+    init?(_ races: [RaceResult]) {
+        let races = races.filter(\.cell.isAllNationalLive)
+        guard !races.isEmpty else { return nil }
+        let seats = races.flatMap(\.seats)
+        self.races = races.count
+        self.seats = seats.count
+        encounters = seats.reduce(0) { $0 + $1.encounters }
+        encountersEndingInFouls = seats.reduce(0) { $0 + $1.encountersEndingInFouls }
+        encountersToFoulsShare = share(encountersEndingInFouls, of: encounters)
+    }
+}
+
+extension BotRaceCell {
+    /// Whether it sails an all-National fleet of live bots: the fleets navigation (#100) and conduct (#101) are gated
+    /// over.
+    var isAllNationalLive: Bool { tierMix == .national && profileMix == .live }
 }
 
 /// One tier's seats over the whole run: what the thresholds hold it to.
@@ -445,6 +488,12 @@ public struct TierSummary: Codable, Hashable, Sendable {
     public var boatContacts: Int
     public var contactsEndingInFouls: Int
     public var contactsToFoulsShare: Double
+    /// Seat encounters (#101): an encounter between two seats of the tier counts for each.
+    public var encounters: Int
+    public var encountersEndingInFouls: Int
+    /// The share of the tier's encounters during which a rule call was made (#101), for the report: the gate holds it
+    /// over the all-National live fleets (`ConductSummary`), not per tier.
+    public var encountersToFoulsShare: Double
     public var foulsAsOffender: Int
     public var dsqMissedPenalty: Int
     public var ocsCount: Int
@@ -462,6 +511,9 @@ public struct TierSummary: Codable, Hashable, Sendable {
         boatContacts = seats.reduce(0) { $0 + $1.boatContacts }
         contactsEndingInFouls = seats.reduce(0) { $0 + $1.contactsEndingInFouls }
         contactsToFoulsShare = share(contactsEndingInFouls, of: boatContacts)
+        encounters = seats.reduce(0) { $0 + $1.encounters }
+        encountersEndingInFouls = seats.reduce(0) { $0 + $1.encountersEndingInFouls }
+        encountersToFoulsShare = share(encountersEndingInFouls, of: encounters)
         foulsAsOffender = seats.reduce(0) { $0 + $1.foulsAsOffender }
         dsqMissedPenalty = seats.reduce(0) { $0 + $1.dsqMissedPenalty }
         ocsCount = seats.reduce(0) { $0 + $1.ocsCount }
@@ -471,7 +523,7 @@ public struct TierSummary: Codable, Hashable, Sendable {
 }
 
 /// A suite run's report (#97): the matrix, every race, each tier's and profile's summary, the skill gap, the
-/// fun pass (#238), the start (#99), navigation (#100), and the gate's verdict.
+/// fun pass (#238), the start (#99), navigation (#100), conduct (#101), and the gate's verdict.
 public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var simulationVersion: String
     public var matrix: BotMatrix
@@ -489,6 +541,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var start: StartSummary?
     /// Navigation (#100) over the all-National live fleets; nil when none sailed.
     public var navigation: NavigationSummary?
+    /// Conduct (#101) over the all-National live fleets; nil when none sailed.
+    public var conduct: ConductSummary?
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -518,10 +572,11 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         funPass = FunPassSummary(races)
         start = StartSummary(races)
         navigation = NavigationSummary(races)
+        conduct = ConductSummary(races)
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
         breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start,
-                                       navigation: navigation)
+                                       navigation: navigation, conduct: conduct)
         passed = breaches.isEmpty
     }
 
@@ -539,6 +594,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
             guard let s = tiers[tier.rawValue] else { continue }
             lines.append("\(tier.rawValue): \(s.finished)/\(s.seats) finished, irons \(fixed(s.meanIronsSeconds)) s/boat, "
                 + "marks \(fixed(s.meanMarkContacts))/boat, contacts \(s.boatContacts) (\(fixed(s.contactsToFoulsShare)) fouls), "
+                + "encounters \(s.encounters) (\(fixed(s.encountersToFoulsShare, 3)) fouls), "
                 + "edge \(fixed(s.meanEdgeSeconds)) s/boat, dsq \(s.dsqMissedPenalty), ocs \(s.ocsCount)")
         }
         for profile in BotProfile.allCases {
@@ -572,6 +628,10 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 + "\(navigation.pairings.count) venue × conditions pairings, finished \(fixed(navigation.finishShare, 3)), "
                 + "dsq \(navigation.dsqMissedPenalty), edge \(fixed(navigation.edgeShare, 4)) of the time, "
                 + "marks \(fixed(navigation.markContactsPerBoat, 3))/boat/race")
+        }
+        if let conduct {
+            lines.append("conduct: \(conduct.races) all-National races, \(conduct.seats) boats, encounters \(conduct.encounters), "
+                + "\(conduct.encountersEndingInFouls) ending in fouls (\(fixed(conduct.encountersToFoulsShare, 3)))")
         }
         lines.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms, max \(fixed(timings.maxMs, 3)) ms")
         lines.append(passed ? "gate: pass" : "gate: FAIL")

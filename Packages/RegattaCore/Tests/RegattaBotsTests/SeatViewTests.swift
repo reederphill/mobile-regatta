@@ -134,11 +134,14 @@ import RegattaCore
     }
 
     /// The view is the race for its seat as it stands: her boat, her relation to each other boat, her place,
-    /// her laylines as the scene draws them, and the rule calls on show.
+    /// her laylines as the scene draws them, the rule calls on show, and her mark's zone and the mark-room notices
+    /// told her (#101), each rule 18 record naming her while it lasts.
     @Test func aSeatSeesItsBoatAndItsRelationsAsTheRaceHasThem() throws {
         let race = botRace(seed: 3)
         var controllers = allBots(race)
         var checked = 0
+        var inZones = 0
+        var notices = 0
         sail(race, &controllers, ticks: 1_500 * Race.tickRate) { race in
             guard race.tick % 97 == 0 else { return }
             let standings = race.standings()
@@ -154,6 +157,16 @@ import RegattaCore
                 #expect(view.own.ease == race.heldInputs[seat].ease)
                 #expect(view.own.autohelm == boat.autohelmReading(in: race.boatClass))
                 #expect(view.own.penalty == race.owedPenalty(ofSeat: seat))
+                let zone = race.course.markZone(of: boat, hull: boat.hull(outline: race.boatClass.hull.outline))
+                #expect(view.own.zone?.mark == zone?.mark.position && view.own.zone?.side == zone?.side
+                        && view.own.zone?.distance == zone?.distance && view.own.zone?.isIn == zone?.isIn)
+                if view.own.zone?.isIn == true { inZones += 1 }
+                let records = race.boats.indices.filter { $0 != seat }.compactMap { race.umpire?.markRoom(SeatPair(seat, $0)) }
+                #expect(view.own.markRoom == records.map {
+                    SeatView.MarkRoomNotice(entitled: $0.entitled, owing: $0.owing, rule: $0.rule)
+                })
+                #expect(view.own.markRoom.allSatisfy { $0.entitled == seat || $0.owing == seat })
+                notices += view.own.markRoom.count
                 for other in view.others {
                     #expect(other.rightOfWay == race.rightOfWay(seat, other.seat))
                     #expect(other.velocity == race.boats[other.seat].velocity && other.isGhost == race.isGhost(seat: other.seat))
@@ -180,6 +193,7 @@ import RegattaCore
             #expect(race.seatView(for: 0).ruleCallLines.map(\.tick) == shown.map(\.tick))
         }
         #expect(checked > 500)
+        #expect(inZones > 0 && notices > 0, "boats were in a mark's zone (\(inZones)) and told of mark-room (\(notices))")
         #expect(race.firstFinishTime != nil, "the finish window opened")
     }
 }

@@ -10,7 +10,9 @@
 ///   forecast;
 /// - the course, the land, her laylines and the class every boat sails;
 /// - the other boats as they're drawn (#15), with her right-of-way relation to each and the rule calls on
-///   show. Never their held inputs (#19), rule 18 records, incident memory or names;
+///   show. Never their held inputs (#19), rule 18 records beyond the notices told her own boat (#101), incident
+///   memory or names;
+/// - her own boat's zone, and the mark-room notices told her (#101);
 /// - the clock, her place, the fleet's size and the finish window's countdown.
 ///
 /// Two equal views hold the same information.
@@ -74,7 +76,9 @@ public struct SeatView: Sendable, Equatable {
         fleetSize = boats.count
         finishWindowRemaining = shared.finishWindowRemaining
 
-        own = OwnBoat(boat, ease: race.heldInputs[seat].ease, boatClass: boatClass, penalty: race.rules.raceFormat.penalty)
+        let zone = shared.course.markZone(of: boat, hull: boat.hull(outline: boatClass.hull.outline))
+        own = OwnBoat(boat, ease: race.heldInputs[seat].ease, boatClass: boatClass, penalty: race.rules.raceFormat.penalty,
+                      zone: zone.map(Zone.init), markRoom: race.markRoomNotices(of: seat))
         let rights = race.rightsOfWay(of: seat)
         var others: [OtherBoat] = []
         others.reserveCapacity(boats.count - 1)
@@ -170,8 +174,15 @@ public struct SeatView: Sendable, Equatable {
         public let sailingWind: Wind
         /// Her wind shadow's multiplier on the sailing wind's speed, 1 in clean air: the HUD's shadow cue (#10).
         public let shadow: Double
+        /// The zone of the mark rule 18 tests her against (#91, #101), as the scene draws it around the mark; nil
+        /// unless she is racing.
+        public let zone: Zone?
+        /// The mark-room notices told her (#91, #101): each rule 18 record naming her, while it lasts. The umpire's
+        /// alone, so none in a prediction (ADR 0005).
+        public let markRoom: [MarkRoomNotice]
 
-        init(_ boat: Boat, ease: Bool, boatClass: BoatClass, penalty: RulesConfig.Penalty) {
+        init(_ boat: Boat, ease: Bool, boatClass: BoatClass, penalty: RulesConfig.Penalty, zone: Zone?,
+             markRoom: [MarkRoomNotice]) {
             position = boat.position
             heading = boat.heading
             speed = boat.speed
@@ -188,6 +199,8 @@ public struct SeatView: Sendable, Equatable {
             windOverGround = boat.windOverGround
             sailingWind = boat.sailingWind
             shadow = boat.shadow
+            self.zone = zone
+            self.markRoom = markRoom
         }
 
         /// Where the sailing wind blows from, radians.
@@ -238,6 +251,45 @@ public struct SeatView: Sendable, Equatable {
         public var velocity: Vec2 { forward * speed }
     }
 
+    /// The zone of the mark rule 18 tests her against (`CourseLayout.markZone(of:hull:)`, #91): the mark of the leg
+    /// she is racing, the nearer of a gate's two, or the nearer end of the finish line. What the scene draws: the
+    /// mark and its zone's circle.
+    public struct Zone: Sendable, Equatable {
+        /// The mark's centre.
+        public let mark: Vec2
+        /// The side she leaves it on.
+        public let side: RoundingSide
+        /// Metres from the mark's centre to the nearest point of her hull.
+        public let distance: Double
+        /// Whether any part of her hull is in the zone.
+        public let isIn: Bool
+
+        init(_ zone: MarkZone) {
+            mark = zone.mark.position
+            side = zone.side
+            distance = zone.distance
+            isIn = zone.isIn
+        }
+    }
+
+    /// A mark-room notice (#91, `RaceEvent.Kind.markRoomNotice`): the rule 18 record it announced to its two boats,
+    /// while it lasts (`UmpireState.markRoom(_:)`). Which boat is entitled to mark-room at the mark they are both
+    /// racing to, and which must give it. Mark-room is not right of way: rules 10–13 still say who keeps clear.
+    public struct MarkRoomNotice: Sendable, Equatable {
+        /// The boat entitled to mark-room.
+        public let entitled: Int
+        /// The boat that must give it to her.
+        public let owing: Int
+        /// `.givingMarkRoom` (18.2) or `.tackingInTheZone` (18.3).
+        public let rule: RacingRule
+
+        public init(entitled: Int, owing: Int, rule: RacingRule) {
+            self.entitled = entitled
+            self.owing = owing
+            self.rule = rule
+        }
+    }
+
     /// A rule call's line between its two boats (#15): who, under which rule, since when. The call alone,
     /// never the incident behind it.
     public struct RuleCallLine: Sendable, Equatable {
@@ -272,6 +324,16 @@ extension Race {
     /// What `seat`'s sailor sees now (`SeatView`): a bot's brain sees the race through this alone (#98).
     public func seatView(for seat: Int) -> SeatView {
         SeatView(race: self, seat: seat, shared: SeatView.Shared(race: self))
+    }
+
+    /// The mark-room notices told `seat` (`SeatView.OwnBoat.markRoom`): each rule 18 record naming her now, in seat
+    /// order of the other boat. None in a prediction, which holds no umpire (ADR 0005).
+    func markRoomNotices(of seat: Int) -> [SeatView.MarkRoomNotice] {
+        guard let umpire else { return [] }
+        return boats.indices.compactMap { other in
+            guard other != seat, let record = umpire.markRoom(SeatPair(seat, other)) else { return nil }
+            return SeatView.MarkRoomNotice(entitled: record.entitled, owing: record.owing, rule: record.rule)
+        }
     }
 
     /// What each of `seats` sees now, in order: each the view `seatView(for:)` gives, with what they see alike
