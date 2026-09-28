@@ -182,9 +182,9 @@ import RegattaCore
     /// #100, rule 21.2: a boat turning a penalty keeps clear of every boat once she is 30° into her turn, whatever
     /// rules 10–13 would give her (#89 built the turns; this is keeping clear while she turns them). Seat 0, on
     /// starboard and so right of way over seat 1 on port by rule 10, is 60° into her turn when seat 1 comes back
-    /// past her on the side she is turning to: she breaks off the turn to keep clear (turning away gives it up), touches
-    /// nobody and is called for nothing, and turns it again once clear, serving it inside its deadlines. With nobody
-    /// near she holds her turn hard over, as ever.
+    /// past her on the side she is turning to: she breaks off the turn to keep clear, turning it again the other way,
+    /// hard over away from seat 1 (turning back gives the first up), touches nobody and is called for nothing, and
+    /// serves it inside its deadlines. With nobody near she holds her turn hard over, as ever.
     @Test func penaltyTurningBotKeepsClearUnder21_2() throws {
         let style = BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
         let hardOver = BoatInput(rudder: 1.0)
@@ -203,13 +203,16 @@ import RegattaCore
 
         var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style)
         var kinds: [RaceEvent.Kind] = []
+        var inputs: [BoatInput] = []
         let complete = RulesConfig.ticks(race.rules.raceFormat.penalty.complete)
         for _ in 0..<(complete + Race.tickRate) {
-            driver.drive(race)
+            if let decision = driver.drive(race), race.boats[0].penaltyTurnsOwed > 0 { inputs.append(decision.input) }
             race.step()
             kinds += race.drainEvents().map(\.kind)
         }
         #expect(kinds.contains(.penaltyReset(seat: 0)), "she broke off her turn to keep clear")
+        #expect(inputs.first == hardOver && inputs.last == BoatInput(rudder: -1.0),
+                "she turned it again to port, away from seat 1: \(inputs.map(\.rudder))")
         #expect(!kinds.contains(.contact(SeatPair(0, 1))), "she touched seat 1")
         let calls = kinds.compactMap { if case .ruleCall(let call) = $0 { call } else { nil } }
         #expect(calls.isEmpty, "\(calls.map { "\($0.rule) on \($0.offender)" })")
