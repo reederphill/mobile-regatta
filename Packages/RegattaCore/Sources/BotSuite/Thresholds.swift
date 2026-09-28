@@ -3,21 +3,26 @@ import RegattaBots
 
 /// What one tier must meet over a run (#19): "the share of bots that finish; time stuck in irons;
 /// contact with marks; the share of contacts ending in fouls (near zero at National); getting stuck
-/// against the edge of the race area".
+/// against the edge of the race area". Since every contact ends in a call, the fouls are gated as a share of
+/// encounters too (#101, the owner, 2026-09-27: `maxEncountersToFoulsShare`).
 public struct TierLimits: Codable, Hashable, Sendable {
     public var minFinishShare: Double
     public var maxMeanIronsSeconds: Double
     public var maxMeanMarkContacts: Double
     public var maxContactsToFoulsShare: Double
     public var maxMeanEdgeSeconds: Double
+    /// The most of the tier's encounters that may end in a rule call (`TierSummary.encountersToFoulsShare`, #101);
+    /// nil gates none, as in a thresholds file from before #101.
+    public var maxEncountersToFoulsShare: Double?
 
     public init(minFinishShare: Double, maxMeanIronsSeconds: Double, maxMeanMarkContacts: Double,
-                maxContactsToFoulsShare: Double, maxMeanEdgeSeconds: Double) {
+                maxContactsToFoulsShare: Double, maxMeanEdgeSeconds: Double, maxEncountersToFoulsShare: Double? = nil) {
         self.minFinishShare = minFinishShare
         self.maxMeanIronsSeconds = maxMeanIronsSeconds
         self.maxMeanMarkContacts = maxMeanMarkContacts
         self.maxContactsToFoulsShare = maxContactsToFoulsShare
         self.maxMeanEdgeSeconds = maxMeanEdgeSeconds
+        self.maxEncountersToFoulsShare = maxEncountersToFoulsShare
     }
 
     /// Why `summary` misses these limits, each line starting with `tier`.
@@ -37,6 +42,9 @@ public struct TierLimits: Codable, Hashable, Sendable {
         }
         if summary.meanEdgeSeconds > maxMeanEdgeSeconds {
             breaches.append("\(tier): edge \(fixed(summary.meanEdgeSeconds)) s/boat > \(fixed(maxMeanEdgeSeconds))")
+        }
+        if let maximum = maxEncountersToFoulsShare, summary.encountersToFoulsShare > maximum {
+            breaches.append("\(tier): encounters to fouls \(fixed(summary.encountersToFoulsShare, 3)) > \(fixed(maximum, 3))")
         }
         return breaches
     }

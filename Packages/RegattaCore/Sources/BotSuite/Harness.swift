@@ -107,6 +107,18 @@ struct RaceTally {
     /// Each seat's boat contacts, oldest first: the id of the incident each one belongs to (the one it
     /// opened, or the pair's still open), if any.
     private var contacts: [[Int?]]
+    /// Each pair's open encounter (#101): whether a rule call has been made between them during it. Opened when the
+    /// pair comes within `encounterDistance` while rules 10–13 name one of them to keep clear (`Race.rightOfWay`),
+    /// closed once their hulls are further apart than that again.
+    private var openEncounters: [SeatPair: Bool] = [:]
+    /// Each seat's encounters begun, and those that ended in a rule call.
+    private var encounters: [Int]
+    private var encountersEndingInFouls: [Int]
+    /// Hulls closer than this are in an encounter, metres: the rules configuration's separation (#88), 2 hull lengths.
+    private let encounterDistance: Double
+    private let outline: [Vec2]
+    /// The furthest any point of a hull lies from its centre, metres.
+    private let hullRadius: Double
     /// Which legs are beats: those rounding the windward mark.
     private let isBeat: [Bool]
     private let upwind: Vec2
@@ -138,6 +150,11 @@ struct RaceTally {
         disqualifications = zeros
         ocsNotices = zeros
         contacts = Array(repeating: [], count: race.boats.count)
+        encounters = zeros
+        encountersEndingInFouls = zeros
+        encounterDistance = race.rules.incidents.separation.metres(hullLength: race.boatClass.hull.length)
+        outline = race.boatClass.hull.outline
+        hullRadius = race.boatClass.hull.outline.reduce(0) { max($0, $1.length) }
         isBeat = race.course.legs.map { $0 == .round(CourseLayout.windwardIndex) }
         upwind = race.course.upwind
         legEntries = Array(repeating: nil, count: race.boats.count)
@@ -151,10 +168,13 @@ struct RaceTally {
 
     /// Call once after each `race.step()`, with the events it emitted.
     mutating func record(_ race: Race, events: [RaceEvent]) {
+        let near = openEncounters(race)
         for event in events {
             switch event.kind {
             case .ocsNotice(let seat): ocsNotices[seat] += 1
-            case .ruleCall(let call): foulsAsOffender[call.offender] += 1
+            case .ruleCall(let call):
+                foulsAsOffender[call.offender] += 1
+                recordFoul(SeatPair(call.offender, call.victim))
             case .markTouch(let seat, _): markContacts[seat] += 1
             case .obstructionContact(let seat, .land): landContacts[seat] += 1
             case .obstructionContact(let seat, .boundary): boundaryContacts[seat] += 1
@@ -171,6 +191,7 @@ struct RaceTally {
             default: break
             }
         }
+        openEncounters = openEncounters.filter { near.contains($0.key) }
         for (seat, boat) in race.boats.enumerated() {
             if !boat.isTakingPenalty && boat.twa < noGo && boat.speed < BotRaceHarness.ironsSpeed {
                 if boat.status == .racing { ironsTicks[seat] += 1 }
@@ -182,6 +203,49 @@ struct RaceTally {
             }
             recordLeg(seat, boat, tick: race.tick)
         }
+    }
+
+    /// Opens an encounter (#101, the owner's 2026-09-27 definition) for each pair within `encounterDistance` of each
+    /// other, hull to hull, while rules 10–13 name one of them to keep clear (`Race.rightOfWay`: neither a ghost), and
+    /// none open; returns every such pair, the ones whose encounters stay open.
+    private mutating func openEncounters(_ race: Race) -> Set<SeatPair> {
+        let boats = race.boats
+        var hulls = [[Vec2]?](repeating: nil, count: boats.count)
+        func hull(_ seat: Int) -> [Vec2] {
+            if let hull = hulls[seat] { return hull }
+            let hull = boats[seat].hull(outline: outline)
+            hulls[seat] = hull
+            return hull
+        }
+        var near: Set<SeatPair> = []
+        for a in boats.indices where !boats[a].isGhost {
+            for b in (a + 1)..<boats.count where !boats[b].isGhost {
+                guard (boats[a].position - boats[b].position).length <= encounterDistance + 2 * hullRadius,
+                      Collision.distance(convex: hull(a), simplePolygon: hull(b)) <= encounterDistance,
+                      race.rightOfWay(a, b) != nil else { continue }
+                let pair = SeatPair(a, b)
+                near.insert(pair)
+                if openEncounters[pair] == nil {
+                    openEncounters[pair] = false
+                    encounters[a] += 1
+                    encounters[b] += 1
+                }
+            }
+        }
+        return near
+    }
+
+    /// A rule call between `pair`'s boats: their encounter ends in a foul, once however many calls it holds. A call
+    /// with no encounter open (never seen: the boats were too far apart) counts as an encounter of its own.
+    private mutating func recordFoul(_ pair: SeatPair) {
+        guard openEncounters[pair] != true else { return }
+        if openEncounters[pair] == nil {
+            encounters[pair.low] += 1
+            encounters[pair.high] += 1
+        }
+        openEncounters[pair] = true
+        encountersEndingInFouls[pair.low] += 1
+        encountersEndingInFouls[pair.high] += 1
     }
 
     /// A beat ends when she moves on from it, and a leg begins as she starts or rounds into it. Her tacks
@@ -227,7 +291,10 @@ struct RaceTally {
             startLineSpot: starts[seat]?.spot,
             rowSpot: rowSpots[seat],
             startSpot: style?.startSpot ?? 0.5,
-            onCourseSeconds: seconds(onCourseTicks[seat])
+            onCourseSeconds: seconds(onCourseTicks[seat]),
+            encounters: encounters[seat],
+            encountersEndingInFouls: encountersEndingInFouls[seat],
+            encountersToFoulsShare: share(encountersEndingInFouls[seat], of: encounters[seat])
         )
     }
 }

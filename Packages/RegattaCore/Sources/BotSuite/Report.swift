@@ -49,12 +49,19 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     /// Seconds on the water (`Boat.isOnCourse`: before her start, OCS or racing), the time `edgeSeconds` is counted
     /// over (#100): what the navigation gate's edge share is a share of.
     public var onCourseSeconds: Double = 0
+    /// Her encounters (#101, the owner's 2026-09-27 definition): each time she and another boat came within 2 hull
+    /// lengths of each other while rules 10–13 named one of them to keep clear, counted once until they separated
+    /// past that again.
+    public var encounters: Int = 0
+    /// Of `encounters`, those during which a rule call was made between the two, on either boat.
+    public var encountersEndingInFouls: Int = 0
+    public var encountersToFoulsShare: Double = 0
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
         "contactsToFoulsShare", "foulsAsOffender", "dsqMissedPenalty", "ocsCount", "edgeSeconds",
         "landContacts", "boundaryContacts", "beats", "preGunIronsSeconds", "startSeconds", "startLineSpot",
-        "rowSpot", "startSpot", "onCourseSeconds",
+        "rowSpot", "startSpot", "onCourseSeconds", "encounters", "encountersEndingInFouls", "encountersToFoulsShare",
     ]
 
     private enum CodingKeys: String, CodingKey {
@@ -62,6 +69,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case contactsEndingInFouls, contactsToFoulsShare, foulsAsOffender, dsqMissedPenalty, ocsCount
         case edgeSeconds, landContacts, boundaryContacts, beats
         case preGunIronsSeconds, startSeconds, startLineSpot, rowSpot, startSpot, onCourseSeconds
+        case encounters, encountersEndingInFouls, encountersToFoulsShare
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -91,6 +99,9 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(rowSpot, forKey: .rowSpot)
         try c.encode(startSpot, forKey: .startSpot)
         try c.encode(onCourseSeconds, forKey: .onCourseSeconds)
+        try c.encode(encounters, forKey: .encounters)
+        try c.encode(encountersEndingInFouls, forKey: .encountersEndingInFouls)
+        try c.encode(encountersToFoulsShare, forKey: .encountersToFoulsShare)
     }
 
     /// Whether her style means her to start in the line's pin third (#99).
@@ -445,6 +456,12 @@ public struct TierSummary: Codable, Hashable, Sendable {
     public var boatContacts: Int
     public var contactsEndingInFouls: Int
     public var contactsToFoulsShare: Double
+    /// Seat encounters (#101): an encounter between two seats of the tier counts for each.
+    public var encounters: Int
+    public var encountersEndingInFouls: Int
+    /// The share of the tier's encounters during which a rule call was made (#101): what #19's "the share of contacts
+    /// ending in fouls (near zero at National)" is gated on, since every contact ends in a call.
+    public var encountersToFoulsShare: Double
     public var foulsAsOffender: Int
     public var dsqMissedPenalty: Int
     public var ocsCount: Int
@@ -462,6 +479,9 @@ public struct TierSummary: Codable, Hashable, Sendable {
         boatContacts = seats.reduce(0) { $0 + $1.boatContacts }
         contactsEndingInFouls = seats.reduce(0) { $0 + $1.contactsEndingInFouls }
         contactsToFoulsShare = share(contactsEndingInFouls, of: boatContacts)
+        encounters = seats.reduce(0) { $0 + $1.encounters }
+        encountersEndingInFouls = seats.reduce(0) { $0 + $1.encountersEndingInFouls }
+        encountersToFoulsShare = share(encountersEndingInFouls, of: encounters)
         foulsAsOffender = seats.reduce(0) { $0 + $1.foulsAsOffender }
         dsqMissedPenalty = seats.reduce(0) { $0 + $1.dsqMissedPenalty }
         ocsCount = seats.reduce(0) { $0 + $1.ocsCount }
@@ -539,6 +559,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
             guard let s = tiers[tier.rawValue] else { continue }
             lines.append("\(tier.rawValue): \(s.finished)/\(s.seats) finished, irons \(fixed(s.meanIronsSeconds)) s/boat, "
                 + "marks \(fixed(s.meanMarkContacts))/boat, contacts \(s.boatContacts) (\(fixed(s.contactsToFoulsShare)) fouls), "
+                + "encounters \(s.encounters) (\(fixed(s.encountersToFoulsShare, 3)) fouls), "
                 + "edge \(fixed(s.meanEdgeSeconds)) s/boat, dsq \(s.dsqMissedPenalty), ocs \(s.ocsCount)")
         }
         for profile in BotProfile.allCases {
