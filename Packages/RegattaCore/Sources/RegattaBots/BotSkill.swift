@@ -66,7 +66,7 @@ public struct BotWeaknesses: Hashable, Sendable {
         let s = min(max(skill, 0), 1)
         let deficit = 1 - s
         startTiming = (1.3 - s) * deficit
-        lineBiasMisread = deg2rad(8) * deficit * deficit
+        lineBiasMisread = Self.lineBiasMisread(skill: s)
         reactionDelay = 8 * deficit
         laylineMisjudge = deg2rad(20) * deficit
         angleMissRate = min(1, 1.8 * deficit)
@@ -81,6 +81,14 @@ public struct BotWeaknesses: Hashable, Sendable {
     public static let fullPuffPerception = 150.0
     /// The skill below which she never rolls a tack (#263).
     public static let rollSkillFloor = 0.4
+
+    /// Radians, at most, by which a bot of `skill` misreads the start line's bias: growing with the square of her
+    /// deficit, and none from National's band (0.8) up, which reads the line (#102's fix loop: a misread spot, however
+    /// small, moved #99's pin-style Nationals out of the pin third).
+    public static func lineBiasMisread(skill: Double) -> Double {
+        let deficit = 1 - skill
+        return deg2rad(8) * deficit * deficit * (1 - ramp(skill, from: 0.7, to: 0.8))
+    }
 
     /// 0 at Club and below (skill 0.6), 1 from National's centre (0.9) up, in proportion between.
     public static func currentSense(skill: Double) -> Double { ramp(skill, from: 0.6, to: 0.9) }

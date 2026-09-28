@@ -105,6 +105,9 @@ struct BotBrain: Sendable {
     /// She gave a penalty turn up to keep clear (rule 21.2, `penaltyInput`) and turns it the other way, since she
     /// last owed none.
     var penaltyGivenUp = false
+    /// Radians into her current penalty turn when she last looked (`OwedPenalty.progress`): a drop means she has
+    /// just served one and the next is starting (`penaltyInput`).
+    var penaltyProgress = 0.0
     /// What she has made of her own wind and speed so far (`observe`).
     var senses = Senses()
     /// What her skill costs her (#102): a live bot's, from her skill; a bot-suite profile's, none.
@@ -152,7 +155,7 @@ struct BotBrain: Sendable {
         let desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
         if let heading = evasiveHeading(boat, view, desired: desired) {
             let ease = aim.ease && aim.tack == boat.tack || easesKeepingClear(boat, view, heading: heading)
-            return BotDecision(input: steer(boat, toHeading: heading, view).eased(ease))
+            return BotDecision(input: clearingQuarter(boat, view, steer(boat, toHeading: heading, view).eased(ease)))
         }
         if aim.tack != boat.tack {
             if canTap(boat, view) {
@@ -171,9 +174,9 @@ struct BotBrain: Sendable {
                     ? Aim(angle: max(sailingAngle(boat), Self.returnAngle), tack: boat.tack)
                     : .groove(.upwind, tack: boat.tack, angle: grooveAngle(.upwind, boat, view))
             }
-            return BotDecision(input: holdingCourse(boat, view, helm(boat, to: own, view)))
+            return BotDecision(input: clearingQuarter(boat, view, holdingCourse(boat, view, helm(boat, to: own, view))))
         }
-        return BotDecision(input: holdingCourse(boat, view, helm(boat, to: aim, view).eased(aim.ease)))
+        return BotDecision(input: clearingQuarter(boat, view, holdingCourse(boat, view, helm(boat, to: aim, view).eased(aim.ease))))
     }
 
     // MARK: - Penalty turns
@@ -217,7 +220,18 @@ struct BotBrain: Sendable {
         guard let owed = b.penalty else {
             penaltyTurn = nil
             penaltyGivenUp = false
+            penaltyProgress = 0
             return nil
+        }
+        // Between one turn and the next she owes, with a mark close aboard: she stops turning and sails clear of it
+        // before the next, as she would before her first (`startPenaltyTurn`). Turning on there sweeps the same
+        // circle, and a circle that touched the mark touches it again, owing another turn each time round (#102).
+        let servedOne = owed.progress < penaltyProgress - .pi
+        penaltyProgress = owed.progress
+        if servedOne, penaltyTurn != nil, let mark = nearestMark(b, view),
+           mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance, canPutOffTurn(owed, view) {
+            penaltyTurn = nil
+            penaltyGivenUp = false
         }
         let keepClear = owed.isStarted && b.status == .racing ? penaltyKeepClear(b, view) : nil
         guard let turn = penaltyTurn ?? startPenaltyTurn(b, view, owed) else {
@@ -540,7 +554,11 @@ struct BotBrain: Sendable {
         let up = grooveAngle(.upwind, b, view)
         let down = grooveAngle(.downwind, b, view)
         let corridor = max(20, distance * tactics.corridor)
-        let lateral = (b.position - target).dot(Vec2.heading(w).rightPerp) - tactics.corridorBias * corridor
+        // Her favoured side shifts the corridor on the leg, not at its end: it fades out over her last
+        // `tacticalRange` or so, so the corridor closes on her mark and never has her tack onto a board that
+        // sails her below its layline, into it.
+        let bias = tactics.corridorBias * min(max(distance / Self.tacticalRange - 1, 0), 1)
+        let lateral = (b.position - target).dot(Vec2.heading(w).rightPerp) - bias * corridor
 
         if offWind < up + deg2rad(2) {
             // Where the target bears from her: to the right of the wind positive.
@@ -701,10 +719,43 @@ struct BotBrain: Sendable {
             guard along > 0, along < max(b.speed, 1) * 3 + 3 else { continue }
             guard abs(offset.cross(ahead)) < obstacle.radius + view.boatClass.hull.beam + Self.markClearance else { continue }
             let markIsToStarboard = offset.dot(ahead.rightPerp) > 0
-            return sailable(desired + (markIsToStarboard ? -1 : 1) * deg2rad(30), wind: b.windDirection)
+            let turned = desired + (markIsToStarboard ? -1 : 1) * deg2rad(30)
+            let away = sailable(turned, wind: b.windDirection)
+            // Close-hauled with the mark to leeward, away from it is into the wind: she shoots it, luffing into the
+            // no-go zone on her way (#102's fix loop), rather than holding her groove into it.
+            guard abs(wrapAngle(away - turned)) > 1e-9,
+                  abs(offset.cross(.heading(away))) < obstacle.radius + view.boatClass.hull.beam + Self.markClearance
+            else { return away }
+            let side: Double = wrapAngle(b.windDirection - desired) >= 0 ? 1 : -1
+            return b.windDirection - side * Self.shootAngle
         }
         return nil
     }
+
+    /// `input`, unless its rudder would swing her stern into a mark on her quarter (#102's fix loop): a boat pivots
+    /// about her middle, so turning away from a mark alongside her aft swings her quarter onto it, and each touch
+    /// costs her a turn; slowed by it, she touched it again every time she turned off it. While it is there she turns,
+    /// gently, the other way, her bow away from it, until it is past her stern.
+    func clearingQuarter(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput) -> BoatInput {
+        let rudder = input.rudderValue
+        guard abs(rudder) > Autohelm.deadBand else { return input }
+        let hull = view.boatClass.hull
+        for obstacle in view.course.obstacles {
+            let offset = obstacle.position - b.position
+            let along = offset.dot(b.forward)
+            guard along < 0, along > -(hull.length / 2 + obstacle.radius + Self.markClearance) else { continue }
+            let lateral = offset.dot(b.forward.rightPerp)
+            guard abs(lateral) < obstacle.radius + hull.beam / 2 + Self.markClearance else { continue }
+            // Rudder to starboard (+) swings her stern to port (−), and the other way about.
+            guard (rudder > 0) == (lateral < 0) else { continue }
+            return BoatInput(rudder: (lateral > 0 ? 1 : -1) * Self.leastRudder, ease: input.ease)
+        }
+        return input
+    }
+
+    /// Radians off the wind she luffs to, shooting a mark close to leeward of her groove (`avoidMarks`): inside the
+    /// no-go zone, on her own tack, carrying her way past it.
+    static let shootAngle = deg2rad(15)
 
     /// Seconds of sailing ahead she looks for the race area's edge.
     static let edgeLookahead = 3.0
