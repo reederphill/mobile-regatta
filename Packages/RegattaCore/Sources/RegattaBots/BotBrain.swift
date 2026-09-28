@@ -735,8 +735,11 @@ struct BotBrain: Sendable {
     /// `input`, unless its rudder would swing her stern into a mark on her quarter (#102's fix loop): a boat pivots
     /// about her middle, so turning away from a mark alongside her aft swings her quarter onto it, and each touch
     /// costs her a turn; slowed by it, she touched it again every time she turned off it. While it is there she turns,
-    /// gently, the other way, her bow away from it, until it is past her stern.
+    /// gently, the other way, her bow away from it, until it is past her stern. Only once she has started: before
+    /// the gun the line's ends are the marks she works about, and turning off her plan there can carry her over
+    /// the line (#99's takeover).
     func clearingQuarter(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput) -> BoatInput {
+        guard b.status != .prestart, b.status != .ocs else { return input }
         let rudder = input.rudderValue
         guard abs(rudder) > Autohelm.deadBand else { return input }
         let hull = view.boatClass.hull

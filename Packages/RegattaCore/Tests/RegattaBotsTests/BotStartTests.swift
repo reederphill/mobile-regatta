@@ -43,7 +43,13 @@ import RegattaCore
     @Test func aBotTakingOverBeforeTheGunStarts() throws {
         for seed: UInt64 in 1...12 {
             let race = Self.startRace(seats: [.human] + Array(repeating: .bot, count: 9), seed: seed)
-            var controllers = SeatControllers(setup: race.setup)
+            // The takeover alone: the fleet around her sails without weaknesses, as the scenario was written for
+            // (#99). Line-bias misreads (#102) move where the fleet holds: on seed 9 she then reached the pin end
+            // early, luffing to keep clear of a boat to leeward, and was over at the gun.
+            var controllers = SeatControllers([.human] + (1..<race.boats.count).map { seat in
+                let style = BotDriver(seat: seat, raceSeed: race.setup.raceSeed).style
+                return .bot(BotDriver(seat: seat, raceSeed: race.setup.raceSeed, style: style, weaknesses: .none(skill: style.skill)))
+            })
             var rng = SplitMix64(seed: seed)
             var step = 0
             sail(race, &controllers, ticks: 30 * Race.tickRate) { race in
