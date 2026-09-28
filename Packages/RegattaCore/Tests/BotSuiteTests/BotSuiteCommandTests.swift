@@ -7,13 +7,14 @@ import Testing
 @Suite struct BotSuiteCommandTests {
     /// #19: the full matrix covers every set of conditions, fleet sizes from 2 to 16, and every tier mix;
     /// since #238, the conditions at version 3 (#221, #233) and their venue; since #286, version 4, with the
-    /// pressure field, and its venue; since #287, version 5 and dev-venue@5, whose geography steers the field.
+    /// pressure field, and its venue; since #287, version 5 and dev-venue@5, whose geography steers the field;
+    /// since #288, version 6 and dev-venue@6, whose puffs form from the field.
     @Test func bundledMatrixCoversTheSuiteAxes() throws {
         let matrix = try BotMatrix.bundled()
         try matrix.validate()
         #expect(matrix.fleetSizes == [2, 5, 10, 16])
-        #expect(matrix.venues == ["dev-venue@5"])
-        #expect(Set(matrix.conditions) == ["classic-oscillating@5", "gusty-offshore@5", "light-and-patchy@5", "sea-breeze@5"])
+        #expect(matrix.venues == ["dev-venue@6"])
+        #expect(Set(matrix.conditions) == ["classic-oscillating@6", "gusty-offshore@6", "light-and-patchy@6", "sea-breeze@6"])
         #expect(Set(matrix.tierMixes) == Set(TierMix.allCases))
         // #231: the live bots the tiers gate, and the skill-gap scenario; #238: the fun pass, in classic
         // oscillating conditions only.
@@ -21,7 +22,7 @@ import Testing
         #expect(!matrix.seeds.isEmpty && !matrix.tideStatesDegrees.isEmpty)
         let perConditions = matrix.seeds.count * matrix.tideStatesDegrees.count * 4 * TierMix.allCases.count
         #expect(matrix.cells.count == perConditions * (4 * 2 + 1))
-        #expect(Set(matrix.cells.filter { $0.profileMix == .funPass }.map(\.conditions)) == ["classic-oscillating@5"])
+        #expect(Set(matrix.cells.filter { $0.profileMix == .funPass }.map(\.conditions)) == ["classic-oscillating@6"])
     }
 
     @Test func optionsOverrideTheMatrix() throws {

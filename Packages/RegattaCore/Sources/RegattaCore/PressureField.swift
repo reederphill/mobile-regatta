@@ -312,6 +312,14 @@ extension WindField {
         let k = windows.window(containing: tick)
         guard k >= 0 else { throw .beforeOrigin(tick: tick) }
         for window in firstWindowNeeded(atTick: tick)...k where keys[window] == nil { throw .missingKey(window) }
+        return heldPressureState(atTick: tick, plan)
+    }
+
+    /// `pressureState(atTick:_:)` from the keys held, never throwing: a window whose key isn't held draws nothing,
+    /// as `sideTarget` and `laneKnots` read it. Where puffs form (#288): their window's key has just been added,
+    /// so its spawn ticks' state is the one sampling will see once the keys before it are all held.
+    func heldPressureState(atTick tick: Int, _ plan: PressurePlan) -> PressureState {
+        let k = windows.window(containing: tick)
         let fraction = Double(tick - windows.start(of: k)) / Double(WindWindows.ticksPerWindow)
         // Each target once, newest first: knot k reads the first `ramp + 1`, knot k − 1 the rest from the second. The
         // cache holds each window's target from the keys' own draws; the race's tendency goes on as `sideTarget` adds it.

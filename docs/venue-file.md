@@ -24,8 +24,10 @@ Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/
   pressure field is laid across, is derived from its geographic grid at load (`Venue.AcrossWind`).
 - `dev-venue@5` (bundled, schema 2): `dev-venue@4` on the version-5 conditions files (schema 4), with its
   geography authored to be seen in play (#287): more pressure and a lane spot in a band off the west
-  headland, a shadow band under the east shore, and a mild left-side tendency. The bot suite's matrix
-  sails it; the default race doesn't.
+  headland, a shadow band under the east shore, and a mild left-side tendency.
+- `dev-venue@6` (bundled, schema 2): `dev-venue@5` on the version-6 conditions files (schema 5), whose puffs
+  and lulls form from the pressure field at about a third of the old coverage (#288). The bot suite's
+  matrix sails it; the default race doesn't.
 - `test-venue@1` (test resource): small hand-checkable grids, concave land, a tidal current with an eddy.
 
 ## Frame and units

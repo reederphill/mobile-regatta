@@ -16,11 +16,12 @@ import Foundation
 /// build. Schema 1 files still load, but only schema 2 and later can be sailed. Schema 3 adds the pressure field
 /// (`pressureField`, #286, ADR 0008): the pressure side and pressure lanes. Schema 4 adds how much the venue's
 /// geography steers them (#287): the range each race scales the venue's side tendency by, and the share of lanes
-/// that form at the venue's lane spots.
+/// that form at the venue's lane spots. Schema 5 adds where puffs and lulls form in it (#288): how many places each
+/// is drawn at, puffs taking the one with the most pressure and lulls the least.
 public struct Conditions: DataFileContent, Hashable {
     public static let kind = "conditions"
     public static let bundleDirectory = "conditions"
-    public static let supportedSchemaVersions = [1, 2, 3, 4]
+    public static let supportedSchemaVersions = [1, 2, 3, 4, 5]
 
     /// Every conditions entry oscillates with a main period in 60–180 s (ADR 0001). #221 made the shifts
     /// faster, about 60–100 s from version 3 of each file (90–180 s before, #10); with 30 s knots, periods
@@ -115,6 +116,16 @@ public struct Conditions: DataFileContent, Hashable {
     public struct PressureField: Hashable, Sendable {
         public let side: Side
         public let lanes: Lanes
+        /// How many places each puff and lull is drawn at (#288): a puff forms at the one with the most pressure at
+        /// its spawn tick, a lull at the one with the least, so puffs gather in the lanes and on the pressure side
+        /// and lulls where the field is weak. 1 draws one place, anywhere, as before. Schema 5; before it,
+        /// `defaultPuffChoices`.
+        public let puffChoices: Int
+
+        /// Before schema 5: puffs and lulls form anywhere.
+        public static let defaultPuffChoices = 1
+        /// The most places a file may draw each puff at.
+        public static let maxPuffChoices = 8
 
         /// The pressure side: a slope in speed across the course, one side stronger, the other weaker.
         public struct Side: Hashable, Sendable {
@@ -161,7 +172,7 @@ public struct Conditions: DataFileContent, Hashable {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2, 3, 4:
+        case 1, 2, 3, 4, 5:
             self = try JSONDecoder().decode(ConditionsSchema.self, from: fileData)
                 .conditions(id: header.id, schemaVersion: header.schemaVersion)
         default:
@@ -185,13 +196,14 @@ public struct Conditions: DataFileContent, Hashable {
 
 public typealias ConditionsFile = DataFile<Conditions>
 
-// MARK: - Schemas 1 to 3
+// MARK: - Schemas 1 to 5
 
-/// The conditions file, schema versions 1 to 4, as written: knots, degrees, seconds, metres, fractions.
+/// The conditions file, schema versions 1 to 5, as written: knots, degrees, seconds, metres, fractions.
 /// Schema 2 is schema 1 plus `shift.wobbleDegrees`, `trend.rampFraction`, `build.overSeconds` and
 /// `build.rampFraction` (#75): required from schema 2, refused in schema 1. Schema 3 is schema 2 plus
 /// `pressureField` (#286): required from schema 3, refused before it. Schema 4 is schema 3 plus
-/// `pressureField.side.tendencyScale` and `pressureField.lanes.spotShare` (#287): required in schema 4, refused before.
+/// `pressureField.side.tendencyScale` and `pressureField.lanes.spotShare` (#287): required from schema 4, refused
+/// before. Schema 5 is schema 4 plus `pressureField.puffChoices` (#288): required in schema 5, refused before.
 private struct ConditionsSchema: Decodable {
     /// `{ "min": a, "max": b }`, in the unit its key names.
     struct Range: Decodable {
@@ -262,6 +274,8 @@ private struct ConditionsSchema: Decodable {
 
         let side: Side
         let lanes: Lanes
+        /// Schema 5: a whole number, written as any JSON number (a tuned copy writes what its slider holds).
+        let puffChoices: Double?
     }
 
     let name: String
@@ -389,6 +403,18 @@ private struct ConditionsSchema: Decodable {
                 try check(side.tendencyScale == nil && lanes.spotShare == nil,
                           "pressureField.side.tendencyScale and pressureField.lanes.spotShare need schema 4")
             }
+            // Schema 5's puff placement (#288): required in schema 5, refused before it.
+            var puffChoices = Conditions.PressureField.defaultPuffChoices
+            if schemaVersion >= 5 {
+                guard let choices = pressureField.puffChoices else {
+                    throw DataFileError.malformed(kind: Conditions.kind, reason: "schema \(schemaVersion) needs pressureField.puffChoices")
+                }
+                try check(choices.rounded() == choices && choices >= 1 && choices <= Double(Conditions.PressureField.maxPuffChoices),
+                          "pressureField.puffChoices must be a whole number 1…\(Conditions.PressureField.maxPuffChoices)")
+                puffChoices = Int(choices)
+            } else {
+                try check(pressureField.puffChoices == nil, "pressureField.puffChoices needs schema 5")
+            }
             parsedPressureField = .init(
                 side: .init(strength: side.strength, persistence: side.persistenceSeconds,
                             bend: try degrees(side.bendDegrees, "pressure side bend"), tendencyScale: tendencyScale),
@@ -397,7 +423,8 @@ private struct ConditionsSchema: Decodable {
                              width: try bounds(lanes.widthMetres, in: 1...10_000, "pressure lane width"),
                              lifetime: try bounds(lanes.lifetimeSeconds, in: 1...3600, "pressure lane lifetime"),
                              drift: lanes.driftMetresPerSecond,
-                             bend: try degrees(lanes.bendDegrees, "pressure lane bend"), spotShare: spotShare))
+                             bend: try degrees(lanes.bendDegrees, "pressure lane bend"), spotShare: spotShare),
+                puffChoices: puffChoices)
         } else {
             try check(pressureField == nil, "pressureField needs schema 3")
         }

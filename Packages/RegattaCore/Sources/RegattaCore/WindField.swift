@@ -42,7 +42,8 @@ public struct WindField: Hashable, Sendable {
     let puffPlan: PuffPlan?
     /// `puffSpawns[k]`: the puffs and lulls key k spawns, made when the key is added so sampling only
     /// reads them. Empty for a window whose key isn't held. A function of the keys and setup, so two
-    /// fields with the same keys hold the same spawns, whatever order the keys came in.
+    /// fields with the same keys hold the same spawns, whatever order the keys came in: where puffs form in the
+    /// pressure field (#288), adding a key redoes the spawns of every held window whose field reads it.
     private var puffSpawns: [[PuffSpawn]] = []
     /// How keys make the pressure field (#286), from the public setup; nil with no race area or for conditions
     /// before schema 3, whose wind has none and samples as it always has.
@@ -85,7 +86,26 @@ public struct WindField: Hashable, Sendable {
         if key.window >= puffSpawns.count {
             puffSpawns += Array(repeating: [], count: key.window - puffSpawns.count + 1)
         }
-        puffSpawns[key.window] = puffPlan.spawns(of: key, windows: windows)
+        guard let pressurePlan, pressurePlan.field.puffChoices > 1 else {
+            puffSpawns[key.window] = puffPlan.spawns(of: key, windows: windows)
+            return
+        }
+        // Each window's puffs form where the field is at its spawn ticks, which reads keys back to
+        // `pressurePlan.lookback` before it, and window 0's throughout at a venue with a side tendency.
+        let last = pressurePlan.readsFirstKey && key.window == 0
+            ? puffSpawns.count - 1 : min(puffSpawns.count - 1, key.window + pressurePlan.lookback)
+        for window in key.window...last {
+            guard let held = keys[window] else { continue }
+            let geographicGrid = setup.pairing.geographicGrid
+            let spawns = puffPlan.spawns(of: held, windows: windows, choices: pressurePlan.field.puffChoices) { tick in
+                let state = heldPressureState(atTick: tick, pressurePlan)
+                return { p in
+                    let field = pressurePlan.effect(at: pressurePlan.coordinate(at: p), side: state.side, lanes: state.lanes)
+                    return geographicGrid.sample(p).speedFactor * field.factor
+                }
+            }
+            puffSpawns[window] = spawns
+        }
     }
 
     /// Redoes the cached knots that read key `window` (just added), and fills windows `since` on, new to the cache: the
@@ -469,6 +489,8 @@ struct PuffCells: Sendable {
 struct PuffPlan: Hashable, Sendable {
     /// Stream tag for `SplitMix64(seed:stream:)` on a key's `puffSeed`: ASCII "windpuff".
     static let seedStream: UInt64 = 0x7769_6E64_7075_6666
+    /// Stream tag for the more places each spawn is drawn at (#288): ASCII "puffplce".
+    static let placeStream: UInt64 = 0x7075_6666_706C_6365
     /// A point is under a puff or lull when it changes the wind speed there by more than this fraction:
     /// the measure of the conditions' `coverage`.
     static let coverageThreshold = 0.05
@@ -556,8 +578,17 @@ struct PuffPlan: Hashable, Sendable {
     /// nothing (ADR 0001: an early key reveals little that can't soon be seen). Its mid-life centre is
     /// uniform over the race area and `margin` around it, and it spawns upwind of that by half its drift,
     /// so it drifts through the water it covers.
-    func spawns(of key: WindKey, windows: WindWindows) -> [PuffSpawn] {
+    ///
+    /// With `choices` above 1 (#288, schema-5 conditions' `pressureField.puffChoices`), each also draws
+    /// `choices − 1` more mid-life centres, two values each, from `placeStream`, and forms at whichever of them all
+    /// has the most pressure (a lull, the least), the first on a tie: `pressure(spawnTick)` gives the pressure at a
+    /// centre then, the geographic grid's speed factor times the pressure field's. So puffs form in the pressure
+    /// lanes and on the pressure side, and lulls where the field is weak, from the key's own draws and the field at
+    /// the spawn tick. With 1, nothing more is drawn.
+    func spawns(of key: WindKey, windows: WindWindows, choices: Int = 1,
+                pressure: (Int) -> (Vec2) -> Double = { _ in { _ in 1 } }) -> [PuffSpawn] {
         var rng = SplitMix64(seed: key.puffSeed, stream: Self.seedStream)
+        var placeRNG = SplitMix64(seed: key.puffSeed, stream: Self.placeStream)
         let whole = spawnsPerWindow.rounded(.down)
         let count = Int(whole) + (rng.unit() < spawnsPerWindow - whole ? 1 : 0)
         let up = Vec2.heading(area.axis), right = up.rightPerp
@@ -577,9 +608,20 @@ struct PuffPlan: Hashable, Sendable {
             let strength = isLull
                 ? -(puffs.lullLoss.lowerBound + (puffs.lullLoss.upperBound - puffs.lullLoss.lowerBound) * depth)
                 : puffs.gain.lowerBound + (puffs.gain.upperBound - puffs.gain.lowerBound) * depth
-            let midLife = area.centre
-                + right * ((2 * across - 1) * (area.halfWidth + margin))
-                + up * ((2 * along - 1) * (area.halfLength + margin))
+            func centre(_ across: Double, _ along: Double) -> Vec2 {
+                area.centre + right * ((2 * across - 1) * (area.halfWidth + margin))
+                    + up * ((2 * along - 1) * (area.halfLength + margin))
+            }
+            var midLife = centre(across, along)
+            if choices > 1 {
+                let pressureAt = pressure(start + offset)
+                var best = pressureAt(midLife)
+                for _ in 1..<choices {
+                    let candidate = centre(placeRNG.unit(), placeRNG.unit())
+                    let value = pressureAt(candidate)
+                    if isLull ? value < best : value > best { (best, midLife) = (value, candidate) }
+                }
+            }
             let velocity = downwind * (drift * baseStrength)
             let halfLife = Double(lifetimeTicks) / Double(Race.tickRate) / 2
             spawns.append(PuffSpawn(spawnTick: start + offset, lifetimeTicks: lifetimeTicks, radius: diameter / 2,
