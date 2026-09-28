@@ -173,6 +173,28 @@ import RegattaCore
         #expect(hud.puffs.contains { $0.intensity > 0 } && hud.puffs.contains { $0.intensity < 0 })
     }
 
+    /// The minimap's wind is one field, summed the way the race sums puffs: a puff and a lull of one strength in one
+    /// place cancel, where two discs would be drawn one over the other. A puff shows over its centre, and nothing
+    /// shows well clear of it, however the noise pushes the sampling.
+    @Test func minimapWindSumsThePuffs() {
+        let puff = MiniPuff(center: Vec2(100, 200), radius: 60, intensity: 0.3)
+        let lull = MiniPuff(center: puff.center, radius: 60, intensity: -0.3)
+        #expect(MinimapWind.speedChange(at: puff.center, puffs: [puff, lull]) == 0)
+        let center = MinimapWind.speedChange(at: puff.center, puffs: [puff])
+        #expect(center > 0 && center <= 0.3)
+        let clear = puff.radius + MinimapWind.warp * 2
+        #expect(MinimapWind.speedChange(at: puff.center + Vec2(clear, 0), puffs: [puff]) == 0)
+
+        // Its pixels, 10 m each over a 400 m square: toned over its centre, clear well away from it.
+        let bytes = MinimapWind.pixels(puffs: [puff], world: CGRect(x: 0, y: 0, width: 400, height: 400),
+                                       width: 40, height: 40, style: .standard)
+        func alpha(at p: Vec2) -> UInt8 { bytes[(Int((400 - p.y) / 10) * 40 + Int(p.x / 10)) * 4 + 3] }
+        #expect(alpha(at: puff.center) > 0)
+        #expect(alpha(at: Vec2(350, 350)) == 0)
+        #expect(MinimapWind.pixels(puffs: [puff, lull], world: CGRect(x: 0, y: 0, width: 400, height: 400),
+                                   width: 40, height: 40, style: .standard).allSatisfy { $0 == 0 })
+    }
+
     /// The cheap tier (#127) freezes the ripple and thins the whitecaps; the puff shading is a race cue, drawn the
     /// same in every tier (#27).
     @Test func cheapTierKeepsTheRaceCues() throws {

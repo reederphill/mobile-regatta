@@ -10,7 +10,7 @@ struct MiniBoat: Identifiable {
 }
 
 /// A puff or lull as the minimap draws it.
-struct MiniPuff {
+nonisolated struct MiniPuff: Sendable {
     let center: Vec2
     /// Metres.
     let radius: Double
