@@ -41,7 +41,7 @@ Implementer reading rules: `grep -n` / `sed -n <range>p` or the codebase-memory 
 - The implementer stops after it pushes the PR with the acceptance → test map in the body. It doesn't wait on CI.
 - The orchestrator waits on CI with one background `gh run watch <id> --exit-status` (or the PR monitor), not a polling loop.
 - Review fixes: a fresh implementer with the PR number, the findings, and the brief. Don't `SendMessage` more rounds into the original implementer.
-- Any agent past ~150K context: stop it and hand off with a short state summary.
+- Context budget (owner, 2026-09-27): no implementer runs past ~400K tokens of context (about 150 tool calls). Near it, the agent commits its work in progress locally (no push onto an open PR), writes a handoff note (done, next, check.sh state, gotchas) and returns; a fresh agent continues from the note in the same worktree.
 
 ## Roles
 
