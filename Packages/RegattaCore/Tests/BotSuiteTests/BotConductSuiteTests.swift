@@ -108,6 +108,33 @@ import Testing
         #expect(old.breaches(tiers: [:], timings: calm, conduct: ConductSummary(over)).isEmpty)
     }
 
+    /// Seeds `clubFoulsMoreThanNational` sails, each an all-Club and an all-National live fleet.
+    static let tierSeeds: [UInt64] = Array(1...10)
+    static let tierFleetSize = 10
+
+    /// #103 acceptance: bots foul only by misjudging (#19), and misjudge more the less skilled they are
+    /// (`BotWeaknesses.ruleMisjudgeRate`, `keepClearLookahead`): over the same seeds, more of the Club bots' encounters
+    /// end in a rule call than the National bots'. Real fleets on the suite's harness (the orchestrator, 2026-09-28),
+    /// all-Club and all-National live fleets of ten, one lap. The National share's own gate (at most 2 %) is the full
+    /// navigation run's (`nationalEncountersToFoulsAtMost2Percent`), not this test's.
+    @Test func clubFoulsMoreThanNational() throws {
+        let matrix = BotMatrix(seeds: Self.tierSeeds, fleetSizes: [Self.tierFleetSize], tierMixes: [.club, .national],
+                               laps: 1)
+        var encounters: [TierMix: Int] = [:], fouls: [TierMix: Int] = [:]
+        for cell in matrix.cells {
+            let result = try BotRaceHarness.run(cell)
+            encounters[cell.tierMix, default: 0] += result.seats.reduce(0) { $0 + $1.encounters }
+            fouls[cell.tierMix, default: 0] += result.seats.reduce(0) { $0 + $1.encountersEndingInFouls }
+        }
+        func rate(_ mix: TierMix) -> Double { share(fouls[mix] ?? 0, of: encounters[mix] ?? 0) }
+        let club = rate(.club), national = rate(.national)
+        print("BotConductSuiteTests.clubFoulsMoreThanNational over \(Self.tierSeeds.count) fleets of \(Self.tierFleetSize): "
+              + "club \(fouls[.club] ?? 0)/\(encounters[.club] ?? 0) (\(club)), "
+              + "national \(fouls[.national] ?? 0)/\(encounters[.national] ?? 0) (\(national))")
+        #expect((encounters[.club] ?? 0) > 0 && (encounters[.national] ?? 0) > 0, "the fleets met")
+        #expect(club > national, "club \(club), national \(national)")
+    }
+
     /// Two boats sailing on, nobody at the helm (seat 0 at `position0`, seat 1 at `position1`), after the gun: each
     /// racing, at `speed`, her autohelm holding her wind angle.
     private func race(_ placements: [(position: Vec2, heading: Double)], speed: Double = 4) throws -> Race {

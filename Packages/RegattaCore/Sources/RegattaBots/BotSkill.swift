@@ -36,10 +36,20 @@ public struct BotWeaknesses: Hashable, Sendable {
     public var rollHitRate: Double
     /// How well she times her cover and lee-bow, 0…1 (#223): the knob fleet tactics (#234) read.
     public var tacticalQuality: Double
+    /// Seconds ahead she looks for a collision she must keep clear of (#103): further, the more skilled she is. She
+    /// projects the other boat on in a straight line at its velocity now, refreshed every decision, so a boat whose
+    /// autohelm follows a shift is predicted on its new course as soon as it turns.
+    public var keepClearLookahead: Double
+    /// The chance, each time she meets a boat she must keep clear of racing under a rule in `misjudgeScope`, that she
+    /// misjudges the encounter (#19, #103: "they foul only by misjudging"): she believes she holds her rights and sails
+    /// on, so fails to keep clear. Drawn once an encounter, never a turn towards the other boat; none from National's
+    /// band up.
+    public var ruleMisjudgeRate: Double
 
     public init(startTiming: Double, lineBiasMisread: Double, reactionDelay: Double, laylineMisjudge: Double,
                 angleMissRate: Double, angleMissSize: Double, puffPerception: Double, currentSense: Double,
-                rollHitRate: Double, tacticalQuality: Double) {
+                rollHitRate: Double, tacticalQuality: Double, keepClearLookahead: Double = 4.5,
+                ruleMisjudgeRate: Double = 0) {
         self.startTiming = startTiming
         self.lineBiasMisread = lineBiasMisread
         self.reactionDelay = reactionDelay
@@ -50,13 +60,18 @@ public struct BotWeaknesses: Hashable, Sendable {
         self.currentSense = currentSense
         self.rollHitRate = rollHitRate
         self.tacticalQuality = tacticalQuality
+        self.keepClearLookahead = keepClearLookahead
+        self.ruleMisjudgeRate = ruleMisjudgeRate
     }
 
-    /// No weaknesses: a bot-suite profile's (#231). Her start timing is her style's as before #102.
+    /// No weaknesses: a bot-suite profile's (#231). Her start timing and keep-clear lookahead are her style's as
+    /// before #102 and #103; she misjudges no rule.
     public static func none(skill: Double) -> BotWeaknesses {
-        BotWeaknesses(startTiming: BotWeaknesses(skill: skill).startTiming, lineBiasMisread: 0, reactionDelay: 0,
-                      laylineMisjudge: 0, angleMissRate: 0, angleMissSize: 0, puffPerception: fullPuffPerception,
-                      currentSense: 0, rollHitRate: 1, tacticalQuality: 1)
+        let own = BotWeaknesses(skill: skill)
+        return BotWeaknesses(startTiming: own.startTiming, lineBiasMisread: 0, reactionDelay: 0,
+                             laylineMisjudge: 0, angleMissRate: 0, angleMissSize: 0, puffPerception: fullPuffPerception,
+                             currentSense: 0, rollHitRate: 1, tacticalQuality: 1,
+                             keepClearLookahead: own.keepClearLookahead, ruleMisjudgeRate: 0)
     }
 
     /// The weaknesses of a bot of `skill`, 0…1. Placeholders (#102), landing on the Build's named endpoints at
@@ -75,6 +90,8 @@ public struct BotWeaknesses: Hashable, Sendable {
         currentSense = Self.currentSense(skill: s)
         rollHitRate = Self.rollHitRate(skill: s)
         tacticalQuality = Self.ramp(s, from: 0.35, to: 0.9)
+        keepClearLookahead = Self.keepClearLookahead(skill: s)
+        ruleMisjudgeRate = Self.ruleMisjudgeRate(skill: s)
     }
 
     /// Metres ahead a bot that notices every puff looks: the far end of `BotBrain.puffLookAhead`.
@@ -98,6 +115,29 @@ public struct BotWeaknesses: Hashable, Sendable {
         guard skill >= rollSkillFloor else { return 0 }
         let rate = 0.3 + (skill - 0.475) * (0.8 - 0.3) / (0.9 - 0.475)
         return min(max(rate, 0), 0.95)
+    }
+
+    /// Seconds ahead a bot of `skill` looks for a collision she must keep clear of: 2.5 s at skill 0 to 4.5 s at 1,
+    /// #99's and #101's tuned lookahead, now a weakness of its own (#103, placeholder).
+    public static func keepClearLookahead(skill: Double) -> Double { 2.5 + 2 * skill }
+
+    /// The rules whose encounters she can misjudge (#103): the give-way rules racing, rules 10, 11 and 12, and the
+    /// mark-room she owes (18.2). Not rule 13 (a tacking boat finishes her tack whatever she believes), rule 21 (her
+    /// penalty turns and her return from OCS keep clear of every boat) or her conduct before her start (#99, #280).
+    public static let misjudgeScope: Set<RacingRule> = [.portStarboard, .windwardLeeward, .clearAstern, .givingMarkRoom]
+
+    /// How fast her misjudging grows with her skill deficit (#103, placeholder): her chance is this times the square of
+    /// her deficit, at most 1.
+    public static let ruleMisjudgeScale = 1.8
+
+    /// The chance a bot of `skill` misjudges an encounter in `misjudgeScope`: growing with the square of her deficit
+    /// (`ruleMisjudgeScale`), and none from National's band (0.8) up, as `lineBiasMisread` fades (#103: the
+    /// all-National fleet conduct gate must not get worse). Placeholders: ~50 % at Club's centre, ~29 % where Club
+    /// meets Regional (0.6), ~16 % at Regional's centre, fading to none at National's bottom (0.8). Most encounters need nobody to give way, so most misjudgements
+    /// cost nothing; a crossing or a converging overlap is where one fouls.
+    public static func ruleMisjudgeRate(skill: Double) -> Double {
+        let deficit = 1 - skill
+        return min(1, ruleMisjudgeScale * deficit * deficit) * (1 - ramp(skill, from: 0.7, to: 0.8))
     }
 
     /// 0 at `a` and below, 1 at `b` and above, linear between.
