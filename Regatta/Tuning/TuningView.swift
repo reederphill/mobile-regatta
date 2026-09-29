@@ -169,6 +169,12 @@ private struct TuningGroupView: View {
             Text(group.note)
                 .font(MenuFont.body(.caption))
                 .foregroundStyle(ChromePalette.text.opacity(0.75))
+            if group.id == TuningCatalog.pressureOverlayGroup {
+                Toggle("Show the pressure field", isOn: Binding(get: { model.showsPressure }, set: { model.showsPressure = $0 }))
+                    .font(MenuFont.body(.subheadline))
+                    .tint(ChromePalette.tint)
+                    .accessibilityIdentifier("tuning-shows-pressure")
+            }
             ForEach(group.sliders) { slider in
                 TuningSliderRow(slider: slider, model: model)
             }

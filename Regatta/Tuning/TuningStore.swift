@@ -17,6 +17,8 @@ struct Tuning: Codable, Equatable {
     var rulesValues: [String: Double] = [:]
     var water = WaterStyle.standard
     var camera = CameraStyle.standard
+    /// The pressure overlay on the water (#289): a look for tuning by, not a tuning, so never the TUNED badge.
+    var showsPressure = false
 
     init() {}
 
@@ -62,7 +64,7 @@ struct Tuning: Codable, Equatable {
     var isTuned: Bool { tunesFiles || water != .standard || camera != .standard }
 
     private enum CodingKeys: String, CodingKey {
-        case name, boatClass, conditions, rulesConfiguration, boatClassValues, conditionsValues, rulesValues, water, camera
+        case name, boatClass, conditions, rulesConfiguration, boatClassValues, conditionsValues, rulesValues, water, camera, showsPressure
     }
 
     /// Lenient: a value this build no longer has, or a render style saved before it gained a field, falls back
@@ -78,6 +80,7 @@ struct Tuning: Codable, Equatable {
         rulesValues = (try? c.decode([String: Double].self, forKey: .rulesValues)) ?? [:]
         water = (try? c.decode(WaterStyle.self, forKey: .water)) ?? .standard
         camera = (try? c.decode(CameraStyle.self, forKey: .camera)) ?? .standard
+        showsPressure = (try? c.decode(Bool.self, forKey: .showsPressure)) ?? false
     }
 
     func jsonData() throws -> Data {

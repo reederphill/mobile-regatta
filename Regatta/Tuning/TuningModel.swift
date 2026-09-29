@@ -213,6 +213,16 @@ final class TuningModel {
 
     func isChanged(_ group: TuningGroup) -> Bool { group.sliders.contains(where: isChanged) }
 
+    /// The water's pressure overlay (#289): the pressure drawn stronger, its lanes' centrelines and its side
+    /// marked, live on the practice race.
+    var showsPressure: Bool {
+        get { tuning.showsPressure }
+        set {
+            tuning.showsPressure = newValue
+            changed()
+        }
+    }
+
     /// Back to the bundled defaults and the standard look.
     func resetAll() {
         tuning = Tuning()
@@ -270,6 +280,7 @@ final class TuningModel {
         guard let session = liveSession else { return }
         if session.scene.waterStyle != tuning.water { session.scene.waterStyle = tuning.water }
         if session.scene.cameraStyle != tuning.camera { session.scene.cameraStyle = tuning.camera }
+        if session.scene.showsPressureOverlay != tuning.showsPressure { session.scene.showsPressureOverlay = tuning.showsPressure }
         session.isTuned = liveSessionSailsTunedFiles || tuning.water != .standard || tuning.camera != .standard
     }
 

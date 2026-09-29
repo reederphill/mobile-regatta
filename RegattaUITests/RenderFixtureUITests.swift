@@ -130,13 +130,15 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         XCTFail(failure, file: file, line: line)
     }
 
-    // The water (#116): puffs, lulls, ripple and whitecaps in two conditions.
+    // The water (#116): puffs, lulls, ripple and whitecaps in two conditions, and the pressure (#289).
 
     /// Light and patchy (no whitecaps, sparse strong puffs, many lulls) against gusty offshore (whitecaps, puffs
-    /// everywhere), both on the fun-pass @3 files, each also in greyscale, where the puffs must still read.
+    /// everywhere), both on the fun-pass @3 files, each also in greyscale, where the puffs must still read; and
+    /// the pressure field on the @6 files, the whole course in view, on the water and the minimap.
     @MainActor func testWaterFixturesMatchReferences() throws {
         try assertAllMatchIPhoneReferences(["water-light-and-patchy", "water-gusty-offshore",
-                                            "water-light-and-patchy-greyscale", "water-gusty-offshore-greyscale"])
+                                            "water-light-and-patchy-greyscale", "water-gusty-offshore-greyscale",
+                                            "water-pressure"])
     }
 
     /// `assertMatchesReference` on iPhone (see `skipOnIPad`) for several fixtures in one test: each renders and
