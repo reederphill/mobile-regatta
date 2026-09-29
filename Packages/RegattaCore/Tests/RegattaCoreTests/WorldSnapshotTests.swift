@@ -410,6 +410,7 @@ struct LogFeeder {
         "events": "undrained output, not state; import drops them",
         "appliedInputs": "the race log, not world state",
         "seatEvents": "the race log, not world state",
+        "pressureMapDrawn": "the seat views' pressure map kept until its next refresh (#290): drawn from the wind, not world state; import drops it",
         "scriptedWind": "a test's wind in place of the keyed wind, fixed at construction like the setup (`Race.init(setup:files:mode:current:wind:)`)",
     ]
 

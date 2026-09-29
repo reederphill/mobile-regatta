@@ -4,8 +4,9 @@
 /// `Race.seatViews(for:)`) and a value: it holds no race and nothing that reaches into one, so a brain can
 /// learn from it only what a player in that seat sees on the screen or in the briefing:
 /// - the wind as it is now, never later (ADR 0001, #10): the puffs and lulls drawn on the water, the course
-///   average they're toned against, every boat's wind shadow, and the wind at her own boat. No key, and
-///   no way to sample the wind at another tick or place: only what is drawn;
+///   average they're toned against, the pressure over the race area as the water and minimap tone it (#290, ADR
+///   0008), every boat's wind shadow, and the wind at her own boat. No key, and no way to sample the wind at another
+///   tick or place: only what is drawn;
 /// - the current in full (ADR 0003): a public function of the venue, the tide and the clock, with its tide
 ///   forecast;
 /// - the course, the land, her laylines and the class every boat sails;
@@ -38,13 +39,17 @@ public struct SeatView: Sendable, Equatable {
     /// its offender's completion deadline whenever the call fixed one (`RuleCall.completeDeadlineTick`).
     public let ruleCallLines: [RuleCallLine]
 
-    /// The puffs and lulls on the water now, as drawn, in window and spawn order.
-    public let puffs: [DrawnPuff]
+    /// The puffs and lulls on the water now, as drawn, in window and spawn order. `internal(set)`, as `pressure` is, so
+    /// a test can clear the water around a field it draws.
+    public internal(set) var puffs: [DrawnPuff]
     /// The wind speed now away from any puff or lull, m/s: what the puffs are toned against (#15). Nil
     /// only in a race without the key for now.
     public let courseWindSpeed: Double?
     /// The wind shadow and backwind every boat casts now, in seat order, hers included; a ghost casts none.
     public let shadowCones: [ShadowCone]
+    /// The pressure over the race area, as the water and the minimap draw it (#290, ADR 0008): a coarse grid of the
+    /// field as it was at most `PressureMap.refreshTicks` ago, and never later. Nil in a race without the keys for it.
+    public internal(set) var pressure: PressureMap?
 
     /// The water's motion over the venue at any place and tick (ADR 0003): public, so given whole.
     public let current: CurrentField
@@ -91,6 +96,7 @@ public struct SeatView: Sendable, Equatable {
         puffs = shared.puffs
         courseWindSpeed = shared.courseWindSpeed
         shadowCones = shared.shadowCones
+        pressure = shared.pressure
 
         current = shared.current
         course = shared.course
@@ -111,6 +117,7 @@ public struct SeatView: Sendable, Equatable {
         let puffs: [DrawnPuff]
         let courseWindSpeed: Double?
         let shadowCones: [ShadowCone]
+        let pressure: PressureMap?
         let current: CurrentField
         let course: CourseLayout
         let land: [Venue.LandPolygon]
@@ -132,6 +139,7 @@ public struct SeatView: Sendable, Equatable {
             cones.reserveCapacity(race.boats.count)
             for caster in race.boats.indices { if let cone = race.shadowCone(ofSeat: caster) { cones.append(cone) } }
             shadowCones = cones
+            pressure = race.pressureMap()
             current = race.current
             course = race.course
             land = race.files.venue.content.land
@@ -300,6 +308,99 @@ public struct SeatView: Sendable, Equatable {
         public let tick: Int
     }
 
+    /// The pressure over the race area (`Pressure`), as the minimap draws it at course scale (#290, ADR 0008): the
+    /// field without its puffs, sampled on a grid of nodes over the race area's rectangle, its sides included, and
+    /// nothing beyond it. The geography (#287) is in it, public as the venue file is; the puffs are `puffs`.
+    public struct PressureMap: Sendable, Equatable {
+        /// The rectangle the grid covers.
+        public let area: RaceArea
+        /// The tick of the field it shows.
+        public let tick: Int
+        /// Nodes across the area, from its left side looking upwind to its right, and along it from its bottom up.
+        public let columns: Int
+        public let rows: Int
+        /// The pressure at each node, row by row from the bottom, each row from the left.
+        public let nodes: [Pressure]
+
+        /// The grid a view's map has: nodes across and along the race area.
+        public static let gridColumns = 16
+        public static let gridRows = 16
+        /// A view's map shows the field at the latest multiple of this many ticks, at or before now: refreshed as
+        /// often as a player's glance at the minimap.
+        public static let refreshTicks = 2 * Race.tickRate
+        /// Metres past a side within which a point still reads the side's nodes: rounding, no more.
+        static let edgeTolerance = 1e-6
+
+        public init(area: RaceArea, tick: Int, columns: Int, rows: Int, nodes: [Pressure]) {
+            precondition(columns >= 2 && rows >= 2 && nodes.count == columns * rows, "a pressure map needs a grid of nodes")
+            self.area = area
+            self.tick = tick
+            self.columns = columns
+            self.rows = rows
+            self.nodes = nodes
+        }
+
+        /// The refresh tick a view at `tick` shows the field at: the latest multiple of `refreshTicks` at or before it.
+        static func refreshTick(atOrBefore tick: Int) -> Int {
+            let every = refreshTicks
+            return tick >= 0 ? tick / every * every : -((every - 1 - tick) / every * every)
+        }
+
+        /// `race`'s map at refresh tick `tick`, or nil if its wind can't be read there.
+        init?(race: Race, tick: Int) {
+            guard let pressure = try? race.wind.pressure(atTick: tick) else { return nil }
+            let area = race.course.raceArea
+            var nodes: [Pressure] = []
+            nodes.reserveCapacity(Self.gridColumns * Self.gridRows)
+            for row in 0..<Self.gridRows {
+                for column in 0..<Self.gridColumns {
+                    nodes.append(pressure(Self.position(column: column, row: row, area, Self.gridColumns, Self.gridRows)))
+                }
+            }
+            self.init(area: area, tick: tick, columns: Self.gridColumns, rows: Self.gridRows, nodes: nodes)
+        }
+
+        /// Where node (`column`, `row`) lies.
+        public func position(column: Int, row: Int) -> Vec2 {
+            Self.position(column: column, row: row, area, columns, rows)
+        }
+
+        static func position(column: Int, row: Int, _ area: RaceArea, _ columns: Int, _ rows: Int) -> Vec2 {
+            let up = Vec2.heading(area.axis)
+            let across = area.halfWidth * (2 * Double(column) / Double(columns - 1) - 1)
+            let along = area.halfLength * (2 * Double(row) / Double(rows - 1) - 1)
+            return area.centre + up.rightPerp * across + up * along
+        }
+
+        /// The pressure at node (`column`, `row`).
+        public func node(column: Int, row: Int) -> Pressure { nodes[row * columns + column] }
+
+        /// The pressure at `p`, between the nodes around it; nil outside the area, where the map shows nothing.
+        public func sample(at p: Vec2) -> Pressure? {
+            let offset = p - area.centre
+            let up = Vec2.heading(area.axis)
+            let across = offset.dot(up.rightPerp), along = offset.dot(up)
+            // Its sides included, to rounding.
+            guard abs(across) <= area.halfWidth + Self.edgeTolerance, abs(along) <= area.halfLength + Self.edgeTolerance
+            else { return nil }
+            func cell(_ x: Double, _ half: Double, _ count: Int) -> (Int, Double) {
+                let u = (x / half + 1) / 2 * Double(count - 1)
+                let lower = min(max(Int(u.rounded(.down)), 0), count - 2)
+                return (lower, min(max(u - Double(lower), 0), 1))
+            }
+            let (c, s) = cell(across, area.halfWidth, columns)
+            let (r, t) = cell(along, area.halfLength, rows)
+            let a = node(column: c, row: r), b = node(column: c + 1, row: r)
+            let d = node(column: c, row: r + 1), e = node(column: c + 1, row: r + 1)
+            func blend(_ value: (Pressure) -> Double) -> Double {
+                let low = value(a) + (value(b) - value(a)) * s
+                let high = value(d) + (value(e) - value(d)) * s
+                return low + (high - low) * t
+            }
+            return Pressure(factor: blend(\.factor), turn: blend(\.turn))
+        }
+    }
+
     /// A puff or lull on the water now, as drawn (#15, #76).
     public struct DrawnPuff: Sendable, Equatable {
         public let center: Vec2
@@ -342,5 +443,15 @@ extension Race {
         guard !seats.isEmpty else { return [] }
         let shared = SeatView.Shared(race: self)
         return seats.map { SeatView(race: self, seat: $0, shared: shared) }
+    }
+
+    /// The pressure map a view shows now (`SeatView.PressureMap`): made once per refresh tick, and kept for the views
+    /// until the next.
+    func pressureMap() -> SeatView.PressureMap? {
+        let refresh = SeatView.PressureMap.refreshTick(atOrBefore: tick)
+        if let drawn = pressureMapDrawn, drawn.tick == refresh { return drawn }
+        let map = SeatView.PressureMap(race: self, tick: refresh)
+        if map != nil { pressureMapDrawn = map }
+        return map
     }
 }
