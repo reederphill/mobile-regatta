@@ -300,6 +300,7 @@ extension BotBrain {
     /// clear of a leeward one near the line drops back rather than luffing over it. Otherwise, OCS or on port,
     /// she keeps her speed to keep clear with.
     func easesKeepingClear(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double) -> Bool {
+        if b.status == .ocs { return abs(wrapAngle(heading - b.windDirection)) < Self.returnAngle - Self.keepClearStep }
         guard b.status == .prestart, view.time < 0, b.tack == .starboard else { return false }
         let arrival = startArrival(view)
         return secondsToLine(b, view, heading: heading, ease: false, within: arrival) < arrival - Self.goHysteresis
@@ -313,8 +314,12 @@ extension BotBrain {
     /// with Ease (`crossesEarly`): keeping clear by luffing over it early would leave her OCS, trapped above the
     /// boats she keeps clear of.
     func startKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Double? {
+        // OCS, she keeps clear of every boat as a returning one (rule 21.1), whatever rules 10–13 would give her
+        // (`OtherBoat.rightOfWay` has only those): she is returning as soon as she heads back.
+        let returning = b.status == .ocs
         let threats = view.others.filter {
-            !$0.isGhost && $0.rightOfWay?.keepClear == view.seat && ($0.position - b.position).length < Self.keepClearRange
+            !$0.isGhost && (returning || $0.rightOfWay?.keepClear == view.seat)
+                && ($0.position - b.position).length < Self.keepClearRange
         }
         guard !threats.isEmpty else { return nil }
         let speed = max(b.speed, 1)

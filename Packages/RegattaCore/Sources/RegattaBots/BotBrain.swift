@@ -665,7 +665,7 @@ struct BotBrain: Sendable {
         guard b.status == .prestart || b.status == .ocs else {
             return ruleKeepClear(b, view, desired: desired, lookahead: lookahead)
         }
-        if b.tack == .port { return startKeepClear(b, view, desired: desired, lookahead: lookahead) }
+        if b.tack == .port || b.status == .ocs { return startKeepClear(b, view, desired: desired, lookahead: lookahead) }
         guard let heading = ruleKeepClear(b, view, desired: desired, lookahead: lookahead) else { return nil }
         guard crossesEarly(b, view, heading: heading) else { return heading }
         return startKeepClear(b, view, desired: desired, lookahead: lookahead) ?? heading
