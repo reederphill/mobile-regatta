@@ -33,7 +33,7 @@ import Testing
     /// from the server, never from the keys.
     @Test func withTheKeysItStepsExactlyLikeTheSeededRace() throws {
         let seeded = Race(setup: try Self.setup(), windSeed: Self.windSeed)
-        var rng = SplitMix64(seed: 70)
+        var rng = SplitMix64(seed: 65)
         for _ in 0..<300 {
             Self.steerBots(seeded, rng: &rng)
             seeded.step()

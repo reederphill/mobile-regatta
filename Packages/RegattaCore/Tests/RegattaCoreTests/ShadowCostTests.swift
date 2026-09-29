@@ -3,7 +3,7 @@ import Testing
 @testable import RegattaCore
 
 /// #263 acceptance (#220's "shadow is clear but not killing"): for skiff@3 a wind shadow is a speed loss, not a wind
-/// loss. Her target is the polar × (1 − 0.65 × the cone's depth at her), she slows to it with the shadow's own 2 s,
+/// loss. Her target is the polar × (1 − 0.48 × the cone's depth at her), she slows to it with the shadow's own 2 s,
 /// and stacked cones never take her below 0.3 of it. About 5 s in a boat's shadow costs what a tack costs: 0.7–1.5
 /// hull lengths against the same boat in clean air. Twin races in open water and a steady wind (`OpenWater`).
 @Suite struct ShadowCostTests {
@@ -12,7 +12,7 @@ import Testing
 
     @Test func classShadowIsASpeedLossWithItsOwnSlowingDown() {
         #expect(shadow.isSpeedLoss && shadow.slowingDown == 2)
-        #expect(shadow.lossCloseIn == 0.65 && shadow.stackingFloor == 0.3)
+        #expect(shadow.lossCloseIn == 0.48 && shadow.stackingFloor == 0.3)
     }
 
     /// Seat 0 close-hauled with seat 1 `lengths` hull lengths up her own cone from her (`OpenWater.race`), sailing the
@@ -68,9 +68,10 @@ import Testing
         let length = OpenWater.hullLength
         let near = ShadowCone(apex: .zero, apparentWindDirection: 0, shadow: shadow)
         let nearer = ShadowCone(apex: near.axis * (0.5 * length), apparentWindDirection: 0, shadow: shadow)
+        let nearest = ShadowCone(apex: near.axis * (0.75 * length), apparentWindDirection: 0, shadow: shadow)
         let p = near.axis * length
-        #expect(near.factor(at: p) * nearer.factor(at: p) < 0.3)
-        let stacked = ShadowCone.factor(at: p, of: [near, nearer], floor: shadow.stackingFloor)
+        #expect(near.factor(at: p) * nearer.factor(at: p) * nearest.factor(at: p) < 0.3)
+        let stacked = ShadowCone.factor(at: p, of: [near, nearer, nearest], floor: shadow.stackingFloor)
         #expect(stacked == 0.3)
 
         // At the floor her target is 0.3 of the polar's, and she slows to it with the shadow's 2 s.

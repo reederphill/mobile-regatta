@@ -51,7 +51,7 @@ enum SkiffFixtures {
     static let pinnedHashes = [
         1: "826fa149ace5a1d876829129216281725001f43c99c247e074582cd99f2ed6f4",
         2: "32e5162d6caf3e32280ca754c1381e1012e4db4ef04252bf278b96dd796f5cd1",
-        3: "cda1a0fad71369935f760f4e435bf012090a75e8cdd6bb13280087c101a77ada",
+        3: "3a6e6b7bf037bc496a9fdddfa45d7000ab41dd1801a08cece1bc2d3a76092c81",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -659,8 +659,8 @@ enum SkiffFixtures {
         #expect(b.steering.turnRateCurveSpeeds == [0, metresPerSecond(knots: 1.5)] && b.steering.turnRateCurveFractions == [0, 1])
     }
 
-    /// #263: skiff@3 is skiff@2 with #220's momentum pair (speeding up 1.5 s, slowing down 10 s), the owner's rudder
-    /// drag (0.25 a second at full rudder), a shadow that is a speed loss (0.65 close in, its own 2 s slowing down,
+    /// #263: skiff@3 is skiff@2 with #220's momentum pair (speeding up 2.5 s, slowing down 10 s), the owner's rudder
+    /// drag (0.25 a second at full rudder), a shadow that is a speed loss (0.48 close in, its own 2 s slowing down,
     /// stacking floor 0.3) and #222's roll tack. Every other value is version 2's; versions 1 and 2 have neither the
     /// shadow's slowing down nor a roll tack, so their shadow still slows the wind.
     @Test func version3IsVersion2WithMomentumShadowCostAndRollTack() throws {
@@ -674,7 +674,7 @@ enum SkiffFixtures {
         steering.rudderDrag = a.steering.rudderDrag
         #expect(steering == a.steering && b.steering.rudderDrag == 0.25)
         #expect(a.momentum == .init(speedingUp: 2.8, slowingDown: 4, noGo: 4.8))
-        #expect(b.momentum == .init(speedingUp: 1.5, slowingDown: 10, noGo: 4.8))
+        #expect(b.momentum == .init(speedingUp: 2.5, slowingDown: 10, noGo: 4.8))
         var shadow = b.windShadow
         shadow.lossCloseIn = a.windShadow.lossCloseIn
         shadow.stackingFloor = a.windShadow.stackingFloor
@@ -682,7 +682,7 @@ enum SkiffFixtures {
         #expect(shadow == a.windShadow)
         #expect(!a.windShadow.isSpeedLoss && a.rollTack == nil)
         #expect(b.windShadow.isSpeedLoss && b.windShadow.slowingDown == 2)
-        #expect(b.windShadow.lossCloseIn == 0.65 && b.windShadow.stackingFloor == 0.3)
+        #expect(b.windShadow.lossCloseIn == 0.48 && b.windShadow.stackingFloor == 0.3)
         #expect(b.rollTack == .init(window: 0.25, hitLossFraction: 0.5, missSpeedFactor: 0.8))
     }
 
@@ -692,7 +692,7 @@ enum SkiffFixtures {
         #expect(c.hull.length == 4.9 && c.hull.beam == 1.8 && c.hull.outline.count == 5)
         #expect(c.polar.twaAxis.count == 18 && c.polar.twaAxis[10] == deg2rad(120) && c.polar.twaAxis[15] == deg2rad(155))
         #expect(c.polar.speeds[3][13] == metresPerSecond(knots: 10.1)) // 8 kn, 145°
-        #expect(c.momentum == .init(speedingUp: 1.5, slowingDown: 10, noGo: 4.8))
+        #expect(c.momentum == .init(speedingUp: 2.5, slowingDown: 10, noGo: 4.8))
         #expect(c.steering.topTurnRate == deg2rad(36) && c.steering.minTurnRate == deg2rad(10))
         #expect(c.steering.autohelm.downwindSnap == deg2rad(8) && c.steering.autohelm.grooveWindAverage == 30)
         #expect(c.windShadow.coneLength == 9 * 4.9)

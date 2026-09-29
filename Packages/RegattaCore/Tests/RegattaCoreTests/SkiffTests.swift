@@ -265,7 +265,7 @@ import Testing
     // MARK: - Manoeuvres
 
     /// #263: a tack tapped from close-hauled with the autohelm holding costs 0.7–1.3 hull lengths made good upwind
-    /// over 25 s against sailing on, at 6, 10 and 14 kn (skiff@3: rudder drag 0.25, momentum 1.5 s / 10 s). She is
+    /// over 25 s against sailing on, at 6, 10 and 14 kn (skiff@3: rudder drag 0.25, momentum 2.5 s / 10 s). She is
     /// close-hauled on the new tack within 3.5 s of the tap and never below 40 % of her entry speed, so the stall
     /// skiff@2 had (30 % of entry, 1.57 L at 10 kn) can't come back.
     @Test(arguments: [6.0, 10, 14])
@@ -285,12 +285,12 @@ import Testing
         #expect(slowest >= 0.4, "\(knots) kn tack slowed to \(slowest) of her entry speed")
     }
 
-    /// A gybe from the groove to the groove, on the plane with the spinnaker up, costs about 3.5 m and
-    /// she is back to full speed about 7 s after the tap, having kept the plane and the spinnaker. Skiff@3's
-    /// momentum (speeding up 1.5 s) and rudder drag 0.25 (#263) made it cheaper than #244 §6.2's 8 m / 12 s;
-    /// the range is the measured cost (3.5 / 3.7 m, 7.0 / 6.7 s at 10 / 12 kn) with a margin.
+    /// A gybe from the groove to the groove, on the plane with the spinnaker up, costs about 5.5 m and
+    /// she is back to full speed about 10 s after the tap, having kept the plane and the spinnaker. Skiff@3's
+    /// momentum (speeding up 2.5 s) and rudder drag 0.25 (#263) made it cheaper than #244 §6.2's 8 m / 12 s;
+    /// the range is the measured cost (5.4 / 5.8 m, 10.6 / 10.2 s at 10 / 12 kn) with a margin.
     @Test(arguments: [10.0, 12])
-    func gybeCostsAbout3_5MetresAndRecoversIn7Seconds(knots: Double) {
+    func gybeCostsAbout5_5MetresAndRecoversIn10Seconds(knots: Double) {
         let groove = Autohelm.grooveAngle(.downwind, tws: tws(knots), boatClass: skiff)
         let entry = skiff.polar.speed(twa: groove, tws: tws(knots))
         let run = tap(starboard(twa: groove, speed: entry, isPlaning: true, spinnaker: .up), knots: knots)
@@ -298,10 +298,10 @@ import Testing
         #expect(run.last!.boomSide == .starboard)
         #expect(run.allSatisfy { $0.isPlaning && $0.spinnaker == .up }, "kept the plane and the spinnaker")
         let lost = metresLost(run, along: -Vec2.heading(windFrom))
-        #expect(lost >= 2.5 && lost <= 5, "\(knots) kn gybe lost \(lost) m")
+        #expect(lost >= 4.5 && lost <= 7, "\(knots) kn gybe lost \(lost) m")
         // Back to within 1% of her entry speed, for good.
         let slow = run.lastIndex { $0.speed < 0.99 * entry } ?? 0
         let recovered = Double(slow + 1) * dt
-        #expect(recovered >= 5.5 && recovered <= 8.5, "\(knots) kn gybe back to full speed after \(recovered) s")
+        #expect(recovered >= 8.5 && recovered <= 12, "\(knots) kn gybe back to full speed after \(recovered) s")
     }
 }
