@@ -113,7 +113,7 @@ extension BotBrain {
         let bearAway: Double
         switch rule {
         case .whileTacking:
-            return b.windDirection + side * (Self.closeHauled(b.windSpeed * b.shadow, view) + deg2rad(10))
+            return b.windDirection + side * (Self.closeHauled(b.polarWindSpeed, view) + deg2rad(10))
         case .portStarboard:
             bearAway = 1
         case .windwardLeeward:

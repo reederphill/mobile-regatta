@@ -180,8 +180,14 @@ public struct SeatView: Sendable, Equatable {
         /// The wind she sails in, over the water (the ground wind less the current): what her wind angle
         /// reads (#14).
         public let sailingWind: Wind
-        /// Her wind shadow's multiplier on the sailing wind's speed, 1 in clean air: the HUD's shadow cue (#10).
+        /// Her wind shadow's multiplier, 1 in clean air: the HUD's shadow cue (#10). On the sailing wind's speed, or on
+        /// her target speed for a class whose shadow is a speed loss (#263, `speedShadow`).
         public let shadow: Double
+        /// The wind speed her polar reads, m/s (`Boat.polarWindSpeed(in:)`): the sailing wind's, less any shadow on it.
+        public let polarWindSpeed: Double
+        /// The shadow's multiplier on her target speed (`Boat.speedShadow(in:)`): 1 for a class whose shadow slows
+        /// the wind instead.
+        public let speedShadow: Double
         /// The zone of the mark rule 18 tests her against (#91, #101), as the scene draws it around the mark; nil
         /// unless she is racing.
         public let zone: Zone?
@@ -207,6 +213,8 @@ public struct SeatView: Sendable, Equatable {
             windOverGround = boat.windOverGround
             sailingWind = boat.sailingWind
             shadow = boat.shadow
+            polarWindSpeed = boat.polarWindSpeed(in: boatClass)
+            speedShadow = boat.speedShadow(in: boatClass)
             self.zone = zone
             self.markRoom = markRoom
         }

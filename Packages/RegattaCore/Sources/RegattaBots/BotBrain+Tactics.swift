@@ -113,6 +113,8 @@ struct Senses: Sendable, Equatable {
     /// Whether she is tacking as rule 13 has it (#99): from her boom crossing head to wind until she is
     /// close-hauled on the new tack. Until then she keeps clear of every boat.
     var tacking = false
+    /// The race clock at the decision she first saw her boom across on her latest tack (#263: when she rolls it).
+    var tackCrossedAt: Double?
     /// The observation delay line (`BotWeaknesses.reactionDelay`, #102): the wind directions she has seen at her
     /// boat, oldest first, back to the one she reads now, that many seconds ago.
     var windHistory: [WindSample] = []
@@ -133,7 +135,7 @@ extension BotBrain {
     mutating func observe(_ b: SeatView.OwnBoat, _ view: SeatView) {
         let dt = senses.time.map { max(0, view.time - $0) } ?? 0
         senses.time = view.time
-        let tws = b.windSpeed * b.shadow
+        let tws = b.polarWindSpeed
         let average = view.boatClass.steering.autohelm.grooveWindAverage
         if let groove = senses.grooveWind, average > 0 {
             senses.grooveWind = groove + (tws - groove) * min(1, dt / average)
@@ -143,7 +145,10 @@ extension BotBrain {
         if let planing = view.boatClass.planing {
             senses.planing = b.isOnCourse && planing.isPlaning(was: senses.planing, twa: b.twa, speed: b.speed, tws: tws)
         }
-        if let side = senses.boomSide, side != b.boomSide { senses.tacking = b.twa < .pi / 2 }
+        if let side = senses.boomSide, side != b.boomSide {
+            senses.tacking = b.twa < .pi / 2
+            if senses.tacking { senses.tackCrossedAt = view.time }
+        }
         if senses.tacking && b.twa >= Self.closeHauled(tws, view) { senses.tacking = false }
         senses.boomSide = b.boomSide
         // What she reads of the wind's direction: as it was `reactionDelay` seconds ago.
@@ -170,7 +175,7 @@ extension BotBrain {
 
     /// Her reckoning of `groove`'s sailing angle: at the wind strength her grooves read.
     func grooveAngle(_ groove: Autohelm.Groove, _ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
-        Autohelm.grooveAngle(groove, tws: senses.grooveWind ?? b.windSpeed * b.shadow, boatClass: view.boatClass)
+        Autohelm.grooveAngle(groove, tws: senses.grooveWind ?? b.polarWindSpeed, boatClass: view.boatClass)
     }
 
     // MARK: - Upwind
@@ -349,7 +354,7 @@ extension BotBrain {
     /// when she has come off it and the wind is strong enough to plane, or above the groove in a lull on it.
     func downwindAim(_ b: SeatView.OwnBoat, _ view: SeatView, aim: Aim) -> Aim {
         guard let planing = view.boatClass.planing, aim.angle >= planing.fromTWA else { return aim }
-        let tws = b.windSpeed * b.shadow
+        let tws = b.polarWindSpeed
         if !senses.planing {
             guard tactics.replanes, let angle = Self.planingAngle(tws: tws, deepest: aim.angle, view.boatClass),
                   aim.angle - angle > view.boatClass.steering.autohelm.downwindSnap else { return aim }

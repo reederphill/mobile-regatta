@@ -315,20 +315,56 @@ public final class Race {
             let i = record.seat
             switch tap {
             case .tackGybe:
-                // The autohelm sails her through head to wind or the gybe to the groove on the new tack.
                 let b = boats[i]
-                if !b.isGhost { boats[i].autohelm = .tackOrGybe(sailingAngle: b.sailingAngle) }
+                guard !b.isGhost else { break }
+                if let roll = boatClass.rollTack, isInTack(b) {
+                    // A second tap during a tack is the roll (#222, #263): one a tack, any after it ignored.
+                    if b.roll == nil { tapRoll(i, roll) }
+                } else {
+                    // The autohelm sails her through head to wind or the gybe to the groove on the new tack.
+                    boats[i].autohelm = .tackOrGybe(sailingAngle: b.sailingAngle)
+                }
             case .protest(let target):
                 emit(.protestRecorded(seat: i, target: target))
             }
         }
     }
 
+    /// Whether `b` is in a tack a roll tap can roll (#263): her autohelm sailing a tack's tap towards head to
+    /// wind, or past it (`isTacking`) until close-hauled.
+    private func isInTack(_ b: Boat) -> Bool {
+        if b.isTacking { return true }
+        guard let helm = b.autohelm, helm.isTapping else { return false }
+        return !helm.target.isDownwind
+    }
+
+    /// Seat `i`'s roll tap this tick (#263): after the crossing, a hit within the class's window of it and a miss
+    /// outside; before it, pending until the crossing (`integrate`) or the window's end.
+    private func tapRoll(_ i: Int, _ roll: BoatClass.RollTackTuning) {
+        guard let crossing = boats[i].tackCrossingTick else {
+            boats[i].roll = .pending(tapTick: tick)
+            return
+        }
+        if tick - crossing <= roll.windowTicks {
+            boats[i].roll = .hit
+            emit(.rollHit(seat: i))
+        } else {
+            missRoll(&boats[i], seat: i, roll)
+        }
+    }
+
+    /// A missed roll (#263): her speed takes the class's miss factor, once.
+    private func missRoll(_ b: inout Boat, seat: Int, _ roll: BoatClass.RollTackTuning) {
+        b.speed *= roll.missSpeedFactor
+        b.roll = .missed
+        emit(.rollMissed(seat: seat))
+    }
+
     /// Engages seat `i`'s autohelm on the angle she sails now, against the grooves in the wind they read
-    /// this tick (`Boat.grooveWindSpeed`), and announces a snap to the groove (#124).
+    /// this tick (`Boat.grooveWindSpeed(in:)`), and announces a snap to the groove (#124).
     private func engageAutohelm(_ i: Int) {
         let b = boats[i]
-        let engaged = Autohelm.engage(sailingAngle: b.sailingAngle, tws: b.grooveWindSpeed, boatClass: boatClass)
+        let engaged = Autohelm.engage(sailingAngle: b.sailingAngle, tws: b.grooveWindSpeed(in: boatClass), boatClass: boatClass)
         boats[i].autohelm = engaged.autohelm
         if engaged.snapped { emit(.grooveSnap(seat: i)) }
     }
@@ -467,8 +503,7 @@ public final class Race {
     /// Moves every boat's average of the wind speed her polar reads a tick on (`Boat.averagedWindSpeed`):
     /// what her autohelm's grooves follow (#245), once the wind and shadows are sampled this tick.
     private func averageGrooveWinds() {
-        let timeConstant = boatClass.steering.autohelm.grooveWindAverage
-        for i in boats.indices { boats[i].averageWind(dt: Race.dt, timeConstant: timeConstant) }
+        for i in boats.indices { boats[i].averageWind(dt: Race.dt, in: boatClass) }
     }
 
     /// The wind shadow and backwind `seat`'s boat casts now, along her apparent wind (#10), or nil for a
@@ -480,24 +515,28 @@ public final class Race {
 
     private func integrate(_ i: Int, _ dt: Double) {
         var b = boats[i]
-        // The polar reads the sailing wind (#14); shadow slows it and never turns it (#10). The current
-        // carries every boat, ghosts too (#11). The autohelm's grooves read the class's average of it (#245).
-        let tws = b.polarWindSpeed
+        // The polar reads the sailing wind (#14); shadow slows it and never turns it (#10), or, for a class whose
+        // shadow is a speed loss, slows her target speed instead (#220, #263). The current carries every boat,
+        // ghosts too (#11). The autohelm's grooves read the class's average of it (#245).
+        let tws = b.polarWindSpeed(in: boatClass)
+        let grooveTWS = b.grooveWindSpeed(in: boatClass)
         // The player steers this tick with the rudder held off centre, or through the tap the autohelm is
         // sailing for her (#219): what a penalty turn reads (`turnPenalty`).
         let playerDriven = b.autohelm?.isTapping ?? true
 
         if let helm = b.autohelm {
             b.desiredRudder = helm.rudder(sailingAngle: b.sailingAngle, boomSide: b.boomSide, tws: tws,
-                                          grooveTWS: b.grooveWindSpeed, boatClass: boatClass)
+                                          grooveTWS: grooveTWS, boatClass: boatClass)
         }
 
         let before = b.heading
+        let speedBefore = b.speed
         let moved = BoatDynamics.advance(
             BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide,
                                isPlaning: b.isPlaning, spinnaker: b.spinnaker),
             control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: !b.isGhost),
-            env: BoatDynamics.Environment(windDirection: b.sailingWind.direction, windSpeed: tws, current: b.current),
+            env: BoatDynamics.Environment(windDirection: b.sailingWind.direction, windSpeed: tws, current: b.current,
+                                          shadow: b.speedShadow(in: boatClass)),
             boatClass: boatClass, dt: dt)
         b.position = moved.position
         b.heading = moved.heading
@@ -516,13 +555,35 @@ public final class Race {
             // The tap has crossed the boom: the autohelm holds the groove on the new tack.
             b.autohelm?.isTapping = false
             b.isTacking = b.twa < .pi / 2
+            b.tackCrossingTick = b.isTacking ? tick : nil
             emit(b.isTacking ? .tacked(seat: i) : .gybed(seat: i))
         }
+        if let roll = boatClass.rollTack { sailRoll(&b, seat: i, roll, speedBefore: speedBefore) }
         if b.isTacking && b.twa >= boatClass.polar.bestUpwind(tws: tws).twa - deg2rad(5) {
             b.isTacking = false
+            b.tackCrossingTick = nil
+            b.roll = nil
         }
 
         boats[i] = b
+    }
+
+    /// A roll tack this tick (#263), once the dynamics have moved her from `speedBefore`: a pending tap hits at a
+    /// crossing within the window and misses once the window has passed without one; a hit keeps back the class's
+    /// share of the tick's speed loss (never a gain: no floor and no jump). Out of her tack, a decided roll is done.
+    private func sailRoll(_ b: inout Boat, seat: Int, _ roll: BoatClass.RollTackTuning, speedBefore: Double) {
+        if case .pending(let tapTick) = b.roll {
+            if let crossing = b.tackCrossingTick, crossing - tapTick <= roll.windowTicks {
+                b.roll = .hit
+                emit(.rollHit(seat: seat))
+            } else if tick - tapTick > roll.windowTicks {
+                missRoll(&b, seat: seat, roll)
+            }
+        }
+        if b.roll == .hit, b.speed < speedBefore {
+            b.speed = speedBefore - roll.hitLossFraction * (speedBefore - b.speed)
+        }
+        if b.roll == .hit || b.roll == .missed, !isInTack(b) { b.roll = nil }
     }
 
     // MARK: - Contact and rules

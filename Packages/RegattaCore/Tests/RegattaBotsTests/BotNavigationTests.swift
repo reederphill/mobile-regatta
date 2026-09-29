@@ -60,8 +60,8 @@ import RegattaCore
             heading = boat.heading
             speed = boat.speed
             windDirection = boat.windDirection
-            windSpeed = boat.polarWindSpeed
-            grooveAngle = Autohelm.grooveAngle(.upwind, tws: boat.grooveWindSpeed, boatClass: race.boatClass)
+            windSpeed = boat.polarWindSpeed(in: race.boatClass)
+            grooveAngle = Autohelm.grooveAngle(.upwind, tws: boat.grooveWindSpeed(in: race.boatClass), boatClass: race.boatClass)
         }
     }
 

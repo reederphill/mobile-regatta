@@ -181,10 +181,10 @@ extension BotBrain {
         let depth = max(-line.side(b.position), 0)
         // How far right of her, along the line, her spot's approach passes her depth.
         let across = (spot - joining * (depth / max(joining.dot(c.upwind), 0.3)) - b.position).dot(direction)
-        let tws = b.windSpeed * b.shadow
+        let tws = b.polarWindSpeed
         let polar = view.boatClass.polar
-        let reach = polar.speed(twa: .pi / 2, tws: tws) * Self.positioningSpeed
-        let runIn = depth / max(polar.bestUpwind(tws: tws).vmg, 0.3)
+        let reach = polar.speed(twa: .pi / 2, tws: tws) * b.speedShadow * Self.positioningSpeed
+        let runIn = depth / max(polar.bestUpwind(tws: tws).vmg * b.speedShadow, 0.3)
         let spare = max(0, arrival - runIn - Self.tackSeconds * 2 - Self.positioningMargin)
         guard across > reach * spare else { return spot }
         let shifted = spot - direction * (across - reach * spare)
@@ -207,8 +207,8 @@ extension BotBrain {
         }
         let slide = wrapAngle(b.windDirection - (line.pin.position - line.committee.position).bearing) + Self.waitOffLine
         if arrival > Self.repositionSeconds, b.tack == .starboard {
-            let speed = BoatDynamics.polarTarget(relativeWind: slide, boomSide: .port, tws: b.windSpeed * b.shadow, isPlaning: false,
-                                                 spinnaker: .down, boatClass: view.boatClass) * view.boatClass.ease.speedFraction
+            let speed = BoatDynamics.polarTarget(relativeWind: slide, boomSide: .port, tws: b.polarWindSpeed, isPlaning: false,
+                                                 spinnaker: .down, boatClass: view.boatClass) * b.speedShadow * view.boatClass.ease.speedFraction
             if min(early, Self.timingHorizon) * speed > landingRoom(b, view, hold: hold) { return nil }
         }
         return Aim(angle: slide, tack: .starboard, tolerance: Self.approachTolerance, ease: true)
@@ -245,8 +245,8 @@ extension BotBrain {
         let length = boatClass.hull.length
         let course = Vec2.heading(b.windDirection - hold - Self.joinMargin - Self.setupMargin)
         let holdCourse = Vec2.heading(b.windDirection - hold)
-        let eased = BoatDynamics.polarTarget(relativeWind: hold, boomSide: .port, tws: b.windSpeed * b.shadow, isPlaning: false,
-                                             spinnaker: .down, boatClass: boatClass) * boatClass.ease.speedFraction
+        let eased = BoatDynamics.polarTarget(relativeWind: hold, boomSide: .port, tws: b.polarWindSpeed, isPlaning: false,
+                                             spinnaker: .down, boatClass: boatClass) * b.speedShadow * boatClass.ease.speedFraction
         let scheduled = eased * max(holdCourse.dot(c.upwind), 0.3) * max(0, arrival - Self.setupSeconds)
         let deepest = max(maxHoldDepth(view, at: spot), length * 2)
         let depth = min(max(-c.startLine.side(b.position), scheduled, length * 2), deepest)
@@ -273,8 +273,8 @@ extension BotBrain {
         guard depth > 0 else { return 0 }
         let relativeWind = wrapAngle(b.windDirection - heading)
         var target = BoatDynamics.polarTarget(relativeWind: relativeWind, boomSide: relativeWind >= 0 ? .port : .starboard,
-                                              tws: b.windSpeed * b.shadow, isPlaning: senses.planing, spinnaker: .down,
-                                              boatClass: boatClass)
+                                              tws: b.polarWindSpeed, isPlaning: senses.planing, spinnaker: .down,
+                                              boatClass: boatClass) * b.speedShadow
         if ease { target *= boatClass.ease.speedFraction }
         let slowing = ease ? boatClass.ease.timeConstant : boatClass.momentum.slowingDown
         let dt = Self.timingStep
