@@ -406,4 +406,44 @@ enum PressureFixtures {
             return false
         }
     }
+
+    /// The water and the minimap draw the pressure (#289) from `WindSampler.pressureFactor(at:)`: the wind the
+    /// geography and the pressure field make, before puffs, so a sampler with no puffs blows exactly that times
+    /// the course average. The reading carries the tick's pressure side and lanes, and where the field is
+    /// strongest lies on a lane or the pressure side.
+    @Test func pressureFactorIsTheWindBeforePuffs() throws {
+        let setup = try PressureFixtures.setup(raceSeed: 2, pairing: PressureFixtures.devPairing("classic-oscillating"))
+        let area = try #require(setup.raceArea)
+        let (field, _) = try WindFixtures.field(setup, windSeed: 3, through: 30)
+        let tick = Self.w.start(of: 30) + 7
+        let sampler = try field.sampler(atTick: tick)
+        let bare = WindSampler(geographicGrid: sampler.geographicGrid, courseSpeed: sampler.courseSpeed,
+                               direction: sampler.direction, pressure: sampler.pressure, puffPlan: nil, puffs: [])
+        let reading = try #require(sampler.pressureReading)
+        let state = try #require(sampler.pressure).state
+        #expect(reading.side == state.side && reading.lanes.map(\.centre) == state.lanes.map(\.centre))
+        #expect(reading.lanes.map(\.intensity) == state.lanes.map(\.intensity) && !reading.lanes.isEmpty)
+        var lowest = Double.infinity, highest = -Double.infinity
+        for p in PuffFixtures.grid(area, spacing: 60) {
+            let factor = sampler.pressureFactor(at: p)
+            #expect(abs(bare.sample(p).speed - sampler.courseSpeed * factor) < 1e-9)
+            let r = try #require(sampler.pressureCoordinate(at: p))
+            let expected = reading.lanes.reduce(1 + reading.side * (r / reading.halfWidth).clamped(to: -1...1)) {
+                let d = (r - $1.centre) / $1.halfWidth
+                return $0 + (abs(d) < 1 ? $1.intensity * (1 - d * d) * (1 - d * d) : 0)
+            }
+            let geography = setup.pairing.geographicGrid.sample(p).speedFactor
+            #expect(abs(factor - geography * expected.clamped(to: 0.5...2)) < 1e-12)
+            lowest = min(lowest, factor)
+            highest = max(highest, factor)
+        }
+        #expect(highest - lowest > 0.05, "a flat field: \(lowest)…\(highest)")
+
+        // No pressure field before schema 3: the factor is the geography alone, and there is nothing to read.
+        let old = PuffFixtures.withRaceArea(try WindFixtures.setup("classic-oscillating", version: 3, raceSeed: 2))
+        let (oldField, _) = try WindFixtures.field(old, windSeed: 3, through: 30)
+        let oldSampler = try oldField.sampler(atTick: tick)
+        #expect(oldSampler.pressureReading == nil && oldSampler.pressureCoordinate(at: area.centre) == nil)
+        #expect(oldSampler.pressureFactor(at: area.centre) == old.pairing.geographicGrid.sample(area.centre).speedFactor)
+    }
 }
