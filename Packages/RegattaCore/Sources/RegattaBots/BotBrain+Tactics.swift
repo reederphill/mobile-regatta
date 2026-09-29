@@ -21,7 +21,7 @@ struct Tactics: Sendable, Equatable {
     var downwindShiftThreshold: Double?
     /// Off the plane, she heads up to plane again, then bears away to the groove.
     var replanes: Bool
-    /// On the plane in a lull, she heads up to stay on it.
+    /// On the plane in a lull, she heads up to stay on it; not in another boat's wind shadow (#263).
     var heatsUpInLulls: Bool
     /// Close to her mark and just below its layline, she pinches up to fetch it rather than tack twice.
     var pinchesToFetch: Bool
@@ -39,6 +39,9 @@ struct Tactics: Sendable, Equatable {
     var seeksClearAir: Bool
     /// Upwind, she tacks with the nearest boat close behind her, to stay between it and the mark.
     var covers: Bool
+    /// She rolls her tacks (#263, `planRoll`), as well as her skill lets her. The groove-only profiles leave the tack
+    /// to the autohelm's tap.
+    var rollsTacks = true
 
     /// Metres ahead she notices puffs and lulls (`BotWeaknesses.puffPerception`), when she seeks them; she reads the
     /// pressure out to twice as far (`pressureLookAhead`).
@@ -64,13 +67,17 @@ struct Tactics: Sendable, Equatable {
         case .baseline:
             // The groove only: headers past a threshold, the corridor, and nothing off the groove.
             self.init(headerThreshold: deg2rad(5), tackInterval: 15)
+            rollsTacks = false
         case .tactician:
-            self.init(headerThreshold: deg2rad(4), tackInterval: 20, anticipation: 6, corridor: 0.8,
+            // #263: a corridor a little wider than the baseline's and her tacks as close together as hers, measured in
+            // the fun pass: with skiff@3's tack cost and momentum, 0.8 and 20 s cost her the edge (#300 retunes).
+            self.init(headerThreshold: deg2rad(4), tackInterval: 15, anticipation: 6, corridor: 0.5,
                       downwindShiftThreshold: deg2rad(5), replanes: true, heatsUpInLulls: true, pinchesToFetch: true,
                       seeksPuffs: true, seeksPressure: true, goesToThePressure: true, seeksClearAir: true, covers: true)
         case .blipTacker:
             // The baseline with a hair trigger: a 3° blip tacks her as a real header does.
             self.init(headerThreshold: deg2rad(3), tackInterval: 15)
+            rollsTacks = false
         }
     }
 
@@ -360,7 +367,9 @@ extension BotBrain {
                   aim.angle - angle > view.boatClass.steering.autohelm.downwindSnap else { return aim }
             return Aim(angle: angle, tack: aim.tack, tolerance: deg2rad(3))
         }
-        if tactics.heatsUpInLulls && b.speed < planing.offSpeed * Self.lullSpeedMargin {
+        // "Heats up in a lull, not in a shadow" (#263): a boat's wind shadow slows her whatever angle she sails
+        // (`speedShadow`), so heading up there only sails her further.
+        if tactics.heatsUpInLulls && b.speed < planing.offSpeed * Self.lullSpeedMargin && b.speedShadow >= 1 {
             return aim.offset(by: -Self.lullHeatUp, tolerance: deg2rad(3))
         }
         return aim

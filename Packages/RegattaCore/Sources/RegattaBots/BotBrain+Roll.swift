@@ -29,7 +29,7 @@ extension BotBrain {
     /// below the floor.
     mutating func planRoll(_ b: SeatView.OwnBoat, _ view: SeatView) {
         rollPlan = nil
-        guard view.boatClass.rollTack != nil, style.skill >= BotWeaknesses.rollSkillFloor,
+        guard tactics.rollsTacks, view.boatClass.rollTack != nil, style.skill >= BotWeaknesses.rollSkillFloor,
               abs(sailingAngle(b)) < .pi / 2 else { return }
         let plan: RollPlan = rng.unit() < weaknesses.rollHitRate ? .onTheCrossing : (rng.bool() ? .tooSoon : .tooLate)
         rollPlan = (plan, view.time)
