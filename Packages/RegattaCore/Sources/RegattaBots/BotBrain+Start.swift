@@ -297,8 +297,10 @@ extension BotBrain {
 
     /// Whether she lets the sheets out while she steers `heading` on starboard to keep clear or off a mark
     /// before the gun: when sailing it sheeted in would bring her to the line early. A windward boat luffing
-    /// clear of a leeward one near the line drops back rather than luffing over it. Otherwise, OCS or on port,
-    /// she keeps her speed to keep clear with.
+    /// clear of a leeward one near the line drops back rather than luffing over it. OCS, kept from running back
+    /// (her heading short of `returnAngle`), she eases and lets the boats she keeps clear of sail on past her
+    /// ("Wait, then run back"): holding her speed there only keeps her in their way. Otherwise, on port, she keeps her
+    /// speed to keep clear with.
     func easesKeepingClear(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double) -> Bool {
         if b.status == .ocs { return abs(wrapAngle(heading - b.windDirection)) < Self.returnAngle - Self.keepClearStep }
         guard b.status == .prestart, view.time < 0, b.tack == .starboard else { return false }
