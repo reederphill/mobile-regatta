@@ -377,13 +377,10 @@ public struct WindSampler: Sendable {
     /// The pressure at `p` (#289): the wind speed the venue's geography and the pressure field make there, as a
     /// multiple of the course average, before any puff or lull. `sample(p).speed` is the course average times
     /// this times the puffs' factor. A pure read of the tick's state, for drawing the field: 1 where there is
-    /// neither geography nor pressure field.
+    /// neither geography nor pressure field. `pressure(at:)`'s factor, the one derivation the bots' pressure map
+    /// (#290) reads too, so what a bot reads and what the player sees can't drift.
     public func pressureFactor(at p: Vec2) -> Double {
-        var factor = geographicGrid.sample(p).speedFactor
-        if let (plan, state) = pressure {
-            factor = factor * plan.effect(at: plan.coordinate(at: p), side: state.side, lanes: state.lanes).factor
-        }
-        return factor
+        pressure(at: p).factor
     }
 
     /// The pressure field as it is at the tick, for a tuning overlay to mark (#289); nil with none.
