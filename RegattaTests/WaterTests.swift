@@ -502,3 +502,24 @@ private struct DrawnSprite: Equatable {
         }
     }
 }
+
+/// Saved water tunings from older builds (#289).
+@MainActor @Suite struct WaterStyleDecodeTests {
+    /// A tuning saved before #289 has no pressure fields in its water: it keeps its tuned water values and
+    /// the pressure fields take their standard defaults, rather than the whole water falling back to standard.
+    @Test func preTwoEightyNineWaterKeepsItsTuning() throws {
+        let water = """
+        {"rippleSpacing": 96, "rippleAlpha": 0.4, "rippleDrift": 0.12, "fullTonePuffGain": 0.42,
+         "fullToneLullLoss": 0.2, "catspaw": 0.3, "whitecapOnsetKnots": 9, "whitecapFullKnots": 20,
+         "whitecapMaxShare": 0.5, "whitecapAlpha": 0.85, "whitecapSeconds": 3.5, "cheapWhitecapShare": 0.5}
+        """
+        let style = try JSONDecoder().decode(WaterStyle.self, from: Data(water.utf8))
+        #expect(style.fullTonePuffGain == 0.42)
+        #expect(style.fullTonePressureGain == WaterStyle.standard.fullTonePressureGain)
+        #expect(style.fullTonePressureLoss == WaterStyle.standard.fullTonePressureLoss)
+
+        let tuning = try JSONDecoder().decode(Tuning.self, from: Data("{\"water\": \(water)}".utf8))
+        #expect(tuning.water.fullTonePuffGain == 0.42)
+        #expect(tuning.water.fullTonePressureGain == WaterStyle.standard.fullTonePressureGain)
+    }
+}

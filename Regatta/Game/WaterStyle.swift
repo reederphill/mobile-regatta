@@ -57,6 +57,32 @@ nonisolated struct WaterStyle: Codable, Equatable, Sendable {
     static let standard = WaterStyle()
 }
 
+/// Lenient: a field missing from a saved style (one saved before the field existed, like the pressure tones
+/// saved before #289) takes its standard value, so an older tuning keeps the rest of its water.
+nonisolated extension WaterStyle {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let standard = WaterStyle.standard
+        func value(_ key: CodingKeys, _ fallback: Double) throws -> Double {
+            try c.decodeIfPresent(Double.self, forKey: key) ?? fallback
+        }
+        self.init(rippleSpacing: try value(.rippleSpacing, standard.rippleSpacing),
+                  rippleAlpha: try value(.rippleAlpha, standard.rippleAlpha),
+                  rippleDrift: try value(.rippleDrift, standard.rippleDrift),
+                  fullTonePuffGain: try value(.fullTonePuffGain, standard.fullTonePuffGain),
+                  fullToneLullLoss: try value(.fullToneLullLoss, standard.fullToneLullLoss),
+                  catspaw: try value(.catspaw, standard.catspaw),
+                  fullTonePressureGain: try value(.fullTonePressureGain, standard.fullTonePressureGain),
+                  fullTonePressureLoss: try value(.fullTonePressureLoss, standard.fullTonePressureLoss),
+                  whitecapOnsetKnots: try value(.whitecapOnsetKnots, standard.whitecapOnsetKnots),
+                  whitecapFullKnots: try value(.whitecapFullKnots, standard.whitecapFullKnots),
+                  whitecapMaxShare: try value(.whitecapMaxShare, standard.whitecapMaxShare),
+                  whitecapAlpha: try value(.whitecapAlpha, standard.whitecapAlpha),
+                  whitecapSeconds: try value(.whitecapSeconds, standard.whitecapSeconds),
+                  cheapWhitecapShare: try value(.cheapWhitecapShare, standard.cheapWhitecapShare))
+    }
+}
+
 /// How much the water spends per frame (#127 picks it from thermal state; the ladder is #27's). The cheap tier
 /// freezes the ripple (no drift, every tile on the course wind, no per-tile sampling), thins the whitecaps and
 /// samples the pressure tone at half resolution. Puff shading and the pressure are race cues, drawn in every tier.
