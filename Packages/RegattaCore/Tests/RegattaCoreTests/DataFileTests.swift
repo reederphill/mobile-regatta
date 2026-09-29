@@ -632,6 +632,9 @@ enum SkiffFixtures {
         for block in ["/hull", "/polar", "/momentum", "/steering", "/windShadow", "/contact", "/ease", "/planing", "/spinnaker", "/byTheLee"] {
             #expect(file.header.placeholders.contains(block), "\(block) should be a placeholder")
         }
+        // #263's roll tack, from version 3 on.
+        #expect(file.header.placeholders.contains("/rollTack") == (file.content.rollTack != nil))
+        #expect((file.content.rollTack != nil) == (version >= 3))
         // The ILCA files stay bundled for replays (ADR 0002): version 3 still loads beside it.
         #expect(try BoatClassFile.bundled(id: Fixtures.classID, version: 3).schemaVersion == 2)
     }
@@ -654,6 +657,33 @@ enum SkiffFixtures {
         #expect(a.steering.turnRateCurveSpeeds == [0, metresPerSecond(knots: 6)] && a.steering.turnRateCurveFractions == [0, 1])
         #expect(b.steering.topTurnRate == deg2rad(36) && b.steering.minTurnRate == deg2rad(10) && b.steering.rudderDrag == 0.4)
         #expect(b.steering.turnRateCurveSpeeds == [0, metresPerSecond(knots: 1.5)] && b.steering.turnRateCurveFractions == [0, 1])
+    }
+
+    /// #263: skiff@3 is skiff@2 with #220's momentum pair (speeding up 1.5 s, slowing down 10 s), the owner's rudder
+    /// drag (0.25 a second at full rudder), a shadow that is a speed loss (0.65 close in, its own 2 s slowing down,
+    /// stacking floor 0.3) and #222's roll tack. Every other value is version 2's; versions 1 and 2 have neither the
+    /// shadow's slowing down nor a roll tack, so their shadow still slows the wind.
+    @Test func version3IsVersion2WithMomentumShadowCostAndRollTack() throws {
+        let v2 = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: 2)
+        let v3 = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: 3)
+        #expect(v3.header.placeholders == v2.header.placeholders + ["/rollTack"])
+        let (a, b) = (v2.content, v3.content)
+        #expect(b.name == a.name && b.hull == a.hull && b.polar == a.polar && b.contact == a.contact && b.ease == a.ease)
+        #expect(b.planing == a.planing && b.spinnaker == a.spinnaker && b.byTheLee == a.byTheLee)
+        var steering = b.steering
+        steering.rudderDrag = a.steering.rudderDrag
+        #expect(steering == a.steering && b.steering.rudderDrag == 0.25)
+        #expect(a.momentum == .init(speedingUp: 2.8, slowingDown: 4, noGo: 4.8))
+        #expect(b.momentum == .init(speedingUp: 1.5, slowingDown: 10, noGo: 4.8))
+        var shadow = b.windShadow
+        shadow.lossCloseIn = a.windShadow.lossCloseIn
+        shadow.stackingFloor = a.windShadow.stackingFloor
+        shadow.slowingDown = nil
+        #expect(shadow == a.windShadow)
+        #expect(!a.windShadow.isSpeedLoss && a.rollTack == nil)
+        #expect(b.windShadow.isSpeedLoss && b.windShadow.slowingDown == 2)
+        #expect(b.windShadow.lossCloseIn == 0.65 && b.windShadow.stackingFloor == 0.3)
+        #expect(b.rollTack == .init(window: 0.25, hitLossFraction: 0.5, missSpeedFactor: 0.8))
     }
 
     @Test func schemaThreeValuesAreConvertedToCodeUnits() throws {

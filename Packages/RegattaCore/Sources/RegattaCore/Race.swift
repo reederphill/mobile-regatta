@@ -317,9 +317,9 @@ public final class Race {
             case .tackGybe:
                 let b = boats[i]
                 guard !b.isGhost else { break }
-                if let roll = boatClass.rollTack, isInTack(b) {
+                if boatClass.rollTack != nil, isInTack(b) {
                     // A second tap during a tack is the roll (#222, #263): one a tack, any after it ignored.
-                    if b.roll == nil { tapRoll(i, roll) }
+                    if b.roll == nil { boats[i].roll = .pending(tapTick: tick) } // timed in `sailRoll`
                 } else {
                     // The autohelm sails her through head to wind or the gybe to the groove on the new tack.
                     boats[i].autohelm = .tackOrGybe(sailingAngle: b.sailingAngle)
@@ -336,28 +336,6 @@ public final class Race {
         if b.isTacking { return true }
         guard let helm = b.autohelm, helm.isTapping else { return false }
         return !helm.target.isDownwind
-    }
-
-    /// Seat `i`'s roll tap this tick (#263): after the crossing, a hit within the class's window of it and a miss
-    /// outside; before it, pending until the crossing (`integrate`) or the window's end.
-    private func tapRoll(_ i: Int, _ roll: BoatClass.RollTackTuning) {
-        guard let crossing = boats[i].tackCrossingTick else {
-            boats[i].roll = .pending(tapTick: tick)
-            return
-        }
-        if tick - crossing <= roll.windowTicks {
-            boats[i].roll = .hit
-            emit(.rollHit(seat: i))
-        } else {
-            missRoll(&boats[i], seat: i, roll)
-        }
-    }
-
-    /// A missed roll (#263): her speed takes the class's miss factor, once.
-    private func missRoll(_ b: inout Boat, seat: Int, _ roll: BoatClass.RollTackTuning) {
-        b.speed *= roll.missSpeedFactor
-        b.roll = .missed
-        emit(.rollMissed(seat: seat))
     }
 
     /// Engages seat `i`'s autohelm on the angle she sails now, against the grooves in the wind they read
@@ -568,16 +546,20 @@ public final class Race {
         boats[i] = b
     }
 
-    /// A roll tack this tick (#263), once the dynamics have moved her from `speedBefore`: a pending tap hits at a
-    /// crossing within the window and misses once the window has passed without one; a hit keeps back the class's
-    /// share of the tick's speed loss (never a gain: no floor and no jump). Out of her tack, a decided roll is done.
+    /// A roll tack this tick (#263), once the dynamics have moved her from `speedBefore`: a pending tap hits when the
+    /// boom crosses within the class's window of it (either side), and misses once the window has passed without a
+    /// crossing, or at once for a tap after the window; a miss takes the class's factor off her speed, once. A hit keeps
+    /// back the class's share of each tick's speed loss (never a gain: no floor and no jump). Out of her tack, a
+    /// decided roll is done.
     private func sailRoll(_ b: inout Boat, seat: Int, _ roll: BoatClass.RollTackTuning, speedBefore: Double) {
         if case .pending(let tapTick) = b.roll {
-            if let crossing = b.tackCrossingTick, crossing - tapTick <= roll.windowTicks {
+            if let crossing = b.tackCrossingTick, abs(tapTick - crossing) <= roll.windowTicks {
                 b.roll = .hit
                 emit(.rollHit(seat: seat))
-            } else if tick - tapTick > roll.windowTicks {
-                missRoll(&b, seat: seat, roll)
+            } else if b.tackCrossingTick != nil || tick - tapTick > roll.windowTicks {
+                b.speed *= roll.missSpeedFactor
+                b.roll = .missed
+                emit(.rollMissed(seat: seat))
             }
         }
         if b.roll == .hit, b.speed < speedBefore {

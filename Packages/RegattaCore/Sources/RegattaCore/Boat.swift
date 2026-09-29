@@ -50,7 +50,7 @@ public enum BoatStatus: Sendable, Equatable {
 /// A roll tack (#222, #263, `BoatClass.RollTackTuning`): the second tack/gybe tap of a tack, and how it went.
 /// One a tack; cleared once she is close-hauled on the new tack.
 public enum RollTack: Sendable, Equatable {
-    /// Tapped at `tapTick`, before the boom crossed: a hit if it crosses within the window, else a miss.
+    /// Tapped at `tapTick`, not yet timed: a hit if the boom crosses within the window of it, either side, else a miss.
     case pending(tapTick: Int)
     /// Within the window of the crossing: until close-hauled she takes the class's share of each tick's speed loss.
     case hit

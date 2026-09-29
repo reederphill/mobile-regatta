@@ -113,8 +113,8 @@ import Testing
         s = hold(s, knots: 8, seconds: 30) { #expect($0.isPlaning) }
         #expect(abs(s.speed - onPlane) < 1e-6, "on the plane at \(s.speed / metresPerSecond(knots: 1)) kn")
 
-        // A lull to 3 kn for 8 s knocks her off the plane.
-        s = hold(s, knots: 3, seconds: 8)
+        // A lull to 3 kn for 12 s knocks her off the plane (skiff@3 bleeds speed off over 10 s, #263).
+        s = hold(s, knots: 3, seconds: 12)
         #expect(!s.isPlaning)
 
         // Back in 8 kn at the same heading she stays off it, at the off-plane speed.
@@ -134,7 +134,7 @@ import Testing
         let planed = try? #require(planedAfter)
         #expect((planed ?? .infinity) <= 8, "planed \(String(describing: planed)) s after heading up")
         // ...and bearing away again to 145° she keeps it and gets back to the on-plane speed.
-        s = hold(headed(s, twa: groove), knots: 8, seconds: 30) { #expect($0.isPlaning) }
+        s = hold(headed(s, twa: groove), knots: 8, seconds: 60) { #expect($0.isPlaning) }
         #expect(abs(s.speed - onPlane) < 1e-3)
     }
 
@@ -283,7 +283,6 @@ import Testing
         #expect(seconds <= 3.5, "\(knots) kn tack close-hauled after \(seconds) s")
         let slowest = run.map(\.speed).min()! / beat.speed
         #expect(slowest >= 0.4, "\(knots) kn tack slowed to \(slowest) of her entry speed")
-        print("TACKCOST \(knots) kn: \(lengths) L, close-hauled \(seconds) s, slowest \(slowest)")
     }
 
     /// A gybe from the groove to the groove, on the plane with the spinnaker up, costs about 8 m and
@@ -298,11 +297,9 @@ import Testing
         #expect(run.allSatisfy { $0.isPlaning && $0.spinnaker == .up }, "kept the plane and the spinnaker")
         let lost = metresLost(run, along: -Vec2.heading(windFrom))
         #expect(lost >= 6 && lost <= 10, "\(knots) kn gybe lost \(lost) m")
-        print("GYBECOST \(knots) kn: \(lost) m")
         // Back to within 1% of her entry speed, for good.
         let slow = run.lastIndex { $0.speed < 0.99 * entry } ?? 0
         let recovered = Double(slow + 1) * dt
         #expect(recovered >= 10 && recovered <= 13, "\(knots) kn gybe back to full speed after \(recovered) s")
-        print("GYBERECOVER \(knots) kn: \(recovered) s")
     }
 }

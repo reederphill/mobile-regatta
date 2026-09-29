@@ -74,8 +74,9 @@ import RegattaCore
     @Test func tackIsTheTapExitingAtTheGroove() throws {
         let race = try Self.beatingRace(seed: 5, left: 250)
         let start = race.exportSnapshot()
-        // Skill 0.4: a bot that doesn't tack on headers, so the corridor alone turns her.
-        let style = BotStyle(skill: 0.4, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
+        // Skill 0.39: a bot that doesn't tack on headers, so the corridor alone turns her, and below the roll's skill
+        // floor (#263), so the tack is the tap alone.
+        let style = BotStyle(skill: 0.39, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
         var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style,
                                weaknesses: .none(skill: style.skill)) // the mechanism alone, no misjudged grooves (#102)
         var decisions: [(tick: Int, decision: BotDecision)] = []
@@ -136,9 +137,11 @@ import RegattaCore
         let upwind = Vec2.heading(entry.windDirection)
         let madeGood = (recovered.position - entry.position).dot(upwind)
         let lost = entry.speed * Foundation.cos(entry.sailingAngle) * seconds - madeGood
-        // The class's own tap tack loses 7–12 m (`SkiffTests.tackCosts7To12Metres`: 7.7 m at 10 kn); a metre looser
-        // below for the race's wind, which shifts under her as she tacks.
-        #expect(lost >= 6 && lost <= 12, "the tack lost \(lost) m over \(seconds) s in \(entry.windSpeed) m/s")
+        // The class's own tap tack loses 0.7–1.3 hull lengths (`SkiffTests.tackCosts0_7To1_3LengthsAt6_10And14Knots`,
+        // #263); measured to back at speed rather than over 25 s, and in the race's wind, which shifts under her as she
+        // tacks, a little looser.
+        let lengths = lost / race.boatClass.hull.length
+        #expect(lengths >= 0.5 && lengths <= 1.5, "the tack lost \(lengths) L over \(seconds) s in \(entry.windSpeed) m/s")
     }
 
     // MARK: - Rule 21.2
