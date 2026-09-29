@@ -1,7 +1,7 @@
 {
   "seeds": [1, 2, 3, 4],
-  "venues": ["dev-venue@5"],
-  "conditions": ["classic-oscillating@5", "gusty-offshore@5", "light-and-patchy@5", "sea-breeze@5"],
+  "venues": ["dev-venue@6"],
+  "conditions": ["classic-oscillating@6", "gusty-offshore@6", "light-and-patchy@6", "sea-breeze@6"],
   "tideStatesDegrees": [0],
   "fleetSizes": [2, 5, 10, 16],
   "tierMixes": ["club", "regional", "national", "mixed"],

@@ -110,10 +110,10 @@ enum ConditionsFixtures {
         #expect(c.puffs.fan == deg2rad(4))
     }
 
-    @Test(arguments: [0, 5])
+    @Test(arguments: [0, 6])
     func wrongSchemaVersionThrows(schemaVersion: Int) throws {
         let data = try ConditionsFixtures.edited("sea-breeze", [(of: #""schemaVersion": 1,"#, with: #""schemaVersion": \#(schemaVersion),"#)])
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "conditions", found: schemaVersion, supported: [1, 2, 3, 4])) {
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "conditions", found: schemaVersion, supported: [1, 2, 3, 4, 5])) {
             try ConditionsFile(data: data)
         }
     }

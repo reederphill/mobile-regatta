@@ -136,7 +136,13 @@ import Glibc
 ///    needs window 0's key throughout. The bot-suite matrix moves to dev-venue@5 and the version-5 conditions.
 ///    Schema-1 venues have no spots or tendency, draw nothing more and use their speed factor as written: their
 ///    races, the default race's included, sail as on 21.
-public let simulationRevision = 22
+/// 23: puffs and lulls form from the pressure field (#288, ADR 0008), on 22. Schema-5 conditions files (version 6,
+///    on dev-venue@6) draw `pressureField.puffChoices` places for each puff and lull (`puffplce` stream) and form it
+///    at the one with the most pressure at its spawn tick (a lull, the least), at about a third of version 5's
+///    coverage. The pressure field's knots are cached per window rather than worked out each tick, bit for bit the
+///    same. The bot-suite matrix moves to dev-venue@6 and the version-6 conditions. Older files draw nothing more:
+///    their races, the default race's included, sail as on 22.
+public let simulationRevision = 23
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
