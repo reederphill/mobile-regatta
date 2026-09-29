@@ -123,13 +123,14 @@ enum TuningCatalog {
         [
             TuningGroup(
                 id: "conditions", title: "Conditions",
-                note: "The wind's oscillation, puffs and pressure field (#221, #220, #286). Period, wobble, fan and lane bend decide how often the favoured tack changes; the pressure side and lanes, where the pressure is.",
+                note: "The wind's oscillation, puffs and pressure field (#221, #220, #286, #287, #288). Period, wobble, fan and lane bend decide how often the favoured tack changes; the pressure side and lanes, where the pressure is; the side tendency and lane spots, how much the venue's geography steers it; puff coverage and choices, how many puffs there are and how closely they keep to the pressure.",
                 applies: .nextRace,
                 sliders: [
                     TuningSlider(.conditions, "/shift/periodSeconds/min", "Period, shortest", unit: " s", 60...180, step: 5),
                     TuningSlider(.conditions, "/shift/periodSeconds/max", "Period, longest", unit: " s", 60...180, step: 5),
                     TuningSlider(.conditions, "/shift/amplitudeDegrees", "Amplitude", unit: "°", 0...25, step: 0.5),
                     TuningSlider(.conditions, "/shift/wobbleDegrees", "Wobble", unit: "°", 0...10, step: 0.5),
+                    TuningSlider(.conditions, "/puffs/coverage", "Puff coverage", 0.02...0.5, step: 0.01),
                     TuningSlider(.conditions, "/puffs/fanDegrees", "Puff fan", unit: "°", 0...30, step: 0.5),
                     TuningSlider(.conditions, "/puffs/lullLoss/min", "Lull loss, least", 0...0.6, step: 0.01),
                     TuningSlider(.conditions, "/puffs/lullLoss/max", "Lull loss, most", 0...0.6, step: 0.01),
@@ -152,6 +153,14 @@ enum TuningCatalog {
                     TuningSlider(.conditions, "/pressureField/lanes/driftMetresPerSecond", "Lane drift", unit: " m/s", 0...2,
                                  step: 0.05),
                     TuningSlider(.conditions, "/pressureField/lanes/bendDegrees", "Lane edge bend", unit: "°", 0...20, step: 0.5),
+                    // How much the venue's geography steers the pressure field (#287), in schema-4 conditions (version 5 on).
+                    TuningSlider(.conditions, "/pressureField/side/tendencyScale/min", "Side tendency, weakest", -1...1,
+                                 step: 0.05),
+                    TuningSlider(.conditions, "/pressureField/side/tendencyScale/max", "Side tendency, strongest", 0...3,
+                                 step: 0.05),
+                    TuningSlider(.conditions, "/pressureField/lanes/spotShare", "Lanes at the venue's spots", 0...1, step: 0.05),
+                    // Where puffs and lulls form in the pressure field (#288), in schema-5 conditions (version 6 on).
+                    TuningSlider(.conditions, "/pressureField/puffChoices", "Puff choices", 1...8, step: 1),
                 ]),
             TuningGroup(
                 id: "grooves", title: "Upwind grooves",

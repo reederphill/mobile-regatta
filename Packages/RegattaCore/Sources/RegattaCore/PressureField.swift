@@ -17,12 +17,21 @@ import Foundation
 ///   puffs, fading in and out over their life. Each lane's sideways position has a knot at each window's end: its
 ///   key draws the lane's sideways drift there, and the position moves by the mean of the drifts either side, so
 ///   between knots the drift is a straight line from one to the next and never beyond `lanes.drift`.
+///
+/// The venue's geography steers both (#287, ADR 0008), from its public file: its side tendency, scaled by a
+/// multiplier window 0's key draws for the race, is added to every side target, so the side leans its way in most
+/// races but not all; and a share of lanes (`lanes.spotShare`) forms at its lane spots instead of anywhere. A venue
+/// with neither (every schema-1 file) draws nothing more, so its field is exactly #286's.
 struct PressurePlan: Hashable, Sendable {
     /// Stream tags for `SplitMix64(seed:stream:)` on a key's `puffSeed`, distinct from `PuffPlan.seedStream`:
     /// ASCII "presside", "preslane" and "presdrft".
     static let sideStream: UInt64 = 0x7072_6573_7369_6465
     static let laneStream: UInt64 = 0x7072_6573_6C61_6E65
     static let driftStream: UInt64 = 0x7072_6573_6472_6674
+    /// Stream tags for the venue's geography (#287): ASCII "prestend" (the race's side tendency multiplier, window 0
+    /// only) and "presspot" (which lanes form at the venue's lane spots, and where).
+    static let tendencyStream: UInt64 = 0x7072_6573_7465_6E64
+    static let spotStream: UInt64 = 0x7072_6573_7370_6F74
     /// How many windows' targets a pressure side knot averages: a new side ramps in over this many windows.
     static let sideRampWindows = 4
     /// A side target looks back this many times the mean windows between setters for one, so it finds none, and
@@ -52,6 +61,13 @@ struct PressurePlan: Hashable, Sendable {
     let lookback: Int
     /// The largest peak lane strength: a lane's edge bend peaks at `lanes.bend` for it.
     let strongestLane: Double
+    /// The venue pairing's side tendency (`Venue.Pairing.sideTendency`): 0 for none.
+    let sideTendency: Double
+    /// Where the venue's lane spots lie across the course, or nil with none.
+    let laneSpots: LaneSpots?
+
+    /// Whether the field reads window 0's key at every tick: for the race's side tendency multiplier.
+    var readsFirstKey: Bool { sideTendency != 0 }
 
     init(setup: WindSetup, area: RaceArea, field: Conditions.PressureField) {
         self.field = field
@@ -70,6 +86,11 @@ struct PressurePlan: Hashable, Sendable {
         // Window k's curve runs from knot k − 1, whose oldest target reaches back `sideRampWindows` more.
         lookback = max(Self.sideRampWindows + sideLookback, laneLookback)
         strongestLane = lanes.strength.upperBound
+        sideTendency = setup.pairing.sideTendency
+        let reach = area.halfWidth + laneMargin
+        laneSpots = LaneSpots(setup.pairing.geographicGrid, reach: reach) { [acrossWind, meanDirection, centre] p in
+            acrossWind.coordinate(at: p, meanDirection: meanDirection) - centre
+        }
     }
 
     /// The across-the-wind coordinate at `p`, from the race area's centre, metres.
@@ -83,7 +104,10 @@ struct PressurePlan: Hashable, Sendable {
     /// these, so existing ones never move.
     ///
     /// Each lane forms inside its window, so none is felt before its window starts, and fades in from nothing (ADR
-    /// 0001). Its centre forms uniform across the race area and `laneMargin` either side.
+    /// 0001). Its centre forms uniform across the race area and `laneMargin` either side, or, at a venue with lane
+    /// spots, with the chance `lanes.spotShare` at one of them instead (`spotStream`: per lane, the coin, the spot
+    /// and where in it). Window 0's key at a venue with a side tendency also draws the race's multiplier on it
+    /// (`tendencyStream`).
     func draws(of key: WindKey, windows: WindWindows) -> PressureDraws {
         var rng = SplitMix64(seed: key.puffSeed, stream: Self.sideStream)
         // Window 0's key always sets a side: no window before it can, so without it the side would start absent.
@@ -99,6 +123,7 @@ struct PressurePlan: Hashable, Sendable {
         let start = windows.start(of: key.window)
         var spawns: [PressureLaneSpawn] = []
         spawns.reserveCapacity(count)
+        var spotRNG = SplitMix64(seed: key.puffSeed, stream: Self.spotStream)
         for index in 0..<count {
             let offset = min(WindWindows.ticksPerWindow - 1, Int(laneRNG.unit() * Double(WindWindows.ticksPerWindow)))
             let lifetime = laneRNG.range(lanes.lifetime.lowerBound, lanes.lifetime.upperBound)
@@ -106,12 +131,24 @@ struct PressurePlan: Hashable, Sendable {
             let strength = laneRNG.range(lanes.strength.lowerBound, lanes.strength.upperBound)
             let across = laneRNG.unit()
             let drift = laneRNG.range(-lanes.drift, lanes.drift)
+            var position = (2 * across - 1) * (halfWidth + laneMargin)
+            if let laneSpots {
+                let atSpot = spotRNG.unit() < lanes.spotShare
+                let spot = spotRNG.unit(), within = spotRNG.unit()
+                if atSpot { position = laneSpots.position(spot, within) }
+            }
             spawns.append(PressureLaneSpawn(
                 window: key.window, index: index, spawnTick: start + offset,
                 lifetimeTicks: min(maxLaneLifetimeTicks, PuffPlan.ticks(seconds: lifetime)), halfWidth: width / 2,
-                strength: strength, start: (2 * across - 1) * (halfWidth + laneMargin), startDrift: drift))
+                strength: strength, start: position, startDrift: drift))
         }
-        return PressureDraws(side: side, lanes: spawns)
+        var tendency = 0.0
+        if key.window == 0 && sideTendency != 0 {
+            var tendencyRNG = SplitMix64(seed: key.puffSeed, stream: Self.tendencyStream)
+            let scale = field.side.tendencyScale
+            tendency = sideTendency * tendencyRNG.range(scale.lowerBound, scale.upperBound)
+        }
+        return PressureDraws(side: side, lanes: spawns, tendency: tendency)
     }
 
     /// The sideways drift key `key` draws for `lane` at the knot ending its window, metres per second: its own
@@ -146,8 +183,57 @@ struct PressureDraws: Hashable, Sendable {
     /// downwind); nil if the window doesn't redraw it.
     let side: Double?
     let lanes: [PressureLaneSpawn]
+    /// Window 0's only: the venue's side tendency as this race has it, the authored tendency times the race's
+    /// multiplier, added to every side target (#287). 0 for any other window, or with no tendency.
+    var tendency = 0.0
 
     static let none = PressureDraws(side: nil, lanes: [])
+}
+
+/// Where a venue's lane spots lie across the course (#287): each grid node that prefers lanes, at its across-the-wind
+/// coordinate relative to the race area's centre, weighted by its preference. A lane is a band along the wind, so a
+/// spot anywhere up or down the course draws it to the same place across. Only nodes a lane may form at count.
+struct LaneSpots: Hashable, Sendable {
+    /// Relative coordinates of the preferring nodes, metres, and their running total of preference.
+    let positions: [Double]
+    let cumulative: [Double]
+    /// A lane forms up to half a cell either side of its node, so spots read as the smooth grid they are.
+    let spread: Double
+
+    /// Nil when no node within `reach` of the centre, across, prefers lanes.
+    init?(_ geographic: Venue.GeographicGrid, reach: Double, coordinate: (Vec2) -> Double) {
+        guard geographic.hasLaneSpots else { return nil }
+        let grid = geographic.grid
+        var positions: [Double] = [], cumulative: [Double] = []
+        var total = 0.0
+        for row in 0..<grid.rows {
+            for column in 0..<grid.columns {
+                let preference = geographic.lanePreference(column: column, row: row)
+                guard preference > 0 else { continue }
+                let r = coordinate(grid.position(column: column, row: row))
+                guard abs(r) <= reach else { continue }
+                total += preference
+                positions.append(r)
+                cumulative.append(total)
+            }
+        }
+        guard total > 0 else { return nil }
+        self.positions = positions
+        self.cumulative = cumulative
+        spread = grid.cellSize / 2
+    }
+
+    /// The position a lane forms at for draws `spot` (which node, by preference) and `within` (where around it),
+    /// each in [0, 1).
+    func position(_ spot: Double, _ within: Double) -> Double {
+        let target = spot * cumulative[cumulative.count - 1]
+        var low = 0, high = cumulative.count - 1
+        while low < high {
+            let mid = (low + high) / 2
+            if cumulative[mid] > target { high = mid } else { low = mid + 1 }
+        }
+        return positions[low] + (2 * within - 1) * spread
+    }
 }
 
 /// One pressure lane as its key spawned it.
@@ -202,6 +288,16 @@ struct PressureLane: Hashable, Sendable {
     }
 }
 
+/// What `WindField` caches per window so `pressureState` only blends knots (#288): the window's pressure side target
+/// from the keys' own draws (`keyedSideTarget`, before the race's tendency), and the knots of each lane its key
+/// spawns (`laneKnotList`), in draw order.
+struct PressureKnots: Hashable, Sendable {
+    var sideTarget = 0.0
+    var lanes: [[WindKnot]] = []
+
+    static let none = PressureKnots()
+}
+
 /// The pressure field at one tick: its side's slope and the lanes alive, ready to apply at any point.
 struct PressureState: Hashable, Sendable {
     let side: Double
@@ -216,16 +312,30 @@ extension WindField {
         let k = windows.window(containing: tick)
         guard k >= 0 else { throw .beforeOrigin(tick: tick) }
         for window in firstWindowNeeded(atTick: tick)...k where keys[window] == nil { throw .missingKey(window) }
+        return heldPressureState(atTick: tick, plan)
+    }
+
+    /// `pressureState(atTick:_:)` from the keys held, never throwing: a window whose key isn't held draws nothing,
+    /// as `sideTarget` and `laneKnots` read it. Where puffs form (#288): their window's key has just been added,
+    /// so its spawn ticks' state is the one sampling will see once the keys before it are all held.
+    func heldPressureState(atTick tick: Int, _ plan: PressurePlan) -> PressureState {
+        let k = windows.window(containing: tick)
         let fraction = Double(tick - windows.start(of: k)) / Double(WindWindows.ticksPerWindow)
-        // Each target once, newest first: knot k reads the first `ramp + 1`, knot k − 1 the rest from the second.
+        // Each target once, newest first: knot k reads the first `ramp + 1`, knot k − 1 the rest from the second. The
+        // cache holds each window's target from the keys' own draws; the race's tendency goes on as `sideTarget` adds it.
         let ramp = PressurePlan.sideRampWindows
-        let targets = (0...(ramp + 1)).map { sideTarget(k - $0, plan) }
+        let tendency = plan.readsFirstKey ? pressureDraws(ofWindow: 0).tendency : nil
+        let targets = (0...(ramp + 1)).map { i in
+            let keyed = k - i >= 0 ? pressureKnots[k - i].sideTarget : 0
+            return tendency.map { keyed + $0 } ?? keyed
+        }
         let side = Self.hermite(Self.sideKnot(targets[1...]), Self.sideKnot(targets[...]), fraction).value
 
         var lanes: [PressureLane] = []
         for window in max(0, k - plan.laneLookback)...k {
-            for spawn in pressureDraws(ofWindow: window).lanes where spawn.isAlive(atTick: tick) {
-                let knots = laneKnots(spawn, k, plan)
+            let knotLists = pressureKnots[window].lanes
+            for (spawn, list) in zip(pressureDraws(ofWindow: window).lanes, knotLists) where spawn.isAlive(atTick: tick) {
+                let knots = Self.laneKnots(list, spawn, k)
                 let position = Self.hermite(knots.from, knots.to, fraction)
                 lanes.append(PressureLane(centre: position.value, drift: position.slope, halfWidth: spawn.halfWidth,
                                           intensity: spawn.intensity(atTick: tick)))
@@ -235,8 +345,15 @@ extension WindField {
     }
 
     /// The pressure side's target for window `j`: the most recent setter's draw in the `sideLookback` windows up to
-    /// it, or 0 with none (or before the first window). Reads held keys only.
+    /// it, or 0 with none (or before the first window), plus the race's side tendency (`PressureDraws.tendency`,
+    /// from window 0's key) at a venue with one. Reads held keys only.
     func sideTarget(_ j: Int, _ plan: PressurePlan) -> Double {
+        let keyed = keyedSideTarget(j, plan)
+        return plan.readsFirstKey ? keyed + pressureDraws(ofWindow: 0).tendency : keyed
+    }
+
+    /// The side target from the windows' own draws alone: #286's. What `pressureKnots` caches per window.
+    func keyedSideTarget(_ j: Int, _ plan: PressurePlan) -> Double {
         var window = j
         while window >= max(0, j - plan.sideLookback + 1) {
             if let side = pressureDraws(ofWindow: window).side { return side }
@@ -268,6 +385,27 @@ extension WindField {
     /// from its start, each later key's drift, and the position moved by the mean of the drifts either side.
     func laneKnot(_ spawn: PressureLaneSpawn, _ j: Int, _ plan: PressurePlan) -> WindKnot {
         laneKnots(spawn, j, plan).to
+    }
+
+    /// Lane `spawn`'s knots as `laneKnots` replays them, for the cache: its start, then the knot ending each window
+    /// from its own through the last it may be alive in (`laneLookback` after it), stopping at the first key not held.
+    func laneKnotList(_ spawn: PressureLaneSpawn, _ plan: PressurePlan) -> [WindKnot] {
+        var position = spawn.start, drift = spawn.startDrift
+        var knots = [WindKnot(value: position, slope: drift)]
+        for window in spawn.window...(spawn.window + plan.laneLookback) {
+            guard let key = keys[window] else { break }
+            let next = plan.drift(of: spawn, key: key)
+            position += WindWindows.seconds * (drift + next) / 2
+            drift = next
+            knots.append(WindKnot(value: position, slope: drift))
+        }
+        return knots
+    }
+
+    /// `laneKnots(spawn, k, _)` from the cached `list` (`laneKnotList`), bit for bit.
+    static func laneKnots(_ list: [WindKnot], _ spawn: PressureLaneSpawn, _ k: Int) -> (from: WindKnot, to: WindKnot) {
+        let i = k - spawn.window
+        return (i < list.count ? list[i] : list[0], list[min(i + 1, list.count - 1)])
     }
 
     /// Lane `spawn`'s knots ending windows `k − 1` and `k`, in one pass: `laneKnot` of each.
