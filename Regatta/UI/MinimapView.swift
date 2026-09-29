@@ -1,7 +1,9 @@
 import SwiftUI
 import RegattaCore
 
-/// Whole-course overview: marks, start line and every boat.
+/// Whole-course overview: the puffs and lulls, marks, start line and every boat. It is a small chart of the
+/// water, on the water's own colour, so a puff reads darker and a lull lighter just as they do on the water (#224:
+/// the wind off screen shows here, not at the view's edges).
 struct MinimapView: View {
     let hud: HUDState
 
@@ -18,6 +20,24 @@ struct MinimapView: View {
             func map(_ p: Vec2) -> CGPoint {
                 CGPoint(x: offsetX + (p.x.clamped(to: minX...maxX) - minX) * scale,
                         y: size.height - offsetY - (p.y.clamped(to: minY...maxY) - minY) * scale)
+            }
+
+            // Under everything else, each in its tone and falling off to its rim like its shading on the water.
+            // Not clamped: one beyond the course lies partly or wholly off the chart.
+            for puff in hud.puffs {
+                let overlay = WaterTone.puffOverlay(intensity: puff.intensity, style: .standard)
+                guard overlay.alpha > 0 else { continue }
+                let center = CGPoint(x: offsetX + (puff.center.x - minX) * scale,
+                                     y: size.height - offsetY - (puff.center.y - minY) * scale)
+                let r = puff.radius * scale
+                let color = overlay.token.color
+                let gradient = Gradient(stops: [
+                    .init(color: color.opacity(overlay.alpha), location: 0),
+                    .init(color: color.opacity(overlay.alpha * 0.56), location: 0.5),
+                    .init(color: color.opacity(0), location: 1),
+                ])
+                context.fill(Path(ellipseIn: CGRect(x: center.x - r, y: center.y - r, width: 2 * r, height: 2 * r)),
+                             with: .radialGradient(gradient, center: center, startRadius: 0, endRadius: r))
             }
 
             var line = Path()
@@ -42,6 +62,8 @@ struct MinimapView: View {
                 context.stroke(Path(ellipseIn: rect), with: .color(.white), lineWidth: 1.5)
             }
         }
-        .background(.black.opacity(0.3), in: .rect(cornerRadius: 12))
+        .background(ChartPalette.water.color, in: .rect(cornerRadius: 12))
+        .clipShape(.rect(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.3), lineWidth: 1))
     }
 }

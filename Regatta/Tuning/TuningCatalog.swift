@@ -217,7 +217,7 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "water", title: "Water",
-                note: "How puffs, lulls, whitecaps and the upwind edge tint draw (#116, #224). Drawn only: never logged.",
+                note: "How puffs, lulls and whitecaps draw (#116). Drawn only: never logged.",
                 applies: .live,
                 sliders: [
                     water("fullTonePuffGain", "Puff at full tone", \.fullTonePuffGain, 0.05...0.6, 0.01),
@@ -228,9 +228,6 @@ enum TuningCatalog {
                     water("whitecapFullKnots", "Whitecaps full at", \.whitecapFullKnots, 5...35, 0.5, unit: " kn"),
                     water("whitecapMaxShare", "Whitecap share", \.whitecapMaxShare, 0...1, 0.05),
                     water("whitecapAlpha", "Whitecap strength", \.whitecapAlpha, 0...1, 0.05),
-                    water("edgeTintStrength", "Edge tint strength", \.edgeTintStrength, 0...1, 0.05),
-                    water("edgeTintReach", "Edge tint reach", \.edgeTintReach, 0...200, 5, unit: " m"),
-                    water("edgeTintDepth", "Edge tint depth", \.edgeTintDepth, 20...200, 5, unit: " pt"),
                 ]),
             TuningGroup(
                 id: "camera", title: "Camera",

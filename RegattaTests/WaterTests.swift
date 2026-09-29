@@ -6,7 +6,7 @@ import RegattaCore
 @testable import Regatta
 
 /// The water (#116): the ripple fainter than any visible puff or lull, whitecaps by the conditions' mean wind
-/// alone, streaks along the local wind (puff fans included), and the upwind edge tint.
+/// alone, streaks along the local wind (puff fans included).
 @MainActor @Suite struct WaterTests {
     /// Every bundled conditions file: the four conditions (#10) at each version.
     static let conditions: [ConditionsFile] = ["light-and-patchy", "classic-oscillating", "sea-breeze", "gusty-offshore"]
@@ -160,47 +160,27 @@ import RegattaCore
         #expect(lull.token == ChartPalette.lull && abs(lull.alpha - 0.5) < 1e-9)
     }
 
-    /// A puff beyond the view, drifting in, tints the upwind edge where it will cross, fading with distance;
-    /// a lull, a puff drifting away, one in view and one beyond reach tint nothing.
-    @Test func edgeTintMarksTheUpwindEdgeWhereAPuffDriftsIn() throws {
-        let style = WaterStyle.standard
-        let half = Vec2(30, 60)
-        func puff(at center: Vec2, strength: Double = 0.3, drift: Vec2 = Vec2(0, -2)) -> Puff {
-            Puff(center: center, radius: 40, strength: strength, age: 30, lifetime: 60, velocity: drift)
-        }
-        let north = try #require(EdgeTint.mark(for: puff(at: Vec2(10, 120)), center: .zero, half: half, style: style))
-        #expect(north.edge == .top)
-        #expect(north.point == Vec2(10, 60))
-        #expect(north.width == 80)
-        #expect(abs(north.alpha - style.edgeTintStrength * (1 - 20 / style.edgeTintReach)) < 1e-9)
-        let slanting = try #require(EdgeTint.mark(for: puff(at: Vec2(-70, 90), drift: Vec2(1, -1)), center: .zero, half: half, style: style))
-        #expect(slanting.edge == .left || slanting.edge == .top)
-        #expect(EdgeTint.mark(for: puff(at: Vec2(10, 120), strength: -0.2), center: .zero, half: half, style: style) == nil)
-        #expect(EdgeTint.mark(for: puff(at: Vec2(10, 120), drift: Vec2(0, 2)), center: .zero, half: half, style: style) == nil)
-        #expect(EdgeTint.mark(for: puff(at: Vec2(10, 20)), center: .zero, half: half, style: style) == nil)
-        #expect(EdgeTint.mark(for: puff(at: Vec2(10, 60 + 40 + style.edgeTintReach + 1)), center: .zero, half: half, style: style) == nil)
-        // Passing by the side, it never comes in; slanting in across the side edge, it isn't upwind.
-        #expect(EdgeTint.mark(for: puff(at: Vec2(100, 120)), center: .zero, half: half, style: style) == nil)
-        #expect(EdgeTint.mark(for: puff(at: Vec2(-80, 0), drift: Vec2(0.3, -2)), center: .zero, half: half, style: style) == nil)
+    /// The minimap shows the wind off screen as well as on (#224): the HUD carries every puff and lull alive,
+    /// each where it is, its size and its tone.
+    @Test func hudCarriesThePuffsForTheMinimap() throws {
+        let race = try Self.race("gusty-offshore", to: -600)
+        let world = Self.world(of: race)
+        let hud = HUDState(world: world)
+        #expect(!hud.puffs.isEmpty)
+        #expect(hud.puffs.map(\.center) == world.puffs.map(\.center))
+        #expect(hud.puffs.map(\.radius) == world.puffs.map(\.radius))
+        #expect(hud.puffs.map(\.intensity) == world.puffs.map(\.intensity))
+        #expect(hud.puffs.contains { $0.intensity > 0 } && hud.puffs.contains { $0.intensity < 0 })
     }
 
-    /// The cheap tier (#127) freezes the ripple and thins the whitecaps; the puff shading and the edge tint are
-    /// race cues, drawn the same in every tier (#27).
+    /// The cheap tier (#127) freezes the ripple and thins the whitecaps; the puff shading is a race cue, drawn the
+    /// same in every tier (#27).
     @Test func cheapTierKeepsTheRaceCues() throws {
         let race = try Self.race("gusty-offshore", to: -600)
         let world = WaterWorld(Self.world(of: race))
         let me = race.boats[0].position
         let full = WaterNode(pointsPerMeter: 8), cheap = WaterNode(pointsPerMeter: 8)
         cheap.quality = .cheap
-        var shownTint = false
-        for dy in stride(from: -200.0, through: 200, by: 25) {
-            let view = Self.view(centeredOn: me + Vec2(0, dy))
-            full.update(world, view: view, dt: 0)
-            cheap.update(world, view: view, dt: 0)
-            #expect(full.tintMarks == cheap.tintMarks)
-            shownTint = shownTint || !full.tintMarks.isEmpty
-        }
-        #expect(shownTint, "no view had a puff beyond its upwind edge")
         let conditions = world.conditions
         #expect(Whitecaps.share(in: conditions, style: .standard, quality: .cheap)
             == Whitecaps.share(in: conditions, style: .standard) * WaterStyle.standard.cheapWhitecapShare)
@@ -226,28 +206,23 @@ import RegattaCore
         let race = try Self.race("gusty-offshore", to: -600)
         let world = WaterWorld(Self.world(of: race))
         let me = race.boats[0].position
-        var caps = 0, tints = 0, streaks = 0
+        var caps = 0, streaks = 0
         for dy in stride(from: -200.0, through: 200, by: 25) {
             let view = Self.view(centeredOn: me + Vec2(0, dy))
             let fresh = WaterNode(pointsPerMeter: 8), used = WaterNode(pointsPerMeter: 8)
             used.update(world, view: Self.view(centeredOn: me, scale: 1 / 0.45), dt: 0)
             fresh.update(world, view: view, dt: 0)
             used.update(world, view: view, dt: 0)
-            let water = DrawnSprite.all(under: fresh), tint = DrawnSprite.all(under: fresh.edgeTint)
+            let water = DrawnSprite.all(under: fresh)
             #expect(water == DrawnSprite.all(under: used), "the pools' history moved the water")
-            #expect(tint == DrawnSprite.all(under: used.edgeTint), "the pools' history moved the edge tint")
             fresh.update(world, view: view, dt: 0)
             #expect(DrawnSprite.all(under: fresh) == water, "redrawn settled, the water moved")
-            #expect(DrawnSprite.all(under: fresh.edgeTint) == tint, "redrawn settled, the edge tint moved")
-            for (name, drawn) in [("water", water), ("edge tint", tint)] {
-                let zs = drawn.map(\.z)
-                #expect(Set(zs).count == zs.count, "\(zs.count - Set(zs).count) \(name) sprites share a z")
-            }
+            let zs = water.map(\.z)
+            #expect(Set(zs).count == zs.count, "\(zs.count - Set(zs).count) water sprites share a z")
             caps += fresh.whitecaps.count
-            tints += fresh.tintMarks.count
             streaks += fresh.streaks.count
         }
-        #expect(caps > 0 && tints > 0 && streaks > 0, "whitecaps \(caps), tint marks \(tints), streaks \(streaks)")
+        #expect(caps > 0 && streaks > 0, "whitecaps \(caps), streaks \(streaks)")
         #expect(!world.puffs.isEmpty)
     }
 
@@ -301,7 +276,7 @@ import RegattaCore
     /// one live.
     @Test func waterStyleIsData() throws {
         var style = WaterStyle.standard
-        style.edgeTintStrength = 0.4
+        style.rippleAlpha = 0.3
         style.catspaw = 0.1
         let decoded = try JSONDecoder().decode(WaterStyle.self, from: JSONEncoder().encode(style))
         #expect(decoded == style)
