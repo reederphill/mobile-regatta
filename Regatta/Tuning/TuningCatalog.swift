@@ -217,12 +217,14 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "water", title: "Water",
-                note: "How puffs, lulls and whitecaps draw (#116). Drawn only: never logged.",
+                note: "How the pressure, puffs, lulls and whitecaps draw (#116, #289). Drawn only: never logged.",
                 applies: .live,
                 sliders: [
                     water("fullTonePuffGain", "Puff at full tone", \.fullTonePuffGain, 0.05...0.6, 0.01),
                     water("fullToneLullLoss", "Lull at full tone", \.fullToneLullLoss, 0.05...0.5, 0.01),
                     water("catspaw", "Catspaw texture", \.catspaw, 0...1, 0.05),
+                    water("fullTonePressureGain", "Pressure at full tone", \.fullTonePressureGain, 0.03...0.5, 0.01),
+                    water("fullTonePressureLoss", "Low pressure at full tone", \.fullTonePressureLoss, 0.03...0.5, 0.01),
                     water("rippleAlpha", "Ripple strength", \.rippleAlpha, 0...1, 0.05),
                     water("whitecapOnsetKnots", "Whitecaps from", \.whitecapOnsetKnots, 0...25, 0.5, unit: " kn"),
                     water("whitecapFullKnots", "Whitecaps full at", \.whitecapFullKnots, 5...35, 0.5, unit: " kn"),
@@ -247,6 +249,9 @@ enum TuningCatalog {
                         .init(title: "Timing windows", ticket: "#222")]),
         ]
     }
+
+    /// The group whose panel carries the pressure overlay's toggle (#289).
+    static let pressureOverlayGroup = "water"
 
     private static func water(_ name: String, _ title: String, _ path: WritableKeyPath<WaterStyle, Double>,
                               _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {

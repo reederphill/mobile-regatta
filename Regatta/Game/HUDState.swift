@@ -9,16 +9,6 @@ struct MiniBoat: Identifiable {
     let isActive: Bool
 }
 
-/// A puff or lull as the minimap draws it.
-struct MiniPuff {
-    let center: Vec2
-    /// Metres.
-    let radius: Double
-    /// Its change in wind speed at its centre now, as a fraction of the course average: positive for a puff,
-    /// negative for a lull (`Puff.intensity`).
-    let intensity: Double
-}
-
 /// A throttled snapshot of the race for the SwiftUI overlay.
 struct HUDState {
     /// Race clock in ticks (`Race.tick`); `clock` is the same in seconds.
@@ -45,8 +35,9 @@ struct HUDState {
     var penaltyTurns = 0
     var penaltyProgress = 0.0
     var boats: [MiniBoat] = []
-    /// The puffs and lulls alive, for the minimap: the wind off screen as well as on.
-    var puffs: [MiniPuff] = []
+    /// The pressure over the minimap's chart (#289), sampled from the model's own field: the wind off screen as
+    /// well as on. Nil where the race doesn't hold the key yet.
+    var pressure: PressureTone?
     var course: CourseLayout?
 
     var isUpwind: Bool { twaDegrees < 90 }
@@ -106,6 +97,6 @@ struct HUDState {
         boats = frame.boats.map {
             MiniBoat(id: $0.id, position: $0.position, colorIndex: $0.colorIndex, isPlayer: $0.id == me, isActive: $0.isOnCourse)
         }
-        puffs = world.puffs.map { MiniPuff(center: $0.center, radius: $0.radius, intensity: $0.intensity) }
+        pressure = world.windSampler.map { MinimapChart(course: course).pressure($0) }
     }
 }

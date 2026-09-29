@@ -129,6 +129,19 @@ import UIKit
         }
     }
 
+    /// The pressure fixture (#289) sails the latest files with a pressure field (dev-venue@6, gusty-offshore@6)
+    /// on the course camera, so the whole field shows, water and minimap, after the gun with lanes alive.
+    @Test func pressureFixtureShowsThePressure() throws {
+        let (fixture, log) = try RenderFixture.load(named: "water-pressure", in: Self.fixtures)
+        #expect(fixture == RenderFixture(log: "water-pressure.racelog.json", freezeTick: 60, camera: .course, vision: .none))
+        let setup = log.header.setup
+        #expect(setup.venue == (try VenueFile.bundled(id: "dev-venue", version: 6)).ref)
+        #expect(setup.conditions == (try ConditionsFile.bundled(id: "gusty-offshore", version: 6)).ref)
+        let world = try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
+        let reading = try #require(world.windSampler?.pressureReading)
+        #expect(!reading.lanes.isEmpty && reading.side != 0)
+    }
+
     @Test func fixtureFieldsDecodeEveryCameraAndVision() throws {
         for camera in LaunchOptions.CameraMode.allCases {
             for vision in VisionFilter.allCases {

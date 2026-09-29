@@ -50,6 +50,17 @@ import RegattaCore
             let faintest = WaterTone.faintestPeakDelta(of: file.content, style: style)
             #expect(abs(ripple) < faintest, "\(file.id)@\(file.version): ripple ΔL \(ripple) vs faintest puff or lull \(faintest)")
         }
+        // So is any pressure lane at its peak, in every file with a pressure field (#289); and the pressure is the
+        // palette's tones too, at full tone ±0.12.
+        let pressureFiles = ["light-and-patchy", "classic-oscillating", "sea-breeze", "gusty-offshore"]
+            .map { try? ConditionsFile.bundled(id: $0, version: 6) }
+        #expect(pressureFiles.allSatisfy { $0?.content.pressureField != nil })
+        for file in pressureFiles.compactMap({ $0 }) {
+            let faintest = try #require(WaterTone.faintestPressureDelta(of: file.content, style: style))
+            #expect(abs(ripple) < faintest, "\(file.id)@6: ripple ΔL \(ripple) vs faintest pressure lane \(faintest)")
+        }
+        #expect(abs(WaterTone.pressureDelta(style.fullTonePressureGain, style: style) + ChartPalette.toneDelta) < 0.01)
+        #expect(abs(WaterTone.pressureDelta(-style.fullTonePressureLoss, style: style) - ChartPalette.toneDelta) < 0.01)
         // A full-tone puff and lull are the palette's own tokens: ±0.12.
         #expect(abs(WaterTone.puffDelta(intensity: style.fullTonePuffGain, style: style) + ChartPalette.toneDelta) < 0.01)
         #expect(abs(WaterTone.puffDelta(intensity: -style.fullToneLullLoss, style: style) - ChartPalette.toneDelta) < 0.01)
@@ -160,17 +171,97 @@ import RegattaCore
         #expect(lull.token == ChartPalette.lull && abs(lull.alpha - 0.5) < 1e-9)
     }
 
-    /// The minimap shows the wind off screen as well as on (#224): the HUD carries every puff and lull alive,
-    /// each where it is, its size and its tone.
-    @Test func hudCarriesThePuffsForTheMinimap() throws {
-        let race = try Self.race("gusty-offshore", to: -600)
-        let world = Self.world(of: race)
+    /// The pressure fixture (#289): dev-venue@6 and gusty-offshore@6, a pressure field with lanes, its side and
+    /// the venue's geography, frozen after the gun.
+    static func pressureWorld() throws -> RenderWorld {
+        let (fixture, log) = try RenderFixture.load(named: "water-pressure", in: RenderFixtureTests.fixtures)
+        return try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
+    }
+
+    /// The water's tone at a point follows the pressure there (#289): each sample of the tone is the model's own
+    /// pressure at its point (`WindSampler.pressureFactor(at:)`), and its pixel darkens the water with more
+    /// pressure and lightens it with less, by the pressure's lightness change to within a pixel's rounding. The
+    /// tone lies under the puffs and covers the view, and on the fixture's water it varies.
+    @Test func waterDrawsThePressure() throws {
+        let world = try Self.pressureWorld()
+        let sampler = try #require(world.windSampler)
+        #expect(sampler.pressureReading.map { !$0.lanes.isEmpty } == true)
+        let style = WaterStyle.standard
+        let me = world.me.position
+        var lowest = Double.infinity, highest = -Double.infinity
+        for view in [Self.view(centeredOn: me), Self.view(centeredOn: me, scale: 6)] {
+            let water = WaterNode(pointsPerMeter: 8)
+            water.update(WaterWorld(world), view: view, dt: 0)
+            let (grid, tone) = try #require(water.pressure)
+            #expect(grid.rect.contains(view.rect))
+            #expect(tone.columns == grid.columns.count && tone.rows == grid.rows.count && tone.boost == 1)
+            let pixels = tone.pixels(style: style)
+            var samples: [(pressure: Double, lightness: Double)] = []
+            for (row, j) in grid.rows.enumerated() {
+                for (column, i) in grid.columns.enumerated() {
+                    let point = grid.position(i, j)
+                    let pressure = tone.pressure(column: column, row: row)
+                    #expect(pressure == sampler.pressureFactor(at: Vec2(Double(point.x), Double(point.y)) / 8) - 1)
+                    // The pixel, premultiplied, over the water.
+                    let k = ((tone.rows - 1 - row) * tone.columns + column) * 4
+                    let alpha = Double(pixels[k + 3]) / 255
+                    let rgb = (0..<3).map { Double(pixels[k + $0]) / 255 + ChartPalette.water.components[$0] * (1 - alpha) }
+                    let lightness = OKLCH(srgb: rgb).L - ChartPalette.water.oklch.L
+                    #expect(abs(lightness - WaterTone.pressureDelta(pressure, style: style)) < 0.01,
+                            "pressure \(pressure): ΔL \(lightness)")
+                    samples.append((pressure, lightness))
+                    lowest = min(lowest, pressure)
+                    highest = max(highest, pressure)
+                }
+            }
+            // Darker where more, in order.
+            let ordered = samples.sorted { $0.pressure < $1.pressure }
+            for (a, b) in zip(ordered, ordered.dropFirst()) where b.pressure - a.pressure > 0.01 {
+                #expect(b.lightness <= a.lightness + 0.005, "\(a) then \(b)")
+            }
+            let sprite = try #require(water.children.first { $0.name == WaterNode.pressureName } as? SKSpriteNode)
+            #expect(!sprite.isHidden && sprite.texture != nil)
+            #expect(abs(sprite.frame.minX - grid.rect.minX) < 1e-3 && abs(sprite.frame.maxY - grid.rect.maxY) < 1e-3
+                && abs(sprite.frame.width - grid.rect.width) < 1e-3 && abs(sprite.frame.height - grid.rect.height) < 1e-3)
+            #expect(sprite.zPosition < 0, "the pressure draws under the puffs")
+        }
+        #expect(highest - lowest > 0.1, "the fixture's pressure is flat: \(lowest)…\(highest)")
+        #expect(lowest < 0 && highest > 0)
+    }
+
+    /// The minimap samples the model's own field at its pixels (#289): the HUD carries the pressure over the
+    /// minimap's chart, each sample the sampler's pressure at the middle of its cell of the chart, and the minimap
+    /// draws them stretched over exactly that chart, a pixel a sample. The same model as the water's: where the
+    /// water samples the same point, it draws the same pressure.
+    @Test func minimapDrawsThePressure() throws {
+        let world = try Self.pressureWorld()
+        let sampler = try #require(world.windSampler)
         let hud = HUDState(world: world)
-        #expect(!hud.puffs.isEmpty)
-        #expect(hud.puffs.map(\.center) == world.puffs.map(\.center))
-        #expect(hud.puffs.map(\.radius) == world.puffs.map(\.radius))
-        #expect(hud.puffs.map(\.intensity) == world.puffs.map(\.intensity))
-        #expect(hud.puffs.contains { $0.intensity > 0 } && hud.puffs.contains { $0.intensity < 0 })
+        let tone = try #require(hud.pressure)
+        let chart = MinimapChart(course: world.course)
+        #expect(tone.columns == MinimapChart.pressureColumns && tone.rows == chart.pressureRows && tone.boost == 1)
+        for row in 0..<tone.rows {
+            for column in 0..<tone.columns {
+                let point = chart.pressurePoint(column: column, row: row)
+                #expect(tone.pressure(column: column, row: row) == sampler.pressureFactor(at: point) - 1)
+            }
+        }
+        // The cells tile the chart: the first's middle is half a cell in, the last's half a cell short.
+        let cellX = (chart.maxX - chart.minX) / Double(tone.columns), cellY = (chart.maxY - chart.minY) / Double(tone.rows)
+        #expect(abs(chart.pressurePoint(column: 0, row: 0).x - (chart.minX + cellX / 2)) < 1e-9)
+        #expect(abs(chart.pressurePoint(column: tone.columns - 1, row: tone.rows - 1).y - (chart.maxY - cellY / 2)) < 1e-9)
+        #expect(abs(cellX - cellY) < 0.05 * cellX, "square samples: \(cellX) × \(cellY) m")
+        // Drawn over the chart exactly, its corners where the chart's corners draw.
+        let size = CGSize(width: 110, height: 150)
+        let rect = chart.rect(in: size)
+        let southWest = chart.point(Vec2(chart.minX, chart.minY), in: size)
+        let northEast = chart.point(Vec2(chart.maxX, chart.maxY), in: size)
+        #expect(abs(rect.minX - southWest.x) < 1e-9 && abs(rect.maxY - southWest.y) < 1e-9)
+        #expect(abs(rect.maxX - northEast.x) < 1e-9 && abs(rect.minY - northEast.y) < 1e-9)
+        let image = try #require(tone.image(style: .standard))
+        #expect(image.width == tone.columns && image.height == tone.rows)
+        let spread = tone.pressures.max()! - tone.pressures.min()!
+        #expect(spread > 0.1, "the fixture's pressure is flat on the minimap: \(spread)")
     }
 
     /// The cheap tier (#127) freezes the ripple and thins the whitecaps; the puff shading is a race cue, drawn the
@@ -195,6 +286,28 @@ import RegattaCore
         #expect(abs(Double(full.drift.x) - expected.x) < 1e-6 && abs(Double(full.drift.y) - expected.y) < 1e-6)
         // Every cheap streak lies on the course wind.
         #expect(cheap.streaks.allSatisfy { $0.windDirection == course.direction })
+
+        // The pressure is a race cue (#289): the cheap tier keeps it, sampled at half the resolution, each sample
+        // the model's pressure, darker where more as in the full tier.
+        let pressured = try Self.pressureWorld()
+        let sampler = try #require(pressured.windSampler)
+        let pressureView = Self.view(centeredOn: pressured.me.position)
+        full.update(WaterWorld(pressured), view: pressureView, dt: 0)
+        cheap.update(WaterWorld(pressured), view: pressureView, dt: 0)
+        let fullTone = try #require(full.pressure), cheapTone = try #require(cheap.pressure)
+        #expect(cheapTone.grid.spacing == 2 * fullTone.grid.spacing)
+        #expect(cheapTone.grid.rect.contains(pressureView.rect))
+        // Half as many a side, but for the samples to spare all round (a view's edges rounded out, and one more).
+        #expect(cheapTone.tone.columns <= (fullTone.tone.columns + 1) / 2 + 2 && cheapTone.tone.rows <= (fullTone.tone.rows + 1) / 2 + 2)
+        #expect(cheapTone.tone.pressures.count < fullTone.tone.pressures.count)
+        for (row, j) in cheapTone.grid.rows.enumerated() {
+            for (column, i) in cheapTone.grid.columns.enumerated() {
+                let point = cheapTone.grid.position(i, j)
+                #expect(cheapTone.tone.pressure(column: column, row: row)
+                    == sampler.pressureFactor(at: Vec2(Double(point.x), Double(point.y)) / 8) - 1)
+            }
+        }
+        #expect(cheapTone.tone.pixels(style: .standard).contains { $0 > 0 }, "the cheap tier drew no pressure")
     }
 
     /// A frozen render fixture draws the same pixels on every launch (#62). The view ignores sibling order, so
@@ -202,11 +315,32 @@ import RegattaCore
     /// streak tiles, in four textures at one z, did, moving a few overlapping pixels a level. So every sprite the
     /// water draws has a z of its own, and the same world through the same view draws the same sprites: on a
     /// fresh node, on one whose pools grew on a wider view first, and again when redrawn settled (dt 0).
+    ///
+    /// The pressure's texture is made anew from its samples (#289), so it is compared by its samples and pixels:
+    /// the same on each, and in every tier.
     @Test func waterDrawsTheSameEveryTime() throws {
         let race = try Self.race("gusty-offshore", to: -600)
         let world = WaterWorld(Self.world(of: race))
         let me = race.boats[0].position
         var caps = 0, streaks = 0
+        let pressured = try Self.pressureWorld()
+        for quality in [WaterQuality.full, .cheap] {
+            for dy in stride(from: -200.0, through: 200, by: 100) {
+                let view = Self.view(centeredOn: pressured.me.position + Vec2(0, dy))
+                let fresh = WaterNode(pointsPerMeter: 8), used = WaterNode(pointsPerMeter: 8)
+                fresh.quality = quality
+                used.quality = quality
+                used.update(WaterWorld(pressured), view: Self.view(centeredOn: pressured.me.position, scale: 1 / 0.45), dt: 0)
+                fresh.update(WaterWorld(pressured), view: view, dt: 0)
+                used.update(WaterWorld(pressured), view: view, dt: 0)
+                let a = try #require(fresh.pressure), b = try #require(used.pressure)
+                #expect(a.grid == b.grid && a.tone == b.tone)
+                #expect(a.tone.pixels(style: .standard) == b.tone.pixels(style: .standard))
+                #expect(DrawnSprite.all(under: fresh) == DrawnSprite.all(under: used))
+                fresh.update(WaterWorld(pressured), view: view, dt: 0)
+                #expect(try #require(fresh.pressure).tone == a.tone, "redrawn settled, the pressure moved")
+            }
+        }
         for dy in stride(from: -200.0, through: 200, by: 25) {
             let view = Self.view(centeredOn: me + Vec2(0, dy))
             let fresh = WaterNode(pointsPerMeter: 8), used = WaterNode(pointsPerMeter: 8)
@@ -344,6 +478,7 @@ private struct DrawnSprite: Equatable {
     var size: CGSize
     var alpha: CGFloat
     var color: [CGFloat]
+    /// Nil for the pressure's, made anew each frame: compared by its samples instead.
     var texture: ObjectIdentifier?
     var textureRect: CGRect?
 
@@ -360,10 +495,31 @@ private struct DrawnSprite: Equatable {
                 drawn.append(DrawnSprite(z: z, position: sprite.position, rotation: sprite.zRotation,
                                          scale: CGSize(width: sprite.xScale, height: sprite.yScale), size: sprite.size,
                                          alpha: sprite.alpha, color: sprite.color.cgColor.components ?? [],
-                                         texture: sprite.texture.map(ObjectIdentifier.init),
+                                         texture: sprite.name == WaterNode.pressureName ? nil : sprite.texture.map(ObjectIdentifier.init),
                                          textureRect: sprite.texture?.textureRect()))
             }
             return drawn
         }
+    }
+}
+
+/// Saved water tunings from older builds (#289).
+@MainActor @Suite struct WaterStyleDecodeTests {
+    /// A tuning saved before #289 has no pressure fields in its water: it keeps its tuned water values and
+    /// the pressure fields take their standard defaults, rather than the whole water falling back to standard.
+    @Test func preTwoEightyNineWaterKeepsItsTuning() throws {
+        let water = """
+        {"rippleSpacing": 96, "rippleAlpha": 0.4, "rippleDrift": 0.12, "fullTonePuffGain": 0.42,
+         "fullToneLullLoss": 0.2, "catspaw": 0.3, "whitecapOnsetKnots": 9, "whitecapFullKnots": 20,
+         "whitecapMaxShare": 0.5, "whitecapAlpha": 0.85, "whitecapSeconds": 3.5, "cheapWhitecapShare": 0.5}
+        """
+        let style = try JSONDecoder().decode(WaterStyle.self, from: Data(water.utf8))
+        #expect(style.fullTonePuffGain == 0.42)
+        #expect(style.fullTonePressureGain == WaterStyle.standard.fullTonePressureGain)
+        #expect(style.fullTonePressureLoss == WaterStyle.standard.fullTonePressureLoss)
+
+        let tuning = try JSONDecoder().decode(Tuning.self, from: Data("{\"water\": \(water)}".utf8))
+        #expect(tuning.water.fullTonePuffGain == 0.42)
+        #expect(tuning.water.fullTonePressureGain == WaterStyle.standard.fullTonePressureGain)
     }
 }

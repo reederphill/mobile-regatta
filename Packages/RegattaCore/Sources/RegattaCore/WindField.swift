@@ -373,6 +373,53 @@ public struct WindSampler: Sendable {
         let puffs = WindField.puffEffect(gain: gain, fan: fan, puffPlan)
         return GroundWind(direction: wrapAngle(direction + puffs.turn), speed: speed * puffs.factor)
     }
+
+    /// The pressure at `p` (#289): the wind speed the venue's geography and the pressure field make there, as a
+    /// multiple of the course average, before any puff or lull. `sample(p).speed` is the course average times
+    /// this times the puffs' factor. A pure read of the tick's state, for drawing the field: 1 where there is
+    /// neither geography nor pressure field.
+    public func pressureFactor(at p: Vec2) -> Double {
+        var factor = geographicGrid.sample(p).speedFactor
+        if let (plan, state) = pressure {
+            factor = factor * plan.effect(at: plan.coordinate(at: p), side: state.side, lanes: state.lanes).factor
+        }
+        return factor
+    }
+
+    /// The pressure field as it is at the tick, for a tuning overlay to mark (#289); nil with none.
+    public var pressureReading: PressureReading? {
+        guard let (plan, state) = pressure else { return nil }
+        return PressureReading(side: state.side, halfWidth: plan.halfWidth, lanes: state.lanes.map {
+            PressureReading.Lane(centre: $0.centre, halfWidth: $0.halfWidth, intensity: $0.intensity)
+        })
+    }
+
+    /// The pressure field's across-the-wind coordinate at `p`: metres right of the race area's centre line
+    /// looking downwind, carried along the venue's bent streamlines, as `PressureReading` places the lanes and
+    /// the pressure side. Nil with no pressure field.
+    public func pressureCoordinate(at p: Vec2) -> Double? {
+        pressure.map { $0.plan.coordinate(at: p) }
+    }
+}
+
+/// The pressure field at one tick, as a tuning overlay reads it (#289): nothing the sim keeps or logs, just
+/// `PressureState` in public terms. Positions are across-the-wind coordinates (`WindSampler.pressureCoordinate`).
+public struct PressureReading: Hashable, Sendable {
+    /// A pressure lane now: where its middle is, its half-width (metres) and its peak gain, a fraction of the
+    /// course average.
+    public struct Lane: Hashable, Sendable {
+        public let centre: Double
+        public let halfWidth: Double
+        public let intensity: Double
+    }
+
+    /// The pressure side's gain at `halfWidth` right of the centre line (looking downwind): positive when the
+    /// right is the pressure side, negative the left.
+    public let side: Double
+    /// Metres from the centre line to where the pressure side's gain stops growing.
+    public let halfWidth: Double
+    /// The lanes alive, in window and spawn order.
+    public let lanes: [Lane]
 }
 
 /// Puffs binned into square cells over the water they reach: each cell lists, in their order, the puffs whose

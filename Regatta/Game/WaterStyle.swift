@@ -27,6 +27,14 @@ nonisolated struct WaterStyle: Codable, Equatable, Sendable {
     /// How much the catspaw texture varies a puff's tone about its mean, 0 (smooth) to 1.
     var catspaw = 0.3
 
+    // MARK: Pressure (#289)
+
+    /// Pressure this much above the course average (a fraction of it: the pressure side, pressure lanes and the
+    /// venue's geography, before puffs) draws at full `ChartPalette.puff`; less, lighter in proportion.
+    var fullTonePressureGain = 0.15
+    /// Pressure this much below the course average draws at full `ChartPalette.lull`.
+    var fullTonePressureLoss = 0.15
+
     // MARK: Whitecaps
 
     /// Below this conditions mean wind, knots, there are no whitecaps.
@@ -49,9 +57,35 @@ nonisolated struct WaterStyle: Codable, Equatable, Sendable {
     static let standard = WaterStyle()
 }
 
+/// Lenient: a field missing from a saved style (one saved before the field existed, like the pressure tones
+/// saved before #289) takes its standard value, so an older tuning keeps the rest of its water.
+nonisolated extension WaterStyle {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let standard = WaterStyle.standard
+        func value(_ key: CodingKeys, _ fallback: Double) throws -> Double {
+            try c.decodeIfPresent(Double.self, forKey: key) ?? fallback
+        }
+        self.init(rippleSpacing: try value(.rippleSpacing, standard.rippleSpacing),
+                  rippleAlpha: try value(.rippleAlpha, standard.rippleAlpha),
+                  rippleDrift: try value(.rippleDrift, standard.rippleDrift),
+                  fullTonePuffGain: try value(.fullTonePuffGain, standard.fullTonePuffGain),
+                  fullToneLullLoss: try value(.fullToneLullLoss, standard.fullToneLullLoss),
+                  catspaw: try value(.catspaw, standard.catspaw),
+                  fullTonePressureGain: try value(.fullTonePressureGain, standard.fullTonePressureGain),
+                  fullTonePressureLoss: try value(.fullTonePressureLoss, standard.fullTonePressureLoss),
+                  whitecapOnsetKnots: try value(.whitecapOnsetKnots, standard.whitecapOnsetKnots),
+                  whitecapFullKnots: try value(.whitecapFullKnots, standard.whitecapFullKnots),
+                  whitecapMaxShare: try value(.whitecapMaxShare, standard.whitecapMaxShare),
+                  whitecapAlpha: try value(.whitecapAlpha, standard.whitecapAlpha),
+                  whitecapSeconds: try value(.whitecapSeconds, standard.whitecapSeconds),
+                  cheapWhitecapShare: try value(.cheapWhitecapShare, standard.cheapWhitecapShare))
+    }
+}
+
 /// How much the water spends per frame (#127 picks it from thermal state; the ladder is #27's). The cheap tier
-/// freezes the ripple (no drift, every tile on the course wind, no per-tile sampling) and thins the whitecaps.
-/// Puff shading is a race cue, drawn the same in every tier.
+/// freezes the ripple (no drift, every tile on the course wind, no per-tile sampling), thins the whitecaps and
+/// samples the pressure tone at half resolution. Puff shading and the pressure are race cues, drawn in every tier.
 nonisolated enum WaterQuality: Sendable {
     case full, cheap
 }
@@ -143,8 +177,13 @@ nonisolated struct RippleLattice: Sendable {
 
     /// The lattice for `style` at camera scale `scale`, and the scale its tiles draw at.
     static func forView(style: WaterStyle, cameraScale scale: Double) -> (lattice: RippleLattice, tileScale: Double) {
-        let step = scale > finestScale ? pow(2, (log2(scale / finestScale)).rounded(.up)) : 1
+        let step = step(cameraScale: scale)
         return (RippleLattice(spacing: style.rippleSpacing * step), step)
+    }
+
+    /// How many times the lattice spreads out at camera scale `scale`: 1 up to `finestScale`, then doubling.
+    static func step(cameraScale scale: Double) -> Double {
+        scale > finestScale ? pow(2, (log2(scale / finestScale)).rounded(.up)) : 1
     }
 
     /// Where tile `index` is on the water, in world points, with the lattice drifted by `drift`: its lattice

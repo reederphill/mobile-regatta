@@ -218,7 +218,7 @@ A wind shift that keeps trending one way over the race.
 _Avoid_: permanent shift
 
 **Geographic shift**:
-A wind shift fixed in place by the venue's shoreline, felt by any boat that sails there.
+The venue's static, public change to the wind at a place, fixed by its shoreline and felt by any boat that sails there: a direction bend and a signed speed change (an older venue's shadow reads as a loss), plus where pressure lanes like to form and the pressure side's standing tendency (#287).
 
 **Pressure**:
 How much stronger or weaker the wind is than the course average at a place. Shaped by the pressure side, pressure lanes and the venue's geography (ADR 0008).
