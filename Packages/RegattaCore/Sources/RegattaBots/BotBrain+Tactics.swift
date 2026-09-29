@@ -27,12 +27,21 @@ struct Tactics: Sendable, Equatable {
     var pinchesToFetch: Bool
     /// Upwind, she weighs the puffs and lulls drawn on the water ahead on each tack.
     var seeksPuffs: Bool
+    /// Upwind, she weighs the pressure ahead on each tack (#290): she goes to the pressure, and into a pressure lane
+    /// on the edge whose bend lifts her.
+    var seeksPressure: Bool
+    /// With the shift neutral, she tacks to the pressure on half the case a shift needs: she goes to the pressure
+    /// when there's no shift to play; and she weighs the pressure along her whole track on each tack
+    /// (`pressureAdvantage`). The tactician's; a live bot weighs the pressure only against the shift, and by the best
+    /// spot she sees on each tack (#290).
+    var goesToThePressure: Bool
     /// Upwind, she tacks out of another boat's wind shadow.
     var seeksClearAir: Bool
     /// Upwind, she tacks with the nearest boat close behind her, to stay between it and the mark.
     var covers: Bool
 
-    /// Metres ahead she notices puffs and lulls (`BotWeaknesses.puffPerception`), when she seeks them.
+    /// Metres ahead she notices puffs and lulls (`BotWeaknesses.puffPerception`), when she seeks them; she reads the
+    /// pressure out to twice as far (`pressureLookAhead`).
     var puffRange = BotWeaknesses.fullPuffPerception
     /// How well she times cover and lee-bow, 0…1 (`BotWeaknesses.tacticalQuality`, #223): she covers a boat within
     /// this share of `BotBrain.coverRange` (and more of it the better she is); #234's fleet tactics read it too.
@@ -48,7 +57,7 @@ struct Tactics: Sendable, Equatable {
             let willingness = style?.tackWillingness ?? 0.5
             let threshold = deg2rad(3 + 2 * (1 - willingness) + 12 * max(0, 0.75 - skill))
             self.init(headerThreshold: threshold, tackInterval: 15 * (1.3 - 0.6 * willingness), replanes: true,
-                      seeksPuffs: weaknesses.puffPerception > 0)
+                      seeksPuffs: weaknesses.puffPerception > 0, seeksPressure: weaknesses.puffPerception > 0)
             puffRange = weaknesses.puffPerception
             corridorBias = 0.5 * (style?.favouredSide ?? 0)
             tacticalQuality = weaknesses.tacticalQuality
@@ -58,7 +67,7 @@ struct Tactics: Sendable, Equatable {
         case .tactician:
             self.init(headerThreshold: deg2rad(4), tackInterval: 20, anticipation: 6, corridor: 0.8,
                       downwindShiftThreshold: deg2rad(5), replanes: true, heatsUpInLulls: true, pinchesToFetch: true,
-                      seeksPuffs: true, seeksClearAir: true, covers: true)
+                      seeksPuffs: true, seeksPressure: true, goesToThePressure: true, seeksClearAir: true, covers: true)
         case .blipTacker:
             // The baseline with a hair trigger: a 3° blip tacks her as a real header does.
             self.init(headerThreshold: deg2rad(3), tackInterval: 15)
@@ -67,7 +76,8 @@ struct Tactics: Sendable, Equatable {
 
     init(headerThreshold: Double?, tackInterval: Double, anticipation: Double = 0, corridor: Double = 0.35,
          downwindShiftThreshold: Double? = nil, replanes: Bool = false, heatsUpInLulls: Bool = false,
-         pinchesToFetch: Bool = false, seeksPuffs: Bool = false, seeksClearAir: Bool = false, covers: Bool = false) {
+         pinchesToFetch: Bool = false, seeksPuffs: Bool = false, seeksPressure: Bool = false,
+         goesToThePressure: Bool = false, seeksClearAir: Bool = false, covers: Bool = false) {
         self.headerThreshold = headerThreshold
         self.tackInterval = tackInterval
         self.anticipation = anticipation
@@ -77,6 +87,8 @@ struct Tactics: Sendable, Equatable {
         self.heatsUpInLulls = heatsUpInLulls
         self.pinchesToFetch = pinchesToFetch
         self.seeksPuffs = seeksPuffs
+        self.seeksPressure = seeksPressure
+        self.goesToThePressure = goesToThePressure
         self.seeksClearAir = seeksClearAir
         self.covers = covers
     }
@@ -164,7 +176,7 @@ extension BotBrain {
     // MARK: - Upwind
 
     /// The tack to beat on inside the corridor to her mark, starting from `planned`: the other one on a
-    /// header past her threshold, and for a tactician, when the other side's puffs, clear air or a boat to
+    /// header past her threshold, and for a tactician, when the other side's puffs, pressure, clear air or a boat to
     /// cover make it worth a tack.
     mutating func upwindTack(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack) -> Tack {
         guard let threshold = tactics.headerThreshold, view.time - lastTackTime > tactics.tackInterval else { return tack }
@@ -172,12 +184,18 @@ extension BotBrain {
         let shift = wrapAngle(direction - view.course.axis)
         // Headed: backed on starboard, veered on port.
         var headed = tack == .starboard ? -shift : shift
+        // Goes to the pressure (`Tactics.goesToThePressure`): with the shift neutral, nothing in it to play, the
+        // pressure calls her tack on half the case a shift needs.
+        let neutral = abs(headed) < threshold / 2
+        let pressure = tactics.seeksPressure ? pressureAdvantage(b, view, over: tack) : 0
         if tactics.seeksPuffs { headed += puffAdvantage(b, view, over: tack) }
+        headed += pressure
         if tactics.seeksClearAir && tack == b.tack && b.shadow < Self.dirtyAir { headed += Self.dirtyAirWeight }
         if tactics.covers, let rival = coverTarget(b, view), rival.tack != tack, headed > -threshold {
             return rival.tack
         }
-        return headed > threshold ? tack.other : tack
+        let bar = tactics.goesToThePressure && neutral && pressure > threshold / 2 ? threshold / 2 : threshold
+        return headed > bar ? tack.other : tack
     }
 
     /// Her wind shadow factor under which she is in another boat's dirty air.
@@ -214,6 +232,56 @@ extension BotBrain {
             return total / Double(Self.puffLookAhead.count)
         }
         return (tone(tack.other) - tone(tack)) * Self.puffWeight
+    }
+
+    /// More pressure ahead, per unit of the factor over hers, averaged along her track, is worth this much shift: as a
+    /// puff's (`puffWeight`), a tenth more wind about a degree and a half. Weighed against the shift, so she plays the
+    /// shifts first and leans to the pressure, rather than sailing off to it through them (#290's bot suite). The
+    /// tactician's read (`Tactics.goesToThePressure`).
+    static let pressureWeight = deg2rad(14)
+    /// More pressure at the best spot she sees on a tack, per unit of the factor over hers, is worth this much shift: a
+    /// live bot's read. More than a puff's: the pressure lasts, and a boat in it keeps its gain for as long as she stays.
+    static let spotPressureWeight = deg2rad(30)
+    /// How far ahead she reads the pressure along each tack, as shares of her `Tactics.puffRange`: out to twice it.
+    static let pressureLookAhead: [Double] = [0.5, 1, 1.5, 2]
+    /// The pressure over hers at which a place's bend counts in full: the edge of a pressure lane she'd sail into.
+    /// Less, and its bend counts for that share; none, and not at all.
+    static let laneEdgePressure = 0.1
+
+    /// How much better, as degrees of shift, the pressure ahead is on the other tack than on `tack` (#290), out as far
+    /// as she sees it on each (`pressureLookAhead`): its pressure over hers, and its wind's turn from hers as a lift on
+    /// that tack. So she goes to the pressure, and into a pressure lane on the edge whose bend lifts her; the edge that
+    /// would head her she leaves. Nothing past the race area's edge counts.
+    ///
+    /// How well she reads it is her skill's (#102, #290's ruling 2): a live bot reads each tack by the best spot she
+    /// sees on it (`spotPressureWeight`), so the further she sees (`BotWeaknesses.puffPerception`) the better the spot
+    /// she finds, and the tiers differ in how well they play the field. The tactician weighs the whole of her track
+    /// (`pressureWeight`), and a bend only where she'd sail into more pressure: a bend with no more pressure in it is
+    /// a shift she'd only sail into and out of again, not worth a tack.
+    func pressureAdvantage(_ b: SeatView.OwnBoat, _ view: SeatView, over tack: Tack) -> Double {
+        guard let map = view.pressure, tactics.puffRange > 0, let here = map.sample(at: b.position) else { return 0 }
+        let up = grooveAngle(.upwind, b, view)
+        let alongTrack = tactics.goesToThePressure
+        func read(_ tack: Tack) -> Double {
+            let ahead = Vec2.heading(Aim(angle: up, tack: tack).heading(wind: b.windDirection))
+            // A veer lifts her on starboard, a back on port.
+            let lift: Double = tack == .starboard ? 1 : -1
+            var total = 0.0
+            var best: Double?
+            for share in Self.pressureLookAhead {
+                guard let there = map.sample(at: b.position + ahead * (share * tactics.puffRange)) else { break }
+                let gain = there.factor - here.factor
+                let bend = lift * wrapAngle(there.turn - here.turn)
+                if alongTrack {
+                    total += gain * Self.pressureWeight + min(max(gain / Self.laneEdgePressure, 0), 1) * bend
+                } else {
+                    let value = gain * Self.spotPressureWeight + bend
+                    best = max(best ?? value, value)
+                }
+            }
+            return alongTrack ? total / Double(Self.pressureLookAhead.count) : best ?? 0
+        }
+        return read(tack.other) - read(tack)
     }
 
     /// The boat close behind her on the beat she'd cover: sailing upwind, within a few lengths and not

@@ -424,3 +424,48 @@ extension WindField {
         return (from, WindKnot(value: position, slope: drift))
     }
 }
+
+// MARK: - Reading the pressure (#290)
+
+/// The pressure at a place (CONTEXT.md, "Pressure"): the wind there before any puff or lull, as the venue's
+/// geography and the pressure field make it. What the water and the minimap tone (ADR 0008), and what a bot reads of
+/// them (`SeatView.PressureMap`).
+public struct Pressure: Sendable, Hashable {
+    /// The wind's speed as a factor of the course average (`WindField.courseAverageSpeed(atTick:)`).
+    public let factor: Double
+    /// How far the wind is turned from the course's direction now, radians, positive veering: the geography's bend
+    /// plus the pressure side's and the lanes' edges'.
+    public let turn: Double
+
+    public init(factor: Double, turn: Double) {
+        self.factor = factor
+        self.turn = turn
+    }
+
+    /// The pressure at `p`: `WindField.sample(_:tick:)`'s geography and pressure field terms, without its puffs.
+    static func at(_ p: Vec2, _ geographicGrid: Venue.GeographicGrid,
+                   _ field: (plan: PressurePlan, state: PressureState)?) -> Pressure {
+        let geographic = geographicGrid.sample(p)
+        guard let (plan, state) = field else { return Pressure(factor: geographic.speedFactor, turn: geographic.directionDelta) }
+        let pressure = plan.effect(at: plan.coordinate(at: p), side: state.side, lanes: state.lanes)
+        return Pressure(factor: geographic.speedFactor * pressure.factor, turn: geographic.directionDelta + pressure.turn)
+    }
+}
+
+extension WindField {
+    /// The pressure anywhere at `tick` (`Pressure`): the tick's pressure state worked out once, to read at many
+    /// places. Throws what `sample(_:tick:)` would.
+    func pressure(atTick tick: Int) throws(WindFieldError) -> (Vec2) -> Pressure {
+        let field = try pressurePlan.map { plan throws(WindFieldError) in (plan, try pressureState(atTick: tick, plan)) }
+        let grid = setup.pairing.geographicGrid
+        return { Pressure.at($0, grid, field) }
+    }
+}
+
+extension WindSampler {
+    /// The pressure at `p` (`Pressure`): this tick's wind there without its puffs, as a factor of the course average
+    /// and a turn from the course's direction.
+    public func pressure(at p: Vec2) -> Pressure {
+        Pressure.at(p, geographicGrid, pressure)
+    }
+}

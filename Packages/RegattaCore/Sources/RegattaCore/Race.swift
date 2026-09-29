@@ -46,6 +46,10 @@ public final class Race {
     /// The umpire's memory: the authoritative race's alone, nil for a prediction. Never in a snapshot:
     /// a test that compares a race with one importing its world hands this on too (`WorldSnapshotTests`).
     public internal(set) var umpire: UmpireState?
+    /// The pressure map the seat views last drew (`SeatView.PressureMap`, #290), kept for their views until its next
+    /// refresh tick. A function of its tick and the keys it read, which never change once held; not race state, and
+    /// nothing a step reads.
+    var pressureMapDrawn: SeatView.PressureMap?
 
     /// The bundled defaults (`RaceFiles.defaults`), for code that needs one of them without a race.
     public static var defaultBoatClass: BoatClass { RaceFiles.defaults.boatClass.content }
@@ -1346,6 +1350,7 @@ extension Race {
 
         wind = snapshotWind
         windKeys = generator
+        pressureMapDrawn = nil
 
         tick = snapshot.tick
         boats = snapshot.seats.map(\.boat)

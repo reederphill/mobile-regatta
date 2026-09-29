@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import RegattaCore
+@testable import RegattaCore
 @testable import RegattaBots
 
 /// #98: a bot sees a race only through its seat's `SeatView`, which holds only what a player in that seat
@@ -131,6 +131,65 @@ import RegattaCore
         #expect(snapshot.contains { $0.contains(".heldInput") } && snapshot.contains { $0.contains(": IncidentIndex") })
         #expect(snapshot.contains { $0.contains(": WindKeyChain") })
         #expect(try !Self.violations(in: FleetRoster(setup: race.setup)).isEmpty)
+    }
+
+    /// #290: a bot's pressure map is the model's own field without its puffs (`WindSampler.pressure(at:)`), as it
+    /// stood at the map's refresh tick and never later, at every node over the race area; between nodes it follows
+    /// the field closely, and past the race area's sides it holds nothing: no node lies beyond them, and it reads
+    /// nothing there.
+    @Test func pressureSampledWithinSight() throws {
+        // The bot suite's files: a pressure field (#286) at a venue with geography (#287).
+        let setup = try RaceSetup(raceSeed: RaceSeed(290), seats: Array(repeating: .bot, count: 8), laps: 2,
+                                  startSequenceTicks: 45 * Race.tickRate,
+                                  venue: VenueFile.bundled(id: "dev-venue", version: 6).ref,
+                                  conditions: ConditionsFile.bundled(id: "classic-oscillating", version: 6).ref)
+        let race = Race(setup: setup, windSeed: WindSeed(290))
+        var controllers = allBots(race)
+        let every = SeatView.PressureMap.refreshTicks
+        sail(race, &controllers, ticks: 300 * Race.tickRate - race.tick + every / 2)
+        #expect(race.tick % every != 0)
+        let view = race.seatView(for: 1)
+        let map = try #require(view.pressure)
+        #expect(map.tick <= race.tick && map.tick > race.tick - every && map.tick % every == 0)
+        #expect(map.columns * map.rows == map.nodes.count && map.nodes.count >= 100)
+        #expect(map.area == race.course.raceArea)
+        let model = try race.wind.sampler(atTick: map.tick)
+        let courseSpeed = try race.wind.courseAverageSpeed(atTick: map.tick)
+        var factors: [Double] = []
+        for row in 0..<map.rows {
+            for column in 0..<map.columns {
+                let p = map.position(column: column, row: row)
+                #expect(map.area.inset(p) >= -1e-6, "node (\(column), \(row)) lies beyond the race area")
+                let node = map.node(column: column, row: row)
+                #expect(node == model.pressure(at: p))
+                #expect(map.sample(at: p).map { abs($0.factor - node.factor) < 1e-12 } == true)
+                factors.append(node.factor)
+                // Where no puff reaches, the model's wind is the pressure times the course average.
+                if model.puffs.allSatisfy({ ($0.center - p).length > $0.radius }) {
+                    let speed = model.sample(p).speed
+                    #expect(abs(speed - node.factor * courseSpeed) < 1e-9 * courseSpeed)
+                }
+            }
+        }
+        // It shows a field: the pressure differs over the area.
+        #expect(factors.max()! - factors.min()! > 0.02)
+        // Between nodes, within a few hundredths of the model.
+        var worst = 0.0
+        for row in 0..<(map.rows - 1) {
+            for column in 0..<(map.columns - 1) {
+                let p = (map.position(column: column, row: row) + map.position(column: column + 1, row: row + 1)) * 0.5
+                let sampled = try #require(map.sample(at: p))
+                worst = max(worst, abs(sampled.factor - model.pressure(at: p).factor))
+            }
+        }
+        #expect(worst < 0.05)
+        // Nothing beyond the sides.
+        let area = map.area
+        let up = Vec2.heading(area.axis), right = up.rightPerp
+        for outside in [right * (area.halfWidth + 1), right * -(area.halfWidth + 1), up * (area.halfLength + 1),
+                        up * -(area.halfLength + 1)] {
+            #expect(map.sample(at: area.centre + outside) == nil)
+        }
     }
 
     /// The view is the race for its seat as it stands: her boat, her relation to each other boat, her place,
