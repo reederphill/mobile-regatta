@@ -330,6 +330,31 @@ import RegattaCore
         #expect(markRoomNotices >= 3, "the mark-room encounters made rule 18 records")
     }
 
+    /// "Tacks away from a boat alongside" (#263): two bots beating on starboard side by side, a hull length apart (inside
+    /// the clearance a tack keeps), both meaning to tack onto port, the windward one misjudging her keep-clear (#103) so
+    /// she doesn't luff out of the clearance first. The windward one, whose tack only opens the gap, tacks; the leeward
+    /// one, whose tack would sail her into the other, waits. Before, each waited on the other and they sailed on together
+    /// (BotEdgeTests, seed 1 in the sea breeze: into the race area's edge).
+    @Test func theWindwardBoatAlongsideTacksAway() throws {
+        for seed: UInt64 in [3, 9, 16] {
+            let water = Water(seed: seed)
+            let heading = water.beat(.starboard)
+            let forward = Vec2.heading(heading)
+            let race = try Self.place(water, [
+                Placement(position: water.centre, heading: heading, speed: water.up.speed),
+                Placement(position: water.centre + forward.rightPerp * water.length - forward * water.length * 0.2,
+                          heading: heading, speed: water.up.speed),
+            ])
+            var tackedAt: [Int?] = [nil, nil]
+            let kinds = Self.sail(race, seconds: 12, planned: [.port, .port], weaknesses: [nil, Self.misjudging(1)]) { race in
+                for seat in 0...1 where tackedAt[seat] == nil && race.boats[seat].tack == .port { tackedAt[seat] = race.tick }
+            }
+            #expect(Self.calls(kinds).isEmpty, "seed \(seed): \(Self.calls(kinds))")
+            let windward = try #require(tackedAt[1], "seed \(seed): the windward boat never tacked")
+            #expect(tackedAt[0].map { $0 > windward } ?? true, "seed \(seed): the leeward boat tacked first: \(tackedAt)")
+        }
+    }
+
     /// The closest `other` comes to `boat` over `horizon` seconds were `boat` sailing `heading` at her speed, `other`
     /// sailing on at hers: both in straight lines, in the same water. Metres between centres.
     static func closestApproach(_ boat: Boat, heading: Double, _ other: Boat, horizon: Double) -> Double {

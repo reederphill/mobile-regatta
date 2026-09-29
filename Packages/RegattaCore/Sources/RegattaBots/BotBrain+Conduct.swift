@@ -219,6 +219,11 @@ extension BotBrain {
     /// the other tack at `tapSpeedShare` of her speed for `tapLookahead` seconds (`tapOntoPortLookahead` for a boat on
     /// starboard when she goes onto port), no boat within `tapRange` comes inside `tapClearance` hull lengths of her.
     /// Before her start her taps are #99's.
+    ///
+    /// "Tacks away from a boat alongside" (#263): a boat already inside the clearance, overlapped with her, is clear of
+    /// a tack that only opens the gap between them. Two boats sailing side by side off the start would otherwise each
+    /// wait on the other to tack, and sail on together into the race area's edge; the one whose tack takes her away
+    /// tacks.
     func tapIsClear(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         guard b.status == .racing else { return true }
         let heading = 2 * b.windDirection - b.heading
@@ -226,9 +231,11 @@ extension BotBrain {
         let clear = view.boatClass.hull.length * Self.tapClearance
         let ontoPort = b.tack == .starboard
         return view.others.allSatisfy { other in
-            guard !other.isGhost, (other.position - b.position).length <= Self.tapRange else { return true }
+            let gap = (other.position - b.position).length
+            guard !other.isGhost, gap <= Self.tapRange else { return true }
             let lookahead = ontoPort && other.tack == .starboard ? Self.tapOntoPortLookahead : Self.tapLookahead
-            return Self.closestApproach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead) >= clear
+            let approach = Self.closestApproach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead)
+            return approach >= min(clear, gap)
         }
     }
 }
