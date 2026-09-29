@@ -142,9 +142,15 @@ struct BotBrain: Sendable {
     private var finishSpot: Double { style.finishSpot }
 
     /// The decision for `view`'s seat now: what she sails, with her roll tap if this is its moment (`rollsNow`).
+    ///
+    /// "Sheets in through the eye": turning through the no-go zone she never eases, whatever she was holding
+    /// with before (#231, #263): the sails can't draw there, and eased she comes out of the tack slower still.
     mutating func decide(_ view: SeatView) -> BotDecision {
         var decision = sail(view)
         if decision.tap == nil, rollsNow(view.own, view) { decision.tap = .tackGybe }
+        if decision.input.ease, view.own.twa < BoatDynamics.noGoAngle(view.boatClass.polar) {
+            decision.input = decision.input.eased(false)
+        }
         return decision
     }
 
@@ -693,7 +699,7 @@ struct BotBrain: Sendable {
             case .portStarboard:
                 return b.windDirection + side * min(max(deg2rad(85), b.twa + deg2rad(30)), deg2rad(150))
             case .whileTacking:
-                return b.windDirection + side * (Self.closeHauled(b.polarWindSpeed, view) + deg2rad(10))
+                return finishingTack(b, view)
             case .windwardLeeward:
                 let noGo = BoatDynamics.noGoAngle(view.boatClass.polar)
                 return b.windDirection + side * max(noGo + deg2rad(2), min(deg2rad(38), b.twa - deg2rad(10)))
