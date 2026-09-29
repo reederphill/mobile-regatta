@@ -51,7 +51,7 @@ enum SkiffFixtures {
     static let pinnedHashes = [
         1: "826fa149ace5a1d876829129216281725001f43c99c247e074582cd99f2ed6f4",
         2: "32e5162d6caf3e32280ca754c1381e1012e4db4ef04252bf278b96dd796f5cd1",
-        3: "8bfa7a344f3eeda1c9fb0c80e9ca39a972de184a37317e0db2cf9df4876ba723",
+        3: "cda1a0fad71369935f760f4e435bf012090a75e8cdd6bb13280087c101a77ada",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
