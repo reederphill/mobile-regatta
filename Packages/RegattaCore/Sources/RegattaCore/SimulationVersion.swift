@@ -129,7 +129,14 @@ import Glibc
 ///    derived at load from its geographic grid): `WindField.sample` scales the speed and bends the direction by
 ///    them after the geographic grid and before the puffs, and needs keys further back (`PressurePlan.lookback`).
 ///    Schema-1 and -2 files have no pressure field: their races sail as on 20.
-public let simulationRevision = 21
+/// 22: venue geography (#287, ADR 0008), on 21. Schema-2 venue files (dev-venue@5, on the schema-4 version-5
+///    conditions files) give each pairing's geographic grid a signed speed change in place of the speed factor,
+///    lane spots and a side tendency: a share of lanes forms at the spots (`presspot` stream), and window 0's key
+///    draws the race's multiplier on the tendency (`prestend`), added to every pressure side target, so the wind
+///    needs window 0's key throughout. The bot-suite matrix moves to dev-venue@5 and the version-5 conditions.
+///    Schema-1 venues have no spots or tendency, draw nothing more and use their speed factor as written: their
+///    races, the default race's included, sail as on 21.
+public let simulationRevision = 22
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

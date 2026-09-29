@@ -2,8 +2,10 @@ import Foundation
 
 /// A venue: the water a race is sailed on, its land, the conditions it can have, and its current,
 /// loaded from its immutable, versioned data file (ADR 0004). Load one with `DataFile<Venue>(data:)`
-/// or `VenueFile.bundled(id:version:)`. The file format is `VenueSchema1`, documented in
-/// `docs/venue-file.md`.
+/// or `VenueFile.bundled(id:version:)`. The file formats are `VenueSchema1` and `VenueSchema2`, documented in
+/// `docs/venue-file.md`. Schema 2 (#287, ADR 0008) gives the geography a signed speed change in place of schema 1's
+/// speed factor, lane spots and a side tendency; a schema-1 file reads as having neither spots nor tendency, its
+/// speed factor as the change `factor − 1`, so it sails as it always has.
 ///
 /// Positions are in the venue's own frame: metres, x east, y north, from an origin the file picks.
 /// Files use metres, degrees and knots; everything here is converted once at load to metres, radians
@@ -11,7 +13,7 @@ import Foundation
 public struct Venue: DataFileContent, Equatable {
     public static let kind = "venue"
     public static let bundleDirectory = "venues"
-    public static let supportedSchemaVersions = [1]
+    public static let supportedSchemaVersions = [1, 2]
 
     /// Name shown to players.
     public let displayName: String
@@ -58,19 +60,26 @@ public struct Venue: DataFileContent, Equatable {
         /// Centre of the start line: the course is laid from here up the seeded mean direction,
         /// square to it, with no deliberate skew (#12).
         public let startLineCentre: Vec2
-        /// The venue's geographic shift for this pairing, land shadow baked in.
+        /// The venue's geographic shift for this pairing: its bend, signed speed change and lane spots.
         public let geographicGrid: GeographicGrid
+        /// The side the pressure usually favours here, and how strongly (#287, ADR 0008): a speed change at the race
+        /// area's sides, signed like the pressure side's slope, positive for more pressure on the right-hand side
+        /// looking downwind (the left of the course, looking upwind). Each race scales it by a multiplier its first
+        /// key draws (`Conditions.PressureField.Side.tendencyScale`), so it is a tendency, not a rule. 0 for none,
+        /// and in every schema-1 file.
+        public let sideTendency: Double
         /// The across-the-wind coordinate (#286, ADR 0008), derived from `geographicGrid` and `meanDirection`
         /// at load, never stored in the file (ADR 0004): what the pressure field is laid across.
         public let acrossWind: AcrossWind
 
         init(conditions: DataFileKey, meanDirection: Double, trendDirection: TrendDirection, startLineCentre: Vec2,
-             geographicGrid: GeographicGrid) {
+             geographicGrid: GeographicGrid, sideTendency: Double = 0) {
             self.conditions = conditions
             self.meanDirection = meanDirection
             self.trendDirection = trendDirection
             self.startLineCentre = startLineCentre
             self.geographicGrid = geographicGrid
+            self.sideTendency = sideTendency
             acrossWind = AcrossWind(geographicGrid, meanDirection: meanDirection)
         }
     }
@@ -259,18 +268,37 @@ public struct Venue: DataFileContent, Equatable {
         }
     }
 
-    /// Geographic shift over the venue for one pairing (#10), with land shadow baked into the speed
-    /// factor. Values are per node, row-major (`grid.index`). `sample` reads it anywhere; `WindField.sample`
-    /// composes it into the wind (#81).
+    /// Geographic shift over the venue for one pairing (#10): how the land bends the wind, speeds it up (off a
+    /// headland, down a channel) or slows it (in the shadow of high shore), and where pressure lanes like to form
+    /// (#287, ADR 0008). Values are per node, row-major (`grid.index`). `sample` reads it anywhere; `WindField.sample`
+    /// composes it into the wind (#81), and the pressure field reads the lane spots (`PressurePlan`).
     public struct GeographicGrid: Sendable, Hashable {
         public let grid: Grid
         /// Change in wind direction, radians; positive veers (clockwise), as in `WindField`.
         public let directionDeltas: [Double]
-        /// Multiplier on wind speed, > 0.
+        /// Multiplier on wind speed, > 0: `1 +` the signed speed change. A schema-1 file's speed factor, read as
+        /// written; a schema-2 file's `1 + speedChange`.
         public let speedFactors: [Double]
+        /// How much pressure lanes like to form along each node (#287), 0…1: 0 no preference, the same everywhere
+        /// for a grid with none (every schema-1 file).
+        public let lanePreferences: [Double]
+
+        /// `lanePreferences` nil for none: all 0.
+        public init(grid: Grid, directionDeltas: [Double], speedFactors: [Double], lanePreferences: [Double]? = nil) {
+            self.grid = grid
+            self.directionDeltas = directionDeltas
+            self.speedFactors = speedFactors
+            self.lanePreferences = lanePreferences ?? Array(repeating: 0, count: grid.nodeCount)
+        }
 
         public func directionDelta(column: Int, row: Int) -> Double { directionDeltas[grid.index(column: column, row: row)] }
         public func speedFactor(column: Int, row: Int) -> Double { speedFactors[grid.index(column: column, row: row)] }
+        /// The signed speed change at a node: `speedFactor − 1`, so a schema-1 file's shadow reads as a loss.
+        public func speedChange(column: Int, row: Int) -> Double { speedFactor(column: column, row: row) - 1 }
+        public func lanePreference(column: Int, row: Int) -> Double { lanePreferences[grid.index(column: column, row: row)] }
+
+        /// Whether any node prefers lanes: false for a schema-1 file, whose lanes form as they always have.
+        public var hasLaneSpots: Bool { lanePreferences.contains { $0 > 0 } }
 
         /// The shift at `p`: bilinear between the four nodes around it, each value on its own (direction
         /// deltas as plain numbers, which is fine at |Δ| < 180°), and `.neutral` beyond the outer nodes.
@@ -411,7 +439,11 @@ public struct Venue: DataFileContent, Equatable {
         case 1:
             // Duplicate keys were already refused by `DataFile`, so every parse below reads the same file.
             let document = try JSONDecoder().decode(VenueSchema1.self, from: fileData)
-            try document.rejectUnknownFields(in: fileData)
+            try VenueSchema1.fields.rejectUnknownFields(in: fileData)
+            self = try document.venue(id: header.id)
+        case 2:
+            let document = try JSONDecoder().decode(VenueSchema2.self, from: fileData)
+            try VenueSchema2.fields.rejectUnknownFields(in: fileData)
             self = try document.venue(id: header.id)
         default:
             throw DataFileError.unsupportedSchemaVersion(
@@ -542,10 +574,7 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
     /// `"eddys"`), or that is `null`, which the decoder would otherwise ignore. A released file can't be
     /// fixed, so it mustn't ship with a field nothing reads. Call after decoding, so type errors come first.
     func rejectUnknownFields(in data: Data) throws {
-        let document = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-        if let pointer = Self.fields.firstUnknownField(in: document, at: "") {
-            throw DataFileError.malformed(kind: Venue.kind, reason: "unknown or null field \(pointer): a venue file has only its schema's fields")
-        }
+        try Self.fields.rejectUnknownFields(in: data)
     }
 
     /// Every field schema 1 has, from each type's `CodingKeys`, so it can't drift from the decoder.
@@ -569,57 +598,25 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
 
     /// Validates the file and converts it to code units. Throws `DataFileError.invalidContent`.
     func venue(id: String) throws -> Venue {
-        let v = VenueValidator(id: id)
-        try v.check(!displayName.isEmpty, "displayName is empty")
-
-        var landmarks: [Venue.Landmark] = []
-        for (k, landmark) in self.landmarks.enumerated() {
-            try v.check(!landmark.asset.isEmpty, "landmark \(k) has an empty asset name")
-            landmarks.append(.init(asset: landmark.asset, position: try v.point(landmark.positionMetres, "landmark \(k) position")))
-        }
-
-        var land: [Venue.LandPolygon] = []
-        for (k, polygon) in self.land.enumerated() {
-            var ring = try polygon.outlineMetres.enumerated().map { try v.point($0.element, "land \(k) point \($0.offset)") }
-            try v.check(ring.count >= 4 && ring.first == ring.last,
-                        "land \(k) is not closed: its last point must repeat its first, with at least 3 corners")
-            ring.removeLast()
-            if let problem = Self.simplePolygonProblem(ring) { throw v.invalid("land \(k) \(problem)") }
-            if Collision.signedArea(ring) < 0 { ring.reverse() }
-            land.append(.init(points: ring))
-        }
-
-        try v.check(!pairings.isEmpty, "a venue needs at least one pairing")
-        var pairings: [Venue.Pairing] = []
-        for (k, pairing) in self.pairings.enumerated() {
-            let what = "pairing \(k) (\(pairing.conditionsRef))"
-            let conditions = pairing.conditionsRef
-            try v.check(DataFile<Venue>.isValidID(conditions.id) && conditions.version >= 1,
-                        "\(what) conditionsRef needs a valid id and a version of at least 1")
-            try v.check(!pairings.contains { $0.conditions.id == conditions.id },
-                        "\(what) repeats conditions \(conditions.id): one pairing per conditions")
-            let centre = try v.point(pairing.startLineCentreMetres, "\(what) startLineCentreMetres")
-            try v.check(!land.contains { $0.contains(centre) }, "\(what) startLineCentreMetres is on land")
+        try VenueParts.venue(id: id, displayName: displayName, landmarks: landmarks, land: land, current: current,
+                             pairings: pairings) { parts, pairing, k in
             let g = pairing.geographicGrid
-            let geometry = try v.grid(
-                "\(what) geographicGrid", origin: g.originMetres, cellSize: g.cellSizeMetres, orientation: g.orientationDegrees,
-                columns: g.columns, rows: g.rows,
-                values: [("directionDeltaDegrees", g.directionDeltaDegrees), ("speedFactor", g.speedFactor)])
-            let deltas = g.directionDeltaDegrees.flatMap { $0 }
+            let basics = try parts.pairingBasics(
+                k, conditionsRef: pairing.conditionsRef, startLineCentreMetres: pairing.startLineCentreMetres,
+                origin: g.originMetres, cellSize: g.cellSizeMetres, orientation: g.orientationDegrees,
+                columns: g.columns, rows: g.rows, directionDeltaDegrees: g.directionDeltaDegrees,
+                values: [("speedFactor", g.speedFactor)])
+            // Read as written: a schema-1 factor is never re-derived, so old files sail exactly as before.
             let factors = g.speedFactor.flatMap { $0 }
-            try v.check(deltas.allSatisfy { abs($0) < 180 }, "\(what) geographicGrid directionDeltaDegrees must be in (-180, 180)")
-            try v.check(factors.allSatisfy { $0 > 0 }, "\(what) geographicGrid speedFactor must be positive")
-            pairings.append(.init(
-                conditions: conditions,
-                meanDirection: try v.bearing(pairing.meanDirectionDegrees, "\(what) meanDirectionDegrees"),
+            try parts.v.check(factors.allSatisfy { $0 > 0 }, "\(basics.what) geographicGrid speedFactor must be positive")
+            return .init(
+                conditions: basics.conditions,
+                meanDirection: try parts.v.bearing(pairing.meanDirectionDegrees, "\(basics.what) meanDirectionDegrees"),
                 trendDirection: pairing.trendDirection,
-                startLineCentre: centre,
-                geographicGrid: .init(grid: geometry, directionDeltas: deltas.map(deg2rad), speedFactors: factors)
-            ))
+                startLineCentre: basics.centre,
+                geographicGrid: .init(grid: basics.geometry, directionDeltas: basics.directionDeltas, speedFactors: factors)
+            )
         }
-
-        return Venue(displayName: displayName, landmarks: landmarks, land: land, pairings: pairings,
-                     current: try current.current(v))
     }
 
     /// Why `points` (an open ring) isn't a simple polygon, or nil if it is: at least three corners,
@@ -643,6 +640,172 @@ public struct VenueSchema1: Codable, Equatable, Sendable {
         }
         guard Collision.signedArea(points) != 0 else { return "has no area" }
         return nil
+    }
+}
+
+// MARK: - Schema 2
+
+/// The venue file, schema version 2 (#287, ADR 0008), exactly as written: schema 1 with each pairing's
+/// geographic grid giving a signed `speedChange` in place of `speedFactor`, and a `lanePreference` per node, and
+/// each pairing a `sideTendency`. Everything else is schema 1's. Documented in `docs/venue-file.md`.
+public struct VenueSchema2: Codable, Equatable, Sendable {
+    public var schemaVersion: Int
+    public var id: String
+    public var version: Int
+    public var placeholders: [String]?
+    public var notes: [String]?
+    public var displayName: String
+    public var landmarks: [VenueSchema1.Landmark]
+    public var land: [VenueSchema1.Land]
+    public var pairings: [Pairing]
+    public var current: VenueSchema1.Current
+
+    enum CodingKeys: String, CodingKey, CaseIterable { case schemaVersion, id, version, placeholders, notes, displayName, landmarks, land, pairings, current }
+
+    public struct Pairing: Codable, Equatable, Sendable {
+        public var conditionsRef: DataFileKey
+        public var meanDirectionDegrees: Double
+        public var trendDirection: Venue.TrendDirection
+        public var startLineCentreMetres: [Double]
+        /// Speed change at the race area's sides, positive for more pressure on the right looking downwind
+        /// (`Venue.Pairing.sideTendency`), within ±`sideTendencyLimit`.
+        public var sideTendency: Double
+        public var geographicGrid: GeographicGrid
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case conditionsRef, meanDirectionDegrees, trendDirection, startLineCentreMetres, sideTendency, geographicGrid }
+    }
+
+    public struct GeographicGrid: Codable, Equatable, Sendable {
+        public var originMetres: [Double]
+        public var cellSizeMetres: Double
+        public var orientationDegrees: Double
+        public var columns: Int
+        public var rows: Int
+        /// `rows` arrays of `columns` values each; row 0 passes through the origin.
+        public var directionDeltaDegrees: [[Double]]
+        /// Signed speed change, a fraction of the wind: positive faster, negative slower (shadow); above −1.
+        public var speedChange: [[Double]]
+        /// Where lanes like to form, 0…1.
+        public var lanePreference: [[Double]]
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case originMetres, cellSizeMetres, orientationDegrees, columns, rows, directionDeltaDegrees, speedChange, lanePreference }
+    }
+
+    /// The largest side tendency, either way: the pressure field's own limit for a side (`Conditions`).
+    public static let sideTendencyLimit = 0.5
+
+    /// Every field schema 2 has, from each type's `CodingKeys`.
+    static let fields: FieldTree = .object(CodingKeys.self, [
+        .landmarks: .array(.object(VenueSchema1.Landmark.CodingKeys.self)),
+        .land: .array(.object(VenueSchema1.Land.CodingKeys.self)),
+        .pairings: .array(.object(Pairing.CodingKeys.self, [
+            .conditionsRef: .object(DataFileKey.CodingKeys.self),
+            .geographicGrid: .object(GeographicGrid.CodingKeys.self),
+        ])),
+        .current: .object(VenueSchema1.Current.CodingKeys.self, [
+            .allowedTideStatesAtGun: .object(VenueSchema1.TideStateRange.CodingKeys.self),
+            .grid: .object(VenueSchema1.CurrentGrid.CodingKeys.self),
+            .byDepth: .object(VenueSchema1.ByDepth.CodingKeys.self),
+            .eddies: .array(.object(VenueSchema1.Eddy.CodingKeys.self)),
+        ]),
+    ])
+
+    /// Validates the file and converts it to code units. Throws `DataFileError.invalidContent`.
+    func venue(id: String) throws -> Venue {
+        try VenueParts.venue(id: id, displayName: displayName, landmarks: landmarks, land: land, current: current,
+                             pairings: pairings) { parts, pairing, k in
+            let g = pairing.geographicGrid
+            let basics = try parts.pairingBasics(
+                k, conditionsRef: pairing.conditionsRef, startLineCentreMetres: pairing.startLineCentreMetres,
+                origin: g.originMetres, cellSize: g.cellSizeMetres, orientation: g.orientationDegrees,
+                columns: g.columns, rows: g.rows, directionDeltaDegrees: g.directionDeltaDegrees,
+                values: [("speedChange", g.speedChange), ("lanePreference", g.lanePreference)])
+            let what = basics.what
+            let changes = g.speedChange.flatMap { $0 }
+            let preferences = g.lanePreference.flatMap { $0 }
+            // A change of −1 or less would stop or reverse the wind.
+            try parts.v.check(changes.allSatisfy { $0 > -1 }, "\(what) geographicGrid speedChange must be above -1")
+            try parts.v.check(preferences.allSatisfy { (0...1).contains($0) }, "\(what) geographicGrid lanePreference must be 0…1")
+            try parts.v.check(pairing.sideTendency.isFinite && abs(pairing.sideTendency) <= Self.sideTendencyLimit,
+                              "\(what) sideTendency must be within ±\(Self.sideTendencyLimit)")
+            return .init(
+                conditions: basics.conditions,
+                meanDirection: try parts.v.bearing(pairing.meanDirectionDegrees, "\(what) meanDirectionDegrees"),
+                trendDirection: pairing.trendDirection,
+                startLineCentre: basics.centre,
+                geographicGrid: .init(grid: basics.geometry, directionDeltas: basics.directionDeltas,
+                                      speedFactors: changes.map { 1 + $0 }, lanePreferences: preferences),
+                sideTendency: pairing.sideTendency
+            )
+        }
+    }
+}
+
+// MARK: - Shared by every schema
+
+/// What every venue schema validates alike: its name, landmarks, land and current, and each pairing's conditions,
+/// start line and grid geometry. A schema converts the rest of each pairing itself.
+private struct VenueParts {
+    let v: VenueValidator
+    let land: [Venue.LandPolygon]
+    /// The pairings converted so far, in file order.
+    let pairings: [Venue.Pairing]
+
+    /// The venue, with `pairing` converting each of the file's pairings (`k` its index) given the parts before it.
+    static func venue<Pairing>(
+        id: String, displayName: String, landmarks: [VenueSchema1.Landmark], land: [VenueSchema1.Land],
+        current: VenueSchema1.Current, pairings filePairings: [Pairing],
+        pairing: (VenueParts, Pairing, Int) throws -> Venue.Pairing
+    ) throws -> Venue {
+        let v = VenueValidator(id: id)
+        try v.check(!displayName.isEmpty, "displayName is empty")
+
+        var converted: [Venue.Landmark] = []
+        for (k, landmark) in landmarks.enumerated() {
+            try v.check(!landmark.asset.isEmpty, "landmark \(k) has an empty asset name")
+            converted.append(.init(asset: landmark.asset, position: try v.point(landmark.positionMetres, "landmark \(k) position")))
+        }
+
+        var polygons: [Venue.LandPolygon] = []
+        for (k, polygon) in land.enumerated() {
+            var ring = try polygon.outlineMetres.enumerated().map { try v.point($0.element, "land \(k) point \($0.offset)") }
+            try v.check(ring.count >= 4 && ring.first == ring.last,
+                        "land \(k) is not closed: its last point must repeat its first, with at least 3 corners")
+            ring.removeLast()
+            if let problem = VenueSchema1.simplePolygonProblem(ring) { throw v.invalid("land \(k) \(problem)") }
+            if Collision.signedArea(ring) < 0 { ring.reverse() }
+            polygons.append(.init(points: ring))
+        }
+
+        try v.check(!filePairings.isEmpty, "a venue needs at least one pairing")
+        var pairings: [Venue.Pairing] = []
+        for (k, filePairing) in filePairings.enumerated() {
+            pairings.append(try pairing(VenueParts(v: v, land: polygons, pairings: pairings), filePairing, k))
+        }
+
+        return Venue(displayName: displayName, landmarks: converted, land: polygons, pairings: pairings,
+                     current: try current.current(v))
+    }
+
+    /// Pairing `k`'s conditions, start line and grid geometry, checked, with its direction deltas in radians and
+    /// the name its errors use. `values` are the schema's other grid columns, checked for shape only.
+    func pairingBasics(
+        _ k: Int, conditionsRef conditions: DataFileKey, startLineCentreMetres: [Double], origin: [Double], cellSize: Double,
+        orientation: Double, columns: Int, rows: Int, directionDeltaDegrees: [[Double]], values: [(name: String, rows: [[Double]])]
+    ) throws -> (what: String, conditions: DataFileKey, centre: Vec2, geometry: Venue.Grid, directionDeltas: [Double]) {
+        let what = "pairing \(k) (\(conditions))"
+        try v.check(DataFile<Venue>.isValidID(conditions.id) && conditions.version >= 1,
+                    "\(what) conditionsRef needs a valid id and a version of at least 1")
+        try v.check(!pairings.contains { $0.conditions.id == conditions.id },
+                    "\(what) repeats conditions \(conditions.id): one pairing per conditions")
+        let centre = try v.point(startLineCentreMetres, "\(what) startLineCentreMetres")
+        try v.check(!land.contains { $0.contains(centre) }, "\(what) startLineCentreMetres is on land")
+        let geometry = try v.grid(
+            "\(what) geographicGrid", origin: origin, cellSize: cellSize, orientation: orientation,
+            columns: columns, rows: rows, values: [("directionDeltaDegrees", directionDeltaDegrees)] + values)
+        let deltas = directionDeltaDegrees.flatMap { $0 }
+        try v.check(deltas.allSatisfy { abs($0) < 180 }, "\(what) geographicGrid directionDeltaDegrees must be in (-180, 180)")
+        return (what, conditions, centre, geometry, deltas.map(deg2rad))
     }
 }
 
@@ -764,6 +927,16 @@ indirect enum FieldTree: Sendable {
 
     static func object<Key: CodingKey & CaseIterable & Hashable>(_: Key.Type, _ nested: [Key: FieldTree] = [:]) -> FieldTree {
         .object(Dictionary(uniqueKeysWithValues: Key.allCases.map { ($0.stringValue, nested[$0] ?? .value) }))
+    }
+
+    /// Throws `malformed` naming the first field in `data` its schema doesn't have (such as a typo, `"eddys"`), or
+    /// that is `null`, which the decoder would otherwise ignore. A released file can't be fixed, so it mustn't ship
+    /// with a field nothing reads. Call after decoding, so type errors come first.
+    func rejectUnknownFields(in data: Data) throws {
+        let document = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+        if let pointer = firstUnknownField(in: document, at: "") {
+            throw DataFileError.malformed(kind: Venue.kind, reason: "unknown or null field \(pointer): a venue file has only its schema's fields")
+        }
     }
 
     /// JSON Pointer of the first member, in key order, that isn't in the tree or is null. Values of the
