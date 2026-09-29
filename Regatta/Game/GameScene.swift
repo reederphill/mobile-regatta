@@ -34,7 +34,17 @@ final class GameScene: SKScene {
             needsPausedRender = true
         }
     }
-    /// The water's tier: the thermal ladder's (#127) seam. Puff shading and the edge tint draw in every tier.
+#if DEBUG
+    /// The tuning panel's pressure overlay (#289, Debug builds): live, even on a paused race.
+    var showsPressureOverlay: Bool {
+        get { water.showsPressureOverlay }
+        set {
+            water.showsPressureOverlay = newValue
+            needsPausedRender = true
+        }
+    }
+#endif
+    /// The water's tier: the thermal ladder's (#127) seam. Puff shading and the pressure draw in every tier.
     var waterQuality: WaterQuality {
         get { water.quality }
         set { water.quality = newValue }
@@ -107,10 +117,6 @@ final class GameScene: SKScene {
 
         addChild(cam)
         camera = cam
-        // The upwind edge tint sits at the view's edges, over the water and under everything else.
-        water.edgeTint.zPosition = -5
-        water.edgeTint.name = "edge tint"
-        cam.addChild(water.edgeTint)
         cam.setScale(1 / zoom)
         cam.position = point(driver.renderWorld.me.position)
 

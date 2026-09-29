@@ -100,12 +100,11 @@ import UIKit
     }
 
     /// The water fixtures (#116) sail the fun-pass files (#233: dev-venue@3 and the conditions' @3) and freeze
-    /// where the water has something to show from the boat camera: a puff and a lull in view, or, for the edge
-    /// tint, a puff drifting in beyond the upwind (top) edge. Each greyscale twin is the same frame.
+    /// where the water has something to show from the boat camera: a puff and a lull in view. Each greyscale twin
+    /// is the same frame.
     @Test func waterFixturesShowWhatTheyAreFor() throws {
         let venue = try VenueFile.bundled(id: "dev-venue", version: 3).ref
-        for (name, conditions) in [("water-light-and-patchy", "light-and-patchy"), ("water-gusty-offshore", "gusty-offshore"),
-                                   ("edge-tint", "gusty-offshore")] {
+        for (name, conditions) in [("water-light-and-patchy", "light-and-patchy"), ("water-gusty-offshore", "gusty-offshore")] {
             let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
             #expect(fixture.camera == .boat && fixture.vision == VisionFilter.none, "\(name)")
             let setup = log.header.setup
@@ -121,18 +120,26 @@ import UIKit
                 let outside = Vec2(max(abs(puff.center.x - center.x) - half.x, 0), max(abs(puff.center.y - center.y) - half.y, 0))
                 return outside.length < puff.radius && abs(puff.intensity) > 0.1
             }
-            if name == "edge-tint" {
-                let marks = EdgeTint.marks(for: world.puffs, center: center, half: half, style: .standard)
-                #expect(marks.contains { $0.edge == .top && $0.alpha > 0.5 }, "\(marks)")
-            } else {
-                #expect(inView.contains { $0.intensity > 0 } && inView.contains { $0.intensity < 0 },
-                        "\(name): \(inView.map(\.intensity))")
-                let (grey, _) = try RenderFixture.load(named: "\(name)-greyscale", in: Self.fixtures)
-                var expected = fixture
-                expected.vision = .greyscale
-                #expect(grey == expected)
-            }
+            #expect(inView.contains { $0.intensity > 0 } && inView.contains { $0.intensity < 0 },
+                    "\(name): \(inView.map(\.intensity))")
+            let (grey, _) = try RenderFixture.load(named: "\(name)-greyscale", in: Self.fixtures)
+            var expected = fixture
+            expected.vision = .greyscale
+            #expect(grey == expected)
         }
+    }
+
+    /// The pressure fixture (#289) sails the latest files with a pressure field (dev-venue@6, gusty-offshore@6)
+    /// on the course camera, so the whole field shows, water and minimap, after the gun with lanes alive.
+    @Test func pressureFixtureShowsThePressure() throws {
+        let (fixture, log) = try RenderFixture.load(named: "water-pressure", in: Self.fixtures)
+        #expect(fixture == RenderFixture(log: "water-pressure.racelog.json", freezeTick: 60, camera: .course, vision: .none))
+        let setup = log.header.setup
+        #expect(setup.venue == (try VenueFile.bundled(id: "dev-venue", version: 6)).ref)
+        #expect(setup.conditions == (try ConditionsFile.bundled(id: "gusty-offshore", version: 6)).ref)
+        let world = try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
+        let reading = try #require(world.windSampler?.pressureReading)
+        #expect(!reading.lanes.isEmpty && reading.side != 0)
     }
 
     @Test func fixtureFieldsDecodeEveryCameraAndVision() throws {

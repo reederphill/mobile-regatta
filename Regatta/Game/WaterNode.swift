@@ -14,6 +14,9 @@ struct WaterWorld {
     var conditions: Conditions
     /// Race clock, seconds.
     var time: Double
+    /// The tick's wind, for the pressure (#289): `WindSampler.pressureFactor(at:)`, and the pressure field's
+    /// state for the tuning overlay. Nil where the race doesn't hold the key yet, or in a test drawing none.
+    var sampler: WindSampler? = nil
 }
 
 extension WaterWorld {
@@ -23,7 +26,7 @@ extension WaterWorld {
     init(_ world: RenderWorld) {
         let sampler = world.windSampler
         self.init(wind: { sampler?.sample($0) }, courseWind: world.courseWind, puffs: world.puffs,
-                  conditions: world.conditions, time: world.time)
+                  conditions: world.conditions, time: world.time, sampler: sampler)
     }
 }
 
@@ -43,11 +46,10 @@ struct WaterView: Equatable {
     }
 }
 
-/// The water (#116, #22): puffs darker and lulls lighter than the course average, with a catspaw texture on
-/// puffs; a faint ripple of streaks, each lying along the wind where it is (puff fans and the fleet-wide shift
+/// The water (#116, #22, #289): the pressure as one continuous tone, darker where there is more; over it, puffs
+/// darker and lulls lighter than the course average, with a catspaw texture on puffs; a faint ripple of streaks, each lying along the wind where it is (puff fans and the fleet-wide shift
 /// included) and all drifting downwind at a speed set by the conditions' mean wind; whitecaps as many as that
-/// mean wind makes, wherever they are; and, in the camera's frame, the upwind edge tint where a puff lies
-/// beyond the view. Everything it draws is set by `style` (#232 tunes it) and `quality` (#127 lowers it).
+/// mean wind makes, wherever they are. Everything it draws is set by `style` (#232 tunes it) and `quality` (#127 lowers it).
 final class WaterNode: SKNode {
     /// A ripple streak as last drawn: where it is (metres) and the wind direction it lies along.
     struct Streak: Equatable {
@@ -59,8 +61,6 @@ final class WaterNode: SKNode {
         didSet { if style.catspaw != oldValue.catspaw { puffTexture = Self.puffTexture(for: style) } }
     }
     var quality = WaterQuality.full
-    /// The upwind edge tint, drawn in the camera's frame: the scene adds it to its camera.
-    let edgeTint = SKNode()
 
     /// How far the ripple has drifted downwind, world points.
     private(set) var drift = CGPoint.zero
@@ -68,20 +68,27 @@ final class WaterNode: SKNode {
     private(set) var streaks: [Streak] = []
     /// The tiles carrying a breaking whitecap last frame.
     private(set) var whitecaps: [RippleLattice.Index] = []
-    /// The tint marks drawn last frame.
-    private(set) var tintMarks: [EdgeTint.Mark] = []
+    /// The pressure tone drawn last frame and the grid it was sampled on; nil with no wind to sample.
+    private(set) var pressure: (grid: PressureGrid, tone: PressureTone)?
+    /// The tuning panel's pressure overlay (#289, Debug builds): the tone drawn `PressureOverlay.boost` times as
+    /// strong, the pressure lanes' centrelines dotted and the pressure side labelled.
+    var showsPressureOverlay = false
+
+    /// The pressure tone's sprite's name: the one sprite whose texture is made each frame.
+    static let pressureName = "pressure"
 
     private let pointsPerMeter: Double
     private let puffLayer = SKNode()
+    private let pressureSprite = SKSpriteNode()
+    private let overlayLines = SKShapeNode()
+    private let overlaySide = SKLabelNode()
     private let rippleLayer = SKNode()
     private var puffTexture: SKTexture
     private let lullTexture = WaterNode.sharedLullTexture
-    private let tintTexture = WaterNode.sharedLullTexture
     private let streakTextures = WaterNode.sharedStreakTextures
     private let whitecapTexture = WaterNode.sharedWhitecapTexture
     private var puffNodes: [SKSpriteNode] = []
     private var tileNodes: [Tile] = []
-    private var tintNodes: [SKSpriteNode] = []
 
     /// The size a streak tile's texture is drawn for: `style.rippleSpacing` scales it from here.
     private static let tileSize = 96.0
@@ -91,19 +98,111 @@ final class WaterNode: SKNode {
         self.style = style
         puffTexture = Self.puffTexture(for: style)
         super.init()
+        // The pressure under the puffs; the tuning overlay's marks over everything the water draws.
+        pressureSprite.zPosition = -1
+        pressureSprite.name = Self.pressureName
+        pressureSprite.isHidden = true
         puffLayer.zPosition = 0
         rippleLayer.zPosition = 1
+        // Clear of the ripple's slots (`DrawOrder`: its tiles and caps reach past 2) and under the next layer's.
+        overlayLines.zPosition = 5
+        overlayLines.strokeColor = .clear
+        overlayLines.fillColor = CuePalette.orange.uiColor
+        overlayLines.isHidden = true
+        overlaySide.zPosition = 6
+        overlaySide.fontName = "Menlo-Bold"
+        overlaySide.fontColor = CuePalette.orange.uiColor
+        overlaySide.verticalAlignmentMode = .center
+        overlaySide.isHidden = true
+        addChild(pressureSprite)
         addChild(puffLayer)
         addChild(rippleLayer)
+        addChild(overlayLines)
+        addChild(overlaySide)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     /// Draws `world` as seen through `view`, `dt` simulated seconds after the last frame (0 when settled).
     func update(_ world: WaterWorld, view: WaterView, dt: Double) {
+        updatePressure(world, view: view)
         updateRipple(world, view: view, dt: dt)
         updatePuffs(world.puffs)
-        updateEdgeTint(world.puffs, view: view)
+        updateOverlay(world, view: view)
+    }
+
+    // MARK: - Pressure (#289)
+
+    /// Samples the pressure on the grid covering the view and stretches it across the grid as one texture, a
+    /// pixel a sample, smoothly interpolated. A new texture only when the tone changed.
+    private func updatePressure(_ world: WaterWorld, view: WaterView) {
+        guard let sampler = world.sampler else {
+            pressure = nil
+            pressureSprite.isHidden = true
+            return
+        }
+        let grid = PressureGrid.forView(view, quality: quality)
+        var pressures: [Double] = []
+        pressures.reserveCapacity(grid.columns.count * grid.rows.count)
+        for j in grid.rows {
+            for i in grid.columns {
+                let point = grid.position(i, j)
+                pressures.append(sampler.pressureFactor(at: Vec2(Double(point.x), Double(point.y)) / pointsPerMeter) - 1)
+            }
+        }
+        let tone = PressureTone(columns: grid.columns.count, rows: grid.rows.count, pressures: pressures,
+                                boost: showsPressureOverlay ? PressureOverlay.boost : 1)
+        if tone != pressure?.tone || pressureSprite.texture == nil || style != drawnStyle {
+            pressureSprite.texture = tone.image(style: style).map { image in
+                let texture = SKTexture(cgImage: image)
+                texture.filteringMode = .linear
+                return texture
+            }
+            drawnStyle = style
+        }
+        pressure = (grid, tone)
+        let rect = grid.rect
+        pressureSprite.isHidden = pressureSprite.texture == nil
+        pressureSprite.size = rect.size
+        pressureSprite.position = CGPoint(x: rect.midX, y: rect.midY)
+    }
+
+    /// The style the pressure's texture was made with.
+    private var drawnStyle: WaterStyle?
+
+    /// The tuning overlay's marks: each pressure lane's centreline, dotted where the field's across-the-wind
+    /// coordinate crosses it, and the pressure side labelled towards it from the view's middle.
+    private func updateOverlay(_ world: WaterWorld, view: WaterView) {
+        guard showsPressureOverlay, let sampler = world.sampler, let reading = sampler.pressureReading else {
+            overlayLines.isHidden = true
+            overlaySide.isHidden = true
+            return
+        }
+        let rect = view.rect
+        let step = Double(rect.width) / 60
+        let path = CGMutablePath()
+        for y in stride(from: Double(rect.minY), through: Double(rect.maxY), by: step) {
+            for x in stride(from: Double(rect.minX), through: Double(rect.maxX), by: step) {
+                guard let r = sampler.pressureCoordinate(at: Vec2(x, y) / pointsPerMeter) else { continue }
+                if reading.lanes.contains(where: { abs(r - $0.centre) * pointsPerMeter < step / 2 }) {
+                    path.addEllipse(in: CGRect(x: x - step / 4, y: y - step / 4, width: step / 2, height: step / 2))
+                }
+            }
+        }
+        overlayLines.path = path
+        overlayLines.isHidden = false
+
+        guard reading.side != 0, let course = world.courseWind else {
+            overlaySide.isHidden = true
+            return
+        }
+        // Positive coordinates lie right of the centre line looking downwind.
+        let right = (-Vec2.heading(course.direction)).rightPerp * (reading.side > 0 ? 1 : -1)
+        let reach = 0.3 * Double(min(rect.width, rect.height))
+        overlaySide.text = String(format: "PRESSURE SIDE %+.0f%%", abs(reading.side) * 100)
+        overlaySide.fontSize = CGFloat(Double(rect.width) / 22)
+        overlaySide.position = CGPoint(x: Double(rect.midX) + right.x * reach, y: Double(rect.midY) + right.y * reach)
+        overlaySide.isHidden = false
     }
 
     // MARK: - Ripple and whitecaps
@@ -236,39 +335,6 @@ final class WaterNode: SKNode {
         }
     }
 
-    // MARK: - Upwind edge tint
-
-    private func updateEdgeTint(_ puffs: [Puff], view: WaterView) {
-        let center = Vec2(Double(view.center.x), Double(view.center.y)) / pointsPerMeter
-        let rect = view.rect
-        let half = Vec2(Double(rect.width), Double(rect.height)) / 2 / pointsPerMeter
-        tintMarks = EdgeTint.marks(for: puffs, center: center, half: half, style: style)
-        while tintNodes.count < tintMarks.count {
-            let node = SKSpriteNode(texture: tintTexture)
-            node.color = ChartPalette.puff.uiColor
-            node.colorBlendFactor = 1
-            // Overlapping marks in one order (`DrawOrder`).
-            node.zPosition = DrawOrder.z(tintNodes.count)
-            edgeTint.addChild(node)
-            tintNodes.append(node)
-        }
-        // Metres to the camera's frame, which draws at scene points whatever the camera's scale.
-        let k = pointsPerMeter / Double(view.scale)
-        for (i, node) in tintNodes.enumerated() {
-            guard i < tintMarks.count else {
-                node.isHidden = true
-                continue
-            }
-            let mark = tintMarks[i]
-            node.isHidden = false
-            node.alpha = CGFloat(mark.alpha)
-            node.position = CGPoint(x: mark.point.x * k, y: mark.point.y * k)
-            // Centred on the edge, so the half inside the view shows: long along the edge.
-            node.size = CGSize(width: max(mark.width * k, style.edgeTintDepth), height: style.edgeTintDepth * 2)
-            node.zRotation = mark.edge == .left || mark.edge == .right ? .pi / 2 : 0
-        }
-    }
-
     // MARK: - Textures
 
     // Made once and shared by every scene: they only depend on the style's catspaw, and a race (or a test)
@@ -288,7 +354,7 @@ final class WaterNode: SKNode {
         return d2 < 1 ? (1 - d2) * (1 - d2) : 0
     }
 
-    /// A lull's texture, and the tint's: smooth, glassy water.
+    /// A lull's texture: smooth, glassy water.
     private static func lullTexture() -> SKTexture {
         texture(pixels: 128) { u, v in profile(u, v) }
     }

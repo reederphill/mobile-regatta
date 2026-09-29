@@ -35,6 +35,9 @@ struct HUDState {
     var penaltyTurns = 0
     var penaltyProgress = 0.0
     var boats: [MiniBoat] = []
+    /// The pressure over the minimap's chart (#289), sampled from the model's own field: the wind off screen as
+    /// well as on. Nil where the race doesn't hold the key yet.
+    var pressure: PressureTone?
     var course: CourseLayout?
 
     var isUpwind: Bool { twaDegrees < 90 }
@@ -94,5 +97,6 @@ struct HUDState {
         boats = frame.boats.map {
             MiniBoat(id: $0.id, position: $0.position, colorIndex: $0.colorIndex, isPlayer: $0.id == me, isActive: $0.isOnCourse)
         }
+        pressure = world.windSampler.map { MinimapChart(course: course).pressure($0) }
     }
 }

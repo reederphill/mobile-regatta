@@ -27,6 +27,14 @@ nonisolated struct WaterStyle: Codable, Equatable, Sendable {
     /// How much the catspaw texture varies a puff's tone about its mean, 0 (smooth) to 1.
     var catspaw = 0.3
 
+    // MARK: Pressure (#289)
+
+    /// Pressure this much above the course average (a fraction of it: the pressure side, pressure lanes and the
+    /// venue's geography, before puffs) draws at full `ChartPalette.puff`; less, lighter in proportion.
+    var fullTonePressureGain = 0.15
+    /// Pressure this much below the course average draws at full `ChartPalette.lull`.
+    var fullTonePressureLoss = 0.15
+
     // MARK: Whitecaps
 
     /// Below this conditions mean wind, knots, there are no whitecaps.
@@ -40,16 +48,6 @@ nonisolated struct WaterStyle: Codable, Equatable, Sendable {
     /// Seconds from a whitecap breaking to the next one in its tile.
     var whitecapSeconds = 3.5
 
-    // MARK: Upwind edge tint (#224)
-
-    /// The tint's alpha at the screen edge for a puff at full tone right at the edge. A race cue: it never
-    /// drops on the degradation ladder (#27, #127).
-    var edgeTintStrength = 0.75
-    /// How far beyond the screen edge a puff still tints it, metres; the tint fades out towards it.
-    var edgeTintReach = 60.0
-    /// How far the tint reaches into the screen, points.
-    var edgeTintDepth = 90.0
-
     // MARK: Cheap tier (#127)
 
     /// The share of the whitecaps the cheap tier keeps.
@@ -59,9 +57,35 @@ nonisolated struct WaterStyle: Codable, Equatable, Sendable {
     static let standard = WaterStyle()
 }
 
+/// Lenient: a field missing from a saved style (one saved before the field existed, like the pressure tones
+/// saved before #289) takes its standard value, so an older tuning keeps the rest of its water.
+nonisolated extension WaterStyle {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let standard = WaterStyle.standard
+        func value(_ key: CodingKeys, _ fallback: Double) throws -> Double {
+            try c.decodeIfPresent(Double.self, forKey: key) ?? fallback
+        }
+        self.init(rippleSpacing: try value(.rippleSpacing, standard.rippleSpacing),
+                  rippleAlpha: try value(.rippleAlpha, standard.rippleAlpha),
+                  rippleDrift: try value(.rippleDrift, standard.rippleDrift),
+                  fullTonePuffGain: try value(.fullTonePuffGain, standard.fullTonePuffGain),
+                  fullToneLullLoss: try value(.fullToneLullLoss, standard.fullToneLullLoss),
+                  catspaw: try value(.catspaw, standard.catspaw),
+                  fullTonePressureGain: try value(.fullTonePressureGain, standard.fullTonePressureGain),
+                  fullTonePressureLoss: try value(.fullTonePressureLoss, standard.fullTonePressureLoss),
+                  whitecapOnsetKnots: try value(.whitecapOnsetKnots, standard.whitecapOnsetKnots),
+                  whitecapFullKnots: try value(.whitecapFullKnots, standard.whitecapFullKnots),
+                  whitecapMaxShare: try value(.whitecapMaxShare, standard.whitecapMaxShare),
+                  whitecapAlpha: try value(.whitecapAlpha, standard.whitecapAlpha),
+                  whitecapSeconds: try value(.whitecapSeconds, standard.whitecapSeconds),
+                  cheapWhitecapShare: try value(.cheapWhitecapShare, standard.cheapWhitecapShare))
+    }
+}
+
 /// How much the water spends per frame (#127 picks it from thermal state; the ladder is #27's). The cheap tier
-/// freezes the ripple (no drift, every tile on the course wind, no per-tile sampling) and thins the whitecaps.
-/// Puff shading and the upwind edge tint are race cues, drawn the same in every tier.
+/// freezes the ripple (no drift, every tile on the course wind, no per-tile sampling), thins the whitecaps and
+/// samples the pressure tone at half resolution. Puff shading and the pressure are race cues, drawn in every tier.
 nonisolated enum WaterQuality: Sendable {
     case full, cheap
 }
@@ -153,8 +177,13 @@ nonisolated struct RippleLattice: Sendable {
 
     /// The lattice for `style` at camera scale `scale`, and the scale its tiles draw at.
     static func forView(style: WaterStyle, cameraScale scale: Double) -> (lattice: RippleLattice, tileScale: Double) {
-        let step = scale > finestScale ? pow(2, (log2(scale / finestScale)).rounded(.up)) : 1
+        let step = step(cameraScale: scale)
         return (RippleLattice(spacing: style.rippleSpacing * step), step)
+    }
+
+    /// How many times the lattice spreads out at camera scale `scale`: 1 up to `finestScale`, then doubling.
+    static func step(cameraScale scale: Double) -> Double {
+        scale > finestScale ? pow(2, (log2(scale / finestScale)).rounded(.up)) : 1
     }
 
     /// Where tile `index` is on the water, in world points, with the lattice drifted by `drift`: its lattice
@@ -172,82 +201,6 @@ nonisolated struct RippleLattice: Sendable {
         let columns = Int(((view.minX - drift.x) / spacing).rounded(.down)) - 1...Int(((view.maxX - drift.x) / spacing).rounded(.up)) + 1
         let rows = Int(((view.minY - drift.y) / rowHeight).rounded(.down)) - 1...Int(((view.maxY - drift.y) / rowHeight).rounded(.up)) + 1
         return (columns, rows)
-    }
-}
-
-/// The upwind edge tint (#224): a soft, water-toned darker tint along the upwind edge of the view where a puff
-/// lies beyond it and is drifting in. No icons and no times. A race cue, like puff shading: every tier draws
-/// it (#27).
-nonisolated enum EdgeTint {
-    /// Which edge of the view a tint lies on.
-    enum Edge: Sendable {
-        case top, bottom, left, right
-
-        /// Pointing out of the view.
-        var outwardNormal: Vec2 {
-            switch self {
-            case .top: Vec2(0, 1)
-            case .bottom: Vec2(0, -1)
-            case .left: Vec2(-1, 0)
-            case .right: Vec2(1, 0)
-            }
-        }
-    }
-
-    struct Mark: Equatable, Sendable {
-        var edge: Edge
-        /// Where on the edge, in the view's own frame: metres from the view's centre.
-        var point: Vec2
-        /// Metres along the edge: the puff's diameter.
-        var width: Double
-        /// 0…1: `WaterStyle.edgeTintStrength` at the puff's tone, fading with its distance beyond the edge.
-        var alpha: Double
-    }
-
-    /// The tints for `puffs` around the view centred at `center` with half-size `half` (metres). A puff tints
-    /// the upwind edge its drift carries it in across, at the point it crosses, while its centre is out of view
-    /// and its edge within `style.edgeTintReach` of the view. Lulls, puffs drifting away or past, and puffs
-    /// coming in across a side edge tint nothing.
-    static func marks(for puffs: [Puff], center: Vec2, half: Vec2, style: WaterStyle) -> [Mark] {
-        puffs.compactMap { mark(for: $0, center: center, half: half, style: style) }
-    }
-
-    static func mark(for puff: Puff, center: Vec2, half: Vec2, style: WaterStyle) -> Mark? {
-        guard puff.intensity > 0, style.edgeTintReach > 0 else { return nil }
-        let p = puff.center - center
-        guard abs(p.x) > half.x || abs(p.y) > half.y else { return nil }
-        let outside = Vec2(max(abs(p.x) - half.x, 0), max(abs(p.y) - half.y, 0))
-        let gap = outside.length - puff.radius
-        guard gap < style.edgeTintReach else { return nil }
-        let direction = puff.velocity.normalized
-        guard direction != .zero else { return nil }
-        // Where its drift line enters the view grown by its radius: a slab test, axis by axis.
-        let grown = half + Vec2(puff.radius, puff.radius)
-        var enter = -Double.infinity, exit = Double.infinity
-        var edge = Edge.top
-        for axis in 0..<2 {
-            let d = direction[axis], o = p[axis], h = grown[axis]
-            if abs(d) < 1e-9 {
-                guard abs(o) <= h else { return nil }
-                continue
-            }
-            let t0 = (-h - o) / d, t1 = (h - o) / d
-            let near = min(t0, t1), far = max(t0, t1)
-            if near > enter {
-                enter = near
-                edge = axis == 0 ? (d > 0 ? .left : .right) : (d > 0 ? .bottom : .top)
-            }
-            exit = min(exit, far)
-        }
-        guard enter <= exit, exit > 0 else { return nil }
-        // Only an upwind edge: one facing within 60° of where the puff comes from. A puff crossing a side edge
-        // on a slant is coming from the side, not from upwind.
-        guard edge.outwardNormal.dot(-direction) >= 0.5 else { return nil }
-        let entry = p + direction * max(enter, 0)
-        let point = Vec2(entry.x.clamped(to: -half.x...half.x), entry.y.clamped(to: -half.y...half.y))
-        let tone = WaterTone.puffOverlay(intensity: puff.intensity, style: style).alpha
-        let proximity = (1 - max(gap, 0) / style.edgeTintReach).clamped(to: 0...1)
-        return Mark(edge: edge, point: point, width: puff.radius * 2, alpha: style.edgeTintStrength * tone * proximity)
     }
 }
 

@@ -175,7 +175,7 @@ import RegattaCore
         let (model, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
         let fan = try slider("conditions:/puffs/fanDegrees", in: model)
-        let edge = try slider("water.edgeTintStrength", in: model)
+        let edge = try slider("water.catspaw", in: model)
         model.set(fan, to: 8.3) // to its step: 8.5
         model.set(edge, to: 0.5)
         #expect(model.value(fan) == 8.5 && model.isChanged(fan))
@@ -207,6 +207,24 @@ import RegattaCore
         #expect(session.scene.waterStyle.fullTonePuffGain == 0.2)
         #expect(session.scene.cameraStyle.lookAheadSeconds == 3)
         #expect(model.practiceFiles() == .defaults)
+    }
+
+    /// The pressure overlay (#289) is a Debug-only switch on the panel: it reaches the live scene, persists with
+    /// the tuning, and is a look to tune by, not a tuning: no TUNED badge and no tuned files.
+    @Test func pressureOverlayReachesTheLiveScene() throws {
+        let (model, root) = model()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = GameSession(config: Self.config)
+        model.attach(session, files: .defaults)
+        #expect(!session.scene.showsPressureOverlay && !model.showsPressure)
+        #expect(model.groups.contains { $0.id == TuningCatalog.pressureOverlayGroup })
+        model.showsPressure = true
+        #expect(session.scene.showsPressureOverlay)
+        #expect(!session.isTuned && !model.tuning.isTuned && model.practiceFiles() == .defaults)
+        model.saveNow()
+        #expect(TuningModel(store: model.store).showsPressure)
+        model.showsPressure = false
+        #expect(!session.scene.showsPressureOverlay)
     }
 
     /// Values a file can't hold (a wobble past the amplitude) show why on the panel, and the race sails that

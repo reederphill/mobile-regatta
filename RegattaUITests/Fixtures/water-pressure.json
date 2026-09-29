@@ -1,0 +1,6 @@
+{
+  "log" : "water-pressure.racelog.json",
+  "freezeTick" : 60,
+  "camera" : "course",
+  "vision" : "none"
+}
