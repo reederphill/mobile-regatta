@@ -158,16 +158,18 @@ import RegattaCore
         #expect(files.conditions.key == key && files.conditions.tune == 1)
         #expect(files.venue.key == DataFileKey(id: "dev-venue", version: 7))
         let data = try #require(files.tunedFiles[files.conditions])
-        for (pointer, value) in tuned { #expect(TunedCopy.number(at: pointer, in: data) == value, "\(pointer)") }
+        // The export writes each value rounded (0.15, not a step sum like 0.15000000000000002).
+        func near(_ a: Double?, _ b: Double?) -> Bool { guard let a, let b else { return a == nil && b == nil }; return abs(a - b) < 1e-9 }
+        for (pointer, value) in tuned { #expect(near(TunedCopy.number(at: pointer, in: data), value), "\(pointer)") }
         let field = try #require(try ConditionsFile(data: data).content.pressureField)
-        #expect(field.side.persistence == tuned["/pressureField/side/persistenceSeconds"])
-        #expect(field.lanes.count == tuned["/pressureField/lanes/count"])
-        #expect(field.side.tendencyScale.lowerBound == tuned["/pressureField/side/tendencyScale/min"])
-        #expect(field.lanes.spotShare == tuned["/pressureField/lanes/spotShare"])
-        #expect(field.lanes.extent?.weakShare == tuned["/pressureField/lanes/weakShare"])
-        #expect(field.lanes.extent?.length.lowerBound == tuned["/pressureField/lanes/lengthMetres/min"])
-        #expect(Double(field.puffChoices) == tuned["/pressureField/puffChoices"])
-        #expect(try ConditionsFile(data: data).content.puffs.coverage == tuned["/puffs/coverage"])
+        #expect(near(field.side.persistence, tuned["/pressureField/side/persistenceSeconds"]))
+        #expect(near(field.lanes.count, tuned["/pressureField/lanes/count"]))
+        #expect(near(field.side.tendencyScale.lowerBound, tuned["/pressureField/side/tendencyScale/min"]))
+        #expect(near(field.lanes.spotShare, tuned["/pressureField/lanes/spotShare"]))
+        #expect(near(field.lanes.extent?.weakShare, tuned["/pressureField/lanes/weakShare"]))
+        #expect(near(field.lanes.extent?.length.lowerBound, tuned["/pressureField/lanes/lengthMetres/min"]))
+        #expect(near(Double(field.puffChoices), tuned["/pressureField/puffChoices"]))
+        #expect(near(try ConditionsFile(data: data).content.puffs.coverage, tuned["/puffs/coverage"]))
         let setup = try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot], boatClass: files.boatClass, venue: files.venue,
                                   conditions: files.conditions, rulesConfiguration: files.rulesConfiguration)
         let race = try RaceFiles(resolving: setup, from: files.catalog)
