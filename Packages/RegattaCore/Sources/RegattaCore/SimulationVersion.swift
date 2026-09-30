@@ -157,7 +157,13 @@ import Glibc
 ///    across it, and puffs and lulls, which form where the field is at their spawn, gather in the strong patches and
 ///    keep out of the weak. The bot-suite matrix moves to dev-venue@7 and the version-7 conditions. Older files draw
 ///    nothing more: their races, the default race's included, sail as on 24.
-public let simulationRevision = 25
+/// 26: ladder distance (#267), on 25. Boats racing rank by `Race.ladderDistanceToFinish(of:)` in place of the path
+///    length: on the beats and runs their distance to the leg's target along the course axis (fixed for the race, so
+///    boats on one ladder line are level however far apart across the course), on the W → O reach straight along the
+///    leg, then each later leg the same way. It sets `standings()`, `place(of:)` and the by-distance places in the
+///    results at the close, and `Race.gapToLeader(of:)` reads it. Boat state and the digest don't move; races whose
+///    close places boats by distance can place them differently from 25.
+public let simulationRevision = 26
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

@@ -2,8 +2,8 @@
 public enum ResultCode: String, Sendable, Hashable, CaseIterable {
     /// Crossed the finish line: placed by her finish, shown as a gap to the winner (#24, "+0:42").
     case finished
-    /// Still racing at the close: placed behind every finisher by her distance still to sail round her
-    /// remaining marks (#8, `Race.distanceToFinish(of:)`).
+    /// Still racing at the close: placed behind every finisher by her ladder distance still to go round her
+    /// remaining marks (#8, #267, `Race.ladderDistanceToFinish(of:)`).
     case byDistance
     /// Disqualified, behind every boat placed by distance (#30). Fixed at the call (#24).
     case dsq = "DSQ"

@@ -30,12 +30,22 @@ public final class Race {
     public let windSeed: WindSeed?
     /// The course, derived from the files, the race seed's wind setup and the fleet size (#12, #80).
     public let course: CourseLayout
-    /// Each leg's target (`CourseLayout.targetPosition(for:)`), by leg index: what `distanceToFinish(of:)`
-    /// measures to on a rounding leg.
+    /// Each leg's target (`CourseLayout.targetPosition(for:)`), by leg index: what `distanceToFinish(of:)` and
+    /// `ladderDistanceToFinish(of:)` measure to on a rounding leg.
     private let legTargets: [Vec2]
     /// For each rounding leg, by leg index, the metres from its target on through every later leg's target to
     /// the nearest point of the finish line (`distanceToFinish(of:)`); 0 for the finish leg.
     private let remainingAfterTarget: [Double]
+    /// The course axis (`CourseLayout.upwind`), cached: the ladder lines are drawn across it (#267), and the
+    /// rank key reads it inside every sort comparison.
+    private let ladderAxis: Vec2
+    /// By leg index, whether the course axis can't measure the leg and ladder distance runs along it instead
+    /// (#267, the owner's ruling): a leg that runs more across the axis than along it, the W → O reach.
+    private let isReachLeg: [Bool]
+    /// For each leg, by leg index, the ladder metres of every later leg (`ladderDistanceToFinish(of:)`): each
+    /// beat or run up or down the axis between its targets, each reach straight along it, the finish leg to
+    /// the nearest point of the finish line. 0 for the finish leg.
+    private let ladderAfterTarget: [Double]
     /// The class every boat sails: hull, polar and handling (ADR 0004).
     public var boatClass: BoatClass { files.boatClass.content }
     /// The water's own motion (#78, ADR 0003), which carries every boat (#79): the venue's current at the
@@ -165,6 +175,10 @@ public final class Race {
         let targets = course.legs.map(course.targetPosition(for:))
         legTargets = targets
         remainingAfterTarget = Race.remainingAfterTargets(targets, legs: course.legs, finish: course.finishLine.segment)
+        let ladder = Race.ladderLegs(targets, course: course)
+        ladderAxis = course.upwind
+        isReachLeg = ladder.isReach
+        ladderAfterTarget = ladder.after
         let windSetup = drawn.with(raceArea: course.raceArea)
         self.windSetup = windSetup
         self.current = current ?? CurrentField(venue: files.venue.content, raceSeed: setup.raceSeed)
@@ -1027,6 +1041,9 @@ public final class Race {
     /// factor and the beat's cap: before anyone has started the estimate is always the gun plus
     /// `leaderSeconds` (480 s) plus the finish window, even where the cap (`beatSizing.maxMetres`) makes the
     /// course quicker to sail than that.
+    ///
+    /// It keeps the path length (`distanceToFinish`), not the ladder distance that ranks the fleet (#267): a
+    /// time estimate wants the metres still to sail, and a pace is metres of path per second.
     public var expectedCloseTick: Int {
         if isOver { return tick }
         if firstFinishTime != nil { return closeTick }
@@ -1123,13 +1140,13 @@ public final class Race {
         return seats
     }
 
-    /// The results as the race stands (`RaceResults`): finishers by finish, boats racing by distance to
-    /// finish, then DSQ, OCS (never started included) and RET. A human seat gone at the close whose boat
+    /// The results as the race stands (`RaceResults`): finishers by finish, boats racing by ladder distance
+    /// (`ladderDistanceToFinish(of:)`, #267), then DSQ, OCS (never started included) and RET. A human seat gone at the close whose boat
     /// hasn't finished or been disqualified is RET (#16), and so is each such seat in an all-gone close's
     /// `allGoneOrder` (`closeAllGone`). Rated if at least 2 humans were at the gun (#30).
     private func score(allGoneOrder: [Int]?) -> RaceResults {
         let presence = presence()
-        var isRET = boats.indices.map { presence[$0].isHuman && presence[$0].isGone && !boats[$0].isGhost }
+        var isRET = boats.indices.map { isGone($0, presence) }
         var placedRETs: [Int] = []
         for seat in (allGoneOrder ?? []).reversed() where presence[seat].isHuman && !boats[seat].isGhost {
             isRET[seat] = true
@@ -1157,7 +1174,7 @@ public final class Race {
         }
         placeEach(finishers, .finished)
         let racing = boats.indices.filter { boats[$0].status == .racing && !isRET[$0] }
-        let distances = racing.map { distanceToFinish(of: boats[$0]) }
+        let distances = racing.map { ladderRank(boats[$0]) }
         placeEach(racing.indices.sorted { (distances[$0], racing[$0]) < (distances[$1], racing[$1]) }.map { racing[$0] },
                   .byDistance)
         tie(boats.indices.filter { boats[$0].status == .dsq }, .dsq)
@@ -1171,8 +1188,9 @@ public final class Race {
 
     // MARK: - Standings
 
-    /// Metres `boat` still has to sail to finish, round her remaining marks (#8): what places a boat still
-    /// racing when the race closes, and ranks the boats racing until then.
+    /// Metres `boat` still has to sail to finish, round her remaining marks (#8): the path length, which times
+    /// the close (`expectedCloseTick`). It no longer ranks anything: standings, places and by-distance results
+    /// go by `ladderDistanceToFinish(of:)` (#267).
     ///
     /// Racing on a rounding leg, it is the straight line to the leg's target (`CourseLayout.targetPosition`:
     /// the mark, or a gate's midpoint), then on through every later leg's target to the nearest point of the
@@ -1221,10 +1239,93 @@ public final class Race {
         return remaining
     }
 
+    /// Metres `boat` still has to go to finish by the ladder (#267): what ranks the boats racing, places those
+    /// unfinished at the close, and gives the gap to the leader (`gapToLeader(of:)`).
+    ///
+    /// Racing on a beat or a run, it is her distance to the leg's target measured along the course axis
+    /// (`CourseLayout.upwind`, fixed for the race, never the live wind), so across the ladder lines: boats on
+    /// one ladder line are level however far apart across the course. On a reach (a leg the axis can't
+    /// measure, W → O) it is the straight line to the target, so the order moves along it. Then every later
+    /// leg the same way (`ladderAfterTarget`). On the finish leg, her distance to the nearest point of the
+    /// finish line along the axis. At a target the leg's and the next leg's totals are equal, so a rounding
+    /// makes no jump. Not racing, it is `distanceToFinish(of:)`.
+    public func ladderDistanceToFinish(of boat: Boat) -> Double {
+        guard boat.status == .racing else { return distanceToFinish(of: boat) }
+        let leg = boat.legIndex
+        guard course.legs.indices.contains(leg) else { return .infinity }
+        guard case .round = course.legs[leg] else {
+            let line = Collision.closestPoint(on: course.finishLine.segment, to: boat.position)
+            return abs((line - boat.position).dot(ladderAxis))
+        }
+        let toTarget = legTargets[leg] - boat.position
+        let here = isReachLeg[leg] ? toTarget.length : abs(toTarget.dot(ladderAxis))
+        return here + ladderAfterTarget[leg]
+    }
+
+    /// Metres by the ladder `seat` is behind the leader (#267): her `ladderDistanceToFinish(of:)` less the least
+    /// of any boat racing, or 0 while a boat has finished. A finished boat's own gap is 0. Nil for a boat not
+    /// yet started (prestart or OCS), disqualified, or whose player has gone (#30). A gone boat can still be
+    /// the leader.
+    public func gapToLeader(of seat: Int) -> Double? {
+        let boat = boats[seat]
+        switch boat.status {
+        case .prestart, .ocs, .dsq: return nil
+        case .finished, .racing: break
+        }
+        if isGone(seat, presence()) { return nil }
+        if boat.status == .finished { return 0 }
+        let mine = ladderDistanceToFinish(of: boat)
+        guard mine.isFinite else { return nil }
+        if boats.contains(where: { $0.status == .finished }) { return mine }
+        let leader = boats.lazy.filter { $0.status == .racing }.map(ladderDistanceToFinish(of:))
+            .filter(\.isFinite).min() ?? mine
+        return mine - leader
+    }
+
+    /// Whether `seat`'s player has gone and her boat is neither finished nor disqualified: RET at a close.
+    private func isGone(_ seat: Int, _ presence: [Presence]) -> Bool {
+        presence[seat].isHuman && presence[seat].isGone && !boats[seat].isGhost
+    }
+
+    /// `ladderDistanceToFinish(of:)` to whole millimetres, for ranking: two boats on one ladder line differ
+    /// only by rounding noise, and the seat must break their tie.
+    private func ladderRank(_ boat: Boat) -> Double {
+        (ladderDistanceToFinish(of: boat) * 1000).rounded()
+    }
+
+    /// `isReachLeg` and `ladderAfterTarget` for a course and its legs' `targets`. Each leg runs from the last
+    /// leg's target (the first from the start line's centre) to its own, the finish leg to the nearest point of
+    /// the finish line.
+    private static func ladderLegs(_ targets: [Vec2], course: CourseLayout) -> (isReach: [Bool], after: [Double]) {
+        let axis = course.upwind
+        let legs = course.legs
+        var isReach = Array(repeating: false, count: legs.count)
+        var length = Array(repeating: 0.0, count: legs.count)
+        var from = course.startLine.centre
+        for k in legs.indices {
+            let to: Vec2
+            if case .round = legs[k] {
+                to = targets[k]
+            } else {
+                to = Collision.closestPoint(on: course.finishLine.segment, to: from)
+            }
+            let run = to - from
+            let along = abs(run.dot(axis))
+            isReach[k] = abs(run.dot(axis.rightPerp)) > along
+            length[k] = isReach[k] ? run.length : along
+            from = to
+        }
+        var after = Array(repeating: 0.0, count: legs.count)
+        for k in legs.indices.reversed() where k + 1 < legs.count {
+            after[k] = length[k + 1] + after[k + 1]
+        }
+        return (isReach, after)
+    }
+
     /// Seats from first to last. Once the race has closed, the results' display order (`results`). Until
-    /// then as the results would rank the fleet now, leaving out who has gone (RET): finishers by finish,
-    /// boats racing by distance to finish, DSQ, then boats not yet started by their distance to the start
-    /// line's centre.
+    /// then: finishers by finish, boats racing by ladder distance (`ladderDistanceToFinish(of:)`, #267), DSQ,
+    /// then boats not yet started by their distance to the start line's centre. A boat whose player has gone
+    /// keeps her place among them until the close makes her RET.
     public func standings() -> [Int] {
         if let results { return results.order }
         return boats.indices.sorted { rankKey($0) < rankKey($1) }
@@ -1245,7 +1346,7 @@ public final class Race {
         let b = boats[i]
         switch b.status {
         case .finished: return (0, b.finishTime ?? 0, b.place ?? i)
-        case .racing: return (1, distanceToFinish(of: b), i)
+        case .racing: return (1, ladderRank(b), i)
         case .dsq: return (2, 0, i)
         case .prestart, .ocs: return (3, (b.position - course.startLine.centre).length, i)
         }
