@@ -1,5 +1,6 @@
 import Foundation
 import RegattaCore
+import RegattaServices
 
 /// Development and test launch arguments, for `xcodebuild test`, UI tests and Instruments. Players never pass them.
 ///
@@ -21,6 +22,9 @@ import RegattaCore
 /// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
 ///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
 /// - `-tuning` opens the debug tuning panel at launch (#232). Debug builds only: other builds don't know it.
+/// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
+///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued` or
+///   `cancelled-race` (`FakeServiceScenario`).
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -52,6 +56,7 @@ struct LaunchOptions: Equatable {
     var startSeconds: Int?
     var appearance: Appearance?
     var vision: VisionFilter?
+    var fakeServices: FakeServiceScenario?
     #if DEBUG
     var tuning = false
     #endif
@@ -78,7 +83,7 @@ struct LaunchOptions: Equatable {
             case "-tuning": tuning = true
             #endif
             case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance",
-                 "-vision":
+                 "-vision", "-fakeServices":
                 guard let value = rest.first, !Self.flags.contains(value) else {
                     problems.append("\(argument) needs a value")
                     continue
@@ -93,7 +98,8 @@ struct LaunchOptions: Equatable {
 
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-online", "-seed", "-fixture", "-timescale",
-                          "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance", "-vision"]
+                          "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance", "-vision",
+                          "-fakeServices"]
         #if DEBUG
         flags.insert("-tuning")
         #endif
@@ -134,6 +140,12 @@ struct LaunchOptions: Equatable {
                 vision = filter
             } else {
                 reject(argument, value, Self.visionNames)
+            }
+        case "-fakeServices":
+            if let scenario = FakeServiceScenario(rawValue: value) {
+                fakeServices = scenario
+            } else {
+                reject(argument, value, FakeServiceScenario.allCases.map(\.rawValue).joined(separator: ", "))
             }
         default:
             break
