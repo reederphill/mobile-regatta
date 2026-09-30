@@ -171,7 +171,8 @@ final class WaterNode: SKNode {
     private var drawnStyle: WaterStyle?
 
     /// The tuning overlay's marks: each pressure lane's centreline, dotted where the field's across-the-wind
-    /// coordinate crosses it, and the pressure side labelled towards it from the view's middle.
+    /// coordinate crosses it (for a finite lane, along its length), and the pressure side labelled towards it from
+    /// the view's middle.
     private func updateOverlay(_ world: WaterWorld, view: WaterView) {
         guard showsPressureOverlay, let sampler = world.sampler, let reading = sampler.pressureReading else {
             overlayLines.isHidden = true
@@ -183,8 +184,14 @@ final class WaterNode: SKNode {
         let path = CGMutablePath()
         for y in stride(from: Double(rect.minY), through: Double(rect.maxY), by: step) {
             for x in stride(from: Double(rect.minX), through: Double(rect.maxX), by: step) {
-                guard let r = sampler.pressureCoordinate(at: Vec2(x, y) / pointsPerMeter) else { continue }
-                if reading.lanes.contains(where: { abs(r - $0.centre) * pointsPerMeter < step / 2 }) {
+                let point = Vec2(x, y) / pointsPerMeter
+                guard let r = sampler.pressureCoordinate(at: point) else { continue }
+                let along = sampler.pressureAlong(at: point) ?? 0
+                let onLane = reading.lanes.contains { lane in
+                    guard abs(r - lane.centre) * pointsPerMeter < step / 2 else { return false }
+                    return lane.halfLength.map { abs(along - lane.alongCentre) < $0 } ?? true
+                }
+                if onLane {
                     path.addEllipse(in: CGRect(x: x - step / 4, y: y - step / 4, width: step / 2, height: step / 2))
                 }
             }

@@ -100,7 +100,7 @@ public struct WindField: Hashable, Sendable {
             let spawns = puffPlan.spawns(of: held, windows: windows, choices: pressurePlan.field.puffChoices) { tick in
                 let state = heldPressureState(atTick: tick, pressurePlan)
                 return { p in
-                    let field = pressurePlan.effect(at: pressurePlan.coordinate(at: p), side: state.side, lanes: state.lanes)
+                    let field = pressurePlan.effect(at: p, side: state.side, lanes: state.lanes)
                     return geographicGrid.sample(p).speedFactor * field.factor
                 }
             }
@@ -132,7 +132,7 @@ public struct WindField: Hashable, Sendable {
         var direction = setup.meanDirection + c.shift + geographic.directionDelta
         if let pressurePlan {
             let state = try pressureState(atTick: tick, pressurePlan)
-            let pressure = pressurePlan.effect(at: pressurePlan.coordinate(at: p), side: state.side, lanes: state.lanes)
+            let pressure = pressurePlan.effect(at: p, side: state.side, lanes: state.lanes)
             speed = speed * pressure.factor
             direction = direction + pressure.turn
         }
@@ -355,7 +355,7 @@ public struct WindSampler: Sendable {
         var speed = courseSpeed * geographic.speedFactor
         var direction = direction + geographic.directionDelta
         if let (plan, state) = pressure {
-            let pressure = plan.effect(at: plan.coordinate(at: p), side: state.side, lanes: state.lanes)
+            let pressure = plan.effect(at: p, side: state.side, lanes: state.lanes)
             speed = speed * pressure.factor
             direction = direction + pressure.turn
         }
@@ -387,8 +387,15 @@ public struct WindSampler: Sendable {
     public var pressureReading: PressureReading? {
         guard let (plan, state) = pressure else { return nil }
         return PressureReading(side: state.side, halfWidth: plan.halfWidth, lanes: state.lanes.map {
-            PressureReading.Lane(centre: $0.centre, halfWidth: $0.halfWidth, intensity: $0.intensity)
+            PressureReading.Lane(centre: $0.centre, halfWidth: $0.halfWidth, intensity: $0.intensity,
+                                 alongCentre: $0.alongCentre, halfLength: $0.halfLength)
         })
+    }
+
+    /// How far up the course `p` is from the race area's centre, metres, where `PressureReading` places a finite lane
+    /// (`Lane.alongCentre`). Nil with no pressure field.
+    public func pressureAlong(at p: Vec2) -> Double? {
+        pressure.map { $0.plan.along(at: p) }
     }
 
     /// The pressure field's across-the-wind coordinate at `p`: metres right of the race area's centre line
@@ -408,6 +415,10 @@ public struct PressureReading: Hashable, Sendable {
         public let centre: Double
         public let halfWidth: Double
         public let intensity: Double
+        /// A finite lane's middle up the course (`WindSampler.pressureAlong(at:)`) and its half-length, metres; nil
+        /// for an unending band.
+        public let alongCentre: Double
+        public let halfLength: Double?
     }
 
     /// The pressure side's gain at `halfWidth` right of the centre line (looking downwind): positive when the

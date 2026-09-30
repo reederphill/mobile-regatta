@@ -36,6 +36,9 @@ public struct BoatClass: DataFileContent, Equatable {
     /// The graded by-the-lee penalty and where the spinnaker collapses (schema 3), or nil: only the
     /// polar's flat `byTheLeePenalty`.
     public var byTheLee: ByTheLeeTuning?
+    /// The roll tack (#222, #263; schema 3, optional), or nil for a class without one: a second tack/gybe tap
+    /// during a tack is an ordinary tap, as before.
+    public var rollTack: RollTackTuning?
 
     public struct Hull: Sendable, Equatable {
         /// Metres.
@@ -179,11 +182,36 @@ public struct BoatClass: DataFileContent, Equatable {
         public var lossCloseIn: Double
         /// Lowest wind multiplier from stacked shadows (0.6 = never below 60 % of the wind).
         public var stackingFloor: Double
+
         /// The backwind zone: how far it reaches to windward of the boat and how wide it is,
         /// metres, and the fraction of wind speed a boat inside it loses.
         public var backwindLength: Double
         public var backwindWidth: Double
         public var backwindLoss: Double
+        /// Seconds: the time constant a shadowed boat slows down at (#220, #263; schema 3, optional). With it the
+        /// shadow is a speed loss: her polar reads the clean wind and her target speed is the polar's × the shadow's
+        /// multiplier (`Boat.shadow`), approached at this. Nil (every class before skiff@3): the shadow slows the
+        /// wind her polar reads (`Boat.polarWindSpeed(in:)`), as #10 built it.
+        public var slowingDown: Double?
+
+        /// Whether the shadow slows the boat rather than the wind her polar reads (`slowingDown`).
+        public var isSpeedLoss: Bool { slowingDown != nil }
+    }
+
+    /// The roll tack (#222, #263): a second tack/gybe tap during a tack, timed on the boom crossing. A hit, within
+    /// `window` of the crossing either way, keeps `hitLossFraction` of each tick's speed loss from the tap (or the
+    /// crossing, for a tap before it) until she is close-hauled: no floor and no jump, so a rolled tack never beats
+    /// not tacking. A miss, outside it, multiplies her speed by `missSpeedFactor` once. One roll a tack.
+    public struct RollTackTuning: Sendable, Equatable {
+        /// Seconds either side of the boom crossing that a roll tap hits.
+        public var window: Double
+        /// The fraction of each tick's speed loss a hit still takes (0.5: she loses half as much).
+        public var hitLossFraction: Double
+        /// Her speed is multiplied by this on a miss.
+        public var missSpeedFactor: Double
+
+        /// `window` in whole ticks at `Race.tickRate`: a tap `window` ticks or fewer from the crossing hits.
+        public var windowTicks: Int { Int((window * Double(Race.tickRate) + 1e-9).rounded(.down)) }
     }
 
     /// Speed multipliers on contact.
@@ -420,7 +448,8 @@ private struct BoatClassSchema2: Decodable {
                 stackingFloor: windShadow.stackingFloor,
                 backwindLength: windShadow.backwind.lengthHullLengths * length,
                 backwindWidth: windShadow.backwind.widthHullLengths * length,
-                backwindLoss: windShadow.backwind.loss
+                backwindLoss: windShadow.backwind.loss,
+                slowingDown: nil
             ),
             contact: .init(boat: contact.boatSpeedFactor, mark: contact.markSpeedFactor),
             ease: .init(speedFraction: ease.speedFraction, timeConstant: ease.timeConstantSeconds)
@@ -490,10 +519,25 @@ private struct BoatClassSchema3Additions: Decodable {
         let spinnakerCollapseDegrees: Double
     }
 
+    /// #263: the shadow's own slow-down (`BoatClass.WindShadow.slowingDown`). Optional: a schema-3 class without
+    /// it (skiff@1, skiff@2) keeps the shadow a wind loss.
+    struct WindShadow: Decodable {
+        let slowingDownSeconds: Double?
+    }
+
+    /// #263: the roll tack (`BoatClass.RollTackTuning`). Optional: a class without it has none.
+    struct RollTack: Decodable {
+        let windowSeconds: Double
+        let hitLossFraction: Double
+        let missSpeedFactor: Double
+    }
+
     let steering: Steering
     let planing: Planing
     let spinnaker: Spinnaker
     let byTheLee: ByTheLee
+    let windShadow: WindShadow?
+    let rollTack: RollTack?
 
     /// The longest hoist or drop the wire snapshot carries (`RegattaProtocol`: a byte of ticks).
     static let maxTransitionSeconds = 8.0
@@ -531,6 +575,17 @@ private struct BoatClassSchema3Additions: Decodable {
         try check(byTheLee.spinnakerCollapseDegrees >= 0 && byTheLee.spinnakerCollapseDegrees <= 90,
                   "spinnaker collapse must be 0...90° by the lee")
 
+        if let seconds = windShadow?.slowingDownSeconds {
+            try check(positive(seconds), "shadow slow-down time must be positive")
+            boatClass.windShadow.slowingDown = seconds
+        }
+        if let roll = rollTack {
+            try check(roll.windowSeconds.isFinite && roll.windowSeconds >= 0, "roll tack window must not be negative")
+            try check(roll.hitLossFraction >= 0 && roll.hitLossFraction <= 1 && roll.missSpeedFactor >= 0 && roll.missSpeedFactor <= 1,
+                      "roll tack hit loss and miss factor must be 0...1")
+            boatClass.rollTack = .init(window: roll.windowSeconds, hitLossFraction: roll.hitLossFraction,
+                                       missSpeedFactor: roll.missSpeedFactor)
+        }
         boatClass.steering.autohelm.grooveWindAverage = average
         boatClass.planing = .init(
             fromTWA: deg2rad(p.fromTWADegrees),

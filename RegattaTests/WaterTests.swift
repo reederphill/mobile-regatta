@@ -51,13 +51,15 @@ import RegattaCore
             #expect(abs(ripple) < faintest, "\(file.id)@\(file.version): ripple ΔL \(ripple) vs faintest puff or lull \(faintest)")
         }
         // So is any pressure lane at its peak, in every file with a pressure field (#289); and the pressure is the
-        // palette's tones too, at full tone ±0.12.
-        let pressureFiles = ["light-and-patchy", "classic-oscillating", "sea-breeze", "gusty-offshore"]
-            .map { try? ConditionsFile.bundled(id: $0, version: 6) }
+        // palette's tones too, at full tone ±0.12 (#289, and more sensitive, 0.10, since the lanes are finite).
+        let pressureFiles = [6, 7].flatMap { version in
+            ["light-and-patchy", "classic-oscillating", "sea-breeze", "gusty-offshore"]
+                .map { try? ConditionsFile.bundled(id: $0, version: version) }
+        }
         #expect(pressureFiles.allSatisfy { $0?.content.pressureField != nil })
         for file in pressureFiles.compactMap({ $0 }) {
             let faintest = try #require(WaterTone.faintestPressureDelta(of: file.content, style: style))
-            #expect(abs(ripple) < faintest, "\(file.id)@6: ripple ΔL \(ripple) vs faintest pressure lane \(faintest)")
+            #expect(abs(ripple) < faintest, "\(file.id)@\(file.version): ripple ΔL \(ripple) vs faintest pressure lane \(faintest)")
         }
         #expect(abs(WaterTone.pressureDelta(style.fullTonePressureGain, style: style) + ChartPalette.toneDelta) < 0.01)
         #expect(abs(WaterTone.pressureDelta(-style.fullTonePressureLoss, style: style) - ChartPalette.toneDelta) < 0.01)

@@ -43,6 +43,16 @@ let wireFieldBounds: [String: @Sendable (WorldSnapshot.Seat, WorldSnapshot.Seat)
         default: return false
         }
     },
+    "boat.roll": { $0.boat.roll == $1.boat.roll },
+    // Exact, but for a crossing further back than the wire carries (`WireSeat.maxCrossingTicks`): it arrives as the
+    // furthest back the wire carries, so later than it was.
+    "boat.tackCrossingTick": {
+        switch ($0.boat.tackCrossingTick, $1.boat.tackCrossingTick) {
+        case (nil, nil): return true
+        case let (a?, b?): return a == b || a < b
+        default: return false
+        }
+    },
     "heldInput.rudder": { $0.heldInput.rudder == $1.heldInput.rudder },
     "heldInput.ease": { $0.heldInput.ease == $1.heldInput.ease },
 ]
@@ -108,7 +118,14 @@ func expectWithinSteps(_ original: WorldSnapshot.Seat, _ decoded: WorldSnapshot.
         var sender = gen.world(seats: 8)
         var receiver = gen.world(seats: 8)
         // Sent at the tick it is applied at, which its penalty clocks run back from (#89).
-        for i in sender.seats.indices { sender.seats[i].boat.penaltyClockTick? += 77 - sender.tick }
+        for i in sender.seats.indices {
+            sender.seats[i].boat.penaltyClockTick? += 77 - sender.tick
+            // #263: and its tack crossings and pending roll taps likewise.
+            sender.seats[i].boat.tackCrossingTick? += 77 - sender.tick
+            if case .pending(let tap) = sender.seats[i].boat.roll {
+                sender.seats[i].boat.roll = .pending(tapTick: tap + 77 - sender.tick)
+            }
+        }
         sender.tick = 77
         receiver.firstFinishTime = 12
         receiver.isOver = true

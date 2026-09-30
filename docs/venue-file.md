@@ -28,6 +28,10 @@ Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/
 - `dev-venue@6` (bundled, schema 2): `dev-venue@5` on the version-6 conditions files (schema 5), whose puffs
   and lulls form from the pressure field at about a third of the old coverage (#288). The bot suite's
   matrix sails it; the default race doesn't.
+- `dev-venue@7` (bundled, schema 2): `dev-venue@6` on the version-7 conditions files (schema 6), whose pressure
+  lanes are finite patches that drift down the wind, some weakening it, with a weaker pressure side, so the
+  pressure changes up the course as well as across it (ADR 0008). The bot suite's matrix sails it; the default
+  race doesn't.
 - `test-venue@1` (test resource): small hand-checkable grids, concave land, a tidal current with an eddy.
 
 ## Frame and units
@@ -233,6 +237,9 @@ How the pressure field reads them (`PressurePlan`, `LaneSpots`):
   like every key (ADR 0001), and adds the result to every window's pressure side target. So the side leans the
   venue's way in most races, but in some the tendency is absent or reversed, and the keys still move the side
   per window. A venue with a tendency needs window 0's key at every tick (`WindField.firstWindowNeeded`).
+- **Lane spots and finite lanes.** With schema-6 conditions a lane is finite (ADR 0008). One formed at a spot
+  lies within half a cell of its node up the course as well as across it, and is never a weak lane, so a spot
+  only ever adds pressure where the venue puts it.
 
 **Old schemas.** A schema-1 file's `speedFactor` is its signed speed change read as `speedFactor − 1`, so its
 shadow is a negative change; the factor is used as written, never re-derived, so schema-1 venues sail exactly as

@@ -62,6 +62,9 @@ public extension Race {
             h.combine(b.queuedPenaltyCallTicks.count)
             for call in b.queuedPenaltyCallTicks { h.combine(call) }
             h.combine(b.isTacking)
+            h.combine(b.tackCrossingTick)
+            h.combine(b.roll?.digestCode)
+            if case .pending(let tapTick) = b.roll { h.combine(tapTick) }
             h.combine(b.isPlaning)
             h.combine(b.spinnaker.digestCode)
             h.combine(b.spinnaker.remaining)
@@ -93,6 +96,17 @@ extension BoatStatus {
         case .finished: 3
         case .dsq: 4
         // 5 was `dnf`, removed by #86 (a boat still racing at the close keeps `racing`): retired, never reused.
+        }
+    }
+}
+
+extension RollTack {
+    /// Stable codes for the digest, independent of the enum's declaration order.
+    var digestCode: Int {
+        switch self {
+        case .pending: 0
+        case .hit: 1
+        case .missed: 2
         }
     }
 }

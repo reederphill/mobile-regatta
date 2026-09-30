@@ -46,6 +46,11 @@ public struct RaceEvent: Sendable, Equatable {
         case protestRecorded(seat: Int, target: Int)
         /// The seat let go of the rudder within a snap width of the groove, and her autohelm took it (#230, #124).
         case grooveSnap(seat: Int)
+        /// The seat's roll tap hit, within the class's window of the boom crossing (#263, `RollTack.hit`): for the
+        /// roll's cues (#117, #121, #124).
+        case rollHit(seat: Int)
+        /// The seat's roll tap missed, outside the window (#263, `RollTack.missed`): her speed took the miss factor.
+        case rollMissed(seat: Int)
 
         /// A decision of the umpire or race committee under the rules: a rule call, a recall, a
         /// disqualification, a mark-room notice, a protest recorded. Only the authoritative race emits
