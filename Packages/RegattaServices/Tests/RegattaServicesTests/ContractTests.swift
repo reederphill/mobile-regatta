@@ -27,3 +27,41 @@ import Testing
         try await RaceSessionServiceContract().run { Fixtures.raceSession($0) }
     }
 }
+
+// #241: the lobby, profile, store, analytics, connectivity and deletion fakes, on the same seam.
+
+@Suite struct LobbyServiceContractTests {
+    @Test func scriptedFakePassesTheSuite() async throws {
+        try await LobbyServiceContract().run { Fixtures.lobby($0) }
+    }
+}
+
+@Suite struct ProfileServiceContractTests {
+    @Test func scriptedFakePassesTheSuite() async throws {
+        try await ProfileServiceContract().run { Fixtures.profile($0) }
+    }
+}
+
+@Suite struct StoreServiceContractTests {
+    @Test func scriptedFakePassesTheSuite() async throws {
+        try await StoreServiceContract().run { Fixtures.store($0) }
+    }
+}
+
+@Suite struct AnalyticsTransportContractTests {
+    @Test func scriptedFakePassesTheSuite() async throws {
+        try await AnalyticsTransportContract().run { Fixtures.analytics($0) }
+    }
+}
+
+@Suite struct ConnectivityServiceContractTests {
+    @Test func scriptedFakePassesTheSuite() async throws {
+        try await ConnectivityServiceContract().run { Fixtures.connectivity($0) }
+    }
+}
+
+@Suite struct DataDeletionServiceContractTests {
+    @Test func scriptedFakePassesTheSuite() async throws {
+        try await DataDeletionServiceContract().run { Fixtures.deletion($0) }
+    }
+}
