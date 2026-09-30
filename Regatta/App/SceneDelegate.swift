@@ -46,7 +46,7 @@ struct AppRoot: View {
             .environment(\.sceneState, sceneState)
             .environment(\.screenSize, screenSize)
             .environment(\.isOnline, onlineStatus.isOnline)
-            .environment(\.lobbyStatus, onlineStatus.lobbyStatus)
+            .environment(\.lobbyStatus, onlineStatus.lobbyStatus.hidingChat(model.deviceSettings.hidesLobbyChat))
     }
 }
 

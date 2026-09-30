@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import RegattaCore
 
@@ -59,6 +60,12 @@ final class AppModel {
     var sheet: Sheet?
     /// The practice race setup, kept between races.
     var settings = RaceSettings()
+    /// The device's settings (#110): the Settings page's rows, saved to `defaults` as they change.
+    var deviceSettings: DeviceSettings {
+        didSet { if deviceSettings != oldValue { deviceSettings.save(to: defaults) } }
+    }
+    /// Where `deviceSettings` lives.
+    @ObservationIgnored let defaults: UserDefaults
     /// The race the cover shows, while `phase` is `.raceSequence`.
     private(set) var race: Race?
     /// The practice race the cover shows, if it's one.
@@ -79,13 +86,20 @@ final class AppModel {
     @ObservationIgnored private let sceneState: SceneState
 
     /// `sceneState` locks the orientation while the race sequence shows (G5).
-    init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current) {
+    init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current, defaults: UserDefaults = .standard) {
         self.sceneState = sceneState
         self.launchOptions = launchOptions
+        self.defaults = defaults
+        deviceSettings = DeviceSettings(defaults: defaults)
         #if DEBUG
         tuning = TuningModel(store: launchOptions.uiTesting ? .inMemory : .standard)
         #endif
         sceneState.isRaceSequenceShowing = false
+    }
+
+    /// Settings' Reset hints: every hint shows again (#25).
+    func resetHints() {
+        DeviceSettings.resetHints(in: defaults)
     }
 
     /// Back to the bare home screen: pops every page and dismisses the sheet.
