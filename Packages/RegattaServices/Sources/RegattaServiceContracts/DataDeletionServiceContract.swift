@@ -23,12 +23,14 @@ public struct DataDeletionServiceContract: ContractSuite {
         try await requireThrows(DataDeletionError.invalidConfirmation, "delete() with a confirmation never issued") {
             try await service.delete(confirmedBy: DeletionConfirmation(token: "contract-forged"))
         }
-        try await require(try await service.plan().deletes == plan.deletes, "a refused deletion deleted something")
+        // Confirms the latest plan: a service may void a confirmation once it issues a newer one.
+        let latest = try await service.plan()
+        try await require(latest.deletes == plan.deletes, "a refused deletion deleted something")
 
-        try await service.delete(confirmedBy: plan.confirmation)
+        try await service.delete(confirmedBy: latest.confirmation)
         try await requireThrows(DataDeletionError.nothingToDelete, "plan() after deleting") { try await service.plan() }
         try await requireThrows(DataDeletionError.nothingToDelete, "delete() twice") {
-            try await service.delete(confirmedBy: plan.confirmation)
+            try await service.delete(confirmedBy: latest.confirmation)
         }
 
         let empty = try await makeService(.nothingHeld)

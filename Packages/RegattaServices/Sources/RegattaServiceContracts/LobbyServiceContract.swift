@@ -38,7 +38,7 @@ public struct LobbyServiceContract: ContractSuite {
         try await refusedPostsDontCount(makeService(.open))
         try await contactsAreStripped(makeService(.open))
         try await filteredIsNotSent(makeService(.open))
-        try await blocking(makeService(.open), makeService(.open))
+        try await blocking(makeService(.open))
         try await reporting(makeService(.open))
         try await freeTextLocked(makeService(.freeTextLocked))
         try await muted(makeService(.muted))
@@ -116,10 +116,19 @@ public struct LobbyServiceContract: ContractSuite {
         try await require(message.post?.delivery == .notSent, "a filtered post came back as \(message)")
     }
 
+    /// The player's own ID, from a quick-chat: the history can hold her own lines, which she can't block or report.
+    private func ownID(_ service: any LobbyService) async throws -> GamePlayerID {
+        guard let me = try await service.post(.wave).post?.author.gamePlayerID else { try fail("a quick-chat came back as a system line") }
+        return me
+    }
+
     /// Blocking hides the other player's lines, is listed, is idempotent and undone by unblocking; blocking
     /// yourself is refused.
-    private func blocking(_ service: any LobbyService, _ other: any LobbyService) async throws {
-        guard let author = try await service.history().compactMap(\.post?.author).first else { try fail("no player's line to block") }
+    private func blocking(_ service: any LobbyService) async throws {
+        let me = try await ownID(service)
+        guard let author = try await service.history().compactMap(\.post?.author).first(where: { $0.gamePlayerID != me }) else {
+            try fail("no other player's line to block")
+        }
         try await service.block(author.gamePlayerID)
         try await require(try await !service.history().contains { $0.post?.author.gamePlayerID == author.gamePlayerID },
                           "a blocked player's lines still show")
@@ -128,15 +137,14 @@ public struct LobbyServiceContract: ContractSuite {
         try await require(list.filter { $0.gamePlayerID == author.gamePlayerID }.count == 1, "the blocked list is \(list)")
         try await service.unblock(author.gamePlayerID)
         try await require(try await !service.blockedPlayers().contains { $0.gamePlayerID == author.gamePlayerID }, "unblocking didn't unlist")
-
-        guard let me = try await other.post(.wave).post?.author.gamePlayerID else { try fail("a quick-chat came back as a system line") }
-        try await requireThrows(LobbyError.cannotBlockSelf, "block(yourself)") { try await other.block(me) }
+        try await requireThrows(LobbyError.cannotBlockSelf, "block(yourself)") { try await service.block(me) }
     }
 
     /// A reported line is hidden from the reporter at once. System lines, own seats and bots can't be reported.
     private func reporting(_ service: any LobbyService) async throws {
+        let me = try await ownID(service)
         let history = try await service.history()
-        guard let line = history.first(where: { $0.post != nil }), let author = line.post?.author,
+        guard let line = history.first(where: { $0.post.map { $0.author.gamePlayerID != me } ?? false }), let author = line.post?.author,
               let system = history.first(where: { $0.post == nil }) else { try fail("the history lacks a line to report") }
         try await service.report(message: line.id)
         try await require(try await !service.history().contains { $0.id == line.id }, "a reported line still shows to the reporter")

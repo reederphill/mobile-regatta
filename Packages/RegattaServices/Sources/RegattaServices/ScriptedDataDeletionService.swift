@@ -37,7 +37,7 @@ public actor ScriptedDataDeletionService: DataDeletionService {
         guard isSignedIn else { throw DataDeletionError.notSignedIn }
         guard !held.isEmpty || hasRaced else { throw DataDeletionError.nothingToDelete }
         guard let number = Int(confirmation.token.dropFirst("delete-".count)), confirmation.token.hasPrefix("delete-"),
-              (1...issued).contains(number) else { throw DataDeletionError.invalidConfirmation }
+              number >= 1, number <= issued else { throw DataDeletionError.invalidConfirmation }
         held = []
         hasRaced = false
     }

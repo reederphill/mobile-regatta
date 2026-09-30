@@ -19,13 +19,15 @@ import Testing
         let files = try Self.sources()
         #expect(files.count >= 9)
         let imports = try Regex(#"^\s*(?:@\w+(?:\([^)]*\))?\s+)*import\s+(?:\w+\s+)?(\w+)"#)
+        let allowed: Set<String> = ["RegattaCore", "RegattaProtocol", "RegattaServices", "Synchronization"]
         // Network and Dispatch only in `PathConnectivityService`, behind `#if canImport(Network)` (#241).
-        let allowed: Set<String> = ["RegattaCore", "RegattaProtocol", "RegattaServices", "Synchronization", "Network", "Dispatch"]
+        let pathMonitor: Set<String> = ["Network", "Dispatch"]
         var foreign: [String] = []
         for file in files {
+            let permitted = file.name.hasSuffix("/PathConnectivityService.swift") ? allowed.union(pathMonitor) : allowed
             for line in file.text.split(separator: "\n") {
                 if let match = String(line).firstMatch(of: imports), let module = match.output[1].substring,
-                   !allowed.contains(String(module)) {
+                   !permitted.contains(String(module)) {
                     foreign.append("\(file.name): \(module)")
                 }
             }

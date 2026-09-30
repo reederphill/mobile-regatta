@@ -61,6 +61,14 @@ import Testing
         #expect(try await lobby.post(.oneMore).post?.delivery == .sent)
         #expect(await lobby.filedReports.isEmpty)
     }
+
+    /// The deletion fake refuses a confirmation it hasn't issued yet, before any plan, rather than trapping.
+    @Test func deletionFakeRefusesAConfirmationBeforeAnyPlan() async throws {
+        let deletion = Fixtures.deletion(.hasOnlineData)
+        await #expect(throws: DataDeletionError.invalidConfirmation) {
+            try await deletion.delete(confirmedBy: DeletionConfirmation(token: "delete-1"))
+        }
+    }
 }
 
 // MARK: - Implementations, each broken in one way
