@@ -154,6 +154,45 @@ struct SeatWithProbe: CustomReflectable {
         #expect(throws: WireError.outOfRange("spinnaker")) { try WireSeat(tooLong, tick: 0) }
     }
 
+    /// #263: her roll of the tack she is in and the tick the boom crossed on it cross the wire, as ticks before the
+    /// snapshot's, so a client predicts the roll's timing and its speed (ADR 0007). A crossing further back than the
+    /// wire carries arrives as the furthest it does: every roll window is far shorter.
+    @Test func snapshotRoundTripCarriesTheRollAndTheTackCrossing() throws {
+        #expect(SnapshotFields.wire.contains("boat.roll") && SnapshotFields.wire.contains("boat.tackCrossingTick"))
+        let tick = 9_000
+        let cases: [(RollTack?, Int?)] = [(nil, nil), (.pending(tapTick: tick), nil), (.pending(tapTick: tick - 63), nil),
+                                          (.hit, tick - 3), (.missed, tick - 254), (nil, tick)]
+        for (roll, crossing) in cases {
+            var seat = Self.seat
+            seat.boat.isTacking = crossing != nil
+            seat.boat.roll = roll
+            seat.boat.tackCrossingTick = crossing
+            let wire = try WireSeat(seat, tick: tick)
+            let bytes = try Frame(seq: 0, tick: tick, message: .snapshot(Snapshot(seats: [wire, wire]))).encoded()
+            #expect(bytes.count == Frame.headerSize + 1 + 1 + 2 * SnapshotQuantisation.bytesPerSeat)
+            guard case .snapshot(let decoded) = try Frame(decoding: bytes).message else {
+                Issue.record("not a snapshot")
+                continue
+            }
+            #expect(decoded.seats[0] == wire)
+            var received = Self.seat
+            received.boat.roll = .missed
+            received.boat.tackCrossingTick = 1
+            decoded.seats[0].apply(to: &received, tick: tick)
+            expectWithinSteps(seat, received)
+        }
+        var old = Self.seat
+        old.boat.tackCrossingTick = tick - 1_000
+        let clamped = try WireSeat(old, tick: tick)
+        var received = Self.seat
+        clamped.apply(to: &received, tick: tick)
+        #expect(received.boat.tackCrossingTick == tick - WireSeat.maxCrossingTicks)
+        var stale = Self.seat
+        stale.boat.roll = .pending(tapTick: tick - 64)
+        #expect(throws: WireError.outOfRange("roll")) { try WireSeat(stale, tick: tick) }
+        #expect(throws: WireError.invalidValue("roll")) { try WireRoll.decode(6) }
+    }
+
     /// #89: the turns owed (up to 127) and the current turn's clock cross the wire, the clock as ticks before
     /// the snapshot's tick, so a client that joins or resyncs mid-penalty predicts the turn's deadlines. The
     /// queued turns' calls stay the receiver's own, trimmed to the turns owed.

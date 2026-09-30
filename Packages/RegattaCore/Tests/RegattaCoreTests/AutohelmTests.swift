@@ -149,7 +149,7 @@ func steadyWind(knots: Double, from direction: Double = 0) -> (Double) -> Wind {
         #expect(race.boats[0].autohelm == Autohelm(target: .groove(.upwind)))
         var worst = 0.0
         steps(race, seconds: 80) { boat in
-            let best = self.dinghy.polar.bestUpwind(tws: boat.polarWindSpeed).twa
+            let best = self.dinghy.polar.bestUpwind(tws: boat.polarWindSpeed(in: self.dinghy)).twa
             worst = max(worst, abs(self.degrees(boat.sailingAngle - best)))
         }
         #expect(worst <= 1, "strayed \(worst)° from the best upwind angle as the wind built")
@@ -192,7 +192,7 @@ func steadyWind(knots: Double, from direction: Double = 0) -> (Double) -> Wind {
         let reading = try #require(boat.autohelmReading(in: skiff))
         #expect(abs(degrees(reading.grooveAngle - groove(14))) < 1, "groove \(degrees(reading.grooveAngle))° in 14 kn")
         #expect(abs(degrees(boat.sailingAngle - reading.grooveAngle)) < 1)
-        let followed = (boat.grooveWindSpeed - metresPerSecond(knots: 10)) / metresPerSecond(knots: 4)
+        let followed = (boat.grooveWindSpeed(in: skiff) - metresPerSecond(knots: 10)) / metresPerSecond(knots: 4)
         #expect(followed > 0.85 && followed < 1, "the groove's wind followed \(followed) of the build")
     }
 
@@ -202,8 +202,8 @@ func steadyWind(knots: Double, from direction: Double = 0) -> (Double) -> Wind {
         let race = try scriptedWindRace(wind: { t in Wind(direction: 0, speed: metresPerSecond(knots: 6 + t / 10)) },
                                         place: sailing(upwindGroove(knots: 6)))
         steps(race, seconds: 20) { boat in
-            #expect(boat.averagedWindSpeed == boat.polarWindSpeed)
-            #expect(boat.grooveWindSpeed == boat.polarWindSpeed)
+            #expect(boat.averagedWindSpeed == boat.polarWindSpeed(in: self.dinghy))
+            #expect(boat.grooveWindSpeed(in: self.dinghy) == boat.polarWindSpeed(in: self.dinghy))
         }
     }
 

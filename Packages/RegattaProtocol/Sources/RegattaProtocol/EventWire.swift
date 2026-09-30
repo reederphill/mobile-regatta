@@ -20,7 +20,8 @@ public enum EventAudience: Equatable, Sendable {
         switch kind {
         case .gun, .cleared, .started, .ruleCall, .markTouch, .obstructionContact, .contact, .penaltyStarted,
              .penaltyReset, .penaltyServed, .tacked, .gybed, .disqualified, .becameGhost, .rounded, .finished,
-             .firstFinish, .raceClosed:
+             .firstFinish, .raceClosed, .rollHit, .rollMissed:
+            // A roll's hit or miss is seen by everyone, as her tack is (#121's wake; #117, #124 cue it).
             self = .everyone
         case .ocsNotice(let recipient):
             // The individual recall (rule 29.1) is told to the boat that was over, and only to her.
@@ -42,7 +43,7 @@ public enum EventAudience: Equatable, Sendable {
 // the codec), and a retired code is never reused. Code 4 was the pre-#73 `foul` (rule, offender,
 // victim); a rule call is code 12. Code 11 was `raceClosed` without results; with them (#86) it is
 // code 23. Code 17 was `markRoomNotice` with a list of recipients, never sent; with the entitled boat,
-// the boat she is entitled over and the mark (#91) it is code 24. Seats, places, legs and turns are one
+// the boat she is entitled over and the mark (#91) it is code 24. #263's roll hit and miss are 25 and 26. Seats, places, legs and turns are one
 // byte; ticks are int32; mark names and reasons are strings.
 
 extension RaceEvent.Kind {
@@ -139,6 +140,12 @@ extension RaceEvent.Kind {
         case .raceClosed(let results):
             w.u8(23)
             try results.encode(to: &w)
+        case .rollHit(let seat):
+            w.u8(25)
+            try w.index(seat, "seat")
+        case .rollMissed(let seat):
+            w.u8(26)
+            try w.index(seat, "seat")
         }
     }
 
@@ -187,6 +194,8 @@ extension RaceEvent.Kind {
         case 24:
             self = .markRoomNotice(boat: try r.index(), entitledOver: try r.index(),
                                    mark: try r.string(limit: WireLimit.string, "mark"))
+        case 25: self = .rollHit(seat: try r.index())
+        case 26: self = .rollMissed(seat: try r.index())
         default: throw WireError.invalidValue("event")
         }
     }

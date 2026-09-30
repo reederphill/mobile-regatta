@@ -9,7 +9,7 @@ enum VenueFixtures {
     /// SHA-256 of `Tests/RegattaCoreTests/Resources/venues/test-venue@1.json`. A released file never
     /// changes (ADR 0004): ship `test-venue@2.json` rather than editing version 1.
     static let testPinnedHash = "a6006f51d15b369557181ce4da8744b633df8c96eb3441fbc415ae20ccc1ab5f"
-    /// SHA-256 of `Resources/venues/dev-venue@1.json` to `@6.json`, by version.
+    /// SHA-256 of `Resources/venues/dev-venue@1.json` to `@7.json`, by version.
     static let devPinnedHashes = [
         1: "5f114297c5191a38366f9b38a59460023e5e08dbe295f1af6f1e8ff19d8df958",
         2: "42154e3d263171997dcd444383b0dcf0d89a04fc2b31280b10a4a5f5af220785",
@@ -17,6 +17,7 @@ enum VenueFixtures {
         4: "0e61d449480d32590e23cc81e13634d1e94389e6ed4764e952eb1a658d94a52c",
         5: "a5fa1d87b635210befddcb8e99066c866a3a7694a488cfa2d4209f998508234b",
         6: "15218c4b6d5b72777f5c99b982a69c307c4c07a98c5c9f36a74eefdcb75427b1",
+        7: "9d1e8f79c157cfe2511d5b52e574c1b02d1d251de4c221e8e8a7c5cb8d69024a",
     ]
 
     static func testFile() throws -> VenueFile {

@@ -229,7 +229,7 @@ The side of the course with more pressure at the moment. It holds for most of a 
 _Avoid_: favoured side (that can mean the shift)
 
 **Pressure lane**:
-A long band of pressure lying along the wind, curving with the venue's geography and drifting slowly sideways. The wind veers on one edge and backs on the other.
+A patch of pressure stretched along the wind: a few hundred metres across and several hundred long, drifting slowly sideways and down the wind, and curving with the venue's geography. Stronger than its surroundings, or a **weak lane** weaker (older venues' lanes are unending strong bands). The wind veers on one edge and backs on the other.
 _Avoid_: gust lane, streak
 
 **Puff**:
@@ -308,6 +308,14 @@ _Avoid_: autopilot, lock, helm (to helm is what a player does)
 
 **Groove**:
 The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. The autohelm snaps to it when let go close to it and follows it as the wind strength changes.
+
+**Tack cost**:
+What a tack loses against sailing on: the distance made good upwind, in hull lengths, over the tack and the speed she takes to get back. About a hull length from close-hauled with the autohelm sailing the tap; it decides which shifts are worth tacking on.
+_Avoid_: tack penalty (a penalty is a rules turn)
+
+**Roll tack**:
+A second tack/gybe tap during a tack, timed on the boom crossing. Close enough to the crossing it hits and she loses less speed until close-hauled; too early or too late it misses and costs her speed. It never makes a tack better than not tacking.
+_Avoid_: double tap (fine as UI copy), roll gybe (a gybe has no roll yet)
 
 **Pinch** / **foot**:
 Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). The autohelm holds either until the player changes it.

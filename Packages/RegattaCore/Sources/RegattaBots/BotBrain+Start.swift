@@ -181,10 +181,10 @@ extension BotBrain {
         let depth = max(-line.side(b.position), 0)
         // How far right of her, along the line, her spot's approach passes her depth.
         let across = (spot - joining * (depth / max(joining.dot(c.upwind), 0.3)) - b.position).dot(direction)
-        let tws = b.windSpeed * b.shadow
+        let tws = b.polarWindSpeed
         let polar = view.boatClass.polar
-        let reach = polar.speed(twa: .pi / 2, tws: tws) * Self.positioningSpeed
-        let runIn = depth / max(polar.bestUpwind(tws: tws).vmg, 0.3)
+        let reach = polar.speed(twa: .pi / 2, tws: tws) * b.speedShadow * Self.positioningSpeed
+        let runIn = depth / max(polar.bestUpwind(tws: tws).vmg * b.speedShadow, 0.3)
         let spare = max(0, arrival - runIn - Self.tackSeconds * 2 - Self.positioningMargin)
         guard across > reach * spare else { return spot }
         let shifted = spot - direction * (across - reach * spare)
@@ -207,8 +207,8 @@ extension BotBrain {
         }
         let slide = wrapAngle(b.windDirection - (line.pin.position - line.committee.position).bearing) + Self.waitOffLine
         if arrival > Self.repositionSeconds, b.tack == .starboard {
-            let speed = BoatDynamics.polarTarget(relativeWind: slide, boomSide: .port, tws: b.windSpeed * b.shadow, isPlaning: false,
-                                                 spinnaker: .down, boatClass: view.boatClass) * view.boatClass.ease.speedFraction
+            let speed = BoatDynamics.polarTarget(relativeWind: slide, boomSide: .port, tws: b.polarWindSpeed, isPlaning: false,
+                                                 spinnaker: .down, boatClass: view.boatClass) * b.speedShadow * view.boatClass.ease.speedFraction
             if min(early, Self.timingHorizon) * speed > landingRoom(b, view, hold: hold) { return nil }
         }
         return Aim(angle: slide, tack: .starboard, tolerance: Self.approachTolerance, ease: true)
@@ -245,8 +245,8 @@ extension BotBrain {
         let length = boatClass.hull.length
         let course = Vec2.heading(b.windDirection - hold - Self.joinMargin - Self.setupMargin)
         let holdCourse = Vec2.heading(b.windDirection - hold)
-        let eased = BoatDynamics.polarTarget(relativeWind: hold, boomSide: .port, tws: b.windSpeed * b.shadow, isPlaning: false,
-                                             spinnaker: .down, boatClass: boatClass) * boatClass.ease.speedFraction
+        let eased = BoatDynamics.polarTarget(relativeWind: hold, boomSide: .port, tws: b.polarWindSpeed, isPlaning: false,
+                                             spinnaker: .down, boatClass: boatClass) * b.speedShadow * boatClass.ease.speedFraction
         let scheduled = eased * max(holdCourse.dot(c.upwind), 0.3) * max(0, arrival - Self.setupSeconds)
         let deepest = max(maxHoldDepth(view, at: spot), length * 2)
         let depth = min(max(-c.startLine.side(b.position), scheduled, length * 2), deepest)
@@ -273,8 +273,8 @@ extension BotBrain {
         guard depth > 0 else { return 0 }
         let relativeWind = wrapAngle(b.windDirection - heading)
         var target = BoatDynamics.polarTarget(relativeWind: relativeWind, boomSide: relativeWind >= 0 ? .port : .starboard,
-                                              tws: b.windSpeed * b.shadow, isPlaning: senses.planing, spinnaker: .down,
-                                              boatClass: boatClass)
+                                              tws: b.polarWindSpeed, isPlaning: senses.planing, spinnaker: .down,
+                                              boatClass: boatClass) * b.speedShadow
         if ease { target *= boatClass.ease.speedFraction }
         let slowing = ease ? boatClass.ease.timeConstant : boatClass.momentum.slowingDown
         let dt = Self.timingStep
@@ -297,9 +297,12 @@ extension BotBrain {
 
     /// Whether she lets the sheets out while she steers `heading` on starboard to keep clear or off a mark
     /// before the gun: when sailing it sheeted in would bring her to the line early. A windward boat luffing
-    /// clear of a leeward one near the line drops back rather than luffing over it. Otherwise, OCS or on port,
-    /// she keeps her speed to keep clear with.
+    /// clear of a leeward one near the line drops back rather than luffing over it. OCS, kept from running back
+    /// (her heading short of `returnAngle`), she eases and lets the boats she keeps clear of sail on past her
+    /// ("Wait, then run back"): holding her speed there only keeps her in their way. Otherwise, on port, she keeps her
+    /// speed to keep clear with.
     func easesKeepingClear(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double) -> Bool {
+        if b.status == .ocs { return abs(wrapAngle(heading - b.windDirection)) < Self.returnAngle - Self.keepClearStep }
         guard b.status == .prestart, view.time < 0, b.tack == .starboard else { return false }
         let arrival = startArrival(view)
         return secondsToLine(b, view, heading: heading, ease: false, within: arrival) < arrival - Self.goHysteresis
@@ -313,8 +316,12 @@ extension BotBrain {
     /// with Ease (`crossesEarly`): keeping clear by luffing over it early would leave her OCS, trapped above the
     /// boats she keeps clear of.
     func startKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Double? {
+        // OCS, she keeps clear of every boat as a returning one (rule 21.1), whatever rules 10–13 would give her
+        // (`OtherBoat.rightOfWay` has only those): she is returning as soon as she heads back.
+        let returning = b.status == .ocs
         let threats = view.others.filter {
-            !$0.isGhost && $0.rightOfWay?.keepClear == view.seat && ($0.position - b.position).length < Self.keepClearRange
+            !$0.isGhost && (returning || $0.rightOfWay?.keepClear == view.seat)
+                && ($0.position - b.position).length < Self.keepClearRange
         }
         guard !threats.isEmpty else { return nil }
         let speed = max(b.speed, 1)

@@ -21,7 +21,7 @@ import Foundation
 public struct Conditions: DataFileContent, Hashable {
     public static let kind = "conditions"
     public static let bundleDirectory = "conditions"
-    public static let supportedSchemaVersions = [1, 2, 3, 4, 5]
+    public static let supportedSchemaVersions = [1, 2, 3, 4, 5, 6]
 
     /// Every conditions entry oscillates with a main period in 60–180 s (ADR 0001). #221 made the shifts
     /// faster, about 60–100 s from version 3 of each file (90–180 s before, #10); with 30 s knots, periods
@@ -126,6 +126,8 @@ public struct Conditions: DataFileContent, Hashable {
         public static let defaultPuffChoices = 1
         /// The most places a file may draw each puff at.
         public static let maxPuffChoices = 8
+        /// The most lanes a file may have alive at once on average.
+        public static let maxLaneCount = 24
 
         /// The pressure side: a slope in speed across the course, one side stronger, the other weaker.
         public struct Side: Hashable, Sendable {
@@ -164,15 +166,30 @@ public struct Conditions: DataFileContent, Hashable {
             /// The share of lanes that form at the venue's lane spots when it has any (#287); the rest form anywhere
             /// across the course. Schema 4; a schema-3 file reads `defaultSpotShare`.
             public let spotShare: Double
+            /// Nil: a lane is a band along the wind without end, as before schema 6. Otherwise each lane is a finite
+            /// patch, so pressure changes up the course as well as across it.
+            public let extent: Extent?
 
             /// The placeholder spot share (#287): lanes form mostly, not always, at the venue's spots.
             public static let defaultSpotShare = 0.7
+
+            /// What makes a lane a finite patch (schema 6): how long it is along the wind, how it drifts down it, and
+            /// how many weaken the wind instead of strengthening it.
+            public struct Extent: Hashable, Sendable {
+                /// A lane's length along the wind, metres: the ellipse's full length, `widthMetres` being its breadth.
+                public let length: ClosedRange<Double>
+                /// Downwind drift as a fraction of the race's base wind speed, so lanes move through the course but slower
+                /// than puffs, which they outlive.
+                public let drift: ClosedRange<Double>
+                /// The share of lanes that weaken the wind (a peak loss drawn like a gain) rather than strengthen it.
+                public let weakShare: Double
+            }
         }
     }
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2, 3, 4, 5:
+        case 1, 2, 3, 4, 5, 6:
             self = try JSONDecoder().decode(ConditionsSchema.self, from: fileData)
                 .conditions(id: header.id, schemaVersion: header.schemaVersion)
         default:
@@ -196,14 +213,16 @@ public struct Conditions: DataFileContent, Hashable {
 
 public typealias ConditionsFile = DataFile<Conditions>
 
-// MARK: - Schemas 1 to 5
+// MARK: - Schemas 1 to 6
 
-/// The conditions file, schema versions 1 to 5, as written: knots, degrees, seconds, metres, fractions.
+/// The conditions file, schema versions 1 to 6, as written: knots, degrees, seconds, metres, fractions.
 /// Schema 2 is schema 1 plus `shift.wobbleDegrees`, `trend.rampFraction`, `build.overSeconds` and
 /// `build.rampFraction` (#75): required from schema 2, refused in schema 1. Schema 3 is schema 2 plus
 /// `pressureField` (#286): required from schema 3, refused before it. Schema 4 is schema 3 plus
 /// `pressureField.side.tendencyScale` and `pressureField.lanes.spotShare` (#287): required from schema 4, refused
-/// before. Schema 5 is schema 4 plus `pressureField.puffChoices` (#288): required in schema 5, refused before.
+/// before. Schema 5 is schema 4 plus `pressureField.puffChoices` (#288): required in schema 5, refused before. Schema 6
+/// is schema 5 plus `pressureField.lanes.lengthMetres`, `alongDriftFraction` and `weakShare`: required in schema 6,
+/// refused before.
 private struct ConditionsSchema: Decodable {
     /// `{ "min": a, "max": b }`, in the unit its key names.
     struct Range: Decodable {
@@ -270,6 +289,10 @@ private struct ConditionsSchema: Decodable {
             let bendDegrees: Double
             /// Schema 4.
             let spotShare: Double?
+            /// Schema 6.
+            let lengthMetres: Range?
+            let alongDriftFraction: Range?
+            let weakShare: Double?
         }
 
         let side: Side
@@ -384,7 +407,8 @@ private struct ConditionsSchema: Decodable {
             try check(side.persistenceSeconds.isFinite && side.persistenceSeconds >= WindWindows.seconds
                         && side.persistenceSeconds <= 3600,
                       "pressure side persistence must be \(WindWindows.seconds)…3600 s")
-            try check(lanes.count.isFinite && lanes.count >= 0 && lanes.count <= 8, "pressure lane count must be 0…8")
+            try check(lanes.count.isFinite && lanes.count >= 0 && lanes.count <= Double(Conditions.PressureField.maxLaneCount),
+                      "pressure lane count must be 0…\(Conditions.PressureField.maxLaneCount)")
             try check(lanes.driftMetresPerSecond.isFinite && lanes.driftMetresPerSecond >= 0 && lanes.driftMetresPerSecond <= 5,
                       "pressure lane drift must be 0…5 m/s")
             // Schema 4's geography columns (#287): required in schema 4, refused before it.
@@ -415,6 +439,21 @@ private struct ConditionsSchema: Decodable {
             } else {
                 try check(pressureField.puffChoices == nil, "pressureField.puffChoices needs schema 5")
             }
+            // Schema 6's finite lanes: required in schema 6, refused before it.
+            var extent: Conditions.PressureField.Lanes.Extent?
+            if schemaVersion >= 6 {
+                guard let length = lanes.lengthMetres, let drift = lanes.alongDriftFraction, let weak = lanes.weakShare else {
+                    throw DataFileError.malformed(
+                        kind: Conditions.kind,
+                        reason: "schema \(schemaVersion) needs pressureField.lanes.lengthMetres, alongDriftFraction and weakShare")
+                }
+                try check(fraction.contains(weak), "pressure lane weak share must be 0…1")
+                extent = .init(length: try bounds(length, in: 1...10_000, "pressure lane length"),
+                               drift: try bounds(drift, in: fraction, "pressure lane along drift"), weakShare: weak)
+            } else {
+                try check(lanes.lengthMetres == nil && lanes.alongDriftFraction == nil && lanes.weakShare == nil,
+                          "pressureField.lanes.lengthMetres, alongDriftFraction and weakShare need schema 6")
+            }
             parsedPressureField = .init(
                 side: .init(strength: side.strength, persistence: side.persistenceSeconds,
                             bend: try degrees(side.bendDegrees, "pressure side bend"), tendencyScale: tendencyScale),
@@ -423,7 +462,8 @@ private struct ConditionsSchema: Decodable {
                              width: try bounds(lanes.widthMetres, in: 1...10_000, "pressure lane width"),
                              lifetime: try bounds(lanes.lifetimeSeconds, in: 1...3600, "pressure lane lifetime"),
                              drift: lanes.driftMetresPerSecond,
-                             bend: try degrees(lanes.bendDegrees, "pressure lane bend"), spotShare: spotShare),
+                             bend: try degrees(lanes.bendDegrees, "pressure lane bend"), spotShare: spotShare,
+                             extent: extent),
                 puffChoices: puffChoices)
         } else {
             try check(pressureField == nil, "pressureField needs schema 3")

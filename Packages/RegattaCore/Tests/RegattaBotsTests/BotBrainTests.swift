@@ -153,6 +153,8 @@ import RegattaCore
         #expect(tactician.seeksPuffs && tactician.seeksPressure && tactician.goesToThePressure && tactician.seeksClearAir)
         #expect(tactician.covers)
         #expect(tactician.corridor > baseline.corridor)
+        // #263: the groove-only profiles leave each tack to the autohelm's tap; the tactician rolls hers.
+        #expect(!baseline.rollsTacks && tactician.rollsTacks)
         // #238: the blip-tacker is the baseline tacking on every header past 3°, the wobble's size (#221).
         var blipTacker = Tactics(profile: .blipTacker, skill: 0.9)
         #expect(blipTacker.headerThreshold == deg2rad(3))
@@ -220,5 +222,36 @@ import RegattaCore
         #expect(angle < deep - skiff.steering.autohelm.downwindSnap)
         #expect(angle >= skiff.planing!.fromTWA)
         #expect(BotBrain.planingAngle(tws: 5 * knots, deepest: deep, skiff) == nil)
+    }
+
+    /// "Heats up in a lull, not in a shadow" (#263): the tactician on the plane and slowing towards falling off it
+    /// heads up to stay on it in clean air; in another boat's wind shadow, which slows her whatever angle she sails
+    /// (skiff@3's speed loss), she holds her aim.
+    @Test func theTacticianHeatsUpInALullNotInAShadow() throws {
+        func aim(shadow: Double) throws -> (aim: Aim, heated: Aim) {
+            let race = botRace(seats: [.bot, .human], seed: 3)
+            let planing = try #require(race.boatClass.planing)
+            let wind = race.seatView(for: 0).own.windDirection
+            var snapshot = race.exportSnapshot()
+            snapshot.seats[0].boat.status = .racing
+            snapshot.seats[0].boat.speed = planing.offSpeed * (1 + BotBrain.lullSpeedMargin) / 2
+            snapshot.seats[0].boat.heading = wind + .pi - deg2rad(30)
+            snapshot.seats[0].boat.boomSide = .port
+            snapshot.seats[0].boat.autohelm = nil
+            snapshot.seats[0].boat.shadow = shadow
+            try race.importSnapshot(snapshot)
+            let view = race.seatView(for: 0)
+            #expect(race.boatClass.windShadow.isSpeedLoss)
+            #expect(view.own.speedShadow == shadow)
+            var brain = BotBrain(style: BotStyle(skill: 0.9, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0,
+                                                 penaltyDirection: 1), profile: .tactician)
+            brain.senses.planing = true
+            let deep = Aim.groove(.downwind, tack: view.own.tack, angle: brain.grooveAngle(.downwind, view.own, view))
+            return (deep, brain.downwindAim(view.own, view, aim: deep))
+        }
+        let clean = try aim(shadow: 1)
+        #expect(clean.heated.angle < clean.aim.angle - deg2rad(5), "in a lull in clean air she heats up")
+        let shadowed = try aim(shadow: 0.8)
+        #expect(shadowed.heated == shadowed.aim, "in a shadow she holds her aim")
     }
 }

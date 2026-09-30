@@ -28,10 +28,12 @@ import Testing
     }
 
     /// Given every key the seeded race uses, a keys-only race that imports its snapshot steps bit for bit
-    /// like it: the keys, not the seed, are the wind.
+    /// like it: the keys, not the seed, are the wind. A prediction has no umpire (ADR 0005), so the steering
+    /// is one the seeded race's umpire makes no call on: its penalties and disqualifications reach a client
+    /// from the server, never from the keys.
     @Test func withTheKeysItStepsExactlyLikeTheSeededRace() throws {
         let seeded = Race(setup: try Self.setup(), windSeed: Self.windSeed)
-        var rng = SplitMix64(seed: 64)
+        var rng = SplitMix64(seed: 65)
         for _ in 0..<300 {
             Self.steerBots(seeded, rng: &rng)
             seeded.step()
@@ -50,6 +52,10 @@ import Testing
             Self.steerBots(seeded, keysOnly, rng: &rng)
             seeded.step()
             try keysOnly.tryStep()
+            guard seeded.boats.allSatisfy({ $0.penaltyTurnsOwed == 0 && $0.status != .dsq }) else {
+                Issue.record("the umpire called a boat at tick \(seeded.tick): pick steering it makes no call on")
+                return
+            }
             guard keysOnly.digest() == seeded.digest() else {
                 Issue.record("diverged at tick \(seeded.tick)")
                 return

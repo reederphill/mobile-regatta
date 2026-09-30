@@ -47,6 +47,17 @@ public enum BoatStatus: Sendable, Equatable {
     case dsq
 }
 
+/// A roll tack (#222, #263, `BoatClass.RollTackTuning`): the second tack/gybe tap of a tack, and how it went.
+/// One a tack; cleared once she is close-hauled on the new tack.
+public enum RollTack: Sendable, Equatable {
+    /// Tapped at `tapTick`, not yet timed: a hit if the boom crosses within the window of it, either side, else a miss.
+    case pending(tapTick: Int)
+    /// Within the window of the crossing: until close-hauled she takes the class's share of each tick's speed loss.
+    case hit
+    /// Outside it: her speed took the class's miss factor once.
+    case missed
+}
+
 public struct Boat: Identifiable, Sendable {
     public let id: Int
     public let isPlayer: Bool
@@ -88,14 +99,19 @@ public struct Boat: Identifiable, Sendable {
     public var queuedPenaltyCallTicks: [Int] = []
     /// Rule 13: past head to wind but not yet close-hauled.
     public var isTacking = false
+    /// The tick the boom crossed on the tack she is in (#263): set with `isTacking`, cleared with it. What a roll
+    /// tap after the crossing is timed against (`RollTack`).
+    public var tackCrossingTick: Int?
+    /// Her roll of the tack she is in (#222, #263), or nil: none tapped yet, or not in a tack.
+    public var roll: RollTack?
     /// On the plane (#248, `BoatClass.planing`): set by `BoatDynamics.advance`, never for a class that
     /// doesn't plane. For drawing (#117, #121) as much as for her speed.
     public var isPlaning = false
     /// Her automatic spinnaker (#248, `BoatClass.spinnaker`): down, going up, up or coming down. Always
     /// down for a class without one. For drawing (#120) as much as for her speed.
     public var spinnaker = Spinnaker.down
-    /// The class's running average of the wind speed her polar reads (`polarWindSpeed`), m/s: what her
-    /// autohelm's grooves follow (#245, `grooveWindSpeed`). Nil until the race first samples her wind.
+    /// The class's running average of the wind speed her polar reads (`polarWindSpeed(in:)`), m/s: what her
+    /// autohelm's grooves follow (#245, `grooveWindSpeed(in:)`). Nil until the race first samples her wind.
     /// With no average (`AutohelmTuning.grooveWindAverage` 0, every schema-2 class) it is the wind right now.
     public var averagedWindSpeed: Double?
 
@@ -108,7 +124,8 @@ public struct Boat: Identifiable, Sendable {
     /// Current at the boat, m/s, the way the water moves: it carries her over the ground whatever she
     /// does (#11). Sampled with the winds at the start of every step.
     public var current = Vec2.zero
-    /// Multiplier from other boats' wind shadow and backwind on the sailing wind's speed, 1 = clean air.
+    /// Multiplier from other boats' wind shadow and backwind, 1 = clean air: on the sailing wind's speed, or on her
+    /// target speed for a class whose shadow is a speed loss (`BoatClass.WindShadow.isSpeedLoss`, #263).
     public var shadow = 1.0
 
     public var finishTime: Double?
@@ -135,11 +152,19 @@ public struct Boat: Identifiable, Sendable {
         get { sailingWind.speed }
         set { sailingWind.speed = newValue }
     }
-    /// The wind speed her polar reads, m/s: the sailing wind's, slowed by any shadow (#10, #14).
-    public var polarWindSpeed: Double { sailingWind.speed * shadow }
-    /// The wind speed her autohelm's grooves read, m/s: the class's average of `polarWindSpeed`
-    /// (`averagedWindSpeed`), or the wind right now before the race has sampled it.
-    public var grooveWindSpeed: Double { averagedWindSpeed ?? polarWindSpeed }
+    /// The wind speed her polar reads in `boatClass`, m/s: the sailing wind's, slowed by any shadow (#10, #14)
+    /// unless the class's shadow slows the boat instead (`BoatClass.WindShadow.isSpeedLoss`, #263).
+    public func polarWindSpeed(in boatClass: BoatClass) -> Double {
+        boatClass.windShadow.isSpeedLoss ? sailingWind.speed : sailingWind.speed * shadow
+    }
+    /// The shadow's multiplier on her target speed in `boatClass` (#220, #263): `shadow` for a class whose shadow
+    /// slows the boat, 1 for one whose shadow slows the wind (`polarWindSpeed(in:)` has it).
+    public func speedShadow(in boatClass: BoatClass) -> Double {
+        boatClass.windShadow.isSpeedLoss ? shadow : 1
+    }
+    /// The wind speed her autohelm's grooves read in `boatClass`, m/s: the class's average of
+    /// `polarWindSpeed(in:)` (`averagedWindSpeed`), or the wind right now before the race has sampled it.
+    public func grooveWindSpeed(in boatClass: BoatClass) -> Double { averagedWindSpeed ?? polarWindSpeed(in: boatClass) }
 
     /// Sailing wind direction relative to the bow; positive = wind over the starboard side.
     public var relativeWind: Double { wrapAngle(windDirection - heading) }
@@ -182,11 +207,12 @@ public struct Boat: Identifiable, Sendable {
         return angle > collapse
     }
 
-    /// Moves `averagedWindSpeed` on by `dt` seconds towards `polarWindSpeed`, the class's exponential
+    /// Moves `averagedWindSpeed` on by `dt` seconds towards `polarWindSpeed(in:)`, the class's exponential
     /// average with its `grooveWindAverage` time constant; with none, or before the first sample, it takes
     /// the wind right now.
-    mutating func averageWind(dt: Double, timeConstant: Double) {
-        let now = polarWindSpeed
+    mutating func averageWind(dt: Double, in boatClass: BoatClass) {
+        let now = polarWindSpeed(in: boatClass)
+        let timeConstant = boatClass.steering.autohelm.grooveWindAverage
         guard let average = averagedWindSpeed, timeConstant > 0 else {
             averagedWindSpeed = now
             return
