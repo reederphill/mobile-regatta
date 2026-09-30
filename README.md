@@ -35,6 +35,9 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   EscapeSimulation.swift  rules 15 and 16.1: room judged by sailing the keep-clear boat's candidate inputs on the umpire's recorded track; 43.1(b)
   RulesConfig.swift       rules configuration file schema: incidents, zone, race format (docs/rules-file.md)
   Resources/rules/        rules configuration files; `fleet-rules@4` (the default) is the v1.0 fleet race
+  Livery.swift            liveries (#118): design, safe-palette colours, sail number; OKLab and the swatch rule
+  LiveryCatalogue.swift   livery catalogue file schema: designs per boat class, safe palette, bot and new-player liveries
+  Resources/liveries/     the livery catalogue, `livery-catalogue@1`
   Incident.swift          incidents and the array-backed IncidentIndex, keyed by sorted seat pairs
   Race.swift              fixed-step race loop: per-seat inputs, start sequence, OCS, contacts, penalties, finish;
                           authoritative or prediction mode (seedless, no umpire; tryStep() stops at a missing wind key)
@@ -163,9 +166,10 @@ bit-for-bit deterministic:
 
 ### Data files
 
-Boat classes, conditions, venues and the rules configuration are immutable, versioned JSON
-files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`. The venue schema is in
-`docs/venue-file.md`; the rules configuration schema in `docs/rules-file.md`.
+Boat classes, conditions, venues, the rules configuration and the livery catalogue are immutable,
+versioned JSON files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`. The venue schema
+is in `docs/venue-file.md`; the rules configuration schema in `docs/rules-file.md`; the livery catalogue's
+in `LiveryCatalogue.swift`.
 
 - Files are UTF-8 JSON. Before anything parses one, the loader refuses other encodings, nesting deeper
   than 512 and a key repeated in one object (parsers disagree on which copy wins, and differently on
@@ -340,6 +344,8 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
   `none`) puts a colour-vision filter over the whole race view, scene, HUD and letterbox alike (Debug builds,
   #111), to check every cue still reads. The render fixtures diff the scene through each (`RegattaUITests/Fixtures/prestart-*.json`).
 - `-tuning` opens the debug tuning panel at launch (Debug builds, #232; see below).
+- `-fakeServices signed-out|underage|communication-restricted|multiplayer-restricted|offline|queued|cancelled-race`
+  runs the online services on that scenario's scripted fakes (`RegattaServices`), for UI tests (#242).
 
 ### Debug tuning panel
 

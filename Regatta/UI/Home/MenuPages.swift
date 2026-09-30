@@ -19,12 +19,7 @@ struct MenuPageView: View {
             PlaceholderPage(title: "Help", systemImage: "questionmark.circle", id: "page-help",
                             message: "How to steer, start and keep clear arrives here.")
         case .settings:
-            PlaceholderPage(title: "Settings", systemImage: "gearshape", id: "page-settings",
-                            message: "Steering, camera, sound and lobby settings arrive here.") {
-                #if DEBUG
-                DevRaceServerField()
-                #endif
-            }
+            SettingsView(model: model)
         #if DEBUG
         case .tuning:
             TuningView(model: model.tuning)
@@ -142,8 +137,9 @@ private struct PlaceholderPage<Extra: View>: View {
 }
 
 #if DEBUG
-/// The dev race server Race online joins in a Debug build (#68), `host:port`. `-onlineHost` overrides it.
-private struct DevRaceServerField: View {
+/// The dev race server Race online joins in a Debug build (#68), `host:port`. `-onlineHost` overrides it. On the
+/// Settings page.
+struct DevRaceServerField: View {
     @AppStorage(RaceServer.addressDefaultsKey) private var host = RaceServer.defaultAddress
 
     var body: some View {

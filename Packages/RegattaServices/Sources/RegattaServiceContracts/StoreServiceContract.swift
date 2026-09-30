@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaServices
 
 /// What `StoreService` promises (#21, #25).

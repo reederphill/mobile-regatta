@@ -107,5 +107,9 @@ import RegattaCore
         status.queuedPlayers = 5
         #expect(LobbyPanelState(isOnline: true, status: status) == .chatHidden(queuedPlayers: 5))
         #expect(LobbyPanelState(isOnline: false, status: status) == .offline)
+        // A player Game Center keeps from chatting sees the queue and leaderboard, whatever the setting (#34).
+        status.hidesChat = false
+        status.canChat = false
+        #expect(LobbyPanelState(isOnline: true, status: status) == .chatHidden(queuedPlayers: 5))
     }
 }

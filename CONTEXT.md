@@ -83,7 +83,7 @@ _Avoid_: time limit (that's the overall cap)
 The latest time after the gun at which the race ends, whether or not any boat has finished.
 
 **Distance to finish**:
-How far a boat still has to sail, round its remaining marks, to finish. Places boats that haven't finished when the race ends.
+How far a boat still has to sail, round its remaining marks, to finish: the path length, which times the race's close. Boats are placed by **Ladder distance**, not this.
 _Avoid_: distance to the line (the finish line is also the start line)
 
 **RET** (retired):
@@ -199,7 +199,11 @@ _Avoid_: arena, bounds, map edge
 The line from a mark along which a boat, at her best angle to the wind, can just fetch it without another tack or gybe. Drawn from the wind only, never from current.
 
 **Ladder line**:
-A line drawn across the wind, so boats on the same line are level in the race to windward or leeward.
+A line drawn across the course axis (the seeded mean wind direction, fixed for the race), so boats on the same line are level in the race to windward or leeward.
+
+**Ladder distance**:
+How far a boat still has to go to finish, counting only progress across the ladder lines on her current leg (along the course axis) plus the full length of each later leg measured the same way. On the reach, which crosses no ladder lines, it is the distance along the leg instead, so the total runs on across each rounding without a jump. Orders boats racing and places those unfinished when the race ends; the gap to the leader is the difference.
+_Avoid_: distance to finish (the path length)
 
 ### Conditions
 

@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaServices
 
 /// What `ProfileService` promises (#21, #25, #26).
@@ -60,7 +61,7 @@ public struct ProfileServiceContract: ContractSuite {
 
     private func requireValid(_ livery: Livery, _ what: String) async throws {
         try await require(Livery.sailNumbers.contains(livery.sailNumber), "\(what) has sail number \(livery.sailNumber)")
-        try await require(Livery.slotCounts.contains(livery.colours.count), "\(what) has \(livery.colours.count) colours")
+        try await require(LiveryDesign.slotCounts.contains(livery.colours.count), "\(what) has \(livery.colours.count) colours")
     }
 
     /// A valid livery is stored and shown, idempotently; an invalid one stores nothing.
@@ -75,7 +76,7 @@ public struct ProfileServiceContract: ContractSuite {
         try await refused(.sailNumber, "sail number \(Livery.sailNumbers.upperBound + 1)") { $0.sailNumber = Livery.sailNumbers.upperBound + 1 }
         try await refused(.unknownDesign, "an unknown design") { $0.design = DesignID("contract-no-such-design") }
         try await refused(.slotCount, "four colours") { $0.colours = Array(repeating: $0.colours[0], count: 4) }
-        try await refused(.colour, "a colour off the palette") { $0.colours[0] = Swatch("contract-no-such-swatch") }
+        try await refused(.colour, "a colour off the palette") { $0.colours[0] = SwatchID("contract-no-such-swatch") }
 
         var change = profile.livery
         change.sailNumber = change.sailNumber % Livery.sailNumbers.upperBound + 1

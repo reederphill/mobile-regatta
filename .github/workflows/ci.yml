@@ -62,6 +62,9 @@ jobs:
               - "Packages/RegattaProtocol/Package.*"
               - "Packages/RegattaClient/Sources/**"
               - "Packages/RegattaClient/Package.*"
+              # The app's online services (#242).
+              - "Packages/RegattaServices/Sources/**"
+              - "Packages/RegattaServices/Package.*"
             # What shapes the race view in the window (G5): the iPad's letterbox test runs only for these.
             viewport:
               - *ci

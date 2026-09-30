@@ -1,3 +1,5 @@
+import RegattaCore
+
 // The player's online profile (#25, #21, #26): rating and badge, races and wins, any racing suspension, progress to
 // the next earned design, and the livery the server stores so it follows the player across devices.
 
@@ -73,12 +75,24 @@ public enum LiveryProblem: Hashable, Sendable {
     case sailNumber
     /// Not the design's number of colour slots.
     case slotCount
-    /// A colour not in the safe palette.
+    /// A colour not in the safe palette, or not allowed in its slot.
     case colour
     /// No such design for the boat class.
     case unknownDesign
     /// A paid design the player doesn't own: it can be tried on, not raced (#21).
     case notOwned
+}
+
+extension LiveryProblem {
+    /// The problem `LiveryCatalogue.validate` found, as the profile reports it.
+    public init(_ error: LiveryError) {
+        switch error {
+        case .sailNumber: self = .sailNumber
+        case .unknownDesign, .wrongBoatClass: self = .unknownDesign
+        case .slotCount: self = .slotCount
+        case .unknownSwatch, .swatchNotAllowed: self = .colour
+        }
+    }
 }
 
 public enum ProfileError: Error, Equatable, Sendable {

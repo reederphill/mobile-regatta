@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaServiceContracts
 import RegattaServices
 import Synchronization

@@ -1,3 +1,4 @@
+import RegattaCore
 import Synchronization
 
 /// What a `ScriptedStoreService` plays.
