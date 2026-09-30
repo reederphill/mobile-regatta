@@ -35,6 +35,9 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   EscapeSimulation.swift  rules 15 and 16.1: room judged by sailing the keep-clear boat's candidate inputs on the umpire's recorded track; 43.1(b)
   RulesConfig.swift       rules configuration file schema: incidents, zone, race format (docs/rules-file.md)
   Resources/rules/        rules configuration files; `fleet-rules@4` (the default) is the v1.0 fleet race
+  Livery.swift            liveries (#118): design, safe-palette colours, sail number; OKLab and the swatch rule
+  LiveryCatalogue.swift   livery catalogue file schema: designs per boat class, safe palette, bot and new-player liveries
+  Resources/liveries/     the livery catalogue, `livery-catalogue@1`
   Incident.swift          incidents and the array-backed IncidentIndex, keyed by sorted seat pairs
   Race.swift              fixed-step race loop: per-seat inputs, start sequence, OCS, contacts, penalties, finish;
                           authoritative or prediction mode (seedless, no umpire; tryStep() stops at a missing wind key)

@@ -72,9 +72,10 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
         static let other = GamePlayerID("G:fake-2")
         static let terms = TermsVersion(1)
         static let race = RaceID("fake-race")
-        static let livery = Livery(boatClass: "skiff", design: DesignID("skiff-starter-stripe"), colours: [Swatch("sky"), Swatch("white")],
-                                   sailNumber: 207)
-        static let chip = LiveryChip(deck: Swatch("sky"), sail: Swatch("white"))
+        static let livery = Livery(design: DesignID("skiff-plain"), colours: [SwatchID("sky-blue"), SwatchID("white")], sailNumber: 207)
+        static let chip = LiveryChip(deck: SwatchID("sky-blue"), sail: SwatchID("white"))
+        /// The bundled livery catalogue (#118), which RegattaCore always ships.
+        static let catalogue = try! LiveryCatalogueFile.bundled(id: "livery-catalogue", version: 1).content
 
         init(_ scenario: FakeServiceScenario) {
             var player = Self.player
@@ -132,10 +133,10 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
                     gamePlayerID: player.gamePlayerID, nickname: player.alias, rating: me.rating, completedRaces: 0, wins: 0, suspension: nil,
                     progress: EarnedProgress(earned: [], next: EarnedMilestone(design: DesignID("skiff-earned-10"), completedRaces: 10)),
                     livery: Self.livery) : nil,
-                designs: [Self.livery.design: 2], palette: Set(Self.livery.colours)))
+                catalogue: Self.catalogue))
             let isOnline = scenario != .offline
             let store = ScriptedStoreService(StoreScenario(
-                products: [StoreProduct(id: ProductID("com.phillreeder.regatta.skiff.chevron"), design: DesignID("skiff-paid-chevron"),
+                products: [StoreProduct(id: ProductID("com.phillreeder.regatta.skiff.chevron-sail"), design: DesignID("skiff-chevron-sail"),
                                         boatClass: "skiff", tier: .tier2, displayPrice: "$1.99")],
                 isOnline: isOnline))
             services = ServiceSet(

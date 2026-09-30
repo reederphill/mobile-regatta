@@ -5,8 +5,8 @@ import CryptoKit
 import Crypto
 #endif
 
-// ADR 0004: boat classes, venues, conditions and the rules configuration are immutable, versioned
-// JSON data files. Every kind goes through this one loader: it reads the common header, refuses
+// ADR 0004: boat classes, venues, conditions, the rules configuration and the livery catalogue (#118) are
+// immutable, versioned JSON data files. Every kind goes through this one loader: it reads the common header, refuses
 // schema versions it doesn't know, hashes the exact bytes, and hands the rest to the kind's decoder.
 // Files are loaded from `Data`, never from paths, so the server can load bytes it was sent.
 
