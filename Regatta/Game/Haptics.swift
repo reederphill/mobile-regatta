@@ -36,25 +36,25 @@ final class SystemHapticGenerator: HapticGenerator {
     }
 }
 
-/// Haptics gated by Settings: `isOn` is asked at each call, so switching Haptics off takes effect mid-race.
+/// Haptics gated by Settings: `isOn` follows Settings' Haptics, set once per change by whoever owns the setting
+/// (`AppModel`), so switching Haptics off takes effect mid-race without reading the settings on every haptic.
 final class GatedHaptics: Haptics {
     private let generator: any HapticGenerator
-    private let isOn: () -> Bool
+    var isOn: Bool
 
-    /// By default the device's generators, on while the device settings in `UserDefaults.standard` say so.
-    init(generator: any HapticGenerator = SystemHapticGenerator(),
-         isOn: @escaping () -> Bool = { DeviceSettings(defaults: .standard).haptics }) {
+    /// By default the device's generators, on: the app passes `AppModel.haptics`, which follows the setting.
+    init(generator: any HapticGenerator = SystemHapticGenerator(), isOn: Bool = true) {
         self.generator = generator
         self.isOn = isOn
     }
 
     func impact(intensity: Double) {
-        guard isOn() else { return }
+        guard isOn else { return }
         generator.impact(intensity: intensity)
     }
 
     func notify(_ kind: HapticNotification) {
-        guard isOn() else { return }
+        guard isOn else { return }
         generator.notify(kind)
     }
 }

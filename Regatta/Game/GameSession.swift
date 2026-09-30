@@ -66,8 +66,8 @@ final class GameSession {
     }
 
     /// An online race (#68).
-    convenience init(online driver: OnlineDriver) {
-        self.init(driver: driver, roster: driver.roster)
+    convenience init(online driver: OnlineDriver, haptics: any Haptics = GatedHaptics()) {
+        self.init(driver: driver, roster: driver.roster, haptics: haptics)
     }
 
     /// A render fixture (#62): `log` replayed to the fixture's freeze tick and frozen there, drawn from

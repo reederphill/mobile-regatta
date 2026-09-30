@@ -62,8 +62,14 @@ final class AppModel {
     var settings = RaceSettings()
     /// The device's settings (#110): the Settings page's rows, saved to `defaults` as they change.
     var deviceSettings: DeviceSettings {
-        didSet { if deviceSettings != oldValue { deviceSettings.save(to: defaults) } }
+        didSet {
+            guard deviceSettings != oldValue else { return }
+            deviceSettings.save(to: defaults)
+            haptics.isOn = deviceSettings.haptics
+        }
     }
+    /// Every race's haptics, on while Settings' Haptics is (#110): set here once per change, not read per haptic.
+    @ObservationIgnored let haptics: GatedHaptics
     /// Where `deviceSettings` lives.
     @ObservationIgnored let defaults: UserDefaults
     /// The race the cover shows, while `phase` is `.raceSequence`.
@@ -90,7 +96,9 @@ final class AppModel {
         self.sceneState = sceneState
         self.launchOptions = launchOptions
         self.defaults = defaults
-        deviceSettings = DeviceSettings(defaults: defaults)
+        let deviceSettings = DeviceSettings(defaults: defaults)
+        self.deviceSettings = deviceSettings
+        haptics = GatedHaptics(isOn: deviceSettings.haptics)
         #if DEBUG
         tuning = TuningModel(store: launchOptions.uiTesting ? .inMemory : .standard)
         #endif
@@ -134,11 +142,11 @@ final class AppModel {
         #if DEBUG
         var config = config
         config.files = tuning.practiceFiles()
-        let session = GameSession(config: config, timescale: launchOptions.timescale)
+        let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics)
         tuning.attach(session, files: config.files)
         return session
         #else
-        return GameSession(config: config, timescale: launchOptions.timescale)
+        return GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics)
         #endif
     }
 

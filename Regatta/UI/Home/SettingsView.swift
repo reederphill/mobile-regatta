@@ -6,7 +6,14 @@ import SwiftUI
 /// A scroll view and a column like the other pages, not a `Form`: an identifier on a `Form` doesn't reach the
 /// accessibility tree, and UI tests find the page by `page-settings`.
 struct SettingsView: View {
+    /// What Delete my online data does once confirmed, and the notice it leaves: the seam the deletion service's plan
+    /// and confirmation fill in #166.
+    typealias OnlineDataDeletion = () async -> String
+    /// Until #166: nothing is deleted, and the notice says so.
+    static let deletionArrivesLater: OnlineDataDeletion = { "Deleting online data arrives with online accounts." }
+
     @Bindable var model: AppModel
+    var deleteOnlineData: OnlineDataDeletion = Self.deletionArrivesLater
     @State private var confirmsDeletion = false
     @State private var shownNotice: String?
 
@@ -116,8 +123,7 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .confirmationDialog("Delete your online data?", isPresented: $confirmsDeletion, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                // The deletion service's plan and confirmation are wired in #166.
-                shownNotice = "Deleting online data arrives with online accounts."
+                Task { shownNotice = await deleteOnlineData() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -194,22 +200,6 @@ struct SettingsView: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
             .padding([.horizontal, .bottom], 16)
-    }
-}
-
-/// Settings → Blocked players: empty until the lobby service's list is wired (#166).
-private struct BlockedPlayersPage: View {
-    var body: some View {
-        ScrollView {
-            Text("You haven't blocked anyone. Long-press a lobby message to block its sender.")
-                .font(MenuFont.body())
-                .multilineTextAlignment(.center)
-                .padding(.vertical, 40)
-                .readableColumn()
-                .accessibilityIdentifier("page-blockedPlayers")
-        }
-        .menuBackground()
-        .navigationTitle("Blocked players")
     }
 }
 
