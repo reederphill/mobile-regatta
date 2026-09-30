@@ -9,7 +9,7 @@
 #
 # What a change reaches, from the files changed since its merge base with --base (default origin/main),
 # committed or not: RegattaCore reaches every package, and the app through its sources; RegattaProtocol
-# reaches RegattaClient and RegattaServer; RegattaClient reaches RegattaServer (its load client); RegattaProtocol
+# reaches RegattaClient, RegattaServices and RegattaServer; RegattaClient reaches RegattaServer (its load client); RegattaProtocol
 # and RegattaClient reach the app through their sources too (the online client, #68). --all
 # builds and tests everything; --packages builds and tests the named packages instead (no app); --no-app skips
 # the app.
@@ -95,42 +95,45 @@ changed_files() {
 }
 
 # Built: what the change reaches. Tested: what it touched (the t_ flags); everything with --all or --packages.
-core=0 protocol=0 client=0 server=0 app=0
-t_core=0 t_protocol=0 t_client=0 t_server=0 t_app=0
+core=0 protocol=0 client=0 services=0 server=0 app=0
+t_core=0 t_protocol=0 t_client=0 t_services=0 t_server=0 t_app=0
 if (( all )); then
-    core=1 protocol=1 client=1 server=1 app=1
-    t_core=1 t_protocol=1 t_client=1 t_server=1 t_app=1
+    core=1 protocol=1 client=1 services=1 server=1 app=1
+    t_core=1 t_protocol=1 t_client=1 t_services=1 t_server=1 t_app=1
 elif [[ -n "$explicit" ]]; then
     for package in $explicit; do
         case "$package" in
             RegattaCore) core=1 t_core=1 ;;
             RegattaProtocol) protocol=1 t_protocol=1 ;;
             RegattaClient) client=1 t_client=1 ;;
+            RegattaServices) services=1 t_services=1 ;;
             RegattaServer) server=1 t_server=1 ;;
             *) echo "check.sh: unknown package $package" >&2; exit 2 ;;
         esac
     done
 elif ! merge_base="$(git merge-base "$base" "${rev:-HEAD}" 2>/dev/null)"; then
     echo "check.sh: no merge base with $base; checking everything"
-    core=1 protocol=1 client=1 server=1 app=1
-    t_core=1 t_protocol=1 t_client=1 t_server=1 t_app=1
+    core=1 protocol=1 client=1 services=1 server=1 app=1
+    t_core=1 t_protocol=1 t_client=1 t_services=1 t_server=1 t_app=1
 else
     while IFS= read -r file; do
         case "$file" in
-            scripts/check.sh | scripts/lib.sh) core=1 protocol=1 client=1 server=1 app=1
-                t_core=1 t_protocol=1 t_client=1 t_server=1 ;;
+            scripts/check.sh | scripts/lib.sh) core=1 protocol=1 client=1 services=1 server=1 app=1
+                t_core=1 t_protocol=1 t_client=1 t_services=1 t_server=1 ;;
             Packages/RegattaCore/Sources/* | Packages/RegattaCore/Package.*) core=1 t_core=1 app=1 ;;
             Packages/RegattaCore/*) core=1 t_core=1 ;;
             Packages/RegattaProtocol/Sources/* | Packages/RegattaProtocol/Package.*) protocol=1 t_protocol=1 app=1 ;;
             Packages/RegattaProtocol/*) protocol=1 t_protocol=1 ;;
             Packages/RegattaClient/Sources/* | Packages/RegattaClient/Package.*) client=1 t_client=1 app=1 ;;
             Packages/RegattaClient/*) client=1 t_client=1 ;;
+            # Not linked by the app yet (#242 wires the fakes in), so no app reach.
+            Packages/RegattaServices/*) services=1 t_services=1 ;;
             Packages/RegattaServer/*) server=1 t_server=1 ;;
             Regatta/* | RegattaTests/* | RegattaUITests/* | Regatta.xcodeproj/*) app=1 ;;
         esac
     done < <(changed_files)
     (( core )) && protocol=1
-    (( protocol )) && client=1 && server=1
+    (( protocol )) && client=1 && services=1 && server=1
     (( client )) && server=1
 fi
 (( no_app )) && app=0 t_app=0
@@ -139,6 +142,7 @@ packages=()
 (( core )) && packages+=(RegattaCore)
 (( protocol )) && packages+=(RegattaProtocol)
 (( client )) && packages+=(RegattaClient)
+(( services )) && packages+=(RegattaServices)
 (( server )) && packages+=(RegattaServer)
 
 if (( ${#packages[@]} == 0 && ! app )); then
@@ -154,6 +158,7 @@ inputs() {
         RegattaCore) echo Packages/RegattaCore ;;
         RegattaProtocol) echo Packages/RegattaCore Packages/RegattaProtocol ;;
         RegattaClient) echo Packages/RegattaCore Packages/RegattaProtocol Packages/RegattaClient ;;
+        RegattaServices) echo Packages/RegattaCore Packages/RegattaProtocol Packages/RegattaServices ;;
         RegattaServer) echo Packages ;;
         app) echo Regatta RegattaTests RegattaUITests Regatta.xcodeproj ThirdParty \
                   Packages/RegattaCore Packages/RegattaProtocol Packages/RegattaClient ;;
@@ -183,6 +188,7 @@ tested() {
         RegattaCore) (( t_core )) ;;
         RegattaProtocol) (( t_protocol )) ;;
         RegattaClient) (( t_client )) ;;
+        RegattaServices) (( t_services )) ;;
         RegattaServer) (( t_server )) ;;
         app) (( t_app )) ;;
     esac
