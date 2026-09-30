@@ -6,7 +6,7 @@ import Testing
 /// speed into it, keeps `edgeSpeedRetention` of her speed along it as the touch begins, and can always
 /// steer away; a touch is recorded and costs no penalty. The autohelm has no special case there (#219).
 ///
-/// The races sail the default class, skiff@2, in still water and a steady scripted wind, so one tick of a
+/// The races sail the default class, skiff@3, in still water and a steady scripted wind, so one tick of a
 /// boat's own dynamics is the same wherever she is on the water.
 @Suite struct RaceAreaContactTests {
     static let boatClass = RaceFiles.defaults.boatClass.ref
@@ -167,7 +167,7 @@ import Testing
         #expect(Self.reachPastTheSides(race) < -1)
         #expect(race.exportSnapshot().touchingEdges.isEmpty)
         // Turning off it from a standstill, pinned there a while, was one touch, and her stern brushes it once
-        // more as she pivots through the gybe: skiff@2 turns at its full rate from 1.5 kn (#89), so at a crawl
+        // more as she pivots through the gybe: skiff@2 and @3 turn at their full rate from 1.5 kn (#89), so at a crawl
         // she turns inside her own length.
         #expect(race.incidents.obstructionContacts.count == 2)
     }

@@ -98,7 +98,7 @@ extension Rules {
     /// pass to windward of it, leaving it to port. Her own heading doesn't matter: fetching is where she is
     /// against the starboard layline through her position, not how she is steering.
     static func isFetchingOnStarboard(_ boat: Boat, mark: Vec2, boatClass: BoatClass) -> Bool {
-        let groove = Autohelm.grooveAngle(.upwind, tws: boat.grooveWindSpeed, boatClass: boatClass)
+        let groove = Autohelm.grooveAngle(.upwind, tws: boat.grooveWindSpeed(in: boatClass), boatClass: boatClass)
         let course = Vec2.heading(boat.windDirection - groove)
         let toMark = mark - boat.position
         return toMark.dot(course) > 0 && toMark.dot(course.rightPerp) <= 0

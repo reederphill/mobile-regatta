@@ -275,9 +275,10 @@ func placeRacing(_ boat: inout Boat, leg: Int, at position: Vec2) {
         }
     }
 
-    /// The results replay (ADR 0002): a race closed at its time limit, with a human gone, from its log.
+    /// The results replay (ADR 0002): a race closed at its time limit, with a human gone, from its log. No one
+    /// steers, so the seed is one where the drifting boats draw no rule call (a DSQ would outrank the RET).
     @Test func aClosedRaceReplaysToTheSameResults() throws {
-        let race = testRace(seats: [.human, .human, .bot], laps: 1, prestartSeconds: 1, seed: 23)
+        let race = testRace(seats: [.human, .human, .bot], laps: 1, prestartSeconds: 1, seed: 29)
         for seat in race.boats.indices { race.record(.joined(race.setup.seats[seat]), seat: seat) }
         while race.tick < 300 { race.step() }
         race.record(.left, seat: 1)

@@ -7,7 +7,7 @@ let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
 
 /// A race for tests: by default seat 0 is human and `opponents` bot seats follow. Nothing sails the
 /// bot seats here (RegattaBotsTests does): every seat only answers to the inputs a test sends. The boats
-/// sail `boatClass`, by default `RaceFiles.defaults`' (skiff@2).
+/// sail `boatClass`, by default `RaceFiles.defaults`' (skiff@3).
 func testRace(
     opponents: Int = 7, seats: [SeatKind]? = nil, laps: Int = 2, prestartSeconds: Int = 60, seed: UInt64,
     boatClass: FileRef = RaceFiles.defaults.boatClass.ref
@@ -39,7 +39,7 @@ enum ScriptedLog {
     /// recorded with (the default is @2 from #85).
     static var rulesConfiguration: FileRef { try! RulesConfigFile.bundled(id: "fleet-rules", version: 1).ref }
     /// The fixture's own boat class, whatever the default moves to: skiff@1, which it was recorded with from
-    /// #248 (the default is skiff@2 from #89).
+    /// #248 (the default is skiff@3 from #263).
     static var boatClass: FileRef { try! BoatClassFile.bundled(id: "skiff", version: 1).ref }
 
     static func setup() throws -> RaceSetup {

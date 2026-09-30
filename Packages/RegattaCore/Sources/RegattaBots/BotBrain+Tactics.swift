@@ -21,7 +21,7 @@ struct Tactics: Sendable, Equatable {
     var downwindShiftThreshold: Double?
     /// Off the plane, she heads up to plane again, then bears away to the groove.
     var replanes: Bool
-    /// On the plane in a lull, she heads up to stay on it.
+    /// On the plane in a lull, she heads up to stay on it; not in another boat's wind shadow (#263).
     var heatsUpInLulls: Bool
     /// Close to her mark and just below its layline, she pinches up to fetch it rather than tack twice.
     var pinchesToFetch: Bool
@@ -39,6 +39,9 @@ struct Tactics: Sendable, Equatable {
     var seeksClearAir: Bool
     /// Upwind, she tacks with the nearest boat close behind her, to stay between it and the mark.
     var covers: Bool
+    /// She rolls her tacks (#263, `planRoll`), as well as her skill lets her. The groove-only profiles leave the tack
+    /// to the autohelm's tap.
+    var rollsTacks = true
 
     /// Metres ahead she notices puffs and lulls (`BotWeaknesses.puffPerception`), when she seeks them; she reads the
     /// pressure out to twice as far (`pressureLookAhead`).
@@ -64,13 +67,17 @@ struct Tactics: Sendable, Equatable {
         case .baseline:
             // The groove only: headers past a threshold, the corridor, and nothing off the groove.
             self.init(headerThreshold: deg2rad(5), tackInterval: 15)
+            rollsTacks = false
         case .tactician:
-            self.init(headerThreshold: deg2rad(4), tackInterval: 20, anticipation: 6, corridor: 0.8,
+            // #263: a corridor a little wider than the baseline's and her tacks as close together as hers, measured in
+            // the fun pass: with skiff@3's tack cost and momentum, 0.8 and 20 s cost her the edge (#300 retunes).
+            self.init(headerThreshold: deg2rad(4), tackInterval: 15, anticipation: 6, corridor: 0.5,
                       downwindShiftThreshold: deg2rad(5), replanes: true, heatsUpInLulls: true, pinchesToFetch: true,
                       seeksPuffs: true, seeksPressure: true, goesToThePressure: true, seeksClearAir: true, covers: true)
         case .blipTacker:
             // The baseline with a hair trigger: a 3° blip tacks her as a real header does.
             self.init(headerThreshold: deg2rad(3), tackInterval: 15)
+            rollsTacks = false
         }
     }
 
@@ -113,6 +120,8 @@ struct Senses: Sendable, Equatable {
     /// Whether she is tacking as rule 13 has it (#99): from her boom crossing head to wind until she is
     /// close-hauled on the new tack. Until then she keeps clear of every boat.
     var tacking = false
+    /// The race clock at the decision she first saw her boom across on her latest tack (#263: when she rolls it).
+    var tackCrossedAt: Double?
     /// The observation delay line (`BotWeaknesses.reactionDelay`, #102): the wind directions she has seen at her
     /// boat, oldest first, back to the one she reads now, that many seconds ago.
     var windHistory: [WindSample] = []
@@ -133,7 +142,7 @@ extension BotBrain {
     mutating func observe(_ b: SeatView.OwnBoat, _ view: SeatView) {
         let dt = senses.time.map { max(0, view.time - $0) } ?? 0
         senses.time = view.time
-        let tws = b.windSpeed * b.shadow
+        let tws = b.polarWindSpeed
         let average = view.boatClass.steering.autohelm.grooveWindAverage
         if let groove = senses.grooveWind, average > 0 {
             senses.grooveWind = groove + (tws - groove) * min(1, dt / average)
@@ -143,7 +152,10 @@ extension BotBrain {
         if let planing = view.boatClass.planing {
             senses.planing = b.isOnCourse && planing.isPlaning(was: senses.planing, twa: b.twa, speed: b.speed, tws: tws)
         }
-        if let side = senses.boomSide, side != b.boomSide { senses.tacking = b.twa < .pi / 2 }
+        if let side = senses.boomSide, side != b.boomSide {
+            senses.tacking = b.twa < .pi / 2
+            if senses.tacking { senses.tackCrossedAt = view.time }
+        }
         if senses.tacking && b.twa >= Self.closeHauled(tws, view) { senses.tacking = false }
         senses.boomSide = b.boomSide
         // What she reads of the wind's direction: as it was `reactionDelay` seconds ago.
@@ -170,7 +182,7 @@ extension BotBrain {
 
     /// Her reckoning of `groove`'s sailing angle: at the wind strength her grooves read.
     func grooveAngle(_ groove: Autohelm.Groove, _ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
-        Autohelm.grooveAngle(groove, tws: senses.grooveWind ?? b.windSpeed * b.shadow, boatClass: view.boatClass)
+        Autohelm.grooveAngle(groove, tws: senses.grooveWind ?? b.polarWindSpeed, boatClass: view.boatClass)
     }
 
     // MARK: - Upwind
@@ -349,13 +361,15 @@ extension BotBrain {
     /// when she has come off it and the wind is strong enough to plane, or above the groove in a lull on it.
     func downwindAim(_ b: SeatView.OwnBoat, _ view: SeatView, aim: Aim) -> Aim {
         guard let planing = view.boatClass.planing, aim.angle >= planing.fromTWA else { return aim }
-        let tws = b.windSpeed * b.shadow
+        let tws = b.polarWindSpeed
         if !senses.planing {
             guard tactics.replanes, let angle = Self.planingAngle(tws: tws, deepest: aim.angle, view.boatClass),
                   aim.angle - angle > view.boatClass.steering.autohelm.downwindSnap else { return aim }
             return Aim(angle: angle, tack: aim.tack, tolerance: deg2rad(3))
         }
-        if tactics.heatsUpInLulls && b.speed < planing.offSpeed * Self.lullSpeedMargin {
+        // "Heats up in a lull, not in a shadow" (#263): a boat's wind shadow slows her whatever angle she sails
+        // (`speedShadow`), so heading up there only sails her further.
+        if tactics.heatsUpInLulls && b.speed < planing.offSpeed * Self.lullSpeedMargin && b.speedShadow >= 1 {
             return aim.offset(by: -Self.lullHeatUp, tolerance: deg2rad(3))
         }
         return aim

@@ -292,7 +292,7 @@ public struct EventState: Equatable, Sendable {
             isOver = true
         case .gun, .ocsNotice, .cleared, .started, .ruleCall, .markTouch, .obstructionContact, .contact, .penaltyStarted,
              .penaltyReset, .penaltyServed, .tacked, .gybed, .disqualified, .markRoomNotice, .becameGhost, .rounded,
-             .firstFinish, .protestRecorded, .grooveSnap:
+             .firstFinish, .protestRecorded, .grooveSnap, .rollHit, .rollMissed:
             // `firstFinish` is announced beside the finish that starts the window, which `finished` records.
             // A DSQ doesn't start it (#86): only a finisher does.
             break
