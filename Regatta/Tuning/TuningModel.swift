@@ -10,7 +10,7 @@ import RegattaCore
 /// writes a tuned copy of each file it changes (the bundled file's bytes with the new numbers at their JSON
 /// Pointers, keeping its id and version and taking a `tune` number), and the race resolves them from its catalog.
 /// Bots sail the same files (#19); online races never see them (the wire refuses a tuned ref). The render values
-/// (water, camera) are app-side and never logged, and reach the race's scene live.
+/// (water, camera, boat) are app-side and never logged, and reach the race's scene live.
 ///
 /// Values persist until reset (`TuningStore`), and the race's log is saved with its tuned copies beside it, so it
 /// replays.
@@ -160,6 +160,7 @@ final class TuningModel {
             return TunedCopy.bestUpwindAngle(twaDegrees: rows, speedKnots: speeds)
         case .water(let path): return WaterStyle.standard[keyPath: path]
         case .camera(let path): return CameraStyle.standard[keyPath: path]
+        case .boat(let path): return BoatStyle.standard[keyPath: path]
         }
     }
 
@@ -168,6 +169,7 @@ final class TuningModel {
         switch slider.target {
         case .water(let path): return tuning.water[keyPath: path]
         case .camera(let path): return tuning.camera[keyPath: path]
+        case .boat(let path): return tuning.boat[keyPath: path]
         case .file, .groove:
             guard let slot = slider.slot, let key = slider.valueKey else { return nil }
             return tuning[values: slot][key] ?? fileValue(slider)
@@ -187,6 +189,7 @@ final class TuningModel {
         switch slider.target {
         case .water(let path): tuning.water[keyPath: path] = same ? file ?? value : value
         case .camera(let path): tuning.camera[keyPath: path] = same ? file ?? value : value
+        case .boat(let path): tuning.boat[keyPath: path] = same ? file ?? value : value
         case .file, .groove:
             guard let slot = slider.slot, let key = slider.valueKey, file != nil else { return }
             tuning[values: slot][key] = same ? nil : value
@@ -200,6 +203,7 @@ final class TuningModel {
             switch slider.target {
             case .water(let path): tuning.water[keyPath: path] = WaterStyle.standard[keyPath: path]
             case .camera(let path): tuning.camera[keyPath: path] = CameraStyle.standard[keyPath: path]
+            case .boat(let path): tuning.boat[keyPath: path] = BoatStyle.standard[keyPath: path]
             case .file, .groove:
                 if let slot = slider.slot, let key = slider.valueKey { tuning[values: slot][key] = nil }
             }
@@ -280,8 +284,10 @@ final class TuningModel {
         guard let session = liveSession else { return }
         if session.scene.waterStyle != tuning.water { session.scene.waterStyle = tuning.water }
         if session.scene.cameraStyle != tuning.camera { session.scene.cameraStyle = tuning.camera }
+        if session.scene.boatStyle != tuning.boat { session.scene.boatStyle = tuning.boat }
         if session.scene.showsPressureOverlay != tuning.showsPressure { session.scene.showsPressureOverlay = tuning.showsPressure }
         session.isTuned = liveSessionSailsTunedFiles || tuning.water != .standard || tuning.camera != .standard
+            || tuning.boat != .standard
     }
 
     /// Saves a practice session's log with its tuned copies beside it, if it sailed any, so it replays

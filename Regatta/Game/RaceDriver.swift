@@ -71,6 +71,9 @@ struct TickFrame {
     /// The keyed wind as the race held it at `tick` (ADR 0001).
     let wind: WindField
     let isOver: Bool
+    /// Each seat's held input at `tick` (`Race.heldInputs`): its ease is what the boat's pose draws from (#117).
+    /// Every client holds every seat's (ADR 0005).
+    let heldInputs: [BoatInput]
 
     /// Race clock in seconds.
     var time: Double { Double(tick) / Double(Race.tickRate) }
@@ -87,14 +90,17 @@ struct TickFrame {
         standings = race.standings()
         wind = race.wind
         self.isOver = isOver
+        heldInputs = race.heldInputs
     }
 
-    init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool) {
+    /// `heldInputs` nil holds every seat neutral.
+    init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool, heldInputs: [BoatInput]? = nil) {
         self.tick = tick
         self.boats = boats
         self.standings = standings
         self.wind = wind
         self.isOver = isOver
+        self.heldInputs = heldInputs ?? Array(repeating: .neutral, count: boats.count)
     }
 
     /// This frame a tick earlier, each boat moved back along its velocity: what the renderer draws from
@@ -105,7 +111,7 @@ struct TickFrame {
             boat.position -= boat.velocity * Race.dt
             return boat
         }
-        return TickFrame(tick: tick - 1, boats: moved, standings: standings, wind: wind, isOver: isOver)
+        return TickFrame(tick: tick - 1, boats: moved, standings: standings, wind: wind, isOver: isOver, heldInputs: heldInputs)
     }
 
     /// Where `seat` stands in the fleet, from 1.
@@ -156,6 +162,18 @@ struct RenderWorld {
         let boat = frame.boats[seat]
         return SailState(isPlaning: boat.isPlaning, spinnaker: boat.spinnaker,
                          isSpinnakerCollapsed: boat.isSpinnakerCollapsed(in: boatClass))
+    }
+
+    /// Whether `seat` holds her sheets eased at the latest tick (`frame`): what her pose flaps the sail for (#117).
+    func ease(ofSeat seat: Int) -> Bool {
+        frame.heldInputs.indices.contains(seat) && frame.heldInputs[seat].ease
+    }
+
+    /// Whether `seat`'s boat is a ghost at the latest tick, as `Race.isGhost(seat:)` says it: finished or DSQ, and
+    /// once the race is over also still OCS or never started (#30, #86).
+    func isGhost(ofSeat seat: Int) -> Bool {
+        let boat = frame.boats[seat]
+        return boat.isGhost || (frame.isOver && (boat.status == .ocs || boat.status == .prestart))
     }
 
     /// This world with each seat's boat drawn as `draw` says: the online driver's visual corrections (#68).
