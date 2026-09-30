@@ -28,6 +28,10 @@ Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/
 - `dev-venue@6` (bundled, schema 2): `dev-venue@5` on the version-6 conditions files (schema 5), whose puffs
   and lulls form from the pressure field at about a third of the old coverage (#288). The bot suite's
   matrix sails it; the default race doesn't.
+- `dev-venue@7` (bundled, schema 2): `dev-venue@6` on the version-7 conditions files (schema 6), whose pressure
+  lanes are finite patches that drift down the wind, some weakening it, with a weaker pressure side, so the
+  pressure changes up the course as well as across it (ADR 0008). The bot suite's matrix sails it; the default
+  race doesn't.
 - `test-venue@1` (test resource): small hand-checkable grids, concave land, a tidal current with an eddy.
 
 ## Frame and units

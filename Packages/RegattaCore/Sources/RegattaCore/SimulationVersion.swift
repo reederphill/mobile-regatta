@@ -142,7 +142,14 @@ import Glibc
 ///    coverage. The pressure field's knots are cached per window rather than worked out each tick, bit for bit the
 ///    same. The bot-suite matrix moves to dev-venue@6 and the version-6 conditions. Older files draw nothing more:
 ///    their races, the default race's included, sail as on 22.
-public let simulationRevision = 23
+/// 24: pressure lanes are finite patches (ADR 0008), on 23. Schema-6 conditions files (version 7, on dev-venue@7) give
+///    `pressureField.lanes` a length along the wind, a drift down it and a share that weaken the wind: each lane is an
+///    ellipse that moves down the course, its length, mid-life place along it, drift and weak coin drawn from the
+///    `presalng` stream (the lane draws before it stay as they were), so the pressure changes up the course as well as
+///    across it, and puffs and lulls, which form where the field is at their spawn, gather in the strong patches and
+///    keep out of the weak. The bot-suite matrix moves to dev-venue@7 and the version-7 conditions. Older files draw
+///    nothing more: their races, the default race's included, sail as on 23.
+public let simulationRevision = 24
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

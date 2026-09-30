@@ -18,6 +18,10 @@ import Foundation
 ///   key draws the lane's sideways drift there, and the position moves by the mean of the drifts either side, so
 ///   between knots the drift is a straight line from one to the next and never beyond `lanes.drift`.
 ///
+/// With schema 6 conditions (`lanes.extent`) a lane is a finite patch, an ellipse along the wind that drifts down it
+/// slowly, and some lanes weaken the wind rather than strengthen it: pressure then changes up the course as well as across
+/// it. Without, a lane is an unending band as it was.
+///
 /// The venue's geography steers both (#287, ADR 0008), from its public file: its side tendency, scaled by a
 /// multiplier window 0's key draws for the race, is added to every side target, so the side leans its way in most
 /// races but not all; and a share of lanes (`lanes.spotShare`) forms at its lane spots instead of anywhere. A venue
@@ -32,6 +36,9 @@ struct PressurePlan: Hashable, Sendable {
     /// only) and "presspot" (which lanes form at the venue's lane spots, and where).
     static let tendencyStream: UInt64 = 0x7072_6573_7465_6E64
     static let spotStream: UInt64 = 0x7072_6573_7370_6F74
+    /// Stream tag for finite lanes (schema 6): ASCII "presalng", per lane its length, where along the course it is at
+    /// mid-life, its drift down the wind and whether it weakens the wind.
+    static let extentStream: UInt64 = 0x7072_6573_616C_6E67
     /// How many windows' targets a pressure side knot averages: a new side ramps in over this many windows.
     static let sideRampWindows = 4
     /// A side target looks back this many times the mean windows between setters for one, so it finds none, and
@@ -61,6 +68,14 @@ struct PressurePlan: Hashable, Sendable {
     let lookback: Int
     /// The largest peak lane strength: a lane's edge bend peaks at `lanes.bend` for it.
     let strongestLane: Double
+    /// What makes lanes finite patches (schema 6), or nil for unending bands.
+    let extent: Conditions.PressureField.Lanes.Extent?
+    /// Up the course (the mean direction), and the race area's centre and half-length: the along-the-wind coordinate.
+    let up: Vec2
+    let areaCentre: Vec2
+    let halfLength: Double
+    /// Drift speed per unit of `extent.drift`: the race's base strength, as puffs'.
+    let baseStrength: Double
     /// The venue pairing's side tendency (`Venue.Pairing.sideTendency`): 0 for none.
     let sideTendency: Double
     /// Where the venue's lane spots lie across the course, or nil with none.
@@ -86,6 +101,11 @@ struct PressurePlan: Hashable, Sendable {
         // Window k's curve runs from knot k − 1, whose oldest target reaches back `sideRampWindows` more.
         lookback = max(Self.sideRampWindows + sideLookback, laneLookback)
         strongestLane = lanes.strength.upperBound
+        extent = lanes.extent
+        up = Vec2.heading(setup.meanDirection)
+        areaCentre = area.centre
+        halfLength = area.halfLength
+        baseStrength = setup.baseStrength
         sideTendency = setup.pairing.sideTendency
         let reach = area.halfWidth + laneMargin
         laneSpots = LaneSpots(setup.pairing.geographicGrid, reach: reach) { [acrossWind, meanDirection, centre] p in
@@ -98,10 +118,20 @@ struct PressurePlan: Hashable, Sendable {
         acrossWind.coordinate(at: p, meanDirection: meanDirection) - centre
     }
 
+    /// The along-the-wind coordinate at `p`: metres up the course from the race area's centre, a straight line
+    /// along the mean direction. Only finite lanes read it.
+    func along(at p: Vec2) -> Double {
+        (p - areaCentre).dot(up)
+    }
+
     /// Key `key.window`'s draws, from `SplitMix64(seed: key.puffSeed, stream:)` in a fixed order: for the pressure
     /// side (`sideStream`) the setter coin, the side and the size; for lanes (`laneStream`) the count, then per lane
     /// its spawn tick in the window, lifetime, width, strength, position across and first drift. New draws go after
-    /// these, so existing ones never move.
+    /// these, so existing ones never move. A finite lane (schema 6) draws four values more from `extentStream`, in a
+    /// stream of their own so the lane draws above stay as they were: its length, its mid-life position along the
+    /// course (uniform over the race area and half the longest length beyond each end), its drift and the weak coin.
+    /// It forms upwind of that position by half its drift and moves down the wind, so it passes through the water
+    /// it covers, as puffs do; a weak lane's strength is negative.
     ///
     /// Each lane forms inside its window, so none is felt before its window starts, and fades in from nothing (ADR
     /// 0001). Its centre forms uniform across the race area and `laneMargin` either side, or, at a venue with lane
@@ -124,6 +154,7 @@ struct PressurePlan: Hashable, Sendable {
         var spawns: [PressureLaneSpawn] = []
         spawns.reserveCapacity(count)
         var spotRNG = SplitMix64(seed: key.puffSeed, stream: Self.spotStream)
+        var extentRNG = SplitMix64(seed: key.puffSeed, stream: Self.extentStream)
         for index in 0..<count {
             let offset = min(WindWindows.ticksPerWindow - 1, Int(laneRNG.unit() * Double(WindWindows.ticksPerWindow)))
             let lifetime = laneRNG.range(lanes.lifetime.lowerBound, lanes.lifetime.upperBound)
@@ -137,10 +168,22 @@ struct PressurePlan: Hashable, Sendable {
                 let spot = spotRNG.unit(), within = spotRNG.unit()
                 if atSpot { position = laneSpots.position(spot, within) }
             }
-            spawns.append(PressureLaneSpawn(
-                window: key.window, index: index, spawnTick: start + offset,
-                lifetimeTicks: min(maxLaneLifetimeTicks, PuffPlan.ticks(seconds: lifetime)), halfWidth: width / 2,
-                strength: strength, start: position, startDrift: drift))
+            let lifetimeTicks = min(maxLaneLifetimeTicks, PuffPlan.ticks(seconds: lifetime))
+            var spawn = PressureLaneSpawn(
+                window: key.window, index: index, spawnTick: start + offset, lifetimeTicks: lifetimeTicks,
+                halfWidth: width / 2, strength: strength, start: position, startDrift: drift)
+            if let extent {
+                let length = extentRNG.range(extent.length.lowerBound, extent.length.upperBound)
+                let mid = (2 * extentRNG.unit() - 1) * (halfLength + extent.length.upperBound / 2)
+                let speed = extentRNG.range(extent.drift.lowerBound, extent.drift.upperBound)
+                let isWeak = extentRNG.unit() < extent.weakShare
+                let velocity = -speed * baseStrength
+                spawn.halfLength = length / 2
+                spawn.alongVelocity = velocity
+                spawn.alongStart = mid - velocity * Double(lifetimeTicks) / Double(Race.tickRate) / 2
+                if isWeak { spawn.strength = -strength }
+            }
+            spawns.append(spawn)
         }
         var tendency = 0.0
         if key.window == 0 && sideTendency != 0 {
@@ -159,15 +202,21 @@ struct PressurePlan: Hashable, Sendable {
         return rng.range(-field.lanes.drift, field.lanes.drift)
     }
 
-    /// The field's pressure and bend at relative coordinate `r` (`coordinate(at:)`), given the pressure side's
-    /// slope `side` and the lanes alive, summed in their order. The factor is kept to 0.5…2, so no overlap stops
-    /// or doubles the wind; the lanes' bend is capped at `lanes.bend`.
-    func effect(at r: Double, side: Double, lanes: [PressureLane]) -> (factor: Double, turn: Double) {
+    /// The field's pressure and bend at `p`: `effect(at:along:side:lanes:)` at its two coordinates.
+    func effect(at p: Vec2, side: Double, lanes: [PressureLane]) -> (factor: Double, turn: Double) {
+        effect(at: coordinate(at: p), along: extent == nil ? 0 : along(at: p), side: side, lanes: lanes)
+    }
+
+    /// The field's pressure and bend at relative coordinate `r` (`coordinate(at:)`) and `a` up the course
+    /// (`along(at:)`, which only finite lanes read), given the pressure side's slope `side` and the lanes alive,
+    /// summed in their order. The factor is kept to 0.5…2, so no overlap stops or doubles the wind; the lanes' bend is
+    /// capped at `lanes.bend`.
+    func effect(at r: Double, along a: Double = 0, side: Double, lanes: [PressureLane]) -> (factor: Double, turn: Double) {
         let sidePressure = side * (r / halfWidth).clamped(to: -1...1)
         let sideTurn = field.side.strength > 0 ? field.side.bend * sidePressure / field.side.strength : 0
         var gain = 0.0, fan = 0.0
         for lane in lanes {
-            let effect = lane.effect(at: r)
+            let effect = lane.effect(at: r, along: a)
             gain += effect.speed
             fan += effect.fan
         }
@@ -246,16 +295,26 @@ struct PressureLaneSpawn: Hashable, Sendable {
     let lifetimeTicks: Int
     /// Metres across.
     let halfWidth: Double
-    /// Peak gain down its middle, as a fraction of wind speed.
-    let strength: Double
+    /// Peak gain down its middle, as a fraction of wind speed; negative for a weak lane (schema 6).
+    var strength: Double
     /// Relative coordinate of its middle at the start of its window, and its drift there, metres per second.
     let start: Double
     let startDrift: Double
+    /// A finite lane's (schema 6) half-length along the wind, nil for an unending band; its position up the course at
+    /// `spawnTick`, and its speed along it, metres per second, negative down the wind.
+    var halfLength: Double?
+    var alongStart = 0.0
+    var alongVelocity = 0.0
 
     var endTick: Int { spawnTick + lifetimeTicks }
 
     func isAlive(atTick tick: Int) -> Bool {
         spawnTick <= tick && tick <= endTick
+    }
+
+    /// Where its middle is up the course at `tick`, metres from the race area's centre: only meaningful for a finite lane.
+    func alongCentre(atTick tick: Int) -> Double {
+        alongStart + alongVelocity * Double(tick - spawnTick) / Double(Race.tickRate)
     }
 
     /// Current strength, fading in and out like a puff's (`Puff.intensity`).
@@ -272,17 +331,26 @@ struct PressureLane: Hashable, Sendable {
     /// Its sideways drift, metres per second.
     let drift: Double
     let halfWidth: Double
-    /// Current peak gain.
+    /// Current peak gain, negative for a weak lane.
     let intensity: Double
+    /// A finite lane's middle up the course, and its half-length; nil half-length for an unending band.
+    var alongCentre = 0.0
+    var halfLength: Double?
 
-    /// What the lane does at relative coordinate `r`. `speed`: `intensity · (1 − d²)²`, where d is the distance
-    /// from its middle over its half-width. `fan`: its edge bend as a share of the peak turn, signed positive
-    /// veering: `speed · d / Puff.fanShapePeak`, so the wind veers on its right-hand edge (looking downwind) and
-    /// backs on its left, as a puff fans.
-    func effect(at r: Double) -> (speed: Double, fan: Double) {
+    /// What the lane does at relative coordinate `r`, and `a` up the course. `speed`: `intensity · (1 − d²)²`, where d
+    /// is the distance from its middle over its half-width; for a finite lane `(1 − d² − e²)²`, where e is the distance
+    /// from its middle up the course over its half-length, so its footprint is an ellipse. `fan`: its edge bend as a
+    /// share of the peak turn, signed positive veering: `speed · d / Puff.fanShapePeak`, so the wind veers on its
+    /// right-hand edge (looking downwind) and backs on its left, as a puff fans; a weak lane draws in, the other way.
+    func effect(at r: Double, along a: Double = 0) -> (speed: Double, fan: Double) {
         let d = (r - centre) / halfWidth
         guard d > -1, d < 1 else { return (0, 0) }
-        let f = 1 - d * d
+        var f = 1 - d * d
+        if let halfLength {
+            let e = (a - alongCentre) / halfLength
+            f -= e * e
+            guard f > 0 else { return (0, 0) }
+        }
         let speed = intensity * f * f
         return (speed, speed * d / Puff.fanShapePeak)
     }
@@ -338,7 +406,9 @@ extension WindField {
                 let knots = Self.laneKnots(list, spawn, k)
                 let position = Self.hermite(knots.from, knots.to, fraction)
                 lanes.append(PressureLane(centre: position.value, drift: position.slope, halfWidth: spawn.halfWidth,
-                                          intensity: spawn.intensity(atTick: tick)))
+                                          intensity: spawn.intensity(atTick: tick),
+                                          alongCentre: spawn.halfLength == nil ? 0 : spawn.alongCentre(atTick: tick),
+                                          halfLength: spawn.halfLength))
             }
         }
         return PressureState(side: side, lanes: lanes)
@@ -447,7 +517,7 @@ public struct Pressure: Sendable, Hashable {
                    _ field: (plan: PressurePlan, state: PressureState)?) -> Pressure {
         let geographic = geographicGrid.sample(p)
         guard let (plan, state) = field else { return Pressure(factor: geographic.speedFactor, turn: geographic.directionDelta) }
-        let pressure = plan.effect(at: plan.coordinate(at: p), side: state.side, lanes: state.lanes)
+        let pressure = plan.effect(at: p, side: state.side, lanes: state.lanes)
         return Pressure(factor: geographic.speedFactor * pressure.factor, turn: geographic.directionDelta + pressure.turn)
     }
 }
