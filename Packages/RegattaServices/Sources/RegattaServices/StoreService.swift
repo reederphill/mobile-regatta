@@ -1,3 +1,5 @@
+import RegattaCore
+
 // Paid livery designs (#21, #25): StoreKit 2 on the device proves ownership, Family Sharing is on, there's no
 // gifting and no subscription in v1.0. A paid design is bought per boat class. Ownership is cached on the device,
 // so My boat and offline practice races show owned designs with no network.

@@ -108,18 +108,18 @@ enum Fixtures {
 // MARK: - #241: lobby, profile, store, analytics, connectivity, deletion
 
 extension Fixtures {
-    static let palette: Set<Swatch> = [Swatch("white"), Swatch("charcoal"), Swatch("sky"), Swatch("bluish-green"), Swatch("reddish-purple")]
-    static let starter = DesignID("skiff-starter-stripe")
+    /// The bundled livery catalogue (#118): the designs and safe palette a stored livery is checked against.
+    static let catalogue = try! LiveryCatalogueFile.bundled(id: "livery-catalogue", version: 1).content
+    static let starter = DesignID("skiff-plain")
     static let earned10 = DesignID("skiff-earned-10")
     static let earned50 = DesignID("skiff-earned-50")
-    static let paid = DesignID("skiff-paid-chevron")
-    static let paidWave = DesignID("skiff-paid-wave")
-    static let designs: [DesignID: Int] = [starter: 2, earned10: 3, earned50: 3, paid: 3, paidWave: 2]
-    static let livery = Livery(boatClass: "skiff", design: starter, colours: [Swatch("sky"), Swatch("white")], sailNumber: 4127)
+    static let paid = DesignID("skiff-pinstripe")
+    static let paidWave = DesignID("skiff-band")
+    static let livery = Livery(design: starter, colours: [SwatchID("sky-blue"), SwatchID("white")], sailNumber: 4127)
 
     static func author(_ id: String, _ nickname: String, rating: Int = 1500) -> LobbyAuthor {
         LobbyAuthor(gamePlayerID: GamePlayerID(id), nickname: nickname, rating: Rating(value: rating, isProvisional: rating == 1500),
-                    chip: LiveryChip(deck: Swatch("charcoal"), sail: Swatch("white")))
+                    chip: LiveryChip(deck: SwatchID("charcoal"), sail: SwatchID("white")))
     }
 
     static let me = author("G:1001", "Ana", rating: 1532)
@@ -166,7 +166,7 @@ extension Fixtures {
 
     static func profile(_ situation: ProfileServiceContract.Situation) -> ScriptedProfileService {
         func service(_ profile: Profile?, locked: Bool = false) -> ScriptedProfileService {
-            ScriptedProfileService(ProfileScenario(profile: profile, designs: designs, unowned: [paid, paidWave], palette: palette, isLiveryLocked: locked))
+            ScriptedProfileService(ProfileScenario(profile: profile, catalogue: catalogue, unowned: [paid, paidWave], isLiveryLocked: locked))
         }
         return switch situation {
         case .signedOut: service(nil)
@@ -179,8 +179,8 @@ extension Fixtures {
     }
 
     static let products = [
-        StoreProduct(id: ProductID("com.phillreeder.regatta.skiff.chevron"), design: paid, boatClass: "skiff", tier: .tier2, displayPrice: "$1.99"),
-        StoreProduct(id: ProductID("com.phillreeder.regatta.skiff.wave"), design: paidWave, boatClass: "skiff", tier: .tier1, displayPrice: "$0.99"),
+        StoreProduct(id: ProductID("com.phillreeder.regatta.skiff.pinstripe"), design: paid, boatClass: "skiff", tier: .tier1, displayPrice: "$0.99"),
+        StoreProduct(id: ProductID("com.phillreeder.regatta.skiff.band"), design: paidWave, boatClass: "skiff", tier: .tier1, displayPrice: "$0.99"),
     ]
 
     static func store(_ situation: StoreServiceContract.Situation) -> ScriptedStoreService {
