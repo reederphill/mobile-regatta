@@ -4,7 +4,7 @@
 /// - It engages on the tick the held rudder centres (`deadBand`), capturing the angle she has then
 ///   (`engage`). Let go within a snap width of the groove (the class's `upwindSnap`, `downwindSnap`),
 ///   it takes the groove, which follows the polar's best angle for the wind strength at the boat: the
-///   class's running average of it (`Boat.grooveWindSpeed`, #245), which for a schema-2 class is the wind
+///   class's running average of it (`Boat.grooveWindSpeed(in:)`, #245), which for a schema-2 class is the wind
 ///   right now. A puff shorter than the skiff's average leaves bearing away in it the player's call.
 ///   Let go inside the no-go zone, it bears away to the upwind groove on her boom's side (her tack).
 ///   The target is an angle to the wind, so a shift never carries it into the no-go zone: she turns
@@ -38,7 +38,7 @@ public struct Autohelm: Sendable, Equatable {
         /// A held sailing angle (`BoomSide.sailingAngle`), radians, −π ..< π: positive with the wind on
         /// the side away from the boom, below −π/2 by the lee.
         case angle(Double)
-        /// The groove on the boom's side, at the wind strength its grooves read (`Boat.grooveWindSpeed`).
+        /// The groove on the boom's side, at the wind strength its grooves read (`Boat.grooveWindSpeed(in:)`).
         case groove(Groove)
 
         /// The held angle, or nil for the groove.
@@ -72,7 +72,7 @@ public struct Autohelm: Sendable, Equatable {
     // MARK: - Engaging
 
     /// The autohelm of a boat whose rudder has just centred at `sailingAngle`, in `tws` (m/s, the wind
-    /// speed her grooves read, `Boat.grooveWindSpeed`), and whether it snapped to the groove. Inside the
+    /// speed her grooves read, `Boat.grooveWindSpeed(in:)`), and whether it snapped to the groove. Inside the
     /// no-go zone it takes the upwind groove without a snap: she bears away to it.
     public static func engage(sailingAngle: Double, tws: Double, boatClass: BoatClass) -> (autohelm: Autohelm, snapped: Bool) {
         let polar = boatClass.polar
@@ -112,7 +112,7 @@ public struct Autohelm: Sendable, Equatable {
     }
 
     /// The sailing angle it steers for in `tws` (m/s, the wind speed her polar reads): the groove's at
-    /// `grooveTWS` (the wind speed her grooves read, `Boat.grooveWindSpeed`; `tws` if nil), or the held
+    /// `grooveTWS` (the wind speed her grooves read, `Boat.grooveWindSpeed(in:)`; `tws` if nil), or the held
     /// angle, kept short of the by-the-lee limit in `tws` by the class's `byTheLeeMargin`. An angle inside
     /// the no-go zone, which only an imported snapshot could hold, steers for the upwind groove.
     public func aim(tws: Double, grooveTWS: Double? = nil, boatClass: BoatClass) -> Double {
@@ -176,6 +176,6 @@ public struct Autohelm: Sendable, Equatable {
 extension Boat {
     /// Her autohelm's reading in the sailing wind at her, or nil while the rudder is held off centre.
     public func autohelmReading(in boatClass: BoatClass) -> Autohelm.Reading? {
-        autohelm?.reading(tws: polarWindSpeed, grooveTWS: grooveWindSpeed, boatClass: boatClass)
+        autohelm?.reading(tws: polarWindSpeed(in: boatClass), grooveTWS: grooveWindSpeed(in: boatClass), boatClass: boatClass)
     }
 }

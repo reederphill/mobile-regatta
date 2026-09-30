@@ -40,7 +40,7 @@ public enum SnapshotQuantisation {
     public static let spinnakerStep = Race.dt
 
     /// Bytes per seat in a wire snapshot.
-    public static let bytesPerSeat = 26
+    public static let bytesPerSeat = 28
 
     static func quantise(_ value: Double, step: Double, in range: ClosedRange<Int>, _ field: String) throws -> Int {
         guard value.isFinite else { throw WireError.outOfRange(field) }
@@ -88,6 +88,59 @@ public struct WireAutohelm: Hashable, Sendable {
         switch target {
         case .angle(let q): Autohelm(target: .angle(SnapshotQuantisation.radians(q)), isTapping: isTapping)
         case .groove(let groove): Autohelm(target: .groove(groove), isTapping: isTapping)
+        }
+    }
+}
+
+/// A roll tack on the wire (#263, `RollTack`): pending with the ticks since its tap (0…63) before the snapshot's tick,
+/// hit or missed.
+public enum WireRoll: Hashable, Sendable {
+    case pending(ticksAgo: UInt8)
+    case hit
+    case missed
+
+    /// The most ticks ago a pending roll's tap can be on the wire: six bits.
+    public static let maxPendingTicks = 63
+
+    /// Quantises `roll` at `tick`. Throws `WireError.outOfRange` for a pending tap the wire can't carry.
+    public init(_ roll: RollTack, tick: Int) throws {
+        switch roll {
+        case .pending(let tapTick):
+            guard let ago = UInt8(exactly: tick - tapTick), Int(ago) <= Self.maxPendingTicks else {
+                throw WireError.outOfRange("roll")
+            }
+            self = .pending(ticksAgo: ago)
+        case .hit: self = .hit
+        case .missed: self = .missed
+        }
+    }
+
+    /// The roll this stands for at `tick`.
+    public func roll(tick: Int) -> RollTack {
+        switch self {
+        case .pending(let ago): .pending(tapTick: tick - Int(ago))
+        case .hit: .hit
+        case .missed: .missed
+        }
+    }
+
+    /// Its byte: bits 0–1 the state (1 pending, 2 hit, 3 missed; 0 is no roll), bits 2–7 a pending tap's ticks ago.
+    var byte: UInt8 {
+        switch self {
+        case .pending(let ago): 1 | ago << 2
+        case .hit: 2
+        case .missed: 3
+        }
+    }
+
+    /// From its byte (`byte`), or nil for no roll; throws for a byte no roll encodes to.
+    static func decode(_ byte: UInt8) throws -> WireRoll? {
+        switch byte & 0b11 {
+        case 0 where byte == 0: return nil
+        case 1: return .pending(ticksAgo: byte >> 2)
+        case 2 where byte == 2: return .hit
+        case 3 where byte == 3: return .missed
+        default: throw WireError.invalidValue("roll")
         }
     }
 }
@@ -179,12 +232,20 @@ public struct WireSeat: Hashable, Sendable {
     public var isPlaning: Bool
     public var spinnaker: WireSpinnaker
     public var averagedWindSpeed: UInt16?
+    /// #263: her roll of the tack she is in, and the ticks since the boom crossed on it (`Boat.tackCrossingTick`)
+    /// before the snapshot's tick, at most `maxCrossingTicks`: a crossing further back than that times a roll tap
+    /// the same as one exactly that far back (a miss; windows are well short of it).
+    public var roll: WireRoll?
+    public var tackCrossingTicks: UInt8?
+
+    /// The most ticks ago a tack's crossing is carried as.
+    public static let maxCrossingTicks = 254
 
     public init(
         x: Int32, y: Int32, heading: Int16, speed: UInt16, rudder: Int16, autohelm: WireAutohelm?, penaltyProgress: Int16,
         heldInput: BoatInput, isTacking: Bool, boomSide: BoomSide, status: BoatStatus, penaltyTurnsOwed: UInt8,
         roundingStage: UInt8, legIndex: UInt8, isPlaning: Bool = false, spinnaker: WireSpinnaker = .down,
-        averagedWindSpeed: UInt16? = nil, penaltyClock: UInt16 = 0
+        averagedWindSpeed: UInt16? = nil, penaltyClock: UInt16 = 0, roll: WireRoll? = nil, tackCrossingTicks: UInt8? = nil
     ) {
         self.x = x
         self.y = y
@@ -204,6 +265,8 @@ public struct WireSeat: Hashable, Sendable {
         self.isPlaning = isPlaning
         self.spinnaker = spinnaker
         self.averagedWindSpeed = averagedWindSpeed
+        self.roll = roll
+        self.tackCrossingTicks = tackCrossingTicks
     }
 
     /// Quantises a seat of the world at `tick`, the snapshot's (the penalty clock goes relative to it). Throws
@@ -242,6 +305,11 @@ public struct WireSeat: Hashable, Sendable {
         averagedWindSpeed = try b.averagedWindSpeed.map {
             UInt16(try Q.quantise($0, step: Q.speedStep, in: 0...65_535, "averagedWindSpeed"))
         }
+        roll = try b.roll.map { try WireRoll($0, tick: tick) }
+        tackCrossingTicks = try b.tackCrossingTick.map {
+            guard tick >= $0 else { throw WireError.outOfRange("tackCrossingTick") }
+            return UInt8(min(tick - $0, Self.maxCrossingTicks))
+        }
     }
 
     /// Overwrites the fields the wire carries, at `tick` (the snapshot's); the rest of `seat`
@@ -269,14 +337,17 @@ public struct WireSeat: Hashable, Sendable {
         seat.boat.isPlaning = isPlaning
         seat.boat.spinnaker = spinnaker.spinnaker
         seat.boat.averagedWindSpeed = averagedWindSpeed.map { Double($0) * Q.speedStep }
+        seat.boat.roll = roll?.roll(tick: tick)
+        seat.boat.tackCrossingTick = tackCrossingTicks.map { tick - Int($0) }
         seat.heldInput = heldInput
     }
 
-    // Layout, 26 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autohelm angle int16
+    // Layout, 28 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autohelm angle int16
     // (0 for the groove or without an autohelm), penalty progress int16, held rudder int8, then two flag
     // bytes and the leg index; then (#248) a sails byte, the spinnaker's ticks left uint8 (0 unless it is
     // going up or coming down) and the averaged wind uint16 (0 without one); then (#89) the penalty clock
-    // uint16 (0 while no turn is owed).
+    // uint16 (0 while no turn is owed); then (#263) the roll byte (`WireRoll.byte`, 0 without one) and the tack
+    // crossing's ticks ago plus one (0 without one).
     //   flags:  bit 0 ease, bit 1 has autohelm, bit 2 tacking, bits 3–5 status, bit 6 boom to starboard,
     //           bit 7 the autohelm is sailing the tap
     //   counts: bits 0–2 penalty turns owed (its low 3 bits), bits 3–5 rounding stage, bit 6 the autohelm
@@ -319,6 +390,9 @@ public struct WireSeat: Hashable, Sendable {
         w.u8(spinnaker.ticksLeft)
         w.u16(averagedWindSpeed ?? 0)
         w.u16(penaltyClock)
+        w.u8(roll?.byte ?? 0)
+        guard tackCrossingTicks.map({ Int($0) <= Self.maxCrossingTicks }) ?? true else { throw WireError.outOfRange("tackCrossingTick") }
+        w.u8(tackCrossingTicks.map { $0 + 1 } ?? 0)
     }
 
     init(from r: inout WireReader) throws {
@@ -339,6 +413,9 @@ public struct WireSeat: Hashable, Sendable {
         let ticksLeft = try r.u8()
         let averaged = try r.u16()
         penaltyClock = try r.u16()
+        roll = try WireRoll.decode(try r.u8())
+        let crossing = try r.u8()
+        tackCrossingTicks = crossing == 0 ? nil : crossing - 1
         guard let kite = WireSpinnaker(code: sails & 0b11, ticksLeft: ticksLeft) else {
             throw WireError.invalidValue("spinnaker")
         }
@@ -400,7 +477,7 @@ public enum SnapshotFields {
         "boat.position", "boat.heading", "boat.speed", "boat.rudder", "boat.autohelm",
         "boat.status", "boat.legIndex", "boat.roundingStage",
         "boat.penaltyTurnsOwed", "boat.penaltyProgress", "boat.penaltyClockTick", "boat.isTacking", "boat.boomSide",
-        "boat.isPlaning", "boat.spinnaker", "boat.averagedWindSpeed",
+        "boat.isPlaning", "boat.spinnaker", "boat.averagedWindSpeed", "boat.roll", "boat.tackCrossingTick",
         "heldInput.rudder", "heldInput.ease",
     ]
 

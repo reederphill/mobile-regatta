@@ -199,12 +199,23 @@ enum TuningCatalog {
                 } ?? [])),
             TuningGroup(
                 id: "shadow", title: "Wind shadow",
-                note: "What sailing in another boat's shadow costs, and how far it reaches (hull lengths).",
+                note: "What sailing in another boat's shadow costs, and how far it reaches (hull lengths). From skiff@3 (#263) the loss is off her speed, not the wind, and she slows to it at the shadow's own rate.",
                 applies: .nextRace,
                 sliders: [
-                    TuningSlider(.boatClass, "/windShadow/lossCloseIn", "Loss close in", 0...0.6, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/lossCloseIn", "Loss close in", 0...0.9, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/stackingFloor", "Stacked cones floor", 0.1...1, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/slowingDownSeconds", "Slowing down in it", unit: " s", 0.5...10, step: 0.1),
                     TuningSlider(.boatClass, "/windShadow/coneLengthHullLengths", "Cone length", 1...20, step: 0.5),
                     TuningSlider(.boatClass, "/windShadow/coneWidthAtEndHullLengths", "Cone width at its end", 0.5...10, step: 0.1),
+                ]),
+            TuningGroup(
+                id: "rollTack", title: "Roll tack",
+                note: "The second tap through a tack (#222, #263): within the window of the boom crossing it keeps back part of her speed loss until close-hauled; outside it, her speed takes the miss.",
+                applies: .nextRace,
+                sliders: [
+                    TuningSlider(.boatClass, "/rollTack/windowSeconds", "Window", unit: " s", 0.05...1, step: 0.05),
+                    TuningSlider(.boatClass, "/rollTack/hitLossFraction", "Loss on a hit", 0...1, step: 0.05),
+                    TuningSlider(.boatClass, "/rollTack/missSpeedFactor", "Speed after a miss", 0.5...1, step: 0.01),
                 ]),
             TuningGroup(
                 id: "raceFormat", title: "Race format",
