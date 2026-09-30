@@ -19,6 +19,13 @@ struct LobbyStatus: Equatable {
     var canChat = true
     /// False for Game Center's `isMultiplayerGamingRestricted`: practice races only (#34).
     var canRaceOnline = true
+
+    /// This status with Settings' Hide lobby chat (#110), a device setting the services don't know.
+    func hidingChat(_ hides: Bool) -> LobbyStatus {
+        var status = self
+        status.hidesChat = hides
+        return status
+    }
 }
 
 /// The services' state as the views read it: connectivity and the lobby status, kept up to date from the

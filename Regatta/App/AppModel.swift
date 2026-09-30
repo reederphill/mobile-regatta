@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import RegattaCore
 
@@ -59,6 +60,18 @@ final class AppModel {
     var sheet: Sheet?
     /// The practice race setup, kept between races.
     var settings = RaceSettings()
+    /// The device's settings (#110): the Settings page's rows, saved to `defaults` as they change.
+    var deviceSettings: DeviceSettings {
+        didSet {
+            guard deviceSettings != oldValue else { return }
+            deviceSettings.save(to: defaults)
+            haptics.isOn = deviceSettings.haptics
+        }
+    }
+    /// Every race's haptics, on while Settings' Haptics is (#110): set here once per change, not read per haptic.
+    @ObservationIgnored let haptics: GatedHaptics
+    /// Where `deviceSettings` lives.
+    @ObservationIgnored let defaults: UserDefaults
     /// The race the cover shows, while `phase` is `.raceSequence`.
     private(set) var race: Race?
     /// The practice race the cover shows, if it's one.
@@ -79,13 +92,22 @@ final class AppModel {
     @ObservationIgnored private let sceneState: SceneState
 
     /// `sceneState` locks the orientation while the race sequence shows (G5).
-    init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current) {
+    init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current, defaults: UserDefaults = .standard) {
         self.sceneState = sceneState
         self.launchOptions = launchOptions
+        self.defaults = defaults
+        let deviceSettings = DeviceSettings(defaults: defaults)
+        self.deviceSettings = deviceSettings
+        haptics = GatedHaptics(isOn: deviceSettings.haptics)
         #if DEBUG
         tuning = TuningModel(store: launchOptions.uiTesting ? .inMemory : .standard)
         #endif
         sceneState.isRaceSequenceShowing = false
+    }
+
+    /// Settings' Reset hints: every hint shows again (#25).
+    func resetHints() {
+        DeviceSettings.resetHints(in: defaults)
     }
 
     /// Back to the bare home screen: pops every page and dismisses the sheet.
@@ -120,11 +142,11 @@ final class AppModel {
         #if DEBUG
         var config = config
         config.files = tuning.practiceFiles()
-        let session = GameSession(config: config, timescale: launchOptions.timescale)
+        let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics)
         tuning.attach(session, files: config.files)
         return session
         #else
-        return GameSession(config: config, timescale: launchOptions.timescale)
+        return GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics)
         #endif
     }
 
