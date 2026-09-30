@@ -28,7 +28,7 @@ public enum BotRaceHarness {
     }
 
     /// `cell`'s setup: every seat a bot sailing the default class (`RaceFiles.defaults`: the skiff since #248,
-    /// which the suite sails since #231; skiff@2 since #89, skiff@3 since #263), the venue and conditions named by their bundled files.
+    /// which the suite sails since #231; skiff@2 since #89, skiff@3 since #263, skiff@4 since #298), the venue and conditions named by their bundled files.
     public static func raceSetup(for cell: BotRaceCell) throws -> RaceSetup {
         let venue = try dataFileKey(cell.venue)
         let conditions = try dataFileKey(cell.conditions)

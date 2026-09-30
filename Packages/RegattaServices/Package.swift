@@ -1,8 +1,9 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// The client's service contracts (#109): protocols and value types for identity, terms, the queue and the race
-// session, a scripted fake of each, and a contract suite per service. The suites are written against the
+// The client's service contracts (#109, #241): protocols and value types for identity, terms, the queue, the race
+// session (#109), the lobby, the profile, the store, analytics, connectivity and data deletion (#241), a scripted
+// fake of each, and a contract suite per service. The suites are written against the
 // protocols and take any conforming implementation, so the same suite runs against the fakes, the remote
 // runner (#143) and the real services. No UIKit: it builds and tests on Linux. The app doesn't link it yet
 // (#242 wires the fakes in).
