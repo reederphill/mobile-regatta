@@ -31,9 +31,9 @@ nonisolated struct WaterStyle: Codable, Equatable, Sendable {
 
     /// Pressure this much above the course average (a fraction of it: the pressure side, pressure lanes and the
     /// venue's geography, before puffs) draws at full `ChartPalette.puff`; less, lighter in proportion.
-    var fullTonePressureGain = 0.15
+    var fullTonePressureGain = 0.10
     /// Pressure this much below the course average draws at full `ChartPalette.lull`.
-    var fullTonePressureLoss = 0.15
+    var fullTonePressureLoss = 0.10
 
     // MARK: Whitecaps
 

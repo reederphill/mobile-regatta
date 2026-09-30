@@ -36,6 +36,9 @@ public struct BoatClass: DataFileContent, Equatable {
     /// The graded by-the-lee penalty and where the spinnaker collapses (schema 3), or nil: only the
     /// polar's flat `byTheLeePenalty`.
     public var byTheLee: ByTheLeeTuning?
+    /// The roll tack (#222, #263; schema 3, optional), or nil for a class without one: a second tack/gybe tap
+    /// during a tack is an ordinary tap, as before.
+    public var rollTack: RollTackTuning?
 
     public struct Hull: Sendable, Equatable {
         /// Metres.
@@ -179,11 +182,46 @@ public struct BoatClass: DataFileContent, Equatable {
         public var lossCloseIn: Double
         /// Lowest wind multiplier from stacked shadows (0.6 = never below 60 % of the wind).
         public var stackingFloor: Double
-        /// The backwind zone: how far it reaches to windward of the boat and how wide it is,
-        /// metres, and the fraction of wind speed a boat inside it loses.
+
+        /// The backwind zone, metres, and the fraction of wind speed (or, for a speed-loss class, of speed) a boat
+        /// inside it loses at its strongest. With `backwindInnerLength` (#298) it is a right trapezoid on the caster's
+        /// windward quarter from her windward stern corner (`sternCorner`): `backwindWidth` out along her stern,
+        /// `backwindLength` astern on its outer edge and `backwindInnerLength` on its inner one (`ShadowCone`).
+        /// Without it (every class before #298), #79's band: `backwindLength` up her apparent wind, `backwindWidth` wide.
         public var backwindLength: Double
         public var backwindWidth: Double
         public var backwindLoss: Double
+        /// Metres astern of the stern the trapezoid's inner edge reaches (#298; optional, `innerLengthHullLengths`),
+        /// or nil for #79's band.
+        public var backwindInnerLength: Double?
+        /// The hull's starboard stern corner in the boat's frame, metres (x out from the centreline, y aft of the
+        /// centre, negative): where the backwind trapezoid starts, mirrored to her windward side. Not a file value:
+        /// read off the hull outline at load (its aftmost points, widest of them; outlines are symmetric).
+        public var sternCorner: Vec2
+        /// Seconds: the time constant a shadowed boat slows down at (#220, #263; schema 3, optional). With it the
+        /// shadow is a speed loss: her polar reads the clean wind and her target speed is the polar's × the shadow's
+        /// multiplier (`Boat.shadow`), approached at this. Nil (every class before skiff@3): the shadow slows the
+        /// wind her polar reads (`Boat.polarWindSpeed(in:)`), as #10 built it.
+        public var slowingDown: Double?
+
+        /// Whether the shadow slows the boat rather than the wind her polar reads (`slowingDown`).
+        public var isSpeedLoss: Bool { slowingDown != nil }
+    }
+
+    /// The roll tack (#222, #263): a second tack/gybe tap during a tack, timed on the boom crossing. A hit, within
+    /// `window` of the crossing either way, keeps `hitLossFraction` of each tick's speed loss from the tap (or the
+    /// crossing, for a tap before it) until she is close-hauled: no floor and no jump, so a rolled tack never beats
+    /// not tacking. A miss, outside it, multiplies her speed by `missSpeedFactor` once. One roll a tack.
+    public struct RollTackTuning: Sendable, Equatable {
+        /// Seconds either side of the boom crossing that a roll tap hits.
+        public var window: Double
+        /// The fraction of each tick's speed loss a hit still takes (0.5: she loses half as much).
+        public var hitLossFraction: Double
+        /// Her speed is multiplied by this on a miss.
+        public var missSpeedFactor: Double
+
+        /// `window` in whole ticks at `Race.tickRate`: a tap `window` ticks or fewer from the crossing hits.
+        public var windowTicks: Int { Int((window * Double(Race.tickRate) + 1e-9).rounded(.down)) }
     }
 
     /// Speed multipliers on contact.
@@ -300,6 +338,9 @@ private struct BoatClassSchema2: Decodable {
             let lengthHullLengths: Double
             let widthHullLengths: Double
             let loss: Double
+            /// #298: the trapezoid's inner length (`BoatClass.WindShadow.backwindInnerLength`). Optional: a file
+            /// without it (every one before #298) casts #79's band.
+            let innerLengthHullLengths: Double?
         }
 
         let coneLengthHullLengths: Double
@@ -385,6 +426,11 @@ private struct BoatClassSchema2: Decodable {
                   "shadow losses and floor must be 0...1")
         try check(windShadow.backwind.lengthHullLengths >= 0 && windShadow.backwind.widthHullLengths >= 0,
                   "backwind size must not be negative")
+        if let inner = windShadow.backwind.innerLengthHullLengths {
+            try check(positive(windShadow.backwind.lengthHullLengths) && positive(windShadow.backwind.widthHullLengths)
+                      && positive(inner) && inner <= windShadow.backwind.lengthHullLengths,
+                      "backwind trapezoid needs a positive length and width, and an inner length in 0 exclusive ... its length")
+        }
         try check(fraction(contact.boatSpeedFactor) && fraction(contact.markSpeedFactor), "contact factors must be 0...1")
         try check(fraction(ease.speedFraction) && positive(ease.timeConstantSeconds), "ease needs a 0...1 fraction and a positive time")
 
@@ -420,11 +466,21 @@ private struct BoatClassSchema2: Decodable {
                 stackingFloor: windShadow.stackingFloor,
                 backwindLength: windShadow.backwind.lengthHullLengths * length,
                 backwindWidth: windShadow.backwind.widthHullLengths * length,
-                backwindLoss: windShadow.backwind.loss
+                backwindLoss: windShadow.backwind.loss,
+                backwindInnerLength: windShadow.backwind.innerLengthHullLengths.map { $0 * length },
+                sternCorner: Self.sternCorner(of: outline),
+                slowingDown: nil
             ),
             contact: .init(boat: contact.boatSpeedFactor, mark: contact.markSpeedFactor),
             ease: .init(speedFraction: ease.speedFraction, timeConstant: ease.timeConstantSeconds)
         )
+    }
+
+    /// The outline's starboard stern corner: of its aftmost points, the one furthest out, x as a distance out.
+    static func sternCorner(of outline: [Vec2]) -> Vec2 {
+        let aft = outline.map(\.y).min() ?? 0
+        let out = outline.filter { $0.y == aft }.map { abs($0.x) }.max() ?? 0
+        return Vec2(out, aft)
     }
 
     /// A simple convex polygon wound clockwise in the boat's frame (x to starboard, y towards the bow):
@@ -490,10 +546,25 @@ private struct BoatClassSchema3Additions: Decodable {
         let spinnakerCollapseDegrees: Double
     }
 
+    /// #263: the shadow's own slow-down (`BoatClass.WindShadow.slowingDown`). Optional: a schema-3 class without
+    /// it (skiff@1, skiff@2) keeps the shadow a wind loss.
+    struct WindShadow: Decodable {
+        let slowingDownSeconds: Double?
+    }
+
+    /// #263: the roll tack (`BoatClass.RollTackTuning`). Optional: a class without it has none.
+    struct RollTack: Decodable {
+        let windowSeconds: Double
+        let hitLossFraction: Double
+        let missSpeedFactor: Double
+    }
+
     let steering: Steering
     let planing: Planing
     let spinnaker: Spinnaker
     let byTheLee: ByTheLee
+    let windShadow: WindShadow?
+    let rollTack: RollTack?
 
     /// The longest hoist or drop the wire snapshot carries (`RegattaProtocol`: a byte of ticks).
     static let maxTransitionSeconds = 8.0
@@ -531,6 +602,17 @@ private struct BoatClassSchema3Additions: Decodable {
         try check(byTheLee.spinnakerCollapseDegrees >= 0 && byTheLee.spinnakerCollapseDegrees <= 90,
                   "spinnaker collapse must be 0...90° by the lee")
 
+        if let seconds = windShadow?.slowingDownSeconds {
+            try check(positive(seconds), "shadow slow-down time must be positive")
+            boatClass.windShadow.slowingDown = seconds
+        }
+        if let roll = rollTack {
+            try check(roll.windowSeconds.isFinite && roll.windowSeconds >= 0, "roll tack window must not be negative")
+            try check(roll.hitLossFraction >= 0 && roll.hitLossFraction <= 1 && roll.missSpeedFactor >= 0 && roll.missSpeedFactor <= 1,
+                      "roll tack hit loss and miss factor must be 0...1")
+            boatClass.rollTack = .init(window: roll.windowSeconds, hitLossFraction: roll.hitLossFraction,
+                                       missSpeedFactor: roll.missSpeedFactor)
+        }
         boatClass.steering.autohelm.grooveWindAverage = average
         boatClass.planing = .init(
             fromTWA: deg2rad(p.fromTWADegrees),

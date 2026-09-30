@@ -51,15 +51,20 @@ public enum BoatDynamics {
     public struct Environment: Sendable, Equatable {
         /// Where the true wind blows from, radians.
         public var windDirection: Double
-        /// True wind speed the sail sees (after any wind shadow), m/s.
+        /// True wind speed the sail sees, m/s: after any wind shadow for a class whose shadow slows the wind
+        /// (`BoatClass.WindShadow.isSpeedLoss` false), the clean wind for one whose shadow slows the boat.
         public var windSpeed: Double
         /// Current, m/s: moves the boat over the ground without changing her speed through the water.
         public var current: Vec2
+        /// The wind shadow's multiplier on her target speed (#220, #263), 1 in clean air: less than 1 only for a
+        /// class whose shadow is a speed loss (`BoatClass.WindShadow.slowingDown`).
+        public var shadow: Double
 
-        public init(windDirection: Double, windSpeed: Double, current: Vec2 = .zero) {
+        public init(windDirection: Double, windSpeed: Double, current: Vec2 = .zero, shadow: Double = 1) {
             self.windDirection = windDirection
             self.windSpeed = windSpeed
             self.current = current
+            self.shadow = shadow
         }
 
         /// A test environment: the same wind everywhere, no current.
@@ -79,6 +84,8 @@ public enum BoatDynamics {
     ///   `slowingDown` above it, `noGo` inside the no-go zone (below the polar's first sailing row, where
     ///   the sail can't draw and the target is 0), and `ease.timeConstant` towards the eased target
     ///   (`ease.speedFraction` of the polar's).
+    /// - A class whose wind shadow is a speed loss (#220, #263) multiplies the target by `env.shadow`, and while
+    ///   shadowed slows down to it at the shadow's own `WindShadow.slowingDown`.
     /// - Rudder drag takes `rudderDrag` of the speed per second at full rudder.
     /// - The boom crosses (`boomCrosses`) on the tick the bow passes head to wind (a tack), or when she
     ///   bears away by the lee past the polar's `byTheLeeLimit` (a gybe). By the lee the speed target is
@@ -120,14 +127,18 @@ public enum BoatDynamics {
             ? polarTarget(relativeWind: relativeWind, boomSide: s.boomSide, tws: env.windSpeed,
                           isPlaning: s.isPlaning, spinnaker: s.spinnaker, boatClass: boatClass)
             : 0
+        let shadowSlowingDown = env.shadow < 1 ? boatClass.windShadow.slowingDown : nil
+        if shadowSlowingDown != nil { target *= env.shadow }
         let timeConstant: Double
         if control.ease && control.sailing {
             target *= boatClass.ease.speedFraction
             timeConstant = target > s.speed ? boatClass.momentum.speedingUp : boatClass.ease.timeConstant
         } else if target > s.speed {
             timeConstant = boatClass.momentum.speedingUp
+        } else if inNoGo {
+            timeConstant = boatClass.momentum.noGo
         } else {
-            timeConstant = inNoGo ? boatClass.momentum.noGo : boatClass.momentum.slowingDown
+            timeConstant = shadowSlowingDown ?? boatClass.momentum.slowingDown
         }
         s.speed += (target - s.speed) * min(1, dt / timeConstant)
         s.speed -= s.speed * abs(s.rudder) * steering.rudderDrag * dt

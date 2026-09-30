@@ -1,26 +1,36 @@
 /// The disturbed air one boat casts (#10): her wind shadow, a cone downwind of her along her apparent
-/// wind, and her backwind, a small zone the other way, to windward of her. Both are sized by her class
+/// wind, and her backwind, a small zone to windward of her. Both are sized by her class
 /// (`BoatClass.WindShadow`, ADR 0004). They slow the boats inside them and never turn the wind.
 ///
-/// Inside either, the loss tapers from its full value on the axis at the boat to nothing at the far
-/// end and at the edges. A ghost casts neither (`Race.shadowCone(ofSeat:)`).
+/// The cone's loss tapers from its full value on the axis at the boat to nothing at the far end and at the edges.
+/// The backwind has two shapes. A class with a backwind inner length (#298) casts a right trapezoid on her windward
+/// quarter, astern of her stern, following her heading and her windward side (`Boat.tack`, which flips at the boom
+/// crossing, #71): its loss fades from full at the stern edge to nothing at the far edge. A class without one casts
+/// #79's band straight up her apparent wind, tapering at the edges. A ghost casts neither (`Race.shadowCone(ofSeat:)`).
 public struct ShadowCone: Sendable, Equatable {
-    /// The caster's position: the cone's apex and the backwind zone's base.
+    /// The caster's position (her hull's centre): the cone's apex and the backwind zone's origin.
     public let apex: Vec2
-    /// Unit vector downwind along the caster's apparent wind: the cone's axis. The backwind zone runs
-    /// the other way, `-axis`.
+    /// Unit vector downwind along the caster's apparent wind: the cone's axis. #79's backwind band runs the
+    /// other way, `-axis`.
     public let axis: Vec2
+    /// Unit vector along the caster's heading: the trapezoid's forward (#298).
+    public let forward: Vec2
+    /// Unit vector square to her heading towards her windward side, the side the wind comes over (#298).
+    public let windward: Vec2
     /// The class's sizes and losses, metres and fractions.
     public let shadow: BoatClass.WindShadow
 
-    /// The shadow `caster` casts, from her position and apparent wind.
+    /// The shadow `caster` casts, from her position, apparent wind, heading and windward side.
     public init(caster: Boat, shadow: BoatClass.WindShadow) {
-        self.init(apex: caster.position, apparentWindDirection: caster.apparentWind.direction, shadow: shadow)
+        self.init(apex: caster.position, apparentWindDirection: caster.apparentWind.direction,
+                  heading: caster.heading, windwardSide: caster.tack, shadow: shadow)
     }
 
-    public init(apex: Vec2, apparentWindDirection: Double, shadow: BoatClass.WindShadow) {
+    public init(apex: Vec2, apparentWindDirection: Double, heading: Double, windwardSide: Tack, shadow: BoatClass.WindShadow) {
         self.apex = apex
         self.axis = -Vec2.heading(apparentWindDirection)
+        self.forward = .heading(heading)
+        self.windward = windwardSide == .starboard ? forward.rightPerp : -forward.rightPerp
         self.shadow = shadow
     }
 
@@ -39,16 +49,48 @@ public struct ShadowCone: Sendable, Equatable {
         let offset = p - apex
         let along = offset.dot(axis)
         let lateral = abs(offset.cross(axis))
-        if along > 0 {
-            guard along < shadow.coneLength else { return 1 }
-            let width = halfWidth(at: along)
-            guard lateral < width else { return 1 }
-            return 1 - shadow.lossCloseIn * (1 - along / shadow.coneLength) * (1 - lateral / width)
+        guard let innerLength = shadow.backwindInnerLength else {
+            // #79's band, exactly as it was: the classes before #298 sail as they did.
+            if along > 0 { return coneFactor(along: along, lateral: lateral) }
+            let upwind = -along
+            let width = shadow.backwindWidth / 2
+            guard upwind > 0, upwind < shadow.backwindLength, lateral < width else { return 1 }
+            return 1 - shadow.backwindLoss * (1 - upwind / shadow.backwindLength) * (1 - lateral / width)
         }
-        let upwind = -along
-        let width = shadow.backwindWidth / 2
-        guard upwind > 0, upwind < shadow.backwindLength, lateral < width else { return 1 }
-        return 1 - shadow.backwindLoss * (1 - upwind / shadow.backwindLength) * (1 - lateral / width)
+        let cone = along > 0 ? coneFactor(along: along, lateral: lateral) : 1
+        return cone * backwindFactor(at: offset, innerLength: innerLength)
+    }
+
+    /// The multiplier this boat's backwind trapezoid alone leaves at `p` (#298), without her cone: 1 outside it, and
+    /// 1 everywhere for a class with #79's band.
+    public func backwindFactor(at p: Vec2) -> Double {
+        guard let innerLength = shadow.backwindInnerLength else { return 1 }
+        return backwindFactor(at: p - apex, innerLength: innerLength)
+    }
+
+    /// Whether `p` is inside this boat's backwind trapezoid (#298); false for a class with #79's band.
+    public func isInBackwind(_ p: Vec2) -> Bool { backwindFactor(at: p) < 1 }
+
+    /// The cone's multiplier `along` metres down its axis and `lateral` off it (`along` > 0).
+    private func coneFactor(along: Double, lateral: Double) -> Double {
+        guard along < shadow.coneLength else { return 1 }
+        let width = halfWidth(at: along)
+        guard lateral < width else { return 1 }
+        return 1 - shadow.lossCloseIn * (1 - along / shadow.coneLength) * (1 - lateral / width)
+    }
+
+    /// The backwind trapezoid's multiplier at `offset` from the caster (#298). In her frame (out to windward, forward),
+    /// from P1, her windward stern corner (`BoatClass.WindShadow.sternCorner`): it reaches `backwindWidth` out along
+    /// the stern edge to P2, `backwindLength` astern from P2 (the outer edge) and `innerLength` astern from P1 (the
+    /// inner edge), and its far edge slants between their ends. The loss is full at the stern edge and fades straight
+    /// to nothing at the far edge, `innerLength` astern on the inside to `backwindLength` on the outside.
+    private func backwindFactor(at offset: Vec2, innerLength: Double) -> Double {
+        let out = offset.dot(windward) - shadow.sternCorner.x
+        let astern = shadow.sternCorner.y - offset.dot(forward)
+        guard out > 0, out < shadow.backwindWidth, astern > 0 else { return 1 }
+        let reach = innerLength + (shadow.backwindLength - innerLength) * out / shadow.backwindWidth
+        guard astern < reach else { return 1 }
+        return 1 - shadow.backwindLoss * (1 - astern / reach)
     }
 
     /// The wind multiplier `cones` leave at `p` together: each one's factor multiplied, never below

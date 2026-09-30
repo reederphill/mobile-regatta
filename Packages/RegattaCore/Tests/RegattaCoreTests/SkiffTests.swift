@@ -1,8 +1,8 @@
 import Testing
 @testable import RegattaCore
 
-/// #248 acceptance: the skiff, the schema-3 class races sail by default (skiff@2 since #89, which turns
-/// quicker). Its polar is #244's seed table (docs/research/49er-skiff-polars-and-handling.md §8); it planes,
+/// #248 acceptance: the skiff, the schema-3 class races sail by default (skiff@3 since #263: #89's quicker turn with
+/// #263's momentum, rudder drag and roll tack). Its polar is #244's seed table (docs/research/49er-skiff-polars-and-handling.md §8); it planes,
 /// hoists and drops an automatic spinnaker, and pays heavily by the lee. The dynamics tests sail in a
 /// constant wind from the north with no current, steered as `Race` steers (the autohelm and its tap), like
 /// `BoomTests`.
@@ -113,8 +113,8 @@ import Testing
         s = hold(s, knots: 8, seconds: 30) { #expect($0.isPlaning) }
         #expect(abs(s.speed - onPlane) < 1e-6, "on the plane at \(s.speed / metresPerSecond(knots: 1)) kn")
 
-        // A lull to 3 kn for 8 s knocks her off the plane.
-        s = hold(s, knots: 3, seconds: 8)
+        // A lull to 3 kn for 12 s knocks her off the plane (skiff@3 bleeds speed off over 10 s, #263).
+        s = hold(s, knots: 3, seconds: 12)
         #expect(!s.isPlaning)
 
         // Back in 8 kn at the same heading she stays off it, at the off-plane speed.
@@ -134,7 +134,7 @@ import Testing
         let planed = try? #require(planedAfter)
         #expect((planed ?? .infinity) <= 8, "planed \(String(describing: planed)) s after heading up")
         // ...and bearing away again to 145° she keeps it and gets back to the on-plane speed.
-        s = hold(headed(s, twa: groove), knots: 8, seconds: 30) { #expect($0.isPlaning) }
+        s = hold(headed(s, twa: groove), knots: 8, seconds: 60) { #expect($0.isPlaning) }
         #expect(abs(s.speed - onPlane) < 1e-3)
     }
 
@@ -264,24 +264,33 @@ import Testing
 
     // MARK: - Manoeuvres
 
-    /// A tack from close-hauled to close-hauled costs about two hull lengths (#244 §6.1: ~10 m medium air). #89
-    /// moved its floor from 8 m to 7: skiff@2 turns a 360 in about 10 s at 36°/s, so it tacks through the wind
-    /// quicker than skiff@1's 30°/s and loses less (7.7 m at 10 kn, 8.4 m at 12), for all its doubled rudder drag.
-    @Test(arguments: [10.0, 12])
-    func tackCosts7To12Metres(knots: Double) {
+    /// #263: a tack tapped from close-hauled with the autohelm holding costs 0.7–1.3 hull lengths made good upwind
+    /// over 25 s against sailing on, at 6, 10 and 14 kn (skiff@3: rudder drag 0.25, momentum 2.5 s / 10 s). She is
+    /// close-hauled on the new tack within 3.5 s of the tap and never below 40 % of her entry speed, so the stall
+    /// skiff@2 had (30 % of entry, 1.57 L at 10 kn) can't come back.
+    @Test(arguments: [6.0, 10, 14])
+    func tackCosts0_7To1_3LengthsAt6_10And14Knots(knots: Double) {
         let beat = skiff.polar.bestUpwind(tws: tws(knots))
         let run = tap(starboard(twa: beat.twa, speed: beat.speed), knots: knots)
         #expect(zip(run, run.dropFirst()).filter { $0.boomSide != $1.boomSide }.count == 1)
         #expect(run.last!.boomSide == .starboard)
         #expect(abs(rad2deg(sailingAngle(run.last!) - beat.twa)) < 0.5, "settled close-hauled on the new tack")
-        let lost = metresLost(run, along: .heading(windFrom))
-        #expect(lost >= 7 && lost <= 12, "\(knots) kn tack lost \(lost) m")
+        let lengths = metresLost(run, along: .heading(windFrom)) / skiff.hull.length
+        #expect(lengths >= 0.7 && lengths <= 1.3, "\(knots) kn tack lost \(lengths) L")
+        // Close-hauled as `Race` has it (rule 13's end): within 5° of the groove on the new tack.
+        let closeHauled = run.firstIndex { $0.boomSide == .starboard && sailingAngle($0) >= beat.twa - deg2rad(5) }
+        let seconds = closeHauled.map { Double($0) * dt } ?? .infinity
+        #expect(seconds <= 3.5, "\(knots) kn tack close-hauled after \(seconds) s")
+        let slowest = run.map(\.speed).min()! / beat.speed
+        #expect(slowest >= 0.4, "\(knots) kn tack slowed to \(slowest) of her entry speed")
     }
 
-    /// A gybe from the groove to the groove, on the plane with the spinnaker up, costs about 8 m and
-    /// she is back to full speed about 12 s after the tap, having kept the plane and the spinnaker (#244 §6.2).
+    /// A gybe from the groove to the groove, on the plane with the spinnaker up, costs about 5.5 m and
+    /// she is back to full speed about 10 s after the tap, having kept the plane and the spinnaker. Skiff@3's
+    /// momentum (speeding up 2.5 s) and rudder drag 0.25 (#263) made it cheaper than #244 §6.2's 8 m / 12 s;
+    /// the range is the measured cost (5.4 / 5.8 m, 10.6 / 10.2 s at 10 / 12 kn) with a margin.
     @Test(arguments: [10.0, 12])
-    func gybeCostsAbout8MetresAndRecoversIn12Seconds(knots: Double) {
+    func gybeCostsAbout5_5MetresAndRecoversIn10Seconds(knots: Double) {
         let groove = Autohelm.grooveAngle(.downwind, tws: tws(knots), boatClass: skiff)
         let entry = skiff.polar.speed(twa: groove, tws: tws(knots))
         let run = tap(starboard(twa: groove, speed: entry, isPlaning: true, spinnaker: .up), knots: knots)
@@ -289,10 +298,10 @@ import Testing
         #expect(run.last!.boomSide == .starboard)
         #expect(run.allSatisfy { $0.isPlaning && $0.spinnaker == .up }, "kept the plane and the spinnaker")
         let lost = metresLost(run, along: -Vec2.heading(windFrom))
-        #expect(lost >= 6 && lost <= 10, "\(knots) kn gybe lost \(lost) m")
+        #expect(lost >= 4.5 && lost <= 7, "\(knots) kn gybe lost \(lost) m")
         // Back to within 1% of her entry speed, for good.
         let slow = run.lastIndex { $0.speed < 0.99 * entry } ?? 0
         let recovered = Double(slow + 1) * dt
-        #expect(recovered >= 10 && recovered <= 13, "\(knots) kn gybe back to full speed after \(recovered) s")
+        #expect(recovered >= 8.5 && recovered <= 12, "\(knots) kn gybe back to full speed after \(recovered) s")
     }
 }

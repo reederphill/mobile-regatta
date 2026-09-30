@@ -16,9 +16,12 @@ public struct RecordedBoat: Sendable, Equatable {
     public var penaltyProgress: Double
     /// Where the wind she sailed in this tick blew from (`Boat.sailingWind`), radians.
     public var windDirection: Double
-    /// The wind speed her polar read this tick, shadow included (`Boat.polarWindSpeed`), m/s.
+    /// The sailing wind's speed this tick, before any shadow (`Boat.sailingWind`), m/s.
     public var windSpeed: Double
-    /// The wind speed her autohelm's grooves read this tick (`Boat.grooveWindSpeed`), m/s.
+    /// Her wind shadow this tick (`Boat.shadow`): with `windSpeed`, what her polar read (`Boat.polarWindSpeed(in:)`).
+    public var shadow: Double
+    /// The wind speed her autohelm's grooves read this tick (`Boat.averagedWindSpeed`, never nil once the race
+    /// has stepped), m/s.
     public var grooveWindSpeed: Double
     /// The current that carried her this tick, m/s.
     public var current: Vec2
@@ -35,13 +38,14 @@ public struct RecordedBoat: Sendable, Equatable {
         penaltyTurnsOwed = boat.penaltyTurnsOwed
         penaltyProgress = boat.penaltyProgress
         windDirection = boat.sailingWind.direction
-        windSpeed = boat.polarWindSpeed
-        grooveWindSpeed = boat.grooveWindSpeed
+        windSpeed = boat.sailingWind.speed
+        shadow = boat.shadow
+        grooveWindSpeed = boat.averagedWindSpeed ?? boat.sailingWind.speed * boat.shadow
         current = boat.current
     }
 
     /// Her as seat `id`'s boat, with only the recorded fields set: every one the rules (`Rules.obligation`),
-    /// the near-miss sweep and the dynamics read. The wind is the sailing wind with her shadow in its speed.
+    /// the near-miss sweep and the dynamics read: the sailing wind and her shadow as they were.
     public func boat(id: Int) -> Boat {
         var boat = Boat(id: id, isPlayer: false, colorIndex: 0, position: state.position, heading: state.heading,
                         speed: state.speed, boomSide: state.boomSide)
@@ -55,6 +59,7 @@ public struct RecordedBoat: Sendable, Equatable {
         boat.penaltyTurnsOwed = penaltyTurnsOwed
         boat.penaltyProgress = penaltyProgress
         boat.sailingWind = Wind(direction: windDirection, speed: windSpeed)
+        boat.shadow = shadow
         boat.averagedWindSpeed = grooveWindSpeed
         boat.current = current
         return boat
@@ -246,8 +251,9 @@ public struct EscapeSimulation: Sendable {
             } else if boat.autohelm == nil {
                 let environment = environments[0]
                 boat.sailingWind = Wind(direction: environment.windDirection, speed: environment.windSpeed)
+                boat.shadow = environment.shadow
                 boat.averagedWindSpeed = environment.grooveWindSpeed
-                boat.autohelm = Autohelm.engage(sailingAngle: boat.sailingAngle, tws: boat.grooveWindSpeed,
+                boat.autohelm = Autohelm.engage(sailingAngle: boat.sailingAngle, tws: environment.grooveWindSpeed,
                                                 boatClass: boatClass).autohelm
             }
             for n in environments.indices {
@@ -262,18 +268,20 @@ public struct EscapeSimulation: Sendable {
     /// rudder, the dynamics, and the tap it may be sailing ending as the boom crosses.
     private func sail(_ boat: inout Boat, ease: Bool, in environment: RecordedBoat) {
         boat.sailingWind = Wind(direction: environment.windDirection, speed: environment.windSpeed)
+        boat.shadow = environment.shadow
         boat.averagedWindSpeed = environment.grooveWindSpeed
         boat.current = environment.current
-        let tws = boat.polarWindSpeed
+        let tws = boat.polarWindSpeed(in: boatClass)
         if let helm = boat.autohelm {
             boat.desiredRudder = helm.rudder(sailingAngle: boat.sailingAngle, boomSide: boat.boomSide, tws: tws,
-                                             grooveTWS: boat.grooveWindSpeed, boatClass: boatClass)
+                                             grooveTWS: environment.grooveWindSpeed, boatClass: boatClass)
         }
         let moved = BoatDynamics.advance(
             BoatDynamics.State(position: boat.position, heading: boat.heading, speed: boat.speed, rudder: boat.rudder,
                                boomSide: boat.boomSide, isPlaning: boat.isPlaning, spinnaker: boat.spinnaker),
             control: BoatDynamics.Control(rudder: boat.desiredRudder, ease: ease, sailing: true),
-            env: BoatDynamics.Environment(windDirection: boat.sailingWind.direction, windSpeed: tws, current: boat.current),
+            env: BoatDynamics.Environment(windDirection: boat.sailingWind.direction, windSpeed: tws, current: boat.current,
+                                          shadow: boat.speedShadow(in: boatClass)),
             boatClass: boatClass, dt: Race.dt)
         if moved.boomSide != boat.boomSide { boat.autohelm?.isTapping = false }
         boat.position = moved.position

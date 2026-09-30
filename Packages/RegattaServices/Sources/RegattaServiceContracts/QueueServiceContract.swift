@@ -49,8 +49,12 @@ public struct QueueServiceContract: ContractSuite {
         for status in queued {
             try await require(status.queuedPlayers >= 1, "\(status.queuedPlayers) players queued, and the player is one")
             try await require(status.secondsToLock >= 0, "a countdown of \(status.secondsToLock) s")
+            // Lock-imminent only when the countdown is within the threshold. The server may lock early,
+            // so the last queued state before fleet lock needn't be imminent.
+            if status.secondsToLock <= QueuedStatus.lockImminentSeconds {
+                try await require(status.isLockImminent, "\(status.secondsToLock) s to fleet lock isn't lock-imminent")
+            }
         }
-        try await require(queued[queued.count - 1].isLockImminent, "fleet lock came without lock-imminent before it: \(queued[queued.count - 1])")
 
         // Once locked, the queue is done with the player.
         try await requireThrows(QueueError.alreadyQueued, "join() after fleet lock") { try await service.join() }
