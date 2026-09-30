@@ -33,8 +33,12 @@ enum LiveryFixtures {
         #expect(earned == [10, 50, 200])
         let tiers = skiff.compactMap { if case .paid(_, let tier) = $0.acquisition { tier } else { nil } }
         #expect(tiers.count == 12 && Set(tiers) == [1, 2, 3])
-        for boatClass in BoatClassFile.bundledKeys().map(\.id) {
+        let boatClasses = BoatClassFile.bundledKeys().map(\.id)
+        for boatClass in boatClasses {
             #expect(!catalogue.designs(for: boatClass).filter { $0.acquisition.isFree }.isEmpty, "\(boatClass) has a free design")
+        }
+        for design in catalogue.designs {
+            #expect(boatClasses.contains(design.boatClass), "\(design.id)'s class \(design.boatClass) is a bundled boat class")
         }
         #expect(catalogue.swatches.count == 9)
         #expect(catalogue.swatch(SwatchID("off-white"))?.slots == [.sail])
@@ -162,6 +166,13 @@ enum LiveryFixtures {
         for (i, own) in roster.enumerated() where !roster[..<i].contains(own) {
             #expect(shown[i] == own, "boat \(i)")
         }
+        // A shared number outside 1…9999 still gets a replacement inside it, and the search ends.
+        #expect(LiveryCatalogue.raceSailNumbers([10001, 10001]) == [10001, 1])
+        #expect(LiveryCatalogue.raceSailNumbers([0, 0, 1]) == [0, 2, 1])
+        // A full fleet: 9999 boats all on 9999, and 9999 boats with one number free.
+        let allSame = LiveryCatalogue.raceSailNumbers(Array(repeating: 9999, count: 9999))
+        #expect(allSame == [9999] + Array(1...9998))
+        #expect(LiveryCatalogue.raceSailNumbers(Array(1...9998) + [5]).last == 9999)
     }
 
     /// The catalogue refuses a file that breaks its rules.
@@ -170,6 +181,14 @@ enum LiveryFixtures {
             (#""tier": 1"#, #""tier": 4"#),
             (#""completedRaces": 10"#, #""completedRaces": 0"#),
             (#""acquisition": "earned""#, #""acquisition": "won""#),
+            // A field nothing reads, or one for another acquisition.
+            (#""id": "skiff-stripe","#, #""id": "skiff-stripe", "colour": "red","#),
+            (#""acquisition": "free""#, #""acquisition": "free", "tier": 2"#),
+            (#""acquisition": "free""#, #""acquisition": "free", "productId": null"#),
+            // Not #RRGGBB, not an id, or a rule that would pass anything.
+            (##""hex": "#56B4E9""##, #""hex": "56B4E9""#),
+            (#""boatClass": "skiff""#, #""boatClass": "Skiff""#),
+            (#""minimumHueDistanceDegrees": 20"#, #""minimumHueDistanceDegrees": 0"#),
         ] {
             #expect(throws: DataFileError.self, "\(with)") { try LiveryCatalogueFile(data: try LiveryFixtures.edited(of, with)) }
         }

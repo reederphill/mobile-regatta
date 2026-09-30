@@ -25,8 +25,9 @@ import Foundation
 /// }
 /// ```
 ///
-/// `completedRaces` goes with `earned`, and `productId` and `tier` (1–3: $0.99, $1.99, $2.99) with `paid`. Every swatch
-/// must pass the rule, or the file is refused.
+/// `completedRaces` goes with `earned`, and `productId` and `tier` (1–3: $0.99, $1.99, $2.99) with `paid`, and neither
+/// with another acquisition. Every swatch must pass the rule, or the file is refused, as is a field the schema
+/// doesn't have.
 public struct LiveryCatalogue: DataFileContent, Hashable {
     public static let kind = "livery catalogue"
     public static let bundleDirectory = "liveries"
@@ -49,11 +50,22 @@ public struct LiveryCatalogue: DataFileContent, Hashable {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         let file = try JSONDecoder().decode(Schema.self, from: fileData)
+        // A released file can't be fixed, so it mustn't ship with a field nothing reads (as venue and rules files).
+        let document = try JSONSerialization.jsonObject(with: fileData, options: [.fragmentsAllowed])
+        if let pointer = Schema.fields.firstUnknownField(in: document, at: "") {
+            throw DataFileError.malformed(kind: Self.kind, reason: "unknown or null field \(pointer): a livery catalogue has only its schema's fields")
+        }
         func fail(_ reason: String) -> DataFileError { .invalidContent(kind: Self.kind, id: header.id, reason: reason) }
         func colour(_ hex: String) throws -> UInt32 {
-            let digits = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
-            guard digits.count == 6, let value = UInt32(digits, radix: 16) else { throw fail("\(hex) isn't a #RRGGBB colour") }
+            // `UInt32(_:radix:)` alone would take a sign ("#+12345") and a missing "#".
+            let digits = hex.dropFirst()
+            guard hex.first == "#", digits.count == 6, digits.allSatisfy(\.isHexDigit), let value = UInt32(digits, radix: 16) else {
+                throw fail("\(hex) isn't a #RRGGBB colour")
+            }
             return value
+        }
+        for id in file.swatches.map(\.id) + file.designs.flatMap({ [$0.id, $0.boatClass] }) where !LiveryCatalogueFile.isValidID(id) {
+            throw fail("\"\(id)\" must be lowercase letters, digits and hyphens")
         }
         let rule = SwatchRule(
             reserved: try file.rule.reserved.map { SwatchRule.Reserved(name: $0.name, rgb: try colour($0.hex)) },
@@ -66,12 +78,18 @@ public struct LiveryCatalogue: DataFileContent, Hashable {
             let acquisition: DesignAcquisition
             switch design.acquisition {
             case "free":
+                guard design.completedRaces == nil, design.productId == nil, design.tier == nil else {
+                    throw fail("free design \(design.id) has an earned or paid field")
+                }
                 acquisition = .free
             case "earned":
                 guard let races = design.completedRaces else { throw fail("earned design \(design.id) has no completedRaces") }
+                guard design.productId == nil, design.tier == nil else { throw fail("earned design \(design.id) has a paid field") }
                 acquisition = .earned(completedRaces: races)
             case "paid":
                 guard let product = design.productId, let tier = design.tier else { throw fail("paid design \(design.id) needs productId and tier") }
+                guard design.completedRaces == nil else { throw fail("paid design \(design.id) has completedRaces") }
+                guard !product.isEmpty else { throw fail("paid design \(design.id) has an empty productId") }
                 acquisition = .paid(productID: product, tier: tier)
             default:
                 throw fail("design \(design.id)'s acquisition \(design.acquisition) isn't free, earned or paid")
@@ -94,6 +112,15 @@ public struct LiveryCatalogue: DataFileContent, Hashable {
             if !condition { throw LiveryCatalogueError(reason: reason()) }
         }
         try require(!swatches.isEmpty && !designs.isEmpty, "a catalogue needs swatches and designs")
+        // A rule with no cues, no water or a zero tuning would pass any swatch.
+        try require(!rule.reserved.isEmpty && !rule.water.isEmpty, "the swatch rule needs reserved hues and water tones")
+        try require(rule.minimumHueDistance > 0 && rule.minimumHueDistance <= 180, "minimumHueDistance \(rule.minimumHueDistance) isn't in 0–180°")
+        try require(rule.chromaFloor >= 0 && rule.chromaFloor.isFinite, "chromaFloor \(rule.chromaFloor) is negative")
+        try require(rule.minimumChevronDistance > 0 && rule.minimumChevronDistance.isFinite, "minimumChevronDistance must be positive")
+        try require(rule.minimumLightnessContrast > 0 && rule.minimumLightnessContrast.isFinite, "minimumLightnessContrast must be positive")
+        for id in rule.contrastExceptions {
+            try require(swatches.contains { $0.id == id }, "contrast exception \(id) isn't a swatch")
+        }
         try require(Set(swatches.map(\.id)).count == swatches.count, "a swatch id repeats")
         try require(Set(designs.map(\.id)).count == designs.count, "a design id repeats")
         for swatch in swatches {
@@ -178,7 +205,11 @@ public struct LiveryCatalogue: DataFileContent, Hashable {
     /// the one that joined later shows another for that race only, the first number after it (wrapping 9999 to 1)
     /// that no boat in the fleet has or shows. The same roster gives the same numbers everywhere; online the server
     /// puts them in the roster.
+    ///
+    /// A replacement is always in `Livery.sailNumbers`, even when the shared number isn't (the search starts over at
+    /// 1). A fleet has at most `Livery.sailNumbers.count` boats, so a free number always exists and the search ends.
     public static func raceSailNumbers(_ numbers: [Int]) -> [Int] {
+        precondition(numbers.count <= Livery.sailNumbers.count, "\(numbers.count) boats can't show unique sail numbers")
         var taken = Set(numbers)
         var shown: Set<Int> = []
         return numbers.map { number in
@@ -188,7 +219,8 @@ public struct LiveryCatalogue: DataFileContent, Hashable {
             }
             var candidate = number
             repeat {
-                candidate = candidate == Livery.sailNumbers.upperBound ? Livery.sailNumbers.lowerBound : candidate + 1
+                candidate = Livery.sailNumbers.contains(candidate) && candidate < Livery.sailNumbers.upperBound
+                    ? candidate + 1 : Livery.sailNumbers.lowerBound
             } while taken.contains(candidate) || shown.contains(candidate)
             taken.insert(candidate)
             shown.insert(candidate)
@@ -211,6 +243,8 @@ private struct Schema: Decodable {
         struct Reserved: Decodable {
             let name: String
             let hex: String
+
+            enum CodingKeys: String, CodingKey, CaseIterable { case name, hex }
         }
 
         let reserved: [Reserved]
@@ -221,12 +255,19 @@ private struct Schema: Decodable {
         let waterHex: [String]
         let minimumLightnessContrast: Double
         let contrastExceptions: [String]
+
+        enum CodingKeys: String, CodingKey, CaseIterable {
+            case reserved, minimumHueDistanceDegrees, chromaFloor, chevronHex, minimumChevronDistance, waterHex
+            case minimumLightnessContrast, contrastExceptions
+        }
     }
 
     struct Swatch: Decodable {
         let id: String
         let hex: String
         let slots: [LiverySlot]
+
+        enum CodingKeys: String, CodingKey, CaseIterable { case id, hex, slots }
     }
 
     struct Design: Decodable {
@@ -239,9 +280,23 @@ private struct Schema: Decodable {
         let completedRaces: Int?
         let productId: String?
         let tier: Int?
+
+        enum CodingKeys: String, CodingKey, CaseIterable {
+            case id, boatClass, pattern, sailGraphic, slots, acquisition, completedRaces, productId, tier
+        }
     }
 
     let rule: Rule
     let swatches: [Swatch]
     let designs: [Design]
+
+    /// The top level's fields: the header's, which the loader decodes, and this schema's.
+    enum FileKeys: String, CodingKey, CaseIterable { case schemaVersion, id, version, placeholders, notes, rule, swatches, designs }
+
+    /// Every field schema 1 has, from each type's `CodingKeys`, so it can't drift from the decoder.
+    static let fields: FieldTree = .object(FileKeys.self, [
+        .rule: .object(Rule.CodingKeys.self, [.reserved: .array(.object(Rule.Reserved.CodingKeys.self))]),
+        .swatches: .array(.object(Swatch.CodingKeys.self)),
+        .designs: .array(.object(Design.CodingKeys.self)),
+    ])
 }

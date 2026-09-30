@@ -166,9 +166,10 @@ bit-for-bit deterministic:
 
 ### Data files
 
-Boat classes, conditions, venues and the rules configuration are immutable, versioned JSON
-files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`. The venue schema is in
-`docs/venue-file.md`; the rules configuration schema in `docs/rules-file.md`.
+Boat classes, conditions, venues, the rules configuration and the livery catalogue are immutable,
+versioned JSON files (ADR 0004), loaded from their bytes by `DataFile<Content>(data:)`. The venue schema
+is in `docs/venue-file.md`; the rules configuration schema in `docs/rules-file.md`; the livery catalogue's
+in `LiveryCatalogue.swift`.
 
 - Files are UTF-8 JSON. Before anything parses one, the loader refuses other encodings, nesting deeper
   than 512 and a key repeated in one object (parsers disagree on which copy wins, and differently on
