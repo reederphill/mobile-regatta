@@ -22,7 +22,7 @@
   ],
   "notes": [
     "A fictional single-handed 4.2 m dinghy modelled on the ILCA (Laser), no spinnaker (#14).",
-    "Version 4 (#298): the backwind is a right trapezoid on her windward quarter, astern of the stern, following her heading and windward side (it swaps sides at the boom crossing): from the windward stern corner (0.63 m out, 0.15 hull lengths) 1 hull length out along the stern, 2 astern on its outer edge and 1.5 on its inner one (innerLengthHullLengths), the far edge slanting between. A boat in it loses up to 25% of her wind at the stern edge, fading to nothing at the far edge. Sizes and loss are placeholders for the owner's sliders (#232). Everything else is version 3's.",
+    "Version 4 (#298): the backwind is a right trapezoid on her windward quarter, astern of the stern, following her heading and windward side (it swaps sides at the boom crossing): from the windward stern corner (0.63 m out, 0.15 hull lengths) 1 hull length out along the stern, 2 astern on its outer edge and 1.5 on its inner one (innerLengthHullLengths), the far edge slanting between. A boat in it loses up to 20% of her wind at the stern edge, fading to nothing at the far edge. Sizes and loss are placeholders for the owner's sliders (#232). Everything else is version 3's.",
     "Units: knots, degrees, seconds, metres; shadow and backwind sizes in hull lengths.",
     "Polar 6-20 kn: docs/research/ilca-dinghy-polars-and-handling.md section 7, except two cells: 165 deg at 8 kn is 5.2 (not 5.3) so the best downwind angle is 180 deg from 8 kn up, and 110 deg at 14 kn is 9.2 (not 9.1) so the reach's steepest gain starts at 12 kn (planing onset).",
     "Version 2 (#71): the turn rate curve, rudder drag and no-go time constant are tuned so tacks and gybes cost what #14 asks: at 10 kn a tack takes about 3.5 s, bottoms out at about half its entry speed and loses about a hull length; a gybe loses a quarter to half a hull length.",
@@ -89,7 +89,7 @@
       "lengthHullLengths": 2.0,
       "widthHullLengths": 1.0,
       "innerLengthHullLengths": 1.5,
-      "loss": 0.25
+      "loss": 0.2
     }
   },
   "contact": {

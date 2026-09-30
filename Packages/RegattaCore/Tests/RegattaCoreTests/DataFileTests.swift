@@ -15,7 +15,7 @@ enum Fixtures {
         1: "8eb6e20398d859edafec53ef904227672dd5ef081d1611fcb2e89d7e9da5849d",
         2: "f5c8f1677a45f76c2ffe27914671ea0ce615614944f331027c506cafb6caa12d",
         3: "0796b93570fb9723697162f3da4617b28ee0100f693116f1574a198c4c3bf792",
-        4: "b5e44029b09343df6eb8d8e48b792277000d61422f39f5d91f6782d068de6ebd",
+        4: "bd90cabe38cfea22c88dd0a6e4c462e04691dec0c5b90420d416bd8555f05bdf",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -53,7 +53,7 @@ enum SkiffFixtures {
         1: "826fa149ace5a1d876829129216281725001f43c99c247e074582cd99f2ed6f4",
         2: "32e5162d6caf3e32280ca754c1381e1012e4db4ef04252bf278b96dd796f5cd1",
         3: "3a6e6b7bf037bc496a9fdddfa45d7000ab41dd1801a08cece1bc2d3a76092c81",
-        4: "f552c5cc37515f55453c93a816547020fb0371e492c40e1155bf65fef1f92d38",
+        4: "4e2d1a94d1c90ac80aa88bdaa4890fc68095b16de61324c6fdaa19f54ee3a9a1",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -708,7 +708,7 @@ enum SkiffFixtures {
         #expect(shadow == a.windShadow)
         #expect(a.windShadow.backwindInnerLength == nil)
         #expect(b.windShadow.backwindLength == 2.0 * length && b.windShadow.backwindWidth == 1.0 * length)
-        #expect(b.windShadow.backwindInnerLength == 1.5 * length && b.windShadow.backwindLoss == 0.25)
+        #expect(b.windShadow.backwindInnerLength == 1.5 * length && b.windShadow.backwindLoss == 0.2)
         // Her windward stern corner, off the hull outline: half the stern's width out, half a hull length aft.
         let sternHalfWidth = classID == SkiffFixtures.classID ? 0.85 : 0.63
         #expect(b.windShadow.sternCorner == Vec2(sternHalfWidth, -length / 2))

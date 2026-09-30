@@ -18,7 +18,7 @@
   ],
   "notes": [
     "A fictional two-person 4.9 m skiff modelled on the 49er (#244, #245): hull 4.9 m long with a 1.8 m hull beam; the racks are drawn, not sailed.",
-    "Version 4 (#298): the backwind is a right trapezoid on her windward quarter, astern of the stern, following her heading and windward side (it swaps sides at the boom crossing): from the windward stern corner 1 hull length out along the stern, 2 astern on its outer edge and 1.5 on its inner one (innerLengthHullLengths), the far edge slanting between. A boat in it loses up to 25% of her target speed at the stern edge, fading to nothing at the far edge: 5 s lee-bowed at 10 kn costs about 0.44 hull lengths against clean air, less than 5 s in a wind shadow. Sizes and loss are placeholders for the owner's sliders (#232). Everything else is version 3's.",
+    "Version 4 (#298): the backwind is a right trapezoid on her windward quarter, astern of the stern, following her heading and windward side (it swaps sides at the boom crossing): from the windward stern corner 1 hull length out along the stern, 2 astern on its outer edge and 1.5 on its inner one (innerLengthHullLengths), the far edge slanting between. A boat in it loses up to 20% of her target speed at the stern edge, fading to nothing at the far edge: 5 s lee-bowed at 10 kn costs about 0.36 hull lengths against clean air, less than 5 s in a wind shadow. Sizes and loss are placeholders for the owner's sliders (#232). Everything else is version 3's.",
     "Units: knots, degrees, seconds, metres; shadow and backwind sizes in hull lengths.",
     "Polar: docs/research/49er-skiff-polars-and-handling.md section 8, every cell, with its rows 120, 140, 145 and 155. It is the speed on the plane with the spinnaker up: rows 0-90 are two sails, rows 110-180 assume the spinnaker (section 4.3).",
     "Planing (schema 3, #248, section 4.4): on the plane from 65 deg TWA at 8 kn or more with the apparent wind no further aft than the beam; off it below 6 kn or forward of 55 deg. Off the plane from 65 deg aft she sails the 6 kn column scaled by 1 + 0.035 per knot of TWS above 6 kn, never above the polar: at 8 kn and 145 deg that is 7.4 kn against 10.1 on the plane, and to get back on she has to head up to 140 deg or closer to the wind (the research's example heads up to 125 deg).",
@@ -91,7 +91,7 @@
       "lengthHullLengths": 2.0,
       "widthHullLengths": 1.0,
       "innerLengthHullLengths": 1.5,
-      "loss": 0.25
+      "loss": 0.2
     }
   },
   "contact": {

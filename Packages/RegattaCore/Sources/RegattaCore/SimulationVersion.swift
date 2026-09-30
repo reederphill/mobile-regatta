@@ -153,7 +153,7 @@ import Glibc
 /// 25: the backwind astern on the windward quarter (#298), on 24. Races sail skiff@4 by default: its backwind is a right
 ///    trapezoid from her windward stern corner (read off the hull outline), 1 hull length out along the stern, 2 astern
 ///    on its outer edge and 1.5 on its inner one, following her heading and windward side (it swaps at the boom
-///    crossing), not her apparent wind; its loss, 0.25 at the stern edge, fades to nothing at the far edge
+///    crossing), not her apparent wind; its loss, 0.2 at the stern edge, fades to nothing at the far edge
 ///    (`ShadowCone.backwindFactor(at:)`). A boat to windward and ahead of her is no longer in it. Classes without the
 ///    inner length (every file before skiff@4 and ilca-dinghy@4) keep #79's band and sail as on 24.
 public let simulationRevision = 25

@@ -223,10 +223,10 @@ import Testing
         let trapezoid = v4.content.windShadow
         #expect(trapezoid.sternCorner == Vec2(0.63, -2.1) && abs(trapezoid.sternCorner.x / hullLength - 0.15) < 1e-12)
         #expect(trapezoid.backwindWidth == 1.0 * hullLength && trapezoid.backwindLength == 2.0 * hullLength)
-        #expect(trapezoid.backwindInnerLength == 1.5 * hullLength && trapezoid.backwindLoss == 0.25)
+        #expect(trapezoid.backwindInnerLength == 1.5 * hullLength && trapezoid.backwindLoss == 0.2)
         let longer = try BoatClassFile(data: Fixtures.edited([
             (of: #""innerLengthHullLengths": 1.5"#, with: #""innerLengthHullLengths": 1.9"#),
-            (of: #""loss": 0.25"#, with: #""loss": 0.4"#),
+            (of: #""loss": 0.2"#, with: #""loss": 0.4"#),
         ], version: 4)).content.windShadow
         #expect(longer.backwindInnerLength == 1.9 * hullLength && longer.backwindLoss == 0.4)
         // Just past the inner corner: 1.7 L astern of the stern is beyond version 4's slanted edge, inside the longer one.

@@ -34,7 +34,7 @@ import Testing
 
     /// Seat 1 starts 3 L ahead of seat 0 and 1.5 L to leeward on port and tacks at once; she is on starboard about
     /// 1.6 L ahead of her and 0.6 L to leeward when her tack ends, seat 0 in her backwind from there on. At 10 kn
-    /// seat 0 loses 0.44 L in the next 5 s against her twin with skiff@4's placeholder loss (0.25): a lee-bow pays,
+    /// seat 0 loses 0.36 L in the next 5 s against her twin with skiff@4's placeholder loss (0.2): a lee-bow pays,
     /// but less than 5 s in a wind shadow (1.2–1.5 L, `ShadowCostTests`).
     @Test func leeBowedBoatLosesSpeedAgainstACleanTwin() throws {
         let (ahead, leeward) = (3.0, 1.5)
