@@ -209,6 +209,16 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/windShadow/coneWidthAtEndHullLengths", "Cone width at its end", 0.5...10, step: 0.1),
                 ]),
             TuningGroup(
+                id: "backwind", title: "Backwind",
+                note: "The zone astern of a boat on her windward quarter that slows a boat she lee-bows (#298, from skiff@4): its loss at her stern, fading to nothing at its far edge, and how far astern it reaches (hull lengths).",
+                applies: .nextRace,
+                sliders: [
+                    TuningSlider(.boatClass, "/windShadow/backwind/loss", "Loss at her stern", 0...0.6, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/backwind/innerLengthHullLengths", "Inner edge length", 0.25...4, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/backwind/lengthHullLengths", "Outer edge length", 0.5...4, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/backwind/widthHullLengths", "Width at her stern", 0.25...3, step: 0.05),
+                ]),
+            TuningGroup(
                 id: "rollTack", title: "Roll tack",
                 note: "The second tap through a tack (#222, #263): within the window of the boom crossing it keeps back part of her speed loss until close-hauled; outside it, her speed takes the miss.",
                 applies: .nextRace,

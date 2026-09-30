@@ -66,9 +66,9 @@ import Testing
 
     @Test func stackedConesFloorAt0_3() {
         let length = OpenWater.hullLength
-        let near = ShadowCone(apex: .zero, apparentWindDirection: 0, shadow: shadow)
-        let nearer = ShadowCone(apex: near.axis * (0.5 * length), apparentWindDirection: 0, shadow: shadow)
-        let nearest = ShadowCone(apex: near.axis * (0.75 * length), apparentWindDirection: 0, shadow: shadow)
+        let near = ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: shadow)
+        let nearer = ShadowCone(apex: near.axis * (0.5 * length), apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: shadow)
+        let nearest = ShadowCone(apex: near.axis * (0.75 * length), apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: shadow)
         let p = near.axis * length
         #expect(near.factor(at: p) * nearer.factor(at: p) * nearest.factor(at: p) < 0.3)
         let stacked = ShadowCone.factor(at: p, of: [near, nearer, nearest], floor: shadow.stackingFloor)

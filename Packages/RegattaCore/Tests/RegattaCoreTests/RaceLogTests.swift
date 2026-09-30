@@ -7,7 +7,7 @@ let testsDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
 
 /// A race for tests: by default seat 0 is human and `opponents` bot seats follow. Nothing sails the
 /// bot seats here (RegattaBotsTests does): every seat only answers to the inputs a test sends. The boats
-/// sail `boatClass`, by default `RaceFiles.defaults`' (skiff@3).
+/// sail `boatClass`, by default `RaceFiles.defaults`' (skiff@4).
 func testRace(
     opponents: Int = 7, seats: [SeatKind]? = nil, laps: Int = 2, prestartSeconds: Int = 60, seed: UInt64,
     boatClass: FileRef = RaceFiles.defaults.boatClass.ref

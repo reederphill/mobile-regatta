@@ -150,7 +150,13 @@ import Glibc
 ///    keeps half of each tick's speed loss until close-hauled, outside it a miss multiplies her speed by 0.8; roll
 ///    hit and roll miss events. Boats carry the roll and the crossing tick in the digest and the wire snapshot.
 ///    Classes without the new fields (every file before skiff@3) sail as on 23.
-public let simulationRevision = 24
+/// 25: the backwind astern on the windward quarter (#298), on 24. Races sail skiff@4 by default: its backwind is a right
+///    trapezoid from her windward stern corner (read off the hull outline), 1 hull length out along the stern, 2 astern
+///    on its outer edge and 1.5 on its inner one, following her heading and windward side (it swaps at the boom
+///    crossing), not her apparent wind; its loss, 0.25 at the stern edge, fades to nothing at the far edge
+///    (`ShadowCone.backwindFactor(at:)`). A boat to windward and ahead of her is no longer in it. Classes without the
+///    inner length (every file before skiff@4 and ilca-dinghy@4) keep #79's band and sail as on 24.
+public let simulationRevision = 25
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
