@@ -82,11 +82,14 @@ final class TuningModel {
         return venues
     }
 
-    /// The venue a race on `conditions` sails at: the default venue if it can host them, else the newest bundled
+    /// The venue a race on `conditions` sails at: the default venue if it can host them, else the newest version of
+    /// the default venue that can (so the panel keeps to the default race's water, #83), else the newest bundled
     /// venue that can.
     func venue(for conditions: DataFileKey) -> FileRef? {
-        if RaceFiles.defaults.venue.content.pairing(for: conditions) != nil { return RaceFiles.defaults.venue.ref }
-        return venues.last { $0.content.pairing(for: conditions) != nil }?.ref
+        let defaultVenue = RaceFiles.defaults.venue
+        if defaultVenue.content.pairing(for: conditions) != nil { return defaultVenue.ref }
+        let hosts = venues.filter { $0.content.pairing(for: conditions) != nil }
+        return (hosts.last { $0.ref.id == defaultVenue.ref.id } ?? hosts.last)?.ref
     }
 
     func baseData(_ slot: TuningSlot, _ key: DataFileKey? = nil) -> Data? {
