@@ -163,7 +163,13 @@ import Glibc
 ///    crossing), not her apparent wind; its loss, 0.2 at the stern edge, fades to nothing at the far edge
 ///    (`ShadowCone.backwindFactor(at:)`). A boat to windward and ahead of her is no longer in it. Classes without the
 ///    inner length (every file before skiff@4 and ilca-dinghy@4) keep #79's band and sail as on 25.
-public let simulationRevision = 26
+/// 27: ladder distance (#267), on 26. Boats racing rank by `Race.ladderDistanceToFinish(of:)` in place of the path
+///    length: on the beats and runs their distance to the leg's target along the course axis (fixed for the race, so
+///    boats on one ladder line are level however far apart across the course), on the W → O reach straight along the
+///    leg, then each later leg the same way. It sets `standings()`, `place(of:)` and the by-distance places in the
+///    results at the close, and `Race.gapToLeader(of:)` reads it. Boat state and the digest don't move; races whose
+///    close places boats by distance can place them differently from 26.
+public let simulationRevision = 27
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

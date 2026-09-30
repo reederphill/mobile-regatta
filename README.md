@@ -344,6 +344,8 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
   `none`) puts a colour-vision filter over the whole race view, scene, HUD and letterbox alike (Debug builds,
   #111), to check every cue still reads. The render fixtures diff the scene through each (`RegattaUITests/Fixtures/prestart-*.json`).
 - `-tuning` opens the debug tuning panel at launch (Debug builds, #232; see below).
+- `-fakeServices signed-out|underage|communication-restricted|multiplayer-restricted|offline|queued|cancelled-race`
+  runs the online services on that scenario's scripted fakes (`RegattaServices`), for UI tests (#242).
 
 ### Debug tuning panel
 

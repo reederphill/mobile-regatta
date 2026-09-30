@@ -10,7 +10,8 @@
 # What a change reaches, from the files changed since its merge base with --base (default origin/main),
 # committed or not: RegattaCore reaches every package, and the app through its sources; RegattaProtocol
 # reaches RegattaClient, RegattaServices and RegattaServer; RegattaClient reaches RegattaServer (its load client); RegattaProtocol
-# and RegattaClient reach the app through their sources too (the online client, #68). --all
+# and RegattaClient reach the app through their sources too (the online client, #68), and so does RegattaServices (the
+# app's services, #242). --all
 # builds and tests everything; --packages builds and tests the named packages instead (no app); --no-app skips
 # the app.
 #
@@ -126,7 +127,8 @@ else
             Packages/RegattaProtocol/*) protocol=1 t_protocol=1 ;;
             Packages/RegattaClient/Sources/* | Packages/RegattaClient/Package.*) client=1 t_client=1 app=1 ;;
             Packages/RegattaClient/*) client=1 t_client=1 ;;
-            # Not linked by the app yet (#242 wires the fakes in), so no app reach.
+            # The app links it (#242).
+            Packages/RegattaServices/Sources/* | Packages/RegattaServices/Package.*) services=1 t_services=1 app=1 ;;
             Packages/RegattaServices/*) services=1 t_services=1 ;;
             Packages/RegattaServer/*) server=1 t_server=1 ;;
             Regatta/* | RegattaTests/* | RegattaUITests/* | Regatta.xcodeproj/*) app=1 ;;
@@ -151,8 +153,8 @@ if (( ${#packages[@]} == 0 && ! app )); then
 fi
 echo "check.sh: tree $tree; packages: ${packages[*]:-none}; app: $( (( app )) && echo yes || echo no )"
 
-# What each unit's tests depend on, as paths in the tree. The app links RegattaCore, RegattaProtocol and
-# RegattaClient; its unit tests read RegattaUITests/Fixtures and the app's sources.
+# What each unit's tests depend on, as paths in the tree. The app links RegattaCore, RegattaProtocol, RegattaClient
+# and RegattaServices; its unit tests read RegattaUITests/Fixtures and the app's sources.
 inputs() {
     case "$1" in
         RegattaCore) echo Packages/RegattaCore ;;
@@ -161,7 +163,7 @@ inputs() {
         RegattaServices) echo Packages/RegattaCore Packages/RegattaProtocol Packages/RegattaServices ;;
         RegattaServer) echo Packages ;;
         app) echo Regatta RegattaTests RegattaUITests Regatta.xcodeproj ThirdParty \
-                  Packages/RegattaCore Packages/RegattaProtocol Packages/RegattaClient ;;
+                  Packages/RegattaCore Packages/RegattaProtocol Packages/RegattaClient Packages/RegattaServices ;;
     esac
 }
 toolchain="$(xcodebuild -version 2>/dev/null | tr '\n' ' ')"

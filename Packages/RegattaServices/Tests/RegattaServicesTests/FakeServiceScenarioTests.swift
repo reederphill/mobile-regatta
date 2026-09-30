@@ -1,0 +1,79 @@
+import RegattaServices
+import Testing
+
+/// The app's `-fakeServices` scenarios (#242): each builds every service, and its fakes report the scenario's state.
+@Suite struct FakeServiceScenarioTests {
+    /// The first item of a stream.
+    static func first<Element: Sendable>(_ stream: AsyncStream<Element>) async -> Element? {
+        var iterator = stream.makeAsyncIterator()
+        return await iterator.next()
+    }
+
+    @Test func everyScenarioBuildsItsServices() async throws {
+        #expect(FakeServiceScenario.allCases.map(\.rawValue) == [
+            "signed-out", "underage", "communication-restricted", "multiplayer-restricted", "offline", "queued", "cancelled-race",
+        ])
+        for scenario in FakeServiceScenario.allCases {
+            let services = ServiceSet.fake(scenario)
+            let player = await services.identity.state().player
+            let queue = await Self.first(services.queue.stateUpdates())
+            let lobby = try await services.lobby.state().access
+            let online = await services.connectivity.status()
+
+            #expect((player == nil) == (scenario == .signedOut), "\(scenario): signed in")
+            #expect(online == (scenario == .offline ? .offline : .online), "\(scenario): connectivity")
+            if player != nil {
+                #expect(try await services.terms.status().isAccepted, "\(scenario): terms accepted")
+                #expect(try await services.profile.profile().gamePlayerID == player?.gamePlayerID, "\(scenario): profile")
+            }
+
+            switch scenario {
+            case .signedOut:
+                #expect(queue == .unavailable(.notSignedIn))
+                #expect(lobby == .closed(.notSignedIn))
+                await #expect(throws: ProfileError.notSignedIn) { try await services.profile.profile() }
+                #expect(await services.identity.signIn().player != nil, "signing in gives a player")
+            case .underage:
+                #expect(player?.isUnderage == true && player?.canChat == false)
+                #expect(lobby == .closed(.communicationRestricted))
+                #expect(queue == .idle)
+            case .communicationRestricted:
+                #expect(player?.isPersonalizedCommunicationRestricted == true && player?.canChat == false)
+                #expect(lobby == .closed(.communicationRestricted))
+                #expect(queue == .idle)
+            case .multiplayerRestricted:
+                #expect(player?.canRaceOnline == false && player?.canChat == true)
+                #expect(queue == .unavailable(.multiplayerRestricted))
+                #expect(lobby == .open)
+            case .offline:
+                await #expect(throws: StoreError.offline) { try await services.store.products() }
+                await #expect(throws: AnalyticsError.unavailable) {
+                    try await services.analytics.send(AnalyticsBatch(installID: InstallID("i"), events: []))
+                }
+            case .queued:
+                guard case .queued(let status)? = queue else {
+                    Issue.record("queued starts at \(String(describing: queue))")
+                    continue
+                }
+                #expect(status.queuedPlayers > 0)
+                var states = services.queue.stateUpdates().makeAsyncIterator()
+                var last: QueueState?
+                while let state = await states.next() { last = state }
+                #expect(last == .fleetLocked, "the countdown ends in fleet lock")
+                #expect(try await services.raceSession.handOff().raceID == RaceID("fake-race"))
+            case .cancelledRace:
+                var updates: [RaceUpdate] = []
+                for await update in services.raceSession.results() { updates.append(update) }
+                #expect(updates.last == .cancelled(.serverShutdown), "the race ends cancelled: \(updates)")
+                #expect(try await services.raceSession.lastRace() == nil)
+            }
+        }
+    }
+
+    /// Before the real services, the app is signed out on the device's own connectivity.
+    @Test func unconnectedIsSignedOutOnTheGivenConnectivity() async {
+        let services = ServiceSet.unconnected(connectivity: ScriptedConnectivityService(.offline))
+        #expect(await services.identity.state() == .signedOut)
+        #expect(await services.connectivity.status() == .offline)
+    }
+}

@@ -5,8 +5,8 @@ import PackageDescription
 // session (#109), the lobby, the profile, the store, analytics, connectivity and data deletion (#241), a scripted
 // fake of each, and a contract suite per service. The suites are written against the
 // protocols and take any conforming implementation, so the same suite runs against the fakes, the remote
-// runner (#143) and the real services. No UIKit: it builds and tests on Linux. The app doesn't link it yet
-// (#242 wires the fakes in).
+// runner (#143) and the real services. No UIKit: it builds and tests on Linux. The app links `RegattaServices`
+// and runs on its fakes (`FakeServiceScenario`, #242) until the real services arrive.
 let package = Package(
     name: "RegattaServices",
     platforms: [.iOS(.v18), .macOS(.v15)],

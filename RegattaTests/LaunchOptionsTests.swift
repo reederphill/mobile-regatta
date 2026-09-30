@@ -1,6 +1,7 @@
 import Testing
 import RegattaBots
 import RegattaCore
+import RegattaServices
 @testable import Regatta
 
 @MainActor @Suite struct LaunchOptionsTests {
@@ -48,6 +49,24 @@ import RegattaCore
         #expect(options.camera == nil)
         #expect(options.autostart)
         #expect(options.problems.count == 4)
+    }
+
+    /// `-fakeServices` names a scenario of scripted fakes for UI tests (#242); an unknown one is ignored with a
+    /// launch problem, and so is a missing value.
+    @Test func parsesFakeServicesScenario() {
+        #expect(parse().fakeServices == nil)
+        for scenario in FakeServiceScenario.allCases {
+            let options = parse("-fakeServices", scenario.rawValue, "-autostart")
+            #expect(options.fakeServices == scenario, "-fakeServices \(scenario.rawValue)")
+            #expect(options.autostart && options.problems.isEmpty)
+        }
+        let unknown = parse("-fakeServices", "haunted")
+        #expect(unknown.fakeServices == nil)
+        #expect(unknown.problems == ["-fakeServices haunted: expected "
+            + "signed-out, underage, communication-restricted, multiplayer-restricted, offline, queued, cancelled-race"])
+        let missing = parse("-fakeServices", "-autostart")
+        #expect(missing.fakeServices == nil && missing.autostart)
+        #expect(missing.problems == ["-fakeServices needs a value"])
     }
 
     /// `-appearance` lets UI tests render the menus in light and dark (#108).

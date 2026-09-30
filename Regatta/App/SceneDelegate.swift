@@ -1,3 +1,4 @@
+import RegattaServices
 import SwiftUI
 import UIKit
 
@@ -14,8 +15,12 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
         sceneState.phase = SceneState.phase(for: windowScene.activationState)
         let window = UIWindow(windowScene: windowScene)
+        // `-fakeServices <scenario>` plays a scenario's scripted fakes (#242); otherwise the device's connectivity,
+        // signed out, until the real services arrive.
+        let services = LaunchOptions.current.fakeServices.map(ServiceSet.fake)
+            ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
         window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size,
-                                                          connectivity: PathConnectivity())
+                                                          onlineStatus: OnlineStatus(services: services))
         if let appearance = LaunchOptions.current.appearance {
             window.overrideUserInterfaceStyle = appearance == .dark ? .dark : .light
         }
@@ -34,13 +39,14 @@ struct AppRoot: View {
     let model: AppModel
     let sceneState: SceneState
     let screenSize: CGSize
-    let connectivity: any Connectivity
+    let onlineStatus: OnlineStatus
 
     var body: some View {
         RootView(model: model)
             .environment(\.sceneState, sceneState)
             .environment(\.screenSize, screenSize)
-            .environment(\.connectivity, connectivity)
+            .environment(\.isOnline, onlineStatus.isOnline)
+            .environment(\.lobbyStatus, onlineStatus.lobbyStatus)
     }
 }
 
@@ -56,9 +62,11 @@ final class RootHostingController: UIHostingController<AppRoot> {
         }
     }
 
-    init(sceneState: SceneState, screenSize: CGSize, connectivity: any Connectivity = FixedConnectivity(isOnline: true)) {
+    /// With no `onlineStatus`, online and signed out, as the placeholders were: for tests.
+    init(sceneState: SceneState, screenSize: CGSize, onlineStatus: OnlineStatus? = nil) {
         let model = AppModel(sceneState: sceneState)
-        super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize, connectivity: connectivity))
+        let onlineStatus = onlineStatus ?? OnlineStatus(services: .fake(.signedOut))
+        super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize, onlineStatus: onlineStatus))
         isOrientationLocked = sceneState.isRaceSequenceShowing
         sceneState.onRaceSequenceShowingChange = { [weak self] showing in self?.isOrientationLocked = showing }
     }

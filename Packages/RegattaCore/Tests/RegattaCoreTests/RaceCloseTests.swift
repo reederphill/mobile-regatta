@@ -99,6 +99,7 @@ func placeRacing(_ boat: inout Boat, leg: Int, at position: Vec2) {
     }
 
     @Test func unfinishedBoatsRankByDistanceRoundRemainingMarks() throws {
+        // By ladder distance round the remaining marks (#267); `distanceToFinish` is still the path length.
         let race = testRace(seats: [.human, .human, .human], laps: 1, prestartSeconds: 1, seed: 11)
         let course = race.course
         #expect(course.legs == [.round(CourseLayout.windwardIndex), .round(CourseLayout.offsetIndex), .finish])
@@ -120,6 +121,11 @@ func placeRacing(_ boat: inout Boat, leg: Int, at position: Vec2) {
         #expect(abs(race.distanceToFinish(of: race.boats[0]) - lowPath) < 1e-9)
         #expect(abs(race.distanceToFinish(of: race.boats[1]) - highPath) < 1e-9)
         #expect(highPath < lowPath)
+        // They rank by ladder distance (#267): up the course axis to W, the reach along it, then down the axis to
+        // the finish line.
+        let rest = (w - o).length + abs((Collision.closestPoint(on: finish, to: o) - o).dot(course.upwind))
+        #expect(abs(race.ladderDistanceToFinish(of: race.boats[0]) - (course.beat - 5 + rest)) < 1e-6)
+        #expect(abs(race.ladderDistanceToFinish(of: race.boats[1]) - (10 + rest)) < 1e-9)
         #expect(Array(race.standings().prefix(2)) == [1, 0])
         #expect(race.place(of: 1) == 1 && race.place(of: 0) == 2)
         #expect(race.distanceToFinish(of: race.boats[2]) > lowPath, "not started: the whole course still to sail")

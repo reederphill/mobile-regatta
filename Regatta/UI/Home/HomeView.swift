@@ -6,7 +6,7 @@ struct HomeView: View {
     @Bindable var model: AppModel
     /// Race online: a stub until matchmaking (Debug builds join the dev server's instant race, #68).
     var onRaceOnline: () -> Void
-    @Environment(\.connectivity) private var connectivity
+    @Environment(\.isOnline) private var isOnline
     @Environment(\.lobbyStatus) private var lobbyStatus
 
     var body: some View {
@@ -24,7 +24,7 @@ struct HomeView: View {
                     if let lastRace = model.lastRace {
                         LastRaceRow(lastRace: lastRace)
                     }
-                    LobbyPanel(state: LobbyPanelState(isOnline: connectivity.isOnline, status: lobbyStatus)) {
+                    LobbyPanel(state: LobbyPanelState(isOnline: isOnline, status: lobbyStatus)) {
                         model.sheet = .signIn
                     }
                 }
@@ -52,8 +52,11 @@ struct HomeView: View {
         Button(action: onRaceOnline) {
             VStack(spacing: 2) {
                 Text("Race online").font(MenuFont.heading(.title2))
-                if !connectivity.isOnline {
+                if !isOnline {
                     Text("Offline").font(MenuFont.body(.subheadline))
+                } else if !lobbyStatus.canRaceOnline {
+                    // Game Center's multiplayer restriction (#34): disabled, with a one-line reason.
+                    Text("Practice races only").font(MenuFont.body(.subheadline))
                 }
             }
             .frame(maxWidth: .infinity)
@@ -61,7 +64,7 @@ struct HomeView: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
-        .disabled(!connectivity.isOnline)
+        .disabled(!isOnline || !lobbyStatus.canRaceOnline)
         .accessibilityIdentifier("race-online")
     }
 
@@ -137,7 +140,8 @@ enum LobbyPanelState: Equatable {
     case offline
     case signIn
     case acceptTerms
-    /// Hide lobby chat is on: the queue's size and the leaderboard instead of the chat.
+    /// Hide lobby chat is on, or Game Center restricts the player's chat (#17, #34): the queue's size and the
+    /// leaderboard instead of the chat.
     case chatHidden(queuedPlayers: Int?)
     case lobby
 
@@ -148,7 +152,7 @@ enum LobbyPanelState: Equatable {
             self = .signIn
         } else if !status.hasAcceptedTerms {
             self = .acceptTerms
-        } else if status.hidesChat {
+        } else if status.hidesChat || !status.canChat {
             self = .chatHidden(queuedPlayers: status.queuedPlayers)
         } else {
             self = .lobby
