@@ -104,3 +104,113 @@ enum Fixtures {
         }
     }
 }
+
+// MARK: - #241: lobby, profile, store, analytics, connectivity, deletion
+
+extension Fixtures {
+    static let palette: Set<Swatch> = [Swatch("white"), Swatch("charcoal"), Swatch("sky"), Swatch("bluish-green"), Swatch("reddish-purple")]
+    static let starter = DesignID("skiff-starter-stripe")
+    static let earned10 = DesignID("skiff-earned-10")
+    static let earned50 = DesignID("skiff-earned-50")
+    static let paid = DesignID("skiff-paid-chevron")
+    static let paidWave = DesignID("skiff-paid-wave")
+    static let designs: [DesignID: Int] = [starter: 2, earned10: 3, earned50: 3, paid: 3, paidWave: 2]
+    static let livery = Livery(boatClass: "skiff", design: starter, colours: [Swatch("sky"), Swatch("white")], sailNumber: 4127)
+
+    static func author(_ id: String, _ nickname: String, rating: Int = 1500) -> LobbyAuthor {
+        LobbyAuthor(gamePlayerID: GamePlayerID(id), nickname: nickname, rating: Rating(value: rating, isProvisional: rating == 1500),
+                    chip: LiveryChip(deck: Swatch("charcoal"), sail: Swatch("white")))
+    }
+
+    static let me = author("G:1001", "Ana", rating: 1532)
+    static let wren = author("G:2002", "Wren", rating: 1610)
+    static let lobbyHistory: [LobbyMessage] = [
+        LobbyMessage(id: MessageID("m1"), kind: .system(.gun(venue: "Dev venue", boats: 10, humans: 3))),
+        LobbyMessage(id: MessageID("m2"), kind: .post(LobbyPost(author: wren, body: .text("anyone for one more?")))),
+        LobbyMessage(id: MessageID("m3"), kind: .post(LobbyPost(author: wren, body: .quickChat(.gg)))),
+        LobbyMessage(id: MessageID("m4"), kind: .system(.winner(venue: "Dev venue", nickname: "Wren"))),
+    ]
+
+    static func lobby(_ situation: LobbyServiceContract.Situation) -> ScriptedLobbyService {
+        func scenario(_ state: LobbyState, background: [LobbyEvent] = []) -> LobbyScenario {
+            LobbyScenario(
+                player: me, state: state, history: lobbyHistory, background: background,
+                filteredWords: [LobbyServiceContract.filteredText],
+                races: [LobbyServiceContract.race: [.player, .human(wren.gamePlayerID), .bot]])
+        }
+        let open = LobbyState(access: .open, canPostFreeText: true)
+        return switch situation {
+        case .open: ScriptedLobbyService(scenario(open))
+        case .freeTextLocked: ScriptedLobbyService(scenario(LobbyState(access: .open, canPostFreeText: false)))
+        case .muted: ScriptedLobbyService(scenario(LobbyState(access: .open, canPostFreeText: true, standing: .muted(until: 1_790_086_400, isAutomatic: true))))
+        case .banned: ScriptedLobbyService(scenario(LobbyState(access: .open, canPostFreeText: true, standing: .banned)))
+        case .racing:
+            ScriptedLobbyService(scenario(
+                LobbyState(access: .closed(.racing), canPostFreeText: true),
+                background: [.state(open), .message(LobbyMessage(id: MessageID("m5"), kind: .post(LobbyPost(author: wren, body: .quickChat(.goodRace)))))]))
+        case .notSignedIn: ScriptedLobbyService(scenario(LobbyState(access: .closed(.notSignedIn), canPostFreeText: false)))
+        case .termsNotAccepted: ScriptedLobbyService(scenario(LobbyState(access: .closed(.termsNotAccepted), canPostFreeText: false)))
+        case .communicationRestricted: ScriptedLobbyService(scenario(LobbyState(access: .closed(.communicationRestricted), canPostFreeText: true)))
+        }
+    }
+
+    static func profile(races: Int, wins: Int, suspension: RacingSuspension? = nil) -> Profile {
+        let milestones = [EarnedMilestone(design: earned10, completedRaces: 10), EarnedMilestone(design: earned50, completedRaces: 50)]
+        return Profile(
+            gamePlayerID: me.gamePlayerID, nickname: me.nickname, rating: Rating(value: races == 0 ? 1500 : 1532, isProvisional: races < 10),
+            completedRaces: races, wins: wins, suspension: suspension,
+            progress: EarnedProgress(earned: milestones.filter { $0.completedRaces <= races }.map(\.design),
+                                     next: milestones.first { $0.completedRaces > races }),
+            livery: livery)
+    }
+
+    static func profile(_ situation: ProfileServiceContract.Situation) -> ScriptedProfileService {
+        func service(_ profile: Profile?, locked: Bool = false) -> ScriptedProfileService {
+            ScriptedProfileService(ProfileScenario(profile: profile, designs: designs, unowned: [paid, paidWave], palette: palette, isLiveryLocked: locked))
+        }
+        return switch situation {
+        case .signedOut: service(nil)
+        case .newPlayer: service(profile(races: 0, wins: 0))
+        case .established: service(profile(races: 32, wins: 4))
+        case .suspended: service(profile(races: 32, wins: 4, suspension: RacingSuspension(until: 1_790_086_400)))
+        case .banned: service(profile(races: 32, wins: 4, suspension: RacingSuspension(until: nil)))
+        case .liveryLocked: service(profile(races: 32, wins: 4), locked: true)
+        }
+    }
+
+    static let products = [
+        StoreProduct(id: ProductID("com.phillreeder.regatta.skiff.chevron"), design: paid, boatClass: "skiff", tier: .tier2, displayPrice: "$1.99"),
+        StoreProduct(id: ProductID("com.phillreeder.regatta.skiff.wave"), design: paidWave, boatClass: "skiff", tier: .tier1, displayPrice: "$0.99"),
+    ]
+
+    static func store(_ situation: StoreServiceContract.Situation) -> ScriptedStoreService {
+        switch situation {
+        case .nothingOwned: ScriptedStoreService(StoreScenario(products: products))
+        case .askToBuyApproved: ScriptedStoreService(StoreScenario(products: products, checkout: .askToBuy(approved: true)))
+        case .cancels: ScriptedStoreService(StoreScenario(products: products, checkout: .cancels))
+        case .refunded: ScriptedStoreService(StoreScenario(products: products, owned: [paid, paidWave], background: [[paidWave]]))
+        case .offline: ScriptedStoreService(StoreScenario(products: products, owned: [paid], isOnline: false))
+        }
+    }
+
+    static func analytics(_ situation: AnalyticsTransportContract.Situation) -> ScriptedAnalyticsTransport {
+        ScriptedAnalyticsTransport(isAvailable: situation == .accepting)
+    }
+
+    static func connectivity(_ situation: ConnectivityServiceContract.Situation) -> ScriptedConnectivityService {
+        switch situation {
+        case .online: ScriptedConnectivityService(.online)
+        case .offline: ScriptedConnectivityService(.offline)
+        // The repeat shows the stream drops it.
+        case .dropsAndRecovers: ScriptedConnectivityService(.online, changes: [.offline, .offline, .online])
+        }
+    }
+
+    static func deletion(_ situation: DataDeletionServiceContract.Situation) -> ScriptedDataDeletionService {
+        switch situation {
+        case .hasOnlineData: ScriptedDataDeletionService(DataDeletionScenario(held: Set(OnlineData.allCases), hasRaced: true))
+        case .nothingHeld: ScriptedDataDeletionService(DataDeletionScenario(held: [], hasRaced: false))
+        case .signedOut: ScriptedDataDeletionService(DataDeletionScenario(isSignedIn: false, held: Set(OnlineData.allCases), hasRaced: true))
+        }
+    }
+}

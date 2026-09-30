@@ -19,7 +19,8 @@ import Testing
         let files = try Self.sources()
         #expect(files.count >= 9)
         let imports = try Regex(#"^\s*(?:@\w+(?:\([^)]*\))?\s+)*import\s+(?:\w+\s+)?(\w+)"#)
-        let allowed: Set<String> = ["RegattaCore", "RegattaProtocol", "RegattaServices", "Synchronization"]
+        // Network and Dispatch only in `PathConnectivityService`, behind `#if canImport(Network)` (#241).
+        let allowed: Set<String> = ["RegattaCore", "RegattaProtocol", "RegattaServices", "Synchronization", "Network", "Dispatch"]
         var foreign: [String] = []
         for file in files {
             for line in file.text.split(separator: "\n") {
