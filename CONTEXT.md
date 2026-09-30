@@ -229,7 +229,7 @@ The side of the course with more pressure at the moment. It holds for most of a 
 _Avoid_: favoured side (that can mean the shift)
 
 **Pressure lane**:
-A long band of pressure lying along the wind, curving with the venue's geography and drifting slowly sideways. The wind veers on one edge and backs on the other.
+A patch of pressure stretched along the wind: a few hundred metres across and several hundred long, drifting slowly sideways and down the wind, and curving with the venue's geography. Stronger than its surroundings, or a **weak lane** weaker (older venues' lanes are unending strong bands). The wind veers on one edge and backs on the other.
 _Avoid_: gust lane, streak
 
 **Puff**:
