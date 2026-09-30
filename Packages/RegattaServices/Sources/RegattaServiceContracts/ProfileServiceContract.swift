@@ -75,6 +75,7 @@ public struct ProfileServiceContract: ContractSuite {
         try await refused(.sailNumber, "sail number \(Livery.sailNumbers.upperBound + 1)") { $0.sailNumber = Livery.sailNumbers.upperBound + 1 }
         try await refused(.unknownDesign, "an unknown design") { $0.design = DesignID("contract-no-such-design") }
         try await refused(.slotCount, "four colours") { $0.colours = Array(repeating: $0.colours[0], count: 4) }
+        try await refused(.colour, "a colour off the palette") { $0.colours[0] = Swatch("contract-no-such-swatch") }
 
         var change = profile.livery
         change.sailNumber = change.sailNumber % Livery.sailNumbers.upperBound + 1
