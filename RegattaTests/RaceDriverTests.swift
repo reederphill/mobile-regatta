@@ -81,6 +81,63 @@ import RegattaCore
     }
 }
 
+/// #117: a boat's pose reads her held ease and whether she is a ghost from the render world, the latest tick's.
+@MainActor @Suite struct RenderWorldPoseInputTests {
+    /// Your held ease reaches the tick frame (`Race.heldInputs`) and the render world's `ease(ofSeat:)`, every
+    /// seat's as the race holds it (the bots ease in the prestart, #99), and a frame extrapolated a tick back (#68)
+    /// keeps it.
+    @Test func heldEaseReachesTheRenderWorld() {
+        let driver = PracticeDriver(config: RaceDriverTests.config)
+        let me = driver.myBoatIndex
+        driver.submit(BoatInput(rudder: 0 as Int8, ease: true))
+        driver.tick(3 / Double(Race.tickRate))
+        let frame = driver.currentFrame
+        #expect(frame.heldInputs.count == frame.boats.count)
+        #expect(frame.heldInputs[me].ease)
+        let world = driver.renderWorld
+        for seat in world.boats.indices {
+            #expect(world.ease(ofSeat: seat) == frame.heldInputs[seat].ease, "seat \(seat)")
+        }
+        let back = frame.extrapolatedBackOneTick()
+        #expect(back.heldInputs == frame.heldInputs)
+        let drawn = RenderWorld(course: world.course, boatClass: world.boatClass, myBoatIndex: me,
+                                previous: back, current: back, alpha: 1)
+        #expect(drawn.ease(ofSeat: me))
+        // The five-argument frame holds every seat neutral; a seat past the inputs never eases.
+        let neutral = TickFrame(tick: frame.tick, boats: frame.boats, standings: frame.standings, wind: frame.wind,
+                                isOver: frame.isOver)
+        #expect(neutral.heldInputs == Array(repeating: .neutral, count: frame.boats.count))
+        #expect(!world.ease(ofSeat: frame.boats.count))
+
+        driver.submit(.neutral)
+        driver.tick(3 / Double(Race.tickRate))
+        #expect(!driver.renderWorld.ease(ofSeat: me))
+    }
+
+    /// A ghost as `Race.isGhost(seat:)` has it: finished or DSQ at once, and an OCS boat or one that never started
+    /// only once the race is over (#30, #86).
+    @Test func ghostsIncludeOCSAndPrestartOnceOver() {
+        let driver = PracticeDriver(config: RaceDriverTests.config)
+        let latest = driver.currentFrame
+        var boats = latest.boats
+        boats[0].status = .racing
+        boats[1].status = .ocs
+        boats[2].status = .prestart
+        boats[3].status = .finished
+        func world(isOver: Bool) -> RenderWorld {
+            let frame = TickFrame(tick: latest.tick, boats: boats, standings: latest.standings, wind: latest.wind,
+                                  isOver: isOver)
+            return RenderWorld(course: driver.course, boatClass: driver.boatClass, myBoatIndex: driver.myBoatIndex,
+                               previous: frame, current: frame, alpha: 1)
+        }
+        let racing = world(isOver: false), over = world(isOver: true)
+        #expect((0..<4).map { racing.isGhost(ofSeat: $0) } == [false, false, false, true])
+        #expect((0..<4).map { over.isGhost(ofSeat: $0) } == [false, true, true, true])
+        boats[0].status = .dsq
+        #expect(world(isOver: false).isGhost(ofSeat: 0))
+    }
+}
+
 /// #79 (#15): the HUD's wind readouts show the wind over the ground, not the wind she sails in.
 @MainActor @Suite struct HUDWindTests {
     @Test func windReadoutsShowTheWindOverTheGround() {

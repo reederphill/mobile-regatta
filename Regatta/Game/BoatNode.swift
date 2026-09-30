@@ -20,8 +20,8 @@ final class BoatNode: SKNode {
     /// the pose itself is the same for every boat.
     private let flutterPhase: Double
     private var sailAngle: CGFloat = 0
-    /// When the current roll miss's flog began (race seconds), while she has one (`BoatPose.RollCue.flog`).
-    private var flogStart: Double?
+    /// The current roll miss's flog (`BoatPose.RollCue.flog`), timed in race seconds.
+    private var flog = FlogTimer()
     private var wakePoints: [CGPoint] = []
     private var wakeTimer = 0.0
 
@@ -118,10 +118,10 @@ final class BoatNode: SKNode {
         alpha = pose.isGhost ? CGFloat(style.ghostAlpha) : 1
     }
 
-    /// Heel (#22): the hull drawn narrower and a drop shadow offset to leeward, the boom's side.
+    /// Heel (#22): the hull drawn narrower and a drop shadow offset to leeward (the boom's side, except by the lee).
     private func updateHeel(_ pose: BoatPose, style: BoatStyle) {
         let heel = CGFloat(pose.heel)
-        let leeward: CGFloat = pose.sailSide == .port ? -1 : 1
+        let leeward: CGFloat = pose.leeSide == .port ? -1 : 1
         hullGroup.xScale = 1 - CGFloat(style.heelNarrowing) * heel
         heelShadow.position = CGPoint(x: leeward * heel * CGFloat(style.heelShadowOffset) * beam, y: 0)
         heelShadow.alpha = heel * CGFloat(style.heelShadowAlpha)
@@ -132,12 +132,7 @@ final class BoatNode: SKNode {
         let side: CGFloat = pose.sailSide == .port ? -1 : 1
         let target = CGFloat(pose.sailTrim) * side
 
-        if pose.roll == .flog {
-            if flogStart == nil { flogStart = time }
-        } else {
-            flogStart = nil
-        }
-        let isFlogging = flogStart.map { time - $0 < style.flogSeconds } ?? false
+        let isFlogging = flog.isFlogging(roll: pose.roll, time: time, seconds: style.flogSeconds)
 
         // A roll hit snaps the sail full at once; otherwise it eases there.
         let snaps = settled || pose.roll == .snap
@@ -305,13 +300,15 @@ private struct BoatArt {
 
     /// A soft white blur of the hull's silhouette, wider than it: under the hull only its halo shows.
     private static func glowTexture(_ path: CGPath, bounds: CGRect) -> SKTexture {
+        // The player glow's token (docs/palette.md).
+        let white = CuePalette.cueWhite.uiColor.cgColor
         // Same centre as the hull's bounds, so the two sprites line up.
-        texture(bounds: bounds.insetBy(dx: -glowBlur * 2, dy: -glowBlur * 2)) { cg in
-            cg.setShadow(offset: .zero, blur: glowBlur * 2, color: UIColor.white.cgColor)
+        return texture(bounds: bounds.insetBy(dx: -glowBlur * 2, dy: -glowBlur * 2)) { cg in
+            cg.setShadow(offset: .zero, blur: glowBlur * 2, color: white)
             cg.addPath(path)
-            cg.setFillColor(UIColor.white.cgColor)
+            cg.setFillColor(white)
             cg.fillPath()
-            cg.setShadow(offset: .zero, blur: glowBlur, color: UIColor.white.cgColor)
+            cg.setShadow(offset: .zero, blur: glowBlur, color: white)
             cg.addPath(path)
             cg.fillPath()
         }

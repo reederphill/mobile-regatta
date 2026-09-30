@@ -25,6 +25,9 @@ nonisolated struct BoatPose: Equatable, Sendable {
     /// The side the boom and sail are on (`Boat.boomSide`): to leeward, except by the lee. It crosses only when
     /// she tacks or gybes, so the sail swings across on a gybe.
     var sailSide: BoomSide
+    /// Her leeward side, from the wind off her bow (`BoomSide.leeward(ofRelativeWind:)`): where her heel drops her
+    /// and her drop shadow falls. The same as `sailSide` except by the lee, when the boom is to windward.
+    var leeSide: BoomSide
     /// How far the sail is let out from the centreline, radians, 0 (sheeted amidships) up to
     /// `BoatStyle.maxTrimDegrees`.
     var sailTrim: Double
@@ -33,7 +36,7 @@ nonisolated struct BoatPose: Equatable, Sendable {
     var flutter: Double
     var roll: RollCue?
     /// How far she heels, 0 (upright) to 1 (overpowered): her hull drawn narrower and her drop shadow offset to
-    /// leeward (`sailSide`).
+    /// leeward (`leeSide`).
     var heel: Double
     var isGhost: Bool
 
@@ -41,6 +44,7 @@ nonisolated struct BoatPose: Equatable, Sendable {
     /// race shows it (`Race.isGhost(seat:)`).
     init(_ boat: Boat, ease: Bool, isGhost: Bool, boatClass: BoatClass, style: BoatStyle = .standard) {
         sailSide = boat.boomSide
+        leeSide = BoomSide.leeward(ofRelativeWind: boat.relativeWind)
         self.isGhost = isGhost
         guard !isGhost else {
             // Limp, amidships: she isn't sailing any more.
@@ -91,6 +95,11 @@ nonisolated struct BoatPose: Equatable, Sendable {
     }
 
     /// The pressure her sails feel, m/s: the sailing wind less any wind shadow or backwind (#220).
+    ///
+    /// Shadowed for every class, speed-loss classes included (`BoatClass.WindShadow.isSpeedLoss`, where the sim takes the
+    /// shadow off her speed rather than her wind): the shadow stands for turbulent air, so in it her heel drops and
+    /// her sail reads starved. The speed loss is only the gameplay mechanic; what she is drawn feeling is the
+    /// turbulence. Don't "fix" this to the unshadowed wind for those classes (owner, 2026-09-30).
     static func feltWind(_ boat: Boat) -> Double {
         boat.sailingWind.speed * boat.shadow
     }
@@ -127,7 +136,9 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var heelOnsetKnots = 6.0
     /// At this pressure, knots, she is overpowered: full heel on a beam reach.
     var heelFullKnots = 18.0
-    /// A multiplier on the heel she shows.
+    /// A gain on the heel she shows, applied before heel is capped at 1 (overpowered). Above 1 it still acts:
+    /// she reaches the cap in less wind, and off a beam reach (close-hauled, broad), where `sin(twa)` keeps her
+    /// under it at 1, she heels more. So its tuning slider runs to 2.
     var heelScale = 1.0
     /// How much narrower her hull draws at full heel, a fraction of her beam.
     var heelNarrowing = 0.14
@@ -193,5 +204,27 @@ nonisolated extension BoatStyle {
             if let value = try c.decodeIfPresent(Double.self, forKey: key) { style[keyPath: path] = value }
         }
         self = style
+    }
+}
+
+/// A roll miss's flog (#222) as a boat draws it: `BoatStyle.flogSeconds` of race time from when the miss is first
+/// drawn, though the race holds the miss until she is close-hauled. Presentation state, one per boat.
+nonisolated struct FlogTimer: Equatable, Sendable {
+    /// When the current miss's flog began, race seconds, while she has one.
+    private(set) var start: Double?
+
+    /// Whether the sail flogs at race time `time` with `roll` showing, for `seconds` from first seen. Time that
+    /// runs backwards (an online re-prediction, a fixture drawn again) starts the flog over from `time`, so a
+    /// start in the future never counts as flogging for ever.
+    mutating func isFlogging(roll: BoatPose.RollCue?, time: Double, seconds: Double) -> Bool {
+        guard roll == .flog else {
+            start = nil
+            return false
+        }
+        if let start, time >= start {
+            return time - start < seconds
+        }
+        start = time
+        return seconds > 0
     }
 }

@@ -101,6 +101,63 @@ import Testing
         #expect(BoatPose(pending, ease: false, isGhost: false, boatClass: Self.boatClass).roll == nil)
     }
 
+    /// By the lee the boom is to windward: the sail stays on the boom's side, out as far as it goes with a small
+    /// flutter, while her heel and drop shadow go to leeward, the other side.
+    @Test func byTheLeeSailOnTheBoomHeelToLeeward() {
+        let style = BoatStyle.standard
+        // Running on starboard (wind over starboard, 170° off the bow), boom to port: not by the lee.
+        let running = BoatPose(Self.boat(twaDegrees: 170, windKnots: 20), ease: false, isGhost: false,
+                               boatClass: Self.boatClass)
+        #expect(running.sailSide == .port && running.leeSide == .port)
+        // The same wind with the boom to starboard: 10° by the lee.
+        var lee = Self.boat(twaDegrees: 170, windKnots: 20)
+        lee.boomSide = .starboard
+        #expect(lee.isByTheLee)
+        let pose = BoatPose(lee, ease: false, isGhost: false, boatClass: Self.boatClass)
+        #expect(pose.sailSide == .starboard, "the sail is on the boom's side")
+        #expect(pose.leeSide == .port, "the heel shadow falls to leeward, away from the boom")
+        #expect(pose.flutter == style.byTheLeeFlutter)
+        #expect(pose.sailTrim == deg2rad(style.maxTrimDegrees))
+        #expect(pose.heel > 0)
+        // Normal sailing, the lee side is the boom's.
+        let reach = BoatPose(Self.boat(twaDegrees: 90), ease: false, isGhost: false, boatClass: Self.boatClass)
+        #expect(reach.leeSide == reach.sailSide)
+    }
+
+    /// The heel gain acts past 1: heel is capped after it, so close-hauled, where `sin(twa)` keeps her under full
+    /// heel, a gain of 2 heels her more (why its slider runs to 2).
+    @Test func heelScaleAboveOneStillHeelsMore() {
+        var double = BoatStyle.standard
+        double.heelScale = 2
+        let boat = Self.boat(twaDegrees: 45, windKnots: 16)
+        let one = BoatPose(boat, ease: false, isGhost: false, boatClass: Self.boatClass).heel
+        let two = BoatPose(boat, ease: false, isGhost: false, boatClass: Self.boatClass, style: double).heel
+        #expect(one > 0 && one < 1 && two > one)
+    }
+
+    /// A roll miss flogs `flogSeconds` of race time from when it is first drawn, then stops though the race still
+    /// holds the miss; time running backwards (a re-prediction, a fixture drawn again) starts it over rather than
+    /// flogging for ever.
+    @Test func flogTimerRunsItsSecondsAndRestartsWhenTimeRunsBack() {
+        var timer = FlogTimer()
+        func flogs(_ roll: BoatPose.RollCue?, at time: Double) -> Bool {
+            timer.isFlogging(roll: roll, time: time, seconds: 1.5)
+        }
+        #expect(!flogs(nil, at: 10))
+        #expect(flogs(.flog, at: 10))
+        #expect(flogs(.flog, at: 11.4))
+        #expect(!flogs(.flog, at: 11.6))
+        #expect(!flogs(.flog, at: 30), "held miss, flog over")
+        // Time runs back before the start: a fresh flog from there, which then ends.
+        #expect(flogs(.flog, at: 5))
+        #expect(timer.start == 5)
+        #expect(!flogs(.flog, at: 7))
+        // The miss clears: a new one starts its own flog.
+        #expect(!flogs(.snap, at: 8))
+        #expect(timer.start == nil)
+        #expect(flogs(.flog, at: 9))
+    }
+
     /// A saved style missing fields keeps the rest (the tuning panel's lenient decode).
     @Test func styleDecodesLeniently() throws {
         let style = try JSONDecoder().decode(BoatStyle.self, from: Data(#"{"heelScale":1.5}"#.utf8))

@@ -278,6 +278,8 @@ enum TuningCatalog {
                 note: "How boats heel, flutter and flog (#117, #220, #222). Drawn only: never logged.",
                 applies: .live,
                 sliders: [
+                    // Past 1 still counts: heel is capped at 1 after the gain, so more heels her sooner and
+                    // off the beam (`BoatStyle.heelScale`).
                     boat("heelScale", "Heel", \.heelScale, 0...2, 0.05),
                     boat("heelFullKnots", "Overpowered at", \.heelFullKnots, 8...30, 0.5, unit: " kn"),
                     boat("starvedFullLoss", "Starved flutter at", \.starvedFullLoss, 0.1...0.8, 0.05),
