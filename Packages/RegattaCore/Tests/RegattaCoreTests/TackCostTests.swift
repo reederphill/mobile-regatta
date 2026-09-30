@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import RegattaCore
 
-/// Races for measuring what a manoeuvre costs against a twin (#263): the default class (skiff@3) in still water and
+/// Races for measuring what a manoeuvre costs against a twin (#263): the default class (skiff@4 since #298) in still water and
 /// a wind the same everywhere and always, so twin races differ only by what one of them does (the in-race "gap" #263
 /// measured was wind shifts and a committee boat, not the sim). Seat 0 sails in open water to the right of the race
 /// area's centre, clear of every mark; seat 1 sits out of the way, well to leeward of her.

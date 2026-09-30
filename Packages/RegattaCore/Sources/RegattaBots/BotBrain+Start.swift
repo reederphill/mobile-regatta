@@ -113,8 +113,11 @@ extension BotBrain {
         let line = view.course.startLine
         // After the gun, back below the line running (she was OCS) or bearing away, she heads up on her own tack
         // first, as turning for the other one from a run is a gybe; on port if starboard would take her past the
-        // pin end.
-        if view.time >= 0, sailingAngle(b) > .pi / 2, line.side(b.position) < 0 {
+        // pin end. Only level with the line between its ends: beyond an end, heading up on port sails her away
+        // from the line and back over its extension, and she would run down and head up again for ever (#298,
+        // seed 7 of `aBotTakingOverBeforeTheGunStarts`); there she sails in behind the line (`lateStartAim`).
+        if view.time >= 0, sailingAngle(b) > .pi / 2, line.side(b.position) < 0,
+           nearestOnLine(b.position, line, clearOfEnds: view.boatClass.hull.length).between {
             let tack = landingRoom(b, view, hold: Self.holdAngle(view)) > 0 ? b.tack : .port
             setTack(tack, view)
             return .groove(.upwind, tack: tack, angle: grooveAngle(.upwind, b, view))
