@@ -78,6 +78,12 @@ struct RaceView: View {
     private var live: some View {
         ZStack {
             scene
+                // In the scene view's own points, where the scene reads the touches (#112).
+                .overlay { TillerIndicator(knob: session.tillerKnob).ignoresSafeArea() }
+
+            if session.showsEdgeLabels {
+                EdgeLabels()
+            }
 
             HUDView(hud: session.hud, messages: session.messages)
                 .allowsHitTesting(false)
@@ -99,6 +105,10 @@ struct RaceView: View {
             #endif
 
             controls
+
+            if LaunchOptions.current.uiTesting {
+                BoatSpeedProbe(session: session)
+            }
 
             // The tuning panel hides the pause menu, so the water shows undimmed behind it.
             if session.isPaused && !showsTuningPanel {
@@ -158,44 +168,8 @@ struct RaceView: View {
 
             Spacer()
 
-            HStack(alignment: .bottom) {
-                SteerHint(systemImage: "chevron.left", label: "Port")
-                Spacer()
-                Button {
-                    session.tackOrGybe()
-                } label: {
-                    Text(session.hud.isUpwind ? "TACK" : "GYBE")
-                        .font(.headline.weight(.heavy))
-                        .tracking(1.5)
-                        .frame(width: 120, height: 56)
-                        // HUD chrome is white on translucent black: orange is the active leg's alone (#22).
-                        .background(.black.opacity(0.5), in: .capsule)
-                        .overlay(Capsule().strokeBorder(.white, lineWidth: 2))
-                        .foregroundStyle(.white)
-                        .shadow(radius: 6, y: 3)
-                }
-                .disabled(!session.hud.status.isRacingOrStarting)
-                Spacer()
-                SteerHint(systemImage: "chevron.right", label: "Starboard")
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 16)
+            RaceControls(session: session)
         }
-    }
-}
-
-private struct SteerHint: View {
-    let systemImage: String
-    let label: String
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: systemImage).font(.title2.weight(.bold))
-            Text(label).font(.caption2.weight(.semibold))
-        }
-        .foregroundStyle(.white.opacity(0.35))
-        .frame(width: 70)
-        .allowsHitTesting(false)
     }
 }
 
