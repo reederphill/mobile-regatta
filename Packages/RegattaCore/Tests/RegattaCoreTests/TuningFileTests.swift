@@ -221,10 +221,10 @@ import Testing
     @Test func bundledKeysListTheBundle() throws {
         let conditions = ConditionsFile.bundledKeys()
         #expect(conditions.contains(Self.conditionsKey))
-        #expect(conditions.count == 24)
+        #expect(conditions.count == 28)
         #expect(BoatClassFile.bundledKeys().contains(DataFileKey(id: "skiff", version: 1)))
         #expect(RulesConfigFile.bundledKeys() == [1, 2, 3, 4].map { DataFileKey(id: "fleet-rules", version: $0) })
-        #expect(VenueFile.bundledKeys().map(\.version) == [1, 2, 3, 4, 5, 6])
+        #expect(VenueFile.bundledKeys().map(\.version) == [1, 2, 3, 4, 5, 6, 7])
         for key in conditions {
             #expect(try ConditionsFile.bundledData(id: key.id, version: key.version) != nil, "\(key)")
         }

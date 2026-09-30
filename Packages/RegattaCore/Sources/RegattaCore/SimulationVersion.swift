@@ -150,7 +150,14 @@ import Glibc
 ///    keeps half of each tick's speed loss until close-hauled, outside it a miss multiplies her speed by 0.8; roll
 ///    hit and roll miss events. Boats carry the roll and the crossing tick in the digest and the wire snapshot.
 ///    Classes without the new fields (every file before skiff@3) sail as on 23.
-public let simulationRevision = 24
+/// 25: pressure lanes are finite patches (ADR 0008), on 24. Schema-6 conditions files (version 7, on dev-venue@7) give
+///    `pressureField.lanes` a length along the wind, a drift down it and a share that weaken the wind: each lane is an
+///    ellipse that moves down the course, its length, mid-life place along it, drift and weak coin drawn from the
+///    `presalng` stream (the lane draws before it stay as they were), so the pressure changes up the course as well as
+///    across it, and puffs and lulls, which form where the field is at their spawn, gather in the strong patches and
+///    keep out of the weak. The bot-suite matrix moves to dev-venue@7 and the version-7 conditions. Older files draw
+///    nothing more: their races, the default race's included, sail as on 24.
+public let simulationRevision = 25
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
