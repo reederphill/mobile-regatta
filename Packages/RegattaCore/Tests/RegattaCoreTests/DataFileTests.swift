@@ -689,7 +689,7 @@ enum SkiffFixtures {
     }
 
     /// #298: skiff@4 and ilca-dinghy@4 are their version 3 with the backwind a trapezoid astern on the windward quarter:
-    /// 2 L on its outer edge (1.5 before), 1 L wide, 1.5 L on its inner edge (new), losing 0.25 at the stern edge (0.1).
+    /// 2 L on its outer edge (1.5 before), 1 L wide, 1.5 L on its inner edge (new), losing 0.2 at the stern edge (0.1).
     /// Every other value is version 3's; version 3 has no inner length, so it keeps #79's band.
     @Test(arguments: [SkiffFixtures.classID, Fixtures.classID])
     func version4IsVersion3WithTheBackwindTrapezoid(classID: String) throws {
