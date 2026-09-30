@@ -3,8 +3,8 @@ import Dispatch
 import Network
 import Synchronization
 
-/// Connectivity from the system's network path (`NWPathMonitor`): what the app's `PathConnectivity` placeholder
-/// does, behind `ConnectivityService`; #242 swaps the app over. Only where Network exists (not on Linux).
+/// Connectivity from the system's network path (`NWPathMonitor`), behind `ConnectivityService`: what the app runs on
+/// outside `-fakeServices` (#242). Only where Network exists (not on Linux).
 /// Unchecked: its state is behind the mutex, and the monitor is only started and cancelled.
 public final class PathConnectivityService: ConnectivityService, @unchecked Sendable {
     private let monitor = NWPathMonitor()

@@ -1,0 +1,308 @@
+{
+  "schemaVersion": 1,
+  "id": "livery-catalogue",
+  "version": 1,
+  "placeholders": [
+    "/designs/8/completedRaces",
+    "/designs/9/completedRaces",
+    "/designs/10/completedRaces"
+  ],
+  "notes": [
+    "Livery catalogue (#118, #21): every livery design per boat class, the safe palette and the rule each swatch passes. Schema: LiveryCatalogue.swift.",
+    "Swatches and rule are docs/palette.md's (#53): reserved hues vermillion, orange, yellow and chevron blue at 20 degrees of OKLCH hue (chroma below 0.06 exempt), OKLab distance 0.15 from the chevron's blue, and OKLCH lightness 0.20 from water, puff and lull, charcoal excepted (read by the hull outline, #29). #169 revises the values as a new version.",
+    "Skiff: 4 free starter designs, 3 earned at 10, 50 and 200 completed online races (#21 'for example': placeholders awaiting tuning), and 12 paid, 4 at each tier ($0.99, $1.99, $2.99). ILCA dinghy: the 4 free starters only. Pattern and sail-graphic names are the renderer's (#119), placeholders until the designs are drawn (#22)."
+  ],
+  "rule": {
+    "reserved": [
+      {
+        "name": "vermillion",
+        "hex": "#D55E00"
+      },
+      {
+        "name": "orange",
+        "hex": "#E69F00"
+      },
+      {
+        "name": "yellow",
+        "hex": "#F0E442"
+      },
+      {
+        "name": "chevron blue",
+        "hex": "#3F51E0"
+      }
+    ],
+    "minimumHueDistanceDegrees": 20,
+    "chromaFloor": 0.06,
+    "chevronHex": "#3F51E0",
+    "minimumChevronDistance": 0.15,
+    "waterHex": [
+      "#174D70",
+      "#002D4D",
+      "#3C6F94"
+    ],
+    "minimumLightnessContrast": 0.2,
+    "contrastExceptions": [
+      "charcoal"
+    ]
+  },
+  "swatches": [
+    {
+      "id": "white",
+      "hex": "#F5F5F2",
+      "slots": ["deck", "accent", "sail"]
+    },
+    {
+      "id": "charcoal",
+      "hex": "#33383D",
+      "slots": ["deck", "accent", "sail"]
+    },
+    {
+      "id": "sky-blue",
+      "hex": "#56B4E9",
+      "slots": ["deck", "accent", "sail"]
+    },
+    {
+      "id": "pale-sky-blue",
+      "hex": "#9ED8F2",
+      "slots": ["deck", "accent", "sail"]
+    },
+    {
+      "id": "pale-bluish-green",
+      "hex": "#5FD3A8",
+      "slots": ["deck", "accent", "sail"]
+    },
+    {
+      "id": "pale-reddish-purple",
+      "hex": "#E6A8CB",
+      "slots": ["deck", "accent", "sail"]
+    },
+    {
+      "id": "lavender",
+      "hex": "#C3B5F0",
+      "slots": ["deck", "accent", "sail"]
+    },
+    {
+      "id": "pale-grey",
+      "hex": "#C8CCD0",
+      "slots": ["deck", "accent", "sail"]
+    },
+    {
+      "id": "off-white",
+      "hex": "#EDE6D6",
+      "slots": ["sail"]
+    }
+  ],
+  "designs": [
+    {
+      "id": "skiff-plain",
+      "boatClass": "skiff",
+      "pattern": "plain",
+      "sailGraphic": "plain",
+      "slots": ["deck", "sail"],
+      "acquisition": "free"
+    },
+    {
+      "id": "skiff-stripe",
+      "boatClass": "skiff",
+      "pattern": "stripe",
+      "sailGraphic": "plain",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "free"
+    },
+    {
+      "id": "skiff-sheer",
+      "boatClass": "skiff",
+      "pattern": "sheer-line",
+      "sailGraphic": "numbers-panel",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "free"
+    },
+    {
+      "id": "skiff-split",
+      "boatClass": "skiff",
+      "pattern": "split-deck",
+      "sailGraphic": "plain",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "free"
+    },
+    {
+      "id": "ilca-dinghy-plain",
+      "boatClass": "ilca-dinghy",
+      "pattern": "plain",
+      "sailGraphic": "plain",
+      "slots": ["deck", "sail"],
+      "acquisition": "free"
+    },
+    {
+      "id": "ilca-dinghy-stripe",
+      "boatClass": "ilca-dinghy",
+      "pattern": "stripe",
+      "sailGraphic": "plain",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "free"
+    },
+    {
+      "id": "ilca-dinghy-sheer",
+      "boatClass": "ilca-dinghy",
+      "pattern": "sheer-line",
+      "sailGraphic": "numbers-panel",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "free"
+    },
+    {
+      "id": "ilca-dinghy-split",
+      "boatClass": "ilca-dinghy",
+      "pattern": "split-deck",
+      "sailGraphic": "plain",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "free"
+    },
+    {
+      "id": "skiff-earned-10",
+      "boatClass": "skiff",
+      "pattern": "chevron-bow",
+      "sailGraphic": "wave",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "earned",
+      "completedRaces": 10
+    },
+    {
+      "id": "skiff-earned-50",
+      "boatClass": "skiff",
+      "pattern": "twin-stripe",
+      "sailGraphic": "compass-rose",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "earned",
+      "completedRaces": 50
+    },
+    {
+      "id": "skiff-earned-200",
+      "boatClass": "skiff",
+      "pattern": "gradient-stern",
+      "sailGraphic": "laurel",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "earned",
+      "completedRaces": 200
+    },
+    {
+      "id": "skiff-band",
+      "boatClass": "skiff",
+      "pattern": "band",
+      "sailGraphic": "plain",
+      "slots": ["deck", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.band",
+      "tier": 1
+    },
+    {
+      "id": "skiff-pinstripe",
+      "boatClass": "skiff",
+      "pattern": "pinstripe",
+      "sailGraphic": "plain",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.pinstripe",
+      "tier": 1
+    },
+    {
+      "id": "skiff-checker-bow",
+      "boatClass": "skiff",
+      "pattern": "checker-bow",
+      "sailGraphic": "plain",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.checker-bow",
+      "tier": 1
+    },
+    {
+      "id": "skiff-dash",
+      "boatClass": "skiff",
+      "pattern": "dash",
+      "sailGraphic": "plain",
+      "slots": ["deck", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.dash",
+      "tier": 1
+    },
+    {
+      "id": "skiff-wave-hull",
+      "boatClass": "skiff",
+      "pattern": "wave-hull",
+      "sailGraphic": "wave-hull-sail",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.wave-hull",
+      "tier": 2
+    },
+    {
+      "id": "skiff-arrow",
+      "boatClass": "skiff",
+      "pattern": "arrow",
+      "sailGraphic": "arrow-sail",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.arrow",
+      "tier": 2
+    },
+    {
+      "id": "skiff-chevron-sail",
+      "boatClass": "skiff",
+      "pattern": "chevron-sail",
+      "sailGraphic": "chevron-sail-sail",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.chevron-sail",
+      "tier": 2
+    },
+    {
+      "id": "skiff-diagonal",
+      "boatClass": "skiff",
+      "pattern": "diagonal",
+      "sailGraphic": "diagonal-sail",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.diagonal",
+      "tier": 2
+    },
+    {
+      "id": "skiff-race-stripes",
+      "boatClass": "skiff",
+      "pattern": "race-stripes",
+      "sailGraphic": "race-stripes-sail",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.race-stripes",
+      "tier": 3
+    },
+    {
+      "id": "skiff-stars",
+      "boatClass": "skiff",
+      "pattern": "stars",
+      "sailGraphic": "stars-sail",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.stars",
+      "tier": 3
+    },
+    {
+      "id": "skiff-tiger",
+      "boatClass": "skiff",
+      "pattern": "tiger",
+      "sailGraphic": "tiger-sail",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.tiger",
+      "tier": 3
+    },
+    {
+      "id": "skiff-swirl",
+      "boatClass": "skiff",
+      "pattern": "swirl",
+      "sailGraphic": "swirl-sail",
+      "slots": ["deck", "accent", "sail"],
+      "acquisition": "paid",
+      "productId": "com.phillreeder.regatta.skiff.swirl",
+      "tier": 3
+    }
+  ]
+}
