@@ -70,7 +70,7 @@ import Testing
             #expect(throws: WireError.unknownMessageType(UInt8(code))) { try Frame(decoding: [UInt8(code)] + Array(repeating: 0, count: 8)) }
         }
         let header: (MessageType) -> [UInt8] = { [$0.rawValue, 0, 0, 0, 0, 0, 0, 0, 0] }
-        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [25]) }
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [27]) }
         // Code 4 was the pre-#73 `foul`, 11 the pre-#86 `raceClosed` without results and 17 the pre-#91
         // `markRoomNotice` with a recipient list: retired, never reused.
         #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [4, 14, 0, 1]) }
@@ -311,6 +311,8 @@ func relabel(_ boat: Boat, isPlayer: Bool) -> Boat {
     copy.penaltyClockTick = boat.penaltyClockTick
     copy.queuedPenaltyCallTicks = boat.queuedPenaltyCallTicks
     copy.isTacking = boat.isTacking
+    copy.tackCrossingTick = boat.tackCrossingTick
+    copy.roll = boat.roll
     copy.boomSide = boat.boomSide
     copy.isPlaning = boat.isPlaning
     copy.spinnaker = boat.spinnaker

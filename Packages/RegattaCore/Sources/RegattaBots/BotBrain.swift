@@ -125,6 +125,8 @@ struct BotBrain: Sendable {
     /// true if she misjudges that encounter and believes she holds her rights. Kept while that boat is within
     /// `keepClearRange` of her.
     var misjudged: [Int: Bool] = [:]
+    /// How she will roll the tack she has tapped (#263, `planRoll`), and when she tapped it; nil with no roll to send.
+    var rollPlan: (plan: RollPlan, tapped: Double)?
 
     /// The stream of her seed her own draws come from.
     static let brainStream: UInt64 = 0x6272_6169_6e64_7277 // "braindrw"
@@ -139,8 +141,21 @@ struct BotBrain: Sendable {
     private var skill: Double { style.skill }
     private var finishSpot: Double { style.finishSpot }
 
-    /// The decision for `view`'s seat now.
+    /// The decision for `view`'s seat now: what she sails, with her roll tap if this is its moment (`rollsNow`).
+    ///
+    /// "Sheets in through the eye": turning through the no-go zone she never eases, whatever she was holding
+    /// with before (#231, #263): the sails can't draw there, and eased she comes out of the tack slower still.
     mutating func decide(_ view: SeatView) -> BotDecision {
+        var decision = sail(view)
+        if decision.tap == nil, rollsNow(view.own, view) { decision.tap = .tackGybe }
+        if decision.input.ease, view.own.twa < BoatDynamics.noGoAngle(view.boatClass.polar) {
+            decision.input = decision.input.eased(false)
+        }
+        return decision
+    }
+
+    /// What she sails now: her held input, and her tack or gybe tap.
+    private mutating func sail(_ view: SeatView) -> BotDecision {
         let boat = view.own
         observe(boat, view)
         guard boat.isOnCourse else { return BotDecision(input: .neutral) }
@@ -149,7 +164,7 @@ struct BotBrain: Sendable {
         var aim = plan(boat, view)
         // Tacked before her start, she bears away to close-hauled before she holds any closer to the wind: until
         // she's there, rule 13 has her keep clear of every boat (#99).
-        let closeHauled = Self.closeHauled(boat.windSpeed * boat.shadow, view) + deg2rad(2)
+        let closeHauled = Self.closeHauled(boat.polarWindSpeed, view) + deg2rad(2)
         let starting = boat.status == .prestart || boat.status == .ocs
         if starting, senses.tacking, aim.tack == boat.tack, aim.groove == nil, aim.angle < closeHauled {
             aim = Aim(angle: closeHauled, tack: aim.tack, ease: aim.ease)
@@ -165,6 +180,7 @@ struct BotBrain: Sendable {
         if aim.tack != boat.tack {
             if canTap(boat, view) {
                 lastTapTime = view.time
+                planRoll(boat, view)
                 return BotDecision(input: .neutral, tap: .tackGybe)
             }
             // Not yet (too slow to tack, or a mark too close to turn by): the same aim on her own tack. Before
@@ -366,7 +382,7 @@ struct BotBrain: Sendable {
             let leeward = -Vec2.heading(b.windDirection) * room
             return view.course.isInRaceArea(b.position + leeward)
         }
-        let closeHauled = view.boatClass.polar.bestUpwind(tws: b.windSpeed * b.shadow).speed
+        let closeHauled = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).speed * b.speedShadow
         return b.speed >= closeHauled * Self.tackingSpeed
     }
 
@@ -649,7 +665,7 @@ struct BotBrain: Sendable {
         guard b.status == .prestart || b.status == .ocs else {
             return ruleKeepClear(b, view, desired: desired, lookahead: lookahead)
         }
-        if b.tack == .port { return startKeepClear(b, view, desired: desired, lookahead: lookahead) }
+        if b.tack == .port || b.status == .ocs { return startKeepClear(b, view, desired: desired, lookahead: lookahead) }
         guard let heading = ruleKeepClear(b, view, desired: desired, lookahead: lookahead) else { return nil }
         guard crossesEarly(b, view, heading: heading) else { return heading }
         return startKeepClear(b, view, desired: desired, lookahead: lookahead) ?? heading
@@ -683,7 +699,7 @@ struct BotBrain: Sendable {
             case .portStarboard:
                 return b.windDirection + side * min(max(deg2rad(85), b.twa + deg2rad(30)), deg2rad(150))
             case .whileTacking:
-                return b.windDirection + side * (Self.closeHauled(b.windSpeed * b.shadow, view) + deg2rad(10))
+                return finishingTack(b, view)
             case .windwardLeeward:
                 let noGo = BoatDynamics.noGoAngle(view.boatClass.polar)
                 return b.windDirection + side * max(noGo + deg2rad(2), min(deg2rad(38), b.twa - deg2rad(10)))

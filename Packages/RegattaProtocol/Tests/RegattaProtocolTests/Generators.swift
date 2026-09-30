@@ -106,6 +106,11 @@ struct Gen {
             boat.penaltyTurnsOwed += boat.colorIndex << 3
             boat.penaltyClockTick = -Int(abs(boat.penaltyProgress) * 2000)
         }
+        // #263, derived likewise: a crossing up to 254 ticks before tick 0 while tacking, and every roll state, a
+        // pending tap up to 63 ticks before it (`world(seats:)` moves both to before the world's tick).
+        let draw = Int(abs(boat.penaltyProgress) * 1000)
+        boat.tackCrossingTick = boat.isTacking ? -(draw % 255) : nil
+        boat.roll = [nil, RollTack.pending(tapTick: -(draw % 64)), .hit, .missed][boat.legIndex / 4 % 4]
         return WorldSnapshot.Seat(boat: boat, heldInput: input())
     }
 
@@ -113,6 +118,11 @@ struct Gen {
         var world = WorldSnapshot(tick: tick(), seats: (0..<seats).map { seat($0) })
         // #89: each penalty clock before the world's tick, as the wire needs.
         for i in world.seats.indices { world.seats[i].boat.penaltyClockTick? += world.tick }
+        // #263: each crossing and pending roll tap likewise.
+        for i in world.seats.indices {
+            world.seats[i].boat.tackCrossingTick? += world.tick
+            if case .pending(let tap) = world.seats[i].boat.roll { world.seats[i].boat.roll = .pending(tapTick: tap + world.tick) }
+        }
         return world
     }
 
@@ -138,6 +148,10 @@ struct Gen {
                 seat.penaltyTurnsOwed |= (UInt8(truncatingIfNeeded: seat.rudder) & 0b1111) << 3
                 seat.penaltyClock = UInt16(truncatingIfNeeded: seat.x)
             }
+            // #263, derived likewise: every roll state, and a crossing only while tacking, up to the wire's cap.
+            let rollDraw = UInt8(truncatingIfNeeded: seat.y >> 8)
+            seat.roll = [nil, WireRoll.pending(ticksAgo: rollDraw & 63), .hit, .missed][Int(rollDraw >> 6)]
+            seat.tackCrossingTicks = seat.isTacking ? min(UInt8(truncatingIfNeeded: seat.x >> 8), UInt8(WireSeat.maxCrossingTicks)) : nil
             return seat
         }
     }
@@ -227,7 +241,9 @@ struct Gen {
         case 18: return .protestRecorded(seat: seat, target: int(0...15))
         case 19: return .tacked(seat: seat)
         case 20: return .gybed(seat: seat)
-        default: return .grooveSnap(seat: seat)
+        case 21: return .grooveSnap(seat: seat)
+        case 22: return .rollHit(seat: seat)
+        default: return .rollMissed(seat: seat)
         }
     }
 
@@ -301,10 +317,12 @@ func eventKindIndex(_ kind: RaceEvent.Kind) -> Int {
     case .tacked: 19
     case .gybed: 20
     case .grooveSnap: 21
+    case .rollHit: 22
+    case .rollMissed: 23
     }
 }
 
-let eventKindCount = 22
+let eventKindCount = 24
 
 /// A fleet race with a bot sailing every seat, for real snapshots: starts, OCS, contacts, roundings, finishes.
 func botRace(seats: Int = 16, laps: Int = 1, prestartSeconds: Int = 30, seed: UInt64 = 63,

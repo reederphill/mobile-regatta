@@ -123,7 +123,7 @@ enum TuningCatalog {
         [
             TuningGroup(
                 id: "conditions", title: "Conditions",
-                note: "The wind's oscillation, puffs and pressure field (#221, #220, #286, #287, #288). Period, wobble, fan and lane bend decide how often the favoured tack changes; the pressure side and lanes, where the pressure is; the side tendency and lane spots, how much the venue's geography steers it; puff coverage and choices, how many puffs there are and how closely they keep to the pressure.",
+                note: "The wind's oscillation, puffs and pressure field (#221, #220, #286, #287, #288). Period, wobble, fan and lane bend decide how often the favoured tack changes; the pressure side and lanes, where the pressure is; the side tendency and lane spots, how much the venue's geography steers it; lane length, drift and weak share, how far lanes reach up the course and how many are lows; puff coverage and choices, how many puffs there are and how closely they keep to the pressure.",
                 applies: .nextRace,
                 sliders: [
                     TuningSlider(.conditions, "/shift/periodSeconds/min", "Period, shortest", unit: " s", 60...180, step: 5),
@@ -139,7 +139,7 @@ enum TuningCatalog {
                     TuningSlider(.conditions, "/pressureField/side/persistenceSeconds", "Pressure side persistence", unit: " s",
                                  60...1200, step: 30),
                     TuningSlider(.conditions, "/pressureField/side/bendDegrees", "Pressure side bend", unit: "°", 0...10, step: 0.5),
-                    TuningSlider(.conditions, "/pressureField/lanes/count", "Pressure lanes", 0...6, step: 0.5),
+                    TuningSlider(.conditions, "/pressureField/lanes/count", "Pressure lanes", 0...24, step: 0.5),
                     TuningSlider(.conditions, "/pressureField/lanes/strength/min", "Lane strength, least", 0...0.3, step: 0.01),
                     TuningSlider(.conditions, "/pressureField/lanes/strength/max", "Lane strength, most", 0...0.3, step: 0.01),
                     TuningSlider(.conditions, "/pressureField/lanes/widthMetres/min", "Lane width, narrowest", unit: " m",
@@ -161,6 +161,16 @@ enum TuningCatalog {
                     TuningSlider(.conditions, "/pressureField/lanes/spotShare", "Lanes at the venue's spots", 0...1, step: 0.05),
                     // Where puffs and lulls form in the pressure field (#288), in schema-5 conditions (version 6 on).
                     TuningSlider(.conditions, "/pressureField/puffChoices", "Puff choices", 1...8, step: 1),
+                    // Finite lanes that drift down the wind and may weaken it, in schema-6 conditions (version 7 on).
+                    TuningSlider(.conditions, "/pressureField/lanes/lengthMetres/min", "Lane length, shortest", unit: " m",
+                                 100...1500, step: 20),
+                    TuningSlider(.conditions, "/pressureField/lanes/lengthMetres/max", "Lane length, longest", unit: " m",
+                                 100...1500, step: 20),
+                    TuningSlider(.conditions, "/pressureField/lanes/alongDriftFraction/min", "Lane drift downwind, least",
+                                 0...1, step: 0.05),
+                    TuningSlider(.conditions, "/pressureField/lanes/alongDriftFraction/max", "Lane drift downwind, most",
+                                 0...1, step: 0.05),
+                    TuningSlider(.conditions, "/pressureField/lanes/weakShare", "Lanes that weaken the wind", 0...1, step: 0.05),
                 ]),
             TuningGroup(
                 id: "grooves", title: "Upwind grooves",
@@ -199,12 +209,33 @@ enum TuningCatalog {
                 } ?? [])),
             TuningGroup(
                 id: "shadow", title: "Wind shadow",
-                note: "What sailing in another boat's shadow costs, and how far it reaches (hull lengths).",
+                note: "What sailing in another boat's shadow costs, and how far it reaches (hull lengths). From skiff@3 (#263) the loss is off her speed, not the wind, and she slows to it at the shadow's own rate.",
                 applies: .nextRace,
                 sliders: [
-                    TuningSlider(.boatClass, "/windShadow/lossCloseIn", "Loss close in", 0...0.6, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/lossCloseIn", "Loss close in", 0...0.9, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/stackingFloor", "Stacked cones floor", 0.1...1, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/slowingDownSeconds", "Slowing down in it", unit: " s", 0.5...10, step: 0.1),
                     TuningSlider(.boatClass, "/windShadow/coneLengthHullLengths", "Cone length", 1...20, step: 0.5),
                     TuningSlider(.boatClass, "/windShadow/coneWidthAtEndHullLengths", "Cone width at its end", 0.5...10, step: 0.1),
+                ]),
+            TuningGroup(
+                id: "backwind", title: "Backwind",
+                note: "The zone astern of a boat on her windward quarter that slows a boat she lee-bows (#298, from skiff@4): its loss at her stern, fading to nothing at its far edge, and how far astern it reaches (hull lengths).",
+                applies: .nextRace,
+                sliders: [
+                    TuningSlider(.boatClass, "/windShadow/backwind/loss", "Loss at her stern", 0...0.6, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/backwind/innerLengthHullLengths", "Inner edge length", 0.25...4, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/backwind/lengthHullLengths", "Outer edge length", 0.5...4, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/backwind/widthHullLengths", "Width at her stern", 0.25...3, step: 0.05),
+                ]),
+            TuningGroup(
+                id: "rollTack", title: "Roll tack",
+                note: "The second tap through a tack (#222, #263): within the window of the boom crossing it keeps back part of her speed loss until close-hauled; outside it, her speed takes the miss.",
+                applies: .nextRace,
+                sliders: [
+                    TuningSlider(.boatClass, "/rollTack/windowSeconds", "Window", unit: " s", 0.05...1, step: 0.05),
+                    TuningSlider(.boatClass, "/rollTack/hitLossFraction", "Loss on a hit", 0...1, step: 0.05),
+                    TuningSlider(.boatClass, "/rollTack/missSpeedFactor", "Speed after a miss", 0.5...1, step: 0.01),
                 ]),
             TuningGroup(
                 id: "raceFormat", title: "Race format",

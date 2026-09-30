@@ -97,6 +97,20 @@ extension BotBrain {
         return nil
     }
 
+    /// She is this close to rule 13's end (`closeHauled`), radians, within the turn she makes before her next decision.
+    static let tackEndMargin = deg2rad(4)
+
+    /// "Finishing the tack": the heading that ends her rule 13, close-hauled on her new tack and a little more. Within
+    /// `tackEndMargin` of close-hauled she steers for it and no further: the tick her tack ends she may hold rights,
+    /// and a rudder still hard over past it, from a decision made while she was tacking, would turn her towards the
+    /// boat that now keeps clear of her (#101, #263).
+    func finishingTack(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        let side: Double = b.tack == .port ? 1 : -1
+        let closeHauled = Self.closeHauled(b.polarWindSpeed, view)
+        let beyond = closeHauled - b.twa < Self.tackEndMargin ? 0 : deg2rad(10)
+        return b.windDirection + side * (closeHauled + beyond)
+    }
+
     /// Her give-way manoeuvre racing (#101), keeping clear of `other` under `rule` with a collision coming on
     /// `desired`: steered with the rudder (`evasiveHeading`).
     /// - Rule 13: she finishes her tack, bearing away to close-hauled on her new tack and a little more, which ends it.
@@ -113,7 +127,7 @@ extension BotBrain {
         let bearAway: Double
         switch rule {
         case .whileTacking:
-            return b.windDirection + side * (Self.closeHauled(b.windSpeed * b.shadow, view) + deg2rad(10))
+            return finishingTack(b, view)
         case .portStarboard:
             bearAway = 1
         case .windwardLeeward:
@@ -123,15 +137,19 @@ extension BotBrain {
             let turn: Double = (other.position - b.position).dot(b.forward.rightPerp) > 0 ? -1 : 1
             bearAway = turn * side
         }
-        return clearingHeading(b, view, desired: desired, lookahead: lookahead, first: bearAway)
+        // The windward boat looks to luff first even turned down towards the leeward one already: bearing away
+        // from alongside her, she speeds up as she turns and doesn't drop astern in time (#263's momentum).
+        return clearingHeading(b, view, desired: desired, lookahead: lookahead, first: bearAway,
+                               keepsFirst: rule == .windwardLeeward)
     }
 
     /// The heading on her own tack nearest `desired` that passes every boat near her at least `keepClearDistance`
     /// times `keepClearMargin` hull lengths off over `lookahead` seconds (`closestApproach`), looking `first` way (+1
-    /// bearing away, −1 luffing), or the way she has already turned off `desired`, and then the other; failing that, the
-    /// one that passes furthest off. Only sailing angles `steer` sails: out of the no-go zone, never by the lee.
+    /// bearing away, −1 luffing), or unless `keepsFirst` the way she has already turned off `desired`, and then the
+    /// other; failing that, the one that passes furthest off. Only sailing angles `steer` sails: out of the no-go zone,
+    /// never by the lee.
     func clearingHeading(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double,
-                         first: Double) -> Double {
+                         first: Double, keepsFirst: Bool = false) -> Double {
         let near = view.others.filter { !$0.isGhost && ($0.position - b.position).length < Self.keepClearRange }
         let side: Double = b.tack == .port ? 1 : -1
         let closest = BoatDynamics.noGoAngle(view.boatClass.polar) + deg2rad(5)
@@ -141,7 +159,7 @@ extension BotBrain {
         // Already turned off `desired` one way, she looks on that way first, so she doesn't swing from side to side.
         let turned = abs(wrapAngle(b.heading - b.windDirection)) - start
         let onHerTack = wrapAngle(b.heading - b.windDirection) * side >= 0
-        let first: Double = abs(turned) > Self.clearingStep && onHerTack ? (turned > 0 ? 1 : -1) : first
+        let first: Double = !keepsFirst && abs(turned) > Self.clearingStep && onHerTack ? (turned > 0 ? 1 : -1) : first
         func distance(_ heading: Double) -> Double {
             near.map { Self.closestApproach(of: $0, to: b, heading: heading, lookahead: lookahead) }.min() ?? .infinity
         }
@@ -201,6 +219,11 @@ extension BotBrain {
     /// the other tack at `tapSpeedShare` of her speed for `tapLookahead` seconds (`tapOntoPortLookahead` for a boat on
     /// starboard when she goes onto port), no boat within `tapRange` comes inside `tapClearance` hull lengths of her.
     /// Before her start her taps are #99's.
+    ///
+    /// "Tacks away from a boat alongside" (#263): a boat already inside the clearance, overlapped with her, is clear of
+    /// a tack that only opens the gap between them. Two boats sailing side by side off the start would otherwise each
+    /// wait on the other to tack, and sail on together into the race area's edge; the one whose tack takes her away
+    /// tacks.
     func tapIsClear(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         guard b.status == .racing else { return true }
         let heading = 2 * b.windDirection - b.heading
@@ -208,9 +231,11 @@ extension BotBrain {
         let clear = view.boatClass.hull.length * Self.tapClearance
         let ontoPort = b.tack == .starboard
         return view.others.allSatisfy { other in
-            guard !other.isGhost, (other.position - b.position).length <= Self.tapRange else { return true }
+            let gap = (other.position - b.position).length
+            guard !other.isGhost, gap <= Self.tapRange else { return true }
             let lookahead = ontoPort && other.tack == .starboard ? Self.tapOntoPortLookahead : Self.tapLookahead
-            return Self.closestApproach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead) >= clear
+            let approach = Self.closestApproach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead)
+            return approach >= min(clear, gap)
         }
     }
 }
