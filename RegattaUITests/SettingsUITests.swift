@@ -28,7 +28,8 @@ final class SettingsUITests: RaceUITestCase {
     /// test flips it back, so the next test starts from the defaults.
     @MainActor func testTogglesPersistAcrossRelaunch() {
         var app = openSettings()
-        var ladder = app.switches["settings-ladderLines"]
+        // `firstMatch`: in case a SwiftUI toggle exposes an inner switch carrying the same identifier.
+        var ladder = app.switches["settings-ladderLines"].firstMatch
         XCTAssertTrue(ladder.waitForExistence(timeout: 20), "no Ladder lines toggle")
         let before = value(ladder)
         flip(ladder)
@@ -37,7 +38,7 @@ final class SettingsUITests: RaceUITestCase {
 
         app.terminate()
         app = openSettings()
-        ladder = app.switches["settings-ladderLines"]
+        ladder = app.switches["settings-ladderLines"].firstMatch
         XCTAssertTrue(ladder.waitForExistence(timeout: 20), "no Ladder lines toggle after relaunch")
         XCTAssertEqual(value(ladder), flipped, "Ladder lines wasn't kept across the relaunch")
 
