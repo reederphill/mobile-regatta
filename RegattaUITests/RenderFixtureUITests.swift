@@ -141,6 +141,16 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
                                             "water-pressure"])
     }
 
+    // The fleet (#117): hulls with their outlines, your glow, heel, sails, and a ghost that must read "not racing"
+    // through every filter (#30).
+
+    /// A bot race on the default files just after the first boat finished: her ghost and at least three racing
+    /// boats around yours, through every vision filter.
+    @MainActor func testFleetFixtureMatchesReferences() throws {
+        try assertAllMatchIPhoneReferences(["fleet", "fleet-deuteranopia", "fleet-protanopia", "fleet-tritanopia",
+                                            "fleet-greyscale", "fleet-washout"])
+    }
+
     /// `assertMatchesReference` on iPhone (see `skipOnIPad`) for several fixtures in one test: each renders and
     /// compares before any failure ends the test, so every render that moved (or has no reference yet) reaches
     /// render-actuals in one CI run rather than one per run.
