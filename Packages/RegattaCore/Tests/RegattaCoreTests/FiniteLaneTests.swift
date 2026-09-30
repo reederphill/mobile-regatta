@@ -147,18 +147,50 @@ enum FiniteLaneFixtures {
                 // It drifts down the wind (negative up the course) at its share of the base wind speed.
                 let speed = -a.alongVelocity / plan.baseStrength
                 #expect(speed >= extent.drift.lowerBound - 1e-12 && speed <= extent.drift.upperBound + 1e-12)
-                // Its mid-life place lies within the race area and half the longest length beyond it.
+                // Its mid-life place lies within the race area and half the longest length beyond it, or at a spot.
                 let mid = a.alongCentre(atTick: a.spawnTick + a.lifetimeTicks / 2)
-                #expect(abs(mid) <= plan.halfLength + extent.length.upperBound / 2 + 1e-6)
+                let spots = try #require(plan.laneSpots)
+                let nearSpot = spots.alongs.contains { abs(mid - $0) <= spots.spread + 1 }
+                #expect(abs(mid) <= plan.halfLength + extent.length.upperBound / 2 + 1e-6 || nearSpot)
                 #expect(a.alongCentre(atTick: a.spawnTick + 30) < a.alongCentre(atTick: a.spawnTick))
                 if a.strength < 0 { weak += 1 }
                 lanes += 1
             }
         }
         #expect(lanes > 50, "\(lanes) lanes")
-        // About the file's share weaken the wind.
+        // About the file's share of the lanes away from the venue's spots weaken the wind.
         let share = Double(weak) / Double(lanes)
-        #expect(abs(share - extent.weakShare) < 0.15, "\(share) weak against \(extent.weakShare)")
+        let expected = extent.weakShare * (1 - plan.field.lanes.spotShare)
+        #expect(abs(share - expected) < 0.15, "\(share) weak against \(expected)")
+    }
+
+    /// A finite lane at one of the venue's spots lies at its node up the course as well as across, and is never weak:
+    /// with every lane at a spot, each is strong and forms within half a cell of a preferring node both ways.
+    @Test func spotLanesAreStrongAndAtTheirNode() throws {
+        let setup = try FiniteLaneFixtures.setup("light-and-patchy", raceSeed: 3)
+        let (field, _) = try WindFixtures.field(setup, windSeed: 3, through: 34)
+        let base = try #require(field.pressurePlan)
+        let lanes = base.field.lanes
+        let allAtSpots = Conditions.PressureField(
+            side: base.field.side,
+            lanes: .init(count: lanes.count, strength: lanes.strength, width: lanes.width, lifetime: lanes.lifetime,
+                         drift: lanes.drift, bend: lanes.bend, spotShare: 1, extent: lanes.extent),
+            puffChoices: base.field.puffChoices)
+        let plan = PressurePlan(setup: setup, area: try #require(setup.raceArea), field: allAtSpots)
+        let spots = try #require(plan.laneSpots)
+        var checked = 0
+        for window in 0...34 {
+            for lane in plan.draws(of: try #require(field.keys[window]), windows: Self.w).lanes {
+                #expect(lane.strength > 0)
+                let mid = lane.alongCentre(atTick: lane.spawnTick + lane.lifetimeTicks / 2)
+                let near = zip(spots.positions, spots.alongs).contains { across, along in
+                    abs(lane.start - across) <= spots.spread + 1e-6 && abs(mid - along) <= spots.spread + 1
+                }
+                #expect(near, "lane at \(lane.start) across, \(mid) along")
+                checked += 1
+            }
+        }
+        #expect(checked > 50)
     }
 
     /// The pressure changes up the course: along a line parallel to the wind, a version-7 field varies by more than 3 %

@@ -108,8 +108,9 @@ struct PressurePlan: Hashable, Sendable {
         baseStrength = setup.baseStrength
         sideTendency = setup.pairing.sideTendency
         let reach = area.halfWidth + laneMargin
-        laneSpots = LaneSpots(setup.pairing.geographicGrid, reach: reach) { [acrossWind, meanDirection, centre] p in
-            acrossWind.coordinate(at: p, meanDirection: meanDirection) - centre
+        let (upCourse, middle) = (Vec2.heading(setup.meanDirection), area.centre)
+        laneSpots = LaneSpots(setup.pairing.geographicGrid, reach: reach, along: { ($0 - middle).dot(upCourse) }) {
+            [acrossWind, meanDirection, centre] p in acrossWind.coordinate(at: p, meanDirection: meanDirection) - centre
         }
     }
 
@@ -131,7 +132,8 @@ struct PressurePlan: Hashable, Sendable {
     /// stream of their own so the lane draws above stay as they were: its length, its mid-life position along the
     /// course (uniform over the race area and half the longest length beyond each end), its drift and the weak coin.
     /// It forms upwind of that position by half its drift and moves down the wind, so it passes through the water
-    /// it covers, as puffs do; a weak lane's strength is negative.
+    /// it covers, as puffs do; a weak lane's strength is negative. A lane at one of the venue's spots uses the place
+    /// draw to lie within half a cell of its node up the course instead, and is never weak, whatever its coin.
     ///
     /// Each lane forms inside its window, so none is felt before its window starts, and fades in from nothing (ADR
     /// 0001). Its centre forms uniform across the race area and `laneMargin` either side, or, at a venue with lane
@@ -163,10 +165,15 @@ struct PressurePlan: Hashable, Sendable {
             let across = laneRNG.unit()
             let drift = laneRNG.range(-lanes.drift, lanes.drift)
             var position = (2 * across - 1) * (halfWidth + laneMargin)
+            var spotAlong: Double?
             if let laneSpots {
                 let atSpot = spotRNG.unit() < lanes.spotShare
                 let spot = spotRNG.unit(), within = spotRNG.unit()
-                if atSpot { position = laneSpots.position(spot, within) }
+                if atSpot {
+                    let node = laneSpots.node(spot)
+                    position = laneSpots.positions[node] + (2 * within - 1) * laneSpots.spread
+                    spotAlong = laneSpots.alongs[node]
+                }
             }
             let lifetimeTicks = min(maxLaneLifetimeTicks, PuffPlan.ticks(seconds: lifetime))
             var spawn = PressureLaneSpawn(
@@ -174,9 +181,14 @@ struct PressurePlan: Hashable, Sendable {
                 halfWidth: width / 2, strength: strength, start: position, startDrift: drift)
             if let extent {
                 let length = extentRNG.range(extent.length.lowerBound, extent.length.upperBound)
-                let mid = (2 * extentRNG.unit() - 1) * (halfLength + extent.length.upperBound / 2)
+                let place = 2 * extentRNG.unit() - 1
                 let speed = extentRNG.range(extent.drift.lowerBound, extent.drift.upperBound)
-                let isWeak = extentRNG.unit() < extent.weakShare
+                let weakCoin = extentRNG.unit()
+                // A lane at one of the venue's spots is there because the venue makes pressure there: it lies at its
+                // node up the course too, and is never weak. Every other lane lies anywhere and is weak by the coin.
+                let mid = spotAlong.map { $0 + place * (laneSpots?.spread ?? 0) }
+                    ?? place * (halfLength + extent.length.upperBound / 2)
+                let isWeak = spotAlong == nil && weakCoin < extent.weakShare
                 let velocity = -speed * baseStrength
                 spawn.halfLength = length / 2
                 spawn.alongVelocity = velocity
@@ -239,35 +251,42 @@ struct PressureDraws: Hashable, Sendable {
     static let none = PressureDraws(side: nil, lanes: [])
 }
 
-/// Where a venue's lane spots lie across the course (#287): each grid node that prefers lanes, at its across-the-wind
-/// coordinate relative to the race area's centre, weighted by its preference. A lane is a band along the wind, so a
-/// spot anywhere up or down the course draws it to the same place across. Only nodes a lane may form at count.
+/// Where a venue's lane spots lie (#287): each grid node that prefers lanes, at its across-the-wind coordinate relative
+/// to the race area's centre, weighted by its preference. An unending lane is a band along the wind, so a spot anywhere
+/// up or down the course draws it to the same place across; a finite lane (schema 6) also forms at its node's place up
+/// the course (`alongs`). Only nodes a lane may form at count.
 struct LaneSpots: Hashable, Sendable {
     /// Relative coordinates of the preferring nodes, metres, and their running total of preference.
     let positions: [Double]
+    /// Each node's place up the course from the race area's centre, metres.
+    let alongs: [Double]
     let cumulative: [Double]
     /// A lane forms up to half a cell either side of its node, so spots read as the smooth grid they are.
     let spread: Double
 
     /// Nil when no node within `reach` of the centre, across, prefers lanes.
-    init?(_ geographic: Venue.GeographicGrid, reach: Double, coordinate: (Vec2) -> Double) {
+    init?(_ geographic: Venue.GeographicGrid, reach: Double, along: (Vec2) -> Double = { _ in 0 },
+          coordinate: (Vec2) -> Double) {
         guard geographic.hasLaneSpots else { return nil }
         let grid = geographic.grid
-        var positions: [Double] = [], cumulative: [Double] = []
+        var positions: [Double] = [], alongs: [Double] = [], cumulative: [Double] = []
         var total = 0.0
         for row in 0..<grid.rows {
             for column in 0..<grid.columns {
                 let preference = geographic.lanePreference(column: column, row: row)
                 guard preference > 0 else { continue }
-                let r = coordinate(grid.position(column: column, row: row))
+                let node = grid.position(column: column, row: row)
+                let r = coordinate(node)
                 guard abs(r) <= reach else { continue }
                 total += preference
                 positions.append(r)
+                alongs.append(along(node))
                 cumulative.append(total)
             }
         }
         guard total > 0 else { return nil }
         self.positions = positions
+        self.alongs = alongs
         self.cumulative = cumulative
         spread = grid.cellSize / 2
     }
@@ -275,13 +294,18 @@ struct LaneSpots: Hashable, Sendable {
     /// The position a lane forms at for draws `spot` (which node, by preference) and `within` (where around it),
     /// each in [0, 1).
     func position(_ spot: Double, _ within: Double) -> Double {
+        positions[node(spot)] + (2 * within - 1) * spread
+    }
+
+    /// The node draw `spot` (in [0, 1)) picks, by preference.
+    func node(_ spot: Double) -> Int {
         let target = spot * cumulative[cumulative.count - 1]
         var low = 0, high = cumulative.count - 1
         while low < high {
             let mid = (low + high) / 2
             if cumulative[mid] > target { high = mid } else { low = mid + 1 }
         }
-        return positions[low] + (2 * within - 1) * spread
+        return low
     }
 }
 

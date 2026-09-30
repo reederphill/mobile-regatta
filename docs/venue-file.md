@@ -237,6 +237,9 @@ How the pressure field reads them (`PressurePlan`, `LaneSpots`):
   like every key (ADR 0001), and adds the result to every window's pressure side target. So the side leans the
   venue's way in most races, but in some the tendency is absent or reversed, and the keys still move the side
   per window. A venue with a tendency needs window 0's key at every tick (`WindField.firstWindowNeeded`).
+- **Lane spots and finite lanes.** With schema-6 conditions a lane is finite (ADR 0008). One formed at a spot
+  lies within half a cell of its node up the course as well as across it, and is never a weak lane, so a spot
+  only ever adds pressure where the venue puts it.
 
 **Old schemas.** A schema-1 file's `speedFactor` is its signed speed change read as `speedFactor − 1`, so its
 shadow is a negative change; the factor is used as written, never re-derived, so schema-1 venues sail exactly as
