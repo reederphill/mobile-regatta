@@ -30,10 +30,10 @@ public struct QueuedStatus: Equatable, Sendable {
         self.secondsToLock = secondsToLock
     }
 
-    /// Fleet lock is this close, in seconds.
-    public static let lockImminentSeconds = 5
+    /// Fleet lock is this close, in seconds: the #25 banner and haptic come about 10 s before it.
+    public static let lockImminentSeconds = 10
 
-    /// The fleet is about to lock: the queue bar stops offering to leave for the chat and practice.
+    /// The fleet is about to lock: time for the lock banner and haptic (#25).
     public var isLockImminent: Bool { secondsToLock <= Self.lockImminentSeconds }
 }
 
@@ -53,7 +53,8 @@ public enum QueueError: Error, Equatable, Sendable {
     case refused(QueueRefusal)
     /// `join` while already queued, or locked into a fleet.
     case alreadyQueued
-    /// `leave` while not queued: leaving is free until fleet lock, and after it the race session's business.
+    /// `leave` while not queued. Leaving is free until fleet lock; after it, leaving means dropping the race
+    /// transport, and the server derives the #26 cooldown from that.
     case notQueued
 }
 

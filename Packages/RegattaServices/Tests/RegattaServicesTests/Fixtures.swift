@@ -30,7 +30,7 @@ enum Fixtures {
         let waiting: [QueueState] = [
             .queued(QueuedStatus(queuedPlayers: 3, secondsToLock: 40)),
             .queued(QueuedStatus(queuedPlayers: 9, secondsToLock: 20)),
-            .queued(QueuedStatus(queuedPlayers: 12, secondsToLock: 4)),
+            .queued(QueuedStatus(queuedPlayers: 12, secondsToLock: 8)),
             .fleetLocked,
         ]
         switch situation {
