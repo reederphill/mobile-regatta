@@ -5,11 +5,16 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  # Nightly, with every job reaching everything (see `changes`): the iPad run and the rest that a pull request skips.
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
-# A new push supersedes the run in progress for the same branch or pull request.
+# A new push supersedes the run in progress for the same pull request. On main every commit's run completes:
+# the group is the commit, so the "Log #N completed" commit that follows a merge can't cancel the merge's run.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Jobs a change can't reach are skipped, which counts as passing for a required check.
@@ -17,17 +22,21 @@ jobs:
     name: What the change reaches
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # A scheduled or manual run has no change to filter: it reaches everything.
     outputs:
-      core: ${{ steps.filter.outputs.core }}
-      protocol: ${{ steps.filter.outputs.protocol }}
-      client: ${{ steps.filter.outputs.client }}
-      server: ${{ steps.filter.outputs.server }}
-      app: ${{ steps.filter.outputs.app }}
-      viewport: ${{ steps.filter.outputs.viewport }}
+      core: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.core }}
+      protocol: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.protocol }}
+      client: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.client }}
+      server: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.server }}
+      app: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.app }}
+      viewport: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.viewport }}
+      imagediff: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.imagediff }}
+      online: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.online }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
         with:
           filters: |
             ci: &ci
@@ -65,6 +74,23 @@ jobs:
               # The app's online services (#242).
               - "Packages/RegattaServices/Sources/**"
               - "Packages/RegattaServices/Package.*"
+            # The image-diff tool's own self-tests (RenderFixtureUITests' testMovedBoat…, …IdenticallyTwice,
+            # …OnePixel…) run only for these.
+            imagediff:
+              - *ci
+              - "RegattaUITests/ImageDiff.swift"
+              - "RegattaUITests/ReferencePolicy.swift"
+              - "RegattaUITests/RenderFixtureTestCase.swift"
+              - "RegattaUITests/RenderFixtureUITests.swift"
+            # Online code: the end-to-end run needs a macOS slot, so it runs only for these.
+            online:
+              - *ci
+              - "Packages/RegattaClient/**"
+              - "Packages/RegattaProtocol/**"
+              - "Packages/RegattaServer/**"
+              - "Regatta/Online*"
+              - "Regatta/Online*/**"
+              - "RegattaUITests/OnlineRaceUITests.swift"
             # What shapes the race view in the window (G5): the iPad's letterbox test runs only for these.
             viewport:
               - *ci
@@ -195,24 +221,53 @@ jobs:
         run: |
           xcodebuild build-for-testing -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' -derivedDataPath DerivedData
-      # A failed test runs once more (-retry-tests-on-failure -test-iterations 2): the simulator now and
-      # then fails to launch or terminate the app between UI tests. A test that fails twice fails the job.
-      # Each test gets 5 min, so a hung test fails itself rather than running the job out of time. The
-      # allowance is a ceiling on the whole test, so no test's own waits add up to more than 3.5 min
-      # (RaceUITestCase); the slowest passing test takes about 2 on the iOS 27 image.
-      - name: xcodebuild test (unit + UI) on iPhone
+      # The render references first, as their own step, with no retry: a render that moved fails the job at
+      # about 13 min, not 31, and its render is in render-actuals for scripts/adopt-references.sh. The
+      # image-diff tool's self-tests are skipped here (their own step, below).
+      - name: xcodebuild test (render references) on iPhone
         run: |
           xcodebuild test-without-building -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+            -only-testing:RegattaUITests/RenderFixtureUITests \
+            -skip-testing:RegattaUITests/RenderFixtureUITests/testFixtureRendersIdenticallyTwice \
+            -skip-testing:RegattaUITests/RenderFixtureUITests/testOnePixelChangeOnARealRenderPasses \
+            -skip-testing:RegattaUITests/RenderFixtureUITests/testMovedBoatFailsWithTheDiffAttached \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 300 \
+            -maximum-test-execution-time-allowance 300 \
+            -derivedDataPath DerivedData -resultBundlePath Regatta-render.xcresult
+      # The rest (unit + UI) runs a failed test once more (-retry-tests-on-failure -test-iterations 2): the
+      # simulator now and then fails to launch or terminate the app between UI tests. A test that fails twice
+      # fails the job. Each test gets 5 min, so a hung test fails itself rather than running the job out of time. The
+      # allowance is a ceiling on the whole test, so no test's own waits add up to more than 3.5 min
+      # (RaceUITestCase); the slowest passing test takes about 2 on the iOS 27 image.
+      - name: xcodebuild test (unit + UI, without the render fixtures) on iPhone
+        run: |
+          xcodebuild test-without-building -project Regatta.xcodeproj -scheme Regatta \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+            -skip-testing:RegattaUITests/RenderFixtureUITests \
             -retry-tests-on-failure -test-iterations 2 \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 300 \
             -maximum-test-execution-time-allowance 300 \
             -derivedDataPath DerivedData -resultBundlePath Regatta.xcresult
+      # The image-diff tool's own tests, only when a change reaches the tool (the imagediff filter).
+      - name: xcodebuild test (image-diff self-tests) on iPhone
+        if: needs.changes.outputs.imagediff == 'true'
+        run: |
+          xcodebuild test-without-building -project Regatta.xcodeproj -scheme Regatta \
+            -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
+            -only-testing:RegattaUITests/RenderFixtureUITests/testFixtureRendersIdenticallyTwice \
+            -only-testing:RegattaUITests/RenderFixtureUITests/testOnePixelChangeOnARealRenderPasses \
+            -only-testing:RegattaUITests/RenderFixtureUITests/testMovedBoatFailsWithTheDiffAttached \
+            -retry-tests-on-failure -test-iterations 2 \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 300 \
+            -maximum-test-execution-time-allowance 300 \
+            -derivedDataPath DerivedData -resultBundlePath Regatta-imagediff.xcresult
       # Only the letterboxed race view (G5) differs on iPad; the other UI tests don't depend on the device. It
-      # runs when a change reaches the view's shape (the viewport filter), and in the iOS 27 workflow's iPad run.
-      # The iPhone shuts down first, so the iPad boots on a runner with its memory back.
+      # runs on main (a push) and nightly, never on a pull request, and only when the change reaches the view's
+      # shape (the viewport filter; a nightly run reaches everything). The iPhone shuts down first, so the iPad
+      # boots on a runner with its memory back.
       - name: xcodebuild test (UI) on iPad, for the letterboxed race view (G5)
-        if: needs.changes.outputs.viewport == 'true'
+        if: github.event_name != 'pull_request' && needs.changes.outputs.viewport == 'true'
         run: |
           xcrun simctl shutdown all || true
           xcodebuild test-without-building -project Regatta.xcodeproj -scheme Regatta \
@@ -227,7 +282,9 @@ jobs:
         with:
           name: Regatta.xcresult
           path: |
+            Regatta-render.xcresult
             Regatta.xcresult
+            Regatta-imagediff.xcresult
             Regatta-iPad.xcresult
           if-no-files-found: ignore
       # A failed reference compare's render: `scripts/adopt-references.sh <PR>` copies it into
@@ -246,7 +303,7 @@ jobs:
   e2e:
     name: Online race end to end (app on the iOS Simulator, local RegattaServer)
     needs: changes
-    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.server == 'true'
+    if: needs.changes.outputs.online == 'true'
     runs-on: macos-26
     timeout-minutes: 40
     env:

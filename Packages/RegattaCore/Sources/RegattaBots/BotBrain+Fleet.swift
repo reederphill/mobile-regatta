@@ -85,9 +85,10 @@ extension BotBrain {
         /// the laylines and `tacticalRange`).
         static let leeBowInsideTackInterval = true
         /// Whether the tactician (`BotProfile.tactician`) lee-bows and tacks on a boat's wind, fully engaged (#234's ruling
-        /// 3: only if her fun-pass win share, gain and beat-the-blip-tacker don't fall; #329 re-measures it on 16 seeds).
-        /// Her cover stays #231's, and she holds no lane.
-        static let tacticianLeeBowsAndTacksOnWind = false
+        /// 3: only if her fun-pass win share, gain and beat-the-blip-tacker don't fall). #329 measured it on 16 seeds with
+        /// the forecast trigger and the pays-check: none fell (0.72, 1.87, 0.71 either way; 12 of 256 races differ), so
+        /// she does. Her cover stays #231's, and she holds no lane.
+        static let tacticianLeeBowsAndTacksOnWind = true
         /// She tacks on a boat's wind within this many lengths of her ...
         static let tackOnWindRange = 8.0
         /// ... when, her tack done, the boat sits in her wind shadow these seconds on, at a factor under
@@ -231,7 +232,7 @@ extension BotBrain {
         guard offset.dot(forward) + relative.dot(forward) * (toLeeward / closing) > 0 else { return false }
         // ... clear of it as she keeps clear (`isAboutToHit`).
         return Self.closestApproach(of: other, to: b, heading: b.heading, lookahead: keepClearLookahead)
-            >= view.boatClass.hull.length * Self.keepClearDistance
+            >= view.boatClass.hull.length * keepClearLengths
     }
 
     /// Whether her tack now would land her on `other`'s lee bow (`tackForecast`): the boat in her backwind and

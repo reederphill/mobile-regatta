@@ -161,7 +161,7 @@ extension BotBrain {
         let side: Double = b.tack == .port ? 1 : -1
         let closest = BoatDynamics.noGoAngle(view.boatClass.polar) + deg2rad(5)
         let angles = closest...Double.pi
-        let clear = view.boatClass.hull.length * Self.keepClearDistance * Self.keepClearMargin
+        let clear = view.boatClass.hull.length * keepClearLengths * Self.keepClearMargin
         let start = abs(wrapAngle(desired - b.windDirection)).clamped(to: angles)
         // Already turned off `desired` one way, she looks on that way first, so she doesn't swing from side to side.
         let turned = abs(wrapAngle(b.heading - b.windDirection)) - start
@@ -191,7 +191,8 @@ extension BotBrain {
     /// changes course only as rule 16.1 lets her, giving that boat room to keep clear. Her ease stays as it was. What
     /// her autohelm does with a centred rudder, following a shift or snapping to the groove, isn't her course change.
     func holdingCourse(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput) -> BoatInput {
-        guard b.status == .racing, input.rudder != 0,
+        // The cautious bot holds her course so before her start too (#104).
+        guard b.status == .racing || (caution != nil && b.status == .prestart), input.rudder != 0,
               turnsTowardsKeepClearBoat(b, view, turn: input.rudder > 0 ? 1 : -1) else { return input }
         return BoatInput(rudder: 0 as Int8, ease: input.ease)
     }
@@ -201,7 +202,7 @@ extension BotBrain {
     /// when that boat is inside `roomDistance` hull lengths of her: any of `roomTurns` that way, both boats sailing on
     /// in straight lines in the same water, weighed every `roomStep` seconds.
     func turnsTowardsKeepClearBoat(_ b: SeatView.OwnBoat, _ view: SeatView, turn: Double) -> Bool {
-        let clear = view.boatClass.hull.length * Self.roomDistance
+        let clear = view.boatClass.hull.length * roomLengths
         let lookahead = roomLookahead
         let moments = Array(stride(from: Self.roomStep, through: lookahead, by: Self.roomStep))
         let headings = Self.roomTurns.map { Vec2.heading(b.heading + turn * $0) * b.speed }
@@ -236,12 +237,12 @@ extension BotBrain {
         guard b.status == .racing || b.status == .prestart else { return true }
         let heading = 2 * b.windDirection - b.heading
         let speed = b.speed * Self.tapSpeedShare
-        let clear = view.boatClass.hull.length * Self.tapClearance
+        let clear = view.boatClass.hull.length * tapClearanceLengths
         let ontoPort = b.tack == .starboard
         return view.others.allSatisfy { other in
             let gap = (other.position - b.position).length
             guard !other.isGhost, gap <= Self.tapRange else { return true }
-            let lookahead = ontoPort && other.tack == .starboard ? Self.tapOntoPortLookahead : Self.tapLookahead
+            let lookahead = (ontoPort && other.tack == .starboard ? Self.tapOntoPortLookahead : Self.tapLookahead) * tapLookaheadScale
             let approach = Self.closestApproach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead)
             return approach >= min(clear, gap)
         }

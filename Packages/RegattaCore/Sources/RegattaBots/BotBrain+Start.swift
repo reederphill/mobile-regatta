@@ -336,7 +336,7 @@ extension BotBrain {
         let side: Double = b.tack == .port ? 1 : -1
         let floor = Self.startLuffFloor(view)
         let near = view.others.filter { !$0.isGhost && ($0.position - b.position).length < Self.keepClearRange }
-        let clear = view.boatClass.hull.length * Self.keepClearDistance * Self.keepClearMargin
+        let clear = view.boatClass.hull.length * keepClearLengths * Self.keepClearMargin
         func passes(_ heading: Double) -> Bool {
             let closest = near.map { Self.closestApproach(of: $0, to: b, heading: heading, lookahead: lookahead) }.min()
             return (closest ?? .infinity) >= clear
@@ -374,8 +374,9 @@ extension BotBrain {
     /// boats she keeps clear of.
     func startKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Double? {
         // OCS, she keeps clear of every boat as a returning one (rule 21.1), whatever rules 10–13 would give her
-        // (`OtherBoat.rightOfWay` has only those): she is returning as soon as she heads back.
-        let returning = b.status == .ocs
+        // (`OtherBoat.rightOfWay` has only those): she is returning as soon as she heads back. The cautious bot keeps
+        // clear of every boat before her start in any case (#104, `keepsClearOfEveryBoat`).
+        let returning = b.status == .ocs || keepsClearOfEveryBoat
         // Not returning, she leaves out a boat she misjudges her encounter with (#280, `judgeEncounters`).
         let threats = view.others.filter { other in
             guard !other.isGhost, (other.position - b.position).length < Self.keepClearRange else { return false }
@@ -395,7 +396,7 @@ extension BotBrain {
                 return (offset + relative * t).length
             }.min() ?? .infinity
         }
-        let clear = view.boatClass.hull.length * Self.keepClearDistance
+        let clear = view.boatClass.hull.length * keepClearLengths
         guard closest(desired) < clear else { return nil }
         let hold = Self.holdAngle(view)
         let side: Double = b.tack == .starboard ? -1 : 1
@@ -404,6 +405,9 @@ extension BotBrain {
         for step in 0...Int((Self.keepClearDeepest - hold) / Self.keepClearStep) {
             let heading = b.windDirection + side * (hold + Double(step) * Self.keepClearStep)
             if crossesEarly(b, view, heading: heading) { continue }
+            // The cautious bot never turns towards a boat keeping clear of her to keep clear of another (#104).
+            if caution != nil, abs(wrapAngle(heading - b.heading)) > deg2rad(2),
+               turnsTowardsKeepClearBoat(b, view, turn: wrapAngle(heading - b.heading) > 0 ? 1 : -1) { continue }
             let distance = closest(heading)
             let turn = abs(wrapAngle(heading - desired))
             if distance >= clear * Self.keepClearMargin, turn < nearest?.turn ?? .infinity { nearest = (heading, turn) }

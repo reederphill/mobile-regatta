@@ -334,10 +334,10 @@ swift scripts/generate-acknowledgements.swift
 
 CI (`.github/workflows/ci.yml`) runs only the jobs a change reaches: `scripts/linux-test.sh` on Linux,
 `scripts/check.sh` for the packages plus `scripts/check-digest-stable.sh` on macOS, and `xcodebuild test` on the
-iOS Simulator (iPhone, plus the UI tests on iPad), and `scripts/e2e.sh` when the app or server changes. `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
+iOS Simulator (iPhone, plus the iPad letterbox test on main and nightly), and `scripts/e2e.sh` when online code changes. `.github/workflows/ios27.yml` runs on GitHub's Xcode 27 image: it archives with the iOS 27 SDK, checks
 the archive with `scripts/check-shipping-config.sh`, launches the app, and runs its tests on iOS 27 iPhone and
-iPad simulators. To save macOS minutes it runs only on pull requests that touch shipping config, on main, weekly
-and by hand.
+iPad simulators. To save macOS minutes it runs only on main pushes that touch shipping config, weekly
+and by hand, never on a pull request.
 
 ### Launch arguments
 

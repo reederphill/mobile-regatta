@@ -39,8 +39,11 @@ import RegattaCore
 
     /// Works from any pre-gun state (#19's takeover): a boat helmed at random for the first half of the sequence,
     /// wherever that leaves her (stalled, past an end of the line, pinned on the race area's edge), then handed to
-    /// a bot, is below the line at the gun and starts.
-    @Test func aBotTakingOverBeforeTheGunStarts() throws {
+    /// a bot, is below the line at the gun and starts: a bot at the fleet's normal draw taking a seat given away
+    /// (`.bot`, #16, #35) within 30 s of the gun, or the cautious bot taking a dropped player's (#104, `.dropped`)
+    /// within `cautiousStartSeconds`.
+    @Test(arguments: [false, true])
+    func aBotTakingOverBeforeTheGunStarts(cautious: Bool) throws {
         for seed: UInt64 in 1...12 {
             let race = Self.startRace(seats: [.human] + Array(repeating: .bot, count: 9), seed: seed)
             // The takeover alone: the fleet around her sails without weaknesses, as the scenario was written for
@@ -58,15 +61,24 @@ import RegattaCore
                 }
                 step += 1
             }
-            controllers[0] = .dropped(BotDriver(seat: 0, raceSeed: race.setup.raceSeed))
+            controllers.takeOver(seat: 0, raceSeed: race.setup.raceSeed, cautious: cautious)
             var started: Int?
-            sail(race, &controllers, ticks: 60 * Race.tickRate) { race in
-                if race.tick == 0 { #expect(race.boats[0].status == .prestart, "seed \(seed): over the line at the gun") }
+            sail(race, &controllers, ticks: 90 * Race.tickRate) { race in
+                if race.tick == 0 {
+                    #expect(race.boats[0].status == .prestart, "seed \(seed) cautious \(cautious): over the line at the gun")
+                }
                 if started == nil, race.boats[0].status == .racing { started = race.tick }
             }
-            #expect(started.map { $0 <= 30 * Race.tickRate } == true, "seed \(seed): started at tick \(started ?? -1)")
+            let within = cautious ? Self.cautiousStartSeconds : 30
+            #expect(started.map { $0 <= within * Race.tickRate } == true,
+                    "seed \(seed) cautious \(cautious): started at tick \(started ?? -1)")
         }
     }
+
+    /// Seconds after the gun by which the cautious bot taking a seat over before it has started (#104, placeholder): she
+    /// is Club's bottom skill, keeps clear of every boat and waits off an end of the line until the gun (`hangBackAim`), so
+    /// she starts late (seeds 1…12: 15–31 s after the gun, seed 3 latest).
+    static let cautiousStartSeconds = 60
 
     /// OCS detection and return (#9 rule 21.1, #85): a bot a little over the line at the gun, beating up it
     /// among the boats starting, is told she's OCS, runs back below the line keeping clear of them as a returning
