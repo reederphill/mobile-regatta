@@ -81,7 +81,7 @@ import UIKit
         fixture.vision = .deuteranopia
         let session = try GameSession(fixture: fixture, log: loaded.log)
         #expect(session.driver.isFrozen)
-        #expect(session.scene.cameraMode == .course)
+        #expect(session.scene.cameraOverride == .northUpCourse)
         #expect(session.vision == .deuteranopia)
         // The race view draws the filter, not the scene (`RaceViewVisionTests`).
         #expect(session.scene.filter == nil && !session.scene.shouldEnableEffects)
@@ -140,6 +140,38 @@ import UIKit
         let world = try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
         let reading = try #require(world.windSampler?.pressureReading)
         #expect(!reading.lanes.isEmpty && reading.side != 0)
+    }
+
+    /// The camera fixtures (#113) draw the race camera, auto framing on: course-up over the prestart log, whose course
+    /// axis is 9° off north (as far off as a shipped venue's gets), and boat-up over the light and patchy log, your
+    /// boat heading 64° east of north. Every other fixture keeps its
+    /// north-up camera from before #113, and its reference.
+    @Test func cameraFixturesDrawTheRaceCamera() throws {
+        let (courseUp, log) = try RenderFixture.load(named: "course-up", in: Self.fixtures)
+        #expect(courseUp == RenderFixture(log: "prestart.racelog.json", freezeTick: -1500, camera: .boat, vision: .none,
+                                          view: .courseUp))
+        #expect(courseUp.cameraMode == .courseUp)
+        let world = try FixtureDriver(log: log, freezeTick: courseUp.freezeTick).renderWorld
+        // Every shipped venue's mean wind is within 10° of north, so 9° is about as far off as a real course gets:
+        // a turn the wrong way would tilt the start line and course by twice that in the reference.
+        #expect(abs(world.course.axis) > 8 * .pi / 180, "axis \(world.course.axis * 180 / .pi)°")
+        let session = try GameSession(fixture: courseUp, log: log)
+        #expect(session.scene.cameraOverride == .courseUp)
+
+        let (boatUp, _) = try RenderFixture.load(named: "boat-up", in: Self.fixtures)
+        #expect(boatUp == RenderFixture(log: "water-light-and-patchy.racelog.json", freezeTick: 30, camera: .boat,
+                                        vision: .none, view: .boatUp))
+        #expect(boatUp.cameraMode == .boatUp)
+        let (_, boatLog) = try RenderFixture.load(named: "boat-up", in: Self.fixtures)
+        let sailing = try FixtureDriver(log: boatLog, freezeTick: boatUp.freezeTick).renderWorld
+        // Her heading is far enough off the axis that boat-up and course-up draw different pictures.
+        #expect(abs(wrapAngle(sailing.me.heading - sailing.course.axis)) > 30 * .pi / 180)
+
+        for name in ["prestart", "prestart-moved", "water-light-and-patchy", "water-gusty-offshore", "water-pressure"] {
+            let (fixture, _) = try RenderFixture.load(named: name, in: Self.fixtures)
+            #expect(fixture.view == nil, "\(name)")
+            #expect([.northUpFollow, .northUpCourse].contains(fixture.cameraMode), "\(name)")
+        }
     }
 
     @Test func fixtureFieldsDecodeEveryCameraAndVision() throws {

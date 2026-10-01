@@ -338,3 +338,21 @@ The only colours a livery may use: readable against every venue's water and neve
 
 **Sail number**:
 A number from 1 to 9999 the player chooses for their boat. It need not be unique; when two boats in a fleet share one, the later one shows another number for that race.
+
+### View
+
+**Course-up**:
+The default camera: the view turned so the course axis is at the top of the screen, putting the windward mark up whatever the venue's orientation. The minimap is always course-up.
+_Avoid_: north-up, map view
+
+**Boat-up**:
+The optional camera: the view turned to follow your boat's heading with about a second's lag, so tacks and penalty turns don't whip it round.
+_Avoid_: chase cam, heading-up
+
+**Auto framing**:
+The camera choosing its own centre and zoom to keep your boat, the boats near her, the water upwind, the start line before and just after the gun, and the next mark inside its zone in view; on by default, eased, never snapping. A pinch-zoom overrides it for a few seconds.
+_Avoid_: auto zoom, smart camera
+
+**View heading**:
+The compass heading at the top of the screen in course-up or boat-up; the HUD's arrows turn by it so they point true on screen.
+_Avoid_: camera angle, screen rotation

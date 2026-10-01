@@ -337,7 +337,7 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
 - `-uitesting` marks a UI test run. It and `-fixture` hide the Debug FPS, node and draw-count overlay so
   screenshots are deterministic.
 - `-fixture <name>`, `-scheme halves|tiller` and `-camera course|boat` are parsed for the render fixtures
-  (#62), steering schemes (#112) and camera (#113).
+  (#62), steering schemes (#112) and camera (#113): `-camera` overrides Settings' camera as course-up or boat-up.
 - `-online` starts an online dev race at launch (Debug builds), on `-onlineHost <host:port>` or the menu's
   host; `-startSeconds <n>` (1…60) and `-raceSeconds <n>` ask the dev server for a short sequence and race.
 - `-vision deut|prot|trit|grey|sun` (or `deuteranopia`, `protanopia`, `tritanopia`, `greyscale`, `washout`,
