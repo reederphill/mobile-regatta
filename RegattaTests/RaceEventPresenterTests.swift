@@ -196,6 +196,20 @@ import RegattaCore
         #expect(recorder.calls == ["impact 0.5"])
     }
 
+    /// Your roll tack's result is read as well as seen (#222), overriding #124's "a miss has no cue": a hit and a miss each
+    /// present a short `.roll` notice, a hit's with its haptic cue and a miss's with none, and another boat's roll presents
+    /// nothing.
+    @Test func yourRollTacksResultPresentsANotice() {
+        let me = Self.me
+        var presenter = RaceEventPresenter(me: me)
+        let hit = presenter.present([Self.event(.rollHit(seat: me))])
+        #expect(hit.cues == [.rollHit] && hit.notices == [PresentedNotice(kind: .roll, text: RuleWords.rollHit)])
+        let miss = presenter.present([Self.event(.rollMissed(seat: me))])
+        #expect(miss.cues.isEmpty && miss.notices == [PresentedNotice(kind: .roll, text: RuleWords.rollMissed)])
+        #expect(presenter.present([Self.event(.rollHit(seat: me + 1)), Self.event(.rollMissed(seat: me + 1))]) == Presentation(),
+                "another boat's roll")
+    }
+
     /// #228: the first keep-clear call made while your autohelm held says so, once per device, in place of the rule's
     /// plain words; rules 10–13 only.
     @Test func autohelmKeepClearWordsShowOnce() {

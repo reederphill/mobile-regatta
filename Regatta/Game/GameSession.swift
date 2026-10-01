@@ -274,12 +274,6 @@ final class GameSession {
             switch event.kind {
             case .finished(me, _), .disqualified(me, _), .raceClosed:
                 finishForPlayer()
-            case .rollHit(seat: me):
-                // Your roll tack's result is read as well as seen (#222, `BoatNode`'s ring); the presenter plays its haptic.
-                // TODO-COPY (#124): `RaceEventPresenter` owns the words.
-                post(.roll, "Roll tack: clean")
-            case .rollMissed(seat: me):
-                post(.roll, "Roll tack: missed")
             default:
                 break
             }
