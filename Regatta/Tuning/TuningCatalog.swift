@@ -300,7 +300,7 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "boat", title: "Boat",
-                note: "How boats heel, flutter and flog (#117, #220, #222). Drawn only: never logged.",
+                note: "How boats heel, flutter and flog, and their wakes and shadow hatches (#117, #121, #220, #222). Drawn only: never logged.",
                 applies: .live,
                 sliders: [
                     // Past 1 still counts: heel is capped at 1 after the gain, so more heels her sooner and
@@ -311,6 +311,15 @@ enum TuningCatalog {
                     boat("flutterDegrees", "Flutter", \.flutterDegrees, 0...20, 0.5, unit: "°"),
                     boat("flogSeconds", "Roll-miss flog", \.flogSeconds, 0...4, 0.1, unit: " s"),
                     boat("ghostAlpha", "Ghost fade", \.ghostAlpha, 0.1...0.9, 0.05),
+                    // #121: wakes, cones and backwind.
+                    boat("wakeMaxHulls", "Wake length", \.wakeMaxHulls, 0...10, 0.25, unit: " hulls"),
+                    boat("wakeSpreadDegrees", "Wake spread", \.wakeSpreadDegrees, 2...40, 1, unit: "°"),
+                    boat("wakePressureFan", "Wake pressure fan", \.wakePressureFan, 0...3, 0.1),
+                    boat("wakeAlpha", "Wake alpha", \.wakeAlpha, 0...1, 0.02),
+                    boat("wakePlaningBoost", "Planing wake", \.wakePlaningBoost, 1...2.5, 0.05),
+                    boat("wakeFlareGain", "Roll-hit flare", \.wakeFlareGain, 0...2, 0.1),
+                    boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.2, 0.005),
+                    boat("backwindShare", "Backwind hatch", \.backwindShare, 0...1, 0.05),
                 ]),
             TuningGroup(
                 id: "later", title: "Later",
