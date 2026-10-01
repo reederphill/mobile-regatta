@@ -1,0 +1,253 @@
+import Foundation
+import Testing
+import RegattaCore
+@testable import Regatta
+
+/// Driver events into notices and haptics (#124): the #22 haptic table, plain words the first time a rule is called
+/// (#23), one-line mark-room notices (#15), and nothing for a moment you see rather than feel.
+@MainActor @Suite struct RaceEventPresenterTests {
+    private static let config = RaceConfig(opponents: 2, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+    private static let me = 0
+    private static let t0 = Date(timeIntervalSinceReferenceDate: 1_000)
+
+    private static func event(_ kind: RaceEvent.Kind) -> RaceEvent { RaceEvent(tick: 0, kind: kind) }
+
+    private static func call(_ rule: RacingRule = .portStarboard, offender: Int, victim: Int, incident: Int = 1,
+                             turns: Int = 1) -> RaceEvent {
+        event(.ruleCall(RuleCall(incidentId: incident, tick: incident, rule: rule, offender: offender, victim: victim,
+                                 leg: 0, turnsOwed: turns, startDeadlineTick: nil, completeDeadlineTick: nil)))
+    }
+
+    /// A session whose haptics reach `recorder`, with the first countdown tick already played and forgotten.
+    private static func session(_ recorder: HapticsTests.RecordingGenerator) -> GameSession {
+        let session = GameSession(config: config, haptics: GatedHaptics(generator: recorder, isOn: true))
+        session.now = { t0 }
+        session.consume([])
+        recorder.calls.removeAll()
+        return session
+    }
+
+    /// Every #22 row, with #219's groove snap and #222's roll hit: the table says it, an event for you plays it, and
+    /// the session plays it as the generator call it names.
+    @Test func eventTableCoversEveryHapticRow() {
+        let expected: [RaceCue: HapticPattern] = [
+            .sequenceTick: .light, .gun: .heavy, .ocs: .notify(.warning), .callAgainstMe: .notify(.error),
+            .callForMe: .notify(.success), .markTouch: .notify(.error), .penaltyDone: .notify(.success),
+            .rounding: .light, .finish: .notify(.success), .protestFiled: .light, .contact: .heavy,
+            .disqualified: .notify(.error), .grooveSnap: .light, .rollHit: .light,
+        ]
+        #expect(RaceCue.haptics == expected)
+        #expect(Set(RaceCue.allCases) == Set(expected.keys), "every cue has a row")
+
+        let me = Self.me
+        let events: [RaceCue: RaceEvent.Kind] = [
+            .gun: .gun, .ocs: .ocsNotice(recipient: me),
+            .markTouch: .markTouch(seat: me, mark: "windward mark"), .penaltyDone: .penaltyServed(seat: me),
+            .rounding: .rounded(seat: me, mark: "windward mark"), .finish: .finished(seat: me, place: 1),
+            .protestFiled: .protestRecorded(seat: me, target: 1, matchedIncidentId: nil), .contact: .contact(SeatPair(me, 1)),
+            .disqualified: .disqualified(seat: me, reason: "Unserved penalty"), .grooveSnap: .grooveSnap(seat: me),
+            .rollHit: .rollHit(seat: me),
+        ]
+        for (cue, kind) in events {
+            var presenter = RaceEventPresenter(me: me)
+            #expect(presenter.present([Self.event(kind)]).cues == [cue], "\(cue)")
+        }
+        var presenter = RaceEventPresenter(me: me)
+        #expect(presenter.present([Self.call(offender: me, victim: 1)]).cues == [.callAgainstMe])
+        #expect(presenter.present([Self.call(offender: 1, victim: me, incident: 2)]).cues == [.callForMe])
+        #expect(presenter.sequenceCue(raceTime: -30) == .sequenceTick)
+        #expect(presenter.sequenceCue(raceTime: -29.5) == nil, "once a second")
+        #expect(presenter.sequenceCue(raceTime: -20) == nil, "only 30, 10 and 5…1")
+        for second in [10.0, 5, 4, 3, 2, 1] { #expect(presenter.sequenceCue(raceTime: -second) == .sequenceTick) }
+
+        for (pattern, call) in [(HapticPattern.light, "impact 0.5"), (.heavy, "impact 1.0"),
+                                (.notify(.success), "notify success"), (.notify(.warning), "notify warning"),
+                                (.notify(.error), "notify error")] {
+            let recorder = HapticsTests.RecordingGenerator()
+            pattern.play(on: GatedHaptics(generator: recorder, isOn: true))
+            #expect(recorder.calls == [call])
+        }
+        // Through the session, gated by Settings' Haptics (#110).
+        let recorder = HapticsTests.RecordingGenerator()
+        let session = Self.session(recorder)
+        session.consume([Self.event(.ocsNotice(recipient: session.driver.myBoatIndex))])
+        #expect(recorder.calls == ["notify warning"])
+    }
+
+    /// The first call of a rule number, for or against you, spells it out (#23); a later one posts no notice: the line,
+    /// its badge and the haptic carry it. Reset hints spells it out again.
+    @Test func secondCallOfSameRuleIsBadgeOnly() throws {
+        let name = "RaceEventPresenterTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let me = Self.me
+        var presenter = RaceEventPresenter(me: me, seen: RuleSeenStore(defaults: defaults))
+
+        let first = presenter.present([Self.call(offender: me, victim: 1, incident: 1)])
+        #expect(first.cues == [.callAgainstMe])
+        let text = try #require(first.notices.first.map(\.text))
+        #expect(first.notices.map(\.kind) == [.ruleCall])
+        #expect(text.contains(RuleWords.plain(.portStarboard)) && text.contains("(rule 10)"), "\(text)")
+        #expect(text.contains("one full circle") && !text.contains("360") && !text.contains("720"), "\(text)")
+
+        // The same call delivered again (an online resync) shows nothing and plays nothing.
+        #expect(presenter.present([Self.call(offender: me, victim: 1, incident: 1)]) == Presentation())
+        // The next rule 10 call, in your favour this time: felt, no notice.
+        let second = presenter.present([Self.call(offender: 1, victim: me, incident: 2)])
+        #expect(second.cues == [.callForMe] && second.notices.isEmpty)
+        // Another number spells itself out, in your favour too.
+        let other = presenter.present([Self.call(.windwardLeeward, offender: 2, victim: me, incident: 3)])
+        #expect(other.notices.first?.text.contains("(rule 11)") == true && other.notices.first?.text.contains("fouled you") == true)
+        // A mark touch is rule 31's first call, then felt alone.
+        #expect(presenter.present([Self.event(.markTouch(seat: me, mark: "pin"))]).notices.first?.text.contains("(rule 31)") == true)
+        #expect(presenter.present([Self.event(.markTouch(seat: me, mark: "pin"))]).notices.isEmpty)
+
+        // Stored with hint progress: a new race on this device remembers, and Reset hints forgets.
+        var nextRace = RaceEventPresenter(me: me, seen: RuleSeenStore(defaults: defaults))
+        #expect(nextRace.present([Self.call(offender: me, victim: 1, incident: 9)]).notices.isEmpty)
+        #expect(RuleSeenStore.rulesKey.hasPrefix(DeviceSettings.hintKeyPrefix))
+        DeviceSettings.resetHints(in: defaults)
+        #expect(nextRace.present([Self.call(offender: me, victim: 1, incident: 10)]).notices.count == 1)
+
+        // A call between two other boats posts nothing and plays nothing (#114).
+        #expect(presenter.present([Self.call(.clearAstern, offender: 1, victim: 2, incident: 11)]) == Presentation())
+    }
+
+    /// Nothing fires for a tack tap, a puff or wind shadow (#22, #112, #220): puffs and shadow have no race event,
+    /// and the moments you see on the water have no cue.
+    @Test func noHapticForTackTapPuffOrShadow() {
+        let me = Self.me
+        var presenter = RaceEventPresenter(me: me)
+        let seen: [RaceEvent.Kind] = [
+            .tacked(seat: me), .gybed(seat: me), .rollMissed(seat: me), .penaltyStarted(seat: me),
+            .penaltyReset(seat: me), .started(seat: me), .cleared(seat: me), .becameGhost(seat: me),
+            .firstFinish(closeTick: 10), .obstructionContact(seat: me, kind: .land),
+            .obstructionContact(seat: me, kind: .mark),
+        ]
+        #expect(presenter.present(seen.map(Self.event)).cues.isEmpty)
+
+        let recorder = HapticsTests.RecordingGenerator()
+        let session = Self.session(recorder)
+        session.tackOrGybe()
+        session.pressTack(at: 10)
+        session.releaseTack(at: 11)
+        // Your own tack, as the race reports it.
+        session.consume([Self.event(.tacked(seat: session.driver.myBoatIndex))])
+        #expect(recorder.calls.isEmpty, "\(recorder.calls)")
+    }
+
+    /// Your autohelm snapping to the groove clicks lightly (#219); another boat's doesn't.
+    @Test func grooveSnapGivesLightHaptic() {
+        var presenter = RaceEventPresenter(me: Self.me)
+        #expect(presenter.present([Self.event(.grooveSnap(seat: Self.me))]).cues == [.grooveSnap])
+        #expect(presenter.present([Self.event(.grooveSnap(seat: 1))]).cues.isEmpty)
+        #expect(RaceCue.grooveSnap.haptic == .light)
+
+        let recorder = HapticsTests.RecordingGenerator()
+        let session = Self.session(recorder)
+        let me = session.driver.myBoatIndex
+        session.consume([Self.event(.grooveSnap(seat: (me + 1) % 3))])
+        #expect(recorder.calls.isEmpty)
+        session.consume([Self.event(.grooveSnap(seat: me))])
+        #expect(recorder.calls == ["impact 0.5"])
+    }
+
+    /// A mark-room notice is one short line (#15), to its two boats only, whichever side of it you are, however long
+    /// the other boat's name.
+    @Test func markRoomNoticeIsOneLine() {
+        let marks = ["pin", "committee boat", "windward mark", "offset mark", "gate left", "gate right"]
+        for long in [false, true] {
+            let name: (Int) -> String = { long ? "A Very Long Sailor Name Indeed \($0)" : "Boat \($0)" }
+            for mark in marks {
+                for (boat, over) in [(Self.me, 1), (1, Self.me)] {
+                    var presenter = RaceEventPresenter(me: Self.me, name: name)
+                    let shown = presenter.present([Self.event(.markRoomNotice(boat: boat, entitledOver: over, mark: mark))])
+                    #expect(shown.notices.count == 1 && shown.notices[0].kind == .markRoom)
+                    let text = shown.notices.first?.text ?? ""
+                    #expect(text.count <= RuleWords.markRoomLimit && !text.contains("\n") && !text.isEmpty, "\(text)")
+                    #expect(text.contains("yours") == (boat == Self.me), "\(text)")
+                }
+            }
+        }
+        var presenter = RaceEventPresenter(me: Self.me)
+        #expect(presenter.present([Self.event(.markRoomNotice(boat: 1, entitledOver: 2, mark: "pin"))]) == Presentation(),
+                "not to a third boat")
+    }
+
+    /// Your roll tap's hit plays a haptic (#222); a miss plays none, and nor does another boat's hit.
+    @Test func rollHitGivesHapticMissDoesNot() {
+        let recorder = HapticsTests.RecordingGenerator()
+        let session = Self.session(recorder)
+        let me = session.driver.myBoatIndex
+        session.consume([Self.event(.rollMissed(seat: me))])
+        session.consume([Self.event(.rollHit(seat: (me + 1) % 3))])
+        #expect(recorder.calls.isEmpty)
+        session.consume([Self.event(.rollHit(seat: me))])
+        #expect(recorder.calls == ["impact 0.5"])
+    }
+
+    /// #228: the first keep-clear call made while your autohelm held says so, once per device, in place of the rule's
+    /// plain words; rules 10–13 only.
+    @Test func autohelmKeepClearWordsShowOnce() {
+        let me = Self.me
+        var presenter = RaceEventPresenter(me: me)
+        let rule15 = presenter.present([Self.call(.acquiringRightOfWay, offender: me, victim: 1, incident: 1)],
+                                       autohelmHolding: true)
+        #expect(rule15.notices.first?.text.contains(RuleWords.autohelmKeepClear) == false, "not rule 15")
+        let first = presenter.present([Self.call(.windwardLeeward, offender: me, victim: 1, incident: 2)],
+                                      autohelmHolding: true)
+        let text = first.notices.first?.text ?? ""
+        #expect(text.contains(RuleWords.autohelmKeepClear) && text.contains("(rule 11)"), "\(text)")
+        #expect(presenter.seen.hasSeen(.windwardLeeward))
+        let again = presenter.present([Self.call(.portStarboard, offender: me, victim: 1, incident: 3)],
+                                      autohelmHolding: true)
+        #expect(again.notices.first?.text.contains(RuleWords.autohelmKeepClear) == false, "once per device")
+        #expect(again.notices.first?.text.contains(RuleWords.plain(.portStarboard)) == true)
+    }
+
+    /// A contact and its call arrive on one tick: one haptic, the strongest; both cues are reported.
+    @Test func oneBatchPlaysItsStrongestHaptic() {
+        let recorder = HapticsTests.RecordingGenerator()
+        let session = Self.session(recorder)
+        let me = session.driver.myBoatIndex
+        var cues: [RaceCue] = []
+        session.onCue = { cues.append($0) }
+        let other = (me + 1) % 3
+        session.consume([Self.event(.contact(SeatPair(me, other))), Self.call(offender: me, victim: other)])
+        #expect(recorder.calls == ["notify error"])
+        #expect(cues == [.contact, .callAgainstMe])
+        #expect(session.notice?.kind == .ruleCall)
+    }
+
+    /// The RTT warning (#18, #68) is one notice as it starts, again only after it clears, and it waits out a live Turn
+    /// notice (#123) rather than going stale behind it.
+    @Test func lagWarningIsOneShotAndWaitsOutAPenalty() {
+        var presenter = RaceEventPresenter(me: Self.me)
+        #expect(presenter.lag(isWarning: false) == nil)
+        #expect(presenter.lag(isWarning: true) == PresentedNotice(kind: .latency, text: RuleWords.lag))
+        #expect(presenter.lag(isWarning: true) == nil, "one-shot")
+        #expect(presenter.lag(isWarning: false) == nil)
+        #expect(presenter.lag(isWarning: true)?.kind == .latency, "re-armed once it cleared")
+
+        var slot = NoticeSlot()
+        func at(_ s: Double) -> Date { Self.t0.addingTimeInterval(s) }
+        slot.setLive(.penalty, text: "Turn · 15s / 30s", at: at(0))
+        #expect(slot.current(at: at(0))?.kind == .penalty)
+        slot.post(.latency, RuleWords.lag, at: at(1))
+        for t in stride(from: 1.0, through: 46, by: 5) {
+            slot.setLive(.penalty, text: "Turn · \(Int(46 - t))s", at: at(t))
+            #expect(slot.current(at: at(t))?.kind == .penalty)
+        }
+        slot.setLive(.penalty, text: nil, at: at(46))
+        #expect(slot.current(at: at(46))?.text == RuleWords.lag, "a whole turn later, still shown")
+    }
+
+    /// The OCS notice is rule 29.1's, and no copy names a 360 or a 720 (#9).
+    @Test func copyIsOneTurnAndOCSUnderRule29_1() {
+        #expect(RuleWords.ocs.contains("29.1") && !RuleWords.ocs.contains("22"))
+        let texts = RacingRule.allCases.flatMap { rule in
+            [true, false].map { RuleWords.firstCall(rule, against: $0, other: "Boat 2", owesTurn: true) }
+        } + [RuleWords.firstMarkTouch("pin"), RuleWords.ocs, RuleWords.lag]
+        for text in texts { #expect(!text.contains("360") && !text.contains("720") && !text.contains("spin"), "\(text)") }
+    }
+}

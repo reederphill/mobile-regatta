@@ -111,7 +111,11 @@ final class AppModel {
         controls.savesZoomMultiplier = { [weak self] multiplier in self?.deviceSettings.zoomMultiplier = multiplier }
     }
 
-    /// Settings' Reset hints: every hint shows again (#25).
+    /// The rule numbers this device has seen called (#23), kept with hint progress in `defaults`: Reset hints clears it.
+    /// UI tests keep it in memory, a race's own, so every run reads the same words.
+    var rulesSeen: RuleSeenStore { launchOptions.uiTesting ? RuleSeenStore() : RuleSeenStore(defaults: defaults) }
+
+    /// Settings' Reset hints: every hint shows again, and so do the plain words of every rule call (#25, #23).
     func resetHints() {
         DeviceSettings.resetHints(in: defaults)
     }
@@ -148,11 +152,13 @@ final class AppModel {
         #if DEBUG
         var config = config
         config.files = tuning.practiceFiles()
-        let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls)
+        let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls,
+                                  rulesSeen: rulesSeen)
         tuning.attach(session, files: config.files)
         return session
         #else
-        return GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls)
+        return GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls,
+                           rulesSeen: rulesSeen)
         #endif
     }
 

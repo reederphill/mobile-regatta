@@ -50,10 +50,15 @@ protocol RaceDriver: AnyObject {
     /// draws it settled, with no easing or animation, and hides the controls (and the HUD, unless the
     /// fixture asks for it, #114).
     var isFrozen: Bool { get }
+
+    /// The round trip to the server has stayed over 250 ms for about 5 s (#18, #68): the HUD's warning (#124).
+    var lagWarning: Bool { get }
 }
 
 extension RaceDriver {
     var isFrozen: Bool { false }
+    /// The RTT warning (#18, #68): only an online race (`OnlineDriver.lagWarning`) has one.
+    var lagWarning: Bool { false }
 
     /// A driver that keeps real time (online) or runs no ticks (a fixture) runs them all.
     @discardableResult func tick(_ dt: Double, within budget: Duration?) -> [TickFrame] { tick(dt) }

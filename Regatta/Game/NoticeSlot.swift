@@ -21,12 +21,14 @@ struct NoticeRule: Equatable {
 }
 
 enum NoticeTable {
+    /// `.latency` waits up to 90 s: the RTT warning is one-shot (#124), and the live Turn notice (#123) holds the slot
+    /// for a whole penalty, one turn's 15 s to start and 30 s to complete, or two stacked, before it shows.
     static let rows: [NoticeKind: NoticeRule] = [
         .ocs: NoticeRule(priority: 60, seconds: 6, maxWait: 2, symbol: "exclamationmark.triangle.fill", holdsHints: true),
         .ruleCall: NoticeRule(priority: 50, seconds: 6, maxWait: 6, symbol: "flag.fill", holdsHints: true),
         .markRoom: NoticeRule(priority: 40, seconds: 4, maxWait: 2, symbol: "circle.dashed", holdsHints: false),
         .penalty: NoticeRule(priority: 30, seconds: 5, maxWait: 4, symbol: "arrow.clockwise", holdsHints: false),
-        .latency: NoticeRule(priority: 20, seconds: 10, maxWait: 30, symbol: "wifi.exclamationmark", holdsHints: false),
+        .latency: NoticeRule(priority: 20, seconds: 10, maxWait: 90, symbol: "wifi.exclamationmark", holdsHints: false),
         .hint: NoticeRule(priority: 10, seconds: 6, maxWait: 60, symbol: "lightbulb", holdsHints: false),
     ]
 
@@ -40,7 +42,7 @@ enum NoticeTable {
 struct Notice: Equatable, Identifiable {
     let id: Int
     let kind: NoticeKind
-    // TODO-COPY (#124): `RaceEventPresenter` owns the words.
+    // TODO-COPY (#171): `RaceEventPresenter` owns the words (`RuleWords`).
     let text: String
     /// When it was posted, and when it stops showing (set once it shows).
     let posted: Date
