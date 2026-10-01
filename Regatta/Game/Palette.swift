@@ -10,13 +10,19 @@ nonisolated enum CuePalette {
     /// The active leg: current marks, zone, rounding arrow, next-mark edge arrow, rule-call line, penalty arc.
     /// It reads amber: truer oranges come within 20° of vermillion.
     static let orange = PaletteToken("orange", 0xE69F00)
-    /// The give-way chevron.
+    /// The chevron blue: no cue draws it since the right-of-way glyphs became glows, so it stays reserved only to
+    /// keep the boat colours clear of it.
     // placeholder: docs/palette.md's working value, until #169 applies #53's final chevron blue.
     static let chevronBlue = PaletteToken("chevronBlue", 0x3F51E0)
     /// Laylines, and the HUD's start clock (#30 reuses it).
     static let yellow = PaletteToken("yellow", 0xF0E442)
     /// Inactive marks.
     static let inactiveGrey = PaletteToken("inactiveGrey", 0x9AA0A6)
+    /// The right-of-way glow round a boat you must keep clear of. Not in `reserved`: it isn't held to the hue rule,
+    /// so a red livery can sit in a red glow (the hull's outline keeps it readable).
+    static let giveWayRed = PaletteToken("giveWayRed", 0xFF4D4D)
+    /// The right-of-way glow round a boat that must keep clear of you.
+    static let hasRightGreen = PaletteToken("hasRightGreen", 0x3DDC84)
     /// The player's glow, wakes and ladder lines (#122); the alpha is set where it's drawn.
     static let cueWhite = PaletteToken("cueWhite", 0xFFFFFF)
     /// Every hull's thin outline, 1 pt inside her edge (#117, #21): what keeps a dark hull readable on the water.
@@ -25,7 +31,7 @@ nonisolated enum CuePalette {
 
     /// The hues nothing else may come near. Grey and white have no hue to reserve.
     static let reserved = [vermillion, orange, yellow, chevronBlue]
-    static let all = reserved + [inactiveGrey, cueWhite, hullOutline]
+    static let all = reserved + [giveWayRed, hasRightGreen, inactiveGrey, cueWhite, hullOutline]
 }
 
 /// Water and land (#22, `docs/palette.md` "ChartPalette"), held to the hue rule: blue-teal water and sage land,

@@ -2,28 +2,27 @@ import RegattaCore
 import SpriteKit
 import UIKit
 
-/// The rule cues over the fleet (#123, #15): the right-of-way glyphs (an orange ⚠ over a boat you must keep clear of,
-/// a blue chevron over one that must keep clear of you), the rule-call lines with their rule-number badges, and your
-/// penalty arc. Every hint pairs its colour with a shape or line style (colour-blind safety). Sizes and widths are
-/// screen points at any zoom, and the glyphs and badges stay upright as the camera turns. Every node has a z of its
-/// own (`DrawOrder`), hidden or not.
+/// The rule cues over the fleet (#123, #15): the right-of-way glows (red round a boat you must keep clear of, green
+/// round one that must keep clear of you, fading in as she nears), the rule-call lines with their rule-number badges,
+/// and your penalty arc. The glows are the boats' own: this layer works out which boats glow and how strongly
+/// (`glows`), and the scene sets each `BoatNode`'s halo from them. The lines and arc pair their colour with a line
+/// style. Their sizes and widths are screen points at any zoom, and the badges stay upright as the camera turns.
+/// Every node has a z of its own (`DrawOrder`), hidden or not.
 final class RuleCueLayer: SKNode {
     static let layerName = "rules"
-    static let glyphName = "rightOfWayGlyph"
     static let lineName = "ruleCallLine"
     static let badgeName = "ruleCallBadge"
     static let arcName = "penaltyArc"
 
-    private var glyphs: [SKSpriteNode] = []
     private var lines: [SKShapeNode] = []
     private var badges: [(plate: SKShapeNode, label: SKLabelNode)] = []
     private let arc = SKShapeNode()
     private let ppm: CGFloat
 
-    private static let giveWayTexture = SKTexture(image: RuleGlyphArt.image(.giveWay))
-    private static let hasRightTexture = SKTexture(image: RuleGlyphArt.image(.hasRight))
+    /// The glow each seat has now, nil where none. Empty until the cues are first drawn, and after `reset`.
+    private(set) var glows: [RightOfWayGlow?] = []
 
-    init(seats: Int, pointsPerMeter: CGFloat) {
+    init(pointsPerMeter: CGFloat) {
         ppm = pointsPerMeter
         super.init()
         name = Self.layerName
@@ -68,14 +67,6 @@ final class RuleCueLayer: SKNode {
             addChild(label)
             badges.append((plate, label))
         }
-        for _ in 0..<seats {
-            let glyph = SKSpriteNode(texture: Self.giveWayTexture)
-            glyph.name = Self.glyphName
-            glyph.isHidden = true
-            glyph.zPosition = next()
-            addChild(glyph)
-            glyphs.append(glyph)
-        }
     }
 
     @available(*, unavailable)
@@ -89,33 +80,13 @@ final class RuleCueLayer: SKNode {
     func update(_ world: RenderWorld, calls: RuleCallLines, style: BoatStyle, px: CGFloat, rotation: CGFloat) {
         let me = world.myBoatIndex
         let ghost = world.isGhost(ofSeat: me)
-        updateGlyphs(world, style: style, px: px, rotation: rotation, ghost: ghost)
+        glows = GlowSelection.glows(keepClear: world.frame.keepClear, positions: world.boats.map(\.position),
+                                    me: me, isGhost: ghost, rangeHulls: style.glowRangeHulls,
+                                    fullHulls: style.glowFullHulls, hullLength: world.boatClass.hull.length)
         let active = ghost ? [] : calls.active(at: world.time, seconds: style.ruleCallLineSeconds,
                                                fadeSeconds: style.ruleCallFadeSeconds)
         updateLines(world, active: active, px: px, rotation: rotation)
         updateArc(world, style: style, px: px, rotation: rotation, ghost: ghost)
-    }
-
-    private func updateGlyphs(_ world: RenderWorld, style: BoatStyle, px: CGFloat, rotation: CGFloat, ghost: Bool) {
-        let shown = GlyphSelection.glyphs(keepClear: world.frame.keepClear, positions: world.boats.map(\.position),
-                                          me: world.myBoatIndex, isGhost: ghost, rangeHulls: style.glyphRangeHulls,
-                                          hullLength: world.boatClass.hull.length)
-        // Screen up, in the world: the glyph sits that far above its boat whatever way the camera faces.
-        let up = CGPoint(x: -sin(rotation), y: cos(rotation))
-        let offset = CGFloat(style.glyphOffset) * px
-        let size = CGFloat(style.glyphSize) * px
-        for (seat, node) in glyphs.enumerated() {
-            guard seat < shown.count, let glyph = shown[seat] else {
-                node.isHidden = true
-                continue
-            }
-            node.isHidden = false
-            node.texture = glyph == .giveWay ? Self.giveWayTexture : Self.hasRightTexture
-            node.size = CGSize(width: size, height: size)
-            let at = point(world.boats[seat].position)
-            node.position = CGPoint(x: at.x + up.x * offset, y: at.y + up.y * offset)
-            node.zRotation = rotation
-        }
     }
 
     private func updateLines(_ world: RenderWorld, active: [RuleCallLines.Line], px: CGFloat, rotation: CGFloat) {
@@ -174,72 +145,15 @@ final class RuleCueLayer: SKNode {
         arc.isHidden = false
     }
 
-    /// How many glyphs, lines and arcs show, for tests: e.g. `glyphs=2 lines=1 arc=1`.
+    /// Puts every boat's glow out, for while the cues are off (the layer's own nodes are hidden with it).
+    func reset() {
+        glows = []
+    }
+
+    /// How many glows, lines and arcs show, for tests: e.g. `glows=2 lines=1 arc=1`.
     var summary: String {
-        let g = glyphs.filter { !$0.isHidden }.count
+        let g = glows.compactMap { $0 }.count
         let l = lines.filter { !$0.isHidden }.count
-        return "glyphs=\(g) lines=\(l) arc=\(arc.isHidden ? 0 : 1)"
-    }
-
-    /// The glyph each seat shows now, nil where none, for tests.
-    var shownGlyphs: [RightOfWayGlyph?] {
-        glyphs.map { node in
-            node.isHidden ? nil : (node.texture === Self.giveWayTexture ? .giveWay : .hasRight)
-        }
-    }
-}
-
-/// The glyphs' art, drawn once (#123): shape carries the meaning, colour backs it. The ⚠ is an orange triangle with
-/// a black exclamation mark; the chevron a blue downward chevron. The ⚠ has a dark outline to lift it off the water;
-/// the chevron, whose blue is close to the water's lightness, a pale tint of its own blue (docs/palette.md). Not white:
-/// white is your boat's (#22).
-enum RuleGlyphArt {
-    static let side: CGFloat = 32
-    /// The chevron's edge: its blue, lightened (the hue stays the reserved chevron blue's; not white, #22).
-    static let chevronEdge = UIColor(red: 0.78, green: 0.81, blue: 1.0, alpha: 1)
-
-    static func image(_ glyph: RightOfWayGlyph) -> UIImage {
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 3
-        format.opaque = false
-        return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { context in
-            let cg = context.cgContext
-            let outline = UIColor.black.withAlphaComponent(0.6)
-            cg.setLineJoin(.round)
-            cg.setLineCap(.round)
-            switch glyph {
-            case .giveWay:
-                let triangle = UIBezierPath()
-                triangle.move(to: CGPoint(x: side / 2, y: 3))
-                triangle.addLine(to: CGPoint(x: side - 2.5, y: side - 4))
-                triangle.addLine(to: CGPoint(x: 2.5, y: side - 4))
-                triangle.close()
-                CuePalette.orange.uiColor.setFill()
-                triangle.fill()
-                outline.setStroke()
-                triangle.lineWidth = 2
-                triangle.stroke()
-                UIColor.black.setFill()
-                UIBezierPath(roundedRect: CGRect(x: side / 2 - 1.75, y: 11, width: 3.5, height: 10), cornerRadius: 1.75)
-                    .fill()
-                UIBezierPath(ovalIn: CGRect(x: side / 2 - 2, y: 22.5, width: 4, height: 4)).fill()
-            case .hasRight:
-                let chevron = UIBezierPath()
-                chevron.move(to: CGPoint(x: 3, y: 7))
-                chevron.addLine(to: CGPoint(x: side / 2, y: 18))
-                chevron.addLine(to: CGPoint(x: side - 3, y: 7))
-                chevron.addLine(to: CGPoint(x: side - 3, y: 15))
-                chevron.addLine(to: CGPoint(x: side / 2, y: 27))
-                chevron.addLine(to: CGPoint(x: 3, y: 15))
-                chevron.close()
-                // A pale tint of the chevron's own blue edges it: dark on dark water (and in greyscale) it vanished
-                // with the dark outline alone.
-                chevronEdge.setStroke()
-                chevron.lineWidth = 3
-                chevron.stroke()
-                CuePalette.chevronBlue.uiColor.setFill()
-                chevron.fill()
-            }
-        }
+        return "glows=\(g) lines=\(l) arc=\(arc.isHidden ? 0 : 1)"
     }
 }

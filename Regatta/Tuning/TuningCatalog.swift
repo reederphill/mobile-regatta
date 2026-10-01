@@ -350,8 +350,10 @@ enum TuningCatalog {
                     boat("edgeArrowInsetSide", "Edge arrow side inset", \.edgeArrowInsetSide, 0...80, 2, unit: " pt"),
                     boat("edgeArrowClearance", "Edge arrow HUD clearance", \.edgeArrowClearance, 0...60, 2, unit: " pt"),
                     // #123: the rule cues.
-                    boat("glyphRangeHulls", "Right-of-way glyph range", \.glyphRangeHulls, 1...20, 0.5, unit: " hulls"),
-                    boat("glyphSize", "Glyph size", \.glyphSize, 8...32, 1, unit: " pt"),
+                    boat("glowRangeHulls", "Right-of-way glow starts", \.glowRangeHulls, 1...20, 0.5, unit: " hulls"),
+                    boat("glowFullHulls", "Right-of-way glow full", \.glowFullHulls, 0.5...10, 0.5, unit: " hulls"),
+                    boat("glowMaxAlpha", "Right-of-way glow alpha", \.glowMaxAlpha, 0.1...1, 0.05),
+                    boat("rightOfWayGlowBlur", "Right-of-way glow blur", \.rightOfWayGlowBlur, 2...20, 1, unit: " pt"),
                     boat("ruleCallLineSeconds", "Rule-call line", \.ruleCallLineSeconds, 2...20, 0.5, unit: " s"),
                     boat("ruleCallFadeSeconds", "Rule-call line fade", \.ruleCallFadeSeconds, 0...5, 0.25, unit: " s"),
                     boat("penaltyArcRadiusHulls", "Penalty arc radius", \.penaltyArcRadiusHulls, 0.5...2, 0.1, unit: " hulls"),
