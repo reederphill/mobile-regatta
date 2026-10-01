@@ -38,7 +38,7 @@ nonisolated struct PenaltyReadout: Equatable, Sendable {
         self.init(owed: owed, tick: frame.tick, startSeconds: penalty.start, completeSeconds: penalty.complete)
     }
 
-    // TODO-COPY (#124): the format is #15's; #124 polishes the words.
+    // TODO-COPY (#171): the format is #15's.
     /// "Turn · 11s / 26s" before the turn is started, "Turn · 26s" once it is, with " ×N" when N turns are owed.
     var noticeText: String {
         let clock = phase == .start ? "\(startSecondsLeft)s / \(completeSecondsLeft)s" : "\(completeSecondsLeft)s"

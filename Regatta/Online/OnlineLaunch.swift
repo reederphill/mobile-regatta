@@ -55,11 +55,14 @@ final class OnlineLaunch {
     @ObservationIgnored private let haptics: any Haptics
     /// The race's steering scheme: the app passes `AppModel.controls` (#112).
     @ObservationIgnored private let controls: ControlSettings
+    /// The rule numbers this device has seen called (#23): the app passes `AppModel.rulesSeen`.
+    @ObservationIgnored private let rulesSeen: RuleSeenStore
 
     init(server: RaceServer, haptics: any Haptics = GatedHaptics(), controls: ControlSettings = ControlSettings(),
-         ticket: @escaping () async throws -> [UInt8]) {
+         rulesSeen: RuleSeenStore = RuleSeenStore(), ticket: @escaping () async throws -> [UInt8]) {
         self.server = server
         self.haptics = haptics
+        self.rulesSeen = rulesSeen
         self.controls = controls
         self.ticket = ticket
     }
@@ -96,7 +99,7 @@ final class OnlineLaunch {
             let clock = clock
             let driver = OnlineDriver(start: start, transport: joined, token: token, clientBuild: Self.clientBuild,
                                       now: clock.now, connect: { WebSocketTransport(url: url) })
-            phase = .racing(GameSession(online: driver, haptics: haptics, controls: controls))
+            phase = .racing(GameSession(online: driver, haptics: haptics, controls: controls, rulesSeen: rulesSeen))
         case .updateRequired(let reason):
             transport.close()
             phase = .updateRequired(reason)

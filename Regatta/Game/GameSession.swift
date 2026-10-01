@@ -69,7 +69,12 @@ final class GameSession {
     @ObservationIgnored private let minimapField = MinimapField()
     /// The clock notices are timed by: wall-clock time, so a notice reads for its seconds at any timescale.
     @ObservationIgnored var now: () -> Date = { .now }
-    @ObservationIgnored private var lastCountdownSecond = Int.max
+    /// Driver events into notices and cues (#124).
+    @ObservationIgnored private var presenter: RaceEventPresenter
+    /// Every cue the presenter plays, for #126's audio. Nothing sets it yet.
+    @ObservationIgnored var onCue: ((RaceCue) -> Void)?
+    /// The plain words posted and not yet shown or dropped, by notice id: what each teaches (`settleMarks`).
+    @ObservationIgnored private var pendingMarks: [Int: [SeenMark]] = [:]
     @ObservationIgnored private var toldUpdateRequired = false
     /// Every haptic goes through here, so Settings' Haptics off silences them all (#110).
     @ObservationIgnored private let haptics: any Haptics
@@ -79,15 +84,15 @@ final class GameSession {
     /// A practice race on the device. `timescale` runs the simulation that many times real time
     /// (`-timescale`, for tests).
     convenience init(config: RaceConfig, timescale: Double = 1, haptics: any Haptics = GatedHaptics(),
-                     controls: ControlSettings = ControlSettings()) {
+                     controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore()) {
         let driver = PracticeDriver(config: config, timescale: timescale)
-        self.init(driver: driver, roster: driver.roster, haptics: haptics, controls: controls)
+        self.init(driver: driver, roster: driver.roster, haptics: haptics, controls: controls, rulesSeen: rulesSeen)
     }
 
     /// An online race (#68).
     convenience init(online driver: OnlineDriver, haptics: any Haptics = GatedHaptics(),
-                     controls: ControlSettings = ControlSettings()) {
-        self.init(driver: driver, roster: driver.roster, haptics: haptics, controls: controls)
+                     controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore()) {
+        self.init(driver: driver, roster: driver.roster, haptics: haptics, controls: controls, rulesSeen: rulesSeen)
     }
 
     /// A render fixture (#62): `log` replayed to the fixture's freeze tick and frozen there, drawn from
@@ -121,17 +126,21 @@ final class GameSession {
         }
     }
 
-    // TODO-COPY (#124): `RaceEventPresenter` writes the real notices; a fixture's is a placeholder of a real length.
+    // TODO-COPY (#171): `RaceEventPresenter` writes the real notices; a fixture's is a placeholder of a real length.
     static func fixtureNoticeText(_ kind: NoticeKind) -> String {
         "TODO-COPY \(kind.rawValue): room at the mark for the inside boat"
     }
 
+    /// `rulesSeen`: which rule numbers this device has seen called, for plain words (#23). In memory by default, so
+    /// tests and fixtures never write the device's; the app passes one over its defaults.
     init(driver: any RaceDriver, roster: FleetRoster, haptics: any Haptics = GatedHaptics(),
-         controls: ControlSettings = ControlSettings()) {
+         controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore()) {
         self.driver = driver
         self.roster = roster
         self.haptics = haptics
         self.controls = controls
+        let me = driver.myBoatIndex
+        presenter = RaceEventPresenter(me: me, seen: rulesSeen) { roster.label(of: $0, playerSeat: me) }
         // `-vision` (Debug); a fixture sets its own after this.
         vision = LaunchOptions.current.raceVision
         scene = GameScene(driver: driver, roster: roster)
@@ -236,9 +245,12 @@ final class GameSession {
         let penalty = showsRuleCues ? PenaltyReadout(frame: driver.currentFrame, seat: driver.myBoatIndex) : nil
         noticeSlot.setLive(.penalty, text: penalty?.noticeText, at: now())
         let current = noticeSlot.current(at: now())
+        settleMarks()
         if current != notice { notice = current }
         closeLeaderboardIfDue()
         if playerDone { results = makeResults() }
+        // The RTT warning (#18, #68): once as it starts.
+        if let lag = presenter.lag(isWarning: driver.lagWarning) { post(lag.kind, lag.text) }
         if let online = driver as? OnlineDriver, case .updateRequired = online.connection, !toldUpdateRequired {
             toldUpdateRequired = true
             post(.latency, "Update Regatta to race online. This race can't reconnect.")
@@ -246,62 +258,25 @@ final class GameSession {
     }
 
     func consume(_ events: [RaceEvent]) {
-        // Every call draws its line (#123), bystanders' too; the notice switch below is #124's.
+        // Every call draws its line (#123), bystanders' too; what you read and feel is the presenter's (#124).
         for event in events {
             if case .ruleCall(let call) = event.kind { scene.ruleCalls.add(call) }
         }
-        for event in events { handle(event) }
-        let time = driver.currentFrame.time
-        if time < 0 {
-            let second = Int(ceil(-time))
-            if second != lastCountdownSecond {
-                lastCountdownSecond = second
-                if second <= 5 || second == 10 || second == 30 { haptics.impact(intensity: 0.5) }
-            }
-        }
-    }
-
-    // MARK: - Events
-
-    private func handle(_ event: RaceEvent) {
+        let presentation = presenter.present(events, autohelmHolding: myBoat.autohelm != nil)
+        for notice in presentation.notices { post(notice.kind, notice.text, marks: notice.marks) }
+        var cues = presentation.cues
+        if let tick = presenter.sequenceCue(raceTime: driver.currentFrame.time) { cues.append(tick) }
+        // One haptic a batch, the strongest: a contact and its call arrive on the same tick.
+        HapticPattern.strongest(of: cues)?.play(on: haptics)
+        if let onCue { cues.forEach(onCue) }
         let me = driver.myBoatIndex
-        func name(_ i: Int) -> String { roster.label(of: i, playerSeat: me) }
-
-        // Only the ticket's notice kinds reach the slot (#114); the gun, a start, a rounding, a finish and a served
-        // penalty are felt, not read.
-        switch event.kind {
-        case .gun:
-            haptics.impact(intensity: 1)
-        case .ocsNotice(let b) where b == me:
-            post(.ocs, "Rule 29.1 — OCS. You were over at the gun: dip back below the line, then start.")
-            haptics.notify(.error)
-        case .ruleCall(let call) where call.offender == me:
-            post(.ruleCall, "Rule \(call.rule.rawValue) — \(call.rule.title). Your foul on \(name(call.victim)): spin a 360°.")
-            haptics.notify(.error)
-        case .ruleCall(let call) where call.victim == me:
-            post(.ruleCall, "Rule \(call.rule.rawValue) — \(call.rule.title). \(name(call.offender)) fouled you and must spin.")
-            haptics.impact(intensity: 0.8)
-        case .ruleCall:
-            // A call between two other boats posts nothing (#114): it would take your notices' slot and hold back
-            // your hints for a foul you weren't in.
-            break
-        case .markTouch(let b, let mark) where b == me:
-            post(.ruleCall, "Rule 31 — you hit the \(mark). Spin a 360°.")
-            haptics.notify(.warning)
-        case .penaltyServed(let b) where b == me:
-            haptics.notify(.success)
-        case .rounded(let b, _) where b == me:
-            haptics.impact(intensity: 0.6)
-        case .finished(let b, _) where b == me:
-            haptics.notify(.success)
-            finishForPlayer()
-        case .disqualified(let b, _) where b == me:
-            haptics.notify(.error)
-            finishForPlayer()
-        case .raceClosed:
-            finishForPlayer()
-        default:
-            break
+        for event in events {
+            switch event.kind {
+            case .finished(me, _), .disqualified(me, _), .raceClosed:
+                finishForPlayer()
+            default:
+                break
+            }
         }
     }
 
@@ -312,8 +287,24 @@ final class GameSession {
         results = makeResults()
     }
 
-    private func post(_ kind: NoticeKind, _ text: String) {
+    private func post(_ kind: NoticeKind, _ text: String, marks: [SeenMark] = []) {
+        if !marks.isEmpty { pendingMarks[noticeSlot.nextID] = marks }
         notice = noticeSlot.post(kind, text, at: now())
+        settleMarks()
+    }
+
+    /// Plain words are seen once their notice shows, and stay unseen if the slot drops it stale (#23, #114).
+    private func settleMarks() {
+        for (id, marks) in pendingMarks {
+            if noticeSlot.showing?.id == id {
+                presenter.shown(marks)
+            } else if !noticeSlot.waiting.contains(where: { $0.id == id }) {
+                presenter.dropped(marks)
+            } else {
+                continue
+            }
+            pendingMarks[id] = nil
+        }
     }
 
     private func makeResults() -> [ResultRow] {

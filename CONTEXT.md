@@ -24,7 +24,7 @@ _Avoid_: false start, early
 
 **Penalty turn**:
 The single turn, including one tack and one gybe, that a boat must complete after a foul or touching a mark.
-_Avoid_: spin, 720, 360 (except as UI shorthand)
+_Avoid_: spin, 720, 360 (never in UI copy: "one full circle", "Turn")
 
 **Foul**:
 Breaking a rule of Part 2 of the RRS with respect to another boat.
@@ -184,6 +184,10 @@ _Avoid_: tutorial (that's a later, separate thing)
 **Hint**:
 A one-line message on the race screen that fires the first time its situation comes up and stops once the player has learned it.
 _Avoid_: tip, tooltip, coach mark
+
+**Plain words**:
+The first call of each rule number on a player, for or against her, spelled out as a sentence with the number in a notice. Later calls of that number show only the line and badge on the water. Seen numbers are stored per device with hint progress and reset with it; Hints off doesn't silence them.
+_Avoid_: rule explanation, tooltip
 
 ### Course
 
