@@ -32,6 +32,7 @@ import Testing
         let scene = SKScene(size: CGSize(width: 400, height: 800))
         let effects = BoatEffects(seat: boat.id, boatClass: boatClass, pointsPerMeter: ppm, style: .standard)
         effects.nodes.forEach(scene.addChild)
+        scene.addChild(effects.cone) // in a race, a mask in the `ConeLayer` at the effects layer's origin
         let pose = BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass)
         effects.update(with: boat, pose: pose, style: .standard, quality: .full, time: 0, dt: 0, settled: true,
                        isFlogging: false)
@@ -111,6 +112,23 @@ import Testing
         effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: true, boatClass: Self.boatClass),
                        style: .standard, quality: .full, time: 0, dt: 0, settled: true, isFlogging: false)
         #expect(effects.cone.isHidden && effects.backwind.isHidden && !effects.wake.isHidden)
+    }
+
+    /// The fleet's cones draw as one faint layer (#15): every boat's cone a mask in the scene's one `ConeLayer`,
+    /// at the effects layer's origin with no turn or scale, so each lands where its own transform puts it, and
+    /// one sheet shows through them all at `BoatStyle.coneAlpha`, so overlapping cones darken no line.
+    @Test func conesDrawAsOneFaintLayer() throws {
+        let (scene, boats) = try DrawOrderTests.scene(fixture: "prestart")
+        let effects = try #require(scene.childNode(withName: "//effects"))
+        let layers = effects.children.compactMap { $0 as? ConeLayer }
+        let layer = try #require(layers.first)
+        #expect(layers.count == 1)
+        #expect(layer.cones.count == boats && layer.cones.allSatisfy { $0 is SKSpriteNode && $0.alpha == 1 })
+        for node in [layer, layer.maskNode] as [SKNode?] {
+            #expect(node?.position == .zero && node?.zRotation == 0 && node?.xScale == 1 && node?.yScale == 1)
+        }
+        #expect(abs(layer.sheet.alpha - CGFloat(BoatStyle.standard.coneAlpha)) < 1e-6) // SpriteKit's Float alpha
+        #expect(BoatStyle.standard.coneAlpha <= 0.05, "very faint (#15)")
     }
 
     /// The backwind's sprite covers exactly core's trapezoid (#298) on her windward quarter: at points just inside

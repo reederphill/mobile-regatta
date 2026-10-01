@@ -19,10 +19,10 @@ import Testing
             let shared = Dictionary(grouping: drawn, by: \.z).filter { $0.value.count > 1 }
             let layers = Set(shared.values.flatMap { $0.map(\.layer) }).sorted()
             #expect(shared.isEmpty, "\(name): \(shared.count) z's drawn by more than one node, in \(layers)")
-            // Each boat's cone, backwind, wake V and wake streak (#121), hidden ones too, and its heel shadow,
-            // hull, outline and sail; your glow too.
+            // Each boat's backwind, wake V and wake streak (#121), hidden ones too, and the cones' one sheet (each
+            // cone is a mask in it, not drawn itself); each boat's heel shadow, hull, outline and sail; your glow too.
             #expect(boats > 1, "\(name)")
-            #expect(drawn.filter { $0.layer == "effects" }.count == 4 * boats, "\(name)")
+            #expect(drawn.filter { $0.layer == "effects" }.count == 3 * boats + 1, "\(name)")
             #expect(drawn.filter { $0.layer == "fleet" }.count == 4 * boats + 1, "\(name)")
             #expect(drawn.filter { $0.layer == "course" }.count > 4, "\(name)")
             // The pressure (#289) under the water's puffs, one sprite of its own.

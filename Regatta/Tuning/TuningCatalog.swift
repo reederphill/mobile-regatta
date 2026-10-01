@@ -293,7 +293,7 @@ enum TuningCatalog {
                     boat("wakeAlpha", "Wake alpha", \.wakeAlpha, 0...1, 0.02),
                     boat("wakePlaningBoost", "Planing wake", \.wakePlaningBoost, 1...2.5, 0.05),
                     boat("wakeFlareGain", "Roll-hit flare", \.wakeFlareGain, 0...2, 0.1),
-                    boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.5, 0.01),
+                    boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.2, 0.005),
                     boat("backwindShare", "Backwind hatch", \.backwindShare, 0...1, 0.05),
                 ]),
             TuningGroup(

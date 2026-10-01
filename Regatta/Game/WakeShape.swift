@@ -43,7 +43,8 @@ nonisolated struct WakeShape: Equatable, Sendable {
     init(speedThroughWater: Double, hullLength: Double, pressure: Double, isPlaning: Bool, style: BoatStyle,
          quality: WakeQuality) {
         let share = style.wakeFullSpeed > 0 ? (speedThroughWater / style.wakeFullSpeed).clamped(to: 0...1) : 1
-        let planing = isPlaning ? max(style.wakePlaningBoost, 0) : 1
+        // Never below 1: planing never shortens her wake, whatever a saved style says.
+        let planing = isPlaning ? max(style.wakePlaningBoost, 1) : 1
         let tier = quality == .short ? max(style.wakeShortShare, 0) : 1
         length = max(hullLength, 0) * max(style.wakeMaxHulls, 0) * share * planing * tier
         // A puff fans the V and a lull narrows it; never folded shut, never splayed flat.

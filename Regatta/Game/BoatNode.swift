@@ -6,13 +6,14 @@ import RegattaCore
 /// effects layer beneath the fleet. No name and no badge: boat names are never shown on the water (#15), and
 /// penalties are #123's and #124's.
 final class BoatNode: SKNode {
-    /// Her wake, cone and backwind: the scene adds `effects.nodes` to its effects layer.
+    /// Her wake, cone and backwind: the scene adds `effects.nodes` to its effects layer and her cone to its
+    /// `ConeLayer`.
     let effects: BoatEffects
 
     /// A ghost fades as one flat image (#30): her hull, outline and sail composited first, then faded together,
     /// so where they overlap she reads no darker than anywhere else. Its effect is on for ghosts only; a live boat
     /// draws straight through it.
-    private let fade = SKEffectNode()
+    let fade = SKEffectNode()
     private let body = SKNode()
     /// What heel narrows: the drop shadow, glow, hull and outline, never the sail (`xScale` would warp it).
     private let hullGroup = SKNode()

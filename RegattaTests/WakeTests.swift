@@ -60,6 +60,42 @@ import Testing
         #expect(short.streakAlpha == 0 && full.streakAlpha > 0)
     }
 
+    /// The shipped wake is short (#220): 1.5 to 2.5 hull lengths at full speed, planing or not. And a saved
+    /// planing boost under 1 never shortens a planing wake (the lenient decoder takes any value).
+    @Test func wakeIsShortAndPlaningNeverShortensIt() throws {
+        let style = BoatStyle.standard
+        let hull = Self.boatClass.hull.length
+        for planing in [false, true] {
+            let shape = WakeShape(Self.boat(speed: style.wakeFullSpeed, planing: planing), boatClass: Self.boatClass,
+                                  style: style, quality: .full)
+            #expect((1.5 * hull...2.5 * hull).contains(shape.length), "planing \(planing): \(shape.length / hull) hulls")
+        }
+        var odd = style
+        odd.wakePlaningBoost = 0.5
+        let saved = try JSONDecoder().decode(BoatStyle.self, from: JSONEncoder().encode(odd))
+        let planing = WakeShape(Self.boat(speed: 6, planing: true), boatClass: Self.boatClass, style: saved, quality: .full)
+        let plain = WakeShape(Self.boat(speed: 6), boatClass: Self.boatClass, style: saved, quality: .full)
+        #expect(planing == plain)
+    }
+
+    /// A ghost fades as one flat image (#30), her body and her wake each: their effect nodes are on, at her ghost
+    /// alpha; a live boat's are off and draw straight through.
+    @Test func ghostsFadeAsOneImage() {
+        let style = BoatStyle.standard
+        let boat = Self.boat(speed: 6)
+        for ghost in [false, true] {
+            let node = BoatNode(boat: boat, isMine: false, color: .red, boatClass: Self.boatClass, pointsPerMeter: 8,
+                                style: style)
+            let pose = BoatPose(boat, ease: false, isGhost: ghost, boatClass: Self.boatClass, style: style)
+            node.update(with: boat, pose: pose, style: style, time: 0, dt: 0, settled: true)
+            let alpha = ghost ? CGFloat(style.ghostAlpha) : 1
+            // SpriteKit keeps alpha as a Float.
+            #expect(node.fade.shouldEnableEffects == ghost && abs(node.fade.alpha - alpha) < 1e-6, "ghost \(ghost)")
+            #expect(node.effects.wake.shouldEnableEffects == ghost && abs(node.effects.wake.alpha - alpha) < 1e-6,
+                    "ghost \(ghost)")
+        }
+    }
+
     /// 16 boats (#57's fleet) sail on for many frames: the effects layer holds no `SKShapeNode`, so no path is ever
     /// rebuilt, and after the first frame its nodes and their textures stay the same ones; only sizes, positions and
     /// alphas change. Prints the effects' node count for the PR.
@@ -132,6 +168,6 @@ extension GameScene {
     var boatWedges: [SKSpriteNode] {
         guard let effects = childNode(withName: "//effects") else { return [] }
         return WakeTests.descendants(of: effects).compactMap { $0.1 as? SKSpriteNode }
-            .filter { $0.parent?.parent === effects && $0.zPosition == BoatEffects.Layer.wedge }
+            .filter { $0.parent is SKEffectNode && $0.parent?.parent === effects && $0.zPosition == BoatEffects.Layer.wedge }
     }
 }

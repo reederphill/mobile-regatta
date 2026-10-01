@@ -8,24 +8,33 @@ import RegattaCore
 ///
 /// The nodes live in the scene's effects layer, in world space (`nodes`), not under the boat's node, so they turn
 /// with the water and the boat's ghost fade doesn't reach them: a ghost's wake fades by her own alpha here, and
-/// her cone and backwind are hidden (#30: she casts neither).
+/// her cone and backwind are hidden (#30: she casts neither). Her cone goes into the fleet's one `ConeLayer`
+/// instead, so the fleet's overlapping cones don't darken into a mat.
 final class BoatEffects {
-    /// The cone, apex at the boat, down her apparent wind (#10).
+    /// The cone, apex at the boat, down her apparent wind (#10): an opaque hatch, a mask in the fleet's
+    /// `ConeLayer`, which draws it at `BoatStyle.coneAlpha`.
     let cone: SKSpriteNode
-    /// The backwind trapezoid on her windward quarter (#298); hidden for a class with #79's band.
+    /// The backwind trapezoid on her windward quarter (#298), its hatch fading from her stern to its far edge as
+    /// its loss does; hidden for a class with #79's band.
     let backwind: SKSpriteNode
-    /// The wake, at her stern and turned to her heading: its V (`wedge`) and centre streak.
-    let wake = SKNode()
+    /// The wake, at her stern and turned to her heading: its V (`wedge`) and centre streak. An effect node so a
+    /// ghost's wake fades as one flat image, as her hull does (#30); its effect is on for ghosts only.
+    let wake = SKEffectNode()
     let wedge: SKSpriteNode
     let streak: SKSpriteNode
 
-    /// The nodes the scene adds to its effects layer.
-    var nodes: [SKNode] { [cone, backwind, wake] }
+    /// The nodes the scene adds to its effects layer; the cone goes into its `ConeLayer`.
+    var nodes: [SKNode] { [backwind, wake] }
+
+    /// How many nodes she draws on the water: her cone, `nodes` and their children (the `-perf` log).
+    var nodeCount: Int { nodes.reduce(1) { $0 + 1 + $1.children.count } }
 
     /// The z's within a boat's effects, each boat a `DrawOrder` slot above the last by seat: every cone under
     /// every backwind under every wake; the streak over its V.
     enum Layer {
-        static let cone: CGFloat = 0, backwind: CGFloat = 0.1, wake: CGFloat = 0.5
+        /// The fleet's `ConeLayer`, under every boat's slot.
+        static let cones: CGFloat = -0.5
+        static let backwind: CGFloat = 0.1, wake: CGFloat = 0.5
         static let wedge: CGFloat = 0, streak: CGFloat = 0.05
     }
 
@@ -51,6 +60,8 @@ final class BoatEffects {
             hatch.colorBlendFactor = 1
         }
         backwind.isHidden = !hasBackwind
+        wake.shouldEnableEffects = false
+        wake.shouldRasterize = false
 
         let white = CuePalette.cueWhite.uiColor
         wedge = SKSpriteNode(texture: art.wedge)
@@ -66,7 +77,7 @@ final class BoatEffects {
         streak.zPosition = Layer.streak
 
         let slot = DrawOrder.z(seat)
-        cone.zPosition = Layer.cone + slot
+        cone.zPosition = slot
         backwind.zPosition = Layer.backwind + slot
         wake.zPosition = Layer.wake + slot
     }
@@ -81,7 +92,6 @@ final class BoatEffects {
         cone.isHidden = pose.isGhost
         cone.position = point
         cone.zRotation = CGFloat(-(boat.apparentWind.direction + .pi)) // the cone follows her apparent wind (#10)
-        cone.alpha = CGFloat(style.coneAlpha)
 
         // Her windward side is starboard on starboard tack (`ShadowCone.windward`); it flips at the boom crossing.
         backwind.isHidden = pose.isGhost || !hasBackwind
@@ -101,6 +111,7 @@ final class BoatEffects {
         let stern = boat.position + boat.forward * boatClass.windShadow.sternCorner.y
         wake.position = CGPoint(x: stern.x * ppm, y: stern.y * ppm)
         wake.zRotation = CGFloat(-boat.heading)
+        if wake.shouldEnableEffects != pose.isGhost { wake.shouldEnableEffects = pose.isGhost }
         wake.alpha = pose.isGhost ? CGFloat(style.ghostAlpha) : 1
 
         let length = CGFloat(shape.length) * ppm
@@ -112,6 +123,38 @@ final class BoatEffects {
         streak.size = CGSize(width: 2 * CGFloat(style.wakeStreakWidth) * ppm, height: streakLength)
         streak.alpha = CGFloat(shape.streakAlpha)
         streak.isHidden = streakLength < 0.5 || shape.streakAlpha < 0.005
+    }
+}
+
+/// The fleet's wind-shadow cones as one faint layer (#15: very faint hatched cones). Each boat's cone hatch is a
+/// mask here, and one black sheet shows through their union at `BoatStyle.coneAlpha`: so a cone's lines are
+/// just readable on the water, and where ten cones overlap no line is darker than one cone's, only the hatch
+/// denser. The mask and the sheet sit at the layer's origin, so each cone lands where its own transform puts it.
+final class ConeLayer: SKCropNode {
+    /// The sheet the cones show: big enough to cover any course.
+    let sheet = SKSpriteNode(color: .black, size: CGSize(width: 400_000, height: 400_000))
+    private let masks = SKNode()
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override init() {
+        super.init()
+        zPosition = BoatEffects.Layer.cones
+        maskNode = masks
+        addChild(sheet)
+    }
+
+    /// The cones it shows.
+    var cones: [SKNode] { masks.children }
+
+    /// Shows `effects`' cone.
+    func add(_ effects: BoatEffects) {
+        masks.addChild(effects.cone)
+    }
+
+    /// Draws the cones at `style`'s alpha.
+    func update(style: BoatStyle) {
+        sheet.alpha = CGFloat(style.coneAlpha)
     }
 }
 
@@ -158,11 +201,13 @@ private struct EffectArt {
         cone = Self.hatch(conePoints, bounds: coneBounds, spacing: spacing, width: width)
         coneAnchor = Self.anchor(coneBounds)
 
-        if let corners = ShadowShapes.backwindLocal(shadow) {
+        if let corners = ShadowShapes.backwindLocal(shadow), let inner = shadow.backwindInnerLength {
             let backwindPoints = points(corners)
             // Taking in the boat's centre, so the anchor is inside the texture.
             let bounds = Self.bounds(of: backwindPoints + [.zero])
-            backwind = Self.hatch(backwindPoints, bounds: bounds, spacing: spacing, width: width)
+            backwind = Self.hatch(backwindPoints, bounds: bounds, spacing: spacing, width: width) { cg in
+                Self.fadeBackwind(cg, shadow: shadow, inner: inner, ppm: ppm)
+            }
             backwindAnchor = Self.anchor(bounds)
         } else {
             backwind = nil
@@ -184,9 +229,12 @@ private struct EffectArt {
         CGPoint(x: -bounds.minX / bounds.width, y: -bounds.minY / bounds.height)
     }
 
-    /// Diagonal lines `spacing` apart and `width` wide, clipped to `outline`: the cones' hatch (#15).
-    private static func hatch(_ outline: [CGPoint], bounds: CGRect, spacing: CGFloat, width: CGFloat) -> SKTexture {
+    /// Diagonal lines `spacing` apart and `width` wide, clipped to `outline`: the cones' hatch (#15). `fade`, if
+    /// any, then fades it (drawing with `.destinationIn`).
+    private static func hatch(_ outline: [CGPoint], bounds: CGRect, spacing: CGFloat, width: CGFloat,
+                              fade: ((CGContext) -> Void)? = nil) -> SKTexture {
         SpriteArt.texture(bounds: bounds) { cg in
+            cg.saveGState()
             let path = CGMutablePath()
             path.addLines(between: outline)
             path.closeSubpath()
@@ -203,59 +251,93 @@ private struct EffectArt {
             cg.setStrokeColor(UIColor.white.cgColor)
             cg.setLineWidth(width)
             cg.strokePath()
+            cg.restoreGState()
+            if let fade {
+                cg.setBlendMode(.destinationIn)
+                fade(cg)
+            }
         }
     }
 
-    /// The wake's V on a 64 × 128 point unit: its two arms from the apex at the top centre, fading astern, over a
-    /// fainter translucent fill between them (#220's ribbon).
+    /// Fades the backwind's hatch as core's loss fades (`ShadowCone`'s backwind factor, #298): full along her
+    /// stern edge, straight down to nothing at the far edge, which reaches `inner` astern on the inside and
+    /// `backwindLength` on the outside. Column by column, a texel wide, in the art's frame (starboard tack).
+    private static func fadeBackwind(_ cg: CGContext, shadow: BoatClass.WindShadow, inner: Double, ppm: CGFloat) {
+        let space = CGColorSpaceCreateDeviceRGB()
+        guard let gradient = CGGradient(colorsSpace: space, colors: [UIColor.white.cgColor,
+                                                                     UIColor(white: 1, alpha: 0).cgColor] as CFArray,
+                                        locations: [0, 1]) else { return }
+        let stern = CGFloat(shadow.sternCorner.y) * ppm, x0 = CGFloat(shadow.sternCorner.x) * ppm
+        let width = CGFloat(shadow.backwindWidth) * ppm
+        let step: CGFloat = 1.0 / 3
+        // Unblended strip edges, so the strips share each texel out exactly once.
+        cg.setShouldAntialias(false)
+        var x: CGFloat = -step
+        while x < width + step {
+            let out = Double((x + step / 2) / width).clamped(to: 0...1)
+            let reach = CGFloat(inner + (shadow.backwindLength - inner) * out) * ppm
+            cg.saveGState()
+            cg.clip(to: CGRect(x: x0 + x, y: stern - reach - 2, width: step, height: reach + 4))
+            cg.drawLinearGradient(gradient, start: CGPoint(x: 0, y: stern), end: CGPoint(x: 0, y: stern - reach),
+                                  options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+            cg.restoreGState()
+            x += step
+        }
+    }
+
+    /// The wake's V on a 64 × 128 point unit (#220): two soft arms from the apex at the top centre over a fainter
+    /// translucent fill between them, the whole of it fading astern (`tailFade`), so it reads as a wake spreading
+    /// behind her, not as rays.
     private static func wedgeTexture() -> SKTexture {
         let bounds = CGRect(x: -32, y: -128, width: 64, height: 128)
         return SpriteArt.texture(bounds: bounds, scale: 2) { cg in
-            let apex = CGPoint(x: 0, y: 0), port = CGPoint(x: -31, y: -128), starboard = CGPoint(x: 31, y: -128)
-            let space = CGColorSpaceCreateDeviceRGB()
-            func fade(_ alpha: CGFloat) -> CGGradient? {
-                CGGradient(colorsSpace: space, colors: [UIColor(white: 1, alpha: alpha).cgColor,
-                                                        UIColor(white: 1, alpha: 0).cgColor] as CFArray,
-                           locations: [0, 1])
-            }
+            let apex = CGPoint(x: 0, y: 0), port = CGPoint(x: -30, y: -128), starboard = CGPoint(x: 30, y: -128)
             let fill = CGMutablePath()
             fill.addLines(between: [apex, starboard, port])
             fill.closeSubpath()
-            if let gradient = fade(0.35) {
-                cg.saveGState()
-                cg.addPath(fill)
-                cg.clip()
-                cg.drawLinearGradient(gradient, start: apex, end: CGPoint(x: 0, y: -128), options: [])
-                cg.restoreGState()
-            }
+            cg.addPath(fill)
+            cg.setFillColor(UIColor(white: 1, alpha: 0.18).cgColor)
+            cg.fillPath()
+            // Each arm a soft line: wide and faint outside, narrower and brighter at its core.
             let arms = CGMutablePath()
             arms.addLines(between: [port, apex, starboard])
-            if let gradient = fade(1) {
-                cg.saveGState()
+            cg.setLineJoin(.round)
+            for (width, alpha) in [(5.0, 0.1), (3.0, 0.18), (1.25, 0.35)] as [(CGFloat, CGFloat)] {
                 cg.addPath(arms)
-                cg.setLineWidth(2)
-                cg.setLineJoin(.round)
-                cg.replacePathWithStrokedPath()
-                cg.clip()
-                cg.drawLinearGradient(gradient, start: apex, end: CGPoint(x: 0, y: -128), options: [])
-                cg.restoreGState()
+                cg.setLineWidth(width)
+                cg.setStrokeColor(UIColor(white: 1, alpha: alpha).cgColor)
+                cg.strokePath()
             }
+            tailFade(cg, from: apex, to: CGPoint(x: 0, y: -128))
         }
     }
 
-    /// The centre streak on an 8 × 128 point unit: a soft line down its middle, half its width, fading astern.
+    /// The centre streak on an 8 × 128 point unit: a soft line, brightest down its middle and gone at its edges
+    /// (it draws twice the streak's width), fading astern.
     private static func streakTexture() -> SKTexture {
         let bounds = CGRect(x: -4, y: -128, width: 8, height: 128)
         return SpriteArt.texture(bounds: bounds, scale: 2) { cg in
             let space = CGColorSpaceCreateDeviceRGB()
-            guard let gradient = CGGradient(colorsSpace: space,
-                                            colors: [UIColor.white.cgColor, UIColor(white: 1, alpha: 0).cgColor] as CFArray,
-                                            locations: [0, 1]) else { return }
-            cg.addPath(CGPath(roundedRect: CGRect(x: -2, y: -128, width: 4, height: 128), cornerWidth: 2,
-                              cornerHeight: 2, transform: nil))
-            cg.clip()
-            cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: -128), options: [])
+            let clear = UIColor(white: 1, alpha: 0).cgColor, soft = UIColor(white: 1, alpha: 0.35).cgColor
+            guard let across = CGGradient(colorsSpace: space, colors: [clear, soft, UIColor.white.cgColor, soft, clear] as CFArray,
+                                          locations: [0, 0.25, 0.5, 0.75, 1]) else { return }
+            cg.drawLinearGradient(across, start: CGPoint(x: -4, y: 0), end: CGPoint(x: 4, y: 0), options: [])
+            tailFade(cg, from: .zero, to: CGPoint(x: 0, y: -128))
         }
+    }
+
+    /// Fades what's drawn from full at `start` to nothing at `end`, easing out (alpha (1 - t)²): most of a wake's
+    /// brightness is close under her stern, its tail dies away.
+    private static func tailFade(_ cg: CGContext, from start: CGPoint, to end: CGPoint) {
+        let stops: [CGFloat] = [0, 0.25, 0.5, 0.75, 1]
+        let colors = stops.map { UIColor(white: 1, alpha: (1 - $0) * (1 - $0)).cgColor }
+        guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray,
+                                        locations: stops) else { return }
+        cg.saveGState()
+        cg.setBlendMode(.destinationIn)
+        cg.drawLinearGradient(gradient, start: start, end: end,
+                              options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+        cg.restoreGState()
     }
 }
 

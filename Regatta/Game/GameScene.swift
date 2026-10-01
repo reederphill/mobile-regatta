@@ -62,6 +62,8 @@ final class GameScene: SKScene {
     private let cam = SKCameraNode()
     private let water = WaterNode(pointsPerMeter: Double(GameScene.pointsPerMeter))
     private let effectsLayer = SKNode()
+    /// The fleet's wind-shadow cones, one faint layer in the effects layer (#121).
+    private let coneLayer = ConeLayer()
     private let courseLayer = SKNode()
     private let boatLayer = SKNode()
     private let laylines = SKShapeNode()
@@ -190,17 +192,20 @@ final class GameScene: SKScene {
 
     private func buildBoats() {
         let me = driver.myBoatIndex
+        effectsLayer.addChild(coneLayer)
         for boat in driver.currentFrame.boats {
             let node = BoatNode(boat: boat, isMine: boat.id == me, color: Palette.boat(boat.colorIndex),
                                 boatClass: driver.boatClass, pointsPerMeter: ppm, style: boatStyle)
             boatNodes.append(node)
             boatLayer.addChild(node)
             node.effects.nodes.forEach(effectsLayer.addChild)
+            coneLayer.add(node.effects)
         }
 #if DEBUG
         // #57's 16-boat demo: what the fleet's wakes, cones and backwinds cost, once at race start (#121).
         if LaunchOptions.current.perf {
-            let nodes = effectsLayer.children.reduce(0) { $0 + 1 + $1.children.count }
+            // The boats' own effects only (`BoatEffects`), not the rest of the effects layer.
+            let nodes = boatNodes.reduce(0) { $0 + $1.effects.nodeCount }
             Logger(subsystem: "com.phillreeder.regatta", category: "perf")
                 .info("Boat effects: \(nodes, privacy: .public) nodes for \(self.boatNodes.count, privacy: .public) boats")
         }
@@ -254,6 +259,7 @@ final class GameScene: SKScene {
             boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality, time: world.time,
                                 dt: dt, settled: settled)
         }
+        coneLayer.update(style: boatStyle)
 
         let player = world.me
         switch cameraMode {
