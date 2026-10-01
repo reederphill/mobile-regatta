@@ -151,6 +151,14 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
                                             "fleet-greyscale", "fleet-washout"])
     }
 
+    // The HUD (#114): clock, place, ground wind, minimap and the notice line over the scene.
+
+    /// Before the gun (yellow sequence clock, place hidden), racing, OCS (place reads OCS, the OCS notice), a
+    /// mark-room notice, and after the first finish (the yellow countdown to the close).
+    @MainActor func testHUDFixturesMatchReferences() throws {
+        try assertAllMatchIPhoneReferences(["hud-prestart", "hud-racing", "hud-ocs", "hud-markroom", "hud-afterfirstfinish"])
+    }
+
     /// `assertMatchesReference` on iPhone (see `skipOnIPad`) for several fixtures in one test: each renders and
     /// compares before any failure ends the test, so every render that moved (or has no reference yet) reaches
     /// render-actuals in one CI run rather than one per run.

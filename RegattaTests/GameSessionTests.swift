@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import RegattaBots
 import RegattaCore
@@ -57,6 +58,29 @@ import RegattaCore
         session.refreshHUD()
         #expect(session.hud.tick == -1800 + 45)
         #expect(session.hud.clock == session.driver.currentFrame.time)
+    }
+
+    /// Only a rule call your boat is in takes the notice slot (#114): a call between two other boats posts nothing,
+    /// so it never delays or drops your own call.
+    @Test func anotherBoatsRuleCallNeverDelaysYours() {
+        let session = GameSession(config: Self.config)
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+        session.now = { start }
+        let me = session.driver.myBoatIndex
+        let others = (0..<4).filter { $0 != me }
+        func call(_ offender: Int, _ victim: Int) -> RaceEvent {
+            RaceEvent(tick: 0, kind: .ruleCall(RuleCall(incidentId: offender * 10 + victim, tick: 0, rule: .portStarboard,
+                                                       offender: offender, victim: victim, leg: 0, turnsOwed: 1,
+                                                       startDeadlineTick: nil, completeDeadlineTick: nil)))
+        }
+        session.consume([call(others[0], others[1])])
+        #expect(session.notice?.kind != .ruleCall, "a call between two other boats posts nothing")
+        session.consume([call(others[0], others[1]), call(others[2], me)])
+        #expect(session.notice?.kind == .ruleCall && session.notice?.text.contains("fouled you") == true,
+                "your call shows at once: \(String(describing: session.notice))")
+        session.consume([call(others[1], others[2])])
+        session.refreshHUD()
+        #expect(session.notice?.text.contains("fouled you") == true, "and stays")
     }
 
     @Test func pausesOnlyAPausableDriver() {

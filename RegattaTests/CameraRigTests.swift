@@ -604,11 +604,10 @@ import RegattaCore
 
     /// The HUD's arrows turn with the view: a compass bearing on screen is the bearing less the view heading.
     @Test func hudArrowsTurnWithTheView() {
-        var hud = HUDState()
-        hud.viewHeading = Self.degrees(37)
-        #expect(abs(hud.screenAngle(ofCompass: Self.degrees(37))) < 1e-12)
-        #expect(abs(hud.screenAngle(ofCompass: Self.degrees(127)) - Self.degrees(90)) < 1e-12)
-        #expect(abs(hud.screenAngle(ofCompass: Self.degrees(-160)) - Self.degrees(163)) < 1e-12)
+        let view = Self.degrees(37)
+        #expect(abs(HUDModel.screenAngle(ofCompass: Self.degrees(37), viewHeading: view)) < 1e-12)
+        #expect(abs(HUDModel.screenAngle(ofCompass: Self.degrees(127), viewHeading: view) - Self.degrees(90)) < 1e-12)
+        #expect(abs(HUDModel.screenAngle(ofCompass: Self.degrees(-160), viewHeading: view) - Self.degrees(163)) < 1e-12)
     }
 
     /// A camera tuning saved before #113 keeps its values; the new fields take their standard ones.
