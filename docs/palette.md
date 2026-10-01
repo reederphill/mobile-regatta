@@ -33,14 +33,17 @@ Sources: #22 (art direction), #29 (safe palette), G7 (#37), #53 (values). Consum
 |---|---|---|---|
 | `vermillion` | `#D55E00` | 0.62 / 0.170 / 48 | wind vane |
 | `orange` | `#E69F00` | 0.75 / 0.158 / 77 | active leg: current marks, zone, rounding arrow, next-mark edge arrow, rule-call line, penalty arc |
-| `chevronBlue` | `#3F51E0` | 0.51 / 0.216 / 271 | give-way chevron |
+| `chevronBlue` | `#3F51E0` | 0.51 / 0.216 / 271 | none now (the give-way chevron is gone); stays reserved |
 | `yellow` | `#F0E442` | 0.90 / 0.172 / 105 | laylines; HUD start clock (#111) |
+| `giveWayRed` | `#FF4D4D` | 0.67 / 0.215 / 25 | right-of-way glow round a boat you must keep clear of; not reserved |
+| `hasRightGreen` | `#3DDC84` | 0.79 / 0.180 / 154 | right-of-way glow round a boat that must keep clear of you; not reserved |
 | `inactiveGrey` | `#9AA0A6` | 0.70 / 0.011 / — | inactive marks |
 | `cueWhite` | `#FFFFFF` | 1.00 / 0 / — | player glow, wakes, ladder lines (#122); alpha set at use site |
 | `hullOutline` | `#F5F5F2` | 0.97 / 0.004 / — | every hull's thin outline, 1 pt inside the edge (#117, #21); #169 restyles |
 
 Cue-to-cue hue separation: vermillion–orange 29°, orange–yellow 28°, chevron–water 29°, chevron–puff 25°.
 
+- The right-of-way glow is the one red/green cue. It has no shape of its own, so under deuteranopia and protanopia the two glows differ by lightness only (green 0.79, red 0.67); neither is in the hue rule's reserved set, so boat colours may match them.
 - `orange` reads amber: truer oranges (`#F28C28` 11°, `#FF9500` 15° from vermillion) fail the hue rule.
 - `chevronBlue` vs water contrast ≈ 1.5:1: legible by hue + shape, not lightness. Outline is a #123 builder choice.
 - Colour-vision filters (deuteranopia, protanopia, tritanopia, greyscale, sunlight washout): run in the #111 harness; orange vs yellow is the pair to watch.

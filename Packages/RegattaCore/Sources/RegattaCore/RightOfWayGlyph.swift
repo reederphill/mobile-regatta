@@ -1,14 +1,15 @@
-/// The right-of-way glyph a player sees on another boat (#15, #123): an orange ⚠ on a boat she must keep
-/// clear of, a blue chevron on a boat that must keep clear of her. No words: shape and colour carry it.
-/// Mark-room is never a glyph (it is a notice): only who keeps clear (`Race.keepClearRelations(of:)`) decides.
+/// The right-of-way cue a player sees on another boat (#15, #123): a red glow on a boat she must keep clear of,
+/// a green glow on a boat that must keep clear of her (the app draws the glow; the name predates it, when these
+/// were a ⚠ and a chevron). No words.
+/// Mark-room is never a glow (it is a notice): only who keeps clear (`Race.keepClearRelations(of:)`) decides.
 public enum RightOfWayGlyph: Sendable, Equatable {
-    /// I must keep clear of her: the ⚠ triangle.
+    /// I must keep clear of her: the red glow.
     case giveWay
-    /// She must keep clear of me: the chevron.
+    /// She must keep clear of me: the green glow.
     case hasRight
 
-    /// How far away, in hull lengths centre to centre, a boat's glyph shows: a placeholder the app's
-    /// `BoatStyle.glyphRangeHulls` slider defaults to, and the server's in-range pairs can reuse (#96).
+    /// How far away, in hull lengths centre to centre, a boat's glow starts to show: a placeholder the app's
+    /// `BoatStyle.glowRangeHulls` slider defaults to, and the server's in-range pairs can reuse (#96).
     public static let defaultRangeHulls = 6.0
 
     /// The glyph `me` sees on the other boat of `relation`, or nil when there is none (a ghost in the pair).

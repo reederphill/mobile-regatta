@@ -212,7 +212,7 @@ final class GameScene: SKScene {
             coneLayer.add(node.effects)
         }
         // Over the fleet, whose top z is about 14 (`DrawOrder`), under the edge arrow (20).
-        let rules = RuleCueLayer(seats: boatNodes.count, pointsPerMeter: ppm)
+        let rules = RuleCueLayer(pointsPerMeter: ppm)
         rules.zPosition = 16
         world.addChild(rules)
         ruleCues = rules
@@ -297,13 +297,20 @@ final class GameScene: SKScene {
         if showsRuleCues {
             ruleCues?.update(world, calls: ruleCalls, style: boatStyle, px: cam.xScale,
                              rotation: cam.zRotation)
+        } else {
+            ruleCues?.reset()
+        }
+        // The right-of-way glows are the boats' own (#123): each seat's from the layer's, none while the cues are off.
+        let glows = ruleCues?.glows ?? []
+        for (seat, node) in boatNodes.enumerated() {
+            node.setRightOfWayGlow(seat < glows.count ? glows[seat] : nil, style: boatStyle)
         }
     }
 
-    /// What the rule cues show (#123), for tests: e.g. `glyphs=2 lines=1 arc=1`.
+    /// What the rule cues show (#123), for tests: e.g. `glows=2 lines=1 arc=1`.
     var ruleCueSummary: String { ruleCues?.summary ?? "" }
-    /// The right-of-way glyph each seat shows, for tests.
-    var shownGlyphs: [RightOfWayGlyph?] { ruleCues?.shownGlyphs ?? [] }
+    /// The right-of-way glow each seat shows, for tests.
+    var shownGlows: [RightOfWayGlow?] { ruleCues?.glows ?? [] }
 
     /// The north-up course camera over `course` in a scene of `sceneSize` (`CameraRig.courseFraming`): centred on
     /// the course, scaled to show the whole of it (marks, pin and committee boat) with a margin, and never closer
