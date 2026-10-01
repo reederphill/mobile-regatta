@@ -109,10 +109,9 @@ nonisolated struct BoatPose: Equatable, Sendable {
 
     /// How far the autohelm pinches and foots (#219), each 0 to 1: its offset from the groove past
     /// `BoatStyle.grooveCueDeadbandDegrees`, full at `grooveCueFullDegrees`. Nothing while it tacks or gybes her
-    /// (`isTapping`) or the rudder is held.
+    /// (`isTapping`), the rudder is held, or it holds an angle out on a reach (`Autohelm.Reading.grooveOffset`).
     static func grooveCue(_ reading: Autohelm.Reading?, style: BoatStyle) -> (pinch: Double, foot: Double) {
-        guard let reading, !reading.isTapping else { return (0, 0) }
-        let offset = rad2deg(reading.offsetFromGroove)
+        guard let offset = reading?.grooveOffset(style: style).map(rad2deg) else { return (0, 0) }
         let span = max(style.grooveCueFullDegrees - style.grooveCueDeadbandDegrees, 0.001)
         let amount = ((abs(offset) - style.grooveCueDeadbandDegrees) / span).clamped(to: 0...1)
         return offset < 0 ? (amount, 0) : (0, amount)
@@ -279,6 +278,9 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// offset at which the sail cue is at its fullest.
     var grooveCueDeadbandDegrees = 1.0
     var grooveCueFullDegrees = 8.0
+    /// A held angle further than this from its groove towards the beam (footing upwind, pinching downwind) is a
+    /// reach, not the groove sailed off: no sail cue and no arc, degrees.
+    var grooveCueReachDegrees = 15.0
     /// Pinched (#219): the sail's leading edge lifts, a small quick flutter at the luff this many degrees either
     /// side at full pinch, and the sail flattens by this share of its belly.
     var pinchLuffDegrees = 3.0
@@ -291,11 +293,11 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var ladderLineAlpha = 0.12
     /// The ladder lines' spacing, metres, from the windward mark.
     var ladderSpacingMetres = 100.0
-    /// The next-mark edge arrow keeps this far inside the race view's top, bottom and sides, scene points: clear of
-    /// the HUD's top row and notice line and of the controls. A mark under them counts as off screen.
-    var edgeArrowInsetTop = 190.0
-    var edgeArrowInsetBottom = 170.0
+    /// The next-mark edge arrow keeps this far inside the race view's sides, scene points, and this much clear of
+    /// the HUD's notice line above and the controls below (`ViewInsets.race`): a mark under them counts as off
+    /// screen.
     var edgeArrowInsetSide = 28.0
+    var edgeArrowClearance = 12.0
 
     /// The shipped placeholders.
     static let standard = BoatStyle()
@@ -329,11 +331,12 @@ nonisolated extension BoatStyle {
             (.hatchSpacing, \.hatchSpacing), (.hatchLineWidth, \.hatchLineWidth),
             (.vaneLengthHulls, \.vaneLengthHulls),
             (.vaneLockDegrees, \.vaneLockDegrees), (.grooveCueDeadbandDegrees, \.grooveCueDeadbandDegrees),
-            (.grooveCueFullDegrees, \.grooveCueFullDegrees), (.pinchLuffDegrees, \.pinchLuffDegrees),
+            (.grooveCueFullDegrees, \.grooveCueFullDegrees), (.grooveCueReachDegrees, \.grooveCueReachDegrees),
+            (.pinchLuffDegrees, \.pinchLuffDegrees),
             (.pinchFlatten, \.pinchFlatten), (.footEaseDegrees, \.footEaseDegrees), (.footFullness, \.footFullness),
             (.laylineAlpha, \.laylineAlpha), (.ladderLineAlpha, \.ladderLineAlpha),
-            (.ladderSpacingMetres, \.ladderSpacingMetres), (.edgeArrowInsetTop, \.edgeArrowInsetTop),
-            (.edgeArrowInsetBottom, \.edgeArrowInsetBottom), (.edgeArrowInsetSide, \.edgeArrowInsetSide),
+            (.ladderSpacingMetres, \.ladderSpacingMetres), (.edgeArrowInsetSide, \.edgeArrowInsetSide),
+            (.edgeArrowClearance, \.edgeArrowClearance),
         ]
         for (key, path) in fields {
             if let value = try c.decodeIfPresent(Double.self, forKey: key) { style[keyPath: path] = value }

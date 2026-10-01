@@ -211,10 +211,10 @@ The thin vermillion arrow under your hull, one hull length, pointing to the wind
 _Avoid_: wind arrow, wind indicator
 
 **Ladder line**:
-A line drawn across the course axis (the seeded mean wind direction, fixed for the race), so boats on the same line are level in the race to windward or leeward.
+A line drawn across the course axis (the seeded mean wind direction, fixed for the race), so boats on the same line are level in the race to windward or leeward. On the W → O reach (a leg that runs more across the axis than along it) the lines run across the leg instead (#267, ruling 2), so boats on one line are level on the reach, as their **Ladder distance** reads them.
 
 **Ladder distance**:
-How far a boat still has to go to finish, counting only progress across the ladder lines on her current leg (along the course axis) plus the full length of each later leg measured the same way. On the reach, which crosses no ladder lines, it is the distance along the leg instead, so the total runs on across each rounding without a jump. Orders boats racing and places those unfinished when the race ends; the gap to the leader is the difference.
+How far a boat still has to go to finish, counting only progress across the ladder lines on her current leg (along the course axis) plus the full length of each later leg measured the same way. On the W → O reach, where the ladder lines run across the leg (#267, ruling 2), it is the distance along the leg to its mark, so the total runs on across each rounding without a jump. Orders boats racing and places those unfinished when the race ends; the gap to the leader is the difference.
 _Avoid_: distance to finish (the path length)
 
 **Gap to leader**:

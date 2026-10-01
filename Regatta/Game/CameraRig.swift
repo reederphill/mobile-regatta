@@ -125,8 +125,12 @@ nonisolated struct CameraRig: Sendable {
     /// The marks the mark-rounding shot keeps on screen: the last rounded, held until the shot changes, so leaving
     /// the mark inside the shot's dwell doesn't drop its widening in one frame.
     private var shotMarks: [Vec2]?
-    /// Whether a start line end is off screen in the pre-start shot: the seam for #122's edge arrow.
+    /// Whether a start line end is off screen in the pre-start shot: outside `visibleInsets`' rect, so the edge
+    /// arrow (#122) and this read one visible area. The seam for #122's edge arrow.
     private(set) var lineEndOffScreen = false
+    /// What the HUD and controls cover of the view (#122): a line end under them counts as off screen. The scene
+    /// sets it each frame (`ViewInsets.race`); none by default.
+    var visibleInsets = ViewInsets.zero
     /// The race clock of the last frame, for which shot it was: nil until the first.
     private var lastTime: Double?
 
@@ -270,7 +274,8 @@ nonisolated struct CameraRig: Sendable {
         pinchBase = pre.base * w + pinchBase * (1 - w)
         pinchCeiling = zoomLimits.upperBound * w + pinchCeiling * (1 - w)
         center = point(pre.center * w + raced.center * (1 - w))
-        lineEndOffScreen = world.startLine.contains { !Self.isOnScreen(project($0, sceneSize: sceneSize), sceneSize) }
+        let visible = visibleInsets.visibleRect(sceneSize: sceneSize)
+        lineEndOffScreen = world.startLine.contains { !ViewInsets.contains(visible, project($0, sceneSize: sceneSize)) }
     }
 
     // MARK: Heading lead
@@ -575,8 +580,25 @@ nonisolated struct CameraRig: Sendable {
         let x = t.clamped(to: 0...1)
         return x * x * (3 - 2 * x)
     }
+}
 
-    static func isOnScreen(_ p: CGPoint, _ sceneSize: CGSize) -> Bool {
-        p.x >= 0 && p.x <= sceneSize.width && p.y >= 0 && p.y <= sceneSize.height
+/// How far the HUD and controls reach into the race view from its edges (#122), scene points: the part of the view
+/// left clear is where a mark or line end counts as on screen, for the edge arrow and `CameraRig.lineEndOffScreen`
+/// alike.
+nonisolated struct ViewInsets: Equatable, Sendable {
+    var top: CGFloat
+    var bottom: CGFloat
+    var side: CGFloat
+
+    static let zero = ViewInsets(top: 0, bottom: 0, side: 0)
+
+    /// The part of a scene of `sceneSize` left clear, from its bottom-left corner, y up (`CameraRig.project`).
+    func visibleRect(sceneSize: CGSize) -> CGRect {
+        CGRect(x: side, y: bottom, width: max(sceneSize.width - 2 * side, 1), height: max(sceneSize.height - top - bottom, 1))
+    }
+
+    /// Whether `p` is inside `rect`, its edges included.
+    static func contains(_ rect: CGRect, _ p: CGPoint) -> Bool {
+        p.x >= rect.minX && p.x <= rect.maxX && p.y >= rect.minY && p.y <= rect.maxY
     }
 }

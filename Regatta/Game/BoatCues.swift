@@ -14,7 +14,7 @@ import RegattaCore
 /// - While the autohelm holds the groove and she sails within `BoatStyle.vaneLockDegrees` of it, the vane locks
 ///   to the tick.
 /// - While it holds an angle off the groove (a pinch or a foot) by more than `grooveCueDeadbandDegrees`, a short
-///   arc runs from the tick to the angle it holds.
+///   arc runs from the tick to the angle it holds; none for an angle held out on a reach (`grooveOffset`).
 nonisolated struct VaneCue: Equatable, Sendable {
     /// Where the vane points.
     var vane: Double
@@ -46,12 +46,26 @@ nonisolated struct VaneCue: Equatable, Sendable {
         isLocked = onGroove
         vane = onGroove ? tick : wrapAngle(boat.windOverGround.direction - boat.heading)
 
-        if let reading, holding, reading.target.angle != nil,
-           abs(reading.offsetFromGroove) > deg2rad(style.grooveCueDeadbandDegrees) {
-            arcEnd = wrapAngle(side * (grooveAngle + reading.offsetFromGroove))
+        if let reading, reading.target.angle != nil, let offset = reading.grooveOffset(style: style),
+           abs(offset) > deg2rad(style.grooveCueDeadbandDegrees) {
+            arcEnd = wrapAngle(side * (grooveAngle + offset))
         } else {
             arcEnd = nil
         }
+    }
+}
+
+extension Autohelm.Reading {
+    /// Its offset from the groove (`offsetFromGroove`, radians) while it sails a groove, for the pinch and foot
+    /// cues (#219): nil while it tacks or gybes, or while it holds an angle more than
+    /// `BoatStyle.grooveCueReachDegrees` from its groove towards the beam. A held angle reads against the upwind
+    /// groove forward of the beam and the downwind one abaft it, so a reach would read as a hard foot or pinch.
+    nonisolated func grooveOffset(style: BoatStyle) -> Double? {
+        guard !isTapping else { return nil }
+        let reach = deg2rad(style.grooveCueReachDegrees)
+        // Towards the beam: footing off the upwind groove, pinching up from the downwind one.
+        let towardsBeam = groove == .upwind ? offsetFromGroove : -offsetFromGroove
+        return towardsBeam > reach ? nil : offsetFromGroove
     }
 }
 
@@ -127,19 +141,11 @@ nonisolated enum EdgeArrow {
         var angle: CGFloat
     }
 
-    /// The part of a scene of `sceneSize` a mark must be inside to count as on screen: inset by `style`'s edge
-    /// arrow insets, clear of the HUD and controls.
-    static func visibleRect(sceneSize: CGSize, style: BoatStyle) -> CGRect {
-        let side = CGFloat(style.edgeArrowInsetSide), top = CGFloat(style.edgeArrowInsetTop)
-        let bottom = CGFloat(style.edgeArrowInsetBottom)
-        return CGRect(x: side, y: bottom, width: max(sceneSize.width - 2 * side, 1),
-                      height: max(sceneSize.height - top - bottom, 1))
-    }
-
-    /// The arrow for a mark drawn at `projected` (`CameraRig.project`): nil while it's inside `visible`, else on
-    /// `visible`'s edge where the ray from its centre to the mark leaves it, pointing along that ray.
+    /// The arrow for a mark drawn at `projected` (`CameraRig.project`): nil while it's inside `visible` (edges
+    /// included, `ViewInsets.contains`), else on `visible`'s edge where the ray from its centre to the mark leaves
+    /// it, pointing along that ray.
     static func placement(projected p: CGPoint, visible: CGRect) -> Placement? {
-        guard !visible.contains(p) else { return nil }
+        guard !ViewInsets.contains(visible, p) else { return nil }
         let c = CGPoint(x: visible.midX, y: visible.midY)
         let dx = p.x - c.x, dy = p.y - c.y
         let tx = dx == 0 ? CGFloat.infinity : (visible.width / 2) / abs(dx)
@@ -151,7 +157,7 @@ nonisolated enum EdgeArrow {
     /// What the arrow points at for your boat with `status` on leg `legIndex` in `course`: the start line's centre
     /// before you've started (prestart, OCS), the leg's mark while racing (a gate's or the finish line's centre,
     /// `CourseLayout.targetPosition`), and nothing once you've stopped. In the pre-start shot with a line end off
-    /// screen (`CameraRig.lineEndOffScreen`), both ends, so the arrow can point at the one that's off.
+    /// screen (`CameraRig.lineEndOffScreen`), both ends: the line, so the arrow shows only while none of it does.
     static func targets(status: BoatStatus, legIndex: Int, course: CourseLayout, lineEndOffScreen: Bool) -> [Vec2] {
         switch status {
         case .prestart, .ocs:
@@ -165,11 +171,40 @@ nonisolated enum EdgeArrow {
         }
     }
 
-    /// The arrow for `targets`, each drawn where `project` puts it: one target's placement, or of two (a line's
-    /// ends), the one that's off screen, or the line's middle when both are.
+    /// The arrow for `targets`, each drawn where `project` puts it: one target's placement, or for two (a line's
+    /// ends) nothing while any part of the line between them is inside `visible`, else the line's middle's.
     static func placement(targets: [Vec2], project: (Vec2) -> CGPoint, visible: CGRect) -> Placement? {
-        let placed = targets.compactMap { placement(projected: project($0), visible: visible) }
-        guard targets.count == 2, placed.count == 2 else { return placed.first }
-        return placement(projected: project((targets[0] + targets[1]) / 2), visible: visible) ?? placed.first
+        guard targets.count == 2 else { return targets.first.flatMap { placement(projected: project($0), visible: visible) } }
+        let a = project(targets[0]), b = project(targets[1])
+        guard !segment(a, b, meets: visible) else { return nil }
+        return placement(projected: project((targets[0] + targets[1]) / 2), visible: visible)
+    }
+
+    /// Whether any part of the segment from `a` to `b` is inside `rect`, its edges included: clipped to the rect
+    /// one slab at a time (Liang-Barsky).
+    static func segment(_ a: CGPoint, _ b: CGPoint, meets rect: CGRect) -> Bool {
+        var t0: CGFloat = 0, t1: CGFloat = 1
+        let d = CGPoint(x: b.x - a.x, y: b.y - a.y)
+        for (p, q) in [(-d.x, a.x - rect.minX), (d.x, rect.maxX - a.x), (-d.y, a.y - rect.minY), (d.y, rect.maxY - a.y)] {
+            if p == 0 {
+                if q < 0 { return false }
+            } else {
+                let t = q / p
+                if p < 0 { t0 = max(t0, t) } else { t1 = min(t1, t) }
+                if t0 > t1 { return false }
+            }
+        }
+        return true
+    }
+
+    /// The race view's clear area (`ViewInsets`) for a scene with the safe area `safeArea` (the scene draws under
+    /// it, the HUD and controls inside it): its top under the HUD's notice line (`HUDView.noticeTop`, lower with
+    /// the live leaderboard on), its bottom over the controls row (`RaceControls.rowHeight`), each with `style`'s
+    /// `edgeArrowClearance` more, and its sides `edgeArrowInsetSide` in.
+    @MainActor static func insets(safeArea: (top: CGFloat, bottom: CGFloat), showsLeaderboard: Bool, style: BoatStyle) -> ViewInsets {
+        let clearance = CGFloat(style.edgeArrowClearance)
+        let top = safeArea.top + HUDView.noticeTop(showsLeaderboard: showsLeaderboard) + HUDView.noticeHeight
+        let bottom = safeArea.bottom + RaceControls.rowHeight
+        return ViewInsets(top: top + clearance, bottom: bottom + clearance, side: CGFloat(style.edgeArrowInsetSide))
     }
 }

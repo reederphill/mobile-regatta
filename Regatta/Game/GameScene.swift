@@ -83,6 +83,8 @@ final class GameScene: SKScene {
     private let grooveTick = SKShapeNode()
     /// The next-mark edge arrow (#15): the camera's child, so it stays put on screen as the view zooms and turns.
     private let edgeArrow = SKShapeNode()
+    /// The camera scale the ladder lines were last built for: a zoom past it rebuilds them.
+    private var ladderScale: CGFloat = 0
     /// The vane's and tick's length the paths were built for, points.
     private var vaneLength: CGFloat = 0
     private let startLine = SKShapeNode()
@@ -313,6 +315,7 @@ final class GameScene: SKScene {
         coneLayer.update(style: boatStyle)
 
         syncCamera()
+        rig.visibleInsets = viewInsets
         rig.advance(CameraWorld(world), sceneSize: size, dt: dt, settled: settled)
         cam.position = rig.center
         cam.setScale(rig.cameraScale)
@@ -348,26 +351,31 @@ final class GameScene: SKScene {
     }
 
     /// Draws the cues (#122) over `world` with the camera of this frame. The laylines and ladder lines are redrawn
-    /// four times a second, or at once in a settled frame; the vane and edge arrow every frame.
+    /// four times a second, at once in a settled frame, and at once when turned back on; the ladder lines also as
+    /// the zoom changes, so they always reach past the view. The vane and edge arrow every frame.
     private func updateCues(_ world: RenderWorld, dt: Double, settled: Bool) {
         let style = boatStyle
         // Line widths in screen points, whatever the zoom.
         let px = cam.xScale
-        laylines.isHidden = !(cueOverride?.laylines ?? session?.controls.showsLaylines ?? true)
-        ladderLines.isHidden = !(cueOverride?.ladderLines ?? session?.controls.showsLadderLines ?? false)
+        let showsLaylines = cueOverride?.laylines ?? session?.controls.showsLaylines ?? true
+        let showsLadderLines = cueOverride?.ladderLines ?? session?.controls.showsLadderLines ?? false
+        let laylinesTurnedOn = showsLaylines && laylines.isHidden
+        let ladderTurnedOn = showsLadderLines && ladderLines.isHidden
+        laylines.isHidden = !showsLaylines
+        ladderLines.isHidden = !showsLadderLines
         laylines.strokeColor = CuePalette.yellow.uiColor.withAlphaComponent(CGFloat(style.laylineAlpha))
         laylines.lineWidth = 1.5 * px
         ladderLines.strokeColor = CuePalette.cueWhite.uiColor.withAlphaComponent(CGFloat(style.ladderLineAlpha))
         ladderLines.lineWidth = 1 * px
 
         cueCountdown -= dt
-        if settled || cueCountdown <= 0 {
-            cueCountdown = 0.25
-            if !laylines.isHidden { updateLaylines(world) }
-            if !ladderLines.isHidden { updateLadderLines(world) }
-        }
+        let refresh = settled || cueCountdown <= 0
+        if refresh { cueCountdown = 0.25 }
+        if showsLaylines && (refresh || laylinesTurnedOn) { updateLaylines(world) }
+        let zoomed = abs(px / max(ladderScale, 1e-6) - 1) > 0.01
+        if showsLadderLines && (refresh || ladderTurnedOn || zoomed) { updateLadderLines(world) }
         updateVane(world, style: style, px: px)
-        updateEdgeArrow(world, style: style)
+        updateEdgeArrow(world)
     }
 
     /// Your laylines, from the formula a bot sees them by (`Laylines`, `SeatView.laylines`): dashed.
@@ -389,6 +397,7 @@ final class GameScene: SKScene {
         let course = world.course
         let leg = course.legSailed(status: me.status, legIndex: me.legIndex)
         let centre = Vec2(Double(cam.position.x / ppm), Double(cam.position.y / ppm))
+        ladderScale = cam.xScale
         let radius = Double(hypot(size.width, size.height) * cam.xScale / ppm)
         let path = CGMutablePath()
         for line in LadderCue.segments(for: leg, in: course, centre: centre, radius: radius,
@@ -453,8 +462,16 @@ final class GameScene: SKScene {
         vaneArc.path = arc
     }
 
+    /// What the HUD and controls cover of the view (#122, `EdgeArrow.insets`): the edge arrow and the rig's line
+    /// ends read the same clear area. The scene draws under the safe area; the HUD and controls keep inside it.
+    private var viewInsets: ViewInsets {
+        let safe = view?.safeAreaInsets ?? .zero
+        return EdgeArrow.insets(safeArea: (top: safe.top, bottom: safe.bottom),
+                                showsLeaderboard: session?.controls.showsLeaderboard ?? false, style: boatStyle)
+    }
+
     /// The next-mark edge arrow (`EdgeArrow`), on the camera: shown only while what you sail for is off screen.
-    private func updateEdgeArrow(_ world: RenderWorld, style: BoatStyle) {
+    private func updateEdgeArrow(_ world: RenderWorld) {
         let me = world.me
         let framing = rig
         let sceneSize = size
@@ -462,7 +479,7 @@ final class GameScene: SKScene {
                                         lineEndOffScreen: framing.lineEndOffScreen)
         guard !world.isGhost(ofSeat: world.myBoatIndex),
               let placed = EdgeArrow.placement(targets: targets, project: { framing.project($0, sceneSize: sceneSize) },
-                                               visible: EdgeArrow.visibleRect(sceneSize: sceneSize, style: style)) else {
+                                               visible: framing.visibleInsets.visibleRect(sceneSize: sceneSize)) else {
             edgeArrow.isHidden = true
             return
         }

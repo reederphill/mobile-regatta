@@ -64,9 +64,11 @@ import Testing
     @Test func edgeArrowHiddenIffMarkVisible() throws {
         let size = CameraRigTests.iPhone
         let style = BoatStyle.standard
-        let visible = EdgeArrow.visibleRect(sceneSize: size, style: style)
-        #expect(visible.minY == CGFloat(style.edgeArrowInsetBottom) && visible.minX == CGFloat(style.edgeArrowInsetSide))
-        #expect(abs(visible.maxY - (size.height - CGFloat(style.edgeArrowInsetTop))) < 1e-9)
+        let visible = EdgeArrow.insets(safeArea: (top: 59, bottom: 34), showsLeaderboard: false, style: style)
+            .visibleRect(sceneSize: size)
+        #expect(visible.minX == CGFloat(style.edgeArrowInsetSide))
+        #expect(abs(visible.maxX - (size.width - CGFloat(style.edgeArrowInsetSide))) < 1e-9)
+        let isInside = { (p: CGPoint) in ViewInsets.contains(visible, p) }
         let world = CameraRigTests.world(axis: CameraRigTests.degrees(37), heading: CameraRigTests.degrees(95))
         for mode in [CameraRig.Mode.courseUp, .boatUp] {
             var rig = CameraRig(mode: mode)
@@ -77,7 +79,7 @@ import Testing
                     let mark = world.myPosition + Vec2(x, y)
                     let p = rig.project(mark, sceneSize: size)
                     let placed = EdgeArrow.placement(projected: p, visible: visible)
-                    #expect((placed == nil) == visible.contains(p), "\(mode) mark at \(p)")
+                    #expect((placed == nil) == isInside(p), "\(mode) mark at \(p)")
                     guard let placed else { hidden += 1; continue }
                     shown += 1
                     // On the rect's edge.
@@ -128,14 +130,39 @@ import Testing
         #expect(EdgeArrow.targets(status: .finished, legIndex: 0, course: course, lineEndOffScreen: false).isEmpty)
         #expect(EdgeArrow.targets(status: .dsq, legIndex: 0, course: course, lineEndOffScreen: false).isEmpty)
 
-        // Of a line's two ends, the arrow points at the one off screen; both off, at the line's middle.
+        // A line's two ends: no arrow while any of the line shows, one end on screen or neither with the line
+        // across the view between them; with none of it on screen, at the line's middle.
         let visible = CGRect(x: 0, y: 0, width: 100, height: 100)
         let project: (Vec2) -> CGPoint = { CGPoint(x: $0.x, y: $0.y) }
-        let oneOff = EdgeArrow.placement(targets: [Vec2(50, 50), Vec2(300, 50)], project: project, visible: visible)
-        #expect(oneOff?.position == CGPoint(x: 100, y: 50) && oneOff?.angle == 0)
+        #expect(EdgeArrow.placement(targets: [Vec2(20, 50), Vec2(80, 50)], project: project, visible: visible) == nil)
+        #expect(EdgeArrow.placement(targets: [Vec2(50, 50), Vec2(300, 50)], project: project, visible: visible) == nil,
+                "one end on screen")
+        #expect(EdgeArrow.placement(targets: [Vec2(-200, 50), Vec2(300, 50)], project: project, visible: visible) == nil,
+                "both ends off, the middle of the line on screen")
+        #expect(EdgeArrow.placement(targets: [Vec2(-50, 120), Vec2(120, -50)], project: project, visible: visible) == nil,
+                "both ends off, the line cutting a corner")
+        #expect(EdgeArrow.placement(targets: [Vec2(100, 100), Vec2(300, 300)], project: project, visible: visible) == nil,
+                "an end on the rect's corner")
         let bothOff = EdgeArrow.placement(targets: [Vec2(-100, 250), Vec2(200, 250)], project: project, visible: visible)
         #expect(abs(Double(bothOff?.angle ?? 0) - .pi / 2) < 1e-9)
-        #expect(EdgeArrow.placement(targets: [Vec2(20, 50), Vec2(80, 50)], project: project, visible: visible) == nil)
+        #expect(EdgeArrow.placement(targets: [Vec2(-90, 120), Vec2(120, 330)], project: project, visible: visible) != nil,
+                "a diagonal line clear of the corner")
+    }
+
+    /// The edge arrow's clear area is the HUD's: its top under the notice line (lower with the live leaderboard
+    /// on), its bottom over the controls row, both inside the safe area and `edgeArrowClearance` clear of them.
+    @Test func edgeArrowInsetsFollowTheHUD() {
+        var style = BoatStyle.standard
+        style.edgeArrowClearance = 10
+        style.edgeArrowInsetSide = 20
+        for board in [false, true] {
+            let insets = EdgeArrow.insets(safeArea: (top: 59, bottom: 34), showsLeaderboard: board, style: style)
+            #expect(insets.top == 59 + HUDView.noticeTop(showsLeaderboard: board) + HUDView.noticeHeight + 10)
+            #expect(insets.bottom == 34 + RaceControls.rowHeight + 10)
+            #expect(insets.side == 20)
+        }
+        #expect(EdgeArrow.insets(safeArea: (0, 0), showsLeaderboard: true, style: style).top
+                >= EdgeArrow.insets(safeArea: (0, 0), showsLeaderboard: false, style: style).top)
     }
 
     /// The cue fixtures (#62) draw every cue: laylines, ladder lines, your vane and the edge arrow, pinching at one
@@ -164,7 +191,9 @@ import Testing
             let targets = EdgeArrow.targets(status: me.status, legIndex: me.legIndex, course: world.course,
                                             lineEndOffScreen: rig.lineEndOffScreen)
             let placed = try #require(EdgeArrow.placement(targets: targets, project: { rig.project($0, sceneSize: size) },
-                                                          visible: EdgeArrow.visibleRect(sceneSize: size, style: .standard)))
+                                                          visible: rig.visibleInsets.visibleRect(sceneSize: size)))
+            #expect(rig.visibleInsets == EdgeArrow.insets(safeArea: (0, 0), showsLeaderboard: session.controls.showsLeaderboard,
+                                                          style: scene.boatStyle), "\(name): the rig reads the HUD's insets")
             let arrow = try #require(scene.camera?.childNode(withName: "edgeArrow"))
             let inView = scene.convertPoint(toView: arrow.convert(.zero, to: scene))
             #expect(abs(inView.x - placed.position.x) < 0.5 && abs(inView.y - (size.height - placed.position.y)) < 0.5,
@@ -303,6 +332,42 @@ import Testing
         let theirs = Self.boat(sailingDegrees: rad2deg(groove), id: 7, isPlayer: true, colorIndex: 4)
         #expect(BoatPose(theirs, ease: false, isGhost: false, boatClass: Self.boatClass,
                          autohelm: Self.reading(.angle(groove - deg2rad(5)), for: theirs)) == pinched)
+    }
+
+    /// The pinch and foot cues show only while she sails a groove: an angle held out on a reach reads against the
+    /// downwind groove abaft the beam (or the upwind one forward of it), which would be a hard pinch (or foot), so
+    /// past `grooveCueReachDegrees` towards the beam there's no sail cue and no arc. Pinching the downwind groove
+    /// within it, and footing deeper than it, still show.
+    @Test func reachAngleShowsNoGrooveCue() {
+        let style = BoatStyle.standard
+        let tws = metresPerSecond(knots: 12)
+        let upwind = Autohelm.grooveAngle(.upwind, tws: tws, boatClass: Self.boatClass)
+        let downwind = Autohelm.grooveAngle(.downwind, tws: tws, boatClass: Self.boatClass)
+        func cues(_ angle: Double) -> (pose: BoatPose, base: BoatPose, arc: Double?, offset: Double) {
+            let boat = Self.boat(sailingDegrees: rad2deg(angle))
+            let reading = Self.reading(.angle(angle), for: boat)
+            let pose = BoatPose(boat, ease: false, isGhost: false, boatClass: Self.boatClass, style: style, autohelm: reading)
+            let base = BoatPose(boat, ease: false, isGhost: false, boatClass: Self.boatClass, style: style, autohelm: nil)
+            let vane = VaneCue(boat, reading: reading, isGhost: false, boatClass: Self.boatClass, style: style)
+            return (pose, base, vane?.arcEnd, reading.offsetFromGroove)
+        }
+        // Reaches: beam on, either side of it, and footing well off the upwind groove.
+        for degrees in [80.0, 95, 110, rad2deg(upwind) + style.grooveCueReachDegrees + 3,
+                        rad2deg(downwind) - style.grooveCueReachDegrees - 3] {
+            let reach = cues(deg2rad(degrees))
+            #expect(abs(reach.offset) > deg2rad(style.grooveCueFullDegrees), "\(degrees)°: the reading's offset is large")
+            #expect(reach.pose == reach.base, "\(degrees)°: a held reach shows a sail cue")
+            #expect(reach.arc == nil, "\(degrees)°: a held reach shows the vane arc")
+        }
+        // Pinching the downwind groove, footing deeper than it, and footing the upwind one: within reach of a groove.
+        let pinchedDown = cues(downwind - deg2rad(6))
+        #expect(pinchedDown.pose.luffLift > 0 && pinchedDown.arc != nil, "pinching downwind")
+        if downwind < .pi - deg2rad(8) {
+            let deeper = cues(downwind + deg2rad(5))
+            #expect(deeper.pose.sailFullness > 1 && deeper.arc != nil, "footing deeper downwind")
+        }
+        let footedUp = cues(upwind + deg2rad(6))
+        #expect(footedUp.pose.sailFullness > 1 && footedUp.arc != nil, "footing upwind")
     }
 
     // MARK: - Ladder lines

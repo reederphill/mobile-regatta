@@ -9,6 +9,12 @@ struct RaceControls: View {
 
     private var isRacing: Bool { session.hud.status.isRacingOrStarting }
 
+    /// A control's height and the row's bottom padding, points.
+    static let controlHeight: CGFloat = 56
+    static let bottomPadding: CGFloat = 16
+    /// How far the row reaches up from the bottom of the safe area: the edge arrow (#122) keeps above it.
+    static let rowHeight = controlHeight + bottomPadding
+
     var body: some View {
         HStack(alignment: .bottom) {
             // Ease holds boats on the line before the gun too (#99).
@@ -27,7 +33,7 @@ struct RaceControls: View {
                 .accessibilityIdentifier("race-protest")
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 16)
+        .padding(.bottom, Self.bottomPadding)
     }
 
     /// Wall-clock seconds for the Tack/Gybe hold (#222): the hold is the player's, not the simulation's.
@@ -45,7 +51,7 @@ private struct ControlLabel: View {
         Text(title)
             .font(.headline.weight(.heavy))
             .tracking(1.5)
-            .frame(width: width, height: 56)
+            .frame(width: width, height: RaceControls.controlHeight)
             .background(.black.opacity(isHeld ? 0.2 : 0.5), in: .capsule)
             .background(.white.opacity(isHeld ? 0.35 : 0), in: .capsule)
             .overlay(Capsule().strokeBorder(.white, lineWidth: 2))
