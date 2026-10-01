@@ -52,8 +52,10 @@ extension BotBrain {
     static let missMargin = deg2rad(2)
     /// Hull lengths of clear water around her she needs to miss the groove.
     static let missClearance = 2.0
-    /// Seconds she keeps a groove choice before she makes it again (`missingGroove`).
-    static let grooveChoiceSeconds = (min: 6.0, max: 14.0)
+    /// Seconds she keeps a groove choice before she makes it again (`missingGroove`). Longer than skiff@3's 10 s
+    /// slow-down (#263): a pinch held for less hardly costs her speed before she chooses again, which hid the miss and
+    /// pressed the tiers together (#300: National/Regional mean-place gap 0.98 at 6–14 s, 1.31 at 10–20 s).
+    static let grooveChoiceSeconds = (min: 10.0, max: 20.0)
 
     /// `aim`, a groove, as she chooses it racing (#219, #231, `BotWeaknesses.angleMissRate`): every so often she
     /// chooses again, and a miss has her pinch or foot past the autohelm's snap to the groove, so it holds the
