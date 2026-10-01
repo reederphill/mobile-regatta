@@ -236,6 +236,7 @@ extension ObstructionKind {
         switch self {
         case .land: 0
         case .boundary: 1
+        case .mark: 2
         }
     }
 

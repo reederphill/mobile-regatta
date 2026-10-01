@@ -429,6 +429,7 @@ public final class Race {
         updateMarkRoom(previous: previous, hulls: hulls, zones: zones, markRoomApplies: markRoomApplies)
         // The umpire records the boats as the calls below judge them (#92).
         recordTrack()
+        forgetSeparatedMarkTouches()
         resolveBoatContacts()
         callNearMisses()
         resolveObstacleContacts()
@@ -716,6 +717,11 @@ public final class Race {
     /// Whether the umpire holds an incident open between seats `a` and `b`. Never, in a prediction.
     private func isIncidentOpen(_ a: Int, _ b: Int) -> Bool { umpire?.openIncident(SeatPair(a, b)) != nil }
 
+    /// Marks (#90): a boat touching a mark loses speed by the class's mark factor on the tick the touch begins,
+    /// and is pushed off it. Touching a mark of her leg (rule 31, `CourseLayout.isRule31Mark`) costs her one
+    /// penalty turn (`penalize`) and is announced (`markTouch`), unless the turn is already owed for the same
+    /// incident (`markTouchVerdict`). Any other touch is an obstruction contact of kind `.mark`: no penalty,
+    /// announced and recorded (`IncidentIndex.obstructionContacts`), as an edge's is. A ghost sails through.
     private func resolveObstacleContacts() {
         var touching = Set<Pair>()
         let obstacles = course.obstacles
@@ -728,13 +734,86 @@ public final class Race {
                 touching.insert(pair)
                 if !obstacleContacts.contains(pair) {
                     boats[i].speed = BoatDynamics.speed(after: .mark, speed: boats[i].speed, boatClass: boatClass)
-                    penalize(i)
-                    emit(.markTouch(seat: i, mark: obstacle.name))
+                    touchMark(i, obstacle)
                 }
                 boats[i].position += push
             }
         }
         obstacleContacts = touching
+    }
+
+    /// What seat `i`'s touch of `obstacle`, begun this tick, costs her (rule 31, #90).
+    private func touchMark(_ i: Int, _ obstacle: Obstacle) {
+        if course.isRule31Mark(obstacle.name, status: boats[i].status, legIndex: boats[i].legIndex) {
+            switch markTouchVerdict(i) {
+            case .turn:
+                penalize(i)
+                emit(.markTouch(seat: i, mark: obstacle.name))
+                rememberMarkTouch(i)
+                return
+            case .sameIncident:
+                break
+            }
+        }
+        incidents.recordObstructionContact(ObstructionContact(tick: tick, leg: boats[i].legIndex, seat: i, kind: .mark))
+        emit(.obstructionContact(seat: i, kind: .mark))
+    }
+
+    /// What touching a mark of her leg costs a boat (#90).
+    private enum MarkTouchVerdict {
+        /// One penalty turn (rule 31).
+        case turn
+        /// Nothing more (44.1(a)): she has an open incident whose call already carries her turn.
+        case sameIncident
+        // 43.1 (#93): a boat compelled onto the mark by another's foul is exonerated, `.exonerated(incidentId)`,
+        // decided in `markTouchVerdict`.
+    }
+
+    /// Rule 44.1(a): whether seat `i`'s touch of a mark of her leg is in the same incident as a foul she is
+    /// already called for: one the umpire holds open (the pair hasn't separated), whose call she is the
+    /// offender of. One turn for the incident, the call's. In a prediction no incident is open, so it predicts
+    /// the turn until the server's snapshot (as #88's calls).
+    private func markTouchVerdict(_ i: Int) -> MarkTouchVerdict {
+        guard let umpire else { return .turn }
+        for other in boats.indices where other != i {
+            if let id = umpire.openIncident(SeatPair(i, other)), case .called(let call)? = incidents[id]?.outcome,
+               call.offender == i {
+                return .sameIncident
+            }
+        }
+        // 43.1 (#93) decides `.exonerated` here.
+        return .turn
+    }
+
+    /// Remembers, for 44.1(a), the boats seat `i`'s penalised mark touch shares an incident with: every boat
+    /// within the incident separation of her now (`UmpireState.markTouchNeighbours(of:)`). A foul she commits
+    /// against one before they separate costs no second turn (`call`). The authoritative race's alone.
+    private func rememberMarkTouch(_ i: Int) {
+        guard umpire != nil else { return }
+        let near = boats.indices.filter { $0 != i && !boats[$0].isGhost && !isSeparated(i, $0) }
+        umpire?.setMarkTouchNeighbours(near, of: i)
+    }
+
+    /// Forgets, before the tick's calls, every remembered mark touch's neighbour that has separated from her
+    /// (`rememberMarkTouch`) or stopped racing. Looked up by seat, in seat order.
+    private func forgetSeparatedMarkTouches() {
+        guard umpire != nil else { return }
+        for i in boats.indices {
+            let neighbours = umpire?.markTouchNeighbours(of: i) ?? []
+            guard !neighbours.isEmpty else { continue }
+            let kept = boats[i].isGhost ? [] : neighbours.filter { !boats[$0].isGhost && !isSeparated(i, $0) }
+            if kept != neighbours { umpire?.setMarkTouchNeighbours(kept, of: i) }
+        }
+    }
+
+    /// Whether seats `a` and `b`'s hulls are more than the rules configuration's `incidents.separation` apart:
+    /// as `resolveBoatContacts` closes an incident.
+    private func isSeparated(_ a: Int, _ b: Int) -> Bool {
+        let hull = boatClass.hull
+        let separation = rules.incidents.separation.metres(hullLength: hull.length)
+        guard (boats[a].position - boats[b].position).length > separation else { return false }
+        return Collision.distance(convex: boats[a].hull(outline: hull.outline),
+                                  simplePolygon: boats[b].hull(outline: hull.outline)) > separation
     }
 
     /// Keeps every boat on the course in the race area (#12, #82): out of the land and inside the
@@ -761,7 +840,7 @@ public final class Race {
                 incidents.recordObstructionContact(ObstructionContact(tick: tick, leg: boats[i].legIndex, seat: i, kind: kind))
                 emit(.obstructionContact(seat: i, kind: kind))
             }
-            for kind in ObstructionKind.allCases where !resolution.touches.contains(kind) {
+            for kind in ObstructionKind.edges where !resolution.touches.contains(kind) {
                 let contact = WorldSnapshot.EdgeContact(seat: i, kind: kind)
                 if edgeContacts.contains(contact),
                    course.isNear(kind, hull: boats[i].hull(outline: outline), within: RaceEdges.touchMargin) {
@@ -774,7 +853,8 @@ public final class Race {
 
     /// Opens an incident for `verdict`, records whom it exonerates (rule 43.1: the incident's `exonerated`,
     /// never a call or an event of their own, #92), decides it with a rule call, penalises the offender one
-    /// turn (`penalize`) and announces the call, with the turn's deadlines when its clock is fixed at the call.
+    /// turn (`penalize`; none, `turnsOwed` 0, when her penalised mark touch was in this incident, 44.1(a), #90)
+    /// and announces the call, with the turn's deadlines when its clock is fixed at the call.
     /// The umpire holds the incident open until the pair separates (`resolveBoatContacts`): one incident
     /// per pair (#9). A prediction has no umpire, so every contact it sails opens one.
     private func call(_ verdict: Verdict) {
@@ -782,10 +862,16 @@ public final class Race {
         var incident = incidents.open(between: verdict.offender, and: verdict.victim, tick: tick, leg: leg)
         for seat in verdict.exonerated { incident.exonerate(seat) }
         let penalty = rules.raceFormat.penalty
-        let clock = penalize(verdict.offender)
+        // 44.1(a) (#90): a foul in the same incident as her penalised mark touch costs no second turn.
+        let touchNeighbours = umpire?.markTouchNeighbours(of: verdict.offender) ?? []
+        let sameIncidentAsTouch = touchNeighbours.contains(verdict.victim)
+        if sameIncidentAsTouch {
+            umpire?.setMarkTouchNeighbours(touchNeighbours.filter { $0 != verdict.victim }, of: verdict.offender)
+        }
+        let clock = sameIncidentAsTouch ? nil : penalize(verdict.offender)
         let call = RuleCall(
             incidentId: incident.id, tick: tick, rule: verdict.rule, offender: verdict.offender, victim: verdict.victim,
-            leg: leg, turnsOwed: 1,
+            leg: leg, turnsOwed: sameIncidentAsTouch ? 0 : 1,
             startDeadlineTick: clock.map { $0 + RulesConfig.ticks(penalty.start) },
             completeDeadlineTick: clock.map { $0 + RulesConfig.ticks(penalty.complete) })
         incident.outcome = .called(call)
@@ -800,7 +886,8 @@ public final class Race {
     /// so only a tick the player drives completes the turn.
     static let heldPenaltyProgress = (2 * Double.pi).nextDown
 
-    /// Seat `i` owes one more penalty turn, called now (#9, #89): a foul's (`call`) or a mark touch's (rule 31).
+    /// Seat `i` owes one more penalty turn, called now (#9, #89): a foul's (`call`) or a mark touch's (rule 31,
+    /// `resolveObstacleContacts`).
     /// Owed turns add up with no cap and are served in order. With none owed it is the current turn at once,
     /// and its clock starts now; otherwise it queues behind the turns she owes, and its clock starts when it
     /// becomes current (`startNextPenaltyClock`). Returns the turn's clock tick when it is fixed now, for the
@@ -1383,7 +1470,7 @@ extension Race {
             }
         }
         let edges = boats.indices.flatMap { seat in
-            ObstructionKind.allCases.map { WorldSnapshot.EdgeContact(seat: seat, kind: $0) }.filter(edgeContacts.contains)
+            ObstructionKind.edges.map { WorldSnapshot.EdgeContact(seat: seat, kind: $0) }.filter(edgeContacts.contains)
         }
         return WorldSnapshot(
             tick: tick,
@@ -1440,9 +1527,9 @@ extension Race {
         guard snapshot.touchingBoats.allSatisfy(validPair),
               snapshot.touchingObstacles.allSatisfy({ seatRange.contains($0.seat) && course.obstacles.indices.contains($0.obstacle) })
         else { throw WorldSnapshotError.invalidContact }
-        let kinds = ObstructionKind.allCases
+        let kinds = ObstructionKind.edges
         let edgeOrder = { (e: WorldSnapshot.EdgeContact) in e.seat * kinds.count + kinds.firstIndex(of: e.kind)! }
-        guard snapshot.touchingEdges.allSatisfy({ seatRange.contains($0.seat) }),
+        guard snapshot.touchingEdges.allSatisfy({ seatRange.contains($0.seat) && kinds.contains($0.kind) }),
               zip(snapshot.touchingEdges, snapshot.touchingEdges.dropFirst()).allSatisfy({ edgeOrder($0) < edgeOrder($1) })
         else { throw WorldSnapshotError.invalidContact }
         if let bad = snapshot.incidents.incidents.first(where: {

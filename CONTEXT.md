@@ -191,6 +191,9 @@ The part of a course between consecutive marks (or the start line and the first 
 An object the course requires a boat to leave on a given side. The start and finish line ends are also marks.
 _Avoid_: buoy (a buoy is just the physical object)
 
+**Mark of the leg**:
+A mark whose touch costs a penalty turn (rule 31): the mark or gate the boat's current leg rounds, or the finish line's ends on the finish leg, plus the start line's ends before she has started. Any other mark is an obstruction to her: touching it slows her and costs no penalty (the gate marks on the second beat and the final run, for example). A mark touch is not an incident: it involves no pair.
+
 **Leeward gate**:
 A pair of marks at the bottom of the course that boats sail between, then round either one.
 _Avoid_: bottom mark (unless it's a single mark), gates

@@ -317,6 +317,19 @@ public struct CourseLayout: Sendable, Equatable {
             .map { Obstacle(name: $0.name, position: $0.position, radius: $0.radius) }
     }
 
+    /// Whether touching the mark named `name` breaks rule 31 for a boat with `status` on leg `legIndex` (#90):
+    /// it is a mark of the leg she is sailing (`marksOfLeg(legSailed(status:legIndex:))`: the mark or gate it
+    /// rounds, or the finish line's ends), or a starting mark (the start line's pin or committee) before she
+    /// has started. Any other mark is an obstruction to her: touching it slows her and costs no penalty. So
+    /// the gate marks on the final run and on the second beat aren't marks of her leg (#12), nor the line's
+    /// ends once she has started until she sails for the finish.
+    public func isRule31Mark(_ name: String, status: BoatStatus, legIndex: Int) -> Bool {
+        if status == .prestart || status == .ocs, name == startLine.pin.name || name == startLine.committee.name {
+            return true
+        }
+        return marksOfLeg(legSailed(status: status, legIndex: legIndex)).contains { $0.name == name }
+    }
+
     public func targetPosition(for leg: Leg) -> Vec2 {
         switch leg {
         case .round(let index):

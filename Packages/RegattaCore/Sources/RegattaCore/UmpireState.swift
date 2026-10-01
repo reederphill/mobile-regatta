@@ -21,6 +21,12 @@ public struct UmpireState: Sendable, Equatable {
     /// ring buffers, filled in seat order, read by pair. Kept apart from the rule 18 memory: room to keep clear
     /// is judged from the boats alone.
     private var recorder = EscapeRecorder()
+    /// Rule 44.1(a) (#90): each boat whose touch of a mark of her leg cost her a turn, by seat, with the seats
+    /// within the incident separation of her when she touched it that haven't separated from her since, in
+    /// seat order. A foul she commits against one of them is the same incident, and costs no further turn.
+    /// Looked up by seat, never iterated (ADR 0002). Kept through an import, as the open incidents are: the
+    /// next tick forgets the neighbours that have separated (`Race.forgetSeparatedMarkTouches`).
+    private var markTouchNeighbours: [Int: [Int]] = [:]
 
     public init() {}
 
@@ -58,6 +64,18 @@ public struct UmpireState: Sendable, Equatable {
             }
         }
         openIncidents = kept
+    }
+
+    // MARK: - Rule 44.1(a) (#90)
+
+    /// The seats a mark touch that cost seat `seat` a turn shares an incident with: those within the separation
+    /// of her at the touch that haven't separated from her since. Empty when she has none.
+    func markTouchNeighbours(of seat: Int) -> [Int] { markTouchNeighbours[seat] ?? [] }
+
+    /// Sets the seats seat `seat`'s mark touch shares an incident with (`markTouchNeighbours(of:)`), in seat
+    /// order: a new touch's, or what is left of them. None forgets her touch.
+    mutating func setMarkTouchNeighbours(_ seats: [Int], of seat: Int) {
+        markTouchNeighbours[seat] = seats.isEmpty ? nil : seats
     }
 
     // MARK: - Rule 18 (#91)
