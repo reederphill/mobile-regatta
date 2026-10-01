@@ -89,17 +89,4 @@ struct InstantRaceTests {
         #expect(await long.host.outcome != nil)
         #expect(await registry.count == 0)
     }
-
-    @Test func windKeysAreRevealedASecondAheadOfTheirWindow() throws {
-        let session = try RaceSession.instant(InstantRaceRequest(clients: 1, seed: 3))
-        let reveal = RaceSession.windKeyReveal(setup: session.setup, windSeed: WindSeed(3))
-        let race = Race(setup: session.setup, windSeed: WindSeed(3))
-        let windows = race.wind.windows
-        let first = reveal(-session.setup.startSequenceTicks)
-        #expect(!first.isEmpty)
-        let next = first.count
-        let due = windows.start(of: next) - Race.tickRate
-        #expect(reveal(due - 1).isEmpty)
-        #expect(reveal(due).map(\.window) == [next])
-    }
 }

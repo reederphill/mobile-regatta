@@ -217,24 +217,6 @@ struct RaceHostTests {
         #expect(await rig.host.log.seatEvents == [SeatEvent(tick: -300, seat: 0, kind: .joined(.human))])
     }
 
-    @Test func windKeyRevealHookSendsKeysOnTheReliableStream() async throws {
-        let clock = VirtualClock()
-        let setup = try RaceSetup(raceSeed: RaceSeed(65), seats: [.human, .bot], laps: 1, startSequenceTicks: 300)
-        // The hook's keys go out as they are: #95 decides which and when.
-        let key = WindKey(window: 3, shift: WindKnot(value: 0.1, slope: 0), strength: WindKnot(value: 1, slope: 0),
-                          wobble: WindWobble(hump: 0, wiggle: 0), puffSeed: 7)
-        let host = RaceHost(setup: setup, windSeed: WindSeed(0x65), clock: clock,
-                            windKeyReveal: { tick in tick == -290 ? [key] : [] })
-        let transport = RecordingTransport()
-        await host.attach(seat: 0, transport: transport)
-        clock.set(await host.time(ofTick: -280))
-        await host.advance()
-        #expect(await host.revealedWindKeys == [key])
-        let keyFrames = transport.frames.filter { if case .windKey = $0.message { true } else { false } }
-        #expect(keyFrames.map(\.tick) == [-290])
-        #expect(keyFrames.map(\.message) == [.windKey(key)])
-    }
-
     // MARK: Close and replay (#59, ADR 0002)
 
     @Test func closeSendsRaceClosedAndStopsTheRace() async throws {

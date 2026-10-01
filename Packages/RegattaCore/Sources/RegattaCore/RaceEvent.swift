@@ -49,8 +49,10 @@ public struct RaceEvent: Sendable, Equatable {
         case firstFinish(closeTick: Int)
         /// The race closed and is scored (`Race.results`).
         case raceClosed(results: RaceResults)
-        /// A protest tap, acknowledged. Recorded, never changes a result in v1.0.
-        case protestRecorded(seat: Int, target: Int)
+        /// Seat `seat`'s protest of `target`, recorded (`IncidentIndex.protests`) and acknowledged to her alone
+        /// (#94): linked to the pair's incident of the protest window before it (`matchedIncidentId`), or to none.
+        /// Never changes a result in v1.0.
+        case protestRecorded(seat: Int, target: Int, matchedIncidentId: Int?)
         /// The seat let go of the rudder within a snap width of the groove, and her autohelm took it (#230, #124).
         case grooveSnap(seat: Int)
         /// The seat's roll tap hit, within the class's window of the boom crossing (#263, `RollTack.hit`): for the

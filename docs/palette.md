@@ -36,7 +36,7 @@ Sources: #22 (art direction), #29 (safe palette), G7 (#37), #53 (values). Consum
 | `chevronBlue` | `#3F51E0` | 0.51 / 0.216 / 271 | give-way chevron |
 | `yellow` | `#F0E442` | 0.90 / 0.172 / 105 | laylines; HUD start clock (#111) |
 | `inactiveGrey` | `#9AA0A6` | 0.70 / 0.011 / — | inactive marks |
-| `cueWhite` | `#FFFFFF` | 1.00 / 0 / — | player glow, wakes; alpha set at use site |
+| `cueWhite` | `#FFFFFF` | 1.00 / 0 / — | player glow, wakes, ladder lines (#122); alpha set at use site |
 | `hullOutline` | `#F5F5F2` | 0.97 / 0.004 / — | every hull's thin outline, 1 pt inside the edge (#117, #21); #169 restyles |
 
 Cue-to-cue hue separation: vermillion–orange 29°, orange–yellow 28°, chevron–water 29°, chevron–puff 25°.

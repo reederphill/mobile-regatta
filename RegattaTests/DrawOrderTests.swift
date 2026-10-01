@@ -9,11 +9,11 @@ import Testing
 /// (#116, `WaterTests.waterDrawsTheSameEveryTime`), then the start row's fleet (#85).
 @MainActor @Suite struct DrawOrderTests {
     /// Each fixture's scene, drawn settled, draws no two nodes at one z: not the fleet's shadow cones, backwinds,
-    /// wakes, heel shadows, hulls, outlines or sails, nor your glow (#117), nor the course, the laylines, the water or its
-    /// pressure. A second scene from the same fixture, as a second launch makes, draws
+    /// wakes, heel shadows, hulls, outlines or sails, nor your glow (#117), nor the course, the cues (#122: laylines, ladder
+    /// lines, your vane, its tick and arc, and the edge arrow on the camera), the water or its pressure. A second scene from the same fixture, as a second launch makes, draws
     /// the same nodes in the same order, and so does the first drawn again.
     @Test func sceneDrawsTheSameEveryTime() throws {
-        for name in ["prestart", "water-gusty-offshore", "water-pressure", "fleet", "chart-saltings-reach"] {
+        for name in ["prestart", "water-gusty-offshore", "water-pressure", "fleet", "cues", "chart-saltings-reach"] {
             let (scene, boats) = try Self.scene(fixture: name)
             let drawn = DrawnNode.all(in: scene)
             let shared = Dictionary(grouping: drawn, by: \.z).filter { $0.value.count > 1 }
@@ -34,9 +34,18 @@ import Testing
                     "\(name)")
             // The pressure (#289) under the water's puffs, one sprite of its own.
             #expect(drawn.filter { $0.layer == WaterNode.pressureName && !$0.isHidden }.count == 1, "\(name)")
-            for layer in ["water", "laylines"] {
+            for layer in ["water", "laylines", "ladderLines", "windVane", "grooveTick", "vaneArc", "edgeArrow"] {
                 #expect(drawn.contains { $0.layer == layer }, "\(name): nothing drawn in the \(layer)")
             }
+            // The cues (#122) over the chart and its marks and line (#115), under the fleet; the edge arrow over all.
+            let charted = [ChartLayer.shallowsName, ChartLayer.boundaryName, ChartLayer.landName, ChartLayer.landmarksName,
+                           "course"]
+            let cues = drawn.filter { ["laylines", "ladderLines", "windVane", "grooveTick", "vaneArc"].contains($0.layer) }
+            let chartTop = try #require(drawn.filter { charted.contains($0.layer) }.map(\.z).max())
+            let fleetBottom = try #require(drawn.filter { $0.layer == "fleet" }.map(\.z).min())
+            let arrow = try #require(drawn.first { $0.layer == "edgeArrow" })
+            #expect(cues.allSatisfy { $0.z > chartTop && $0.z < fleetBottom }, "\(name)")
+            #expect(drawn.allSatisfy { $0.layer == "edgeArrow" || $0.z < arrow.z }, "\(name)")
 
             #expect(try DrawnNode.all(in: Self.scene(fixture: name).scene) == drawn, "\(name): a second scene drew differently")
             scene.update(1)

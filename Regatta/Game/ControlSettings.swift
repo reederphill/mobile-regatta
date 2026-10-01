@@ -2,8 +2,9 @@ import Observation
 
 /// The device's control settings every race reads (#112, #113): owned by `AppModel`, which sets it from Settings once
 /// per change (with `-scheme` over the stored scheme and `-camera` over the stored camera), and shared by every race
-/// like `GatedHaptics`. The scene reads the scheme, camera, auto zoom and pinch multiplier each frame, and the HUD
-/// the leaderboard switch, so a switch mid-race (#131) takes effect at once (a camera change eases). None of them goes on the wire.
+/// like `GatedHaptics`. The scene reads the scheme, camera, auto zoom, pinch multiplier and cue toggles each frame, and the
+/// HUD the leaderboard switch, so a switch mid-race (#131) takes effect at once (a camera change eases). None of them goes
+/// on the wire.
 @Observable
 final class ControlSettings {
     var steering: DeviceSettings.Steering
@@ -14,6 +15,10 @@ final class ControlSettings {
     /// The pinch multiplier on every shot's zoom (#322): the scene sets it as you pinch and `savesZoomMultiplier`
     /// keeps it.
     var zoomMultiplier: Double
+    /// Whether the laylines are drawn (#122): on by default.
+    var showsLaylines: Bool
+    /// Whether the ladder lines are drawn (#122): off by default.
+    var showsLadderLines: Bool
     /// Keeps a new pinch multiplier in the device's settings: `AppModel` sets it.
     @ObservationIgnored var savesZoomMultiplier: ((Double) -> Void)?
 
@@ -21,11 +26,14 @@ final class ControlSettings {
     var showsLeaderboard: Bool
 
     init(steering: DeviceSettings.Steering = .halves, camera: DeviceSettings.Camera = .courseUp, autoZoom: Bool = true,
-         zoomMultiplier: Double = 1, showsLeaderboard: Bool = true) {
+         zoomMultiplier: Double = 1, showsLaylines: Bool = true, showsLadderLines: Bool = false,
+         showsLeaderboard: Bool = true) {
         self.steering = steering
         self.camera = camera
         self.autoZoom = autoZoom
         self.zoomMultiplier = zoomMultiplier
+        self.showsLaylines = showsLaylines
+        self.showsLadderLines = showsLadderLines
         self.showsLeaderboard = showsLeaderboard
     }
 
@@ -34,6 +42,7 @@ final class ControlSettings {
         self.init(steering: Self.steering(settings.steering, override: launchOptions.steeringScheme),
                   camera: Self.camera(settings.camera, override: launchOptions.camera),
                   autoZoom: settings.autoZoom, zoomMultiplier: settings.zoomMultiplier,
+                  showsLaylines: settings.laylines, showsLadderLines: settings.ladderLines,
                   showsLeaderboard: settings.liveLeaderboard)
     }
 
@@ -43,6 +52,8 @@ final class ControlSettings {
         camera = Self.camera(settings.camera, override: launchOptions.camera)
         autoZoom = settings.autoZoom
         zoomMultiplier = settings.zoomMultiplier
+        showsLaylines = settings.laylines
+        showsLadderLines = settings.ladderLines
         showsLeaderboard = settings.liveLeaderboard
     }
 

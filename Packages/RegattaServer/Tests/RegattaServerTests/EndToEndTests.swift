@@ -47,6 +47,8 @@ struct EndToEndTests {
             #expect(report.roundTrips.max < 5000)
             #expect(report.snapshotsRefused == 0)
             #expect(report.undecodableFrames == 0)
+            // No wind key before its reveal tick, every due key in the join, never the wind seed (#95).
+            #expect(report.auditViolations.isEmpty, "\(report.auditViolations)")
             // The race leaves the server when it closes.
             for _ in 0..<100 where await server.registry.count > 0 { try await Task.sleep(for: .milliseconds(20)) }
             #expect(await server.registry.count == 0)

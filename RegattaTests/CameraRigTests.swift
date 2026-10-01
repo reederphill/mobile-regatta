@@ -333,6 +333,35 @@ import RegattaCore
         #expect(abs(Self.heightUp(rig, world.myPosition) - (0.5 - CameraStyle.standard.leadAlong / 2)) < 1e-6)
     }
 
+    /// A start line end under the HUD or the controls counts as off screen (#122): `lineEndOffScreen` reads the
+    /// clear area `visibleInsets` leaves, the same rect the edge arrow reads, so the two never disagree.
+    @Test func lineEndUnderTheHUDIsOffScreen() {
+        let axis = Self.degrees(37)
+        let up = Vec2.heading(axis)
+        let world = Self.world(axis: axis, me: up * (-3 * 2 * 23.0), heading: axis, time: -60, lineHalf: 23)
+        var rig = CameraRig(mode: .courseUp)
+        rig.advance(world, sceneSize: Self.iPhone, dt: 0, settled: true)
+        #expect(!rig.lineEndOffScreen, "both ends on the bare screen")
+        let ends = world.startLine.map { rig.project($0, sceneSize: Self.iPhone) }
+        let lowest = ends.map(\.y).min() ?? 0
+
+        // A HUD reaching just below the line: both ends under it.
+        rig.visibleInsets = ViewInsets(top: Self.iPhone.height - lowest + 1, bottom: 0, side: 0)
+        rig.advance(world, sceneSize: Self.iPhone, dt: 0, settled: true)
+        #expect(rig.lineEndOffScreen, "the line's ends are under the HUD")
+        let visible = rig.visibleInsets.visibleRect(sceneSize: Self.iPhone)
+        for end in world.startLine {
+            #expect(!ViewInsets.contains(visible, rig.project(end, sceneSize: Self.iPhone)))
+            #expect(EdgeArrow.placement(projected: rig.project(end, sceneSize: Self.iPhone), visible: visible) != nil,
+                    "the arrow reads the end as off screen too")
+        }
+
+        // One just clear of it: on screen again.
+        rig.visibleInsets = ViewInsets(top: Self.iPhone.height - (ends.map(\.y).max() ?? 0) - 1, bottom: 0, side: 0)
+        rig.advance(world, sceneSize: Self.iPhone, dt: 0, settled: true)
+        #expect(!rig.lineEndOffScreen)
+    }
+
     /// Rounding the windward mark with a close pinch-zoom: the mark-rounding shot widens, smoothly and only as
     /// much as it must, to keep the mark on screen.
     @Test func markRoundingWidensToKeepTheMark() {

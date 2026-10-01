@@ -177,7 +177,13 @@ import Glibc
 ///    open incident cost one turn between them, either order: a touch while she is the offender of an open call
 ///    is an obstruction contact, and a call against a boat within the separation of her penalised touch since
 ///    owes no turn (`turnsOwed` 0).
-public let simulationRevision = 28
+/// 29: protests and the incident index (#94), on 28. A protest is linked to the pair's latest incident when its last
+///    contact (or its opening, for a near miss) was within the protest window before it, inclusive, and recorded in
+///    `IncidentIndex.protests`; `protestRecorded` carries the matched incident's id and goes to the protester alone.
+///    The index also records every boat contact (`contacts`), every penalised mark touch (`markTouches`) and
+///    each incident's trigger (contact or near miss), and a race's log carries it (`RaceLog.incidentIndex`). Boat
+///    state, the calls and the digest don't move; the events, the index and the log's JSON do.
+public let simulationRevision = 29
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

@@ -238,7 +238,10 @@ struct Gen {
         case 15: return .finished(seat: seat, place: int(1...16))
         case 16: return .firstFinish(closeTick: tick())
         case 17: return .raceClosed(results: results())
-        case 18: return .protestRecorded(seat: seat, target: int(0...15))
+        case 18:
+            // #94: the matched incident is derived from the draws, so the seeded stream doesn't move.
+            let target = int(0...15)
+            return .protestRecorded(seat: seat, target: target, matchedIncidentId: target & 1 == 1 ? seat * 4_099 : nil)
         case 19: return .tacked(seat: seat)
         case 20: return .gybed(seat: seat)
         case 21: return .grooveSnap(seat: seat)

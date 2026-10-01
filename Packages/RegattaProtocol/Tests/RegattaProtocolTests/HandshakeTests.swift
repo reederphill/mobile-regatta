@@ -122,7 +122,7 @@ import Testing
             for _ in 0..<3 { race.step() }
             seq += 1
             let world = race.exportSnapshot()
-            // Every key the race makes goes out as a WindKey frame (on the race's own schedule, not #95's).
+            // Every key the race makes goes out as a WindKey frame (on the race's own schedule; RaceHost's `WindRevealTests` capture the host's).
             while keysSent < race.wind.keys.endWindow, let key = race.wind.keys[keysSent] {
                 try check(Frame(seq: seq, tick: race.tick, message: .windKey(key)))
                 keysSent += 1

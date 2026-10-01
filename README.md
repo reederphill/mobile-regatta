@@ -252,7 +252,9 @@ where it stands (the dev race-length override, for e2e runs); `startSeconds=S` s
 
 `regatta-loadclient` creates an instant race and sails every seat at once with `RaceClient` on a scripted helm,
 then prints each client's bytes down and up (TCP payload, the join included) and its ping round trips. It exits
-non-zero unless every client sailed to the race's close; `--check-bandwidth` also fails a client over #27's budget
+non-zero unless every client sailed to the race's close and passed the wind audit (no wind key before its reveal
+tick, every due key in each join and resync, and in an instant race, whose wind seed the dev endpoint derives from
+the public race seed, never the seed's bytes: #95); `--check-bandwidth` also fails a client over #27's budget
 (5 KiB/s down, under 1 MB per race). `--token` sails one seat of a race made elsewhere; `--json` prints the reports.
 
 ```bash

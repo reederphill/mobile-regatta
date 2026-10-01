@@ -72,6 +72,14 @@ public struct InstantRaceRequest: Hashable, Sendable {
 
     /// Seats in the fleet: the clients, and bots up to `botFillTo`.
     public var fleetSize: Int { max(clients, Self.botFillTo) }
+
+    /// The wind seed of an instant race whose race seed is `raceSeed`. A dev stand-in: anyone can derive
+    /// it from the public race seed, so it keeps a given `seed` reproducing the wind and lets the load
+    /// client check that the seed's bytes never reach the wire. Production seeds come from the vetted
+    /// pool (#37 G1) and are never derivable.
+    public static func windSeed(forRaceSeed raceSeed: UInt64) -> UInt64 {
+        raceSeed ^ 0x5EED_5EED_5EED_5EED
+    }
 }
 
 public enum InstantRaceRequestError: Error, Equatable, Sendable {

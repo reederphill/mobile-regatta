@@ -46,6 +46,48 @@ final class SettingsUITests: RaceUITestCase {
         XCTAssertEqual(value(ladder), before, "the toggle didn't flip back")
     }
 
+    /// Laylines off and ladder lines on in Settings reach the race: the scene hides the laylines and draws the
+    /// ladder lines (`race-cues`, `CueProbe`). A `defer` sets both back, so the next test starts from the defaults
+    /// even when an assertion here fails.
+    @MainActor func testLaylineAndLadderTogglesChangeVisibility() {
+        var app = openSettings()
+        let laylines = app.switches["settings-laylines"].firstMatch
+        let ladder = app.switches["settings-ladderLines"].firstMatch
+        XCTAssertTrue(laylines.waitForExistence(timeout: 20), "no Laylines toggle")
+        XCTAssertTrue(ladder.waitForExistence(timeout: 20), "no Ladder lines toggle")
+        XCTAssertEqual(value(laylines), "1", "laylines aren't on by default")
+        XCTAssertEqual(value(ladder), "0", "ladder lines aren't off by default")
+        defer { restoreCueToggles() }
+        flip(laylines)
+        flip(ladder)
+        XCTAssertEqual(value(laylines), "0", "the Laylines toggle didn't flip")
+        XCTAssertEqual(value(ladder), "1", "the Ladder lines toggle didn't flip")
+        app.terminate()
+
+        app = launchRace()
+        let cues = app.staticTexts["race-cues"].firstMatch
+        XCTAssertTrue(cues.waitForExistence(timeout: 20), "no cue probe")
+        let (seen, last) = watch(cues, until: Date().addingTimeInterval(20)) {
+            ($0.value as? String)?.hasPrefix("laylines=0 ladder=1") == true
+        }
+        XCTAssertTrue(seen, "the race drew \(String(describing: last?.value)), not laylines off and ladder lines on")
+        app.terminate()
+    }
+
+    /// Sets the Laylines toggle back on and the Ladder lines toggle back off, whichever way they were left.
+    @MainActor private func restoreCueToggles() {
+        let app = openSettings()
+        let laylines = app.switches["settings-laylines"].firstMatch
+        let ladder = app.switches["settings-ladderLines"].firstMatch
+        guard laylines.waitForExistence(timeout: 20), ladder.waitForExistence(timeout: 20) else {
+            return XCTFail("no cue toggles to restore")
+        }
+        if value(laylines) != "1" { flip(laylines) }
+        if value(ladder) != "0" { flip(ladder) }
+        XCTAssertEqual(value(laylines), "1", "the Laylines toggle didn't flip back")
+        XCTAssertEqual(value(ladder), "0", "the Ladder lines toggle didn't flip back")
+    }
+
     /// The live leaderboard (#268) is on by default: up on the HUD once the gun has gone. Turned off in Settings, a
     /// race after the gun has no board. The test turns it back on, so the next test starts from the defaults. The
     /// waits add up to under 3.5 min (`RaceUITestCase`): each race's start sequence runs at 8× (about 8-15 s).

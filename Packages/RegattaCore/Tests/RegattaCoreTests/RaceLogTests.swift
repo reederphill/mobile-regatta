@@ -70,8 +70,16 @@ enum ScriptedLog {
     ]
     static let startingTack = 900
 
-    /// Sails the script through a live race (no brains) and returns the race's own log.
+    /// Sails the script through a live race (no brains) and returns the race's own log, less its incident index
+    /// (#94): the fixture is the inputs, and the index, derived from them, moves with every rules revision.
     static func make() throws -> RaceLog {
+        var log = try race().log!
+        log.incidentIndex = nil
+        return log
+    }
+
+    /// Sails the script through a live race (no brains) to its last tick.
+    static func race() throws -> Race {
         let race = Race(setup: try setup(), windSeed: windSeed)
         var rng = SplitMix64(seed: 59)
         var nextChange = seats.indices.map { _ in rng.int(in: 1...60) }
@@ -107,7 +115,7 @@ enum ScriptedLog {
             recordDue()
         }
         precondition(nextEvent == events.count, "seat events past the end of the script")
-        return race.log!
+        return race
     }
 }
 
@@ -262,11 +270,11 @@ enum ScriptedLog {
             let now = race.boats[0].autohelm?.isTapping == true
             if now && !tapping { tapStarts.append(race.tick) }
             tapping = now
-            protests += race.drainEvents().filter { $0.kind == .protestRecorded(seat: 0, target: 1) }
+            protests += race.drainEvents().filter { $0.kind == .protestRecorded(seat: 0, target: 1, matchedIncidentId: nil) }
         }
         #expect(tapStarts == [t])
         #expect(!tapping, "the tack finished and wasn't started again")
-        #expect(protests == [RaceEvent(tick: t, kind: .protestRecorded(seat: 0, target: 1))])
+        #expect(protests == [RaceEvent(tick: t, kind: .protestRecorded(seat: 0, target: 1, matchedIncidentId: nil))])
         #expect(try #require(race.log).inputs == [
             InputRecord(tick: t, seat: 0, kind: .tap(.tackGybe)),
             InputRecord(tick: t, seat: 0, kind: .tap(.protest(target: 1))),

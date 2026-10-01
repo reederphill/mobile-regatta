@@ -2,7 +2,6 @@ import Foundation
 import RaceHost
 import RegattaCore
 import RegattaDevAPI
-import Synchronization
 
 /// One race on the server (#31: a race is a self-contained unit): its `RaceHost`, the driver that steps it
 /// on the wall clock, which connection holds each seat, and its close. It owns all of its state; races
@@ -29,8 +28,7 @@ public actor RaceSession {
         self.closeAtTick = closeAtTick
         self.clock = clock
         humanSeats = Set(setup.seats.indices.filter { setup.seats[$0] == .human })
-        host = RaceHost(setup: setup, windSeed: windSeed, clock: clock, options: options,
-                        windKeyReveal: Self.windKeyReveal(setup: setup, windSeed: windSeed))
+        host = RaceHost(setup: setup, windSeed: windSeed, clock: clock, options: options)
     }
 
     /// A race for the instant-race endpoint: the clients in seats 0…n−1, bots after them up to
@@ -41,29 +39,8 @@ public actor RaceSession {
         let startTicks = (request.startSeconds ?? RaceSetup.defaultStartSequenceTicks / Race.tickRate) * Race.tickRate
         let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: seats, laps: 1, startSequenceTicks: startTicks)
         let closeAt = request.raceSeconds.map { $0 * Race.tickRate }
-        return RaceSession(id: id, setup: setup, windSeed: WindSeed(seed ^ 0x5EED_5EED_5EED_5EED), closeAtTick: closeAt, clock: clock)
+        return RaceSession(id: id, setup: setup, windSeed: WindSeed(InstantRaceRequest.windSeed(forRaceSeed: seed)), closeAtTick: closeAt, clock: clock)
     }
-
-    /// Reveals wind key k once the race has simulated tick `windowStart(k) − 30`: a second ahead (ADR 0001).
-    /// Interim schedule until #95 owns it; the same one the client's tests script.
-    static func windKeyReveal(setup: RaceSetup, windSeed: WindSeed) -> RaceHost.WindKeyReveal {
-        let race = Race(setup: setup, windSeed: windSeed)
-        guard let generator = try? WindKeyGenerator(windSeed: windSeed, setup: race.windSetup, windows: race.wind.windows) else {
-            return { _ in [] }
-        }
-        let state = Mutex(generator)
-        return { tick in
-            state.withLock { generator in
-                var keys: [WindKey] = []
-                while generator.windows.start(of: generator.nextWindow) - revealLeadTicks <= tick {
-                    keys.append(generator.next())
-                }
-                return keys
-            }
-        }
-    }
-
-    static let revealLeadTicks = Race.tickRate
 
     // MARK: - Seats
 

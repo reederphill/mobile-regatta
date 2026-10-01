@@ -279,7 +279,7 @@ public final class Race {
     public var log: RaceLog? {
         guard let windSeed else { return nil }
         return RaceLog(header: .init(setup: setup, windSeed: windSeed, tideStateAtGun: tideStateAtGun), inputs: appliedInputs,
-                seatEvents: seatEvents, finalTick: tick, allGoneClose: allGoneClose)
+                seatEvents: seatEvents, finalTick: tick, allGoneClose: allGoneClose, incidentIndex: incidents)
     }
 
     private func acceptsInput(from seat: Int) -> Bool {
@@ -288,8 +288,10 @@ public final class Race {
 
     /// Applies the inputs stamped for this tick and logs them: held inputs first, the last one per
     /// seat winning and logged only if it changed, then taps in the order they came. So a seat's
-    /// held input and tap in the same tick act the same whichever arrived first.
-    private func applyInputs() {
+    /// held input and tap in the same tick act the same whichever arrived first. Returns the tick's protests,
+    /// in the order they came, for `step` to record after the tick's calls (`recordProtest`).
+    private func applyInputs() -> [ProtestTap] {
+        var protests: [ProtestTap] = []
         var held = heldInputs
         var taps: [InputRecord] = []
         if !pending.isEmpty {
@@ -339,9 +341,30 @@ public final class Race {
                     boats[i].autohelm = .tackOrGybe(sailingAngle: b.sailingAngle)
                 }
             case .protest(let target):
-                emit(.protestRecorded(seat: i, target: target))
+                protests.append(ProtestTap(protester: i, protested: target))
             }
         }
+        return protests
+    }
+
+    /// A protest tap applied this tick (#94), recorded after the tick's calls.
+    private struct ProtestTap {
+        let protester: Int
+        let protested: Int
+    }
+
+    /// Records seat `i`'s protest of `target` (#94, #9): any boat may protest any other, a ghost or a bot
+    /// included, and a protest never changes a result. The umpire links it to the pair's incident of the
+    /// protest window before it (`UmpireState.matchProtest`), and only the protester is told. Applied with the
+    /// tick's inputs, recorded after the tick's calls (`step`). The authoritative race's alone: a prediction
+    /// records no protest and emits no rule event.
+    private func recordProtest(by i: Int, of target: Int) {
+        guard let umpire else { return }
+        let matched = umpire.matchProtest(by: i, of: target, atTick: tick,
+                                          window: RulesConfig.ticks(rules.raceFormat.protestWindow), in: incidents)
+        incidents.recordProtest(Protest(tick: tick, leg: boats[i].legIndex, protester: i, protested: target,
+                                        matchedIncidentId: matched))
+        emit(.protestRecorded(seat: i, target: target, matchedIncidentId: matched))
     }
 
     /// Whether `b` is in a tack a roll tap can roll (#263): her autohelm sailing a tack's tap towards head to
@@ -414,7 +437,7 @@ public final class Race {
         applyWindShadows()
         averageGrooveWinds()
 
-        applyInputs()
+        let protests = applyInputs()
 
         let previous = boats
         for i in boats.indices { integrate(i, Race.dt) }
@@ -432,6 +455,8 @@ public final class Race {
         forgetSeparatedMarkTouches()
         resolveBoatContacts()
         callNearMisses()
+        // After the tick's calls, so a protest on the tick an incident opens is about it (#94).
+        for protest in protests { recordProtest(by: protest.protester, of: protest.protested) }
         resolveObstacleContacts()
         resolveEdgeContacts()
         for i in boats.indices { updateProgress(i, from: previous[i]) }
@@ -638,14 +663,25 @@ public final class Race {
                     if !isIncidentOpen(i, j),
                        let verdict = Rules.judge(boats[i], boats[j], overlapped: overlaps.isOverlapped(i, j),
                                                  course: course, hull: hull, escape: escapeSimulation(i, j)) {
-                        call(verdict)
+                        call(verdict, trigger: .contact)
                     }
+                    recordBoatContact(i, j)
                 }
                 boats[i].position += push * 0.5
                 boats[j].position -= push * 0.5
             }
         }
         boatContacts = touching
+    }
+
+    /// Records seats `i` and `j`'s contact, begun this tick, in the incident index (#94) with the incident it is
+    /// part of: the one the umpire holds open between them, which it may just have opened. The authoritative
+    /// race's alone, as the umpire's incident memory is.
+    private func recordBoatContact(_ i: Int, _ j: Int) {
+        guard let umpire else { return }
+        let pair = SeatPair(i, j)
+        incidents.recordBoatContact(BoatContact(tick: tick, leg: max(boats[i].legIndex, boats[j].legIndex), parties: pair,
+                                                incidentId: umpire.openIncident(pair)))
     }
 
     /// Near misses (#9): an overlapped pair not touching and with no incident open, where the right-of-way
@@ -665,7 +701,7 @@ public final class Race {
                       let obligation = Rules.obligation(boats[i], boats[j], overlapped: true, course: course, hull: hull),
                       sweep.hits(boats[obligation.victim], boats[obligation.offender], hull: hull)
                 else { continue }
-                call(escapeSimulation(i, j)?.verdict(obligation, course: course) ?? obligation)
+                call(escapeSimulation(i, j)?.verdict(obligation, course: course) ?? obligation, trigger: .nearMiss)
             }
         }
     }
@@ -748,6 +784,10 @@ public final class Race {
             switch markTouchVerdict(i) {
             case .turn:
                 penalize(i)
+                if umpire != nil {
+                    // The index's record of it (#94); the authoritative race's alone.
+                    incidents.recordMarkTouch(MarkTouch(tick: tick, leg: boats[i].legIndex, seat: i, mark: obstacle.name))
+                }
                 emit(.markTouch(seat: i, mark: obstacle.name))
                 rememberMarkTouch(i)
                 return
@@ -857,9 +897,9 @@ public final class Race {
     /// and announces the call, with the turn's deadlines when its clock is fixed at the call.
     /// The umpire holds the incident open until the pair separates (`resolveBoatContacts`): one incident
     /// per pair (#9). A prediction has no umpire, so every contact it sails opens one.
-    private func call(_ verdict: Verdict) {
+    private func call(_ verdict: Verdict, trigger: Incident.Trigger) {
         let leg = boats[verdict.offender].legIndex
-        var incident = incidents.open(between: verdict.offender, and: verdict.victim, tick: tick, leg: leg)
+        var incident = incidents.open(between: verdict.offender, and: verdict.victim, tick: tick, leg: leg, trigger: trigger)
         for seat in verdict.exonerated { incident.exonerate(seat) }
         let penalty = rules.raceFormat.penalty
         // 44.1(a) (#90): a foul in the same incident as her penalised mark touch costs no second turn.
@@ -1542,6 +1582,25 @@ extension Race {
             !seatRange.contains($0.seat) || !course.legs.indices.contains($0.leg) || $0.tick > snapshot.tick
         }) {
             throw WorldSnapshotError.invalidObstructionContact(index: bad)
+        }
+        let incidentCount = snapshot.incidents.count
+        if let bad = snapshot.incidents.contacts.firstIndex(where: {
+            !seatRange.contains($0.parties.low) || !seatRange.contains($0.parties.high)
+                || !course.legs.indices.contains($0.leg) || $0.tick > snapshot.tick
+                || ($0.incidentId.map { !(0..<incidentCount).contains($0) } ?? false)
+        }) {
+            throw WorldSnapshotError.invalidBoatContact(index: bad)
+        }
+        if let bad = snapshot.incidents.markTouches.firstIndex(where: {
+            !seatRange.contains($0.seat) || !course.legs.indices.contains($0.leg) || $0.tick > snapshot.tick
+        }) {
+            throw WorldSnapshotError.invalidMarkTouch(index: bad)
+        }
+        if let bad = snapshot.incidents.protests.firstIndex(where: {
+            !seatRange.contains($0.protester) || !seatRange.contains($0.protested)
+                || !course.legs.indices.contains($0.leg) || $0.tick > snapshot.tick
+        }) {
+            throw WorldSnapshotError.invalidProtest(index: bad)
         }
         if let results = snapshot.results {
             var rowCount = Array(repeating: 0, count: boats.count)
