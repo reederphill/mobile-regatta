@@ -128,6 +128,13 @@ nonisolated struct BoatPose: Equatable, Sendable {
         boat.sailingWind.speed * boat.shadow
     }
 
+    /// The pressure she feels against her own recent average (#220): `feltWind` over `Boat.averagedWindSpeed`,
+    /// above 1 in a puff and below it in a lull, shadow or backwind. 1 for a class with no average, as `starved`.
+    static func pressure(_ boat: Boat) -> Double {
+        guard let average = boat.averagedWindSpeed, average > 0.01 else { return 1 }
+        return feltWind(boat) / average
+    }
+
     /// How starved of pressure she is (#220), 0 to 1: how far the pressure she feels is under her own recent average
     /// (`Boat.averagedWindSpeed`, the class's groove average), past `BoatStyle.starvedDeadband`, as a share of
     /// `starvedFullLoss`. A class with no average reads the wind right now, so never looks starved.
@@ -201,9 +208,66 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
 
     /// Your boat's soft white glow (#15): its alpha. No ring, no halo circle.
     var glowAlpha = 0.55
-    /// A ghost (#30) drawn faded: the alpha of everything she draws.
+    /// A ghost (#30) drawn faded: the alpha she draws at, as one flat image (her hull, outline and sail don't
+    /// darken where they overlap), and the alpha her wake draws at on top of its own.
     var ghostAlpha = 0.4
 
+    // MARK: Art (#117)
+
+    /// A ghost's limp sail: its belly, a share of a full one.
+    var ghostSailBelly = 0.35
+    /// The most belly a flapping sail loses, a share of a full one.
+    var flapBellyLoss = 0.55
+    /// How fast a fluttering sail swings and its belly pumps, radians per race second.
+    var flutterSwingRate = 22.0
+    var flapBellyRate = 31.0
+    /// Each boat's flutter phase, radians a seat on from the last, so a flapping fleet doesn't flap in step.
+    var flutterPhaseStep = 2.39
+    /// Your glow's blur, points: soft, with no hard edge that would read as a ring (#15). Baked into the textures
+    /// when the fleet is built, so the boats built after a change take it.
+    var glowBlur = 5.0
+    /// Every hull's outline width, points, drawn inside her silhouette. Baked in when the fleet is built.
+    var outlineWidth = 1.0
+
+    // MARK: Wake (#15, #220, #222, #121)
+
+    /// At this speed through the water, m/s, and above, her wake is its longest.
+    var wakeFullSpeed = 10.0
+    /// Her wake's longest, in hull lengths astern of her stern: short, a wake under her stern (#220), not a beam.
+    var wakeMaxHulls = 2.0
+    /// The V's half-angle at full speed and even pressure, degrees; half of it at a standstill.
+    var wakeSpreadDegrees = 16.0
+    /// How hard pressure fans the V and the lack of it narrows and fades it (#220): its spread changes by this
+    /// share of how far the pressure she feels is off her recent average.
+    var wakePressureFan = 1.0
+    /// The V's alpha at even pressure, `CuePalette.cueWhite`.
+    var wakeAlpha = 0.25
+    /// Planing (#245, #248): her wake is this much longer, wider and brighter, at least 1 (`WakeShape` holds it
+    /// there). A placeholder until #220's look.
+    var wakePlaningBoost = 1.2
+    /// The centre streak: its length, a share of the V's, its width, metres, and its alpha, a share of the V's.
+    var wakeStreakShare = 0.6
+    var wakeStreakWidth = 0.18
+    var wakeStreakAlpha = 0.5
+    /// How fast the wake follows her speed and pressure, per race second.
+    var wakeEaseRate = 4.0
+    /// A roll hit's flare (#222): how much bigger and brighter her wake starts, fading over this many seconds.
+    var wakeFlareGain = 0.6
+    var wakeFlareSeconds = 0.8
+    /// The short wake tier's (#127) length, a share of the full one's; it has no centre streak.
+    var wakeShortShare = 0.5
+
+    // MARK: Wind shadow, backwind (#10, #298)
+
+    /// The shadow cones' hatch alpha (black): very faint (#15), fainter than a puff's darker water. The fleet's
+    /// cones draw as one layer (`ConeLayer`), so overlapping cones never draw a line darker than this.
+    var coneAlpha = 0.04
+    /// The backwind zone's alpha at her stern, a share of the cone's: fainter still, fading to nothing at its far
+    /// edge as its loss does (#298).
+    var backwindShare = 0.6
+    /// The hatch both are drawn in: its lines' spacing and width, points. Baked in when the fleet is built.
+    var hatchSpacing = 5.0
+    var hatchLineWidth = 1.0
     // MARK: Cues (#122)
 
     /// The wind vane's length, in hull lengths (#15: one).
@@ -251,7 +315,19 @@ nonisolated extension BoatStyle {
             (.flutterDegrees, \.flutterDegrees), (.byTheLeeFlutter, \.byTheLeeFlutter),
             (.starvedDeadband, \.starvedDeadband), (.starvedFullLoss, \.starvedFullLoss),
             (.starvedFlutter, \.starvedFlutter), (.flogDegrees, \.flogDegrees), (.flogSeconds, \.flogSeconds),
-            (.glowAlpha, \.glowAlpha), (.ghostAlpha, \.ghostAlpha), (.vaneLengthHulls, \.vaneLengthHulls),
+            (.glowAlpha, \.glowAlpha), (.ghostAlpha, \.ghostAlpha),
+            (.ghostSailBelly, \.ghostSailBelly), (.flapBellyLoss, \.flapBellyLoss),
+            (.flutterSwingRate, \.flutterSwingRate), (.flapBellyRate, \.flapBellyRate),
+            (.flutterPhaseStep, \.flutterPhaseStep), (.glowBlur, \.glowBlur), (.outlineWidth, \.outlineWidth),
+            (.wakeFullSpeed, \.wakeFullSpeed), (.wakeMaxHulls, \.wakeMaxHulls),
+            (.wakeSpreadDegrees, \.wakeSpreadDegrees), (.wakePressureFan, \.wakePressureFan),
+            (.wakeAlpha, \.wakeAlpha), (.wakePlaningBoost, \.wakePlaningBoost),
+            (.wakeStreakShare, \.wakeStreakShare), (.wakeStreakWidth, \.wakeStreakWidth),
+            (.wakeStreakAlpha, \.wakeStreakAlpha), (.wakeEaseRate, \.wakeEaseRate),
+            (.wakeFlareGain, \.wakeFlareGain), (.wakeFlareSeconds, \.wakeFlareSeconds),
+            (.wakeShortShare, \.wakeShortShare), (.coneAlpha, \.coneAlpha), (.backwindShare, \.backwindShare),
+            (.hatchSpacing, \.hatchSpacing), (.hatchLineWidth, \.hatchLineWidth),
+            (.vaneLengthHulls, \.vaneLengthHulls),
             (.vaneLockDegrees, \.vaneLockDegrees), (.grooveCueDeadbandDegrees, \.grooveCueDeadbandDegrees),
             (.grooveCueFullDegrees, \.grooveCueFullDegrees), (.pinchLuffDegrees, \.pinchLuffDegrees),
             (.pinchFlatten, \.pinchFlatten), (.footEaseDegrees, \.footEaseDegrees), (.footFullness, \.footFullness),
@@ -285,5 +361,27 @@ nonisolated struct FlogTimer: Equatable, Sendable {
         }
         start = time
         return seconds > 0
+    }
+}
+
+/// A roll hit's wake flare (#222) as a boat draws it: from 1 when the hit is first drawn down to 0 over
+/// `BoatStyle.wakeFlareSeconds` of race time, though the race holds the hit until she is close-hauled. Time that
+/// runs backwards starts it over, as `FlogTimer`. Presentation state, one per boat.
+nonisolated struct FlareTimer: Equatable, Sendable {
+    /// When the current hit's flare began, race seconds, while she has one.
+    private(set) var start: Double?
+
+    /// How much of the flare is left at race time `time` with `roll` showing, 0 to 1.
+    mutating func flare(roll: BoatPose.RollCue?, time: Double, seconds: Double) -> Double {
+        guard roll == .snap else {
+            start = nil
+            return 0
+        }
+        if let start, time >= start {
+            guard seconds > 0 else { return 0 }
+            return max(0, 1 - (time - start) / seconds)
+        }
+        start = time
+        return seconds > 0 ? 1 : 0
     }
 }

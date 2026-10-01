@@ -21,7 +21,8 @@ final class RaceAssemblyUITests: RaceUITestCase {
     /// test (`RaceUITestCase`).
     @MainActor func testPracticeRaceOnTheNewCoreReachesTheGunAndAFirstRounding() throws {
         let app = launchRace(["-demo", "-timescale", "8"])
-        let status = app.staticTexts["race-status"]
+        // A uitesting-only probe (`RaceStatusProbe`, #114): the HUD shows no status line.
+        let status = app.descendants(matching: .any)["race-status"].firstMatch
         let deadline = Date.now.addingTimeInterval(180)
         let gun = watch(status, until: deadline) { Self.leg(of: $0) != nil }
         XCTAssertTrue(gun.seen, "never started racing after the gun: \(Self.describe(gun.last))")

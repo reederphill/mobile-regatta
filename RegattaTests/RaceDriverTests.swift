@@ -148,14 +148,14 @@ import RegattaCore
         boats[me].windOverGround = Wind(direction: deg2rad(20), speed: 5)
         boats[me].sailingWind = Wind(direction: deg2rad(-10), speed: 3)
         boats[me].apparentWind = Wind(direction: deg2rad(-40), speed: 4)
-        boats[me].shadow = 1
+        // Another boat's shadow doesn't reach the readout (#15): you read it from the wakes.
+        boats[me].shadow = 0.6
         let moved = TickFrame(tick: frame.tick, boats: boats, standings: frame.standings, wind: frame.wind, isOver: frame.isOver)
         let world = RenderWorld(course: driver.course, boatClass: driver.boatClass, myBoatIndex: me,
                                 previous: moved, current: moved, alpha: 1)
         let hud = HUDState(world: world)
         #expect(abs(hud.windDirection - deg2rad(20)) < 1e-12)
-        #expect(abs(hud.windKnots - 5 * 1.943_84) < 1e-9)
-        #expect(abs(hud.windShiftDegrees - rad2deg(wrapAngle(deg2rad(20) - driver.course.axis))) < 1e-9)
+        #expect(abs(hud.windKnots - knots(metresPerSecond: 5)) < 1e-9)
         // Her wind angle is the one she sails at: the sailing wind's.
         #expect(abs(hud.twaDegrees - rad2deg(boats[me].twa)) < 1e-9)
     }

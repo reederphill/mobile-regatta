@@ -230,8 +230,9 @@ jobs:
           if-no-files-found: ignore
       # A failed reference compare's render: `scripts/adopt-references.sh <PR>` copies it into
       # RegattaUITests/References/, so a reference change never needs a local simulator run (#215).
+      # Also on a cancelled job: a run that times out (many reference tests failing twice) still leaves its renders.
       - name: Upload the renders that failed their reference compare (render-actuals)
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: render-actuals

@@ -15,17 +15,23 @@ import RegattaCore
 //   (`holdingCourse`, rule 16.1); turning off a mark that way, she holds her course instead while it clears the mark
 //   (`evasiveHeading`). She never gives her lane up to such a boat either: nothing here has her give way when she
 //   has right of way. A turn her autohelm makes following a shift isn't hers.
-// - She taps a tack or gybe only clear of every boat (`tapIsClear`): a boat tacking keeps clear (rule 13), and one
-//   that acquires right of way by it gives room (rule 15).
+// - She taps a tack or gybe only clear of every boat (`tapIsClear`), racing and before her start (#280): a boat
+//   tacking keeps clear (rule 13), and one that acquires right of way by it gives room (rule 15).
 // - Misjudging (#103, #19: "they foul only by misjudging"): meeting a boat she must keep clear of under a rule in
 //   `BotWeaknesses.misjudgeScope`, she may misjudge the encounter, by her skill's `ruleMisjudgeRate`, drawn once an
-//   encounter (`judgeEncounters`): she believes she holds her rights and sails on, as she would were she the
-//   right-of-way boat, so fails to keep clear. A misjudgement only ever leaves out her give-way manoeuvre: it never
-//   turns her towards a boat, and her hold-course under 16.1 is as ever. None from National's band up.
+//   encounter (`judgeEncounters`), racing and before her start (#280): she believes she holds her rights and sails on,
+//   as she would were she the right-of-way boat, so fails to keep clear. A misjudgement only ever leaves out her
+//   give-way manoeuvre: it never turns her towards a boat, and her hold-course under 16.1 is as ever. None from
+//   National's band up.
 // - Ghosts have no rights or obligations: she ignores them. She never steers at a boat to force a foul, and never
 //   protests: a `BotDecision` has no protest tap.
 //
-// Before her start her conduct is #99's (`keepClear`, `BotBrain+Start.swift`), unchanged.
+// Before her start (#99, #280) she keeps clear as `keepClear` has her (`BotBrain+Start.swift`): on port by the water
+// (`startKeepClear`), on starboard as the rule has her, the windward boat luffing as far as just outside the no-go zone
+// (`startLuff`) and easing to drop astern when that isn't enough; she taps only clear of every boat, misjudges as she
+// does racing, and keeps clear of every boat 30° into a penalty turn (rule 21.2, `penaltyInput`). She doesn't hold her
+// course as the right-of-way boat there: she steers her approach to the line (#280 measured holding course before the
+// gun at on time 0.55 against the start gate's 0.60).
 extension BotBrain {
     /// Hull lengths, centre to centre, inside which a turn of hers towards a boat that must keep clear of her takes
     /// that boat's room (`holdingCourse`).
@@ -56,13 +62,14 @@ extension BotBrain {
 
     // MARK: - Misjudging
 
-    /// Draws her judgement of each boat she meets racing that she must keep clear of under a rule in
-    /// `BotWeaknesses.misjudgeScope` (#103): once an encounter, the first decision she owes that boat keep-clear
-    /// within `keepClearRange`, kept until that boat is beyond it again, so she doesn't swing between judgements
-    /// through one encounter. From her own stream (`rng`), and only if she can misjudge at all, so a bot that
-    /// misjudges nothing draws nothing. Before her start, or not racing, she judges nothing (#99, #280).
+    /// Draws her judgement of each boat she meets racing, or before her start (#280), that she must keep clear of under
+    /// a rule in `BotWeaknesses.misjudgeScope` (#103): once an encounter, the first decision she owes that boat
+    /// keep-clear within `keepClearRange`, kept until that boat is beyond it again, so she doesn't swing between
+    /// judgements through one encounter. From her own stream (`rng`), and only if she can misjudge at all, so a bot
+    /// that misjudges nothing draws nothing. OCS she keeps clear of every boat as a returning one (rule 21.1), finished
+    /// she sails no more: she judges nothing then.
     mutating func judgeEncounters(_ b: SeatView.OwnBoat, _ view: SeatView) {
-        guard b.status == .racing, weaknesses.ruleMisjudgeRate > 0 else {
+        guard b.status == .racing || b.status == .prestart, weaknesses.ruleMisjudgeRate > 0 else {
             if !misjudged.isEmpty { misjudged = [:] }
             return
         }
@@ -215,17 +222,18 @@ extension BotBrain {
 
     // MARK: - Tacking clear
 
-    /// Whether a tack or gybe now leaves her clear of every boat, racing (rules 13 and 15): sailing her wind angle on
-    /// the other tack at `tapSpeedShare` of her speed for `tapLookahead` seconds (`tapOntoPortLookahead` for a boat on
-    /// starboard when she goes onto port), no boat within `tapRange` comes inside `tapClearance` hull lengths of her.
-    /// Before her start her taps are #99's.
+    /// Whether a tack or gybe now leaves her clear of every boat, racing or before her start (rules 13 and 15, #280):
+    /// sailing her wind angle on the other tack at `tapSpeedShare` of her speed for `tapLookahead` seconds
+    /// (`tapOntoPortLookahead` for a boat on starboard when she goes onto port), no boat within `tapRange` comes inside
+    /// `tapClearance` hull lengths of her. Held off a tap before her start, she sails her own tack's groove meanwhile
+    /// (`sail`). OCS, her return is #99's: she runs back on her own tack, short of a gybe.
     ///
     /// "Tacks away from a boat alongside" (#263): a boat already inside the clearance, overlapped with her, is clear of
     /// a tack that only opens the gap between them. Two boats sailing side by side off the start would otherwise each
     /// wait on the other to tack, and sail on together into the race area's edge; the one whose tack takes her away
     /// tacks.
     func tapIsClear(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
-        guard b.status == .racing else { return true }
+        guard b.status == .racing || b.status == .prestart else { return true }
         let heading = 2 * b.windDirection - b.heading
         let speed = b.speed * Self.tapSpeedShare
         let clear = view.boatClass.hull.length * Self.tapClearance

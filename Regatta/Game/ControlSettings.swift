@@ -2,8 +2,9 @@ import Observation
 
 /// The device's control settings every race reads (#112, #113): owned by `AppModel`, which sets it from Settings once
 /// per change (with `-scheme` over the stored scheme and `-camera` over the stored camera), and shared by every race
-/// like `GatedHaptics`. The scene reads the scheme, camera, auto zoom, pinch multiplier and cue toggles each frame, so a
-/// switch mid-race (#131) takes effect at once (a camera change eases). None of them goes on the wire.
+/// like `GatedHaptics`. The scene reads the scheme, camera, auto zoom, pinch multiplier and cue toggles each frame, and the
+/// HUD the leaderboard switch, so a switch mid-race (#131) takes effect at once (a camera change eases). None of them goes
+/// on the wire.
 @Observable
 final class ControlSettings {
     var steering: DeviceSettings.Steering
@@ -21,14 +22,19 @@ final class ControlSettings {
     /// Keeps a new pinch multiplier in the device's settings: `AppModel` sets it.
     @ObservationIgnored var savesZoomMultiplier: ((Double) -> Void)?
 
+    /// Whether the HUD shows the live leaderboard (#268).
+    var showsLeaderboard: Bool
+
     init(steering: DeviceSettings.Steering = .halves, camera: DeviceSettings.Camera = .courseUp, autoZoom: Bool = true,
-         zoomMultiplier: Double = 1, showsLaylines: Bool = true, showsLadderLines: Bool = false) {
+         zoomMultiplier: Double = 1, showsLaylines: Bool = true, showsLadderLines: Bool = false,
+         showsLeaderboard: Bool = true) {
         self.steering = steering
         self.camera = camera
         self.autoZoom = autoZoom
         self.zoomMultiplier = zoomMultiplier
         self.showsLaylines = showsLaylines
         self.showsLadderLines = showsLadderLines
+        self.showsLeaderboard = showsLeaderboard
     }
 
     /// The device's controls from `settings`, with a test launch's `-scheme` and `-camera` over them.
@@ -36,7 +42,8 @@ final class ControlSettings {
         self.init(steering: Self.steering(settings.steering, override: launchOptions.steeringScheme),
                   camera: Self.camera(settings.camera, override: launchOptions.camera),
                   autoZoom: settings.autoZoom, zoomMultiplier: settings.zoomMultiplier,
-                  showsLaylines: settings.laylines, showsLadderLines: settings.ladderLines)
+                  showsLaylines: settings.laylines, showsLadderLines: settings.ladderLines,
+                  showsLeaderboard: settings.liveLeaderboard)
     }
 
     /// Takes `settings`, with a test launch's `-scheme` and `-camera` over them: once per Settings change.
@@ -47,6 +54,7 @@ final class ControlSettings {
         zoomMultiplier = settings.zoomMultiplier
         showsLaylines = settings.laylines
         showsLadderLines = settings.ladderLines
+        showsLeaderboard = settings.liveLeaderboard
     }
 
     /// A pinch or a two-finger double tap set a new multiplier: it's kept across races.

@@ -1,61 +1,56 @@
+import CoreGraphics
 import Foundation
 import RegattaCore
 
-struct MiniBoat: Identifiable {
+/// A boat on the minimap (#114). Extensible: the rival marker (#235) adds to it.
+struct MiniBoat: Identifiable, Equatable {
     let id: Int
     let position: Vec2
     let colorIndex: Int
     let isPlayer: Bool
-    let isActive: Bool
+    /// Marked by shape, not a new hue (#19): a diamond in her livery colour.
+    let isBot: Bool
+    /// Finished, DSQ, or still OCS or unstarted at the close (`RenderWorld.isGhost(ofSeat:)`, #30): drawn faded.
+    let isGhost: Bool
 }
 
-/// A throttled snapshot of the race for the SwiftUI overlay.
+/// A throttled snapshot of the race for the SwiftUI overlay (#114): the clock, place, the ground wind at your boat
+/// and the minimap's fleet and marks. What it shows and how is `HUDModel`'s.
 struct HUDState {
     /// Race clock in ticks (`Race.tick`); `clock` is the same in seconds.
     var tick = 0
     var clock = 0.0
     var status: BoatStatus = .prestart
-    var speedKnots = 0.0
-    var twaDegrees = 0.0
-    var tack: Tack = .starboard
-    var windKnots = 0.0
-    /// Shift from the course axis in degrees; positive = veered (clockwise).
-    var windShiftDegrees = 0.0
-    /// Compass direction the wind blows from, radians.
-    var windDirection = 0.0
-    var inShadow = false
+    /// The tick the race closes on once a boat has finished, else nil (`TickFrame.closeTick`, #30).
+    var closeTick: Int?
     var place = 1
     var fleet = 1
     var legNumber = 1
     var legCount = 1
-    var targetName = ""
-    var targetDistance = 0.0
-    /// Compass bearing to the target, radians.
-    var targetBearing = 0.0
-    var penaltyTurns = 0
-    var penaltyProgress = 0.0
+    /// The wind angle she sails at (the sailing wind's): the controls read it (`isUpwind`), the HUD doesn't show it.
+    var twaDegrees = 0.0
+    /// The wind over the ground at your boat (#15): knots, and the compass direction it blows from, radians. Nobody
+    /// else's shadow is in it: you read the shadow from the wakes, not the HUD (#15).
+    var windKnots = 0.0
+    var windDirection = 0.0
     var boats: [MiniBoat] = []
-    /// The pressure over the minimap's chart (#289), sampled from the model's own field: the wind off screen as
-    /// well as on. Nil where the race doesn't hold the key yet.
-    var pressure: PressureTone?
     var course: CourseLayout?
-
-    /// The compass heading at the top of the screen (`GameScene.viewHeading`, #113), radians: course-up's axis or
-    /// boat-up's lagged heading.
-    var viewHeading = 0.0
+    /// The marks of the leg you're sailing, drawn orange on the minimap; the rest are grey (#22, G7).
+    var activeMarks: [Vec2] = []
+    /// The start (or finish) line is where you're going: before you've started, and on the finish leg.
+    var lineIsActive = false
+    /// The pressure over the minimap's chart, cached by `MinimapField` (#289); nil until the race holds the key.
+    var pressureImage: CGImage?
+    /// The live leaderboard (#268), from the latest tick's standings and gaps.
+    var leaderboard = LeaderboardState()
 
     var isUpwind: Bool { twaDegrees < 90 }
 
-    /// Where compass bearing `compass` (radians) points on screen, clockwise from screen up: what an arrow drawn
-    /// pointing up turns by, so it reads right in course-up and boat-up (#13).
-    func screenAngle(ofCompass compass: Double) -> Double {
-        wrapAngle(compass - viewHeading)
-    }
-
     init() {}
 
-    /// The HUD for `world`'s latest tick, from your seat.
-    init(world: RenderWorld) {
+    /// The HUD for `world`'s latest tick, from your seat. `isBot` marks the bots on the minimap (#19): the roster's,
+    /// which the simulation doesn't hold (#60).
+    init(world: RenderWorld, isBot: (Int) -> Bool = { _ in false }) {
         let frame = world.frame
         let me = world.myBoatIndex
         let p = frame.boats[me]
@@ -64,49 +59,28 @@ struct HUDState {
         tick = frame.tick
         clock = frame.time
         status = p.status
-        speedKnots = p.speed * 1.943_84
+        closeTick = frame.closeTick
         twaDegrees = rad2deg(p.twa)
-        tack = p.tack
-        // The wind readouts show the wind over the ground (#15); the wind angle is the one she sails at.
-        windKnots = p.windOverGround.speed * p.shadow * 1.943_84
-        windShiftDegrees = rad2deg(wrapAngle(p.windOverGround.direction - course.axis))
+        // `windOverGround` is the wind at her before anyone's shadow: the HUD shows that (#15).
+        windKnots = knots(metresPerSecond: p.windOverGround.speed)
         windDirection = p.windOverGround.direction
-        inShadow = p.shadow < 0.97
         fleet = frame.boats.count
         place = frame.place(of: me)
+        leaderboard = LeaderboardState(frame: frame, me: me)
         legCount = course.legs.count
         legNumber = min(p.legIndex + 1, legCount)
-        penaltyTurns = p.penaltyTurnsOwed
-        if p.penaltyTurnsOwed > 0 {
-            // The current turn's share of its 360° (#89): `penaltyProgress` is that turn's alone.
-            penaltyProgress = abs(p.penaltyProgress) / (2 * .pi)
+
+        let leg = course.legSailed(status: p.status, legIndex: p.legIndex)
+        if p.status == .prestart || p.status == .ocs || leg == .finish {
+            lineIsActive = true
+        } else {
+            activeMarks = course.marksOfLeg(leg).map(\.position)
         }
 
-        let target: Vec2
-        switch p.status {
-        case .prestart where frame.time < 0:
-            targetName = "Start line"
-            target = course.startLine.centre
-        case .prestart:
-            targetName = "Cross the start line"
-            target = course.startLine.centre
-        case .ocs:
-            targetName = "Return below the line"
-            target = course.startLine.centre - course.upwind * 20
-        case .racing:
-            let leg = course.legs[p.legIndex]
-            targetName = course.name(of: leg).capitalized
-            target = course.targetPosition(for: leg)
-        case .finished, .dsq:
-            targetName = "Finished"
-            target = p.position
+        boats = frame.boats.indices.map { i in
+            let boat = frame.boats[i]
+            return MiniBoat(id: boat.id, position: boat.position, colorIndex: boat.colorIndex, isPlayer: i == me,
+                            isBot: isBot(i), isGhost: world.isGhost(ofSeat: i))
         }
-        targetDistance = (target - p.position).length
-        targetBearing = (target - p.position).bearing
-
-        boats = frame.boats.map {
-            MiniBoat(id: $0.id, position: $0.position, colorIndex: $0.colorIndex, isPlayer: $0.id == me, isActive: $0.isOnCourse)
-        }
-        pressure = world.windSampler.map { MinimapChart(course: course).pressure($0) }
     }
 }

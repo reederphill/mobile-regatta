@@ -62,12 +62,18 @@ struct RaceView: View {
             .ignoresSafeArea()
     }
 
-    /// A frozen render fixture (#62): the scene alone, no HUD or controls, so a UI test's screenshot of
-    /// `render-fixture` is the render and nothing else. Its accessibility value is `bottomInset`, the
-    /// safe-area inset at the bottom of the race rect in points: the home-indicator band, which the UI
-    /// tests leave out of the diff because the system dims and hides the indicator on its own timer.
+    /// A frozen render fixture (#62): the scene, and the HUD if the fixture asks for it (#114), never the
+    /// controls, so a UI test's screenshot of `render-fixture` is the render and nothing else. Its
+    /// accessibility value is `bottomInset`, the safe-area inset at the bottom of the race rect in points: the
+    /// home-indicator band, which the UI tests leave out of the diff because the system dims and hides the
+    /// indicator on its own timer.
     private func fixture(bottomInset: CGFloat) -> some View {
-        scene
+        ZStack {
+            scene
+            if session.showsFixtureHUD {
+                hudView
+            }
+        }
             .accessibilityElement()
             .accessibilityLabel("Render fixture")
             .accessibilityValue(String(Double(bottomInset)))
@@ -85,19 +91,19 @@ struct RaceView: View {
                 EdgeLabels()
             }
 
-            HUDView(hud: session.hud, messages: session.messages)
-                .allowsHitTesting(false)
+            hudView
 
             #if DEBUG
             if session.isTuned {
-                // Its own overlay (#232), under the minimap, clear of the clock and the controls.
+                // Its own overlay (#232), under the minimap and the notice line, clear of the clock and the controls.
                 VStack {
                     HStack {
                         Spacer()
                         TunedBadge()
                     }
                     .padding(.horizontal, 16)
-                    .padding(.top, 142)
+                    .padding(.top, HUDView.noticeTop(showsLeaderboard: session.controls.showsLeaderboard)
+                             + HUDView.noticeHeight + 8)
                     Spacer()
                 }
                 .allowsHitTesting(false)
@@ -109,6 +115,7 @@ struct RaceView: View {
             if LaunchOptions.current.uiTesting {
                 BoatSpeedProbe(session: session)
                 CueProbe(session: session)
+                RaceStatusProbe(hud: session.hud)
             }
 
             // The tuning panel hides the pause menu, so the water shows undimmed behind it.
@@ -125,6 +132,16 @@ struct RaceView: View {
                 ResultsView(rows: session.results, onRestart: onRestart, onExit: onExit)
             }
         }
+    }
+
+    /// The HUD over the race: touches pass through it to steer, but for the live leaderboard and the place, which
+    /// open the board (#268).
+    private var hudView: some View {
+        HUDView(hud: session.hud, notice: session.notice, heading: { [scene = session.scene] in scene.viewHeading },
+                isPaused: session.isPaused || session.driver.isFrozen,
+                showsLeaderboard: session.controls.showsLeaderboard,
+                isLeaderboardExpanded: session.isLeaderboardExpanded,
+                toggleLeaderboard: { [session] in session.toggleLeaderboard() })
     }
 
     private var showsTuningPanel: Bool {

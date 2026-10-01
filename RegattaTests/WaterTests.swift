@@ -232,15 +232,18 @@ import RegattaCore
     }
 
     /// The minimap samples the model's own field at its pixels (#289): the HUD carries the pressure over the
-    /// minimap's chart, each sample the sampler's pressure at the middle of its cell of the chart, and the minimap
+    /// minimap's chart (course-up on the race area, #114, cached by `MinimapField`), each sample the sampler's pressure at the middle of its cell of the chart, and the minimap
     /// draws them stretched over exactly that chart, a pixel a sample. The same model as the water's: where the
     /// water samples the same point, it draws the same pressure.
     @Test func minimapDrawsThePressure() throws {
         let world = try Self.pressureWorld()
         let sampler = try #require(world.windSampler)
-        let hud = HUDState(world: world)
-        let tone = try #require(hud.pressure)
         let chart = MinimapChart(course: world.course)
+        let tone = chart.pressure(sampler)
+        // The HUD draws exactly this tone's image (`MinimapField`).
+        let field = MinimapField()
+        let drawn = try #require(field.refresh(world))
+        #expect(field.chart == chart && drawn.width == tone.columns && drawn.height == tone.rows)
         #expect(tone.columns == MinimapChart.pressureColumns && tone.rows == chart.pressureRows && tone.boost == 1)
         for row in 0..<tone.rows {
             for column in 0..<tone.columns {
@@ -249,15 +252,17 @@ import RegattaCore
             }
         }
         // The cells tile the chart: the first's middle is half a cell in, the last's half a cell short.
-        let cellX = (chart.maxX - chart.minX) / Double(tone.columns), cellY = (chart.maxY - chart.minY) / Double(tone.rows)
-        #expect(abs(chart.pressurePoint(column: 0, row: 0).x - (chart.minX + cellX / 2)) < 1e-9)
-        #expect(abs(chart.pressurePoint(column: tone.columns - 1, row: tone.rows - 1).y - (chart.maxY - cellY / 2)) < 1e-9)
+        // In course coordinates: across the axis (u) and up it (v), the chart course-up.
+        let cellX = (chart.maxU - chart.minU) / Double(tone.columns), cellY = (chart.maxV - chart.minV) / Double(tone.rows)
+        #expect(abs(chart.courseCoordinates(chart.pressurePoint(column: 0, row: 0)).u - (chart.minU + cellX / 2)) < 1e-9)
+        #expect(abs(chart.courseCoordinates(chart.pressurePoint(column: tone.columns - 1, row: tone.rows - 1)).v
+            - (chart.maxV - cellY / 2)) < 1e-9)
         #expect(abs(cellX - cellY) < 0.05 * cellX, "square samples: \(cellX) × \(cellY) m")
         // Drawn over the chart exactly, its corners where the chart's corners draw.
         let size = CGSize(width: 110, height: 150)
         let rect = chart.rect(in: size)
-        let southWest = chart.point(Vec2(chart.minX, chart.minY), in: size)
-        let northEast = chart.point(Vec2(chart.maxX, chart.maxY), in: size)
+        let southWest = chart.point(chart.position(u: chart.minU, v: chart.minV), in: size)
+        let northEast = chart.point(chart.position(u: chart.maxU, v: chart.maxV), in: size)
         #expect(abs(rect.minX - southWest.x) < 1e-9 && abs(rect.maxY - southWest.y) < 1e-9)
         #expect(abs(rect.maxX - northEast.x) < 1e-9 && abs(rect.minY - northEast.y) < 1e-9)
         let image = try #require(tone.image(style: .standard))

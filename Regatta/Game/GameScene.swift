@@ -1,3 +1,4 @@
+import os
 import SpriteKit
 import RegattaBots
 import RegattaCore
@@ -61,11 +62,15 @@ final class GameScene: SKScene {
         get { water.quality }
         set { water.quality = newValue }
     }
+    /// The wakes' tier: the thermal ladder's (#127) seam. Every tier's wake is speed-scaled.
+    var wakeQuality = WakeQuality.full
 
     private let world = SKNode()
     private let cam = SKCameraNode()
     private let water = WaterNode(pointsPerMeter: Double(GameScene.pointsPerMeter))
     private let effectsLayer = SKNode()
+    /// The fleet's wind-shadow cones, one faint layer in the effects layer (#121).
+    private let coneLayer = ConeLayer()
     private let courseLayer = SKNode()
     private let boatLayer = SKNode()
     /// The boat-side cues (#122) in the world, under the fleet: laylines, ladder lines and your wind vane with its
@@ -237,14 +242,24 @@ final class GameScene: SKScene {
 
     private func buildBoats() {
         let me = driver.myBoatIndex
+        effectsLayer.addChild(coneLayer)
         for boat in driver.currentFrame.boats {
             let node = BoatNode(boat: boat, isMine: boat.id == me, color: Palette.boat(boat.colorIndex),
-                                boatClass: driver.boatClass, pointsPerMeter: ppm)
+                                boatClass: driver.boatClass, pointsPerMeter: ppm, style: boatStyle)
             boatNodes.append(node)
             boatLayer.addChild(node)
-            effectsLayer.addChild(node.shadowCone)
-            effectsLayer.addChild(node.wake)
+            node.effects.nodes.forEach(effectsLayer.addChild)
+            coneLayer.add(node.effects)
         }
+#if DEBUG
+        // #57's 16-boat demo: what the fleet's wakes, cones and backwinds cost, once at race start (#121).
+        if LaunchOptions.current.perf {
+            // The boats' own effects only (`BoatEffects`), not the rest of the effects layer.
+            let nodes = boatNodes.reduce(0) { $0 + $1.effects.nodeCount }
+            Logger(subsystem: "com.phillreeder.regatta", category: "perf")
+                .info("Boat effects: \(nodes, privacy: .public) nodes for \(self.boatNodes.count, privacy: .public) boats")
+        }
+#endif
     }
 
     // MARK: - Loop
@@ -292,8 +307,10 @@ final class GameScene: SKScene {
         for (i, boat) in world.boats.enumerated() {
             let pose = BoatPose(boat, ease: world.ease(ofSeat: i), isGhost: world.isGhost(ofSeat: i),
                                 boatClass: world.boatClass, style: boatStyle, autohelm: world.autohelm(ofSeat: i))
-            boatNodes[i].update(with: boat, pose: pose, style: boatStyle, time: world.time, dt: dt, settled: settled)
+            boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality, time: world.time,
+                                dt: dt, settled: settled)
         }
+        coneLayer.update(style: boatStyle)
 
         syncCamera()
         rig.advance(CameraWorld(world), sceneSize: size, dt: dt, settled: settled)
