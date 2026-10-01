@@ -122,7 +122,8 @@ struct RootView: View {
         let server = RaceServer(address: launchOptions.onlineHost
             ?? UserDefaults.standard.string(forKey: RaceServer.addressDefaultsKey) ?? RaceServer.defaultAddress)
         let (raceSeconds, startSeconds) = (launchOptions.raceSeconds, launchOptions.startSeconds)
-        let launch = OnlineLaunch(server: server, haptics: model.haptics, controls: model.controls) {
+        let launch = OnlineLaunch(server: server, haptics: model.haptics, controls: model.controls,
+                                  rulesSeen: model.rulesSeen) {
             try await DevInstantRace.ticket(server: server, raceSeconds: raceSeconds, startSeconds: startSeconds)
         }
         model.startRaceSequence(.online(launch))

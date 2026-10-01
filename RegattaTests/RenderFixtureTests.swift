@@ -126,6 +126,45 @@ import UIKit
         }
     }
 
+    /// The rule-cue fixtures (#123) through every filter: `rules-call` draws two rule-call lines, the arc counting
+    /// your started turn's complete deadline and glyphs; `rules-penalty` your unstarted turn's arc, both glyphs and
+    /// the HUD's live Turn notice. Every older fixture draws no rule cue, so its reference doesn't move.
+    @Test func ruleFixturesShowTheRuleCues() throws {
+        func session(_ name: String) throws -> GameSession {
+            let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            let session = try GameSession(fixture: fixture, log: log)
+            SKView(frame: CGRect(x: 0, y: 0, width: 402, height: 874)).presentScene(session.scene)
+            session.scene.update(0)
+            return session
+        }
+        for vision in VisionFilter.allCases {
+            let suffix = vision == .none ? "" : "-\(vision.rawValue)"
+            let (call, _) = try RenderFixture.load(named: "rules-call" + suffix, in: Self.fixtures)
+            let (penalty, _) = try RenderFixture.load(named: "rules-penalty" + suffix, in: Self.fixtures)
+            #expect(call.vision == vision && penalty.vision == vision && call.ruleCues == true && penalty.ruleCues == true)
+            #expect(call.freezeTick == -1255 && penalty.freezeTick == -1290)
+        }
+
+        let call = try session("rules-call")
+        #expect(call.scene.ruleCueSummary.hasSuffix("lines=2 arc=1"), "\(call.scene.ruleCueSummary)")
+        #expect(call.scene.shownGlyphs.contains(.giveWay))
+        #expect(!call.showsFixtureHUD, "no HUD in this fixture")
+        let calls = call.ruleCalls.active(at: call.driver.currentFrame.time, seconds: 8, fadeSeconds: 1.5)
+        #expect(calls.map(\.badge) == ["11", "10"])
+
+        let penalty = try session("rules-penalty")
+        #expect(penalty.scene.ruleCueSummary.hasSuffix("lines=1 arc=1"), "\(penalty.scene.ruleCueSummary)")
+        #expect(penalty.scene.shownGlyphs.contains(.giveWay) && penalty.scene.shownGlyphs.contains(.hasRight))
+        #expect(penalty.showsFixtureHUD)
+        #expect(penalty.notice?.kind == .penalty && penalty.notice?.text == "Turn · 18s / 38s")
+
+        for name in ["prestart", "fleet", "cues", "hud-prestart", "hud-racing"] {
+            let older = try session(name)
+            #expect(older.scene.ruleCueSummary == "glyphs=0 lines=0 arc=0", "\(name)")
+            #expect(older.notice?.kind != .penalty, "\(name)")
+        }
+    }
+
     /// The live leaderboard fixtures (#268): compact through every filter, and tapped open, on `hud-racing`'s tick.
     /// The board is opt-in, so #114's HUD fixtures draw without it and keep their references.
     @Test func leaderboardFixturesShowTheBoard() throws {

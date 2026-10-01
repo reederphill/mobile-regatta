@@ -13,7 +13,8 @@ struct NoticeRule: Equatable {
     let priority: Int
     /// How long it shows.
     let seconds: Double
-    /// How long it may wait behind another before it is dropped as stale.
+    /// How long it may wait behind another before it is dropped as stale. The clock stops while a live notice holds
+    /// the slot (the Turn notice, for a whole penalty however many turns are stacked) and starts again when it goes.
     let maxWait: Double
     /// Its tone, by shape: no red or green (#5, #15).
     let symbol: String
@@ -43,11 +44,15 @@ enum NoticeTable {
 struct Notice: Equatable, Identifiable {
     let id: Int
     let kind: NoticeKind
-    // TODO-COPY (#124): `RaceEventPresenter` owns the words.
+    // TODO-COPY (#171): `RaceEventPresenter` owns the words (`RuleWords`).
     let text: String
     /// When it was posted, and when it stops showing (set once it shows).
     let posted: Date
     var expires: Date
+    /// A live notice (`NoticeSlot.setLive`): its text updates in place, and it never expires or goes stale while set.
+    var isLive = false
+    /// When its wait for the slot last started, if not `posted`: when a live notice stopped holding the slot.
+    var waitStart: Date?
 
     var symbol: String { NoticeTable.rule(kind).symbol }
 }
@@ -59,18 +64,50 @@ struct Notice: Equatable, Identifiable {
 struct NoticeSlot: Equatable {
     private(set) var showing: Notice?
     private(set) var waiting: [Notice] = []
-    private var nextID = 0
+    /// The id the next notice posted gets.
+    private(set) var nextID = 0
 
     /// Posts `text` as a `kind` notice at `now`, and returns what shows.
     @discardableResult mutating func post(_ kind: NoticeKind, _ text: String, at now: Date) -> Notice? {
         let notice = Notice(id: nextID, kind: kind, text: text, posted: now, expires: now)
         nextID += 1
         if let current = showing, NoticeTable.rule(kind).priority > NoticeTable.rule(current.kind).priority {
-            if current.kind == .hint { waiting.insert(current, at: 0) }
+            if current.isLive { restartWaits(at: now) }
+            if current.kind == .hint || current.isLive { waiting.insert(current, at: 0) }
             showing = nil
         }
         waiting.append(notice)
         return current(at: now)
+    }
+
+    /// Sets the live `kind` notice to `text` at `now`, or takes it down when `text` is nil (#123: the Turn countdown).
+    /// A live notice updates its text in place, never expires or goes stale while set, and one a higher-priority
+    /// notice replaces waits to show again, as a hint does. Otherwise it takes its turn by `NoticeTable` like any.
+    mutating func setLive(_ kind: NoticeKind, text: String?, at now: Date) {
+        guard let text else {
+            if let shown = showing, shown.isLive, shown.kind == kind {
+                showing = nil
+                restartWaits(at: now)
+            }
+            waiting.removeAll { $0.isLive && $0.kind == kind }
+            return
+        }
+        if let shown = showing, shown.isLive, shown.kind == kind {
+            if shown.text != text { showing = shown.withText(text) }
+            return
+        }
+        if let i = waiting.firstIndex(where: { $0.isLive && $0.kind == kind }) {
+            waiting[i] = waiting[i].withText(text)
+            return
+        }
+        let notice = Notice(id: nextID, kind: kind, text: text, posted: now, expires: .distantFuture, isLive: true)
+        nextID += 1
+        if let current = showing, NoticeTable.rule(kind).priority > NoticeTable.rule(current.kind).priority {
+            if current.isLive { restartWaits(at: now) }
+            if current.kind == .hint || current.isLive { waiting.insert(current, at: 0) }
+            showing = nil
+        }
+        waiting.append(notice)
     }
 
     /// Shows `notice` as it is, expiry included: a render fixture's, which never expires.
@@ -81,13 +118,23 @@ struct NoticeSlot: Equatable {
     /// What shows at `now`: the one showing until it expires, then the next waiting.
     mutating func current(at now: Date) -> Notice? {
         if let shown = showing, shown.expires <= now { showing = nil }
-        waiting.removeAll { $0.posted.addingTimeInterval(NoticeTable.rule($0.kind).maxWait) < now }
+        // While a live notice holds the slot, nothing waiting goes stale (#124: the RTT warning outlasts a penalty).
+        if showing?.isLive != true {
+            waiting.removeAll {
+                !$0.isLive && ($0.waitStart ?? $0.posted).addingTimeInterval(NoticeTable.rule($0.kind).maxWait) < now
+            }
+        }
         if showing == nil, let next = nextEligible() {
             var notice = waiting.remove(at: next)
-            notice.expires = now.addingTimeInterval(NoticeTable.rule(notice.kind).seconds)
+            notice.expires = notice.isLive ? .distantFuture : now.addingTimeInterval(NoticeTable.rule(notice.kind).seconds)
             showing = notice
         }
         return showing
+    }
+
+    /// A live notice stopped holding the slot at `now`: every wait starts again from there.
+    private mutating func restartWaits(at now: Date) {
+        for i in waiting.indices { waiting[i].waitStart = now }
     }
 
     /// The waiting notice to show next: the highest priority, oldest first; a hint only when nothing that holds
@@ -101,5 +148,11 @@ struct NoticeSlot: Equatable {
             best = i
         }
         return best
+    }
+}
+
+private extension Notice {
+    func withText(_ text: String) -> Notice {
+        Notice(id: id, kind: kind, text: text, posted: posted, expires: expires, isLive: isLive, waitStart: waitStart)
     }
 }

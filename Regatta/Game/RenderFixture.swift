@@ -19,6 +19,10 @@ import RegattaCore
 /// board is off, so the HUD fixtures before #268 keep their references. Without `hud`, the scene alone, as every
 /// fixture before #114.
 ///
+/// `"ruleCues": true` draws the rule cues (#123): right-of-way glyphs, rule-call lines from the replay's calls, your
+/// penalty arc and, with `hud`, the Turn notice. Without it they are off, so the fixtures before #123 keep their
+/// references.
+///
 /// The app is launched with `-fixture <name>`, and finds `<name>.json` in the directory the
 /// `REGATTA_FIXTURE_DIR` environment variable names (the UI test passes its own `Fixtures` folder).
 struct RenderFixture: Codable, Equatable {
@@ -39,6 +43,8 @@ struct RenderFixture: Codable, Equatable {
     var ladderLines: Bool? = nil
     /// The HUD over the scene (#114); nil draws the scene alone.
     var hud: HUDFixture? = nil
+    /// Whether the rule cues are drawn (#123); nil leaves them off.
+    var ruleCues: Bool? = nil
 
     struct HUDFixture: Codable, Equatable {
         /// A notice the fixture shows for good: the replay drains no events, so it can't post one itself.
@@ -191,8 +197,13 @@ final class FixtureDriver: RaceDriver {
         venue = race.files.venue.content
         boatClass = race.boatClass
         roster = FleetRoster(setup: setup)
-        currentFrame = TickFrame(race: race)
+        currentFrame = TickFrame(race: race, keepClearOf: myBoatIndex)
+        ruleCalls = race.incidents.incidents.compactMap { if case .called(let call) = $0.outcome { call } else { nil } }
     }
+
+    /// The rule calls made up to the freeze tick, in incident order: a frozen fixture drains no events, so the
+    /// session seeds its rule-call lines from these (#123).
+    let ruleCalls: [RuleCall]
 
     func tick(_ dt: Double) -> [TickFrame] { [] }
     func submit(_ input: BoatInput) {}

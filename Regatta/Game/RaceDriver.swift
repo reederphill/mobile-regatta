@@ -50,10 +50,15 @@ protocol RaceDriver: AnyObject {
     /// draws it settled, with no easing or animation, and hides the controls (and the HUD, unless the
     /// fixture asks for it, #114).
     var isFrozen: Bool { get }
+
+    /// The round trip to the server has stayed over 250 ms for about 5 s (#18, #68): the HUD's warning (#124).
+    var lagWarning: Bool { get }
 }
 
 extension RaceDriver {
     var isFrozen: Bool { false }
+    /// The RTT warning (#18, #68): only an online race (`OnlineDriver.lagWarning`) has one.
+    var lagWarning: Bool { false }
 
     /// A driver that keeps real time (online) or runs no ticks (a fixture) runs them all.
     @discardableResult func tick(_ dt: Double, within budget: Duration?) -> [TickFrame] { tick(dt) }
@@ -85,17 +90,27 @@ struct TickFrame {
     /// gives none: the live leaderboard's. Read from the race once per tick, never worked out here. Online it is the
     /// prediction's (#64).
     let gaps: [Double?]
+    /// Who must keep clear between the viewing seat and each other seat (`Race.keepClearRelations(of:)`, #123), by
+    /// seat: the right-of-way glyphs. Nil hides them: online until the server sends its own (#96, ADR 0005), never
+    /// worked out from the client's world.
+    let keepClear: [RightOfWay?]?
+    /// Each seat's owed penalty (`Race.owedPenalty(ofSeat:)`), by seat: the penalty arc and Turn notice (#123).
+    /// Online it is the prediction's, which holds the server's penalty state.
+    let owed: [OwedPenalty?]
+    /// The rules' penalty windows (`raceFormat.penalty`): the arc's and notice's deadlines, never literals.
+    let penalty: RulesConfig.Penalty?
 
     /// Race clock in seconds.
     var time: Double { Double(tick) / Double(Race.tickRate) }
 
-    init(race: Race) {
-        self.init(race: race, isOver: race.isOver)
+    /// `race` after its tick, with the right-of-way glyphs `keepClearOf` that seat sees (none when nil).
+    init(race: Race, keepClearOf seat: Int? = nil) {
+        self.init(race: race, isOver: race.isOver, keepClearOf: seat)
     }
 
     /// `race` after its tick, over when `isOver` says: online, the server decides that, not the
     /// prediction (#68).
-    init(race: Race, isOver: Bool) {
+    init(race: Race, isOver: Bool, keepClearOf seat: Int? = nil) {
         tick = race.tick
         boats = race.boats
         standings = race.standings()
@@ -104,11 +119,15 @@ struct TickFrame {
         heldInputs = race.heldInputs
         closeTick = race.firstFinishTime != nil ? race.closeTick : nil
         gaps = race.gapsToLeader()
+        keepClear = seat.map { race.keepClearRelations(of: $0) }
+        owed = race.boats.indices.map { race.owedPenalty(ofSeat: $0) }
+        penalty = race.rules.raceFormat.penalty
     }
 
     /// `heldInputs` nil holds every seat neutral; `gaps` nil gives every seat none.
     init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool, heldInputs: [BoatInput]? = nil,
-         closeTick: Int? = nil, gaps: [Double?]? = nil) {
+         closeTick: Int? = nil, gaps: [Double?]? = nil, keepClear: [RightOfWay?]? = nil, owed: [OwedPenalty?]? = nil,
+         penalty: RulesConfig.Penalty? = nil) {
         self.tick = tick
         self.boats = boats
         self.standings = standings
@@ -117,6 +136,9 @@ struct TickFrame {
         self.heldInputs = heldInputs ?? Array(repeating: .neutral, count: boats.count)
         self.closeTick = closeTick
         self.gaps = gaps ?? Array(repeating: nil, count: boats.count)
+        self.keepClear = keepClear
+        self.owed = owed ?? Array(repeating: nil, count: boats.count)
+        self.penalty = penalty
     }
 
     /// This frame a tick earlier, each boat moved back along its velocity: what the renderer draws from
@@ -128,7 +150,7 @@ struct TickFrame {
             return boat
         }
         return TickFrame(tick: tick - 1, boats: moved, standings: standings, wind: wind, isOver: isOver, heldInputs: heldInputs,
-                         closeTick: closeTick, gaps: gaps)
+                         closeTick: closeTick, gaps: gaps, keepClear: keepClear, owed: owed, penalty: penalty)
     }
 
     /// Where `seat` stands in the fleet, from 1.

@@ -90,6 +90,12 @@ final class GameScene: SKScene {
     /// Race area, land, shallows, marks and the start line (#115).
     private(set) lazy var chart = ChartLayer(course: driver.course, venue: driver.venue, pointsPerMeter: ppm)
     private var boatNodes: [BoatNode] = []
+    /// The rule cues (#123) over the fleet: built with it.
+    private var ruleCues: RuleCueLayer?
+    /// Whether the rule cues draw: a render fixture's turn them off unless it asks for them.
+    var showsRuleCues = true
+    /// The rule calls whose lines draw (#123): the session adds each one it drains.
+    var ruleCalls = RuleCallLines()
 
     private var lastUpdate: TimeInterval?
     /// The most wall-clock time a frame spends starting ticks: half a 60 Hz frame. A frame is at most
@@ -205,6 +211,11 @@ final class GameScene: SKScene {
             node.effects.nodes.forEach(effectsLayer.addChild)
             coneLayer.add(node.effects)
         }
+        // Over the fleet, whose top z is about 14 (`DrawOrder`), under the edge arrow (20).
+        let rules = RuleCueLayer(seats: boatNodes.count, pointsPerMeter: ppm)
+        rules.zPosition = 16
+        world.addChild(rules)
+        ruleCues = rules
 #if DEBUG
         // #57's 16-boat demo: what the fleet's wakes, cones and backwinds cost, once at race start (#121).
         if LaunchOptions.current.perf {
@@ -282,7 +293,17 @@ final class GameScene: SKScene {
         chart.update(status: world.me.status, legIndex: world.me.legIndex, cameraScale: cam.xScale)
 
         updateCues(world, dt: dt, settled: settled)
+        ruleCues?.isHidden = !showsRuleCues
+        if showsRuleCues {
+            ruleCues?.update(world, calls: ruleCalls, style: boatStyle, px: cam.xScale,
+                             rotation: cam.zRotation)
+        }
     }
+
+    /// What the rule cues show (#123), for tests: e.g. `glyphs=2 lines=1 arc=1`.
+    var ruleCueSummary: String { ruleCues?.summary ?? "" }
+    /// The right-of-way glyph each seat shows, for tests.
+    var shownGlyphs: [RightOfWayGlyph?] { ruleCues?.shownGlyphs ?? [] }
 
     /// The north-up course camera over `course` in a scene of `sceneSize` (`CameraRig.courseFraming`): centred on
     /// the course, scaled to show the whole of it (marks, pin and committee boat) with a margin, and never closer
