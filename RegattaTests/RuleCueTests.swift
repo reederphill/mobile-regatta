@@ -4,7 +4,7 @@ import Testing
 @testable import Regatta
 
 /// #123 acceptance: the penalty arc and Turn notice (`PenaltyReadout`), the rule-call lines (`RuleCallLines`), the
-/// glyphs' range (`GlyphSelection`) and the live penalty notice (`NoticeSlot.setLive`).
+/// glows' range and fade (`GlowSelection`) and the live penalty notice (`NoticeSlot.setLive`).
 @MainActor @Suite struct RuleCueTests {
     /// A turn whose clock started at tick `clock`, under start/complete windows of `start`/`complete` seconds.
     static func owed(clock: Int = 300, start: Double, complete: Double, turns: Int = 1, started: Bool = false) -> OwedPenalty {
@@ -59,7 +59,7 @@ import Testing
 
     /// A practice frame carries your keep-clear row and the rules' penalty windows (fleet-rules@4: 20 s / 40 s); a
     /// frame's readout reads those windows, and none shows for a seat that owes nothing.
-    @Test func practiceFramesCarryGlyphsAndTheRulesPenalty() throws {
+    @Test func practiceFramesCarryKeepClearRowsAndTheRulesPenalty() throws {
         let driver = PracticeDriver(config: RaceDriverTests.config)
         let base = driver.currentFrame
         #expect(base.keepClear?.count == base.boats.count)
@@ -101,21 +101,41 @@ import Testing
         #expect(shown.map(\.offender) == [5, 4, 3, 2])
     }
 
-    @Test func glyphsShowWithinRangeAndNotOnlineOrAsAGhost() {
+    @Test func glowsShowWithinRangeAndNotOnlineOrAsAGhost() {
         let positions = [Vec2(0, 0), Vec2(0, 10), Vec2(0, 40), Vec2(5, 0)]
-        let keepClear: [RightOfWay?] = [nil, RightOfWay(keepClear: 1, rule: .portStarboard),
+        let relations: [RightOfWay?] = [nil, RightOfWay(keepClear: 1, rule: .portStarboard),
                                         RightOfWay(keepClear: 0, rule: .windwardLeeward), nil]
-        let glyphs = GlyphSelection.glyphs(keepClear: keepClear, positions: positions, me: 0, isGhost: false,
-                                           rangeHulls: 6, hullLength: 4)
-        #expect(glyphs == [nil, .hasRight, nil, nil], "seat 2 is 40 m off, past 24 m; seat 3 is a ghost")
-        let wider = GlyphSelection.glyphs(keepClear: keepClear, positions: positions, me: 0, isGhost: false,
-                                          rangeHulls: 10, hullLength: 4)
-        #expect(wider == [nil, .hasRight, .giveWay, nil])
-        #expect(GlyphSelection.glyphs(keepClear: nil, positions: positions, me: 0, isGhost: false, rangeHulls: 10,
-                                      hullLength: 4) == [nil, nil, nil, nil])
-        #expect(GlyphSelection.glyphs(keepClear: keepClear, positions: positions, me: 0, isGhost: true, rangeHulls: 10,
-                                      hullLength: 4) == [nil, nil, nil, nil])
-        #expect(BoatStyle.standard.glyphRangeHulls == RightOfWayGlyph.defaultRangeHulls)
+        func glows(keepClear: [RightOfWay?]? = relations, isGhost: Bool = false, rangeHulls: Double) -> [RightOfWayGlow?] {
+            GlowSelection.glows(keepClear: keepClear, positions: positions, me: 0, isGhost: isGhost,
+                                rangeHulls: rangeHulls, fullHulls: 1.5, hullLength: 4)
+        }
+        // Seat 1 is 10 m (2.5 hulls) off, between the range's edge and full; seat 2 is 40 m (10 hulls) off, past a
+        // 6-hull range; seat 3 has no relation (a ghost).
+        let near = glows(rangeHulls: 6)
+        #expect(near.map { $0?.kind } == [nil, .hasRight, nil, nil])
+        let partly = near[1]?.intensity ?? 0
+        #expect(partly > 0 && partly < 1, "\(partly)")
+        let wider = glows(rangeHulls: 12)
+        #expect(wider.map { $0?.kind } == [nil, .hasRight, .giveWay, nil])
+        #expect((wider[1]?.intensity ?? 0) > partly, "a wider range puts seat 1 further in")
+        #expect(glows(keepClear: nil, rangeHulls: 12).allSatisfy { $0 == nil })
+        #expect(glows(isGhost: true, rangeHulls: 12).allSatisfy { $0 == nil })
+        #expect(BoatStyle.standard.glowRangeHulls == RightOfWayGlyph.defaultRangeHulls)
+        #expect(BoatStyle.standard.glowFullHulls < BoatStyle.standard.glowRangeHulls)
+    }
+
+    /// The glow fades in from nothing at the range's edge to full at the full distance, easing at both ends, and
+    /// stays full inside it.
+    @Test func glowFadesInWithDistance() {
+        func fade(_ hulls: Double) -> Double { GlowSelection.fadeIn(hulls: hulls, rangeHulls: 6, fullHulls: 2) }
+        #expect(fade(7) == 0 && fade(6) == 0)
+        #expect(fade(2) == 1 && fade(0.5) == 1)
+        #expect(abs(fade(4) - 0.5) < 1e-9, "halfway is half")
+        let steps = stride(from: 6.0, through: 2.0, by: -0.25).map(fade)
+        #expect(zip(steps, steps.dropFirst()).allSatisfy { $0 <= $1 }, "never dims as she nears: \(steps)")
+        // A range no wider than the full distance is a switch, not a fade.
+        #expect(GlowSelection.fadeIn(hulls: 3, rangeHulls: 2, fullHulls: 2) == 0)
+        #expect(GlowSelection.fadeIn(hulls: 1, rangeHulls: 2, fullHulls: 2) == 1)
     }
 
     private static let t0 = Date(timeIntervalSinceReferenceDate: 1_000)

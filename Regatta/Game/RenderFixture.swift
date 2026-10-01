@@ -19,7 +19,7 @@ import RegattaCore
 /// board is off, so the HUD fixtures before #268 keep their references. Without `hud`, the scene alone, as every
 /// fixture before #114.
 ///
-/// `"ruleCues": true` draws the rule cues (#123): right-of-way glyphs, rule-call lines from the replay's calls, your
+/// `"ruleCues": true` draws the rule cues (#123): right-of-way glows, rule-call lines from the replay's calls, your
 /// penalty arc and, with `hud`, the Turn notice. Without it they are off, so the fixtures before #123 keep their
 /// references.
 ///

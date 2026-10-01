@@ -120,16 +120,16 @@ import RegattaProtocol
                 "a call between two other boats takes no notice: \(String(describing: rig.session.notice))")
     }
 
-    /// Online the right-of-way glyphs stay hidden until the server sends its own (#96, ADR 0005): no frame carries
+    /// Online the right-of-way glows stay hidden until the server sends its own (#96, ADR 0005): no frame carries
     /// a keep-clear row from the client's world. The rule-call lines still draw, from the server's events (#123).
-    @Test func onlineFramesShowNoGlyphsButDrawTheServersRuleCallLines() throws {
+    @Test func onlineFramesShowNoGlowsButDrawTheServersRuleCallLines() throws {
         let rig = try OnlineRig(collisionCourse: true)
-        var framesWithGlyphs = 0
+        var framesWithGlows = 0
         rig.run(for: 8_000_000) { _ in
-            if rig.driver.currentFrame.keepClear != nil { framesWithGlyphs += 1 }
+            if rig.driver.currentFrame.keepClear != nil { framesWithGlows += 1 }
             return false
         }
-        #expect(framesWithGlyphs == 0)
+        #expect(framesWithGlows == 0)
         #expect(rig.driver.currentFrame.penalty != nil, "the arc's windows are the rules'")
         let sent = rig.server.sentEvents.compactMap { if case .ruleCall(let call) = $0.event.kind { call } else { nil } }
         let first = try #require(sent.first, "the server's race makes a rule call")

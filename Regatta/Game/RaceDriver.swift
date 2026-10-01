@@ -91,7 +91,7 @@ struct TickFrame {
     /// prediction's (#64).
     let gaps: [Double?]
     /// Who must keep clear between the viewing seat and each other seat (`Race.keepClearRelations(of:)`, #123), by
-    /// seat: the right-of-way glyphs. Nil hides them: online until the server sends its own (#96, ADR 0005), never
+    /// seat: the right-of-way glows. Nil hides them: online until the server sends its own (#96, ADR 0005), never
     /// worked out from the client's world.
     let keepClear: [RightOfWay?]?
     /// Each seat's owed penalty (`Race.owedPenalty(ofSeat:)`), by seat: the penalty arc and Turn notice (#123).
@@ -103,7 +103,7 @@ struct TickFrame {
     /// Race clock in seconds.
     var time: Double { Double(tick) / Double(Race.tickRate) }
 
-    /// `race` after its tick, with the right-of-way glyphs `keepClearOf` that seat sees (none when nil).
+    /// `race` after its tick, with the right-of-way glows `keepClearOf` that seat sees (none when nil).
     init(race: Race, keepClearOf seat: Int? = nil) {
         self.init(race: race, isOver: race.isOver, keepClearOf: seat)
     }

@@ -96,20 +96,37 @@ nonisolated struct RuleCallLines: Equatable, Sendable {
     }
 }
 
-/// Which boats show a right-of-way glyph to `me` this frame, and which glyph (#123): every other boat within
-/// `rangeHulls` of her with a keep-clear relation; none while the frame carries no relations (online until #96) or
-/// she is a ghost.
-nonisolated enum GlyphSelection {
-    static func glyphs(keepClear: [RightOfWay?]?, positions: [Vec2], me: Int, isGhost: Bool, rangeHulls: Double,
-                       hullLength: Double) -> [RightOfWayGlyph?] {
+/// The right-of-way glow round one boat (#123): red where `me` must keep clear of her, green where she must keep
+/// clear of `me`, `intensity` 0 to 1 (1 at the glow's full distance, 0 where it starts).
+nonisolated struct RightOfWayGlow: Equatable, Sendable {
+    let kind: RightOfWayGlyph
+    let intensity: Double
+}
+
+/// Which boats glow to `me` this frame, and how strongly (#123): every other boat within `rangeHulls` of her with a
+/// keep-clear relation, fading in from nothing at `rangeHulls` to full at `fullHulls` (centre to centre); none while
+/// the frame carries no relations (online until #96) or she is a ghost.
+nonisolated enum GlowSelection {
+    static func glows(keepClear: [RightOfWay?]?, positions: [Vec2], me: Int, isGhost: Bool, rangeHulls: Double,
+                      fullHulls: Double, hullLength: Double) -> [RightOfWayGlow?] {
         guard let keepClear, !isGhost, positions.indices.contains(me) else {
             return Array(repeating: nil, count: positions.count)
         }
         return positions.indices.map { seat in
             guard seat != me, keepClear.indices.contains(seat),
-                  RightOfWayGlyph.isInRange(positions[me], positions[seat], rangeHulls: rangeHulls, hullLength: hullLength)
-            else { return nil }
-            return RightOfWayGlyph.glyph(for: keepClear[seat], me: me)
+                  RightOfWayGlyph.isInRange(positions[me], positions[seat], rangeHulls: rangeHulls, hullLength: hullLength),
+                  let kind = RightOfWayGlyph.glyph(for: keepClear[seat], me: me) else { return nil }
+            let hulls = (positions[seat] - positions[me]).length / hullLength
+            let intensity = fadeIn(hulls: hulls, rangeHulls: rangeHulls, fullHulls: fullHulls)
+            return intensity > 0 ? RightOfWayGlow(kind: kind, intensity: intensity) : nil
         }
+    }
+
+    /// 0 at `rangeHulls` and beyond, 1 at `fullHulls` and inside, eased between (smoothstep) so the glow neither
+    /// pops on at the edge nor stops growing abruptly at the end.
+    static func fadeIn(hulls: Double, rangeHulls: Double, fullHulls: Double) -> Double {
+        guard rangeHulls > fullHulls else { return hulls <= rangeHulls ? 1 : 0 }
+        let t = min(1, max(0, (rangeHulls - hulls) / (rangeHulls - fullHulls)))
+        return t * t * (3 - 2 * t)
     }
 }

@@ -130,8 +130,8 @@ import UIKit
     }
 }
 
-/// Nothing in the app depends on red or green (#5, #15), and neither colour is a cue (#22): the app's sources
-/// never name them (#111).
+/// Nothing in the app depends on red or green (#5, #15), bar the right-of-way glow's own two tokens
+/// (`CuePalette.giveWayRed`, `hasRightGreen`): the app's sources never name the system's (#111).
 @MainActor @Suite struct ForbiddenColourSourceTests {
     /// Reads the app's sources from the checkout on the host, as `GameSceneSourceTests` does.
     @Test func noSourceNamesRedOrGreen() throws {

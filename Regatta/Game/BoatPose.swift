@@ -301,12 +301,14 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
 
     // MARK: Rule cues (#123)
 
-    /// A boat's right-of-way glyph shows while her centre is within this many hull lengths of yours: a debug
+    /// A boat's right-of-way glow starts to fade in when her centre is this many hull lengths from yours: a debug
     /// slider (fun before realism), its default the core's placeholder the server can reuse (#96).
-    var glyphRangeHulls = RightOfWayGlyph.defaultRangeHulls
-    /// The glyph's size and how far above the boat it sits, screen points, whatever the zoom.
-    var glyphSize = 16.0
-    var glyphOffset = 24.0
+    var glowRangeHulls = RightOfWayGlyph.defaultRangeHulls
+    /// The glow is at full strength from this many hull lengths in, and its alpha there.
+    var glowFullHulls = 1.5
+    var glowMaxAlpha = 0.9
+    /// The glow's blur, points. Baked into the textures when the fleet is built, like `glowBlur`.
+    var rightOfWayGlowBlur = 9.0
     /// A rule call's dashed line shows this many seconds of race time, fading out over the last
     /// `ruleCallFadeSeconds`.
     var ruleCallLineSeconds = 8.0
@@ -353,7 +355,8 @@ nonisolated extension BoatStyle {
             (.laylineAlpha, \.laylineAlpha), (.ladderLineAlpha, \.ladderLineAlpha),
             (.ladderSpacingMetres, \.ladderSpacingMetres), (.edgeArrowInsetSide, \.edgeArrowInsetSide),
             (.edgeArrowClearance, \.edgeArrowClearance),
-            (.glyphRangeHulls, \.glyphRangeHulls), (.glyphSize, \.glyphSize), (.glyphOffset, \.glyphOffset),
+            (.glowRangeHulls, \.glowRangeHulls), (.glowFullHulls, \.glowFullHulls), (.glowMaxAlpha, \.glowMaxAlpha),
+            (.rightOfWayGlowBlur, \.rightOfWayGlowBlur),
             (.ruleCallLineSeconds, \.ruleCallLineSeconds), (.ruleCallFadeSeconds, \.ruleCallFadeSeconds),
             (.penaltyArcRadiusHulls, \.penaltyArcRadiusHulls), (.penaltyArcWidth, \.penaltyArcWidth),
         ]
