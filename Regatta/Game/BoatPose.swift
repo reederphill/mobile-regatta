@@ -266,12 +266,13 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
 
     // MARK: Wind shadow, backwind (#10, #298)
 
-    /// The shadow cones' hatch alpha (white, to read on dark water): faint (#15) but seen. The fleet's cones draw as
-    /// one layer (`ConeLayer`), so overlapping cones never draw a line brighter than this.
-    var coneAlpha = 0.12
-    /// The backwind zone's alpha, a share of the cone's: much stronger, as it is small and sits over the cone's own
-    /// hatch. Its hatch thins towards its far edge as its loss does (#298); its outline and fill stay.
-    var backwindShare = 4.2
+    /// The shadow cones' hatch alpha at its strongest, beside the boat (white, to read on dark water): faint (#15) but
+    /// seen. The hatch fades with distance and to its sides as core's loss does, so most of a cone is a fraction of
+    /// this. The fleet's cones draw as one layer (`ConeLayer`), so overlapping cones never draw a line brighter than this.
+    var coneAlpha = 0.3
+    /// The backwind zone's alpha, a share of the cone's (0.5 of full alpha at 0.3): much stronger than the cone's
+    /// average, as it is small and sits over the cone's own hatch. Its hatch thins towards its far edge as its loss does (#298); its outline and fill stay.
+    var backwindShare = 1.68
     /// The hatch both are drawn in: its lines' spacing and width, points. Baked in when the fleet is built.
     var hatchSpacing = 5.0
     var hatchLineWidth = 1.25
