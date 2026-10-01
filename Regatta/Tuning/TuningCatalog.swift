@@ -303,7 +303,7 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "boat", title: "Boat",
-                note: "How boats heel, flutter and flog, their wakes and shadow hatches, and the boat-side cues (#117, #121, #122, #220, #222). Drawn only: never logged.",
+                note: "How boats heel, flutter and flog, their wakes and shadow hatches, and the boat-side cues and rule cues (#117, #121, #122, #123, #220, #222). Drawn only: never logged.",
                 applies: .live,
                 sliders: [
                     // Past 1 still counts: heel is capped at 1 after the gain, so more heels her sooner and
@@ -339,6 +339,13 @@ enum TuningCatalog {
                     boat("ladderSpacingMetres", "Ladder spacing", \.ladderSpacingMetres, 25...300, 5, unit: " m"),
                     boat("edgeArrowInsetSide", "Edge arrow side inset", \.edgeArrowInsetSide, 0...80, 2, unit: " pt"),
                     boat("edgeArrowClearance", "Edge arrow HUD clearance", \.edgeArrowClearance, 0...60, 2, unit: " pt"),
+                    // #123: the rule cues.
+                    boat("glyphRangeHulls", "Right-of-way glyph range", \.glyphRangeHulls, 1...20, 0.5, unit: " hulls"),
+                    boat("glyphSize", "Glyph size", \.glyphSize, 8...32, 1, unit: " pt"),
+                    boat("ruleCallLineSeconds", "Rule-call line", \.ruleCallLineSeconds, 2...20, 0.5, unit: " s"),
+                    boat("ruleCallFadeSeconds", "Rule-call line fade", \.ruleCallFadeSeconds, 0...5, 0.25, unit: " s"),
+                    boat("penaltyArcRadiusHulls", "Penalty arc radius", \.penaltyArcRadiusHulls, 0.5...2, 0.1, unit: " hulls"),
+                    boat("penaltyArcWidth", "Penalty arc width", \.penaltyArcWidth, 1...10, 0.5, unit: " pt"),
                 ]),
             TuningGroup(
                 id: "later", title: "Later",
