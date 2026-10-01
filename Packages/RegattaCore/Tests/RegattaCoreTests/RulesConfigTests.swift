@@ -425,6 +425,109 @@ import Testing
         #expect(throws: DecodingError.self) { try JSONDecoder().decode(Incident.self, from: JSONEncoder().encode(badCall)) }
     }
 
+    /// The golden race's incident index (#94): replaying the fixture twice gives byte-identical encodings, the
+    /// same as the live race the script sails, and a log carries it through its JSON byte for byte. Its two
+    /// protests are recorded as the script taps them.
+    @Test func replayReproducesByteIdenticalIndex() throws {
+        let fixture = try ScriptedLog.fixture()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let first = try Replayer.replay(fixture, requireMatchingVersion: false)
+        let second = try Replayer.replay(fixture, requireMatchingVersion: false)
+        let bytes = try encoder.encode(first.incidents)
+        #expect(try encoder.encode(second.incidents) == bytes)
+        #expect(try encoder.encode(ScriptedLog.race().incidents) == bytes)
+
+        let log = try #require(first.log)
+        #expect(log.incidentIndex == first.incidents)
+        let read = try RaceLog(jsonData: log.jsonData())
+        #expect(try encoder.encode(#require(read.incidentIndex)) == bytes)
+        #expect(read == log)
+
+        // The script's two protests (steps 1500 and 2400), neither within 15 s of an incident of its pair.
+        let start = -ScriptedLog.startSequenceTicks
+        #expect(first.incidents.protests == [
+            Protest(tick: start + 1500, leg: 0, protester: 3, protested: 7, matchedIncidentId: nil),
+            Protest(tick: start + 2400, leg: 0, protester: 12, protested: 0, matchedIncidentId: nil),
+        ])
+        let counts: [Int] = [first.incidents.count, first.incidents.contacts.count, first.incidents.obstructionContacts.count,
+                  first.incidents.markTouches.count]
+        #expect(counts == [6, 6, 9, 0])
+        #expect(first.incidents.contacts.allSatisfy { $0.incidentId != nil }, "every contact of racing boats is in an incident")
+    }
+
+    /// A short scripted race's index, entry by entry (#94): a contact the umpire calls, a touch again inside the
+    /// incident, a protest 5 s after and one with no incident. Pinned as JSON, integers and strings only, so it
+    /// reads the same on every platform.
+    @Test func scriptedIndexIsPinned() throws {
+        let race = try IncidentFixture.race()
+        try IncidentFixture.touching(race, tick: 300)
+        race.step()
+        let length = race.boatClass.hull.length
+        try IncidentFixture.apart(race, tick: race.tick, at: race.boats[0].position, gap: length)
+        race.step()
+        try IncidentFixture.touching(race, tick: race.tick, at: race.boats[0].position)
+        race.step()
+        try IncidentFixture.apart(race, tick: race.tick, at: race.boats[0].position, gap: 3 * length)
+        race.tap(.protest(target: 1), seat: 0, atTick: 451)
+        race.tap(.protest(target: 0), seat: 1, atTick: 900)
+        while race.tick < 900 { race.step() }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let json = String(decoding: try encoder.encode(race.incidents), as: UTF8.self)
+        #expect(json == ##"{"contacts":[{"incidentId":0,"leg":0,"parties":{"high":1,"low":0},"tick":301},"## +
+            ##"{"incidentId":0,"leg":0,"parties":{"high":1,"low":0},"tick":303}],"## +
+            ##""incidents":[{"exonerated":[],"id":0,"leg":0,"outcome":{"called":{"_0":{"completeDeadlineTick":1501,"## +
+            ##""incidentId":0,"leg":0,"offender":1,"rule":"11","startDeadlineTick":901,"tick":301,"turnsOwed":1,"victim":0}}},"## +
+            ##""parties":{"high":1,"low":0},"tick":301,"trigger":"contact"}],"markTouches":[],"obstructionContacts":[],"## +
+            ##""protests":[{"leg":0,"matchedIncidentId":0,"protested":1,"protester":0,"tick":451},"## +
+            ##"{"leg":0,"protested":0,"protester":1,"tick":900}]}"##)
+        #expect(try JSONDecoder().decode(IncidentIndex.self, from: Data(json.utf8)) == race.incidents)
+    }
+
+    /// The new records round-trip, and decoding refuses records out of tick order or naming another pair's
+    /// incident, or a later one (#94).
+    @Test func decodingValidatesContactsAndProtests() throws {
+        var index = Self.sample()
+        index.recordBoatContact(BoatContact(tick: 100, leg: 0, parties: SeatPair(2, 5), incidentId: 0))
+        index.recordBoatContact(BoatContact(tick: 120, leg: 0, parties: SeatPair(3, 4), incidentId: nil))
+        index.recordMarkTouch(MarkTouch(tick: 200, leg: 1, seat: 4, mark: "windward"))
+        index.recordProtest(Protest(tick: 410, leg: 1, protester: 5, protested: 2, matchedIncidentId: 2))
+        index.recordProtest(Protest(tick: 500, leg: 1, protester: 6, protested: 1, matchedIncidentId: nil))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        let data = try encoder.encode(index)
+        #expect(try JSONDecoder().decode(IncidentIndex.self, from: data) == index)
+        #expect(index.protests(by: 5).map(\.tick) == [410])
+        #expect(index.incidents(involving: 2).map(\.id) == [0, 2])
+        let json = String(decoding: data, as: UTF8.self)
+        for (from, to) in [(#""tick":120"#, #""tick":90"#),                // contacts out of order
+                           (#""matchedIncidentId":2"#, #""matchedIncidentId":1"#), // another pair's incident
+                           (#""tick":410"#, #""tick":390"#),               // before its incident
+                           (#""protester":6"#, #""protester":1"#)] {        // herself
+            #expect(throws: DecodingError.self, "\(to)") {
+                try JSONDecoder().decode(IncidentIndex.self, from: Data(json.replacingOccurrences(of: from, with: to).utf8))
+            }
+        }
+    }
+
+    /// A log carries its race's index, and a replay refuses a log whose index it doesn't reproduce (#94).
+    @Test func replayRefusesAnotherIncidentIndex() throws {
+        let race = testRace(seats: [.human, .human], seed: 5)
+        race.tap(.protest(target: 1), seat: 0, atTick: race.tick + 5)
+        for _ in 0..<30 { race.step() }
+        var log = try #require(race.log)
+        #expect(log.incidentIndex?.protests.map(\.protester) == [0])
+        #expect(try Replayer.replay(log).incidents == race.incidents)
+        log.incidentIndex = IncidentIndex()
+        #expect(throws: ReplayError.incidentIndexMismatch) { try Replayer.replay(log) }
+        // With the version check off a replay is only this build's reading, and the index isn't checked.
+        #expect(try Replayer.replay(log, requireMatchingVersion: false).incidents == race.incidents)
+        // A log with no index (every log before #94) replays as before.
+        log.incidentIndex = nil
+        #expect(try Replayer.replay(log).incidents == race.incidents)
+    }
+
     /// Deterministic containers (ADR 0002): the rules model's sources declare no `Set` or `Dictionary`,
     /// so nothing in them can iterate one. Stricter than the package-wide iteration scan.
     @Test func rulesModelSourcesUseNoSetOrDictionary() throws {

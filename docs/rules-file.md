@@ -176,7 +176,7 @@ opposite tacks when both are on a beat (18.1(a)).
 | `penalty.completeSeconds` | s ≥ start | 30 (v3: 40) | … and completed this long after it (`missedComplete`). v3 loosens #9's 15 s and 30 s a little (the owner, #89). |
 | `penalty.startedTurnDegrees` | degrees, (0, 360] | 30 | Turned this far, the turn counts as started. |
 | `penalty.stackedPenaltyDeadlines` | `sequential` or `fromCall`; schema 3 | — (v3: `sequential`) | When an owed turn's clock starts (#89, G4). Owed turns are served in order, each a call's one turn. `sequential`: at the later of its call and the completion of the turn before it, so a turn queued behind another gets its full start and complete windows once that one is done. `fromCall`: at its own call, however many turns are owed ahead of it. Absent before schema 3: `fromCall`. |
-| `protestWindowSeconds` | s | 15 | After an incident, a protest can be lodged for this long. |
+| `protestWindowSeconds` | s | 15 | After an incident's last contact (or its opening, for a near miss), a protest is linked to it for this long, inclusive (#94). A later protest is still recorded, linked to no incident. |
 | `finishWindowSeconds` | s | 120 | After the first finish, the rest can finish for this long. |
 | `timeLimitSeconds` | s | 960 | After the gun, the race ends whatever happens. |
 | `startLine.hullLengthsPerBoat` | L | 1.25 | Line length = this × fleet size × L … |

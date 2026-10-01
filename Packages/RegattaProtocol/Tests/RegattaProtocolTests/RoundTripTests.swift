@@ -80,9 +80,17 @@ import Testing
             #expect(throws: WireError.unknownMessageType(UInt8(code))) { try Frame(decoding: [UInt8(code)] + Array(repeating: 0, count: 8)) }
         }
         let header: (MessageType) -> [UInt8] = { [$0.rawValue, 0, 0, 0, 0, 0, 0, 0, 0] }
-        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [27]) }
-        // Code 4 was the pre-#73 `foul`, 11 the pre-#86 `raceClosed` without results and 17 the pre-#91
-        // `markRoomNotice` with a recipient list: retired, never reused.
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [28]) }
+        // Code 4 was the pre-#73 `foul`, 10 the pre-#94 `protestRecorded` without its incident, 11 the pre-#86
+        // `raceClosed` without results and 17 the pre-#91 `markRoomNotice` with a recipient list: retired, never reused.
+        #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [10, 3, 7]) }
+        // Protest recorded (#94): seat, target, then a flag, 0 for no incident or 1 and its id.
+        _ = try Frame(decoding: header(.event) + [27, 3, 7, 0])
+        _ = try Frame(decoding: header(.event) + [27, 3, 7, 1, 0, 9])
+        #expect(throws: WireError.invalidValue("matchedIncidentId")) { try Frame(decoding: header(.event) + [27, 3, 7, 2]) }
+        #expect(throws: WireError.outOfRange("matchedIncidentId")) {
+            try Frame(seq: 0, tick: 0, message: .event(.protestRecorded(seat: 3, target: 7, matchedIncidentId: 65_536))).encoded()
+        }
         #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [4, 14, 0, 1]) }
         #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [11]) }
         #expect(throws: WireError.invalidValue("event")) { try Frame(decoding: header(.event) + [17, 2, 0, 1]) }
@@ -286,9 +294,10 @@ import Testing
             let kind = gen.eventKind(index)
             let audience = EventAudience(kind)
             switch kind {
-            case .protestRecorded(let seat, let target):
-                #expect(audience == .seats([seat, target]))
-                #expect(!EventAudience.seats([seat, target]).includes(seat: 16))
+            case .protestRecorded(let seat, let target, _):
+                // The protester alone (#94): a protest is a record, and the protested boat isn't told.
+                #expect(audience == .seats([seat]))
+                #expect(!audience.includes(seat: target) || target == seat)
             case .ocsNotice(let recipient):
                 #expect(audience == .seats([recipient]))
             case .markRoomNotice(let boat, let entitledOver, _):

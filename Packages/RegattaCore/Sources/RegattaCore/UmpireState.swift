@@ -4,8 +4,9 @@
 /// Its incident memory (#88): each pair's open incident, one per pair until the boats separate by the rules
 /// configuration's `incidents.separation`. Its rule 18 memory (#91): each pair's record at the mark they are
 /// both racing to, and each boat's presence in that mark's zone. Its recorded track (#92): every boat over the
-/// last few seconds, what the escape simulation reads (`EscapeSimulation`). The rules tickets move the rest of
-/// theirs here: protest matching.
+/// last few seconds, what the escape simulation reads (`EscapeSimulation`). Its protest matching (#94):
+/// which incident a protest is about, read from the race's incident index, so it holds no state of its own
+/// and survives an import.
 public struct UmpireState: Sendable, Equatable {
     /// Each pair's open incident, by id: opened by a contact or a near miss, closed when the pair
     /// separates. Looked up by pair, never iterated (ADR 0002).
@@ -76,6 +77,22 @@ public struct UmpireState: Sendable, Equatable {
     /// order: a new touch's, or what is left of them. None forgets her touch.
     mutating func setMarkTouchNeighbours(_ seats: [Int], of seat: Int) {
         markTouchNeighbours[seat] = seats.isEmpty ? nil : seats
+    }
+
+    // MARK: - Protests (#94)
+
+    /// The incident seat `protester`'s protest of `protested` at tick `tick` is about: the pair's latest
+    /// incident, when its last activity (its opening, or the last boat contact recorded in it) was no more than
+    /// `window` ticks before the protest, inclusive at both ends, the same tick matching. Nil otherwise: "no
+    /// call". Reads `incidents`, the race's index, which a snapshot carries, so nothing here is lost at an
+    /// import. The race matches a protest after its tick's calls (`Race.step`), so an incident opened on the
+    /// protest's own tick is in `incidents` and matches.
+    func matchProtest(by protester: Int, of protested: Int, atTick tick: Int, window: Int,
+                      in incidents: IncidentIndex) -> Int? {
+        guard let incident = incidents.latest(between: protester, and: protested) else { return nil }
+        let lastActivity = max(incident.tick, incidents.lastContactTick(inIncident: incident.id) ?? incident.tick)
+        let since = tick - lastActivity
+        return (0...window).contains(since) ? incident.id : nil
     }
 
     // MARK: - Rule 18 (#91)

@@ -86,7 +86,7 @@ public struct WorldSnapshot: Sendable {
     public var touchingEdges: [EdgeContact]
     /// Every incident so far: never sent to clients (#18, #96), and a receiver keeps its own. Rule calls
     /// carry their incident's id, so a race that imports goes on numbering from here, and the rules read
-    /// past incidents (#94). Which incidents are still open is the umpire's memory (`UmpireState`, #88),
+    /// past incidents. The whole incident index (#94), protests and contacts too. Which incidents are still open is the umpire's memory (`UmpireState`, #88),
     /// never the world's.
     public var incidents: IncidentIndex
     public var firstFinishTime: Double?
@@ -151,6 +151,15 @@ public enum WorldSnapshotError: Error, Equatable, Sendable {
     /// `incidents.obstructionContacts[index]` names a seat or leg the race doesn't have, or happened
     /// after the snapshot's tick.
     case invalidObstructionContact(index: Int)
+    /// `incidents.contacts[index]` names a seat, leg or incident the race doesn't have, or happened after
+    /// the snapshot's tick (#94).
+    case invalidBoatContact(index: Int)
+    /// `incidents.markTouches[index]` names a seat or leg the race doesn't have, or happened after the
+    /// snapshot's tick (#94).
+    case invalidMarkTouch(index: Int)
+    /// `incidents.protests[index]` names a seat or leg the race doesn't have, or happened after the snapshot's
+    /// tick (#94).
+    case invalidProtest(index: Int)
     /// An overlap naming a seat the race doesn't have, a pair with `a >= b` or out of order, or a
     /// change count outside 0 ..< the last point of certainty.
     case invalidOverlap

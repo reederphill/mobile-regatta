@@ -15,6 +15,9 @@ public enum ReplayError: Error, Equatable, Sendable {
     /// The race refused the log's all-gone close (`Race.closeAllGone`): it was already over, the close
     /// isn't at the final tick, or its leave order names a seat that isn't human or names one twice.
     case rejectedAllGoneClose(atTick: Int)
+    /// The replay's incident index isn't the one the log carries (#94): the log was altered, or this build
+    /// doesn't reproduce the race.
+    case incidentIndexMismatch
 }
 
 /// Re-simulates a race from its log (ADR 0002): builds the authoritative race from the header's setup,
@@ -85,6 +88,11 @@ public enum Replayer {
             guard race.closeAllGone(atTick: close.tick, leaveOrder: close.leaveOrder) else {
                 throw ReplayError.rejectedAllGoneClose(atTick: close.tick)
             }
+        }
+        // The log's incident index is derived from the rest (#94), so the same version reproduces it; with the
+        // version check off the race is only this build's reading, and its index may differ.
+        if requireMatchingVersion, let index = log.incidentIndex, index != race.incidents {
+            throw ReplayError.incidentIndexMismatch
         }
         return race
     }

@@ -56,6 +56,7 @@ public enum BoatTap: Hashable, Sendable {
     /// Tack or gybe: the autohelm sails her through head to wind or the gybe to the groove on the new
     /// tack (ADR 0007); any rudder input cancels it (#13).
     case tackGybe
-    /// Protest another seat. Recorded, never changes a result in v1.0.
+    /// Protest another seat, any boat but herself, a ghost or a bot included (#94). Recorded in the incident
+    /// index with the pair's incident of the protest window, or none; never changes a result in v1.0.
     case protest(target: Int)
 }
