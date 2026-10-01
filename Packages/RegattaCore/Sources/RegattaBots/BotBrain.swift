@@ -136,14 +136,25 @@ struct BotBrain: Sendable {
     /// Her draws for the fleet tactics (#234): her timing errors. A stream of her seed of its own, so they never move
     /// the draws `rng` makes.
     var tacticsRng: SplitMix64
+    /// What makes her cautious, if she is the cautious bot (#104, `BotBrain+Cautious.swift`); nil for every other bot.
+    let caution: Caution?
+    /// She is taking the seat over and hasn't decided yet (#104): her first decision rebuilds her plan from what the
+    /// seat sees (`adopt`).
+    var takingOver = false
+    /// A penalty turn she took over part-turned with the rudder centred, whose way she is reading (`readPenaltyTurn`).
+    var penaltyRead: PenaltyRead?
+    /// The boats around her as she saw them at her last decision, by seat (`guarded`): the cautious bot's only.
+    var seen: [Seen?] = []
 
     /// The stream of her seed her own draws come from.
     static let brainStream: UInt64 = 0x6272_6169_6e64_7277 // "braindrw"
     /// The stream of her seed her fleet tactics' draws come from (#234).
     static let tacticsStream: UInt64 = 0x7461_6374_6963_7321 // "tactics!"
 
-    init(style: BotStyle, profile: BotProfile? = nil, seed: UInt64 = 0, weaknesses: BotWeaknesses? = nil) {
+    init(style: BotStyle, profile: BotProfile? = nil, seed: UInt64 = 0, weaknesses: BotWeaknesses? = nil,
+         caution: Caution? = nil) {
         self.style = style
+        self.caution = caution
         self.weaknesses = weaknesses ?? (profile == nil ? BotWeaknesses(skill: style.skill) : .none(skill: style.skill))
         tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
         rng = SplitMix64(seed: seed, stream: Self.brainStream)
@@ -160,6 +171,11 @@ struct BotBrain: Sendable {
     mutating func decide(_ view: SeatView) -> BotDecision {
         var decision = sail(view)
         if decision.tap == nil, rollsNow(view.own, view) { decision.tap = .tackGybe }
+        // The cautious bot looks before she leaps (#104), and notes the boats around her for her next look.
+        if caution != nil {
+            if decision.tap == nil, let input = guarded(view, decision.input) { decision.input = input }
+            see(view)
+        }
         if decision.input.ease, view.own.twa < BoatDynamics.noGoAngle(view.boatClass.polar) {
             decision.input = decision.input.eased(false)
         }
@@ -170,6 +186,10 @@ struct BotBrain: Sendable {
     private mutating func sail(_ view: SeatView) -> BotDecision {
         let boat = view.own
         observe(boat, view)
+        if takingOver {
+            takingOver = false
+            adopt(view)
+        }
         guard boat.isOnCourse else { return BotDecision(input: .neutral) }
         judgeEncounters(boat, view)
         if let input = penaltyInput(boat, view) { return BotDecision(input: input) }
@@ -179,6 +199,11 @@ struct BotBrain: Sendable {
         let closeHauled = Self.closeHauled(boat.polarWindSpeed, view) + deg2rad(2)
         let starting = boat.status == .prestart || boat.status == .ocs
         if starting, senses.tacking, aim.tack == boat.tack, aim.groove == nil, aim.angle < closeHauled {
+            aim = Aim(angle: closeHauled, tack: aim.tack, ease: aim.ease)
+        }
+        // The cautious bot does so racing too: held below close-hauled, in a groove she misses or a pinch, she would
+        // stay tacking under rule 13 for as long, keeping clear of every boat (#104).
+        if caution != nil, senses.tacking, aim.tack == boat.tack, aim.angle < closeHauled {
             aim = Aim(angle: closeHauled, tack: aim.tack, ease: aim.ease)
         }
         // The autohelm is sailing the tap through the tack or gybe: hands off. Any rudder would cancel it
@@ -258,8 +283,10 @@ struct BotBrain: Sendable {
             penaltyTurn = nil
             penaltyGivenUp = false
             penaltyProgress = 0
+            penaltyRead = nil
             return nil
         }
+        if let reading = readPenaltyTurn(b, view, owed) { return reading }
         // Between one turn and the next she owes, with a mark close aboard: she stops turning and sails clear of it
         // before the next, as she would before her first (`startPenaltyTurn`). Turning on there sweeps the same
         // circle, and a circle that touched the mark touches it again, owing another turn each time round (#102).
@@ -489,7 +516,7 @@ struct BotBrain: Sendable {
         let c = view.course
         switch b.status {
         case .prestart:
-            return startAim(b, view)
+            return hangBackAim(b, view) ?? startAim(b, view)
         case .ocs:
             return returnAim(b, view)
         case .racing:
@@ -716,7 +743,7 @@ struct BotBrain: Sendable {
         guard b.status == .prestart || b.status == .ocs else {
             return ruleKeepClear(b, view, desired: desired, lookahead: lookahead)
         }
-        if b.tack == .port || b.status == .ocs {
+        if b.tack == .port || b.status == .ocs || keepsClearOfEveryBoat {
             return startKeepClear(b, view, desired: desired, lookahead: lookahead).map { Evasion(heading: $0) }
         }
         guard let kept = ruleKeepClear(b, view, desired: desired, lookahead: lookahead) else { return nil }
@@ -727,7 +754,8 @@ struct BotBrain: Sendable {
 
     /// Seconds ahead she looks for a collision she must keep clear of: further, the more skilled she is
     /// (`BotWeaknesses.keepClearLookahead`, #103).
-    var keepClearLookahead: Double { weaknesses.keepClearLookahead }
+    /// The cautious bot looks `Caution.keepClearLookahead` ahead instead (#104).
+    var keepClearLookahead: Double { caution == nil ? weaknesses.keepClearLookahead : Caution.keepClearLookahead }
 
     /// The heading the rule she must keep clear under has her steer, if a collision is coming: ducking, luffing,
     /// finishing a tack, or turning away. Racing, her give-way manoeuvre for each relation is `racingKeepClear`'s
@@ -775,7 +803,7 @@ struct BotBrain: Sendable {
                               lookahead: Double) -> Bool {
         guard (other.position - b.position).length < 30 else { return false }
         return Self.closestApproach(of: other, to: b, heading: desired, lookahead: lookahead)
-            < view.boatClass.hull.length * Self.keepClearDistance
+            < view.boatClass.hull.length * keepClearLengths
     }
 
     /// The closest `other` comes to her over the next `lookahead` seconds, metres between centres, sailing `heading`

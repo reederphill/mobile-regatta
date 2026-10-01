@@ -8,7 +8,7 @@ public enum SeatController: Sendable {
     case human
     /// A bot fills the seat.
     case bot(BotDriver)
-    /// A bot sails a dropped player's boat until they rejoin (#19; the cautious mode comes with #104).
+    /// A bot sails a dropped player's boat until they rejoin (#19): the cautious bot (#104, `BotDriver.cautious`).
     case dropped(BotDriver)
 
     /// The driver sailing the seat, if a bot is.
@@ -36,6 +36,25 @@ public struct SeatControllers: Sendable {
 
     public init(_ seats: [SeatController]) {
         self.seats = seats
+    }
+
+    /// A bot takes `seat` over from wherever the boat is (#19, #104), at any tick: between steps, after `drive(_:)` and
+    /// `race.step()` or before them. `cautious`, the cautious bot sails a dropped player's boat (`.dropped`);
+    /// otherwise a bot at the fleet's normal draw takes a seat given away before the gun (`.bot`, #16, #35). Either
+    /// rebuilds her plan from the seat's view on her first decision (`BotDriver.takingOver()`). Sends nothing: the
+    /// player's last held input holds until her first decision applies, on the tick after it.
+    public mutating func takeOver(seat: Int, raceSeed: RaceSeed, cautious: Bool) {
+        seats[seat] = cautious
+            ? .dropped(.cautious(seat: seat, raceSeed: raceSeed))
+            : .bot(BotDriver(seat: seat, raceSeed: raceSeed).takingOver())
+    }
+
+    /// Hands `seat` back to its player (#19, #104), after `race.step()` and before the next `drive`: no bot input is
+    /// pending then (a bot's decision on a tick applies on the next, which the step has applied), so the player's
+    /// inputs apply from the next tick. Called between `drive` and `step`, the bot's decision for the next tick stands. The
+    /// boat keeps everything the race holds for her: her penalty turn's progress, her autohelm's target. Sends nothing.
+    public mutating func handBack(seat: Int) {
+        seats[seat] = .human
     }
 
     public subscript(seat: Int) -> SeatController {
