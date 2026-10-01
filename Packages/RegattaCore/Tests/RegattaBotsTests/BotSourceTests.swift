@@ -48,8 +48,9 @@ import Testing
         }
     }
 
-    /// The race, and the types that hold what it holds beyond the present tick or beyond one seat.
-    static let forbidden = #"\b(?:Race|WorldSnapshot|WindField|WindKeyChain|WindKey|WindKeyGenerator|WindSeed|RaceLog|Replayer|IncidentIndex|UmpireState|OverlapTracker)\b"#
+    /// The race, and the types that hold what it holds beyond the present tick or beyond one seat; and who sails each
+    /// seat (#234: a bot's targets are blind to human or bot), which a seat's view never holds.
+    static let forbidden = #"\b(?:isBot|SeatKind|FleetRoster|Race|WorldSnapshot|WindField|WindKeyChain|WindKey|WindKeyGenerator|WindSeed|RaceLog|Replayer|IncidentIndex|UmpireState|OverlapTracker)\b"#
 
     /// Lines of `files`' code (comments aside) that name a forbidden type.
     static func violations(in files: [(name: String, text: String)]) throws -> [String] {
