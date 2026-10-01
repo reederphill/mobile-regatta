@@ -87,6 +87,45 @@ import UIKit
         #expect(session.scene.filter == nil && !session.scene.shouldEnableEffects)
     }
 
+    /// The HUD fixtures (#114) are what their names say: before the gun, racing, OCS, a mark-room notice, and after
+    /// the first finish with the countdown to the close. Each draws the HUD over the scene; every older fixture
+    /// draws the scene alone, so its reference doesn't move.
+    @Test func hudFixturesShowWhatTheyAreFor() throws {
+        func hud(_ name: String) throws -> (fixture: RenderFixture, session: GameSession) {
+            let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            #expect(fixture.hud != nil, "\(name)")
+            let session = try GameSession(fixture: fixture, log: log)
+            #expect(session.showsFixtureHUD, "\(name)")
+            return (fixture, session)
+        }
+        let prestart = try hud("hud-prestart").session
+        #expect(prestart.hud.clock < 0 && prestart.hud.status == .prestart && prestart.notice == nil)
+        #expect(HUDModel(prestart.hud).clockTone == .yellow && HUDModel(prestart.hud).placeText == nil)
+
+        let racing = try hud("hud-racing").session
+        #expect(racing.hud.status == .racing && racing.hud.closeTick == nil && racing.notice == nil)
+        #expect(HUDModel(racing.hud).clockTone == .white)
+
+        let ocs = try hud("hud-ocs").session
+        #expect(ocs.hud.status == .ocs, "the fixture's seat is OCS at its tick: \(ocs.hud.status)")
+        #expect(HUDModel(ocs.hud).placeText == "OCS" && ocs.notice?.kind == .ocs)
+
+        let markRoom = try hud("hud-markroom").session
+        #expect(markRoom.notice?.kind == .markRoom && markRoom.notice?.expires == .distantFuture)
+
+        let finish = try hud("hud-afterfirstfinish").session
+        let close = try #require(finish.hud.closeTick, "a boat has finished at the fixture's tick")
+        #expect(finish.hud.tick < close)
+        #expect(HUDModel(finish.hud).clockTone == .yellow && HUDModel(finish.hud).clockText.hasPrefix("-"))
+        #expect(finish.hud.boats.contains(where: \.isGhost) && finish.hud.boats.contains(where: \.isBot))
+
+        for name in ["prestart", "fleet", "water-light-and-patchy", "course-up", "boat-up"] {
+            let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            #expect(fixture.hud == nil, "\(name)")
+            #expect(try !GameSession(fixture: fixture, log: log).showsFixtureHUD, "\(name)")
+        }
+    }
+
     /// The reference diffs cover every filter (#111): each has a fixture, the prestart one seen through it.
     @Test func everyVisionFilterHasAPrestartFixture() throws {
         let (prestart, _) = try RenderFixture.load(named: "prestart", in: Self.fixtures)

@@ -1,0 +1,8 @@
+{
+  "log" : "water-light-and-patchy.racelog.json",
+  "freezeTick" : 30,
+  "camera" : "boat",
+  "vision" : "none",
+  "view" : "courseUp",
+  "hud" : { "notice" : "markRoom" }
+}

@@ -113,34 +113,59 @@ nonisolated struct PressureGrid: Equatable, Sendable {
     }
 }
 
-/// The minimap's chart (#282, #289): the course's marks with a margin, metres, fitted into the minimap's size
-/// with north up. The HUD samples the pressure over it and the minimap draws the samples across it, so the map's
-/// tone is the model's at its pixels.
+/// The minimap's chart (#282, #289, #114): the race area with a small margin, metres, fitted into the minimap's size
+/// course-up, whatever the camera: the course axis at the top. Points on it are in course coordinates, `u` across
+/// the axis (to the right looking upwind) and `v` up it, from the race area's centre. The HUD samples the pressure
+/// over it and the minimap draws the samples across it, so the map's tone is the model's at its pixels.
 nonisolated struct MinimapChart: Equatable, Sendable {
-    var minX: Double
-    var maxX: Double
-    var minY: Double
-    var maxY: Double
+    /// The race area's centre, metres, and the course axis, radians.
+    var centre: Vec2
+    var axis: Double
+    /// The chart's edges in course coordinates, metres.
+    var minU: Double
+    var maxU: Double
+    var minV: Double
+    var maxV: Double
 
     /// Samples across the chart: its pressure tone is `pressureColumns` wide, and as many rows as keep them square.
     static let pressureColumns = 48
+    /// The margin round the race area, a fraction of its longer half side.
+    static let margin = 0.04
 
     init(course: CourseLayout) {
-        let points = course.obstacles.map(\.position)
-        minX = (points.map(\.x).min() ?? 0) - 60
-        maxX = (points.map(\.x).max() ?? 0) + 60
-        minY = (points.map(\.y).min() ?? 0) - 110
-        maxY = (points.map(\.y).max() ?? 0) + 40
+        let area = course.raceArea
+        centre = area.centre
+        axis = area.axis
+        let margin = Self.margin * max(area.halfWidth, area.halfLength)
+        minU = -area.halfWidth - margin
+        maxU = area.halfWidth + margin
+        minV = -area.halfLength - margin
+        maxV = area.halfLength + margin
+    }
+
+    var upwind: Vec2 { .heading(axis) }
+    var right: Vec2 { upwind.rightPerp }
+
+    /// `p` (metres) in course coordinates.
+    func courseCoordinates(_ p: Vec2) -> (u: Double, v: Double) {
+        let offset = p - centre
+        return (offset.dot(right), offset.dot(upwind))
+    }
+
+    /// The water at course coordinates `u`, `v`, metres.
+    func position(u: Double, v: Double) -> Vec2 {
+        centre + right * u + upwind * v
     }
 
     /// Metres a pressure sample covers across.
-    var pressureCell: Double { (maxX - minX) / Double(Self.pressureColumns) }
-    var pressureRows: Int { max(1, Int(((maxY - minY) / pressureCell).rounded())) }
+    var pressureCell: Double { (maxU - minU) / Double(Self.pressureColumns) }
+    var pressureRows: Int { max(1, Int(((maxV - minV) / pressureCell).rounded())) }
 
-    /// The middle of pressure sample `column`, `row` on the water, metres: its cells tile the chart, rows from the
-    /// bottom.
+    /// The middle of pressure sample `column`, `row` on the water, metres: its cells tile the chart, columns across
+    /// the axis from the left, rows up it from the bottom.
     func pressurePoint(column: Int, row: Int) -> Vec2 {
-        Vec2(minX + (Double(column) + 0.5) * pressureCell, minY + (Double(row) + 0.5) * (maxY - minY) / Double(pressureRows))
+        position(u: minU + (Double(column) + 0.5) * pressureCell,
+                 v: minV + (Double(row) + 0.5) * (maxV - minV) / Double(pressureRows))
     }
 
     /// The pressure over the chart, from the tick's sampler.
@@ -158,21 +183,22 @@ nonisolated struct MinimapChart: Equatable, Sendable {
 
     /// Metres to minimap points, and the chart's offset, fitting it into `size`.
     private func fit(_ size: CGSize) -> (scale: Double, x: Double, y: Double) {
-        let scale = min(size.width / (maxX - minX), size.height / (maxY - minY))
-        return (scale, (size.width - (maxX - minX) * scale) / 2, (size.height - (maxY - minY) * scale) / 2)
+        let scale = min(size.width / (maxU - minU), size.height / (maxV - minV))
+        return (scale, (size.width - (maxU - minU) * scale) / 2, (size.height - (maxV - minV) * scale) / 2)
     }
 
-    /// Where `p` (metres) draws in a minimap of `size`, kept on the chart.
+    /// Where `p` (metres) draws in a minimap of `size`, kept on the chart: the axis up.
     func point(_ p: Vec2, in size: CGSize) -> CGPoint {
         let fit = fit(size)
-        return CGPoint(x: fit.x + (p.x.clamped(to: minX...maxX) - minX) * fit.scale,
-                       y: size.height - fit.y - (p.y.clamped(to: minY...maxY) - minY) * fit.scale)
+        let (u, v) = courseCoordinates(p)
+        return CGPoint(x: fit.x + (u.clamped(to: minU...maxU) - minU) * fit.scale,
+                       y: size.height - fit.y - (v.clamped(to: minV...maxV) - minV) * fit.scale)
     }
 
     /// Where the whole chart draws in a minimap of `size`: the pressure tone's rectangle.
     func rect(in size: CGSize) -> CGRect {
         let fit = fit(size)
-        return CGRect(x: fit.x, y: fit.y, width: (maxX - minX) * fit.scale, height: (maxY - minY) * fit.scale)
+        return CGRect(x: fit.x, y: fit.y, width: (maxU - minU) * fit.scale, height: (maxV - minV) * fit.scale)
     }
 }
 
