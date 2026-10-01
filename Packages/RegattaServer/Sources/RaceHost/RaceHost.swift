@@ -64,10 +64,11 @@ public struct RaceOutcome: Hashable, Sendable {
 /// a seat no player attaches to `firstInputHoldTicks` after the host starts. A seat left before the gun
 /// goes to a fleet bot for good (#35); left after it, the boat takes the dropped-boat path.
 /// When every human is gone, `onAllGone` fires once, after the grace (G3).
+///
+/// Wind (#95): the host makes the wind keys from the secret wind seed and reveals each on
+/// `WindKeyWire`'s schedule, a second before its window starts: on the reliable stream to every attached
+/// seat, and in every `RaceStart` and `Resync` as the keys revealed so far. The seed never leaves the host.
 public actor RaceHost {
-    /// Wind keys to reveal once the race has simulated `tick` (#95). Stub until #95: reveals nothing.
-    public typealias WindKeyReveal = @Sendable (_ tick: Int) -> [WindKey]
-
     private struct Seat {
         var transport: (any SeatTransport)?
         var hasJoined = false
@@ -106,11 +107,14 @@ public actor RaceHost {
     private let clock: any HostClock
     private let onBehind: (@Sendable (_ ticksBehind: Int) -> Void)?
     private let onAllGone: (@Sendable (_ allGone: AllGone) -> Void)?
-    private let windKeyReveal: WindKeyReveal
+    /// Makes the wind keys from the secret wind seed (#75), ahead of the race's own chain, which holds keys
+    /// only through its current window. Same seed and chain, so the keys are the race's.
+    private var keyGenerator: WindKeyGenerator
     /// Clock time of the race's first tick, `-startSequenceTicks`.
     private let startedAt: UInt64
     private let startTick: Int
     private var seats: [Seat]
+    /// Every key revealed so far, from window 0, in order (`WindKeyWire.revealTick`).
     private var revealed: [WindKey] = []
     /// The seats the setup gives to players: only these count as humans.
     private let humanSeats: [Int]
@@ -125,7 +129,7 @@ public actor RaceHost {
     /// one does. `roster` defaults to "Seat n" names.
     /// `onAllGone` fires once when every human is gone and the grace is over (G3; #148 closes the race).
     public init(setup: RaceSetup, windSeed: WindSeed, clock: any HostClock, options: RaceHostOptions = RaceHostOptions(),
-                roster: [RosterEntry]? = nil, windKeyReveal: @escaping WindKeyReveal = { _ in [] },
+                roster: [RosterEntry]? = nil,
                 onBehind: (@Sendable (_ ticksBehind: Int) -> Void)? = nil,
                 onAllGone: (@Sendable (_ allGone: AllGone) -> Void)? = nil) {
         let race = Race(setup: setup, windSeed: windSeed)
@@ -136,13 +140,20 @@ public actor RaceHost {
         self.options = options
         self.onBehind = onBehind
         self.onAllGone = onAllGone
-        self.windKeyReveal = windKeyReveal
+        do {
+            keyGenerator = try WindKeyGenerator(windSeed: windSeed, setup: race.windSetup, windows: race.wind.windows)
+        } catch {
+            preconditionFailure("a race built from a wind seed has keyed wind: \(error)")
+        }
         startedAt = clock.now()
         startTick = race.tick
         seats = Array(repeating: Seat(caps: options.caps), count: race.boats.count)
         humanSeats = setup.seats.indices.filter { setup.seats[$0] == .human }
         gone = Array(repeating: nil, count: race.boats.count)
         for seat in humanSeats { seats[seat].holdDeadline = startTick + options.firstInputHoldTicks }
+        // Keys due before the first tick (from the window origin, #75): no seat is attached yet, so they
+        // reach each seat in its `RaceStart`.
+        revealed = Self.dueKeys(&keyGenerator, atTick: race.tick)
     }
 
     // MARK: - Reading
@@ -198,14 +209,17 @@ public actor RaceHost {
         checkAllGone()
         for seat in seats.indices { acknowledge(seat) }
         for event in race.drainEvents() { enqueue(event, to: EventAudience(event.kind)) }
-        let keys = windKeyReveal(race.tick)
-        if !keys.isEmpty {
-            revealed += keys
-            for key in keys { enqueueReliable(.windKey(key), to: .everyone) }
-        }
+        let keys = Self.dueKeys(&keyGenerator, atTick: race.tick)
+        revealed += keys
+        for key in keys { enqueueReliable(.windKey(key), to: .everyone) }
         flushReliable()
         if race.tick % options.snapshotEvery == 0 { sendSnapshots() }
         if race.isOver { close() }
+    }
+
+    /// Makes every key whose reveal tick (`WindKeyWire.revealTick`) is at or before `tick`, not made yet.
+    private static func dueKeys(_ generator: inout WindKeyGenerator, atTick tick: Int) -> [WindKey] {
+        generator.keys(through: WindKeyWire.lastRevealedWindow(atTick: tick, windows: generator.windows))
     }
 
     /// Brings `seat`'s ack up to the latest of its inputs the race has now applied (#64's contract).

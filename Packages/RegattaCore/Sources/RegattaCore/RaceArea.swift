@@ -93,7 +93,7 @@ public enum RaceEdges {
         /// was clear. A boat touching the land and the boundary at once meets them as one edge facing
         /// this way (`speed`), as her hull is pushed.
         public let normal: Vec2
-        /// Each kind of edge touched, in `ObstructionKind.allCases` order; empty if the hull was clear.
+        /// Each kind of edge touched, in `ObstructionKind.edges` order; empty if the hull was clear.
         public let touches: [ObstructionKind]
     }
 
@@ -104,7 +104,7 @@ public enum RaceEdges {
     /// instead, as far as clears the new one: so a hull in a corner narrower than itself (a notch in the
     /// land, land meeting the boundary) comes straight out rather than creeping out one side at a time.
     public static func resolve(hull: [Vec2], area: RaceArea, land: [Venue.LandPolygon]) -> Resolution {
-        let kinds = ObstructionKind.allCases
+        let kinds = ObstructionKind.edges
         var hull = hull
         var total = Vec2.zero
         var touched = [Bool](repeating: false, count: kinds.count)
@@ -160,6 +160,8 @@ public enum RaceEdges {
             return land.contains { polygon in
                 Collision.distance(convex: hull, simplePolygon: polygon.points) < margin
             }
+        case .mark:
+            return false
         }
     }
 

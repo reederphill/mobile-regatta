@@ -169,7 +169,15 @@ import Glibc
 ///    leg, then each later leg the same way. It sets `standings()`, `place(of:)` and the by-distance places in the
 ///    results at the close, and `Race.gapToLeader(of:)` reads it. Boat state and the digest don't move; races whose
 ///    close places boats by distance can place them differently from 26.
-public let simulationRevision = 27
+/// 28: rule 31, marks of the leg (#90), on 27. Only a mark of the leg a boat is sailing (`CourseLayout.isRule31Mark`:
+///    the mark or gate her leg rounds, the finish line's ends on the finish leg, and the start line's ends before
+///    she has started) costs a penalty turn and a `markTouch`; any other touch (the gate marks on the second beat
+///    and the final run, the windward mark on the reach) is an `obstructionContact` of the new kind `.mark`: slowed
+///    as before, no penalty, recorded in `IncidentIndex.obstructionContacts`. 44.1(a): a touch and a foul in one
+///    open incident cost one turn between them, either order: a touch while she is the offender of an open call
+///    is an obstruction contact, and a call against a boat within the separation of her penalised touch since
+///    owes no turn (`turnsOwed` 0).
+public let simulationRevision = 28
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

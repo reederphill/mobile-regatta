@@ -20,7 +20,6 @@ import RegattaProtocol
 /// client's boat was at every tick.
 final class ScriptedHost {
     static let snapshotEvery = 3
-    static let revealLead = 30
     static let maxAhead = 30
 
     let race: Race
@@ -145,10 +144,9 @@ final class ScriptedHost {
         }
     }
 
-    /// Reveals every key k with `windowStart(k) − 30` at or before the current tick (#95).
+    /// Reveals every key whose reveal tick is at or before the current tick: the host's schedule (#95).
     private func revealKeys(send: Bool) {
-        while race.wind.windows.start(of: keys.nextWindow) - Self.revealLead <= race.tick {
-            let key = keys.next()
+        for key in keys.keys(through: WindKeyWire.lastRevealedWindow(atTick: race.tick, windows: keys.windows)) {
             revealed.append(key)
             if send { sendReliable(Frame(seq: reliableSeq, tick: race.tick, message: .windKey(key))) }
         }

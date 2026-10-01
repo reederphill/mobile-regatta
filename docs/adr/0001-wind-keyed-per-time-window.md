@@ -1,6 +1,6 @@
 # Wind is keyed per time window, revealed just ahead
 
-Wind is a pure function so the server and every client compute it identically without streaming it, but a pure function of one race seed would let a modified client compute every future shift and puff, and knowing the next shift is most of the game. So wind is a pure function of a chain of time-window keys, the venue, the race clock and position, and the server reveals each key about 30 s before its window starts: roughly how far ahead an honest player can see puffs anyway. After the race the full chain is known, so the race stays reproducible.
+Wind is a pure function so the server and every client compute it identically without streaming it, but a pure function of one race seed would let a modified client compute every future shift and puff, and knowing the next shift is most of the game. So wind is a pure function of a chain of time-window keys, the venue, the race clock and position, and the server reveals each key just before its window starts (amended, #95: key k, which carries the knot ending window k, is revealed at windowStart(k) − 30 ticks, a second ahead, so exact foresight of the shift is 0–30 s): roughly how far ahead an honest player can see puffs anyway. After the race the full chain is known, so the race stays reproducible.
 
 ## Considered options
 

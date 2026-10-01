@@ -37,6 +37,16 @@ import Testing
         #expect(seen == Set(0..<eventKindCount))
     }
 
+    /// Every obstruction kind round-trips, `.mark` (#90) included: the generator draws only the edges, so its
+    /// stream stays as it was.
+    @Test func everyObstructionKindRoundTrips() throws {
+        for (seat, kind) in ObstructionKind.allCases.enumerated() {
+            let event = RaceEvent(tick: 1_234 + seat, kind: .obstructionContact(seat: seat, kind: kind))
+            let decoded = try Frame(decoding: Frame(seq: 7, event: event).encoded())
+            #expect(decoded.raceEvent == event)
+        }
+    }
+
     /// Quantised fields come back within their step: world → wire → frame → world.
     @Test func quantisedSeatsRoundTripWithinTheirSteps() throws {
         var gen = Gen(seed: 0x5EA7)
@@ -93,7 +103,8 @@ import Testing
         #expect(throws: WireError.invalidValue("rudder")) { try Frame(decoding: header(.inputHeld) + [0x80, 0]) }
         // A rule call: incident id (u16), tick (i32), then the rule's code; there are 16 rules.
         #expect(throws: WireError.invalidValue("rule")) { try Frame(decoding: header(.event) + [12, 0, 0, 0, 0, 0, 0, 16]) }
-        #expect(throws: WireError.invalidValue("obstruction")) { try Frame(decoding: header(.event) + [13, 0, 2]) }
+        // Obstruction kinds: land 0, boundary 1, mark 2 (#90).
+        #expect(throws: WireError.invalidValue("obstruction")) { try Frame(decoding: header(.event) + [13, 0, 3]) }
         #expect(throws: WireError.invalidValue("contact")) { try Frame(decoding: header(.event) + [14, 3, 3]) }
         #expect(throws: WireError.invalidValue("contact")) { try Frame(decoding: header(.event) + [14, 3, 1]) }
         // Reasons are the exception: unknown codes decode as `.unknown` (HandshakeTests).

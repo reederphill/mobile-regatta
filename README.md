@@ -252,7 +252,9 @@ where it stands (the dev race-length override, for e2e runs); `startSeconds=S` s
 
 `regatta-loadclient` creates an instant race and sails every seat at once with `RaceClient` on a scripted helm,
 then prints each client's bytes down and up (TCP payload, the join included) and its ping round trips. It exits
-non-zero unless every client sailed to the race's close; `--check-bandwidth` also fails a client over #27's budget
+non-zero unless every client sailed to the race's close and passed the wind audit (no wind key before its reveal
+tick, every due key in each join and resync, and in an instant race, whose wind seed the dev endpoint derives from
+the public race seed, never the seed's bytes: #95); `--check-bandwidth` also fails a client over #27's budget
 (5 KiB/s down, under 1 MB per race). `--token` sails one seat of a race made elsewhere; `--json` prints the reports.
 
 ```bash
@@ -397,7 +399,8 @@ is, each frame (`WaterTests.waterUpdateStaysCheap` prints its cost).
   is below the line, then start. While you sail back, keep clear of everyone else.
 - Round the windward mark and leeward mark to port, then finish by crossing the line downwind.
 - Dark water is a puff and pale water is a lull. The faint cone behind each boat is its wind shadow.
-- Fouling another boat or touching a mark costs one penalty turn: a 360° one way, a tack and a gybe. Start
-  it within 20 s and finish it within 40 s or you're disqualified; owe more than one and each gets its own
+- Fouling another boat or touching a mark of your leg (the one you're rounding, or a line end before you
+  start or as you finish) costs one penalty turn, and a foul and a touch in one incident cost one between
+  them: a 360° one way, a tack and a gybe. Start it within 20 s and finish it within 40 s or you're disqualified; owe more than one and each gets its own
   20 s and 40 s once the one before is done. You can't finish while you owe one: take it on the course side
   and cross again.
