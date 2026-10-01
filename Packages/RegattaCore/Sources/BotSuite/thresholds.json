@@ -10,5 +10,6 @@
   },
   "start": { "maxOCSShare": 0.05, "minOnTimeShare": 0.6, "maxMeanPreGunIronsSeconds": 1, "minPinThirdShare": 0.67 },
   "navigation": { "minFinishShare": 0.98, "maxDSQMissedPenalty": 0, "maxEdgeShare": 0.02, "maxMarkContactsPerBoat": 0.2 },
-  "conduct": { "maxEncountersToFoulsShare": 0.02 }
+  "conduct": { "maxEncountersToFoulsShare": 0.02 },
+  "encounters": { "minCloseEncountersPerRace": 8 }
 }

@@ -56,12 +56,25 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     /// Of `encounters`, those during which a rule call was made between the two, on either boat.
     public var encountersEndingInFouls: Int = 0
     public var encountersToFoulsShare: Double = 0
+    /// Her close encounters racing (#234: "crossings within 3 hull lengths, shadow time given/received, covers"):
+    /// `crossings + shadowGiven + shadowReceived + covers`. Not `encounters`, which counts rule relations.
+    public var closeEncounters: Int = 0
+    /// Each time she and a boat on the other tack came within 3 hull lengths of each other, centre to centre, counted
+    /// once until they were further apart again.
+    public var crossings: Int = 0
+    /// Episodes of 2 s or more in which her shadow or backwind left a boat's wind under 0.85 (`shadowGiven`), and in
+    /// which one boat's left hers so (`shadowReceived`).
+    public var shadowGiven: Int = 0
+    public var shadowReceived: Int = 0
+    /// Her tacks onto the tack of a boat behind her within 10 hull lengths that had tacked onto it 10 s before or less.
+    public var covers: Int = 0
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
         "contactsToFoulsShare", "foulsAsOffender", "dsqMissedPenalty", "ocsCount", "edgeSeconds",
         "landContacts", "boundaryContacts", "beats", "preGunIronsSeconds", "startSeconds", "startLineSpot",
         "rowSpot", "startSpot", "onCourseSeconds", "encounters", "encountersEndingInFouls", "encountersToFoulsShare",
+        "closeEncounters", "crossings", "shadowGiven", "shadowReceived", "covers",
     ]
 
     private enum CodingKeys: String, CodingKey {
@@ -70,6 +83,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case edgeSeconds, landContacts, boundaryContacts, beats
         case preGunIronsSeconds, startSeconds, startLineSpot, rowSpot, startSpot, onCourseSeconds
         case encounters, encountersEndingInFouls, encountersToFoulsShare
+        case closeEncounters, crossings, shadowGiven, shadowReceived, covers
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -102,6 +116,11 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(encounters, forKey: .encounters)
         try c.encode(encountersEndingInFouls, forKey: .encountersEndingInFouls)
         try c.encode(encountersToFoulsShare, forKey: .encountersToFoulsShare)
+        try c.encode(closeEncounters, forKey: .closeEncounters)
+        try c.encode(crossings, forKey: .crossings)
+        try c.encode(shadowGiven, forKey: .shadowGiven)
+        try c.encode(shadowReceived, forKey: .shadowReceived)
+        try c.encode(covers, forKey: .covers)
     }
 
     /// Whether her style means her to start in the line's pin third (#99).
@@ -202,6 +221,10 @@ public struct RaceResult: Codable, Hashable, Sendable {
     public var skillGap: RaceSkillGap?
     /// How the profiles sailed the shifts (#238), in a race of the fun-pass mix; nil otherwise.
     public var funPass: RaceFunPass?
+    /// The middle third of the fleet by rank at the end (#234), and their close encounters
+    /// (`SeatMetrics.closeEncounters`), on average: what a mid-fleet boat met. Nil in a race from before #234.
+    public var midFleetSeats: [Int]?
+    public var midFleetCloseEncounters: Double?
     public var timings: TickTimings
 
     /// `ranks`: each seat's place in the race's order at the end (`Race.place(of:)`), finished or not.
@@ -215,8 +238,19 @@ public struct RaceResult: Codable, Hashable, Sendable {
         fleet = FleetMetrics(seats)
         skillGap = RaceSkillGap(seats: seats, ranks: ranks, hullLength: hullLength)
         funPass = cell.profileMix == .funPass ? RaceFunPass(seats: seats, ranks: ranks) : nil
+        let middle = midFleet(ranks)
+        midFleetSeats = middle
+        midFleetCloseEncounters = middle.isEmpty ? nil
+            : Double(middle.reduce(0) { $0 + seats[$1].closeEncounters }) / Double(middle.count)
         self.timings = timings
     }
+}
+
+/// The seats in the middle third of a fleet whose places at the end are `ranks` (each seat's, from 1), in seat order:
+/// those whose place, counted from 0, is at least a third of the fleet and under two thirds (#234: "a mid-fleet boat").
+func midFleet(_ ranks: [Int]) -> [Int] {
+    let n = Double(ranks.count)
+    return ranks.indices.filter { Double(ranks[$0] - 1) >= n / 3 && Double(ranks[$0] - 1) < 2 * n / 3 }
 }
 
 /// The scripted profiles of `seats` in the race's order at the end (`ranks`, each seat's place), first place
@@ -470,6 +504,41 @@ public struct ConductSummary: Codable, Hashable, Sendable {
     }
 }
 
+/// Close encounters over a run (#234), over the same all-National live fleets as navigation and conduct: what the
+/// thresholds' `encounters` limit holds. How much racing a mid-fleet boat sees (#223: "the bot suite counts close
+/// encounters per race for a mid-fleet boat"): each race's middle third by rank (`RaceResult.midFleetSeats`), their
+/// close encounters on average, and the mean of that over the races.
+public struct CloseEncounterSummary: Codable, Hashable, Sendable {
+    /// Races of all-National live fleets.
+    public var races: Int
+    /// Their mid-fleet seats, all races together.
+    public var midFleetSeats: Int
+    /// A mid-fleet boat's close encounters per race, and their parts.
+    public var closeEncountersPerRace: Double
+    public var crossingsPerRace: Double
+    public var shadowGivenPerRace: Double
+    public var shadowReceivedPerRace: Double
+    public var coversPerRace: Double
+
+    /// Nil when no race was of an all-National live fleet.
+    init?(_ races: [RaceResult]) {
+        let races = races.filter(\.cell.isAllNationalLive)
+        guard !races.isEmpty else { return nil }
+        self.races = races.count
+        let middles = races.map { race in (race.midFleetSeats ?? []).map { race.seats[$0] } }
+        midFleetSeats = middles.reduce(0) { $0 + $1.count }
+        func perRace(_ value: (SeatMetrics) -> Int) -> Double {
+            let means = middles.map { seats in seats.isEmpty ? 0 : Double(seats.reduce(0) { $0 + value($1) }) / Double(seats.count) }
+            return means.reduce(0, +) / Double(means.count)
+        }
+        closeEncountersPerRace = perRace(\.closeEncounters)
+        crossingsPerRace = perRace(\.crossings)
+        shadowGivenPerRace = perRace(\.shadowGiven)
+        shadowReceivedPerRace = perRace(\.shadowReceived)
+        coversPerRace = perRace(\.covers)
+    }
+}
+
 extension BotRaceCell {
     /// Whether it sails an all-National fleet of live bots: the fleets navigation (#100) and conduct (#101) are gated
     /// over.
@@ -543,6 +612,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var navigation: NavigationSummary?
     /// Conduct (#101) over the all-National live fleets; nil when none sailed.
     public var conduct: ConductSummary?
+    /// Close encounters (#234) over the all-National live fleets; nil when none sailed.
+    public var closeEncounters: CloseEncounterSummary?
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -573,10 +644,11 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         start = StartSummary(races)
         navigation = NavigationSummary(races)
         conduct = ConductSummary(races)
+        closeEncounters = CloseEncounterSummary(races)
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
         breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start,
-                                       navigation: navigation, conduct: conduct)
+                                       navigation: navigation, conduct: conduct, closeEncounters: closeEncounters)
         passed = breaches.isEmpty
     }
 
@@ -632,6 +704,11 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         if let conduct {
             lines.append("conduct: \(conduct.races) all-National races, \(conduct.seats) boats, encounters \(conduct.encounters), "
                 + "\(conduct.encountersEndingInFouls) ending in fouls (\(fixed(conduct.encountersToFoulsShare, 3)))")
+        }
+        if let close = closeEncounters {
+            lines.append("close encounters: \(close.races) all-National races, \(fixed(close.closeEncountersPerRace)) per mid-fleet boat "
+                + "per race (crossings \(fixed(close.crossingsPerRace)), shadow given \(fixed(close.shadowGivenPerRace)), "
+                + "received \(fixed(close.shadowReceivedPerRace)), covers \(fixed(close.coversPerRace)))")
         }
         lines.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms, max \(fixed(timings.maxMs, 3)) ms")
         lines.append(passed ? "gate: pass" : "gate: FAIL")
