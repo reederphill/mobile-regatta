@@ -1,0 +1,7 @@
+{
+  "log" : "chart-fellmere.racelog.json",
+  "freezeTick" : -1500,
+  "camera" : "course",
+  "vision" : "tritanopia",
+  "view" : "area"
+}

@@ -201,6 +201,59 @@ import UIKit
         }
     }
 
+    /// The chart fixtures (#115): each new venue's first pairing (conditions@7), eight boats frozen in the sequence
+    /// (the windward mark and line orange, the rest grey), drawn north up over the whole course and race area, plain
+    /// and through tritanopia. Each frame holds what it's for: the race-area boundary; land for Hollin Bay and
+    /// Fellmere; tinted shallows for Saltings Reach, the only venue with a current; and every landmark.
+    @Test func chartFixturesShowWhatTheyAreFor() throws {
+        for venueID in ["hollin-bay", "saltings-reach", "fellmere"] {
+            let name = "chart-\(venueID)"
+            let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            #expect(fixture == RenderFixture(log: "\(name).racelog.json", freezeTick: -1500, camera: .course,
+                                             vision: .none, view: .area), "\(name)")
+            #expect(fixture.cameraMode == .northUpArea)
+            let venue = try VenueFile.bundled(id: venueID, version: 1)
+            let setup = log.header.setup
+            #expect(setup.venue == venue.ref, "\(name)")
+            #expect(setup.conditions.key == venue.content.pairings[0].conditions, "\(name)")
+            #expect(setup.seats.count == 8, "\(name)")
+            let (tritanopia, _) = try RenderFixture.load(named: "\(name)-tritanopia", in: Self.fixtures)
+            var expected = fixture
+            expected.vision = .tritanopia
+            #expect(tritanopia == expected, "\(name)")
+
+            let (scene, _) = try DrawOrderTests.scene(fixture: name)
+            #expect(scene.driver.renderWorld.me.status == .prestart)
+            func inView(_ p: Vec2) -> Bool {
+                let q = scene.rig.project(p, sceneSize: scene.size)
+                return (0...scene.size.width).contains(q.x) && (0...scene.size.height).contains(q.y)
+            }
+            let course = scene.driver.course
+            #expect(course.raceArea.corners.allSatisfy(inView), "\(name): the boundary isn't all in view")
+            #expect(venue.content.landmarks.map(\.position).allSatisfy(inView), "\(name): a landmark is out of view")
+            // Points across the view (north up), every 10 m.
+            let ppm = Double(GameScene.pointsPerMeter), scale = Double(scene.rig.cameraScale)
+            let centre = Vec2(Double(scene.rig.center.x), Double(scene.rig.center.y)) / ppm
+            let half = Vec2(Double(scene.size.width), Double(scene.size.height)) * scale / 2 / ppm
+            let samples = stride(from: centre.x - half.x, through: centre.x + half.x, by: 10).flatMap { x in
+                stride(from: centre.y - half.y, through: centre.y + half.y, by: 10).map { Vec2(x, $0) }
+            }.filter(inView)
+            #expect(samples.count > 1000, "\(name)")
+            if venueID != "saltings-reach" {
+                #expect(samples.contains(where: venue.content.isLand), "\(name): no land in view")
+            } else {
+                let current = try #require(venue.content.current)
+                let grid = current.grid
+                let shallow = (0..<grid.columns).flatMap { c in (0..<grid.rows).map { (c, $0) } }.filter { c, r in
+                    ChartGeometry.shallowsWeight(depth: current.depth(column: c, row: r), maxDepth: current.maxDepth,
+                                                 fraction: ChartStyle.standard.shallowFraction) > 0.5
+                        && inView(grid.position(column: c, row: r)) && !venue.content.isLand(grid.position(column: c, row: r))
+                }
+                #expect(!shallow.isEmpty, "\(name): no shallows in view")
+            }
+        }
+    }
+
     @Test func fixtureFieldsDecodeEveryCameraAndVision() throws {
         for camera in LaunchOptions.CameraMode.allCases {
             for vision in VisionFilter.allCases {

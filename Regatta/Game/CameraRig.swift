@@ -26,6 +26,9 @@ nonisolated struct CameraWorld: Sendable {
     var time: Double
     /// Every mark on the course, the start line's ends included (`CourseLayout.obstacles`).
     var course: [Vec2]
+    /// What the chart fixtures' area camera frames with the course (#115): the race area's corners and the venue's
+    /// landmarks (`ChartLayer.framing`), so the boundary, the land and its silhouettes are in view.
+    var area: [Vec2] = []
 }
 
 extension CameraWorld {
@@ -40,7 +43,7 @@ extension CameraWorld {
                   startLine: [course.startLine.pin.position, course.startLine.committee.position],
                   nextMarks: course.marksOfLeg(course.legSailed(status: me.status, legIndex: me.legIndex)).map(\.position),
                   zoneRadius: course.zoneRadius, hullLength: world.boatClass.hull.length, time: world.time,
-                  course: course.obstacles.map(\.position))
+                  course: course.obstacles.map(\.position), area: course.raceArea.corners)
     }
 }
 
@@ -66,6 +69,12 @@ nonisolated struct CameraRig: Sendable {
         case northUpFollow
         /// North up, the whole course in view (the fixtures' `"camera": "course"`).
         case northUpCourse
+        /// North up, the whole course and its race area in view: the chart fixtures' `"view": "area"` (#115), so the
+        /// boundary and the land show.
+        case northUpArea
+
+        /// Whether the camera frames a fixed set of points rather than zooming: the course and area cameras.
+        var framesPoints: Bool { self == .northUpCourse || self == .northUpArea }
     }
 
     var mode: Mode
@@ -128,7 +137,7 @@ nonisolated struct CameraRig: Sendable {
         followZoom = new.defaultZoom
         pinchedZoom = nil
         pinchHoldLeft = nil
-        if !isAutoFraming && mode != .northUpCourse { zoom = followZoom }
+        if !isAutoFraming && !mode.framesPoints { zoom = followZoom }
     }
 
     // MARK: - Frame
@@ -141,7 +150,7 @@ nonisolated struct CameraRig: Sendable {
         defer { hasFramed = true }
 
         switch mode {
-        case .northUpFollow, .northUpCourse:
+        case .northUpFollow, .northUpCourse, .northUpArea:
             viewHeading = 0
         case .courseUp, .boatUp:
             let target = mode == .courseUp ? world.axis : world.myHeading
@@ -167,9 +176,10 @@ nonisolated struct CameraRig: Sendable {
             }
         }
 
-        if mode == .northUpCourse {
+        if mode.framesPoints {
             // As the course camera always framed: no easing, never closer than the follow zoom.
-            if let framing = Self.courseFraming(world.course, sceneSize: sceneSize, zoom: CGFloat(followZoom),
+            let points = mode == .northUpArea ? world.course + world.area : world.course
+            if let framing = Self.courseFraming(points, sceneSize: sceneSize, zoom: CGFloat(followZoom),
                                                 margin: CGFloat(style.courseMargin), pointsPerMeter: pointsPerMeter) {
                 center = framing.center
                 courseScale = framing.scale
@@ -281,7 +291,7 @@ nonisolated struct CameraRig: Sendable {
             zoom = zoomed
         } else {
             followZoom = (followZoom * scale).clamped(to: zoomLimits)
-            if mode != .northUpCourse { zoom = followZoom }
+            if !mode.framesPoints { zoom = followZoom }
         }
     }
 

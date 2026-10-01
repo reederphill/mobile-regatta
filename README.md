@@ -105,6 +105,11 @@ Regatta/                The iOS app
   Game/VisualCorrection.swift  eases a corrected prediction's drawn position over ~150 ms, snaps past a hull length (online, #68)
   Game/GameScene.swift    SpriteKit renderer, camera, touch steering; reads RenderWorld, never a Race
   Game/BoatNode.swift     batched boat sprites, sails, wakes, wind-shadow cones
+  Game/ChartLayer.swift   the chart: race-area boundary and hatch, land and relief, landmarks, shallows tint, marks and line
+  Game/ChartMarks.swift   which marks are the active leg's (orange) or grey, and the rounding-side arrow (pure)
+  Game/ChartGeometry.swift  hatch band, coast edges, relief strips, shallows weight and OKLab blend (pure)
+  Game/ChartStyle.swift   the chart's tuning values
+  Game/LandmarkSilhouette.swift  placeholder landmark vectors by venue asset name (#169 replaces)
   Game/GameSession.swift  hosts a driver and bridges it to SwiftUI: HUD, rule-call messages, haptics
   Game/RaceConfig.swift   a practice race's settings, seeds and seat controllers; roster names and the bot glyph
   Game/RaceViewportPolicy.swift  race-view sizing: letterboxed portrait in any window (G5)

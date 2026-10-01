@@ -10,6 +10,8 @@ protocol RaceDriver: AnyObject {
     /// Your seat. Every "you" in the scene, HUD and results reads it, never seat 0.
     var myBoatIndex: Int { get }
     var course: CourseLayout { get }
+    /// The venue the race is sailed at: its land, landmarks and depths, for the chart (#115).
+    var venue: Venue { get }
     var boatClass: BoatClass { get }
     /// Whether the race can stop while you pause: a practice race can, an online one can't.
     var isPausable: Bool { get }
