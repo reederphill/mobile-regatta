@@ -25,7 +25,9 @@ public struct BotStyle: Hashable, Sendable {
     public var favouredSide: Double
     /// How willing she is to tack, 0…1: the willing tack on smaller shifts, sooner after the last tack.
     public var tackWillingness: Double
-    /// How she engages the boats around her, 0 sailing her own race … 1 combative (#223): fleet tactics (#234) read it.
+    /// How she engages the boats around her, 0 sailing her own race … 1 combative (#223): the one value every fleet
+    /// tactic reads (#234, `Tactics.engagement`): whether she covers, holds her lane, lee-bows or tacks on a boat's wind,
+    /// and how far off a boat she covers. Independent of her skill, which sets how well she plays them.
     public var engagement: Double
     /// −1…1: which way, and how far, she misreads the start line's bias (`BotWeaknesses.lineBiasMisread`).
     public var lineBiasDraw: Double
@@ -128,15 +130,24 @@ struct BotBrain: Sendable {
     var misjudged: [Int: Bool] = [:]
     /// How she will roll the tack she has tapped (#263, `planRoll`), and when she tapped it; nil with no roll to send.
     var rollPlan: (plan: RollPlan, tapped: Double)?
+    /// What she has made of the boats around her (#234, `observeFleet`): each one's tack, when she saw it tack, and
+    /// her timing error on it.
+    var fleet = FleetSense()
+    /// Her draws for the fleet tactics (#234): her timing errors. A stream of her seed of its own, so they never move
+    /// the draws `rng` makes.
+    var tacticsRng: SplitMix64
 
     /// The stream of her seed her own draws come from.
     static let brainStream: UInt64 = 0x6272_6169_6e64_7277 // "braindrw"
+    /// The stream of her seed her fleet tactics' draws come from (#234).
+    static let tacticsStream: UInt64 = 0x7461_6374_6963_7321 // "tactics!"
 
     init(style: BotStyle, profile: BotProfile? = nil, seed: UInt64 = 0, weaknesses: BotWeaknesses? = nil) {
         self.style = style
         self.weaknesses = weaknesses ?? (profile == nil ? BotWeaknesses(skill: style.skill) : .none(skill: style.skill))
         tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
         rng = SplitMix64(seed: seed, stream: Self.brainStream)
+        tacticsRng = SplitMix64(seed: seed, stream: Self.tacticsStream)
     }
 
     private var skill: Double { style.skill }
@@ -391,7 +402,7 @@ struct BotBrain: Sendable {
     /// Whether she can tap now: a tap done, no mark close enough for the turn to swing her onto, and for a
     /// tack, the speed to carry her through it; for a gybe, room to leeward inside the race area. Racing, she also
     /// taps only clear of every boat (`tapIsClear`, #101).
-    private func canTap(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+    func canTap(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         guard view.time - lastTapTime >= Self.tapInterval,
               isClearOfMarks(b, view, lengths: Self.tapMarkClearance), tapIsClear(b, view) else { return false }
         guard abs(sailingAngle(b)) < .pi / 2 else {
@@ -614,7 +625,10 @@ struct BotBrain: Sendable {
             } else if tack == .port && relative <= -(up + overstand) {
                 tack = .starboard // on the starboard layline
             } else if distance > Self.tacticalRange {
-                tack = upwindTack(b, view, planned: tack)
+                // A fleet tactic's tack (#234) onto a board past its layline would only be tacked back.
+                tack = upwindTack(b, view, planned: tack) { other in
+                    other == .starboard ? relative >= up + overstand : relative <= -(up + overstand)
+                }
             }
             setTack(tack, view)
             let aim = upwindAim(b, view, tack: tack, relative: relative, distance: distance)
