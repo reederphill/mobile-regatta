@@ -283,7 +283,7 @@ final class GameSession {
                 place = "DSQ"
                 detail = "Unserved penalty"
             case .racing:
-                // Once the race has closed, a boat still racing is placed by distance to finish (#86).
+                // Once the race has closed, a boat still racing is placed by ladder distance (#86, #267).
                 place = "\(rank + 1)"
                 detail = frame.isOver ? "By distance" : "Racing · leg \(b.legIndex + 1)"
             case .prestart, .ocs:

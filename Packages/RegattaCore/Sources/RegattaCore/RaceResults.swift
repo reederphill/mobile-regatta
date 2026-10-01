@@ -5,7 +5,7 @@ public enum ResultCode: String, Sendable, Hashable, CaseIterable {
     /// Still racing at the close: placed behind every finisher by her ladder distance still to go round her
     /// remaining marks (#8, #267, `Race.ladderDistanceToFinish(of:)`).
     case byDistance
-    /// Disqualified, behind every boat placed by distance (#30). Fixed at the call (#24).
+    /// Disqualified, behind every boat placed by ladder distance (#30). Fixed at the call (#24).
     case dsq = "DSQ"
     /// Over the line at the gun and never came back, or never started: behind DSQ and ahead of RET (#30).
     case ocs = "OCS"
@@ -34,8 +34,8 @@ public struct SeatResult: Sendable, Hashable {
 
 /// The race's results, fixed as it closes (`Race.results`, the `raceClosed` event).
 ///
-/// Every seat has exactly one row, in display order: finishers by finish, then boats placed by distance to
-/// finish, then DSQ, OCS and RET (#30). DSQs, OCSs and, at a normal close, RETs are tied among themselves
+/// Every seat has exactly one row, in display order: finishers by finish, then boats placed by ladder
+/// distance, then DSQ, OCS and RET (#30). DSQs, OCSs and, at a normal close, RETs are tied among themselves
 /// and shown in seat order (display only). At an all-gone close (`Race.closeAllGone`) the RETs are placed
 /// one by one in reverse leave order: the player who left latest ranks highest (#30, G3).
 public struct RaceResults: Sendable, Hashable {
