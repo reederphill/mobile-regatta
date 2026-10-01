@@ -20,10 +20,11 @@ import Testing
     /// The CLI's options for the full navigation run.
     static let fullRun = ["--tier-mix", "national", "--profile-mix", "live"]
 
-    /// Every venue this build ships, at its latest version, as `id@version`.
-    static func availableVenues() -> [String] {
-        let latest = Dictionary(VenueFile.bundledKeys().map { ($0.id, $0.version) }, uniquingKeysWith: max)
-        return latest.map { "\($0.key)@\($0.value)" }.sorted()
+    /// The venues the bundled matrix sails, as `id@version`. The matrix pairs every venue with every conditions it
+    /// names, so it can't yet express the real venues' two pairings each (#83): it sails dev-venue only, and the real
+    /// venues join it when the matrix gets per-pairing cells.
+    static func availableVenues() throws -> [String] {
+        try BotMatrix.bundled().venues.sorted()
     }
 
     /// A seat of a race: finished unless not, with the given penalty disqualifications, seconds at the edge of the
@@ -53,7 +54,7 @@ import Testing
         // The full run sails every available venue × conditions pairing, with all-National live fleets only.
         let matrix = try BotSuiteOptions(arguments: Self.fullRun).matrix()
         var pairings: Set<String> = []
-        for venue in Self.availableVenues() {
+        for venue in try Self.availableVenues() {
             let key = try dataFileKey(venue)
             for pairing in try VenueFile.bundled(id: key.id, version: key.version).content.pairings {
                 pairings.insert("\(venue) × \(pairing.conditions.id)@\(pairing.conditions.version)")

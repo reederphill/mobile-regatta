@@ -19,10 +19,13 @@ nonisolated enum CuePalette {
     static let inactiveGrey = PaletteToken("inactiveGrey", 0x9AA0A6)
     /// The player's glow and wakes; the alpha is set where it's drawn.
     static let cueWhite = PaletteToken("cueWhite", 0xFFFFFF)
+    /// Every hull's thin outline, 1 pt inside her edge (#117, #21): what keeps a dark hull readable on the water.
+    /// #169 restyles it.
+    static let hullOutline = PaletteToken("hullOutline", 0xF5F5F2)
 
     /// The hues nothing else may come near. Grey and white have no hue to reserve.
     static let reserved = [vermillion, orange, yellow, chevronBlue]
-    static let all = reserved + [inactiveGrey, cueWhite]
+    static let all = reserved + [inactiveGrey, cueWhite, hullOutline]
 }
 
 /// Water and land (#22, `docs/palette.md` "ChartPalette"), held to the hue rule: blue-teal water and sage land,

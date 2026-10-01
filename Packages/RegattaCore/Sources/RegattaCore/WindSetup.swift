@@ -68,6 +68,32 @@ public struct WindSetup: Hashable, Sendable {
         self.raceArea = raceArea
     }
 
+    /// A setup with its mean direction and base strength given rather than drawn: what offline checks over a
+    /// pairing (`VenueCheck`, #83) lay a course from, at a forced rotation and strength, instead of hunting for
+    /// race seeds that draw them. `meanDirection` is radians (wrapped), `baseStrength` m/s. The trend follows the
+    /// pairing as the seeded init does, with `either` taken as `eitherTrend`; nil for conditions with no trend.
+    /// Races never use it: they draw theirs from the race seed.
+    public init(
+        conditions: ConditionsFile, pairing: Venue.Pairing, meanDirection: Double, baseStrength: Double,
+        eitherTrend: TrendDirection = .right
+    ) {
+        conditionsRef = conditions.ref
+        self.conditions = conditions.content
+        self.pairing = pairing
+        self.meanDirection = wrapAngle(meanDirection)
+        self.baseStrength = baseStrength
+        if conditions.content.trend == nil {
+            trend = nil
+        } else {
+            switch pairing.trendDirection {
+            case .back: trend = .left
+            case .veer: trend = .right
+            case .either: trend = eitherTrend
+            }
+        }
+        raceArea = nil
+    }
+
     /// This setup with `raceArea` attached, every drawn value unchanged: course derivation (#80) needs
     /// the drawn setup to lay out the area, so it attaches the area afterwards instead of drawing twice.
     public func with(raceArea: RaceArea?) -> WindSetup {

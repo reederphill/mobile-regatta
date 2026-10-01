@@ -11,6 +11,7 @@ final class GameScene: SKScene {
     static let defaultZoom = CGFloat(CameraStyle.standard.defaultZoom)
 
     let driver: any RaceDriver
+    /// The fleet's names, which the scene never draws: boat names are never shown on the water (#15, #117).
     let roster: FleetRoster
     weak var session: GameSession?
     /// A render fixture's camera (#62), with auto framing on; nil takes the device's camera and auto framing from
@@ -38,6 +39,10 @@ final class GameScene: SKScene {
             cam.setScale(rig.cameraScale)
             needsPausedRender = true
         }
+    }
+    /// How boats are drawn (#117): the debug tuning panel's (#232) seam, live, even on a paused race.
+    var boatStyle = BoatStyle.standard {
+        didSet { needsPausedRender = true }
     }
 #if DEBUG
     /// The tuning panel's pressure overlay (#289, Debug builds): live, even on a paused race.
@@ -186,8 +191,8 @@ final class GameScene: SKScene {
     private func buildBoats() {
         let me = driver.myBoatIndex
         for boat in driver.currentFrame.boats {
-            let node = BoatNode(boat: boat, name: roster.label(of: boat.id, playerSeat: me), isMine: boat.id == me,
-                                color: Palette.boat(boat.colorIndex), boatClass: driver.boatClass, pointsPerMeter: ppm)
+            let node = BoatNode(boat: boat, isMine: boat.id == me, color: Palette.boat(boat.colorIndex),
+                                boatClass: driver.boatClass, pointsPerMeter: ppm)
             boatNodes.append(node)
             boatLayer.addChild(node)
             effectsLayer.addChild(node.shadowCone)
@@ -238,7 +243,9 @@ final class GameScene: SKScene {
         let dt = settled ? 0 : max(0, world.time - (lastRenderTime ?? world.time))
         lastRenderTime = world.time
         for (i, boat) in world.boats.enumerated() {
-            boatNodes[i].update(with: boat, time: world.time, dt: dt, settled: settled)
+            let pose = BoatPose(boat, ease: world.ease(ofSeat: i), isGhost: world.isGhost(ofSeat: i),
+                                boatClass: world.boatClass, style: boatStyle)
+            boatNodes[i].update(with: boat, pose: pose, style: boatStyle, time: world.time, dt: dt, settled: settled)
         }
 
         syncCamera()

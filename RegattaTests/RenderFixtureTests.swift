@@ -129,6 +129,33 @@ import UIKit
         }
     }
 
+    /// The fleet fixture (#117) is a bot race on the default files, frozen after the first finish and before the
+    /// close, with a ghost and at least three racing boats in the boat camera's view; its five twins are the same
+    /// frame through each other filter.
+    @Test func fleetFixtureShowsAGhostAmongTheFleet() throws {
+        let (fixture, log) = try RenderFixture.load(named: "fleet", in: Self.fixtures)
+        #expect(fixture.camera == .boat && fixture.vision == VisionFilter.none)
+        #expect(log.header.setup.boatClass.key == RaceFiles.defaults.boatClass.ref.key)
+        let world = try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
+        #expect(!world.frame.isOver)
+        #expect(!world.isGhost(ofSeat: world.myBoatIndex))
+        let me = world.me
+        let center = me.position + me.velocity * 2
+        let half = Vec2(402, 874) * 1.25 / 2 / Double(GameScene.pointsPerMeter)
+        let inView = world.boats.indices.filter { seat in
+            let p = world.boats[seat].position
+            return abs(p.x - center.x) < half.x && abs(p.y - center.y) < half.y
+        }
+        #expect(inView.filter { world.isGhost(ofSeat: $0) }.count >= 1, "\(inView)")
+        #expect(inView.filter { !world.isGhost(ofSeat: $0) }.count >= 3, "\(inView)")
+        for vision in VisionFilter.allCases where vision != .none {
+            let (twin, _) = try RenderFixture.load(named: "fleet-\(vision.rawValue)", in: Self.fixtures)
+            var expected = fixture
+            expected.vision = vision
+            #expect(twin == expected, "\(vision)")
+        }
+    }
+
     /// The pressure fixture (#289) sails the latest files with a pressure field (dev-venue@6, gusty-offshore@6)
     /// on the course camera, so the whole field shows, water and minimap, after the gun with lanes alive.
     @Test func pressureFixtureShowsThePressure() throws {

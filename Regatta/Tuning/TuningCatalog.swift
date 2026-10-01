@@ -26,6 +26,7 @@ struct TuningSlider: Identifiable {
         /// A render value: app-side, live, never logged.
         case water(WritableKeyPath<WaterStyle, Double>)
         case camera(WritableKeyPath<CameraStyle, Double>)
+        case boat(WritableKeyPath<BoatStyle, Double>)
     }
 
     let id: String
@@ -54,7 +55,7 @@ struct TuningSlider: Identifiable {
         switch target {
         case .file(_, let pointer): pointer
         case .groove(let column): TuningSlider.grooveKey(column)
-        case .water, .camera: nil
+        case .water, .camera, .boat: nil
         }
     }
 
@@ -62,7 +63,7 @@ struct TuningSlider: Identifiable {
         switch target {
         case .file(let slot, _): slot
         case .groove: .boatClass
-        case .water, .camera: nil
+        case .water, .camera, .boat: nil
         }
     }
 
@@ -283,6 +284,20 @@ enum TuningCatalog {
                     camera("courseMargin", "Course view margin", \.courseMargin, 1...2, 0.05),
                 ]),
             TuningGroup(
+                id: "boat", title: "Boat",
+                note: "How boats heel, flutter and flog (#117, #220, #222). Drawn only: never logged.",
+                applies: .live,
+                sliders: [
+                    // Past 1 still counts: heel is capped at 1 after the gain, so more heels her sooner and
+                    // off the beam (`BoatStyle.heelScale`).
+                    boat("heelScale", "Heel", \.heelScale, 0...2, 0.05),
+                    boat("heelFullKnots", "Overpowered at", \.heelFullKnots, 8...30, 0.5, unit: " kn"),
+                    boat("starvedFullLoss", "Starved flutter at", \.starvedFullLoss, 0.1...0.8, 0.05),
+                    boat("flutterDegrees", "Flutter", \.flutterDegrees, 0...20, 0.5, unit: "°"),
+                    boat("flogSeconds", "Roll-miss flog", \.flogSeconds, 0...4, 0.1, unit: " s"),
+                    boat("ghostAlpha", "Ghost fade", \.ghostAlpha, 0.1...0.9, 0.05),
+                ]),
+            TuningGroup(
                 id: "later", title: "Later",
                 note: "Values later tickets bring, tuned here once they're in a file.",
                 applies: .later, sliders: [],
@@ -297,6 +312,11 @@ enum TuningCatalog {
     private static func water(_ name: String, _ title: String, _ path: WritableKeyPath<WaterStyle, Double>,
                               _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {
         TuningSlider(id: "water.\(name)", title: title, unit: unit, range: range, step: step, target: .water(path))
+    }
+
+    private static func boat(_ name: String, _ title: String, _ path: WritableKeyPath<BoatStyle, Double>,
+                             _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {
+        TuningSlider(id: "boat.\(name)", title: title, unit: unit, range: range, step: step, target: .boat(path))
     }
 
     private static func camera(_ name: String, _ title: String, _ path: WritableKeyPath<CameraStyle, Double>,

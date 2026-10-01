@@ -32,6 +32,19 @@ Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/
   lanes are finite patches that drift down the wind, some weakening it, with a weaker pressure side, so the
   pressure changes up the course as well as across it (ADR 0008). The bot suite's matrix sails it; the default
   race doesn't.
+- `hollin-bay@1`, `saltings-reach@1`, `fellmere@1` (bundled, schema 2, #83): the three real venues (#12, #36), each
+  with two pairings on the version-7 conditions files. **Hollin Bay** is the open bay, the control: shore to the
+  north and east, little shore effect, no current; classic oscillating from 240° and sea breeze from 200° (veering).
+  **Saltings Reach** is the tidal estuary, the one venue with a current (#11): a channel running north-east (the
+  flood) down the middle of the reach with shallows either side, a salt-marsh edge on the north-west bank and a sea
+  wall on the south-east; 2 kn at the deepest water, a tide clock 19 times real time, any tide state at the gun;
+  classic oscillating from 225° (the course along the channel) and gusty offshore from 315° (off the marsh, across
+  it). **Fellmere** is the hill-ringed lake: land all round (four pieces of one shore), strong bends and shadow, lanes
+  through the gaps, no current; light and patchy from 200° and gusty offshore from 290°. Each pairing's grid is laid
+  square to its mean, 100 m cells, covering the race area at every seeded rotation. The files' `notes` say what each
+  grid does; their grids, side tendencies and current are placeholders until play teaches what reads well. Overviews
+  of every pairing are in `docs/venues/` (`regatta-venue-png`). The default race still sails `dev-venue@2`; practice
+  setup (#131) picks a real venue.
 - `test-venue@1` (test resource): small hand-checkable grids, concave land, a tidal current with an eddy.
 
 ## Frame and units
@@ -270,4 +283,33 @@ don't check this yet.) It throws `invalidContent` for a venue that breaks any of
 - The current rules in the tables above.
 
 Land clear of the start line, marks and race area, and the estuary's channel inside it, are offline
-checks over the derived course (#83), not load-time validation.
+checks over the derived course (#83), not load-time validation: below.
+
+## Offline checks (#83)
+
+Every bundled real venue passes both (`VenueCheckTests`, `VenueSailabilityTests`); a new venue version must too. Both
+lay each pairing's course with `CourseLayout.derive`, as a race does, from the default class and rules files, so a
+retuned polar or race format is re-checked (#14): for the largest fleet (16), one lap (the longest beat) at the strength
+in the conditions' range whose beat is longest, at every rotation of the mean the race seed may draw (±10°, in 2.5°
+steps; `WindSetup(conditions:pairing:meanDirection:baseStrength:)` forces it).
+
+**Venue check** (`VenueCheck`). A pairing fails, with a message naming it and the rotation, when:
+
+- any land reaches into the race area's rectangle (land is only at the edges, #12);
+- land is within 30 m (`landClearanceMetres`) of the start line or any mark;
+- its geographic grid doesn't cover the rectangle (outside it the shift is neutral: a cliff);
+- at a venue with current: the current grid doesn't cover the rectangle, the deepest water (every node at the
+  deepest depth) lies outside it, or no shallows node lies in it. The channel is water at least half
+  (`channelFraction`) the deepest node's depth; shallows are shallower, but deeper than 0.
+
+**Sailability** (`VenueSailability`, #11, #14). In a 25 % lull (the conditions' weakest strength × 0.75), shifted and
+scaled by the pairing's geographic grid, and the current at every tide state the venue allows at the gun (15° steps;
+eddies included), a boat sails the class polar's best upwind angle on the sailing wind (ground wind less current).
+Her progress is her velocity over the ground along the course axis, on the better tack, at points every 20 m over
+the race area from the start line to the windward mark. On every course and at every tide state, (1) somewhere
+across the beat progress is at least 1 kn, and (2) nowhere is it negative: she is never swept backwards.
+
+**Overviews.** `swift run --package-path Packages/RegattaCore regatta-venue-png` draws every real pairing into
+`docs/venues/<venue>@<v>__<conditions>@<v>.png`, and prints both checks' results: land (green), depth tint (blues,
+Saltings Reach), the race area at −10° (orange), the authored mean (grey, dashed) and +10° (purple), with each one's
+marks (red) and start line (black), the anchor (black dot) and landmarks (green squares). #84 reviews them.

@@ -26,7 +26,10 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast
   Venue.swift             venue file schema: land, pairings with geographic grids, current (docs/venue-file.md)
-  Resources/venues/       venue files; `dev-venue@2` stands in until the real venues (#83)
+  Resources/venues/       venue files: the real venues `hollin-bay@1`, `saltings-reach@1`, `fellmere@1` (#83); races
+                          sail `dev-venue@2` by default until practice setup picks a venue (#131)
+  VenueCheck.swift        the offline venue check: each pairing's course clear of land, grids covering it (#83)
+  VenueSailability.swift  the offline sailability check: upwind progress in a 25 % lull at peak current (#14)
   CourseLayout.swift      the course derived from the files and race seed: marks, gate, lines, race area, start row
   Course.swift            rounding rays and obstacles, shared by the course and the rules
   Boat.swift              boat state and hull shape
@@ -52,6 +55,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Digest.swift            FNV-1a state digest for golden replay tests
   WorldSnapshot.swift     the whole predictable world at a tick; `Race.exportSnapshot()` / `importSnapshot(_:)` (ADR 0005)
   Sources/regatta-replay  `regatta-replay <log>`: replays a race log and prints its final digest
+  Sources/regatta-venue-png `regatta-venue-png [dir] [venue@v ...]`: an overview PNG per venue pairing into docs/venues (#83)
   Sources/RegattaBots/    bots, outside the simulation: they sail seats through the input API (#60)
     SeatController.swift    who sails each seat (human, bot, dropped), swappable at any tick
     BotDriver.swift         10 Hz decisions applied next tick; the bot's own seed, hash(race seed, seat, "bot")

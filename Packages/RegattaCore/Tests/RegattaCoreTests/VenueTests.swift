@@ -19,6 +19,12 @@ enum VenueFixtures {
         6: "15218c4b6d5b72777f5c99b982a69c307c4c07a98c5c9f36a74eefdcb75427b1",
         7: "9d1e8f79c157cfe2511d5b52e574c1b02d1d251de4c221e8e8a7c5cb8d69024a",
     ]
+    /// SHA-256 of the three real venues' files (#83), `Resources/venues/<id>@1.json`.
+    static let realPinnedHashes = [
+        "hollin-bay": "9552bb1d08414c79b5fa76078bf826b7326565777a6b8a113a34027813267832",
+        "saltings-reach": "f9851810cec9ddc3ea69e5b6985f8842d5035e0bc2f84ffaf7e83392d57cc1d6",
+        "fellmere": "4ad2fa32993d6fa76c15a8c5c9f6426384d14df1fb0ade84696078ff6ae59020",
+    ]
 
     static func testFile() throws -> VenueFile {
         try VenueFile.bundled(id: testID, version: 1, in: .module)
@@ -70,6 +76,14 @@ enum VenueFixtures {
 }
 
 @Suite struct VenueFileTests {
+    /// #83 (#36): the three real venues, bundled, with their players' names; only the estuary has a current (#11).
+    @Test func threeVenuesHaveTheirDisplayNames() throws {
+        let names = try ["hollin-bay", "saltings-reach", "fellmere"].map { try VenueFile.bundled(id: $0, version: 1).content }
+        #expect(names.map(\.displayName) == ["Hollin Bay", "Saltings Reach", "Fellmere"])
+        #expect(names.map(\.hasCurrent) == [false, true, false])
+        #expect(names.allSatisfy { $0.pairings.count == 2 && $0.pairings.allSatisfy { $0.conditions.version == 7 } })
+    }
+
     @Test func testFixtureDecodes() throws {
         let file = try VenueFixtures.testFile()
         #expect(file.schemaVersion == 1 && file.id == "test-venue" && file.version == 1)
@@ -149,6 +163,9 @@ enum VenueFixtures {
         for (version, hash) in VenueFixtures.devPinnedHashes {
             let dev = try VenueFile.bundled(id: VenueFixtures.devID, version: version)
             #expect(dev.ref.hash.hex == hash, "dev-venue@\(version)")
+        }
+        for (id, hash) in VenueFixtures.realPinnedHashes {
+            #expect(try VenueFile.bundled(id: id, version: 1).ref.hash.hex == hash, "\(id)@1")
         }
     }
 

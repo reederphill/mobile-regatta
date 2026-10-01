@@ -13,19 +13,18 @@ struct RaceControls: View {
         HStack(alignment: .bottom) {
             // Ease holds boats on the line before the gun too (#99).
             HoldButton(title: "EASE", width: 96, identifier: "race-ease", isEnabled: isRacing, isPaused: session.isPaused,
-                       onPress: { session.setEase(true) }, onRelease: { session.setEase(false) })
+                       onPress: { session.setEase(true) }, onRelease: { session.setEase(false) },
+                       accessibilityToggle: .init(isOn: session.isEasing, toggle: { session.toggleEase() }))
             Spacer()
             HoldButton(title: session.hud.isUpwind ? "TACK" : "GYBE", width: 120, identifier: "race-tack",
                        isEnabled: isRacing, isPaused: session.isPaused,
                        onPress: { session.pressTack(at: Self.now) }, onRelease: { session.releaseTack(at: Self.now) })
             Spacer()
-            // A placeholder until #125 wires it to the protest picker.
-            Button {} label: {
-                ControlLabel(title: "PROTEST", width: 96, isHeld: false)
-            }
-            .buttonStyle(.plain)
-            .disabled(!isRacing)
-            .accessibilityIdentifier("race-protest")
+            // A placeholder until #125 wires it to the protest picker: it brightens under the finger like the others.
+            Button("Protest") {}
+                .buttonStyle(ControlButtonStyle(title: "PROTEST", width: 96))
+                .disabled(!isRacing)
+                .accessibilityIdentifier("race-protest")
         }
         .padding(.horizontal, 16)
         .padding(.bottom, 16)
@@ -56,6 +55,16 @@ private struct ControlLabel: View {
     }
 }
 
+/// A plain button's face: the control label, brighter while pressed.
+private struct ControlButtonStyle: ButtonStyle {
+    let title: String
+    let width: CGFloat
+
+    func makeBody(configuration: Configuration) -> some View {
+        ControlLabel(title: title, width: width, isHeld: configuration.isPressed)
+    }
+}
+
 /// A button that reports its press and its release (#99 Ease, #222 Tack/Gybe). A pause overlay steals the touch
 /// without ending the gesture, so a pause (or the button going away or disabled) lets go of it too, without a release.
 private struct HoldButton: View {
@@ -66,10 +75,18 @@ private struct HoldButton: View {
     let isPaused: Bool
     let onPress: () -> Void
     let onRelease: () -> Void
+    /// VoiceOver can't hold a button, so a hold that is a mode (Ease) is a toggle there, its value On or Off; nil
+    /// (Tack/Gybe) makes the action a press and release.
+    var accessibilityToggle: AccessibilityToggle?
     @State private var isHeld = false
 
+    struct AccessibilityToggle {
+        let isOn: Bool
+        let toggle: () -> Void
+    }
+
     var body: some View {
-        ControlLabel(title: title, width: width, isHeld: isHeld)
+        ControlLabel(title: title, width: width, isHeld: isHeld || accessibilityToggle?.isOn == true)
             .contentShape(.capsule)
             .gesture(
                 DragGesture(minimumDistance: 0)
@@ -96,9 +113,14 @@ private struct HoldButton: View {
             .accessibilityLabel(title.capitalized)
             .accessibilityAddTraits(.isButton)
             .accessibilityIdentifier(identifier)
+            .accessibilityValue(accessibilityToggle.map { $0.isOn ? "On" : "Off" } ?? "")
             .accessibilityAction {
-                onPress()
-                onRelease()
+                if let accessibilityToggle {
+                    accessibilityToggle.toggle()
+                } else {
+                    onPress()
+                    onRelease()
+                }
             }
     }
 }
@@ -152,7 +174,8 @@ struct TillerIndicator: View {
 }
 
 /// UI tests only: your boat's speed in knots as an accessibility value (`race-boat-speed`), since the HUD shows no
-/// speed number (#15). Read from the driver about four times a second, apart from the HUD's state (#114).
+/// speed number (#15), and her speed the moment Ease was last let go (`race-ease-release`, labelled with how many
+/// times it has been, #112). Read from the driver about four times a second, apart from the HUD's state (#114).
 struct BoatSpeedProbe: View {
     let session: GameSession
 
@@ -160,14 +183,22 @@ struct BoatSpeedProbe: View {
         TimelineView(.periodic(from: .now, by: 0.25)) { _ in
             let boat = session.driver.currentFrame.boats[session.driver.myBoatIndex]
             let value = String(format: "%.2f", knots(metresPerSecond: boat.speed))
-            Text(value)
-                .font(.system(size: 1))
-                .foregroundStyle(.clear)
-                .accessibilityLabel("Boat speed")
-                .accessibilityValue(value)
-                .accessibilityIdentifier("race-boat-speed")
+            let release = session.easeReleases
+            let releaseValue = String(format: "%.2f", release.knots)
+            VStack(spacing: 0) {
+                Text(value)
+                    .accessibilityLabel("Boat speed")
+                    .accessibilityValue(value)
+                    .accessibilityIdentifier("race-boat-speed")
+                Text(releaseValue)
+                    .accessibilityLabel("Ease released \(release.count)")
+                    .accessibilityValue(releaseValue)
+                    .accessibilityIdentifier("race-ease-release")
+            }
+            .font(.system(size: 1))
+            .foregroundStyle(.clear)
         }
-        .frame(width: 1, height: 1)
+        .frame(width: 1, height: 2)
         .allowsHitTesting(false)
     }
 }
