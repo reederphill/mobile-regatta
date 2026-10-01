@@ -87,7 +87,8 @@ final class BoatEffects {
         cone.zRotation = CGFloat(-(boat.apparentWind.direction + .pi)) // the cone follows her apparent wind (#10)
 
         // Her windward side is starboard on starboard tack (`ShadowCone.windward`); it flips at the boom crossing.
-        backwind.isHidden = pose.isGhost || !hasBackwind
+        // She casts none while running (`ShadowCone.isRunning`).
+        backwind.isHidden = pose.isGhost || !hasBackwind || ShadowCone(caster: boat, shadow: boatClass.windShadow).isRunning
         backwind.position = point
         backwind.zRotation = CGFloat(-boat.heading)
         backwind.xScale = boat.tack == .starboard ? 1 : -1
@@ -202,7 +203,7 @@ private struct EffectArt {
     static func shared(shadow: BoatClass.WindShadow, pointsPerMeter ppm: CGFloat, style: BoatStyle) -> EffectArt {
         let key = Key(shadow: [shadow.coneLength, shadow.coneWidthAtBoat, shadow.coneWidthAtEnd,
                                shadow.backwindLength, shadow.backwindWidth, shadow.backwindInnerLength ?? -1,
-                               shadow.sternCorner.x, shadow.sternCorner.y],
+                               shadow.sternCorner.x, shadow.sternCorner.y, shadow.backwindSternSlant ? 1 : 0],
                       ppm: ppm, hatch: [style.hatchSpacing, style.hatchLineWidth])
         if let art = cache[key] { return art }
         let art = EffectArt(shadow: shadow, ppm: ppm, style: style)
@@ -219,16 +220,14 @@ private struct EffectArt {
         cone = Self.hatch(conePoints, bounds: coneBounds, spacing: spacing, width: width)
         coneAnchor = Self.anchor(coneBounds)
 
-        if let corners = ShadowShapes.backwindLocal(shadow), let inner = shadow.backwindInnerLength {
+        if let corners = ShadowShapes.backwindLocal(shadow) {
             let backwindPoints = points(corners)
             // Taking in the boat's centre, so the anchor is inside the texture.
-            // A point of margin all round, so its outline isn't cut off at the texture's edge.
-            let bounds = Self.bounds(of: backwindPoints + [.zero]).insetBy(dx: -1, dy: -1)
-            // Its outline and a light fill make the right trapezoid read as a shape, not a patch of hatch: the fade
-            // only thins it (`backwindFadeFloor`), so the slanted far edge stays seen.
-            backwind = Self.hatch(backwindPoints, bounds: bounds, spacing: spacing, width: width,
-                                  fill: 0.22, outline: 1.5) { cg in
-                Self.fadeBackwind(cg, shadow: shadow, inner: inner, ppm: ppm)
+            let bounds = Self.bounds(of: backwindPoints + [.zero])
+            // A light fill under the hatch makes the trapezoid read as a shape, not a patch of lines: the fade only
+            // thins it (`backwindFadeFloor`), so its far edge stays seen.
+            backwind = Self.hatch(backwindPoints, bounds: bounds, spacing: spacing, width: width, fill: 0.22) { cg in
+                Self.fadeBackwind(cg, shadow: shadow, ppm: ppm)
             }
             backwindAnchor = Self.anchor(bounds)
         } else {
@@ -251,8 +250,7 @@ private struct EffectArt {
     /// Diagonal lines `spacing` apart and `width` wide, clipped to `outline`: the cones' hatch (#15). `fade`, if
     /// any, then fades it (drawing with `.destinationIn`).
     private static func hatch(_ outline: [CGPoint], bounds: CGRect, spacing: CGFloat, width: CGFloat,
-                              fill: CGFloat = 0, outline outlineWidth: CGFloat = 0,
-                              fade: ((CGContext) -> Void)? = nil) -> SKTexture {
+                              fill: CGFloat = 0, fade: ((CGContext) -> Void)? = nil) -> SKTexture {
         SpriteArt.texture(bounds: bounds) { cg in
             cg.saveGState()
             let path = CGMutablePath()
@@ -280,15 +278,6 @@ private struct EffectArt {
                 cg.setBlendMode(.destinationIn)
                 fade(cg)
             }
-            if outlineWidth > 0 {
-                // Over the faded art, so its far edge shows as plainly as its stern edge.
-                cg.setBlendMode(.normal)
-                cg.addPath(path)
-                cg.setStrokeColor(UIColor.white.cgColor)
-                cg.setLineWidth(outlineWidth)
-                cg.setLineJoin(.miter)
-                cg.strokePath()
-            }
         }
     }
 
@@ -296,10 +285,11 @@ private struct EffectArt {
     /// stops at a share, so the zone's whole shape stays readable on the water.
     private static let backwindFadeFloor: CGFloat = 0.35
 
-    /// Fades the backwind's hatch as core's loss fades (`ShadowCone`'s backwind factor, #298): full along her
-    /// stern edge, straight down to `backwindFadeFloor` at the far edge, which reaches `inner` astern on the inside and
-    /// `backwindLength` on the outside. Column by column, a texel wide, in the art's frame (starboard tack).
-    private static func fadeBackwind(_ cg: CGContext, shadow: BoatClass.WindShadow, inner: Double, ppm: CGFloat) {
+    /// Fades the backwind's hatch as core's loss fades (`ShadowCone`'s backwind factor, #298): full along its stern
+    /// edge, straight down to `backwindFadeFloor` at its far edge, each at the span `BoatClass.WindShadow.backwindSpan(out:)`
+    /// gives where it is (one edge slants, the far one or the stern one). Column by column, a texel wide, in the art's
+    /// frame (starboard tack).
+    private static func fadeBackwind(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat) {
         let space = CGColorSpaceCreateDeviceRGB()
         guard let gradient = CGGradient(colorsSpace: space, colors: [UIColor.white.cgColor,
                                                                      UIColor(white: 1, alpha: Self.backwindFadeFloor).cgColor] as CFArray,
@@ -311,11 +301,12 @@ private struct EffectArt {
         cg.setShouldAntialias(false)
         var x: CGFloat = -step
         while x < width + step {
-            let out = Double((x + step / 2) / width).clamped(to: 0...1)
-            let reach = CGFloat(inner + (shadow.backwindLength - inner) * out) * ppm
+            let out = Double((x + step / 2) / width).clamped(to: 0...1) * shadow.backwindWidth
+            guard let span = shadow.backwindSpan(out: out) else { break }
+            let top = stern - CGFloat(span.start) * ppm, bottom = stern - CGFloat(span.end) * ppm
             cg.saveGState()
-            cg.clip(to: CGRect(x: x0 + x, y: stern - reach - 2, width: step, height: reach + 4))
-            cg.drawLinearGradient(gradient, start: CGPoint(x: 0, y: stern), end: CGPoint(x: 0, y: stern - reach),
+            cg.clip(to: CGRect(x: x0 + x, y: bottom - 2, width: step, height: top - bottom + 4))
+            cg.drawLinearGradient(gradient, start: CGPoint(x: 0, y: top), end: CGPoint(x: 0, y: bottom),
                                   options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
             cg.restoreGState()
             x += step
