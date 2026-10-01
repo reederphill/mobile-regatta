@@ -142,6 +142,9 @@ nonisolated struct CameraRig: Sendable {
     var visibleInsets = ViewInsets.zero
     /// The race clock of the last frame, for which shot it was: nil until the first.
     private var lastTime: Double?
+    /// Your boat's offset from the screen's centre in the pre-start shot, points: eased towards the composition's
+    /// (`preStartOffsetSeconds`), so nothing slides her faster than that. Nil outside the pre-start.
+    private var preStartOffset: (x: Double, y: Double)?
 
     // Pinch-zoom.
     /// The pinch multiplier on every shot's zoom (#322): 1 until a pinch, kept across races by the scene.
@@ -275,15 +278,26 @@ nonisolated struct CameraRig: Sendable {
             center = point(raced.center)
             zoom = raced.zoom
             lineEndOffScreen = false
+            preStartOffset = nil
             return
         }
         // The pre-start shot, handing over to the race's over `gunHandOverSeconds` after the gun.
         let pre = preStartComposition(world, sceneSize: sceneSize)
+        if let held = preStartOffset, !snap {
+            let k = 1 - exp(-dt / max(style.preStartOffsetSeconds, 1e-3))
+            preStartOffset = (held.x + (pre.offset.x - held.x) * k, held.y + (pre.offset.y - held.y) * k)
+        } else {
+            preStartOffset = pre.offset
+        }
+        let offset = preStartOffset ?? pre.offset
+        let (up, right) = axes
+        let k = pre.zoom * pointsPerMeter
+        let preCentre = world.myPosition + right * (-offset.x / k) + up * (-offset.y / k)
         let w = world.time < 0 ? 1 : 1 - Self.smoothstep(world.time / handOver)
         zoom = pre.zoom * w + raced.zoom * (1 - w)
         pinchBase = pre.base * w + pinchBase * (1 - w)
         pinchCeiling = zoomLimits.upperBound * w + pinchCeiling * (1 - w)
-        center = point(pre.center * w + raced.center * (1 - w))
+        center = point(preCentre * w + raced.center * (1 - w))
         let visible = visibleInsets.visibleRect(sceneSize: sceneSize)
         lineEndOffScreen = world.startLine.contains { !ViewInsets.contains(visible, project($0, sceneSize: sceneSize)) }
     }
@@ -432,60 +446,42 @@ nonisolated struct CameraRig: Sendable {
                    cap(d.dot(up), half: Double(sceneSize.height) / 2, lead: lead.along))
     }
 
-    /// The pre-start shot (#322): your boat `preStartBoatHeight` up the screen below the line (as far down it above
-    /// the line, easing between over `preStartFlipLineLengths` either side), the view centred across on the line's
-    /// middle as far as keeps her inside the middle `preStartBoatWidth` of it, zoomed as close as fits both line
-    /// ends inside `edgeMargin`, down to the widest limit; times the pinch multiplier. `base` is the zoom before it.
-    func preStartComposition(_ world: CameraWorld, sceneSize: CGSize) -> (center: Vec2, zoom: Double, base: Double) {
-        let me = world.myPosition
+    /// The pre-start shot (#322): your boat's offset from the screen's centre (points) and the zoom, from where she
+    /// is, before easing. The zoom is the line's alone, constant through the pre-start: both ends across the width
+    /// inside `edgeMargin`, down to the widest limit, times the pinch multiplier (`base` is the zoom before it); a
+    /// line end above or below the screen has the edge arrow. The offset blends two compositions by speed: the
+    /// line's, your boat `preStartBoatHeight` up the screen below the line (as far down it above the line, easing
+    /// between over `preStartFlipLineLengths` either side) and, across, as far from the middle as the line's
+    /// middle puts her inside the middle `preStartBoatWidth`; and the heading lead at `preStartLeadShare` of its
+    /// strength, which has all of it at `preStartLeadSpeed`, so a boat sailing keeps open water ahead of her bow.
+    func preStartComposition(_ world: CameraWorld, sceneSize: CGSize)
+        -> (offset: (x: Double, y: Double), zoom: Double, base: Double) {
+        let width = Double(sceneSize.width), height = Double(sceneSize.height)
+        let share = style.preStartLeadShare
+        let leadX = -lead.across * share * width / 2, leadY = -lead.along * share * height / 2
         guard world.startLine.count == 2 else {
             let zoom = (style.openWaterZoom * appliedMultiplier).clamped(to: zoomLimits)
-            return (leadCentre(world, sceneSize: sceneSize, zoom: zoom), zoom, style.openWaterZoom)
+            return ((-lead.across * width / 2, -lead.along * height / 2), zoom, style.openWaterZoom)
         }
+        let me = world.myPosition
         let (up, right) = axes
-        let width = Double(sceneSize.width), height = Double(sceneSize.height)
         let ends = world.startLine
         let middle = (ends[0] + ends[1]) / 2
         let lineLength = max((ends[1] - ends[0]).length, 1)
+
+        // The zoom: the line's ends across the width, wherever you are.
+        let halfSpan = max(ends.map { abs(($0 - middle).dot(right)) }.max() ?? 0, 1e-3)
+        let fit = (style.edgeMargin * width / 2 / (halfSpan * pointsPerMeter)).clamped(to: zoomLimits)
+        let zoom = (fit * appliedMultiplier).clamped(to: zoomLimits)
+
         // Below the line (negative) your boat sits low, above it high: a smooth flip through the line.
         let above = (me - middle).dot(up)
         let flip = tanh(above / max(style.preStartFlipLineLengths * lineLength, 1e-3))
-        // Your boat's height on screen from its middle, points.
         let boatY = (0.5 - style.preStartBoatHeight) * flip * height
-        let middleAcross = (middle - me).dot(right)
-
-        // The centre's offset across from your boat at zoom `z`, metres.
-        func across(_ z: Double) -> Double {
-            let half = style.preStartBoatWidth * width / 2 / (z * pointsPerMeter)
-            return middleAcross.clamped(to: -half...half)
-        }
-        func fits(_ z: Double) -> Bool {
-            let k = z * pointsPerMeter
-            let boatX = -across(z) * k
-            return ends.allSatisfy { end in
-                let d = end - me
-                return abs(boatX + d.dot(right) * k) <= style.edgeMargin * width / 2
-                    && abs(boatY + d.dot(up) * k) <= style.edgeMargin * height / 2
-            }
-        }
-        let limits = zoomLimits
-        var fit: Double
-        if fits(limits.upperBound) {
-            fit = limits.upperBound
-        } else if !fits(limits.lowerBound) {
-            fit = limits.lowerBound
-        } else {
-            // Fitting only gets easier zooming out: bisect between the limits, in log zoom.
-            var lo = log(limits.lowerBound), hi = log(limits.upperBound)
-            for _ in 0..<40 {
-                let mid = (lo + hi) / 2
-                if fits(exp(mid)) { lo = mid } else { hi = mid }
-            }
-            fit = exp(lo)
-        }
-        let zoom = (fit * appliedMultiplier).clamped(to: limits)
-        let k = zoom * pointsPerMeter
-        return (me + right * across(zoom) + up * (-boatY / k), zoom, fit)
+        let half = style.preStartBoatWidth * width / 2 / (zoom * pointsPerMeter)
+        let boatX = -(middle - me).dot(right).clamped(to: -half...half) * zoom * pointsPerMeter
+        let w = Self.smoothstep(world.myVelocity.length / max(style.preStartLeadSpeed, 1e-3))
+        return ((boatX * (1 - w) + leadX * w, boatY * (1 - w) + leadY * w), zoom, fit)
     }
 
     /// The pinch-zoom limits for `world`: `minZoom`…`maxZoom`, the widest raised to the zoom that just fits the
