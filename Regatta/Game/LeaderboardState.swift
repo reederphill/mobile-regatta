@@ -117,7 +117,8 @@ struct LeaderboardState: Equatable {
         case .prestart: return .none
         case .racing:
             if rank == 0 { return .leader }
-            return metres.map { .metres(rounded(metres: $0)) } ?? .none
+            // A boat behind the leader never reads "+0 m", which looks like a dead heat: at least 1 m.
+            return metres.map { .metres(max(rounded(metres: $0), 1)) } ?? .none
         }
     }
 

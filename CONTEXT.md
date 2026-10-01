@@ -206,7 +206,7 @@ How far a boat still has to go to finish, counting only progress across the ladd
 _Avoid_: distance to finish (the path length)
 
 **Gap to leader**:
-How far a boat is behind the leader in **Ladder distance**, in metres: her ladder distance less the least of any boat racing. Once a boat has finished, it is her own ladder distance still to go; a finished boat's gap is 0. None for a boat not started, disqualified, or whose player has gone. Shown on the **Live leaderboard**.
+How far a boat is behind the leader in **Ladder distance**, in metres: her ladder distance less the least of any boat racing. Once a boat has finished, it is her own ladder distance still to go; a finished boat's gap is 0. None for a boat not started, disqualified, or whose player has gone before finishing (a finished boat keeps 0). A boat behind the leader shows at least 1 m. Shown on the **Live leaderboard**.
 _Avoid_: time gap, distance behind
 
 **Live leaderboard**:

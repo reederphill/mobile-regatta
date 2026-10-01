@@ -83,12 +83,12 @@ import RegattaCore
         // From a frame: the leader racing; a finished leader shows Fin, and the boats racing after a finish their
         // metres still to go (#267); DSQ, OCS, a late starter and a boat with no gap (gone) show their codes.
         let racing = LeaderboardState(frame: Self.frame(gaps: [0: 0, 1: 37.6, 2: 212.4, 3: 0.2]), me: 1)
-        #expect(racing.rows.prefix(4).map(\.gap) == [.leader, .metres(38), .metres(210), .metres(0)])
+        #expect(racing.rows.prefix(4).map(\.gap) == [.leader, .metres(38), .metres(210), .metres(1)])
         let later = LeaderboardState(
             frame: Self.frame(statuses: [0: .finished, 1: .finished, 5: .dsq, 6: .ocs, 7: .prestart],
                               gaps: [0: 0, 1: 0, 2: 150.2, 3: 0.4]),
             me: 2)
-        #expect(later.rows.map(\.gap) == [.finished, .finished, .metres(150), .metres(0), .none, .dsq, .ocs, .none])
+        #expect(later.rows.map(\.gap) == [.finished, .finished, .metres(150), .metres(1), .none, .dsq, .ocs, .none])
         #expect(later.accessibilityLabel == "Leaderboard, 3rd, 150 m behind the leader")
     }
 

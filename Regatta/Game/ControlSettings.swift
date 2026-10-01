@@ -2,8 +2,8 @@ import Observation
 
 /// The device's control settings every race reads (#112, #113): owned by `AppModel`, which sets it from Settings once
 /// per change (with `-scheme` over the stored scheme and `-camera` over the stored camera), and shared by every race
-/// like `GatedHaptics`. The scene reads the scheme, camera, auto zoom and pinch multiplier each frame, the HUD the leaderboard switch, so a switch mid-race (#131)
-/// takes effect at once (a camera change eases). None of them goes on the wire.
+/// like `GatedHaptics`. The scene reads the scheme, camera, auto zoom and pinch multiplier each frame, and the HUD
+/// the leaderboard switch, so a switch mid-race (#131) takes effect at once (a camera change eases). None of them goes on the wire.
 @Observable
 final class ControlSettings {
     var steering: DeviceSettings.Steering
