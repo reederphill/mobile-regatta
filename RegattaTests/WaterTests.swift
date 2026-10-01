@@ -52,7 +52,7 @@ import RegattaCore
         }
         // So is any pressure lane at its peak, in every file with a pressure field (#289); and the pressure is the
         // palette's tones too, at full tone ±0.12 (#289, and more sensitive, 0.10, since the lanes are finite).
-        let pressureFiles = [6, 7].flatMap { version in
+        let pressureFiles = [6, 7, 8].flatMap { version in
             ["light-and-patchy", "classic-oscillating", "sea-breeze", "gusty-offshore"]
                 .map { try? ConditionsFile.bundled(id: $0, version: version) }
         }

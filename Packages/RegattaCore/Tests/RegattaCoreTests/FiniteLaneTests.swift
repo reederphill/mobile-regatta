@@ -14,6 +14,14 @@ enum FiniteLaneFixtures {
         ("sea-breeze", "54e788f185b30afa503b48d0221e67a2e623d396ef2630034c571e0157294a05"),
     ]
 
+    /// The version-8 files' SHA-256 (the owner's lane tuning).
+    static let version8Hashes: [(id: String, hash: String)] = [
+        ("classic-oscillating", "7f25a953b048a0cf10c24e787869414de412c0c68abe65a0018bec5376b0e838"),
+        ("gusty-offshore", "bd948397188603b2cb73579195b8cd44be22b56e2403c19405ab46f3077a0804"),
+        ("light-and-patchy", "fca3e5028df123babc36983da39544c775b7f442b4fc597a5867acce8b4e0faf"),
+        ("sea-breeze", "a1035f21fe51804f7c0f1846dcfc705f6a4a5fbb25b6082819759c262eba5d38"),
+    ]
+
     /// `id`@`version`'s setup with a race area at dev-venue@`version`.
     static func setup(_ id: String, version: Int = 7, raceSeed: UInt64 = 1) throws -> WindSetup {
         try GeographyFixtures.setup(id, version: version, raceSeed: raceSeed)
@@ -80,6 +88,40 @@ enum FiniteLaneFixtures {
         #expect(pairing.geographicGrid == old.geographicGrid && pairing.sideTendency == old.sideTendency)
         #expect(pairing.meanDirection == old.meanDirection && pairing.startLineCentre == old.startLineCentre)
         #expect(venue.landmarks == was.landmarks && venue.land == was.land && venue.current == was.current)
+    }
+
+    /// The version-8 files are version 7 with the owner's lane tuning (2026-10-01), the same in all four: 16 lanes,
+    /// strength 0.10–0.20, width 60–200 m, life 30–180 s. Pinned; the venues that paired version 7 pair them in their
+    /// next version, otherwise unchanged.
+    @Test(arguments: FiniteLaneFixtures.version7Hashes.map(\.id))
+    func version8FilesAreVersion7WithTheOwnersLaneTuning(id: String) throws {
+        let v8 = try ConditionsFile.bundled(id: id, version: 8)
+        #expect(v8.schemaVersion == 6 && v8.version == 8)
+        #expect(v8.ref.hash.hex == FiniteLaneFixtures.version8Hashes.first { $0.id == id }?.hash)
+        let before = try ConditionsFixtures.leaves(id, version: 7), after = try ConditionsFixtures.leaves(id, version: 8)
+        let header = ["/version", "/schemaVersion", "/placeholders", "/notes"]
+        let changed = Set(before.keys).union(after.keys)
+            .filter { before[$0] != after[$0] }
+            .filter { pointer in !header.contains { pointer == $0 || pointer.hasPrefix($0 + "/") } }
+        let tuned: Set<String> = ["/pressureField/lanes/count", "/pressureField/lanes/strength/min", "/pressureField/lanes/strength/max",
+                                  "/pressureField/lanes/widthMetres/min", "/pressureField/lanes/widthMetres/max",
+                                  "/pressureField/lanes/lifetimeSeconds/min", "/pressureField/lanes/lifetimeSeconds/max"]
+        #expect(changed.isSubset(of: tuned), "\(changed.subtracting(tuned))")
+        let lanes = try #require(v8.content.pressureField?.lanes)
+        #expect(lanes.count == 16 && lanes.strength == 0.1...0.2 && lanes.width == 60...200 && lanes.lifetime == 30...180)
+
+        for (venue, was) in [("dev-venue", 7), ("hollin-bay", 1), ("saltings-reach", 1), ("fellmere", 1)] {
+            let old = try VenueFile.bundled(id: venue, version: was).content
+            let new = try VenueFile.bundled(id: venue, version: was + 1).content
+            guard let pairing = old.pairing(for: DataFileKey(id: id, version: 7)) else {
+                #expect(new.pairing(for: v8.ref.key) == nil, "\(venue) pairs \(id) in neither version")
+                continue
+            }
+            let next = try #require(new.pairing(for: v8.ref.key), "\(venue)@\(was + 1) pairs \(id)@8")
+            #expect(next.geographicGrid == pairing.geographicGrid && next.sideTendency == pairing.sideTendency)
+            #expect(next.meanDirection == pairing.meanDirection && next.startLineCentre == pairing.startLineCentre)
+            #expect(new.landmarks == old.landmarks && new.land == old.land && new.current == old.current)
+        }
     }
 
     @Test func conditionsFilesArePinned() throws {

@@ -138,7 +138,7 @@ import RegattaCore
         // The default conditions (schema 2) have no pressure field.
         for slider in pressure { #expect(model.fileValue(slider) == nil, "\(slider.id) in a schema-2 file") }
 
-        let key = DataFileKey(id: "classic-oscillating", version: 7)
+        let key = DataFileKey(id: "classic-oscillating", version: 8)
         #expect(model.options(.conditions).contains(key))
         model.setBase(.conditions, key)
         var tuned: [String: Double] = [:]
@@ -156,7 +156,7 @@ import RegattaCore
 
         let files = model.practiceFiles()
         #expect(files.conditions.key == key && files.conditions.tune == 1)
-        #expect(files.venue.key == DataFileKey(id: "dev-venue", version: 7))
+        #expect(files.venue.key == DataFileKey(id: "dev-venue", version: 8))
         let data = try #require(files.tunedFiles[files.conditions])
         // The export writes each value rounded (0.15, not a step sum like 0.15000000000000002).
         func near(_ a: Double?, _ b: Double?) -> Bool { guard let a, let b else { return a == nil && b == nil }; return abs(a - b) < 1e-9 }

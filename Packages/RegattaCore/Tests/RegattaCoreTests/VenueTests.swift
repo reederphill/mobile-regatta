@@ -9,7 +9,7 @@ enum VenueFixtures {
     /// SHA-256 of `Tests/RegattaCoreTests/Resources/venues/test-venue@1.json`. A released file never
     /// changes (ADR 0004): ship `test-venue@2.json` rather than editing version 1.
     static let testPinnedHash = "a6006f51d15b369557181ce4da8744b633df8c96eb3441fbc415ae20ccc1ab5f"
-    /// SHA-256 of `Resources/venues/dev-venue@1.json` to `@7.json`, by version.
+    /// SHA-256 of `Resources/venues/dev-venue@1.json` to `@8.json`, by version.
     static let devPinnedHashes = [
         1: "5f114297c5191a38366f9b38a59460023e5e08dbe295f1af6f1e8ff19d8df958",
         2: "42154e3d263171997dcd444383b0dcf0d89a04fc2b31280b10a4a5f5af220785",
@@ -18,12 +18,19 @@ enum VenueFixtures {
         5: "a5fa1d87b635210befddcb8e99066c866a3a7694a488cfa2d4209f998508234b",
         6: "15218c4b6d5b72777f5c99b982a69c307c4c07a98c5c9f36a74eefdcb75427b1",
         7: "9d1e8f79c157cfe2511d5b52e574c1b02d1d251de4c221e8e8a7c5cb8d69024a",
+        8: "24edc4684be97e8fadbe5a6f130ffc9815fb1e3e8e21d89420fe62baa160bf7f",
     ]
     /// SHA-256 of the three real venues' files (#83), `Resources/venues/<id>@1.json`.
     static let realPinnedHashes = [
         "hollin-bay": "9552bb1d08414c79b5fa76078bf826b7326565777a6b8a113a34027813267832",
         "saltings-reach": "f9851810cec9ddc3ea69e5b6985f8842d5035e0bc2f84ffaf7e83392d57cc1d6",
         "fellmere": "4ad2fa32993d6fa76c15a8c5c9f6426384d14df1fb0ade84696078ff6ae59020",
+    ]
+    /// And their version 2: version 1 on the version-8 conditions files (the owner's lane tuning).
+    static let realVersion2PinnedHashes = [
+        "hollin-bay": "e5c515eadfdd50e8bd099efae47e78a6334e1d526b1640e9003617187dcc6fcd",
+        "saltings-reach": "37f62e0eb1da1301ecfbfff6dc7415cb5cd615526c64d700d67c86dcc6513025",
+        "fellmere": "f3893e9d9df5edd61abb5ea04c98323c59c4174e611c0057d9ee4b13a44998cd",
     ]
 
     static func testFile() throws -> VenueFile {
@@ -166,6 +173,9 @@ enum VenueFixtures {
         }
         for (id, hash) in VenueFixtures.realPinnedHashes {
             #expect(try VenueFile.bundled(id: id, version: 1).ref.hash.hex == hash, "\(id)@1")
+        }
+        for (id, hash) in VenueFixtures.realVersion2PinnedHashes {
+            #expect(try VenueFile.bundled(id: id, version: 2).ref.hash.hex == hash, "\(id)@2")
         }
     }
 

@@ -26,7 +26,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast
   Venue.swift             venue file schema: land, pairings with geographic grids, current (docs/venue-file.md)
-  Resources/venues/       venue files: the real venues `hollin-bay@1`, `saltings-reach@1`, `fellmere@1` (#83); races
+  Resources/venues/       venue files: the real venues `hollin-bay@2`, `saltings-reach@2`, `fellmere@2` (#83); races
                           sail `dev-venue@2` by default until practice setup picks a venue (#131)
   VenueCheck.swift        the offline venue check: each pairing's course clear of land, grids covering it (#83)
   VenueSailability.swift  the offline sailability check: upwind progress in a 25 % lull at peak current (#14)

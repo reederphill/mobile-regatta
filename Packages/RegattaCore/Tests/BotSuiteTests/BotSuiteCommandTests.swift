@@ -14,8 +14,8 @@ import Testing
         let matrix = try BotMatrix.bundled()
         try matrix.validate()
         #expect(matrix.fleetSizes == [2, 5, 10, 16])
-        #expect(matrix.venues == ["dev-venue@7"])
-        #expect(Set(matrix.conditions) == ["classic-oscillating@7", "gusty-offshore@7", "light-and-patchy@7", "sea-breeze@7"])
+        #expect(matrix.venues == ["dev-venue@8"])
+        #expect(Set(matrix.conditions) == ["classic-oscillating@8", "gusty-offshore@8", "light-and-patchy@8", "sea-breeze@8"])
         #expect(Set(matrix.tierMixes) == Set(TierMix.allCases))
         // #231: the live bots the tiers gate, and the skill-gap scenario; #238: the fun pass, in classic
         // oscillating conditions only.
@@ -23,7 +23,7 @@ import Testing
         #expect(!matrix.seeds.isEmpty && !matrix.tideStatesDegrees.isEmpty)
         let perConditions = matrix.seeds.count * matrix.tideStatesDegrees.count * 4 * TierMix.allCases.count
         #expect(matrix.cells.count == perConditions * (4 * 2 + 1))
-        #expect(Set(matrix.cells.filter { $0.profileMix == .funPass }.map(\.conditions)) == ["classic-oscillating@7"])
+        #expect(Set(matrix.cells.filter { $0.profileMix == .funPass }.map(\.conditions)) == ["classic-oscillating@8"])
     }
 
     @Test func optionsOverrideTheMatrix() throws {

@@ -30,8 +30,11 @@ Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/
   matrix sails it; the default race doesn't.
 - `dev-venue@7` (bundled, schema 2): `dev-venue@6` on the version-7 conditions files (schema 6), whose pressure
   lanes are finite patches that drift down the wind, some weakening it, with a weaker pressure side, so the
-  pressure changes up the course as well as across it (ADR 0008). The bot suite's matrix sails it; the default
-  race doesn't.
+  pressure changes up the course as well as across it (ADR 0008).
+- `dev-venue@8` (bundled, schema 2): `dev-venue@7` on the version-8 conditions files, the owner's lane tuning
+  (2026-10-01: 16 lanes, strength 0.10–0.20, width 60–200 m, life 30–180 s). The bot suite's matrix sails it; the
+  default race doesn't.
+- `hollin-bay@2`, `saltings-reach@2`, `fellmere@2`: version 1 on the version-8 conditions files; nothing else changes.
 - `hollin-bay@1`, `saltings-reach@1`, `fellmere@1` (bundled, schema 2, #83): the three real venues (#12, #36), each
   with two pairings on the version-7 conditions files. **Hollin Bay** is the open bay, the control: shore to the
   north and east, little shore effect, no current; classic oscillating from 240° and sea breeze from 200° (veering).

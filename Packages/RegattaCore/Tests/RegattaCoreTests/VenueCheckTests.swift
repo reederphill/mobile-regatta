@@ -5,12 +5,14 @@ import Testing
 /// The three real venues (#83) and edited copies of their bytes.
 enum RealVenues {
     static let ids = ["hollin-bay", "saltings-reach", "fellmere"]
+    /// The version the app sails: version 2, on the version-8 conditions files.
+    static let version = 2
 
-    static func file(_ id: String) throws -> VenueFile { try VenueFile.bundled(id: id, version: 1) }
+    static func file(_ id: String) throws -> VenueFile { try VenueFile.bundled(id: id, version: version) }
 
-    /// Venue `id`@1 as `fixture-venue@1`, its JSON edited by `edit`.
+    /// Venue `id`@`version` as `fixture-venue@1`, its JSON edited by `edit`.
     static func edited(_ id: String, _ edit: (inout [String: Any]) throws -> Void) throws -> Venue {
-        let bytes = try #require(try VenueFile.bundledData(id: id, version: 1))
+        let bytes = try #require(try VenueFile.bundledData(id: id, version: version))
         var json = try #require(try JSONSerialization.jsonObject(with: bytes) as? [String: Any])
         json["id"] = "fixture-venue"
         json["version"] = 1
