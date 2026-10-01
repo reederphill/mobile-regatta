@@ -22,7 +22,7 @@ enum RaceCue: CaseIterable, Hashable {
     case disqualified
     /// Your autohelm snapped to the groove (#219, #230).
     case grooveSnap
-    /// Your roll tap hit (#222, #263); a miss has no cue.
+    /// Your roll tap hit (#222, #263); a miss has no haptic, only its notice.
     case rollHit
 
     /// The #22 table, completed by #219 (groove snap) and #222 (roll hit): one row a cue.
@@ -174,14 +174,19 @@ struct RaceEventPresenter {
         case .grooveSnap(let seat):
             if seat == me { out.cues.append(.grooveSnap) }
         case .rollHit(let seat):
-            if seat == me { out.cues.append(.rollHit) }
+            guard seat == me else { return }
+            out.cues.append(.rollHit)
+            out.notices.append(PresentedNotice(kind: .roll, text: RuleWords.rollHit))
+        case .rollMissed(let seat):
+            // Overrides #124: a miss has no haptic, but it is read, as a hit is (`BoatNode`'s ring shows it too).
+            if seat == me { out.notices.append(PresentedNotice(kind: .roll, text: RuleWords.rollMissed)) }
         case .markRoomNotice(let boat, let entitledOver, let mark):
             guard boat == me || entitledOver == me else { return }
             let text = RuleWords.markRoom(at: mark, entitled: boat == me, other: name(boat == me ? entitledOver : boat))
             out.notices.append(PresentedNotice(kind: .markRoom, text: text))
-        case .tacked, .gybed, .rollMissed, .penaltyStarted, .penaltyReset, .started, .cleared, .becameGhost,
+        case .tacked, .gybed, .penaltyStarted, .penaltyReset, .started, .cleared, .becameGhost,
              .firstFinish, .raceClosed:
-            // Seen on the water or in the results, not felt (#22). A roll miss shows in the speed alone (#222).
+            // Seen on the water or in the results, not felt (#22).
             break
         case .obstructionContact:
             // Land, the boundary or a free mark: visible on the water. #22's Contact is boat to boat.

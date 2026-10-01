@@ -31,6 +31,13 @@ final class BoatNode: SKNode {
     private var sailAngle: CGFloat = 0
     /// The current roll miss's flog (`BoatPose.RollCue.flog`), timed in race seconds.
     private var flog = FlogTimer()
+    /// Your roll ring (#222): a sprite on your boat only, nil for the rest of the fleet, and always there on yours so the
+    /// scene's node count doesn't depend on her class; it stays hidden for a class with no roll tack.
+    private let ring: SKSpriteNode?
+    private let ringArt: [RollRingArt.Look: SKTexture]
+    private var ringTimer = RollRingTimer()
+    private let rollWindow: Double?
+    private let length: CGFloat
 
     /// The z's a boat's parts draw at, each boat a `DrawOrder` slot above the last by seat: in the fleet's layer
     /// every drop shadow under your glow, the glow under every hull, every hull under its outline and every
@@ -39,6 +46,7 @@ final class BoatNode: SKNode {
         static let fleet: CGFloat = 5, mine: CGFloat = 10
         static let heelShadow: CGFloat = 0, rightOfWayGlow: CGFloat = 0.05, glow: CGFloat = 0.1, hull: CGFloat = 0.2
         static let outline: CGFloat = 0.3, sail: CGFloat = 1
+        static let ring: CGFloat = 2
     }
 
     /// `isMine` marks your boat (the driver's `myBoatIndex`): a soft white glow under her hull, and drawn on top.
@@ -50,6 +58,8 @@ final class BoatNode: SKNode {
         beam = CGFloat(boatClass.hull.beam) * ppm
         seat = boat.id
         let length = CGFloat(boatClass.hull.length) * ppm
+        self.length = length
+        rollWindow = boatClass.rollTack?.window
 
         // Hulls and sails are sprites sharing a few textures, per class and scale, so SpriteKit can batch the
         // whole fleet into a handful of draw calls; so are the effects.
@@ -80,6 +90,14 @@ final class BoatNode: SKNode {
         sail.position = CGPoint(x: 0, y: length * 0.16)
         sail.zPosition = Layer.sail
 
+        ringArt = Dictionary(uniqueKeysWithValues: RollRingArt.Look.allCases.map { ($0, RollRingArt.texture($0)) })
+        let rollRing = isMine ? SKSpriteNode(texture: ringArt[.approach]) : nil
+        rollRing?.color = CuePalette.cueWhite.uiColor
+        rollRing?.colorBlendFactor = 1
+        rollRing?.zPosition = Layer.ring
+        rollRing?.isHidden = true
+        ring = rollRing
+
         effects = BoatEffects(seat: boat.id, boatClass: boatClass, pointsPerMeter: ppm, style: style)
         fade.shouldEnableEffects = false
         fade.shouldRasterize = false
@@ -95,6 +113,7 @@ final class BoatNode: SKNode {
         body.addChild(sail)
         fade.addChild(body)
         addChild(fade)
+        if let ring { addChild(ring) }
 
         // A z each, from the seat (`DrawOrder`): the start row (#85) puts the fleet's hulls and sails over each
         // other.
@@ -117,9 +136,31 @@ final class BoatNode: SKNode {
         effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
                        settled: settled, isFlogging: isFlogging)
 
+        updateRing(boat, style: style, time: time)
+
         glow?.alpha = CGFloat(style.glowAlpha)
         fade.shouldEnableEffects = pose.isGhost
         fade.alpha = pose.isGhost ? CGFloat(style.ghostAlpha) : 1
+    }
+
+    /// Your roll ring (#222): none on the rest of the fleet. It stays upright and unscaled by heel, centred on the boat.
+    private func updateRing(_ boat: Boat, style: BoatStyle, time: Double) {
+        guard let ring else { return }
+        guard let state = ringTimer.ring(for: boat, window: rollWindow, time: time, seconds: style.rollRingSeconds) else {
+            ring.isHidden = true
+            return
+        }
+        let look: RollRingArt.Look
+        switch state.kind {
+        case .approach: look = state.isTapped ? .tapped : .approach
+        case .hit: look = .hit
+        case .miss: look = .miss
+        }
+        if let texture = ringArt[look], ring.texture !== texture { ring.texture = texture }
+        let diameter = 2 * length * CGFloat(style.rollRingHulls * state.radiusShare)
+        ring.size = CGSize(width: diameter, height: diameter)
+        ring.alpha = CGFloat(style.rollRingAlpha * state.alphaShare)
+        ring.isHidden = false
     }
 
     /// Lights or puts out her right-of-way glow (#123): red where you keep clear of her, green where she keeps clear
@@ -336,5 +377,52 @@ private struct BoatArt {
         }
         let anchor = CGPoint(x: -bounds.minX / bounds.width, y: -bounds.minY / bounds.height)
         return (texture, anchor)
+    }
+}
+
+/// The roll ring's textures (#222), drawn in white on a 128 point square and sized per frame. Shape carries the
+/// meaning: the approach is a thin ring, with a dot in it once a tap is in; a hit is a solid ring ringed with ticks; a
+/// miss is a broken ring with a cross through it.
+private enum RollRingArt {
+    enum Look: CaseIterable, Hashable {
+        case approach, tapped, hit, miss
+    }
+
+    static func texture(_ look: Look) -> SKTexture {
+        let bounds = CGRect(x: -64, y: -64, width: 128, height: 128)
+        return SpriteArt.texture(bounds: bounds, scale: 2) { cg in
+            cg.setStrokeColor(UIColor.white.cgColor)
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.setLineCap(.round)
+            switch look {
+            case .approach, .tapped:
+                cg.setLineWidth(4)
+                cg.strokeEllipse(in: bounds.insetBy(dx: 6, dy: 6))
+                if look == .tapped { cg.fillEllipse(in: CGRect(x: -9, y: -9, width: 18, height: 18)) }
+            case .hit:
+                // A solid ring with eight ticks bursting out of it.
+                cg.setLineWidth(7)
+                cg.strokeEllipse(in: bounds.insetBy(dx: 22, dy: 22))
+                cg.setLineWidth(6)
+                for i in 0..<8 {
+                    let angle = CGFloat(i) * .pi / 4
+                    cg.move(to: CGPoint(x: cos(angle) * 48, y: sin(angle) * 48))
+                    cg.addLine(to: CGPoint(x: cos(angle) * 62, y: sin(angle) * 62))
+                }
+                cg.strokePath()
+            case .miss:
+                // A broken ring with a cross through it.
+                cg.setLineWidth(6)
+                cg.setLineDash(phase: 0, lengths: [16, 14])
+                cg.strokeEllipse(in: bounds.insetBy(dx: 8, dy: 8))
+                cg.setLineDash(phase: 0, lengths: [])
+                cg.setLineWidth(8)
+                cg.move(to: CGPoint(x: -26, y: -26))
+                cg.addLine(to: CGPoint(x: 26, y: 26))
+                cg.move(to: CGPoint(x: -26, y: 26))
+                cg.addLine(to: CGPoint(x: 26, y: -26))
+                cg.strokePath()
+            }
+        }
     }
 }

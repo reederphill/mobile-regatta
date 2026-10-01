@@ -56,6 +56,12 @@ enum RuleWords {
     // TODO-COPY (#171)
     static let ocs = "OCS (rule 29.1): you were over at the gun. Dip back below the line, then start."
 
+    /// Your roll tack's result (#222), read as well as seen, a moment long (`NoticeKind.roll`).
+    // TODO-COPY (#171)
+    static let rollHit = "Roll tack: clean"
+    // TODO-COPY (#171)
+    static let rollMissed = "Roll tack: missed"
+
     /// The RTT warning (#18, #68), once as it starts.
     // TODO-COPY (#171)
     static let lag = "Slow connection: your boat may jump."

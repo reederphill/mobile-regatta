@@ -202,6 +202,11 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// A missed roll's flog: its swing either side, degrees, and how long it lasts, seconds.
     var flogDegrees = 18.0
     var flogSeconds = 1.5
+    /// Your roll ring (#222): its alpha, its radius at its widest in hull lengths (where the approach starts), and how
+    /// long a hit's or a miss's result shows, race seconds.
+    var rollRingAlpha = 0.9
+    var rollRingHulls = 1.6
+    var rollRingSeconds = 1.3
 
     // MARK: Your boat, ghosts
 
@@ -239,8 +244,11 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// How hard pressure fans the V and the lack of it narrows and fades it (#220): its spread changes by this
     /// share of how far the pressure she feels is off her recent average.
     var wakePressureFan = 1.0
-    /// The V's alpha at even pressure, `CuePalette.cueWhite`.
-    var wakeAlpha = 0.25
+    /// The wake string's alpha at even pressure, `CuePalette.cueWhite`.
+    var wakeAlpha = 0.35
+    /// The wake string: how many race seconds of her track it holds, and its width, points.
+    var wakeTrailSeconds = 3.4
+    var wakeTrailWidth = 1.5
     /// Planing (#245, #248): her wake is this much longer, wider and brighter, at least 1 (`WakeShape` holds it
     /// there). A placeholder until #220's look.
     var wakePlaningBoost = 1.2
@@ -258,15 +266,16 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
 
     // MARK: Wind shadow, backwind (#10, #298)
 
-    /// The shadow cones' hatch alpha (black): very faint (#15), fainter than a puff's darker water. The fleet's
-    /// cones draw as one layer (`ConeLayer`), so overlapping cones never draw a line darker than this.
-    var coneAlpha = 0.04
-    /// The backwind zone's alpha at her stern, a share of the cone's: fainter still, fading to nothing at its far
-    /// edge as its loss does (#298).
-    var backwindShare = 0.6
+    /// The shadow cones' hatch alpha at its strongest, beside the boat (white, to read on dark water): faint (#15) but
+    /// seen. The hatch fades with distance and to its sides as core's loss does, so most of a cone is a fraction of
+    /// this. The fleet's cones draw as one layer (`ConeLayer`), so overlapping cones never draw a line brighter than this.
+    var coneAlpha = 0.3
+    /// The backwind zone's alpha, a share of the cone's (0.5 of full alpha at 0.3): much stronger than the cone's
+    /// average, as it is small and sits over the cone's own hatch. Its hatch thins towards its far edge as its loss does (#298); its outline and fill stay.
+    var backwindShare = 1.68
     /// The hatch both are drawn in: its lines' spacing and width, points. Baked in when the fleet is built.
     var hatchSpacing = 5.0
-    var hatchLineWidth = 1.0
+    var hatchLineWidth = 1.25
     // MARK: Cues (#122)
 
     /// The wind vane's length, in hull lengths (#15: one).
@@ -342,6 +351,9 @@ nonisolated extension BoatStyle {
             (.wakeFullSpeed, \.wakeFullSpeed), (.wakeMaxHulls, \.wakeMaxHulls),
             (.wakeSpreadDegrees, \.wakeSpreadDegrees), (.wakePressureFan, \.wakePressureFan),
             (.wakeAlpha, \.wakeAlpha), (.wakePlaningBoost, \.wakePlaningBoost),
+            (.wakeTrailSeconds, \.wakeTrailSeconds), (.wakeTrailWidth, \.wakeTrailWidth),
+            (.rollRingSeconds, \.rollRingSeconds), (.rollRingAlpha, \.rollRingAlpha),
+            (.rollRingHulls, \.rollRingHulls),
             (.wakeStreakShare, \.wakeStreakShare), (.wakeStreakWidth, \.wakeStreakWidth),
             (.wakeStreakAlpha, \.wakeStreakAlpha), (.wakeEaseRate, \.wakeEaseRate),
             (.wakeFlareGain, \.wakeFlareGain), (.wakeFlareSeconds, \.wakeFlareSeconds),

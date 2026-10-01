@@ -105,8 +105,9 @@ Regatta/                The iOS app
   Game/VisualCorrection.swift  eases a corrected prediction's drawn position over ~150 ms, snaps past a hull length (online, #68)
   Game/GameScene.swift    SpriteKit renderer, camera, touch steering; reads RenderWorld, never a Race
   Game/BoatNode.swift     batched boat sprites: hull, outline, sail, heel, ghost fade
-  Game/BoatEffects.swift  each boat's wake, wind-shadow cone and backwind as sprites; the fleet's one ConeLayer
-  Game/WakeShape.swift    a wake's length, spread and alpha from speed through the water and pressure
+  Game/BoatEffects.swift  each boat's wake string, wind-shadow cone and backwind; the fleet's one ConeLayer
+  Game/WakeShape.swift    a wake's alpha (and V numbers) from speed through the water and pressure
+  Game/RollRing.swift     your roll tack ring: the window after the crossing, a hit's burst, a miss's collapse
   Game/ShadowShapes.swift the cone's and backwind's outlines, from core's ShadowCone sizes
   Game/ChartLayer.swift   the chart: race-area boundary and hatch, land and relief, landmarks, shallows tint, marks and line
   Game/ChartMarks.swift   which marks are the active leg's (orange) or grey, and the rounding-side arrow (pure)

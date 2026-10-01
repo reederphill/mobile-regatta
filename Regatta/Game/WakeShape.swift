@@ -8,8 +8,9 @@ nonisolated enum WakeQuality: Sendable {
     case short
 }
 
-/// How a boat's wake is drawn this frame (#15, #220, #121): a V from her stern plus a centre streak, as long as her
-/// speed through the water makes it and as wide and bright as the pressure she feels. Pure: presentation only,
+/// How a boat's wake is drawn this frame (#15, #220, #121): its alpha is the pressure she feels, and a roll miss
+/// kills it and a hit flares it. (Its V and streak numbers are the shape's, kept for the tuning panel; the wake the
+/// scene draws is her stern's track, `BoatEffects.trail`.) Pure: presentation only,
 /// nothing here reaches the race (ADR 0002).
 ///
 /// "Speed is the wake" (#15): its length follows her speed through the water and nothing else (her class's hull,
