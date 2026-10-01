@@ -41,6 +41,8 @@ struct HUDState {
     var lineIsActive = false
     /// The pressure over the minimap's chart, cached by `MinimapField` (#289); nil until the race holds the key.
     var pressureImage: CGImage?
+    /// The live leaderboard (#268), from the latest tick's standings and gaps.
+    var leaderboard = LeaderboardState()
 
     var isUpwind: Bool { twaDegrees < 90 }
 
@@ -64,6 +66,7 @@ struct HUDState {
         windDirection = p.windOverGround.direction
         fleet = frame.boats.count
         place = frame.place(of: me)
+        leaderboard = LeaderboardState(frame: frame, me: me)
         legCount = course.legs.count
         legNumber = min(p.legIndex + 1, legCount)
 

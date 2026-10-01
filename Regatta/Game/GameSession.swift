@@ -53,6 +53,12 @@ final class GameSession {
     /// The device's steering scheme, live (#112, #131).
     let controls: ControlSettings
 
+    /// The live leaderboard shows the whole fleet (#268): a tap opens it, and it closes on the next tap or after
+    /// `leaderboardOpenSeconds` of wall-clock time.
+    private(set) var isLeaderboardExpanded = false
+    @ObservationIgnored private var leaderboardOpenedAt: Date?
+    static let leaderboardOpenSeconds: TimeInterval = 5
+
     @ObservationIgnored private var noticeSlot = NoticeSlot()
     /// The minimap's pressure, sampled every couple of seconds rather than every refresh (#289, #114).
     @ObservationIgnored private let minimapField = MinimapField()
@@ -87,6 +93,10 @@ final class GameSession {
         scene.cameraOverride = fixture.cameraMode
         vision = fixture.vision
         showsHUDInFixture = fixture.hud != nil
+        // The board only where the fixture asks for it (#268), held open if it says so: the session's controls are
+        // its own here, never the app's.
+        controls.showsLeaderboard = fixture.hud?.leaderboard != nil
+        isLeaderboardExpanded = fixture.hud?.leaderboard == .expanded
         if let kind = fixture.hud?.notice {
             // A notice the replay can't make (it drains no events): shown for good, so the render holds still.
             noticeSlot.show(Notice(id: 0, kind: kind, text: Self.fixtureNoticeText(kind), posted: .distantPast,
@@ -186,6 +196,20 @@ final class GameSession {
 
     func refreshHUD() { refreshHUD(samplesPressure: true) }
 
+    /// A tap on the place or the live leaderboard (#268): opens it to the whole fleet, or closes it.
+    func toggleLeaderboard() {
+        isLeaderboardExpanded.toggle()
+        leaderboardOpenedAt = isLeaderboardExpanded ? now() : nil
+    }
+
+    /// Closes the open leaderboard once it has been open its seconds; a frozen fixture's stays open.
+    private func closeLeaderboardIfDue() {
+        guard isLeaderboardExpanded, !driver.isFrozen, let opened = leaderboardOpenedAt,
+              now().timeIntervalSince(opened) >= Self.leaderboardOpenSeconds else { return }
+        isLeaderboardExpanded = false
+        leaderboardOpenedAt = nil
+    }
+
     private func refreshHUD(samplesPressure: Bool) {
         let world = driver.renderWorld
         let roster = roster
@@ -194,6 +218,7 @@ final class GameSession {
         self.hud = hud
         let current = noticeSlot.current(at: now())
         if current != notice { notice = current }
+        closeLeaderboardIfDue()
         if playerDone { results = makeResults() }
         if let online = driver as? OnlineDriver, case .updateRequired = online.connection, !toldUpdateRequired {
             toldUpdateRequired = true
@@ -283,7 +308,7 @@ final class GameSession {
                 place = "DSQ"
                 detail = "Unserved penalty"
             case .racing:
-                // Once the race has closed, a boat still racing is placed by distance to finish (#86).
+                // Once the race has closed, a boat still racing is placed by ladder distance (#86, #267).
                 place = "\(rank + 1)"
                 detail = frame.isOver ? "By distance" : "Racing · leg \(b.legIndex + 1)"
             case .prestart, .ocs:

@@ -83,6 +83,27 @@ import RegattaCore
         #expect(session.notice?.text.contains("fouled you") == true, "and stays")
     }
 
+    /// A tap opens the live leaderboard to the whole fleet (#268); the next tap closes it, and so do 5 s of
+    /// wall-clock time.
+    @Test func leaderboardOpensOnATapAndClosesAfterFiveSeconds() {
+        let session = GameSession(config: Self.config)
+        var time = Date(timeIntervalSinceReferenceDate: 1000)
+        session.now = { time }
+        #expect(!session.isLeaderboardExpanded)
+        session.toggleLeaderboard()
+        #expect(session.isLeaderboardExpanded)
+        session.toggleLeaderboard()
+        #expect(!session.isLeaderboardExpanded, "a second tap closes it")
+
+        session.toggleLeaderboard()
+        time += 4.9
+        session.refreshHUD()
+        #expect(session.isLeaderboardExpanded)
+        time += 0.1
+        session.refreshHUD()
+        #expect(!session.isLeaderboardExpanded, "closed after 5 s")
+    }
+
     @Test func pausesOnlyAPausableDriver() {
         let session = GameSession(config: Self.config)
         session.setPaused(true)
