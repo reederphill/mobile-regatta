@@ -222,8 +222,12 @@ private struct EffectArt {
         if let corners = ShadowShapes.backwindLocal(shadow), let inner = shadow.backwindInnerLength {
             let backwindPoints = points(corners)
             // Taking in the boat's centre, so the anchor is inside the texture.
-            let bounds = Self.bounds(of: backwindPoints + [.zero])
-            backwind = Self.hatch(backwindPoints, bounds: bounds, spacing: spacing, width: width) { cg in
+            // A point of margin all round, so its outline isn't cut off at the texture's edge.
+            let bounds = Self.bounds(of: backwindPoints + [.zero]).insetBy(dx: -1, dy: -1)
+            // Its outline and a light fill make the right trapezoid read as a shape, not a patch of hatch: the fade
+            // only thins it (`backwindFadeFloor`), so the slanted far edge stays seen.
+            backwind = Self.hatch(backwindPoints, bounds: bounds, spacing: spacing, width: width,
+                                  fill: 0.22, outline: 1.5) { cg in
                 Self.fadeBackwind(cg, shadow: shadow, inner: inner, ppm: ppm)
             }
             backwindAnchor = Self.anchor(bounds)
@@ -247,6 +251,7 @@ private struct EffectArt {
     /// Diagonal lines `spacing` apart and `width` wide, clipped to `outline`: the cones' hatch (#15). `fade`, if
     /// any, then fades it (drawing with `.destinationIn`).
     private static func hatch(_ outline: [CGPoint], bounds: CGRect, spacing: CGFloat, width: CGFloat,
+                              fill: CGFloat = 0, outline outlineWidth: CGFloat = 0,
                               fade: ((CGContext) -> Void)? = nil) -> SKTexture {
         SpriteArt.texture(bounds: bounds) { cg in
             cg.saveGState()
@@ -255,6 +260,10 @@ private struct EffectArt {
             path.closeSubpath()
             cg.addPath(path)
             cg.clip()
+            if fill > 0 {
+                cg.setFillColor(UIColor(white: 1, alpha: fill).cgColor)
+                cg.fill(bounds)
+            }
             let lines = CGMutablePath()
             var offset = -bounds.height
             while offset < bounds.width {
@@ -271,16 +280,29 @@ private struct EffectArt {
                 cg.setBlendMode(.destinationIn)
                 fade(cg)
             }
+            if outlineWidth > 0 {
+                // Over the faded art, so its far edge shows as plainly as its stern edge.
+                cg.setBlendMode(.normal)
+                cg.addPath(path)
+                cg.setStrokeColor(UIColor.white.cgColor)
+                cg.setLineWidth(outlineWidth)
+                cg.setLineJoin(.miter)
+                cg.strokePath()
+            }
         }
     }
 
+    /// How much of the backwind's hatch is left at its far edge: core's loss fades to nothing there, but drawn it
+    /// stops at a share, so the zone's whole shape stays readable on the water.
+    private static let backwindFadeFloor: CGFloat = 0.35
+
     /// Fades the backwind's hatch as core's loss fades (`ShadowCone`'s backwind factor, #298): full along her
-    /// stern edge, straight down to nothing at the far edge, which reaches `inner` astern on the inside and
+    /// stern edge, straight down to `backwindFadeFloor` at the far edge, which reaches `inner` astern on the inside and
     /// `backwindLength` on the outside. Column by column, a texel wide, in the art's frame (starboard tack).
     private static func fadeBackwind(_ cg: CGContext, shadow: BoatClass.WindShadow, inner: Double, ppm: CGFloat) {
         let space = CGColorSpaceCreateDeviceRGB()
         guard let gradient = CGGradient(colorsSpace: space, colors: [UIColor.white.cgColor,
-                                                                     UIColor(white: 1, alpha: 0).cgColor] as CFArray,
+                                                                     UIColor(white: 1, alpha: Self.backwindFadeFloor).cgColor] as CFArray,
                                         locations: [0, 1]) else { return }
         let stern = CGFloat(shadow.sternCorner.y) * ppm, x0 = CGFloat(shadow.sternCorner.x) * ppm
         let width = CGFloat(shadow.backwindWidth) * ppm

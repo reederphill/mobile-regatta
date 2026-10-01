@@ -327,7 +327,7 @@ enum TuningCatalog {
                     boat("wakePlaningBoost", "Planing wake", \.wakePlaningBoost, 1...2.5, 0.05),
                     boat("wakeFlareGain", "Roll-hit flare", \.wakeFlareGain, 0...2, 0.1),
                     boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.4, 0.01),
-                    boat("backwindShare", "Backwind hatch", \.backwindShare, 0...3, 0.1),
+                    boat("backwindShare", "Backwind hatch", \.backwindShare, 0...6, 0.1),
                     // #122: the boat-side cues.
                     boat("vaneLengthHulls", "Vane length", \.vaneLengthHulls, 0.5...2, 0.1, unit: " hulls"),
                     boat("vaneLockDegrees", "Vane locks within", \.vaneLockDegrees, 0...5, 0.25, unit: "°"),
