@@ -1,7 +1,7 @@
 import UIKit
 import XCTest
 
-/// The race camera (#113): course-up and boat-up, auto framing on, each frozen settled and diffed against its
+/// The race camera (#113): course-up and boat-up, auto zoom on, each frozen settled and diffed against its
 /// reference. In a file of its own beside `RenderFixtureUITests`; XCTest runs them as that class's tests (`@objc`, so
 /// discovery finds them in an extension).
 extension RenderFixtureUITests {

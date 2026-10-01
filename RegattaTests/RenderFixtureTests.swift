@@ -208,7 +208,7 @@ import UIKit
         #expect(!reading.lanes.isEmpty && reading.side != 0)
     }
 
-    /// The camera fixtures (#113) draw the race camera, auto framing on: course-up over the prestart log, whose course
+    /// The camera fixtures (#113) draw the race camera, auto zoom on: course-up over the prestart log, whose course
     /// axis is 9° off north (as far off as a shipped venue's gets), and boat-up over the light and patchy log, your
     /// boat heading 64° east of north. Every other fixture keeps its
     /// north-up camera from before #113, and its reference.
