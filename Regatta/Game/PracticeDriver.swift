@@ -53,7 +53,7 @@ final class PracticeDriver: RaceDriver {
         venue = race.files.venue.content
         boatClass = race.boatClass
         clock = TickClock(timescale: timescale)
-        currentFrame = TickFrame(race: race)
+        currentFrame = TickFrame(race: race, keepClearOf: myBoatIndex)
         previousFrame = currentFrame
     }
 
@@ -119,7 +119,7 @@ final class PracticeDriver: RaceDriver {
         Signpost.simStep.measure { race.step() }
         events += race.drainEvents()
         previousFrame = currentFrame
-        currentFrame = TickFrame(race: race)
+        currentFrame = TickFrame(race: race, keepClearOf: myBoatIndex)
         return currentFrame
     }
 }

@@ -191,8 +191,13 @@ final class FixtureDriver: RaceDriver {
         venue = race.files.venue.content
         boatClass = race.boatClass
         roster = FleetRoster(setup: setup)
-        currentFrame = TickFrame(race: race)
+        currentFrame = TickFrame(race: race, keepClearOf: myBoatIndex)
+        ruleCalls = race.incidents.incidents.compactMap { if case .called(let call) = $0.outcome { call } else { nil } }
     }
+
+    /// The rule calls made up to the freeze tick, in incident order: a frozen fixture drains no events, so the
+    /// session seeds its rule-call lines from these (#123).
+    let ruleCalls: [RuleCall]
 
     func tick(_ dt: Double) -> [TickFrame] { [] }
     func submit(_ input: BoatInput) {}

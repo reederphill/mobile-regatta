@@ -60,6 +60,9 @@ final class GameSession {
     static let leaderboardOpenSeconds: TimeInterval = 5
 
     @ObservationIgnored private var noticeSlot = NoticeSlot()
+    /// The rule calls whose dashed lines the scene draws (#123): every call drained, yours or not, or a frozen
+    /// fixture's replayed ones.
+    @ObservationIgnored private(set) var ruleCalls = RuleCallLines()
     /// The minimap's pressure, sampled every couple of seconds rather than every refresh (#289, #114).
     @ObservationIgnored private let minimapField = MinimapField()
     /// The clock notices are timed by: wall-clock time, so a notice reads for its seconds at any timescale.
@@ -90,6 +93,8 @@ final class GameSession {
     convenience init(fixture: RenderFixture, log: RaceLog) throws {
         let driver = try FixtureDriver(log: log, freezeTick: fixture.freezeTick, seat: fixture.hud?.seat)
         self.init(driver: driver, roster: driver.roster)
+        // It drains no events: its rule-call lines are the replay's calls.
+        for call in driver.ruleCalls { ruleCalls.add(call) }
         scene.cameraOverride = fixture.cameraMode
         let defaults = DeviceSettings()
         scene.cueOverride = (laylines: fixture.laylines ?? defaults.laylines,
@@ -219,6 +224,9 @@ final class GameSession {
         var hud = HUDState(world: world) { roster[$0].isBot }
         hud.pressureImage = samplesPressure ? minimapField.refresh(world) : minimapField.image
         self.hud = hud
+        // Your owed penalty turn's countdown (#123), live in the slot while you owe one.
+        let penalty = PenaltyReadout(frame: driver.currentFrame, seat: driver.myBoatIndex)
+        noticeSlot.setLive(.penalty, text: penalty?.noticeText, at: now())
         let current = noticeSlot.current(at: now())
         if current != notice { notice = current }
         closeLeaderboardIfDue()
@@ -230,6 +238,10 @@ final class GameSession {
     }
 
     func consume(_ events: [RaceEvent]) {
+        // Every call draws its line (#123), bystanders' too; the notice switch below is #124's.
+        for event in events {
+            if case .ruleCall(let call) = event.kind { ruleCalls.add(call) }
+        }
         for event in events { handle(event) }
         let time = driver.currentFrame.time
         if time < 0 {

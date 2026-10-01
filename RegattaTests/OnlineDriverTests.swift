@@ -120,6 +120,22 @@ import RegattaProtocol
                 "a call between two other boats takes no notice: \(String(describing: rig.session.notice))")
     }
 
+    /// Online the right-of-way glyphs stay hidden until the server sends its own (#96, ADR 0005): no frame carries
+    /// a keep-clear row from the client's world. The rule-call lines still draw, from the server's events (#123).
+    @Test func onlineFramesShowNoGlyphsButDrawTheServersRuleCallLines() throws {
+        let rig = try OnlineRig(collisionCourse: true)
+        var framesWithGlyphs = 0
+        rig.run(for: 8_000_000) { _ in
+            if rig.driver.currentFrame.keepClear != nil { framesWithGlyphs += 1 }
+            return false
+        }
+        #expect(framesWithGlyphs == 0)
+        #expect(rig.driver.currentFrame.penalty != nil, "the arc's windows are the rules'")
+        let sent = rig.server.sentEvents.compactMap { if case .ruleCall(let call) = $0.event.kind { call } else { nil } }
+        let first = try #require(sent.first, "the server's race makes a rule call")
+        #expect(rig.session.ruleCalls.calls.first == first)
+    }
+
     /// Fault-injected transport (acceptance): the connection drops mid-race, after the gun. The driver
     /// rejoins on a new connection with the same token once the network is back, the client asks for a
     /// `Resync` and sails from it, and the helm set as it lands is applied by the server within one
