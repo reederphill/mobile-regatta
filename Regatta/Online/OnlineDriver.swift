@@ -32,6 +32,7 @@ final class OnlineDriver: RaceDriver {
 
     let myBoatIndex: Int
     let course: CourseLayout
+    let venue: Venue
     let boatClass: BoatClass
     let isPausable = false
     /// Names and bot marks, from the race's setup (#60).
@@ -73,6 +74,7 @@ final class OnlineDriver: RaceDriver {
         let race = client.predicted.race
         myBoatIndex = start.yourSeat
         course = race.course
+        venue = race.files.venue.content
         boatClass = race.boatClass
         roster = FleetRoster(setup: start.setup)
         corrections = race.boats.map { _ in VisualCorrection(snapDistance: race.boatClass.hull.length) }

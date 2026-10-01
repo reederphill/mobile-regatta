@@ -108,6 +108,11 @@ Regatta/                The iOS app
   Game/BoatEffects.swift  each boat's wake, wind-shadow cone and backwind as sprites; the fleet's one ConeLayer
   Game/WakeShape.swift    a wake's length, spread and alpha from speed through the water and pressure
   Game/ShadowShapes.swift the cone's and backwind's outlines, from core's ShadowCone sizes
+  Game/ChartLayer.swift   the chart: race-area boundary and hatch, land and relief, landmarks, shallows tint, marks and line
+  Game/ChartMarks.swift   which marks are the active leg's (orange) or grey, and the rounding-side arrow (pure)
+  Game/ChartGeometry.swift  hatch band, coast edges, relief strips, shallows weight and OKLab blend (pure)
+  Game/ChartStyle.swift   the chart's tuning values
+  Game/LandmarkSilhouette.swift  placeholder landmark vectors by venue asset name (#169 replaces)
   Game/GameSession.swift  hosts a driver and bridges it to SwiftUI: HUD, rule-call messages, haptics
   Game/RaceConfig.swift   a practice race's settings, seeds and seat controllers; roster names and the bot glyph
   Game/RaceViewportPolicy.swift  race-view sizing: letterboxed portrait in any window (G5)

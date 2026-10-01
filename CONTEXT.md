@@ -209,6 +209,18 @@ _Avoid_: spreader mark, wing mark (a wing mark is on a reaching course)
 The water a course's boats may sail in, bounded by land or a drawn boundary. A boat can't leave it.
 _Avoid_: arena, bounds, map edge
 
+**Chart**:
+The race scene's static picture of the venue and course, drawn flat from above like a nautical chart: the race area's boundary, land, landmarks, shallows, marks and the start and finish line. The current is never on it.
+_Avoid_: map, background
+
+**Shallows**:
+Water shallower than the rest of a venue with a current, where the current runs weaker and turns earlier. The chart tints it tan at the water's own lightness.
+_Avoid_: sandbank, shoal
+
+**Landmark**:
+A recognisable silhouette on a venue's land, such as a lighthouse, clubhouse or tree clump, so a player knows where they are. Scenery only: it never affects the race.
+_Avoid_: prop, feature
+
 **Layline**:
 The line from a mark along which a boat, at her best angle to the wind, can just fetch it without another tack or gybe. Drawn from the wind only, never from current.
 
