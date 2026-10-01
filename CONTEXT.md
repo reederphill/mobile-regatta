@@ -279,6 +279,22 @@ Air deflected off a boat's sails that slows a boat just to windward of her and a
 To put your boat to leeward of another boat and just ahead of her, on the same tack and close enough that she sits in your backwind. She can only sink back or tack away. Usually done by crossing her bow and tacking onto her lee bow, which needs room to cross. She is then _lee-bowed_.
 _Avoid_: lee-bowing the tide (see **Current on the lee bow**), cover (that puts you between her and the mark), tack on her wind (that puts you to windward of her)
 
+**Cover**:
+To tack to stay between a boat that has tacked away and the mark, on her tack. Bots cover the nearest boat behind them that tacks away, later and less often the less skilled they are.
+_Avoid_: lee-bow, tack on her wind (both put her in your air; a cover only keeps you between her and the mark)
+
+**Tack on her wind**:
+To tack to windward and ahead of a boat on the other tack, close enough that she sits in your wind shadow.
+_Avoid_: slam dunk (the starboard boat tacking on a port boat that has just ducked her), cover
+
+**Hold her lane**:
+A boat in clear air with another close to windward or in her backwind holding on rather than tacking away on a small shift: a tactical choice, not a right. Not **Defend lane** (keeping her water as the right-of-way boat under the rules) nor a **Pressure lane** (wind).
+_Avoid_: defend lane
+
+**Close encounter**:
+What the bot suite counts as the racing a mid-fleet boat sees: crossings of two boats on opposite tacks within 3 hull lengths, episodes of 2 s or more in or giving wind shadow or backwind, and covers.
+_Avoid_: encounter (the rules relation the conduct gate counts)
+
 **Current on the lee bow**:
 Close-hauled with the current setting across the wind on the leeward bow. It lifts the boat toward a windward mark and raises the apparent wind speed.
 _Avoid_: lee-bowing (in this game that means the tactic above)

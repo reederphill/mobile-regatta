@@ -193,6 +193,24 @@ public struct ConductLimits: Codable, Hashable, Sendable {
     }
 }
 
+/// What close encounters must show over a run (#234), over the same all-National live fleets as conduct
+/// (`CloseEncounterSummary`): #223's floor, "~8 per race (placeholder)", for a mid-fleet boat. Optional; it gates only a
+/// run that sailed such a fleet.
+public struct EncounterLimits: Codable, Hashable, Sendable {
+    /// The fewest close encounters a mid-fleet boat may meet per race, on average.
+    public var minCloseEncountersPerRace: Double?
+
+    public init(minCloseEncountersPerRace: Double? = nil) {
+        self.minCloseEncountersPerRace = minCloseEncountersPerRace
+    }
+
+    /// Why `summary` misses these limits, each line starting with `encounters`; none without a summary.
+    func breaches(_ summary: CloseEncounterSummary?) -> [String] {
+        guard let summary, let minimum = minCloseEncountersPerRace, summary.closeEncountersPerRace < minimum else { return [] }
+        return ["encounters: close encounters \(fixed(summary.closeEncountersPerRace)) per mid-fleet boat per race < \(fixed(minimum))"]
+    }
+}
+
 /// The suite's gate (#19, #27): limits per tier, keyed by `BotTier.rawValue`, per scripted profile, keyed by
 /// `BotProfile.rawValue` (#231, #238), the start's (#99), navigation's (#100), conduct's (#101), and the worst race's p99
 /// tick. A tier or profile with no limits isn't gated, and a profile's, the start's, navigation's or conduct's limits gate
@@ -208,20 +226,24 @@ public struct BotThresholds: Codable, Hashable, Sendable {
     public var navigation: NavigationLimits?
     /// Conduct's limits (#101); nil when a thresholds file has none.
     public var conduct: ConductLimits?
+    /// Close encounters' limits (#234); nil when a thresholds file has none.
+    public var encounters: EncounterLimits?
     public var maxP99TickMs: Double
 
     public init(tiers: [String: TierLimits], profiles: [String: ProfileLimits] = [:], start: StartLimits? = nil,
-                navigation: NavigationLimits? = nil, conduct: ConductLimits? = nil, maxP99TickMs: Double) {
+                navigation: NavigationLimits? = nil, conduct: ConductLimits? = nil, encounters: EncounterLimits? = nil,
+                maxP99TickMs: Double) {
         self.tiers = tiers
         self.profiles = profiles
         self.start = start
         self.navigation = navigation
         self.conduct = conduct
+        self.encounters = encounters
         self.maxP99TickMs = maxP99TickMs
     }
 
     private enum CodingKeys: String, CodingKey {
-        case tiers, profiles, start, navigation, conduct, maxP99TickMs
+        case tiers, profiles, start, navigation, conduct, encounters, maxP99TickMs
     }
 
     public init(from decoder: Decoder) throws {
@@ -231,15 +253,16 @@ public struct BotThresholds: Codable, Hashable, Sendable {
                   start: try c.decodeIfPresent(StartLimits.self, forKey: .start),
                   navigation: try c.decodeIfPresent(NavigationLimits.self, forKey: .navigation),
                   conduct: try c.decodeIfPresent(ConductLimits.self, forKey: .conduct),
+                  encounters: try c.decodeIfPresent(EncounterLimits.self, forKey: .encounters),
                   maxP99TickMs: try c.decode(Double.self, forKey: .maxP99TickMs))
     }
 
-    /// Why a run with these tier summaries, timings, skill gap, fun pass, start, navigation and conduct misses the
+    /// Why a run with these tier summaries, timings, skill gap, fun pass, start, navigation, conduct and close encounters misses the
     /// thresholds; empty when it meets them.
     public func breaches(tiers summaries: [String: TierSummary], timings: BotSuiteReport.RunTimings,
                          skillGap: SkillGapSummary? = nil, funPass: FunPassSummary? = nil,
                          start: StartSummary? = nil, navigation: NavigationSummary? = nil,
-                         conduct: ConductSummary? = nil) -> [String] {
+                         conduct: ConductSummary? = nil, closeEncounters: CloseEncounterSummary? = nil) -> [String] {
         var breaches = BotTier.allCases.flatMap { tier -> [String] in
             guard let summary = summaries[tier.rawValue], let limits = tiers[tier.rawValue] else { return [] }
             return limits.breaches(tier.rawValue, summary)
@@ -250,6 +273,7 @@ public struct BotThresholds: Codable, Hashable, Sendable {
         breaches += self.start?.breaches(start) ?? []
         breaches += self.navigation?.breaches(navigation) ?? []
         breaches += self.conduct?.breaches(conduct) ?? []
+        breaches += self.encounters?.breaches(closeEncounters) ?? []
         if timings.maxP99Ms > maxP99TickMs {
             breaches.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms > \(fixed(maxP99TickMs, 3))")
         }

@@ -79,6 +79,9 @@ import Testing
         // National seats' encounters end, since no tier's limits hold them; the same seats in an all-National live
         // fleet breach the conduct limit, and only that.
         bundled.maxP99TickMs = .greatestFiniteMagnitude
+        // The close-encounter floor (#234) gates these fleets too, on counts these seats don't hold: it's
+        // `BotEncounterSuiteTests`'.
+        bundled.encounters = nil
         let smoke = BotMatrix(seeds: [1, 2, 3], fleetSizes: [10], tierMixes: [.mixed], laps: 1)
         #expect(smoke.cells.allSatisfy { !$0.isAllNationalLive })
         let smokeReport = BotSuiteReport(matrix: smoke, thresholds: bundled, races: [result(fouled, mix: .mixed)])
