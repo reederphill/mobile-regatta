@@ -81,7 +81,7 @@ public struct WorldSnapshot: Sendable {
     public var touchingBoats: [SeatPair]
     /// Seats touching an obstacle at this tick, by seat then obstacle.
     public var touchingObstacles: [ObstacleContact]
-    /// Seats touching an edge at this tick, by seat then `ObstructionKind.allCases`: a touch slows a boat
+    /// Seats touching an edge at this tick, by seat then `ObstructionKind.edges`: a touch slows a boat
     /// most, and is recorded, when it begins.
     public var touchingEdges: [EdgeContact]
     /// Every incident so far: never sent to clients (#18, #96), and a receiver keeps its own. Rule calls
