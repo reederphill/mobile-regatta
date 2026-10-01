@@ -209,6 +209,8 @@ struct WindRevealTests {
         let rejoined = RecordingTransport()
         while await rig.host.outcome == nil {
             let tick = await rig.host.tick
+            // A one-lap race closes well inside this; a hang fails the test instead of the job's time limit.
+            guard tick < 40_000 else { Issue.record("the race never closed (tick \(tick))"); break }
             if tick < 1200 && tick + 300 >= 1200 {
                 await rig.run(to: 1200)
                 // A mid-race rejoin: a RaceStart and a Resync, each with every key revealed so far.
