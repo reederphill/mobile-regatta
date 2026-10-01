@@ -11,7 +11,7 @@ import Testing
     @Test func everyKindHasARowAndTheOrderIsTheTicket() {
         for kind in NoticeKind.allCases { #expect(NoticeTable.rows[kind] != nil, "\(kind)") }
         let order = NoticeKind.allCases.sorted { NoticeTable.rule($0).priority > NoticeTable.rule($1).priority }
-        #expect(order == [.ocs, .ruleCall, .markRoom, .penalty, .latency, .hint])
+        #expect(order == [.ocs, .ruleCall, .markRoom, .roll, .penalty, .latency, .hint])
         #expect(NoticeKind.allCases.filter { NoticeTable.rule($0).holdsHints } == [.ocs, .ruleCall])
     }
 

@@ -202,11 +202,11 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// A missed roll's flog: its swing either side, degrees, and how long it lasts, seconds.
     var flogDegrees = 18.0
     var flogSeconds = 1.5
-    /// Your roll ring (#222): its alpha, its radius at its widest in hull lengths, and how long a hit's or a miss's
-    /// result shows, race seconds.
-    var rollRingAlpha = 0.8
-    var rollRingHulls = 1.2
-    var rollRingSeconds = 0.7
+    /// Your roll ring (#222): its alpha, its radius at its widest in hull lengths (where the approach starts), and how
+    /// long a hit's or a miss's result shows, race seconds.
+    var rollRingAlpha = 0.9
+    var rollRingHulls = 1.6
+    var rollRingSeconds = 1.3
 
     // MARK: Your boat, ghosts
 
