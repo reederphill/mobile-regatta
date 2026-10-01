@@ -91,6 +91,9 @@ import Testing
         // A mark touch (no other boat) draws no line.
         lines.add(Self.call(30, .touchingMark, offender: 3, victim: 3))
         #expect(lines.calls.count == 1)
+        // A call delivered again (an online resync) is recorded once.
+        lines.add(Self.call(0, .changingCourse))
+        #expect(lines.calls.count == 1)
         // At most four, the newest first.
         for i in 1...5 { lines.add(Self.call(i * 30, offender: i, victim: i + 1)) }
         let shown = at(6)

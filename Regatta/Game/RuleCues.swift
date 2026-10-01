@@ -71,9 +71,10 @@ nonisolated struct RuleCallLines: Equatable, Sendable {
 
     private(set) var calls: [RuleCall] = []
 
-    /// Records `call`. A call with no other boat (a mark touch) draws no line, so it isn't kept.
+    /// Records `call`. A call with no other boat (a mark touch) draws no line, so it isn't kept; nor is one already
+    /// recorded (an online event delivered again after a resync).
     mutating func add(_ call: RuleCall) {
-        guard call.offender != call.victim else { return }
+        guard call.offender != call.victim, !calls.contains(call) else { return }
         calls.append(call)
         if calls.count > Self.kept { calls.removeFirst(calls.count - Self.kept) }
     }
