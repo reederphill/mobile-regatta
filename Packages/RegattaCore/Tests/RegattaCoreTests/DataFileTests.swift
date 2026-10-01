@@ -730,12 +730,14 @@ enum SkiffFixtures {
         shadow.backwindRunningAngle = nil
         shadow.backwindInnerLength = a.windShadow.backwindInnerLength
         shadow.backwindScaleSpeed = nil
+        shadow.backwindRunningFade = 0
         shadow.coneFromHull = false
         #expect(shadow == a.windShadow, "only the new values and the trapezoid's steeper edge differ")
         #expect(!a.windShadow.backwindSternSlant && a.windShadow.backwindRunningAngle == nil)
         #expect(a.windShadow.backwindScaleSpeed == nil && !a.windShadow.coneFromHull)
         #expect(b.windShadow.backwindSternSlant && b.windShadow.backwindRunningAngle == deg2rad(115))
         #expect(b.windShadow.coneFromHull && b.windShadow.bowY == a.hull.length / 2)
+        #expect(abs(b.windShadow.backwindRunningFade - deg2rad(25)) < 1e-12 && a.windShadow.backwindRunningFade == 0)
         #expect(b.windShadow.backwindScaleSpeed == metresPerSecond(knots: 6) && b.windShadow.backwindMaxScale == 1.5)
         #expect(b.windShadow.backwindInnerLength == 0.75 * a.hull.length && b.windShadow.backwindLoss == 0.2)
     }
