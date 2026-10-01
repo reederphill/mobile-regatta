@@ -308,6 +308,22 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var edgeArrowInsetSide = 28.0
     var edgeArrowClearance = 12.0
 
+    // MARK: Rule cues (#123)
+
+    /// A boat's right-of-way glyph shows while her centre is within this many hull lengths of yours: a debug
+    /// slider (fun before realism), its default the core's placeholder the server can reuse (#96).
+    var glyphRangeHulls = RightOfWayGlyph.defaultRangeHulls
+    /// The glyph's size and how far above the boat it sits, screen points, whatever the zoom.
+    var glyphSize = 16.0
+    var glyphOffset = 24.0
+    /// A rule call's dashed line shows this many seconds of race time, fading out over the last
+    /// `ruleCallFadeSeconds`.
+    var ruleCallLineSeconds = 8.0
+    var ruleCallFadeSeconds = 1.5
+    /// The penalty arc's radius, hull lengths from your boat's centre, and its width, screen points.
+    var penaltyArcRadiusHulls = 0.9
+    var penaltyArcWidth = 4.0
+
     /// The shipped placeholders.
     static let standard = BoatStyle()
 }
@@ -349,6 +365,9 @@ nonisolated extension BoatStyle {
             (.laylineAlpha, \.laylineAlpha), (.ladderLineAlpha, \.ladderLineAlpha),
             (.ladderSpacingMetres, \.ladderSpacingMetres), (.edgeArrowInsetSide, \.edgeArrowInsetSide),
             (.edgeArrowClearance, \.edgeArrowClearance),
+            (.glyphRangeHulls, \.glyphRangeHulls), (.glyphSize, \.glyphSize), (.glyphOffset, \.glyphOffset),
+            (.ruleCallLineSeconds, \.ruleCallLineSeconds), (.ruleCallFadeSeconds, \.ruleCallFadeSeconds),
+            (.penaltyArcRadiusHulls, \.penaltyArcRadiusHulls), (.penaltyArcWidth, \.penaltyArcWidth),
         ]
         for (key, path) in fields {
             if let value = try c.decodeIfPresent(Double.self, forKey: key) { style[keyPath: path] = value }

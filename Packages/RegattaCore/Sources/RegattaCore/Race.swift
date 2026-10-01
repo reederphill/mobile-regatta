@@ -632,6 +632,21 @@ public final class Race {
         }
     }
 
+    /// Who must keep clear between `seat` and every other seat, in seat order, nil at `seat` itself and for
+    /// any pair with a ghost: `Rules.obligation` (rule 21 over rules 10–13), so a returning or penalised boat
+    /// keeps clear. Mark-room never changes it (Case 25). What the right-of-way glyphs show (#123); read-only.
+    public func keepClearRelations(of seat: Int) -> [RightOfWay?] {
+        guard boats.indices.contains(seat) else { return [] }
+        let hull = boatClass.hull
+        let boat = boats[seat]
+        return boats.indices.map { other in
+            guard other != seat,
+                  let verdict = Rules.obligation(boat, boats[other], overlapped: overlaps.isOverlapped(seat, other),
+                                                 course: course, hull: hull) else { return nil }
+            return RightOfWay(keepClear: verdict.offender, rule: verdict.rule)
+        }
+    }
+
     /// Boats touching: a contact costs both boats speed and is announced (`RaceEvent.Kind.contact`) on the
     /// tick it begins, and opens an incident unless the pair has one open (`call`). The pushes part them.
     /// A pair not touching whose open incident the umpire holds closes it once their hulls are more than

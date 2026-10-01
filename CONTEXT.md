@@ -24,7 +24,7 @@ _Avoid_: false start, early
 
 **Penalty turn**:
 The single turn, including one tack and one gybe, that a boat must complete after a foul or touching a mark.
-_Avoid_: spin, 720, 360 (except as UI shorthand)
+_Avoid_: spin, 720, 360 (never in UI copy: "one full circle", "Turn")
 
 **Foul**:
 Breaking a rule of Part 2 of the RRS with respect to another boat.
@@ -185,6 +185,10 @@ _Avoid_: tutorial (that's a later, separate thing)
 A one-line message on the race screen that fires the first time its situation comes up and stops once the player has learned it.
 _Avoid_: tip, tooltip, coach mark
 
+**Plain words**:
+The first call of each rule number on a player, for or against her, spelled out as a sentence with the number in a notice. Later calls of that number show only the line and badge on the water. Seen numbers are stored per device with hint progress and reset with it; Hints off doesn't silence them.
+_Avoid_: rule explanation, tooltip
+
 ### Course
 
 **Venue**:
@@ -235,6 +239,14 @@ The line from a mark along which a boat, at her best angle to the wind, can just
 **Wind vane**:
 The thin vermillion arrow under your hull, one hull length, pointing to the wind over the ground. No label and no numbers; it carries the groove tick.
 _Avoid_: wind arrow, wind indicator
+
+**Right-of-way glyph**:
+The wordless mark over another boat that says who keeps clear: an orange ⚠ triangle on a boat you must keep clear of, a blue chevron on a boat that must keep clear of you. Shown only within a short range; mark-room is never a glyph (it is a notice), and a ghost has none.
+_Avoid_: boat label, rights icon
+
+**Penalty arc**:
+The orange arc round your boat while you owe a penalty turn: it counts down the start deadline until the turn is started, then the complete deadline. With it, a short "Turn" notice gives both countdowns.
+_Avoid_: penalty timer, spin meter
 
 **Ladder line**:
 A line drawn across the course axis (the seeded mean wind direction, fixed for the race), so boats on the same line are level in the race to windward or leeward. On the W → O reach (a leg that runs more across the axis than along it) the lines run across the leg instead (#267, ruling 2), so boats on one line are level on the reach, as their **Ladder distance** reads them.
