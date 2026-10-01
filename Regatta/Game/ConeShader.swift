@@ -21,23 +21,23 @@ final class ConeShader {
 
     init(shadow: BoatClass.WindShadow, pointsPerMeter ppm: CGFloat, style: BoatStyle) {
         let box = ConeShading.box(shadow)
-        size = CGSize(width: box.width * ppm, height: box.height * ppm)
+        size = CGSize(width: box.width * Double(ppm), height: box.height * Double(ppm))
         anchor = CGPoint(x: 0.5, y: box.upwind / box.height)
         let spacing = Float(max(style.hatchSpacing, 1)), width = Float(max(style.hatchLineWidth, 0.25))
         shader = SKShader(source: ConeShading.source, uniforms: [
             SKUniform(name: "u_size", vectorFloat2: vector_float2(Float(size.width), Float(size.height))),
             SKUniform(name: "u_anchorY", float: Float(anchor.y)),
-            SKUniform(name: "u_far", vectorFloat2: vector_float2(Float(shadow.coneWidthAtEnd / 2 * ppm),
-                                                                 Float(shadow.coneLength * ppm))),
-            SKUniform(name: "u_hatch", vectorFloat2: vector_float2(spacing * 2.0.squareRoot(), width)),
+            SKUniform(name: "u_far", vectorFloat2: vector_float2(Float(shadow.coneWidthAtEnd / 2 * Double(ppm)),
+                                                                 Float(shadow.coneLength * Double(ppm)))),
+            SKUniform(name: "u_hatch", vectorFloat2: vector_float2(spacing * Float(2).squareRoot(), width)),
             nearA, nearB,
         ])
     }
 
     /// Moves the near edge's ends, in metres in the cone's frame.
     func update(nearA a: Vec2, nearB b: Vec2, ppm: CGFloat) {
-        nearA.vectorFloat2Value = vector_float2(Float(a.x * ppm), Float(a.y * ppm))
-        nearB.vectorFloat2Value = vector_float2(Float(b.x * ppm), Float(b.y * ppm))
+        nearA.vectorFloat2Value = vector_float2(Float(a.x * Double(ppm)), Float(a.y * Double(ppm)))
+        nearB.vectorFloat2Value = vector_float2(Float(b.x * Double(ppm)), Float(b.y * Double(ppm)))
     }
 }
 
@@ -104,10 +104,10 @@ nonisolated enum ConeShading {
         }
         float strength = 0.0;
         if (hi > lo && p.y < u_far.y && p.x > lo && p.x < hi) {
-            float half = (hi - lo) * 0.5;
+            float reach = (hi - lo) * 0.5;
             float across = abs(p.x - (lo + hi) * 0.5);
             float along = clamp(p.y, 0.0, u_far.y);
-            strength = (1.0 - along / u_far.y) * (1.0 - across / half);
+            strength = (1.0 - along / u_far.y) * (1.0 - across / reach);
         }
         float t = mod(p.x + p.y, u_hatch.x);
         float dist = min(t, u_hatch.x - t) / 1.41421356;
