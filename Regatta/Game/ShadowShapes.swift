@@ -21,14 +21,18 @@ nonisolated enum ShadowShapes {
     }
 
     /// The backwind trapezoid (#298) in the boat's frame on starboard tack, metres: x out to starboard (her
-    /// windward side on starboard tack), y forward. Its corners: P1, her windward stern corner; P2, `backwindWidth`
-    /// out along her stern; P3, `backwindLength` astern of P2; P4, `backwindInnerLength` astern of P1. Nil for a
-    /// class with #79's band, which draws no zone.
+    /// windward side on starboard tack), y forward. Its corners, from `BoatClass.WindShadow.backwindSpan(out:)`: P1,
+    /// her windward stern corner offset by the span's start on the hull side; P2, `backwindWidth` out along her stern, by
+    /// the start there; P3 and P4, the far edge's ends, outboard then hull side. One edge slants: the far one for
+    /// skiff@4's shape, the stern one for skiff@5's. Nil for a class with #79's band, which draws no zone.
     static func backwindLocal(_ shadow: BoatClass.WindShadow) -> [Vec2]? {
-        guard let inner = shadow.backwindInnerLength else { return nil }
-        let p1 = Vec2(shadow.sternCorner.x, shadow.sternCorner.y)
-        let p2 = Vec2(p1.x + shadow.backwindWidth, p1.y)
-        return [p1, p2, Vec2(p2.x, p2.y - shadow.backwindLength), Vec2(p1.x, p1.y - inner)]
+        guard let hullSide = shadow.backwindSpan(out: 0), let outboard = shadow.backwindSpan(out: shadow.backwindWidth) else {
+            return nil
+        }
+        let corner = shadow.sternCorner
+        let out = corner.x + shadow.backwindWidth
+        return [Vec2(corner.x, corner.y - hullSide.start), Vec2(out, corner.y - outboard.start),
+                Vec2(out, corner.y - outboard.end), Vec2(corner.x, corner.y - hullSide.end)]
     }
 
     /// The backwind trapezoid's corners on the water: `backwindLocal` turned to her heading and mirrored to her

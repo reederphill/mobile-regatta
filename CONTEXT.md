@@ -291,7 +291,7 @@ The disturbed, weaker air downwind of a boat's sails.
 _Avoid_: dirty air (fine as UI copy)
 
 **Backwind**:
-Air deflected off a boat's sails that slows a boat just to windward of her and astern. What makes a safe leeward position safe.
+Air deflected off a boat's sails that slows a boat just to windward of her and astern. What makes a safe leeward position safe. She casts none while running, only close-hauled and reaching.
 
 **Lee-bow**:
 To put your boat to leeward of another boat and just ahead of her, on the same tack and close enough that she sits in your backwind. She can only sink back or tack away. Usually done by crossing her bow and tacking onto her lee bow, which needs room to cross. She is then _lee-bowed_.
