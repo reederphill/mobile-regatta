@@ -53,10 +53,14 @@ final class OnlineLaunch {
     @ObservationIgnored private let clock = MonotonicClock()
     /// The race's haptics: the app passes `AppModel.haptics`, gated by Settings (#110).
     @ObservationIgnored private let haptics: any Haptics
+    /// The race's steering scheme: the app passes `AppModel.controls` (#112).
+    @ObservationIgnored private let controls: ControlSettings
 
-    init(server: RaceServer, haptics: any Haptics = GatedHaptics(), ticket: @escaping () async throws -> [UInt8]) {
+    init(server: RaceServer, haptics: any Haptics = GatedHaptics(), controls: ControlSettings = ControlSettings(),
+         ticket: @escaping () async throws -> [UInt8]) {
         self.server = server
         self.haptics = haptics
+        self.controls = controls
         self.ticket = ticket
     }
 
@@ -92,7 +96,7 @@ final class OnlineLaunch {
             let clock = clock
             let driver = OnlineDriver(start: start, transport: joined, token: token, clientBuild: Self.clientBuild,
                                       now: clock.now, connect: { WebSocketTransport(url: url) })
-            phase = .racing(GameSession(online: driver, haptics: haptics))
+            phase = .racing(GameSession(online: driver, haptics: haptics, controls: controls))
         case .updateRequired(let reason):
             transport.close()
             phase = .updateRequired(reason)
