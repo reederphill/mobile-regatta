@@ -194,14 +194,6 @@ public struct BoatClass: DataFileContent, Equatable {
         /// Metres astern of the stern the trapezoid's inner edge reaches (#298; optional, `innerLengthHullLengths`),
         /// or nil for #79's band.
         public var backwindInnerLength: Double?
-        /// Which edge of the trapezoid slants (optional, `slantedAtStern`; false when absent, #298's shape): false, its
-        /// far edge, `backwindInnerLength` astern on the hull side to `backwindLength` outboard; true, its stern edge,
-        /// level with her stern on the hull side to `backwindLength - backwindInnerLength` astern outboard, with the far
-        /// edge flat `backwindLength` astern (`backwindSpan(out:)`).
-        public var backwindSternSlant = false
-        /// The true wind angle, radians, from which she is running and casts no backwind (optional,
-        /// `runningFromDegrees`): nil, she casts it on every point of sail (`ShadowCone`).
-        public var backwindRunningAngle: Double?
         /// The hull's starboard stern corner in the boat's frame, metres (x out from the centreline, y aft of the
         /// centre, negative): where the backwind trapezoid starts, mirrored to her windward side. Not a file value:
         /// read off the hull outline at load (its aftmost points, widest of them; outlines are symmetric).
@@ -214,17 +206,6 @@ public struct BoatClass: DataFileContent, Equatable {
 
         /// Whether the shadow slows the boat rather than the wind her polar reads (`slowingDown`).
         public var isSpeedLoss: Bool { slowingDown != nil }
-
-        /// The backwind trapezoid's extent astern of her stern line `out` metres out along it from the stern corner
-        /// (0 on the hull side, `backwindWidth` outboard): where it starts and where it ends, metres astern. Nil for a
-        /// class with #79's band. The slanted edge is the far one (`start` 0) or the stern one (`end` the full length).
-        public func backwindSpan(out: Double) -> (start: Double, end: Double)? {
-            guard let inner = backwindInnerLength else { return nil }
-            // `out` is on 0...backwindWidth (a class with an inner length has a positive width). The far-edge shape's
-            // operations are #298's exactly, so the classes sailed before this one replay bit for bit.
-            if backwindSternSlant { return ((backwindLength - inner) * out / backwindWidth, backwindLength) }
-            return (0, inner + (backwindLength - inner) * out / backwindWidth)
-        }
     }
 
     /// The roll tack (#222, #263): a second tack/gybe tap during a tack, timed on the boom crossing. A hit, within
@@ -360,10 +341,6 @@ private struct BoatClassSchema2: Decodable {
             /// #298: the trapezoid's inner length (`BoatClass.WindShadow.backwindInnerLength`). Optional: a file
             /// without it (every one before #298) casts #79's band.
             let innerLengthHullLengths: Double?
-            /// The trapezoid's stern edge slants, not its far one (`BoatClass.WindShadow.backwindSternSlant`). Optional.
-            let slantedAtStern: Bool?
-            /// The true wind angle from which she is running and casts none (`backwindRunningAngle`). Optional.
-            let runningFromDegrees: Double?
         }
 
         let coneLengthHullLengths: Double
@@ -454,11 +431,6 @@ private struct BoatClassSchema2: Decodable {
                       && positive(inner) && inner <= windShadow.backwind.lengthHullLengths,
                       "backwind trapezoid needs a positive length and width, and an inner length in 0 exclusive ... its length")
         }
-        try check(windShadow.backwind.slantedAtStern != true || windShadow.backwind.innerLengthHullLengths != nil,
-                  "a backwind slanted at the stern needs an inner length")
-        if let running = windShadow.backwind.runningFromDegrees {
-            try check(running > 0 && running <= 180, "backwind running angle must be above 0 and at most 180°")
-        }
         try check(fraction(contact.boatSpeedFactor) && fraction(contact.markSpeedFactor), "contact factors must be 0...1")
         try check(fraction(ease.speedFraction) && positive(ease.timeConstantSeconds), "ease needs a 0...1 fraction and a positive time")
 
@@ -496,8 +468,6 @@ private struct BoatClassSchema2: Decodable {
                 backwindWidth: windShadow.backwind.widthHullLengths * length,
                 backwindLoss: windShadow.backwind.loss,
                 backwindInnerLength: windShadow.backwind.innerLengthHullLengths.map { $0 * length },
-                backwindSternSlant: windShadow.backwind.slantedAtStern ?? false,
-                backwindRunningAngle: windShadow.backwind.runningFromDegrees.map(deg2rad),
                 sternCorner: Self.sternCorner(of: outline),
                 slowingDown: nil
             ),

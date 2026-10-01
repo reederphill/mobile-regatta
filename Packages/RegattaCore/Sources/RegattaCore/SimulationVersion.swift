@@ -183,13 +183,7 @@ import Glibc
 ///    The index also records every boat contact (`contacts`), every penalised mark touch (`markTouches`) and
 ///    each incident's trigger (contact or near miss), and a race's log carries it (`RaceLog.incidentIndex`). Boat
 ///    state, the calls and the digest don't move; the events, the index and the log's JSON do.
-/// 30: the backwind turned half a turn and off while running (#298 follow-up), on 29. Races sail skiff@5 by default: its
-///    backwind trapezoid has its stern edge slanted (level with her stern on the hull side, 0.5 hull lengths astern
-///    outboard) and its far edge flat, 2 astern, 1 wide, its loss 0.2 full along the stern edge and fading to nothing at
-///    the far edge (`BoatClass.WindShadow.backwindSpan(out:)`), and she casts none while running, her true wind angle
-///    115 degrees or more (`ShadowCone.isRunning`). Files without the new optional fields (skiff@4, ilca-dinghy@4 and
-///    before) sail as on 29, bit for bit.
-public let simulationRevision = 30
+public let simulationRevision = 29
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

@@ -144,13 +144,7 @@ import Testing
             let (scene, effects) = Self.drawn(boat, boatClass: Self.boatClass)
             let local = try #require(ShadowShapes.backwindLocal(shadow))
             let corners = try #require(ShadowShapes.backwindCorners(core))
-            // Running (skiff@5): she casts none, so nothing is drawn and core slows no one.
-            #expect(effects.backwind.isHidden == core.isRunning, "\(c)")
-            guard !core.isRunning else {
-                let inside = corners.reduce(Vec2.zero, +) / 4
-                #expect(!core.isInBackwind(inside), "\(c): running, no backwind")
-                continue
-            }
+            #expect(!effects.backwind.isHidden, "\(c)")
 
             for (l, world) in zip(local, corners) {
                 let p = scene.convert(CGPoint(x: l.x * Double(Self.ppm), y: l.y * Double(Self.ppm)), from: effects.backwind)
