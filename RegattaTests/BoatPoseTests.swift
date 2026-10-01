@@ -165,5 +165,13 @@ import Testing
         expected.heelScale = 1.5
         #expect(style == expected)
         #expect(try JSONDecoder().decode(BoatStyle.self, from: JSONEncoder().encode(expected)) == expected)
+
+        // Every field is in the decoder's list (#121's wake, cone and art values too): a style with every value
+        // moved off its standard comes back whole.
+        let standard = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(BoatStyle.standard)) as? [String: Double])
+        let moved = standard.mapValues { $0 + 0.25 }
+        let decoded = try JSONDecoder().decode(BoatStyle.self, from: JSONSerialization.data(withJSONObject: moved))
+        let back = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(decoded)) as? [String: Double])
+        #expect(back == moved, "fields the lenient decoder drops: \(moved.keys.filter { back[$0] != moved[$0] }.sorted())")
     }
 }

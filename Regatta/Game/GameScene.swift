@@ -1,3 +1,4 @@
+import os
 import SpriteKit
 import RegattaBots
 import RegattaCore
@@ -54,6 +55,8 @@ final class GameScene: SKScene {
         get { water.quality }
         set { water.quality = newValue }
     }
+    /// The wakes' tier: the thermal ladder's (#127) seam. Every tier's wake is speed-scaled.
+    var wakeQuality = WakeQuality.full
 
     private let world = SKNode()
     private let cam = SKCameraNode()
@@ -189,12 +192,19 @@ final class GameScene: SKScene {
         let me = driver.myBoatIndex
         for boat in driver.currentFrame.boats {
             let node = BoatNode(boat: boat, isMine: boat.id == me, color: Palette.boat(boat.colorIndex),
-                                boatClass: driver.boatClass, pointsPerMeter: ppm)
+                                boatClass: driver.boatClass, pointsPerMeter: ppm, style: boatStyle)
             boatNodes.append(node)
             boatLayer.addChild(node)
-            effectsLayer.addChild(node.shadowCone)
-            effectsLayer.addChild(node.wake)
+            node.effects.nodes.forEach(effectsLayer.addChild)
         }
+#if DEBUG
+        // #57's 16-boat demo: what the fleet's wakes, cones and backwinds cost, once at race start (#121).
+        if LaunchOptions.current.perf {
+            let nodes = effectsLayer.children.reduce(0) { $0 + 1 + $1.children.count }
+            Logger(subsystem: "com.phillreeder.regatta", category: "perf")
+                .info("Boat effects: \(nodes, privacy: .public) nodes for \(self.boatNodes.count, privacy: .public) boats")
+        }
+#endif
     }
 
     // MARK: - Loop
@@ -241,7 +251,8 @@ final class GameScene: SKScene {
         for (i, boat) in world.boats.enumerated() {
             let pose = BoatPose(boat, ease: world.ease(ofSeat: i), isGhost: world.isGhost(ofSeat: i),
                                 boatClass: world.boatClass, style: boatStyle)
-            boatNodes[i].update(with: boat, pose: pose, style: boatStyle, time: world.time, dt: dt, settled: settled)
+            boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality, time: world.time,
+                                dt: dt, settled: settled)
         }
 
         let player = world.me

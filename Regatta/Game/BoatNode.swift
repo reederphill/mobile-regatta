@@ -2,12 +2,17 @@ import SpriteKit
 import RegattaCore
 
 /// Draws one boat (#117) from her pose (`BoatPose`): her drop shadow, hull, outline and sail, your boat's glow
-/// under her hull, plus a wake and a wind-shadow cone that live in the world layer beneath the fleet. No name and
-/// no badge: boat names are never shown on the water (#15), and penalties are #123's and #124's.
+/// under her hull, plus her wake, wind-shadow cone and backwind (`BoatEffects`, #121) that live in the world's
+/// effects layer beneath the fleet. No name and no badge: boat names are never shown on the water (#15), and
+/// penalties are #123's and #124's.
 final class BoatNode: SKNode {
-    let wake = SKShapeNode()
-    let shadowCone: SKSpriteNode
+    /// Her wake, cone and backwind: the scene adds `effects.nodes` to its effects layer.
+    let effects: BoatEffects
 
+    /// A ghost fades as one flat image (#30): her hull, outline and sail composited first, then faded together,
+    /// so where they overlap she reads no darker than anywhere else. Its effect is on for ghosts only; a live boat
+    /// draws straight through it.
+    private let fade = SKEffectNode()
     private let body = SKNode()
     /// What heel narrows: the drop shadow, glow, hull and outline, never the sail (`xScale` would warp it).
     private let hullGroup = SKNode()
@@ -16,36 +21,34 @@ final class BoatNode: SKNode {
     private let sail: SKSpriteNode
     private let ppm: CGFloat
     private let beam: CGFloat
-    /// Each boat's flutter swings on its own phase, so a flapping fleet doesn't flap in step. Presentation only:
-    /// the pose itself is the same for every boat.
-    private let flutterPhase: Double
+    /// Her seat: each boat's flutter swings on its own phase (`BoatStyle.flutterPhaseStep`), so a flapping fleet
+    /// doesn't flap in step. Presentation only: the pose itself is the same for every boat.
+    private let seat: Int
     private var sailAngle: CGFloat = 0
     /// The current roll miss's flog (`BoatPose.RollCue.flog`), timed in race seconds.
     private var flog = FlogTimer()
-    private var wakePoints: [CGPoint] = []
-    private var wakeTimer = 0.0
 
-    /// The z's a boat's parts draw at, each boat a `DrawOrder` slot above the last by seat: in the effects layer
-    /// every shadow cone under every wake, and in the fleet's every drop shadow under your glow, the glow under
-    /// every hull, every hull under its outline and every outline under every sail. Your boat draws over all of
-    /// the fleet's.
+    /// The z's a boat's parts draw at, each boat a `DrawOrder` slot above the last by seat: in the fleet's layer
+    /// every drop shadow under your glow, the glow under every hull, every hull under its outline and every
+    /// outline under every sail. Your boat draws over all of the fleet's. (The effects layer's are `BoatEffects`'.)
     private enum Layer {
-        static let cone: CGFloat = 0, wake: CGFloat = 0.5
         static let fleet: CGFloat = 5, mine: CGFloat = 10
         static let heelShadow: CGFloat = 0, glow: CGFloat = 0.1, hull: CGFloat = 0.2, outline: CGFloat = 0.3, sail: CGFloat = 1
     }
 
     /// `isMine` marks your boat (the driver's `myBoatIndex`): a soft white glow under her hull, and drawn on top.
-    /// Every hull is the same size and every hull has the same outline.
-    init(boat: Boat, isMine: Bool, color: UIColor, boatClass: BoatClass, pointsPerMeter ppm: CGFloat) {
+    /// Every hull is the same size and every hull has the same outline. `style`'s baked-in art values (glow blur,
+    /// outline width, hatch) are drawn into the textures here.
+    init(boat: Boat, isMine: Bool, color: UIColor, boatClass: BoatClass, pointsPerMeter ppm: CGFloat,
+         style: BoatStyle = .standard) {
         self.ppm = ppm
         beam = CGFloat(boatClass.hull.beam) * ppm
-        flutterPhase = Double(boat.id) * 2.39
+        seat = boat.id
         let length = CGFloat(boatClass.hull.length) * ppm
 
-        // Hulls, sails and shadow cones are sprites sharing a few textures, per class and scale, so SpriteKit
-        // can batch the whole fleet into a handful of draw calls.
-        let art = BoatArt.shared(boatClass: boatClass, pointsPerMeter: ppm)
+        // Hulls and sails are sprites sharing a few textures, per class and scale, so SpriteKit can batch the
+        // whole fleet into a handful of draw calls; so are the effects.
+        let art = BoatArt.shared(boatClass: boatClass, pointsPerMeter: ppm, style: style)
         heelShadow = SKSpriteNode(texture: art.hull)
         heelShadow.color = .black
         heelShadow.colorBlendFactor = 1
@@ -68,11 +71,9 @@ final class BoatNode: SKNode {
         sail.position = CGPoint(x: 0, y: length * 0.16)
         sail.zPosition = Layer.sail
 
-        shadowCone = SKSpriteNode(texture: art.cone)
-        shadowCone.anchorPoint = CGPoint(x: 0.5, y: 0)
-        shadowCone.color = .black
-        shadowCone.colorBlendFactor = 1
-        shadowCone.alpha = 0.05
+        effects = BoatEffects(seat: boat.id, boatClass: boatClass, pointsPerMeter: ppm, style: style)
+        fade.shouldEnableEffects = false
+        fade.shouldRasterize = false
 
         super.init()
 
@@ -82,18 +83,12 @@ final class BoatNode: SKNode {
         hullGroup.addChild(outline)
         body.addChild(hullGroup)
         body.addChild(sail)
-        addChild(body)
+        fade.addChild(body)
+        addChild(fade)
 
-        wake.strokeColor = UIColor.white.withAlphaComponent(0.22)
-        wake.lineWidth = 1.5
-        wake.lineCap = .round
-        wake.lineJoin = .round
-
-        // A z each, from the seat (`DrawOrder`): the start row (#85) puts the fleet's cones, wakes, hulls and
-        // sails over each other.
+        // A z each, from the seat (`DrawOrder`): the start row (#85) puts the fleet's hulls and sails over each
+        // other.
         let seat = DrawOrder.z(boat.id)
-        shadowCone.zPosition = Layer.cone + seat
-        wake.zPosition = Layer.wake + seat
         zPosition = (isMine ? Layer.mine : Layer.fleet) + seat
     }
 
@@ -101,21 +96,20 @@ final class BoatNode: SKNode {
 
     /// Draws `boat` in `pose` at race time `time` (seconds; every flutter swings on it, never the wall clock).
     /// `settled` trims the sail straight to its target rather than easing it there (a frozen render fixture).
-    func update(with boat: Boat, pose: BoatPose, style: BoatStyle, time: Double, dt: Double, settled: Bool = false) {
-        let point = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
-        position = point
+    /// `wakeQuality` is the wake's tier (#127).
+    func update(with boat: Boat, pose: BoatPose, style: BoatStyle, wakeQuality: WakeQuality = .full, time: Double,
+                dt: Double, settled: Bool = false) {
+        position = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
         body.zRotation = CGFloat(-boat.heading)
 
         updateHeel(pose, style: style)
-        updateSail(pose, style: style, time: time, dt: dt, settled: settled)
-        updateWake(point, dt: dt, active: !pose.isGhost)
-
-        shadowCone.isHidden = pose.isGhost
-        shadowCone.position = point
-        shadowCone.zRotation = CGFloat(-(boat.apparentWind.direction + .pi)) // the cone follows her apparent wind (#10)
+        let isFlogging = updateSail(pose, style: style, time: time, dt: dt, settled: settled)
+        effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
+                       settled: settled, isFlogging: isFlogging)
 
         glow?.alpha = CGFloat(style.glowAlpha)
-        alpha = pose.isGhost ? CGFloat(style.ghostAlpha) : 1
+        fade.shouldEnableEffects = pose.isGhost
+        fade.alpha = pose.isGhost ? CGFloat(style.ghostAlpha) : 1
     }
 
     /// Heel (#22): the hull drawn narrower and a drop shadow offset to leeward (the boom's side, except by the lee).
@@ -127,7 +121,9 @@ final class BoatNode: SKNode {
         heelShadow.alpha = heel * CGFloat(style.heelShadowAlpha)
     }
 
-    private func updateSail(_ pose: BoatPose, style: BoatStyle, time: Double, dt: Double, settled: Bool) {
+    /// Returns whether a roll miss's flog is on (the wake dies with it, #222).
+    @discardableResult
+    private func updateSail(_ pose: BoatPose, style: BoatStyle, time: Double, dt: Double, settled: Bool) -> Bool {
         // The sail sits on the boom side, to leeward except by the lee, eased out as far as the pose says.
         let side: CGFloat = pose.sailSide == .port ? -1 : 1
         let target = CGFloat(pose.sailTrim) * side
@@ -138,7 +134,8 @@ final class BoatNode: SKNode {
         let snaps = settled || pose.roll == .snap
         sailAngle += (target - sailAngle) * (snaps ? 1 : min(1, CGFloat(dt) * 8))
 
-        let swing = sin(time * 22 + flutterPhase)
+        let flutterPhase = Double(seat) * style.flutterPhaseStep
+        let swing = sin(time * style.flutterSwingRate + flutterPhase)
         var amplitude = deg2rad(style.flutterDegrees) * pose.flutter
         var flap = pose.flutter
         if isFlogging {
@@ -147,27 +144,11 @@ final class BoatNode: SKNode {
         }
         sail.zRotation = sailAngle + CGFloat(swing * amplitude)
         // A flapping sail loses its belly; a ghost's hangs limp.
-        let belly = pose.isGhost ? 0.35 : 1 - 0.55 * flap * (0.5 + 0.5 * sin(time * 31 + flutterPhase))
+        let belly = pose.isGhost
+            ? style.ghostSailBelly
+            : 1 - style.flapBellyLoss * flap * (0.5 + 0.5 * sin(time * style.flapBellyRate + flutterPhase))
         sail.xScale = side * CGFloat(belly)
-    }
-
-    private func updateWake(_ point: CGPoint, dt: Double, active: Bool) {
-        wakeTimer -= dt
-        guard wakeTimer <= 0 else { return }
-        wakeTimer = 0.12
-        if active {
-            wakePoints.append(point)
-            if wakePoints.count > 28 { wakePoints.removeFirst() }
-        } else if !wakePoints.isEmpty {
-            wakePoints.removeFirst()
-        }
-        let path = CGMutablePath()
-        if let first = wakePoints.first {
-            path.move(to: first)
-            for p in wakePoints.dropFirst() { path.addLine(to: p) }
-            path.addLine(to: point)
-        }
-        wake.path = path
+        return isFlogging
     }
 
 }
@@ -182,35 +163,33 @@ private struct BoatArt {
     let glow: SKTexture
     let sail: SKTexture
     let sailAnchor: CGPoint
-    let cone: SKTexture
 
-    /// What the art is drawn from: the class's hull and wind shadow, and the scale.
+    /// What the art is drawn from: the class's hull, the scale, and the glow's blur and outline's width.
     private struct Key: Hashable {
         var outline: [Double]
         var length: Double
         var beam: Double
-        var cone: [Double]
         var ppm: CGFloat
+        var glowBlur: Double
+        var outlineWidth: Double
     }
 
     private static var cache: [Key: BoatArt] = [:]
 
     /// Built once per class and scale: a boat never rebuilds a texture as she sails, and the tuning panel can
     /// swap the class in one process.
-    static func shared(boatClass: BoatClass, pointsPerMeter ppm: CGFloat) -> BoatArt {
-        let hull = boatClass.hull, shadow = boatClass.windShadow
-        let key = Key(outline: hull.outline.flatMap { [$0.x, $0.y] }, length: hull.length, beam: hull.beam,
-                      cone: [shadow.coneLength, shadow.coneWidthAtBoat, shadow.coneWidthAtEnd], ppm: ppm)
+    static func shared(boatClass: BoatClass, pointsPerMeter ppm: CGFloat, style: BoatStyle) -> BoatArt {
+        let hull = boatClass.hull
+        let key = Key(outline: hull.outline.flatMap { [$0.x, $0.y] }, length: hull.length, beam: hull.beam, ppm: ppm,
+                      glowBlur: style.glowBlur, outlineWidth: style.outlineWidth)
         if let art = cache[key] { return art }
-        let art = BoatArt(boatClass: boatClass, ppm: ppm)
+        let art = BoatArt(boatClass: boatClass, ppm: ppm, glowBlur: CGFloat(style.glowBlur),
+                          outlineWidth: CGFloat(style.outlineWidth))
         cache[key] = art
         return art
     }
 
-    /// Your glow's blur, points: soft, with no hard edge that would read as a ring (#15).
-    private static let glowBlur: CGFloat = 5
-
-    private init(boatClass: BoatClass, ppm: CGFloat) {
+    private init(boatClass: BoatClass, ppm: CGFloat, glowBlur: CGFloat, outlineWidth: CGFloat) {
         let length = CGFloat(boatClass.hull.length) * ppm
         let beam = CGFloat(boatClass.hull.beam) * ppm
         let path = BoatArt.hullPath(boatClass.hull, ppm: ppm)
@@ -220,25 +199,14 @@ private struct BoatArt {
         let bounds = CGRect(x: -halfWidth, y: -halfHeight, width: halfWidth * 2, height: halfHeight * 2)
         hull = BoatArt.hullTexture(path, bounds: bounds, length: length, beam: beam)
         outline = BoatArt.texture(bounds: bounds) { cg in
-            BoatArt.strokeInside(path, width: 1, color: .white, in: cg)
+            BoatArt.strokeInside(path, width: outlineWidth, color: .white, in: cg)
         }
-        glow = BoatArt.glowTexture(path, bounds: bounds)
+        glow = BoatArt.glowTexture(path, bounds: bounds, blur: glowBlur)
         (sail, sailAnchor) = BoatArt.sailTexture(length: length * 0.62, bulge: beam * 0.45, mastRadius: max(1.5, beam * 0.1))
-        cone = BoatArt.coneTexture(boatClass.windShadow, ppm: ppm)
     }
 
-    /// Renders `draw` into a texture whose coordinate space is y-up with `bounds`
-    /// mapped onto the image, matching SpriteKit.
     private static func texture(bounds: CGRect, scale: CGFloat = 3, draw: (CGContext) -> Void) -> SKTexture {
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = scale
-        let image = UIGraphicsImageRenderer(size: bounds.size, format: format).image { context in
-            let cg = context.cgContext
-            cg.translateBy(x: -bounds.minX, y: bounds.maxY)
-            cg.scaleBy(x: 1, y: -1)
-            draw(cg)
-        }
-        return SKTexture(image: image)
+        SpriteArt.texture(bounds: bounds, scale: scale, draw: draw)
     }
 
     /// The class's hull outline (`BoatClass.Hull.outline`: metres, x to starboard, y to the bow) in points, bow
@@ -298,8 +266,9 @@ private struct BoatArt {
         }
     }
 
-    /// A soft white blur of the hull's silhouette, wider than it: under the hull only its halo shows.
-    private static func glowTexture(_ path: CGPath, bounds: CGRect) -> SKTexture {
+    /// A soft white blur of the hull's silhouette, wider than it: under the hull only its halo shows. `glowBlur`,
+    /// points: soft, with no hard edge that would read as a ring (#15).
+    private static func glowTexture(_ path: CGPath, bounds: CGRect, blur glowBlur: CGFloat) -> SKTexture {
         // The player glow's token (docs/palette.md).
         let white = CuePalette.cueWhite.uiColor.cgColor
         // Same centre as the hull's bounds, so the two sprites line up.
@@ -335,22 +304,5 @@ private struct BoatArt {
         }
         let anchor = CGPoint(x: -bounds.minX / bounds.width, y: -bounds.minY / bounds.height)
         return (texture, anchor)
-    }
-
-    /// The wind-shadow cone, starting at the boat and widening downwind along +y.
-    private static func coneTexture(_ shadow: BoatClass.WindShadow, ppm: CGFloat) -> SKTexture {
-        let length = CGFloat(shadow.coneLength) * ppm
-        let halfStart = CGFloat(shadow.coneWidthAtBoat / 2) * ppm
-        let halfEnd = CGFloat(shadow.coneWidthAtEnd / 2) * ppm
-        let bounds = CGRect(x: -halfEnd, y: 0, width: halfEnd * 2, height: length)
-        return texture(bounds: bounds, scale: 1) { cg in
-            cg.move(to: CGPoint(x: -halfStart, y: 0))
-            cg.addLine(to: CGPoint(x: halfStart, y: 0))
-            cg.addLine(to: CGPoint(x: halfEnd, y: length))
-            cg.addLine(to: CGPoint(x: -halfEnd, y: length))
-            cg.closePath()
-            cg.setFillColor(UIColor.white.cgColor)
-            cg.fillPath()
-        }
     }
 }
