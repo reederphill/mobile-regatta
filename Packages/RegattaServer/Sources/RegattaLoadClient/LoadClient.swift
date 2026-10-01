@@ -48,6 +48,10 @@ public struct LoadClientOptions: Sendable {
     public var timeout: Duration
     public var handshakeTimeout: Duration
     public var clientBuild: String
+    /// Derives the race's wind seed from its public race seed, if the client can (the dev instant race,
+    /// `InstantRaceRequest.windSeed(forRaceSeed:)`), so the wind audit can look for the seed's bytes on
+    /// the wire. Nil (a `--token` race): the audit checks the reveal schedule only.
+    public var windSeedOfRace: (@Sendable (UInt64) -> UInt64)?
 
     public init(host: String = "127.0.0.1", port: Int = 8080, frameRate: Int = 30, script: InputScript = .weave,
                 timeout: Duration = .seconds(3600), handshakeTimeout: Duration = .seconds(10),
@@ -112,6 +116,42 @@ public struct LoadReport: Codable, Hashable, Sendable {
     public var finalStatus: String
     /// The server's close reason, if it closed the connection with one.
     public var closeReason: String?
+    /// What broke the wind reveal rules (`WindAudit`, #95): a key before its reveal tick, a join or resync
+    /// without every due key, the wind seed's bytes. Empty for a clean race.
+    public var auditViolations: [String] = []
+}
+
+extension LoadReport {
+    private enum CodingKeys: String, CodingKey {
+        case seat, completed, bytesReceived, bytesSent, joinBytes, seconds, downstreamBytesPerSecond, roundTrips
+        case clientRoundTrips, heldSent, tapsSent, pingsSent, resyncRequests, resyncsApplied, snapshotsRefused
+        case undecodableFrames, serverEvents, finalStatus, closeReason, auditViolations
+    }
+
+    /// Decodes a report, from before `auditViolations` too (as empty).
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        seat = try c.decode(Int.self, forKey: .seat)
+        completed = try c.decode(Bool.self, forKey: .completed)
+        bytesReceived = try c.decode(Int.self, forKey: .bytesReceived)
+        bytesSent = try c.decode(Int.self, forKey: .bytesSent)
+        joinBytes = try c.decode(Int.self, forKey: .joinBytes)
+        seconds = try c.decode(Double.self, forKey: .seconds)
+        downstreamBytesPerSecond = try c.decode(Double.self, forKey: .downstreamBytesPerSecond)
+        roundTrips = try c.decode(RoundTrips.self, forKey: .roundTrips)
+        clientRoundTrips = try c.decode(RoundTrips.self, forKey: .clientRoundTrips)
+        heldSent = try c.decode(Int.self, forKey: .heldSent)
+        tapsSent = try c.decode(Int.self, forKey: .tapsSent)
+        pingsSent = try c.decode(Int.self, forKey: .pingsSent)
+        resyncRequests = try c.decode(Int.self, forKey: .resyncRequests)
+        resyncsApplied = try c.decode(Int.self, forKey: .resyncsApplied)
+        snapshotsRefused = try c.decode(Int.self, forKey: .snapshotsRefused)
+        undecodableFrames = try c.decode(Int.self, forKey: .undecodableFrames)
+        serverEvents = try c.decode(Int.self, forKey: .serverEvents)
+        finalStatus = try c.decode(String.self, forKey: .finalStatus)
+        closeReason = try c.decodeIfPresent(String.self, forKey: .closeReason)
+        auditViolations = try c.decodeIfPresent([String].self, forKey: .auditViolations) ?? []
+    }
 }
 
 /// The #27 budget for one client's downstream: about 5 KB/s during a race, under 1 MB per race with the join.
@@ -178,7 +218,11 @@ public enum LoadClient {
         let joinBytes = transport.wireBytes.received
         let startedAt = micros()
 
-        let client = RaceClient(start: start, transport: transport)
+        // The handshake frames were read before the audit could know the seed: audit them now.
+        var audit = WindAudit(start: start, windSeed: options.windSeedOfRace)
+        for frame in [ack, joined] { if let bytes = try? frame.encoded() { audit.check(bytes) } }
+        let audited = AuditingTransport(transport, audit: audit)
+        let client = RaceClient(start: start, transport: audited)
         let frame = UInt64(1_000_000 / max(1, options.frameRate))
         let deadline = startedAt + UInt64(options.timeout.components.seconds) * 1_000_000
         var clientRoundTrips: [UInt64] = []
@@ -223,7 +267,7 @@ public enum LoadClient {
             pingsSent: stats.pingsSent, resyncRequests: stats.resyncRequests, resyncsApplied: stats.resyncsApplied,
             snapshotsRefused: stats.snapshotsRefused, undecodableFrames: stats.undecodableFrames,
             serverEvents: serverEvents, finalStatus: "\(client.status)",
-            closeReason: close.reason.flatMap { $0.isEmpty ? nil : $0 })
+            closeReason: close.reason.flatMap { $0.isEmpty ? nil : $0 }, auditViolations: audited.violations)
     }
 
     /// Creates an instant race (`POST /dev/instant-race`) and sails every seat of it at once, one client
@@ -232,6 +276,9 @@ public enum LoadClient {
                                        group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton)
         async throws -> (race: InstantRaceResponse, reports: [Result<LoadReport, any Error>]) {
         let race = try await DevClient.instantRace(request, host: options.host, port: options.port, group: group)
+        var audited = options
+        audited.windSeedOfRace = { InstantRaceRequest.windSeed(forRaceSeed: $0) }
+        let options = audited
         let tokens = try race.tokens.map { text in
             guard let data = Data(base64Encoded: text) else { throw LoadClientError.handshake("token isn't base64") }
             return [UInt8](data)
