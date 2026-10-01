@@ -62,4 +62,9 @@ enum HUDFont {
         // `Font.custom(_:fixedSize:)` with `.monospacedDigit()`.
         .system(size: size, weight: .bold).monospacedDigit()
     }
+
+    /// `number(size:)` as a UIKit font, for measuring the HUD's layout (`HUDLayout`). #169 swaps both together.
+    static func uiNumber(size: CGFloat) -> UIFont {
+        .monospacedDigitSystemFont(ofSize: size, weight: .bold)
+    }
 }

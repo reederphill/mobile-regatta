@@ -115,8 +115,9 @@ import RegattaProtocol
         let passed = try #require(predictedTicks.first { $0.tick >= sent.event.tick })
         #expect(passed.time + delay <= shown.time, "the prediction was at the call's tick \(shown.time - passed.time) µs before it was shown")
         #expect(ruleMessagesBeforeTheCall == 0)
-        #expect(rig.session.notice?.kind == .ruleCall && rig.session.notice?.text.contains("fouled") == true,
-                "the session shows the server's call: \(String(describing: rig.session.notice))")
+        // The call is between seats 1 and 2, not the client's boat, so the session posts no notice for it (#114).
+        #expect(rig.session.notice?.kind != .ruleCall,
+                "a call between two other boats takes no notice: \(String(describing: rig.session.notice))")
     }
 
     /// Fault-injected transport (acceptance): the connection drops mid-race, after the gun. The driver

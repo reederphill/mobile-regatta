@@ -25,25 +25,26 @@ struct HUDView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .top) {
-                HStack(alignment: .top) {
-                    clockAndPlace
-                        .padding(.leading, 60)
-                    Spacer()
-                    MinimapView(hud: hud)
-                        .frame(width: Self.minimapSize.width, height: Self.minimapSize.height)
-                        .accessibilityElement()
-                        .accessibilityLabel("Minimap")
-                        .accessibilityIdentifier("race-minimap")
-                }
+            // One row, so the readouts can't meet at any width (#114): the clock column is as wide as the widest
+            // clock, the minimap is fixed, and the wind is centred in what is left between them.
+            HStack(alignment: .top, spacing: HUDLayout.spacing) {
+                clockAndPlace
+                    .frame(width: HUDLayout.clockColumnWidth, alignment: .leading)
                 wind
+                    .frame(maxWidth: .infinity)
+                MinimapView(hud: hud)
+                    .frame(width: Self.minimapSize.width, height: Self.minimapSize.height)
+                    .accessibilityElement()
+                    .accessibilityLabel("Minimap")
+                    .accessibilityIdentifier("race-minimap")
             }
-            .padding(.horizontal, 16)
+            .padding(.leading, HUDLayout.edge + HUDLayout.pauseClearance)
+            .padding(.trailing, HUDLayout.edge)
             .padding(.top, 4)
 
             NoticeLine(notice: notice)
                 .frame(height: Self.noticeHeight, alignment: .top)
-                .padding(.horizontal, 16)
+                .padding(.horizontal, HUDLayout.edge)
                 .padding(.top, 8)
 
             Spacer()
@@ -53,13 +54,13 @@ struct HUDView: View {
     private var clockAndPlace: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(model.clockText)
-                .font(HUDFont.number(size: 30))
+                .font(HUDFont.number(size: HUDLayout.clockSize))
                 .foregroundStyle(model.clockTone == .yellow ? CuePalette.yellow.color : .white)
                 // UI tests read the tick to see the race advance at sub-second resolution.
                 .accessibilityIdentifier("race-clock")
                 .accessibilityValue(String(hud.tick))
             Text(model.placeText ?? " ")
-                .font(HUDFont.number(size: 17))
+                .font(HUDFont.number(size: HUDLayout.placeSize))
                 .foregroundStyle(.white)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(model.placeText ?? "")
@@ -76,10 +77,23 @@ struct HUDView: View {
                     .font(.system(size: 18, weight: .bold))
                     .rotationEffect(.radians(HUDModel.screenAngle(ofCompass: hud.windDirection, viewHeading: heading())))
             }
-            Text(model.windText)
-                .font(HUDFont.number(size: 15))
-                .lineLimit(1)
+            // One line where it fits, "12 kn" over "from 352°" where it doesn't (an iPhone's width).
+            ViewThatFits(in: .horizontal) {
+                Text(model.windText)
+                    .fixedSize()
+                VStack(spacing: 0) {
+                    Text(model.windParts.speed)
+                    Text(model.windParts.from)
+                }
                 .fixedSize()
+                VStack(spacing: 0) {
+                    Text(model.windParts.speed)
+                    Text(model.windParts.from)
+                }
+                .minimumScaleFactor(0.6)
+            }
+            .font(HUDFont.number(size: HUDLayout.windSize))
+            .lineLimit(1)
         }
         .foregroundStyle(.white)
         .padding(.top, 6)
@@ -115,5 +129,39 @@ private struct NoticeLine: View {
         .accessibilityLabel(notice?.text ?? "")
         .accessibilityValue(notice?.kind.rawValue ?? "none")
         .accessibilityIdentifier("race-notice")
+    }
+}
+
+/// The HUD's top row (#114): the clock column after the pause button, the minimap at the right, and the wind centred
+/// between them in whatever width is left. Pure, so tests check it fits at every width the race gets.
+enum HUDLayout {
+    /// The side margin.
+    static let edge: CGFloat = 16
+    /// Clear of the pause button (16-56 pt from the race rect's leading edge, `RaceView`).
+    static let pauseClearance: CGFloat = 60
+    /// Between the clock column, the wind and the minimap.
+    static let spacing: CGFloat = 8
+    static let clockSize: CGFloat = 30
+    static let placeSize: CGFloat = 17
+    static let windSize: CGFloat = 15
+
+    /// The widest clock and place the HUD shows: a sequence under ten minutes, the 16-min limit, a 16-boat fleet.
+    static let widestClocks = ["-9:59", "15:59"]
+    static let widestPlaces = ["16th/16", "OCS", "DSQ"]
+
+    /// The clock column's width: the widest clock or place, so the wind doesn't move as the clock runs.
+    static let clockColumnWidth: CGFloat = max(
+        widestClocks.map { width(of: $0, size: clockSize) }.max() ?? 0,
+        widestPlaces.map { width(of: $0, size: placeSize) }.max() ?? 0
+    ).rounded(.up)
+
+    /// The width the wind readout is centred in, for a race rect `width` points wide.
+    static func windSpan(width: CGFloat) -> CGFloat {
+        width - edge - pauseClearance - clockColumnWidth - spacing - spacing - HUDView.minimapSize.width - edge
+    }
+
+    /// `text`'s width in the HUD's number face at `size`.
+    static func width(of text: String, size: CGFloat) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: HUDFont.uiNumber(size: size)]).width
     }
 }

@@ -95,4 +95,31 @@ import RegattaCore
         let fields = Mirror(reflecting: HUDState()).children.compactMap(\.label)
         #expect(!fields.contains("viewHeading"), "the HUD state holds no copied view heading")
     }
+
+    /// The top row's clock, wind and minimap can't meet (#114): at every race width (an SE's 375 pt, an iPhone 17's
+    /// 402 pt, and the iPad letterbox in landscape and portrait, #107) the wind's widest two-line form fits between
+    /// the clock column and the minimap, and on an iPad its one-line form does.
+    @Test func topRowFitsAtEveryRaceWidth() {
+        let (speed, from) = HUDModel.windParts(knots: 40, direction: deg2rad(358))
+        let wind = HUDModel.windText(knots: 40, direction: deg2rad(358))
+        let twoLines = max(HUDLayout.width(of: speed, size: HUDLayout.windSize),
+                           HUDLayout.width(of: from, size: HUDLayout.windSize))
+        let oneLine = HUDLayout.width(of: wind, size: HUDLayout.windSize)
+        func letterbox(_ screen: CGSize, landscape: Bool) -> CGFloat {
+            let window = landscape ? CGSize(width: screen.height, height: screen.width) : screen
+            return RaceViewportPolicy.shipping.layout(window: window, screen: window).raceRect.width
+        }
+        let iPads = [CGSize(width: 744, height: 1133), CGSize(width: 820, height: 1180), CGSize(width: 1032, height: 1376)]
+            .flatMap { [letterbox($0, landscape: true), letterbox($0, landscape: false)] }
+        for width in [375, 402] + iPads {
+            let span = HUDLayout.windSpan(width: width)
+            #expect(twoLines <= span, "at \(width) pt the wind needs \(twoLines) pt of \(span)")
+        }
+        for width in iPads {
+            #expect(oneLine <= HUDLayout.windSpan(width: width), "at \(width) pt one line needs \(oneLine) pt")
+        }
+        for clock in HUDLayout.widestClocks {
+            #expect(HUDLayout.width(of: clock, size: HUDLayout.clockSize) <= HUDLayout.clockColumnWidth)
+        }
+    }
 }

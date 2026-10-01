@@ -50,9 +50,19 @@ struct HUDModel {
     }
 
     static func windText(knots: Double, direction: Double) -> String {
+        let (speed, from) = windParts(knots: knots, direction: direction)
+        return "\(speed), \(from)"
+    }
+
+    /// The wind's words in two parts, "12 kn" and "from 352°", for the readout's two-line form on a narrow screen.
+    var windParts: (speed: String, from: String) {
+        Self.windParts(knots: hud.windKnots, direction: hud.windDirection)
+    }
+
+    static func windParts(knots: Double, direction: Double) -> (speed: String, from: String) {
         var degrees = Int(rad2deg(direction).rounded()) % 360
         if degrees < 0 { degrees += 360 }
-        return "\(Int(knots.rounded())) kn, from \(degrees)°"
+        return ("\(Int(knots.rounded())) kn", "from \(degrees)°")
     }
 
     /// Where compass bearing `compass` (radians) points on screen, clockwise from screen up, with `viewHeading` (the

@@ -110,7 +110,9 @@ final class GameSession {
         vision = LaunchOptions.current.raceVision
         scene = GameScene(driver: driver, roster: roster)
         scene.session = self
-        refreshHUD()
+        // The minimap's first pressure sample (up to ~170 ms on first use, #310) waits for the scene's first HUD
+        // refresh, off the race's construction; a frozen fixture takes it here, as its render holds still.
+        refreshHUD(samplesPressure: driver.isFrozen)
         // A frozen fixture shows only the notice it names.
         if !driver.isFrozen { post(.hint, Self.startHint(controls.steering)) }
     }
@@ -182,11 +184,13 @@ final class GameSession {
         scene.resetInput()
     }
 
-    func refreshHUD() {
+    func refreshHUD() { refreshHUD(samplesPressure: true) }
+
+    private func refreshHUD(samplesPressure: Bool) {
         let world = driver.renderWorld
         let roster = roster
         var hud = HUDState(world: world) { roster[$0].isBot }
-        hud.pressureImage = minimapField.refresh(world)
+        hud.pressureImage = samplesPressure ? minimapField.refresh(world) : minimapField.image
         self.hud = hud
         let current = noticeSlot.current(at: now())
         if current != notice { notice = current }
@@ -229,8 +233,10 @@ final class GameSession {
         case .ruleCall(let call) where call.victim == me:
             post(.ruleCall, "Rule \(call.rule.rawValue) — \(call.rule.title). \(name(call.offender)) fouled you and must spin.")
             haptics.impact(intensity: 0.8)
-        case .ruleCall(let call):
-            post(.ruleCall, "\(name(call.offender)) fouled \(name(call.victim)) — Rule \(call.rule.rawValue)")
+        case .ruleCall:
+            // A call between two other boats posts nothing (#114): it would take your notices' slot and hold back
+            // your hints for a foul you weren't in.
+            break
         case .markTouch(let b, let mark) where b == me:
             post(.ruleCall, "Rule 31 — you hit the \(mark). Spin a 360°.")
             haptics.notify(.warning)
