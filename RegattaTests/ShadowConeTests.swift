@@ -254,4 +254,50 @@ import Testing
         }
         #expect(alphas[45] == alphas[90] && alphas[90]! > alphas[100]! && alphas[100]! > alphas[110]! && alphas[110]! > alphas[114]!)
     }
+
+    /// The backwind's edge is soft (`BoatStyle.backwindFeather`): across her hull-side edge its alpha falls from its
+    /// inside value to nothing over a few points, centred on core's edge, where with no feather it stops dead.
+    @Test func backwindEdgeIsSoft() throws {
+        let shadow = Self.boatClass.windShadow
+        let boat = Self.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
+        // Mean alpha over a strip of the art a pixel wide and 24 points tall, 1 hull length astern of her stern line on
+        // her hull-side edge (x = her stern corner), `across` points out from it (negative: outside the zone).
+        func alpha(_ effects: BoatEffects, across: CGFloat) throws -> Double {
+            let sprite = effects.backwind
+            let texture = try #require(sprite.texture)
+            let image = try #require(texture.cgImage())
+            let size = texture.size()
+            let sx = CGFloat(image.width) / size.width, sy = CGFloat(image.height) / size.height
+            let x = shadow.sternCorner.x * Double(Self.ppm) + Double(across) + Double(sprite.anchorPoint.x * size.width)
+            let y0 = -Self.boatClass.hull.length * Double(Self.ppm) + Double(sprite.anchorPoint.y * size.height)
+            guard x >= 0, x < Double(size.width) else { return 0 }
+            var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
+            let context = try #require(CGContext(data: &data, width: image.width, height: image.height, bitsPerComponent: 8,
+                                                 bytesPerRow: image.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+            var total = 0.0, count = 0.0
+            for dy in stride(from: -12.0, through: 12, by: 0.5) {
+                let row = Double(image.height) - (y0 + dy) * Double(sy) // the bitmap's rows run top down
+                let column = Int(x * Double(sx))
+                guard row >= 0, Int(row) < image.height else { continue }
+                total += Double(data[(Int(row) * image.width + column) * 4 + 3]) / 255
+                count += 1
+            }
+            return count > 0 ? total / count : 0
+        }
+        let soft = Self.drawn(boat, boatClass: Self.boatClass).effects
+        var hardStyle = BoatStyle.standard
+        hardStyle.backwindFeather = 0
+        let hardEffects = BoatEffects(seat: boat.id, boatClass: Self.boatClass, pointsPerMeter: Self.ppm, style: hardStyle)
+
+        let inside = try alpha(soft, across: 10), edge = try alpha(soft, across: 0), outside = try alpha(soft, across: -8)
+        #expect(inside > 0.2, "inside the zone")
+        #expect(edge > outside && edge < inside, "falls across the edge: \(inside) \(edge) \(outside)")
+        #expect(outside < inside * 0.4, "mostly gone a few points out")
+        #expect(edge > 0.25 * inside && edge < 0.8 * inside, "about half at core's edge")
+        // With no feather the same strip stops at the edge: nothing outside, the zone's own alpha just inside.
+        #expect(try alpha(hardEffects, across: -2) == 0)
+        #expect(try alpha(hardEffects, across: 2) > 0.2)
+    }
 }

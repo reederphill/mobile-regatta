@@ -331,6 +331,7 @@ enum TuningCatalog {
                     boat("wakeFlareGain", "Roll-hit flare", \.wakeFlareGain, 0...2, 0.1),
                     boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.4, 0.01),
                     boat("backwindShare", "Backwind hatch", \.backwindShare, 0...6, 0.1),
+                    boat("backwindFeather", "Backwind edge softness", \.backwindFeather, 0...8, 0.5, unit: " pt"),
                     boat("shadowFollowSeconds", "Shadow and backwind trail", \.shadowFollowSeconds, 0...4, 0.1, unit: " s"),
                     // #122: the boat-side cues.
                     boat("vaneLengthHulls", "Vane length", \.vaneLengthHulls, 0.5...2, 0.1, unit: " hulls"),

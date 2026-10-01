@@ -1,3 +1,4 @@
+import CoreImage
 import SpriteKit
 import RegattaCore
 
@@ -232,7 +233,7 @@ private struct EffectArt {
         let key = Key(shadow: [shadow.coneLength, shadow.coneWidthAtBoat, shadow.coneWidthAtEnd,
                                shadow.backwindLength, shadow.backwindWidth, shadow.backwindInnerLength ?? -1,
                                shadow.sternCorner.x, shadow.sternCorner.y, shadow.backwindSternSlant ? 1 : 0],
-                      ppm: ppm, hatch: [style.hatchSpacing, style.hatchLineWidth])
+                      ppm: ppm, hatch: [style.hatchSpacing, style.hatchLineWidth, style.backwindFeather])
         if let art = cache[key] { return art }
         let art = EffectArt(shadow: shadow, ppm: ppm, style: style)
         cache[key] = art
@@ -247,11 +248,14 @@ private struct EffectArt {
             let backwindPoints = points(corners)
             // Taking in the centre of her stern line, so the anchor is inside the texture.
             let sternCentre = CGPoint(x: 0, y: shadow.sternCorner.y * ppm)
-            let bounds = Self.bounds(of: backwindPoints + [sternCentre])
+            // Room round it for the soft edge, which reaches that far out.
+            let feather = CGFloat(max(style.backwindFeather, 0)), margin = (feather * 3).rounded(.up)
+            let bounds = Self.bounds(of: backwindPoints + [sternCentre]).insetBy(dx: -margin, dy: -margin)
             // A light fill under the hatch makes the trapezoid read as a shape, not a patch of lines: the fade only
             // thins it (`backwindFadeFloor`), so its far edge stays seen.
-            backwind = Self.hatch(backwindPoints, bounds: bounds, spacing: spacing, width: width, fill: 0.22) { cg in
-                Self.fadeBackwind(cg, shadow: shadow, ppm: ppm)
+            backwind = Self.hatch(backwindPoints, bounds: bounds, spacing: spacing, width: width, fill: 0.22,
+                                  feather: feather) { cg in
+                Self.fadeBackwind(cg, shadow: shadow, ppm: ppm, margin: margin)
             }
             backwindAnchor = CGPoint(x: -bounds.minX / bounds.width, y: (sternCentre.y - bounds.minY) / bounds.height)
         } else {
@@ -267,17 +271,22 @@ private struct EffectArt {
     }
 
 
-    /// Diagonal lines `spacing` apart and `width` wide, clipped to `outline`: the cones' hatch (#15). `fade`, if
-    /// any, then fades it (drawing with `.destinationIn`).
+    /// Diagonal lines `spacing` apart and `width` wide over `outline` (#15), with a light `fill` under them. With no
+    /// `feather` the hatch is clipped to `outline`, hard edged; with one it is not, and a copy of the outline blurred by
+    /// `feather` points multiplies it (`featherMask`), so the zone's edge fades out over a few points either side of
+    /// where core's zone ends. `fade`, if any, then fades it (drawing with `.destinationIn`).
     private static func hatch(_ outline: [CGPoint], bounds: CGRect, spacing: CGFloat, width: CGFloat,
-                              fill: CGFloat = 0, fade: ((CGContext) -> Void)? = nil) -> SKTexture {
-        SpriteArt.texture(bounds: bounds) { cg in
+                              fill: CGFloat = 0, feather: CGFloat = 0, fade: ((CGContext) -> Void)? = nil) -> SKTexture {
+        let mask = feather > 0 ? featherMask(outline, bounds: bounds, radius: feather) : nil
+        return SpriteArt.texture(bounds: bounds) { cg in
             cg.saveGState()
-            let path = CGMutablePath()
-            path.addLines(between: outline)
-            path.closeSubpath()
-            cg.addPath(path)
-            cg.clip()
+            if mask == nil {
+                let path = CGMutablePath()
+                path.addLines(between: outline)
+                path.closeSubpath()
+                cg.addPath(path)
+                cg.clip()
+            }
             if fill > 0 {
                 cg.setFillColor(UIColor(white: 1, alpha: fill).cgColor)
                 cg.fill(bounds)
@@ -294,11 +303,39 @@ private struct EffectArt {
             cg.setLineWidth(width)
             cg.strokePath()
             cg.restoreGState()
+            if let mask {
+                cg.setBlendMode(.destinationIn)
+                cg.draw(mask, in: bounds)
+            }
             if let fade {
                 cg.setBlendMode(.destinationIn)
                 fade(cg)
             }
         }
+    }
+
+    /// `outline` filled white on clear and blurred (Gaussian, `radius` points), over `bounds`, in the frame
+    /// `SpriteArt.texture` draws in: the soft-edged alpha a hatch is multiplied by. Nil if the blur can't be made.
+    private static func featherMask(_ outline: [CGPoint], bounds: CGRect, radius: CGFloat) -> CGImage? {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 3
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(size: bounds.size, format: format).image { context in
+            let cg = context.cgContext
+            cg.translateBy(x: -bounds.minX, y: bounds.maxY)
+            cg.scaleBy(x: 1, y: -1)
+            let path = CGMutablePath()
+            path.addLines(between: outline)
+            path.closeSubpath()
+            cg.addPath(path)
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.fillPath()
+        }
+        guard let input = CIImage(image: image),
+              let blur = CIFilter(name: "CIGaussianBlur", parameters: [kCIInputImageKey: input.clampedToExtent(),
+                                                                       kCIInputRadiusKey: radius * format.scale]),
+              let output = blur.outputImage?.cropped(to: input.extent) else { return nil }
+        return CIContext().createCGImage(output, from: input.extent)
     }
 
     /// How much of the backwind's hatch is left at its far edge: core's loss fades to nothing there, but drawn it
@@ -309,7 +346,7 @@ private struct EffectArt {
     /// edge, straight down to `backwindFadeFloor` at its far edge, each at the span `BoatClass.WindShadow.backwindSpan(out:)`
     /// gives where it is (one edge slants, the far one or the stern one). Column by column, a texel wide, in the art's
     /// frame (starboard tack).
-    private static func fadeBackwind(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat) {
+    private static func fadeBackwind(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat, margin: CGFloat) {
         let space = CGColorSpaceCreateDeviceRGB()
         guard let gradient = CGGradient(colorsSpace: space, colors: [UIColor.white.cgColor,
                                                                      UIColor(white: 1, alpha: Self.backwindFadeFloor).cgColor] as CFArray,
@@ -319,13 +356,13 @@ private struct EffectArt {
         let step: CGFloat = 1.0 / 3
         // Unblended strip edges, so the strips share each texel out exactly once.
         cg.setShouldAntialias(false)
-        var x: CGFloat = -step
-        while x < width + step {
+        var x: CGFloat = -step - margin
+        while x < width + step + margin {
             let out = Double((x + step / 2) / width).clamped(to: 0...1) * shadow.backwindWidth
             guard let span = shadow.backwindSpan(out: out) else { break }
             let top = stern - CGFloat(span.start) * ppm, bottom = stern - CGFloat(span.end) * ppm
             cg.saveGState()
-            cg.clip(to: CGRect(x: x0 + x, y: bottom - 2, width: step, height: top - bottom + 4))
+            cg.clip(to: CGRect(x: x0 + x, y: bottom - margin - 2, width: step, height: top - bottom + 2 * margin + 4))
             cg.drawLinearGradient(gradient, start: CGPoint(x: 0, y: top), end: CGPoint(x: 0, y: bottom),
                                   options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
             cg.restoreGState()
