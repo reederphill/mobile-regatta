@@ -190,11 +190,13 @@ final class RuleCueLayer: SKNode {
 }
 
 /// The glyphs' art, drawn once (#123): shape carries the meaning, colour backs it. The ⚠ is an orange triangle with
-/// a black exclamation mark; the chevron a blue downward chevron. Both have a dark outline to lift them off the water
-/// (the chevron's blue is close to the water's lightness: legible by hue and shape, docs/palette.md). Not white:
+/// a black exclamation mark; the chevron a blue downward chevron. The ⚠ has a dark outline to lift it off the water;
+/// the chevron, whose blue is close to the water's lightness, a pale tint of its own blue (docs/palette.md). Not white:
 /// white is your boat's (#22).
 enum RuleGlyphArt {
     static let side: CGFloat = 32
+    /// The chevron's edge: its blue, lightened (the hue stays the reserved chevron blue's; not white, #22).
+    static let chevronEdge = UIColor(red: 0.78, green: 0.81, blue: 1.0, alpha: 1)
 
     static func image(_ glyph: RightOfWayGlyph) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
@@ -230,11 +232,13 @@ enum RuleGlyphArt {
                 chevron.addLine(to: CGPoint(x: side / 2, y: 27))
                 chevron.addLine(to: CGPoint(x: 3, y: 15))
                 chevron.close()
+                // A pale tint of the chevron's own blue edges it: dark on dark water (and in greyscale) it vanished
+                // with the dark outline alone.
+                chevronEdge.setStroke()
+                chevron.lineWidth = 3
+                chevron.stroke()
                 CuePalette.chevronBlue.uiColor.setFill()
                 chevron.fill()
-                outline.setStroke()
-                chevron.lineWidth = 2
-                chevron.stroke()
             }
         }
     }
