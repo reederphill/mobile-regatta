@@ -11,8 +11,9 @@ import RegattaCore
 /// state takes the same pose, whatever her livery or setting (#22). Presentation only: nothing here reaches the
 /// race (ADR 0002).
 ///
-/// The base pose only: #122's pinch/foot sail-shape cue layers on `sailTrim`, and #120's sailors and #127's far
-/// tier keep `heel` and `sailSide` apart from `flutter`.
+/// The base pose, plus #122's pinch/foot sail-shape cue (#219) from her autohelm's offset from the groove: the
+/// same for every boat in the same state, as the rest. #120's sailors and #127's far tier keep `heel` and
+/// `sailSide` apart from `flutter`.
 nonisolated struct BoatPose: Equatable, Sendable {
     /// The cue a roll tack (#222, #263) shows while it lasts.
     enum RollCue: Equatable, Sendable {
@@ -39,10 +40,17 @@ nonisolated struct BoatPose: Equatable, Sendable {
     /// leeward (`leeSide`).
     var heel: Double
     var isGhost: Bool
+    /// Pinched (#219), 0 to 1: how far her sail's leading edge lifts. 0 on the groove, footing or hand steering.
+    var luffLift = 0.0
+    /// The sail's belly, 1 for its base shape: flatter pinched, fuller footed (#219). Footed, `sailTrim` is
+    /// eased too.
+    var sailFullness = 1.0
 
     /// `boat`'s pose in `boatClass`. `ease` is her held ease; `isGhost` whether she has stopped racing, as the
-    /// race shows it (`Race.isGhost(seat:)`).
-    init(_ boat: Boat, ease: Bool, isGhost: Bool, boatClass: BoatClass, style: BoatStyle = .standard) {
+    /// race shows it (`Race.isGhost(seat:)`); `autohelm` what her autohelm holds (`RenderWorld.autohelm(ofSeat:)`),
+    /// nil while her rudder is held, for the sail-shape cue.
+    init(_ boat: Boat, ease: Bool, isGhost: Bool, boatClass: BoatClass, style: BoatStyle = .standard,
+         autohelm: Autohelm.Reading? = nil) {
         sailSide = boat.boomSide
         leeSide = BoomSide.leeward(ofRelativeWind: boat.relativeWind)
         self.isGhost = isGhost
@@ -77,6 +85,11 @@ nonisolated struct BoatPose: Equatable, Sendable {
             flutter = style.byTheLeeFlutter
         } else {
             sailTrim = (awa * style.trimPerApparentAngle).clamped(to: minTrim...maxTrim)
+            // The sail-shape cue (#219), only on a sail that draws: the luff lifts pinched; footed, eased and full.
+            let cue = Self.grooveCue(autohelm, style: style)
+            luffLift = cue.pinch
+            sailTrim = min(sailTrim + deg2rad(style.footEaseDegrees) * cue.foot, maxTrim)
+            sailFullness = 1 + style.footFullness * cue.foot - style.pinchFlatten * cue.pinch
         }
         flutter = max(flutter, Self.starved(boat, style: style) * style.starvedFlutter)
 
@@ -92,6 +105,17 @@ nonisolated struct BoatPose: Equatable, Sendable {
         self.flutter = flutter.clamped(to: 0...1)
 
         heel = ease || headToWind ? 0 : Self.heel(felt: Self.feltWind(boat), twa: twa, style: style)
+    }
+
+    /// How far the autohelm pinches and foots (#219), each 0 to 1: its offset from the groove past
+    /// `BoatStyle.grooveCueDeadbandDegrees`, full at `grooveCueFullDegrees`. Nothing while it tacks or gybes her
+    /// (`isTapping`) or the rudder is held.
+    static func grooveCue(_ reading: Autohelm.Reading?, style: BoatStyle) -> (pinch: Double, foot: Double) {
+        guard let reading, !reading.isTapping else { return (0, 0) }
+        let offset = rad2deg(reading.offsetFromGroove)
+        let span = max(style.grooveCueFullDegrees - style.grooveCueDeadbandDegrees, 0.001)
+        let amount = ((abs(offset) - style.grooveCueDeadbandDegrees) / span).clamped(to: 0...1)
+        return offset < 0 ? (amount, 0) : (0, amount)
     }
 
     /// The pressure her sails feel, m/s: the sailing wind less any wind shadow or backwind (#220).
@@ -180,6 +204,35 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// A ghost (#30) drawn faded: the alpha of everything she draws.
     var ghostAlpha = 0.4
 
+    // MARK: Cues (#122)
+
+    /// The wind vane's length, in hull lengths (#15: one).
+    var vaneLengthHulls = 1.0
+    /// The vane locks to the groove tick while the autohelm holds the groove and she sails within this of it,
+    /// degrees (#219).
+    var vaneLockDegrees = 1.5
+    /// The autohelm's offset from the groove under which nothing shows (no arc, no sail cue), degrees, and the
+    /// offset at which the sail cue is at its fullest.
+    var grooveCueDeadbandDegrees = 1.0
+    var grooveCueFullDegrees = 8.0
+    /// Pinched (#219): the sail's leading edge lifts, a small quick flutter at the luff this many degrees either
+    /// side at full pinch, and the sail flattens by this share of its belly.
+    var pinchLuffDegrees = 3.0
+    var pinchFlatten = 0.25
+    /// Footed (#219): the sail eased out this many degrees further at full foot, and fuller by this share.
+    var footEaseDegrees = 6.0
+    var footFullness = 0.2
+    /// The laylines' and ladder lines' alpha: very faint (#15), the ladder lines fainter still.
+    var laylineAlpha = 0.3
+    var ladderLineAlpha = 0.12
+    /// The ladder lines' spacing, metres, from the windward mark.
+    var ladderSpacingMetres = 100.0
+    /// The next-mark edge arrow keeps this far inside the race view's top, bottom and sides, scene points: clear of
+    /// the HUD's top row and notice line and of the controls. A mark under them counts as off screen.
+    var edgeArrowInsetTop = 190.0
+    var edgeArrowInsetBottom = 170.0
+    var edgeArrowInsetSide = 28.0
+
     /// The shipped placeholders.
     static let standard = BoatStyle()
 }
@@ -198,7 +251,13 @@ nonisolated extension BoatStyle {
             (.flutterDegrees, \.flutterDegrees), (.byTheLeeFlutter, \.byTheLeeFlutter),
             (.starvedDeadband, \.starvedDeadband), (.starvedFullLoss, \.starvedFullLoss),
             (.starvedFlutter, \.starvedFlutter), (.flogDegrees, \.flogDegrees), (.flogSeconds, \.flogSeconds),
-            (.glowAlpha, \.glowAlpha), (.ghostAlpha, \.ghostAlpha),
+            (.glowAlpha, \.glowAlpha), (.ghostAlpha, \.ghostAlpha), (.vaneLengthHulls, \.vaneLengthHulls),
+            (.vaneLockDegrees, \.vaneLockDegrees), (.grooveCueDeadbandDegrees, \.grooveCueDeadbandDegrees),
+            (.grooveCueFullDegrees, \.grooveCueFullDegrees), (.pinchLuffDegrees, \.pinchLuffDegrees),
+            (.pinchFlatten, \.pinchFlatten), (.footEaseDegrees, \.footEaseDegrees), (.footFullness, \.footFullness),
+            (.laylineAlpha, \.laylineAlpha), (.ladderLineAlpha, \.ladderLineAlpha),
+            (.ladderSpacingMetres, \.ladderSpacingMetres), (.edgeArrowInsetTop, \.edgeArrowInsetTop),
+            (.edgeArrowInsetBottom, \.edgeArrowInsetBottom), (.edgeArrowInsetSide, \.edgeArrowInsetSide),
         ]
         for (key, path) in fields {
             if let value = try c.decodeIfPresent(Double.self, forKey: key) { style[keyPath: path] = value }

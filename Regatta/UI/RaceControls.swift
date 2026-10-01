@@ -202,3 +202,23 @@ struct BoatSpeedProbe: View {
         .allowsHitTesting(false)
     }
 }
+
+/// UI tests only: which boat-side cues the scene draws (#122), as an accessibility value (`race-cues`), e.g.
+/// `laylines=1 ladder=0 vane=1 arrow=0` (`GameScene.cueSummary`). Read about four times a second.
+struct CueProbe: View {
+    let session: GameSession
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+            let value = session.scene.cueSummary
+            Text(value)
+                .accessibilityLabel("Cues")
+                .accessibilityValue(value)
+                .accessibilityIdentifier("race-cues")
+                .font(.system(size: 1))
+                .foregroundStyle(.clear)
+        }
+        .frame(width: 1, height: 1)
+        .allowsHitTesting(false)
+    }
+}

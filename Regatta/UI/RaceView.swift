@@ -108,6 +108,7 @@ struct RaceView: View {
 
             if LaunchOptions.current.uiTesting {
                 BoatSpeedProbe(session: session)
+                CueProbe(session: session)
             }
 
             // The tuning panel hides the pause menu, so the water shows undimmed behind it.

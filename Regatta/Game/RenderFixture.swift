@@ -11,7 +11,7 @@ import RegattaCore
 ///
 /// With no `view`, `camera` is a north-up camera from before #113 (`boat` follows your boat, `course` frames the
 /// whole course), so the fixtures drawn that way keep their references. `"view": "courseUp"` or `"boatUp"` draws
-/// the race camera itself (#113), auto zoom on, settled.
+/// the race camera itself (#113), auto zoom on, settled. `"laylines"` and `"ladderLines"` set the cue toggles (#122).
 ///
 /// The app is launched with `-fixture <name>`, and finds `<name>.json` in the directory the
 /// `REGATTA_FIXTURE_DIR` environment variable names (the UI test passes its own `Fixtures` folder).
@@ -27,6 +27,10 @@ struct RenderFixture: Codable, Equatable {
     var vision: VisionFilter
     /// The race camera this fixture is drawn from (#113); nil draws `camera`'s north-up camera.
     var view: View? = nil
+    /// Whether the laylines and ladder lines are drawn (#122); nil takes the app's default (laylines on, ladder
+    /// lines off).
+    var laylines: Bool? = nil
+    var ladderLines: Bool? = nil
 
     enum View: String, Codable, CaseIterable {
         case courseUp, boatUp

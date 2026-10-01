@@ -2,8 +2,8 @@ import Foundation
 
 /// The settings kept on this device (#110, #25): in `UserDefaults`, never synced. Settings is one page; every value
 /// here is a row on it. The steering scheme and camera are per device (#13). Haptics and Hide lobby chat act now; the
-/// steering, camera, zoom, layline and ladder values are read by the tickets that draw them (#112, #113, #122),
-/// which also apply the `-scheme` / `-camera` test overrides on top of them.
+/// steering, camera, zoom, layline and ladder values reach the race through `ControlSettings` (#112, #113, #122),
+/// which also applies the `-scheme` / `-camera` test overrides on top of them.
 nonisolated struct DeviceSettings: Equatable, Sendable {
     enum Steering: String, CaseIterable, Sendable {
         /// Hold the left or right half of the screen to steer (the default).

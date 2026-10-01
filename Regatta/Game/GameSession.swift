@@ -83,11 +83,14 @@ final class GameSession {
     }
 
     /// A render fixture (#62): `log` replayed to the fixture's freeze tick and frozen there, drawn from
-    /// its camera through its vision filter.
+    /// its camera through its vision filter, with its laylines and ladder lines (#122) or the app's defaults.
     convenience init(fixture: RenderFixture, log: RaceLog) throws {
         let driver = try FixtureDriver(log: log, freezeTick: fixture.freezeTick)
         self.init(driver: driver, roster: driver.roster)
         scene.cameraOverride = fixture.cameraMode
+        let defaults = DeviceSettings()
+        scene.cueOverride = (laylines: fixture.laylines ?? defaults.laylines,
+                             ladderLines: fixture.ladderLines ?? defaults.ladderLines)
         vision = fixture.vision
     }
 

@@ -9,11 +9,11 @@ import Testing
 /// (#116, `WaterTests.waterDrawsTheSameEveryTime`), then the start row's fleet (#85).
 @MainActor @Suite struct DrawOrderTests {
     /// Each fixture's scene, drawn settled, draws no two nodes at one z: not the fleet's shadow cones, wakes,
-    /// heel shadows, hulls, outlines or sails, nor your glow (#117), nor the course, the laylines, the water or its
-    /// pressure. A second scene from the same fixture, as a second launch makes, draws
+    /// heel shadows, hulls, outlines or sails, nor your glow (#117), nor the course, the cues (#122: laylines, ladder
+    /// lines, your vane, its tick and arc, and the edge arrow on the camera), the water or its pressure. A second scene from the same fixture, as a second launch makes, draws
     /// the same nodes in the same order, and so does the first drawn again.
     @Test func sceneDrawsTheSameEveryTime() throws {
-        for name in ["prestart", "water-gusty-offshore", "water-pressure", "fleet"] {
+        for name in ["prestart", "water-gusty-offshore", "water-pressure", "fleet", "cues"] {
             let (scene, boats) = try Self.scene(fixture: name)
             let drawn = DrawnNode.all(in: scene)
             let shared = Dictionary(grouping: drawn, by: \.z).filter { $0.value.count > 1 }
@@ -26,7 +26,7 @@ import Testing
             #expect(drawn.filter { $0.layer == "course" }.count > 4, "\(name)")
             // The pressure (#289) under the water's puffs, one sprite of its own.
             #expect(drawn.filter { $0.layer == WaterNode.pressureName && !$0.isHidden }.count == 1, "\(name)")
-            for layer in ["water", "laylines"] {
+            for layer in ["water", "laylines", "ladderLines", "windVane", "grooveTick", "vaneArc", "edgeArrow"] {
                 #expect(drawn.contains { $0.layer == layer }, "\(name): nothing drawn in the \(layer)")
             }
 

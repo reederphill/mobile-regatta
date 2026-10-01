@@ -45,4 +45,39 @@ final class SettingsUITests: RaceUITestCase {
         flip(ladder)
         XCTAssertEqual(value(ladder), before, "the toggle didn't flip back")
     }
+
+    /// Laylines off and ladder lines on in Settings reach the race: the scene hides the laylines and draws the
+    /// ladder lines (`race-cues`, `CueProbe`). The test sets both back, so the next test starts from the defaults.
+    @MainActor func testLaylineAndLadderTogglesChangeVisibility() {
+        var app = openSettings()
+        let laylines = app.switches["settings-laylines"].firstMatch
+        let ladder = app.switches["settings-ladderLines"].firstMatch
+        XCTAssertTrue(laylines.waitForExistence(timeout: 20), "no Laylines toggle")
+        XCTAssertTrue(ladder.waitForExistence(timeout: 20), "no Ladder lines toggle")
+        XCTAssertEqual(value(laylines), "1", "laylines aren't on by default")
+        XCTAssertEqual(value(ladder), "0", "ladder lines aren't off by default")
+        flip(laylines)
+        flip(ladder)
+        XCTAssertEqual(value(laylines), "0", "the Laylines toggle didn't flip")
+        XCTAssertEqual(value(ladder), "1", "the Ladder lines toggle didn't flip")
+        app.terminate()
+
+        app = launchRace()
+        let cues = app.staticTexts["race-cues"].firstMatch
+        XCTAssertTrue(cues.waitForExistence(timeout: 20), "no cue probe")
+        let (seen, last) = watch(cues, until: Date().addingTimeInterval(20)) {
+            ($0.value as? String)?.hasPrefix("laylines=0 ladder=1") == true
+        }
+        XCTAssertTrue(seen, "the race drew \(String(describing: last?.value)), not laylines off and ladder lines on")
+        app.terminate()
+
+        app = openSettings()
+        let laylinesAgain = app.switches["settings-laylines"].firstMatch
+        let ladderAgain = app.switches["settings-ladderLines"].firstMatch
+        XCTAssertTrue(laylinesAgain.waitForExistence(timeout: 20) && ladderAgain.waitForExistence(timeout: 20))
+        flip(laylinesAgain)
+        flip(ladderAgain)
+        XCTAssertEqual(value(laylinesAgain), "1", "the Laylines toggle didn't flip back")
+        XCTAssertEqual(value(ladderAgain), "0", "the Ladder lines toggle didn't flip back")
+    }
 }

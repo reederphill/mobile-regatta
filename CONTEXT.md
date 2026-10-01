@@ -198,6 +198,10 @@ _Avoid_: arena, bounds, map edge
 **Layline**:
 The line from a mark along which a boat, at her best angle to the wind, can just fetch it without another tack or gybe. Drawn from the wind only, never from current.
 
+**Wind vane**:
+The thin vermillion arrow under your hull, one hull length, pointing to the wind over the ground. No label and no numbers; it carries the groove tick.
+_Avoid_: wind arrow, wind indicator
+
 **Ladder line**:
 A line drawn across the course axis (the seeded mean wind direction, fixed for the race), so boats on the same line are level in the race to windward or leeward.
 
@@ -312,6 +316,9 @@ _Avoid_: autopilot, lock, helm (to helm is what a player does)
 
 **Groove**:
 The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. The autohelm snaps to it when let go close to it and follows it as the wind strength changes.
+
+**Groove tick**:
+A tick on the wind vane at the groove on the boat's tack. The vane locks to it while the autohelm holds the groove; a pinch or foot shows as a short arc from it to the angle held.
 
 **Tack cost**:
 What a tack loses against sailing on: the distance made good upwind, in hull lengths, over the tack and the speed she takes to get back. About a hull length from close-hauled with the autohelm sailing the tap; it decides which shifts are worth tacking on.
