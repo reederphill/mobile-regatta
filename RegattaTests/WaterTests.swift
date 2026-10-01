@@ -471,6 +471,52 @@ import RegattaCore
     }
 }
 
+extension WaterTests {
+    /// A turned view (course-up and boat-up, #113) draws the bounding box of its turned rectangle: up to 2.3 times
+    /// an upright view's area at 45°. The ripple lattice and the pressure grid spread by that area, so at any scale
+    /// and angle a turned view takes no more tiles than `waterUpdateStaysCheap`'s bound, nor more pressure samples
+    /// than an upright view at the finest scale; upright, nothing changes.
+    @Test func turnedViewStaysInsideTheTileBound() throws {
+        let race = try Self.race("gusty-offshore", to: -300)
+        let world = WaterWorld(Self.world(of: race))
+        let me = race.boats[0].position
+        let sceneSize = CGSize(width: 402, height: 874)
+        let spacing = WaterStyle.standard.rippleSpacing, finest = RippleLattice.finestScale
+        let bound = (Int(Double(sceneSize.width) * finest / spacing) + 5)
+            * (Int(Double(sceneSize.height) * finest / (spacing * 0.8)) + 5)
+        let samples = (Int(Double(sceneSize.width) * finest / PressureGrid.fullSpacing) + 5)
+            * (Int(Double(sceneSize.height) * finest / PressureGrid.fullSpacing) + 5)
+
+        let upright = Self.view(centeredOn: me)
+        #expect(upright.spreadScale == Double(upright.scale))
+        #expect(upright.rect == CGRect(x: upright.center.x - 402 * 1.25 / 2, y: upright.center.y - 874 * 1.25 / 2,
+                                       width: 402 * 1.25, height: 874 * 1.25))
+
+        for scale in [1.25, 1 / 0.45, finest, finest * 1.5, finest * 4] {
+            for degrees in [0.0, 15, 30, 45, 60, 90, 135, -45] {
+                var view = Self.view(centeredOn: me, scale: CGFloat(scale))
+                view.rotation = CGFloat(degrees * .pi / 180)
+                // The rect holds every corner of the turned view.
+                let rect = view.rect.insetBy(dx: -0.001, dy: -0.001)
+                for (sx, sy) in [(-1.0, -1.0), (-1, 1), (1, -1), (1, 1)] {
+                    let x = sx * 402 * scale / 2, y = sy * 874 * scale / 2
+                    let r = Double(view.rotation)
+                    let corner = CGPoint(x: Double(view.center.x) + x * cos(r) - y * sin(r),
+                                         y: Double(view.center.y) + x * sin(r) + y * cos(r))
+                    #expect(rect.contains(corner), "scale \(scale), \(degrees)°")
+                }
+                let water = WaterNode(pointsPerMeter: 8)
+                water.update(world, view: view, dt: 0)
+                #expect(!water.streaks.isEmpty && water.streaks.count <= bound,
+                        "\(water.streaks.count) tiles at scale \(scale), \(degrees)°, bound \(bound)")
+                let grid = try #require(water.pressure?.grid)
+                #expect(grid.columns.count * grid.rows.count <= samples,
+                        "\(grid.columns.count * grid.rows.count) samples at scale \(scale), \(degrees)°, bound \(samples)")
+            }
+        }
+    }
+}
+
 /// A sprite as the water draws it: everything its pixels depend on, its z summed down from the node it's under.
 private struct DrawnSprite: Equatable {
     var z: CGFloat

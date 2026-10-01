@@ -7,15 +7,22 @@ import RegattaCore
 /// two ticks (`RenderWorld`). The scene never holds a `Race`.
 final class GameScene: SKScene {
     static let pointsPerMeter: CGFloat = 8
-    /// The boat camera's zoom until you pinch, unless the tuning panel (#232) sets another.
+    /// The follow camera's zoom until you pinch-zoom, unless the tuning panel (#232) sets another.
     static let defaultZoom = CGFloat(CameraStyle.standard.defaultZoom)
 
     let driver: any RaceDriver
     /// The fleet's names, which the scene never draws: boat names are never shown on the water (#15, #117).
     let roster: FleetRoster
     weak var session: GameSession?
-    /// Follow your boat, or frame the whole course. Render fixtures set it (#62); the device setting is #113.
-    var cameraMode: LaunchOptions.CameraMode = .boat
+    /// A render fixture's camera (#62), with auto framing on; nil takes the device's camera and auto framing from
+    /// `session.controls` (#113), read every frame.
+    var cameraOverride: CameraRig.Mode? {
+        didSet { syncCamera() }
+    }
+    /// The compass heading at the top of the screen, radians in [−π, π): the HUD's arrows turn by it (#113).
+    var viewHeading: Double { rig.viewHeading }
+    /// The camera's maths: course-up, boat-up, auto framing and pinch-zoom (#113).
+    private(set) var rig = CameraRig(pointsPerMeter: Double(GameScene.pointsPerMeter))
     /// The water's look: the debug tuning panel's (#232) seam, live, even on a paused race.
     var waterStyle: WaterStyle {
         get { water.style }
@@ -25,13 +32,11 @@ final class GameScene: SKScene {
         }
     }
     /// The camera's framing: the debug tuning panel's (#232) seam, live, even on a paused race. A new default zoom
-    /// replaces your pinch.
+    /// replaces your pinch-zoom.
     var cameraStyle = CameraStyle.standard {
         didSet {
-            if cameraStyle.defaultZoom != oldValue.defaultZoom {
-                zoom = CGFloat(cameraStyle.defaultZoom)
-                cam.setScale(1 / zoom)
-            }
+            rig.setStyle(cameraStyle)
+            cam.setScale(rig.cameraScale)
             needsPausedRender = true
         }
     }
@@ -74,7 +79,6 @@ final class GameScene: SKScene {
     private var lastRenderTime: Double?
     private var hudCountdown = 0.0
     private var laylineCountdown = 0.0
-    private var zoom = GameScene.defaultZoom
     /// A render-only value changed while the race is paused: draw the standing world once more with it.
     private var needsPausedRender = false
 
@@ -121,7 +125,7 @@ final class GameScene: SKScene {
 
         addChild(cam)
         camera = cam
-        cam.setScale(1 / zoom)
+        cam.setScale(rig.cameraScale)
         cam.position = point(driver.renderWorld.me.position)
 
         laylines.strokeColor = UIColor.white.withAlphaComponent(0.22)
@@ -244,18 +248,13 @@ final class GameScene: SKScene {
             boatNodes[i].update(with: boat, pose: pose, style: boatStyle, time: world.time, dt: dt, settled: settled)
         }
 
-        let player = world.me
-        switch cameraMode {
-        case .boat:
-            let target = point(player.position + player.velocity * cameraStyle.lookAheadSeconds)
-            let k = settled ? 1 : CGFloat(1 - exp(-dt * cameraStyle.followRate))
-            cam.position = CGPoint(x: cam.position.x + (target.x - cam.position.x) * k,
-                                   y: cam.position.y + (target.y - cam.position.y) * k)
-        case .course:
-            frameCourse(world.course)
-        }
+        syncCamera()
+        rig.advance(CameraWorld(world), sceneSize: size, dt: dt, settled: settled)
+        cam.position = rig.center
+        cam.setScale(rig.cameraScale)
+        cam.zRotation = rig.cameraRotation
 
-        let view = WaterView(center: cam.position, sceneSize: size, scale: cam.xScale)
+        let view = WaterView(center: cam.position, sceneSize: size, scale: cam.xScale, rotation: cam.zRotation)
         Signpost.waterUpdate.measure { water.update(WaterWorld(world), view: view, dt: dt) }
 
         // Before the gun the line is where you're going: the active leg's orange.
@@ -270,24 +269,13 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Puts the whole course, marks, pin and committee boat, in view with a margin.
-    private func frameCourse(_ course: CourseLayout) {
-        guard let framing = Self.courseFraming(course, sceneSize: size, zoom: zoom, margin: CGFloat(cameraStyle.courseMargin))
-        else { return }
-        cam.position = framing.center
-        cam.setScale(framing.scale)
-    }
-
-    /// The course camera over `course` in a scene of `sceneSize`: centred on the course, scaled to show the whole
-    /// of it (marks, pin and committee boat) with a margin, and never closer than `zoom`.
+    /// The north-up course camera over `course` in a scene of `sceneSize` (`CameraRig.courseFraming`): centred on
+    /// the course, scaled to show the whole of it (marks, pin and committee boat) with a margin, and never closer
+    /// than `zoom`.
     static func courseFraming(_ course: CourseLayout, sceneSize: CGSize, zoom: CGFloat,
                               margin: CGFloat = CGFloat(CameraStyle.standard.courseMargin)) -> (center: CGPoint, scale: CGFloat)? {
-        let points = course.obstacles.map(\.position)
-        let xs = points.map { CGFloat($0.x) * pointsPerMeter }, ys = points.map { CGFloat($0.y) * pointsPerMeter }
-        guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max(),
-              sceneSize.width > 0, sceneSize.height > 0 else { return nil }
-        return (CGPoint(x: (minX + maxX) / 2, y: (minY + maxY) / 2),
-                max((maxX - minX) / sceneSize.width, (maxY - minY) / sceneSize.height, 1 / zoom) * margin)
+        CameraRig.courseFraming(course.obstacles.map(\.position), sceneSize: sceneSize, zoom: zoom, margin: margin,
+                                pointsPerMeter: Double(pointsPerMeter))
     }
 
     /// Your laylines, from the formula a bot sees them by (`Laylines`, `SeatView.laylines`).
@@ -315,6 +303,18 @@ final class GameScene: SKScene {
         guard let session, steering.scheme != session.controls.steering else { return }
         steering.scheme = session.controls.steering
         publishTillerKnob()
+    }
+
+    /// Follows the device's camera and auto framing, live (#113, #131): a change eases, it doesn't snap. A render
+    /// fixture's camera stands instead.
+    private func syncCamera() {
+        if let cameraOverride {
+            rig.mode = cameraOverride
+            rig.autoFraming = true
+        } else if let session {
+            rig.mode = session.controls.camera == .boatUp ? .boatUp : .courseUp
+            rig.autoFraming = session.controls.autoFraming
+        }
     }
 
     /// Hands the tiller's track and knob to the session for `RaceView` to draw, when they move.
@@ -359,13 +359,13 @@ final class GameScene: SKScene {
         // A pinch-zoom never steers (#13).
         switch gesture.state {
         case .began: steering.pinchBegan(); publishTillerKnob()
-        case .ended, .cancelled, .failed: steering.pinchEnded()
+        case .ended, .cancelled, .failed: steering.pinchEnded(); rig.pinchEnded()
         default: break
         }
         guard gesture.state == .began || gesture.state == .changed else { return }
-        zoom = (zoom * gesture.scale).clamped(to: 0.45...2.2)
+        rig.pinchChanged(by: Double(gesture.scale))
         gesture.scale = 1
-        cam.setScale(1 / zoom)
+        cam.setScale(rig.cameraScale)
     }
 
     /// Clears held touches, e.g. when an overlay steals them.

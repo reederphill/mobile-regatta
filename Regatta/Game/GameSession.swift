@@ -87,7 +87,7 @@ final class GameSession {
     convenience init(fixture: RenderFixture, log: RaceLog) throws {
         let driver = try FixtureDriver(log: log, freezeTick: fixture.freezeTick)
         self.init(driver: driver, roster: driver.roster)
-        scene.cameraMode = fixture.camera
+        scene.cameraOverride = fixture.cameraMode
         vision = fixture.vision
     }
 
@@ -170,6 +170,7 @@ final class GameSession {
 
     func refreshHUD() {
         hud = HUDState(world: driver.renderWorld)
+        hud.viewHeading = scene.viewHeading
         let now = Date.now
         messages.removeAll { $0.expires < now }
         if playerDone { results = makeResults() }

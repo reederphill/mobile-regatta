@@ -94,7 +94,7 @@ nonisolated struct PressureGrid: Equatable, Sendable {
 
     /// The grid covering `view` in `quality`.
     @MainActor static func forView(_ view: WaterView, quality: WaterQuality) -> PressureGrid {
-        let spacing = fullSpacing * RippleLattice.step(cameraScale: Double(view.scale)) * (quality == .cheap ? 2 : 1)
+        let spacing = fullSpacing * RippleLattice.step(cameraScale: view.spreadScale) * (quality == .cheap ? 2 : 1)
         let rect = view.rect
         return PressureGrid(spacing: spacing,
                             columns: Int((rect.minX / spacing).rounded(.down)) - 1...Int((rect.maxX / spacing).rounded(.up)) + 1,

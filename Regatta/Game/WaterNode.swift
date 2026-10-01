@@ -39,10 +39,25 @@ struct WaterView: Equatable {
     var sceneSize: CGSize
     /// The camera's scale: world points per scene point.
     var scale: CGFloat
+    /// The camera's rotation (`SKCameraNode.zRotation`, #113): course-up and boat-up turn the view.
+    var rotation: CGFloat = 0
 
+    /// The world points the view covers, upright: the bounding box of the turned view rectangle.
     var rect: CGRect {
-        let size = CGSize(width: sceneSize.width * scale, height: sceneSize.height * scale)
+        let c = abs(cos(rotation)), s = abs(sin(rotation))
+        let width = sceneSize.width * scale, height = sceneSize.height * scale
+        let size = CGSize(width: width * c + height * s, height: width * s + height * c)
         return CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height)
+    }
+
+    /// The camera scale the water spreads its ripple lattice and pressure grid by: `scale`, grown by how much more
+    /// area `rect` covers than the upright view, so a turned view (up to 2.3 times the area at 45°) takes no more
+    /// tiles or samples than an upright one would at that area. Exactly `scale` upright.
+    var spreadScale: Double {
+        guard rotation != 0, sceneSize.width > 0, sceneSize.height > 0, scale > 0 else { return Double(scale) }
+        let box = rect.size
+        let upright = Double(sceneSize.width * scale) * Double(sceneSize.height * scale)
+        return Double(scale) * (Double(box.width) * Double(box.height) / upright).squareRoot()
     }
 }
 
@@ -222,7 +237,7 @@ final class WaterNode: SKNode {
             drift = CGPoint(x: drift.x + downwind.x, y: drift.y + downwind.y)
         }
 
-        let (lattice, tileScale) = RippleLattice.forView(style: style, cameraScale: Double(view.scale))
+        let (lattice, tileScale) = RippleLattice.forView(style: style, cameraScale: view.spreadScale)
         let (columns, rows) = lattice.indices(covering: view.rect, drift: drift)
         let count = columns.count * rows.count
         while tileNodes.count < count { tileNodes.append(makeTile()) }

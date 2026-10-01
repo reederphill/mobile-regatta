@@ -35,6 +35,22 @@ import RegattaServices
         #expect(options.camera == .course)
     }
 
+    /// `-camera` overrides the device's camera (#113): `course` is course-up and `boat` boat-up; without it, Settings'.
+    @Test func cameraOverridesTheDeviceCamera() {
+        #expect(ControlSettings.camera(.boatUp, override: .course) == .courseUp)
+        #expect(ControlSettings.camera(.courseUp, override: .boat) == .boatUp)
+        #expect(ControlSettings.camera(.boatUp, override: nil) == .boatUp)
+        #expect(ControlSettings.camera(.courseUp, override: nil) == .courseUp)
+        var settings = DeviceSettings()
+        settings.camera = .courseUp
+        settings.autoFraming = false
+        let controls = ControlSettings(settings, launchOptions: parse("-camera", "boat"))
+        #expect(controls.camera == .boatUp && !controls.autoFraming)
+        settings.autoFraming = true
+        controls.update(settings, launchOptions: parse())
+        #expect(controls.camera == .courseUp && controls.autoFraming)
+    }
+
     @Test func skipsArgumentsItDoesNotKnow() {
         let options = parse("-NSTreatUnknownArgumentsAsOpen", "NO", "-ApplePersistenceIgnoreState", "YES", "-autostart")
         #expect(options.autostart)

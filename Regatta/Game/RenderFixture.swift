@@ -2,12 +2,16 @@ import Foundation
 import RegattaBots
 import RegattaCore
 
-/// A render fixture (#62): a race log replayed headless to `freezeTick`, drawn from `camera` through a
+/// A render fixture (#62): a race log replayed headless to `freezeTick`, drawn from `camera` (or `view`) through a
 /// `vision` filter, and frozen there, so a UI test can diff the screen against a reference image.
 ///
 /// Fixtures live in `RegattaUITests/Fixtures/` as small JSON files naming their log:
 ///
 ///     { "log": "prestart.racelog.json", "freezeTick": -1500, "camera": "boat", "vision": "none" }
+///
+/// With no `view`, `camera` is a north-up camera from before #113 (`boat` follows your boat, `course` frames the
+/// whole course), so the fixtures drawn that way keep their references. `"view": "courseUp"` or `"boatUp"` draws
+/// the race camera itself (#113), auto framing on, settled.
 ///
 /// The app is launched with `-fixture <name>`, and finds `<name>.json` in the directory the
 /// `REGATTA_FIXTURE_DIR` environment variable names (the UI test passes its own `Fixtures` folder).
@@ -21,6 +25,22 @@ struct RenderFixture: Codable, Equatable {
     var freezeTick: Int
     var camera: LaunchOptions.CameraMode
     var vision: VisionFilter
+    /// The race camera this fixture is drawn from (#113); nil draws `camera`'s north-up camera.
+    var view: View? = nil
+
+    enum View: String, Codable, CaseIterable {
+        case courseUp, boatUp
+    }
+
+    /// The camera the scene draws this fixture from.
+    var cameraMode: CameraRig.Mode {
+        switch (view, camera) {
+        case (.courseUp?, _): .courseUp
+        case (.boatUp?, _): .boatUp
+        case (nil, .boat): .northUpFollow
+        case (nil, .course): .northUpCourse
+        }
+    }
 
     enum LoadError: Error, CustomStringConvertible {
         case noDirectory
