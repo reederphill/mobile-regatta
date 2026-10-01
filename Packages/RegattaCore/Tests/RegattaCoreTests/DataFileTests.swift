@@ -41,11 +41,11 @@ enum Fixtures {
     }
 }
 
-/// The bundled schema-3 boat class races sail by default (`Race.defaultBoatClass`, #248): skiff@4 since #298,
+/// The bundled schema-3 boat class races sail by default (`Race.defaultBoatClass`, #248): skiff@5 since #298's follow-up,
 /// and edited copies of its bytes.
 enum SkiffFixtures {
     static let classID = "skiff"
-    static let version = 4
+    static let version = 5
     /// SHA-256 of each bundled `Resources/boat-classes/skiff@<version>.json`. A released file never changes
     /// (ADR 0004): if one fails, ship the change as the next version instead of editing it. Version 1 stays
     /// bundled for the logs sailed on it (ADR 0002).
@@ -54,6 +54,7 @@ enum SkiffFixtures {
         2: "32e5162d6caf3e32280ca754c1381e1012e4db4ef04252bf278b96dd796f5cd1",
         3: "3a6e6b7bf037bc496a9fdddfa45d7000ab41dd1801a08cece1bc2d3a76092c81",
         4: "4e2d1a94d1c90ac80aa88bdaa4890fc68095b16de61324c6fdaa19f54ee3a9a1",
+        5: "b7f604c427b27eff8b9f0b9882e29c4684d7a5f21b5beb9de3907650c7d3de23",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -151,7 +152,7 @@ enum SkiffFixtures {
         }
         #expect(BoatClass.supportedSchemaVersions == [2, 3])
         #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version)).ref,
-                "races sail skiff@4 unless told otherwise (#248, #89, #263, #298)")
+                "races sail skiff@5 unless told otherwise (#248, #89, #263, #298)")
     }
 
     @Test func missingHeaderIsMalformed() throws {
@@ -712,6 +713,25 @@ enum SkiffFixtures {
         // Her windward stern corner, off the hull outline: half the stern's width out, half a hull length aft.
         let sternHalfWidth = classID == SkiffFixtures.classID ? 0.85 : 0.63
         #expect(b.windShadow.sternCorner == Vec2(sternHalfWidth, -length / 2))
+    }
+
+    /// #298's follow-up: skiff@5 is skiff@4 with the backwind trapezoid turned half a turn (its stern edge slants, its
+    /// far edge is flat) and off while running (115° true wind angle). Every other value is version 4's.
+    @Test func version5IsVersion4WithTheBackwindTurnedAndOffRunning() throws {
+        let v4 = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: 4)
+        let v5 = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: 5)
+        #expect(v5.schemaVersion == v4.schemaVersion && v5.header.placeholders == v4.header.placeholders)
+        let (a, b) = (v4.content, v5.content)
+        #expect(b.name == a.name && b.hull == a.hull && b.polar == a.polar && b.momentum == a.momentum && b.steering == a.steering)
+        #expect(b.contact == a.contact && b.ease == a.ease && b.rollTack == a.rollTack)
+        #expect(b.planing == a.planing && b.spinnaker == a.spinnaker && b.byTheLee == a.byTheLee)
+        var shadow = b.windShadow
+        shadow.backwindSternSlant = false
+        shadow.backwindRunningAngle = nil
+        #expect(shadow == a.windShadow, "only the two new values differ")
+        #expect(!a.windShadow.backwindSternSlant && a.windShadow.backwindRunningAngle == nil)
+        #expect(b.windShadow.backwindSternSlant && b.windShadow.backwindRunningAngle == deg2rad(115))
+        #expect(b.windShadow.backwindInnerLength == 1.5 * a.hull.length && b.windShadow.backwindLoss == 0.2)
     }
 
     @Test func schemaThreeValuesAreConvertedToCodeUnits() throws {
