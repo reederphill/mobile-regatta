@@ -77,30 +77,44 @@ import Testing
         return points
     }
 
-    /// The cone's sprite covers exactly where core's shadow slows a boat: its corners where `ShadowShapes` puts
-    /// them, and at points just inside and outside each corner and edge, the sprite draws where `factor(at:)` is
-    /// under 1 and nowhere it is 1, on both tacks with the apparent wind bent.
+    /// The cone's sprite is cut from the corners core cuts the shadow from, and its shader's strength is core's loss. Its
+    /// corners land where `ShadowShapes` puts them (its near edge her bow and stern, for skiff@5, whichever way she
+    /// points), the shader is given those near ends, and at points just inside and outside each corner and edge core
+    /// slows a boat where the polygon says it does, with its loss the shader's arithmetic (`ConeShading.fade`), on both
+    /// tacks with the apparent wind bent.
     @Test func coneGeometryMatchesCoreShadow() {
         let shadow = Self.boatClass.windShadow
+        #expect(shadow.coneFromHull, "the default class casts its cone from her bow and stern")
         for c in Self.cases {
             let boat = Self.boat(headingDegrees: c.heading, boomSide: c.boom, apparentDegrees: c.apparent)
             let core = ShadowCone(caster: boat, shadow: shadow)
             let (scene, effects) = Self.drawn(boat, boatClass: Self.boatClass)
-            let local = ShadowShapes.coneLocal(shadow)
+            let corners = ShadowShapes.coneCorners(core)
+            let far = shadow.coneWidthAtEnd / 2
+            let local = core.nearEdge.sorted { $0.x < $1.x } + [Vec2(far, shadow.coneLength), Vec2(-far, shadow.coneLength)]
 
             // The corners through the sprite land on the world corners.
-            for (l, world) in zip(local, ShadowShapes.coneCorners(core)) {
+            for (l, world) in zip(local, corners) {
                 let p = scene.convert(CGPoint(x: l.x * Double(Self.ppm), y: l.y * Double(Self.ppm)), from: effects.cone)
                 #expect(abs(p.x / Self.ppm - world.x) < 1e-3 && abs(p.y / Self.ppm - world.y) < 1e-3, "\(c)")
             }
-            // Its apex corners are core's half-width at the boat either side of the apex.
-            #expect((ShadowShapes.coneCorners(core)[0] - (core.apex - core.axis.rightPerp * core.halfWidth(at: 0))).length < 1e-9)
+            // Its near corners are her bow and stern on the water, and the shader has them.
+            let bow = boat.position + boat.forward * shadow.bowY, stern = boat.position + boat.forward * shadow.sternCorner.y
+            #expect(corners.prefix(2).contains { ($0 - bow).length < 1e-9 } && corners.prefix(2).contains { ($0 - stern).length < 1e-9 }, "\(c)")
+            let given = [effects.coneShader.nearA.vectorFloat2Value, effects.coneShader.nearB.vectorFloat2Value]
+            for end in core.nearEdge {
+                let want = vector_float2(Float(end.x * Double(Self.ppm)), Float(end.y * Double(Self.ppm)))
+                #expect(given.contains(want), "\(c)")
+            }
 
             var checked = 0
-            for (p, inside) in Self.samples(ShadowShapes.coneCorners(core)) where !core.isInBackwind(p) {
+            for (p, inside) in Self.samples(corners) where !core.isInBackwind(p) {
                 let slowed = core.factor(at: p) < 1
                 #expect(slowed == inside, "\(c): core at \(p)")
-                #expect(Self.draws(effects.cone, local: local, at: p, in: scene) == slowed, "\(c): sprite at \(p)")
+                let offset = p - core.apex
+                let fade = ConeShading.fade(across: offset.dot(core.axis.rightPerp), along: offset.dot(core.axis),
+                                            nearA: core.nearA, nearB: core.nearB, halfEnd: far, length: shadow.coneLength)
+                #expect(abs((1 - core.factor(at: p)) - shadow.lossCloseIn * fade) < 1e-9, "\(c): the loss is the shader's at \(p)")
                 checked += 1
             }
             #expect(checked >= 12, "\(c)")
@@ -142,7 +156,9 @@ import Testing
             let boat = Self.boat(headingDegrees: c.heading, boomSide: c.boom, apparentDegrees: c.apparent)
             let core = ShadowCone(caster: boat, shadow: shadow)
             let (scene, effects) = Self.drawn(boat, boatClass: Self.boatClass)
-            let local = try #require(ShadowShapes.backwindLocal(shadow))
+            // The sprite's origin is the centre of her stern line, and it is scaled by her speed from there: its own space
+            // holds the unscaled outline.
+            let local = try #require(ShadowShapes.backwindLocal(shadow)).map { Vec2($0.x, $0.y - shadow.sternCorner.y) }
             let corners = try #require(ShadowShapes.backwindCorners(core))
             // Running (skiff@5): she casts none, so nothing is drawn and core slows no one.
             #expect(effects.backwind.isHidden == core.isRunning, "\(c)")

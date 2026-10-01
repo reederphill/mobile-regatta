@@ -183,12 +183,15 @@ import Glibc
 ///    The index also records every boat contact (`contacts`), every penalised mark touch (`markTouches`) and
 ///    each incident's trigger (contact or near miss), and a race's log carries it (`RaceLog.incidentIndex`). Boat
 ///    state, the calls and the digest don't move; the events, the index and the log's JSON do.
-/// 30: the backwind turned half a turn and off while running (#298 follow-up), on 29. Races sail skiff@5 by default: its
-///    backwind trapezoid has its stern edge slanted (level with her stern on the hull side, 0.5 hull lengths astern
-///    outboard) and its far edge flat, 2 astern, 1 wide, its loss 0.2 full along the stern edge and fading to nothing at
-///    the far edge (`BoatClass.WindShadow.backwindSpan(out:)`), and she casts none while running, her true wind angle
-///    115 degrees or more (`ShadowCone.isRunning`). Files without the new optional fields (skiff@4, ilca-dinghy@4 and
-///    before) sail as on 29, bit for bit.
+/// 30: the shadow reshaped (#298 follow-up, the owner's playtest), on 29. Races sail skiff@5 by default, and its cone starts
+///    from her bow and stern, not a line across her centre (`ShadowCone.nearEdge`, `coneFromBowAndStern`): its near edge is
+///    the hull's line, so it follows her heading across the wind, and it fades with distance and to its sides as before.
+///    Its backwind trapezoid has its stern edge turned steep (level with her stern on the hull side, 1.25 hull lengths
+///    astern outboard) and its far edge flat, 2 astern, 1 wide, its loss 0.2 full along the stern edge and fading to
+///    nothing at the far edge (`BoatClass.WindShadow.backwindSpan(out:)`). Its length astern scales with her speed
+///    through the water, full size at 6 knots, to 1.5 times at 9 and nothing when stopped (`backwindScale(speed:)`),
+///    and she casts none while running, her true wind angle 115 degrees or more (`ShadowCone.isRunning`). Files without
+///    the new optional fields (skiff@4, ilca-dinghy@4 and before) sail as on 29, bit for bit.
 public let simulationRevision = 30
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`

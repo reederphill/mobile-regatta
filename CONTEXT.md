@@ -287,11 +287,11 @@ A small, short-lived patch of stronger wind moving down the course, found mostly
 _Avoid_: gust (for a moving patch)
 
 **Wind shadow**:
-The disturbed, weaker air downwind of a boat's sails.
+The disturbed, weaker air downwind of a boat's sails: a cone from her bow and stern that fades with distance down the wind and towards its sides.
 _Avoid_: dirty air (fine as UI copy)
 
 **Backwind**:
-Air deflected off a boat's sails that slows a boat just to windward of her and astern. What makes a safe leeward position safe. She casts none while running, only close-hauled and reaching.
+Air deflected off a boat's sails that slows a boat just to windward of her and astern. What makes a safe leeward position safe. It reaches further astern the faster she sails, and she casts none while running, only close-hauled and reaching.
 
 **Lee-bow**:
 To put your boat to leeward of another boat and just ahead of her, on the same tack and close enough that she sits in your backwind. She can only sink back or tack away. Usually done by crossing her bow and tacking onto her lee bow, which needs room to cross. She is then _lee-bowed_.
