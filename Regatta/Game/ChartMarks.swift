@@ -45,8 +45,9 @@ nonisolated enum ChartMarks {
         /// Which `CourseLayout.elements` it belongs to.
         var element: Int
         var side: RoundingSide
-        /// The direction a boat comes to it from, a unit vector: upwind to the windward mark, from the windward
-        /// mark to the offset mark, downwind to the gate (as `CourseLayout.roundingStages` has it).
+        /// The direction a boat travels as she comes to it, a unit vector: upwind to the windward mark, from the
+        /// windward mark towards the offset mark, downwind to the gate (as `CourseLayout.roundingStages` has it). The
+        /// side she comes from is `-approach`.
         var approach: Vec2
     }
 

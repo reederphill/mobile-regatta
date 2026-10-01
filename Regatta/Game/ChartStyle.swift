@@ -40,8 +40,10 @@ nonisolated struct ChartStyle: Sendable {
 
     /// A mark's zone, the start line, the gate's connector and the rounding arrow, screen points. tuning: 1.5.
     var cueLineWidth: CGFloat = 1.5
-    /// The dashes of the zone, the start line and the gate's connector, world points. tuning: 10 on, 8 off.
-    var dashes: [CGFloat] = [10, 8]
+    /// The dashes of the zone, the start line and the gate's connector, world points at camera scale 1; drawn
+    /// scaled with the camera like the strokes' widths (`dashes(atCameraScale:)`). tuning: 10 on, 8 off.
+    var dashes: [CGFloat] = ChartStyle.defaultDashes
+    static let defaultDashes: [CGFloat] = [10, 8]
     /// The rounding arrow's radius, as a fraction of the zone's. tuning: 0.5.
     var arrowRadiusFraction = 0.5
     /// How far round the mark the rounding arrow sweeps, radians. tuning: 150°.
@@ -60,4 +62,14 @@ nonisolated struct ChartStyle: Sendable {
     var rescaleThreshold: CGFloat = 0.05
 
     static let standard = ChartStyle()
+
+    /// The dash pattern drawn at camera scale `scale` (world points per screen point): `dashes` scaled by it, so a
+    /// dash keeps its length on screen, as the strokes' widths do, and zoomed out the dashes don't close up into a
+    /// solid line. An empty or degenerate `dashes` falls back to `defaultDashes`: never a solid line.
+    func dashes(atCameraScale scale: CGFloat) -> [CGFloat] {
+        let usable = dashes.count >= 2 && dashes.allSatisfy { $0.isFinite && $0 > 0 }
+        let pattern = usable ? dashes : Self.defaultDashes
+        let factor = scale.isFinite && scale > 0 ? scale : 1
+        return pattern.map { $0 * factor }
+    }
 }

@@ -52,6 +52,10 @@ final class ChartLayer {
     /// Each stroke and the width it draws at on screen, in points: scaled by the camera's scale (`rescale`).
     private var strokes: [(node: SKShapeNode, width: CGFloat)] = []
     private var strokeScale: CGFloat?
+    /// The dashed strokes and their undashed paths, re-dashed at each rescale so a dash keeps its screen length.
+    private var dashed: [(node: SKShapeNode, path: CGPath)] = []
+    /// The dash pattern the dashed strokes are drawn with now, world points.
+    private(set) var dashPattern: [CGFloat]
 
     /// What the marks were last styled for: the leg drawn active and whether the line is.
     private struct StyleKey: Equatable {
@@ -65,6 +69,7 @@ final class ChartLayer {
         self.venue = venue
         self.style = style
         ppm = pointsPerMeter
+        dashPattern = style.dashes(atCameraScale: 1)
     }
 
     private func point(_ v: Vec2) -> CGPoint {
@@ -226,7 +231,7 @@ final class ChartLayer {
         let zoneRadius = CGFloat(course.zoneRadius) * ppm
         for buoy in ChartMarks.buoys(of: course) {
             let zone = SKShapeNode(circleOfRadius: zoneRadius)
-            zone.path = zone.path?.copy(dashingWithPhase: 0, lengths: style.dashes)
+            if let circle = zone.path { dash(zone, circle) }
             zone.position = point(buoy.mark.position)
             strokes.append((zone, style.cueLineWidth))
 
@@ -245,7 +250,7 @@ final class ChartLayer {
             let connector = CGMutablePath()
             connector.move(to: point(gates[0].buoy.mark.position))
             connector.addLine(to: point(gates[1].buoy.mark.position))
-            gateConnector.path = connector.copy(dashingWithPhase: 0, lengths: style.dashes)
+            dash(gateConnector, connector)
             strokes.append((gateConnector, style.cueLineWidth))
             courseLayer.addChild(gateConnector)
         }
@@ -267,7 +272,7 @@ final class ChartLayer {
         let line = CGMutablePath()
         line.move(to: point(course.startLine.pin.position))
         line.addLine(to: point(course.startLine.committee.position))
-        startLine.path = line.copy(dashingWithPhase: 0, lengths: style.dashes)
+        dash(startLine, line)
         strokes.append((startLine, style.cueLineWidth))
         courseLayer.addChild(startLine)
 
@@ -345,6 +350,14 @@ final class ChartLayer {
     private func rescale(_ scale: CGFloat) {
         strokeScale = scale
         for (node, width) in strokes { node.lineWidth = width * scale }
+        dashPattern = style.dashes(atCameraScale: scale)
+        for (node, path) in dashed { node.path = path.copy(dashingWithPhase: 0, lengths: dashPattern) }
+    }
+
+    /// Draws `node` as `path` dashed, now and at every rescale.
+    private func dash(_ node: SKShapeNode, _ path: CGPath) {
+        dashed.append((node, path))
+        node.path = path.copy(dashingWithPhase: 0, lengths: dashPattern)
     }
 
     // MARK: - Tests

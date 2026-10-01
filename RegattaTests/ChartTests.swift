@@ -79,6 +79,25 @@ import RegattaCore
         #expect(scene.chart.lineIsActive)
     }
 
+    /// The dashes scale with the camera like the strokes' widths, so zoomed out they keep their screen length and
+    /// don't close up into a solid line; an empty pattern falls back to the default, never solid.
+    @Test func dashesScaleWithTheCamera() throws {
+        let venue = try VenueFile.bundled(id: "fellmere", version: 1).content
+        let chart = ChartLayer(course: Self.course, venue: venue, pointsPerMeter: GameScene.pointsPerMeter)
+        chart.install(in: SKNode(), courseLayer: SKNode())
+        chart.update(status: .prestart, legIndex: 0, cameraScale: 1)
+        let near = chart.dashPattern
+        chart.update(status: .prestart, legIndex: 0, cameraScale: 3.8)
+        #expect(near == ChartStyle.defaultDashes)
+        #expect(chart.dashPattern == near.map { $0 * 3.8 })
+
+        var style = ChartStyle.standard
+        style.dashes = []
+        #expect(style.dashes(atCameraScale: 2) == ChartStyle.defaultDashes.map { $0 * 2 })
+        style.dashes = [0, 0]
+        #expect(style.dashes(atCameraScale: 1) == ChartStyle.defaultDashes)
+    }
+
     /// The rounding arrow starts on the side a boat comes from and sweeps the way she rounds: anticlockwise to port,
     /// clockwise to starboard.
     @Test func roundingArrowSweepsTheRoundingSide() {
@@ -207,6 +226,40 @@ import RegattaCore
         }
         // The banks are tinted, the channel isn't.
         #expect(tinted > 0 && tinted < current.grid.nodeCount)
+    }
+
+    /// The shallows sprite sits on the depth grid: the texel under each node's world position is that node's own
+    /// tint, so the image is neither flipped nor rotated nor shifted against the grid.
+    @Test func shallowsSpriteLinesUpWithTheGrid() throws {
+        let venue = try VenueFile.bundled(id: "saltings-reach", version: 1).content
+        let current = try #require(venue.current)
+        let grid = current.grid
+        let chart = ChartLayer(course: ChartMarksTests.course, venue: venue, pointsPerMeter: GameScene.pointsPerMeter)
+        let world = SKNode()
+        chart.install(in: world, courseLayer: SKNode())
+        let sprite = try #require(chart.shallows.compactMap { $0 as? SKSpriteNode }.first { $0.texture != nil })
+        let pixels = ChartLayer.shallowsPixels(current)
+        let ppm = GameScene.pointsPerMeter
+        var distinct = Set<[UInt8]>()
+        for row in 0..<grid.rows {
+            for column in 0..<grid.columns {
+                let p = grid.position(column: column, row: row)
+                let local = sprite.convert(CGPoint(x: CGFloat(p.x) * ppm, y: CGFloat(p.y) * ppm), from: world)
+                let u = Int(((local.x / sprite.size.width + 0.5) * CGFloat(grid.columns)).rounded(.down))
+                let v = Int(((local.y / sprite.size.height + 0.5) * CGFloat(grid.rows)).rounded(.down))
+                #expect((0..<grid.columns).contains(u) && (0..<grid.rows).contains(v), "node (\(column), \(row))")
+                guard (0..<grid.columns).contains(u), (0..<grid.rows).contains(v) else { continue }
+                // Image rows run top-down; the sprite's local y runs up.
+                let i = ((grid.rows - 1 - v) * grid.columns + u) * 4
+                let weight = ChartGeometry.shallowsWeight(depth: current.depth(column: column, row: row),
+                                                          maxDepth: current.maxDepth, fraction: ChartStyle.standard.shallowFraction)
+                let expected = ShallowsTint.colour(weight: weight).rgb8
+                #expect(Array(pixels[i..<i + 3]) == expected, "node (\(column), \(row)) drew texel (\(u), \(v))")
+                distinct.insert(expected)
+            }
+        }
+        // The grid isn't uniform, so a misplaced texel shows.
+        #expect(distinct.count > 1)
     }
 
     /// The tint is its own colour through tritanopia (the filter #11 names) and the red-green dichromacies, though not
