@@ -143,11 +143,14 @@ final class BoatNode: SKNode {
             amplitude = max(amplitude, deg2rad(style.flogDegrees))
             flap = 1
         }
-        sail.zRotation = sailAngle + CGFloat(swing * amplitude)
-        // A flapping sail loses its belly; a ghost's hangs limp.
+        // Pinched (#219): the leading edge lifts, a small quick shiver at the luff on top of any flutter.
+        let luff = sin(time * 37 + flutterPhase) * deg2rad(style.pinchLuffDegrees) * pose.luffLift
+        sail.zRotation = sailAngle + CGFloat(swing * amplitude + luff)
+        // A flapping sail loses its belly; a ghost's hangs limp. Pinched it flattens, footed it fills (#219).
         let belly = pose.isGhost
             ? style.ghostSailBelly
-            : 1 - style.flapBellyLoss * flap * (0.5 + 0.5 * sin(time * style.flapBellyRate + flutterPhase))
+            : pose.sailFullness
+                * (1 - style.flapBellyLoss * flap * (0.5 + 0.5 * sin(time * style.flapBellyRate + flutterPhase)))
         sail.xScale = side * CGFloat(belly)
         return isFlogging
     }

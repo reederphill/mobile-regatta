@@ -9,6 +9,12 @@ struct RaceControls: View {
 
     private var isRacing: Bool { session.hud.status.isRacingOrStarting }
 
+    /// A control's height and the row's bottom padding, points.
+    static let controlHeight: CGFloat = 56
+    static let bottomPadding: CGFloat = 16
+    /// How far the row reaches up from the bottom of the safe area: the edge arrow (#122) keeps above it.
+    static let rowHeight = controlHeight + bottomPadding
+
     var body: some View {
         HStack(alignment: .bottom) {
             // Ease holds boats on the line before the gun too (#99).
@@ -27,7 +33,7 @@ struct RaceControls: View {
                 .accessibilityIdentifier("race-protest")
         }
         .padding(.horizontal, 16)
-        .padding(.bottom, 16)
+        .padding(.bottom, Self.bottomPadding)
     }
 
     /// Wall-clock seconds for the Tack/Gybe hold (#222): the hold is the player's, not the simulation's.
@@ -45,7 +51,7 @@ private struct ControlLabel: View {
         Text(title)
             .font(.headline.weight(.heavy))
             .tracking(1.5)
-            .frame(width: width, height: 56)
+            .frame(width: width, height: RaceControls.controlHeight)
             .background(.black.opacity(isHeld ? 0.2 : 0.5), in: .capsule)
             .background(.white.opacity(isHeld ? 0.35 : 0), in: .capsule)
             .overlay(Capsule().strokeBorder(.white, lineWidth: 2))
@@ -199,6 +205,26 @@ struct BoatSpeedProbe: View {
             .foregroundStyle(.clear)
         }
         .frame(width: 1, height: 2)
+        .allowsHitTesting(false)
+    }
+}
+
+/// UI tests only: which boat-side cues the scene draws (#122), as an accessibility value (`race-cues`), e.g.
+/// `laylines=1 ladder=0 vane=1 arrow=0` (`GameScene.cueSummary`). Read about four times a second.
+struct CueProbe: View {
+    let session: GameSession
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+            let value = session.scene.cueSummary
+            Text(value)
+                .accessibilityLabel("Cues")
+                .accessibilityValue(value)
+                .accessibilityIdentifier("race-cues")
+                .font(.system(size: 1))
+                .foregroundStyle(.clear)
+        }
+        .frame(width: 1, height: 1)
         .allowsHitTesting(false)
     }
 }

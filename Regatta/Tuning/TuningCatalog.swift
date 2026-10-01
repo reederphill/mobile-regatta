@@ -300,7 +300,7 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "boat", title: "Boat",
-                note: "How boats heel, flutter and flog, and their wakes and shadow hatches (#117, #121, #220, #222). Drawn only: never logged.",
+                note: "How boats heel, flutter and flog, their wakes and shadow hatches, and the boat-side cues (#117, #121, #122, #220, #222). Drawn only: never logged.",
                 applies: .live,
                 sliders: [
                     // Past 1 still counts: heel is capped at 1 after the gain, so more heels her sooner and
@@ -320,6 +320,22 @@ enum TuningCatalog {
                     boat("wakeFlareGain", "Roll-hit flare", \.wakeFlareGain, 0...2, 0.1),
                     boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.2, 0.005),
                     boat("backwindShare", "Backwind hatch", \.backwindShare, 0...1, 0.05),
+                    // #122: the boat-side cues.
+                    boat("vaneLengthHulls", "Vane length", \.vaneLengthHulls, 0.5...2, 0.1, unit: " hulls"),
+                    boat("vaneLockDegrees", "Vane locks within", \.vaneLockDegrees, 0...5, 0.25, unit: "°"),
+                    boat("grooveCueDeadbandDegrees", "Pinch/foot shows past", \.grooveCueDeadbandDegrees, 0...5, 0.25,
+                         unit: "°"),
+                    boat("grooveCueFullDegrees", "Sail cue full at", \.grooveCueFullDegrees, 2...20, 0.5, unit: "°"),
+                    boat("grooveCueReachDegrees", "Reach past groove", \.grooveCueReachDegrees, 5...40, 1, unit: "°"),
+                    boat("pinchLuffDegrees", "Pinched luff lift", \.pinchLuffDegrees, 0...10, 0.5, unit: "°"),
+                    boat("pinchFlatten", "Pinched flatten", \.pinchFlatten, 0...0.6, 0.05),
+                    boat("footEaseDegrees", "Footed ease", \.footEaseDegrees, 0...15, 0.5, unit: "°"),
+                    boat("footFullness", "Footed fullness", \.footFullness, 0...0.6, 0.05),
+                    boat("laylineAlpha", "Layline alpha", \.laylineAlpha, 0.05...1, 0.05),
+                    boat("ladderLineAlpha", "Ladder line alpha", \.ladderLineAlpha, 0.03...0.6, 0.01),
+                    boat("ladderSpacingMetres", "Ladder spacing", \.ladderSpacingMetres, 25...300, 5, unit: " m"),
+                    boat("edgeArrowInsetSide", "Edge arrow side inset", \.edgeArrowInsetSide, 0...80, 2, unit: " pt"),
+                    boat("edgeArrowClearance", "Edge arrow HUD clearance", \.edgeArrowClearance, 0...60, 2, unit: " pt"),
                 ]),
             TuningGroup(
                 id: "later", title: "Later",

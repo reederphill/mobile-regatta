@@ -224,11 +224,15 @@ _Avoid_: prop, feature
 **Layline**:
 The line from a mark along which a boat, at her best angle to the wind, can just fetch it without another tack or gybe. Drawn from the wind only, never from current.
 
+**Wind vane**:
+The thin vermillion arrow under your hull, one hull length, pointing to the wind over the ground. No label and no numbers; it carries the groove tick.
+_Avoid_: wind arrow, wind indicator
+
 **Ladder line**:
-A line drawn across the course axis (the seeded mean wind direction, fixed for the race), so boats on the same line are level in the race to windward or leeward.
+A line drawn across the course axis (the seeded mean wind direction, fixed for the race), so boats on the same line are level in the race to windward or leeward. On the W → O reach (a leg that runs more across the axis than along it) the lines run across the leg instead (#267, ruling 2), so boats on one line are level on the reach, as their **Ladder distance** reads them.
 
 **Ladder distance**:
-How far a boat still has to go to finish, counting only progress across the ladder lines on her current leg (along the course axis) plus the full length of each later leg measured the same way. On the reach, which crosses no ladder lines, it is the distance along the leg instead, so the total runs on across each rounding without a jump. Orders boats racing and places those unfinished when the race ends; the gap to the leader is the difference.
+How far a boat still has to go to finish, counting only progress across the ladder lines on her current leg (along the course axis) plus the full length of each later leg measured the same way. On the W → O reach, where the ladder lines run across the leg (#267, ruling 2), it is the distance along the leg to its mark, so the total runs on across each rounding without a jump. Orders boats racing and places those unfinished when the race ends; the gap to the leader is the difference.
 _Avoid_: distance to finish (the path length)
 
 **Gap to leader**:
@@ -362,6 +366,9 @@ _Avoid_: autopilot, lock, helm (to helm is what a player does)
 
 **Groove**:
 The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. The autohelm snaps to it when let go close to it and follows it as the wind strength changes.
+
+**Groove tick**:
+A tick on the wind vane at the groove on the boat's tack. The vane locks to it while the autohelm holds the groove; a pinch or foot shows as a short arc from it to the angle held.
 
 **Tack cost**:
 What a tack loses against sailing on: the distance made good upwind, in hull lengths, over the tack and the speed she takes to get back. About a hull length from close-hauled with the autohelm sailing the tap; it decides which shifts are worth tacking on.
