@@ -79,6 +79,10 @@ struct TickFrame {
     /// end and the time limit), nil while nobody has: the HUD's yellow countdown (#30, #114). Read from the race,
     /// never worked out here. Online it is the prediction's, so it appears once the server has told it of a finish.
     let closeTick: Int?
+    /// Each seat's gap to the leader in ladder metres (`Race.gapsToLeader()`, #267, #268), by seat, nil where the race
+    /// gives none: the live leaderboard's. Read from the race once per tick, never worked out here. Online it is the
+    /// prediction's (#64).
+    let gaps: [Double?]
 
     /// Race clock in seconds.
     var time: Double { Double(tick) / Double(Race.tickRate) }
@@ -97,11 +101,12 @@ struct TickFrame {
         self.isOver = isOver
         heldInputs = race.heldInputs
         closeTick = race.firstFinishTime != nil ? race.closeTick : nil
+        gaps = race.gapsToLeader()
     }
 
-    /// `heldInputs` nil holds every seat neutral.
+    /// `heldInputs` nil holds every seat neutral; `gaps` nil gives every seat none.
     init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool, heldInputs: [BoatInput]? = nil,
-         closeTick: Int? = nil) {
+         closeTick: Int? = nil, gaps: [Double?]? = nil) {
         self.tick = tick
         self.boats = boats
         self.standings = standings
@@ -109,6 +114,7 @@ struct TickFrame {
         self.isOver = isOver
         self.heldInputs = heldInputs ?? Array(repeating: .neutral, count: boats.count)
         self.closeTick = closeTick
+        self.gaps = gaps ?? Array(repeating: nil, count: boats.count)
     }
 
     /// This frame a tick earlier, each boat moved back along its velocity: what the renderer draws from
@@ -120,7 +126,7 @@ struct TickFrame {
             return boat
         }
         return TickFrame(tick: tick - 1, boats: moved, standings: standings, wind: wind, isOver: isOver, heldInputs: heldInputs,
-                         closeTick: closeTick)
+                         closeTick: closeTick, gaps: gaps)
     }
 
     /// Where `seat` stands in the fleet, from 1.

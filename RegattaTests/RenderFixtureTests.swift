@@ -126,6 +126,44 @@ import UIKit
         }
     }
 
+    /// The live leaderboard fixtures (#268): compact through every filter, and tapped open, on `hud-racing`'s tick.
+    /// The board is opt-in, so #114's HUD fixtures draw without it and keep their references.
+    @Test func leaderboardFixturesShowTheBoard() throws {
+        let (compact, log) = try RenderFixture.load(named: "hud-leaderboard", in: Self.fixtures)
+        let session = try GameSession(fixture: compact, log: log)
+        #expect(session.controls.showsLeaderboard && !session.isLeaderboardExpanded)
+        let board = session.hud.leaderboard
+        #expect(board.isVisible)
+        let lines = board.entries(expanded: false).map { entry -> String in
+            switch entry {
+            case .row(let row): "\(row.place):\(row.gap.text)\(row.isMe ? "*" : "")"
+            case .separator: "sep"
+            }
+        }
+        // The log's own seat, 4th of 6 at the tick: the leader, a skip, the boat ahead, you and the boat behind.
+        #expect(lines == ["1:Leader", "sep", "3:+6 m", "4:+10 m*", "5:+32 m"])
+
+        for vision in VisionFilter.allCases where vision != .none {
+            let (fixture, _) = try RenderFixture.load(named: "hud-leaderboard-\(vision.rawValue)", in: Self.fixtures)
+            var expected = compact
+            expected.vision = vision
+            #expect(fixture == expected, "\(vision)")
+        }
+        let (expanded, _) = try RenderFixture.load(named: "hud-leaderboard-expanded", in: Self.fixtures)
+        var expected = compact
+        expected.hud?.leaderboard = .expanded
+        #expect(expanded == expected)
+        let open = try GameSession(fixture: expanded, log: log)
+        #expect(open.isLeaderboardExpanded)
+        open.refreshHUD()
+        #expect(open.isLeaderboardExpanded, "a frozen fixture's board stays open")
+
+        for name in ["hud-prestart", "hud-racing", "hud-ocs", "hud-markroom", "hud-afterfirstfinish"] {
+            let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            #expect(try !GameSession(fixture: fixture, log: log).controls.showsLeaderboard, "\(name)")
+        }
+    }
+
     /// The reference diffs cover every filter (#111): each has a fixture, the prestart one seen through it.
     @Test func everyVisionFilterHasAPrestartFixture() throws {
         let (prestart, _) = try RenderFixture.load(named: "prestart", in: Self.fixtures)

@@ -45,4 +45,46 @@ final class SettingsUITests: RaceUITestCase {
         flip(ladder)
         XCTAssertEqual(value(ladder), before, "the toggle didn't flip back")
     }
+
+    /// The live leaderboard (#268) is on by default: up on the HUD once the gun has gone. Turned off in Settings, a
+    /// race after the gun has no board. The test turns it back on, so the next test starts from the defaults. The
+    /// waits add up to under 3.5 min (`RaceUITestCase`): each race's start sequence runs at 8× (about 8-15 s).
+    @MainActor func testLiveLeaderboardToggleHidesBoard() {
+        var app = launchRace(["-timescale", "8"])
+        XCTAssertTrue(waitForGun(app), "the race never reached the gun")
+        let board = app.descendants(matching: .any)["race-leaderboard"].firstMatch
+        XCTAssertTrue(board.waitForExistence(timeout: 15), "no live leaderboard after the gun with the setting on")
+        app.terminate()
+
+        app = openSettings()
+        var toggle = app.switches["settings-liveLeaderboard"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 20), "no Live leaderboard toggle")
+        if !toggle.isHittable { app.swipeUp() }
+        XCTAssertEqual(value(toggle), "1", "Live leaderboard isn't on by default")
+        flip(toggle)
+        XCTAssertEqual(value(toggle), "0", "the toggle didn't flip off")
+        app.terminate()
+
+        app = launchRace(["-timescale", "8"])
+        XCTAssertTrue(waitForGun(app), "the race never reached the gun")
+        XCTAssertFalse(app.descendants(matching: .any)["race-leaderboard"].firstMatch.waitForExistence(timeout: 5),
+                       "the live leaderboard shows with the setting off")
+        app.terminate()
+
+        app = openSettings()
+        toggle = app.switches["settings-liveLeaderboard"].firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 20), "no Live leaderboard toggle")
+        if !toggle.isHittable { app.swipeUp() }
+        flip(toggle)
+        XCTAssertEqual(value(toggle), "1", "the toggle didn't flip back on")
+    }
+
+    /// Waits up to 60 s for the race clock to pass the gun, read from the uitesting status probe's value (whole
+    /// seconds from the gun).
+    @MainActor private func waitForGun(_ app: XCUIApplication) -> Bool {
+        let status = app.descendants(matching: .any)["race-status"].firstMatch
+        return watch(status, until: Date.now.addingTimeInterval(60)) { snapshot in
+            ((snapshot.value as? String).flatMap { Int($0) } ?? -1) >= 0
+        }.seen
+    }
 }

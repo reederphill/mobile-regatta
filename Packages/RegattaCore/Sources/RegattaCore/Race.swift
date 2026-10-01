@@ -1072,7 +1072,7 @@ public final class Race {
     /// disqualified is RET, placed one by one in reverse leave order, the latest gone highest (G3: by when
     /// each went, not by `atTick`); any other human gone at the close is RET too, tied behind them. A seat
     /// given away before the gun (`SeatEvent.Kind.leftBeforeGun`) is a fleet bot's (#16) and scored as one.
-    /// Bots still racing are placed by distance, and a human who finished keeps the finish.
+    /// Bots still racing are placed by ladder distance, and a human who finished keeps the finish.
     ///
     /// Returns false, changing nothing, if the race is over, `atTick` isn't `tick`, or `leaveOrder` names a
     /// seat that isn't one of the race's human seats, or names one twice. The log records the close
@@ -1264,22 +1264,32 @@ public final class Race {
 
     /// Metres by the ladder `seat` is behind the leader (#267): her `ladderDistanceToFinish(of:)` less the least
     /// of any boat racing, or 0 while a boat has finished. A finished boat's own gap is 0. Nil for a boat not
-    /// yet started (prestart or OCS), disqualified, or whose player has gone (#30). A gone boat can still be
-    /// the leader.
+    /// yet started (prestart or OCS), disqualified, or whose player has gone and who hasn't finished (#30). A
+    /// gone boat can still be the leader. `gapsToLeader()[seat]`: for the whole fleet, call that once.
     public func gapToLeader(of seat: Int) -> Double? {
-        let boat = boats[seat]
-        switch boat.status {
-        case .prestart, .ocs, .dsq: return nil
-        case .finished, .racing: break
+        gapsToLeader()[seat]
+    }
+
+    /// `gapToLeader(of:)` for every seat, by seat (#268): the seats' presence, each racing boat's ladder
+    /// distance and the leader's are worked out once, so a client can read the whole fleet every tick.
+    public func gapsToLeader() -> [Double?] {
+        let presence = presence()
+        let anyFinished = boats.contains { $0.status == .finished }
+        let ladder = boats.map { $0.status == .racing ? ladderDistanceToFinish(of: $0) : .infinity }
+        let leader = ladder.filter(\.isFinite).min()
+        return boats.indices.map { seat -> Double? in
+            let boat = boats[seat]
+            switch boat.status {
+            case .prestart, .ocs, .dsq: return nil
+            case .finished, .racing: break
+            }
+            if isGone(seat, presence) { return nil }
+            if boat.status == .finished { return 0 }
+            let mine = ladder[seat]
+            guard mine.isFinite else { return nil }
+            if anyFinished { return mine }
+            return mine - (leader ?? mine)
         }
-        if isGone(seat, presence()) { return nil }
-        if boat.status == .finished { return 0 }
-        let mine = ladderDistanceToFinish(of: boat)
-        guard mine.isFinite else { return nil }
-        if boats.contains(where: { $0.status == .finished }) { return mine }
-        let leader = boats.lazy.filter { $0.status == .racing }.map(ladderDistanceToFinish(of:))
-            .filter(\.isFinite).min() ?? mine
-        return mine - leader
     }
 
     /// Whether `seat`'s player has gone and her boat is neither finished nor disqualified: RET at a close.
@@ -1296,7 +1306,7 @@ public final class Race {
     /// `isReachLeg` and `ladderAfterTarget` for a course and its legs' `targets`. Each leg runs from the last
     /// leg's target (the first from the start line's centre) to its own, the finish leg to the nearest point of
     /// the finish line.
-    private static func ladderLegs(_ targets: [Vec2], course: CourseLayout) -> (isReach: [Bool], after: [Double]) {
+    static func ladderLegs(_ targets: [Vec2], course: CourseLayout) -> (isReach: [Bool], after: [Double]) {
         let axis = course.upwind
         let legs = course.legs
         var isReach = Array(repeating: false, count: legs.count)

@@ -155,4 +155,119 @@ import Testing
         boat.position = Collision.closestPoint(on: course.finishLine.segment, to: boat.position)
         #expect(abs(race.ladderDistanceToFinish(of: boat)) < 1e-9, "on the finish line")
     }
+
+    // MARK: #268: the whole fleet's gaps once per tick, and #267's review
+
+    /// `gapToLeader(of:)` as #267 worked it, one seat at a time, for checking `gapsToLeader()` against.
+    /// `gone`: the seats whose player has gone.
+    static func reference(_ race: Race, _ seat: Int, gone: Set<Int> = []) -> Double? {
+        let boat = race.boats[seat]
+        switch boat.status {
+        case .prestart, .ocs, .dsq: return nil
+        case .finished, .racing: break
+        }
+        if gone.contains(seat), !boat.isGhost { return nil }
+        if boat.status == .finished { return 0 }
+        let mine = race.ladderDistanceToFinish(of: boat)
+        guard mine.isFinite else { return nil }
+        if race.boats.contains(where: { $0.status == .finished }) { return mine }
+        let leader = race.boats.lazy.filter { $0.status == .racing }.map(race.ladderDistanceToFinish(of:))
+            .filter(\.isFinite).min() ?? mine
+        return mine - leader
+    }
+
+    static func expectGapsAgree(_ race: Race, gone: Set<Int> = [], sourceLocation: SourceLocation = #_sourceLocation) {
+        let gaps = race.gapsToLeader()
+        #expect(gaps.count == race.boats.count, sourceLocation: sourceLocation)
+        for seat in race.boats.indices {
+            let expected = reference(race, seat, gone: gone)
+            #expect(gaps[seat] == expected, "seat \(seat)", sourceLocation: sourceLocation)
+            #expect(race.gapToLeader(of: seat) == gaps[seat], "seat \(seat)", sourceLocation: sourceLocation)
+        }
+    }
+
+    /// `gapsToLeader()` gives, bit for bit, the gaps #267's one-seat `gapToLeader(of:)` gave, over the
+    /// scenarios above: level, wide, legs apart, on the reach, a finished leader with OCS, DSQ and gone.
+    @Test func gapsToLeaderMatchesOneSeatAtATime() throws {
+        let race = Self.race(seats: 6)
+        let course = race.course
+        let (w, o, gate) = Self.targets(course)
+        for seat in race.boats.indices { race.record(.joined(.human), seat: seat) }
+        Self.expectGapsAgree(race)
+        try jump(race, to: 600) { snapshot in
+            placeRacing(&snapshot.seats[0].boat, leg: 0, at: w - course.upwind * 40 + course.right * 15)
+            placeRacing(&snapshot.seats[1].boat, leg: 2, at: o)
+            placeRacing(&snapshot.seats[2].boat, leg: 1, at: w + (o - w) / 3 + course.upwind * 3)
+            placeRacing(&snapshot.seats[3].boat, leg: 3, at: gate)
+            snapshot.seats[4].boat.status = .dsq
+            placeRacing(&snapshot.seats[5].boat, leg: 0, at: w - course.upwind * 40 - course.right * 200)
+        }
+        Self.expectGapsAgree(race)
+        #expect(race.gapsToLeader()[3] == 0, "the leader")
+        race.record(.dropped, seat: 3)
+        Self.expectGapsAgree(race, gone: [3])
+        #expect(race.gapsToLeader()[3] == nil, "gone, but still the leader the others are measured from")
+        #expect(try #require(race.gapsToLeader()[0]) > 0)
+
+        try jump(race, to: 601) { snapshot in
+            snapshot.seats[1].boat.status = .finished
+            snapshot.seats[1].boat.place = 1
+            snapshot.seats[1].boat.finishTime = 5
+            snapshot.firstFinishTime = 5
+            snapshot.seats[2].boat.status = .ocs
+        }
+        Self.expectGapsAgree(race, gone: [3])
+    }
+
+    /// #267's review: a boat that finished and whose player then left keeps her gap of 0 (she isn't RET:
+    /// her finish stands), while a racing boat whose player dropped has none.
+    @Test func finishedThenGoneKeepsGapZero() throws {
+        let race = Self.race(seats: 3)
+        let course = race.course
+        let (w, _, gate) = Self.targets(course)
+        for seat in race.boats.indices { race.record(.joined(.human), seat: seat) }
+        try jump(race, to: 600) { snapshot in
+            snapshot.seats[0].boat.status = .finished
+            snapshot.seats[0].boat.place = 1
+            snapshot.seats[0].boat.finishTime = 5
+            snapshot.firstFinishTime = 5
+            placeRacing(&snapshot.seats[1].boat, leg: 3, at: gate + (w - gate) * 0.5)
+            placeRacing(&snapshot.seats[2].boat, leg: 3, at: gate)
+        }
+        race.record(.left, seat: 0)
+        race.record(.dropped, seat: 2)
+        #expect(race.gapToLeader(of: 0) == 0, "finished, then left: the finish stands")
+        #expect(race.gapsToLeader()[0] == 0)
+        #expect(race.gapToLeader(of: 1) == race.ladderDistanceToFinish(of: race.boats[1]))
+        #expect(race.gapToLeader(of: 2) == nil, "racing, then dropped")
+    }
+
+    /// `isReachLeg`'s boundary is strict: a leg exactly as far across the axis as along it is a beat or a
+    /// run, measured along the axis; a hair further across is a reach, measured along the leg. Either way the
+    /// total runs on across the rounding.
+    @Test func reachLegBoundaryIsStrict() throws {
+        let base = Self.race(seats: 2).course
+        func mark(_ name: String, _ x: Double, _ y: Double) -> CourseLayout.Mark {
+            CourseLayout.Mark(name: name, position: Vec2(x, y), radius: 1)
+        }
+        // Axis 0: up the course is +y and right is +x exactly, so the dot products are exact.
+        let line = CourseLayout.Line(pin: mark("pin", -50, 0), committee: mark("committee", 50, 0))
+        let course = CourseLayout(
+            axis: 0, beat: base.beat, startLine: line, finishLine: line, elements: base.elements,
+            legs: [.round(0), .round(1), .finish], raceArea: base.raceArea, land: [],
+            edgeSpeedRetention: base.edgeSpeedRetention, placement: base.placement, zoneRadius: base.zoneRadius)
+        #expect(course.upwind == Vec2(0, 1) && course.right == Vec2(1, 0))
+
+        for (across, isReach) in [(40.0, false), (40.0.nextUp, true)] {
+            let first = Vec2(across, 40)
+            let second = first + Vec2(0, 100)
+            let targets = [first, second, Vec2(across, 0)]
+            let ladder = Race.ladderLegs(targets, course: course)
+            #expect(ladder.isReach == [isReach, false, false], "across \(across)")
+            // At the first target: leg 0's total (nothing left of it) equals leg 1's from the same point.
+            let onLeg1 = abs((second - first).dot(course.upwind)) + ladder.after[1]
+            #expect(abs(ladder.after[0] - onLeg1) < 1e-9)
+            #expect(abs(ladder.after[1] - second.y) < 1e-9, "the finish leg, down the axis to the line")
+        }
+    }
 }
