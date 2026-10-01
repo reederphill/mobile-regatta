@@ -14,7 +14,8 @@ import RegattaLoadClient
 //
 // Without --token it creates a dev instant race (the server must run with ENV=dev) with N clients and
 // sails every seat at once. With --token it sails that one seat. Exit status 0 if every client sailed the
-// race to its close (and, with --check-bandwidth, stayed within #27's budget), 1 otherwise, 2 for bad usage.
+// race to its close, received no wind key early nor the wind seed (#95), and, with --check-bandwidth,
+// stayed within #27's budget; 1 otherwise, 2 for bad usage.
 
 let usage = """
     usage: regatta-loadclient [--host H] [--port P] [--clients N] [--race-seconds S] [--start-seconds S]
@@ -90,6 +91,11 @@ for result in results {
     case .success(let report):
         reports.append(report)
         if !report.completed { ok = false }
+        // The wind reveal audit (#95) always gates: a key early or the wind seed on the wire fails the run.
+        for violation in report.auditViolations {
+            ok = false
+            FileHandle.standardError.write(Data("wind audit, seat \(report.seat): \(violation)\n".utf8))
+        }
         if checkBandwidth {
             for violation in budget.violations(report) {
                 ok = false

@@ -142,9 +142,29 @@ public struct RosterEntry: Equatable, Sendable {
 }
 
 /// Wind keys on the wire are RegattaCore's `WindKey` (#75) in its own fixed 64-byte encoding
-/// (`WindKey.bytes`), revealed about a window ahead (ADR 0001; the schedule is #95's). A key is derived
-/// one way from the wind seed, which is never on the wire.
+/// (`WindKey.bytes`). A key is derived one way from the wind seed, which is never on the wire.
+///
+/// The reveal schedule (ADR 0001, #95): the server reveals key k at tick `windowStart(k) − revealLeadTicks`,
+/// so a client at most `revealLeadTicks` ahead of the server holds key k by the time it reaches window k.
+/// Key k carries the knot ending window k, so exact foresight of the shift is 0–30 s. Keys revealed
+/// before the gun follow the same rule from the window origin: the first `RaceStart` carries every key
+/// whose reveal tick has passed.
 public enum WindKeyWire {
+    /// How far ahead of its window a key is revealed, in ticks: the 1 s input-ahead cap
+    /// (`InputCaps.maxTicksAhead`, `LeadController.maxLead`), so a client at its most-ahead lead still
+    /// holds key k when it reaches window k.
+    public static let revealLeadTicks = 30
+
+    /// The server tick at which key `window` is revealed.
+    public static func revealTick(of window: Int, windows: WindWindows) -> Int {
+        windows.start(of: window) - revealLeadTicks
+    }
+
+    /// The highest window whose key is revealed once the server has simulated `tick`.
+    public static func lastRevealedWindow(atTick tick: Int, windows: WindWindows) -> Int {
+        windows.window(containing: tick + revealLeadTicks)
+    }
+
     /// The highest window a key on the wire may have: past the longest sequence and
     /// `WorldSnapshot.maxTick`, so a hostile key can't make a receiver's `WindKeyChain` grow without bound.
     public static let maxWindow = (RaceStart.maxStartSequenceTicks + WorldSnapshot.maxTick) / WindWindows.ticksPerWindow + 2
