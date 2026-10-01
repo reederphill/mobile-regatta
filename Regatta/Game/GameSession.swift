@@ -141,8 +141,22 @@ final class GameSession {
 
     /// The Ease button is held or let go (#99).
     func setEase(_ easing: Bool) {
+        if isEasing && !easing {
+            easeReleases.count += 1
+            easeReleases.knots = knots(metresPerSecond: myBoat.speed)
+        }
         isEasing = easing
     }
+
+    /// VoiceOver's Ease (#112): an accessibility action can't hold, so the first activation holds Ease and the
+    /// second lets it go.
+    func toggleEase() {
+        setEase(!isEasing)
+    }
+
+    /// How many times Ease has been let go, and your boat's speed in knots the moment it last was: UI tests read it
+    /// (`race-ease-release`), since a test's press returns only after the release, with the boat already speeding up.
+    @ObservationIgnored private(set) var easeReleases = (count: 0, knots: 0.0)
 
     private var myBoat: Boat { driver.currentFrame.boats[driver.myBoatIndex] }
 
