@@ -190,7 +190,7 @@ import Glibc
 ///    astern outboard) and its far edge flat, 2 astern, 1 wide, its loss 0.2 full along the stern edge and fading to
 ///    nothing at the far edge (`BoatClass.WindShadow.backwindSpan(out:)`). Its length astern scales with her speed
 ///    through the water, full size at 6 knots, to 1.5 times at 9 and nothing when stopped (`backwindScale(speed:)`),
-///    and she casts none while running, her true wind angle 115 degrees or more (`ShadowCone.isRunning`). Files without
+///    and she loses it gradually across a reach, full at 90 degrees true wind angle and none from 115, running (`ShadowCone.backwindPresence`). Files without
 ///    the new optional fields (skiff@4, ilca-dinghy@4 and before) sail as on 29, bit for bit.
 public let simulationRevision = 30
 

@@ -190,4 +190,68 @@ import Testing
         #expect(ShadowShapes.backwindCorners(ShadowCone(caster: boat, shadow: banded.windShadow)) == nil)
         #expect(Self.drawn(boat, boatClass: banded).effects.backwind.isHidden)
     }
+
+    /// Her cone and backwind trail her (`BoatStyle.shadowFollowSeconds`): after she turns they turn after her, over the
+    /// time constant, the short way round, and settle on hers; a settled fixture, or no time constant, draws them at hers.
+    @Test func shadowAndBackwindTrailHerTurn() {
+        let boatClass = Self.boatClass
+        let before = Self.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
+        var after = before
+        after.heading = deg2rad(-100)
+        after.apparentWind = Wind(direction: deg2rad(-55), speed: 9)
+        func draw(_ effects: BoatEffects, _ boat: Boat, dt: Double, settled: Bool = false, style: BoatStyle = .standard) {
+            effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass), style: style,
+                           quality: .full, time: 0, dt: dt, settled: settled, isFlogging: false)
+        }
+        let effects = BoatEffects(seat: 2, boatClass: boatClass, pointsPerMeter: Self.ppm, style: .standard)
+        draw(effects, before, dt: 0) // the first frame draws at hers
+        let (cone0, backwind0) = (effects.cone.zRotation, effects.backwind.zRotation)
+        #expect(abs(backwind0 - CGFloat(-before.heading)) < 1e-9)
+
+        draw(effects, after, dt: 0.1)
+        let (cone1, backwind1) = (effects.cone.zRotation, effects.backwind.zRotation)
+        #expect(abs(cone1 - cone0) > 1e-3 && abs(cone1 - CGFloat(-(after.apparentWind.direction + .pi))) > 1e-3, "partway: the cone")
+        #expect(abs(backwind1 - backwind0) > 1e-3 && abs(backwind1 - CGFloat(-after.heading)) > 1e-3, "partway: the backwind")
+        // Towards hers, not away: each step closes on the target.
+        let target = CGFloat(-after.heading)
+        var last = abs(backwind1 - target)
+        for _ in 0..<80 {
+            draw(effects, after, dt: 0.1)
+            let now = abs(effects.backwind.zRotation - target)
+            #expect(now <= last + 1e-9)
+            last = now
+        }
+        #expect(last < 1e-3 && abs(effects.cone.zRotation - CGFloat(-(after.apparentWind.direction + .pi))) < 1e-3, "settles on hers")
+
+        // Settled, or with no time constant, it is at hers at once.
+        let rigid = BoatEffects(seat: 3, boatClass: boatClass, pointsPerMeter: Self.ppm, style: .standard)
+        draw(rigid, before, dt: 0, settled: true)
+        draw(rigid, after, dt: 0.1, settled: true)
+        #expect(abs(rigid.backwind.zRotation - target) < 1e-9)
+        var style = BoatStyle.standard
+        style.shadowFollowSeconds = 0
+        let none = BoatEffects(seat: 4, boatClass: boatClass, pointsPerMeter: Self.ppm, style: style)
+        draw(none, before, dt: 0, style: style)
+        draw(none, after, dt: 0.1, style: style)
+        #expect(abs(none.backwind.zRotation - target) < 1e-9)
+    }
+
+    /// Across a reach the backwind fades with her true wind angle rather than blinking out: full alpha upwind, a share of
+    /// it between the class's fade start and running angle, hidden from the running angle (`ShadowCone.backwindPresence`).
+    @Test func backwindFadesAcrossAReach() {
+        let shadow = Self.boatClass.windShadow
+        var alphas: [Double: CGFloat] = [:]
+        for degrees in [45.0, 90, 100, 110, 114, 120] {
+            let boat = Self.boat(headingDegrees: degrees, boomSide: .starboard, apparentDegrees: degrees / 2)
+            let (_, effects) = Self.drawn(boat, boatClass: Self.boatClass)
+            let presence = ShadowCone(caster: boat, shadow: shadow).backwindPresence
+            #expect(effects.backwind.isHidden == (presence <= 0), "\(degrees)°")
+            alphas[degrees] = effects.backwind.alpha
+            if presence > 0 {
+                let full = CGFloat(BoatStyle.standard.coneAlpha * BoatStyle.standard.backwindShare)
+                #expect(abs(effects.backwind.alpha - full * CGFloat(presence)) < 1e-6, "\(degrees)°")
+            }
+        }
+        #expect(alphas[45] == alphas[90] && alphas[90]! > alphas[100]! && alphas[100]! > alphas[110]! && alphas[110]! > alphas[114]!)
+    }
 }

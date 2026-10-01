@@ -202,6 +202,11 @@ public struct BoatClass: DataFileContent, Equatable {
         /// The true wind angle, radians, from which she is running and casts no backwind (optional,
         /// `runningFromDegrees`): nil, she casts it on every point of sail (`ShadowCone`).
         public var backwindRunningAngle: Double?
+        /// How far before `backwindRunningAngle` the backwind starts to fade, radians (optional,
+        /// `runningFadeDegrees`; 0 when absent, so it is switched off at the running angle with no fade): its loss falls
+        /// straight from full that far forward of it to nothing at it, so she loses it gradually bearing away
+        /// across a reach and gains it back coming up (`ShadowCone.backwindPresence`).
+        public var backwindRunningFade = 0.0
         /// The speed, m/s, at which the backwind trapezoid is its full size (optional, `speedScale.referenceKnots`), and
         /// the most it grows to (`speedScale.maxScale`, 1.5 when absent): the trapezoid's length astern scales with her
         /// speed through the water, in proportion, from nothing when stopped (`backwindScale(speed:)`). Nil: it is
@@ -385,6 +390,8 @@ private struct BoatClassSchema2: Decodable {
             let slantedAtStern: Bool?
             /// The true wind angle from which she is running and casts none (`backwindRunningAngle`). Optional.
             let runningFromDegrees: Double?
+            /// The backwind fades out over this many degrees before the running angle (`backwindRunningFade`). Optional.
+            let runningFadeDegrees: Double?
             /// The trapezoid grows with her speed (`backwindScaleSpeed`, `backwindMaxScale`). Optional.
             struct SpeedScale: Decodable {
                 let referenceKnots: Double
@@ -487,7 +494,11 @@ private struct BoatClassSchema2: Decodable {
                   "a backwind slanted at the stern needs an inner length")
         if let running = windShadow.backwind.runningFromDegrees {
             try check(running > 0 && running <= 180, "backwind running angle must be above 0 and at most 180°")
+            try check((windShadow.backwind.runningFadeDegrees ?? 0) >= 0 && (windShadow.backwind.runningFadeDegrees ?? 0) <= running,
+                      "backwind running fade must be 0 up to the running angle")
         }
+        try check(windShadow.backwind.runningFadeDegrees == nil || windShadow.backwind.runningFromDegrees != nil,
+                  "a backwind running fade needs a running angle")
         if let scale = windShadow.backwind.speedScale {
             try check(windShadow.backwind.innerLengthHullLengths != nil && positive(scale.referenceKnots)
                       && (scale.maxScale ?? 1.5) >= 1, "a backwind speed scale needs an inner length, a positive reference speed and a max scale of 1 or more")
@@ -533,6 +544,7 @@ private struct BoatClassSchema2: Decodable {
                 backwindInnerLength: windShadow.backwind.innerLengthHullLengths.map { $0 * length },
                 backwindSternSlant: windShadow.backwind.slantedAtStern ?? false,
                 backwindRunningAngle: windShadow.backwind.runningFromDegrees.map(deg2rad),
+                backwindRunningFade: deg2rad(windShadow.backwind.runningFadeDegrees ?? 0),
                 backwindScaleSpeed: windShadow.backwind.speedScale.map { metresPerSecond(knots: $0.referenceKnots) },
                 backwindMaxScale: windShadow.backwind.speedScale?.maxScale ?? 1.5,
                 coneFromHull: windShadow.coneFromBowAndStern ?? false,

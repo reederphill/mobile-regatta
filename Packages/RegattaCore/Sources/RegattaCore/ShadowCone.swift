@@ -105,6 +105,18 @@ public struct ShadowCone: Sendable, Equatable {
         return twa >= limit
     }
 
+    /// How much of her backwind she casts, 1 down to 0: all of it forward of her class's running fade, falling
+    /// straight to none at the running angle (`BoatClass.WindShadow.backwindRunningFade`), so bearing away across a
+    /// reach fades it out and coming up fades it back in. 1 for a class with no running angle, and when her angle
+    /// isn't known.
+    public var backwindPresence: Double {
+        guard let limit = shadow.backwindRunningAngle, let twa = trueWindAngle else { return 1 }
+        guard twa < limit else { return 0 }
+        let band = shadow.backwindRunningFade
+        guard band > 0, twa > limit - band else { return 1 }
+        return (limit - twa) / band
+    }
+
     /// Whether `p` is inside this boat's backwind trapezoid (#298); false for a class with #79's band.
     public func isInBackwind(_ p: Vec2) -> Bool { backwindFactor(at: p) < 1 }
 
@@ -155,9 +167,10 @@ public struct ShadowCone: Sendable, Equatable {
     /// from P1, her windward stern corner (`BoatClass.WindShadow.sternCorner`): it reaches `backwindWidth` out along
     /// the stern line, and astern between the start and end of its span there (`BoatClass.WindShadow.backwindSpan(out:)`),
     /// one of whose edges slants. The loss is full at its start (the stern edge) and fades straight to nothing at its
-    /// end (the far edge). Nothing while she is running.
+    /// end (the far edge), all of it scaled by `backwindPresence`: less across a reach, nothing while she is running.
     private func trapezoidFactor(at offset: Vec2) -> Double {
-        guard !isRunning else { return 1 }
+        let presence = backwindPresence
+        guard presence > 0 else { return 1 }
         let out = offset.dot(windward) - shadow.sternCorner.x
         // Her speed scales the trapezoid's length astern: a boat stopped casts none (`backwindScale(speed:)`).
         let scale = shadow.backwindScale(speed: speed)
@@ -165,7 +178,7 @@ public struct ShadowCone: Sendable, Equatable {
         let astern = (shadow.sternCorner.y - offset.dot(forward)) / scale
         guard out > 0, out < shadow.backwindWidth, astern > 0, let span = shadow.backwindSpan(out: out) else { return 1 }
         guard astern > span.start, astern < span.end else { return 1 }
-        return 1 - shadow.backwindLoss * (1 - (astern - span.start) / (span.end - span.start))
+        return 1 - shadow.backwindLoss * presence * (1 - (astern - span.start) / (span.end - span.start))
     }
 
     /// The wind multiplier `cones` leave at `p` together: each one's factor multiplied, never below

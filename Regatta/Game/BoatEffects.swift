@@ -41,6 +41,8 @@ final class BoatEffects {
     private let ppm: CGFloat
     private let boatClass: BoatClass
     private let hasBackwind: Bool
+    /// The heading and apparent wind her cone and backwind were drawn along last frame, trailing hers (`follow`).
+    private var followed: (heading: Double, wind: Double)?
     /// The wake drawn last frame, eased towards each frame's (`BoatStyle.wakeEaseRate`).
     private(set) var shape: WakeShape?
     private var flare = FlareTimer()
@@ -84,22 +86,30 @@ final class BoatEffects {
                 settled: Bool, isFlogging: Bool) {
         let point = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
 
+        // Her shadow and backwind trail her: they turn after her heading and her apparent wind, not with them, as the air
+        // she disturbed does (`BoatStyle.shadowFollowSeconds`). Drawn only; core's cone and backwind are cast at once.
+        let followed = follow(heading: boat.heading, wind: boat.apparentWind.direction, dt: dt,
+                              seconds: style.shadowFollowSeconds, settled: settled)
+        let core = ShadowCone(apex: boat.position, apparentWindDirection: followed.wind, heading: followed.heading,
+                              windwardSide: boat.tack, shadow: boatClass.windShadow, trueWindAngle: boat.twa,
+                              speed: boat.speedThroughWater)
+
         cone.isHidden = pose.isGhost
         cone.position = point
-        cone.zRotation = CGFloat(-(boat.apparentWind.direction + .pi)) // the cone follows her apparent wind (#10)
-        let core = ShadowCone(caster: boat, shadow: boatClass.windShadow)
+        cone.zRotation = CGFloat(-(followed.wind + .pi)) // the cone follows her apparent wind (#10)
         coneShader.update(nearA: core.nearA, nearB: core.nearB, ppm: ppm)
 
         // Her windward side is starboard on starboard tack (`ShadowCone.windward`); it flips at the boom crossing.
-        // She casts none while running (`ShadowCone.isRunning`).
-        backwind.isHidden = pose.isGhost || !hasBackwind || ShadowCone(caster: boat, shadow: boatClass.windShadow).isRunning
+        // She casts less of it across a reach, and none while running (`ShadowCone.backwindPresence`).
+        let presence = core.backwindPresence
+        backwind.isHidden = pose.isGhost || !hasBackwind || presence <= 0
         // Anchored on her stern line, so her speed lengthens and shortens it from there (`backwindScale(speed:)`).
         let stern = boat.position + boat.forward * boatClass.windShadow.sternCorner.y
         backwind.position = CGPoint(x: stern.x * ppm, y: stern.y * ppm)
-        backwind.zRotation = CGFloat(-boat.heading)
+        backwind.zRotation = CGFloat(-followed.heading)
         backwind.xScale = boat.tack == .starboard ? 1 : -1
         backwind.yScale = CGFloat(boatClass.windShadow.backwindScale(speed: boat.speedThroughWater))
-        backwind.alpha = CGFloat(style.coneAlpha * style.backwindShare)
+        backwind.alpha = CGFloat(style.coneAlpha * style.backwindShare * presence)
 
         // A roll miss kills the wake; a hit flares it, fading (#222).
         let flare = flare.flare(roll: pose.roll, time: time, seconds: style.wakeFlareSeconds)
@@ -123,6 +133,21 @@ final class BoatEffects {
         trail.lineWidth = CGFloat(style.wakeTrailWidth)
         trail.alpha = CGFloat(shape.alpha) * (pose.isGhost ? CGFloat(style.ghostAlpha) : 1)
         trail.isHidden = history.isEmpty || trail.alpha < 0.005
+    }
+
+    /// Moves the heading and apparent wind her shadow is drawn along `dt` race seconds towards hers (exponential, over
+    /// `seconds`), the short way round; straight to hers when `settled` (a frozen fixture), with no time constant, or
+    /// the first time.
+    private func follow(heading: Double, wind: Double, dt: Double, seconds: Double, settled: Bool) -> (heading: Double, wind: Double) {
+        guard !settled, seconds > 0, let from = followed else {
+            followed = (heading, wind)
+            return (heading, wind)
+        }
+        let k = 1 - exp(-max(dt, 0) / seconds)
+        let next = (heading: wrapAngle(from.heading + wrapAngle(heading - from.heading) * k),
+                    wind: wrapAngle(from.wind + wrapAngle(wind - from.wind) * k))
+        followed = next
+        return next
     }
 
     /// Keeps `history`: a point every `sampleInterval` race seconds while she sails, the old ones dropped after

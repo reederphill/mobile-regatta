@@ -272,6 +272,9 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// The backwind zone's alpha, a share of the cone's: much stronger, as it is small and sits over the cone's own
     /// hatch. Its hatch thins towards its far edge as its loss does (#298); its outline and fill stay.
     var backwindShare = 4.2
+    /// How long, seconds, her cone and backwind take to turn after her heading and apparent wind: the air she disturbed
+    /// shifts after her, it isn't welded to her (drawn only). 0 draws them rigid.
+    var shadowFollowSeconds = 1.2
     /// The hatch both are drawn in: its lines' spacing and width, points. Baked in when the fleet is built.
     var hatchSpacing = 5.0
     var hatchLineWidth = 1.25
@@ -338,7 +341,7 @@ nonisolated extension BoatStyle {
             (.wakeStreakShare, \.wakeStreakShare), (.wakeStreakWidth, \.wakeStreakWidth),
             (.wakeStreakAlpha, \.wakeStreakAlpha), (.wakeEaseRate, \.wakeEaseRate),
             (.wakeFlareGain, \.wakeFlareGain), (.wakeFlareSeconds, \.wakeFlareSeconds),
-            (.wakeShortShare, \.wakeShortShare), (.coneAlpha, \.coneAlpha), (.backwindShare, \.backwindShare),
+            (.wakeShortShare, \.wakeShortShare), (.coneAlpha, \.coneAlpha), (.backwindShare, \.backwindShare), (.shadowFollowSeconds, \.shadowFollowSeconds),
             (.hatchSpacing, \.hatchSpacing), (.hatchLineWidth, \.hatchLineWidth),
             (.vaneLengthHulls, \.vaneLengthHulls),
             (.vaneLockDegrees, \.vaneLockDegrees), (.grooveCueDeadbandDegrees, \.grooveCueDeadbandDegrees),

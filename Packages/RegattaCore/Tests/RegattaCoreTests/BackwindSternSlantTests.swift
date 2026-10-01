@@ -76,6 +76,35 @@ import Testing
         #expect(!ShadowCone(caster: boat, shadow: shadow).isRunning)
     }
 
+    /// Across a reach the backwind fades out and back in with her true wind angle, full to 90° and none from 115° (skiff@5),
+    /// straight between, rather than switching off.
+    @Test func backwindFadesAcrossAReach() throws {
+        #expect(shadow.backwindRunningAngle == deg2rad(115) && abs(shadow.backwindRunningFade - deg2rad(25)) < 1e-12)
+        let inside = shadow.sternCorner + Vec2(0.5 * length, -1.2 * length)
+        func presence(_ degrees: Double) -> Double { zone(trueWindAngle: deg2rad(degrees)).backwindPresence }
+        #expect(presence(30) == 1 && presence(90) == 1)
+        #expect(abs(presence(102.5) - 0.5) < 1e-12 && abs(presence(95) - 0.8) < 1e-12)
+        #expect(presence(115) == 0 && presence(150) == 0 && zone().backwindPresence == 1)
+        // Its loss at a point falls with the presence, a share of the full loss, and is nothing at the running angle.
+        let full = 1 - zone(trueWindAngle: deg2rad(90)).backwindFactor(at: inside)
+        #expect(full > 0)
+        for degrees in [95.0, 102.5, 110] {
+            let loss = 1 - zone(trueWindAngle: deg2rad(degrees)).backwindFactor(at: inside)
+            #expect(abs(loss - full * presence(degrees)) < 1e-12, "\(degrees)°")
+        }
+        #expect(zone(trueWindAngle: deg2rad(115)).backwindFactor(at: inside) == 1)
+        // It only ever falls as she bears away across the reach.
+        let losses = stride(from: 85.0, through: 118, by: 1).map { 1 - zone(trueWindAngle: deg2rad($0)).backwindFactor(at: inside) }
+        #expect(zip(losses, losses.dropFirst()).allSatisfy { $0 >= $1 })
+        // A class with no fade keeps a hard switch at its running angle.
+        var hard = shadow
+        hard.backwindRunningFade = 0
+        let cone = ShadowCone(apex: .zero, apparentWindDirection: .pi / 2, heading: 0, windwardSide: .starboard, shadow: hard,
+                              trueWindAngle: deg2rad(114.9))
+        #expect(cone.backwindPresence == 1 && ShadowCone(apex: .zero, apparentWindDirection: .pi / 2, heading: 0,
+                                                          windwardSide: .starboard, shadow: hard, trueWindAngle: deg2rad(115)).backwindPresence == 0)
+    }
+
     /// Her speed scales how far astern the trapezoid reaches: its full size at 6 knots, in proportion either way, to 1.5
     /// times at 9 knots and no more, and nothing when stopped. A cone with no speed draws it full size.
     @Test func backwindScalesWithSpeed() throws {

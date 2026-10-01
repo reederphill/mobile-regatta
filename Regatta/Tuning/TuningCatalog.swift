@@ -229,6 +229,7 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/windShadow/backwind/lengthHullLengths", "Long edge length", 0.5...4, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/widthHullLengths", "Width at her stern", 0.25...3, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/runningFromDegrees", "Off running from", unit: "°", 60...180, step: 1),
+                    TuningSlider(.boatClass, "/windShadow/backwind/runningFadeDegrees", "Fades out over", unit: "°", 0...60, step: 1),
                     TuningSlider(.boatClass, "/windShadow/backwind/speedScale/referenceKnots", "Full size at", unit: "kn", 2...16, step: 0.5),
                 ]),
             TuningGroup(
@@ -330,6 +331,7 @@ enum TuningCatalog {
                     boat("wakeFlareGain", "Roll-hit flare", \.wakeFlareGain, 0...2, 0.1),
                     boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.4, 0.01),
                     boat("backwindShare", "Backwind hatch", \.backwindShare, 0...6, 0.1),
+                    boat("shadowFollowSeconds", "Shadow and backwind trail", \.shadowFollowSeconds, 0...4, 0.1, unit: " s"),
                     // #122: the boat-side cues.
                     boat("vaneLengthHulls", "Vane length", \.vaneLengthHulls, 0.5...2, 0.1, unit: " hulls"),
                     boat("vaneLockDegrees", "Vane locks within", \.vaneLockDegrees, 0...5, 0.25, unit: "°"),
