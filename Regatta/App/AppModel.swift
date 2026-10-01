@@ -71,7 +71,7 @@ final class AppModel {
     }
     /// Every race's haptics, on while Settings' Haptics is (#110): set here once per change, not read per haptic.
     @ObservationIgnored let haptics: GatedHaptics
-    /// Every race's steering scheme (#112), camera and auto framing (#113): Settings', or `-scheme`'s and `-camera`'s
+    /// Every race's steering scheme (#112), camera, auto zoom and pinch multiplier (#113, #322): Settings', or `-scheme`'s and `-camera`'s
     /// over them; set here once per change.
     @ObservationIgnored let controls: ControlSettings
     /// Where `deviceSettings` lives.
@@ -108,6 +108,7 @@ final class AppModel {
         tuning = TuningModel(store: launchOptions.uiTesting ? .inMemory : .standard)
         #endif
         sceneState.isRaceSequenceShowing = false
+        controls.savesZoomMultiplier = { [weak self] multiplier in self?.deviceSettings.zoomMultiplier = multiplier }
     }
 
     /// Settings' Reset hints: every hint shows again (#25).

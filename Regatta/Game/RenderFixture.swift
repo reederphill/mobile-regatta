@@ -11,7 +11,7 @@ import RegattaCore
 ///
 /// With no `view`, `camera` is a north-up camera from before #113 (`boat` follows your boat, `course` frames the
 /// whole course), so the fixtures drawn that way keep their references. `"view": "courseUp"` or `"boatUp"` draws
-/// the race camera itself (#113), auto framing on, settled.
+/// the race camera itself (#113), auto zoom on, settled.
 ///
 /// The app is launched with `-fixture <name>`, and finds `<name>.json` in the directory the
 /// `REGATTA_FIXTURE_DIR` environment variable names (the UI test passes its own `Fixtures` folder).
