@@ -217,7 +217,7 @@ private struct EffectArt {
         let conePoints = points(ShadowShapes.coneLocal(shadow))
         let coneBounds = Self.bounds(of: conePoints)
         cone = Self.hatch(conePoints, bounds: coneBounds, spacing: spacing, width: width) { cg in
-            Self.fadeCone(cg, length: CGFloat(shadow.coneLength) * ppm)
+            Self.fadeCone(cg, shadow: shadow, ppm: ppm)
         }
         coneAnchor = Self.anchor(coneBounds)
 
@@ -282,20 +282,38 @@ private struct EffectArt {
         }
     }
 
-    /// How much of the cone's hatch is left at its far end: core's loss tapers to nothing there, so the hatch does
-    /// too, down to a trace that keeps the cone's far edge findable.
+    /// The least the cone's hatch is faded to: core's loss reaches nothing at the cone's far end and edges, but drawn it
+    /// keeps a trace, so the cone's whole outline stays findable.
     private static let coneFadeFloor: CGFloat = 0.04
 
-    /// Fades the cone's hatch as core's loss fades with distance (`ShadowCone`'s cone factor): full at the apex, straight
-    /// down to `coneFadeFloor` at its far end, `length` points down its axis. The cone layer composites the hatches
-    /// as a mask, so this alpha is what shows.
-    private static func fadeCone(_ cg: CGContext, length: CGFloat) {
-        guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                        colors: [UIColor.white.cgColor,
-                                                 UIColor(white: 1, alpha: Self.coneFadeFloor).cgColor] as CFArray,
-                                        locations: [0, 1]) else { return }
-        cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: length),
-                              options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+    /// Fades the cone's hatch exactly as core's loss fades (`ShadowCone`'s cone factor): the loss is
+    /// `(1 - along / length) * (1 - lateral / halfWidth)` of its full value, so the hatch is full at the apex on the
+    /// axis, straight down to nothing at the far end and to nothing at the edges, `coneFadeFloor` the least. The cone
+    /// layer composites the hatches as masks, so this alpha is what shows. Row by row, a texel tall, in the art's
+    /// frame (apex at the origin, widening along +y).
+    private static func fadeCone(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat) {
+        let space = CGColorSpaceCreateDeviceRGB()
+        let length = CGFloat(shadow.coneLength) * ppm
+        let step: CGFloat = 1.0 / 3
+        // Unblended strip edges, so the strips share each texel row exactly once.
+        cg.setShouldAntialias(false)
+        var y: CGFloat = -step
+        while y < length + step {
+            let along = Double(((y + step / 2) / length).clamped(to: 0...1))
+            let half = CGFloat(shadow.coneWidthAtBoat + (shadow.coneWidthAtEnd - shadow.coneWidthAtBoat) * along) / 2 * ppm
+            let centre = max(CGFloat(1 - along), Self.coneFadeFloor)
+            let edge = Self.coneFadeFloor
+            guard let gradient = CGGradient(colorsSpace: space, colors: [UIColor(white: 1, alpha: edge).cgColor,
+                                                                         UIColor(white: 1, alpha: centre).cgColor,
+                                                                         UIColor(white: 1, alpha: edge).cgColor] as CFArray,
+                                            locations: [0, 0.5, 1]) else { return }
+            cg.saveGState()
+            cg.clip(to: CGRect(x: -half - 1, y: y, width: 2 * half + 2, height: step))
+            cg.drawLinearGradient(gradient, start: CGPoint(x: -half, y: 0), end: CGPoint(x: half, y: 0),
+                                  options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+            cg.restoreGState()
+            y += step
+        }
     }
 
     /// How much of the backwind's hatch is left at its far edge: core's loss fades to nothing there, but drawn it
