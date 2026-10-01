@@ -40,7 +40,7 @@ final class ControlSettings {
         zoomMultiplier = settings.zoomMultiplier
     }
 
-    /// A pinch or a double tap set a new multiplier: it's kept across races.
+    /// A pinch or a two-finger double tap set a new multiplier: it's kept across races.
     func keepZoomMultiplier(_ multiplier: Double) {
         zoomMultiplier = multiplier
         savesZoomMultiplier?(multiplier)

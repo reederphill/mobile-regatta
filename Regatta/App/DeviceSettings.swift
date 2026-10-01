@@ -21,7 +21,7 @@ nonisolated struct DeviceSettings: Equatable, Sendable {
     var camera = Camera.courseUp
     /// Auto zoom (#113, #322): the camera's shots set its zoom. Off, it stays at open water's.
     var autoZoom = true
-    /// The pinch-zoom multiplier on every shot's zoom (#322), kept across races; a double tap resets it to 1.
+    /// The pinch-zoom multiplier on every shot's zoom (#322), kept across races; a two-finger double tap resets it to 1.
     var zoomMultiplier = 1.0
     var laylines = true
     var ladderLines = false

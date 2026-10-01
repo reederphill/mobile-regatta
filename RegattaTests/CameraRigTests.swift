@@ -177,6 +177,19 @@ import RegattaCore
     /// A boat oscillating across 4–6 hull lengths, at any pace, changes the shot at most once in any 4 s: close
     /// quarters comes on after a second within 4 and holds until none is within 6 for 3 s, and holds 4 s anyway.
     @Test func closeQuartersHasHysteresisAndDwell() {
+        // A boat holding 3 hull lengths off: close quarters comes on after 1 s, not before.
+        var near = Self.world(heading: 0)
+        var onRig = CameraRig(mode: .courseUp)
+        onRig.advance(near, sceneSize: Self.iPhone, dt: 0, settled: true)
+        #expect(onRig.shot == .openWater)
+        near.others = [near.myPosition + Vec2(3 * Self.hull, 0)]
+        for frame in 1...(60 * 2) {
+            near.time += 1.0 / 60
+            onRig.advance(near, sceneSize: Self.iPhone, dt: 1.0 / 60)
+            if frame <= 57 { #expect(onRig.shot == .openWater, "close quarters early, frame \(frame)") }
+            if frame >= 62 { #expect(onRig.shot == .closeQuarters, "no close quarters after 1 s, frame \(frame)") }
+        }
+
         for period in [2.0, 5.0, 8.0, 20.0] {
             var world = Self.world(heading: 0)
             var rig = CameraRig(mode: .courseUp)
@@ -269,6 +282,36 @@ import RegattaCore
             #expect(abs(flipped - 0.6) <= 0.03, "\(mode): above the line, boat \(flipped) up")
         }
 
+        // Off-centre across the line: a little, and the view stays centred on the line's middle; far, and the view
+        // follows her only as far as keeps her inside the middle 70 % of the width.
+        let right = up.rightPerp
+        for mode in [CameraRig.Mode.courseUp, .boatUp] {
+            var rig = CameraRig(mode: mode)
+            let near = Self.world(axis: axis, me: up * (-3 * 2 * lineHalf) + right * 10, heading: axis, time: -60,
+                                  lineHalf: lineHalf)
+            rig.advance(near, sceneSize: Self.iPhone, dt: 0, settled: true)
+            #expect(abs(rig.project(Vec2(0, 0), sceneSize: Self.iPhone).x - Self.iPhone.width / 2) < 1e-6,
+                    "\(mode): the line's middle off centre")
+            #expect(abs(Self.heightUp(rig, near.myPosition) - 0.4) <= 0.03)
+            for across in [-1.0, 1.0] {
+                let far = Self.world(axis: axis, me: up * (-3 * 2 * lineHalf) + right * (across * 6 * 2 * lineHalf),
+                                     heading: axis, time: -60, lineHalf: lineHalf)
+                rig.advance(far, sceneSize: Self.iPhone, dt: 0, settled: true)
+                let x = Double(rig.project(far.myPosition, sceneSize: Self.iPhone).x / Self.iPhone.width)
+                #expect(abs(x - 0.5) <= 0.35 + 1e-6, "\(mode): boat \(x) across")
+                #expect(abs(abs(x - 0.5) - 0.35) < 1e-6, "\(mode): the view should follow her only to the edge")
+                #expect(abs(Self.heightUp(rig, far.myPosition) - 0.4) <= 0.03)
+            }
+        }
+
+        // A line too long to fit even at the widest zoom: the widest it is, and a line end is off screen.
+        let long = Self.world(axis: axis, me: up * -100, heading: axis, time: -60, lineHalf: 2000)
+        var wide = CameraRig(mode: .courseUp)
+        wide.advance(long, sceneSize: Self.iPhone, dt: 0, settled: true)
+        #expect(wide.shot == .preStart)
+        #expect(wide.zoom == wide.zoomLimits.lowerBound)
+        #expect(wide.lineEndOffScreen)
+
         // Sailing up through the line to the gun and on: the view moves smoothly, and 3 s after the gun the boat
         // is where the lead puts her.
         var world = Self.world(axis: axis, me: up * -60, heading: axis, time: -10, lineHalf: lineHalf)
@@ -293,6 +336,13 @@ import RegattaCore
     /// Rounding the windward mark with a close pinch-zoom: the mark-rounding shot widens, smoothly and only as
     /// much as it must, to keep the mark on screen.
     @Test func markRoundingWidensToKeepTheMark() {
+        // Inside the shot's reach with the mark already on screen: the shot's own zoom, not widened.
+        var fits = CameraRig(mode: .courseUp)
+        fits.advance(Self.world(me: Vec2(-10, 790), heading: .pi / 2, time: 300), sceneSize: Self.iPhone, dt: 0,
+                     settled: true)
+        #expect(fits.shot == .markRounding)
+        #expect(abs(fits.zoom - CameraStyle.standard.markRoundingZoom) < 1e-9, "zoom \(fits.zoom)")
+
         let mark = Vec2(0, 800)
         var world = Self.world(me: Vec2(-60, 780), heading: .pi / 2, time: 300)
         var rig = CameraRig(mode: .courseUp)
@@ -391,6 +441,104 @@ import RegattaCore
         }
         #expect(abs(rig.zoom - style.openWaterZoom * 1.5) < 1e-9)
         #expect(abs(Self.heightUp(rig, world.myPosition) - (0.5 + style.leadAlong / 2)) < 1e-6)
+    }
+
+    /// Leaving the mark's zone inside the shot's 4 s dwell: the shot holds, and so does its widening to keep the
+    /// mark on screen, so the zoom never steps from the capped to the uncapped mark-rounding zoom in one frame.
+    @Test func leavingTheMarkInsideTheDwellDoesNotPop() {
+        let style = CameraStyle.standard
+        let mark = Vec2(0, 800)
+        var world = Self.world(me: Vec2(-40, 798), heading: .pi / 2, time: 300)
+        var rig = CameraRig(mode: .courseUp)
+        rig.advance(world, sceneSize: Self.iPhone, dt: 0, settled: true)
+        rig.pinchChanged(by: 2)
+        #expect(abs(rig.zoomMultiplier - 2) < 1e-9)
+        // At 120 Hz, so the widening's own steps stay well under the pop it used to make (about 0.6).
+        var lastZoom = rig.zoom
+        var narrowest = Double.infinity
+        var left = false
+        for frame in 1...(120 * 10) {
+            world.myPosition += Vec2(12.0 / 120, 0)
+            world.time += 1.0 / 120
+            // Past the mark, the next leg's.
+            if world.myPosition.x > 0 { world.nextMarks = [Vec2(0, -100)] }
+            rig.advance(world, sceneSize: Self.iPhone, dt: 1.0 / 120)
+            #expect(abs(rig.zoom - lastZoom) < 0.03, "a zoom step of \(rig.zoom - lastZoom) at frame \(frame)")
+            lastZoom = rig.zoom
+            if rig.shot == .markRounding { narrowest = min(narrowest, rig.zoom) }
+            if !left, world.myPosition.x > 0, (world.myPosition - mark).length > world.zoneRadius {
+                left = true
+                #expect(rig.shot == .markRounding, "the shot should hold through its dwell")
+            }
+        }
+        #expect(left)
+        #expect(narrowest < style.markRoundingZoom * 2 - 0.05, "the cap never engaged: \(narrowest)")
+        #expect(rig.shot == .openWater)
+    }
+
+    /// A pinch at a zoom limit, or against mark rounding's cap, changes nothing: the multiplier stays what the
+    /// drawn zoom over the shot's own zoom says, so a later pinch the other way shows at once.
+    @Test func pinchAtALimitKeepsTheMultiplier() {
+        let style = CameraStyle.standard
+        let world = Self.world(heading: 0)
+        var rig = CameraRig(mode: .courseUp)
+        rig.advance(world, sceneSize: Self.iPhone, dt: 0, settled: true)
+        let upper = rig.zoomLimits.upperBound, lower = rig.zoomLimits.lowerBound
+
+        rig.pinchChanged(by: 4)
+        #expect(abs(rig.zoom - upper) < 1e-9)
+        #expect(abs(rig.zoomMultiplier - upper / style.openWaterZoom) < 1e-9)
+        let atUpper = (zoom: rig.zoom, multiplier: rig.zoomMultiplier)
+        rig.pinchChanged(by: 1.5)
+        #expect(rig.zoomMultiplier == atUpper.multiplier && rig.zoom == atUpper.zoom)
+        rig.advance(world, sceneSize: Self.iPhone, dt: 1.0 / 60)
+        #expect(abs(rig.zoom - upper) < 1e-9)
+        rig.pinchChanged(by: 0.9)
+        #expect(abs(rig.zoom - upper * 0.9) < 1e-9)
+        rig.advance(world, sceneSize: Self.iPhone, dt: 1.0 / 60)
+        #expect(abs(rig.zoom - upper * 0.9) < 1e-9, "the pinch out shows at once and stays")
+
+        rig.pinchChanged(by: 0.01)
+        #expect(abs(rig.zoom - lower) < 1e-9)
+        let atLower = (zoom: rig.zoom, multiplier: rig.zoomMultiplier)
+        #expect(abs(atLower.multiplier - lower / style.openWaterZoom) < 1e-9)
+        rig.pinchChanged(by: 0.5)
+        #expect(rig.zoomMultiplier == atLower.multiplier && rig.zoom == atLower.zoom)
+
+        // Mark rounding's cap: pinching in stops where the mark would leave the screen.
+        let rounding = Self.world(me: Vec2(-25, 795), heading: .pi / 2, time: 300)
+        var capped = CameraRig(mode: .courseUp)
+        capped.advance(rounding, sceneSize: Self.iPhone, dt: 0, settled: true)
+        #expect(capped.shot == .markRounding)
+        #expect(abs(capped.zoom - style.markRoundingZoom) < 1e-9)
+        capped.pinchChanged(by: 3)
+        let atCap = (zoom: capped.zoom, multiplier: capped.zoomMultiplier)
+        #expect(atCap.zoom < style.markRoundingZoom * 3 - 0.1, "the cap should stop the pinch: \(atCap.zoom)")
+        #expect(abs(atCap.multiplier * style.markRoundingZoom - atCap.zoom) < 1e-9)
+        capped.pinchChanged(by: 1.5)
+        #expect(capped.zoomMultiplier == atCap.multiplier && capped.zoom == atCap.zoom)
+        capped.advance(rounding, sceneSize: Self.iPhone, dt: 0, settled: true)
+        #expect(abs(capped.zoom - atCap.zoom) < 1e-9)
+        #expect(Self.onScreen(capped.project(Vec2(0, 800), sceneSize: Self.iPhone)))
+    }
+
+    /// The pinch-zoom's reset is a two-finger double tap, so a one-finger double tap that steers never resets it.
+    @Test func zoomResetIsATwoFingerDoubleTap() {
+        let tap = GameScene.zoomResetRecognizer(target: nil, action: nil)
+        #expect(tap.numberOfTouchesRequired == 2)
+        #expect(tap.numberOfTapsRequired == 2)
+        #expect(!tap.cancelsTouchesInView, "the taps still reach the scene")
+    }
+
+    /// A rig reports no pre-start shot before its first frame, and the right one from the first frame's race clock.
+    @Test func shotFollowsTheFirstFramesClock() {
+        var midRace = CameraRig(mode: .courseUp)
+        #expect(midRace.shot == .openWater)
+        midRace.advance(Self.world(time: 120), sceneSize: Self.iPhone, dt: 0, settled: true)
+        #expect(midRace.shot == .openWater)
+        var beforeGun = CameraRig(mode: .courseUp)
+        beforeGun.advance(Self.world(time: -30), sceneSize: Self.iPhone, dt: 0, settled: true)
+        #expect(beforeGun.shot == .preStart)
     }
 
     // MARK: - The rest of the camera

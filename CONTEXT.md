@@ -358,7 +358,7 @@ What sets the camera's zoom at a moment of the race, never its centre. In order 
 _Avoid_: framing, camera mode
 
 **Auto zoom**:
-The camera's shots choosing its zoom; on by default. Off, the heading lead stays and the zoom is open water's. Either way a pinch-zoom multiplies the zoom and is kept across races; a double tap resets it.
+The camera's shots choosing its zoom; on by default. Off, the heading lead stays and the zoom is open water's. Either way a pinch-zoom multiplies the zoom and is kept across races; a two-finger double tap resets it.
 _Avoid_: auto framing, smart camera
 
 **View heading**:

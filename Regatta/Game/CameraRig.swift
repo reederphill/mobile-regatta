@@ -120,20 +120,28 @@ nonisolated struct CameraRig: Sendable {
     private var raceShotDrawn: Double
     private(set) var isCloseQuarters = false
     private var closeQuartersTimer = 0.0
-    /// The marks being rounded while the mark-rounding shot is on.
+    /// The marks being rounded, while you're within the mark-rounding shot's reach of them.
     private var roundingMarks: [Vec2]?
+    /// The marks the mark-rounding shot keeps on screen: the last rounded, held until the shot changes, so leaving
+    /// the mark inside the shot's dwell doesn't drop its widening in one frame.
+    private var shotMarks: [Vec2]?
     /// Whether a start line end is off screen in the pre-start shot: the seam for #122's edge arrow.
     private(set) var lineEndOffScreen = false
-    /// The time of the last frame, for which shot it was.
-    private var lastTime = 0.0
+    /// The race clock of the last frame, for which shot it was: nil until the first.
+    private var lastTime: Double?
 
     // Pinch-zoom.
     /// The pinch multiplier on every shot's zoom (#322): 1 until a pinch, kept across races by the scene.
     private(set) var zoomMultiplier = 1.0
-    /// The multiplier drawn: eases to `zoomMultiplier` after a double tap's reset.
+    /// The multiplier drawn: eases to `zoomMultiplier` after a two-finger double tap's reset.
     private var appliedMultiplier = 1.0
     private var multiplierFrom = 1.0
     private var multiplierProgress = 1.0
+    /// The zoom per unit of the pinch multiplier the last frame drew (the shot's own, eased, before the mark-rounding
+    /// cap and the limits), and the closest zoom it may draw (the limit, or the cap): a pinch keeps the multiplier
+    /// where it changes what's drawn.
+    private var pinchBase: Double
+    private var pinchCeiling: Double
 
     init(mode: Mode = .courseUp, autoZoom: Bool = true, style: CameraStyle = .standard,
          pointsPerMeter: Double = 8) {
@@ -146,6 +154,8 @@ nonisolated struct CameraRig: Sendable {
         raceShotFrom = style.openWaterZoom
         raceShotDrawn = style.openWaterZoom
         zoomLimits = style.minZoom...max(style.minZoom, style.maxZoom)
+        pinchBase = style.openWaterZoom
+        pinchCeiling = zoomLimits.upperBound
     }
 
     /// Whether shots set the zoom: auto zoom is on, in course-up or boat-up.
@@ -153,9 +163,11 @@ nonisolated struct CameraRig: Sendable {
         autoZoom && (mode == .courseUp || mode == .boatUp)
     }
 
-    /// The shot drawn: pre-start until the hand-over after the gun, then the race's.
+    /// The shot drawn: pre-start until the hand-over after the gun, then the race's. Before the first frame there's
+    /// no race clock, so no pre-start.
     var shot: Shot {
         guard isAutoZooming else { return .openWater }
+        guard let lastTime else { return raceShot }
         return lastTime < style.gunHandOverSeconds ? .preStart : raceShot
     }
 
@@ -255,6 +267,8 @@ nonisolated struct CameraRig: Sendable {
         let pre = preStartComposition(world, sceneSize: sceneSize)
         let w = world.time < 0 ? 1 : 1 - Self.smoothstep(world.time / handOver)
         zoom = pre.zoom * w + raced.zoom * (1 - w)
+        pinchBase = pre.base * w + pinchBase * (1 - w)
+        pinchCeiling = zoomLimits.upperBound * w + pinchCeiling * (1 - w)
         center = point(pre.center * w + raced.center * (1 - w))
         lineEndOffScreen = world.startLine.contains { !Self.isOnScreen(project($0, sceneSize: sceneSize), sceneSize) }
     }
@@ -335,6 +349,19 @@ nonisolated struct CameraRig: Sendable {
             raceShotDwell = 0
             raceShotProgress = snap ? 1 : 0
         }
+
+        // The mark-rounding shot's marks: held until the shot changes; another mark's cap is eased to.
+        if raceShot == .markRounding {
+            if let marks = roundingMarks, marks != shotMarks {
+                if shotMarks != nil, !snap {
+                    raceShotFrom = raceShotDrawn
+                    raceShotProgress = 0
+                }
+                shotMarks = marks
+            }
+        } else {
+            shotMarks = nil
+        }
     }
 
     /// Auto zoom off: no shots, open water's zoom.
@@ -347,26 +374,30 @@ nonisolated struct CameraRig: Sendable {
         isCloseQuarters = false
         closeQuartersTimer = 0
         roundingMarks = nil
+        shotMarks = nil
     }
 
     /// The race shot's zoom this frame, eased from the last shot's, times the pinch multiplier, within the limits.
-    /// Mark rounding's widens just enough to keep the mark on screen.
+    /// Mark rounding's widens just enough to keep the mark on screen, until the shot changes.
     private mutating func raceShotZoom(_ world: CameraWorld, sceneSize: CGSize) -> Double {
         let multiplier = appliedMultiplier
-        var target: Double
+        let own: Double
         switch raceShot {
-        case .openWater, .preStart: target = style.openWaterZoom * multiplier
-        case .closeQuarters: target = style.closeQuartersZoom * multiplier
-        case .markRounding:
-            target = style.markRoundingZoom * multiplier
-            if let marks = roundingMarks,
-               let mark = marks.min(by: { ($0 - world.myPosition).length < ($1 - world.myPosition).length }) {
-                target = min(target, markZoomCap(mark, world: world, sceneSize: sceneSize))
-            }
+        case .openWater, .preStart: own = style.openWaterZoom
+        case .closeQuarters: own = style.closeQuartersZoom
+        case .markRounding: own = style.markRoundingZoom
         }
+        var cap = Double.infinity
+        if raceShot == .markRounding, let marks = shotMarks,
+           let mark = marks.min(by: { ($0 - world.myPosition).length < ($1 - world.myPosition).length }) {
+            cap = markZoomCap(mark, world: world, sceneSize: sceneSize)
+        }
+        let target = min(own * multiplier, cap)
         let e = Self.smoothstep(raceShotProgress)
         let eased = raceShotFrom * multiplier + (target - raceShotFrom * multiplier) * e
         raceShotDrawn = eased / multiplier
+        pinchBase = raceShotFrom + (own - raceShotFrom) * e
+        pinchCeiling = min(zoomLimits.upperBound, cap)
         return eased.clamped(to: zoomLimits)
     }
 
@@ -389,12 +420,12 @@ nonisolated struct CameraRig: Sendable {
     /// The pre-start shot (#322): your boat `preStartBoatHeight` up the screen below the line (as far down it above
     /// the line, easing between over `preStartFlipLineLengths` either side), the view centred across on the line's
     /// middle as far as keeps her inside the middle `preStartBoatWidth` of it, zoomed as close as fits both line
-    /// ends inside `edgeMargin`, down to the widest limit; times the pinch multiplier.
-    func preStartComposition(_ world: CameraWorld, sceneSize: CGSize) -> (center: Vec2, zoom: Double) {
+    /// ends inside `edgeMargin`, down to the widest limit; times the pinch multiplier. `base` is the zoom before it.
+    func preStartComposition(_ world: CameraWorld, sceneSize: CGSize) -> (center: Vec2, zoom: Double, base: Double) {
         let me = world.myPosition
         guard world.startLine.count == 2 else {
             let zoom = (style.openWaterZoom * appliedMultiplier).clamped(to: zoomLimits)
-            return (leadCentre(world, sceneSize: sceneSize, zoom: zoom), zoom)
+            return (leadCentre(world, sceneSize: sceneSize, zoom: zoom), zoom, style.openWaterZoom)
         }
         let (up, right) = axes
         let width = Double(sceneSize.width), height = Double(sceneSize.height)
@@ -439,7 +470,7 @@ nonisolated struct CameraRig: Sendable {
         }
         let zoom = (fit * appliedMultiplier).clamped(to: limits)
         let k = zoom * pointsPerMeter
-        return (me + right * across(zoom) + up * (-boatY / k), zoom)
+        return (me + right * across(zoom) + up * (-boatY / k), zoom, fit)
     }
 
     /// The pinch-zoom limits for `world`: `minZoom`…`maxZoom`, the widest raised to the zoom that just fits the
@@ -469,7 +500,9 @@ nonisolated struct CameraRig: Sendable {
     }
 
     /// The fingers spread by `scale` since the last call: the zoom changes now, within the limits. In course-up and
-    /// boat-up it's the multiplier on every shot that changes.
+    /// boat-up it's the multiplier on every shot that changes, kept where the shot drawn shows it: from the drawn
+    /// zoom over the shot's own, within the limits (and mark rounding's cap), so a pinch at a limit changes nothing
+    /// rather than growing a multiplier nobody sees.
     mutating func pinchChanged(by scale: Double) {
         guard scale.isFinite, scale > 0 else { return }
         switch mode {
@@ -477,17 +510,22 @@ nonisolated struct CameraRig: Sendable {
             followZoom = (followZoom * scale).clamped(to: zoomLimits)
             if mode != .northUpCourse { zoom = followZoom }
         case .courseUp, .boatUp:
-            let zoomed = (zoom * scale).clamped(to: zoomLimits)
-            let applied = zoom > 0 ? zoomed / zoom : 1
-            zoom = zoomed
-            zoomMultiplier = (appliedMultiplier * applied).clamped(to: 0.1...10)
+            let lower = zoomLimits.lowerBound
+            let upper = max(lower, min(zoomLimits.upperBound, pinchCeiling))
+            guard pinchBase > 0, zoom > 0 else { return }
+            let shown = (lower / pinchBase)...(upper / pinchBase)
+            let from = appliedMultiplier.clamped(to: shown)
+            let to = (from * scale).clamped(to: shown)
+            guard abs(to - from) > 1e-12 * from else { return }
+            zoom = (zoom * to / from).clamped(to: zoomLimits)
+            zoomMultiplier = to.clamped(to: 0.1...10)
             appliedMultiplier = zoomMultiplier
             multiplierFrom = zoomMultiplier
             multiplierProgress = 1
         }
     }
 
-    /// A double tap: the multiplier eases back to 1 over a shot transition.
+    /// A two-finger double tap: the multiplier eases back to 1 over a shot transition.
     mutating func resetZoomMultiplier() {
         guard zoomMultiplier != 1 || appliedMultiplier != 1 else { return }
         multiplierFrom = appliedMultiplier

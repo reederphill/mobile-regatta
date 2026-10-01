@@ -111,12 +111,7 @@ final class GameScene: SKScene {
         view.isMultipleTouchEnabled = true
         guard world.parent == nil else { return }
         view.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:))))
-        // A double tap resets the pinch-zoom (#322); the taps still steer as touches.
-        let doubleTap = UITapGestureRecognizer(target: self, action: #selector(doubleTapped(_:)))
-        doubleTap.numberOfTapsRequired = 2
-        doubleTap.cancelsTouchesInView = false
-        doubleTap.delaysTouchesEnded = false
-        view.addGestureRecognizer(doubleTap)
+        view.addGestureRecognizer(Self.zoomResetRecognizer(target: self, action: #selector(doubleTapped(_:))))
 
         water.zPosition = -10
         effectsLayer.zPosition = 0
@@ -381,7 +376,19 @@ final class GameScene: SKScene {
         cam.setScale(rig.cameraScale)
     }
 
-    /// A double tap: the pinch-zoom eases back to every shot's own zoom, and that's kept (#322).
+    /// The pinch-zoom's reset (#322): a two-finger double tap, the fingers of the pinch it undoes, so a quick
+    /// one-finger double tap that steers (the halves scheme taps the screen's halves) never resets the zoom. The
+    /// taps still reach the scene as touches.
+    static func zoomResetRecognizer(target: Any?, action: Selector?) -> UITapGestureRecognizer {
+        let doubleTap = UITapGestureRecognizer(target: target, action: action)
+        doubleTap.numberOfTouchesRequired = 2
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.cancelsTouchesInView = false
+        doubleTap.delaysTouchesEnded = false
+        return doubleTap
+    }
+
+    /// A two-finger double tap: the pinch-zoom eases back to every shot's own zoom, and that's kept (#322).
     @objc private func doubleTapped(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended, cameraOverride == nil else { return }
         rig.resetZoomMultiplier()
