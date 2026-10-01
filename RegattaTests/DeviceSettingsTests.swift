@@ -20,6 +20,7 @@ import Testing
             #expect(fresh == DeviceSettings())
             #expect(fresh.steering == .halves && fresh.camera == .courseUp)
             #expect(fresh.autoFraming && fresh.laylines && !fresh.ladderLines && fresh.hints)
+            #expect(fresh.liveLeaderboard, "the live leaderboard is on by default (#268)")
             #expect(fresh.music && fresh.effects && fresh.haptics)
             #expect(!fresh.hidesLobbyChat && fresh.sharesUsageData)
 
@@ -29,6 +30,7 @@ import Testing
             changed.autoFraming = false
             changed.laylines = false
             changed.ladderLines = true
+            changed.liveLeaderboard = false
             changed.hints = false
             changed.music = false
             changed.effects = false

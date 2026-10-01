@@ -57,14 +57,15 @@ enum MenuFont {
 /// layout holds (the HUD sits in a fixed-aspect race rect, #107). A notice's words are SF.
 enum HUDFont {
     /// A HUD number in the display face, tabular figures so the clock doesn't jitter.
-    static func number(size: CGFloat) -> Font {
+    /// `weight` heavy marks your row on the live leaderboard (#268).
+    static func number(size: CGFloat, weight: Font.Weight = .bold) -> Font {
         // placeholder: the system font until #169 bundles Barlow Semi Condensed Bold (#53), as
         // `Font.custom(_:fixedSize:)` with `.monospacedDigit()`.
-        .system(size: size, weight: .bold).monospacedDigit()
+        .system(size: size, weight: weight).monospacedDigit()
     }
 
     /// `number(size:)` as a UIKit font, for measuring the HUD's layout (`HUDLayout`). #169 swaps both together.
-    static func uiNumber(size: CGFloat) -> UIFont {
-        .monospacedDigitSystemFont(ofSize: size, weight: .bold)
+    static func uiNumber(size: CGFloat, weight: UIFont.Weight = .bold) -> UIFont {
+        .monospacedDigitSystemFont(ofSize: size, weight: weight)
     }
 }

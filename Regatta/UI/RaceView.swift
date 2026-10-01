@@ -102,7 +102,8 @@ struct RaceView: View {
                         TunedBadge()
                     }
                     .padding(.horizontal, 16)
-                    .padding(.top, HUDView.noticeTop + HUDView.noticeHeight + 8)
+                    .padding(.top, HUDView.noticeTop(showsLeaderboard: session.controls.showsLeaderboard)
+                             + HUDView.noticeHeight + 8)
                     Spacer()
                 }
                 .allowsHitTesting(false)
@@ -132,11 +133,14 @@ struct RaceView: View {
         }
     }
 
-    /// The HUD over the race: touches pass through it to steer.
+    /// The HUD over the race: touches pass through it to steer, but for the live leaderboard and the place, which
+    /// open the board (#268).
     private var hudView: some View {
         HUDView(hud: session.hud, notice: session.notice, heading: { [scene = session.scene] in scene.viewHeading },
-                isPaused: session.isPaused || session.driver.isFrozen)
-            .allowsHitTesting(false)
+                isPaused: session.isPaused || session.driver.isFrozen,
+                showsLeaderboard: session.controls.showsLeaderboard,
+                isLeaderboardExpanded: session.isLeaderboardExpanded,
+                toggleLeaderboard: { [session] in session.toggleLeaderboard() })
     }
 
     private var showsTuningPanel: Bool {

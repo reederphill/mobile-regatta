@@ -2,7 +2,7 @@ import Foundation
 
 /// The settings kept on this device (#110, #25): in `UserDefaults`, never synced. Settings is one page; every value
 /// here is a row on it. The steering scheme and camera are per device (#13). Haptics and Hide lobby chat act now; the
-/// steering, camera, framing, layline and ladder values are read by the tickets that draw them (#112, #113, #122),
+/// steering, camera, framing, layline and ladder values are read by the tickets that draw them (#112, #113, #122, #268),
 /// which also apply the `-scheme` / `-camera` test overrides on top of them.
 nonisolated struct DeviceSettings: Equatable, Sendable {
     enum Steering: String, CaseIterable, Sendable {
@@ -23,6 +23,8 @@ nonisolated struct DeviceSettings: Equatable, Sendable {
     var autoFraming = true
     var laylines = true
     var ladderLines = false
+    /// The live leaderboard on the race HUD (#268).
+    var liveLeaderboard = true
     var hints = true
     var music = true
     var effects = true
@@ -42,6 +44,7 @@ nonisolated struct DeviceSettings: Equatable, Sendable {
         autoFraming = flag(.autoFraming, autoFraming)
         laylines = flag(.laylines, laylines)
         ladderLines = flag(.ladderLines, ladderLines)
+        liveLeaderboard = flag(.liveLeaderboard, liveLeaderboard)
         hints = flag(.hints, hints)
         music = flag(.music, music)
         effects = flag(.effects, effects)
@@ -57,6 +60,7 @@ nonisolated struct DeviceSettings: Equatable, Sendable {
         defaults.set(autoFraming, forKey: Key.autoFraming.rawValue)
         defaults.set(laylines, forKey: Key.laylines.rawValue)
         defaults.set(ladderLines, forKey: Key.ladderLines.rawValue)
+        defaults.set(liveLeaderboard, forKey: Key.liveLeaderboard.rawValue)
         defaults.set(hints, forKey: Key.hints.rawValue)
         defaults.set(music, forKey: Key.music.rawValue)
         defaults.set(effects, forKey: Key.effects.rawValue)
@@ -72,6 +76,7 @@ nonisolated struct DeviceSettings: Equatable, Sendable {
         case autoFraming = "settings.autoFraming"
         case laylines = "settings.laylines"
         case ladderLines = "settings.ladderLines"
+        case liveLeaderboard = "settings.liveLeaderboard"
         case hints = "settings.hints"
         case music = "settings.music"
         case effects = "settings.effects"
