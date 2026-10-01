@@ -23,6 +23,8 @@ final class RecordingTransport: SeatTransport {
     func close() { state.withLock { $0.closed = true } }
 
     var isClosed: Bool { state.withLock { $0.closed } }
+    /// Every frame's bytes, as sent.
+    var sentBytes: [[UInt8]] { state.withLock { $0.frames } }
     var frames: [Frame] { state.withLock { $0.frames }.map { try! Frame(decoding: $0) } }
     var events: [RaceEvent] { frames.compactMap(\.raceEvent) }
     var snapshotTicks: [Int] {
@@ -38,6 +40,7 @@ struct Rig {
     let clock = VirtualClock()
     let host: RaceHost
     let setup: RaceSetup
+    let windSeed: WindSeed
     let seat0 = RecordingTransport()
     private let alerts = AlertLog()
     private let allGoneLog = AllGoneLog()
@@ -47,14 +50,15 @@ struct Rig {
     var allGones: [AllGone] { allGoneLog.fired }
 
     init(humans: Int = 1, seats: Int = 4, startSequenceTicks: Int = 300, options: RaceHostOptions = RaceHostOptions(),
-         firstInputHold: Bool = false) async throws {
+         firstInputHold: Bool = false, windSeed: WindSeed = WindSeed(0x65)) async throws {
         var options = options
         if !firstInputHold { options.firstInputHoldTicks = .max / 2 }
         let kinds: [SeatKind] = (0..<seats).map { $0 < humans ? .human : .bot }
         setup = try RaceSetup(raceSeed: RaceSeed(65), seats: kinds, laps: 1, startSequenceTicks: startSequenceTicks)
+        self.windSeed = windSeed
         let alerts = alerts
         let allGoneLog = allGoneLog
-        host = RaceHost(setup: setup, windSeed: WindSeed(0x65), clock: clock, options: options,
+        host = RaceHost(setup: setup, windSeed: windSeed, clock: clock, options: options,
                         onBehind: { ticks in alerts.append(ticks) },
                         onAllGone: { allGone in allGoneLog.append(allGone) })
         #expect(await host.attach(seat: 0, transport: seat0))
