@@ -33,6 +33,9 @@ _Avoid_: collision (contact is not itself a foul)
 **Incident**:
 What triggers a ruling between two boats: contact, or a near miss. One incident per pair until they separate by 2 hull lengths.
 
+**Incident index**:
+A race's record of its incidents, protests, boat contacts and mark, land and boundary touches, kept with its log.
+
 **Near miss**:
 No contact, but sweeping an overlapped right-of-way boat's hull ±10° over 0.5 s would hit. It triggers a ruling as contact does.
 
@@ -80,7 +83,7 @@ The last moment at which it was certain whether two boats were overlapped, or wh
 _Avoid_: overlap timer
 
 **Protest**:
-A player's claim that a rule was broken in an incident, or that a rule call was wrong. In v1.0 it's recorded but never changes a result.
+A player's claim that a rule was broken in an incident, or that a rule call was wrong. In v1.0 it's recorded but never changes a result. Any boat can protest any other, a finished boat or a bot included. It is linked to the pair's incident of the prior 15 s, or to none.
 _Avoid_: report, appeal (an appeal is a later challenge to a protest decision)
 
 **Finish window**:

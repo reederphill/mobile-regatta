@@ -64,7 +64,7 @@ public struct Verdict: Sendable, Equatable {
 
 /// A rule call: the race's decision on an incident (the `Incident` with id `incidentId`) and the
 /// penalty it sets. Seats index `Race.boats`; ticks are race ticks.
-public struct RuleCall: Sendable, Equatable, Codable {
+public struct RuleCall: Sendable, Hashable, Codable {
     public let incidentId: Int
     public let tick: Int
     public let rule: RacingRule

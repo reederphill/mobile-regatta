@@ -103,14 +103,20 @@ public struct RaceLog: Codable, Hashable, Sendable {
     /// Set when the race closed because every human had gone: a replay closes it the same way after its
     /// final tick's seat events. Absent from the JSON when nil, so older logs read and write unchanged.
     public var allGoneClose: AllGoneClose?
+    /// The race's incident index at `finalTick` (#94): its incidents, boat, mark and obstruction contacts and
+    /// protests, kept with its log (#9: "an index of incidents"). Derived from the rest, so a replay on the
+    /// same simulation version reproduces it exactly (`Replayer` checks it does). Absent from the JSON when nil,
+    /// so older logs read and write unchanged.
+    public var incidentIndex: IncidentIndex?
 
     public init(header: Header, inputs: [InputRecord] = [], seatEvents: [SeatEvent] = [], finalTick: Int,
-                allGoneClose: AllGoneClose? = nil) {
+                allGoneClose: AllGoneClose? = nil, incidentIndex: IncidentIndex? = nil) {
         self.header = header
         self.inputs = inputs
         self.seatEvents = seatEvents
         self.finalTick = finalTick
         self.allGoneClose = allGoneClose
+        self.incidentIndex = incidentIndex
     }
 
     /// Stable JSON: sorted keys, so the same log always encodes to the same bytes.

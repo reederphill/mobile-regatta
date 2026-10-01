@@ -29,9 +29,9 @@ public enum EventAudience: Equatable, Sendable {
         case .markRoomNotice(let boat, let entitledOver, _):
             // A new rule 18 record is told to its two boats, and only to them (#91, #15).
             self = .seats([boat, entitledOver])
-        case .protestRecorded(let seat, let target):
-            // The acknowledgement goes to the protesting boat, and the protested boat is told (RRS 61.1).
-            self = .seats([seat, target])
+        case .protestRecorded(let seat, _, _):
+            // The acknowledgement goes to the protesting boat, and only to her: a protest is a record (#94, #9).
+            self = .seats([seat])
         case .grooveSnap(let seat):
             // The snap is felt by the boat that let go (#124), and nobody else.
             self = .seats([seat])
@@ -43,7 +43,8 @@ public enum EventAudience: Equatable, Sendable {
 // the codec), and a retired code is never reused. Code 4 was the pre-#73 `foul` (rule, offender,
 // victim); a rule call is code 12. Code 11 was `raceClosed` without results; with them (#86) it is
 // code 23. Code 17 was `markRoomNotice` with a list of recipients, never sent; with the entitled boat,
-// the boat she is entitled over and the mark (#91) it is code 24. #263's roll hit and miss are 25 and 26. Seats, places, legs and turns are one
+// the boat she is entitled over and the mark (#91) it is code 24. #263's roll hit and miss are 25 and 26. Code 10
+// was `protestRecorded` (seat, target); with the matched incident (#94) it is code 27. Seats, places, legs and turns are one
 // byte; ticks are int32; mark names and reasons are strings.
 
 extension RaceEvent.Kind {
@@ -78,10 +79,18 @@ extension RaceEvent.Kind {
             w.u8(9)
             try w.index(seat, "seat")
             try w.string(reason, limit: WireLimit.string, "reason")
-        case .protestRecorded(let seat, let target):
-            w.u8(10)
+        case .protestRecorded(let seat, let target, let matchedIncidentId):
+            w.u8(27)
             try w.index(seat, "seat")
             try w.index(target, "target")
+            // #94: a flag, then the incident's id when the protest matched one.
+            if let matchedIncidentId {
+                guard let id = UInt16(exactly: matchedIncidentId) else { throw WireError.outOfRange("matchedIncidentId") }
+                w.u8(1)
+                w.u16(id)
+            } else {
+                w.u8(0)
+            }
         case .ruleCall(let call):
             w.u8(12)
             guard let incidentId = UInt16(exactly: call.incidentId) else { throw WireError.outOfRange("incidentId") }
@@ -160,7 +169,6 @@ extension RaceEvent.Kind {
         case 7: self = .rounded(seat: try r.index(), mark: try r.string(limit: WireLimit.string, "mark"))
         case 8: self = .finished(seat: try r.index(), place: try r.index())
         case 9: self = .disqualified(seat: try r.index(), reason: try r.string(limit: WireLimit.string, "reason"))
-        case 10: self = .protestRecorded(seat: try r.index(), target: try r.index())
         case 12:
             let incidentId = Int(try r.u16())
             let tick = try r.i32()
@@ -196,6 +204,15 @@ extension RaceEvent.Kind {
                                    mark: try r.string(limit: WireLimit.string, "mark"))
         case 25: self = .rollHit(seat: try r.index())
         case 26: self = .rollMissed(seat: try r.index())
+        case 27:
+            let seat = try r.index(), target = try r.index()
+            let matchedIncidentId: Int?
+            switch try r.u8() {
+            case 0: matchedIncidentId = nil
+            case 1: matchedIncidentId = Int(try r.u16())
+            default: throw WireError.invalidValue("matchedIncidentId")
+            }
+            self = .protestRecorded(seat: seat, target: target, matchedIncidentId: matchedIncidentId)
         default: throw WireError.invalidValue("event")
         }
     }
