@@ -14,14 +14,14 @@ final class GameScene: SKScene {
     /// The fleet's names, which the scene never draws: boat names are never shown on the water (#15, #117).
     let roster: FleetRoster
     weak var session: GameSession?
-    /// A render fixture's camera (#62), with auto framing on; nil takes the device's camera and auto framing from
-    /// `session.controls` (#113), read every frame.
+    /// A render fixture's camera (#62), with auto zoom on and no pinch; nil takes the device's camera, auto zoom
+    /// and pinch multiplier from `session.controls` (#113, #322), read every frame.
     var cameraOverride: CameraRig.Mode? {
         didSet { syncCamera() }
     }
     /// The compass heading at the top of the screen, radians in [−π, π): the HUD's arrows turn by it (#113).
     var viewHeading: Double { rig.viewHeading }
-    /// The camera's maths: course-up, boat-up, auto framing and pinch-zoom (#113).
+    /// The camera's maths: course-up, boat-up, the heading lead, shots and pinch-zoom (#113, #322).
     private(set) var rig = CameraRig(pointsPerMeter: Double(GameScene.pointsPerMeter))
     /// The water's look: the debug tuning panel's (#232) seam, live, even on a paused race.
     var waterStyle: WaterStyle {
@@ -31,8 +31,7 @@ final class GameScene: SKScene {
             needsPausedRender = true
         }
     }
-    /// The camera's framing: the debug tuning panel's (#232) seam, live, even on a paused race. A new default zoom
-    /// replaces your pinch-zoom.
+    /// The camera's framing: the debug tuning panel's (#232) seam, live, even on a paused race.
     var cameraStyle = CameraStyle.standard {
         didSet {
             rig.setStyle(cameraStyle)
@@ -77,6 +76,8 @@ final class GameScene: SKScene {
     static let tickBudget: Duration = .milliseconds(8)
     /// The race clock last drawn, so effects run on simulated time (`-timescale` included).
     private var lastRenderTime: Double?
+    /// Whether fingers are pinching: the rig's pinch multiplier, not the saved one, stands until they lift.
+    private var isPinching = false
     private var hudCountdown = 0.0
     private var laylineCountdown = 0.0
     /// A render-only value changed while the race is paused: draw the standing world once more with it.
@@ -110,6 +111,7 @@ final class GameScene: SKScene {
         view.isMultipleTouchEnabled = true
         guard world.parent == nil else { return }
         view.addGestureRecognizer(UIPinchGestureRecognizer(target: self, action: #selector(pinched(_:))))
+        view.addGestureRecognizer(Self.zoomResetRecognizer(target: self, action: #selector(doubleTapped(_:))))
 
         water.zPosition = -10
         effectsLayer.zPosition = 0
@@ -305,15 +307,17 @@ final class GameScene: SKScene {
         publishTillerKnob()
     }
 
-    /// Follows the device's camera and auto framing, live (#113, #131): a change eases, it doesn't snap. A render
-    /// fixture's camera stands instead.
+    /// Follows the device's camera, auto zoom and pinch multiplier, live (#113, #131, #322): a change of camera
+    /// eases, it doesn't snap. A render fixture's camera stands instead, unpinched.
     private func syncCamera() {
         if let cameraOverride {
             rig.mode = cameraOverride
-            rig.autoFraming = true
+            rig.autoZoom = true
+            rig.setZoomMultiplier(1)
         } else if let session {
             rig.mode = session.controls.camera == .boatUp ? .boatUp : .courseUp
-            rig.autoFraming = session.controls.autoFraming
+            rig.autoZoom = session.controls.autoZoom
+            if !isPinching { rig.setZoomMultiplier(session.controls.zoomMultiplier) }
         }
     }
 
@@ -358,14 +362,37 @@ final class GameScene: SKScene {
     @objc private func pinched(_ gesture: UIPinchGestureRecognizer) {
         // A pinch-zoom never steers (#13).
         switch gesture.state {
-        case .began: steering.pinchBegan(); publishTillerKnob()
-        case .ended, .cancelled, .failed: steering.pinchEnded(); rig.pinchEnded()
+        case .began: steering.pinchBegan(); publishTillerKnob(); isPinching = true
+        case .ended, .cancelled, .failed:
+            steering.pinchEnded()
+            isPinching = false
+            // The multiplier is kept across races (#322): saved once, when the fingers lift.
+            if cameraOverride == nil { session?.controls.keepZoomMultiplier(rig.zoomMultiplier) }
         default: break
         }
         guard gesture.state == .began || gesture.state == .changed else { return }
         rig.pinchChanged(by: Double(gesture.scale))
         gesture.scale = 1
         cam.setScale(rig.cameraScale)
+    }
+
+    /// The pinch-zoom's reset (#322): a two-finger double tap, the fingers of the pinch it undoes, so a quick
+    /// one-finger double tap that steers (the halves scheme taps the screen's halves) never resets the zoom. The
+    /// taps still reach the scene as touches.
+    static func zoomResetRecognizer(target: Any?, action: Selector?) -> UITapGestureRecognizer {
+        let doubleTap = UITapGestureRecognizer(target: target, action: action)
+        doubleTap.numberOfTouchesRequired = 2
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.cancelsTouchesInView = false
+        doubleTap.delaysTouchesEnded = false
+        return doubleTap
+    }
+
+    /// A two-finger double tap: the pinch-zoom eases back to every shot's own zoom, and that's kept (#322).
+    @objc private func doubleTapped(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended, cameraOverride == nil else { return }
+        rig.resetZoomMultiplier()
+        session?.controls.keepZoomMultiplier(rig.zoomMultiplier)
     }
 
     /// Clears held touches, e.g. when an overlay steals them.
