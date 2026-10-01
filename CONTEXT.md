@@ -349,9 +349,17 @@ _Avoid_: north-up, map view
 The optional camera: the view turned to follow your boat's heading with about a second's lag, so tacks and penalty turns don't whip it round.
 _Avoid_: chase cam, heading-up
 
-**Auto framing**:
-The camera choosing its own centre and zoom to keep your boat, the boats near her, the water upwind, the start line before and just after the gun, and the next mark inside its zone in view; on by default, eased, never snapping. A pinch-zoom overrides it for a few seconds.
-_Avoid_: auto zoom, smart camera
+**Heading lead**:
+Where the camera centres: your boat plus a lead the way she's heading, sized as a share of the screen (further up it than across it) at every zoom and speed. The lead's direction follows your heading with a couple of seconds' lag and shrinks while she turns hard (360s, pre-start spins). Nothing else moves the centre after the start.
+_Avoid_: look-ahead, upwind framing
+
+**Shot**:
+What sets the camera's zoom at a moment of the race, never its centre. In order of precedence: pre-start (your boat low on the screen with the line in view, until just after the gun), close quarters (zoomed in while a boat is within a few hull lengths), mark rounding (widening only as much as keeps the mark on screen) and open water. A shot holds a few seconds before a lower one replaces it, and changes ease.
+_Avoid_: framing, camera mode
+
+**Auto zoom**:
+The camera's shots choosing its zoom; on by default. Off, the heading lead stays and the zoom is open water's. Either way a pinch-zoom multiplies the zoom and is kept across races; a two-finger double tap resets it.
+_Avoid_: auto framing, smart camera
 
 **View heading**:
 The compass heading at the top of the screen in course-up or boat-up; the HUD's arrows turn by it so they point true on screen.

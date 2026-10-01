@@ -43,12 +43,12 @@ import RegattaServices
         #expect(ControlSettings.camera(.courseUp, override: nil) == .courseUp)
         var settings = DeviceSettings()
         settings.camera = .courseUp
-        settings.autoFraming = false
+        settings.autoZoom = false
         let controls = ControlSettings(settings, launchOptions: parse("-camera", "boat"))
-        #expect(controls.camera == .boatUp && !controls.autoFraming)
-        settings.autoFraming = true
+        #expect(controls.camera == .boatUp && !controls.autoZoom)
+        settings.autoZoom = true
         controls.update(settings, launchOptions: parse())
-        #expect(controls.camera == .courseUp && controls.autoFraming)
+        #expect(controls.camera == .courseUp && controls.autoZoom)
     }
 
     @Test func skipsArgumentsItDoesNotKnow() {
