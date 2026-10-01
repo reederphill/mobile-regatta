@@ -89,6 +89,7 @@ jobs:
               - "Packages/RegattaProtocol/**"
               - "Packages/RegattaServer/**"
               - "Regatta/Online*"
+              - "Regatta/Online*/**"
               - "RegattaUITests/OnlineRaceUITests.swift"
             # What shapes the race view in the window (G5): the iPad's letterbox test runs only for these.
             viewport:
