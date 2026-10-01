@@ -18,6 +18,14 @@ import RegattaCore
                                  leg: 0, turnsOwed: turns, startDeadlineTick: nil, completeDeadlineTick: nil)))
     }
 
+    /// `events` presented, and every notice of them shown at once (`RaceEventPresenter.shown`).
+    private static func show(_ events: [RaceEvent], on presenter: inout RaceEventPresenter,
+                             autohelmHolding: Bool = false) -> Presentation {
+        let out = presenter.present(events, autohelmHolding: autohelmHolding)
+        for notice in out.notices { presenter.shown(notice.marks) }
+        return out
+    }
+
     /// A session whose haptics reach `recorder`, with the first countdown tick already played and forgotten.
     private static func session(_ recorder: HapticsTests.RecordingGenerator) -> GameSession {
         let session = GameSession(config: config, haptics: GatedHaptics(generator: recorder, isOn: true))
@@ -83,7 +91,7 @@ import RegattaCore
         let me = Self.me
         var presenter = RaceEventPresenter(me: me, seen: RuleSeenStore(defaults: defaults))
 
-        let first = presenter.present([Self.call(offender: me, victim: 1, incident: 1)])
+        let first = Self.show([Self.call(offender: me, victim: 1, incident: 1)], on: &presenter)
         #expect(first.cues == [.callAgainstMe])
         let text = try #require(first.notices.first.map(\.text))
         #expect(first.notices.map(\.kind) == [.ruleCall])
@@ -91,21 +99,23 @@ import RegattaCore
         #expect(text.contains("one full circle") && !text.contains("360") && !text.contains("720"), "\(text)")
 
         // The same call delivered again (an online resync) shows nothing and plays nothing.
-        #expect(presenter.present([Self.call(offender: me, victim: 1, incident: 1)]) == Presentation())
+        #expect(Self.show([Self.call(offender: me, victim: 1, incident: 1)], on: &presenter) == Presentation())
         // The next rule 10 call, in your favour this time: felt, no notice.
-        let second = presenter.present([Self.call(offender: 1, victim: me, incident: 2)])
+        let second = Self.show([Self.call(offender: 1, victim: me, incident: 2)], on: &presenter)
         #expect(second.cues == [.callForMe] && second.notices.isEmpty)
         // Another number spells itself out, in your favour too.
-        let other = presenter.present([Self.call(.windwardLeeward, offender: 2, victim: me, incident: 3)])
+        let other = Self.show([Self.call(.windwardLeeward, offender: 2, victim: me, incident: 3)], on: &presenter)
         #expect(other.notices.first?.text.contains("(rule 11)") == true && other.notices.first?.text.contains("fouled you") == true)
         // A mark touch is rule 31's first call, then felt alone.
-        #expect(presenter.present([Self.event(.markTouch(seat: me, mark: "pin"))]).notices.first?.text.contains("(rule 31)") == true)
-        #expect(presenter.present([Self.event(.markTouch(seat: me, mark: "pin"))]).notices.isEmpty)
+        #expect(Self.show([Self.event(.markTouch(seat: me, mark: "pin"))], on: &presenter).notices.first?.text.contains("(rule 31)") == true)
+        #expect(Self.show([Self.event(.markTouch(seat: me, mark: "pin"))], on: &presenter).notices.isEmpty)
 
         // Stored with hint progress: a new race on this device remembers, and Reset hints forgets.
         var nextRace = RaceEventPresenter(me: me, seen: RuleSeenStore(defaults: defaults))
         #expect(nextRace.present([Self.call(offender: me, victim: 1, incident: 9)]).notices.isEmpty)
-        #expect(RuleSeenStore.rulesKey.hasPrefix(DeviceSettings.hintKeyPrefix))
+        for key in [RuleSeenStore.rulesKey, RuleSeenStore.rulesAgainstKey, RuleSeenStore.autohelmKey] {
+            #expect(key.hasPrefix(DeviceSettings.hintKeyPrefix))
+        }
         DeviceSettings.resetHints(in: defaults)
         #expect(nextRace.present([Self.call(offender: me, victim: 1, incident: 10)]).notices.count == 1)
 
@@ -191,16 +201,17 @@ import RegattaCore
     @Test func autohelmKeepClearWordsShowOnce() {
         let me = Self.me
         var presenter = RaceEventPresenter(me: me)
-        let rule15 = presenter.present([Self.call(.acquiringRightOfWay, offender: me, victim: 1, incident: 1)],
-                                       autohelmHolding: true)
+        let rule15 = Self.show([Self.call(.acquiringRightOfWay, offender: me, victim: 1, incident: 1)], on: &presenter,
+                               autohelmHolding: true)
         #expect(rule15.notices.first?.text.contains(RuleWords.autohelmKeepClear) == false, "not rule 15")
-        let first = presenter.present([Self.call(.windwardLeeward, offender: me, victim: 1, incident: 2)],
-                                      autohelmHolding: true)
+        let first = Self.show([Self.call(.windwardLeeward, offender: me, victim: 1, incident: 2)], on: &presenter,
+                              autohelmHolding: true)
         let text = first.notices.first?.text ?? ""
         #expect(text.contains(RuleWords.autohelmKeepClear) && text.contains("(rule 11)"), "\(text)")
-        #expect(presenter.seen.hasSeen(.windwardLeeward))
-        let again = presenter.present([Self.call(.portStarboard, offender: me, victim: 1, incident: 3)],
-                                      autohelmHolding: true)
+        #expect(presenter.seen.hasSeen(.rule(.windwardLeeward)) && presenter.seen.hasSeen(.ruleAgainst(.windwardLeeward)))
+        #expect(text.contains(RuleWords.penaltyLine), "\(text)")
+        let again = Self.show([Self.call(.portStarboard, offender: me, victim: 1, incident: 3)], on: &presenter,
+                              autohelmHolding: true)
         #expect(again.notices.first?.text.contains(RuleWords.autohelmKeepClear) == false, "once per device")
         #expect(again.notices.first?.text.contains(RuleWords.plain(.portStarboard)) == true)
     }
@@ -220,7 +231,7 @@ import RegattaCore
     }
 
     /// The RTT warning (#18, #68) is one notice as it starts, again only after it clears, and it waits out a live Turn
-    /// notice (#123) rather than going stale behind it.
+    /// notice (#123) rather than going stale behind it: three stacked turns, 135 s, are well past its 30 s wait.
     @Test func lagWarningIsOneShotAndWaitsOutAPenalty() {
         var presenter = RaceEventPresenter(me: Self.me)
         #expect(presenter.lag(isWarning: false) == nil)
@@ -234,12 +245,129 @@ import RegattaCore
         slot.setLive(.penalty, text: "Turn · 15s / 30s", at: at(0))
         #expect(slot.current(at: at(0))?.kind == .penalty)
         slot.post(.latency, RuleWords.lag, at: at(1))
-        for t in stride(from: 1.0, through: 46, by: 5) {
-            slot.setLive(.penalty, text: "Turn · \(Int(46 - t))s", at: at(t))
+        for t in stride(from: 1.0, through: 136, by: 5) {
+            slot.setLive(.penalty, text: "Turn · \(Int(136 - t))s", at: at(t))
             #expect(slot.current(at: at(t))?.kind == .penalty)
         }
-        slot.setLive(.penalty, text: nil, at: at(46))
-        #expect(slot.current(at: at(46))?.text == RuleWords.lag, "a whole turn later, still shown")
+        #expect(NoticeTable.rule(.latency).priority < NoticeTable.rule(.penalty).priority, "it never covers a turn")
+        slot.setLive(.penalty, text: nil, at: at(136))
+        #expect(slot.current(at: at(136))?.text == RuleWords.lag, "three turns later, still shown")
+
+    }
+
+    /// A rule's first call against you always spells it out with the penalty line (#23), even after a call of it in your
+    /// favour already spelled it out; a later call against you is badge only.
+    @Test func firstCallAgainstYouCarriesThePenaltyLineAfterOneForYou() throws {
+        let me = Self.me
+        var presenter = RaceEventPresenter(me: me)
+        let forMe = Self.show([Self.call(offender: 1, victim: me, incident: 1)], on: &presenter)
+        let forText = try #require(forMe.notices.first?.text)
+        #expect(forText.contains(RuleWords.plain(.portStarboard)) && !forText.contains(RuleWords.penaltyLine))
+
+        let against = Self.show([Self.call(offender: me, victim: 1, incident: 2)], on: &presenter)
+        let text = try #require(against.notices.first?.text)
+        #expect(text.contains(RuleWords.plain(.portStarboard)) && text.contains("(rule 10)"), "\(text)")
+        #expect(text.contains(RuleWords.penaltyLine), "\(text)")
+        #expect(Self.show([Self.call(offender: me, victim: 2, incident: 3)], on: &presenter).notices.isEmpty)
+        #expect(Self.show([Self.call(offender: 2, victim: me, incident: 4)], on: &presenter).notices.isEmpty)
+    }
+
+    /// Plain words are seen only once they show (#23): a call the slot drops stale behind others (#114) leaves its rule
+    /// unseen, and the next call of it spells it out.
+    @Test func plainWordsTheSlotDropsLeaveTheRuleUnseen() throws {
+        let store = RuleSeenStore()
+        let session = GameSession(config: Self.config, rulesSeen: store)
+        var time = Self.pastStartHint(session)
+        session.now = { time }
+        let me = session.driver.myBoatIndex
+        let (one, two) = ((me + 1) % 3, (me + 2) % 3)
+        // OCS shows for 6 s; the rule 11 call waits, then shows; the rule 10 call waits past its 6 s and is dropped.
+        session.consume([Self.event(.ocsNotice(recipient: me)), Self.call(.windwardLeeward, offender: one, victim: me),
+                         Self.call(offender: two, victim: me, incident: 2)])
+        #expect(session.notice?.kind == .ocs)
+        #expect(!store.hasSeen(.rule(.windwardLeeward)), "not seen while it waits")
+        time += 6
+        session.refreshHUD()
+        #expect(session.notice?.text.contains("(rule 11)") == true, "\(String(describing: session.notice))")
+        #expect(store.hasSeen(.rule(.windwardLeeward)))
+        time += 6
+        session.refreshHUD()
+        #expect(session.notice == nil, "the rule 10 call went stale: \(String(describing: session.notice))")
+        #expect(!store.hasSeen(.rule(.portStarboard)), "dropped unshown, so unseen")
+
+        session.consume([Self.call(offender: two, victim: me, incident: 3)])
+        #expect(session.notice?.text.contains(RuleWords.plain(.portStarboard)) == true)
+        #expect(store.hasSeen(.rule(.portStarboard)))
+    }
+
+    /// The session feeds the driver's RTT warning (#68) to the presenter: one `.latency` notice as it starts.
+    @Test func sessionPostsTheDriversLagWarningOnce() {
+        let driver = FakeDriver(config: Self.config)
+        let session = GameSession(driver: driver, roster: driver.practice.roster)
+        let time = Self.pastStartHint(session)
+        session.now = { time }
+        session.refreshHUD()
+        #expect(session.notice == nil)
+        driver.lagWarning = true
+        session.refreshHUD()
+        #expect(session.notice?.kind == .latency && session.notice?.text == RuleWords.lag)
+        let shown = session.notice?.id
+        driver.lagWarning = true
+        session.refreshHUD()
+        #expect(session.notice?.id == shown, "one-shot while it lasts")
+    }
+
+    /// #228's words come from your boat's autohelm in the driver's frame as the call is consumed: holding, they show;
+    /// with the rudder held off centre (no autohelm), the rule's plain words do.
+    @Test func sessionReadsTheFramesAutohelmForKeepClearWords() throws {
+        for holding in [true, false] {
+            let driver = PracticeDriver(config: Self.config)
+            let session = GameSession(driver: driver, roster: driver.roster)
+            session.now = { Self.t0 }
+            let me = driver.myBoatIndex
+            // Hold the rudder off centre; then, for the autohelm, centre it again and let it capture.
+            driver.submit(BoatInput(rudder: 1.0))
+            driver.tick(5 * Race.dt + 1e-9)
+            if holding {
+                driver.submit(.neutral)
+                driver.tick(5 * Race.dt + 1e-9)
+            }
+            _ = driver.drainEvents()
+            #expect((driver.currentFrame.boats[me].autohelm != nil) == holding)
+            session.consume([Self.call(offender: me, victim: (me + 1) % 3)])
+            let text = try #require(session.notice?.text)
+            #expect(text.contains(RuleWords.autohelmKeepClear) == holding, "\(text)")
+            #expect(text.contains(RuleWords.plain(.portStarboard)) == !holding, "\(text)")
+        }
+    }
+
+    /// A clock time after the start hint a new session posts on the wall clock has expired, with the slot cleared of it.
+    private static func pastStartHint(_ session: GameSession) -> Date {
+        let time = Date.now.addingTimeInterval(3_600)
+        session.now = { time }
+        session.refreshHUD()
+        return time
+    }
+
+    /// A practice driver with an RTT warning you set: an online race's signal, without a server.
+    @MainActor private final class FakeDriver: RaceDriver {
+        let practice: PracticeDriver
+        var lagWarning = false
+
+        init(config: RaceConfig) { practice = PracticeDriver(config: config) }
+
+        var myBoatIndex: Int { practice.myBoatIndex }
+        var course: CourseLayout { practice.course }
+        var venue: Venue { practice.venue }
+        var boatClass: BoatClass { practice.boatClass }
+        var isPausable: Bool { false }
+        var currentFrame: TickFrame { practice.currentFrame }
+        var previousFrame: TickFrame { practice.previousFrame }
+        var alpha: Double { practice.alpha }
+        func tick(_ dt: Double) -> [TickFrame] { practice.tick(dt) }
+        func submit(_ input: BoatInput) { practice.submit(input) }
+        func tap(_ tap: BoatTap) -> Bool { practice.tap(tap) }
+        func drainEvents() -> [RaceEvent] { practice.drainEvents() }
     }
 
     /// The OCS notice is rule 29.1's, and no copy names a 360 or a 720 (#9).

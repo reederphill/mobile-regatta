@@ -2,8 +2,9 @@ import Foundation
 import RegattaCore
 
 /// The plain-words text of a rule call (#23): the first time a rule number is called on you, in your favour or
-/// against you, the call spells the rule out; after that the line and its badge on the water carry it (#123), with
-/// no notice. `RuleSeenStore` keeps which numbers this device has seen.
+/// against you, the call spells the rule out, and its first call against you always does, with the penalty line;
+/// after that the line and its badge on the water carry it (#123), with no notice. `RuleSeenStore` keeps what this
+/// device has seen.
 enum RuleWords {
     /// The rule in a sentence, by number. Every rule that reaches a call today has its own (10, 11, 12, 13, 15, 16.1,
     /// 21.1, 21.2 as `ruleCall`, 31 as `markTouch`); the rest fall back to the rule's title.
@@ -73,11 +74,23 @@ enum RuleWords {
     }
 }
 
-/// Which rule numbers this device has seen called, for plain words (#23): kept with hint progress under
+/// What a plain-words notice teaches you, marked seen once the notice shows (#23): a rule number spelled out, a rule's
+/// first call against you (always with its penalty line, even after a call of it in your favour), and #228's
+/// autohelm words.
+enum SeenMark: Hashable {
+    case rule(RacingRule)
+    case ruleAgainst(RacingRule)
+    case autohelmKeepClear
+}
+
+/// What this device has seen spelled out, for plain words (#23): kept with hint progress under
 /// `DeviceSettings.hintKeyPrefix`, so Settings' Reset hints clears it with them. Read through every time, never
 /// cached, so a reset takes effect at the next call. In memory (tests, fixtures) unless given defaults.
 final class RuleSeenStore {
+    /// The rule numbers spelled out, for or against you.
     static let rulesKey = DeviceSettings.hintKeyPrefix + "rulesSeen"
+    /// The rule numbers spelled out against you, with the penalty line.
+    static let rulesAgainstKey = DeviceSettings.hintKeyPrefix + "rulesSeenAgainst"
     /// #228's autohelm keep-clear words, once per device.
     static let autohelmKey = DeviceSettings.hintKeyPrefix + "autohelmKeepClear"
 
@@ -88,26 +101,30 @@ final class RuleSeenStore {
         self.defaults = defaults
     }
 
-    func hasSeen(_ rule: RacingRule) -> Bool {
-        seenRules.contains(rule.rawValue)
+    func hasSeen(_ mark: SeenMark) -> Bool {
+        switch mark {
+        case .rule(let rule): rules(Self.rulesKey).contains(rule.rawValue)
+        case .ruleAgainst(let rule): rules(Self.rulesAgainstKey).contains(rule.rawValue)
+        case .autohelmKeepClear: value(forKey: Self.autohelmKey) as? Bool ?? false
+        }
     }
 
-    func markSeen(_ rule: RacingRule) {
-        let seen = seenRules
+    func markSeen(_ mark: SeenMark) {
+        switch mark {
+        case .rule(let rule): insert(rule, into: Self.rulesKey)
+        case .ruleAgainst(let rule): insert(rule, into: Self.rulesAgainstKey)
+        case .autohelmKeepClear: set(true, forKey: Self.autohelmKey)
+        }
+    }
+
+    private func rules(_ key: String) -> [String] {
+        value(forKey: key) as? [String] ?? []
+    }
+
+    private func insert(_ rule: RacingRule, into key: String) {
+        let seen = rules(key)
         guard !seen.contains(rule.rawValue) else { return }
-        set(seen + [rule.rawValue], forKey: Self.rulesKey)
-    }
-
-    var hasSeenAutohelmKeepClear: Bool {
-        value(forKey: Self.autohelmKey) as? Bool ?? false
-    }
-
-    func markAutohelmKeepClearSeen() {
-        set(true, forKey: Self.autohelmKey)
-    }
-
-    private var seenRules: [String] {
-        value(forKey: Self.rulesKey) as? [String] ?? []
+        set(seen + [rule.rawValue], forKey: key)
     }
 
     private func value(forKey key: String) -> Any? {

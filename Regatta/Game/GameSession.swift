@@ -73,6 +73,8 @@ final class GameSession {
     @ObservationIgnored private var presenter: RaceEventPresenter
     /// Every cue the presenter plays, for #126's audio. Nothing sets it yet.
     @ObservationIgnored var onCue: ((RaceCue) -> Void)?
+    /// The plain words posted and not yet shown or dropped, by notice id: what each teaches (`settleMarks`).
+    @ObservationIgnored private var pendingMarks: [Int: [SeenMark]] = [:]
     @ObservationIgnored private var toldUpdateRequired = false
     /// Every haptic goes through here, so Settings' Haptics off silences them all (#110).
     @ObservationIgnored private let haptics: any Haptics
@@ -243,6 +245,7 @@ final class GameSession {
         let penalty = showsRuleCues ? PenaltyReadout(frame: driver.currentFrame, seat: driver.myBoatIndex) : nil
         noticeSlot.setLive(.penalty, text: penalty?.noticeText, at: now())
         let current = noticeSlot.current(at: now())
+        settleMarks()
         if current != notice { notice = current }
         closeLeaderboardIfDue()
         if playerDone { results = makeResults() }
@@ -260,7 +263,7 @@ final class GameSession {
             if case .ruleCall(let call) = event.kind { scene.ruleCalls.add(call) }
         }
         let presentation = presenter.present(events, autohelmHolding: myBoat.autohelm != nil)
-        for notice in presentation.notices { post(notice.kind, notice.text) }
+        for notice in presentation.notices { post(notice.kind, notice.text, marks: notice.marks) }
         var cues = presentation.cues
         if let tick = presenter.sequenceCue(raceTime: driver.currentFrame.time) { cues.append(tick) }
         // One haptic a batch, the strongest: a contact and its call arrive on the same tick.
@@ -284,8 +287,24 @@ final class GameSession {
         results = makeResults()
     }
 
-    private func post(_ kind: NoticeKind, _ text: String) {
+    private func post(_ kind: NoticeKind, _ text: String, marks: [SeenMark] = []) {
+        if !marks.isEmpty { pendingMarks[noticeSlot.nextID] = marks }
         notice = noticeSlot.post(kind, text, at: now())
+        settleMarks()
+    }
+
+    /// Plain words are seen once their notice shows, and stay unseen if the slot drops it stale (#23, #114).
+    private func settleMarks() {
+        for (id, marks) in pendingMarks {
+            if noticeSlot.showing?.id == id {
+                presenter.shown(marks)
+            } else if !noticeSlot.waiting.contains(where: { $0.id == id }) {
+                presenter.dropped(marks)
+            } else {
+                continue
+            }
+            pendingMarks[id] = nil
+        }
     }
 
     private func makeResults() -> [ResultRow] {

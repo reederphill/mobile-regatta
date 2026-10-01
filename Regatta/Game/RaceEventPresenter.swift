@@ -92,12 +92,19 @@ struct Presentation: Equatable {
 struct PresentedNotice: Equatable {
     let kind: NoticeKind
     let text: String
+    /// What it teaches: seen once it shows (`RaceEventPresenter.shown`), never if the slot drops it unshown.
+    var marks: [SeenMark] = []
 }
 
 /// Turns the driver's race events into what you see and feel (#124): notices for the slot (#114), cues for haptics
 /// and #126's audio. Shared by practice and online: online the events are the server's only (ADR 0005). It keeps
 /// no game state (the session finishes your race); only what it has shown: the calls already presented (an online
-/// call delivered again after a resync shows once), the countdown second and the lag warning's edge.
+/// call delivered again after a resync shows once), the plain words waiting in the slot, the countdown second and the
+/// lag warning's edge.
+///
+/// Plain words are seen only once they show: the session reports each notice's `marks` as `shown` or `dropped`
+/// (stale in the slot, #114), and a dropped one leaves its rule unseen for the next call. While one waits, a later
+/// call of the same rule doesn't spell it out again.
 ///
 /// Only events about you present: a call between two other boats posts nothing and plays nothing (#114). In
 /// practice the driver drains every seat's events, so every one is filtered by `me`.
@@ -108,6 +115,8 @@ struct RaceEventPresenter {
     let seen: RuleSeenStore
 
     private var presentedCalls: Set<RuleCall> = []
+    /// Marks of notices posted and not yet shown or dropped, counted by notice.
+    private var pending: [SeenMark: Int] = [:]
     private var lastCountdownSecond = Int.max
     private var isLagWarning = false
 
@@ -139,15 +148,16 @@ struct RaceEventPresenter {
             guard call.offender == me || call.victim == me, presentedCalls.insert(call).inserted else { return }
             let against = call.offender == me
             out.cues.append(against ? .callAgainstMe : .callForMe)
-            if let text = callText(call, against: against, autohelmHolding: autohelmHolding) {
-                out.notices.append(PresentedNotice(kind: .ruleCall, text: text))
+            if let notice = callNotice(call, against: against, autohelmHolding: autohelmHolding) {
+                out.notices.append(notice)
             }
         case .markTouch(let seat, let mark):
             guard seat == me else { return }
             out.cues.append(.markTouch)
-            if !seen.hasSeen(.touchingMark) {
-                seen.markSeen(.touchingMark)
-                out.notices.append(PresentedNotice(kind: .ruleCall, text: RuleWords.firstMarkTouch(mark)))
+            // Rule 31 is always against you: its first touch spells it out with the penalty line.
+            if !hasSeen(.ruleAgainst(.touchingMark)) {
+                out.notices.append(notice(.ruleCall, RuleWords.firstMarkTouch(mark),
+                                          marks: [.rule(.touchingMark), .ruleAgainst(.touchingMark)]))
             }
         case .penaltyServed(let seat):
             if seat == me { out.cues.append(.penaltyDone) }
@@ -179,19 +189,49 @@ struct RaceEventPresenter {
         }
     }
 
-    /// A call's text: plain words the first time its rule number is called on you (#23), or #228's autohelm words the
-    /// first time a keep-clear call catches your autohelm holding; nil after that, when the line and badge carry it.
-    private func callText(_ call: RuleCall, against: Bool, autohelmHolding: Bool) -> String? {
+    /// A call's notice: plain words the first time its rule number is called on you (#23), and the first time it is
+    /// called against you, with the penalty line; or #228's autohelm words the first time a keep-clear call catches
+    /// your autohelm holding. Nil after that, when the line and badge carry it.
+    private mutating func callNotice(_ call: RuleCall, against: Bool, autohelmHolding: Bool) -> PresentedNotice? {
         let other = name(against ? call.victim : call.offender)
         let owesTurn = call.turnsOwed > 0
-        if against, autohelmHolding, RuleWords.keepClearRules.contains(call.rule), !seen.hasSeenAutohelmKeepClear {
-            seen.markAutohelmKeepClearSeen()
-            seen.markSeen(call.rule)
-            return RuleWords.firstCall(call.rule, against: true, other: other, owesTurn: owesTurn, autohelm: true)
+        let rule = call.rule
+        if against, autohelmHolding, RuleWords.keepClearRules.contains(rule), !hasSeen(.autohelmKeepClear) {
+            let text = RuleWords.firstCall(rule, against: true, other: other, owesTurn: owesTurn, autohelm: true)
+            return notice(.ruleCall, text, marks: [.autohelmKeepClear, .rule(rule), .ruleAgainst(rule)])
         }
-        guard !seen.hasSeen(call.rule) else { return nil }
-        seen.markSeen(call.rule)
-        return RuleWords.firstCall(call.rule, against: against, other: other, owesTurn: owesTurn)
+        let marks: [SeenMark] = against ? [.rule(rule), .ruleAgainst(rule)] : [.rule(rule)]
+        guard !hasSeen(marks[marks.count - 1]) else { return nil }
+        return notice(.ruleCall, RuleWords.firstCall(rule, against: against, other: other, owesTurn: owesTurn),
+                      marks: marks)
+    }
+
+    private func hasSeen(_ mark: SeenMark) -> Bool {
+        pending[mark] != nil || seen.hasSeen(mark)
+    }
+
+    /// A notice teaching `marks`, pending until it shows or drops.
+    private mutating func notice(_ kind: NoticeKind, _ text: String, marks: [SeenMark]) -> PresentedNotice {
+        for mark in marks { pending[mark, default: 0] += 1 }
+        return PresentedNotice(kind: kind, text: text, marks: marks)
+    }
+
+    /// A notice teaching `marks` showed: they are seen on this device.
+    mutating func shown(_ marks: [SeenMark]) {
+        for mark in marks { seen.markSeen(mark) }
+        release(marks)
+    }
+
+    /// A notice teaching `marks` went stale unshown: the next call teaches them again.
+    mutating func dropped(_ marks: [SeenMark]) {
+        release(marks)
+    }
+
+    private mutating func release(_ marks: [SeenMark]) {
+        for mark in marks {
+            guard let count = pending[mark] else { continue }
+            pending[mark] = count > 1 ? count - 1 : nil
+        }
     }
 
     /// The sequence tick at race time `time` (negative before the gun): at 30 s, 10 s and 5…1 s, once each.
