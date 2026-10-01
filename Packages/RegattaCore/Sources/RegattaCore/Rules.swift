@@ -72,7 +72,8 @@ public struct RuleCall: Sendable, Equatable, Codable {
     public let victim: Int
     /// The offender's leg index at the call.
     public let leg: Int
-    /// The penalty turns the call adds to what she owes: one (#89).
+    /// The penalty turns the call adds to what she owes: one (#89), or none when her penalised mark touch was
+    /// in the same incident (44.1(a), #90).
     public let turnsOwed: Int
     /// The tick by which the offender must have started her penalty turn, when its clock is fixed at the call:
     /// always under `fromCall` stacking, and under `sequential` when she owed nothing before it. Nil when the

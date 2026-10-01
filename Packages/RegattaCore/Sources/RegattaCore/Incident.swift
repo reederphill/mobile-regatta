@@ -109,7 +109,8 @@ public struct Incident: Sendable, Equatable, Codable {
     }
 }
 
-/// A boat touching land or the race area's boundary (#82): recorded, never a foul or a penalty.
+/// A boat touching land or the race area's boundary (#82), or a mark that costs her no turn (#90): recorded,
+/// never a foul or a penalty.
 public struct ObstructionContact: Sendable, Equatable, Codable {
     /// The tick the touch began on.
     public let tick: Int

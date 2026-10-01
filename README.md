@@ -397,7 +397,8 @@ is, each frame (`WaterTests.waterUpdateStaysCheap` prints its cost).
   is below the line, then start. While you sail back, keep clear of everyone else.
 - Round the windward mark and leeward mark to port, then finish by crossing the line downwind.
 - Dark water is a puff and pale water is a lull. The faint cone behind each boat is its wind shadow.
-- Fouling another boat or touching a mark costs one penalty turn: a 360° one way, a tack and a gybe. Start
-  it within 20 s and finish it within 40 s or you're disqualified; owe more than one and each gets its own
+- Fouling another boat or touching a mark of your leg (the one you're rounding, or a line end before you
+  start or as you finish) costs one penalty turn, and a foul and a touch in one incident cost one between
+  them: a 360° one way, a tack and a gybe. Start it within 20 s and finish it within 40 s or you're disqualified; owe more than one and each gets its own
   20 s and 40 s once the one before is done. You can't finish while you owe one: take it on the course side
   and cross again.

@@ -1,8 +1,14 @@
-/// What a boat hit that isn't a mark or another boat (#82).
+/// What a boat hit that isn't another boat and costs her no penalty (#82, #90).
 public enum ObstructionKind: String, Sendable, CaseIterable, Codable {
     case land
     /// The race area's drawn boundary.
     case boundary
+    /// A mark that isn't a mark of her leg (rule 31, #90: `CourseLayout.isRule31Mark`), or one of her leg
+    /// touched in an incident whose call already carries her turn (44.1(a)).
+    case mark
+
+    /// The race area's edges (#82), in the order an edge touch lists them: the kinds `RaceEdges` resolves.
+    public static let edges: [ObstructionKind] = [.land, .boundary]
 }
 
 /// Something the race decided, stamped with the tick it happened on. Seat ids index `Race.boats`.
@@ -16,7 +22,8 @@ public struct RaceEvent: Sendable, Equatable {
         case started(seat: Int)
         /// A rule call on an incident, with the penalty and its deadlines.
         case ruleCall(RuleCall)
-        /// Touching a mark (rule 31).
+        /// Touching a mark of her leg (rule 31, #90), which costs her a penalty turn. A touch that costs none
+        /// is an `obstructionContact` of kind `.mark`.
         case markTouch(seat: Int, mark: String)
         case obstructionContact(seat: Int, kind: ObstructionKind)
         /// Two boats touched. Contact is not itself a foul.
