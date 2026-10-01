@@ -4,15 +4,6 @@ import RegattaBots
 import RegattaCore
 import UIKit
 
-struct RaceMessage: Identifiable {
-    enum Tone { case info, good, alert }
-
-    let id = UUID()
-    let text: String
-    let tone: Tone
-    let expires: Date
-}
-
 struct ResultRow: Identifiable {
     let id: Int
     let place: String
@@ -24,11 +15,11 @@ struct ResultRow: Identifiable {
     let isBot: Bool
 }
 
-/// Hosts one race's driver and bridges it to SwiftUI: HUD snapshots, rule-call messages,
+/// Hosts one race's driver and bridges it to SwiftUI: HUD snapshots, the notice slot (#114),
 /// haptics and results. It never holds a `Race`: a practice race is a `PracticeDriver`, an online one
 /// an `OnlineDriver`.
 ///
-/// Messages come only from the events the driver drains. Online those are the server's alone (#18, #68):
+/// Notices come only from the events the driver drains. Online those are the server's alone (#18, #68):
 /// the prediction's own rule calls, OCS, penalties and finishes never reach here, so none is shown
 /// before the server calls it.
 @Observable
@@ -48,7 +39,8 @@ final class GameSession {
     var isTuned = false
 
     var hud = HUDState()
-    var messages: [RaceMessage] = []
+    /// The one notice line under the top readouts (#114), what `noticeSlot` shows now.
+    private(set) var notice: Notice?
     var results: [ResultRow] = []
     var isPaused = false
     var playerDone = false
@@ -61,6 +53,11 @@ final class GameSession {
     /// The device's steering scheme, live (#112, #131).
     let controls: ControlSettings
 
+    @ObservationIgnored private var noticeSlot = NoticeSlot()
+    /// The minimap's pressure, sampled every couple of seconds rather than every refresh (#289, #114).
+    @ObservationIgnored private let minimapField = MinimapField()
+    /// The clock notices are timed by: wall-clock time, so a notice reads for its seconds at any timescale.
+    @ObservationIgnored var now: () -> Date = { .now }
     @ObservationIgnored private var lastCountdownSecond = Int.max
     @ObservationIgnored private var toldUpdateRequired = false
     /// Every haptic goes through here, so Settings' Haptics off silences them all (#110).
@@ -85,10 +82,22 @@ final class GameSession {
     /// A render fixture (#62): `log` replayed to the fixture's freeze tick and frozen there, drawn from
     /// its camera through its vision filter.
     convenience init(fixture: RenderFixture, log: RaceLog) throws {
-        let driver = try FixtureDriver(log: log, freezeTick: fixture.freezeTick)
+        let driver = try FixtureDriver(log: log, freezeTick: fixture.freezeTick, seat: fixture.hud?.seat)
         self.init(driver: driver, roster: driver.roster)
         scene.cameraOverride = fixture.cameraMode
         vision = fixture.vision
+        showsHUDInFixture = fixture.hud != nil
+        if let kind = fixture.hud?.notice {
+            // A notice the replay can't make (it drains no events): shown for good, so the render holds still.
+            noticeSlot.show(Notice(id: 0, kind: kind, text: Self.fixtureNoticeText(kind), posted: .distantPast,
+                                   expires: .distantFuture))
+            notice = noticeSlot.current(at: now())
+        }
+    }
+
+    // TODO-COPY (#124): `RaceEventPresenter` writes the real notices; a fixture's is a placeholder of a real length.
+    static func fixtureNoticeText(_ kind: NoticeKind) -> String {
+        "TODO-COPY \(kind.rawValue): room at the mark for the inside boat"
     }
 
     init(driver: any RaceDriver, roster: FleetRoster, haptics: any Haptics = GatedHaptics(),
@@ -101,8 +110,9 @@ final class GameSession {
         vision = LaunchOptions.current.raceVision
         scene = GameScene(driver: driver, roster: roster)
         scene.session = self
-        hud = HUDState(world: driver.renderWorld)
-        post(Self.startHint(controls.steering), .info, seconds: 6)
+        refreshHUD()
+        // A frozen fixture shows only the notice it names.
+        if !driver.isFrozen { post(.hint, Self.startHint(controls.steering)) }
     }
 
     // TODO-COPY (#171): #129's scheme-aware hints replace this.
@@ -112,6 +122,10 @@ final class GameSession {
         case .tiller: "Touch anywhere and slide sideways to steer. Be below the line at the gun."
         }
     }
+
+    /// A render fixture that draws the HUD over its scene (#114).
+    var showsFixtureHUD: Bool { driver.isFrozen && showsHUDInFixture }
+    @ObservationIgnored private var showsHUDInFixture = false
 
     /// The halves' faint "‹ Port / Starboard ›" edge labels show in the first race only, and only in halves (#23).
     var showsEdgeLabels: Bool { Self.showsEdgeLabels(isFirstRace: isFirstRace, steering: controls.steering) }
@@ -169,14 +183,17 @@ final class GameSession {
     }
 
     func refreshHUD() {
-        hud = HUDState(world: driver.renderWorld)
-        hud.viewHeading = scene.viewHeading
-        let now = Date.now
-        messages.removeAll { $0.expires < now }
+        let world = driver.renderWorld
+        let roster = roster
+        var hud = HUDState(world: world) { roster[$0].isBot }
+        hud.pressureImage = minimapField.refresh(world)
+        self.hud = hud
+        let current = noticeSlot.current(at: now())
+        if current != notice { notice = current }
         if playerDone { results = makeResults() }
         if let online = driver as? OnlineDriver, case .updateRequired = online.connection, !toldUpdateRequired {
             toldUpdateRequired = true
-            post("Update Regatta to race online. This race can't reconnect.", .alert, seconds: 10)
+            post(.latency, "Update Regatta to race online. This race can't reconnect.")
         }
     }
 
@@ -198,42 +215,33 @@ final class GameSession {
         let me = driver.myBoatIndex
         func name(_ i: Int) -> String { roster.label(of: i, playerSeat: me) }
 
+        // Only the ticket's notice kinds reach the slot (#114); the gun, a start, a rounding, a finish and a served
+        // penalty are felt, not read.
         switch event.kind {
         case .gun:
-            post("Gun! Race on.", .good)
             haptics.impact(intensity: 1)
         case .ocsNotice(let b) where b == me:
-            post("Rule 29.1 — OCS. You were over at the gun: dip back below the line, then start.", .alert, seconds: 6)
+            post(.ocs, "Rule 29.1 — OCS. You were over at the gun: dip back below the line, then start.")
             haptics.notify(.error)
-        case .ocsNotice(let b):
-            post("\(name(b)) is OCS", .info)
-        case .cleared(let b) where b == me:
-            post("Cleared. Now cross the line to start.", .info)
-        case .started(let b) where b == me:
-            post("You're away.", .good)
         case .ruleCall(let call) where call.offender == me:
-            post("Rule \(call.rule.rawValue) — \(call.rule.title). Your foul on \(name(call.victim)): spin a 360°.", .alert, seconds: 6)
+            post(.ruleCall, "Rule \(call.rule.rawValue) — \(call.rule.title). Your foul on \(name(call.victim)): spin a 360°.")
             haptics.notify(.error)
         case .ruleCall(let call) where call.victim == me:
-            post("Rule \(call.rule.rawValue) — \(call.rule.title). \(name(call.offender)) fouled you and must spin.", .good, seconds: 5)
+            post(.ruleCall, "Rule \(call.rule.rawValue) — \(call.rule.title). \(name(call.offender)) fouled you and must spin.")
             haptics.impact(intensity: 0.8)
         case .ruleCall(let call):
-            post("\(name(call.offender)) fouled \(name(call.victim)) — Rule \(call.rule.rawValue)", .info)
+            post(.ruleCall, "\(name(call.offender)) fouled \(name(call.victim)) — Rule \(call.rule.rawValue)")
         case .markTouch(let b, let mark) where b == me:
-            post("Rule 31 — you hit the \(mark). Spin a 360°.", .alert, seconds: 5)
+            post(.ruleCall, "Rule 31 — you hit the \(mark). Spin a 360°.")
             haptics.notify(.warning)
         case .penaltyServed(let b) where b == me:
-            post("Penalty done.", .good)
             haptics.notify(.success)
-        case .rounded(let b, let mark) where b == me:
-            post("Rounded the \(mark) in \(ordinal(placeOfPlayer())).", .good)
+        case .rounded(let b, _) where b == me:
             haptics.impact(intensity: 0.6)
-        case .finished(let b, let place) where b == me:
-            post("Finished \(ordinal(place))!", .good, seconds: 8)
+        case .finished(let b, _) where b == me:
             haptics.notify(.success)
             finishForPlayer()
-        case .disqualified(let b, let reason) where b == me:
-            post("DSQ — \(reason).", .alert, seconds: 8)
+        case .disqualified(let b, _) where b == me:
             haptics.notify(.error)
             finishForPlayer()
         case .raceClosed:
@@ -250,13 +258,8 @@ final class GameSession {
         results = makeResults()
     }
 
-    private func post(_ text: String, _ tone: RaceMessage.Tone, seconds: Double = 4) {
-        messages.append(RaceMessage(text: text, tone: tone, expires: .now.addingTimeInterval(seconds)))
-        if messages.count > 4 { messages.removeFirst(messages.count - 4) }
-    }
-
-    private func placeOfPlayer() -> Int {
-        driver.currentFrame.place(of: driver.myBoatIndex)
+    private func post(_ kind: NoticeKind, _ text: String) {
+        notice = noticeSlot.post(kind, text, at: now())
     }
 
     private func makeResults() -> [ResultRow] {

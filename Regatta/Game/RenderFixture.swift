@@ -13,6 +13,10 @@ import RegattaCore
 /// whole course), so the fixtures drawn that way keep their references. `"view": "courseUp"` or `"boatUp"` draws
 /// the race camera itself (#113), auto framing on, settled.
 ///
+/// With `hud` the fixture draws the race HUD over the scene (#114): `{ "hud": { "notice": "markRoom" } }` shows that
+/// notice, and `"seat"` draws the race from another seat's boat (a log whose own seat is never OCS can still show
+/// the OCS HUD). Without it, the scene alone, as every fixture before #114.
+///
 /// The app is launched with `-fixture <name>`, and finds `<name>.json` in the directory the
 /// `REGATTA_FIXTURE_DIR` environment variable names (the UI test passes its own `Fixtures` folder).
 struct RenderFixture: Codable, Equatable {
@@ -27,6 +31,15 @@ struct RenderFixture: Codable, Equatable {
     var vision: VisionFilter
     /// The race camera this fixture is drawn from (#113); nil draws `camera`'s north-up camera.
     var view: View? = nil
+    /// The HUD over the scene (#114); nil draws the scene alone.
+    var hud: HUDFixture? = nil
+
+    struct HUDFixture: Codable, Equatable {
+        /// A notice the fixture shows for good: the replay drains no events, so it can't post one itself.
+        var notice: NoticeKind? = nil
+        /// The seat that is "you", in place of the log's human seat.
+        var seat: Int? = nil
+    }
 
     enum View: String, Codable, CaseIterable {
         case courseUp, boatUp
@@ -145,7 +158,8 @@ final class FixtureDriver: RaceDriver {
     var previousFrame: TickFrame { currentFrame }
     let alpha = 1.0
 
-    init(log: RaceLog, freezeTick: Int) throws {
+    /// `seat` is your seat in place of the log's human one (`RenderFixture.HUDFixture.seat`).
+    init(log: RaceLog, freezeTick: Int, seat: Int? = nil) throws {
         let start = -log.header.setup.startSequenceTicks
         guard (start...log.finalTick).contains(freezeTick) else {
             throw FixtureError.freezeTickOutOfRange(freezeTick: freezeTick, start: start, finalTick: log.finalTick)
@@ -156,7 +170,7 @@ final class FixtureDriver: RaceDriver {
         truncated.finalTick = freezeTick
         let race = try Replayer.replay(truncated, requireMatchingVersion: false)
         let setup = log.header.setup
-        myBoatIndex = setup.seats.firstIndex(of: .human) ?? 0
+        myBoatIndex = seat ?? setup.seats.firstIndex(of: .human) ?? 0
         course = race.course
         boatClass = race.boatClass
         roster = FleetRoster(setup: setup)

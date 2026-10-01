@@ -45,7 +45,8 @@ protocol RaceDriver: AnyObject {
     var renderWorld: RenderWorld { get }
 
     /// Whether the race stands still at one tick for a render fixture (`FixtureDriver`, #62): the scene
-    /// draws it settled, with no easing or animation, and hides the HUD and controls.
+    /// draws it settled, with no easing or animation, and hides the controls (and the HUD, unless the
+    /// fixture asks for it, #114).
     var isFrozen: Bool { get }
 }
 
@@ -74,6 +75,10 @@ struct TickFrame {
     /// Each seat's held input at `tick` (`Race.heldInputs`): its ease is what the boat's pose draws from (#117).
     /// Every client holds every seat's (ADR 0005).
     let heldInputs: [BoatInput]
+    /// The tick the race closes on once a boat has finished (`Race.closeTick`: the earlier of the finish window's
+    /// end and the time limit), nil while nobody has: the HUD's yellow countdown (#30, #114). Read from the race,
+    /// never worked out here. Online it is the prediction's, so it appears once the server has told it of a finish.
+    let closeTick: Int?
 
     /// Race clock in seconds.
     var time: Double { Double(tick) / Double(Race.tickRate) }
@@ -91,16 +96,19 @@ struct TickFrame {
         wind = race.wind
         self.isOver = isOver
         heldInputs = race.heldInputs
+        closeTick = race.firstFinishTime != nil ? race.closeTick : nil
     }
 
     /// `heldInputs` nil holds every seat neutral.
-    init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool, heldInputs: [BoatInput]? = nil) {
+    init(tick: Int, boats: [Boat], standings: [Int], wind: WindField, isOver: Bool, heldInputs: [BoatInput]? = nil,
+         closeTick: Int? = nil) {
         self.tick = tick
         self.boats = boats
         self.standings = standings
         self.wind = wind
         self.isOver = isOver
         self.heldInputs = heldInputs ?? Array(repeating: .neutral, count: boats.count)
+        self.closeTick = closeTick
     }
 
     /// This frame a tick earlier, each boat moved back along its velocity: what the renderer draws from
@@ -111,7 +119,8 @@ struct TickFrame {
             boat.position -= boat.velocity * Race.dt
             return boat
         }
-        return TickFrame(tick: tick - 1, boats: moved, standings: standings, wind: wind, isOver: isOver, heldInputs: heldInputs)
+        return TickFrame(tick: tick - 1, boats: moved, standings: standings, wind: wind, isOver: isOver, heldInputs: heldInputs,
+                         closeTick: closeTick)
     }
 
     /// Where `seat` stands in the fleet, from 1.
