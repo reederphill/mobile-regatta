@@ -1,8 +1,8 @@
 import RegattaCore
 
 /// What a bot plays beyond sailing the groove to the marks (#231): when she tacks or gybes, and when she
-/// leaves the groove. Set by a bot-suite profile (`BotProfile`), or for a live bot by her skill's weaknesses and her
-/// style (#102) until #234 adds the fleet tactics.
+/// leaves the groove, and how she plays the boats around her (#234, `BotBrain+Fleet.swift`). Set by a bot-suite profile
+/// (`BotProfile`), or for a live bot by her skill's weaknesses and her style (#102, #234).
 struct Tactics: Sendable, Equatable {
     /// She tacks on a header past this, radians, against the course axis; nil: never on a header.
     var headerThreshold: Double?
@@ -37,8 +37,25 @@ struct Tactics: Sendable, Equatable {
     var goesToThePressure: Bool
     /// Upwind, she tacks out of another boat's wind shadow.
     var seeksClearAir: Bool
-    /// Upwind, she tacks with the nearest boat close behind her, to stay between it and the mark.
+    /// Upwind, she tacks with the nearest boat close behind her, to stay between it and the mark: the tactician's
+    /// cover (#231), with no memory of when that boat tacked. A live bot's is `coversTackers`.
     var covers: Bool
+    /// How she engages the boats around her (`BotStyle.engagement`, #234), 0 sailing her own race … 1 combative: the
+    /// one scalar every fleet tactic reads, for whether she plays it (`FleetTactics` floors) and how far off a boat she
+    /// covers. Zero for the profiles, unless one plays a fleet tactic.
+    var engagement = 0.0
+    /// Fleet tactics (#234, `BotBrain+Fleet.swift`). "Cover": she tacks with a boat behind her that tacked away, once
+    /// she has seen it (her reaction delay) and while it isn't too late.
+    var coversTackers = false
+    /// "Lee-bow": on port, meeting a starboard boat she can just cross, she tacks onto her lee bow, when her tack as she
+    /// reckons it would leave the boat in her backwind.
+    var leeBows = false
+    /// "Tack on her wind": ahead of a boat on the other tack, she tacks to put her in her wind shadow, when that pays
+    /// against her own plan.
+    var tacksOnWind = false
+    /// "Hold her lane": in clear air with a boat in her backwind or to windward close by on her tack, she holds on
+    /// rather than tack away on a small header, a puff, the pressure or another boat.
+    var holdsLane = false
     /// She rolls her tacks (#263, `planRoll`), as well as her skill lets her. The groove-only profiles leave the tack
     /// to the autohelm's tap.
     var rollsTacks = true
@@ -64,6 +81,12 @@ struct Tactics: Sendable, Equatable {
             puffRange = weaknesses.puffPerception
             corridorBias = 0.5 * (style?.favouredSide ?? 0)
             tacticalQuality = weaknesses.tacticalQuality
+            // #234: how she plays the fleet is her style's engagement; how well, her skill's tactical quality.
+            engagement = style?.engagement ?? 0.5
+            coversTackers = engagement >= BotBrain.FleetTactics.coverEngagement
+            holdsLane = engagement >= BotBrain.FleetTactics.laneEngagement
+            leeBows = engagement >= BotBrain.FleetTactics.leeBowEngagement
+            tacksOnWind = engagement >= BotBrain.FleetTactics.tackOnWindEngagement
         case .baseline:
             // The groove only: headers past a threshold, the corridor, and nothing off the groove.
             self.init(headerThreshold: deg2rad(5), tackInterval: 15)
@@ -74,6 +97,10 @@ struct Tactics: Sendable, Equatable {
             self.init(headerThreshold: deg2rad(4), tackInterval: 15, anticipation: 6, corridor: 0.5,
                       downwindShiftThreshold: deg2rad(5), replanes: true, heatsUpInLulls: true, pinchesToFetch: true,
                       seeksPuffs: true, seeksPressure: true, goesToThePressure: true, seeksClearAir: true, covers: true)
+            // #234 (ruling 3): she plays no fleet tactic of #234's; her cover stays #231's (`covers`). Lee-bowing and
+            // tacking on a boat's wind, fully engaged, her fun-pass gain fell on 16 seeds (1.91 → 1.74 L/beat; win share
+            // 0.72 → 0.73, beat-the-blip-tacker 0.69 → 0.70; on 4 seeds all three rose: 2.18 → 2.29, 0.70 → 0.72,
+            // 0.71 → 0.72), so she stays as she was.
         case .blipTacker:
             // The baseline with a hair trigger: a 3° blip tacks her as a real header does.
             self.init(headerThreshold: deg2rad(3), tackInterval: 15)
@@ -172,6 +199,7 @@ extension BotBrain {
         } else {
             senses.direction = seen
         }
+        observeFleet(view)
     }
 
     /// The sailing angle at which a boat that has tacked is close-hauled, and no longer tacking (rule 13): a
@@ -189,13 +217,18 @@ extension BotBrain {
 
     /// The tack to beat on inside the corridor to her mark, starting from `planned`: the other one on a
     /// header past her threshold, and for a tactician, when the other side's puffs, pressure, clear air or a boat to
-    /// cover make it worth a tack.
-    mutating func upwindTack(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack) -> Tack {
+    /// cover make it worth a tack. Her fleet tactics (#234, `fleetPlay`) come first: holding her lane she tacks only on a
+    /// header past twice her threshold; a cover, a lee-bow or a tack on a boat's wind tacks her (the last only when it
+    /// pays against her plan: the shift, puffs, pressure and dirty air). Neither ever onto a board she has `overstood`
+    /// (past its layline, where navigating would tack her straight back), and only when she can tap now (`canTap`).
+    mutating func upwindTack(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack,
+                             overstood: (Tack) -> Bool = { _ in false }) -> Tack {
         guard let threshold = tactics.headerThreshold, view.time - lastTackTime > tactics.tackInterval else { return tack }
         let direction = (senses.direction ?? b.windDirection) + senses.directionRate * tactics.anticipation
         let shift = wrapAngle(direction - view.course.axis)
         // Headed: backed on starboard, veered on port.
         var headed = tack == .starboard ? -shift : shift
+        let shifted = headed
         // Goes to the pressure (`Tactics.goesToThePressure`): with the shift neutral, nothing in it to play, the
         // pressure calls her tack on half the case a shift needs.
         let neutral = abs(headed) < threshold / 2
@@ -203,6 +236,14 @@ extension BotBrain {
         if tactics.seeksPuffs { headed += puffAdvantage(b, view, over: tack) }
         headed += pressure
         if tactics.seeksClearAir && tack == b.tack && b.shadow < Self.dirtyAir { headed += Self.dirtyAirWeight }
+        if let play = fleetPlay(b, view, planned: tack, headed: shifted, lean: headed, threshold: threshold,
+                                overstood: overstood) {
+            guard play.play == .holdLane else { return tack.other }
+            // Holding her lane, only a big header tacks her, and like any fleet tactic's tack, only when she can tap
+            // it now and onto a board she hasn't overstood.
+            let tacks = shifted > threshold * FleetTactics.laneHeader && !overstood(tack.other) && canTap(b, view)
+            return tacks ? tack.other : tack
+        }
         if tactics.covers, let rival = coverTarget(b, view), rival.tack != tack, headed > -threshold {
             return rival.tack
         }

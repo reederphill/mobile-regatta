@@ -169,8 +169,10 @@ jobs:
     runs-on: macos-26
     # About 10 min, 15 with the iPad: a cold boot of each simulator is 2-4 min of it. The rest is room for the
     # two fast-timescale race tests (iPhone only) to hang on both tries, 2 × 2 × the 5 min allowance below =
-    # 20 min, and one more launch that fails at the allowance: 15 + 20 + 5 = 40.
-    timeout-minutes: 40
+    # 20 min, and one more launch that fails at the allowance: 15 + 20 + 5 = 40. By 2026-10-01 the render fixtures
+    # (HUD, leaderboard, fleet, charts: 1-3 min each) brought a green run to 39 min, so the job has 60; splitting the
+    # render fixtures into their own job is the lasting fix.
+    timeout-minutes: 60
     env:
       # DEVELOPER_DIR rather than xcode-select: switching with xcode-select hid the simulators.
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer

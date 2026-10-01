@@ -55,6 +55,8 @@ struct RenderFixture: Codable, Equatable {
 
     enum View: String, Codable, CaseIterable {
         case courseUp, boatUp
+        /// North up over the whole course and race area (#115): the chart fixtures, boundary and land in view.
+        case area
     }
 
     /// The camera the scene draws this fixture from.
@@ -62,6 +64,7 @@ struct RenderFixture: Codable, Equatable {
         switch (view, camera) {
         case (.courseUp?, _): .courseUp
         case (.boatUp?, _): .boatUp
+        case (.area?, _): .northUpArea
         case (nil, .boat): .northUpFollow
         case (nil, .course): .northUpCourse
         }
@@ -162,6 +165,7 @@ final class FixtureDriver: RaceDriver {
 
     let myBoatIndex: Int
     let course: CourseLayout
+    let venue: Venue
     let boatClass: BoatClass
     let isPausable = false
     let isFrozen = true
@@ -184,6 +188,7 @@ final class FixtureDriver: RaceDriver {
         let setup = log.header.setup
         myBoatIndex = seat ?? setup.seats.firstIndex(of: .human) ?? 0
         course = race.course
+        venue = race.files.venue.content
         boatClass = race.boatClass
         roster = FleetRoster(setup: setup)
         currentFrame = TickFrame(race: race)

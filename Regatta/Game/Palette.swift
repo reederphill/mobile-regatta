@@ -46,8 +46,23 @@ nonisolated enum ChartPalette {
     static let shallows = PaletteToken("shallows", 0xCDC8B4)
     /// Whitecaps (#116): a cool near-white, too grey for the hue rule, drawn part-transparent over the water.
     static let foam = PaletteToken("foam", 0xE3EEF2)
+    /// The race scene's shallows (#11, #15, #115): a tan at the water's lightness, so the tint changes hue, not
+    /// lightness, and can't read as a puff or lull. Blended over the water by depth (`ShallowsTint`). Under the chroma
+    /// floor, so the hue rule exempts it although its hue is near orange's.
+    static let shallowsTint = PaletteToken("shallowsTint", 0x574628)
+    /// The land's relief (#115): its coasts facing away from the light.
+    static let landShade = PaletteToken("landShade", 0x889979)
+    /// The land's relief: its coasts facing the light.
+    static let landLit = PaletteToken("landLit", 0xAFC2A0)
+    /// Landmark silhouettes on the land (#22, #115).
+    static let landmark = PaletteToken("landmark", 0x606F53)
+    /// The race area's boundary line and its hatched band outside (#15, #115): a pale blue-grey.
+    static let boundary = PaletteToken("boundary", 0xB6C7D3)
+    /// The dark hairline round each buoy and the committee boat (#115): white is the player's (#22).
+    static let markEdge = PaletteToken("markEdge", 0x2B3238)
 
-    static let all = [water, puff, lull, land, shallows, foam]
+    static let all = [water, puff, lull, land, shallows, foam, shallowsTint, landShade, landLit, landmark, boundary,
+                      markEdge]
 }
 
 /// The prototype's boat colours, until liveries (#119) delete them.

@@ -1,0 +1,7 @@
+{
+  "log" : "chart-hollin-bay.racelog.json",
+  "freezeTick" : -1500,
+  "camera" : "course",
+  "vision" : "tritanopia",
+  "view" : "area"
+}

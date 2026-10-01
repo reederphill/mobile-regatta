@@ -8,7 +8,7 @@ Sources: #22 (art direction), #29 (safe palette), G7 (#37), #53 (values). Consum
 | Layer | Scope | Hue-validated (#111) |
 |---|---|---|
 | `CuePalette` | race scene + HUD cues; defines the reserved hues | reference set |
-| `ChartPalette` | water, puff, lull, land, shallows, foam | yes |
+| `ChartPalette` | water, puff, lull, land, shallows, foam, shallowsTint, landShade, landLit, landmark, boundary, markEdge | yes |
 | Safe palette | livery swatches (#118) | yes + water contrast |
 | `ChromePalette` | menus, sheets, results, lobby | no (G7) |
 
@@ -55,9 +55,16 @@ Cue-to-cue hue separation: vermillion–orange 29°, orange–yellow 28°, chevr
 | `land` | `#9DB08E` | 0.73 / 0.052 / 131 | sage; tan rejected (13–15° from orange/yellow) |
 | `shallows` | `#CDC8B4` | 0.83 / 0.028 / 95 | low-chroma sand; exempt via chroma floor |
 | `foam` | `#E3EEF2` | 0.94 / 0.013 / 221 | whitecaps (#116), drawn part-transparent; exempt via chroma floor |
+| `shallowsTint` | `#574628` | 0.404 / 0.051 / 81 | race-scene shallows (#11, #115): tan at the water's lightness (ΔL +0.001), blended over the water in OKLab by depth; exempt via chroma floor |
+| `landShade` | `#889979` | 0.661 / 0.050 / 131 | land relief, coasts facing away from the light (#115) |
+| `landLit` | `#AFC2A0` | 0.790 / 0.051 / 131 | land relief, coasts facing the light (#115) |
+| `landmark` | `#606F53` | 0.521 / 0.046 / 131 | landmark silhouettes (#22, #115) |
+| `boundary` | `#B6C7D3` | 0.820 / 0.025 / 238 | race-area boundary line and hatched band (#15, #115) |
+| `markEdge` | `#2B3238` | 0.313 / 0.014 / 244 | dark hairline round buoys and the committee boat (#115) |
 
 - puff/lull delta: ±0.12 (tuning). At the prototype's 0.17, sky blue fails swatch contrast against lull.
-- Relief shading (Fellmere hills): drawn in code on `land` (#115); no asset.
+- Relief shading (Fellmere hills): drawn in code on `land` (#115); no asset. Bands in from each coast (not along shared inland edges) in `landLit`/`landShade` by the coast's facing to a north-west light, from polygon shape alone.
+- Shallows (#115): `shallows` (sand) stays for menu depictions; the race scene draws `shallowsTint`, which keeps the water's lightness (|ΔL| ≤ 0.02 at every depth, `ShallowsTintTests`). Under tritanopia and deuteranopia it stays ~0.12 OKLab ΔE from the water; greyscale can't tell them apart, by spec (#11: hue only).
 
 ## Safe palette (livery swatches, #118)
 

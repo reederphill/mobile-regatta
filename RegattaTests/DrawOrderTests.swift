@@ -13,7 +13,7 @@ import Testing
     /// lines, your vane, its tick and arc, and the edge arrow on the camera), the water or its pressure. A second scene from the same fixture, as a second launch makes, draws
     /// the same nodes in the same order, and so does the first drawn again.
     @Test func sceneDrawsTheSameEveryTime() throws {
-        for name in ["prestart", "water-gusty-offshore", "water-pressure", "fleet", "cues"] {
+        for name in ["prestart", "water-gusty-offshore", "water-pressure", "fleet", "cues", "chart-saltings-reach"] {
             let (scene, boats) = try Self.scene(fixture: name)
             let drawn = DrawnNode.all(in: scene)
             let shared = Dictionary(grouping: drawn, by: \.z).filter { $0.value.count > 1 }
@@ -25,6 +25,13 @@ import Testing
             #expect(drawn.filter { $0.layer == "effects" }.count == 3 * boats + 1, "\(name)")
             #expect(drawn.filter { $0.layer == "fleet" }.count == 4 * boats + 1, "\(name)")
             #expect(drawn.filter { $0.layer == "course" }.count > 4, "\(name)")
+            // The chart (#115): the boundary's band and line, the land and its relief, a landmark; shallows where
+            // the venue has a current.
+            #expect(drawn.filter { $0.layer == ChartLayer.boundaryName }.count == 2, "\(name)")
+            #expect(drawn.contains { $0.layer == ChartLayer.landName } && drawn.contains { $0.layer == ChartLayer.landmarksName },
+                    "\(name)")
+            #expect(drawn.filter { $0.layer == ChartLayer.shallowsName }.count == (name.hasPrefix("chart-saltings") ? 2 : 0),
+                    "\(name)")
             // The pressure (#289) under the water's puffs, one sprite of its own.
             #expect(drawn.filter { $0.layer == WaterNode.pressureName && !$0.isHidden }.count == 1, "\(name)")
             for layer in ["water", "laylines", "ladderLines", "windVane", "grooveTick", "vaneArc", "edgeArrow"] {

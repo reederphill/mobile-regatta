@@ -111,6 +111,10 @@ struct RaceTally {
     /// pair comes within `encounterDistance` while rules 10–13 name one of them to keep clear (`Race.rightOfWay`),
     /// closed once their hulls are further apart than that again.
     private var openEncounters: [SeatPair: Bool] = [:]
+    /// The open encounters begun before the gun (#280, #234's ruling 6: fouls split before and after the gun).
+    private var preStartPairs: Set<SeatPair> = []
+    private var preStartEncounters: [Int]
+    private var preStartEncountersEndingInFouls: [Int]
     /// Each seat's encounters begun, and those that ended in a rule call.
     private var encounters: [Int]
     private var encountersEndingInFouls: [Int]
@@ -129,6 +133,19 @@ struct RaceTally {
     /// Each seat's beats sailed, in order.
     private var beats: [[BeatSplit]]
     private let startLine: CourseLayout.Line
+    /// Close encounters (#234), racing: what fleet tactics make of the boats around her. Hull lengths, centre to
+    /// centre, inside which two boats on opposite tacks cross (`closeEncounterDistance`), and the pairs inside it now.
+    private let closeEncounterDistance: Double
+    private var closePairs: Set<SeatPair> = []
+    private var crossings: [Int]
+    /// Ticks each seat (the first index) has sailed in one caster's shadow or backwind (the second) under
+    /// `RaceTally.shadowFactor`, unbroken; an episode counts once it reaches `RaceTally.shadowSeconds`.
+    private var shadowTicks: [[Int]]
+    private var shadowGiven: [Int]
+    private var shadowReceived: [Int]
+    /// The tick each seat last tacked, penalty turns aside; and her tacks that covered a boat (`recordCover`).
+    private var lastTackTicks: [Int?]
+    private var covers: [Int]
     /// Where along the start line each seat's start-row slot lies (#35): `lineSpot` of where she began.
     private let rowSpots: [Double]
     /// Each seat's start (#85), once she has made it: the tick she crossed the line from the pre-start
@@ -152,6 +169,8 @@ struct RaceTally {
         contacts = Array(repeating: [], count: race.boats.count)
         encounters = zeros
         encountersEndingInFouls = zeros
+        preStartEncounters = zeros
+        preStartEncountersEndingInFouls = zeros
         encounterDistance = race.rules.incidents.separation.metres(hullLength: race.boatClass.hull.length)
         outline = race.boatClass.hull.outline
         hullRadius = race.boatClass.hull.outline.reduce(0) { max($0, $1.length) }
@@ -164,7 +183,27 @@ struct RaceTally {
         startLine = line
         rowSpots = race.boats.map { lineSpot($0.position, on: line) }
         starts = Array(repeating: nil, count: race.boats.count)
+        closeEncounterDistance = race.boatClass.hull.length * RaceTally.crossingLengths
+        crossings = zeros
+        shadowTicks = Array(repeating: zeros, count: race.boats.count)
+        shadowGiven = zeros
+        shadowReceived = zeros
+        lastTackTicks = Array(repeating: nil, count: race.boats.count)
+        covers = zeros
     }
+
+    /// Hull lengths, centre to centre, inside which two boats on opposite tacks cross (#234: "crossings within 3 hull
+    /// lengths").
+    static let crossingLengths = 3.0
+    /// A boat whose wind one caster's shadow or backwind leaves under this factor is in it (#234), as a bot reads
+    /// dirty air (`BotBrain.dirtyAir`) ...
+    static let shadowFactor = 0.85
+    /// ... and an episode of it counts once it lasts this long, seconds: a boat sailing through a cone doesn't.
+    static let shadowSeconds = 2.0
+    /// A tack covers a boat (#234) that tacked onto the same tack this many seconds before or less ...
+    static let coverSeconds = 10.0
+    /// ... within this many hull lengths, behind her up the course.
+    static let coverLengths = 10.0
 
     /// Call once after each `race.step()`, with the events it emitted.
     mutating func record(_ race: Race, events: [RaceEvent]) {
@@ -174,12 +213,14 @@ struct RaceTally {
             case .ocsNotice(let seat): ocsNotices[seat] += 1
             case .ruleCall(let call):
                 foulsAsOffender[call.offender] += 1
-                recordFoul(SeatPair(call.offender, call.victim))
+                recordFoul(SeatPair(call.offender, call.victim), race)
             case .markTouch(let seat, _): markContacts[seat] += 1
             case .obstructionContact(let seat, .land): landContacts[seat] += 1
             case .obstructionContact(let seat, .boundary): boundaryContacts[seat] += 1
             case .disqualified(let seat, _): disqualifications[seat] += 1
-            case .tacked(let seat) where !race.boats[seat].isTakingPenalty: legTacks[seat] += 1
+            case .tacked(let seat) where !race.boats[seat].isTakingPenalty:
+                legTacks[seat] += 1
+                recordCover(race, seat: seat)
             case .started(let seat): starts[seat] = (race.tick, lineSpot(race.boats[seat].position, on: startLine))
             case .contact(let pair):
                 // A contact opens an incident for the pair, or touches again inside the one still open
@@ -192,6 +233,7 @@ struct RaceTally {
             }
         }
         openEncounters = openEncounters.filter { near.contains($0.key) }
+        preStartPairs = preStartPairs.filter { near.contains($0) || openEncounters[$0] != nil }
         for (seat, boat) in race.boats.enumerated() {
             if !boat.isTakingPenalty && boat.twa < noGo && boat.speed < BotRaceHarness.ironsSpeed {
                 if boat.status == .racing { ironsTicks[seat] += 1 }
@@ -202,6 +244,64 @@ struct RaceTally {
                 if area.inset(boat.position) < BotRaceHarness.edgeMargin { edgeTicks[seat] += 1 }
             }
             recordLeg(seat, boat, tick: race.tick)
+        }
+        recordCloseEncounters(race)
+    }
+
+    /// A tack of `seat`'s, racing, onto the tack of a boat behind her up the course within `coverLengths` that tacked
+    /// onto it `coverSeconds` before or less: she covers it (#234). Counted for her, once a tack.
+    private mutating func recordCover(_ race: Race, seat: Int) {
+        defer { lastTackTicks[seat] = race.tick }
+        let boats = race.boats
+        let boat = boats[seat]
+        guard boat.status == .racing else { return }
+        let reach = race.boatClass.hull.length * RaceTally.coverLengths
+        let recent = Int(RaceTally.coverSeconds * Double(Race.tickRate))
+        for other in boats.indices where other != seat && !boats[other].isGhost && boats[other].status == .racing {
+            guard let tacked = lastTackTicks[other], race.tick - tacked <= recent, boats[other].tack == boat.tack else { continue }
+            let offset = boats[other].position - boat.position
+            guard offset.length <= reach, offset.dot(upwind) < 0 else { continue }
+            covers[seat] += 1
+            return
+        }
+    }
+
+    /// Crossings and shadow episodes this tick (#234), between racing boats: a pair on opposite tacks coming within
+    /// `closeEncounterDistance` crosses, once until they are further apart again; a boat whose wind one caster leaves
+    /// under `shadowFactor` for `shadowSeconds` unbroken has an episode of shadow given (the caster's) and received.
+    private mutating func recordCloseEncounters(_ race: Race) {
+        let boats = race.boats
+        let racing = boats.map { $0.status == .racing && !$0.isGhost }
+        var close: Set<SeatPair> = []
+        for a in boats.indices where racing[a] {
+            for b in (a + 1)..<boats.count where racing[b] {
+                guard (boats[a].position - boats[b].position).length <= closeEncounterDistance else { continue }
+                let pair = SeatPair(a, b)
+                if closePairs.contains(pair) {
+                    close.insert(pair)
+                } else if boats[a].tack != boats[b].tack {
+                    close.insert(pair)
+                    crossings[a] += 1
+                    crossings[b] += 1
+                }
+            }
+        }
+        closePairs = close
+        let cones = boats.indices.map { racing[$0] ? race.shadowCone(ofSeat: $0) : nil }
+        let episode = Int(RaceTally.shadowSeconds * Double(Race.tickRate))
+        for receiver in boats.indices {
+            for caster in boats.indices where caster != receiver {
+                guard racing[receiver], let cone = cones[caster],
+                      cone.factor(at: boats[receiver].position) < RaceTally.shadowFactor else {
+                    shadowTicks[receiver][caster] = 0
+                    continue
+                }
+                shadowTicks[receiver][caster] += 1
+                if shadowTicks[receiver][caster] == episode {
+                    shadowReceived[receiver] += 1
+                    shadowGiven[caster] += 1
+                }
+            }
         }
     }
 
@@ -229,6 +329,11 @@ struct RaceTally {
                     openEncounters[pair] = false
                     encounters[a] += 1
                     encounters[b] += 1
+                    if race.tick < 0 {
+                        preStartPairs.insert(pair)
+                        preStartEncounters[a] += 1
+                        preStartEncounters[b] += 1
+                    }
                 }
             }
         }
@@ -237,15 +342,24 @@ struct RaceTally {
 
     /// A rule call between `pair`'s boats: their encounter ends in a foul, once however many calls it holds. A call
     /// with no encounter open (never seen: the boats were too far apart) counts as an encounter of its own.
-    private mutating func recordFoul(_ pair: SeatPair) {
+    private mutating func recordFoul(_ pair: SeatPair, _ race: Race) {
         guard openEncounters[pair] != true else { return }
         if openEncounters[pair] == nil {
             encounters[pair.low] += 1
             encounters[pair.high] += 1
+            if race.tick < 0 {
+                preStartPairs.insert(pair)
+                preStartEncounters[pair.low] += 1
+                preStartEncounters[pair.high] += 1
+            }
         }
         openEncounters[pair] = true
         encountersEndingInFouls[pair.low] += 1
         encountersEndingInFouls[pair.high] += 1
+        if preStartPairs.contains(pair) {
+            preStartEncountersEndingInFouls[pair.low] += 1
+            preStartEncountersEndingInFouls[pair.high] += 1
+        }
     }
 
     /// A beat ends when she moves on from it, and a leg begins as she starts or rounds into it. Her tacks
@@ -294,7 +408,14 @@ struct RaceTally {
             onCourseSeconds: seconds(onCourseTicks[seat]),
             encounters: encounters[seat],
             encountersEndingInFouls: encountersEndingInFouls[seat],
-            encountersToFoulsShare: share(encountersEndingInFouls[seat], of: encounters[seat])
+            encountersToFoulsShare: share(encountersEndingInFouls[seat], of: encounters[seat]),
+            preStartEncounters: preStartEncounters[seat],
+            preStartEncountersEndingInFouls: preStartEncountersEndingInFouls[seat],
+            closeEncounters: crossings[seat] + shadowGiven[seat] + shadowReceived[seat] + covers[seat],
+            crossings: crossings[seat],
+            shadowGiven: shadowGiven[seat],
+            shadowReceived: shadowReceived[seat],
+            covers: covers[seat]
         )
     }
 }
