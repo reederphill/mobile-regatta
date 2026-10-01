@@ -90,14 +90,15 @@ import Testing
         let centre: Vec2
         let length: Double
 
-        init(seats: [SeatKind] = [.bot, .bot], seed: UInt64) {
+        /// `veer`: the wind veered that much off the course's axis, radians (#329): a header on port, a lift on starboard.
+        init(seats: [SeatKind] = [.bot, .bot], seed: UInt64, veer: Double = 0) {
             let drawn = botRace(seats: seats, seed: seed)
             for _ in 0..<(drawn.setup.startSequenceTicks + Race.tickRate) { drawn.step() }
             let c = drawn.course
             centre = c.startLine.centre + c.upwind * (c.beat * 0.35)
             // Its strength there at the gun, down the course's axis: neither tack lifted, so her own plan leans neither
             // way (a tack on a boat's wind must pay against it, `paysToTackOnWind`).
-            let wind = GroundWind(direction: c.axis, speed: drawn.groundWind(at: centre).speed)
+            let wind = GroundWind(direction: c.axis + veer, speed: drawn.groundWind(at: centre).speed)
             race = try! Race(setup: drawn.setup, files: RaceFiles(resolving: drawn.setup),
                              mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)), current: nil, wind: { _ in wind })
             for _ in 0..<(race.setup.startSequenceTicks + Race.tickRate) { race.step() }
@@ -221,18 +222,34 @@ import Testing
         }
     }
 
+    /// What a port bot made of a starboard boat at her decisions, as `leeBowTarget`'s two gates read it: whether she
+    /// could ever just cross her (`canJustCross`), and whether her tack would ever have landed her on her lee bow
+    /// (`leeBowLands`), with and without her able to cross.
+    struct LeeBowGates {
+        var crossed = false
+        var landedCrossing = false
+        var landedNotCrossing = false
+    }
+
     /// A port bot (seat 0, National) beating at seat 1, a bot beating on starboard sailing her own race, from `ahead` hull
-    /// lengths ahead of her and 3.5 to leeward, in seat 1's frame: what happened over `seconds`, and the closest they came.
-    static func portMeetsStarboard(seed: UInt64, ahead: Double, engagement: Double = 1, seconds: Double = 12) throws
-        -> (tapped: Int?, kinds: [RaceEvent.Kind], race: Race, closest: Double, backwinded: Bool, tacked: (ahead: Double, leeward: Double)?) {
+    /// lengths ahead of her and 3.5 to leeward, in seat 1's frame: what happened over `seconds`, the closest they came,
+    /// and how the lee-bow's gates read at seat 0's decisions on port (`LeeBowGates`, a twin of her brain looking on).
+    /// `justTacked`: she tacked onto port a second ago, well inside her tack interval (`Tactics.tackInterval`).
+    static func portMeetsStarboard(seed: UInt64, ahead: Double, leeward: Double = 3.5, engagement: Double = 1,
+                                   seconds: Double = 12, justTacked: Bool = false) throws
+        -> (tapped: Int?, kinds: [RaceEvent.Kind], race: Race, closest: Double, backwinded: Bool,
+            tacked: (ahead: Double, leeward: Double)?, gates: LeeBowGates) {
         let scene = Scene(seed: seed)
-        let port = scene.offStarboardBoat(at: scene.centre, ahead: ahead, leeward: 3.5)
+        let port = scene.offStarboardBoat(at: scene.centre, ahead: ahead, leeward: leeward)
         try scene.place([scene.beating(.port, at: port), scene.beating(.starboard, at: scene.centre)])
         var closest = Double.infinity
         var backwinded = false
         var tacked: (ahead: Double, leeward: Double)?
-        let sailed = Self.sail(scene.race, Self.pilot(seat: 0, scene.race, engagement: engagement, planned: .port),
-                               seconds: seconds, others: [Self.victim(scene.race)]) { race in
+        var pilot = Self.pilot(seat: 0, scene.race, engagement: engagement, planned: .port)
+        if justTacked { pilot.brain.lastTackTime = scene.race.time - 1 }
+        var looking = pilot.brain
+        var gates = LeeBowGates()
+        let sailed = Self.sail(scene.race, pilot, seconds: seconds, others: [Self.victim(scene.race)]) { race in
             closest = min(closest, (race.boats[0].position - race.boats[1].position).length / scene.length)
             if race.boats[0].tack == .starboard, let cone = race.shadowCone(ofSeat: 0),
                cone.isInBackwind(race.boats[1].position) { backwinded = true }
@@ -241,8 +258,19 @@ import Testing
                 let forward = race.boats[1].forward
                 tacked = (offset.dot(forward) / scene.length, offset.dot(-forward.rightPerp) / scene.length)
             }
+            // Her next decision's view (`Pilot.drive`), while she is still on port and not tacking.
+            guard race.tick.isMultiple(of: BotDriver.decisionInterval) else { return }
+            let view = race.seatView(for: 0)
+            looking.observe(view.own, view)
+            guard view.own.tack == .port, !race.boats[0].isTacking,
+                  let other = view.others.first(where: { $0.seat == 1 }) else { return }
+            let crosses = looking.canJustCross(view.own, view, other)
+            let lands = looking.leeBowLands(view.own, view, other)
+            gates.crossed = gates.crossed || crosses
+            gates.landedCrossing = gates.landedCrossing || (crosses && lands)
+            gates.landedNotCrossing = gates.landedNotCrossing || (!crosses && lands)
         }
-        return (sailed.tapped, sailed.kinds, scene.race, closest, backwinded, tacked)
+        return (sailed.tapped, sailed.kinds, scene.race, closest, backwinded, tacked, gates)
     }
 
     /// #234 acceptance (the owner, 2026-09-29: "lee-bow when she can just cross, duck when she can't"): a National port
@@ -250,6 +278,10 @@ import Testing
     /// clear of her as she keeps clear) tacks onto her lee bow: on starboard ahead of her and to leeward, the starboard
     /// boat in her backwind. One she can't cross (a length ahead) she ducks, holding port. No rule call either way. In a
     /// steady wind, so a header on starboard doesn't hold her off it (`fleetPlay`).
+    ///
+    /// #329: the can-just-cross gate (`canJustCross`) is what separates the two, not a lee-bow that never fires: meeting
+    /// the boat she can cross, her tack would land on its lee bow (`leeBowLands`) and she could cross it; meeting one 3.5
+    /// lengths ahead and 2 to leeward, her tack would land there too, but she could never cross it, and she ducks.
     @Test func leeBowsInsteadOfDuckingWhenPossible() throws {
         for seed in Self.fleetSeeds {
             let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.8)
@@ -259,19 +291,52 @@ import Testing
             #expect(tacked.leeward > 0 && tacked.leeward < 1.5, "seed \(seed): and \(tacked.leeward) L to leeward")
             #expect(lee.backwinded, "seed \(seed): the starboard boat sat in her backwind")
             #expect(lee.closest > 1, "seed \(seed): she came within \(lee.closest) L")
+            #expect(lee.gates.landedCrossing, "seed \(seed): she could cross and her tack would land")
 
             let duck = try Self.portMeetsStarboard(seed: seed, ahead: 4.5, seconds: 7)
             #expect(BotConductTests.calls(duck.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(duck.kinds))")
             #expect(duck.tapped == nil && duck.race.boats[0].tack == .port, "seed \(seed): she can't cross, so ducks")
+
+            // #329: closer still, 3.5 lengths ahead and 2 to leeward, her tack would land her on the starboard boat's
+            // lee bow, but she can't cross her clear of her keep-clear distance: she ducks, the crossing gate's doing.
+            let gated = try Self.portMeetsStarboard(seed: seed, ahead: 3.5, leeward: 2, seconds: 7)
+            #expect(BotConductTests.calls(gated.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(gated.kinds))")
+            #expect(gated.gates.landedNotCrossing, "seed \(seed): her tack would have landed on her lee bow")
+            #expect(!gated.gates.crossed, "seed \(seed): but she could never just cross her")
+            #expect(gated.tapped == nil && gated.race.boats[0].tack == .port, "seed \(seed): so she ducks")
+        }
+    }
+
+    /// #329 (the owner, 2026-10-01): a lee-bow answers a crossing, so it isn't held to her tack interval
+    /// (`FleetTactics.leeBowInsideTackInterval`). The port bot of `leeBowsInsteadOfDuckingWhenPossible`, having tacked
+    /// onto port a second before, still lee-bows the starboard boat she can just cross, clear and with no rule call. Her
+    /// tack on a boat's wind is hers to choose, so it waits for the interval: crossing well ahead of the starboard boat
+    /// a second after a tack (`crossingAhead`), she holds port past the chance.
+    @Test func leeBowAnswersInsideTheTackInterval() throws {
+        #expect(BotBrain.FleetTactics.leeBowInsideTackInterval)
+        for seed in Self.fleetSeeds {
+            let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.8, seconds: 8, justTacked: true)
+            #expect(BotConductTests.calls(lee.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(lee.kinds))")
+            #expect(lee.tapped != nil, "seed \(seed): she didn't lee-bow inside her tack interval")
+            #expect(lee.tacked != nil && lee.backwinded, "seed \(seed): the starboard boat sat in her backwind")
+            #expect(lee.closest > 1, "seed \(seed): she came within \(lee.closest) L")
+
+            let onWind = try Self.crossingAhead(seed: seed, together: true, seconds: 8, justTacked: true)
+            #expect(onWind.tapped == nil, "seed \(seed): she tacked on her wind inside her tack interval")
         }
     }
 
     /// A port bot (seat 0, National) crossing well ahead of seat 1, a bot beating on starboard sailing her own race, from
-    /// 7 hull lengths ahead and 2 to leeward of her in her frame (crossing about 5 lengths ahead of her); or, `together` false, the same with seat 0 400 m off to
-    /// leeward. Seat 1's metres made good along her heading over `seconds`, and the rest.
-    static func crossingAhead(seed: UInt64, together: Bool, seconds: Double = 16) throws
+    /// 7 hull lengths ahead and 2 to leeward of her in her frame (crossing about 5 lengths ahead of her); or, `together`
+    /// false, the same with seat 0 400 m off to leeward. Seat 1's metres made good along her heading over `seconds`, and
+    /// the rest. The wind veered `veer` off the course's axis: by default 2°, half a National bot's threshold, a header
+    /// on port, so her plan leans to starboard and a tack on the starboard boat's wind pays in the scenes' 10–13 kn
+    /// (#329's `FleetTactics.shadowCost`: plan neutral, it pays only in light air). `justTacked`: she tacked onto port a
+    /// second ago, well inside her tack interval.
+    static func crossingAhead(seed: UInt64, together: Bool, seconds: Double = 16, veer: Double = deg2rad(2),
+                              justTacked: Bool = false) throws
         -> (tapped: Int?, kinds: [RaceEvent.Kind], madeGood: Double, shadowed: Bool, closest: Double, length: Double) {
-        let scene = Scene(seed: seed)
+        let scene = Scene(seed: seed, veer: veer)
         var port = scene.offStarboardBoat(at: scene.centre, ahead: 7, leeward: 2)
         if !together { port = port - Vec2.heading(scene.wind) * 400 }
         try scene.place([scene.beating(.port, at: port), scene.beating(.starboard, at: scene.centre)])
@@ -279,8 +344,9 @@ import Testing
         let course = scene.race.boats[1].forward
         var shadowed = false
         var closest = Double.infinity
-        let sailed = Self.sail(scene.race, Self.pilot(seat: 0, scene.race, planned: .port), seconds: seconds,
-                               others: [Self.victim(scene.race)]) { race in
+        var pilot = Self.pilot(seat: 0, scene.race, planned: .port)
+        if justTacked { pilot.brain.lastTackTime = scene.race.time - 1 }
+        let sailed = Self.sail(scene.race, pilot, seconds: seconds, others: [Self.victim(scene.race)]) { race in
             if let cone = race.shadowCone(ofSeat: 0), cone.factor(at: race.boats[1].position) < 1 { shadowed = true }
             closest = min(closest, (race.boats[0].position - race.boats[1].position).length / scene.length)
         }
@@ -290,6 +356,8 @@ import Testing
     /// #234 acceptance (#101: "#234's tack-on-wind and lee-bow are made as the keep-clear or tacking boat and must still
     /// complete clear"): a National port bot crossing ahead of a starboard boat tacks on her wind, onto starboard, and
     /// the starboard boat sits in her wind shadow; her tack completes clear, with no rule 13 or 15 call, nor any other.
+    /// #329: with her plan leaning to starboard (`crossingAhead`'s header on port), so the tack pays in these winds
+    /// (`FleetTactics.shadowCost`, `FleetTacticsTuningTests.tackOnWindPayoffBinds`).
     @Test func tackOnWindCompletesClear() throws {
         for seed in Self.fleetSeeds {
             let sailed = try Self.crossingAhead(seed: seed, together: true)
@@ -373,5 +441,48 @@ import Testing
         #expect(a.play == b.play)
         #expect(a.decision == b.decision)
         #expect(try play([.bot, .bot, .bot]).play == a.play)
+    }
+}
+
+/// #329: the fleet tactics' tuning follow-ups to #234.
+@Suite struct FleetTacticsTuningTests {
+    /// #329 ("calibrate the shadow-loss estimate ... so the check actually binds"): at the forecast trigger (a factor of
+    /// 0.72, where she tacks on a boat's wind in `BotTacticsTests.crossingAhead`), with her own plan neutral, the tack
+    /// pays in light air (#263's tack costs 0.74 L at 6 kn) and not at 10 or 14 kn (1.10, 1.27 L). It pays at 14 kn
+    /// with her plan leaning to the other tack by half her threshold, and never, not even at 6 kn, lifted on this tack
+    /// by her threshold. The deepest shadow (#263's 0.48 close in) pays at every wind, plan neutral.
+    @Test func tackOnWindPayoffBinds() {
+        let threshold = deg2rad(4)
+        func pays(_ knots: Double, factor: Double = 0.72, lean: Double = 0) -> Bool {
+            BotBrain.paysToTackOnWind(windSpeed: knots * 0.514444, factor: factor, lean: lean, threshold: threshold)
+        }
+        #expect(pays(6))
+        #expect(!pays(10))
+        #expect(!pays(14))
+        #expect(pays(14, lean: threshold / 2))
+        #expect(!pays(6, lean: -threshold))
+        #expect(pays(6, factor: 0.52) && pays(10, factor: 0.52) && pays(14, factor: 0.52))
+    }
+
+    /// #329 ("`ownCone` finds her cone by seat order with no check that the cone is hers"): every seat's own cone in a
+    /// three-boat race is the one the race casts from her boat; and a cone is hers only from where she is and along her
+    /// heading, float noise aside: another boat's, or one turned a hundredth of a radian, isn't.
+    @Test func ownConeIsHers() throws {
+        let scene = BotTacticsTests.Scene(seats: [.bot, .bot, .bot], seed: 9)
+        let starboard = scene.centre
+        try scene.place([scene.beating(.port, at: scene.offStarboardBoat(at: starboard, ahead: 4, leeward: 1.75)),
+                         scene.beating(.starboard, at: starboard),
+                         scene.beating(.starboard, at: scene.offStarboardBoat(at: starboard, ahead: -1, leeward: -4))])
+        let brain = BotTacticsTests.pilot(seat: 0, scene.race, planned: .port).brain
+        for seat in 0..<3 {
+            let view = scene.race.seatView(for: seat)
+            #expect(brain.ownCone(view.own, view) == scene.race.shadowCone(ofSeat: seat), "seat \(seat)")
+        }
+        let boat = scene.race.boats[1]
+        let cone = try #require(scene.race.shadowCone(ofSeat: 1))
+        #expect(BotBrain.isCone(cone, castFrom: boat.position + Vec2(1e-9, -1e-9), heading: boat.heading + 1e-12))
+        #expect(!BotBrain.isCone(cone, castFrom: scene.race.boats[0].position, heading: boat.heading))
+        #expect(!BotBrain.isCone(cone, castFrom: boat.position, heading: boat.heading + 0.01))
+        #expect(!BotBrain.isCone(cone, castFrom: boat.position, heading: boat.heading + .pi))
     }
 }

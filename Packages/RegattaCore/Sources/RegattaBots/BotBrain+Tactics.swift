@@ -97,10 +97,14 @@ struct Tactics: Sendable, Equatable {
             self.init(headerThreshold: deg2rad(4), tackInterval: 15, anticipation: 6, corridor: 0.5,
                       downwindShiftThreshold: deg2rad(5), replanes: true, heatsUpInLulls: true, pinchesToFetch: true,
                       seeksPuffs: true, seeksPressure: true, goesToThePressure: true, seeksClearAir: true, covers: true)
-            // #234 (ruling 3): she plays no fleet tactic of #234's; her cover stays #231's (`covers`). Lee-bowing and
-            // tacking on a boat's wind, fully engaged, her fun-pass gain fell on 16 seeds (1.91 → 1.74 L/beat; win share
-            // 0.72 → 0.73, beat-the-blip-tacker 0.69 → 0.70; on 4 seeds all three rose: 2.18 → 2.29, 0.70 → 0.72,
-            // 0.71 → 0.72), so she stays as she was.
+            // #234 (ruling 3): her cover stays #231's (`covers`) and she holds no lane. #234's first lee-bow and tack on
+            // a boat's wind cost her fun-pass gain on 16 seeds (1.91 → 1.74 L/beat); with #329's forecast trigger and
+            // pays-check nothing fell, so she plays both, fully engaged (`FleetTactics.tacticianLeeBowsAndTacksOnWind`).
+            if BotBrain.FleetTactics.tacticianLeeBowsAndTacksOnWind {
+                engagement = 1
+                leeBows = true
+                tacksOnWind = true
+            }
         case .blipTacker:
             // The baseline with a hair trigger: a 3° blip tacks her as a real header does.
             self.init(headerThreshold: deg2rad(3), tackInterval: 15)
@@ -221,14 +225,22 @@ extension BotBrain {
     /// header past twice her threshold; a cover, a lee-bow or a tack on a boat's wind tacks her (the last only when it
     /// pays against her plan: the shift, puffs, pressure and dirty air). Neither ever onto a board she has `overstood`
     /// (past its layline, where navigating would tack her straight back), and only when she can tap now (`canTap`).
+    /// Inside her tack interval only a lee-bow tacks her (#329, `FleetTactics.leeBowInsideTackInterval`): it answers a
+    /// crossing, not a tack of her choosing.
     mutating func upwindTack(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack,
                              overstood: (Tack) -> Bool = { _ in false }) -> Tack {
-        guard let threshold = tactics.headerThreshold, view.time - lastTackTime > tactics.tackInterval else { return tack }
+        guard let threshold = tactics.headerThreshold else { return tack }
         let direction = (senses.direction ?? b.windDirection) + senses.directionRate * tactics.anticipation
         let shift = wrapAngle(direction - view.course.axis)
         // Headed: backed on starboard, veered on port.
         var headed = tack == .starboard ? -shift : shift
         let shifted = headed
+        guard view.time - lastTackTime > tactics.tackInterval else {
+            guard FleetTactics.leeBowInsideTackInterval, tactics.leeBows,
+                  let play = fleetPlay(b, view, planned: tack, headed: shifted, lean: shifted, threshold: threshold,
+                                       leeBowOnly: true, overstood: overstood), play.play == .leeBow else { return tack }
+            return tack.other
+        }
         // Goes to the pressure (`Tactics.goesToThePressure`): with the shift neutral, nothing in it to play, the
         // pressure calls her tack on half the case a shift needs.
         let neutral = abs(headed) < threshold / 2

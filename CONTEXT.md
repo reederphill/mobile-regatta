@@ -427,11 +427,11 @@ The optional camera: the view turned to follow your boat's heading with about a 
 _Avoid_: chase cam, heading-up
 
 **Heading lead**:
-Where the camera centres: your boat plus a lead the way she's heading, sized as a share of the screen (further up it than across it) at every zoom and speed. The lead's direction follows your heading with a couple of seconds' lag and shrinks while she turns hard (360s, pre-start spins). Nothing else moves the centre after the start.
+Where the camera centres: your boat plus a lead the way she's heading, sized as a share of the screen (further up it than across it) at every zoom and speed. The lead's direction follows your heading with a couple of seconds' lag and shrinks while she turns hard (360s, pre-start spins). Nothing else moves the centre after the start; before it the line shares the centre while she is slow.
 _Avoid_: look-ahead, upwind framing
 
 **Shot**:
-What sets the camera's zoom at a moment of the race, never its centre. In order of precedence: pre-start (your boat low on the screen with the line in view, until just after the gun), close quarters (zoomed in while a boat is within a few hull lengths), mark rounding (widening only as much as keeps the mark on screen) and open water. A shot holds a few seconds before a lower one replaces it, and changes ease.
+What sets the camera's zoom at a moment of the race, never its centre. In order of precedence: pre-start (a zoom that is the line's alone, both ends across the width, never moving with your boat; she sits low on the screen while stopped and a half-strength heading lead takes over as she gathers speed, her place eased; until just after the gun), close quarters (zoomed in while a boat is within a few hull lengths), mark rounding (widening only as much as keeps the mark on screen) and open water. A shot holds a few seconds before a lower one replaces it, and changes ease.
 _Avoid_: framing, camera mode
 
 **Auto zoom**:
