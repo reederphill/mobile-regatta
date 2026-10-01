@@ -54,8 +54,6 @@ import RegattaCore
         let way: Int8 = seed.isMultiple(of: 2) ? 100 : -100
         race.apply(BoatInput(rudder: way), seat: 0, atTick: race.tick + 1)
         var events: [RaceEvent.Kind] = []
-        var lowest = Double.infinity
-        // Progress so far, towards serving the turns owed: never falls while she owes one.
         func record(_ race: Race) {
             events += race.drainEvents().map(\.kind)
         }
@@ -81,7 +79,6 @@ import RegattaCore
             let now = abs(race.boats[0].penaltyProgress)
             if race.boats[0].penaltyTurnsOwed == owed, now < previous - 1e-9 { fell = true }
             previous = now
-            lowest = min(lowest, now)
         }
         guard race.boats[0].penaltyTurnsOwed == owed else { return false }
         #expect(!fell, "seed \(seed): the bot turned the penalty back")

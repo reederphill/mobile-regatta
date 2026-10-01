@@ -49,8 +49,9 @@ public struct SeatControllers: Sendable {
             : .bot(BotDriver(seat: seat, raceSeed: raceSeed).takingOver())
     }
 
-    /// Hands `seat` back to its player (#19, #104), between steps: no bot input is pending then (a bot's decision on a
-    /// tick applies on the next, which `race.step()` has stepped), so the player's inputs apply from the next tick. The
+    /// Hands `seat` back to its player (#19, #104), after `race.step()` and before the next `drive`: no bot input is
+    /// pending then (a bot's decision on a tick applies on the next, which the step has applied), so the player's
+    /// inputs apply from the next tick. Called between `drive` and `step`, the bot's decision for the next tick stands. The
     /// boat keeps everything the race holds for her: her penalty turn's progress, her autohelm's target. Sends nothing.
     public mutating func handBack(seat: Int) {
         seats[seat] = .human

@@ -47,9 +47,9 @@ public struct BotDriver: Sendable {
         self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, profile: profile)
     }
 
-    /// The bot for `seat` with a given style and `weaknesses` in place of her skill's (`BotWeaknesses`): for tests
-    /// of a mechanism her weaknesses would blur.
-    /// Cautious (#104, `BotBrain.Caution`) with `caution`.
+    /// The bot for `seat` with a given style and `weaknesses` in place of her skill's (`BotWeaknesses`), cautious
+    /// (#104, `BotBrain.Caution`) with `caution`: `BotDriver.cautious` builds on it, and tests of a mechanism her
+    /// weaknesses would blur use it.
     init(seat: Int, raceSeed: RaceSeed, style: BotStyle, weaknesses: BotWeaknesses, caution: BotBrain.Caution? = nil) {
         self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, weaknesses: weaknesses,
                   caution: caution)
