@@ -1,0 +1,8 @@
+{
+  "log" : "fleet.racelog.json",
+  "freezeTick" : 900,
+  "camera" : "boat",
+  "vision" : "protanopia",
+  "view" : "courseUp",
+  "hud" : { "leaderboard" : "compact" }
+}

@@ -5,7 +5,9 @@ import RegattaCore
 /// right, and one notice line under them. Nothing else: no speed, no instruments, no start aids, no shadow readout.
 /// Its colours keep to the reserved-colour rule (#22, G7): the clock is the cue yellow in the start sequence and the
 /// countdown to the close, and everything else is white on translucent black. Nothing reads by red or green (#5,
-/// #15): a notice's tone is its symbol. The left column below the place stays free for the leaderboard (#268).
+/// #15): a notice's tone is its symbol. Under the clock and place, from the gun to the close, the live leaderboard
+/// (#268): it and the place are the HUD's only touch targets (a tap opens the board to the whole fleet); every other
+/// touch passes through to steer.
 struct HUDView: View {
     let hud: HUDState
     let notice: Notice?
@@ -13,11 +15,19 @@ struct HUDView: View {
     var heading: () -> Double = { 0 }
     /// Stops the per-frame redraw while the race is paused.
     var isPaused = false
+    /// Settings' Live leaderboard (#268).
+    var showsLeaderboard = false
+    var isLeaderboardExpanded = false
+    var toggleLeaderboard: () -> Void = {}
 
     /// The minimap's size, points.
     static let minimapSize = CGSize(width: 96, height: 132)
-    /// The top of the notice line, under the minimap.
-    static let noticeTop: CGFloat = 4 + minimapSize.height + 8
+
+    /// The top of the notice line: under the minimap, and with the live leaderboard on, under the compact board too
+    /// (#268), reserved for the whole race so the notice never jumps. The open board draws over it for its seconds.
+    static func noticeTop(showsLeaderboard: Bool) -> CGFloat {
+        max(4 + minimapSize.height, showsLeaderboard ? HUDLayout.boardBottomCompact : 0) + 8
+    }
     /// The notice line's reserved height: two lines of footnote, so the layout doesn't jump.
     static let noticeHeight: CGFloat = 44
 
@@ -45,10 +55,33 @@ struct HUDView: View {
             NoticeLine(notice: notice)
                 .frame(height: Self.noticeHeight, alignment: .top)
                 .padding(.horizontal, HUDLayout.edge)
-                .padding(.top, 8)
+                .padding(.top, Self.noticeTop(showsLeaderboard: showsLeaderboard) - 4 - Self.minimapSize.height)
 
             Spacer()
         }
+        // Touches pass through the readouts to steer; only the board and the place take a tap.
+        .allowsHitTesting(false)
+        .overlay(alignment: .topLeading) {
+            if showsLeaderboard && hud.leaderboard.isVisible {
+                leaderboard
+            }
+        }
+    }
+
+    /// The live leaderboard under the clock and place, and a tap target over the place that opens it too (#268).
+    private var leaderboard: some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
+                .frame(width: HUDLayout.clockColumnWidth, height: HUDLayout.lineHeight(size: HUDLayout.placeSize))
+                .contentShape(.rect)
+                .onTapGesture(perform: toggleLeaderboard)
+                .accessibilityHidden(true)
+                .padding(.top, HUDLayout.placeTop)
+            LeaderboardView(state: hud.leaderboard, isExpanded: isLeaderboardExpanded, isPaused: isPaused,
+                            toggle: toggleLeaderboard)
+                .padding(.top, HUDLayout.boardTop)
+        }
+        .padding(.leading, HUDLayout.edge + HUDLayout.pauseClearance)
     }
 
     private var clockAndPlace: some View {
@@ -132,6 +165,72 @@ private struct NoticeLine: View {
     }
 }
 
+/// The live leaderboard (#268): place, livery swatch and gap to the leader on each row, white on translucent black
+/// (#22, G7), "you" in heavy weight inside a white outline, never by colour alone (#15). One shape of swatch for every
+/// boat. Rows are keyed by seat, so a reorder slides them; the gaps don't animate.
+private struct LeaderboardView: View {
+    let state: LeaderboardState
+    let isExpanded: Bool
+    let isPaused: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        let entries = state.entries(expanded: isExpanded)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(entries) { entry in
+                switch entry {
+                case .row(let row):
+                    LeaderboardRow(row: row)
+                case .separator:
+                    Text("⋯")
+                        .font(.system(size: 10, weight: .bold))
+                        .frame(width: HUDLayout.boardRowWidth, height: HUDLayout.boardSeparatorHeight)
+                        .opacity(0.7)
+                }
+            }
+        }
+        .padding(HUDLayout.boardPadding)
+        .foregroundStyle(.white)
+        .background(.black.opacity(0.55), in: .rect(cornerRadius: 8))
+        .animation(isPaused ? nil : .snappy(duration: 0.25), value: entries.map(\.id))
+        .contentShape(.rect)
+        .onTapGesture(perform: toggle)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(state.accessibilityLabel)
+        .accessibilityValue(isExpanded ? "expanded" : "compact")
+        .accessibilityAction(.default, toggle)
+        .accessibilityIdentifier("race-leaderboard")
+    }
+}
+
+private struct LeaderboardRow: View {
+    let row: LeaderboardState.Row
+
+    var body: some View {
+        HStack(spacing: HUDLayout.boardSpacing) {
+            Text(String(row.place))
+                .frame(width: HUDLayout.boardPlaceWidth, alignment: .trailing)
+            Circle()
+                .fill(Palette.boatColor(row.colorIndex))
+                .overlay(Circle().strokeBorder(.white.opacity(0.5), lineWidth: 1))
+                .frame(width: HUDLayout.boardSwatch, height: HUDLayout.boardSwatch)
+            Text(row.gap.text)
+                .contentTransition(.identity)
+                .frame(width: HUDLayout.boardGapWidth, alignment: .trailing)
+        }
+        .font(HUDFont.number(size: HUDLayout.boardSize, weight: row.isMe ? .heavy : .bold))
+        .lineLimit(1)
+        .padding(.horizontal, HUDLayout.boardRowInset)
+        .frame(height: HUDLayout.boardRowHeight)
+        .overlay {
+            if row.isMe {
+                RoundedRectangle(cornerRadius: 4).strokeBorder(.white, lineWidth: 1.5)
+            }
+        }
+    }
+}
+
 /// The HUD's top row (#114): the clock column after the pause button, the minimap at the right, and the wind centred
 /// between them in whatever width is left. Pure, so tests check it fits at every width the race gets.
 enum HUDLayout {
@@ -161,7 +260,47 @@ enum HUDLayout {
     }
 
     /// `text`'s width in the HUD's number face at `size`.
-    static func width(of text: String, size: CGFloat) -> CGFloat {
-        (text as NSString).size(withAttributes: [.font: HUDFont.uiNumber(size: size)]).width
+    static func width(of text: String, size: CGFloat, weight: UIFont.Weight = .bold) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: HUDFont.uiNumber(size: size, weight: weight)]).width
     }
+
+    /// A line's height in the HUD's number face at `size`, whole points up.
+    static func lineHeight(size: CGFloat, weight: UIFont.Weight = .bold) -> CGFloat {
+        HUDFont.uiNumber(size: size, weight: weight).lineHeight.rounded(.up)
+    }
+
+    // MARK: The live leaderboard (#268)
+
+    /// The top of the place line, under the clock.
+    static let placeTop: CGFloat = 4 + lineHeight(size: clockSize)
+    /// The bottom of the wind readout at its tallest (arrow over two lines, an iPhone's width).
+    static let windBottom: CGFloat = 4 + 6 + UIFont.systemFont(ofSize: 18, weight: .bold).lineHeight.rounded(.up) + 2
+        + 2 * lineHeight(size: windSize)
+    /// The board's top: under the place, and under the wind, so a board wider than the clock column can't meet it.
+    static let boardTop: CGFloat = max(placeTop + lineHeight(size: placeSize), windBottom) + 4
+
+    static let boardSize: CGFloat = 13
+    static let boardSwatch: CGFloat = 9
+    /// Between a row's place, swatch and gap.
+    static let boardSpacing: CGFloat = 5
+    /// Round the rows, inside the panel.
+    static let boardPadding: CGFloat = 4
+    /// Each row's own side inset, inside your row's outline.
+    static let boardRowInset: CGFloat = 4
+    static let boardSeparatorHeight: CGFloat = 9
+    static let boardRowHeight: CGFloat = lineHeight(size: boardSize, weight: .heavy) + 3
+
+    /// The widest place and gap a row shows: a 16-boat fleet, a gap under 10 km, and the words.
+    static let widestBoardPlaces = ["16"]
+    static let widestGaps = ["+9995 m", "Leader", "Fin", "DSQ", "OCS", "—"]
+    static let boardPlaceWidth: CGFloat = widestBoardPlaces.map { width(of: $0, size: boardSize, weight: .heavy) }
+        .max()!.rounded(.up)
+    static let boardGapWidth: CGFloat = widestGaps.map { width(of: $0, size: boardSize, weight: .heavy) }
+        .max()!.rounded(.up)
+    static let boardRowWidth: CGFloat = boardRowInset + boardPlaceWidth + boardSpacing + boardSwatch + boardSpacing
+        + boardGapWidth + boardRowInset
+    static let boardWidth: CGFloat = boardRowWidth + 2 * boardPadding
+
+    /// The compact board's bottom at its tallest: four rows and a separator.
+    static let boardBottomCompact: CGFloat = boardTop + 2 * boardPadding + 4 * boardRowHeight + boardSeparatorHeight
 }

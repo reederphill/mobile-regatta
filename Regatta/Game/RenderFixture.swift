@@ -15,7 +15,9 @@ import RegattaCore
 ///
 /// With `hud` the fixture draws the race HUD over the scene (#114): `{ "hud": { "notice": "markRoom" } }` shows that
 /// notice, and `"seat"` draws the race from another seat's boat (a log whose own seat is never OCS can still show
-/// the OCS HUD). Without it, the scene alone, as every fixture before #114.
+/// the OCS HUD). `"leaderboard": "compact"` or `"expanded"` shows the live leaderboard (#268) with it; without it the
+/// board is off, so the HUD fixtures before #268 keep their references. Without `hud`, the scene alone, as every
+/// fixture before #114.
 ///
 /// The app is launched with `-fixture <name>`, and finds `<name>.json` in the directory the
 /// `REGATTA_FIXTURE_DIR` environment variable names (the UI test passes its own `Fixtures` folder).
@@ -39,6 +41,12 @@ struct RenderFixture: Codable, Equatable {
         var notice: NoticeKind? = nil
         /// The seat that is "you", in place of the log's human seat.
         var seat: Int? = nil
+        /// The live leaderboard (#268), compact or tapped open; nil leaves it off.
+        var leaderboard: Leaderboard? = nil
+    }
+
+    enum Leaderboard: String, Codable, CaseIterable {
+        case compact, expanded
     }
 
     enum View: String, Codable, CaseIterable {
