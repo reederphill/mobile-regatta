@@ -103,11 +103,12 @@ import RegattaCore
         let seat: Int
         var brain: BotBrain
 
-        init(seat: Int, plannedTack: Tack?, race: Race, skill: Double = 1, weaknesses: BotWeaknesses? = nil) {
+        init(seat: Int, plannedTack: Tack?, race: Race, skill: Double = 1, weaknesses: BotWeaknesses? = nil,
+             caution: BotBrain.Caution? = nil) {
             self.seat = seat
             var style = BotConductTests.skill1
             style.skill = skill
-            brain = BotBrain(style: style, seed: UInt64(seat + 1), weaknesses: weaknesses)
+            brain = BotBrain(style: style, seed: UInt64(seat + 1), weaknesses: weaknesses, caution: caution)
             brain.plannedTack = plannedTack ?? race.boats[seat].tack
         }
 
@@ -122,11 +123,12 @@ import RegattaCore
     }
 
     /// Sails `race` with both seats' bots for `seconds`, at `skill` (skill 1 unless given) or with `weaknesses` (each
-    /// seat's, if given): every event, and `each` after every step.
+    /// seat's, if given), cautious with `caution` (#104) if given: every event, and `each` after every step.
     static func sail(_ race: Race, seconds: Double, planned: [Tack?] = [nil, nil], skill: Double = 1,
-                     weaknesses: [BotWeaknesses?] = [nil, nil], each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
+                     weaknesses: [BotWeaknesses?] = [nil, nil], caution: BotBrain.Caution? = nil,
+                     each: (Race) -> Void = { _ in }) -> [RaceEvent.Kind] {
         var pilots = [0, 1].map {
-            Pilot(seat: $0, plannedTack: planned[$0], race: race, skill: skill, weaknesses: weaknesses[$0])
+            Pilot(seat: $0, plannedTack: planned[$0], race: race, skill: skill, weaknesses: weaknesses[$0], caution: caution)
         }
         var kinds: [RaceEvent.Kind] = []
         for _ in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
@@ -394,6 +396,20 @@ import RegattaCore
     /// keep clear of her.
     @Test(arguments: BotConductTests.everySkill)
     func rightOfWayBotNeverRuddersTowardAKeepClearBoat(skill: Double) throws {
+        try Self.checkRightOfWayNeverRuddersTowardAKeepClearBoat(skill: skill)
+    }
+
+    /// #104: the cautious bot holds to #101's invariant too: both bots cautious, at her skill and with her weaknesses.
+    @Test func cautiousRightOfWayBotNeverRuddersTowardAKeepClearBoat() throws {
+        let skill = BotBrain.Caution.skill
+        try Self.checkRightOfWayNeverRuddersTowardAKeepClearBoat(skill: skill, weaknesses: BotBrain.Caution.weaknesses(skill: skill),
+                                                                   caution: .standard)
+    }
+
+    /// `rightOfWayBotNeverRuddersTowardAKeepClearBoat` at `skill`, both bots with `weaknesses` (their skill's if nil) and
+    /// `caution`.
+    static func checkRightOfWayNeverRuddersTowardAKeepClearBoat(skill: Double, weaknesses: BotWeaknesses? = nil,
+                                                                caution: BotBrain.Caution? = nil) throws {
         let clearance = 1.5
         var violations: [String] = []
         var checked = 0
@@ -405,7 +421,8 @@ import RegattaCore
             let changesCourse = try #require(escape.changesCourse)
             let length = race.boatClass.hull.length
             var headings = race.boats.map(\.heading)
-            _ = Self.sail(race, seconds: encounter.seconds, planned: encounter.planned, skill: skill) { race in
+            _ = Self.sail(race, seconds: encounter.seconds, planned: encounter.planned, skill: skill,
+                          weaknesses: [weaknesses, weaknesses], caution: caution) { race in
                 defer { headings = race.boats.map(\.heading) }
                 for seat in 0..<2 where race.boats[seat].status == .racing {
                     let other = 1 - seat

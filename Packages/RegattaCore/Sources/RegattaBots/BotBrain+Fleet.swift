@@ -199,7 +199,7 @@ extension BotBrain {
             guard offset.dot(forward) + relative.dot(forward) * (toLeeward / closing) > 0 else { return false }
             // ... clear of it as she keeps clear (`isAboutToHit`): she can cross, and won't duck it.
             guard Self.closestApproach(of: other, to: b, heading: b.heading, lookahead: keepClearLookahead)
-                    >= length * Self.keepClearDistance,
+                    >= length * keepClearLengths,
                   let forecast = tackForecast(b, view, on: other) else { return false }
             return forecast.allSatisfy { $0.astern >= length * FleetTactics.leeBowAstern && $0.backwind }
         }

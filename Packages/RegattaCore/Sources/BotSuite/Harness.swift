@@ -42,6 +42,12 @@ public enum BotRaceHarness {
     }
 
     public static func run(_ cell: BotRaceCell) throws -> RaceResult {
+        try run(cell, cautiousSeats: [])
+    }
+
+    /// Sails `cell`, with the cautious bot (#104, `BotDriver.cautious`) in `cautiousSeats` in place of the cell's bots:
+    /// a dropped player's boat among them, from the start. Her metrics give her seat's tier as the cell's.
+    public static func run(_ cell: BotRaceCell, cautiousSeats: Set<Int>) throws -> RaceResult {
         let setup = try raceSetup(for: cell)
         // Assembled as the server assembles a race (#81): the files the setup names, the race of record.
         let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
@@ -49,7 +55,9 @@ public enum BotRaceHarness {
         let tiers = setup.seats.indices.map { cell.tierMix.tier(ofSeat: $0, raceSeed: setup.raceSeed) }
         let profiles = setup.seats.indices.map { cell.profile(ofSeat: $0) }
         var controllers = SeatControllers(tiers.indices.map {
-            .bot(cell.tierMix.driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
+            cautiousSeats.contains($0)
+                ? .dropped(.cautious(seat: $0, raceSeed: setup.raceSeed))
+                : .bot(cell.tierMix.driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
         })
         var tally = RaceTally(race: race)
         let lastTick = cell.capSecondsAfterGun * Race.tickRate

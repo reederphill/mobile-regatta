@@ -110,6 +110,14 @@ _Avoid_: AI, CPU
 How well a bot sails: **Club**, **Regional** or **National**. Online, bots are matched to the fleet's ratings instead of using a fixed tier.
 _Avoid_: difficulty, level
 
+**Cautious bot**:
+The bot that sails a dropped player's boat until they come back: a Club bot at the bottom of Club's band, not a fourth tier. It takes the boat from wherever she is, always gives way, early and wide, and never attacks, so dropping never helps.
+_Avoid_: easy bot, autopilot
+
+**Handback**:
+A dropped player taking their boat back from the cautious bot. The boat keeps everything she had: a penalty turn part turned, the autohelm's target. The player's inputs apply from the next tick.
+_Avoid_: resume (the server's word for the player rejoining), takeover (the bot taking the boat)
+
 **Rival**:
 One of the 1–2 bots in a practice race whose skill is set from the player's recent practice results, so the player usually finishes near them. A rival races like any other bot and never targets the player. Practice only.
 _Avoid_: nemesis; "rival" for just any nearby boat

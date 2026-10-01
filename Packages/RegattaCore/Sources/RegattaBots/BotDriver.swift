@@ -49,16 +49,32 @@ public struct BotDriver: Sendable {
 
     /// The bot for `seat` with a given style and `weaknesses` in place of her skill's (`BotWeaknesses`): for tests
     /// of a mechanism her weaknesses would blur.
-    init(seat: Int, raceSeed: RaceSeed, style: BotStyle, weaknesses: BotWeaknesses) {
-        self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, weaknesses: weaknesses)
+    /// Cautious (#104, `BotBrain.Caution`) with `caution`.
+    init(seat: Int, raceSeed: RaceSeed, style: BotStyle, weaknesses: BotWeaknesses, caution: BotBrain.Caution? = nil) {
+        self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, weaknesses: weaknesses,
+                  caution: caution)
     }
 
-    private init(seat: Int, seed: UInt64, style: BotStyle, profile: BotProfile? = nil, weaknesses: BotWeaknesses? = nil) {
+    private init(seat: Int, seed: UInt64, style: BotStyle, profile: BotProfile? = nil, weaknesses: BotWeaknesses? = nil,
+                 caution: BotBrain.Caution? = nil) {
         self.seat = seat
         self.seed = seed
         self.profile = profile
         phase = seat % BotDriver.decisionInterval
-        brain = BotBrain(style: style, profile: profile, seed: seed, weaknesses: weaknesses)
+        brain = BotBrain(style: style, profile: profile, seed: seed, weaknesses: weaknesses, caution: caution)
+    }
+
+    /// Whether she is the cautious bot that sails a dropped player's boat (#104, `cautious(seat:raceSeed:)`).
+    public var isCautious: Bool { brain.caution != nil }
+
+    /// This driver taking a seat over at any tick (#19, #104): mid-race, mid-tack, mid-penalty, OCS, in irons, on the
+    /// race area's edge, or before the gun. Her first decision rebuilds her plan from what the seat sees and nothing
+    /// else (`BotBrain.adopt`): the tack the boat is on, a tap the autohelm is sailing, a penalty turn's way. A driver
+    /// that sails a seat from the start needs none of it.
+    public func takingOver() -> BotDriver {
+        var driver = self
+        driver.brain.takingOver = true
+        return driver
     }
 
     /// Whether the driver decides when the race is at `tick`.
