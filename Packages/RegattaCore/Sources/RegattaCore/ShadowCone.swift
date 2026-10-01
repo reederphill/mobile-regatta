@@ -65,14 +65,14 @@ public struct ShadowCone: Sendable, Equatable {
             return 1 - shadow.backwindLoss * (1 - upwind / shadow.backwindLength) * (1 - lateral / width)
         }
         let cone = along > 0 ? coneFactor(along: along, lateral: lateral) : 1
-        return cone * backwindFactor(at: offset)
+        return cone * trapezoidFactor(at: offset)
     }
 
     /// The multiplier this boat's backwind trapezoid alone leaves at `p` (#298), without her cone: 1 outside it, and
     /// 1 everywhere for a class with #79's band, or while she is running (`isRunning`).
     public func backwindFactor(at p: Vec2) -> Double {
         guard shadow.backwindInnerLength != nil else { return 1 }
-        return backwindFactor(at: p - apex)
+        return trapezoidFactor(at: p - apex)
     }
 
     /// Whether she is running, so casts no backwind: her true wind angle at or past her class's running angle.
@@ -97,7 +97,7 @@ public struct ShadowCone: Sendable, Equatable {
     /// the stern line, and astern between the start and end of its span there (`BoatClass.WindShadow.backwindSpan(out:)`),
     /// one of whose edges slants. The loss is full at its start (the stern edge) and fades straight to nothing at its
     /// end (the far edge). Nothing while she is running.
-    private func backwindFactor(at offset: Vec2) -> Double {
+    private func trapezoidFactor(at offset: Vec2) -> Double {
         guard !isRunning else { return 1 }
         let out = offset.dot(windward) - shadow.sternCorner.x
         let astern = shadow.sternCorner.y - offset.dot(forward)
