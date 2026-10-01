@@ -73,6 +73,12 @@ nonisolated struct CameraStyle: Codable, Equatable, Sendable {
     /// Your boat's speed, m/s, at which the heading lead has taken the pre-start composition over from the line's
     /// (smoothly from rest), so a boat sailing keeps open water ahead of her bow.
     var preStartLeadSpeed = 1.5
+    /// The share of the heading lead's strength before the gun: enough for open water ahead, not enough to swing the
+    /// view while manoeuvring.
+    var preStartLeadShare = 0.5
+    /// Your boat's offset from the screen's centre eases to the pre-start composition's with this time constant,
+    /// seconds, so crossing the line, a change of speed or a turn never slides her faster.
+    var preStartOffsetSeconds = 1.5
     /// Seconds after the gun the pre-start shot hands over to the heading lead.
     var gunHandOverSeconds = 3.0
 
@@ -123,6 +129,8 @@ nonisolated extension CameraStyle {
         try read(.preStartBoatWidth, \.preStartBoatWidth)
         try read(.preStartFlipLineLengths, \.preStartFlipLineLengths)
         try read(.preStartLeadSpeed, \.preStartLeadSpeed)
+        try read(.preStartLeadShare, \.preStartLeadShare)
+        try read(.preStartOffsetSeconds, \.preStartOffsetSeconds)
         try read(.gunHandOverSeconds, \.gunHandOverSeconds)
         try read(.minZoom, \.minZoom)
         try read(.maxZoom, \.maxZoom)

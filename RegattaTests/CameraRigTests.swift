@@ -271,9 +271,9 @@ import RegattaCore
             let height = Self.heightUp(rig, world.myPosition)
             #expect(abs(height - 0.4) <= 0.03, "\(mode): boat \(height) up")
             for end in world.startLine {
-                #expect(Self.onScreen(rig.project(end, sceneSize: Self.iPhone)), "\(mode): line end off screen")
+                let x = rig.project(end, sceneSize: Self.iPhone).x
+                #expect(x > 0 && x < Self.iPhone.width, "\(mode): line end off screen across")
             }
-            #expect(!rig.lineEndOffScreen)
 
             var above = world
             above.myPosition = up * (3 * 2 * lineHalf)
@@ -335,7 +335,7 @@ import RegattaCore
 
     /// Under way before the gun, the heading lead takes the composition over from the line's (#322): reaching along
     /// the line at speed, the boat is not at the edge across and has open water ahead of her bow, however far along
-    /// the line she is; sailing away from the line zooms out to keep both line ends on screen; and the share moves
+    /// the line she is; sailing away from the line doesn't zoom; and the share moves
     /// smoothly from rest to speed.
     @Test func preStartLeadsAlongHeadingWhenUnderWay() {
         let axis = Self.degrees(37)
@@ -371,10 +371,8 @@ import RegattaCore
         rest.myVelocity = Vec2(0, 0)
         var atRest = CameraRig(mode: .courseUp)
         atRest.advance(rest, sceneSize: Self.iPhone, dt: 0, settled: true)
-        #expect(rig.zoom <= atRest.zoom + 1e-9, "zooms out, or no closer than at rest, to keep the line")
-        for end in away.startLine {
-            #expect(Self.onScreen(rig.project(end, sceneSize: Self.iPhone)), "line end off screen going away")
-        }
+        
+        #expect(rig.zoom == atRest.zoom, "the pre-start zoom is the line's alone")
         let height = Self.heightUp(rig, away.myPosition)
         #expect(height > 0.5 && height < 0.8, "boat \(height) up, bow down the screen: more room below her than above")
 
@@ -393,12 +391,54 @@ import RegattaCore
         }
     }
 
+    /// The pre-start zoom is the line's alone (#322): the same from anywhere, at rest or sailing, before the gun.
+    /// And your boat's place on the screen eases (`preStartOffsetSeconds`): sailing up through the line with a change
+    /// of speed and turns on the way, she never moves more than 3 points a frame.
+    @Test func preStartZoomIsConstantAndTheBoatEasesOnTheScreen() {
+        let axis = Self.degrees(37)
+        let up = Vec2.heading(axis), right = up.rightPerp
+        let lineHalf = 23.0
+        var zooms = Set<Double>()
+        for lines in [-5.0, -1.0, 0.1, 3.0] {
+            for speed in [0.0, 4.0] {
+                let w = Self.world(axis: axis, me: up * (lines * 2 * lineHalf) + right * 17, heading: axis + 1,
+                                   time: -60, lineHalf: lineHalf, speed: speed)
+                var rig = CameraRig(mode: .courseUp)
+                rig.advance(w, sceneSize: Self.iPhone, dt: 0, settled: true)
+                zooms.insert(rig.zoom)
+            }
+        }
+        #expect(zooms.count == 1, "zooms \(zooms)")
+
+        var world = Self.world(axis: axis, me: up * (-2 * 2 * lineHalf), heading: axis, time: -40,
+                               lineHalf: lineHalf, speed: 0)
+        var rig = CameraRig(mode: .courseUp)
+        rig.advance(world, sceneSize: Self.iPhone, dt: 0, settled: true)
+        let zoom = rig.zoom
+        var last = rig.project(world.myPosition, sceneSize: Self.iPhone)
+        var heading = axis
+        var speed = 0.0
+        for frame in 1...(60 * 30) {
+            world.time += 1.0 / 60
+            speed = frame < 120 ? 0 : min(5, speed + 0.1)
+            heading = axis + (frame % 600 < 300 ? 0.4 : -0.4)
+            world.myVelocity = Vec2.heading(heading) * speed
+            world.myHeading = heading
+            world.myPosition += world.myVelocity / 60
+            rig.advance(world, sceneSize: Self.iPhone, dt: 1.0 / 60)
+            let p = rig.project(world.myPosition, sceneSize: Self.iPhone)
+            #expect(hypot(p.x - last.x, p.y - last.y) < 3, "a slide of \(p) from \(last) at \(world.time)")
+            #expect(abs(rig.zoom - zoom) < 1e-9, "the zoom moved at \(world.time)")
+            last = p
+        }
+    }
+
     /// A start line end under the HUD or the controls counts as off screen (#122): `lineEndOffScreen` reads the
     /// clear area `visibleInsets` leaves, the same rect the edge arrow reads, so the two never disagree.
     @Test func lineEndUnderTheHUDIsOffScreen() {
         let axis = Self.degrees(37)
         let up = Vec2.heading(axis)
-        let world = Self.world(axis: axis, me: up * (-3 * 2 * 23.0), heading: axis, time: -60, lineHalf: 23, speed: 0)
+        let world = Self.world(axis: axis, me: up * (-1 * 2 * 23.0), heading: axis, time: -60, lineHalf: 23, speed: 0)
         var rig = CameraRig(mode: .courseUp)
         rig.advance(world, sceneSize: Self.iPhone, dt: 0, settled: true)
         #expect(!rig.lineEndOffScreen, "both ends on the bare screen")
