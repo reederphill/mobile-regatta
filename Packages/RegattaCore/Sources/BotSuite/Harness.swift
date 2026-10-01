@@ -111,6 +111,10 @@ struct RaceTally {
     /// pair comes within `encounterDistance` while rules 10–13 name one of them to keep clear (`Race.rightOfWay`),
     /// closed once their hulls are further apart than that again.
     private var openEncounters: [SeatPair: Bool] = [:]
+    /// The open encounters begun before the gun (#280, #234's ruling 6: fouls split before and after the gun).
+    private var preStartPairs: Set<SeatPair> = []
+    private var preStartEncounters: [Int]
+    private var preStartEncountersEndingInFouls: [Int]
     /// Each seat's encounters begun, and those that ended in a rule call.
     private var encounters: [Int]
     private var encountersEndingInFouls: [Int]
@@ -165,6 +169,8 @@ struct RaceTally {
         contacts = Array(repeating: [], count: race.boats.count)
         encounters = zeros
         encountersEndingInFouls = zeros
+        preStartEncounters = zeros
+        preStartEncountersEndingInFouls = zeros
         encounterDistance = race.rules.incidents.separation.metres(hullLength: race.boatClass.hull.length)
         outline = race.boatClass.hull.outline
         hullRadius = race.boatClass.hull.outline.reduce(0) { max($0, $1.length) }
@@ -207,7 +213,7 @@ struct RaceTally {
             case .ocsNotice(let seat): ocsNotices[seat] += 1
             case .ruleCall(let call):
                 foulsAsOffender[call.offender] += 1
-                recordFoul(SeatPair(call.offender, call.victim))
+                recordFoul(SeatPair(call.offender, call.victim), race)
             case .markTouch(let seat, _): markContacts[seat] += 1
             case .obstructionContact(let seat, .land): landContacts[seat] += 1
             case .obstructionContact(let seat, .boundary): boundaryContacts[seat] += 1
@@ -227,6 +233,7 @@ struct RaceTally {
             }
         }
         openEncounters = openEncounters.filter { near.contains($0.key) }
+        preStartPairs = preStartPairs.filter { near.contains($0) || openEncounters[$0] != nil }
         for (seat, boat) in race.boats.enumerated() {
             if !boat.isTakingPenalty && boat.twa < noGo && boat.speed < BotRaceHarness.ironsSpeed {
                 if boat.status == .racing { ironsTicks[seat] += 1 }
@@ -322,6 +329,11 @@ struct RaceTally {
                     openEncounters[pair] = false
                     encounters[a] += 1
                     encounters[b] += 1
+                    if race.tick < 0 {
+                        preStartPairs.insert(pair)
+                        preStartEncounters[a] += 1
+                        preStartEncounters[b] += 1
+                    }
                 }
             }
         }
@@ -330,15 +342,24 @@ struct RaceTally {
 
     /// A rule call between `pair`'s boats: their encounter ends in a foul, once however many calls it holds. A call
     /// with no encounter open (never seen: the boats were too far apart) counts as an encounter of its own.
-    private mutating func recordFoul(_ pair: SeatPair) {
+    private mutating func recordFoul(_ pair: SeatPair, _ race: Race) {
         guard openEncounters[pair] != true else { return }
         if openEncounters[pair] == nil {
             encounters[pair.low] += 1
             encounters[pair.high] += 1
+            if race.tick < 0 {
+                preStartPairs.insert(pair)
+                preStartEncounters[pair.low] += 1
+                preStartEncounters[pair.high] += 1
+            }
         }
         openEncounters[pair] = true
         encountersEndingInFouls[pair.low] += 1
         encountersEndingInFouls[pair.high] += 1
+        if preStartPairs.contains(pair) {
+            preStartEncountersEndingInFouls[pair.low] += 1
+            preStartEncountersEndingInFouls[pair.high] += 1
+        }
     }
 
     /// A beat ends when she moves on from it, and a leg begins as she starts or rounds into it. Her tacks
@@ -388,6 +409,8 @@ struct RaceTally {
             encounters: encounters[seat],
             encountersEndingInFouls: encountersEndingInFouls[seat],
             encountersToFoulsShare: share(encountersEndingInFouls[seat], of: encounters[seat]),
+            preStartEncounters: preStartEncounters[seat],
+            preStartEncountersEndingInFouls: preStartEncountersEndingInFouls[seat],
             closeEncounters: crossings[seat] + shadowGiven[seat] + shadowReceived[seat] + covers[seat],
             crossings: crossings[seat],
             shadowGiven: shadowGiven[seat],

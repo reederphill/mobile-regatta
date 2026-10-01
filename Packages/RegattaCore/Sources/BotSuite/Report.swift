@@ -56,6 +56,9 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     /// Of `encounters`, those during which a rule call was made between the two, on either boat.
     public var encountersEndingInFouls: Int = 0
     public var encountersToFoulsShare: Double = 0
+    /// Of `encounters` and `encountersEndingInFouls`, those begun before the gun (#280; #234 reports the split).
+    public var preStartEncounters: Int = 0
+    public var preStartEncountersEndingInFouls: Int = 0
     /// Her close encounters racing (#234: "crossings within 3 hull lengths, shadow time given/received, covers"):
     /// `crossings + shadowGiven + shadowReceived + covers`. Not `encounters`, which counts rule relations.
     public var closeEncounters: Int = 0
@@ -74,7 +77,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         "contactsToFoulsShare", "foulsAsOffender", "dsqMissedPenalty", "ocsCount", "edgeSeconds",
         "landContacts", "boundaryContacts", "beats", "preGunIronsSeconds", "startSeconds", "startLineSpot",
         "rowSpot", "startSpot", "onCourseSeconds", "encounters", "encountersEndingInFouls", "encountersToFoulsShare",
-        "closeEncounters", "crossings", "shadowGiven", "shadowReceived", "covers",
+        "preStartEncounters", "preStartEncountersEndingInFouls", "closeEncounters", "crossings", "shadowGiven", "shadowReceived", "covers",
     ]
 
     private enum CodingKeys: String, CodingKey {
@@ -83,7 +86,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case edgeSeconds, landContacts, boundaryContacts, beats
         case preGunIronsSeconds, startSeconds, startLineSpot, rowSpot, startSpot, onCourseSeconds
         case encounters, encountersEndingInFouls, encountersToFoulsShare
-        case closeEncounters, crossings, shadowGiven, shadowReceived, covers
+        case preStartEncounters, preStartEncountersEndingInFouls, closeEncounters, crossings, shadowGiven, shadowReceived, covers
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -116,6 +119,8 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(encounters, forKey: .encounters)
         try c.encode(encountersEndingInFouls, forKey: .encountersEndingInFouls)
         try c.encode(encountersToFoulsShare, forKey: .encountersToFoulsShare)
+        try c.encode(preStartEncounters, forKey: .preStartEncounters)
+        try c.encode(preStartEncountersEndingInFouls, forKey: .preStartEncountersEndingInFouls)
         try c.encode(closeEncounters, forKey: .closeEncounters)
         try c.encode(crossings, forKey: .crossings)
         try c.encode(shadowGiven, forKey: .shadowGiven)
@@ -563,6 +568,9 @@ public struct TierSummary: Codable, Hashable, Sendable {
     /// The share of the tier's encounters during which a rule call was made (#101), for the report: the gate holds it
     /// over the all-National live fleets (`ConductSummary`), not per tier.
     public var encountersToFoulsShare: Double
+    /// Of those, the ones begun before the gun, and those of them ending in a rule call (#280, #234).
+    public var preStartEncounters: Int
+    public var preStartEncountersEndingInFouls: Int
     public var foulsAsOffender: Int
     public var dsqMissedPenalty: Int
     public var ocsCount: Int
@@ -583,6 +591,8 @@ public struct TierSummary: Codable, Hashable, Sendable {
         encounters = seats.reduce(0) { $0 + $1.encounters }
         encountersEndingInFouls = seats.reduce(0) { $0 + $1.encountersEndingInFouls }
         encountersToFoulsShare = share(encountersEndingInFouls, of: encounters)
+        preStartEncounters = seats.reduce(0) { $0 + $1.preStartEncounters }
+        preStartEncountersEndingInFouls = seats.reduce(0) { $0 + $1.preStartEncountersEndingInFouls }
         foulsAsOffender = seats.reduce(0) { $0 + $1.foulsAsOffender }
         dsqMissedPenalty = seats.reduce(0) { $0 + $1.dsqMissedPenalty }
         ocsCount = seats.reduce(0) { $0 + $1.ocsCount }
@@ -666,7 +676,9 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
             guard let s = tiers[tier.rawValue] else { continue }
             lines.append("\(tier.rawValue): \(s.finished)/\(s.seats) finished, irons \(fixed(s.meanIronsSeconds)) s/boat, "
                 + "marks \(fixed(s.meanMarkContacts))/boat, contacts \(s.boatContacts) (\(fixed(s.contactsToFoulsShare)) fouls), "
-                + "encounters \(s.encounters) (\(fixed(s.encountersToFoulsShare, 3)) fouls), "
+                + "encounters \(s.encounters) (\(fixed(s.encountersToFoulsShare, 3)) fouls; "
+                + "pre-start \(s.preStartEncountersEndingInFouls)/\(s.preStartEncounters), "
+                + "racing \(s.encountersEndingInFouls - s.preStartEncountersEndingInFouls)/\(s.encounters - s.preStartEncounters)), "
                 + "edge \(fixed(s.meanEdgeSeconds)) s/boat, dsq \(s.dsqMissedPenalty), ocs \(s.ocsCount)")
         }
         for profile in BotProfile.allCases {
