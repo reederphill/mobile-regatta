@@ -240,9 +240,9 @@ The line from a mark along which a boat, at her best angle to the wind, can just
 The thin vermillion arrow under your hull, one hull length, pointing to the wind over the ground. No label and no numbers; it carries the groove tick.
 _Avoid_: wind arrow, wind indicator
 
-**Right-of-way glyph**:
-The wordless mark over another boat that says who keeps clear: an orange ⚠ triangle on a boat you must keep clear of, a blue chevron on a boat that must keep clear of you. Shown only within a short range; mark-room is never a glyph (it is a notice), and a ghost has none.
-_Avoid_: boat label, rights icon
+**Right-of-way glow**:
+The wordless halo round another boat that says who keeps clear: red on a boat you must keep clear of, green on a boat that must keep clear of you. It fades in from nothing as she comes within a short range, to full strength close in; mark-room is never a glow (it is a notice), and a ghost has none. The core's `RightOfWayGlyph` is its red/green kind (the name dates from when these were a ⚠ and a chevron).
+_Avoid_: boat label, rights icon, glyph
 
 **Penalty arc**:
 The orange arc round your boat while you owe a penalty turn: it counts down the start deadline until the turn is started, then the complete deadline. With it, a short "Turn" notice gives both countdowns.

@@ -19,6 +19,9 @@ final class BoatNode: SKNode {
     private let hullGroup = SKNode()
     private let heelShadow: SKSpriteNode
     private let glow: SKSpriteNode?
+    /// The right-of-way glow (#123): a white halo tinted red or green and faded by `setRightOfWayGlow`, under the
+    /// hull. Your own boat never has one.
+    private let rightOfWayGlow: SKSpriteNode
     private let sail: SKSpriteNode
     private let ppm: CGFloat
     private let beam: CGFloat
@@ -41,7 +44,8 @@ final class BoatNode: SKNode {
     /// outline under every sail. Your boat draws over all of the fleet's. (The effects layer's are `BoatEffects`'.)
     private enum Layer {
         static let fleet: CGFloat = 5, mine: CGFloat = 10
-        static let heelShadow: CGFloat = 0, glow: CGFloat = 0.1, hull: CGFloat = 0.2, outline: CGFloat = 0.3, sail: CGFloat = 1
+        static let heelShadow: CGFloat = 0, rightOfWayGlow: CGFloat = 0.05, glow: CGFloat = 0.1, hull: CGFloat = 0.2
+        static let outline: CGFloat = 0.3, sail: CGFloat = 1
         static let ring: CGFloat = 2
     }
 
@@ -76,6 +80,10 @@ final class BoatNode: SKNode {
         outline.zPosition = Layer.outline
         glow = isMine ? SKSpriteNode(texture: art.glow) : nil
         glow?.zPosition = Layer.glow
+        rightOfWayGlow = SKSpriteNode(texture: art.rightOfWayGlow)
+        rightOfWayGlow.colorBlendFactor = 1
+        rightOfWayGlow.isHidden = true
+        rightOfWayGlow.zPosition = Layer.rightOfWayGlow
 
         sail = SKSpriteNode(texture: art.sail)
         sail.anchorPoint = art.sailAnchor
@@ -97,6 +105,7 @@ final class BoatNode: SKNode {
         super.init()
 
         hullGroup.addChild(heelShadow)
+        hullGroup.addChild(rightOfWayGlow)
         if let glow { hullGroup.addChild(glow) }
         hullGroup.addChild(hull)
         hullGroup.addChild(outline)
@@ -154,6 +163,18 @@ final class BoatNode: SKNode {
         ring.isHidden = false
     }
 
+    /// Lights or puts out her right-of-way glow (#123): red where you keep clear of her, green where she keeps clear
+    /// of you, `glow.intensity` of `style.glowMaxAlpha`. Nil hides it.
+    func setRightOfWayGlow(_ glow: RightOfWayGlow?, style: BoatStyle) {
+        guard let glow else {
+            rightOfWayGlow.isHidden = true
+            return
+        }
+        rightOfWayGlow.color = (glow.kind == .giveWay ? CuePalette.giveWayRed : CuePalette.hasRightGreen).uiColor
+        rightOfWayGlow.alpha = CGFloat(glow.intensity * style.glowMaxAlpha)
+        rightOfWayGlow.isHidden = false
+    }
+
     /// Heel (#22): the hull drawn narrower and a drop shadow offset to leeward (the boom's side, except by the lee).
     private func updateHeel(_ pose: BoatPose, style: BoatStyle) {
         let heel = CGFloat(pose.heel)
@@ -206,6 +227,8 @@ private struct BoatArt {
     let outline: SKTexture
     /// Your boat's soft glow, drawn under her hull.
     let glow: SKTexture
+    /// The right-of-way glow's halo (#123): a wider white blur, tinted at use.
+    let rightOfWayGlow: SKTexture
     let sail: SKTexture
     let sailAnchor: CGPoint
 
@@ -216,6 +239,7 @@ private struct BoatArt {
         var beam: Double
         var ppm: CGFloat
         var glowBlur: Double
+        var rightOfWayGlowBlur: Double
         var outlineWidth: Double
     }
 
@@ -226,15 +250,17 @@ private struct BoatArt {
     static func shared(boatClass: BoatClass, pointsPerMeter ppm: CGFloat, style: BoatStyle) -> BoatArt {
         let hull = boatClass.hull
         let key = Key(outline: hull.outline.flatMap { [$0.x, $0.y] }, length: hull.length, beam: hull.beam, ppm: ppm,
-                      glowBlur: style.glowBlur, outlineWidth: style.outlineWidth)
+                      glowBlur: style.glowBlur, rightOfWayGlowBlur: style.rightOfWayGlowBlur,
+                      outlineWidth: style.outlineWidth)
         if let art = cache[key] { return art }
         let art = BoatArt(boatClass: boatClass, ppm: ppm, glowBlur: CGFloat(style.glowBlur),
-                          outlineWidth: CGFloat(style.outlineWidth))
+                          rightOfWayGlowBlur: CGFloat(style.rightOfWayGlowBlur), outlineWidth: CGFloat(style.outlineWidth))
         cache[key] = art
         return art
     }
 
-    private init(boatClass: BoatClass, ppm: CGFloat, glowBlur: CGFloat, outlineWidth: CGFloat) {
+    private init(boatClass: BoatClass, ppm: CGFloat, glowBlur: CGFloat, rightOfWayGlowBlur: CGFloat,
+                 outlineWidth: CGFloat) {
         let length = CGFloat(boatClass.hull.length) * ppm
         let beam = CGFloat(boatClass.hull.beam) * ppm
         let path = BoatArt.hullPath(boatClass.hull, ppm: ppm)
@@ -247,6 +273,7 @@ private struct BoatArt {
             BoatArt.strokeInside(path, width: outlineWidth, color: .white, in: cg)
         }
         glow = BoatArt.glowTexture(path, bounds: bounds, blur: glowBlur)
+        rightOfWayGlow = BoatArt.glowTexture(path, bounds: bounds, blur: rightOfWayGlowBlur)
         (sail, sailAnchor) = BoatArt.sailTexture(length: length * 0.62, bulge: beam * 0.45, mastRadius: max(1.5, beam * 0.1))
     }
 
@@ -312,7 +339,8 @@ private struct BoatArt {
     }
 
     /// A soft white blur of the hull's silhouette, wider than it: under the hull only its halo shows. `glowBlur`,
-    /// points: soft, with no hard edge that would read as a ring (#15).
+    /// points: soft, with no hard edge that would read as a ring (#15). Your glow draws it as it is, the
+    /// right-of-way glow tinted and wider.
     private static func glowTexture(_ path: CGPath, bounds: CGRect, blur glowBlur: CGFloat) -> SKTexture {
         // The player glow's token (docs/palette.md).
         let white = CuePalette.cueWhite.uiColor.cgColor
