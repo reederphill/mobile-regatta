@@ -162,8 +162,9 @@ import RegattaCore
         #expect(blipTacker == baseline)
         // A profile's play doesn't come from the bot's skill; a live bot's does.
         #expect(Tactics(profile: .baseline, skill: 0.1) == baseline)
-        // #234: no profile plays the fleet as a live bot does; the tactician's cover is #231's (`covers`).
-        #expect(!tactician.leeBows && !tactician.tacksOnWind && !tactician.coversTackers && !tactician.holdsLane)
+        // #234, #329: the tactician lee-bows and tacks on a boat's wind; her cover is #231's (`covers`), and she holds
+        // no lane. The baseline plays no fleet tactic.
+        #expect(tactician.leeBows && tactician.tacksOnWind && !tactician.coversTackers && !tactician.holdsLane)
         #expect(!baseline.leeBows && !baseline.tacksOnWind && !baseline.coversTackers && !baseline.holdsLane)
         // A live bot plays the fleet as her style's engagement has her (#234): all of it combative, none of it sailing
         // her own race.
