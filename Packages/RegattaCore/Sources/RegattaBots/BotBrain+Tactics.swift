@@ -95,6 +95,12 @@ struct Tactics: Sendable, Equatable {
             self.init(headerThreshold: deg2rad(4), tackInterval: 15, anticipation: 6, corridor: 0.5,
                       downwindShiftThreshold: deg2rad(5), replanes: true, heatsUpInLulls: true, pinchesToFetch: true,
                       seeksPuffs: true, seeksPressure: true, goesToThePressure: true, seeksClearAir: true, covers: true)
+            // #234 (ruling 3): she lee-bows and tacks on a boat's wind, fully engaged; measured on the fun pass's 4 seeds,
+            // her gain, win share and beat-the-blip-tacker share all rose (1.60 → 1.95 L/beat, 0.76 → 0.77, 0.79 → 0.82).
+            // Her cover stays #231's (`covers`).
+            leeBows = true
+            tacksOnWind = true
+            engagement = 1
         case .blipTacker:
             // The baseline with a hair trigger: a 3° blip tacks her as a real header does.
             self.init(headerThreshold: deg2rad(3), tackInterval: 15)

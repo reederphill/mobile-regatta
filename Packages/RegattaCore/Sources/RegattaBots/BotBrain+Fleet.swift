@@ -33,7 +33,7 @@ struct FleetSense: Sendable {
         var timing: Double
     }
 
-    var boats: [Int: Boat] = [:]
+    var bySeat: [Int: Boat] = [:]
 }
 
 extension BotBrain {
@@ -102,19 +102,19 @@ extension BotBrain {
     /// Takes in what she sees of the boats around her now (`FleetSense`): a boat's tack seen to change marks when.
     mutating func observeFleet(_ view: SeatView) {
         guard playsTheFleet else { return }
-        var boats: [Int: FleetSense.Boat] = [:]
+        var bySeat: [Int: FleetSense.Boat] = [:]
         for other in view.others where !other.isGhost {
-            if var boat = fleet.boats[other.seat] {
+            if var boat = fleet.bySeat[other.seat] {
                 if boat.tack != other.tack {
                     boat.tack = other.tack
                     boat.tackedAt = view.time
                 }
-                boats[other.seat] = boat
+                bySeat[other.seat] = boat
             } else {
-                boats[other.seat] = FleetSense.Boat(tack: other.tack, tackedAt: -.infinity, timing: tacticsRng.range(-1, 1))
+                bySeat[other.seat] = FleetSense.Boat(tack: other.tack, tackedAt: -.infinity, timing: tacticsRng.range(-1, 1))
             }
         }
-        fleet.boats = boats
+        fleet.bySeat = bySeat
     }
 
     /// The fleet tactic she plays now, beating on her own tack (`planned` hers), racing and not tacking, or nil: holding
@@ -155,7 +155,7 @@ extension BotBrain {
         let up = view.course.upwind
         let seen = weaknesses.reactionDelay + FleetTactics.coverReaction
         return nearest(view, within: range, of: b) { other, offset in
-            guard other.tack != b.tack, let boat = fleet.boats[other.seat], boat.tack == other.tack else { return false }
+            guard other.tack != b.tack, let boat = fleet.bySeat[other.seat], boat.tack == other.tack else { return false }
             let age = view.time - boat.tackedAt
             return age >= seen && age <= max(seen, FleetTactics.coverLate) && -offset.dot(up) > length * FleetTactics.coverBehind
                 && abs(offset.dot(up.rightPerp)) > length * FleetTactics.coverAbeam
@@ -229,7 +229,7 @@ extension BotBrain {
 
     /// Seconds early (positive) or late she reads `other` (`FleetTactics.timingError`): none at full tactical quality.
     func timing(_ other: SeatView.OtherBoat) -> Double {
-        (1 - tactics.tacticalQuality) * FleetTactics.timingError * (fleet.boats[other.seat]?.timing ?? 0)
+        (1 - tactics.tacticalQuality) * FleetTactics.timingError * (fleet.bySeat[other.seat]?.timing ?? 0)
     }
 
     /// The nearest boat to her within `range` metres, beating and no ghost, that `matches` (with its offset from her):

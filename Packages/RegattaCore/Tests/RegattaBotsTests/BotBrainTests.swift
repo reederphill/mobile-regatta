@@ -162,6 +162,18 @@ import RegattaCore
         #expect(blipTacker == baseline)
         // A profile's play doesn't come from the bot's skill; a live bot's does.
         #expect(Tactics(profile: .baseline, skill: 0.1) == baseline)
+        // #234: the tactician lee-bows and tacks on a boat's wind, fully engaged; the groove-only profiles play no boat.
+        #expect(tactician.leeBows && tactician.tacksOnWind && tactician.engagement == 1)
+        #expect(!baseline.leeBows && !baseline.tacksOnWind && !baseline.coversTackers && !baseline.holdsLane)
+        // A live bot plays the fleet as her style's engagement has her (#234): all of it combative, none of it sailing
+        // her own race.
+        func live(engagement: Double) -> Tactics {
+            Tactics(profile: nil, skill: 0.9, style: BotStyle(skill: 0.9, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0,
+                                                              penaltyDirection: 1, engagement: engagement))
+        }
+        let combative = live(engagement: 1), ownRace = live(engagement: 0)
+        #expect(combative.coversTackers && combative.holdsLane && combative.leeBows && combative.tacksOnWind)
+        #expect(!ownRace.coversTackers && !ownRace.holdsLane && !ownRace.leeBows && !ownRace.tacksOnWind)
         // #102: a live bot plays shifts at any skill, the smaller ones the more skilled she is.
         let club = try #require(Tactics(profile: nil, skill: 0.4).headerThreshold)
         let national = try #require(Tactics(profile: nil, skill: 0.9).headerThreshold)
