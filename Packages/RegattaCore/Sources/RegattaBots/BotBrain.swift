@@ -25,7 +25,9 @@ public struct BotStyle: Hashable, Sendable {
     public var favouredSide: Double
     /// How willing she is to tack, 0…1: the willing tack on smaller shifts, sooner after the last tack.
     public var tackWillingness: Double
-    /// How she engages the boats around her, 0 sailing her own race … 1 combative (#223): fleet tactics (#234) read it.
+    /// How she engages the boats around her, 0 sailing her own race … 1 combative (#223): the one value every fleet
+    /// tactic reads (#234, `Tactics.engagement`): whether she covers, holds her lane, lee-bows or tacks on a boat's wind,
+    /// and how far off a boat she covers. Independent of her skill, which sets how well she plays them.
     public var engagement: Double
     /// −1…1: which way, and how far, she misreads the start line's bias (`BotWeaknesses.lineBiasMisread`).
     public var lineBiasDraw: Double
