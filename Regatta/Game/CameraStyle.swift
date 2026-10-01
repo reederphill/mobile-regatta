@@ -70,6 +70,9 @@ nonisolated struct CameraStyle: Codable, Equatable, Sendable {
     var preStartBoatWidth = 0.7
     /// The flip from below the line to above it eases over this many line lengths either side of it.
     var preStartFlipLineLengths = 0.25
+    /// Your boat's speed, m/s, at which the heading lead has taken the pre-start composition over from the line's
+    /// (smoothly from rest), so a boat sailing keeps open water ahead of her bow.
+    var preStartLeadSpeed = 1.5
     /// Seconds after the gun the pre-start shot hands over to the heading lead.
     var gunHandOverSeconds = 3.0
 
@@ -119,6 +122,7 @@ nonisolated extension CameraStyle {
         try read(.preStartBoatHeight, \.preStartBoatHeight)
         try read(.preStartBoatWidth, \.preStartBoatWidth)
         try read(.preStartFlipLineLengths, \.preStartFlipLineLengths)
+        try read(.preStartLeadSpeed, \.preStartLeadSpeed)
         try read(.gunHandOverSeconds, \.gunHandOverSeconds)
         try read(.minZoom, \.minZoom)
         try read(.maxZoom, \.maxZoom)

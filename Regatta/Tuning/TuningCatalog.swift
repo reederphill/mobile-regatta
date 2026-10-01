@@ -290,6 +290,7 @@ enum TuningCatalog {
                     camera("preStartBoatHeight", "Pre-start boat height", \.preStartBoatHeight, 0.1...0.5, 0.05),
                     camera("preStartBoatWidth", "Pre-start boat width", \.preStartBoatWidth, 0.2...1, 0.05),
                     camera("preStartFlipLineLengths", "Pre-start flip over", \.preStartFlipLineLengths, 0.05...2, 0.05, unit: " lines"),
+                    camera("preStartLeadSpeed", "Pre-start lead from speed", \.preStartLeadSpeed, 0.25...5, 0.25, unit: " m/s"),
                     camera("gunHandOverSeconds", "Hand-over after the gun", \.gunHandOverSeconds, 0...10, 0.5, unit: " s"),
                     camera("minZoom", "Widest zoom", \.minZoom, 0.1...1, 0.05),
                     camera("maxZoom", "Closest zoom", \.maxZoom, 1...4, 0.1),

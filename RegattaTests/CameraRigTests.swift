@@ -18,12 +18,12 @@ import RegattaCore
     /// side (`lineHalf`), the windward mark 800 m up the axis, the gate 100 m down it. Your boat 20 m below the line,
     /// heading `heading` at 5 m/s, the ground wind 5 m/s down the axis. Nothing else, unless `others`.
     static func world(axis: Double = 0, me: Vec2? = nil, heading: Double? = nil, others: [Vec2] = [],
-                      time: Double = 120, windSpeed: Double = 5, lineHalf: Double = 50) -> CameraWorld {
+                      time: Double = 120, windSpeed: Double = 5, lineHalf: Double = 50, speed: Double = 5) -> CameraWorld {
         let up = Vec2.heading(axis), right = up.rightPerp
         let position = me ?? up * -20
         let heading = heading ?? axis
         let windward = up * 800
-        return CameraWorld(myPosition: position, myVelocity: Vec2.heading(heading) * 5, myHeading: heading,
+        return CameraWorld(myPosition: position, myVelocity: Vec2.heading(heading) * speed, myHeading: heading,
                            wind: Wind(direction: axis, speed: windSpeed), others: others, axis: axis,
                            startLine: [right * -lineHalf, right * lineHalf], nextMarks: [windward], zoneRadius: 3 * hull,
                            hullLength: hull, time: time,
@@ -254,7 +254,7 @@ import RegattaCore
         #expect(Self.leadShare(rig) > 0.99)
     }
 
-    /// Before the gun on a portrait phone, with your boat 3 line lengths below the line: she's 40 % ± 3 % up the
+    /// Before the gun on a portrait phone, with your boat at rest 3 line lengths below the line: she's 40 % ± 3 % up the
     /// screen and both line ends are on it, in course-up and in boat-up (which is course-up until the gun). Above
     /// the line the composition flips. After the gun it hands over to the lead over 3 s, without a jump.
     @Test func preStartPutsBoatAt40PercentWithTheLine() {
@@ -263,7 +263,7 @@ import RegattaCore
         let lineHalf = 23.0
         for mode in [CameraRig.Mode.courseUp, .boatUp] {
             let world = Self.world(axis: axis, me: up * (-3 * 2 * lineHalf), heading: axis + Self.degrees(100),
-                                   time: -60, lineHalf: lineHalf)
+                                   time: -60, lineHalf: lineHalf, speed: 0)
             var rig = CameraRig(mode: mode)
             rig.advance(world, sceneSize: Self.iPhone, dt: 0, settled: true)
             #expect(rig.shot == .preStart)
@@ -288,14 +288,14 @@ import RegattaCore
         for mode in [CameraRig.Mode.courseUp, .boatUp] {
             var rig = CameraRig(mode: mode)
             let near = Self.world(axis: axis, me: up * (-3 * 2 * lineHalf) + right * 10, heading: axis, time: -60,
-                                  lineHalf: lineHalf)
+                                  lineHalf: lineHalf, speed: 0)
             rig.advance(near, sceneSize: Self.iPhone, dt: 0, settled: true)
             #expect(abs(rig.project(Vec2(0, 0), sceneSize: Self.iPhone).x - Self.iPhone.width / 2) < 1e-6,
                     "\(mode): the line's middle off centre")
             #expect(abs(Self.heightUp(rig, near.myPosition) - 0.4) <= 0.03)
             for across in [-1.0, 1.0] {
                 let far = Self.world(axis: axis, me: up * (-3 * 2 * lineHalf) + right * (across * 6 * 2 * lineHalf),
-                                     heading: axis, time: -60, lineHalf: lineHalf)
+                                     heading: axis, time: -60, lineHalf: lineHalf, speed: 0)
                 rig.advance(far, sceneSize: Self.iPhone, dt: 0, settled: true)
                 let x = Double(rig.project(far.myPosition, sceneSize: Self.iPhone).x / Self.iPhone.width)
                 #expect(abs(x - 0.5) <= 0.35 + 1e-6, "\(mode): boat \(x) across")
@@ -305,7 +305,7 @@ import RegattaCore
         }
 
         // A line too long to fit even at the widest zoom: the widest it is, and a line end is off screen.
-        let long = Self.world(axis: axis, me: up * -100, heading: axis, time: -60, lineHalf: 2000)
+        let long = Self.world(axis: axis, me: up * -100, heading: axis, time: -60, lineHalf: 2000, speed: 0)
         var wide = CameraRig(mode: .courseUp)
         wide.advance(long, sceneSize: Self.iPhone, dt: 0, settled: true)
         #expect(wide.shot == .preStart)
@@ -333,12 +333,72 @@ import RegattaCore
         #expect(abs(Self.heightUp(rig, world.myPosition) - (0.5 - CameraStyle.standard.leadAlong / 2)) < 1e-6)
     }
 
+    /// Under way before the gun, the heading lead takes the composition over from the line's (#322): reaching along
+    /// the line at speed, the boat is not at the edge across and has open water ahead of her bow, however far along
+    /// the line she is; sailing away from the line zooms out to keep both line ends on screen; and the share moves
+    /// smoothly from rest to speed.
+    @Test func preStartLeadsAlongHeadingWhenUnderWay() {
+        let axis = Self.degrees(37)
+        let up = Vec2.heading(axis), right = up.rightPerp
+        let lineHalf = 23.0
+        let below = up * (-1.5 * 2 * lineHalf)
+        for mode in [CameraRig.Mode.courseUp, .boatUp] {
+            for side in [-1.0, 1.0] {
+                // Reaching away from the line's middle, towards its end and on past it.
+                let me = below + right * (side * 2 * lineHalf)
+                let world = Self.world(axis: axis, me: me, heading: axis + side * .pi / 2, time: -60,
+                                       lineHalf: lineHalf, speed: 4)
+                var rig = CameraRig(mode: mode)
+                rig.advance(world, sceneSize: Self.iPhone, dt: 0, settled: true)
+                var stopped = world
+                stopped.myVelocity = Vec2(0, 0)
+                var atRest = CameraRig(mode: mode)
+                atRest.advance(stopped, sceneSize: Self.iPhone, dt: 0, settled: true)
+                let x = Double(rig.project(me, sceneSize: Self.iPhone).x / Self.iPhone.width)
+                let restX = Double(atRest.project(me, sceneSize: Self.iPhone).x / Self.iPhone.width)
+                // Her bow points to screen right (side 1) or left (side -1): the boat is behind the middle of the
+                // screen, with at least a quarter of it ahead of her bow.
+                #expect(abs(x - 0.5) <= 0.25 + 1e-6, "\(mode): boat \(x) across the screen")
+                #expect(abs(x - 0.5) < abs(restX - 0.5), "\(mode): no nearer the edge than at rest")
+            }
+        }
+
+        // Sailing straight away from the line: the line stays on screen by zooming out, the boat well off the edge.
+        let away = Self.world(axis: axis, me: below, heading: axis + .pi, time: -60, lineHalf: lineHalf, speed: 4)
+        var rig = CameraRig(mode: .courseUp)
+        rig.advance(away, sceneSize: Self.iPhone, dt: 0, settled: true)
+        var rest = away
+        rest.myVelocity = Vec2(0, 0)
+        var atRest = CameraRig(mode: .courseUp)
+        atRest.advance(rest, sceneSize: Self.iPhone, dt: 0, settled: true)
+        #expect(rig.zoom <= atRest.zoom + 1e-9, "zooms out, or no closer than at rest, to keep the line")
+        for end in away.startLine {
+            #expect(Self.onScreen(rig.project(end, sceneSize: Self.iPhone)), "line end off screen going away")
+        }
+        let height = Self.heightUp(rig, away.myPosition)
+        #expect(height > 0.5 && height < 0.8, "boat \(height) up, bow down the screen: more room below her than above")
+
+        // The share from rest to speed is smooth: the boat's place on the screen moves less than a point per
+        // 0.05 m/s.
+        var last: CGPoint?
+        for step in 0...60 {
+            var w = Self.world(axis: axis, me: below + right * 30, heading: axis, time: -60, lineHalf: lineHalf,
+                               speed: Double(step) * 0.05)
+            w.myVelocity = Vec2.heading(axis) * Double(step) * 0.05
+            var r = CameraRig(mode: .courseUp)
+            r.advance(w, sceneSize: Self.iPhone, dt: 0, settled: true)
+            let p = r.project(w.myPosition, sceneSize: Self.iPhone)
+            if let last { #expect(hypot(p.x - last.x, p.y - last.y) < 12, "a jump at \(step)") }
+            last = p
+        }
+    }
+
     /// A start line end under the HUD or the controls counts as off screen (#122): `lineEndOffScreen` reads the
     /// clear area `visibleInsets` leaves, the same rect the edge arrow reads, so the two never disagree.
     @Test func lineEndUnderTheHUDIsOffScreen() {
         let axis = Self.degrees(37)
         let up = Vec2.heading(axis)
-        let world = Self.world(axis: axis, me: up * (-3 * 2 * 23.0), heading: axis, time: -60, lineHalf: 23)
+        let world = Self.world(axis: axis, me: up * (-3 * 2 * 23.0), heading: axis, time: -60, lineHalf: 23, speed: 0)
         var rig = CameraRig(mode: .courseUp)
         rig.advance(world, sceneSize: Self.iPhone, dt: 0, settled: true)
         #expect(!rig.lineEndOffScreen, "both ends on the bare screen")
