@@ -28,6 +28,13 @@ final class BoatNode: SKNode {
     private var sailAngle: CGFloat = 0
     /// The current roll miss's flog (`BoatPose.RollCue.flog`), timed in race seconds.
     private var flog = FlogTimer()
+    /// Your roll ring (#222): a sprite on your boat only, nil for the rest of the fleet.
+    private let ring: SKSpriteNode?
+    private let brokenRing: SKTexture
+    private let solidRing: SKTexture
+    private var ringTimer = RollRingTimer()
+    private let rollWindow: Double?
+    private let length: CGFloat
 
     /// The z's a boat's parts draw at, each boat a `DrawOrder` slot above the last by seat: in the fleet's layer
     /// every drop shadow under your glow, the glow under every hull, every hull under its outline and every
@@ -35,6 +42,7 @@ final class BoatNode: SKNode {
     private enum Layer {
         static let fleet: CGFloat = 5, mine: CGFloat = 10
         static let heelShadow: CGFloat = 0, glow: CGFloat = 0.1, hull: CGFloat = 0.2, outline: CGFloat = 0.3, sail: CGFloat = 1
+        static let ring: CGFloat = 2
     }
 
     /// `isMine` marks your boat (the driver's `myBoatIndex`): a soft white glow under her hull, and drawn on top.
@@ -46,6 +54,8 @@ final class BoatNode: SKNode {
         beam = CGFloat(boatClass.hull.beam) * ppm
         seat = boat.id
         let length = CGFloat(boatClass.hull.length) * ppm
+        self.length = length
+        rollWindow = boatClass.rollTack?.window
 
         // Hulls and sails are sprites sharing a few textures, per class and scale, so SpriteKit can batch the
         // whole fleet into a handful of draw calls; so are the effects.
@@ -72,6 +82,15 @@ final class BoatNode: SKNode {
         sail.position = CGPoint(x: 0, y: length * 0.16)
         sail.zPosition = Layer.sail
 
+        solidRing = RollRingArt.texture(broken: false)
+        brokenRing = RollRingArt.texture(broken: true)
+        let rollRing = isMine && boatClass.rollTack != nil ? SKSpriteNode(texture: solidRing) : nil
+        rollRing?.color = CuePalette.cueWhite.uiColor
+        rollRing?.colorBlendFactor = 1
+        rollRing?.zPosition = Layer.ring
+        rollRing?.isHidden = true
+        ring = rollRing
+
         effects = BoatEffects(seat: boat.id, boatClass: boatClass, pointsPerMeter: ppm, style: style)
         fade.shouldEnableEffects = false
         fade.shouldRasterize = false
@@ -86,6 +105,7 @@ final class BoatNode: SKNode {
         body.addChild(sail)
         fade.addChild(body)
         addChild(fade)
+        if let ring { addChild(ring) }
 
         // A z each, from the seat (`DrawOrder`): the start row (#85) puts the fleet's hulls and sails over each
         // other.
@@ -108,9 +128,26 @@ final class BoatNode: SKNode {
         effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
                        settled: settled, isFlogging: isFlogging)
 
+        updateRing(boat, style: style, time: time)
+
         glow?.alpha = CGFloat(style.glowAlpha)
         fade.shouldEnableEffects = pose.isGhost
         fade.alpha = pose.isGhost ? CGFloat(style.ghostAlpha) : 1
+    }
+
+    /// Your roll ring (#222): none on the rest of the fleet. It stays upright and unscaled by heel, centred on the boat.
+    private func updateRing(_ boat: Boat, style: BoatStyle, time: Double) {
+        guard let ring else { return }
+        guard let state = ringTimer.ring(for: boat, window: rollWindow, time: time, seconds: style.rollRingSeconds) else {
+            ring.isHidden = true
+            return
+        }
+        let texture = state.isBroken ? brokenRing : solidRing
+        if ring.texture !== texture { ring.texture = texture }
+        let diameter = 2 * length * CGFloat(style.rollRingHulls * state.radiusShare)
+        ring.size = CGSize(width: diameter, height: diameter)
+        ring.alpha = CGFloat(style.rollRingAlpha * state.alphaShare)
+        ring.isHidden = false
     }
 
     /// Heel (#22): the hull drawn narrower and a drop shadow offset to leeward (the boom's side, except by the lee).
@@ -308,5 +345,20 @@ private struct BoatArt {
         }
         let anchor = CGPoint(x: -bounds.minX / bounds.width, y: -bounds.minY / bounds.height)
         return (texture, anchor)
+    }
+}
+
+/// The roll ring's two textures (#222), drawn in white on a 128 point square and sized per frame: a solid ring,
+/// and the same ring broken into dashes.
+private enum RollRingArt {
+    static func texture(broken: Bool) -> SKTexture {
+        let bounds = CGRect(x: -64, y: -64, width: 128, height: 128)
+        return SpriteArt.texture(bounds: bounds, scale: 2) { cg in
+            cg.setStrokeColor(UIColor.white.cgColor)
+            cg.setLineWidth(5)
+            cg.setLineCap(.round)
+            if broken { cg.setLineDash(phase: 0, lengths: [14, 12]) }
+            cg.strokeEllipse(in: bounds.insetBy(dx: 6, dy: 6))
+        }
     }
 }

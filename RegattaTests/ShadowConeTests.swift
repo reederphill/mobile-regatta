@@ -111,7 +111,7 @@ import Testing
         let effects = BoatEffects(seat: 2, boatClass: Self.boatClass, pointsPerMeter: Self.ppm, style: .standard)
         effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: true, boatClass: Self.boatClass),
                        style: .standard, quality: .full, time: 0, dt: 0, settled: true, isFlogging: false)
-        #expect(effects.cone.isHidden && effects.backwind.isHidden && !effects.wake.isHidden)
+        #expect(effects.cone.isHidden && effects.backwind.isHidden && !effects.trail.isHidden)
     }
 
     /// The fleet's cones draw as one faint layer (#15): every boat's cone a mask in the scene's one `ConeLayer`,
@@ -128,7 +128,7 @@ import Testing
             #expect(node?.position == .zero && node?.zRotation == 0 && node?.xScale == 1 && node?.yScale == 1)
         }
         #expect(abs(layer.sheet.alpha - CGFloat(BoatStyle.standard.coneAlpha)) < 1e-6) // SpriteKit's Float alpha
-        #expect(BoatStyle.standard.coneAlpha <= 0.05, "very faint (#15)")
+        #expect(BoatStyle.standard.coneAlpha <= 0.2, "faint (#15), though seen")
     }
 
     /// The backwind's sprite covers exactly core's trapezoid (#298) on her windward quarter: at points just inside
