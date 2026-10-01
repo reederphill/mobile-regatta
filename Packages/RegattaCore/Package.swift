@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "RegattaBots", targets: ["RegattaBots"]),
         .executable(name: "regatta-replay", targets: ["regatta-replay"]),
         .executable(name: "regatta-botsuite", targets: ["regatta-botsuite"]),
+        .executable(name: "regatta-venue-png", targets: ["regatta-venue-png"]),
     ],
     dependencies: [
         // SHA-256 of data files on Linux (the race server); Apple platforms use CryptoKit.
@@ -33,6 +34,8 @@ let package = Package(
         // The bot-tier file (#102): each tier's skill band and a Mixed fleet's shares, versioned, byte for byte.
         .target(name: "RegattaBots", dependencies: ["RegattaCore"], resources: [.copy("bot-tiers@1.json")]),
         .executableTarget(name: "regatta-replay", dependencies: ["RegattaCore"]),
+        // Offline tooling (#83): an overview PNG per venue × conditions pairing into docs/venues, for review (#84).
+        .executableTarget(name: "regatta-venue-png", dependencies: ["RegattaCore"]),
         // regatta-replay is a dependency so `swift test` builds it: the golden test runs it as its own process.
         .testTarget(
             name: "RegattaCoreTests",

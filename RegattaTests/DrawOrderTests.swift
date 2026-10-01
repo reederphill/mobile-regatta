@@ -9,17 +9,17 @@ import Testing
 /// (#116, `WaterTests.waterDrawsTheSameEveryTime`), then the start row's fleet (#85).
 @MainActor @Suite struct DrawOrderTests {
     /// Each fixture's scene, drawn settled, draws no two nodes at one z: not the fleet's shadow cones, wakes,
-    /// hulls, your hull's outline, names, badges or sails (hidden or not: a badge shows when a penalty is owed), nor the course, the
-    /// laylines, the water or its pressure. A second scene from the same fixture, as a second launch makes, draws
+    /// heel shadows, hulls, outlines or sails, nor your glow (#117), nor the course, the laylines, the water or its
+    /// pressure. A second scene from the same fixture, as a second launch makes, draws
     /// the same nodes in the same order, and so does the first drawn again.
     @Test func sceneDrawsTheSameEveryTime() throws {
-        for name in ["prestart", "water-gusty-offshore", "water-pressure"] {
+        for name in ["prestart", "water-gusty-offshore", "water-pressure", "fleet"] {
             let (scene, boats) = try Self.scene(fixture: name)
             let drawn = DrawnNode.all(in: scene)
             let shared = Dictionary(grouping: drawn, by: \.z).filter { $0.value.count > 1 }
             let layers = Set(shared.values.flatMap { $0.map(\.layer) }).sorted()
             #expect(shared.isEmpty, "\(name): \(shared.count) z's drawn by more than one node, in \(layers)")
-            // Each boat's cone and wake, and its hull, sail, name and badge; your hull's outline too.
+            // Each boat's cone and wake, and its heel shadow, hull, outline and sail; your glow too.
             #expect(boats > 1, "\(name)")
             #expect(drawn.filter { $0.layer == "effects" }.count == 2 * boats, "\(name)")
             #expect(drawn.filter { $0.layer == "fleet" }.count == 4 * boats + 1, "\(name)")

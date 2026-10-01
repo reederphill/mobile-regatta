@@ -48,7 +48,7 @@ struct TuningView: View {
                     .disabled(!model.tuning.isTuned)
                     .accessibilityIdentifier("tuning-reset-all")
             }
-            Text("Data values become tuned copies of their files at the next practice race start; bots sail them too. Water and camera values apply live. Never online.")
+            Text("Data values become tuned copies of their files at the next practice race start; bots sail them too. Water, camera and boat values apply live. Never online.")
                 .font(MenuFont.body(.footnote))
                 .foregroundStyle(ChromePalette.text.opacity(0.75))
             ForEach(TuningSlot.allCases, id: \.self) { slot in
