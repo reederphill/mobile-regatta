@@ -54,7 +54,7 @@ enum SkiffFixtures {
         2: "32e5162d6caf3e32280ca754c1381e1012e4db4ef04252bf278b96dd796f5cd1",
         3: "3a6e6b7bf037bc496a9fdddfa45d7000ab41dd1801a08cece1bc2d3a76092c81",
         4: "4e2d1a94d1c90ac80aa88bdaa4890fc68095b16de61324c6fdaa19f54ee3a9a1",
-        5: "e3d7559a1d2045b131338a04836f6e7a85f82ad34d0411fda2b4cd8d2654b605",
+        5: "ce105fbd37ca455498592ea9ae4e47a34a5e255617b2490019a1360330261b80",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -732,6 +732,9 @@ enum SkiffFixtures {
         shadow.backwindScaleSpeed = nil
         shadow.backwindRunningFade = 0
         shadow.coneFromHull = false
+        shadow.coneSwing = 0
+        shadow.coneLength = a.windShadow.coneLength
+        shadow.coneWidthAtEnd = a.windShadow.coneWidthAtEnd
         #expect(shadow == a.windShadow, "only the new values and the trapezoid's steeper edge differ")
         #expect(!a.windShadow.backwindSternSlant && a.windShadow.backwindRunningAngle == nil)
         #expect(a.windShadow.backwindScaleSpeed == nil && !a.windShadow.coneFromHull)
@@ -751,7 +754,7 @@ enum SkiffFixtures {
         #expect(c.momentum == .init(speedingUp: 2.5, slowingDown: 10, noGo: 4.8))
         #expect(c.steering.topTurnRate == deg2rad(36) && c.steering.minTurnRate == deg2rad(10))
         #expect(c.steering.autohelm.downwindSnap == deg2rad(8) && c.steering.autohelm.grooveWindAverage == 30)
-        #expect(c.windShadow.coneLength == 9 * 4.9)
+        #expect(c.windShadow.coneLength == 10 * 4.9) // skiff@5's, longer than version 4's 9
         let planing = try #require(c.planing)
         #expect(planing == .init(fromTWA: deg2rad(65), offBelowTWA: deg2rad(55), onSpeed: metresPerSecond(knots: 8),
                                  onMaxAWA: deg2rad(90), offSpeed: metresPerSecond(knots: 6),

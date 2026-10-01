@@ -320,7 +320,9 @@ extension BotBrain {
         guard let cone = ownCone(b, view) else { return nil }
         let w = b.windDirection
         let heading = 2 * w - b.heading
-        let apparent = 2 * w - (-cone.axis).bearing
+        // Her apparent wind now, mirrored about the true wind as her tack mirrors it: its own direction when her cone's axis is
+        // swung astern of it (`BoatClass.WindShadow.coneSwing`), else read back off the axis as before.
+        let apparent = 2 * w - (cone.shadow.coneSwing > 0 ? cone.apparentWindDirection : (-cone.axis).bearing)
         let forward = Vec2.heading(heading)
         let carry = FleetTactics.tackCarry
         let read = timing(other)

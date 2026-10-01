@@ -97,7 +97,8 @@ final class BoatEffects {
 
         cone.isHidden = pose.isGhost
         cone.position = point
-        cone.zRotation = CGFloat(-(followed.wind + .pi)) // the cone follows her apparent wind (#10)
+        // The cone's axis down her apparent wind (#10), swung astern for a class that does (`BoatClass.WindShadow.coneSwing`).
+        cone.zRotation = CGFloat(atan2(-core.axis.x, core.axis.y))
         coneShader.update(nearA: core.nearA, nearB: core.nearB, ppm: ppm)
 
         // Her windward side is starboard on starboard tack (`ShadowCone.windward`); it flips at the boom crossing.

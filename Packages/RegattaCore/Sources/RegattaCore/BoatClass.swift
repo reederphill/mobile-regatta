@@ -218,6 +218,11 @@ public struct BoatClass: DataFileContent, Equatable {
         /// those two points to the far end's corners. False: a line across her centre, square to the wind
         /// (`coneWidthAtBoat` wide), as every class before skiff@5 (`ShadowCone`).
         public var coneFromHull = false
+        /// How far the cone's axis is swung from straight downwind her apparent wind towards straight astern of her, a
+        /// share 0...1 of the angle between them (optional, `coneSwingAsternShare`; 0 when absent: along her apparent wind,
+        /// as every class before skiff@5). Close-hauled the wind is nearly over the bow and the cone already falls
+        /// astern; across a reach it would fall well to leeward, and the swing opens it behind her (`ShadowCone`).
+        public var coneSwing = 0.0
         /// The hull outline's forwardmost point on the centreline in the boat's frame, metres (y forward of the centre):
         /// where the cone starts at her bow. Not a file value: read off the hull outline at load.
         public var bowY: Double
@@ -407,6 +412,8 @@ private struct BoatClassSchema2: Decodable {
         let stackingFloor: Double
         /// The cone starts from her bow and stern (`BoatClass.WindShadow.coneFromHull`). Optional.
         let coneFromBowAndStern: Bool?
+        /// The cone's axis swings this share of the way from downwind to astern (`BoatClass.WindShadow.coneSwing`). Optional.
+        let coneSwingAsternShare: Double?
         let backwind: Backwind
     }
 
@@ -503,6 +510,7 @@ private struct BoatClassSchema2: Decodable {
             try check(windShadow.backwind.innerLengthHullLengths != nil && positive(scale.referenceKnots)
                       && (scale.maxScale ?? 1.5) >= 1, "a backwind speed scale needs an inner length, a positive reference speed and a max scale of 1 or more")
         }
+        try check(fraction(windShadow.coneSwingAsternShare ?? 0), "the cone's swing astern must be a share, 0...1")
         try check(windShadow.coneFromBowAndStern != true || windShadow.backwind.innerLengthHullLengths != nil,
                   "a cone from the bow and stern needs a backwind inner length (the trapezoid class)")
         try check(fraction(contact.boatSpeedFactor) && fraction(contact.markSpeedFactor), "contact factors must be 0...1")
@@ -548,6 +556,7 @@ private struct BoatClassSchema2: Decodable {
                 backwindScaleSpeed: windShadow.backwind.speedScale.map { metresPerSecond(knots: $0.referenceKnots) },
                 backwindMaxScale: windShadow.backwind.speedScale?.maxScale ?? 1.5,
                 coneFromHull: windShadow.coneFromBowAndStern ?? false,
+                coneSwing: windShadow.coneSwingAsternShare ?? 0,
                 bowY: outline.map(\.y).max() ?? 0,
                 sternCorner: Self.sternCorner(of: outline),
                 slowingDown: nil

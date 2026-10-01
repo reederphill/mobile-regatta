@@ -19,7 +19,7 @@
   "notes": [
     "A fictional two-person 4.9 m skiff modelled on the 49er (#244, #245): hull 4.9 m long with a 1.8 m hull beam; the racks are drawn, not sailed.",
     "Version 4 (#298): the backwind is a right trapezoid on her windward quarter, astern of the stern, following her heading and windward side (it swaps sides at the boom crossing): from the windward stern corner 1 hull length out along the stern, 2 astern on its outer edge and 1.5 on its inner one (innerLengthHullLengths), the far edge slanting between. A boat in it loses up to 20% of her target speed at the stern edge, fading to nothing at the far edge: 5 s lee-bowed at 10 kn costs about 0.36 hull lengths against clean air, less than 5 s in a wind shadow. Sizes and loss are placeholders for the owner's sliders (#232). Everything else is version 3's.",
-    "Version 5 (#298 follow-up, the owner's playtest): the cone starts from her bow and stern, not a line across her centre (coneFromBowAndStern), so close-hauled it leaves her narrower and slanted with the hull; the backwind trapezoid is turned half a turn and its stern edge is steep: from the windward stern corner the zone is 2 hull lengths long on the hull side (lengthHullLengths 2.0 is the flat far edge astern of the stern line) and its outboard side starts 1.25 astern of her stern (innerLengthHullLengths 0.75 is its length there), 1 hull length wide, so the stern edge runs about 51 degrees back from her stern line. Its loss, 0.2, is full along the stern edge and fades to nothing at the far edge. Its length astern scales with her speed through the water: the size above at 6 knots, in proportion either way, to 1.5 times at 9 knots, nothing when stopped (speedScale). She loses it gradually across a reach, fading from full at 90 degrees true wind angle to none at 115 (runningFadeDegrees 25), where the spinnaker goes up and she is running, and gains it back coming up. Everything else is version 4's.",    "Units: knots, degrees, seconds, metres; shadow and backwind sizes in hull lengths.",
+    "Version 5 (#298 follow-up, the owner's playtest): the cone starts from her bow and stern, not a line across her centre (coneFromBowAndStern), so close-hauled it leaves her narrower and slanted with the hull, and is opened behind her: 10 hull lengths long (9 in version 4) and 6 wide at its end (4.2), its axis swung half the way from downwind towards straight astern (coneSwingAsternShare 0.5); the backwind trapezoid is turned half a turn and its stern edge is steep: from the windward stern corner the zone is 2 hull lengths long on the hull side (lengthHullLengths 2.0 is the flat far edge astern of the stern line) and its outboard side starts 1.25 astern of her stern (innerLengthHullLengths 0.75 is its length there), 1 hull length wide, so the stern edge runs about 51 degrees back from her stern line. Its loss, 0.2, is full along the stern edge and fades to nothing at the far edge. Its length astern scales with her speed through the water: the size above at 6 knots, in proportion either way, to 1.5 times at 9 knots, nothing when stopped (speedScale). She loses it gradually across a reach, fading from full at 90 degrees true wind angle to none at 115 (runningFadeDegrees 25), where the spinnaker goes up and she is running, and gains it back coming up. Everything else is version 4's.",    "Units: knots, degrees, seconds, metres; shadow and backwind sizes in hull lengths.",
     "Polar: docs/research/49er-skiff-polars-and-handling.md section 8, every cell, with its rows 120, 140, 145 and 155. It is the speed on the plane with the spinnaker up: rows 0-90 are two sails, rows 110-180 assume the spinnaker (section 4.3).",
     "Planing (schema 3, #248, section 4.4): on the plane from 65 deg TWA at 8 kn or more with the apparent wind no further aft than the beam; off it below 6 kn or forward of 55 deg. Off the plane from 65 deg aft she sails the 6 kn column scaled by 1 + 0.035 per knot of TWS above 6 kn, never above the polar: at 8 kn and 145 deg that is 7.4 kn against 10.1 on the plane, and to get back on she has to head up to 140 deg or closer to the wind (the research's example heads up to 125 deg).",
     "Spinnaker (section 4.3): hoisted past 115 deg TWA, dropped forward of 105 deg, 4 s each way. Without it drawing she sails the polar x 0.65 from 110 deg aft, 1 at 90 deg and linear between.",
@@ -81,13 +81,14 @@
     }
   },
   "windShadow": {
-    "coneLengthHullLengths": 9,
+    "coneLengthHullLengths": 10,
     "coneWidthAtBoatHullLengths": 1.0,
-    "coneWidthAtEndHullLengths": 4.2,
+    "coneWidthAtEndHullLengths": 6,
     "lossCloseIn": 0.48,
     "stackingFloor": 0.3,
     "slowingDownSeconds": 2,
     "coneFromBowAndStern": true,
+    "coneSwingAsternShare": 0.5,
     "backwind": {
       "lengthHullLengths": 2.0,
       "widthHullLengths": 1.0,

@@ -203,6 +203,12 @@ import Testing
             effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass), style: style,
                            quality: .full, time: 0, dt: dt, settled: settled, isFlogging: false)
         }
+        // The sprite's turn that draws the cone along `boat`'s own cone (its axis, swung astern for skiff@5).
+        func turn(_ boat: Boat) -> CGFloat {
+            let axis = ShadowCone(caster: boat, shadow: boatClass.windShadow).axis
+            return CGFloat(atan2(-axis.x, axis.y))
+        }
+        func apart(_ a: CGFloat, _ b: CGFloat) -> CGFloat { abs(CGFloat(wrapAngle(Double(a - b)))) }
         let effects = BoatEffects(seat: 2, boatClass: boatClass, pointsPerMeter: Self.ppm, style: .standard)
         draw(effects, before, dt: 0) // the first frame draws at hers
         let (cone0, backwind0) = (effects.cone.zRotation, effects.backwind.zRotation)
@@ -210,7 +216,7 @@ import Testing
 
         draw(effects, after, dt: 0.1)
         let (cone1, backwind1) = (effects.cone.zRotation, effects.backwind.zRotation)
-        #expect(abs(cone1 - cone0) > 1e-3 && abs(cone1 - CGFloat(-(after.apparentWind.direction + .pi))) > 1e-3, "partway: the cone")
+        #expect(apart(cone1, cone0) > 1e-3 && apart(cone1, turn(after)) > 1e-3, "partway: the cone")
         #expect(abs(backwind1 - backwind0) > 1e-3 && abs(backwind1 - CGFloat(-after.heading)) > 1e-3, "partway: the backwind")
         // Towards hers, not away: each step closes on the target.
         let target = CGFloat(-after.heading)
@@ -221,7 +227,7 @@ import Testing
             #expect(now <= last + 1e-9)
             last = now
         }
-        #expect(last < 1e-3 && abs(effects.cone.zRotation - CGFloat(-(after.apparentWind.direction + .pi))) < 1e-3, "settles on hers")
+        #expect(last < 1e-3 && apart(effects.cone.zRotation, turn(after)) < 1e-3, "settles on hers")
 
         // Settled, or with no time constant, it is at hers at once.
         let rigid = BoatEffects(seat: 3, boatClass: boatClass, pointsPerMeter: Self.ppm, style: .standard)

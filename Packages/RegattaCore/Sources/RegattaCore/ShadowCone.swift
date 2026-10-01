@@ -4,7 +4,8 @@
 ///
 /// The cone's loss tapers from its full value on the axis at the boat to nothing at the far end and at the edges.
 /// Its near edge is a line across her centre, square to the wind, or for a class that casts it from her bow and
-/// stern (`BoatClass.WindShadow.coneFromHull`) the line from her bow to her stern, whichever way she points.
+/// stern (`BoatClass.WindShadow.coneFromHull`) the line from her bow to her stern, whichever way she points. Its axis
+/// is down her apparent wind, or for a class that swings it astern (`coneSwing`) part of the way to straight astern.
 /// The backwind has two shapes. A class with a backwind inner length (#298) casts a right trapezoid on her windward
 /// quarter, astern of her stern, following her heading and her windward side (`Boat.tack`, which flips at the boom
 /// crossing, #71): its loss fades from full at the stern edge to nothing at the far edge, and one of those edges
@@ -14,8 +15,11 @@
 public struct ShadowCone: Sendable, Equatable {
     /// The caster's position (her hull's centre): the cone's apex and the backwind zone's origin.
     public let apex: Vec2
-    /// Unit vector downwind along the caster's apparent wind: the cone's axis. #79's backwind band runs the
-    /// other way, `-axis`.
+    /// The caster's apparent wind direction, radians, the way it blows from.
+    public let apparentWindDirection: Double
+    /// Unit vector down the cone: along the caster's apparent wind downwind, or for a class that swings its cone astern
+    /// (`BoatClass.WindShadow.coneSwing`) turned part of the way from there to straight astern of her. #79's backwind
+    /// band runs the other way, `-axis`, and is never swung.
     public let axis: Vec2
     /// Unit vector along the caster's heading: the trapezoid's forward (#298).
     public let forward: Vec2
@@ -47,7 +51,16 @@ public struct ShadowCone: Sendable, Equatable {
                 trueWindAngle: Double? = nil, speed: Double? = nil) {
         self.trueWindAngle = trueWindAngle
         self.speed = speed
-        let axis = -Vec2.heading(apparentWindDirection), forward = Vec2.heading(heading)
+        let forward = Vec2.heading(heading)
+        let axis: Vec2
+        if shadow.coneSwing > 0 {
+            // From downwind towards astern by the class's share of the angle between them, the short way round.
+            let downwind = apparentWindDirection + .pi, astern = heading + .pi
+            axis = Vec2.heading(downwind + shadow.coneSwing * wrapAngle(astern - downwind))
+        } else {
+            axis = -Vec2.heading(apparentWindDirection)
+        }
+        self.apparentWindDirection = apparentWindDirection
         self.apex = apex
         self.axis = axis
         self.forward = forward
