@@ -103,10 +103,11 @@ Cue-to-cue hue separation: vermillion–orange 29°, orange–yellow 28°, chevr
 |---|---|---|
 | menu headings | Barlow Semi Condensed | SemiBold |
 | menu numbers | Barlow Semi Condensed | Bold, tabular figures (`.monospacedDigit()`; font has `tnum`) |
+| HUD numbers (clock, place, wind) | Barlow Semi Condensed | Bold, tabular figures (`HUDFont.number`) |
 | body | SF (system) | — |
 
 - Dynamic Type: `Font.custom(_:size:relativeTo:)`.
-- HUD: unchanged (SF Rounded); #22 scopes the display face to menus.
+- HUD: the clock, place and wind numbers are in the display face (#114, `HUDFont`); a notice's words are SF body.
 - Files + licence: `docs/assets-manifest.md`.
 
 ## Prototype token mapping (#111, #169)

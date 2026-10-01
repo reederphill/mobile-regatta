@@ -12,23 +12,26 @@ import Testing
         try body(defaults)
     }
 
-    /// Nothing stored reads as the defaults (auto framing on among them); every value survives a save and a load;
+    /// Nothing stored reads as the defaults (auto zoom on and no pinch-zoom among them); every value survives a save and a load;
     /// a value stored wrong reads as its default.
     @Test func defaultsAndRoundTrip() throws {
         try withDefaults { defaults in
             let fresh = DeviceSettings(defaults: defaults)
             #expect(fresh == DeviceSettings())
             #expect(fresh.steering == .halves && fresh.camera == .courseUp)
-            #expect(fresh.autoFraming && fresh.laylines && !fresh.ladderLines && fresh.hints)
+            #expect(fresh.autoZoom && fresh.zoomMultiplier == 1 && fresh.laylines && !fresh.ladderLines && fresh.hints)
+            #expect(fresh.liveLeaderboard, "the live leaderboard is on by default (#268)")
             #expect(fresh.music && fresh.effects && fresh.haptics)
             #expect(!fresh.hidesLobbyChat && fresh.sharesUsageData)
 
             var changed = DeviceSettings()
             changed.steering = .tiller
             changed.camera = .boatUp
-            changed.autoFraming = false
+            changed.autoZoom = false
+            changed.zoomMultiplier = 1.35
             changed.laylines = false
             changed.ladderLines = true
+            changed.liveLeaderboard = false
             changed.hints = false
             changed.music = false
             changed.effects = false
@@ -46,6 +49,17 @@ import Testing
         }
     }
 
+    /// Auto zoom was Auto framing (#113, #322): a device that turned Auto framing off keeps auto zoom off, until
+    /// Auto zoom itself is saved.
+    @Test func autoFramingReadsAsAutoZoom() throws {
+        try withDefaults { defaults in
+            defaults.set(false, forKey: DeviceSettings.legacyAutoFramingKey)
+            #expect(!DeviceSettings(defaults: defaults).autoZoom)
+            defaults.set(true, forKey: DeviceSettings.Key.autoZoom.rawValue)
+            #expect(DeviceSettings(defaults: defaults).autoZoom)
+        }
+    }
+
     /// The model saves each change as it's made, and a new model on the same defaults reads it back.
     @Test func theModelSavesChanges() throws {
         try withDefaults { defaults in
@@ -54,8 +68,12 @@ import Testing
             model.deviceSettings.ladderLines = true
             model.deviceSettings.camera = .boatUp
             #expect(DeviceSettings(defaults: defaults).ladderLines)
+            // A pinch-zoom kept by a race (#322) is saved too, and every race reads it.
+            model.controls.keepZoomMultiplier(1.4)
+            #expect(model.deviceSettings.zoomMultiplier == 1.4)
             let reopened = AppModel(defaults: defaults)
             #expect(reopened.deviceSettings.ladderLines && reopened.deviceSettings.camera == .boatUp)
+            #expect(reopened.deviceSettings.zoomMultiplier == 1.4 && reopened.controls.zoomMultiplier == 1.4)
         }
     }
 

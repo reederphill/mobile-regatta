@@ -104,7 +104,10 @@ Regatta/                The iOS app
   Game/PracticeDriver.swift  an offline practice race: owns the Race and on-device bots, latches your input per tick, keeps the log
   Game/VisualCorrection.swift  eases a corrected prediction's drawn position over ~150 ms, snaps past a hull length (online, #68)
   Game/GameScene.swift    SpriteKit renderer, camera, touch steering; reads RenderWorld, never a Race
-  Game/BoatNode.swift     batched boat sprites, sails, wakes, wind-shadow cones
+  Game/BoatNode.swift     batched boat sprites: hull, outline, sail, heel, ghost fade
+  Game/BoatEffects.swift  each boat's wake, wind-shadow cone and backwind as sprites; the fleet's one ConeLayer
+  Game/WakeShape.swift    a wake's length, spread and alpha from speed through the water and pressure
+  Game/ShadowShapes.swift the cone's and backwind's outlines, from core's ShadowCone sizes
   Game/ChartLayer.swift   the chart: race-area boundary and hatch, land and relief, landmarks, shallows tint, marks and line
   Game/ChartMarks.swift   which marks are the active leg's (orange) or grey, and the rounding-side arrow (pure)
   Game/ChartGeometry.swift  hatch band, coast edges, relief strips, shallows weight and OKLab blend (pure)

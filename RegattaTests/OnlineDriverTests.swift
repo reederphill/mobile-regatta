@@ -103,7 +103,7 @@ import RegattaProtocol
         rig.run(for: 8_000_000) { now in
             predictedTicks.append((now, rig.driver.client.predicted.tick))
             if !rig.shown.contains(where: { Self.isRuleCall($0.event) }) {
-                ruleMessagesBeforeTheCall += rig.session.messages.filter { $0.text.contains("Rule") || $0.text.contains("fouled") }.count
+                if rig.session.notice?.kind == .ruleCall { ruleMessagesBeforeTheCall += 1 }
             }
             return false
         }
@@ -115,7 +115,9 @@ import RegattaProtocol
         let passed = try #require(predictedTicks.first { $0.tick >= sent.event.tick })
         #expect(passed.time + delay <= shown.time, "the prediction was at the call's tick \(shown.time - passed.time) µs before it was shown")
         #expect(ruleMessagesBeforeTheCall == 0)
-        #expect(rig.session.messages.contains { $0.text.contains("fouled") }, "the session shows the server's call")
+        // The call is between seats 1 and 2, not the client's boat, so the session posts no notice for it (#114).
+        #expect(rig.session.notice?.kind != .ruleCall,
+                "a call between two other boats takes no notice: \(String(describing: rig.session.notice))")
     }
 
     /// Fault-injected transport (acceptance): the connection drops mid-race, after the gun. The driver
@@ -209,7 +211,7 @@ import RegattaProtocol
         rig.run(for: 3_000_000)
         #expect(rig.driver.connection == .updateRequired(.protocolVersion))
         #expect(rig.network.attempts == 1)
-        #expect(rig.session.messages.contains { $0.text.contains("Update Regatta") })
+        #expect(rig.session.notice?.kind == .latency && rig.session.notice?.text.contains("Update Regatta") == true)
     }
 
     /// The server's close ends the race for the player: the results, no more ticks, no rejoin.

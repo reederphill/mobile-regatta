@@ -151,6 +151,24 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
                                             "fleet-greyscale", "fleet-washout"])
     }
 
+    // The HUD (#114): clock, place, ground wind, minimap and the notice line over the scene.
+
+    /// Before the gun (yellow sequence clock, place hidden), racing, OCS (place reads OCS, the OCS notice), a
+    /// mark-room notice, and after the first finish (the yellow countdown to the close).
+    @MainActor func testHUDFixturesMatchReferences() throws {
+        try assertAllMatchIPhoneReferences(["hud-prestart", "hud-racing", "hud-ocs", "hud-markroom", "hud-afterfirstfinish"])
+    }
+
+    // The live leaderboard (#268): the compact board under the clock and place, and tapped open.
+
+    /// The compact board on the fleet log mid-race (you 4th of 6: leader, a skip, the boat ahead, you, the boat
+    /// behind) through every vision filter (#62, #111), and the board open to the whole fleet.
+    @MainActor func testLeaderboardMatchesReference() throws {
+        try assertAllMatchIPhoneReferences(["hud-leaderboard", "hud-leaderboard-deuteranopia", "hud-leaderboard-protanopia",
+                                            "hud-leaderboard-tritanopia", "hud-leaderboard-greyscale",
+                                            "hud-leaderboard-washout", "hud-leaderboard-expanded"])
+    }
+
     /// `assertMatchesReference` on iPhone (see `skipOnIPad`) for several fixtures in one test: each renders and
     /// compares before any failure ends the test, so every render that moved (or has no reference yet) reaches
     /// render-actuals in one CI run rather than one per run.

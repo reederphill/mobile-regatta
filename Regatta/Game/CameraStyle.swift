@@ -1,17 +1,17 @@
 import Foundation
 
-/// How the race camera frames the race, in one value (#113, #224): the boat-up lag, auto framing's distances,
-/// times and ease, the pinch-zoom limits and hold, and the follow camera's look-ahead, rate and zoom with auto
-/// framing off. The debug tuning panel (#232) puts a slider on each, and `GameScene.cameraStyle` takes a new one
-/// live. App-side and never logged: nothing here reaches the simulation. Every default is a placeholder until
-/// tuned there.
+/// How the race camera frames the race, in one value (#113, #322): the boat-up lag, the heading lead, each shot's
+/// zoom and the thresholds, dwell and easing between shots, the pre-start composition, the pinch-zoom limits, and
+/// the north-up fixture cameras'. The debug tuning panel (#232) puts a slider on each, and `GameScene.cameraStyle`
+/// takes a new one live. App-side and never logged: nothing here reaches the simulation. Every default is a
+/// placeholder until tuned there.
 nonisolated struct CameraStyle: Codable, Equatable, Sendable {
-    /// Seconds of your boat's velocity the follow camera (auto framing off) centres ahead of her.
+    /// Seconds of your boat's velocity the north-up follow camera (render fixtures) centres ahead of her.
     var lookAheadSeconds = 2.0
-    /// How fast the camera's centre closes on its target: the share of the gap it closes in a second is
-    /// 1 − e^−rate.
+    /// How fast the north-up follow camera's centre closes on its target: the share of the gap it closes in a
+    /// second is 1 − e^−rate.
     var followRate = 3.0
-    /// The follow camera's zoom (auto framing off) until you pinch-zoom: 1 is a point per point, larger is closer.
+    /// The north-up follow camera's zoom (render fixtures): 1 is a point per point, larger is closer.
     var defaultZoom = 0.8
     /// The north-up course camera's view over the whole course (render fixtures), as a multiple of its extent.
     var courseMargin = 1.2
@@ -22,55 +22,106 @@ nonisolated struct CameraStyle: Codable, Equatable, Sendable {
     /// turned after τ. A change of camera turns the same way.
     var boatUpLagSeconds = 1.0
 
-    // MARK: Auto framing (#224)
+    // MARK: Heading lead (#322)
 
-    /// Boats within this many hull lengths of yours are framed with her. Ghosts (finished, DSQ) never are.
-    var framingHullLengths = 6.0
-    /// Seconds of wind upwind of your boat kept in view: that many seconds at the ground wind's speed at her
-    /// (ADR 0001's 30 s, the reveal lead).
-    var framingUpwindSeconds = 30.0
-    /// The start line stays framed from the start sequence until this many seconds after the gun.
-    var lineFramingSecondsAfterGun = 10.0
-    /// The view around the framed box, as a multiple of its extent.
-    var framingMargin = 1.25
-    /// How fast the zoom closes on auto framing's: the share of the gap it closes in a second is 1 − e^−rate.
-    var framingEaseRate = 1.0
+    /// How far the centre leads your boat along screen-up when she heads up the screen: a share of half the
+    /// screen's height, the same at every zoom and speed.
+    var leadAlong = 0.35
+    /// How far the centre leads your boat across the screen when she heads across it: a share of half its width.
+    var leadAcross = 0.25
+    /// The lead's direction follows your heading with this time constant τ, seconds, the short way round.
+    var leadDirectionSeconds = 2.0
+    /// The heading's rate of turn is smoothed over this many seconds to measure its unsteadiness.
+    var leadUnsteadinessSeconds = 1.0
+    /// A smoothed rate of turn, degrees a second, at which the lead is gone: it shrinks in proportion up to it.
+    var leadGoneTurnRate = 40.0
+
+    // MARK: Shots (#322)
+
+    /// The open-water shot's zoom.
+    var openWaterZoom = 0.7
+    /// The mark-rounding shot's zoom, before it widens to keep the mark on screen.
+    var markRoundingZoom = 0.9
+    /// The close-quarters shot's zoom.
+    var closeQuartersZoom = 1.6
+    /// Close quarters comes on when a boat is within this many hull lengths of yours …
+    var closeQuartersOnHullLengths = 4.0
+    /// … for this many seconds.
+    var closeQuartersOnSeconds = 1.0
+    /// Close quarters goes off when no boat is within this many hull lengths …
+    var closeQuartersOffHullLengths = 6.0
+    /// … for this many seconds.
+    var closeQuartersOffSeconds = 3.0
+    /// Mark rounding comes on inside this many times the zone of the next mark.
+    var markRoundingZones = 2.0
+    /// A shot holds at least this many seconds before another replaces it, unless that one has higher precedence.
+    var shotDwellSeconds = 4.0
+    /// A change of shot eases its zoom over this many seconds.
+    var shotTransitionSeconds = 1.5
+    /// The share of the screen's half-width and half-height a mark (mark rounding) or a line end (pre-start) is kept
+    /// inside.
+    var edgeMargin = 0.9
+
+    // MARK: Pre-start shot (#322)
+
+    /// Your boat's height up the screen before the gun, below the line (above it, the composition flips).
+    var preStartBoatHeight = 0.4
+    /// The share of the screen's width, about its middle, your boat stays inside before the gun.
+    var preStartBoatWidth = 0.7
+    /// The flip from below the line to above it eases over this many line lengths either side of it.
+    var preStartFlipLineLengths = 0.25
+    /// Seconds after the gun the pre-start shot hands over to the heading lead.
+    var gunHandOverSeconds = 3.0
 
     // MARK: Pinch-zoom
 
     /// The widest the camera zooms out: 1 is a point per point. Raised to the zoom that fits the whole course
     /// when that is closer, so the widest view is never wider than the course.
-    var minZoom = 0.45
+    var minZoom = 0.35
     /// The closest the camera zooms in.
     var maxZoom = 2.2
-    /// Seconds a pinch-zoom holds after the fingers lift before easing back to auto framing.
-    var pinchHoldSeconds = 5.0
 
     /// The shipped placeholders.
     static let standard = CameraStyle()
 }
 
-/// Lenient: a field missing from a saved style (one saved before the field existed, like auto framing's before
-/// #113) takes its standard value, so an older tuning keeps the rest of its camera.
+/// Lenient: a field missing from a saved style (one saved before the field existed) takes its standard value, and
+/// a field it no longer has (#113's framing, the pinch hold) is ignored, so an older tuning keeps the rest of its
+/// camera.
 nonisolated extension CameraStyle {
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        let standard = CameraStyle.standard
-        func value(_ key: CodingKeys, _ fallback: Double) throws -> Double {
-            try c.decodeIfPresent(Double.self, forKey: key) ?? fallback
+        var style = CameraStyle.standard
+        func read(_ key: CodingKeys, _ path: WritableKeyPath<CameraStyle, Double>) throws {
+            if let value = try c.decodeIfPresent(Double.self, forKey: key) { style[keyPath: path] = value }
         }
-        self.init(lookAheadSeconds: try value(.lookAheadSeconds, standard.lookAheadSeconds),
-                  followRate: try value(.followRate, standard.followRate),
-                  defaultZoom: try value(.defaultZoom, standard.defaultZoom),
-                  courseMargin: try value(.courseMargin, standard.courseMargin),
-                  boatUpLagSeconds: try value(.boatUpLagSeconds, standard.boatUpLagSeconds),
-                  framingHullLengths: try value(.framingHullLengths, standard.framingHullLengths),
-                  framingUpwindSeconds: try value(.framingUpwindSeconds, standard.framingUpwindSeconds),
-                  lineFramingSecondsAfterGun: try value(.lineFramingSecondsAfterGun, standard.lineFramingSecondsAfterGun),
-                  framingMargin: try value(.framingMargin, standard.framingMargin),
-                  framingEaseRate: try value(.framingEaseRate, standard.framingEaseRate),
-                  minZoom: try value(.minZoom, standard.minZoom),
-                  maxZoom: try value(.maxZoom, standard.maxZoom),
-                  pinchHoldSeconds: try value(.pinchHoldSeconds, standard.pinchHoldSeconds))
+        try read(.lookAheadSeconds, \.lookAheadSeconds)
+        try read(.followRate, \.followRate)
+        try read(.defaultZoom, \.defaultZoom)
+        try read(.courseMargin, \.courseMargin)
+        try read(.boatUpLagSeconds, \.boatUpLagSeconds)
+        try read(.leadAlong, \.leadAlong)
+        try read(.leadAcross, \.leadAcross)
+        try read(.leadDirectionSeconds, \.leadDirectionSeconds)
+        try read(.leadUnsteadinessSeconds, \.leadUnsteadinessSeconds)
+        try read(.leadGoneTurnRate, \.leadGoneTurnRate)
+        try read(.openWaterZoom, \.openWaterZoom)
+        try read(.markRoundingZoom, \.markRoundingZoom)
+        try read(.closeQuartersZoom, \.closeQuartersZoom)
+        try read(.closeQuartersOnHullLengths, \.closeQuartersOnHullLengths)
+        try read(.closeQuartersOnSeconds, \.closeQuartersOnSeconds)
+        try read(.closeQuartersOffHullLengths, \.closeQuartersOffHullLengths)
+        try read(.closeQuartersOffSeconds, \.closeQuartersOffSeconds)
+        try read(.markRoundingZones, \.markRoundingZones)
+        try read(.shotDwellSeconds, \.shotDwellSeconds)
+        try read(.shotTransitionSeconds, \.shotTransitionSeconds)
+        try read(.edgeMargin, \.edgeMargin)
+        try read(.preStartBoatHeight, \.preStartBoatHeight)
+        try read(.preStartBoatWidth, \.preStartBoatWidth)
+        try read(.preStartFlipLineLengths, \.preStartFlipLineLengths)
+        try read(.gunHandOverSeconds, \.gunHandOverSeconds)
+        try read(.minZoom, \.minZoom)
+        try read(.maxZoom, \.maxZoom)
+        self = style
     }
 }

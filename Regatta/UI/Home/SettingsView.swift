@@ -36,11 +36,13 @@ struct SettingsView: View {
                         }
                     }
                     Divider()
-                    toggleRow("Auto framing", isOn: $model.deviceSettings.autoFraming, id: "settings-autoFraming")
+                    toggleRow("Auto zoom", isOn: $model.deviceSettings.autoZoom, id: "settings-autoZoom")
                     Divider()
                     toggleRow("Laylines", isOn: $model.deviceSettings.laylines, id: "settings-laylines")
                     Divider()
                     toggleRow("Ladder lines", isOn: $model.deviceSettings.ladderLines, id: "settings-ladderLines")
+                    Divider()
+                    toggleRow("Live leaderboard", isOn: $model.deviceSettings.liveLeaderboard, id: "settings-liveLeaderboard")
                 }
                 section("Hints") {
                     toggleRow("Hints", isOn: $model.deviceSettings.hints, id: "settings-hints")

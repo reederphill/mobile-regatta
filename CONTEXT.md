@@ -19,7 +19,7 @@ The countdown before the gun, during which boats manoeuvre below the start line.
 _Avoid_: pre-race, lobby countdown
 
 **OCS** (On Course Side):
-A boat with any part of her hull on the course side of the start line at the gun. She must return until her whole hull is on the pre-start side before starting. A boat that never comes back is scored OCS, and so is a boat that never started: behind every boat placed by distance to finish and every DSQ, and ahead of RET.
+A boat with any part of her hull on the course side of the start line at the gun. She must return until her whole hull is on the pre-start side before starting. A boat that never comes back is scored OCS, and so is a boat that never started: behind every boat placed by ladder distance and every DSQ, and ahead of RET.
 _Avoid_: false start, early
 
 **Penalty turn**:
@@ -56,6 +56,14 @@ _Avoid_: hold heading, stand on
 A right-of-way boat keeping the water she's sailing in rather than giving it up to a boat that must keep clear of her: she holds course, and luffs only within the room rule 16.1 leaves the other boat.
 _Avoid_: hunting (steering at a boat to force a foul, which bots never do)
 
+**Encounter**:
+Two boats coming within 2 hull lengths of each other while rules 10–13 name one of them to keep clear, counted once until they separate past that again. The bot suite's conduct gate is the share of encounters that end in a rule call.
+_Avoid_: incident (the umpire's ruling trigger), meeting
+
+**Misjudgement**:
+A bot that must keep clear in an encounter believing she holds her rights, drawn once an encounter by her skill, so she sails on and fouls. It only ever leaves out her give-way manoeuvre, never turns her towards a boat; none from National up.
+_Avoid_: mistake, random foul
+
 **Zone**:
 The water within 3 hull lengths of a mark; the rules configuration sets the size. A boat is in it once any part of her hull is, and rule 18 applies between two boats racing to the same mark only while at least one of them is in its zone.
 
@@ -87,7 +95,7 @@ How far a boat still has to sail, round its remaining marks, to finish: the path
 _Avoid_: distance to the line (the finish line is also the start line)
 
 **RET** (retired):
-A boat whose player is gone when the race ends. She's placed behind every boat still racing, including those placed by distance to finish. When several are RET they tie for last, unless the race ended because every human had gone: then the player who left latest ranks highest.
+A boat whose player is gone when the race ends. She's placed behind every boat still racing, including those placed by ladder distance. When several are RET they tie for last, unless the race ended because every human had gone: then the player who left latest ranks highest.
 _Avoid_: DNF, quit, abandoned
 
 **Ghost**:
@@ -135,7 +143,7 @@ An online race with at least two humans at the gun. Only results between humans 
 _Avoid_: ranked match
 
 **Completed race**:
-An online race in which the player's result is finished, placed by distance, DSQ or OCS: they stayed in the race. RET never counts, and a cancelled race counts for nothing. Earned liveries and the free-text unlock count completed races.
+An online race in which the player's result is finished, placed by ladder distance, DSQ or OCS: they stayed in the race. RET never counts, and a cancelled race counts for nothing. Earned liveries and the free-text unlock count completed races.
 _Avoid_: finished race (when DSQ and OCS are meant too)
 
 **Race token**:
@@ -216,6 +224,14 @@ A line drawn across the course axis (the seeded mean wind direction, fixed for t
 **Ladder distance**:
 How far a boat still has to go to finish, counting only progress across the ladder lines on her current leg (along the course axis) plus the full length of each later leg measured the same way. On the reach, which crosses no ladder lines, it is the distance along the leg instead, so the total runs on across each rounding without a jump. Orders boats racing and places those unfinished when the race ends; the gap to the leader is the difference.
 _Avoid_: distance to finish (the path length)
+
+**Gap to leader**:
+How far a boat is behind the leader in **Ladder distance**, in metres: her ladder distance less the least of any boat racing. Once a boat has finished, it is her own ladder distance still to go; a finished boat's gap is 0. None for a boat not started, disqualified, or whose player has gone before finishing (a finished boat keeps 0). A boat behind the leader shows at least 1 m. Shown on the **Live leaderboard**.
+_Avoid_: time gap, distance behind
+
+**Live leaderboard**:
+The in-race HUD board under the clock and place, from the gun to the close: the leader, the boats directly ahead of and behind you, and you, each with a livery swatch and a **Gap to leader**; tap to see the whole fleet. Never names. Not the online ratings leaderboard (#165).
+_Avoid_: ranking table, leaderboard (alone, for this board)
 
 ### Conditions
 
@@ -361,9 +377,17 @@ _Avoid_: north-up, map view
 The optional camera: the view turned to follow your boat's heading with about a second's lag, so tacks and penalty turns don't whip it round.
 _Avoid_: chase cam, heading-up
 
-**Auto framing**:
-The camera choosing its own centre and zoom to keep your boat, the boats near her, the water upwind, the start line before and just after the gun, and the next mark inside its zone in view; on by default, eased, never snapping. A pinch-zoom overrides it for a few seconds.
-_Avoid_: auto zoom, smart camera
+**Heading lead**:
+Where the camera centres: your boat plus a lead the way she's heading, sized as a share of the screen (further up it than across it) at every zoom and speed. The lead's direction follows your heading with a couple of seconds' lag and shrinks while she turns hard (360s, pre-start spins). Nothing else moves the centre after the start.
+_Avoid_: look-ahead, upwind framing
+
+**Shot**:
+What sets the camera's zoom at a moment of the race, never its centre. In order of precedence: pre-start (your boat low on the screen with the line in view, until just after the gun), close quarters (zoomed in while a boat is within a few hull lengths), mark rounding (widening only as much as keeps the mark on screen) and open water. A shot holds a few seconds before a lower one replaces it, and changes ease.
+_Avoid_: framing, camera mode
+
+**Auto zoom**:
+The camera's shots choosing its zoom; on by default. Off, the heading lead stays and the zoom is open water's. Either way a pinch-zoom multiplies the zoom and is kept across races; a two-finger double tap resets it.
+_Avoid_: auto framing, smart camera
 
 **View heading**:
 The compass heading at the top of the screen in course-up or boat-up; the HUD's arrows turn by it so they point true on screen.
