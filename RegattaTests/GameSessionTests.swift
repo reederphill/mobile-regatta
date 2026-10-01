@@ -83,6 +83,25 @@ import RegattaCore
         #expect(session.notice?.text.contains("fouled you") == true, "and stays")
     }
 
+    /// Your roll tack's result is read as well as seen (#222): a hit and a miss each post a short notice, and another
+    /// boat's roll posts none.
+    @Test func yourRollTacksResultPostsANotice() {
+        let session = GameSession(config: Self.config)
+        session.now = { Date(timeIntervalSinceReferenceDate: 0) }
+        let me = session.driver.myBoatIndex
+        let other = (0..<4).first { $0 != me } ?? 1
+        session.consume([RaceEvent(tick: 0, kind: .rollHit(seat: other)), RaceEvent(tick: 0, kind: .rollMissed(seat: other))])
+        #expect(session.notice?.kind != .roll, "another boat's roll posts nothing")
+        session.consume([RaceEvent(tick: 1, kind: .rollHit(seat: me))])
+        #expect(session.notice?.kind == .roll && session.notice?.text.contains("clean") == true,
+                "\(String(describing: session.notice))")
+        session.now = { Date(timeIntervalSinceReferenceDate: 5) }
+        session.refreshHUD()
+        session.consume([RaceEvent(tick: 2, kind: .rollMissed(seat: me))])
+        #expect(session.notice?.kind == .roll && session.notice?.text.contains("missed") == true,
+                "\(String(describing: session.notice))")
+    }
+
     /// A tap opens the live leaderboard to the whole fleet (#268); the next tap closes it, and so do 5 s of
     /// wall-clock time.
     @Test func leaderboardOpensOnATapAndClosesAfterFiveSeconds() {

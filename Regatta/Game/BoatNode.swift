@@ -31,8 +31,7 @@ final class BoatNode: SKNode {
     /// Your roll ring (#222): a sprite on your boat only, nil for the rest of the fleet, and always there on yours so the
     /// scene's node count doesn't depend on her class; it stays hidden for a class with no roll tack.
     private let ring: SKSpriteNode?
-    private let brokenRing: SKTexture
-    private let solidRing: SKTexture
+    private let ringArt: [RollRingArt.Look: SKTexture]
     private var ringTimer = RollRingTimer()
     private let rollWindow: Double?
     private let length: CGFloat
@@ -83,9 +82,8 @@ final class BoatNode: SKNode {
         sail.position = CGPoint(x: 0, y: length * 0.16)
         sail.zPosition = Layer.sail
 
-        solidRing = RollRingArt.texture(broken: false)
-        brokenRing = RollRingArt.texture(broken: true)
-        let rollRing = isMine ? SKSpriteNode(texture: solidRing) : nil
+        ringArt = Dictionary(uniqueKeysWithValues: RollRingArt.Look.allCases.map { ($0, RollRingArt.texture($0)) })
+        let rollRing = isMine ? SKSpriteNode(texture: ringArt[.approach]) : nil
         rollRing?.color = CuePalette.cueWhite.uiColor
         rollRing?.colorBlendFactor = 1
         rollRing?.zPosition = Layer.ring
@@ -143,8 +141,13 @@ final class BoatNode: SKNode {
             ring.isHidden = true
             return
         }
-        let texture = state.isBroken ? brokenRing : solidRing
-        if ring.texture !== texture { ring.texture = texture }
+        let look: RollRingArt.Look
+        switch state.kind {
+        case .approach: look = state.isTapped ? .tapped : .approach
+        case .hit: look = .hit
+        case .miss: look = .miss
+        }
+        if let texture = ringArt[look], ring.texture !== texture { ring.texture = texture }
         let diameter = 2 * length * CGFloat(style.rollRingHulls * state.radiusShare)
         ring.size = CGSize(width: diameter, height: diameter)
         ring.alpha = CGFloat(style.rollRingAlpha * state.alphaShare)
@@ -349,17 +352,49 @@ private struct BoatArt {
     }
 }
 
-/// The roll ring's two textures (#222), drawn in white on a 128 point square and sized per frame: a solid ring,
-/// and the same ring broken into dashes.
+/// The roll ring's textures (#222), drawn in white on a 128 point square and sized per frame. Shape carries the
+/// meaning: the approach is a thin ring, with a dot in it once a tap is in; a hit is a solid ring ringed with ticks; a
+/// miss is a broken ring with a cross through it.
 private enum RollRingArt {
-    static func texture(broken: Bool) -> SKTexture {
+    enum Look: CaseIterable, Hashable {
+        case approach, tapped, hit, miss
+    }
+
+    static func texture(_ look: Look) -> SKTexture {
         let bounds = CGRect(x: -64, y: -64, width: 128, height: 128)
         return SpriteArt.texture(bounds: bounds, scale: 2) { cg in
             cg.setStrokeColor(UIColor.white.cgColor)
-            cg.setLineWidth(5)
+            cg.setFillColor(UIColor.white.cgColor)
             cg.setLineCap(.round)
-            if broken { cg.setLineDash(phase: 0, lengths: [14, 12]) }
-            cg.strokeEllipse(in: bounds.insetBy(dx: 6, dy: 6))
+            switch look {
+            case .approach, .tapped:
+                cg.setLineWidth(4)
+                cg.strokeEllipse(in: bounds.insetBy(dx: 6, dy: 6))
+                if look == .tapped { cg.fillEllipse(in: CGRect(x: -9, y: -9, width: 18, height: 18)) }
+            case .hit:
+                // A solid ring with eight ticks bursting out of it.
+                cg.setLineWidth(7)
+                cg.strokeEllipse(in: bounds.insetBy(dx: 22, dy: 22))
+                cg.setLineWidth(6)
+                for i in 0..<8 {
+                    let angle = CGFloat(i) * .pi / 4
+                    cg.move(to: CGPoint(x: cos(angle) * 48, y: sin(angle) * 48))
+                    cg.addLine(to: CGPoint(x: cos(angle) * 62, y: sin(angle) * 62))
+                }
+                cg.strokePath()
+            case .miss:
+                // A broken ring with a cross through it.
+                cg.setLineWidth(6)
+                cg.setLineDash(phase: 0, lengths: [16, 14])
+                cg.strokeEllipse(in: bounds.insetBy(dx: 8, dy: 8))
+                cg.setLineDash(phase: 0, lengths: [])
+                cg.setLineWidth(8)
+                cg.move(to: CGPoint(x: -26, y: -26))
+                cg.addLine(to: CGPoint(x: 26, y: 26))
+                cg.move(to: CGPoint(x: -26, y: 26))
+                cg.addLine(to: CGPoint(x: 26, y: -26))
+                cg.strokePath()
+            }
         }
     }
 }

@@ -270,6 +270,12 @@ final class GameSession {
             haptics.notify(.warning)
         case .penaltyServed(let b) where b == me:
             haptics.notify(.success)
+        case .rollHit(let b) where b == me:
+            // TODO-COPY (#124): `RaceEventPresenter` owns the words.
+            post(.roll, "Roll tack: clean")
+            haptics.impact(intensity: 0.7)
+        case .rollMissed(let b) where b == me:
+            post(.roll, "Roll tack: missed")
         case .rounded(let b, _) where b == me:
             haptics.impact(intensity: 0.6)
         case .finished(let b, _) where b == me:
