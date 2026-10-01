@@ -51,6 +51,21 @@ import RegattaCore
             length = race.boatClass.hull.length
         }
 
+        /// Before the gun (#280): two bots on seed `seed`'s race, `toGun` seconds before it, nothing placed yet, the
+        /// water `below` hull lengths below the middle of the start line.
+        init(seed: UInt64, toGun: Int, below: Double) {
+            race = botRace(seats: [.bot, .bot], prestartSeconds: toGun + 10, seed: seed)
+            for _ in 0..<(10 * Race.tickRate) { race.step() }
+            let c = race.course
+            length = race.boatClass.hull.length
+            centre = c.startLine.centre - c.upwind * (length * below)
+            leg = 0
+            let wind = race.groundWind(at: centre)
+            self.wind = wind.direction
+            up = race.boatClass.polar.bestUpwind(tws: wind.speed)
+            down = race.boatClass.polar.bestDownwind(tws: wind.speed)
+        }
+
         /// Her heading on `tack` at wind angle `angle`.
         func heading(_ tack: Tack, _ angle: Double) -> Double { tack == .starboard ? wind - angle : wind + angle }
         func beat(_ tack: Tack) -> Double { heading(tack, up.twa) }
@@ -481,7 +496,7 @@ import RegattaCore
     }
 
     /// #103: she judges an encounter once, keeps that judgement while the other boat is near and forgets it once it is
-    /// beyond `keepClearRange`; a bot that can't misjudge draws nothing, and before her start nobody judges anything.
+    /// beyond `keepClearRange`; a bot that can't misjudge draws nothing.
     @Test func encountersAreJudgedOnceAndOnlyWhenMisjudgingIsPossible() throws {
         let encounter = Self.portStarboard(seed: 11, early: 0, running: false)
         let race = try encounter.race()
@@ -515,5 +530,201 @@ import RegattaCore
         var starboard = BotBrain(style: Self.skill1, seed: 7, weaknesses: Self.misjudging(1))
         _ = starboard.decide(race.seatView(for: 0))
         #expect(starboard.misjudged.isEmpty)
+    }
+
+    // MARK: - Before the start (#280)
+
+    /// Before the gun, both on starboard below the line, `toGun` seconds before it: seat 0 the leeward boat, holding
+    /// `leeward` off the wind, seat 1 `abeam` hull lengths to windward of her and `ahead` ahead, holding `windward` off
+    /// it, both at `speed`.
+    static func prestartWindwardLeeward(seed: UInt64, toGun: Int = 25, leeward: Double, windward: Double, abeam: Double,
+                                        ahead: Double = 0, speed: Double = 2) throws -> Race {
+        let water = Water(seed: seed, toGun: toGun, below: 5)
+        let heading = water.heading(.starboard, leeward)
+        let forward = Vec2.heading(heading)
+        return try place(water, [
+            Placement(position: water.centre, heading: heading, speed: speed, status: .prestart),
+            Placement(position: water.centre + forward.rightPerp * water.length * abeam + forward * water.length * ahead,
+                      heading: water.heading(.starboard, windward), speed: speed, status: .prestart),
+        ])
+    }
+
+    /// One decision `sailOne` records.
+    struct Sailed {
+        var decision: BotDecision
+        var keepClear: RacingRule?
+        var gap: Double
+        var ahead: Double
+        var twa: Double
+    }
+
+    /// Sails `race` for `seconds` with only `seat`'s bot at the helm, the other boat holding what her autohelm holds:
+    /// every decision of the bot's, with the rule she keeps clear of the other boat under as she made it (nil: none),
+    /// the metres between them, centre to centre, how far she is ahead of the other boat along its heading, and her
+    /// wind angle, and every event.
+    static func sailOne(_ race: Race, seat: Int, seconds: Double, skill: Double = 1, weaknesses: BotWeaknesses? = nil,
+                        planned: Tack? = nil) -> (decisions: [Sailed], kinds: [RaceEvent.Kind]) {
+        var pilot = Pilot(seat: seat, plannedTack: planned, race: race, skill: skill, weaknesses: weaknesses)
+        var decisions: [Sailed] = []
+        var kinds: [RaceEvent.Kind] = []
+        for _ in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
+            let view = race.seatView(for: seat)
+            let right = view.others.first?.rightOfWay
+            let gap = view.others.first.map { ($0.position - view.own.position).length } ?? .infinity
+            let ahead = view.others.first.map { (view.own.position - $0.position).dot(Vec2.heading($0.heading)) } ?? 0
+            let keepClear = right?.keepClear == seat ? right?.rule : nil
+            if let decision = pilot.drive(race) {
+                decisions.append(Sailed(decision: decision, keepClear: keepClear, gap: gap, ahead: ahead, twa: view.own.twa))
+            }
+            race.step()
+            kinds += race.drainEvents().map(\.kind)
+        }
+        return (decisions, kinds)
+    }
+
+    /// #280 acceptance: before the gun, a windward boat holding near close-hauled (#99's hold, a few degrees outside
+    /// the no-go zone) with a leeward boat converging on her keeps clear (rule 11): she luffs (rudder towards the wind),
+    /// or, with no luff left, eases and drops astern; she never bears away towards her, and the rule 11 call never
+    /// comes. #99's luff target sat inside `steer`'s no-go clamp, so she luffed by nothing.
+    @Test func windwardLuffHoldingNearCloseHauledLuffs() throws {
+        var failures: [String] = []
+        for seed: UInt64 in [3, 7, 13] {
+            for (windward, abeam, ahead) in [(36.0, 1.1, 0.3), (33.0, 1.1, 0.3), (36.0, 0.9, 0.0), (40.0, 1.2, 0.5)] {
+                let race = try Self.prestartWindwardLeeward(seed: seed, leeward: deg2rad(32), windward: deg2rad(windward),
+                                                            abeam: abeam, ahead: ahead)
+                let sailed = Self.sailOne(race, seat: 1, seconds: 15, planned: .starboard)
+                let calls = Self.calls(sailed.kinds)
+                let name = "seed \(seed) windward at \(windward)° abeam \(abeam) ahead \(ahead)"
+                if !calls.isEmpty { failures.append("\(name): \(calls)") }
+                // Bearing away on starboard turns her to port: towards the leeward boat, inside the distance she keeps.
+                let close = race.boatClass.hull.length * BotBrain.keepClearDistance
+                let bearsAway = sailed.decisions.filter {
+                    $0.keepClear == .windwardLeeward && $0.gap < close && $0.decision.input.rudder < 0
+                }
+                if !bearsAway.isEmpty { failures.append("\(name): bore away keeping clear \(bearsAway.count) times") }
+                // Luffing on starboard turns her to starboard, away from the leeward boat: inside her hold angle, the luff
+                // #99's clamp took away. Luffed to the floor and still inside the distance she keeps, with the gun more
+                // than `startLuffEaseSeconds` off, she eases and drops astern too.
+                let keeping = sailed.decisions.filter { $0.keepClear == .windwardLeeward && $0.gap < close }
+                if let first = keeping.first, let last = keeping.last {
+                    let view = race.seatView(for: 1)
+                    let luffs = keeping.contains { $0.twa < BotBrain.holdAngle(view) }
+                    if !luffs { failures.append("\(name): never luffed inside her hold keeping clear") }
+                    // Within half a degree of the luff floor, 1° outside the no-go zone.
+                    let floor = BoatDynamics.noGoAngle(race.boatClass.polar) + deg2rad(1.5)
+                    let atFloor = keeping.contains { $0.twa < floor }
+                    let dropsAstern = keeping.contains { $0.decision.input.ease } && last.ahead < first.ahead
+                    if atFloor && !dropsAstern { failures.append("\(name): at the luff floor, never eased astern") }
+                }
+                if !sailed.decisions.contains(where: { $0.keepClear == .windwardLeeward }) {
+                    failures.append("\(name): never windward")
+                }
+            }
+        }
+        #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
+    }
+
+    /// Before the gun, seat 0 60° into a penalty turn to starboard below the line, reaching on starboard, hard over (as
+    /// `penalised`, before her start); seat 1 reaching back past her on port, `ahead` hull lengths ahead and `across` to
+    /// her starboard.
+    static func prestartPenalised(seed: UInt64, ahead: Double, across: Double) throws -> Race {
+        let water = Water(seed: seed, toGun: 40, below: 6)
+        let heading = water.wind - .pi / 2
+        let forward = Vec2.heading(heading)
+        return try place(water, [
+            Placement(position: water.centre, heading: heading, speed: 3, status: .prestart),
+            Placement(position: water.centre + forward * water.length * ahead + forward.rightPerp * water.length * across,
+                      heading: heading + .pi, speed: 3, status: .prestart),
+        ]) { snapshot in
+            snapshot.seats[0].boat.autohelm = nil
+            snapshot.seats[0].boat.rudder = 1
+            snapshot.seats[0].heldInput = BoatInput(rudder: 1.0)
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyProgress = deg2rad(60)
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+        }
+    }
+
+    /// #280 acceptance: a bot turning a penalty before the gun keeps clear of every boat as she turns it (rule 21.2),
+    /// as she does racing (#100), rather than turning on into the boats around her: the turn doesn't collect further
+    /// 21.2 calls, and she never owes more than the one. Before, #99 held the turn hard over whoever was near, and one
+    /// boat went from one turn owed to four in 2 s.
+    @Test func prestartPenaltyDoesNotCascade() throws {
+        var failures: [String] = []
+        for seed: UInt64 in [3, 5, 7] {
+            for (ahead, across) in [(2.0, 0.5), (14.0 / 4.9, 7.0 / 4.9), (3.0, 1.0), (1.5, 1.0)] {
+                let race = try Self.prestartPenalised(seed: seed, ahead: ahead, across: across)
+                var most = 0
+                let kinds = Self.sail(race, seconds: 20) { race in most = max(most, race.boats[0].penaltyTurnsOwed) }
+                let calls = Self.calls(kinds).filter { $0 == "21.2 on 0" }
+                if !calls.isEmpty || most > 1 {
+                    failures.append("seed \(seed) ahead \(ahead) across \(across): \(Self.calls(kinds)), owed at most \(most)")
+                }
+            }
+        }
+        #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
+    }
+
+    /// Before the gun, `toGun` seconds before it below the line: seat 0 beating on starboard, seat 1 reaching across on
+    /// port (60° off the wind, where she positions before the gun) into her, both meeting in `meet` seconds.
+    static func prestartPortStarboard(seed: UInt64, toGun: Int = 50, meet: Double = 4) throws -> Race {
+        let water = Water(seed: seed, toGun: toGun, below: 8)
+        let starboard = water.beat(.starboard), port = water.heading(.port, deg2rad(60))
+        let speed = water.up.speed * 0.8
+        // Reaching, she sails faster.
+        let reaching = water.race.boatClass.polar.speed(twa: deg2rad(60), tws: water.race.groundWind(at: water.centre).speed)
+        return try place(water, [
+            Placement(position: water.centre - Vec2.heading(starboard) * speed * meet, heading: starboard, speed: speed,
+                      status: .prestart),
+            Placement(position: water.centre - Vec2.heading(port) * reaching * meet, heading: port, speed: reaching,
+                      status: .prestart),
+        ])
+    }
+
+    /// #280, ruling 2 (#103's model before the start): a port boat that misjudges her encounter before the gun believes
+    /// she holds her rights and sails on into the starboard boat, and is called under rule 10; judging it right, she
+    /// keeps clear and nobody is called. Never a turn towards: misjudging only leaves her keep-clear out.
+    @Test func prestartMisjudgingPortBoatSailsOnAndIsCalled() throws {
+        for seed: UInt64 in [3, 11] {
+            let judged = Self.sailOne(try Self.prestartPortStarboard(seed: seed), seat: 1, seconds: 12,
+                                      weaknesses: Self.misjudging(0), planned: .port)
+            #expect(Self.calls(judged.kinds).isEmpty, "seed \(seed): \(Self.calls(judged.kinds))")
+            let misjudged = Self.sailOne(try Self.prestartPortStarboard(seed: seed), seat: 1, seconds: 12,
+                                         weaknesses: Self.misjudging(1), planned: .port)
+            #expect(Self.calls(misjudged.kinds).first == "10 on 1", "seed \(seed): \(Self.calls(misjudged.kinds))")
+        }
+    }
+
+    /// #280, ruling 2: before her start she judges an encounter once, as racing, and only if she can misjudge at all: a
+    /// bot from National's band up (skill 0.8 and over) draws nothing, and so misjudges nothing before the gun either.
+    @Test func prestartEncountersAreJudgedOnceAndOnlyWhenMisjudgingIsPossible() throws {
+        let race = try Self.prestartPortStarboard(seed: 11)
+        for _ in 0..<(2 * Race.tickRate) { race.step() }
+        let port = race.seatView(for: 1)
+        #expect(port.own.status == .prestart)
+        #expect(port.others[0].rightOfWay?.keepClear == 1)
+        var brain = BotBrain(style: Self.skill1, seed: 7, weaknesses: Self.misjudging(1))
+        brain.plannedTack = .port
+        _ = brain.decide(port)
+        #expect(brain.misjudged == [0: true])
+        let drawn = brain.rng
+        _ = brain.decide(port)
+        var once = brain.rng, then = drawn
+        #expect(once.next() == then.next(), "judged once an encounter")
+        var never = BotBrain(style: Self.skill1, seed: 7, weaknesses: Self.misjudging(0))
+        never.plannedTack = .port
+        var untouched = never.rng
+        _ = never.decide(port)
+        #expect(never.misjudged.isEmpty)
+        #expect(never.rng.next() == untouched.next(), "no draw")
+        for skill in [0.8, 0.9, 1.0] {
+            var style = Self.skill1
+            style.skill = skill
+            var national = BotBrain(style: style, seed: 7)
+            national.plannedTack = .port
+            #expect(national.weaknesses.ruleMisjudgeRate == 0)
+            _ = national.decide(port)
+            #expect(national.misjudged.isEmpty, "skill \(skill)")
+        }
     }
 }

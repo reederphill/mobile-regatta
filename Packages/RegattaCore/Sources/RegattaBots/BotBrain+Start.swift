@@ -292,10 +292,64 @@ extension BotBrain {
         return .infinity
     }
 
-    /// Whether sailing `heading` with Ease would still put her bow over the start line before the gun.
-    func crossesEarly(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double) -> Bool {
+    /// Whether sailing `heading` with Ease would still put her bow over the start line before the gun, or within
+    /// `within` seconds if that is sooner.
+    func crossesEarly(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double, within: Double? = nil) -> Bool {
         guard b.status == .prestart, view.time < 0, view.course.startLine.side(b.position) < 0 else { return false }
-        return secondsToLine(b, view, heading: heading, ease: true, within: -view.time) < -view.time
+        let horizon = min(-view.time, within ?? .infinity)
+        return secondsToLine(b, view, heading: heading, ease: true, within: horizon) < horizon
+    }
+
+    /// How far outside the no-go zone she luffs at most before her start (#280): inside her hold angle, so a windward
+    /// boat holding there still has a luff left.
+    static let startLuffMargin = deg2rad(1)
+    /// The radians she luffs by at a time, weighing the least luff that keeps her clear (`startLuff`).
+    static let startLuffStep = deg2rad(2)
+    /// Seconds ahead a windward boat's luff before her start may not carry her over the line, with Ease: a luff is
+    /// over in a few seconds, then she bears away to her hold again, so only a luff that reaches the line that soon
+    /// leaves her OCS (`keepClear`).
+    static let luffLineSeconds = 6.0
+    /// Seconds before the gun from which a windward boat luffed to `startLuffFloor` and still not clear no longer eases
+    /// to drop astern (`Evasion.dropsAstern`): later, slowed there, she starts late. #280 measured easing to the gun
+    /// at on time 0.50 against the start gate's 0.60.
+    static let startLuffEaseSeconds = 20.0
+
+    /// The closest to the wind she luffs before her start (`startLuffMargin`).
+    static func startLuffFloor(_ view: SeatView) -> Double {
+        BoatDynamics.noGoAngle(view.boatClass.polar) + startLuffMargin
+    }
+
+    /// Whether `heading` is a windward boat's luff before her start (`startLuff`): inside her hold angle.
+    func isStartLuff(_ b: SeatView.OwnBoat, _ view: SeatView, _ heading: Double) -> Bool {
+        b.status == .prestart && abs(wrapAngle(heading - b.windDirection)) < Self.holdAngle(view) - 1e-9
+    }
+
+    /// Rule 11 before her start (#280): the windward boat luffs, away from the leeward one. The angle she sails, or
+    /// `desired` if that is closer to the wind, if it already passes every boat near her `keepClearDistance` times
+    /// `keepClearMargin` hull lengths off over `lookahead` seconds (`closestApproach`); else the least luff from there
+    /// that does, every `startLuffStep`, down to `startLuffFloor`; failing that, the floor, where she eases and drops
+    /// astern (`Evasion.dropsAstern`) while the gun is further off than `startLuffEaseSeconds`. She holds just outside
+    /// the no-go zone (#99), so there is little luff left from her hold: never a bear-away, which only turns her
+    /// towards the leeward boat. Only this luff steers closer to the wind than `steer`'s usual 5° outside the no-go
+    /// zone (`Evasion.closest`).
+    func startLuff(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Evasion {
+        let side: Double = b.tack == .port ? 1 : -1
+        let floor = Self.startLuffFloor(view)
+        let near = view.others.filter { !$0.isGhost && ($0.position - b.position).length < Self.keepClearRange }
+        let clear = view.boatClass.hull.length * Self.keepClearDistance * Self.keepClearMargin
+        func passes(_ heading: Double) -> Bool {
+            let closest = near.map { Self.closestApproach(of: $0, to: b, heading: heading, lookahead: lookahead) }.min()
+            return (closest ?? .infinity) >= clear
+        }
+        var angle = max(floor, min(abs(wrapAngle(desired - b.windDirection)), abs(wrapAngle(b.heading - b.windDirection))))
+        while true {
+            let heading = b.windDirection + side * angle
+            if passes(heading) { return Evasion(heading: heading, closest: floor) }
+            guard angle > floor else { break }
+            angle = max(floor, angle - Self.startLuffStep)
+        }
+        return Evasion(heading: b.windDirection + side * floor, closest: floor,
+                       dropsAstern: view.time < 0 && -view.time > Self.startLuffEaseSeconds)
     }
 
     /// Whether she lets the sheets out while she steers `heading` on starboard to keep clear or off a mark
@@ -322,9 +376,12 @@ extension BotBrain {
         // OCS, she keeps clear of every boat as a returning one (rule 21.1), whatever rules 10–13 would give her
         // (`OtherBoat.rightOfWay` has only those): she is returning as soon as she heads back.
         let returning = b.status == .ocs
-        let threats = view.others.filter {
-            !$0.isGhost && (returning || $0.rightOfWay?.keepClear == view.seat)
-                && ($0.position - b.position).length < Self.keepClearRange
+        // Not returning, she leaves out a boat she misjudges her encounter with (#280, `judgeEncounters`).
+        let threats = view.others.filter { other in
+            guard !other.isGhost, (other.position - b.position).length < Self.keepClearRange else { return false }
+            if returning { return true }
+            guard let right = other.rightOfWay, right.keepClear == view.seat else { return false }
+            return !misjudges(other, right.rule)
         }
         guard !threats.isEmpty else { return nil }
         let speed = max(b.speed, 1)
@@ -407,3 +464,4 @@ extension BotBrain {
         return (line.pin.position + direction * along.clamped(to: inner), inner.contains(along))
     }
 }
+

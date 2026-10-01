@@ -40,7 +40,7 @@ public struct BotWeaknesses: Hashable, Sendable {
     /// projects the other boat on in a straight line at its velocity now, refreshed every decision, so a boat whose
     /// autohelm follows a shift is predicted on its new course as soon as it turns.
     public var keepClearLookahead: Double
-    /// The chance, each time she meets a boat she must keep clear of racing under a rule in `misjudgeScope`, that she
+    /// The chance, each time she meets a boat she must keep clear of under a rule in `misjudgeScope`, that she
     /// misjudges the encounter (#19, #103: "they foul only by misjudging"): she believes she holds her rights and sails
     /// on, so fails to keep clear. Drawn once an encounter, never a turn towards the other boat; none from National's
     /// band up.
@@ -121,9 +121,9 @@ public struct BotWeaknesses: Hashable, Sendable {
     /// #99's and #101's tuned lookahead, now a weakness of its own (#103, placeholder).
     public static func keepClearLookahead(skill: Double) -> Double { 2.5 + 2 * skill }
 
-    /// The rules whose encounters she can misjudge (#103): the give-way rules racing, rules 10, 11 and 12, and the
-    /// mark-room she owes (18.2). Not rule 13 (a tacking boat finishes her tack whatever she believes), rule 21 (her
-    /// penalty turns and her return from OCS keep clear of every boat) or her conduct before her start (#99, #280).
+    /// The rules whose encounters she can misjudge (#103): the give-way rules, rules 10, 11 and 12, racing and before
+    /// her start (#280), and the mark-room she owes (18.2). Not rule 13 (a tacking boat finishes her tack whatever she
+    /// believes) or rule 21 (her penalty turns and her return from OCS keep clear of every boat).
     public static let misjudgeScope: Set<RacingRule> = [.portStarboard, .windwardLeeward, .clearAstern, .givingMarkRoom]
 
     /// How fast her misjudging grows with her skill deficit (#103, placeholder): her chance is this times the square of
