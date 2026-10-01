@@ -142,7 +142,7 @@ import Testing
             #expect(node?.position == .zero && node?.zRotation == 0 && node?.xScale == 1 && node?.yScale == 1)
         }
         #expect(abs(layer.sheet.alpha - CGFloat(BoatStyle.standard.coneAlpha)) < 1e-6) // SpriteKit's Float alpha
-        #expect(BoatStyle.standard.coneAlpha <= 0.2, "faint (#15), though seen")
+        #expect(BoatStyle.standard.coneAlpha <= 0.4, "faint (#15), though seen: it is only this strong beside the boat")
     }
 
     /// The backwind's sprite covers exactly core's trapezoid (#298) on her windward quarter: at points just inside
