@@ -28,7 +28,8 @@ final class BoatNode: SKNode {
     private var sailAngle: CGFloat = 0
     /// The current roll miss's flog (`BoatPose.RollCue.flog`), timed in race seconds.
     private var flog = FlogTimer()
-    /// Your roll ring (#222): a sprite on your boat only, nil for the rest of the fleet.
+    /// Your roll ring (#222): a sprite on your boat only, nil for the rest of the fleet, and always there on yours so the
+    /// scene's node count doesn't depend on her class; it stays hidden for a class with no roll tack.
     private let ring: SKSpriteNode?
     private let brokenRing: SKTexture
     private let solidRing: SKTexture
@@ -84,7 +85,7 @@ final class BoatNode: SKNode {
 
         solidRing = RollRingArt.texture(broken: false)
         brokenRing = RollRingArt.texture(broken: true)
-        let rollRing = isMine && boatClass.rollTack != nil ? SKSpriteNode(texture: solidRing) : nil
+        let rollRing = isMine ? SKSpriteNode(texture: solidRing) : nil
         rollRing?.color = CuePalette.cueWhite.uiColor
         rollRing?.colorBlendFactor = 1
         rollRing?.zPosition = Layer.ring
