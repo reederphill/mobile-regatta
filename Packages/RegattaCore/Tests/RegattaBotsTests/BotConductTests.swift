@@ -549,21 +549,33 @@ import RegattaCore
         ])
     }
 
+    /// One decision `sailOne` records.
+    struct Sailed {
+        var decision: BotDecision
+        var keepClear: RacingRule?
+        var gap: Double
+        var ahead: Double
+        var twa: Double
+    }
+
     /// Sails `race` for `seconds` with only `seat`'s bot at the helm, the other boat holding what her autohelm holds:
-    /// every decision of the bot's, with the rule she keeps clear of the other boat under as she made it (nil: none) and
-    /// the metres between them, centre to centre, and every event.
+    /// every decision of the bot's, with the rule she keeps clear of the other boat under as she made it (nil: none),
+    /// the metres between them, centre to centre, how far she is ahead of the other boat along its heading, and her
+    /// wind angle, and every event.
     static func sailOne(_ race: Race, seat: Int, seconds: Double, skill: Double = 1, weaknesses: BotWeaknesses? = nil,
-                        planned: Tack? = nil)
-        -> (decisions: [(decision: BotDecision, keepClear: RacingRule?, gap: Double)], kinds: [RaceEvent.Kind]) {
+                        planned: Tack? = nil) -> (decisions: [Sailed], kinds: [RaceEvent.Kind]) {
         var pilot = Pilot(seat: seat, plannedTack: planned, race: race, skill: skill, weaknesses: weaknesses)
-        var decisions: [(decision: BotDecision, keepClear: RacingRule?, gap: Double)] = []
+        var decisions: [Sailed] = []
         var kinds: [RaceEvent.Kind] = []
         for _ in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
             let view = race.seatView(for: seat)
             let right = view.others.first?.rightOfWay
             let gap = view.others.first.map { ($0.position - view.own.position).length } ?? .infinity
+            let ahead = view.others.first.map { (view.own.position - $0.position).dot(Vec2.heading($0.heading)) } ?? 0
             let keepClear = right?.keepClear == seat ? right?.rule : nil
-            if let decision = pilot.drive(race) { decisions.append((decision, keepClear, gap)) }
+            if let decision = pilot.drive(race) {
+                decisions.append(Sailed(decision: decision, keepClear: keepClear, gap: gap, ahead: ahead, twa: view.own.twa))
+            }
             race.step()
             kinds += race.drainEvents().map(\.kind)
         }
@@ -571,8 +583,9 @@ import RegattaCore
     }
 
     /// #280 acceptance: before the gun, a windward boat holding near close-hauled (#99's hold, a few degrees outside
-    /// the no-go zone) with a leeward boat converging on her keeps clear (rule 11): she never bears away towards her, and
-    /// the rule 11 call never comes. #99's luff target sat inside `steer`'s no-go clamp, so she luffed by nothing.
+    /// the no-go zone) with a leeward boat converging on her keeps clear (rule 11): she luffs (rudder towards the wind),
+    /// or, with no luff left, eases and drops astern; she never bears away towards her, and the rule 11 call never
+    /// comes. #99's luff target sat inside `steer`'s no-go clamp, so she luffed by nothing.
     @Test func windwardLuffHoldingNearCloseHauledLuffs() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 7, 13] {
@@ -589,6 +602,20 @@ import RegattaCore
                     $0.keepClear == .windwardLeeward && $0.gap < close && $0.decision.input.rudder < 0
                 }
                 if !bearsAway.isEmpty { failures.append("\(name): bore away keeping clear \(bearsAway.count) times") }
+                // Luffing on starboard turns her to starboard, away from the leeward boat: inside her hold angle, the luff
+                // #99's clamp took away. Luffed to the floor and still inside the distance she keeps, with the gun more
+                // than `startLuffEaseSeconds` off, she eases and drops astern too.
+                let keeping = sailed.decisions.filter { $0.keepClear == .windwardLeeward && $0.gap < close }
+                if let first = keeping.first, let last = keeping.last {
+                    let view = race.seatView(for: 1)
+                    let luffs = keeping.contains { $0.twa < BotBrain.holdAngle(view) }
+                    if !luffs { failures.append("\(name): never luffed inside her hold keeping clear") }
+                    // Within half a degree of the luff floor, 1° outside the no-go zone.
+                    let floor = BoatDynamics.noGoAngle(race.boatClass.polar) + deg2rad(1.5)
+                    let atFloor = keeping.contains { $0.twa < floor }
+                    let dropsAstern = keeping.contains { $0.decision.input.ease } && last.ahead < first.ahead
+                    if atFloor && !dropsAstern { failures.append("\(name): at the luff floor, never eased astern") }
+                }
                 if !sailed.decisions.contains(where: { $0.keepClear == .windwardLeeward }) {
                     failures.append("\(name): never windward")
                 }

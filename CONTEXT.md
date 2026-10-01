@@ -56,6 +56,14 @@ _Avoid_: hold heading, stand on
 A right-of-way boat keeping the water she's sailing in rather than giving it up to a boat that must keep clear of her: she holds course, and luffs only within the room rule 16.1 leaves the other boat.
 _Avoid_: hunting (steering at a boat to force a foul, which bots never do)
 
+**Encounter**:
+Two boats coming within 2 hull lengths of each other while rules 10–13 name one of them to keep clear, counted once until they separate past that again. The bot suite's conduct gate is the share of encounters that end in a rule call.
+_Avoid_: incident (the umpire's ruling trigger), meeting
+
+**Misjudgement**:
+A bot that must keep clear in an encounter believing she holds her rights, drawn once an encounter by her skill, so she sails on and fouls. It only ever leaves out her give-way manoeuvre, never turns her towards a boat; none from National up.
+_Avoid_: mistake, random foul
+
 **Zone**:
 The water within 3 hull lengths of a mark; the rules configuration sets the size. A boat is in it once any part of her hull is, and rule 18 applies between two boats racing to the same mark only while at least one of them is in its zone.
 

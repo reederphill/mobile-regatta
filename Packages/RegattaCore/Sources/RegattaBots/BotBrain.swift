@@ -121,7 +121,8 @@ struct BotBrain: Sendable {
     /// Her groove choice (`BotWeaknesses.angleMissRate`): radians off the groove she sails, past its snap (0: in
     /// it), until the race clock reaches `until`.
     var grooveMiss = (offset: 0.0, until: -Double.infinity)
-    /// Her judgement of each boat she has met racing and must keep clear of (#103, `judgeEncounters`), by its seat:
+    /// Her judgement of each boat she has met, racing or before her start (#280), and must keep clear of under a rule in
+    /// `BotWeaknesses.misjudgeScope` (#103, `judgeEncounters`), by its seat:
     /// true if she misjudges that encounter and believes she holds her rights. Kept while that boat is within
     /// `keepClearRange` of her.
     var misjudged: [Int: Bool] = [:]
@@ -173,9 +174,11 @@ struct BotBrain: Sendable {
         // (#13) and leave her head to wind; it's over in a couple of seconds.
         if boat.autohelm?.isTapping == true { return BotDecision(input: .neutral) }
         let desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
-        if let heading = evasiveHeading(boat, view, desired: desired) {
-            let ease = aim.ease && aim.tack == boat.tack || easesKeepingClear(boat, view, heading: heading)
-            return BotDecision(input: clearingQuarter(boat, view, steer(boat, toHeading: heading, view).eased(ease)))
+        if let evasion = evasion(boat, view, desired: desired) {
+            let ease = aim.ease && aim.tack == boat.tack || evasion.dropsAstern
+                || easesKeepingClear(boat, view, heading: evasion.heading)
+            let input = steer(boat, toHeading: evasion.heading, view, closest: evasion.closest)
+            return BotDecision(input: clearingQuarter(boat, view, input.eased(ease)))
         }
         if aim.tack != boat.tack {
             if canTap(boat, view) {
@@ -237,7 +240,8 @@ struct BotBrain: Sendable {
     /// all again (`canGiveUpTurn`), and not towards a mark near her. Otherwise she turns on whoever is near: she never
     /// eases or centres the rudder mid-turn to wait, since the autohelm taking her swings her heading back against
     /// the turn, and the tick she takes the helm again to turn on gives the turn up, perhaps too late to start it
-    /// again. Before her start she starts one only in clear water.
+    /// again. Before her start she starts one only in clear water, and putting it off there keeps clear of every boat
+    /// until `penaltyPutOffKeepClearSeconds` before the gun.
     private mutating func penaltyInput(_ b: SeatView.OwnBoat, _ view: SeatView) -> BoatInput? {
         guard let owed = b.penalty else {
             penaltyTurn = nil
@@ -258,13 +262,13 @@ struct BotBrain: Sendable {
         let keepClear = owed.isStarted ? penaltyKeepClear(b, view) : nil
         guard let turn = penaltyTurn ?? startPenaltyTurn(b, view, owed) else {
             // Not turning it yet, but 30° into it all the same (a rounding counts towards it): she keeps clear. Before
-            // her start, putting it off in the crowd, she keeps clear of every boat already (#280): any turn she sails
-            // there counts towards it, and 30° in, a boat close aboard would have her foul again.
-            if keepClear == nil, b.status == .prestart, let clear = penaltyKeepClear(b, view),
-               !crossesEarly(b, view, heading: clear.heading) {
-                return steer(b, toHeading: clear.heading, view)
-            }
-            return keepClear.map { steer(b, toHeading: $0.heading, view) }
+            // her start, putting it off in the crowd while the gun is further off than `penaltyPutOffKeepClearSeconds`,
+            // she keeps clear of every boat already (#280): any turn she sails there counts towards it, and 30° in, a
+            // boat close aboard would have her foul again. Either way, before her start not over the line early.
+            let puttingOff = b.status == .prestart && -view.time > Self.penaltyPutOffKeepClearSeconds
+            guard let clear = keepClear ?? (puttingOff ? penaltyKeepClear(b, view) : nil),
+                  !crossesEarly(b, view, heading: clear.heading) else { return nil }
+            return steer(b, toHeading: clear.heading, view)
         }
         let markAway = nearestMark(b, view).map { Self.away(from: $0.offset, b) }
         guard let keepClear, keepClear.away != turn, (markAway ?? keepClear.away) == keepClear.away, !penaltyGivenUp,
@@ -325,6 +329,12 @@ struct BotBrain: Sendable {
     private static func away(from offset: Vec2, _ b: SeatView.OwnBoat) -> Double {
         offset.dot(b.forward.rightPerp) > 0 ? -1 : 1
     }
+
+    /// Seconds before the gun from which a boat putting her penalty turn off before her start no longer keeps clear
+    /// of every boat meanwhile (`penaltyInput`, #280): later she is lining up for the line. #280 measured keeping
+    /// clear to the gun at on time 0.645 against 0.665 on the start population, and 0.53 against 0.61 on the acceptance
+    /// run, against the start gate's 0.60.
+    static let penaltyPutOffKeepClearSeconds = 30.0
 
     /// Hull lengths of water around her, before her start, she waits for before a penalty turn (#99): the
     /// crowd below the line holds, waits and crosses on every course, and a boat turning a penalty keeps clear
@@ -441,13 +451,14 @@ struct BotBrain: Sendable {
     }
 
     /// Steers with the rudder for `heading`, keeping clear or off a mark: on her own tack, never through
-    /// head to wind or past the by-the-lee limit (tacks and gybes are the tap's), nor closer to the wind than 5° outside
-    /// the no-go zone, or before her start `startLuffFloor`. Centred once she's on it.
-    private func steer(_ b: SeatView.OwnBoat, toHeading heading: Double, _ view: SeatView) -> BoatInput {
+    /// head to wind or past the by-the-lee limit (tacks and gybes are the tap's), nor closer to the wind than
+    /// `closest`, by default 5° outside the no-go zone (a windward boat's luff before her start goes closer, #280,
+    /// `startLuff`). Centred once she's on it.
+    private func steer(_ b: SeatView.OwnBoat, toHeading heading: Double, _ view: SeatView,
+                       closest: Double? = nil) -> BoatInput {
         let polar = view.boatClass.polar
         var target = b.boomSide.sailingAngle(relativeWind: wrapAngle(b.windDirection - heading))
-        // Before her start she holds just outside the no-go zone (#99), and luffs from there (#280).
-        let closest = b.status == .prestart ? Self.startLuffFloor(view) : BoatDynamics.noGoAngle(polar) + deg2rad(5)
+        let closest = closest ?? BoatDynamics.noGoAngle(polar) + deg2rad(5)
         if target > -.pi / 2 && target < closest { target = closest }
         let byTheLee = max(0, polar.byTheLeeLimit(tws: b.windSpeed) - deg2rad(5))
         if target <= -.pi / 2 && .pi + target > byTheLee { target = byTheLee - .pi }
@@ -656,30 +667,48 @@ struct BotBrain: Sendable {
     /// course instead when that turn would take her, the right-of-way boat, towards a boat that must keep clear of
     /// her (#101, `turnsTowardsKeepClearBoat`) and her course clears the mark.
     func evasiveHeading(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
+        evasion(b, view, desired: desired)?.heading
+    }
+
+    /// A heading she steers for instead of her desired one (`evasion`), and how: as close to the wind as `steer` goes
+    /// unless `closest` says closer (a windward boat's luff before her start, `startLuff`, #280), and eased to drop
+    /// astern if `dropsAstern`.
+    struct Evasion: Sendable {
+        var heading: Double
+        var closest: Double? = nil
+        var dropsAstern = false
+    }
+
+    /// `evasiveHeading`, with how she steers it (`Evasion`): only her keep-clear heading, when neither a mark nor the
+    /// edge turns her off it, carries more than the heading.
+    func evasion(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Evasion? {
         let keepingClear = keepClear(b, view, desired: desired)
-        var evasive = keepingClear.map { avoidMarks(b, view, desired: $0) ?? $0 } ?? avoidMarks(b, view, desired: desired)
-        if keepingClear == nil, b.status == .racing, let off = evasive,
+        var evasive = keepingClear.map { kept in avoidMarks(b, view, desired: kept.heading).map { Evasion(heading: $0) } ?? kept }
+            ?? avoidMarks(b, view, desired: desired).map { Evasion(heading: $0) }
+        if keepingClear == nil, b.status == .racing, let off = evasive?.heading,
            turnsTowardsKeepClearBoat(b, view, turn: wrapAngle(off - b.heading) > 0 ? 1 : -1),
            avoidMarks(b, view, desired: b.heading) == nil {
-            evasive = b.heading
+            evasive = Evasion(heading: b.heading)
         }
-        return avoidEdges(b, view, desired: evasive ?? desired) ?? evasive
+        return avoidEdges(b, view, desired: evasive?.heading ?? desired).map { Evasion(heading: $0) } ?? evasive
     }
 
     /// A heading that keeps her clear if a collision is coming and she is the one that must keep clear, or racing,
     /// must give the other mark-room (#101). Before her start (#99) she keeps clear on port by the water
     /// (`startKeepClear`), and on starboard as `ruleKeepClear` has her unless that would take her over the line early:
     /// a luff (`startLuff`, #280) only if it would within `luffLineSeconds`, since she bears away again once clear.
-    private func keepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Double? {
+    private func keepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Evasion? {
         let lookahead = keepClearLookahead
         guard b.status == .prestart || b.status == .ocs else {
             return ruleKeepClear(b, view, desired: desired, lookahead: lookahead)
         }
-        if b.tack == .port || b.status == .ocs { return startKeepClear(b, view, desired: desired, lookahead: lookahead) }
-        guard let heading = ruleKeepClear(b, view, desired: desired, lookahead: lookahead) else { return nil }
-        guard crossesEarly(b, view, heading: heading, within: isStartLuff(b, view, heading) ? Self.luffLineSeconds : nil)
-        else { return heading }
-        return startKeepClear(b, view, desired: desired, lookahead: lookahead) ?? heading
+        if b.tack == .port || b.status == .ocs {
+            return startKeepClear(b, view, desired: desired, lookahead: lookahead).map { Evasion(heading: $0) }
+        }
+        guard let kept = ruleKeepClear(b, view, desired: desired, lookahead: lookahead) else { return nil }
+        let within = isStartLuff(b, view, kept.heading) ? Self.luffLineSeconds : nil
+        guard crossesEarly(b, view, heading: kept.heading, within: within) else { return kept }
+        return startKeepClear(b, view, desired: desired, lookahead: lookahead).map { Evasion(heading: $0) } ?? kept
     }
 
     /// Seconds ahead she looks for a collision she must keep clear of: further, the more skilled she is
@@ -690,12 +719,12 @@ struct BotBrain: Sendable {
     /// finishing a tack, or turning away. Racing, her give-way manoeuvre for each relation is `racingKeepClear`'s
     /// (#101), and she gives the boat she owes mark-room to (`SeatView.OwnBoat.markRoom`) room as she would keep
     /// clear of her, whatever rules 10–13 give her.
-    private func ruleKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Double? {
+    private func ruleKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Evasion? {
         for other in view.others where !other.isGhost {
             if b.status == .racing {
                 guard let rule = keepClearRule(b, view, other), !misjudges(other, rule),
                       isAboutToHit(other, b, view, desired: desired, lookahead: lookahead) else { continue }
-                return racingKeepClear(b, view, from: other, rule: rule, desired: desired, lookahead: lookahead)
+                return Evasion(heading: racingKeepClear(b, view, from: other, rule: rule, desired: desired, lookahead: lookahead))
             }
             guard isAboutToHit(other, b, view, desired: desired, lookahead: lookahead) else { continue }
             guard let right = other.rightOfWay, right.keepClear == view.seat, !misjudges(other, right.rule) else { continue }
@@ -709,9 +738,9 @@ struct BotBrain: Sendable {
             // #280). Misjudging the encounter (#103, `judgeEncounters`), she sails on.
             switch right.rule {
             case .portStarboard:
-                return b.windDirection + side * min(max(deg2rad(85), b.twa + deg2rad(30)), deg2rad(150))
+                return Evasion(heading: b.windDirection + side * min(max(deg2rad(85), b.twa + deg2rad(30)), deg2rad(150)))
             case .whileTacking:
-                return finishingTack(b, view)
+                return Evasion(heading: finishingTack(b, view))
             case .windwardLeeward:
                 return startLuff(b, view, desired: desired, lookahead: lookahead)
             default:
@@ -720,7 +749,7 @@ struct BotBrain: Sendable {
                 let otherIsToStarboard = offset.dot(b.forward.rightPerp) > 0
                 let turn: Double = otherIsToStarboard ? -1 : 1
                 if turn * side < 0 { return startLuff(b, view, desired: desired, lookahead: lookahead) }
-                return sailable(b.heading + turn * deg2rad(35), wind: b.windDirection)
+                return Evasion(heading: sailable(b.heading + turn * deg2rad(35), wind: b.windDirection))
             }
         }
         return nil
