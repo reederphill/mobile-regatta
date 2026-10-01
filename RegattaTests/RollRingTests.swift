@@ -21,19 +21,23 @@ import Testing
         var timer = RollRingTimer()
         let crossing = 90.0 / Double(Race.tickRate)
         let boat = Self.tacking()
-        #expect(timer.ring(for: boat, window: Self.window, time: crossing - 0.1, seconds: Self.seconds) == nil)
+        let before = timer.ring(for: boat, window: Self.window, time: crossing - 0.1, seconds: Self.seconds)
+        #expect(before == nil)
         let start = try #require(timer.ring(for: boat, window: Self.window, time: crossing, seconds: Self.seconds))
         let late = try #require(timer.ring(for: boat, window: Self.window, time: crossing + 0.4, seconds: Self.seconds))
         #expect(start.kind == .window && late.kind == .window)
         #expect(start.progress == 0 && late.progress > 0.7)
         #expect(late.radiusShare < start.radiusShare)
-        #expect(timer.ring(for: boat, window: Self.window, time: crossing + 0.6, seconds: Self.seconds) == nil)
+        let after = timer.ring(for: boat, window: Self.window, time: crossing + 0.6, seconds: Self.seconds)
+        #expect(after == nil)
 
         var upright = boat
         upright.isTacking = false
         upright.tackCrossingTick = nil
-        #expect(timer.ring(for: upright, window: Self.window, time: crossing, seconds: Self.seconds) == nil)
-        #expect(timer.ring(for: boat, window: nil, time: crossing, seconds: Self.seconds) == nil, "a class with no roll tack")
+        let notTacking = timer.ring(for: upright, window: Self.window, time: crossing, seconds: Self.seconds)
+        let noRoll = timer.ring(for: boat, window: nil, time: crossing, seconds: Self.seconds)
+        #expect(notTacking == nil)
+        #expect(noRoll == nil, "a class with no roll tack")
     }
 
     /// A tap waiting on the crossing shows a steady ring; a hit bursts out and a miss collapses in, each fading over
@@ -41,7 +45,8 @@ import Testing
     @Test func hitAndMissShowForTheirSecondsOnly() throws {
         var timer = RollRingTimer()
         let pending = Self.tacking(crossedAtTick: nil, roll: .pending(tapTick: 80))
-        #expect(timer.ring(for: pending, window: Self.window, time: 2, seconds: Self.seconds)?.kind == .pending)
+        let waiting = timer.ring(for: pending, window: Self.window, time: 2, seconds: Self.seconds)
+        #expect(waiting?.kind == .pending)
 
         for (roll, kind) in [(RollTack.hit, RollRing.Kind.hit), (.missed, .miss)] {
             var timer = RollRingTimer()
@@ -51,9 +56,11 @@ import Testing
             #expect(first.kind == kind && first.progress == 0 && mid.progress > 0.4 && mid.alphaShare < first.alphaShare)
             #expect(first.isBroken == (kind == .miss))
             #expect((mid.radiusShare > first.radiusShare) == (kind == .hit))
-            #expect(timer.ring(for: boat, window: Self.window, time: 5.8, seconds: Self.seconds) == nil)
+            let over = timer.ring(for: boat, window: Self.window, time: 5.8, seconds: Self.seconds)
+            #expect(over == nil)
             // Drawn again from an earlier time (an online re-prediction): it starts over.
-            #expect(timer.ring(for: boat, window: Self.window, time: 4, seconds: Self.seconds)?.progress == 0)
+            let again = timer.ring(for: boat, window: Self.window, time: 4, seconds: Self.seconds)
+            #expect(again?.progress == 0)
         }
     }
 }
