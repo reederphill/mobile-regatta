@@ -13,7 +13,7 @@ import RegattaServices
 /// - `-timescale <n>` runs the simulation at `n`× real time.
 /// - `-uitesting` marks a UI test run.
 /// - `-scheme halves|tiller` overrides the device's steering scheme (#112).
-/// - `-camera course|boat` overrides the device's camera (#113).
+/// - `-camera course|boat` overrides the device's camera as course-up or boat-up (#113).
 /// - `-online` starts an online race on the dev server's instant race at launch (#68, Debug builds).
 /// - `-onlineHost <host:port>` is the dev race server, instead of the Settings page's field (Debug builds).
 /// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override).
@@ -30,6 +30,8 @@ struct LaunchOptions: Equatable {
         case halves, tiller
     }
 
+    /// `-camera`: `course` is course-up and `boat` boat-up (#113). A render fixture's `camera` (#62) takes the same
+    /// names for the north-up cameras it was drawn with before #113: the whole course, and following your boat.
     enum CameraMode: String, CaseIterable {
         case course, boat
     }

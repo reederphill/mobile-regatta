@@ -265,12 +265,22 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "camera", title: "Camera",
-                note: "How the boat camera frames you (#224's framing; its auto zoom isn't built yet). Drawn only: never logged.",
+                note: "How the camera frames you (#113, #224): boat-up's lag, auto framing, the pinch-zoom limits and hold, "
+                    + "and the follow camera with auto framing off. Drawn only: never logged.",
                 applies: .live,
                 sliders: [
-                    camera("lookAheadSeconds", "Look-ahead", \.lookAheadSeconds, 0...6, 0.25, unit: " s"),
+                    camera("boatUpLagSeconds", "Boat-up lag", \.boatUpLagSeconds, 0.1...3, 0.1, unit: " s"),
+                    camera("framingHullLengths", "Framed boats within", \.framingHullLengths, 0...15, 0.5, unit: " L"),
+                    camera("framingUpwindSeconds", "Upwind water framed", \.framingUpwindSeconds, 0...60, 1, unit: " s"),
+                    camera("lineFramingSecondsAfterGun", "Line framed after the gun", \.lineFramingSecondsAfterGun, 0...60, 1, unit: " s"),
+                    camera("framingMargin", "Framing margin", \.framingMargin, 1...2, 0.05),
+                    camera("framingEaseRate", "Framing zoom ease", \.framingEaseRate, 0.1...5, 0.1, unit: " /s"),
+                    camera("minZoom", "Widest zoom", \.minZoom, 0.1...1, 0.05),
+                    camera("maxZoom", "Closest zoom", \.maxZoom, 1...4, 0.1),
+                    camera("pinchHoldSeconds", "Pinch-zoom hold", \.pinchHoldSeconds, 0...15, 0.5, unit: " s"),
                     camera("followRate", "Follow rate", \.followRate, 0.5...10, 0.25, unit: " /s"),
-                    camera("defaultZoom", "Zoom", \.defaultZoom, 0.45...2.2, 0.05),
+                    camera("lookAheadSeconds", "Look-ahead (framing off)", \.lookAheadSeconds, 0...6, 0.25, unit: " s"),
+                    camera("defaultZoom", "Zoom (framing off)", \.defaultZoom, 0.45...2.2, 0.05),
                     camera("courseMargin", "Course view margin", \.courseMargin, 1...2, 0.05),
                 ]),
             TuningGroup(

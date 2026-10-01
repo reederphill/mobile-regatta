@@ -66,12 +66,13 @@ final class AppModel {
             guard deviceSettings != oldValue else { return }
             deviceSettings.save(to: defaults)
             haptics.isOn = deviceSettings.haptics
-            controls.steering = ControlSettings.steering(deviceSettings.steering, override: launchOptions.steeringScheme)
+            controls.update(deviceSettings, launchOptions: launchOptions)
         }
     }
     /// Every race's haptics, on while Settings' Haptics is (#110): set here once per change, not read per haptic.
     @ObservationIgnored let haptics: GatedHaptics
-    /// Every race's steering scheme (#112): Settings', or `-scheme`'s over it; set here once per change.
+    /// Every race's steering scheme (#112), camera and auto framing (#113): Settings', or `-scheme`'s and `-camera`'s
+    /// over them; set here once per change.
     @ObservationIgnored let controls: ControlSettings
     /// Where `deviceSettings` lives.
     @ObservationIgnored let defaults: UserDefaults
@@ -102,7 +103,7 @@ final class AppModel {
         let deviceSettings = DeviceSettings(defaults: defaults)
         self.deviceSettings = deviceSettings
         haptics = GatedHaptics(isOn: deviceSettings.haptics)
-        controls = ControlSettings(steering: ControlSettings.steering(deviceSettings.steering, override: launchOptions.steeringScheme))
+        controls = ControlSettings(deviceSettings, launchOptions: launchOptions)
         #if DEBUG
         tuning = TuningModel(store: launchOptions.uiTesting ? .inMemory : .standard)
         #endif

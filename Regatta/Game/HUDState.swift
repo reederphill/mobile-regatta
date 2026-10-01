@@ -40,7 +40,17 @@ struct HUDState {
     var pressure: PressureTone?
     var course: CourseLayout?
 
+    /// The compass heading at the top of the screen (`GameScene.viewHeading`, #113), radians: course-up's axis or
+    /// boat-up's lagged heading.
+    var viewHeading = 0.0
+
     var isUpwind: Bool { twaDegrees < 90 }
+
+    /// Where compass bearing `compass` (radians) points on screen, clockwise from screen up: what an arrow drawn
+    /// pointing up turns by, so it reads right in course-up and boat-up (#13).
+    func screenAngle(ofCompass compass: Double) -> Double {
+        wrapAngle(compass - viewHeading)
+    }
 
     init() {}
 
