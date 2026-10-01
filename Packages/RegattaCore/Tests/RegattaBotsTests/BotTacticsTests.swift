@@ -80,7 +80,8 @@ import Testing
     // MARK: - Fleet tactics (#234)
 
     /// Open water a third of the way up seed `seed`'s first beat after the gun, nobody placed yet, the seats as given,
-    /// in a steady wind: the wind there at the gun, held, so no shift plays a part in what a bot does there. The wind,
+    /// in a steady wind: the wind's strength there at the gun, held, down the course's axis, so no shift plays a part in
+    /// what a bot does there. The wind,
     /// the best upwind in it, and the boats' hull length.
     struct Scene {
         let race: Race
@@ -94,7 +95,9 @@ import Testing
             for _ in 0..<(drawn.setup.startSequenceTicks + Race.tickRate) { drawn.step() }
             let c = drawn.course
             centre = c.startLine.centre + c.upwind * (c.beat * 0.35)
-            let wind = drawn.groundWind(at: centre)
+            // Its strength there at the gun, down the course's axis: neither tack lifted, so her own plan leans neither
+            // way (a tack on a boat's wind must pay against it, `paysToTackOnWind`).
+            let wind = GroundWind(direction: c.axis, speed: drawn.groundWind(at: centre).speed)
             race = try! Race(setup: drawn.setup, files: RaceFiles(resolving: drawn.setup),
                              mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)), current: nil, wind: { _ in wind })
             for _ in 0..<(race.setup.startSequenceTicks + Race.tickRate) { race.step() }
@@ -310,14 +313,17 @@ import Testing
         }
     }
 
-    /// #234 acceptance: in clear air with a boat in her backwind (the lee-bow's geometry, `LeeBowTests`: 1.6 lengths
-    /// astern of her and 0.6 to windward), a National bot holds her lane on a header past her threshold that would
-    /// tack her with no boat there; a header past twice her threshold tacks her all the same.
+    /// #234 acceptance: in clear air with a boat on her tack astern and to windward of her (1.5 lengths astern and 2.5 to
+    /// windward), a National bot holds her lane on a header past her threshold that would tack her with no boat there; a
+    /// header past twice her threshold tacks her all the same, but like any fleet tactic's tack, never onto a board she
+    /// has overstood, nor with the boat too close to tack clear of (in her backwind, 1.6 lengths astern and 0.6 to
+    /// windward, `LeeBowTests`' geometry).
     @Test func holdsItsLane() throws {
         for seed in Self.fleetSeeds {
-            func tack(header: Double, neighbour: Bool) throws -> Tack {
+            func tack(header: Double, neighbour: Bool, close: Bool = false, overstood: Bool = false) throws -> Tack {
                 let scene = Scene(seed: seed)
-                var behind = scene.offStarboardBoat(at: scene.centre, ahead: -1.6, leeward: -0.6)
+                var behind = close ? scene.offStarboardBoat(at: scene.centre, ahead: -1.6, leeward: -0.6)
+                    : scene.offStarboardBoat(at: scene.centre, ahead: -1.5, leeward: -2.5)
                 if !neighbour { behind = behind + Vec2.heading(scene.wind) * 400 }
                 try scene.place([scene.beating(.starboard, at: scene.centre), scene.beating(.starboard, at: behind)])
                 scene.race.step()
@@ -331,11 +337,15 @@ import Testing
                 // Headed on starboard: backed.
                 brain.senses.direction = view.course.axis - header * threshold
                 brain.senses.directionRate = 0
-                return brain.upwindTack(view.own, view, planned: .starboard)
+                return brain.upwindTack(view.own, view, planned: .starboard) { _ in overstood }
             }
             #expect(try tack(header: 1.5, neighbour: false) == .port, "seed \(seed): the header tacks her alone")
             #expect(try tack(header: 1.5, neighbour: true) == .starboard, "seed \(seed): she holds her lane")
             #expect(try tack(header: 2.5, neighbour: true) == .port, "seed \(seed): a big header tacks her all the same")
+            #expect(try tack(header: 2.5, neighbour: true, overstood: true) == .starboard,
+                    "seed \(seed): but not onto a board she has overstood")
+            #expect(try tack(header: 2.5, neighbour: true, close: true) == .starboard,
+                    "seed \(seed): nor with a boat too close to tack clear of")
         }
     }
 
@@ -347,13 +357,13 @@ import Testing
             let scene = Scene(seats: seats, seed: 9)
             let starboard = scene.centre
             let other = scene.offStarboardBoat(at: starboard, ahead: -1, leeward: -4)
-            let port = scene.offStarboardBoat(at: starboard, ahead: 3.2, leeward: 1)
+            let port = scene.offStarboardBoat(at: starboard, ahead: 4, leeward: 1.75)
             try scene.place([scene.beating(.port, at: port), scene.beating(.starboard, at: starboard),
                              scene.beating(.starboard, at: other)])
             let view = scene.race.seatView(for: 0)
             var brain = Self.pilot(seat: 0, scene.race, planned: .port).brain
             brain.observe(view.own, view)
-            let play = brain.fleetPlay(view.own, view, planned: .port, headed: 0, threshold: deg2rad(5)) { _ in false }
+            let play = brain.fleetPlay(view.own, view, planned: .port, headed: 0, lean: 0, threshold: deg2rad(5)) { _ in false }
             var deciding = Self.pilot(seat: 0, scene.race, planned: .port).brain
             return (play, deciding.decide(view))
         }

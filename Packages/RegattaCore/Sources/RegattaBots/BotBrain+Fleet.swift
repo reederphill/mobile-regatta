@@ -8,9 +8,11 @@ import RegattaCore
 //   tack away, on all but a big header. Her tactical choice; defending a lane as the right-of-way boat under the
 //   rules is #101's (`holdingCourse`).
 // - Cover: she tacks with the nearest boat behind her that has tacked away, to stay between it and the mark.
-// - Lee-bow: on port, meeting a starboard boat she can just cross, she tacks onto her lee bow, putting her in her
-//   backwind; one she can't cross she ducks, as she keeps clear (`racingKeepClear`), no code here.
-// - Tack on her wind: ahead of a boat on the other tack, she tacks to put her in her wind shadow.
+// - Lee-bow: on port, meeting a starboard boat she can just cross, she tacks onto her lee bow when her tack, as she
+//   reckons it, would leave her in her backwind; one she can't cross she ducks, as she keeps clear (`racingKeepClear`),
+//   no code here.
+// - Tack on her wind: ahead of a boat on the other tack, she tacks to put her in her wind shadow, when that pays
+//   against her own plan (the tack's cost, the shift, puffs and pressure).
 //
 // Targets are chosen from her `SeatView` alone (#98), by where the boats are and how they sail: never by who sails
 // them (`BotSourceTests` keeps the seat kinds out of every brain file). How willing she is to play them is her style's
@@ -70,19 +72,30 @@ extension BotBrain {
         static let coverAbeam = 2.0
         static let coverBehind = 1.0
         /// A lee-bow (`LeeBowTests`: a tack 3 L ahead and 1.5 L to leeward of a starboard boat lands her on her lee
-        /// bow): she tacks between these lengths to leeward of the starboard boat's track, when she can just cross
-        /// her: sailing on, she would pass clear of her (`BotBrain.keepClearDistance` or more, so she isn't ducking
-        /// her), crossing her track no more than `leeBowCrossing` lengths ahead of her.
-        static let leeBowLeeward = (min: 0.6, max: 1.2)
-        static let leeBowCrossing = 3.0
+        /// bow, the starboard boat 1 to 2.5 L astern of her in her backwind): on port, to leeward of a starboard boat
+        /// within `leeBowRange` she can just cross (sailing on she would pass ahead of her and clear, as she keeps clear,
+        /// `BotBrain.keepClearDistance`), she tacks when her tack now, as she reckons it (`tackCarry`, `tackPickUp`),
+        /// would leave the starboard boat in her backwind and `leeBowAstern` lengths or more astern of her at every one
+        /// of `tackOnWindSeconds`. The geometry is her reckoning's, not a fixed window.
+        static let leeBowRange = 8.0
+        static let leeBowAstern = 0.75
         /// She tacks on a boat's wind within this many lengths of her ...
         static let tackOnWindRange = 8.0
         /// ... when, her tack done, the boat sits in her wind shadow these seconds on, at a factor under
-        /// `tackOnWindShadow` on average: a loss of about half a length or more over 5 s (#263's shadow cost) ...
+        /// `tackOnWindShadow` on average ...
         static let tackOnWindSeconds: [Double] = [4, 5, 6]
         static let tackOnWindShadow = 0.75
-        /// ... and clear astern of her on her new tack by this many lengths or more, so she is clear ahead.
+        /// ... clear astern of her on her new tack by this many lengths or more, so she is clear ahead ...
         static let tackOnWindAstern = 1.0
+        /// ... and the tack pays against her own plan (`paysToTackOnWind`): the boat's loss, `shadowCost` lengths a
+        /// second per unit of shadow (#263: 1.22-1.47 L per 5 s at the cone's 0.48 close in) for the `shadowHeld`
+        /// seconds she holds her there (until the boat sees it and is out of it: a reaction, up to 8 s at Club, and a
+        /// tack away), beats her tack's cost (`tackCost`: lengths, by the wind she sails in, m/s; #263's 0.74 / 1.10 /
+        /// 1.27 L at 6 / 10 / 14 kn on skiff@4): more on a lift or with the puffs or pressure this side, less on a
+        /// header or in dirty air (her plan's lean to the other tack, as a share of her threshold).
+        static let shadowCost = 0.56
+        static let shadowHeld = 10.0
+        static let tackCost: [(wind: Double, lengths: Double)] = [(3.09, 0.74), (5.14, 1.10), (7.20, 1.27)]
         /// How she reckons her tack, measured in the scripted scenes (`BotTacticsTests`, skiff@4 rolling her tack at
         /// 10 kn: through it in about 2.5 s, back to speed about 6 s after her tap): sailing on her heading now at this
         /// share of her speed now for so many seconds ...
@@ -118,17 +131,21 @@ extension BotBrain {
     }
 
     /// The fleet tactic she plays now, beating on her own tack (`planned` hers), racing and not tacking, or nil: holding
-    /// her lane, or a cover, a lee-bow or a tack on a boat's wind, in that order. A tack only when she can tap it now
-    /// (`canTap`), onto a board she hasn't `overstood`, and not onto a header worse than her threshold (`headed`, on her
-    /// tack, positive headed).
-    func fleetPlay(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack, headed: Double, threshold: Double,
-                   overstood: (Tack) -> Bool) -> FleetPlay? {
+    /// her lane, or a lee-bow, a cover or a tack on a boat's wind, in that order. A tack only when she can tap it now
+    /// (`canTap`), onto a board she hasn't `overstood`, and not onto a header worse than her threshold (`headed`, the
+    /// shift on her tack, positive headed). `lean` is how much her own plan leans to the other tack, as `headed` with
+    /// the puffs, the pressure and her dirty air in it: a tack on a boat's wind must pay against it.
+    func fleetPlay(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack, headed: Double, lean: Double,
+                   threshold: Double, overstood: (Tack) -> Bool) -> FleetPlay? {
         guard playsTheFleet, b.status == .racing, tack == b.tack, !senses.tacking else { return nil }
         if tactics.holdsLane, let seat = laneNeighbour(b, view) { return FleetPlay(seat: seat, play: .holdLane) }
         guard headed > -threshold, !overstood(tack.other) else { return nil }
-        let play = (tactics.coversTackers ? coverTackTarget(b, view).map { FleetPlay(seat: $0, play: .cover) } : nil)
-            ?? (tactics.leeBows ? leeBowTarget(b, view).map { FleetPlay(seat: $0, play: .leeBow) } : nil)
-            ?? (tactics.tacksOnWind ? tackOnWindTarget(b, view).map { FleetPlay(seat: $0, play: .tackOnWind) } : nil)
+        // The lee-bow before the cover: a crossing passes in a second or two, a cover's chance lasts `coverLate`.
+        let play = (tactics.leeBows ? leeBowTarget(b, view).map { FleetPlay(seat: $0, play: .leeBow) } : nil)
+            ?? (tactics.coversTackers ? coverTackTarget(b, view).map { FleetPlay(seat: $0, play: .cover) } : nil)
+            ?? (tactics.tacksOnWind
+                ? tackOnWindTarget(b, view, lean: lean, threshold: threshold).map { FleetPlay(seat: $0, play: .tackOnWind) }
+                : nil)
         guard let play, canTap(b, view) else { return nil }
         return play
     }
@@ -162,14 +179,14 @@ extension BotBrain {
         }
     }
 
-    /// The starboard boat she lee-bows (`Tactics.leeBows`), she on port: the nearest one beating whose track she is
-    /// sailing across from leeward, between `leeBowLeeward` lengths to leeward of it, that she can just cross were she
-    /// to sail on, as she reads it (`timing`): passing clear of it, crossing its track within `leeBowCrossing` lengths
-    /// ahead of it.
+    /// The starboard boat she lee-bows (`Tactics.leeBows`), she on port: the nearest one beating within `leeBowRange`,
+    /// she to leeward of its track, that she can just cross were she to sail on (passing ahead of it, and clear of it as
+    /// she keeps clear, so she isn't ducking it), and that her tack now would leave in her backwind and clear astern of
+    /// her (`tackForecast`), as she reads it (`timing`).
     func leeBowTarget(_ b: SeatView.OwnBoat, _ view: SeatView) -> Int? {
-        guard b.tack == .port else { return nil }
+        guard b.tack == .port, isBeating(b) else { return nil }
         let length = view.boatClass.hull.length
-        return nearest(view, within: length * 6, of: b) { other, _ in
+        return nearest(view, within: length * FleetTactics.leeBowRange, of: b) { other, _ in
             guard other.tack == .starboard else { return false }
             let forward = other.forward
             let leeward = -forward.rightPerp
@@ -177,54 +194,91 @@ extension BotBrain {
             let offset = b.position - other.position + relative * timing(other)
             let toLeeward = offset.dot(leeward)
             let closing = -relative.dot(leeward)
-            guard closing > 0.1, toLeeward >= length * FleetTactics.leeBowLeeward.min,
-                  toLeeward <= length * FleetTactics.leeBowLeeward.max else { return false }
-            let crossing = offset.dot(forward) + relative.dot(forward) * (toLeeward / closing)
-            guard crossing > 0, crossing <= length * FleetTactics.leeBowCrossing else { return false }
-            // Clear of her sailing on, as she keeps clear (`isAboutToHit`), centre to centre: she can cross.
-            return abs(offset.cross(relative.normalized)) >= length * Self.keepClearDistance
+            guard toLeeward > 0, closing > 0.1 else { return false }
+            // Sailing on she crosses its track ahead of it ...
+            guard offset.dot(forward) + relative.dot(forward) * (toLeeward / closing) > 0 else { return false }
+            // ... clear of it as she keeps clear (`isAboutToHit`): she can cross, and won't duck it.
+            guard Self.closestApproach(of: other, to: b, heading: b.heading, lookahead: keepClearLookahead)
+                    >= length * Self.keepClearDistance,
+                  let forecast = tackForecast(b, view, on: other) else { return false }
+            return forecast.allSatisfy { $0.astern >= length * FleetTactics.leeBowAstern && $0.backwind }
         }
     }
 
     /// The boat she tacks on the wind of (`Tactics.tacksOnWind`): the nearest one beating on the other tack within
-    /// `tackOnWindRange`, whose bow she has crossed (she is to windward of it), that her tack now would leave in her wind shadow (`tackOnWindShadow(_:_:on:)`) at a factor under
-    /// `FleetTactics.tackOnWindShadow` on average.
-    func tackOnWindTarget(_ b: SeatView.OwnBoat, _ view: SeatView) -> Int? {
+    /// `tackOnWindRange`, whose bow she has crossed (she is to windward of it), that her tack now would leave in her wind
+    /// shadow, clear astern of her (`tackForecast`), at a factor under `FleetTactics.tackOnWindShadow` on average, when
+    /// that pays against her own plan (`paysToTackOnWind`).
+    func tackOnWindTarget(_ b: SeatView.OwnBoat, _ view: SeatView, lean: Double, threshold: Double) -> Int? {
+        guard isBeating(b) else { return nil }
         let length = view.boatClass.hull.length
         return nearest(view, within: length * FleetTactics.tackOnWindRange, of: b) { other, offset in
             // She has crossed her: to windward of her.
             let windward = other.tack == .starboard ? other.forward.rightPerp : -other.forward.rightPerp
-            guard other.tack != b.tack, -offset.dot(windward) > 0,
-                  let factor = tackOnWindShadow(b, view, on: other) else { return false }
+            guard other.tack != b.tack, -offset.dot(windward) > 0, let forecast = tackForecast(b, view, on: other),
+                  forecast.allSatisfy({ $0.astern >= length * FleetTactics.tackOnWindAstern }) else { return false }
+            let factor = forecast.reduce(0) { $0 + $1.factor } / Double(forecast.count)
             return factor < FleetTactics.tackOnWindShadow
+                && paysToTackOnWind(b, factor: factor, lean: lean, threshold: threshold)
         }
     }
 
-    /// The wind her shadow would leave `other` were she to tack now, as she reckons her tack (`tackCarry`,
-    /// `tackPickUp`) and it sailing on: its factor at `tackOnWindSeconds` on average, as she reads `other`
-    /// (`timing`); nil unless it is clear astern of her by `tackOnWindAstern` or more at every one of them.
-    func tackOnWindShadow(_ b: SeatView.OwnBoat, _ view: SeatView, on other: SeatView.OtherBoat) -> Double? {
-        guard let cone = view.shadowCones.first(where: { $0.apex == b.position }) else { return nil }
-        let length = view.boatClass.hull.length
+    /// Whether a tack on a boat's wind that leaves her at `factor` pays (`FleetTactics.shadowCost`): her loss in the
+    /// shadow over `shadowHeld` seconds against the tack's cost in the wind she sails in (`tackCost`), scaled by her
+    /// own plan's `lean` to the other tack: none at her threshold, twice it lifted by as much.
+    func paysToTackOnWind(_ b: SeatView.OwnBoat, factor: Double, lean: Double, threshold: Double) -> Bool {
+        let gain = (1 - factor) * FleetTactics.shadowCost * FleetTactics.shadowHeld
+        let plan = min(max(1 - lean / threshold, 0), 2)
+        return gain >= Self.tackCost(windSpeed: b.polarWindSpeed) * plan
+    }
+
+    /// A tack's cost in lengths at `windSpeed`, m/s (`FleetTactics.tackCost`): between its points, and flat past them.
+    static func tackCost(windSpeed: Double) -> Double {
+        let points = FleetTactics.tackCost
+        guard let first = points.first, let last = points.last else { return 0 }
+        if windSpeed <= first.wind { return first.lengths }
+        for (low, high) in zip(points, points.dropFirst()) where windSpeed <= high.wind {
+            return low.lengths + (high.lengths - low.lengths) * (windSpeed - low.wind) / (high.wind - low.wind)
+        }
+        return last.lengths
+    }
+
+    /// Whether she is beating: close enough to the wind that a tack now lands her close-hauled on the other tack, as
+    /// `tackForecast` reckons it. Not while she bears away to keep clear.
+    func isBeating(_ b: SeatView.OwnBoat) -> Bool {
+        abs(wrapAngle(b.windDirection - b.heading)) < FleetTactics.beating
+    }
+
+    /// Her own wind shadow and backwind now: `SeatView.shadowCones` is in seat order with the ghosts left out, so hers
+    /// comes after every other boat's in a seat before hers that casts one.
+    func ownCone(_ view: SeatView) -> ShadowCone? {
+        let index = view.others.reduce(0) { $0 + ($1.seat < view.seat && !$1.isGhost ? 1 : 0) }
+        return view.shadowCones.indices.contains(index) ? view.shadowCones[index] : nil
+    }
+
+    /// Where `other` would sit from her were she to tack now, as she reckons her tack (`tackCarry`, `tackPickUp`) and
+    /// it sailing on, as she reads it (`timing`), at each of `tackOnWindSeconds`: metres astern of her along her new
+    /// heading, her shadow's factor on it (wind shadow or backwind), and whether that is her backwind. Nil without her
+    /// shadow (`ownCone`).
+    func tackForecast(_ b: SeatView.OwnBoat, _ view: SeatView, on other: SeatView.OtherBoat)
+        -> [(astern: Double, factor: Double, backwind: Bool)]? {
+        guard let cone = ownCone(view) else { return nil }
         let w = b.windDirection
         let heading = 2 * w - b.heading
         let apparent = 2 * w - (-cone.axis).bearing
         let forward = Vec2.heading(heading)
         let carry = FleetTactics.tackCarry
         let read = timing(other)
-        var factor = 0.0
-        for t in FleetTactics.tackOnWindSeconds {
+        return FleetTactics.tackOnWindSeconds.map { t in
             var her = b.position + b.forward * (b.speed * carry.share * min(t, carry.seconds))
             for phase in FleetTactics.tackPickUp where t > phase.from {
                 her += forward * (b.speed * phase.share * (min(t, phase.to) - phase.from))
             }
             let them = other.position + other.velocity * (t + read)
-            guard (her - them).dot(forward) >= length * FleetTactics.tackOnWindAstern else { return nil }
             let after = ShadowCone(apex: her, apparentWindDirection: apparent, heading: heading,
                                    windwardSide: b.tack.other, shadow: view.boatClass.windShadow)
-            factor += after.factor(at: them)
+            return ((her - them).dot(forward), after.factor(at: them), after.isInBackwind(them))
         }
-        return factor / Double(FleetTactics.tackOnWindSeconds.count)
     }
 
     /// Seconds early (positive) or late she reads `other` (`FleetTactics.timingError`): none at full tactical quality.
