@@ -427,8 +427,7 @@ final class GameScene: SKScene {
         let me = world.me
         let framing = rig
         let sceneSize = size
-        let targets = EdgeArrow.targets(status: me.status, legIndex: me.legIndex, course: world.course,
-                                        lineEndOffScreen: framing.lineEndOffScreen)
+        let targets = EdgeArrow.targets(status: me.status, legIndex: me.legIndex, course: world.course)
         guard !world.isGhost(ofSeat: world.myBoatIndex),
               let placed = EdgeArrow.placement(targets: targets, project: { framing.project($0, sceneSize: sceneSize) },
                                                visible: framing.visibleInsets.visibleRect(sceneSize: sceneSize)) else {

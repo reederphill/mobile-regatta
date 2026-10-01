@@ -135,7 +135,7 @@ nonisolated struct CameraRig: Sendable {
     /// the mark inside the shot's dwell doesn't drop its widening in one frame.
     private var shotMarks: [Vec2]?
     /// Whether a start line end is off screen in the pre-start shot: outside `visibleInsets`' rect, so the edge
-    /// arrow (#122) and this read one visible area. The seam for #122's edge arrow.
+    /// arrow (#122) and this read one visible area. The arrow itself tests the whole line against that area.
     private(set) var lineEndOffScreen = false
     /// What the HUD and controls cover of the view (#122): a line end under them counts as off screen. The scene
     /// sets it each frame (`ViewInsets.race`); none by default.

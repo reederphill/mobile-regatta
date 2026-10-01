@@ -110,28 +110,27 @@ import Testing
         #expect(abs(wrapAngle(Double(turned.angle - up.angle))) > 1, "boat-up didn't turn it")
     }
 
-    /// What the arrow points at: the start line's centre before the start, or its end that's off screen in the
-    /// pre-start shot (`CameraRig.lineEndOffScreen`); the leg's mark racing, a gate's and the finish line's centre;
-    /// nothing once finished.
+    /// What the arrow points at: the start line's two ends before the start, prestart and OCS on the way back
+    /// alike, whatever the camera; the leg's mark racing, a gate's and the finish line's centre; nothing once
+    /// finished.
     @Test func edgeArrowTargetsTheMarkYouSailFor() throws {
         let course = try Self.course()
         let line = course.startLine
-        #expect(EdgeArrow.targets(status: .prestart, legIndex: 0, course: course, lineEndOffScreen: false) == [line.centre])
-        #expect(EdgeArrow.targets(status: .ocs, legIndex: 0, course: course, lineEndOffScreen: false) == [line.centre])
-        #expect(EdgeArrow.targets(status: .prestart, legIndex: 0, course: course, lineEndOffScreen: true)
-                == [line.pin.position, line.committee.position])
+        for status in [BoatStatus.prestart, .ocs] {
+            #expect(EdgeArrow.targets(status: status, legIndex: 0, course: course)
+                    == [line.pin.position, line.committee.position], "\(status)")
+        }
         for (k, leg) in course.legs.enumerated() {
-            #expect(EdgeArrow.targets(status: .racing, legIndex: k, course: course, lineEndOffScreen: false)
-                    == [course.targetPosition(for: leg)])
+            #expect(EdgeArrow.targets(status: .racing, legIndex: k, course: course) == [course.targetPosition(for: leg)])
         }
         let gate = course.marksOfLeg(.round(CourseLayout.gateIndex)).map(\.position)
         #expect(gate.count == 2)
         #expect((course.targetPosition(for: .round(CourseLayout.gateIndex)) - (gate[0] + gate[1]) / 2).length < 1e-6)
-        #expect(EdgeArrow.targets(status: .finished, legIndex: 0, course: course, lineEndOffScreen: false).isEmpty)
-        #expect(EdgeArrow.targets(status: .dsq, legIndex: 0, course: course, lineEndOffScreen: false).isEmpty)
+        #expect(EdgeArrow.targets(status: .finished, legIndex: 0, course: course).isEmpty)
+        #expect(EdgeArrow.targets(status: .dsq, legIndex: 0, course: course).isEmpty)
 
         // A line's two ends: no arrow while any of the line shows, one end on screen or neither with the line
-        // across the view between them; with none of it on screen, at the line's middle.
+        // across the view between them; with none of it on screen, at its nearer end.
         let visible = CGRect(x: 0, y: 0, width: 100, height: 100)
         let project: (Vec2) -> CGPoint = { CGPoint(x: $0.x, y: $0.y) }
         #expect(EdgeArrow.placement(targets: [Vec2(20, 50), Vec2(80, 50)], project: project, visible: visible) == nil)
@@ -143,8 +142,13 @@ import Testing
                 "both ends off, the line cutting a corner")
         #expect(EdgeArrow.placement(targets: [Vec2(100, 100), Vec2(300, 300)], project: project, visible: visible) == nil,
                 "an end on the rect's corner")
-        let bothOff = EdgeArrow.placement(targets: [Vec2(-100, 250), Vec2(200, 250)], project: project, visible: visible)
-        #expect(abs(Double(bothOff?.angle ?? 0) - .pi / 2) < 1e-9)
+        // Above the view, the pin up and to the left, the committee boat further off to the right: the pin's way.
+        let pin = Vec2(-100, 250), committee = Vec2(400, 250)
+        let bothOff = try #require(EdgeArrow.placement(targets: [pin, committee], project: project, visible: visible))
+        #expect(bothOff == EdgeArrow.placement(projected: CGPoint(x: pin.x, y: pin.y), visible: visible))
+        #expect(bothOff.angle > .pi / 2 && bothOff.angle < .pi, "up and left: \(rad2deg(Double(bothOff.angle)))°")
+        #expect(EdgeArrow.placement(targets: [committee, pin], project: project, visible: visible) == bothOff,
+                "the nearer end, whichever end is listed first")
         #expect(EdgeArrow.placement(targets: [Vec2(-90, 120), Vec2(120, 330)], project: project, visible: visible) != nil,
                 "a diagonal line clear of the corner")
     }
@@ -188,8 +192,7 @@ import Testing
 
             let me = world.me
             let rig = scene.rig
-            let targets = EdgeArrow.targets(status: me.status, legIndex: me.legIndex, course: world.course,
-                                            lineEndOffScreen: rig.lineEndOffScreen)
+            let targets = EdgeArrow.targets(status: me.status, legIndex: me.legIndex, course: world.course)
             let placed = try #require(EdgeArrow.placement(targets: targets, project: { rig.project($0, sceneSize: size) },
                                                           visible: rig.visibleInsets.visibleRect(sceneSize: size)))
             #expect(rig.visibleInsets == EdgeArrow.insets(safeArea: (0, 0), showsLeaderboard: session.controls.showsLeaderboard,

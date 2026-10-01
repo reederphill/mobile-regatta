@@ -37,6 +37,15 @@ import Testing
             for layer in ["water", "laylines", "ladderLines", "windVane", "grooveTick", "vaneArc", "edgeArrow"] {
                 #expect(drawn.contains { $0.layer == layer }, "\(name): nothing drawn in the \(layer)")
             }
+            // The cues (#122) over the chart and its marks and line (#115), under the fleet; the edge arrow over all.
+            let charted = [ChartLayer.shallowsName, ChartLayer.boundaryName, ChartLayer.landName, ChartLayer.landmarksName,
+                           "course"]
+            let cues = drawn.filter { ["laylines", "ladderLines", "windVane", "grooveTick", "vaneArc"].contains($0.layer) }
+            let chartTop = try #require(drawn.filter { charted.contains($0.layer) }.map(\.z).max())
+            let fleetBottom = try #require(drawn.filter { $0.layer == "fleet" }.map(\.z).min())
+            let arrow = try #require(drawn.first { $0.layer == "edgeArrow" })
+            #expect(cues.allSatisfy { $0.z > chartTop && $0.z < fleetBottom }, "\(name)")
+            #expect(drawn.allSatisfy { $0.layer == "edgeArrow" || $0.z < arrow.z }, "\(name)")
 
             #expect(try DrawnNode.all(in: Self.scene(fixture: name).scene) == drawn, "\(name): a second scene drew differently")
             scene.update(1)

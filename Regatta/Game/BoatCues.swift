@@ -154,15 +154,15 @@ nonisolated enum EdgeArrow {
         return Placement(position: CGPoint(x: c.x + dx * t, y: c.y + dy * t), angle: atan2(dy, dx))
     }
 
-    /// What the arrow points at for your boat with `status` on leg `legIndex` in `course`: the start line's centre
-    /// before you've started (prestart, OCS), the leg's mark while racing (a gate's or the finish line's centre,
-    /// `CourseLayout.targetPosition`), and nothing once you've stopped. In the pre-start shot with a line end off
-    /// screen (`CameraRig.lineEndOffScreen`), both ends: the line, so the arrow shows only while none of it does.
-    static func targets(status: BoatStatus, legIndex: Int, course: CourseLayout, lineEndOffScreen: Bool) -> [Vec2] {
+    /// What the arrow points at for your boat with `status` on leg `legIndex` in `course`: the start line's two
+    /// ends before you've started (prestart, and OCS on the way back), so the arrow shows only while none of the
+    /// line does and then points at its nearer end; the leg's mark while racing (a gate's or the finish line's
+    /// centre, `CourseLayout.targetPosition`); and nothing once you've stopped.
+    static func targets(status: BoatStatus, legIndex: Int, course: CourseLayout) -> [Vec2] {
         switch status {
         case .prestart, .ocs:
             let line = course.startLine
-            return lineEndOffScreen ? [line.pin.position, line.committee.position] : [line.centre]
+            return [line.pin.position, line.committee.position]
         case .racing:
             guard course.legs.indices.contains(legIndex) else { return [] }
             return [course.targetPosition(for: course.legs[legIndex])]
@@ -172,12 +172,15 @@ nonisolated enum EdgeArrow {
     }
 
     /// The arrow for `targets`, each drawn where `project` puts it: one target's placement, or for two (a line's
-    /// ends) nothing while any part of the line between them is inside `visible`, else the line's middle's.
+    /// ends) nothing while any part of the line between them is inside `visible`, else the placement of the end
+    /// drawn nearer `visible`'s centre.
     static func placement(targets: [Vec2], project: (Vec2) -> CGPoint, visible: CGRect) -> Placement? {
         guard targets.count == 2 else { return targets.first.flatMap { placement(projected: project($0), visible: visible) } }
         let a = project(targets[0]), b = project(targets[1])
         guard !segment(a, b, meets: visible) else { return nil }
-        return placement(projected: project((targets[0] + targets[1]) / 2), visible: visible)
+        let c = CGPoint(x: visible.midX, y: visible.midY)
+        let nearer = hypot(a.x - c.x, a.y - c.y) <= hypot(b.x - c.x, b.y - c.y) ? a : b
+        return placement(projected: nearer, visible: visible)
     }
 
     /// Whether any part of the segment from `a` to `b` is inside `rect`, its edges included: clipped to the rect
