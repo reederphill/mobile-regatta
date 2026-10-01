@@ -26,15 +26,24 @@ import RegattaCore
         haptics.notify(.success)
         #expect(generator.calls == ["impact 0.5", "notify success"])
 
-        // A race's haptics all go through the gate: a tap with Haptics off reaches no generator.
+        // A race's haptics all go through the gate: the gun with Haptics off reaches no generator.
+        let gun = RaceEvent(tick: 0, kind: .gun)
         let silent = RecordingGenerator()
-        let session = GameSession(config: Self.config, haptics: GatedHaptics(generator: silent, isOn: false))
-        session.tackOrGybe()
-        session.consume([])
+        GameSession(config: Self.config, haptics: GatedHaptics(generator: silent, isOn: false)).consume([gun])
         #expect(silent.calls.isEmpty)
         let heard = RecordingGenerator()
-        GameSession(config: Self.config, haptics: GatedHaptics(generator: heard, isOn: true)).tackOrGybe()
-        #expect(heard.calls == ["impact 0.4"])
+        GameSession(config: Self.config, haptics: GatedHaptics(generator: heard, isOn: true)).consume([gun])
+        #expect(heard.calls.contains("impact 1.0"), "the gun")
+    }
+
+    /// The tack tap has no haptic (#112, #124).
+    @Test func aTackTapPlaysNoHaptic() {
+        let heard = RecordingGenerator()
+        let session = GameSession(config: Self.config, haptics: GatedHaptics(generator: heard, isOn: true))
+        session.tackOrGybe()
+        session.pressTack(at: 10)
+        session.releaseTack(at: 11)
+        #expect(heard.calls.isEmpty)
     }
 
     /// The app's gate follows the model's settings, in the model's own defaults: it starts as they say, and Settings'

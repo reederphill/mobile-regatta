@@ -52,22 +52,34 @@ final class GameSession {
     var results: [ResultRow] = []
     var isPaused = false
     var playerDone = false
+    /// The Ease button is held (#99, #112): the scene sends it with the rudder every frame.
+    var isEasing = false
+    /// The tiller's track and knob while a tiller drag is held (#112): the scene sets it, `RaceView` draws it.
+    var tillerKnob: SteeringInterpreter.TillerKnob?
+    /// This is the player's first race: the halves edge labels show (#23). #134 sets it; nothing does yet.
+    var isFirstRace = false
+    /// The device's steering scheme, live (#112, #131).
+    let controls: ControlSettings
 
     @ObservationIgnored private var lastCountdownSecond = Int.max
     @ObservationIgnored private var toldUpdateRequired = false
     /// Every haptic goes through here, so Settings' Haptics off silences them all (#110).
     @ObservationIgnored private let haptics: any Haptics
+    /// The Tack/Gybe button's hold and release (#222).
+    @ObservationIgnored private var tackHold = TackHold()
 
     /// A practice race on the device. `timescale` runs the simulation that many times real time
     /// (`-timescale`, for tests).
-    convenience init(config: RaceConfig, timescale: Double = 1, haptics: any Haptics = GatedHaptics()) {
+    convenience init(config: RaceConfig, timescale: Double = 1, haptics: any Haptics = GatedHaptics(),
+                     controls: ControlSettings = ControlSettings()) {
         let driver = PracticeDriver(config: config, timescale: timescale)
-        self.init(driver: driver, roster: driver.roster, haptics: haptics)
+        self.init(driver: driver, roster: driver.roster, haptics: haptics, controls: controls)
     }
 
     /// An online race (#68).
-    convenience init(online driver: OnlineDriver, haptics: any Haptics = GatedHaptics()) {
-        self.init(driver: driver, roster: driver.roster, haptics: haptics)
+    convenience init(online driver: OnlineDriver, haptics: any Haptics = GatedHaptics(),
+                     controls: ControlSettings = ControlSettings()) {
+        self.init(driver: driver, roster: driver.roster, haptics: haptics, controls: controls)
     }
 
     /// A render fixture (#62): `log` replayed to the fixture's freeze tick and frozen there, drawn from
@@ -79,27 +91,80 @@ final class GameSession {
         vision = fixture.vision
     }
 
-    init(driver: any RaceDriver, roster: FleetRoster, haptics: any Haptics = GatedHaptics()) {
+    init(driver: any RaceDriver, roster: FleetRoster, haptics: any Haptics = GatedHaptics(),
+         controls: ControlSettings = ControlSettings()) {
         self.driver = driver
         self.roster = roster
         self.haptics = haptics
+        self.controls = controls
         // `-vision` (Debug); a fixture sets its own after this.
         vision = LaunchOptions.current.raceVision
         scene = GameScene(driver: driver, roster: roster)
         scene.session = self
         hud = HUDState(world: driver.renderWorld)
-        post("Hold the left or right side of the screen to steer. Be below the line at the gun.", .info, seconds: 6)
+        post(Self.startHint(controls.steering), .info, seconds: 6)
     }
 
-    func tackOrGybe() {
-        // With `-demo` a bot sails your seat, and the driver refuses the tap.
-        guard driver.tap(.tackGybe) else { return }
-        haptics.impact(intensity: 0.4)
+    // TODO-COPY (#171): #129's scheme-aware hints replace this.
+    static func startHint(_ steering: DeviceSettings.Steering) -> String {
+        switch steering {
+        case .halves: "Hold the left or right side of the screen to steer. Be below the line at the gun."
+        case .tiller: "Touch anywhere and slide sideways to steer. Be below the line at the gun."
+        }
     }
 
-    /// Pauses a race that can pause; one that can't (online) keeps running.
+    /// The halves' faint "‹ Port / Starboard ›" edge labels show in the first race only, and only in halves (#23).
+    var showsEdgeLabels: Bool { Self.showsEdgeLabels(isFirstRace: isFirstRace, steering: controls.steering) }
+
+    static func showsEdgeLabels(isFirstRace: Bool, steering: DeviceSettings.Steering) -> Bool {
+        isFirstRace && steering == .halves
+    }
+
+    /// One tack/gybe tap. With `-demo` a bot sails your seat, and the driver refuses it. No haptic (#112).
+    @discardableResult func tackOrGybe() -> Bool {
+        driver.tap(.tackGybe)
+    }
+
+    /// The Tack/Gybe button goes down at wall-clock `time`: the tap that starts the tack or gybe, unless the boat is
+    /// already in one (#222).
+    func pressTack(at time: Double) {
+        guard tackHold.press(at: time, inManoeuvre: TackHold.isInManoeuvre(myBoat)) else { return }
+        if !tackOrGybe() { tackHold.pressRefused() }
+    }
+
+    /// The Tack/Gybe button comes up at wall-clock `time`: after a hold, the roll, if the boat is still in the tack
+    /// the press began. The sim times it against the boom crossing (#263).
+    func releaseTack(at time: Double) {
+        guard tackHold.release(at: time, inTack: TackHold.isInTack(myBoat)) else { return }
+        tackOrGybe()
+    }
+
+    /// The Ease button is held or let go (#99).
+    func setEase(_ easing: Bool) {
+        if isEasing && !easing {
+            easeReleases.count += 1
+            easeReleases.knots = knots(metresPerSecond: myBoat.speed)
+        }
+        isEasing = easing
+    }
+
+    /// VoiceOver's Ease (#112): an accessibility action can't hold, so the first activation holds Ease and the
+    /// second lets it go.
+    func toggleEase() {
+        setEase(!isEasing)
+    }
+
+    /// How many times Ease has been let go, and your boat's speed in knots the moment it last was: UI tests read it
+    /// (`race-ease-release`), since a test's press returns only after the release, with the boat already speeding up.
+    @ObservationIgnored private(set) var easeReleases = (count: 0, knots: 0.0)
+
+    private var myBoat: Boat { driver.currentFrame.boats[driver.myBoatIndex] }
+
+    /// Pauses a race that can pause; one that can't (online) keeps running. Either way the overlay takes the
+    /// touches: steering and Ease let go.
     func setPaused(_ paused: Bool) {
         isPaused = paused && driver.isPausable
+        isEasing = false
         scene.resetInput()
     }
 
@@ -180,6 +245,7 @@ final class GameSession {
     private func finishForPlayer() {
         guard !playerDone else { return }
         playerDone = true
+        isEasing = false
         results = makeResults()
     }
 

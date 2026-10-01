@@ -66,10 +66,13 @@ final class AppModel {
             guard deviceSettings != oldValue else { return }
             deviceSettings.save(to: defaults)
             haptics.isOn = deviceSettings.haptics
+            controls.steering = ControlSettings.steering(deviceSettings.steering, override: launchOptions.steeringScheme)
         }
     }
     /// Every race's haptics, on while Settings' Haptics is (#110): set here once per change, not read per haptic.
     @ObservationIgnored let haptics: GatedHaptics
+    /// Every race's steering scheme (#112): Settings', or `-scheme`'s over it; set here once per change.
+    @ObservationIgnored let controls: ControlSettings
     /// Where `deviceSettings` lives.
     @ObservationIgnored let defaults: UserDefaults
     /// The race the cover shows, while `phase` is `.raceSequence`.
@@ -99,6 +102,7 @@ final class AppModel {
         let deviceSettings = DeviceSettings(defaults: defaults)
         self.deviceSettings = deviceSettings
         haptics = GatedHaptics(isOn: deviceSettings.haptics)
+        controls = ControlSettings(steering: ControlSettings.steering(deviceSettings.steering, override: launchOptions.steeringScheme))
         #if DEBUG
         tuning = TuningModel(store: launchOptions.uiTesting ? .inMemory : .standard)
         #endif
@@ -142,11 +146,11 @@ final class AppModel {
         #if DEBUG
         var config = config
         config.files = tuning.practiceFiles()
-        let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics)
+        let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls)
         tuning.attach(session, files: config.files)
         return session
         #else
-        return GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics)
+        return GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls)
         #endif
     }
 

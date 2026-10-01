@@ -78,9 +78,8 @@ final class GameScene: SKScene {
     /// A render-only value changed while the race is paused: draw the standing world once more with it.
     private var needsPausedRender = false
 
-    private var portTouches = Set<UITouch>()
-    private var starboardTouches = Set<UITouch>()
-    private var rudderInput = 0.0
+    /// Touches on the water to rudder, in the device's steering scheme (#112).
+    private var steering = SteeringInterpreter()
 
     init(driver: any RaceDriver, roster: FleetRoster) {
         self.driver = driver
@@ -217,9 +216,10 @@ final class GameScene: SKScene {
             return
         }
 
-        updateRudder(frameTime)
+        syncScheme()
+        let rudder = steering.advance(by: frameTime)
         // The driver latches it for the next tick. With `-demo` a bot sails your seat and ignores it.
-        driver.submit(BoatInput(rudder: rudderInput))
+        driver.submit(BoatInput(rudder: rudder, ease: session.isEasing))
         driver.tick(frameTime, within: Self.tickBudget)
 
         Signpost.renderUpdate.measure { render(driver.renderWorld) }
@@ -310,25 +310,34 @@ final class GameScene: SKScene {
 
     // MARK: - Input
 
-    private func updateRudder(_ dt: Double) {
-        let target = (starboardTouches.isEmpty ? 0.0 : 1.0) - (portTouches.isEmpty ? 0.0 : 1.0)
-        if target == 0 {
-            rudderInput = 0
-        } else {
-            let maxChange = 3.5 * dt
-            rudderInput += (target - rudderInput).clamped(to: -maxChange...maxChange)
-        }
+    /// Follows the device's scheme, live (#131): a change lets go of every touch.
+    private func syncScheme() {
+        guard let session, steering.scheme != session.controls.steering else { return }
+        steering.scheme = session.controls.steering
+        publishTillerKnob()
+    }
+
+    /// Hands the tiller's track and knob to the session for `RaceView` to draw, when they move.
+    private func publishTillerKnob() {
+        guard let session, session.tillerKnob != steering.tillerKnob else { return }
+        session.tillerKnob = steering.tillerKnob
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let view else { return }
+        syncScheme()
         for touch in touches {
-            if touch.location(in: view).x < view.bounds.midX {
-                portTouches.insert(touch)
-            } else {
-                starboardTouches.insert(touch)
-            }
+            steering.touchBegan(ObjectIdentifier(touch), at: touch.location(in: view), midX: view.bounds.midX)
         }
+        publishTillerKnob()
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let view else { return }
+        for touch in touches {
+            steering.touchMoved(ObjectIdentifier(touch), to: touch.location(in: view))
+        }
+        publishTillerKnob()
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -341,12 +350,18 @@ final class GameScene: SKScene {
 
     private func release(_ touches: Set<UITouch>) {
         for touch in touches {
-            portTouches.remove(touch)
-            starboardTouches.remove(touch)
+            steering.touchEnded(ObjectIdentifier(touch))
         }
+        publishTillerKnob()
     }
 
     @objc private func pinched(_ gesture: UIPinchGestureRecognizer) {
+        // A pinch-zoom never steers (#13).
+        switch gesture.state {
+        case .began: steering.pinchBegan(); publishTillerKnob()
+        case .ended, .cancelled, .failed: steering.pinchEnded()
+        default: break
+        }
         guard gesture.state == .began || gesture.state == .changed else { return }
         zoom = (zoom * gesture.scale).clamped(to: 0.45...2.2)
         gesture.scale = 1
@@ -355,9 +370,8 @@ final class GameScene: SKScene {
 
     /// Clears held touches, e.g. when an overlay steals them.
     func resetInput() {
-        portTouches.removeAll()
-        starboardTouches.removeAll()
-        rudderInput = 0
+        steering.reset()
+        publishTillerKnob()
         lastUpdate = nil
     }
 }
