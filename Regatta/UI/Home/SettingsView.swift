@@ -36,7 +36,7 @@ struct SettingsView: View {
                         }
                     }
                     Divider()
-                    toggleRow("Auto framing", isOn: $model.deviceSettings.autoFraming, id: "settings-autoFraming")
+                    toggleRow("Auto zoom", isOn: $model.deviceSettings.autoZoom, id: "settings-autoZoom")
                     Divider()
                     toggleRow("Laylines", isOn: $model.deviceSettings.laylines, id: "settings-laylines")
                     Divider()
