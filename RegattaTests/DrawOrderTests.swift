@@ -13,7 +13,8 @@ import Testing
     /// lines, your vane, its tick and arc, and the edge arrow on the camera), the water or its pressure. A second scene from the same fixture, as a second launch makes, draws
     /// the same nodes in the same order, and so does the first drawn again.
     @Test func sceneDrawsTheSameEveryTime() throws {
-        for name in ["prestart", "water-gusty-offshore", "water-pressure", "fleet", "cues", "chart-saltings-reach"] {
+        for name in ["prestart", "water-gusty-offshore", "water-pressure", "fleet", "cues", "chart-saltings-reach",
+                     "rules-call", "rules-penalty"] {
             let (scene, boats) = try Self.scene(fixture: name)
             let drawn = DrawnNode.all(in: scene)
             let shared = Dictionary(grouping: drawn, by: \.z).filter { $0.value.count > 1 }

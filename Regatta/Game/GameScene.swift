@@ -92,6 +92,10 @@ final class GameScene: SKScene {
     private var boatNodes: [BoatNode] = []
     /// The rule cues (#123) over the fleet: built with it.
     private var ruleCues: RuleCueLayer?
+    /// Whether the rule cues draw: a render fixture's turn them off unless it asks for them.
+    var showsRuleCues = true
+    /// The rule calls whose lines draw (#123): the session adds each one it drains.
+    var ruleCalls = RuleCallLines()
 
     private var lastUpdate: TimeInterval?
     /// The most wall-clock time a frame spends starting ticks: half a 60 Hz frame. A frame is at most
@@ -289,8 +293,11 @@ final class GameScene: SKScene {
         chart.update(status: world.me.status, legIndex: world.me.legIndex, cameraScale: cam.xScale)
 
         updateCues(world, dt: dt, settled: settled)
-        ruleCues?.update(world, calls: session?.ruleCalls ?? RuleCallLines(), style: boatStyle, px: cam.xScale,
-                         rotation: cam.zRotation)
+        ruleCues?.isHidden = !showsRuleCues
+        if showsRuleCues {
+            ruleCues?.update(world, calls: ruleCalls, style: boatStyle, px: cam.xScale,
+                             rotation: cam.zRotation)
+        }
     }
 
     /// What the rule cues show (#123), for tests: e.g. `glyphs=2 lines=1 arc=1`.

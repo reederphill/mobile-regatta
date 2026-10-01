@@ -236,6 +236,14 @@ The line from a mark along which a boat, at her best angle to the wind, can just
 The thin vermillion arrow under your hull, one hull length, pointing to the wind over the ground. No label and no numbers; it carries the groove tick.
 _Avoid_: wind arrow, wind indicator
 
+**Right-of-way glyph**:
+The wordless mark over another boat that says who keeps clear: an orange ⚠ triangle on a boat you must keep clear of, a blue chevron on a boat that must keep clear of you. Shown only within a short range; mark-room is never a glyph (it is a notice), and a ghost has none.
+_Avoid_: boat label, rights icon
+
+**Penalty arc**:
+The orange arc round your boat while you owe a penalty turn: it counts down the start deadline until the turn is started, then the complete deadline. With it, a short "Turn" notice gives both countdowns.
+_Avoid_: penalty timer, spin meter
+
 **Ladder line**:
 A line drawn across the course axis (the seeded mean wind direction, fixed for the race), so boats on the same line are level in the race to windward or leeward. On the W → O reach (a leg that runs more across the axis than along it) the lines run across the leg instead (#267, ruling 2), so boats on one line are level on the reach, as their **Ladder distance** reads them.
 
