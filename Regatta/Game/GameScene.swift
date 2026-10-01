@@ -71,7 +71,8 @@ final class GameScene: SKScene {
     private let courseLayer = SKNode()
     private let boatLayer = SKNode()
     private let laylines = SKShapeNode()
-    private let startLine = SKShapeNode()
+    /// Race area, land, shallows, marks and the start line (#115).
+    private(set) lazy var chart = ChartLayer(course: driver.course, venue: driver.venue, pointsPerMeter: ppm)
     private var boatNodes: [BoatNode] = []
 
     private var lastUpdate: TimeInterval?
@@ -143,56 +144,7 @@ final class GameScene: SKScene {
     }
 
     private func buildCourse() {
-        let course = driver.course
-
-        for mark in course.elements.flatMap(\.marks) {
-            let zone = SKShapeNode(circleOfRadius: CGFloat(course.zoneRadius) * ppm)
-            zone.path = zone.path?.copy(dashingWithPhase: 0, lengths: [6, 6])
-            zone.strokeColor = UIColor.white.withAlphaComponent(0.18)
-            zone.lineWidth = 1
-            zone.position = point(mark.position)
-            courseLayer.addChild(zone)
-            courseLayer.addChild(buoy(at: mark.position, radius: mark.radius, color: CuePalette.orange.uiColor))
-        }
-
-        // The line's ends are marks (#15), so the pin is a mark's orange, not yellow: yellow is the laylines' (#22).
-        let pin = course.startLine.pin
-        courseLayer.addChild(buoy(at: pin.position, radius: pin.radius, color: CuePalette.orange.uiColor))
-
-        let committee = SKShapeNode(ellipseOf: CGSize(width: 4.6 * ppm, height: 5.2 * ppm))
-        committee.fillColor = UIColor(white: 0.95, alpha: 1)
-        committee.strokeColor = UIColor(white: 0.55, alpha: 1)
-        committee.lineWidth = 1.5
-        committee.position = point(course.startLine.committee.position)
-        // The flag is the course layer's own node, not the committee boat's child, so it takes a z of its own.
-        let flag = SKShapeNode(rect: CGRect(x: -3, y: -3, width: 10, height: 7))
-        flag.fillColor = CuePalette.orange.uiColor
-        flag.lineWidth = 0
-        flag.position = committee.position
-        courseLayer.addChild(committee)
-        courseLayer.addChild(flag)
-
-        let line = CGMutablePath()
-        line.move(to: point(course.startLine.pin.position))
-        line.addLine(to: point(course.startLine.committee.position))
-        startLine.path = line.copy(dashingWithPhase: 0, lengths: [8, 6])
-        startLine.lineWidth = 2
-        courseLayer.addChild(startLine)
-
-        // A z each (`DrawOrder`), in the order built: the start line crosses the pin and the committee boat, and
-        // draws over them.
-        for (slot, node) in courseLayer.children.enumerated() {
-            node.zPosition = DrawOrder.z(slot)
-        }
-    }
-
-    private func buoy(at position: Vec2, radius: Double, color: UIColor) -> SKNode {
-        let node = SKShapeNode(circleOfRadius: max(CGFloat(radius) * ppm, 5))
-        node.fillColor = color
-        node.strokeColor = .white
-        node.lineWidth = 1.5
-        node.position = point(position)
-        return node
+        chart.install(in: world, courseLayer: courseLayer)
     }
 
     private func buildBoats() {
@@ -268,7 +220,9 @@ final class GameScene: SKScene {
         coneLayer.update(style: boatStyle)
 
         syncCamera()
-        rig.advance(CameraWorld(world), sceneSize: size, dt: dt, settled: settled)
+        var cameraWorld = CameraWorld(world)
+        cameraWorld.area = chart.framing
+        rig.advance(cameraWorld, sceneSize: size, dt: dt, settled: settled)
         cam.position = rig.center
         cam.setScale(rig.cameraScale)
         cam.zRotation = rig.cameraRotation
@@ -276,10 +230,8 @@ final class GameScene: SKScene {
         let view = WaterView(center: cam.position, sceneSize: size, scale: cam.xScale, rotation: cam.zRotation)
         Signpost.waterUpdate.measure { water.update(WaterWorld(world), view: view, dt: dt) }
 
-        // Before the gun the line is where you're going: the active leg's orange.
-        startLine.strokeColor = world.time < 0
-            ? CuePalette.orange.uiColor.withAlphaComponent(0.9)
-            : UIColor.white.withAlphaComponent(0.4)
+        // The active leg's marks orange, the rest grey (#15); strokes kept steady on screen as the camera zooms.
+        chart.update(status: world.me.status, legIndex: world.me.legIndex, cameraScale: cam.xScale)
 
         laylineCountdown -= dt
         if laylineCountdown <= 0 {
