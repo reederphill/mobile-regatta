@@ -264,12 +264,15 @@ import RegattaCore
         #expect(model.value(snap) == 4.5 && model.value(spread) == 2)
 
         let urls = try model.exportFiles(named: "wide start")
-        #expect(urls.map(\.lastPathComponent) == ["skiff@5.json", "fleet-rules@6.json", "wide start.tuning.json"])
+        // Each exports as the next version of the bundled default it tunes, whatever that default is now.
+        let boatClass = RaceFiles.defaults.boatClass.ref, rulesFile = RaceFiles.defaults.rulesConfiguration.ref
+        #expect(urls.map(\.lastPathComponent) == ["\(boatClass.id)@\(boatClass.version + 1).json",
+                                                  "\(rulesFile.id)@\(rulesFile.version + 1).json", "wide start.tuning.json"])
         let skiff = try BoatClassFile(data: Data(contentsOf: urls[0]))
-        #expect(skiff.version == 5 && skiff.content.steering.autohelm.upwindSnap == deg2rad(4.5))
+        #expect(skiff.version == boatClass.version + 1 && skiff.content.steering.autohelm.upwindSnap == deg2rad(4.5))
         #expect(skiff.header.placeholders.last == "/steering/autohelm/upwindSnapDegrees")
         let rules = try RulesConfigFile(data: Data(contentsOf: urls[1]))
-        #expect(rules.version == 6 && rules.header.placeholders.contains("/raceFormat/startRow/spreadLineLengths"))
+        #expect(rules.version == rulesFile.version + 1 && rules.header.placeholders.contains("/raceFormat/startRow/spreadLineLengths"))
         let exported = try JSONDecoder().decode(Tuning.self, from: Data(contentsOf: urls[2]))
         #expect(exported.boatClassValues == ["/steering/autohelm/upwindSnapDegrees": 4.5])
         model.delete(saved)
