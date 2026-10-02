@@ -37,6 +37,8 @@ final class OnlineDriver: RaceDriver {
     let isPausable = false
     /// Names and bot marks, from the race's setup (#60).
     let roster: FleetRoster
+    /// Each seat's livery (#119). The wire carries none yet: every other seat wears a seeded free starter.
+    let liveries: FleetLiveries
     let client: RaceClient
 
     private(set) var previousFrame: TickFrame
@@ -77,6 +79,7 @@ final class OnlineDriver: RaceDriver {
         venue = race.files.venue.content
         boatClass = race.boatClass
         roster = FleetRoster(setup: start.setup)
+        liveries = FleetLiveries(setup: start.setup, mySeat: start.yourSeat)
         corrections = race.boats.map { _ in VisualCorrection(snapDistance: race.boatClass.hull.length) }
         currentFrame = TickFrame(race: race, isOver: false)
         previousFrame = currentFrame

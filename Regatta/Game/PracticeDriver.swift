@@ -16,6 +16,8 @@ final class PracticeDriver: RaceDriver {
     let isPausable = true
     /// Names and bot marks, kept outside the simulation (#60).
     let roster: FleetRoster
+    /// Each seat's livery (#119): yours, and a seeded free starter per bot.
+    let liveries: FleetLiveries
     /// The bytes of the tuned copies the race sails (#232), by ref: saved beside its log so it replays.
     let tunedFiles: [FileRef: Data]
 
@@ -49,6 +51,7 @@ final class PracticeDriver: RaceDriver {
         seats = config.seatControllers
         roster = config.roster
         myBoatIndex = setup.seats.firstIndex(of: .human) ?? 0
+        liveries = FleetLiveries(setup: setup, mySeat: myBoatIndex)
         course = race.course
         venue = race.files.venue.content
         boatClass = race.boatClass

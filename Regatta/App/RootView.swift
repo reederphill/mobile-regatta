@@ -21,6 +21,8 @@ struct RootView: View {
     @State private var checkedLaunchArguments = false
     /// Why the `-fixture` launch couldn't start, shown instead of the menu so a UI test sees it.
     @State private var fixtureError: String?
+    /// The off-water gallery a `-fixture` launch shows in place of the menu (#119).
+    @State private var fixtureGallery: RenderFixture.Gallery?
     @State private var showsOnlineStub = false
     @Environment(\.sceneState) private var sceneState
     @Environment(\.screenSize) private var screenSize
@@ -30,6 +32,10 @@ struct RootView: View {
             Text("Render fixture failed: \(fixtureError)")
                 .padding()
                 .accessibilityIdentifier("fixture-error")
+        } else if let fixtureGallery {
+            switch fixtureGallery {
+            case .livery: LiveryGalleryView()
+            }
         } else {
             HomeView(model: model, onRaceOnline: raceOnline)
                 .onAppear(perform: autostartIfRequested)
@@ -134,6 +140,10 @@ struct RootView: View {
     /// `-fixture <name>`: replays the fixture's log to its freeze tick and freezes the race there (#62).
     private func startFixture(named name: String) {
         do {
+            if let gallery = try RenderFixture.gallery(named: name) {
+                fixtureGallery = gallery
+                return
+            }
             let (fixture, log) = try RenderFixture.load(named: name)
             model.startRaceSequence(try GameSession(fixture: fixture, log: log))
         } catch {

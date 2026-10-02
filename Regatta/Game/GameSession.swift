@@ -9,7 +9,8 @@ struct ResultRow: Identifiable {
     let place: String
     let name: String
     let detail: String
-    let colorIndex: Int
+    /// Her livery (#21, #119): the chip and sail number beside the name.
+    let livery: Livery
     let isPlayer: Bool
     /// Marked with the bot glyph (#19).
     let isBot: Bool
@@ -310,6 +311,7 @@ final class GameSession {
     private func makeResults() -> [ResultRow] {
         let frame = driver.currentFrame
         let me = driver.myBoatIndex
+        let liveries = driver.liveries
         return frame.standings.enumerated().map { rank, i in
             let b = frame.boats[i]
             let place: String
@@ -330,7 +332,7 @@ final class GameSession {
                 detail = "Not started"
             }
             return ResultRow(id: b.id, place: place, name: roster.name(of: i, playerSeat: me), detail: detail,
-                             colorIndex: b.colorIndex, isPlayer: i == me, isBot: roster[i].isBot)
+                             livery: liveries[i], isPlayer: i == me, isBot: roster[i].isBot)
         }
     }
 }

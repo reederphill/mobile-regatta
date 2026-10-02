@@ -220,7 +220,7 @@ final class BoatNode: SKNode {
 }
 
 /// Pre-rendered boat textures, drawn in white so each sprite can be tinted.
-private struct BoatArt {
+struct BoatArt {
     /// The hull, from the class's outline; the drop shadow draws it too, tinted black.
     let hull: SKTexture
     /// Every hull's thin outline, drawn over it in `CuePalette.hullOutline`.

@@ -1,3 +1,4 @@
+import RegattaServices
 import SwiftUI
 
 struct ResultsView: View {
@@ -19,9 +20,12 @@ struct ResultsView: View {
                                 Text(row.place)
                                     .font(.headline.monospacedDigit())
                                     .frame(width: 40, alignment: .leading)
-                                Circle()
-                                    .fill(Palette.boatColor(row.colorIndex))
-                                    .frame(width: 10, height: 10)
+                                LiveryChipView(chip: LiveryChip(row.livery), diameter: 14)
+                                Text(String(row.livery.sailNumber))
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 36, alignment: .leading)
+                                    .accessibilityLabel("Sail number \(row.livery.sailNumber)")
                                 if row.isBot {
                                     Image(systemName: BotGlyph.symbolName)
                                         .foregroundStyle(.secondary)

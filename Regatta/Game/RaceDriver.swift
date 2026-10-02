@@ -53,12 +53,17 @@ protocol RaceDriver: AnyObject {
 
     /// The round trip to the server has stayed over 250 ms for about 5 s (#18, #68): the HUD's warning (#124).
     var lagWarning: Bool { get }
+
+    /// Each seat's livery (#21, #119): presentation only, never the simulation's.
+    var liveries: FleetLiveries { get }
 }
 
 extension RaceDriver {
     var isFrozen: Bool { false }
     /// The RTT warning (#18, #68): only an online race (`OnlineDriver.lagWarning`) has one.
     var lagWarning: Bool { false }
+    /// A driver with no fleet liveries draws every seat in `FleetLiveries.yours`.
+    var liveries: FleetLiveries { FleetLiveries(liveries: []) }
 
     /// A driver that keeps real time (online) or runs no ticks (a fixture) runs them all.
     @discardableResult func tick(_ dt: Double, within budget: Duration?) -> [TickFrame] { tick(dt) }
