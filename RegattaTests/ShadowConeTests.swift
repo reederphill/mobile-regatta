@@ -9,6 +9,9 @@ import Testing
 @MainActor @Suite struct ShadowConeTests {
     static let boatClass = Race.defaultBoatClass
     static let ppm: CGFloat = 8
+    /// How near a sprite's `zRotation` lands on an exact angle: SpriteKit keeps it in single precision, so an angle
+    /// reads back up to half a float ulp off (about 1e-7 near pi), not within 1e-9 (#354).
+    static let rotationTolerance: CGFloat = 1e-6
 
     /// A boat heading `headingDegrees` with her boom on `boomSide`, her apparent wind `apparentDegrees` (bent off the
     /// sailing wind's north).
@@ -61,6 +64,24 @@ import Testing
         return inside
     }
 
+    /// The convex hull of `points`, anticlockwise (monotone chain). Core's cone is the hull of its near edge and the far
+    /// end's corners (`ShadowCone.span(at:)`, and the shader's crossings): close-hauled her near edge runs almost along
+    /// the axis and the ring of the four corners is not convex, so the hull, not the ring, is the shape core slows in.
+    static func convexHull(_ points: [Vec2]) -> [Vec2] {
+        let sorted = points.sorted { ($0.x, $0.y) < ($1.x, $1.y) }
+        func turn(_ o: Vec2, _ a: Vec2, _ b: Vec2) -> Double { (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x) }
+        var lower: [Vec2] = [], upper: [Vec2] = []
+        for p in sorted {
+            while lower.count >= 2, turn(lower[lower.count - 2], lower[lower.count - 1], p) <= 0 { lower.removeLast() }
+            lower.append(p)
+        }
+        for p in sorted.reversed() {
+            while upper.count >= 2, turn(upper[upper.count - 2], upper[upper.count - 1], p) <= 0 { upper.removeLast() }
+            upper.append(p)
+        }
+        return Array(lower.dropLast() + upper.dropLast())
+    }
+
     /// Points just inside and just outside each corner and edge midpoint of `corners`: (point, inside).
     static func samples(_ corners: [Vec2], nudge: Double = 0.15) -> [(Vec2, Bool)] {
         let centre = corners.reduce(Vec2.zero, +) / Double(corners.count)
@@ -79,8 +100,8 @@ import Testing
 
     /// The cone's sprite is cut from the corners core cuts the shadow from, and its shader's strength is core's loss. Its
     /// corners land where `ShadowShapes` puts them (its near edge her bow and stern, for skiff@5, whichever way she
-    /// points), the shader is given those near ends, and at points just inside and outside each corner and edge core
-    /// slows a boat where the polygon says it does, with its loss the shader's arithmetic (`ConeShading.fade`), on both
+    /// points), the shader is given those near ends, and at points just inside and outside each corner and edge of their
+    /// convex hull (the cone core and the shader cut, #354) core slows a boat where the polygon says it does, with its loss the shader's arithmetic (`ConeShading.fade`), on both
     /// tacks with the apparent wind bent.
     @Test func coneGeometryMatchesCoreShadow() {
         let shadow = Self.boatClass.windShadow
@@ -101,14 +122,15 @@ import Testing
             // Its near corners are her bow and stern on the water, and the shader has them.
             let bow = boat.position + boat.forward * shadow.bowY, stern = boat.position + boat.forward * shadow.sternCorner.y
             #expect(corners.prefix(2).contains { ($0 - bow).length < 1e-9 } && corners.prefix(2).contains { ($0 - stern).length < 1e-9 }, "\(c)")
-            let given = [effects.coneShader.nearA.vectorFloat2Value, effects.coneShader.nearB.vectorFloat2Value]
+            let near = ConeShader.near(of: effects.cone)
+            let given = [near?.a, near?.b]
             for end in core.nearEdge {
                 let want = vector_float2(Float(end.x * Double(Self.ppm)), Float(end.y * Double(Self.ppm)))
                 #expect(given.contains(want), "\(c)")
             }
 
             var checked = 0
-            for (p, inside) in Self.samples(corners) where !core.isInBackwind(p) {
+            for (p, inside) in Self.samples(Self.convexHull(corners)) where !core.isInBackwind(p) {
                 let slowed = core.factor(at: p) < 1
                 #expect(slowed == inside, "\(c): core at \(p)")
                 let offset = p - core.apex
@@ -212,7 +234,7 @@ import Testing
         let effects = BoatEffects(seat: 2, boatClass: boatClass, pointsPerMeter: Self.ppm, style: .standard)
         draw(effects, before, dt: 0) // the first frame draws at hers
         let (cone0, backwind0) = (effects.cone.zRotation, effects.backwind.zRotation)
-        #expect(abs(backwind0 - CGFloat(-before.heading)) < 1e-9)
+        #expect(abs(backwind0 - CGFloat(-before.heading)) < Self.rotationTolerance)
 
         draw(effects, after, dt: 0.1)
         let (cone1, backwind1) = (effects.cone.zRotation, effects.backwind.zRotation)
@@ -221,10 +243,11 @@ import Testing
         // Towards hers, not away: each step closes on the target.
         let target = CGFloat(-after.heading)
         var last = abs(backwind1 - target)
-        for _ in 0..<80 {
+        // 12 s, 10 time constants (`shadowFollowSeconds` 1.2 s): 0.96 rad left after the first step is 4e-5 then.
+        for _ in 0..<120 {
             draw(effects, after, dt: 0.1)
             let now = abs(effects.backwind.zRotation - target)
-            #expect(now <= last + 1e-9)
+            #expect(now <= last + Self.rotationTolerance)
             last = now
         }
         #expect(last < 1e-3 && apart(effects.cone.zRotation, turn(after)) < 1e-3, "settles on hers")
@@ -233,13 +256,13 @@ import Testing
         let rigid = BoatEffects(seat: 3, boatClass: boatClass, pointsPerMeter: Self.ppm, style: .standard)
         draw(rigid, before, dt: 0, settled: true)
         draw(rigid, after, dt: 0.1, settled: true)
-        #expect(abs(rigid.backwind.zRotation - target) < 1e-9)
+        #expect(abs(rigid.backwind.zRotation - target) < Self.rotationTolerance)
         var style = BoatStyle.standard
         style.shadowFollowSeconds = 0
         let none = BoatEffects(seat: 4, boatClass: boatClass, pointsPerMeter: Self.ppm, style: style)
         draw(none, before, dt: 0, style: style)
         draw(none, after, dt: 0.1, style: style)
-        #expect(abs(none.backwind.zRotation - target) < 1e-9)
+        #expect(abs(none.backwind.zRotation - target) < Self.rotationTolerance)
     }
 
     /// Across a reach the backwind fades with her true wind angle rather than blinking out: full alpha upwind, a share of
@@ -266,8 +289,11 @@ import Testing
     @Test func backwindEdgeIsSoft() throws {
         let shadow = Self.boatClass.windShadow
         let boat = Self.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
-        // Mean alpha over a strip of the art a pixel wide and 24 points tall, 1 hull length astern of her stern line on
-        // her hull-side edge (x = her stern corner), `across` points out from it (negative: outside the zone).
+        // Mean alpha over a strip of the art a pixel wide and 24 points tall, half a hull length astern of her stern line on
+        // her hull-side edge (x = her stern corner), `across` points out from it (negative: outside the zone). Not further
+        // astern: the hatch fades towards the far edge (`backwindFadeFloor`), and 1 hull length astern, half way down
+        // skiff@5's 2 hull lengths, a hatch column's mean sat at the 0.2 below (#354). Nearer, the strip reaches her steep
+        // stern edge.
         func alpha(_ effects: BoatEffects, across: CGFloat) throws -> Double {
             let sprite = effects.backwind
             let texture = try #require(sprite.texture)
@@ -275,7 +301,7 @@ import Testing
             let size = texture.size()
             let sx = CGFloat(image.width) / size.width, sy = CGFloat(image.height) / size.height
             let x = shadow.sternCorner.x * Double(Self.ppm) + Double(across) + Double(sprite.anchorPoint.x * size.width)
-            let y0 = -Self.boatClass.hull.length * Double(Self.ppm) + Double(sprite.anchorPoint.y * size.height)
+            let y0 = -0.5 * Self.boatClass.hull.length * Double(Self.ppm) + Double(sprite.anchorPoint.y * size.height)
             guard x >= 0, x < Double(size.width) else { return 0 }
             var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
             let context = try #require(CGContext(data: &data, width: image.width, height: image.height, bitsPerComponent: 8,

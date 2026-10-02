@@ -18,6 +18,8 @@ import RegattaServices
 /// - `-onlineHost <host:port>` is the dev race server, instead of the Settings page's field (Debug builds).
 /// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override).
 /// - `-startSeconds <n>` gives an online dev race an `n`-second start sequence, 1…60.
+/// - `-laps <n>` sails every practice race `n` laps, 1…9, instead of the settings' (#354: a UI test that waits for the
+///   results sails a short race, so a slow simulator still reaches them).
 /// - `-appearance light|dark` overrides the system appearance, for UI tests of the menus in both (#108).
 /// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
 ///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
@@ -56,6 +58,7 @@ struct LaunchOptions: Equatable {
     var onlineHost: String?
     var raceSeconds: Int?
     var startSeconds: Int?
+    var laps: Int?
     var appearance: Appearance?
     var vision: VisionFilter?
     var fakeServices: FakeServiceScenario?
@@ -84,8 +87,8 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             #endif
-            case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance",
-                 "-vision", "-fakeServices":
+            case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
+                 "-appearance", "-vision", "-fakeServices":
                 guard let value = rest.first, !Self.flags.contains(value) else {
                     problems.append("\(argument) needs a value")
                     continue
@@ -100,8 +103,8 @@ struct LaunchOptions: Equatable {
 
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-online", "-seed", "-fixture", "-timescale",
-                          "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-appearance", "-vision",
-                          "-fakeServices"]
+                          "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps", "-appearance",
+                          "-vision", "-fakeServices"]
         #if DEBUG
         flags.insert("-tuning")
         #endif
@@ -135,6 +138,8 @@ struct LaunchOptions: Equatable {
             if let n = Int(value), (1...3600).contains(n) { raceSeconds = n } else { reject(argument, value, "a whole number of seconds, 1…3600") }
         case "-startSeconds":
             if let n = Int(value), (1...60).contains(n) { startSeconds = n } else { reject(argument, value, "a whole number of seconds, 1…60") }
+        case "-laps":
+            if let n = Int(value), (1...9).contains(n) { laps = n } else { reject(argument, value, "a whole number of laps, 1…9") }
         case "-appearance":
             if let style = Appearance(rawValue: value) { appearance = style } else { reject(argument, value, "light or dark") }
         case "-vision":
@@ -175,9 +180,11 @@ struct LaunchOptions: Equatable {
     /// Whether launch skips the menu and starts a race.
     var startsRace: Bool { autostart || demo || perf }
 
-    /// A race started from the menu or restarted: the player's settings, on the pinned seed if there is one.
+    /// A race started from the menu or restarted: the player's settings, on the pinned seed if there is one, and
+    /// `-laps`' laps if given.
     func raceConfig(from settings: RaceSettings) -> RaceConfig {
         var config = settings.config
+        if let laps { config.laps = laps }
         if let seed {
             config.seed = seed
             config.windSeed = RaceConfig.windSeed(pinnedTo: seed)
