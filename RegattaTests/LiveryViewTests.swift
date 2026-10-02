@@ -84,11 +84,22 @@ import UIKit
         #expect(unknown.pattern == .plain && unknown.deck == 0xC3B5F0 && unknown.sail == LiveryArt.fallbackRGB)
     }
 
-    @Test func aDarkNumbersPanelTakesWhiteDigits() {
+    @Test func theNumberSitsOnTheSailNeverOnTheGraphic() {
         let look = LiveryArt.Look(pattern: .plain, sailGraphic: .numbersPanel, deck: 0xF5F5F2, accent: 0x33383D,
                                   sail: 0xF5F5F2, sailNumber: 1)
-        #expect(look.numberGround == 0x33383D)
-        #expect(look.numberInk == LiveryArt.numberInks.light)
+        #expect(look.numberGround == 0xF5F5F2)
+        #expect(look.numberInk == LiveryArt.numberInks.dark)
+    }
+
+    @Test func theLeechStripeStaysClearOfTheNumber() {
+        let g = LiveryArt.Geometry(hull: RaceFiles.defaults.boatClass.content.hull, pointsPerMeter: 20)
+        let stripe = LiveryArt.leechStripe(g)
+        // The digits are fitted inside the frame, which reaches the leech at its corners: check the middle 60 %.
+        let frame = LiveryArt.numberFrame(g).insetBy(dx: LiveryArt.numberFrame(g).width * 0.2, dy: LiveryArt.numberFrame(g).height * 0.2)
+        for i in 0...10 { for j in 0...10 {
+            let p = CGPoint(x: frame.minX + frame.width * CGFloat(i) / 10, y: frame.minY + frame.height * CGFloat(j) / 10)
+            #expect(!(stripe.contains(p) && g.sail.contains(p)))
+        } }
     }
 
     // MARK: Chip
