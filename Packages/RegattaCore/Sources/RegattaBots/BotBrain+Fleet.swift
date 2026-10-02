@@ -11,8 +11,9 @@ import RegattaCore
 // - Lee-bow: on port, meeting a starboard boat she can just cross, she tacks onto her lee bow when her tack, as she
 //   reckons it, would leave her in her backwind; one she can't cross she ducks, as she keeps clear (`racingKeepClear`),
 //   no code here.
-// - Tack on her wind: ahead of a boat on the other tack, she tacks to put her in her wind shadow, when that pays
-//   against her own plan (the tack's cost, the shift, puffs and pressure).
+// - Tack on her wind: ahead of a boat on the other tack and upwind of it (to windward in the wind's frame, up to
+//   `FleetTactics.tackOnWindLeewardSlack` to leeward of its track), she tacks to put her in her wind shadow, when that
+//   pays against her own plan (the tack's cost, the shift, puffs and pressure).
 //
 // Targets are chosen from her `SeatView` alone (#98), by where the boats are and how they sail: never by who sails
 // them (`BotSourceTests` keeps the seat kinds out of every brain file). How willing she is to play them is her style's
@@ -91,6 +92,14 @@ extension BotBrain {
         static let tacticianLeeBowsAndTacksOnWind = true
         /// She tacks on a boat's wind within this many lengths of her ...
         static let tackOnWindRange = 8.0
+        /// ... and she no more than this many hull lengths to leeward of its track (#349): her distance from its track,
+        /// measured from her position perpendicular to its heading; to windward of its track always passes. skiff@5's
+        /// cone, swung half astern (#339), covers a boat best while she is still 0.1 to 0.5 L to leeward of its track and
+        /// lets go as she crosses it (`BotTacticsTests.crossingAhead`, seeds 3, 11 and 20: a forecast factor of
+        /// 0.69–0.74 to leeward, 0.75–0.79 at best once across), so a gate at its track hid the window. Measured: 0.5,
+        /// 1.0 and no slack at all tap at the same moment in that scene; 1.0 clears the 0.4 L the first good decision
+        /// needs with room (`BotTacticsTests.tackOnWindGateAllowsOnlyTheSlackToLeeward`).
+        static let tackOnWindLeewardSlack = 1.0
         /// ... when, her tack done, the boat sits in her wind shadow these seconds on, at a factor under
         /// `tackOnWindShadow` on average ...
         static let tackOnWindSeconds: [Double] = [4, 5, 6]
@@ -112,6 +121,11 @@ extension BotBrain {
         /// from the first second; the forecast factor (4 to 6 s on) is shallower than where she sits once in it. So a
         /// tack on a boat's wind at the trigger pays on its own (a neutral plan) only in light air: about 0.85 L against
         /// 0.74 L at 6 kn and 1.10 L at 10 kn; in more wind, only when her plan leans to the other tack.
+        ///
+        /// #349 re-measured it on skiff@5's cone (#339) in the same scene, the real bot tapping at the forecast trigger
+        /// (seeds 3, 11, 20; forecast 0.71 / 0.74 / 0.75): the loss over the 10 s after her tap against the clean twin
+        /// over 10 × (1 − forecast) is 0.46 / 0.42 / 0.41 L. It stays 0.32: a larger cost makes the pays-check easier
+        /// (a loosening), which is the owner's call (`FleetTacticsTuningTests.tackOnWindPayoffBinds` binds at 0.32).
         static let shadowCost = 0.32
         static let shadowHeld = 10.0
         static let tackCost: [(wind: Double, lengths: Double)] = [(3.09, 0.74), (5.14, 1.10), (7.20, 1.27)]
@@ -226,6 +240,11 @@ extension BotBrain {
     /// Whether she, on port, to leeward of `other`'s track on starboard, can just cross it, as she reads it (`timing`):
     /// sailing on she would pass ahead of it, and clear of it as she keeps clear (`isAboutToHit`), so she isn't ducking
     /// it. The lee-bow's first gate (`leeBowTarget`); one she can't cross she ducks.
+    ///
+    /// A safety gate on skiff@5 (#349): its narrow backwind starts at her stern, so wherever her tack lands a boat in it
+    /// she can also cross it (312 starts on seeds 3, 11 and 20, 0.5–6.5 L ahead and 0.5–4 L to leeward: 46 landings,
+    /// none she couldn't cross). It refuses nothing there today; it stays so a lee-bow never becomes a tack under a boat
+    /// she should duck.
     func canJustCross(_ b: SeatView.OwnBoat, _ view: SeatView, _ other: SeatView.OtherBoat) -> Bool {
         guard other.tack == .starboard else { return false }
         let forward = other.forward
@@ -251,16 +270,17 @@ extension BotBrain {
     }
 
     /// The boat she tacks on the wind of (`Tactics.tacksOnWind`): the nearest one beating on the other tack within
-    /// `tackOnWindRange`, whose bow she has crossed (she is to windward of it), that her tack now would leave in her wind
-    /// shadow, clear astern of her (`tackForecast`), at a factor under `FleetTactics.tackOnWindShadow` on average, when
-    /// that pays against her own plan (`paysToTackOnWind`).
+    /// `tackOnWindRange`, upwind of it (to windward of its track, or up to `tackOnWindLeewardSlack` lengths to leeward
+    /// of it, #349), that her tack now would leave in her wind shadow, clear astern of her (`tackForecast`), at a factor
+    /// under `FleetTactics.tackOnWindShadow` on average, when that pays against her own plan (`paysToTackOnWind`).
     func tackOnWindTarget(_ b: SeatView.OwnBoat, _ view: SeatView, lean: Double, threshold: Double) -> Int? {
         guard isBeating(b) else { return nil }
         let length = view.boatClass.hull.length
         return nearest(view, within: length * FleetTactics.tackOnWindRange, of: b) { other, offset in
-            // She has crossed her: to windward of her.
+            // Upwind of her: to windward of her track, or no more than the slack to leeward of it (#349).
             let windward = other.tack == .starboard ? other.forward.rightPerp : -other.forward.rightPerp
-            guard other.tack != b.tack, -offset.dot(windward) > 0, let forecast = tackForecast(b, view, on: other),
+            guard other.tack != b.tack, -offset.dot(windward) > -length * FleetTactics.tackOnWindLeewardSlack,
+                  let forecast = tackForecast(b, view, on: other),
                   forecast.allSatisfy({ $0.astern >= length * FleetTactics.tackOnWindAstern }) else { return false }
             let factor = forecast.reduce(0) { $0 + $1.factor } / Double(forecast.count)
             return factor < FleetTactics.tackOnWindShadow
