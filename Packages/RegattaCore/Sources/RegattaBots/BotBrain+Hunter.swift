@@ -20,8 +20,10 @@ import RegattaCore
 //   for away from the boat she holds off too, up to `Hunter.maxTurn` and a little, then makes it at the same rate; and
 //   with a boat that must keep clear of her in range but none to hunt (clear astern of her), she turns no faster. Nor
 //   does she let the autohelm turn her faster there (`gently`): a turn it makes is hers under 16.1 (#228).
-// - With mark-room at a mark (rule 18, `OwnBoat.markRoom`), in its zone, she takes all of it: she sails her rounding
-//   as the plan steers it, without the hold a live bot keeps.
+// - With mark-room at a mark (rule 18, `OwnBoat.markRoom`), in its zone, she takes all of it: she rounds as a live bot
+//   does, which gives none of it up (`BotProfileTests.hunterTakesAllHerMarkRoom`), and hunts no one there.
+// - She tacks or gybes only with no boat that must keep clear of her in range on the side the tap turns her to
+//   (`tapTurnsAtKeepClearBoat`): the tap turns faster than rule 16.1's test.
 // - She keeps clear first: `evasion` (a boat she must keep clear of, marks, the edge) is steered before this is
 //   reached, and she never hunts a boat she owes mark-room, a ghost, or with a penalty to take; before her start she
 //   sails as a live bot does (pre-start fighting is #337's).
@@ -71,21 +73,36 @@ extension BotBrain {
         return nearest.map { ($0.boat, $0.rule) }
     }
 
-    /// The hunter's held input (#355) in place of `holdingCourse`'s: `input` (her plan's helm) as she hunts the boat she
-    /// hunts (`quarry`), or as a live bot holds her course when there is none. `desired` is the heading her plan sails.
-    func hunting(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> BoatInput {
-        guard b.status == .racing, b.penalty == nil else { return holdingCourse(b, view, input) }
-        // Mark-room: all of it, rounding as her plan steers.
-        if b.zone?.isIn == true, b.markRoom.contains(where: { $0.entitled == view.seat }) { return input }
+    /// What the hunter's hunting made of her plan's helm (#355), for the suite to count (`BotDriver.isHuntingTurn`).
+    enum HuntStep: Hashable, Sendable {
+        /// She turned at the boat she hunts (`quarry`): a luff, or a turn that brings it closer.
+        case turn
+        /// She held at the edge of her turn, or turned as her plan asks no faster than she hunts.
+        case hold
+        /// With a boat that must keep clear of her in range and none to hunt, she turned no faster than she hunts.
+        case gentle
+    }
+
+    /// The hunter's held input (#355) in place of `holdingCourse`'s, and what hunting made of it: `input` (her plan's
+    /// helm) as she hunts the boat she hunts (`quarry`), or as a live bot holds her course (step nil) when there is
+    /// none. `desired` is the heading her plan sails.
+    func hunting(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> (BoatInput, HuntStep?) {
+        guard b.status == .racing, b.penalty == nil else { return (holdingCourse(b, view, input), nil) }
+        let held = holdingCourse(b, view, input)
+        // Mark-room (rule 18), in its zone: she rounds as a live bot does, which already takes all of it
+        // (`BotProfileTests.hunterTakesAllHerMarkRoom`); hunting there, or turning no faster than she hunts, would give
+        // some of it away.
+        if b.zone?.isIn == true, b.markRoom.contains(where: { $0.entitled == view.seat }) { return (held, nil) }
         let most = huntRudder(b, view)
         guard let (quarry, rule) = quarry(b, view) else {
             // No boat to hunt: she holds her course as a live bot does, and with a boat that must keep clear of her
             // still in range (clear astern of her, say) she turns no faster than she hunts.
-            let held = holdingCourse(b, view, input)
-            guard hasKeepClearBoatInRange(b, view) else { return held }
-            return gently(b, view, BoatInput(rudder: held.rudderValue.clamped(to: -most...most), ease: held.ease), most: most)
+            guard hasKeepClearBoatInRange(b, view) else { return (held, nil) }
+            return (gently(b, view, BoatInput(rudder: held.rudderValue.clamped(to: -most...most), ease: held.ease), most: most),
+                    .gentle)
         }
-        return gently(b, view, huntingInput(b, view, input, desired: desired, quarry: quarry, rule: rule, most: most), most: most)
+        let (hunted, turned) = huntingInput(b, view, input, desired: desired, quarry: quarry, rule: rule, most: most)
+        return (gently(b, view, hunted, most: most), turned ? .turn : .hold)
     }
 
     /// `input`, or with the autohelm due to turn her, her own rudder of `most` towards where it would turn her instead:
@@ -103,19 +120,28 @@ extension BotBrain {
         return BoatInput(rudder: (-windSign * error > 0 ? 1 : -1) * most, ease: input.ease)
     }
 
-    /// The hunter's held input with `quarry` to hunt under `rule` (`hunting`).
+    /// The hunter's held input with `quarry` to hunt under `rule` (`hunting`), and whether she turned at it.
     private func huntingInput(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double,
-                              quarry: SeatView.OtherBoat, rule: RacingRule, most: Double) -> BoatInput {
+                              quarry: SeatView.OtherBoat, rule: RacingRule, most: Double) -> (BoatInput, Bool) {
         let off = wrapAngle(b.heading - desired)
         if let toward = turn(towards: quarry, rule: rule, b, view), canTurn(toward, at: quarry, b, view, off: off) {
-            return BoatInput(rudder: toward * most, ease: input.ease)
+            return (BoatInput(rudder: toward * most, ease: input.ease), true)
         }
         let rudder = input.rudderValue
-        guard abs(rudder) > Autohelm.deadBand else { return input }
+        guard abs(rudder) > Autohelm.deadBand else { return (input, false) }
         let towards = isTowards(rudder > 0 ? 1 : -1, quarry, rule: rule, b, view)
         // Holding at her edge: no further towards the boat, and no turn away from it while she is within her turn.
-        if towards || abs(off) <= Hunter.maxTurn + Hunter.holdSlack { return BoatInput(rudder: 0 as Int8, ease: input.ease) }
-        return BoatInput(rudder: rudder.clamped(to: -most...most), ease: input.ease)
+        if towards || abs(off) <= Hunter.maxTurn + Hunter.holdSlack { return (BoatInput(rudder: 0 as Int8, ease: input.ease), false) }
+        return (BoatInput(rudder: rudder.clamped(to: -most...most), ease: input.ease), false)
+    }
+
+    /// Whether a tack or gybe now would turn the suite's hunter, racing, at a boat that must keep clear of her within
+    /// `Hunter.rangeLengths`: on the side the tap turns her to (up through the wind on a beat, away from it on a run). The
+    /// tap turns her at the autohelm's rate, faster than rule 16.1's course-change test, so she holds it off (`canTap`)
+    /// until no such boat is there. Never for a live bot, nor for her before her start.
+    func tapTurnsAtKeepClearBoat(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard tactics.hunts, b.status == .racing else { return false }
+        return turnsTowardsKeepClearBoat(b, view, turn: abs(sailingAngle(b)) < .pi / 2 ? luff(b) : -luff(b))
     }
 
     /// Whether a boat that must keep clear of her is within `Hunter.rangeLengths` of her, wherever it is.

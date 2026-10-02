@@ -63,7 +63,7 @@ public enum BotRaceHarness {
                 : .bot(cell.tierMix.driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
         })
         var tally = RaceTally(race: race)
-        // #355: in a hunters race, every rule call (offender and victim), and the ticks each hunter turned at a boat.
+        // #355: in a hunters race, every rule call (offender and victim), and the ticks each hunter turned at a boat she hunted.
         let hunterSeats = cell.profileMix == .hunters ? profiles.indices.filter { profiles[$0] == .hunter } : []
         var hunts = cell.profileMix == .hunters ? HuntTally(hunters: hunterSeats) : nil
         let lastTick = cell.capSecondsAfterGun * Race.tickRate
@@ -79,7 +79,7 @@ public enum BotRaceHarness {
             let drained = race.drainEvents()
             events(race, drained)
             tally.record(race, events: drained)
-            hunts?.record(race, events: drained)
+            hunts?.record(race, events: drained, controllers: controllers)
         }
         let seats = tiers.indices.map { seat in
             tally.metrics(seat: seat, of: race, tier: tiers[seat], profile: profiles[seat],
@@ -108,36 +108,25 @@ public enum BotRaceHarness {
     }
 }
 
-/// A hunters race's own tally (#355): every rule call, offender and victim, and the ticks a hunter's held rudder turned
-/// her towards a boat that must keep clear of her within her hunting range (`BotBrain.Hunter.rangeLengths`, 4 lengths): so
-/// a scan of the mix can tell she hunted at all.
+/// A hunters race's own tally (#355): every rule call, offender and victim, and the ticks a hunter held her hunting
+/// branch's turn at a boat (`BotDriver.isHuntingTurn`: a luff, or a turn bringing a boat that must keep clear of her
+/// closer), racing: so a scan of the mix can tell she hunted at all. Her other ticks (holding course, keeping clear,
+/// tacking, rounding) aren't counted.
 struct HuntTally {
     let hunters: [Int]
     private(set) var calls: [RuleCallRecord] = []
     private(set) var turnTicks = 0
-    /// Hull lengths, centre to centre, inside which a hunter's turn at a boat counts: her hunting range.
-    static let rangeLengths = 4.0
 
     init(hunters: [Int]) { self.hunters = hunters }
 
-    mutating func record(_ race: Race, events: [RaceEvent]) {
+    /// After a tick: its events, and the hunters' decisions held through it (`controllers`).
+    mutating func record(_ race: Race, events: [RaceEvent], controllers: SeatControllers) {
         for event in events {
             guard case .ruleCall(let call) = event.kind else { continue }
             calls.append(RuleCallRecord(rule: call.rule.rawValue, offender: call.offender, victim: call.victim, tick: call.tick))
         }
-        let range = race.boatClass.hull.length * Self.rangeLengths
-        for seat in hunters {
-            let boat = race.boats[seat]
-            // Her held rudder: her own turn, not the autohelm's or a tap's.
-            let rudder = race.heldInputs[seat].rudderValue
-            guard boat.status == .racing, abs(rudder) > Autohelm.deadBand, boat.autohelm?.isTapping != true else { continue }
-            let starboard = rudder > 0
-            let turnsAtOne = race.boats.indices.contains { other in
-                guard other != seat, race.rightOfWay(seat, other)?.keepClear == other else { return false }
-                let offset = race.boats[other].position - boat.position
-                return offset.length <= range && (offset.dot(Vec2.heading(boat.heading).rightPerp) > 0) == starboard
-            }
-            if turnsAtOne { turnTicks += 1 }
+        for seat in hunters where race.boats[seat].status == .racing && controllers[seat].driver?.isHuntingTurn == true {
+            turnTicks += 1
         }
     }
 }

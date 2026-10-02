@@ -204,6 +204,70 @@ import RegattaCore
         return closest
     }
 
+    /// What seat 0 did at the mark in a mark-room scene (`BotConductTests.markRoom`), sailing `profile` against a live
+    /// bot outside her: her decisions in the zone with mark-room that hunting made something of (`BotDecision.hunt`),
+    /// when she rounded (her leg changed), how near the mark she came before it, and the calls.
+    struct Rounding {
+        var huntedInZone = 0
+        var decisionsInZone = 0
+        var roundedTick: Int?
+        var nearest = Double.infinity
+        var calls: [String] = []
+    }
+
+    static func round(_ encounter: BotConductTests.Encounter, mark: Vec2, profile: BotProfile) throws -> Rounding {
+        let race = try encounter.race()
+        var pilots = [
+            BotConductTests.Pilot(seat: 0, plannedTack: encounter.planned[0], race: race, profile: profile),
+            BotConductTests.Pilot(seat: 1, plannedTack: encounter.planned[1], race: race),
+        ]
+        let leg = race.boats[0].legIndex
+        var rounding = Rounding()
+        var kinds: [RaceEvent.Kind] = []
+        for tick in 0..<Int(encounter.seconds * Double(Race.tickRate)) where !race.isOver {
+            let own = race.seatView(for: 0).own
+            let entitled = own.zone?.isIn == true && own.markRoom.contains { $0.entitled == 0 }
+            if let decision = pilots[0].drive(race), entitled {
+                rounding.decisionsInZone += 1
+                if decision.hunt != nil { rounding.huntedInZone += 1 }
+            }
+            _ = pilots[1].drive(race)
+            race.step()
+            kinds += race.drainEvents().map(\.kind)
+            let a = race.boats[0]
+            if rounding.roundedTick == nil {
+                rounding.nearest = min(rounding.nearest, (a.position - mark).length)
+                if a.legIndex != leg { rounding.roundedTick = tick }
+            }
+        }
+        rounding.calls = BotConductTests.calls(kinds)
+        return rounding
+    }
+
+    /// Rule 18: with mark-room she takes all of it. A live bot already does: holding her course against the boat
+    /// outside (`holdingCourse`) gives none of it up at the mark, and the hunter rounding with a hold no faster than she
+    /// hunts, or hunting the outside boat there, rounded wider and later (#355's findings round: 1.2 to 5.2 m wider). So
+    /// in the zone she rounds as the live bot does, and hunts no one: as near the mark as the tactician, no call on her.
+    @Test func hunterTakesAllHerMarkRoom() throws {
+        let scenes: [(BotConductTests.Encounter, offset: Bool)] = [(1.2, 0.0), (1.2, 0.6), (1.5, -0.6)].map {
+            (BotConductTests.markRoom(seed: 19, abeam: $0.0, ahead: $0.1), false)
+        } + [1.2, -1.2].map { (BotConductTests.markRoom(seed: 20, abeam: $0, ahead: 0, offsetMark: true), true) }
+        var inZone = 0
+        for (encounter, offset) in scenes {
+            let race = try encounter.race()
+            let mark = race.course.elements[offset ? CourseLayout.offsetIndex : CourseLayout.windwardIndex].marks[0].position
+            let hunted = try Self.round(encounter, mark: mark, profile: .hunter)
+            let held = try Self.round(encounter, mark: mark, profile: .tactician)
+            inZone += hunted.decisionsInZone
+            #expect(hunted.huntedInZone == 0, "\(encounter.name): hunted \(hunted.huntedInZone) times with mark-room")
+            #expect(hunted.roundedTick != nil, "\(encounter.name): never rounded")
+            #expect(hunted.nearest <= held.nearest + race.boatClass.hull.length * 0.25,
+                    "\(encounter.name): rounded \(hunted.nearest) m off the mark, the tactician \(held.nearest) m")
+            #expect(!hunted.calls.contains { $0.hasSuffix("on 0") }, "\(encounter.name): \(hunted.calls)")
+        }
+        #expect(inZone > 0, "she was never in a zone with mark-room: the scenes test nothing")
+    }
+
     @Test func theHunterIsTheTacticianHunting() {
         for skill in [0.0, 0.5, 1.0] {
             var hunter = Tactics(profile: .hunter, skill: skill)
@@ -221,16 +285,31 @@ import RegattaCore
         for seat in 0..<16 {
             #expect(BotDriver(seat: seat, raceSeed: RaceSeed(7)).profile == nil)
         }
-        // And no source outside RegattaBots and the suite names a profile.
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        let sources = root.appendingPathComponent("Sources")
-        let dirs = try FileManager.default.contentsOfDirectory(atPath: sources.path).filter { $0 != "RegattaBots" && $0 != "BotSuite" }
-        for dir in dirs {
-            let path = sources.appendingPathComponent(dir)
-            for name in (try? FileManager.default.subpathsOfDirectory(atPath: path.path)) ?? [] where name.hasSuffix(".swift") {
+        // And no source outside RegattaBots and the suite names a profile: not the core's other modules, the client's,
+        // the server's or the services', nor the app's (`Regatta/`, where the checkout has it: Linux CI mounts only
+        // `Packages/`).
+        let fm = FileManager.default
+        let packages = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let core = packages.appendingPathComponent("RegattaCore/Sources")
+        var dirs = try fm.contentsOfDirectory(atPath: core.path).filter { $0 != "RegattaBots" && $0 != "BotSuite" }
+            .map { core.appendingPathComponent($0) }
+        for package in ["RegattaClient", "RegattaServer", "RegattaServices"] {
+            let sources = packages.appendingPathComponent("\(package)/Sources")
+            #expect(fm.fileExists(atPath: sources.path), "\(package)'s sources")
+            dirs.append(sources)
+        }
+        let app = packages.deletingLastPathComponent().appendingPathComponent("Regatta")
+        if fm.fileExists(atPath: app.path) { dirs.append(app) }
+        var scanned = 0
+        for path in dirs {
+            let dir = path.path
+            for name in (try? fm.subpathsOfDirectory(atPath: path.path)) ?? [] where name.hasSuffix(".swift") {
                 let text = try String(contentsOf: path.appendingPathComponent(name), encoding: .utf8)
+                scanned += 1
                 #expect(!text.contains("BotProfile"), "\(dir)/\(name) names BotProfile")
             }
         }
+        #expect(scanned > 50, "scanned \(scanned) sources")
     }
 }

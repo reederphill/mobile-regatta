@@ -245,8 +245,8 @@ public struct RaceResult: Codable, Hashable, Sendable {
     public var timings: TickTimings
     /// Every rule call in the race, oldest first, in a race of the hunters mix (#355); nil otherwise.
     public var ruleCalls: [RuleCallRecord]? = nil
-    /// The ticks its hunters' rudders turned them towards a boat that must keep clear within their hunting range, in a
-    /// race of the hunters mix (#355); nil otherwise.
+    /// The ticks its hunters held their hunting turn at a boat that must keep clear of them (`HuntTally`, a luff or a
+    /// turn bringing it closer), in a race of the hunters mix (#355); nil otherwise.
     public var hunterTurnTicks: Int? = nil
 
     /// `ranks`: each seat's place in the race's order at the end (`Race.place(of:)`), finished or not.
@@ -600,17 +600,21 @@ public struct HuntersSummary: Codable, Hashable, Sendable {
     public var liveOnLive: [String: Int]
     /// Calls on hunters under rule 16.1 or 17: her overdoing it. Reported, never gated.
     public var overdoneCalls: Int
-    /// Ticks the hunters' rudders turned them at a boat that must keep clear (`RaceResult.hunterTurnTicks`): that
-    /// they hunted at all.
+    /// Ticks the hunters held their hunting turn at a boat that must keep clear of them (`RaceResult.hunterTurnTicks`):
+    /// that they hunted at all.
     public var hunterTurnTicks: Int
     /// The live seats of the hunters races.
     public var live: TierSummary
     /// The same seats of the live twins; nil without twins.
     public var twinLive: TierSummary?
-    /// The live seats' mean finishing place in the hunters races (hunters ahead of them counted), and the same
-    /// seats' in their live twins; nil when none finished.
+    /// The live seats' mean finishing place in the hunters races, ranked by order of finish among the live seats that
+    /// finished only (hunters not counted), and the same seats' in their live twins, ranked among themselves; nil when
+    /// none finished. Each race's ranks run 1 to its finishers, so this reads with the DNFs beside it.
     public var liveMeanPlace: Double?
     public var twinLiveMeanPlace: Double?
+    /// The live seats of the hunters races that didn't finish, and the same seats of their live twins; nil without twins.
+    public var liveDNFs: Int
+    public var twinLiveDNFs: Int?
 
     /// Nil when no race was of the hunters mix.
     init?(_ races: [RaceResult]) {
@@ -623,7 +627,13 @@ public struct HuntersSummary: Codable, Hashable, Sendable {
         var hunterOnHunter: [String: Int] = [:], liveOnLive: [String: Int] = [:]
         var liveSeats: [SeatMetrics] = [], twinSeats: [SeatMetrics] = []
         var places: [Int] = [], twinPlaces: [Int] = []
-        var twinRaces = 0
+        var twinRaces = 0, liveDNFs = 0, twinLiveDNFs = 0
+        // Ranks by order of finish among `seats` only, 1 for the first of them home, by their places in the race; and
+        // how many didn't finish.
+        func ranked(_ seats: [SeatMetrics]) -> (ranks: [Int], dnfs: Int) {
+            let home = seats.compactMap(\.place).sorted()
+            return (home.indices.map { $0 + 1 }, seats.count - home.count)
+        }
         for race in hunted {
             let isHunter = { (seat: Int) in race.seats[seat].profile == .hunter }
             for call in race.ruleCalls ?? [] {
@@ -636,14 +646,18 @@ public struct HuntersSummary: Codable, Hashable, Sendable {
             }
             let live = race.seats.filter { $0.profile == nil }
             liveSeats += live
-            places += live.compactMap(\.place)
+            let (ranks, dnfs) = ranked(live)
+            places += ranks
+            liveDNFs += dnfs
             var twinCell = race.cell
             twinCell.profileMix = .live
             guard let twin = twins[twinCell] else { continue }
             twinRaces += 1
             let same = live.map { twin.seats[$0.seat] }
             twinSeats += same
-            twinPlaces += same.compactMap(\.place)
+            let (twinRanks, twinDNFs) = ranked(same)
+            twinPlaces += twinRanks
+            twinLiveDNFs += twinDNFs
         }
         self.twinRaces = twinRaces
         self.liveOnHunter = liveOnHunter
@@ -659,6 +673,8 @@ public struct HuntersSummary: Codable, Hashable, Sendable {
         let mean = { (places: [Int]) in places.isEmpty ? nil : Double(places.reduce(0, +)) / Double(places.count) }
         liveMeanPlace = mean(places)
         twinLiveMeanPlace = mean(twinPlaces)
+        self.liveDNFs = liveDNFs
+        self.twinLiveDNFs = twinRaces == 0 ? nil : twinLiveDNFs
     }
 }
 
@@ -862,16 +878,16 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 lines.append("  hunters: \(profile.finished)/\(profile.seats) finished, contacts \(profile.boatContacts), "
                     + "calls \(callsLine(profile.callsByRule))")
             }
-            func liveLine(_ name: String, _ s: TierSummary, place: Double?) -> String {
-                "  \(name): \(s.finished)/\(s.seats) finished (\(fixed(s.finishShare, 3))), mean place "
-                    + "\(place.map { fixed($0) } ?? "-"), contacts \(s.boatContacts), encounters \(s.encounters) "
+            func liveLine(_ name: String, _ s: TierSummary, place: Double?, dnfs: Int?) -> String {
+                "  \(name): \(s.finished)/\(s.seats) finished (\(fixed(s.finishShare, 3))), mean place among live seats "
+                    + "\(place.map { fixed($0) } ?? "-") (DNF \(dnfs.map(String.init) ?? "-")), contacts \(s.boatContacts), encounters \(s.encounters) "
                     + "(\(fixed(s.encountersToFoulsShare, 3)) fouls), called before the first rounding "
                     + "\(fixed(s.calledBeforeFirstRoundingShare)) of boats, tacks racing \(fixed(s.racingTacksPerBoat, 1))/boat, "
                     + "calls \(callsLine(s.callsByRule))"
             }
-            lines.append(liveLine("live with hunters", hunters.live, place: hunters.liveMeanPlace))
+            lines.append(liveLine("live with hunters", hunters.live, place: hunters.liveMeanPlace, dnfs: hunters.liveDNFs))
             if let twin = hunters.twinLive {
-                lines.append(liveLine("same seats without", twin, place: hunters.twinLiveMeanPlace))
+                lines.append(liveLine("same seats without", twin, place: hunters.twinLiveMeanPlace, dnfs: hunters.twinLiveDNFs))
             }
         }
         lines.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms, max \(fixed(timings.maxMs, 3)) ms")

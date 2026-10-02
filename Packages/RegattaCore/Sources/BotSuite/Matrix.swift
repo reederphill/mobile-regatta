@@ -30,9 +30,10 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     case hunters
 
     /// The profile sailing `seat` in a race of `fleetSize` boats with race seed `seed`, or nil for a live bot. Only the
-    /// hunters mix reads the fleet size.
-    public func profile(ofSeat seat: Int, seed: UInt64, fleetSize: Int = 0) -> BotProfile? {
-        switch self {
+    /// hunters mix reads the fleet size, but every mix needs it: a seat of the fleet.
+    public func profile(ofSeat seat: Int, seed: UInt64, fleetSize: Int) -> BotProfile? {
+        precondition(fleetSize > 0 && (0..<fleetSize).contains(seat), "seat \(seat) of a fleet of \(fleetSize)")
+        return switch self {
         case .live: nil
         case .skillGap: (seat + Int(seed % 2)).isMultiple(of: 2) ? .baseline : .tactician
         case .funPass: [BotProfile.baseline, .tactician, .blipTacker][(seat + Int(seed % 3)) % 3]
@@ -44,7 +45,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// Whether `seat` of a fleet of `fleetSize` sails the hunter in the hunters mix on seed `seed`: every
     /// `fleetSize / 2`th seat in a fleet of ten or more, else one seat, rotating with the seed.
     static func isHunterSeat(_ seat: Int, seed: UInt64, fleetSize: Int) -> Bool {
-        let spacing = max(1, fleetSize >= 10 ? fleetSize / 2 : fleetSize)
+        let spacing = fleetSize >= 10 ? fleetSize / 2 : fleetSize
         return (seat + Int(seed % UInt64(spacing))) % spacing == 0
     }
 

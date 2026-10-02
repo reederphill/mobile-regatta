@@ -31,6 +31,9 @@ public struct BotDriver: Sendable {
     public let phase: Int
     /// Decisions made so far.
     public private(set) var decisions = 0
+    /// Whether the decision she holds is the suite's hunter turning at the boat she hunts (#355, `BotBrain.hunting`):
+    /// a luff, or a turn that brings a boat that must keep clear of her closer. Never for a live bot.
+    public private(set) var isHuntingTurn = false
 
     private var brain: BotBrain
 
@@ -99,6 +102,7 @@ public struct BotDriver: Sendable {
         precondition(view.seat == seat && view.tick == race.tick, "seat \(seat) at tick \(race.tick) given the view of seat \(view.seat) at tick \(view.tick)")
         let decision = brain.decide(view)
         decisions += 1
+        isHuntingTurn = decision.hunt == .turn
         let next = race.tick + 1
         race.apply(decision.input, seat: seat, atTick: next)
         if let tap = decision.tap { race.tap(tap, seat: seat, atTick: next) }

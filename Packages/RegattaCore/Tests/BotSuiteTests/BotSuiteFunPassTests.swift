@@ -18,9 +18,9 @@ import Testing
     /// The fun-pass mix gives every seat one of the three profiles by turns, one seat further along for each
     /// seed; a matrix sails it only in classic oscillating conditions, whatever their version.
     @Test func funPassMixRotatesTheThreeProfiles() {
-        #expect((0..<4).map { ProfileMix.funPass.profile(ofSeat: $0, seed: 3) } == [.baseline, .tactician, .blipTacker, .baseline])
-        #expect((0..<4).map { ProfileMix.funPass.profile(ofSeat: $0, seed: 1) } == [.tactician, .blipTacker, .baseline, .tactician])
-        #expect((0..<3).map { ProfileMix.funPass.profile(ofSeat: $0, seed: 2) } == [.blipTacker, .baseline, .tactician])
+        #expect((0..<4).map { ProfileMix.funPass.profile(ofSeat: $0, seed: 3, fleetSize: 4) } == [.baseline, .tactician, .blipTacker, .baseline])
+        #expect((0..<4).map { ProfileMix.funPass.profile(ofSeat: $0, seed: 1, fleetSize: 4) } == [.tactician, .blipTacker, .baseline, .tactician])
+        #expect((0..<3).map { ProfileMix.funPass.profile(ofSeat: $0, seed: 2, fleetSize: 3) } == [.blipTacker, .baseline, .tactician])
 
         #expect(ProfileMix.funPass.sails(in: "classic-oscillating@3") && ProfileMix.funPass.sails(in: "classic-oscillating@2"))
         #expect(!ProfileMix.funPass.sails(in: "gusty-offshore@3"))

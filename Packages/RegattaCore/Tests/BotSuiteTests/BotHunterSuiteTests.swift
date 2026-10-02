@@ -6,7 +6,9 @@ import Testing
 
 /// #355 acceptance: in the hunters mix (`ProfileMix.hunters`) the suite's hunter (`BotProfile.hunter`) sails to the edge
 /// of the rules, so she draws calls under 16.1 or 17 only when she overdoes it: the count is reported, never asserted to
-/// zero. The scan isn't vacuous: her rudder turns her at a boat that must keep clear of her on `hunterTurnTicks` ticks.
+/// zero. The scan isn't vacuous: she held her hunting turn at a boat that must keep clear of her on `hunterTurnTicks`
+/// ticks, and her hunting tells: the live bots draw more calls with a hunter the victim than with the same seats the
+/// victim in the race's live twin (every seat a live bot).
 @Suite struct BotHunterSuiteTests {
     @Test func huntersDrawRule16Or17CallsOnlyWhenTheyOverdoIt() throws {
         let matrix = BotMatrix(seeds: [1, 2, 3], fleetSizes: [5, 10, 16], tierMixes: [.national, .mixed],
@@ -14,19 +16,42 @@ import Testing
         var turnTicks = 0
         var overdone: [String] = []
         var byRule: [String: Int] = [:]
+        var onHunters = 0, onSameSeatsInTwins = 0
         for cell in matrix.cells {
             let result = try BotRaceHarness.run(cell, cautiousSeats: [])
+            var twinCell = cell
+            twinCell.profileMix = .live
             turnTicks += try #require(result.hunterTurnTicks)
-            for call in try #require(result.ruleCalls) where result.seats[call.offender].profile == .hunter {
+            let hunters = Set(result.seats.indices.filter { result.seats[$0].profile == .hunter })
+            for call in try #require(result.ruleCalls) {
+                if hunters.contains(call.victim) && !hunters.contains(call.offender) { onHunters += 1 }
+                guard hunters.contains(call.offender) else { continue }
                 byRule[call.rule, default: 0] += 1
                 if call.rule == RacingRule.changingCourse.rawValue || call.rule == RacingRule.properCourse.rawValue {
-                    overdone.append("seed \(cell.seed) \(cell.tierMix) \(cell.fleetSize): \(call.rule) on \(call.offender)")
+                    overdone.append("seed \(cell.seed) \(cell.tierMix) \(cell.fleetSize) tick \(call.tick): \(call.rule) on \(call.offender)")
                 }
             }
+            // The twin's calls on the other seats, against the hunters' seats sailed by live bots.
+            onSameSeatsInTwins += try Self.calls(in: twinCell, against: hunters)
         }
         print("BotHunterSuiteTests: \(matrix.cells.count) races, \(turnTicks) hunter turn ticks, calls on hunters "
-            + "\(callsLine(byRule)); under 16.1/17 \(overdone.count): \(overdone)")
+            + "\(callsLine(byRule)); under 16.1/17 \(overdone.count): \(overdone); calls on live bots with a hunter the victim "
+            + "\(onHunters), with the same seats the victim in the live twins \(onSameSeatsInTwins)")
         #expect(turnTicks > 0, "no hunter ever turned at a boat that must keep clear of her: the scan is vacuous")
+        #expect(onHunters > onSameSeatsInTwins,
+                "hunting changed nothing: \(onHunters) calls with a hunter the victim, \(onSameSeatsInTwins) with the same seats live")
+    }
+
+    /// Rule calls in `cell`'s race with a seat of `victims` the victim and none of them the offender.
+    static func calls(in cell: BotRaceCell, against victims: Set<Int>) throws -> Int {
+        var count = 0
+        _ = try BotRaceHarness.run(cell, cautiousSeats: []) { _, events in
+            for event in events {
+                guard case .ruleCall(let call) = event.kind else { continue }
+                if victims.contains(call.victim) && !victims.contains(call.offender) { count += 1 }
+            }
+        }
+        return count
     }
 }
 
@@ -96,7 +121,10 @@ import Testing
         #expect(summary.hunterTurnTicks == 42)
         #expect(summary.live.seats == 2 && summary.live.finished == 2)
         #expect(summary.twinLive?.seats == 2 && summary.twinLive?.finished == 1, "seats 1 and 2 of the twin")
-        #expect(summary.liveMeanPlace == 2.5 && summary.twinLiveMeanPlace == 1)
+        // Places ranked among the live seats only, by order of finish: seats 2 then 1 home (ranks 1, 2); in the twin
+        // seat 1 home, seat 2 not (rank 1, one DNF).
+        #expect(summary.liveMeanPlace == 1.5 && summary.twinLiveMeanPlace == 1)
+        #expect(summary.liveDNFs == 0 && summary.twinLiveDNFs == 1)
         #expect(HuntersSummary([twin]) == nil)
 
         // The gated tiers are the live seats of the races without hunters only.
