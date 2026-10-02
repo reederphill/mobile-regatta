@@ -287,6 +287,8 @@ import Testing
     /// it (a 6 by 6 grid of starts, ahead 3 to 5.8 and leeward 1 to 3.5, on seeds 3, 11 and 20, found none that lands and
     /// can't cross): the gate no longer has a landing to refuse there, so the scene asserts she ducks, not that her tack
     /// would have landed (`LeeBowGates.landedNotCrossing` stays, as the grid's probe).
+    /// #349 widened the grid (312 starts, 0.5 to 6.5 ahead and 0.5 to 4 to leeward, same seeds): 46 landings, every one
+    /// crossable, so `canJustCross` stays as a safety gate that refuses nothing here today.
     @Test func leeBowsInsteadOfDuckingWhenPossible() throws {
         for seed in Self.fleetSeeds {
             let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.8)
