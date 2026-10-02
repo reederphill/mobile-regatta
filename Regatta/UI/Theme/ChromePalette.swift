@@ -13,6 +13,10 @@ enum ChromePalette {
     /// Buttons and controls.
     // placeholder: docs/palette.md.
     static let tint = dynamic(light: 0x1B4F82, dark: 0x7FB3E0)
+    /// A label on a `tint` fill (a prominent button), where the inherited `text` colour would be navy on navy:
+    /// white on the light-mode navy (8.5:1), the dark-mode background navy on the pale dark-mode tint (7.5:1).
+    // placeholder: not in docs/palette.md yet, until #169.
+    static let onTint = dynamic(light: 0xFFFFFF, dark: 0x0B1F33)
     /// Panels and rows on `background`.
     // placeholder: not in docs/palette.md yet; white on the pale chart blue, a lighter navy in dark mode.
     static let surface = dynamic(light: 0xFFFFFF, dark: 0x13304D)

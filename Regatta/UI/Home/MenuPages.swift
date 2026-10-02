@@ -102,6 +102,8 @@ struct PracticeSetupView: View {
                 Button(action: model.beginPractice) {
                     Text("Start race")
                         .font(MenuFont.heading(.title3))
+                        // The page's `menuBackground` text colour would otherwise reach the label: navy on the navy fill.
+                        .foregroundStyle(ChromePalette.onTint)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
                 }
