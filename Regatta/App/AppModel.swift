@@ -160,13 +160,16 @@ final class AppModel {
         self.myBoatDefaults = myBoatDefaults
         let boatClass = RaceFiles.defaults.boatClass.ref.id
         let completed = CompletedRacesStore(defaults: myBoatDefaults)
-        if let races = launchOptions.completedRaces { completed.count = races }
+        // UI tests only, and into their own suite: never into the app's defaults, where it would unlock earned designs.
+        if launchOptions.uiTesting, let races = launchOptions.completedRaces { completed.count = races }
         // UI tests start from the fixed livery, so every run draws the same boat.
         let myLivery = LiveryStore(defaults: myBoatDefaults)
             .load(boatClass: boatClass, fallback: launchOptions.uiTesting ? FleetLiveries.yours : nil)
         self.myLivery = myLivery
-        let store = store ?? StubStoreService(boatClass: boatClass, suiteName: MyBoatDefaults.suiteName(for: launchOptions))
-        myBoat = MyBoatModel(saved: myLivery, completedRaces: completed.count, store: store)
+        let store = store ?? StubStoreService(boatClass: boatClass, defaults: .init(myBoatDefaults))
+        // What you own as the stub keeps it, now, so a bought design never reads Buy until the stream catches up.
+        myBoat = MyBoatModel(saved: myLivery, owned: StubStoreService.owned(in: myBoatDefaults),
+                             completedRaces: completed.count, store: store)
         haptics = GatedHaptics(isOn: deviceSettings.haptics)
         controls = ControlSettings(deviceSettings, launchOptions: launchOptions)
         #if DEBUG

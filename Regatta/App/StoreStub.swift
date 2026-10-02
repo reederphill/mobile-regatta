@@ -39,20 +39,30 @@ actor StubStoreService: StoreService {
         }
     }
 
-    private let suiteName: String?
+    /// Defaults the stub may keep: `UserDefaults` is thread-safe (Apple's documentation) but not `Sendable` in this SDK.
+    struct Defaults: @unchecked Sendable {
+        let defaults: UserDefaults
+        init(_ defaults: UserDefaults) { self.defaults = defaults }
+    }
+
+    private let defaults: Defaults
     private let isOnline: Bool
     private let catalogue: [StoreProduct]
     private var owned: Set<DesignID>
     private var watchers: [UUID: AsyncStream<Set<DesignID>>.Continuation] = [:]
 
-    /// `suiteName` names the defaults that keep what you own (nil: the app's own). `isOnline` false fails every
-    /// purchase as offline (`-fakeServices offline`).
-    init(boatClass: String, suiteName: String?, isOnline: Bool = true) {
-        self.suiteName = suiteName
+    /// The designs `defaults` keeps as owned: what a stub on them starts with.
+    nonisolated static func owned(in defaults: UserDefaults) -> Set<DesignID> {
+        Set((defaults.stringArray(forKey: ownedKey) ?? []).map(DesignID.init))
+    }
+
+    /// `defaults` keep what you own: My boat's (`MyBoatDefaults`). `isOnline` false fails every purchase as offline
+    /// (`-fakeServices offline`).
+    init(boatClass: String, defaults: Defaults, isOnline: Bool = true) {
+        self.defaults = defaults
         self.isOnline = isOnline
         catalogue = Self.products(boatClass: boatClass)
-        let defaults = suiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
-        owned = Set((defaults.stringArray(forKey: Self.ownedKey) ?? []).map(DesignID.init))
+        owned = Self.owned(in: defaults.defaults)
     }
 
     func products() throws -> [StoreProduct] {
@@ -68,8 +78,7 @@ actor StubStoreService: StoreService {
         if owned.contains(product.design) { return .purchased(product.design) }
         guard Self.completesPurchases else { return .cancelled }
         owned.insert(product.design)
-        let defaults = suiteName.flatMap(UserDefaults.init(suiteName:)) ?? .standard
-        defaults.set(owned.map(\.rawValue).sorted(), forKey: Self.ownedKey)
+        defaults.defaults.set(owned.map(\.rawValue).sorted(), forKey: Self.ownedKey)
         for watcher in watchers.values { watcher.yield(owned) }
         return .purchased(product.design)
     }

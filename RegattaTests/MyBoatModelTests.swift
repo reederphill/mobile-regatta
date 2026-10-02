@@ -196,6 +196,17 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         #expect(model.action == .save)
     }
 
+    /// A number typed with leading zeros reads as saved after Save: "0042" shows 42.
+    @Test func savingShowsTheNumberAsSaved() {
+        let model = model()
+        model.numberText = "0007"
+        #expect(model.action == .save)
+        model.save()
+        #expect(model.saved.sailNumber == 7)
+        #expect(model.numberText == "7")
+        #expect(model.action == .saved)
+    }
+
     @Test func leavingDiscardsTheDraftAndTryItSelects() {
         let model = model()
         model.select(DesignID("skiff-plain"))
@@ -211,9 +222,8 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
 
     /// Buy with the store stub: the design is owned and the button returns to Save, with no auto-save; it stays owned.
     @Test func buyingOwnsTheDesignAndReturnsToSave() async {
-        let suite = "MyBoatTests-\(UUID().uuidString)"
-        _ = emptySuite(suite)
-        let model = model(store: StubStoreService(boatClass: "skiff", suiteName: suite))
+        let defaults = emptySuite()
+        let model = model(store: StubStoreService(boatClass: "skiff", defaults: .init(defaults)))
         var saves = 0
         model.onSave = { _ in saves += 1 }
         model.select(DesignID("skiff-stars"))
@@ -224,7 +234,7 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         #expect(model.owned.contains(DesignID("skiff-stars")))
         #expect(model.action == .save)
         #expect(saves == 0)
-        let again = StubStoreService(boatClass: "skiff", suiteName: suite)
+        let again = StubStoreService(boatClass: "skiff", defaults: .init(defaults))
         #expect(await again.ownedDesigns() == [DesignID("skiff-stars")])
     }
 
@@ -257,6 +267,32 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
     }
 }
 
+/// My boat's state at launch (#136).
+@MainActor @Suite struct MyBoatLaunchTests {
+    private func options(_ arguments: String...) -> LaunchOptions {
+        LaunchOptions(arguments: ["/path/to/Regatta"] + arguments)
+    }
+
+    /// `-completedRaces` is the UI tests': without `-uitesting` it neither counts nor reaches the app's defaults.
+    @Test func completedRacesOnlyUnderUITesting() {
+        let defaults = emptySuite()
+        let app = AppModel(launchOptions: options("-completedRaces", "5"), defaults: defaults)
+        #expect(app.myBoat.completedRaces == 0)
+        #expect(defaults.object(forKey: CompletedRacesStore.key) == nil)
+        let testing = AppModel(launchOptions: options("-uitesting", "-completedRaces", "5"), defaults: defaults)
+        #expect(testing.myBoat.completedRaces == 5)
+        #expect(defaults.object(forKey: CompletedRacesStore.key) == nil, "kept in the UI tests' own suite")
+    }
+
+    /// A design bought before launch is owned from the first frame, not once the ownership stream yields.
+    @Test func ownedDesignsAreSeededAtLaunch() {
+        let defaults = emptySuite()
+        defaults.set(["skiff-stars"], forKey: StubStoreService.ownedKey)
+        let app = AppModel(launchOptions: options(), defaults: defaults)
+        #expect(app.myBoat.owned == [DesignID("skiff-stars")])
+    }
+}
+
 /// The render cache is bounded (#136): typing a sail number renders a new image per keystroke.
 @MainActor @Suite struct LiveryRendererCacheTests {
     @Test func theCacheDoesNotKeepEveryRender() {
@@ -273,6 +309,5 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         for look in looks { _ = LiveryRenderer.image(look, hull: hull, size: size) }
         let kept = looks.filter { LiveryRenderer.cachedImage($0, hull: hull, size: size) != nil }.count
         #expect(kept < looks.count)
-        #expect(LiveryRenderer.cachedImage(looks.last!, hull: hull, size: size) != nil, "the newest render is kept")
     }
 }

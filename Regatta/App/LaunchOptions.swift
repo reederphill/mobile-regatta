@@ -37,7 +37,8 @@ import RegattaServices
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
-/// - `-completedRaces <n>` sets the online races you've completed, which earned designs count (#136).
+/// - `-completedRaces <n>` (with `-uitesting`) sets the online races you've completed, which earned designs count (#136).
+///   Kept in the UI tests' own suite; without `-uitesting` it's ignored, so it never unlocks a design for real.
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller

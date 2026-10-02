@@ -201,6 +201,8 @@ final class MyBoatModel {
         let livery = draft
         guard (try? catalogue.validate(livery, boatClass: boatClass)) != nil else { return }
         saved = livery
+        // The field shows the number as saved: "0042" reads 42.
+        typedNumber = String(livery.sailNumber)
         onSave(livery)
     }
 

@@ -22,10 +22,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         var services = launchOptions.fakeServices.map(ServiceSet.fake)
             ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
         // The shop sells every paid design from a stub until StoreKit (#137): see `StubStoreService`. Its defaults
-        // are My boat's, which UI tests empty at launch, so empty them first.
-        _ = MyBoatDefaults.defaults(for: launchOptions, standard: .standard)
+        // are My boat's (UI tests' own suite, emptied at launch).
         services.store = StubStoreService(boatClass: RaceFiles.defaults.boatClass.ref.id,
-                                          suiteName: MyBoatDefaults.suiteName(for: launchOptions),
+                                          defaults: .init(MyBoatDefaults.defaults(for: launchOptions, standard: .standard)),
                                           isOnline: launchOptions.fakeServices != .offline)
         window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size,
                                                           onlineStatus: OnlineStatus(services: services))
