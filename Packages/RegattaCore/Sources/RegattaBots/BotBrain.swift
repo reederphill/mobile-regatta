@@ -146,7 +146,8 @@ struct BotBrain: Sendable {
     /// The boats around her as she saw them at her last decision, by seat (`guarded`): the cautious bot's only.
     var seen: [Seen?] = []
     /// Whether she holds her aim within her proper course while told she is restricted under rule 17
-    /// (`properCourseLimited`, #346). Always, but in tests that compare her steering with the limit left out.
+    /// (`properCourseLimited`, #346). A test seam: always true in play; only tests that compare her steering with the
+    /// limit left out set it false.
     var limitsProperCourse = true
 
     /// The stream of her seed her own draws come from.

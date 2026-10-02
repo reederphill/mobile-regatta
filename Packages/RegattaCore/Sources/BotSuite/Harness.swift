@@ -47,9 +47,10 @@ public enum BotRaceHarness {
 
     /// Sails `cell`, with the cautious bot (#104, `BotDriver.cautious`) in `cautiousSeats` in place of the cell's bots:
     /// a dropped player's boat among them, from the start. Her metrics give her seat's tier as the cell's. `events`
-    /// sees each tick's events as the tally does: for tests that look for one kind of call (#346).
+    /// sees the race after each tick and that tick's events as the tally does: for tests that look for one kind of
+    /// call, or the state behind it (#346).
     public static func run(_ cell: BotRaceCell, cautiousSeats: Set<Int>,
-                           events: ([RaceEvent]) -> Void = { _ in }) throws -> RaceResult {
+                           events: (Race, [RaceEvent]) -> Void = { _, _ in }) throws -> RaceResult {
         let setup = try raceSetup(for: cell)
         // Assembled as the server assembles a race (#81): the files the setup names, the race of record.
         let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
@@ -73,7 +74,7 @@ public enum BotRaceHarness {
             race.step()
             tickMs.append(milliseconds(start.duration(to: clock.now)))
             let drained = race.drainEvents()
-            events(drained)
+            events(race, drained)
             tally.record(race, events: drained)
         }
         let seats = tiers.indices.map { seat in

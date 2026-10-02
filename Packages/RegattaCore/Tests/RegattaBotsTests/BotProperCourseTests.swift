@@ -13,12 +13,13 @@ extension BotConductTests {
     /// At `shiftTick` the wind turns `shift` radians so that her held angle, still held, is carried that far closer
     /// to the wind than the bearing to the mark: above her proper course. With `restricted`, seat 0 gets the rule 17
     /// record against seat 1, as if she had come up from astern (placing by snapshot forgets the umpire's memory).
+    /// With `fromMark`, she is placed that many hull lengths short of the offset mark on the same line instead.
     struct Reach {
         let race: Race
         let leg: Int
         let shiftTick: Int
 
-        init(seed: UInt64, shift: Double, restricted: Bool, abeam: Double = 2) throws {
+        init(seed: UInt64, shift: Double, restricted: Bool, abeam: Double = 2, fromMark: Double? = nil) throws {
             let probe = botRace(seats: [.bot, .bot], seed: seed)
             let c = probe.course
             let leg = try #require(c.legs.firstIndex(of: .round(CourseLayout.offsetIndex)))
@@ -26,7 +27,9 @@ extension BotConductTests {
             let mark = c.elements[CourseLayout.offsetIndex].marks[0].position
             // Below the leg, well clear of both marks' zones: the offset mark a reach away, a little above abeam.
             let approach = (mark - windward).normalized
-            let at = mark - approach * ((mark - windward).length + 11) - c.upwind * 35
+            let far = mark - approach * ((mark - windward).length + 11) - c.upwind * 35
+            // `fromMark` hull lengths short of the mark on the same line, in its zone: where rule 18 takes over.
+            let at = fromMark.map { mark + (far - mark).normalized * (probe.boatClass.hull.length * $0) } ?? far
             let heading = (mark - at).bearing
             let base = GroundWind(direction: wrapAngle(c.axis), speed: metresPerSecond(knots: 10))
             // On starboard (the wind over her starboard side, boom to port) a wind turned clockwise turns her
@@ -254,5 +257,64 @@ extension SeatViewTests {
         race.umpire?.setProperCourse(ProperCourseRecord(leeward: 0, windward: 1), for: SeatPair(0, 1))
         try race.importSnapshot(race.exportSnapshot())
         #expect(race.seatView(for: 0).own.properCourse == nil)
+    }
+
+    /// #346: the notice ends with the record when the windward boat tacks away (#345's tack end path): two boats
+    /// beating on starboard a hull length apart, seat 0 to leeward held to her proper course against seat 1; seat 1
+    /// puts her helm hard up through the wind. On the first tick the record is gone she is tacking (or on port), and
+    /// the pair are still overlapped within two lengths: it's the tack that ended it.
+    @Test func properCourseNoticeClearsOnATack() throws {
+        let water = BotConductTests.Water(seed: 3)
+        let heading = water.beat(.starboard)
+        let forward = Vec2.heading(heading)
+        let race = try BotConductTests.place(water, [
+            .init(position: water.centre, heading: heading, speed: water.up.speed),
+            .init(position: water.centre + forward.rightPerp * water.length - forward * water.length * 0.2,
+                  heading: heading, speed: water.up.speed),
+        ]) { snapshot in
+            snapshot.touchingBoats = []
+            snapshot.overlaps = [.init(pair: .init(0, 1), isOverlapped: true, changeTicks: 0)]
+        }
+        race.umpire?.setProperCourse(ProperCourseRecord(leeward: 0, windward: 1), for: SeatPair(0, 1))
+        #expect(race.seatView(for: 0).own.properCourse?.windward == [1])
+        // Hard to starboard: on starboard tack, towards the wind and through it.
+        _ = race.apply(BoatInput(rudder: 1.0), seat: 1, atTick: race.tick + 1)
+        var ended: (tacked: Bool, near: Bool)?
+        for _ in 0..<(5 * Race.tickRate) where ended == nil {
+            race.step()
+            _ = race.drainEvents()
+            if race.umpire?.properCourse(SeatPair(0, 1)) == nil {
+                #expect(race.seatView(for: 0).own.properCourse == nil)
+                ended = (race.boats[1].isTacking || race.boats[1].boomSide != race.boats[0].boomSide,
+                         (race.boats[0].position - race.boats[1].position).length - water.length <= 2 * water.length
+                             && race.overlaps.isOverlapped(0, 1))
+            } else {
+                #expect(race.seatView(for: 0).own.properCourse != nil)
+            }
+        }
+        let end = try #require(ended, "the record outlasted the windward boat's tack")
+        #expect(end.tacked && end.near)
+    }
+
+    /// #346: the notice ends with the record when rule 18 takes over (#345's rule 18 end path): the pair a length
+    /// and a half short of the offset mark, in its zone, still overlapped on the same tack within two lengths.
+    @Test func properCourseNoticeClearsWhenRule18TakesOver() throws {
+        let reach = try BotConductTests.Reach(seed: 1, shift: 0, restricted: true, abeam: 1.5, fromMark: 1.5)
+        let race = reach.race
+        let length = race.boatClass.hull.length
+        #expect(race.seatView(for: 0).own.properCourse?.windward == [1])
+        #expect(race.seatView(for: 0).own.zone != nil && race.seatView(for: 1).own.zone != nil)
+        race.step()
+        _ = race.drainEvents()
+        #expect(race.umpire?.properCourse(SeatPair(0, 1)) == nil)
+        #expect(race.seatView(for: 0).own.properCourse == nil)
+        #expect(race.overlaps.isOverlapped(0, 1) && race.boats[0].boomSide == race.boats[1].boomSide
+            && !race.boats.contains(where: \.isTacking)
+            && (race.boats[0].position - race.boats[1].position).length - length <= 2 * length)
+
+        // The same pair clear of the zone keeps the record over that tick: it is rule 18 that ended it.
+        let clear = try BotConductTests.Reach(seed: 1, shift: 0, restricted: true, abeam: 1.5)
+        clear.race.step()
+        #expect(clear.race.seatView(for: 0).own.properCourse != nil)
     }
 }
