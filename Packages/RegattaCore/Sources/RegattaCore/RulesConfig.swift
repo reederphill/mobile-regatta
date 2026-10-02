@@ -28,7 +28,9 @@ public struct RulesConfig: DataFileContent {
     /// a schema-1 or -2 file means `fromCall`.
     /// Schema 4 (#92) adds the escape simulation's "changes course" test (`Escape.changesCourse`); a schema-1 to
     /// -3 file has none (nil), and its races run no escape simulation: rules 15 and 16.1 are never called.
-    public static let supportedSchemaVersions = [1, 2, 3, 4]
+    /// Schema 5 (#345) adds rule 17's limits (`Incidents.properCourse`); a schema-1 to -4 file has none (nil), and
+    /// its races never call rule 17.
+    public static let supportedSchemaVersions = [1, 2, 3, 4, 5]
 
     public var incidents: Incidents
     /// The rule 18 zone.
@@ -48,6 +50,36 @@ public struct RulesConfig: DataFileContent {
         public var separation: HullLengths
         /// A change in overlap or zone state counts only once it has held this long (#18), seconds.
         public var lastPointOfCertainty: Double
+        /// Rule 17's limits (schema 5, #345). Nil in a schema-1 to -4 file: the umpire keeps no rule 17 records and
+        /// never calls rule 17.
+        public var properCourse: ProperCourseLimits?
+    }
+
+    /// Rule 17 (#345): a boat that becomes overlapped to leeward from clear astern within `distance` of the other
+    /// shall not sail above her proper course (`ProperCourse`) while they stay overlapped on the same tack within
+    /// it. "Above" is closer to the wind than proper course less the leg's tolerance.
+    public struct ProperCourseLimits: Sendable, Equatable {
+        /// The hull gap within which the overlap begins and holds (the RRS's two hull lengths).
+        public var distance: HullLengths
+        /// Radians closer to the wind than proper course a boat may sail on a beat: the pinch allowance.
+        public var beatTolerance: Double
+        /// Radians closer to the wind than proper course a boat may sail on a reach or a run.
+        public var reachRunTolerance: Double
+        /// Seconds: a boat above proper course that, both boats projected on at their velocities, ends clear
+        /// astern of the other within this is promptly sailing astern of her (rule 17's exception).
+        public var promptlyAstern: Double
+
+        public init(distance: HullLengths, beatTolerance: Double, reachRunTolerance: Double, promptlyAstern: Double) {
+            self.distance = distance
+            self.beatTolerance = beatTolerance
+            self.reachRunTolerance = reachRunTolerance
+            self.promptlyAstern = promptlyAstern
+        }
+
+        /// The tolerance for a proper course of `kind`, radians.
+        public func tolerance(_ kind: ProperCourse.Kind) -> Double {
+            kind == .beat ? beatTolerance : reachRunTolerance
+        }
     }
 
     /// Would the right-of-way boat have hit the keep-clear boat had she held her course? The sweep turns
@@ -230,7 +262,7 @@ public struct RulesConfig: DataFileContent {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2, 3, 4:
+        case 1, 2, 3, 4, 5:
             // Duplicate keys were already refused by `DataFile`, so every parse below reads the same file.
             let document = try JSONDecoder().decode(RulesConfigSchema.self, from: fileData)
             try document.rejectUnknownFields(in: fileData)
@@ -254,13 +286,14 @@ public struct RulesConfig: DataFileContent {
 
 public typealias RulesConfigFile = DataFile<RulesConfig>
 
-// MARK: - Schemas 1 to 4
+// MARK: - Schemas 1 to 5
 
-/// The rules configuration file, schema versions 1 to 4, as written. Documented in `docs/rules-file.md`.
+/// The rules configuration file, schema versions 1 to 5, as written. Documented in `docs/rules-file.md`.
 /// Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths` (#85): required in schema 2
 /// and later, refused in schema 1. Schema 3 is schema 2 plus `raceFormat.penalty.stackedPenaltyDeadlines`
 /// (#89): required in schema 3 and later, refused before it. Schema 4 is schema 3 plus
-/// `incidents.escape.changesCourseDegreesPerSecond` (#92): required in schema 4, refused before it.
+/// `incidents.escape.changesCourseDegreesPerSecond` (#92): required in schema 4 and later, refused before it.
+/// Schema 5 is schema 4 plus `incidents.properCourse` (#345): required in schema 5, refused before it.
 struct RulesConfigSchema: Decodable {
     let schemaVersion: Int
     let id: String
@@ -283,9 +316,22 @@ struct RulesConfigSchema: Decodable {
         let escape: Escape
         let separationHullLengths: Double
         let lastPointOfCertaintySeconds: Double
+        /// Schema 5.
+        let properCourse: ProperCourse?
 
         enum CodingKeys: String, CodingKey, CaseIterable {
-            case nearMissSweep, escape, separationHullLengths, lastPointOfCertaintySeconds
+            case nearMissSweep, escape, separationHullLengths, lastPointOfCertaintySeconds, properCourse
+        }
+    }
+
+    struct ProperCourse: Decodable {
+        let distanceHullLengths: Double
+        let beatToleranceDegrees: Double
+        let reachRunToleranceDegrees: Double
+        let promptlyAsternSeconds: Double
+
+        enum CodingKeys: String, CodingKey, CaseIterable {
+            case distanceHullLengths, beatToleranceDegrees, reachRunToleranceDegrees, promptlyAsternSeconds
         }
     }
 
@@ -435,11 +481,12 @@ struct RulesConfigSchema: Decodable {
         }
     }
 
-    /// Every field schemas 1 to 4 have, from each type's `CodingKeys`, so it can't drift from the decoder.
+    /// Every field schemas 1 to 5 have, from each type's `CodingKeys`, so it can't drift from the decoder.
     static let fields: FieldTree = .object(CodingKeys.self, [
         .incidents: .object(Incidents.CodingKeys.self, [
             .nearMissSweep: .object(NearMissSweep.CodingKeys.self),
             .escape: .object(Escape.CodingKeys.self, [.candidates: .object(Escape.Candidates.CodingKeys.self)]),
+            .properCourse: .object(ProperCourse.CodingKeys.self),
         ]),
         .zone: .object(Zone.CodingKeys.self),
         .markRoomGiven: .object(MarkRoomGiven.CodingKeys.self),
@@ -456,7 +503,7 @@ struct RulesConfigSchema: Decodable {
     ])
 
     /// Validates the file and converts it to code units. Throws `DataFileError.invalidContent`, or `malformed`
-    /// for a schema-2, -3 or -4 file without a field its schema requires.
+    /// for a schema-2 to -5 file without a field its schema requires.
     func rulesConfig(id: String, schemaVersion: Int, fileData: Data) throws -> RulesConfig {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
             if !condition { throw DataFileError.invalidContent(kind: RulesConfig.kind, id: id, reason: reason()) }
@@ -508,6 +555,21 @@ struct RulesConfigSchema: Decodable {
 
         try positive(incidents.separationHullLengths, "incidents.separationHullLengths")
         try duration(incidents.lastPointOfCertaintySeconds, "incidents.lastPointOfCertaintySeconds")
+        // Schema 5's rule 17 limits: required in schema 5, refused before it, where rule 17 is never called.
+        var properCourse: RulesConfig.ProperCourseLimits?
+        if schemaVersion >= 5 {
+            guard let limits = incidents.properCourse else {
+                throw DataFileError.malformed(kind: RulesConfig.kind, reason: "schema \(schemaVersion) needs incidents.properCourse")
+            }
+            try positive(limits.distanceHullLengths, "incidents.properCourse.distanceHullLengths")
+            let beat = try angle(limits.beatToleranceDegrees, "incidents.properCourse.beatToleranceDegrees", max: 45)
+            let reachRun = try angle(limits.reachRunToleranceDegrees, "incidents.properCourse.reachRunToleranceDegrees", max: 45)
+            try duration(limits.promptlyAsternSeconds, "incidents.properCourse.promptlyAsternSeconds")
+            properCourse = .init(distance: HullLengths(limits.distanceHullLengths), beatTolerance: beat,
+                                 reachRunTolerance: reachRun, promptlyAstern: limits.promptlyAsternSeconds)
+        } else {
+            try check(incidents.properCourse == nil, "incidents.properCourse needs schema 5")
+        }
         try positive(zone.radiusHullLengths, "zone.radiusHullLengths")
         try positive(markRoomGiven.roundingDistanceHullLengths, "markRoomGiven.roundingDistanceHullLengths")
         try nonNegative(markRoomGiven.clearanceHullLengths, "markRoomGiven.clearanceHullLengths")
@@ -593,7 +655,8 @@ struct RulesConfigSchema: Decodable {
                               startTickOffset: escape.startTickOffset, initially: escape.initiallySeconds,
                               changesCourse: changesCourse),
                 separation: HullLengths(incidents.separationHullLengths),
-                lastPointOfCertainty: incidents.lastPointOfCertaintySeconds),
+                lastPointOfCertainty: incidents.lastPointOfCertaintySeconds,
+                properCourse: properCourse),
             zone: .init(radius: HullLengths(zone.radiusHullLengths)),
             markRoomGiven: .init(roundingDistance: HullLengths(markRoomGiven.roundingDistanceHullLengths),
                                  clearance: HullLengths(markRoomGiven.clearanceHullLengths)),

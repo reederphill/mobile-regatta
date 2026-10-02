@@ -52,7 +52,7 @@ import Testing
             try RaceFiles(resolving: setup)
         }
 
-        // A catalog's fleet-rules@4 (the default) with other bytes than the setup's ref.
+        // A catalog's fleet-rules@5 (the default) with other bytes than the setup's ref.
         var catalog = RaceFileCatalog()
         let retuned = try RulesConfigFile(data: RulesConfigTests.tampered(#""finishWindowSeconds": 120"#, #""finishWindowSeconds": 150"#))
         try catalog.rulesConfigurations.add(retuned)

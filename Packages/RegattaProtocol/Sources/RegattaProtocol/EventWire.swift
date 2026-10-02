@@ -239,6 +239,7 @@ extension RacingRule {
         case .touchingMark: 13
         case .exoneratedCompelled: 14
         case .exoneratedEntitledRoom: 15
+        case .properCourse: 16
         }
     }
 

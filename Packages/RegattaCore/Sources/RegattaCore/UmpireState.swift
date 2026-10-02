@@ -6,7 +6,8 @@
 /// both racing to, and each boat's presence in that mark's zone. Its recorded track (#92): every boat over the
 /// last few seconds, what the escape simulation reads (`EscapeSimulation`). Its protest matching (#94):
 /// which incident a protest is about, read from the race's incident index, so it holds no state of its own
-/// and survives an import.
+/// and survives an import. Its rule 17 memory (#345): each pair's record of a leeward boat that came up from
+/// clear astern (`ProperCourseRecord`).
 public struct UmpireState: Sendable, Equatable {
     /// Each pair's open incident, by id: opened by a contact or a near miss, closed when the pair
     /// separates. Looked up by pair, never iterated (ADR 0002).
@@ -28,6 +29,9 @@ public struct UmpireState: Sendable, Equatable {
     /// Looked up by seat, never iterated (ADR 0002). Kept through an import, as the open incidents are: the
     /// next tick forgets the neighbours that have separated (`Race.forgetSeparatedMarkTouches`).
     private var markTouchNeighbours: [Int: [Int]] = [:]
+    /// Rule 17 (#345): each pair's record while it holds (`ProperCourseRecord`). Looked up by pair, never iterated
+    /// (ADR 0002). Forgotten at an import, with the recorded track it is opened from.
+    private var properCourseRecords: [SeatPair: ProperCourseRecord] = [:]
 
     public init() {}
 
@@ -43,8 +47,12 @@ public struct UmpireState: Sendable, Equatable {
     /// Seats `a` and `b`'s recorded track, oldest first through the newest tick recorded; nil before any.
     public func track(_ a: Int, _ b: Int) -> PairTrack? { recorder.track(a, b) }
 
-    /// Forgets the recorded track: after an import (`Race.importSnapshot`) the boats' past isn't the one it holds.
-    mutating func forgetTrack() { recorder = EscapeRecorder() }
+    /// Forgets the recorded track and the rule 17 records read from it: after an import (`Race.importSnapshot`) the
+    /// boats' past isn't the one it holds.
+    mutating func forgetTrack() {
+        recorder = EscapeRecorder()
+        properCourseRecords = [:]
+    }
 
     /// The id of the incident open between `pair`'s boats, if they haven't separated since it opened.
     func openIncident(_ pair: SeatPair) -> Int? { openIncidents[pair] }
@@ -93,6 +101,90 @@ public struct UmpireState: Sendable, Equatable {
         let lastActivity = max(incident.tick, incidents.lastContactTick(inIncident: incident.id) ?? incident.tick)
         let since = tick - lastActivity
         return (0...window).contains(since) ? incident.id : nil
+    }
+
+    // MARK: - Rule 17 (#345)
+
+    /// The rule 17 record between `pair`'s boats, while it holds: which of them is the leeward boat held to her
+    /// proper course, against which windward boat.
+    public func properCourse(_ pair: SeatPair) -> ProperCourseRecord? { properCourseRecords[pair] }
+
+    /// Sets `pair`'s rule 17 record, or forgets it: for tests, which place boats by snapshot (forgetting the umpire's
+    /// memory) and need a record without sailing one up from astern. The next update ends it unless it holds.
+    mutating func setProperCourse(_ record: ProperCourseRecord?, for pair: SeatPair) { properCourseRecords[pair] = record }
+
+    /// One tick of rule 17 (#345), after the boats have moved, the overlaps and rule 18 have been updated and the
+    /// tick recorded (`record`), in seat-pair order. Nothing under a rules configuration without rule 17's limits.
+    ///
+    /// - A record opens for seats `a` < `b`, both racing, on the tick their overlap (as of the last point of
+    ///   certainty) begins, when rule 11 holds between them (same tack, neither tacking: `Rules.rightOfWay`), rule
+    ///   18 isn't in force between them (`ProperCourseTick.isMarkRoomInForce`), their hulls are within the limits'
+    ///   `distance` now and on the tick the hulls first showed the overlap, and on the tick before that (the last
+    ///   point of certainty back), on the same tack and neither tacking, the leeward boat was clear astern of the
+    ///   windward one (`Rules.isClearAstern`): she made the overlap. Not if the windward boat came up from astern,
+    ///   or neither was astern (an overlap through a boat between, or one from another tack).
+    /// - It holds while both are racing, overlapped as of the last point of certainty within `distance`, rule 11
+    ///   still on the same windward boat, and rule 18 not in force; it ends for good on the first tick any fails
+    ///   (separation, a tack, rule 18 taking over). A new overlap from clear astern opens a new one.
+    mutating func updateProperCourse(_ tick: ProperCourseTick) {
+        guard let limits = tick.rules.incidents.properCourse else { return }
+        let hull = tick.boatClass.hull
+        let reach = limits.distance.metres(hullLength: hull.length)
+        let margin = RulesConfig.ticks(tick.rules.incidents.lastPointOfCertainty)
+        let anyRecord = !properCourseRecords.isEmpty
+        let n = tick.boats.count
+        for a in 0..<n {
+            for b in (a + 1)..<n {
+                let pair = SeatPair(a, b)
+                let (boatA, boatB) = (tick.boats[a], tick.boats[b])
+                // The hulls are no further apart than the centres less a hull length.
+                let near = (boatA.position - boatB.position).length - hull.length <= reach
+                if anyRecord, let held = properCourseRecords[pair] {
+                    if !(near && holds(held, a, b, tick, reach: reach)) { properCourseRecords[pair] = nil }
+                    continue
+                }
+                guard near, let record = opens(a, b, tick, reach: reach, margin: margin) else { continue }
+                properCourseRecords[pair] = record
+            }
+        }
+    }
+
+    /// Whether the rule 11 relation of seats `a` < `b` now (as `updateProperCourse` reads it) has `windward` keeping
+    /// clear of the other within `reach` metres, both racing, rule 18 not in force.
+    private func isRule11(_ a: Int, _ b: Int, _ tick: ProperCourseTick, reach: Double) -> RightOfWay? {
+        let (boatA, boatB) = (tick.boats[a], tick.boats[b])
+        guard boatA.status == .racing, boatB.status == .racing, tick.overlaps.isOverlapped(a, b),
+              !tick.isMarkRoomInForce(a, b, umpire: self),
+              let right = Rules.rightOfWay(boatA, boatB, overlapped: true, hull: tick.boatClass.hull),
+              right.rule == .windwardLeeward,
+              Collision.distance(convex: tick.hulls[a], simplePolygon: tick.hulls[b]) <= reach
+        else { return nil }
+        return right
+    }
+
+    private func holds(_ record: ProperCourseRecord, _ a: Int, _ b: Int, _ tick: ProperCourseTick, reach: Double) -> Bool {
+        isRule11(a, b, tick, reach: reach)?.keepClear == record.windward
+    }
+
+    private func opens(_ a: Int, _ b: Int, _ tick: ProperCourseTick, reach: Double, margin: Int) -> ProperCourseRecord? {
+        let index = OverlapTracker.index(a, b, seats: tick.boats.count)
+        guard tick.overlaps.isOverlapped(a, b), recorder.overlapped(index, ticksBack: 1) == false,
+              let right = isRule11(a, b, tick, reach: reach)
+        else { return nil }
+        let windward = right.keepClear, leeward = windward == a ? b : a
+        guard let leewardBefore = recorder.recorded(leeward, ticksBack: margin),
+              let windwardBefore = recorder.recorded(windward, ticksBack: margin),
+              let leewardFirst = recorder.recorded(leeward, ticksBack: margin - 1),
+              let windwardFirst = recorder.recorded(windward, ticksBack: margin - 1)
+        else { return nil }
+        let (now, l, w) = (tick.boats, leewardBefore.boat(id: leeward), windwardBefore.boat(id: windward))
+        let outline = tick.boatClass.hull.outline
+        guard l.boomSide == now[leeward].boomSide, w.boomSide == now[windward].boomSide, !l.isTacking, !w.isTacking,
+              Rules.isClearAstern(l, of: w, hull: tick.boatClass.hull),
+              Collision.distance(convex: leewardFirst.boat(id: leeward).hull(outline: outline),
+                                 simplePolygon: windwardFirst.boat(id: windward).hull(outline: outline)) <= reach
+        else { return nil }
+        return ProperCourseRecord(leeward: leeward, windward: windward, tick: tick.tick)
     }
 
     // MARK: - Rule 18 (#91)
@@ -178,6 +270,43 @@ public struct UmpireState: Sendable, Equatable {
                     : nil
             }
         }
+    }
+}
+
+/// Rule 17 between one pair (#345): `leeward` became overlapped to leeward of `windward` from clear astern within
+/// two hull lengths (the rules configuration's `incidents.properCourse.distance`), so while it holds she shall not
+/// sail above her proper course (`ProperCourse`). Held by `UmpireState` (`updateProperCourse`); umpire memory only,
+/// never in a snapshot, on the wire or in the digest.
+public struct ProperCourseRecord: Sendable, Equatable {
+    public let leeward: Int
+    public let windward: Int
+    /// The tick it opened.
+    public let tick: Int
+
+    public init(leeward: Int, windward: Int, tick: Int) {
+        self.leeward = leeward
+        self.windward = windward
+        self.tick = tick
+    }
+}
+
+/// What the umpire's rule 17 update reads on one tick (`UmpireState.updateProperCourse`): the race after the boats
+/// have moved and the overlaps and rule 18 have been updated, before contacts.
+struct ProperCourseTick {
+    let tick: Int
+    let boats: [Boat]
+    /// Each boat's hull, world coordinates.
+    let hulls: [[Vec2]]
+    /// Whether rule 18 applies between each pair now (`Rules.markRoomApplies`), by `OverlapTracker.index`.
+    let markRoomApplies: [Bool]
+    let overlaps: OverlapTracker
+    let rules: RulesConfig
+    let boatClass: BoatClass
+
+    /// Whether rule 18 is in force between seats `a` < `b` now: it applies between them, or `umpire` holds a
+    /// rule 18 record naming them. Rule 17 doesn't apply then (#343).
+    func isMarkRoomInForce(_ a: Int, _ b: Int, umpire: UmpireState) -> Bool {
+        markRoomApplies[OverlapTracker.index(a, b, seats: boats.count)] || umpire.markRoom(SeatPair(a, b)) != nil
     }
 }
 

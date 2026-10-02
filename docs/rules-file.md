@@ -22,8 +22,11 @@ changes; a change ships as `<id>@<version + 1>.json`.
 - `fleet-rules@3` (bundled, schema 3): version 2 plus `penalty.stackedPenaltyDeadlines`, `sequential` (#89,
   G4), with the penalty deadlines loosened a little, to 20 s and 40 s (#9's 15 s and 30 s; the owner, #89).
   Kept so its race logs replay.
-- `fleet-rules@4` (bundled, schema 4): version 3 plus `escape.changesCourseDegreesPerSecond`, 12 (#92). The
-  default (`RaceFiles.defaults`, `Race.defaultRulesConfiguration`).
+- `fleet-rules@4` (bundled, schema 4): version 3 plus `escape.changesCourseDegreesPerSecond`, 12 (#92). Kept
+  so its race logs replay.
+- `fleet-rules@5` (bundled, schema 5): version 4 plus `incidents.properCourse` (#345, rule 17): 2 hull lengths,
+  5° on a beat, 8° on a reach or run, a 4 s "promptly sails astern" window. The default (`RaceFiles.defaults`,
+  `Race.defaultRulesConfiguration`).
 
 Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths`, the start row's spacing floor:
 required in schema 2, refused in schema 1. A schema-1 file has no floor (`RulesConfig.StartRow.minimumSpacing`
@@ -34,9 +37,13 @@ deadlines from its own call.
 Schema 4 is schema 3 plus `incidents.escape.changesCourseDegreesPerSecond`: required in schema 4, refused
 before it. A schema-1 to -3 file has none (`RulesConfig.Escape.changesCourse` is nil), and its races run no
 escape simulation: rules 15 and 16.1 are never called, which is what they did.
+Schema 5 is schema 4 plus `incidents.properCourse`: required in schema 5, refused before it. A schema-1 to -4
+file has none (`RulesConfig.Incidents.properCourse` is nil): the umpire keeps no rule 17 records, and rule 17
+is never called, which is what they did.
 The tables' `v1` column gives version 1's values; version 2's are the same, plus that floor, version
 3's the same again, plus `sequential` stacking and its looser penalty deadlines (marked v3), and version 4's
-the same again, plus the "changes course" rate (marked v4).
+the same again, plus the "changes course" rate (marked v4), and version 5's the same again, plus rule 17's
+limits (marked v5).
 
 ## Units
 
@@ -52,7 +59,8 @@ the same again, plus the "changes course" rate (marked v4).
 
 - `builderValues` lists, as JSON Pointers, the values the spec leaves to the builder: the near-miss sweep
   geometry, the escape simulation's candidate set, start tick, "initially" window and (from version 4)
-  "changes course" rate, and the mark-room-given and "on a beat" tests. Each must resolve (the loader
+  "changes course" rate, (from version 5) rule 17's tolerances and "promptly sails astern" window, and the
+  mark-room-given and "on a beat" tests. Each must resolve (the loader
   checks). They are ordinary data: changing one is a new version like any other value.
 - `placeholders` (the header field every data file has) lists values awaiting tuning: the start row
   (#35, and from version 2 its spacing floor, #85), the edge speed retention (#82) and the beat-sizing
@@ -65,7 +73,7 @@ the ranges below.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `schemaVersion`, `id`, `version` | header | As for every data file. `schemaVersion` is 1 to 4. |
+| `schemaVersion`, `id`, `version` | header | As for every data file. `schemaVersion` is 1 to 5. |
 | `placeholders` | [JSON Pointer] | Optional. Values awaiting tuning; each must resolve. |
 | `builderValues` | [JSON Pointer] | Values the builder chose; each must resolve. |
 | `notes` | [string] | Optional free text; ignored by the loader. |
@@ -92,6 +100,10 @@ the ranges below.
 | `escape.changesCourseDegreesPerSecond` | degrees/s > 0; schema 4 | — (v4: 12) | *Builder value.* The right-of-way boat changes course (rule 16.1) on a tick her heading turns faster than this. A rate, not an angle, so one value sits between the autohelm following shifts and a luff however long the encounter has run (#228): see below. Absent before schema 4: no escape simulation. |
 | `separationHullLengths` | L | 2 | Contacts between the same two boats closer together than this are one incident. |
 | `lastPointOfCertaintySeconds` | s | 0.5 | A change in overlap or zone state counts only once it has held this long (#18). |
+| `properCourse.distanceHullLengths` | L > 0; schema 5 | — (v5: 2) | Rule 17: the hull gap within which a leeward boat's overlap from clear astern begins and holds. |
+| `properCourse.beatToleranceDegrees` | (0, 45]; schema 5 | — (v5: 5) | *Builder value.* How far above proper course (the upwind groove) a boat may sail on a beat: the pinch allowance. |
+| `properCourse.reachRunToleranceDegrees` | (0, 45]; schema 5 | — (v5: 8) | *Builder value.* The same on a reach or a run (leeway included). |
+| `properCourse.promptlyAsternSeconds` | s; schema 5 | — (v5: 4) | *Builder value.* Rule 17's exception: a boat that, both boats projected on at their velocities, ends clear astern of the other within this is promptly sailing astern. |
 
 A ruling is triggered by contact or by a near miss (#9, #88). **The near-miss sweep** (builder geometry,
 `RulesConfig.NearMissSweep.hits`): for a pair overlapped as of the last point of certainty, not touching and
@@ -136,6 +148,21 @@ other (#228). Version 4's 12°/s sits above the fastest shift-following measured
 16 boats clear of the edges for 10 minutes on four seeds in each conditions file (@3): at most about 5.7°/s,
 in gusty-offshore, with a boat stalled at an edge turning at the class's 10°/s floor; a luff is 30–36°/s.
 Only the authoritative race records the track and runs the simulation: a prediction calls the obligation.
+
+**Rule 17** (#345, `UmpireState.updateProperCourse`, `EscapeSimulation.verdict`; schema 5): proper course is defined
+by fiat (`ProperCourse`): the upwind groove on her tack on a beat, the bearing to the mark on a reach, the bearing to
+the further gate mark or finish line end (by distance across the course) on a run, never deeper than the downwind
+groove; none before her start. The umpire opens a record for a pair on the tick their overlap (as of the last point
+of certainty) begins, both racing on the same tack, rule 11 between them, rule 18 not in force, within
+`distanceHullLengths`, when the leeward boat was clear astern of the windward one on the tick before the hulls first
+showed the overlap; it holds while they stay so, and ends for good otherwise (separation, a tack, rule 18). On an
+incident (contact or near miss) between such a pair that is rule 11 on the windward boat, the call is rule 17 on
+the leeward boat, the windward boat exonerated, when she is above proper course by more than the leg's tolerance,
+isn't promptly sailing astern, and the windward boat, on her own track (then sailed on as she was steering for
+`horizonSeconds`), would have been clear of the leeward boat's proper-course path: the leeward boat sailed from the
+tick before her run above proper course began (or the track's first) with her autohelm set to her proper course each
+tick. Rule 17 is tried first: when it applies it is the one call, over rules 15 and 16.1. Otherwise the chain above
+runs unchanged. No penalty tier of its own: one turn.
 
 ### Zone
 

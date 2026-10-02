@@ -450,8 +450,9 @@ public final class Race {
         let markRoomApplies = markRoomAppliesByPair(zones)
         overlaps.update(boats, hull: boatClass.hull, margin: lastPointOfCertaintyTicks, markRoomApplies: markRoomApplies)
         updateMarkRoom(previous: previous, hulls: hulls, zones: zones, markRoomApplies: markRoomApplies)
-        // The umpire records the boats as the calls below judge them (#92).
+        // The umpire records the boats as the calls below judge them (#92), and its rule 17 records read that (#345).
         recordTrack()
+        updateProperCourse(hulls: hulls, markRoomApplies: markRoomApplies)
         forgetSeparatedMarkTouches()
         resolveBoatContacts()
         callNearMisses()
@@ -732,11 +733,31 @@ public final class Race {
                         keeping: escape.recordedTicks)
     }
 
-    /// The escape simulation for seats `a` and `b` on the umpire's recorded track, or nil in a prediction or
-    /// under a rules configuration without one.
+    /// The escape simulation for seats `a` and `b` on the umpire's recorded track, with the pair's rule 17 record
+    /// (#345), or nil in a prediction or under a rules configuration without one.
     private func escapeSimulation(_ a: Int, _ b: Int) -> EscapeSimulation? {
-        guard let track = umpire?.track(a, b) else { return nil }
-        return EscapeSimulation(track: track, rules: rules, boatClass: boatClass)
+        guard let umpire, let track = umpire.track(a, b) else { return nil }
+        return EscapeSimulation(track: track, rules: rules, boatClass: boatClass,
+                                properCourse: umpire.properCourse(SeatPair(a, b)))
+    }
+
+    /// Rule 17 (#345): the umpire's records of leeward boats that came up from clear astern
+    /// (`UmpireState.updateProperCourse`). The authoritative race's alone, under a rules configuration with rule 17's
+    /// limits (schema 5).
+    private func updateProperCourse(hulls: [[Vec2]], markRoomApplies: [Bool]) {
+        guard umpire != nil, rules.incidents.properCourse != nil else { return }
+        umpire?.updateProperCourse(ProperCourseTick(
+            tick: tick, boats: boats, hulls: hulls, markRoomApplies: markRoomApplies, overlaps: overlaps, rules: rules,
+            boatClass: boatClass))
+    }
+
+    /// The windward boats seat `seat` is held to her proper course against now (rule 17, #345: the umpire's records
+    /// naming her the leeward boat), in seat order. None in a prediction, which holds no umpire (ADR 0005).
+    public func properCourseRestrictions(of seat: Int) -> [Int] {
+        guard let umpire else { return [] }
+        return boats.indices.filter { other in
+            other != seat && umpire.properCourse(SeatPair(seat, other))?.leeward == seat
+        }
     }
 
     /// Whether rule 18 applies between each pair now (`Rules.markRoomApplies`), by `OverlapTracker.index`,

@@ -3,7 +3,7 @@ import Testing
 @testable import RegattaCore
 
 /// Two boats set up for the escape simulation (#92): `IncidentFixture`'s two-seat race (ilca-dinghy@3 in a
-/// steady 10 kn from the course's axis, no current, the default rules fleet-rules@4), placed mid-beat and sailed
+/// steady 10 kn from the course's axis, no current, the default rules fleet-rules@5), placed mid-beat and sailed
 /// on from there. Placing imports a snapshot, so the umpire records their track from the placing tick on.
 enum EscapeFixture {
     typealias F = IncidentFixture

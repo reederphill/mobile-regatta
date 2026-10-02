@@ -14,7 +14,7 @@ import Testing
     }
 
     /// The arc is what's left of the start deadline over the start window, whatever the rules say it is: 15 s
-    /// (#9's) and 20 s (fleet-rules@4's) both read from the data.
+    /// (#9's) and 20 s (fleet-rules@5's) both read from the data.
     @Test(arguments: [(15.0, 30.0), (20.0, 40.0)])
     func arcFractionIsStartDeadlineRemainingOverTheStartWindow(start: Double, complete: Double) {
         let owed = Self.owed(start: start, complete: complete)
@@ -57,7 +57,7 @@ import Testing
         #expect(past.noticeText == "Turn · 0s / 0s")
     }
 
-    /// A practice frame carries your keep-clear row and the rules' penalty windows (fleet-rules@4: 20 s / 40 s); a
+    /// A practice frame carries your keep-clear row and the rules' penalty windows (fleet-rules@5: 20 s / 40 s); a
     /// frame's readout reads those windows, and none shows for a seat that owes nothing.
     @Test func practiceFramesCarryKeepClearRowsAndTheRulesPenalty() throws {
         let driver = PracticeDriver(config: RaceDriverTests.config)

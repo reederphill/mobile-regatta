@@ -60,15 +60,15 @@ public struct RaceFiles: Sendable {
     /// The bundled files a `RaceSetup` names unless told otherwise: skiff@5 (v1.0's class, planing with an
     /// automatic spinnaker, #248, turning a penalty turn in about 10 s, #89, with #263's momentum, shadow cost, tack
     /// cost and roll tack, #298's backwind astern on her windward quarter; in skiff@5 the cone starts from her bow and stern, the backwind's stern edge is steep, it grows with her speed and it is off while running), dev-venue@2 (whose pairings name the schema-2 conditions),
-    /// classic-oscillating@2 and fleet-rules@4 (schema 4: the start row's spacing floor, #85, sequential
-    /// penalty deadlines, #89, and the escape simulation's "changes course" rate, #92).
+    /// classic-oscillating@2 and fleet-rules@5 (schema 5: the start row's spacing floor, #85, sequential
+    /// penalty deadlines, #89, the escape simulation's "changes course" rate, #92, and rule 17's limits, #345).
     public static let defaults: RaceFiles = {
         do {
             return try RaceFiles(
                 boatClass: .bundled(id: "skiff", version: 5),
                 venue: .bundled(id: "dev-venue", version: 2),
                 conditions: .bundled(id: "classic-oscillating", version: 2),
-                rulesConfiguration: .bundled(id: "fleet-rules", version: 4)
+                rulesConfiguration: .bundled(id: "fleet-rules", version: 5)
             )
         } catch {
             preconditionFailure("the bundled default race files failed to load: \(error)")
