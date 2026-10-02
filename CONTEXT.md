@@ -141,7 +141,7 @@ _Avoid_: nemesis; "rival" for just any nearby boat
 A practice race whose bots are drawn from all three bot tiers. The default for practice.
 
 **Briefing**:
-The short screen between fleet lock and the start sequence showing the venue, conditions, the wind and tide forecasts, the course and the fleet. The only place current is shown.
+The short screen before the start sequence showing the venue, conditions, a short wind and current description and the fleet, in words, never numbers. Practice waits for Ready; online shows it for 15 s after fleet lock. The only place current is shown.
 _Avoid_: loading screen, pre-race
 
 ### Online play

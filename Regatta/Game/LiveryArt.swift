@@ -41,7 +41,8 @@ enum LiveryArt {
     /// A design's sail graphic. Names are the catalogue's (`LiveryDesign.sailGraphic`).
     enum SailGraphic: String, CaseIterable {
         case plain
-        /// A panel in the accent colour behind the sail number.
+        /// A stripe in the accent colour along the sail's leech, clear of the sail number (owner 2026-10-02: no
+        /// panel behind the number; placeholder until the art is drawn, #169).
         case numbersPanel = "numbers-panel"
 
         /// The drawn graphic by catalogue name; a name with no art yet (#169) draws plain.
@@ -95,8 +96,8 @@ enum LiveryArt {
                       sail: colour(.sail) ?? LiveryArt.fallbackRGB, sailNumber: livery.sailNumber)
         }
 
-        /// What the sail number sits on: the accent panel, or the sail.
-        var numberGround: UInt32 { sailGraphic == .numbersPanel ? (accent ?? sail) : sail }
+        /// What the sail number sits on: always the sail; no graphic runs behind it.
+        var numberGround: UInt32 { sail }
 
         /// The sail number's ink: charcoal or white, whichever has more OKLCH lightness contrast with its ground.
         var numberInk: UInt32 {
@@ -161,8 +162,17 @@ enum LiveryArt {
         case .plain:
             nil
         case .numbersPanel:
-            CGPath(rect: numberFrame(g).insetBy(dx: -g.sailBelly * 0.08, dy: -g.sailLength * 0.05), transform: nil)
+            leechStripe(g)
         }
+    }
+
+    /// A band along the sail's curved edge (the leech), filled inside the sail's clip: about 0.15 of the belly deep,
+    /// so it stays clear of `numberFrame`.
+    static func leechStripe(_ g: Geometry) -> CGPath {
+        let leech = CGMutablePath()
+        leech.move(to: .zero)
+        leech.addQuadCurve(to: CGPoint(x: 0, y: -g.sailLength), control: CGPoint(x: g.sailBelly * 2, y: -g.sailLength * 0.45))
+        return leech.copy(strokingWithWidth: g.sailBelly * 0.3, lineCap: .butt, lineJoin: .round, miterLimit: 1)
     }
 
     /// Where the sail number sits, in sail space: the belly's deepest part, its long side along the boom.
