@@ -14,6 +14,8 @@ struct RaceView: View {
     var onSailAgain: (() -> Void)? = nil
     /// The results' Change setup (#25), or nil to leave it out.
     var onChangeSetup: (() -> Void)? = nil
+    /// The first race's results' Race online (#24): leaves the race for online racing. Nil falls back to `onExit`.
+    var onRaceOnline: (() -> Void)? = nil
     /// Sending the app to the background pauses a practice race (#25), read from the scene (`SceneState`).
     @Environment(\.sceneState) private var sceneState
     @State private var showsHelp = false
@@ -155,10 +157,22 @@ struct RaceView: View {
                 )
             }
 
-            if session.playerDone {
-                ResultsView(rows: session.results, onSailAgain: onSailAgain ?? onRestart, onChangeSetup: onChangeSetup,
-                            onExit: onExit)
+            // About 3 s after your finish horn the results slide up over the race, which keeps running and drawing
+            // above them (#24, #132).
+            if session.showsResults, let results = session.results {
+                ResultsView(model: results, buttons: resultsButtons)
             }
+        }
+        .animation(.easeOut(duration: 0.35), value: session.showsResults)
+    }
+
+    /// Practice: Home, Change setup, Sail again; the first race: Race online and Help (#24).
+    private var resultsButtons: ResultsView.Buttons {
+        switch session.resultsButtons {
+        case .practice:
+            .practice(home: onExit, changeSetup: onChangeSetup, sailAgain: onSailAgain ?? onRestart)
+        case .firstRace:
+            .firstRace(raceOnline: onRaceOnline ?? onExit, help: { showsHelp = true })
         }
     }
 

@@ -22,7 +22,7 @@ struct HomeView: View {
                     tuning
                     #endif
                     if let lastRace = model.lastRace {
-                        LastRaceRow(lastRace: lastRace)
+                        LastRaceRow(lastRace: lastRace) { model.sheet = .lastRace }
                     }
                     LobbyPanel(state: LobbyPanelState(isOnline: isOnline, status: lobbyStatus)) {
                         model.sheet = .signIn
@@ -44,7 +44,14 @@ struct HomeView: View {
         }
         .tint(ChromePalette.tint)
         .sheet(item: $model.sheet) { sheet in
-            MenuSheetView(sheet: sheet)
+            if sheet == .lastRace, let lastRace = model.lastRace {
+                // Your last race's results, reopened (#24, #132): large, with Close only.
+                ResultsView(model: lastRace, buttons: .reopened(close: { model.sheet = nil }), presentation: .page)
+                    .environment(\.colorScheme, .dark)
+                    .presentationDetents([.large])
+            } else {
+                MenuSheetView(sheet: sheet)
+            }
         }
     }
 
@@ -242,19 +249,27 @@ private struct NoticeRow: View {
     }
 }
 
-/// The last race's entry on the home screen (#24).
+/// The last race's entry on the home screen (#24): your place, and a tap reopens the results (#132).
 private struct LastRaceRow: View {
-    let lastRace: AppModel.LastRace
+    let lastRace: RaceResultViewModel
+    var open: () -> Void
 
     var body: some View {
-        HStack {
-            Text("Last race").font(MenuFont.heading(.headline))
-            Spacer()
-            Text("\(lastRace.place) of \(lastRace.fleetSize)").font(MenuFont.number(.headline))
+        Button(action: open) {
+            HStack {
+                // TODO-COPY (#171)
+                Text("Last race").font(MenuFont.heading(.headline))
+                Spacer()
+                Text(lastRace.summary).font(MenuFont.number(.headline))
+                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+            }
+            .padding(16)
+            .background(ChromePalette.surface, in: .rect(cornerRadius: 16))
+            .contentShape(.rect)
         }
-        .padding(16)
-        .background(ChromePalette.surface, in: .rect(cornerRadius: 16))
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("last-race")
     }
 }

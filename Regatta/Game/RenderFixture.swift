@@ -115,6 +115,17 @@ struct RenderFixture: Codable, Equatable {
         case practiceSetup
         /// The pause menu over the race's chrome (#131): `{ "gallery": "pauseMenu" }`.
         case pauseMenu
+        /// The results sheet on a sample race (#132): `{ "gallery": "results", "results": "live" }` or `"closed"`
+        /// (`ResultsGalleryView`).
+        case results(ResultsStage)
+    }
+
+    /// Which moment of the sample race a results fixture shows (#132).
+    enum ResultsStage: String, Codable, Equatable {
+        /// Boats still sailing behind the sheet.
+        case live
+        /// The race closed.
+        case closed
     }
 
     /// A briefing render fixture (#130): the race it briefs, with no log, since a briefing needs only the setup.
@@ -170,15 +181,17 @@ struct RenderFixture: Codable, Equatable {
 
     private struct GalleryFile: Decodable {
         enum Kind: String, Decodable {
-            case livery, briefing, practiceSetup, pauseMenu
+            case livery, briefing, practiceSetup, pauseMenu, results
         }
 
         var gallery: Kind?
         var briefing: BriefingFixture?
+        var results: ResultsStage?
     }
 
     enum GalleryError: Error, Equatable {
         case briefingMissing
+        case resultsStageMissing
     }
 
     /// The gallery fixture `name` in `directory` shows, or nil for a race fixture.
@@ -191,6 +204,9 @@ struct RenderFixture: Codable, Equatable {
             case .livery?: return .livery
             case .practiceSetup?: return .practiceSetup
             case .pauseMenu?: return .pauseMenu
+            case .results?:
+                guard let stage = decoded.results else { throw GalleryError.resultsStageMissing }
+                return .results(stage)
             case .briefing?:
                 guard let briefing = decoded.briefing else { throw GalleryError.briefingMissing }
                 return .briefing(briefing)

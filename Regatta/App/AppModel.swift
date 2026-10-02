@@ -29,6 +29,8 @@ final class AppModel {
         case signIn
         /// A lobby player's boat card.
         case boatCard
+        /// Your last race's results, reopened from home's Last race (#24, #132): large, with Close only.
+        case lastRace
 
         var id: Self { self }
     }
@@ -48,12 +50,6 @@ final class AppModel {
     struct Notice: Equatable {
         var title: String
         var message: String
-    }
-
-    /// The home screen's last-race entry (#24).
-    struct LastRace: Equatable {
-        var place: Int
-        var fleetSize: Int
     }
 
     private(set) var phase: Phase = .home {
@@ -104,8 +100,14 @@ final class AppModel {
     @ObservationIgnored var menuMusic: any MenuMusic = SilentMenuMusic()
     /// Home's notice slot. Nothing posts one yet.
     var notice: Notice?
-    /// Home's last-race slot. Filled once results are kept (#24).
-    var lastRace: LastRace?
+    /// Your last race's results, home's Last race row (#24, #132): kept as a practice race closes, or as you leave one
+    /// you were done in, and replaced only by the next such race. Kept on the device across launches (ruling 6).
+    var lastRace: RaceResultViewModel? {
+        didSet {
+            guard lastRace != oldValue, let lastRace else { return }
+            LastRaceStore(defaults: practiceDefaults).save(lastRace)
+        }
+    }
 
     let launchOptions: LaunchOptions
     #if DEBUG
@@ -129,6 +131,7 @@ final class AppModel {
             practiceDefaults = defaults
         }
         practiceSetup = PracticeSetup(defaults: practiceDefaults)
+        lastRace = LastRaceStore(defaults: practiceDefaults).load()
         haptics = GatedHaptics(isOn: deviceSettings.haptics)
         controls = ControlSettings(deviceSettings, launchOptions: launchOptions)
         #if DEBUG
@@ -221,6 +224,7 @@ final class AppModel {
         #if DEBUG
         tuning.attach(session, files: config.files)
         #endif
+        session.onResultsFinal = { [weak self] results in self?.lastRace = results }
         return session
     }
 
@@ -271,10 +275,29 @@ final class AppModel {
         race = nil
     }
 
-    /// Keeps a practice race sailed on tuned copies, with them beside its log, as it leaves (#232, ADR 0004).
+    /// Keeps a practice race sailed on tuned copies, with them beside its log, as it leaves (#232, ADR 0004); and its
+    /// results for home's Last race if you were done in it (#132).
     private func archiveRace() {
+        if let kept = session?.resultsToKeep() { lastRace = kept }
         #if DEBUG
         if let session { tuning.archive(session) }
         #endif
+    }
+}
+
+/// Home's Last race (#24, #132): the last race's results as JSON in the practice defaults, so UI tests, which empty
+/// those at launch, start with none.
+struct LastRaceStore {
+    let defaults: UserDefaults
+    static let key = "lastRace"
+
+    func load() -> RaceResultViewModel? {
+        guard let data = defaults.data(forKey: Self.key) else { return nil }
+        return try? JSONDecoder().decode(RaceResultViewModel.self, from: data)
+    }
+
+    func save(_ results: RaceResultViewModel) {
+        guard let data = try? JSONEncoder().encode(results) else { return }
+        defaults.set(data, forKey: Self.key)
     }
 }

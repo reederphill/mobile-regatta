@@ -28,6 +28,8 @@ struct MenuGalleryView: View {
             PauseMenu(settings: .constant(DeviceSettings()), onResume: {}, onRestart: {}, onLeave: {}, onHelp: {})
                 .background(ChromePalette.background.ignoresSafeArea())
                 .environment(\.colorScheme, .dark)
+        case .results(let stage):
+            ResultsGalleryView(stage: stage)
         default:
             NavigationStack {
                 PracticeSetupView(model: model)
