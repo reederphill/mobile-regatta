@@ -4,7 +4,7 @@ import RegattaCore
 @testable import RegattaBots
 
 /// #342: "Tacks away from a squeeze". Racing, a windward bot keeping clear under rule 11 luffs when that clears her,
-/// tacks away when it doesn't and a tack is clear, and eases to drop astern when neither.
+/// tacks away when it doesn't and a tack is clear, and otherwise steers the heading that passes furthest off.
 extension BotConductTests {
     /// Beating on starboard: seat 0 at the water's centre at her close-hauled speed, seat 1 a bot `abeam` hull lengths
     /// to windward and `astern` astern, `faster` times as fast, coming up from astern. With `windward`, a third boat
@@ -91,8 +91,9 @@ extension BotConductTests {
     }
 
     /// #342 acceptance: `tapIsClear` still gates the tack. The squeeze of `windwardBotTacksAwayFromSqueezeWithNoEscapeOnHerTack`
-    /// with a third boat alongside the bot to windward, where her tack would take her: she doesn't tack into her, and eases
-    /// to drop astern instead.
+    /// with a third boat alongside the bot to windward, where her tack would take her: she doesn't tack into her, and is
+    /// called under none of rules 10, 13 and 15. (She doesn't ease to drop astern: fix round 1 took the racing ease out,
+    /// since in the bot matrix it called more fouls than it saved.)
     @Test func windwardBotDoesNotTackIntoABoat() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 7, 13] {
@@ -104,7 +105,6 @@ extension BotConductTests {
             let keeping = sailed.decisions.filter { $0.keepClear == .windwardLeeward && $0.gap < length * 2 }
             if keeping.isEmpty { failures.append("seed \(seed): never kept clear of the leeward boat") }
             if keeping.contains(where: { $0.decision.tap == .tackGybe }) { failures.append("seed \(seed): tacked into the windward boat") }
-            if !keeping.contains(where: { $0.decision.input.ease }) { failures.append("seed \(seed): never eased to drop astern") }
             let calls = Self.calls(sailed.kinds).filter { $0.hasPrefix("13 ") || $0.hasPrefix("15 ") || $0.hasPrefix("10 ") }
             if !calls.isEmpty { failures.append("seed \(seed): \(calls)") }
         }

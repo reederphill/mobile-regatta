@@ -101,6 +101,10 @@ struct BotBrain: Sendable {
     var lastTackTime = -1_000.0
     /// When she last tapped: she lets a tap finish before another.
     var lastTapTime = -1_000.0
+    /// Whether, this decision, her course would keep her on the other tack were she to tack now (`navigate`): beating
+    /// inside the corridor, out of `tacticalRange` of her mark and short of the other tack's layline. Only then does she
+    /// tack away from a squeeze (#342, `tacksAwayClear`).
+    var tackAwayOpen = false
     /// The rudder she holds hard over through her penalty turns, one way, from when she starts them until
     /// she owes none (`penaltyInput`); nil while she isn't turning one.
     var penaltyTurn: Double?
@@ -193,6 +197,7 @@ struct BotBrain: Sendable {
         guard boat.isOnCourse else { return BotDecision(input: .neutral) }
         judgeEncounters(boat, view)
         if let input = penaltyInput(boat, view) { return BotDecision(input: input) }
+        tackAwayOpen = false
         var aim = plan(boat, view)
         // Tacked before her start, she bears away to close-hauled before she holds any closer to the wind: until
         // she's there, rule 13 has her keep clear of every boat (#99).
@@ -651,6 +656,9 @@ struct BotBrain: Sendable {
             // Where the target bears from her: to the right of the wind positive.
             let relative = wrapAngle(bearing - w)
             var tack = plannedTack
+            let other = b.tack.other
+            tackAwayOpen = abs(lateral) <= corridor && distance > Self.tacticalRange
+                && !(other == .starboard ? relative >= up + overstand : relative <= -(up + overstand))
             if lateral < -corridor {
                 tack = .port
             } else if lateral > corridor {
