@@ -243,6 +243,11 @@ public struct RaceResult: Codable, Hashable, Sendable {
     public var midFleetSeats: [Int]?
     public var midFleetCloseEncounters: Double?
     public var timings: TickTimings
+    /// Every rule call in the race, oldest first, in a race of the hunters mix (#355); nil otherwise.
+    public var ruleCalls: [RuleCallRecord]? = nil
+    /// The ticks its hunters' rudders turned them towards a boat that must keep clear within their hunting range, in a
+    /// race of the hunters mix (#355); nil otherwise.
+    public var hunterTurnTicks: Int? = nil
 
     /// `ranks`: each seat's place in the race's order at the end (`Race.place(of:)`), finished or not.
     init(cell: BotRaceCell, finalTick: Int, capped: Bool, tideStateAtGun: Double?, seats: [SeatMetrics],
@@ -260,6 +265,21 @@ public struct RaceResult: Codable, Hashable, Sendable {
         midFleetCloseEncounters = middle.isEmpty ? nil
             : Double(middle.reduce(0) { $0 + seats[$1].closeEncounters }) / Double(middle.count)
         self.timings = timings
+    }
+}
+
+/// One rule call (#355): the rule (`RacingRule.rawValue`), on which seat, against which, and when.
+public struct RuleCallRecord: Codable, Hashable, Sendable {
+    public var rule: String
+    public var offender: Int
+    public var victim: Int
+    public var tick: Int
+
+    public init(rule: String, offender: Int, victim: Int, tick: Int) {
+        self.rule = rule
+        self.offender = offender
+        self.victim = victim
+        self.tick = tick
     }
 }
 
@@ -562,6 +582,86 @@ extension BotRaceCell {
     var isAllNationalLive: Bool { tierMix == .national && profileMix == .live }
 }
 
+/// The hunters scenario over a run (#355): how the live bots fare against hunters (`BotProfile.hunter`) that sail to
+/// the edge of the rules, and how the hunters fare under them. Over the races of the hunters mix, and their live
+/// twins: the same cell (seed, venue, conditions, tide, fleet, tier mix, laps) with every seat a live bot, when the run
+/// sailed it (`--profile-mix live --profile-mix hunters`). The hunters' own seats are `BotSuiteReport.profiles`'s.
+public struct HuntersSummary: Codable, Hashable, Sendable {
+    /// Races of the hunters mix.
+    public var races: Int
+    /// Of those, the ones whose live twin the run sailed.
+    public var twinRaces: Int
+    /// Rule calls on live bots with a hunter as the right-of-way boat or the victim, by rule (`RacingRule.rawValue`).
+    public var liveOnHunter: [String: Int]
+    /// Rule calls on hunters with a live bot as the victim, by rule.
+    public var hunterOnLive: [String: Int]
+    /// Rule calls between hunters, and between live bots, by rule: the control.
+    public var hunterOnHunter: [String: Int]
+    public var liveOnLive: [String: Int]
+    /// Calls on hunters under rule 16.1 or 17: her overdoing it. Reported, never gated.
+    public var overdoneCalls: Int
+    /// Ticks the hunters' rudders turned them at a boat that must keep clear (`RaceResult.hunterTurnTicks`): that
+    /// they hunted at all.
+    public var hunterTurnTicks: Int
+    /// The live seats of the hunters races.
+    public var live: TierSummary
+    /// The same seats of the live twins; nil without twins.
+    public var twinLive: TierSummary?
+    /// The live seats' mean finishing place in the hunters races (hunters ahead of them counted), and the same
+    /// seats' in their live twins; nil when none finished.
+    public var liveMeanPlace: Double?
+    public var twinLiveMeanPlace: Double?
+
+    /// Nil when no race was of the hunters mix.
+    init?(_ races: [RaceResult]) {
+        let hunted = races.filter { $0.cell.profileMix == .hunters }
+        guard !hunted.isEmpty else { return nil }
+        var twins: [BotRaceCell: RaceResult] = [:]
+        for race in races where race.cell.profileMix == .live { twins[race.cell] = race }
+        self.races = hunted.count
+        var liveOnHunter: [String: Int] = [:], hunterOnLive: [String: Int] = [:]
+        var hunterOnHunter: [String: Int] = [:], liveOnLive: [String: Int] = [:]
+        var liveSeats: [SeatMetrics] = [], twinSeats: [SeatMetrics] = []
+        var places: [Int] = [], twinPlaces: [Int] = []
+        var twinRaces = 0
+        for race in hunted {
+            let isHunter = { (seat: Int) in race.seats[seat].profile == .hunter }
+            for call in race.ruleCalls ?? [] {
+                switch (isHunter(call.offender), isHunter(call.victim)) {
+                case (false, true): liveOnHunter[call.rule, default: 0] += 1
+                case (true, false): hunterOnLive[call.rule, default: 0] += 1
+                case (true, true): hunterOnHunter[call.rule, default: 0] += 1
+                case (false, false): liveOnLive[call.rule, default: 0] += 1
+                }
+            }
+            let live = race.seats.filter { $0.profile == nil }
+            liveSeats += live
+            places += live.compactMap(\.place)
+            var twinCell = race.cell
+            twinCell.profileMix = .live
+            guard let twin = twins[twinCell] else { continue }
+            twinRaces += 1
+            let same = live.map { twin.seats[$0.seat] }
+            twinSeats += same
+            twinPlaces += same.compactMap(\.place)
+        }
+        self.twinRaces = twinRaces
+        self.liveOnHunter = liveOnHunter
+        self.hunterOnLive = hunterOnLive
+        self.hunterOnHunter = hunterOnHunter
+        self.liveOnLive = liveOnLive
+        overdoneCalls = [RacingRule.changingCourse, .properCourse].reduce(0) { sum, rule in
+            sum + (hunterOnLive[rule.rawValue] ?? 0) + (hunterOnHunter[rule.rawValue] ?? 0)
+        }
+        hunterTurnTicks = hunted.reduce(0) { $0 + ($1.hunterTurnTicks ?? 0) }
+        live = TierSummary(liveSeats)
+        twinLive = twinSeats.isEmpty ? nil : TierSummary(twinSeats)
+        let mean = { (places: [Int]) in places.isEmpty ? nil : Double(places.reduce(0, +)) / Double(places.count) }
+        liveMeanPlace = mean(places)
+        twinLiveMeanPlace = mean(twinPlaces)
+    }
+}
+
 /// One tier's seats over the whole run: what the thresholds hold it to.
 public struct TierSummary: Codable, Hashable, Sendable {
     public var seats: Int
@@ -645,6 +745,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var conduct: ConductSummary?
     /// Close encounters (#234) over the all-National live fleets; nil when none sailed.
     public var closeEncounters: CloseEncounterSummary?
+    /// The hunters scenario (#355) over its races; nil when none sailed.
+    public var hunters: HuntersSummary?
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -662,8 +764,10 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         self.thresholds = thresholds
         self.races = races
         let seats = races.flatMap(\.seats)
+        // The live bots the tiers gate: never those racing hunters (#355), whose numbers are `hunters`'.
+        let gated = races.filter { $0.cell.profileMix != .hunters }.flatMap(\.seats)
         tiers = Dictionary(uniqueKeysWithValues: BotTier.allCases.compactMap { tier in
-            let ofTier = seats.filter { $0.tier == tier && $0.profile == nil }
+            let ofTier = gated.filter { $0.tier == tier && $0.profile == nil }
             return ofTier.isEmpty ? nil : (tier.rawValue, TierSummary(ofTier))
         })
         profiles = Dictionary(uniqueKeysWithValues: BotProfile.allCases.compactMap { profile in
@@ -676,6 +780,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         navigation = NavigationSummary(races)
         conduct = ConductSummary(races)
         closeEncounters = CloseEncounterSummary(races)
+        hunters = HuntersSummary(races)
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
         breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start,
@@ -744,6 +849,30 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
             lines.append("close encounters: \(close.races) all-National races, \(fixed(close.closeEncountersPerRace)) per mid-fleet boat "
                 + "per race (crossings \(fixed(close.crossingsPerRace)), shadow given \(fixed(close.shadowGivenPerRace)), "
                 + "received \(fixed(close.shadowReceivedPerRace)), covers \(fixed(close.coversPerRace)))")
+        }
+        if let hunters {
+            let profile = profiles[BotProfile.hunter.rawValue]
+            lines.append("hunters: \(hunters.races) races (\(hunters.twinRaces) with live twins), hunter turn ticks "
+                + "\(hunters.hunterTurnTicks), calls on hunters under 16.1/17 \(hunters.overdoneCalls)")
+            lines.append("  calls on live bots, hunter the victim: \(callsLine(hunters.liveOnHunter))")
+            lines.append("  calls on hunters, live bot the victim: \(callsLine(hunters.hunterOnLive)); hunter on hunter: "
+                + "\(callsLine(hunters.hunterOnHunter))")
+            lines.append("  calls between live bots: \(callsLine(hunters.liveOnLive))")
+            if let profile {
+                lines.append("  hunters: \(profile.finished)/\(profile.seats) finished, contacts \(profile.boatContacts), "
+                    + "calls \(callsLine(profile.callsByRule))")
+            }
+            func liveLine(_ name: String, _ s: TierSummary, place: Double?) -> String {
+                "  \(name): \(s.finished)/\(s.seats) finished (\(fixed(s.finishShare, 3))), mean place "
+                    + "\(place.map { fixed($0) } ?? "-"), contacts \(s.boatContacts), encounters \(s.encounters) "
+                    + "(\(fixed(s.encountersToFoulsShare, 3)) fouls), called before the first rounding "
+                    + "\(fixed(s.calledBeforeFirstRoundingShare)) of boats, tacks racing \(fixed(s.racingTacksPerBoat, 1))/boat, "
+                    + "calls \(callsLine(s.callsByRule))"
+            }
+            lines.append(liveLine("live with hunters", hunters.live, place: hunters.liveMeanPlace))
+            if let twin = hunters.twinLive {
+                lines.append(liveLine("same seats without", twin, place: hunters.twinLiveMeanPlace))
+            }
         }
         lines.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms, max \(fixed(timings.maxMs, 3)) ms")
         lines.append(passed ? "gate: pass" : "gate: FAIL")

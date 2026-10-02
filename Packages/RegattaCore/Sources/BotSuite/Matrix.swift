@@ -23,21 +23,36 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// and blip-tacker seats by turns, starting one seat further along for each seed. #221's proof that the
     /// shifts are worth playing: the tactician tacks often, and beats the boat that tacks on every blip.
     case funPass
+    /// The hunters scenario (#355): hunters (`BotProfile.hunter`) among live bots, one in a fleet under ten (a 1-v-1
+    /// against a hunter in a two-boat race), two in a fleet of ten or more, half the fleet apart; the hunters' seats
+    /// one further along for each seed, as the fun pass's. Sailed only when named (`--profile-mix hunters`), never in
+    /// the bundled matrix; its races stay out of the live tiers the thresholds gate (`BotSuiteReport.tiers`).
+    case hunters
 
-    /// The profile sailing `seat` in a race with race seed `seed`, or nil for a live bot.
-    public func profile(ofSeat seat: Int, seed: UInt64) -> BotProfile? {
+    /// The profile sailing `seat` in a race of `fleetSize` boats with race seed `seed`, or nil for a live bot. Only the
+    /// hunters mix reads the fleet size.
+    public func profile(ofSeat seat: Int, seed: UInt64, fleetSize: Int = 0) -> BotProfile? {
         switch self {
         case .live: nil
         case .skillGap: (seat + Int(seed % 2)).isMultiple(of: 2) ? .baseline : .tactician
         case .funPass: [BotProfile.baseline, .tactician, .blipTacker][(seat + Int(seed % 3)) % 3]
+        case .hunters:
+            ProfileMix.isHunterSeat(seat, seed: seed, fleetSize: fleetSize) ? .hunter : nil
         }
+    }
+
+    /// Whether `seat` of a fleet of `fleetSize` sails the hunter in the hunters mix on seed `seed`: every
+    /// `fleetSize / 2`th seat in a fleet of ten or more, else one seat, rotating with the seed.
+    static func isHunterSeat(_ seat: Int, seed: UInt64, fleetSize: Int) -> Bool {
+        let spacing = max(1, fleetSize >= 10 ? fleetSize / 2 : fleetSize)
+        return (seat + Int(seed % UInt64(spacing))) % spacing == 0
     }
 
     /// The conditions file the mix is sailed in, by id, whatever its version; nil for any the matrix names.
     /// The fun pass's numbers (#221) are for an oscillating breeze: a matrix sails it in no other conditions.
     public var conditionsID: String? {
         switch self {
-        case .live, .skillGap: nil
+        case .live, .skillGap, .hunters: nil
         case .funPass: "classic-oscillating"
         }
     }
@@ -212,7 +227,7 @@ public struct BotRaceCell: Codable, Hashable, Sendable {
     public var capSecondsAfterGun: Int
 
     /// The profile sailing `seat`, or nil for a live bot.
-    public func profile(ofSeat seat: Int) -> BotProfile? { profileMix.profile(ofSeat: seat, seed: seed) }
+    public func profile(ofSeat seat: Int) -> BotProfile? { profileMix.profile(ofSeat: seat, seed: seed, fleetSize: fleetSize) }
 }
 
 /// `id@version`, as the matrix and report name a data file.
