@@ -682,6 +682,69 @@ import RegattaCore
         #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
     }
 
+    /// Racing on the beat (#351): seat 0 just called, owing a turn she hasn't started, beating on starboard; seat 1
+    /// beating beside her on the same tack, `across` hull lengths to her starboard (negative: to port) and `ahead` hull
+    /// lengths ahead, inside `BotBrain.penaltyBoatClearance`. On `legIndex` if given (the water's leg by default).
+    static func racingPenalised(seed: UInt64, ahead: Double, across: Double, legIndex: Int? = nil) throws -> Race {
+        let water = Water(seed: seed)
+        let heading = water.beat(.starboard)
+        let forward = Vec2.heading(heading)
+        let speed = water.up.speed
+        return try place(water, [
+            Placement(position: water.centre, heading: heading, speed: speed, legIndex: legIndex),
+            Placement(position: water.centre + forward * water.length * ahead + forward.rightPerp * water.length * across,
+                      heading: heading, speed: speed, legIndex: legIndex),
+        ]) { snapshot in
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyProgress = 0
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+        }
+    }
+
+    /// The pairs `racingPenalised` sails: abeam to either side, and overlapped ahead and astern.
+    static let racingPenalisedPairs: [(ahead: Double, across: Double)] = [(0, 1.5), (0, -1.5), (1, 1.2), (-1, -1.2)]
+
+    /// #351 acceptance: racing, a bot that owes a turn with another boat in her water (`BotBrain.penaltyBoatClearance`)
+    /// puts it off and sails on rather than turning it at once through her: she isn't 30° into it in the first 2 s, she
+    /// isn't called 21.2 (before, a penalised boat turning in the pack collected 21.2 calls from boats that had nothing to
+    /// do with her first foul), and she still serves it in time (no missed-penalty disqualification).
+    @Test func racingPenaltyInACrowdIsPutOffAndDoesNotCascade() throws {
+        var failures: [String] = []
+        for seed: UInt64 in [3, 5, 7] {
+            for pair in Self.racingPenalisedPairs {
+                let race = try Self.racingPenalised(seed: seed, ahead: pair.ahead, across: pair.across)
+                let early = race.tick + 2 * Race.tickRate
+                var startedEarly = false
+                let kinds = Self.sail(race, seconds: 45) { race in
+                    if race.tick <= early, abs(race.boats[0].penaltyProgress) >= deg2rad(30) { startedEarly = true }
+                }
+                let foul = Self.calls(kinds).filter { $0 == "21.2 on 0" }
+                let boat = race.boats[0]
+                if startedEarly || !foul.isEmpty || boat.status == .dsq || boat.penaltyTurnsOwed > 0 {
+                    failures.append("seed \(seed) \(pair): started early \(startedEarly), \(Self.calls(kinds)), "
+                                    + "\(boat.status), owes \(boat.penaltyTurnsOwed)")
+                }
+            }
+        }
+        #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
+    }
+
+    /// #351: on the last leg she can't finish owing a turn, so there she starts it at once, crowd or not.
+    @Test func racingPenaltyOnTheLastLegStartsAtOnce() throws {
+        for seed: UInt64 in [3, 5] {
+            let probe = Water(seed: seed).race.course.legs
+            let last = probe.count - 1
+            guard case .finish = probe[last] else { Issue.record("seed \(seed): last leg isn't the finish"); continue }
+            let race = try Self.racingPenalised(seed: seed, ahead: 0, across: 1.5, legIndex: last)
+            let early = race.tick + 2 * Race.tickRate
+            var started = false
+            _ = Self.sail(race, seconds: 2.5) { race in
+                if race.tick <= early, abs(race.boats[0].penaltyProgress) >= deg2rad(30) { started = true }
+            }
+            #expect(started, "seed \(seed): not 30° into her turn 2 s after it was hers")
+        }
+    }
+
     /// Before the gun, `toGun` seconds before it below the line: seat 0 beating on starboard, seat 1 reaching across on
     /// port (60° off the wind, where she positions before the gun) into her, both meeting in `meet` seconds.
     static func prestartPortStarboard(seed: UInt64, toGun: Int = 50, meet: Double = 4) throws -> Race {

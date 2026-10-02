@@ -19,9 +19,12 @@ import RegattaServices
 /// - `-online` starts an online race on the dev server's instant race at launch (#68, Debug builds).
 /// - `-onlineHost <host:port>` is the dev race server, instead of the Settings page's field (Debug builds).
 /// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override).
-/// - `-startSeconds <n>` gives an online dev race an `n`-second start sequence, 1…60.
+/// - `-startSeconds <n>` gives an online dev race's, and every practice race's, start sequence `n` seconds, 1…60
+///   (#361: a UI test that waits for the results spends less of its watch before the gun).
 /// - `-laps <n>` sails every practice race `n` laps, 1…9, instead of the setup's (#354: a UI test that waits for the
 ///   results sails a short race, so a slow simulator still reaches them).
+/// - `-hideScene` draws none of a live race's world (#361): the scene still moves every node, and the HUD and results
+///   show, but SpriteKit rasterises nothing, so a UI test waiting for the results doesn't hang on the runner's GPU.
 /// - `-appearance light|dark` overrides the system appearance, for UI tests of the menus in both (#108).
 /// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
 ///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
@@ -74,6 +77,7 @@ struct LaunchOptions: Equatable {
     var raceSeconds: Int?
     var startSeconds: Int?
     var laps: Int?
+    var hidesScene = false
     var appearance: Appearance?
     var vision: VisionFilter?
     var fakeServices: FakeServiceScenario?
@@ -106,6 +110,7 @@ struct LaunchOptions: Equatable {
             case "-resetSettings": resetSettings = true
             case "-online": online = true
             case "-keepMyBoat": keepMyBoat = true
+            case "-hideScene": hidesScene = true
             #if DEBUG
             case "-tuning": tuning = true
             #endif
@@ -124,9 +129,9 @@ struct LaunchOptions: Equatable {
     }
 
     private static let flags: Set<String> = {
-        var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-seed", "-fixture",
-                          "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps", "-appearance",
-                          "-vision", "-fakeServices", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces"]
+        var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
+                          "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
+                          "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces"]
         #if DEBUG
         flags.insert("-tuning")
         #endif
@@ -220,18 +225,18 @@ struct LaunchOptions: Equatable {
         return (.random(in: .min ... .max), .random(in: .min ... .max))
     }
 
-    /// A practice race on `setup` (Start, Sail again): on fresh seeds or the pinned one, and `-laps`' laps if given.
+    /// A practice race on `setup` (Start, Sail again): on fresh seeds or the pinned one, and `-laps`' laps and
+    /// `-startSeconds`' start sequence if given.
     func raceConfig(from setup: PracticeSetup) -> RaceConfig {
         let (seed, windSeed) = seeds()
-        var config = setup.config(seed: seed, windSeed: windSeed)
-        if let laps { config.laps = laps }
-        return config
+        return raceConfig(from: setup.config(seed: seed, windSeed: windSeed))
     }
 
-    /// `config` on the pinned seed if there is one, and `-laps`' laps if given.
+    /// `config` on the pinned seed if there is one, and `-laps`' laps and `-startSeconds`' start sequence if given.
     func raceConfig(from config: RaceConfig) -> RaceConfig {
         var config = config
         if let laps { config.laps = laps }
+        if let startSeconds { config.prestartSeconds = Double(startSeconds) }
         if let seed {
             config.seed = seed
             config.windSeed = RaceConfig.windSeed(pinnedTo: seed)
