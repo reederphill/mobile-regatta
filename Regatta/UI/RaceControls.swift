@@ -87,6 +87,11 @@ private struct HoldButton: View {
     /// (Tack/Gybe) makes the action a press and release.
     var accessibilityToggle: AccessibilityToggle?
     @State private var isHeld = false
+    /// A finger is on the button (reset by SwiftUI when the touch ends or is cancelled).
+    @GestureState private var isTouching = false
+    /// The controls were let go under a finger still down: that touch presses nothing until it lifts, so a press
+    /// from before Help (or a pause) never comes back as a stale tack.
+    @State private var ignoresTouch = false
 
     struct AccessibilityToggle {
         let isOn: Bool
@@ -98,8 +103,9 @@ private struct HoldButton: View {
             .contentShape(.capsule)
             .gesture(
                 DragGesture(minimumDistance: 0)
+                    .updating($isTouching) { _, touching, _ in touching = true }
                     .onChanged { _ in
-                        guard !isHeld else { return }
+                        guard !isHeld, !ignoresTouch else { return }
                         isHeld = true
                         onPress()
                     }
@@ -110,13 +116,23 @@ private struct HoldButton: View {
                     }
             )
             .disabled(!isEnabled)
-            .onChange(of: releases) { isHeld = false }
+            .onChange(of: releases) {
+                isHeld = false
+                ignoresTouch = isTouching
+            }
             .onChange(of: isEnabled) { _, enabled in
                 guard !enabled, isHeld else { return }
                 isHeld = false
+                ignoresTouch = isTouching
                 onRelease()
             }
-            .onDisappear { isHeld = false }
+            .onChange(of: isTouching) { _, touching in
+                if !touching { ignoresTouch = false }
+            }
+            .onDisappear {
+                isHeld = false
+                ignoresTouch = false
+            }
             .accessibilityElement()
             .accessibilityLabel(title.capitalized)
             .accessibilityAddTraits(.isButton)

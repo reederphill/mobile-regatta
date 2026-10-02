@@ -123,8 +123,8 @@ final class GameScene: SKScene {
     /// A render-only value changed while the race is paused: draw the standing world once more with it.
     private var needsPausedRender = false
 
-    /// Touches on the water to rudder, in the device's steering scheme (#112).
-    private var steering = SteeringInterpreter()
+    /// Touches on the water to rudder, in the device's steering scheme (#112). Internal for tests (`resetInput`).
+    var steering = SteeringInterpreter()
 
     init(driver: any RaceDriver, roster: FleetRoster) {
         self.driver = driver

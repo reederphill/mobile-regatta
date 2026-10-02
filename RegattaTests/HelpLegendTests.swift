@@ -17,6 +17,7 @@ import UIKit
     /// Every item's picture is drawn, at the legend's size, every pixel opaque, with more on it than the bare water:
     /// a share of its pixels well off the water's colour.
     @Test func everyLegendItemRendersNonEmpty() throws {
+        var drawn: [LegendItem: [UInt8]] = [:]
         for item in LegendItem.allCases {
             let image = try #require(LegendArt.image(for: item), "\(item): no picture")
             let cg = try #require(image.cgImage)
@@ -32,6 +33,14 @@ import UIKit
             }.count
             #expect(marked > total / 200, "\(item): \(marked) of \(total) pixels off the water's colour")
             #expect(image.size == LegendArt.size, "\(item): \(image.size)")
+            drawn[item] = pixels
+        }
+        // Each item draws its own symbol: no two pictures the same.
+        let items = LegendItem.allCases
+        for (i, a) in items.enumerated() {
+            for b in items[(i + 1)...] {
+                #expect(drawn[a] != drawn[b], "\(a) and \(b) draw the same picture")
+            }
         }
     }
 
@@ -53,9 +62,19 @@ import UIKit
     @Test func openingHelpReleasesTheControls() throws {
         let session = GameSession(config: RaceConfig(opponents: 1, seed: 1, windSeed: 1))
         session.setEase(true)
+        // A finger on the tiller, slid hard over.
+        let finger = "finger"
+        session.scene.steering.scheme = .tiller
+        session.scene.steering.touchBegan(finger, at: CGPoint(x: 100, y: 300), midX: 200)
+        session.scene.steering.touchMoved(finger, to: CGPoint(x: 200, y: 300))
+        #expect(session.scene.steering.rudder != 0)
         let releases = session.controlReleases
         session.releaseControls()
         #expect(!session.isEasing)
+        #expect(session.scene.steering.rudder == 0, "the rudder is centred")
+        #expect(session.scene.steering.tillerKnob == nil, "nothing held")
+        session.scene.steering.touchMoved(finger, to: CGPoint(x: 0, y: 300))
+        #expect(session.scene.steering.rudder == 0, "the finger still down steers nothing")
         #expect(!session.isPaused, "Help alone doesn't pause the race")
         #expect(session.controlReleases == releases + 1)
 

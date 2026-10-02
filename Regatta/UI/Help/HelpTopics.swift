@@ -76,36 +76,22 @@ private struct HelpSection: View {
 
 // MARK: - Steering
 
-/// Both steering schemes, with a small picture each, then letting go: the autohelm, the groove, pinch and foot, and
-/// the groove tick (#219), and the buttons.
+/// Both steering schemes, with a small picture each, then letting go (the autohelm, the groove, pinch and foot, the
+/// groove tick, #219) and the two buttons, in a few short lines.
 private struct SteeringHelp: View {
     var body: some View {
         // TODO-COPY (#171): every line on this page.
         HStack(alignment: .top, spacing: 16) {
-            SchemeCard(title: "Halves", line: "Hold the left or right side to turn that way.") { HalvesDiagram() }
-            SchemeCard(title: "Tiller", line: "Touch anywhere and slide sideways.") { TillerDiagram() }
+            SchemeCard(title: "Halves", line: "Hold a side to turn that way.") { HalvesDiagram() }
+            SchemeCard(title: "Tiller", line: "Touch and slide sideways.") { TillerDiagram() }
         }
-        HelpSection(heading: "Pick one", lines: ["Settings, Steering."])
         HelpSection(heading: "Let go", lines: [
-            "Let go and the autohelm sails on for you.",
-            "Near the groove, the best angle to sail, it snaps to the groove.",
-            "Anywhere else it holds the angle you let go at.",
-        ])
-        HelpSection(heading: "Pinch and foot", lines: [
-            "Pinch: sail above the groove. Foot: sail below it.",
-            "The autohelm holds either until you steer again.",
-        ])
-        HelpSection(heading: "The groove tick", lines: [
-            "The tick on your wind vane marks the groove.",
-            "On the groove, the vane sits on the tick.",
-            "A pinch or foot shows as a short arc from the tick.",
+            "The autohelm sails on. Near the groove, the best angle, it snaps to it: the vane sits on the groove tick.",
+            "Pinch above it or foot below it, and it holds there.",
         ])
         HelpSection(heading: "Buttons", lines: [
-            "Ease: hold to let the sails out and slow down.",
-            "Tack or Gybe: tap to turn through the wind. You come out on the groove.",
-            "Steer at any time to take back the helm.",
+            "Ease: hold to slow down. Tack: tap to turn; you come out on the groove.",
         ])
-        HelpSection(heading: "Zoom", lines: ["Pinch-zoom with two fingers. Double tap with two fingers to reset."])
     }
 }
 
@@ -160,26 +146,38 @@ private struct TillerDiagram: View {
 
 // MARK: - Rules
 
-/// The rules on one page (#23): 10 to 13 in the words the rule calls use, mark-room, touching a mark, starts and the
-/// penalty turn.
+/// The rules on one page (#23), one line each in the words the race's own notices use (`RuleWords`): 10 to 13,
+/// mark-room, touching a mark, starts and the penalty turn.
 private struct RulesHelp: View {
+    static let rules: [RacingRule] = [.portStarboard, .windwardLeeward, .clearAstern, .whileTacking, .givingMarkRoom,
+                                      .touchingMark]
+
     var body: some View {
-        ForEach([RacingRule.portStarboard, .windwardLeeward, .clearAstern, .whileTacking], id: \.self) { rule in
-            HelpSection(heading: "Rule \(rule.rawValue)", lines: [RuleWords.plain(rule) + "."])
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Self.rules, id: \.self) { rule in
+                RuleLine(number: rule.rawValue, line: RuleWords.plain(rule) + ".")
+            }
         }
-        // TODO-COPY (#171)
-        HelpSection(heading: "Rule 18", lines: ["Near a mark, give the boat inside you room to round it."])
-        HelpSection(heading: "Rule 31", lines: [RuleWords.plain(.touchingMark) + "."])
-        // TODO-COPY (#171)
-        HelpSection(heading: "Starts", lines: [
-            "Be behind the line at the gun.",
-            "Over early? Dip back behind the line, then start.",
-        ])
-        // TODO-COPY (#171)
-        HelpSection(heading: "Penalty turns", lines: [
-            "Break a rule and you owe a penalty turn. " + RuleWords.penaltyLine,
-            "The orange arc round your boat shows the time left.",
-        ])
+        HelpSection(heading: "Starts", lines: [RuleWords.ocs])
+        HelpSection(heading: "Penalty turns", lines: [RuleWords.penaltyLine])
+    }
+}
+
+/// A rule's number, as its badge shows it, and its line.
+private struct RuleLine: View {
+    let number: String
+    let line: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(number)
+                .font(MenuFont.heading(.headline))
+                .frame(minWidth: 40, alignment: .leading)
+            Text(line)
+                .font(MenuFont.body())
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -206,7 +204,7 @@ private struct CurrentHelp: View {
             "Earlier in the shallows: near the shore it turns first.",
         ])
         HelpSection(heading: "On the water", lines: [
-            "The current carries every boat. Your wake bends with it.",
+            "The current carries every boat.",
             "Sail where it helps you, and out of it where it doesn't.",
         ])
     }
