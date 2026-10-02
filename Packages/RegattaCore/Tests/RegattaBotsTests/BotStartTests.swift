@@ -117,4 +117,40 @@ import RegattaCore
             #expect(returning.isEmpty, "seed \(seed): called under rule 21.1 returning")
         }
     }
+
+    /// #350: with less time to the gun than a tack takes, close below the start line and level with it between its
+    /// ends, she is set up where she is (`BotBrain.isSetUpWhereSheIs`), and her spot's bearing is clamped to where she
+    /// holds, waits or goes from (`startAim`). Beyond an end, or deeper, or earlier, she isn't: a boat as close below the
+    /// line but beyond its pin end still sails to her setup point (`toSetup`).
+    @Test func setUpWhereSheIsOnlyCloseBelowTheLineBetweenItsEnds() throws {
+        func placed(toGun: Int, below: Double, beyondPin: Double?) throws -> (brain: BotBrain, view: SeatView) {
+            let water = BotConductTests.Water(seed: 1, toGun: toGun, below: below)
+            let line = water.race.course.startLine
+            let direction = (line.committee.position - line.pin.position).normalized
+            let position = beyondPin.map {
+                line.pin.position - direction * (water.length * $0) - water.race.course.upwind * (water.length * below)
+            } ?? water.centre
+            let heading = water.heading(.starboard, deg2rad(90))
+            let race = try BotConductTests.place(water, [
+                .init(position: position, heading: heading, speed: 2, status: .prestart),
+                .init(position: water.centre - water.race.course.upwind * 200, heading: heading, speed: 2, status: .prestart),
+            ])
+            return (BotBrain(style: BotConductTests.skill1), race.seatView(for: 0))
+        }
+        func setUp(_ placed: (brain: BotBrain, view: SeatView)) -> Bool {
+            placed.brain.isSetUpWhereSheIs(placed.view.own, placed.view, arrival: placed.brain.startArrival(placed.view))
+        }
+        #expect(setUp(try placed(toGun: 2, below: 1, beyondPin: nil)), "close below the line between its ends")
+        #expect(!setUp(try placed(toGun: 2, below: 3, beyondPin: nil)), "three lengths below it")
+        #expect(!setUp(try placed(toGun: 8, below: 1, beyondPin: nil)), "with time for a tack")
+        let beyond = try placed(toGun: 2, below: 1, beyondPin: 3)
+        #expect(!setUp(beyond), "beyond the pin end")
+        let b = beyond.view.own
+        let hold = BotBrain.holdAngle(beyond.view)
+        let arrival = beyond.brain.startArrival(beyond.view)
+        var aiming = beyond.brain, setting = beyond.brain
+        let spot = setting.reachableSpot(b, beyond.view, hold: hold, arrival: arrival)
+        #expect(aiming.startAim(b, beyond.view) == setting.toSetup(b, beyond.view, spot: spot, hold: hold, arrival: arrival),
+                "beyond the pin end she sails to her setup point")
+    }
 }

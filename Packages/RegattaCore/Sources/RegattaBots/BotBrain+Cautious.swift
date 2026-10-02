@@ -197,6 +197,48 @@ extension BotBrain {
         return best.input
     }
 
+    /// Her own track through a tack or gybe tapped now, a `guardStep` apart for `seconds`: the autohelm sailing the tap
+    /// through head to wind or the gybe and on in the groove of the new tack, as the race sails it, in the wind she has
+    /// now. The cautious bot's look before she taps (`tapIsClear`, #350): from a reach, or slow, the turn alone takes
+    /// seconds, sailing on where she was going and stopping in head to wind, not straight off on the new tack.
+    func tapTrack(_ b: SeatView.OwnBoat, _ view: SeatView, seconds: Double) -> [Vec2] {
+        let boatClass = view.boatClass
+        var state = BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder,
+                                       boomSide: b.boomSide)
+        var helm = Autohelm.tackOrGybe(sailingAngle: b.boomSide.sailingAngle(relativeWind: b.relativeWind))
+        let env = BoatDynamics.Environment(windDirection: b.windDirection, windSpeed: b.polarWindSpeed, shadow: b.speedShadow)
+        return (0..<Int((seconds / Self.guardStep).rounded())).map { _ in
+            let angle = state.boomSide.sailingAngle(relativeWind: wrapAngle(b.windDirection - state.heading))
+            let rudder = helm.rudder(sailingAngle: angle, boomSide: state.boomSide, tws: b.polarWindSpeed, boatClass: boatClass)
+            let moved = BoatDynamics.advance(state, control: .init(rudder: rudder), env: env, boatClass: boatClass,
+                                             dt: Self.guardStep)
+            if moved.boomSide != state.boomSide { helm.isTapping = false }
+            state = moved
+            return state.position
+        }
+    }
+
+    /// The closest `other` comes to her over the next `lookahead` seconds, metres between centres, as she sails `track`
+    /// (`tapTrack`) and `other` goes on as she saw it going: turning as it turned since her last decision (`seen`, at
+    /// most `guardTurnRate`). The cautious bot's look before she taps (`tapIsClear`, #350): a boat bearing away out of
+    /// its own tack crossed her bow as she tacked from a reach (seed 69 of `CautiousBotSuiteTests`), clear of her by
+    /// the straight-line reckoning every bot makes.
+    func tapApproach(of other: SeatView.OtherBoat, track: [Vec2], lookahead: Double, _ view: SeatView) -> Double {
+        var rate = 0.0
+        if other.seat < seen.count, let last = seen[other.seat], view.time > last.time {
+            rate = (wrapAngle(other.heading - last.heading) / (view.time - last.time))
+                .clamped(to: -Self.guardTurnRate...Self.guardTurnRate)
+        }
+        var position = other.position, heading = other.heading
+        var closest = (position - view.own.position).length
+        for own in track.prefix(Int((lookahead / Self.guardStep).rounded())) {
+            heading = wrapAngle(heading + rate * Self.guardStep)
+            position = position + Vec2.heading(heading) * other.speed * Self.guardStep
+            closest = min(closest, (position - own).length)
+        }
+        return closest
+    }
+
     /// Notes every boat as she sees it now, for `guarded` at her next decision.
     mutating func see(_ view: SeatView) {
         guard caution != nil else { return }
