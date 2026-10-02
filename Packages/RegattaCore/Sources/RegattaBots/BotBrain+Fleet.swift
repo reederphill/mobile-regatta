@@ -122,6 +122,13 @@ extension BotBrain {
         /// ... and on her new heading, at these shares of her speed now between these seconds after her tap; at her
         /// speed now after the last.
         static let tackPickUp: [(from: Double, to: Double, share: Double)] = [(0.75, 3.5, 0.55), (3.5, 6, 0.75), (6, .infinity, 1)]
+        /// The share of her speed now she is making `t` seconds after her tap, as she reckons it: her cone's backwind
+        /// grows with her speed through the water (`BoatClass.WindShadow.backwindScale(speed:)`), so a boat just out of
+        /// a tack casts a smaller one than at full speed. The pick-up's share in force at `t`, else the carry's.
+        static func tackSpeedShare(at t: Double) -> Double {
+            for phase in FleetTactics.tackPickUp where t > phase.from && t <= phase.to { return phase.share }
+            return tackCarry.share
+        }
         /// Seconds early or late she reads a lee-bow or a tack on a boat's wind, at no tactical quality; none at full.
         static let timingError = 2.0
         /// A boat further off the wind than this, radians, isn't beating: no fleet tactic plays her.
@@ -320,7 +327,9 @@ extension BotBrain {
         guard let cone = ownCone(b, view) else { return nil }
         let w = b.windDirection
         let heading = 2 * w - b.heading
-        let apparent = 2 * w - (-cone.axis).bearing
+        // Her apparent wind now, mirrored about the true wind as her tack mirrors it: its own direction when her cone's axis is
+        // swung astern of it (`BoatClass.WindShadow.coneSwing`), else read back off the axis as before.
+        let apparent = 2 * w - (cone.shadow.coneSwing > 0 ? cone.apparentWindDirection : (-cone.axis).bearing)
         let forward = Vec2.heading(heading)
         let carry = FleetTactics.tackCarry
         let read = timing(other)
@@ -330,8 +339,10 @@ extension BotBrain {
                 her += forward * (b.speed * phase.share * (min(t, phase.to) - phase.from))
             }
             let them = other.position + other.velocity * (t + read)
+            // Her tack keeps her true wind angle (mirrored); her speed is her reckoned one at `t`, not her speed now.
             let after = ShadowCone(apex: her, apparentWindDirection: apparent, heading: heading,
-                                   windwardSide: b.tack.other, shadow: view.boatClass.windShadow)
+                                   windwardSide: b.tack.other, shadow: view.boatClass.windShadow, trueWindAngle: b.twa,
+                                   speed: b.speed * FleetTactics.tackSpeedShare(at: t))
             return ((her - them).dot(forward), after.factor(at: them), after.isInBackwind(them))
         }
     }

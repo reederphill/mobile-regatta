@@ -221,13 +221,16 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "backwind", title: "Backwind",
-                note: "The zone astern of a boat on her windward quarter that slows a boat she lee-bows (#298, from skiff@4): its loss at her stern, fading to nothing at its far edge, and how far astern it reaches (hull lengths).",
+                note: "The zone astern of a boat on her windward quarter that slows a boat she lee-bows (#298, from skiff@4; skiff@5 turns it so its stern edge slants and turns it off running): its loss at her stern edge, fading to nothing at its far edge, how far astern it reaches (hull lengths; its length scales with her speed, full size at the speed below), and the true wind angle from which she is running and casts none.",
                 applies: .nextRace,
                 sliders: [
                     TuningSlider(.boatClass, "/windShadow/backwind/loss", "Loss at her stern", 0...0.6, step: 0.01),
-                    TuningSlider(.boatClass, "/windShadow/backwind/innerLengthHullLengths", "Inner edge length", 0.25...4, step: 0.05),
-                    TuningSlider(.boatClass, "/windShadow/backwind/lengthHullLengths", "Outer edge length", 0.5...4, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/backwind/innerLengthHullLengths", "Short edge length", 0.25...4, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/backwind/lengthHullLengths", "Long edge length", 0.5...4, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/widthHullLengths", "Width at her stern", 0.25...3, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/backwind/runningFromDegrees", "Off running from", unit: "°", 60...180, step: 1),
+                    TuningSlider(.boatClass, "/windShadow/backwind/runningFadeDegrees", "Fades out over", unit: "°", 0...60, step: 1),
+                    TuningSlider(.boatClass, "/windShadow/backwind/speedScale/referenceKnots", "Full size at", unit: "kn", 2...16, step: 0.5),
                 ]),
             TuningGroup(
                 id: "rollTack", title: "Roll tack",
@@ -328,6 +331,8 @@ enum TuningCatalog {
                     boat("wakeFlareGain", "Roll-hit flare", \.wakeFlareGain, 0...2, 0.1),
                     boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.4, 0.01),
                     boat("backwindShare", "Backwind hatch", \.backwindShare, 0...6, 0.1),
+                    boat("backwindFeather", "Backwind edge softness", \.backwindFeather, 0...8, 0.5, unit: " pt"),
+                    boat("shadowFollowSeconds", "Shadow and backwind trail", \.shadowFollowSeconds, 0...4, 0.1, unit: " s"),
                     // #122: the boat-side cues.
                     boat("vaneLengthHulls", "Vane length", \.vaneLengthHulls, 0.5...2, 0.1, unit: " hulls"),
                     boat("vaneLockDegrees", "Vane locks within", \.vaneLockDegrees, 0...5, 0.25, unit: "°"),

@@ -23,7 +23,10 @@ import Testing
             var caster = receiver
             let apparent = BoatWinds.resolve(ground: caster.windOverGround, current: .zero,
                                              velocityThroughWater: caster.velocity).apparent
-            caster.position = receiver.position + Vec2.heading(apparent.direction) * lengths * OpenWater.hullLength
+            // Her cone's axis, from her resolved apparent wind and heading (skiff@5 swings it astern of the wind).
+            let axis = ShadowCone(apex: .zero, apparentWindDirection: apparent.direction, heading: caster.heading,
+                                  windwardSide: caster.tack, shadow: OpenWater.boatClass.windShadow).axis
+            caster.position = receiver.position - axis * lengths * OpenWater.hullLength
             if !together { caster.position += Vec2.heading(caster.windDirection) * 400 }
             snapshot.seats[1].boat.position = caster.position
             snapshot.seats[1].boat.heading = caster.heading
@@ -35,7 +38,9 @@ import Testing
         }
     }
 
-    @Test(arguments: [1.0, 2, 3])
+    /// 1.5, 2 and 3 L down the cone. Not 1: skiff@5's cone is swung astern of her, so a boat 1 L down its axis sits
+    /// bow to stern against her (the hulls touch), which is a contact, not a shadow.
+    @Test(arguments: [1.5, 2, 3])
     func fiveSecondsInAConeCosts0_7To1_5Lengths(lengths: Double) throws {
         let shaded = try race(lengths: lengths, together: true), clean = try race(lengths: lengths, together: false)
         let start = shaded.boats[0].position

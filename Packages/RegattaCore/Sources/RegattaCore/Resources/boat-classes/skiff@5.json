@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 3,
+  "id": "skiff",
+  "version": 5,
+  "name": "Skiff",
+  "placeholders": [
+    "/hull",
+    "/polar",
+    "/momentum",
+    "/steering",
+    "/windShadow",
+    "/contact",
+    "/ease",
+    "/planing",
+    "/spinnaker",
+    "/byTheLee",
+    "/rollTack"
+  ],
+  "notes": [
+    "A fictional two-person 4.9 m skiff modelled on the 49er (#244, #245): hull 4.9 m long with a 1.8 m hull beam; the racks are drawn, not sailed.",
+    "Version 4 (#298): the backwind is a right trapezoid on her windward quarter, astern of the stern, following her heading and windward side (it swaps sides at the boom crossing): from the windward stern corner 1 hull length out along the stern, 2 astern on its outer edge and 1.5 on its inner one (innerLengthHullLengths), the far edge slanting between. A boat in it loses up to 20% of her target speed at the stern edge, fading to nothing at the far edge: 5 s lee-bowed at 10 kn costs about 0.36 hull lengths against clean air, less than 5 s in a wind shadow. Sizes and loss are placeholders for the owner's sliders (#232). Everything else is version 3's.",
+    "Version 5 (#298 follow-up, the owner's playtest): the cone starts from her bow and stern, not a line across her centre (coneFromBowAndStern), so close-hauled it leaves her narrower and slanted with the hull, and is opened behind her: 10 hull lengths long (9 in version 4) and 6 wide at its end (4.2), its axis swung half the way from downwind towards straight astern (coneSwingAsternShare 0.5); the backwind trapezoid is turned half a turn and its stern edge is steep: from the windward stern corner the zone is 2 hull lengths long on the hull side (lengthHullLengths 2.0 is the flat far edge astern of the stern line) and its outboard side starts 1.25 astern of her stern (innerLengthHullLengths 0.75 is its length there), 1 hull length wide, so the stern edge runs about 51 degrees back from her stern line. Its loss, 0.2, is full along the stern edge and fades to nothing at the far edge. Its length astern scales with her speed through the water: the size above at 6 knots, in proportion either way, to 1.5 times at 9 knots, nothing when stopped (speedScale). She loses it gradually across a reach, fading from full at 90 degrees true wind angle to none at 115 (runningFadeDegrees 25), where the spinnaker goes up and she is running, and gains it back coming up. Everything else is version 4's.",    "Units: knots, degrees, seconds, metres; shadow and backwind sizes in hull lengths.",
+    "Polar: docs/research/49er-skiff-polars-and-handling.md section 8, every cell, with its rows 120, 140, 145 and 155. It is the speed on the plane with the spinnaker up: rows 0-90 are two sails, rows 110-180 assume the spinnaker (section 4.3).",
+    "Planing (schema 3, #248, section 4.4): on the plane from 65 deg TWA at 8 kn or more with the apparent wind no further aft than the beam; off it below 6 kn or forward of 55 deg. Off the plane from 65 deg aft she sails the 6 kn column scaled by 1 + 0.035 per knot of TWS above 6 kn, never above the polar: at 8 kn and 145 deg that is 7.4 kn against 10.1 on the plane, and to get back on she has to head up to 140 deg or closer to the wind (the research's example heads up to 125 deg).",
+    "Spinnaker (section 4.3): hoisted past 115 deg TWA, dropped forward of 105 deg, 4 s each way. Without it drawing she sails the polar x 0.65 from 110 deg aft, 1 at 90 deg and linear between.",
+    "By the lee (section 8): 2% of speed per degree by the lee (10% per 5 deg), and the spinnaker collapses past 10 deg; the boom crosses 20 deg by the lee.",
+    "Autohelm (#245, overriding part of #219): an 8 deg downwind snap (the groove is flat) and 3 deg upwind; the grooves follow a 30 s exponential average of the wind strength at the boat.",
+    "Handling (section 6, version 3): speeding up 2.5 s and slowing down 10 s (#220: gains arrive fast, losses bleed off slowly), no-go 4.8 s (coasting about 2 hull lengths to half speed), 36 deg/s full-rudder turns from 1.5 kn up with a 10 deg/s floor, rudder drag 0.25 per second, and a head-to-wind fall-off of 3 deg/s, under what the floor turns, so a boat stopped head to wind can still tack. A tack from close-hauled with the autohelm costs 0.74 / 1.10 / 1.27 hull lengths at 6 / 10 / 14 kn against sailing on for 25 s, close-hauled 2.5-2.6 s after the tap, never below 40% of her entry speed. A gybe on the plane costs 5.4 m at 10 kn and 5.8 m at 12 kn, back to full speed 10.6 / 10.2 s after the tap, still planing.",
+    "Wind shadow (section 5): 9 hull lengths long and 4.2 wide at its end, about 1.3x ilca-dinghy@3's in metres (the taller rig); backwind as ilca-dinghy@3. Version 3 (#220): the shadow slows the boat, not the wind: her target speed is the polar x (1 - 0.48 x the cone's depth at her), she slows to it over 2 s, and stacked cones never take her below 0.3 of it. 5 s one to three hull lengths down a close-hauled boat's cone at 10 kn costs 1.47 / 1.36 / 1.22 hull lengths (one / two / three down) against clean air.",
+    "Roll tack (version 3, #222): a second tack/gybe tap during a tack is the roll. Within 0.25 s of the boom crossing it hits, and until close-hauled she takes half of each tick's speed loss (about 0.16 hull lengths saved at 10 kn); outside it her speed is multiplied by 0.8.",
+    "Every value is a placeholder (the JSON Pointers above) awaiting tuning.",
+    "Version 2 is version 1 with a quicker penalty turn (#89, the owner): skiff@1 took 14-22 s over a hard-over 360 in open water, slowing below the 6 kn its full turn rate needed and stalling head to wind. Version 1 turned 30 deg/s from 6 kn up with a 5 deg/s floor and rudder drag 0.2 per second (a tack about 9 m, a gybe about 7 m). Now 36 deg/s full-rudder turns from 1.5 kn up with a 10 deg/s floor serve a clean 360 in about 10 s at 8-16 kn, and doubling the rudder drag keeps a tack and a gybe close to the research's costs (tack 7.7 m and gybe 8.9 m at 10 kn; 8.4 m and 9.6 m at 12 kn). Everything else as version 1.",
+    "Version 3 is version 2 with #220's momentum pair (speeding up 2.8 -> 2.5 s, slowing down 4 -> 10 s), rudder drag 0.4 -> 0.25 (the owner, #263: skiff@2 lost 1.06 / 1.57 / 1.81 hull lengths a tack at 6 / 10 / 14 kn, slowing to 30% of her entry speed), the shadow as a speed loss (loss close in 0.25 -> 0.48, stacking floor 0.6 -> 0.3, its own 2 s slowing down) and the roll tack. Everything else as version 2."
+  ],
+  "hull": {
+    "lengthMetres": 4.9,
+    "beamMetres": 1.8,
+    "outlineMetres": [[0, 2.45], [0.9, 0], [0.85, -2.45], [-0.85, -2.45], [-0.9, 0]]
+  },
+  "polar": {
+    "twaDegrees": [0, 30, 35, 40, 45, 52, 60, 75, 90, 110, 120, 135, 140, 145, 150, 155, 165, 180],
+    "columns": [
+      { "twsKnots": 0, "speedKnots": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+      { "twsKnots": 4, "speedKnots": [0, 1.8, 2.5, 3.2, 3.8, 4.5, 5, 5.3, 5.4, 5.4, 5.5, 5.1, 4.6, 4.2, 3.8, 3.5, 3.1, 2.8] },
+      { "twsKnots": 6, "speedKnots": [0, 2.6, 3.8, 4.7, 5.3, 6, 6.7, 7.2, 7.5, 7.8, 8, 7.9, 7.5, 6.9, 6.2, 5.6, 4.9, 4.2] },
+      { "twsKnots": 8, "speedKnots": [0, 3.3, 4.8, 5.9, 6.6, 7.4, 8.4, 9.1, 9.5, 10.4, 10.8, 10.9, 10.7, 10.1, 9.2, 8.3, 7, 5.6] },
+      { "twsKnots": 10, "speedKnots": [0, 3.9, 5.6, 6.9, 7.9, 8.8, 9.8, 10.6, 11, 12.4, 12.8, 12.8, 12.6, 12.3, 11.8, 11, 8.9, 7] },
+      { "twsKnots": 12, "speedKnots": [0, 4.2, 6.1, 7.5, 8.6, 9.6, 10.8, 11.6, 11.8, 13.9, 14.4, 14.8, 14.6, 14.2, 13.8, 13.2, 11.6, 8.4] },
+      { "twsKnots": 14, "speedKnots": [0, 4.5, 6.4, 7.9, 9.1, 10.2, 11.5, 12.4, 12.8, 15.1, 15.6, 16, 15.9, 15.6, 15.2, 14.6, 13.1, 10] },
+      { "twsKnots": 16, "speedKnots": [0, 4.6, 6.6, 8.2, 9.4, 10.6, 12.1, 13.1, 13.7, 16.2, 16.8, 17.1, 17, 16.8, 16.3, 15.8, 14.6, 11.5] },
+      { "twsKnots": 20, "speedKnots": [0, 4.7, 6.7, 8.3, 9.6, 11, 12.9, 14.3, 15.2, 17.8, 18.3, 18.6, 18.5, 18.3, 17.9, 17.6, 16.6, 13] },
+      { "twsKnots": 25, "speedKnots": [0, 4.7, 6.7, 8.3, 9.6, 11.2, 13.4, 15.3, 16.5, 19, 19.4, 19.5, 19.3, 19.1, 18.7, 18.3, 17.6, 15] }
+    ],
+    "byTheLeeLimit": [
+      { "twsKnots": 6, "degrees": 20 }
+    ],
+    "byTheLeePenalty": 0
+  },
+  "momentum": {
+    "speedingUpSeconds": 2.5,
+    "slowingDownSeconds": 10,
+    "noGoSeconds": 4.8
+  },
+  "steering": {
+    "topTurnRateDegreesPerSecond": 36,
+    "minTurnRateDegreesPerSecond": 10,
+    "turnRateCurve": [
+      { "speedKnots": 0, "fraction": 0 },
+      { "speedKnots": 1.5, "fraction": 1 }
+    ],
+    "headToWindFallOffDegreesPerSecond": 3,
+    "rudderDragPerSecond": 0.25,
+    "rudderSlewPerSecond": 5,
+    "autohelm": {
+      "upwindSnapDegrees": 3,
+      "downwindSnapDegrees": 8,
+      "gainRudderPerDegree": 0.1,
+      "deadRunMarginDegrees": 3,
+      "byTheLeeMarginDegrees": 3,
+      "grooveWindAverageSeconds": 30
+    }
+  },
+  "windShadow": {
+    "coneLengthHullLengths": 10,
+    "coneWidthAtBoatHullLengths": 1.0,
+    "coneWidthAtEndHullLengths": 6,
+    "lossCloseIn": 0.48,
+    "stackingFloor": 0.3,
+    "slowingDownSeconds": 2,
+    "coneFromBowAndStern": true,
+    "coneSwingAsternShare": 0.5,
+    "backwind": {
+      "lengthHullLengths": 2.0,
+      "widthHullLengths": 1.0,
+      "innerLengthHullLengths": 0.75,
+      "slantedAtStern": true,
+      "runningFromDegrees": 115,
+      "runningFadeDegrees": 25,
+      "speedScale": { "referenceKnots": 6, "maxScale": 1.5 },
+      "loss": 0.2
+    }
+  },
+  "contact": {
+    "boatSpeedFactor": 0.6,
+    "markSpeedFactor": 0.5
+  },
+  "ease": {
+    "speedFraction": 0.3,
+    "timeConstantSeconds": 2
+  },
+  "planing": {
+    "fromTWADegrees": 65,
+    "offBelowTWADegrees": 55,
+    "onSpeedKnots": 8,
+    "onMaxAWADegrees": 90,
+    "offSpeedKnots": 6,
+    "offPlane": {
+      "referenceTWSKnots": 6,
+      "gainPerKnot": 0.035
+    }
+  },
+  "spinnaker": {
+    "hoistAboveTWADegrees": 115,
+    "dropBelowTWADegrees": 105,
+    "transitionSeconds": 4,
+    "twoSail": {
+      "speedFactor": 0.65,
+      "fromTWADegrees": 90,
+      "fullTWADegrees": 110
+    }
+  },
+  "byTheLee": {
+    "speedLossPerDegree": 0.02,
+    "spinnakerCollapseDegrees": 10
+  },
+  "rollTack": {
+    "windowSeconds": 0.25,
+    "hitLossFraction": 0.5,
+    "missSpeedFactor": 0.8
+  }
+}

@@ -183,7 +183,18 @@ import Glibc
 ///    The index also records every boat contact (`contacts`), every penalised mark touch (`markTouches`) and
 ///    each incident's trigger (contact or near miss), and a race's log carries it (`RaceLog.incidentIndex`). Boat
 ///    state, the calls and the digest don't move; the events, the index and the log's JSON do.
-public let simulationRevision = 29
+/// 30: the shadow reshaped (#298 follow-up, the owner's playtest), on 29. Races sail skiff@5 by default, and its cone starts
+///    from her bow and stern, not a line across her centre (`ShadowCone.nearEdge`, `coneFromBowAndStern`): its near edge is
+///    the hull's line, so it follows her heading across the wind, and it fades with distance and to its sides as before. It is
+///    10 hull lengths long and 6 wide at its end, and its axis is swung half the way from downwind towards straight astern
+///    (`BoatClass.WindShadow.coneSwing`), so it opens behind her.
+///    Its backwind trapezoid has its stern edge turned steep (level with her stern on the hull side, 1.25 hull lengths
+///    astern outboard) and its far edge flat, 2 astern, 1 wide, its loss 0.2 full along the stern edge and fading to
+///    nothing at the far edge (`BoatClass.WindShadow.backwindSpan(out:)`). Its length astern scales with her speed
+///    through the water, full size at 6 knots, to 1.5 times at 9 and nothing when stopped (`backwindScale(speed:)`),
+///    and she loses it gradually across a reach, full at 90 degrees true wind angle and none from 115, running (`ShadowCone.backwindPresence`). Files without
+///    the new optional fields (skiff@4, ilca-dinghy@4 and before) sail as on 29, bit for bit.
+public let simulationRevision = 30
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

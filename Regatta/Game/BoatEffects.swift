@@ -1,3 +1,4 @@
+import CoreImage
 import SpriteKit
 import RegattaCore
 
@@ -11,9 +12,11 @@ import RegattaCore
 /// backwind are hidden (#30: she casts neither). Her cone goes into the fleet's one `ConeLayer`
 /// instead, so the fleet's overlapping cones don't darken into a mat.
 final class BoatEffects {
-    /// The cone, apex at the boat, down her apparent wind (#10): an opaque hatch, a mask in the fleet's
-    /// `ConeLayer`, which draws it at `BoatStyle.coneAlpha`.
+    /// The cone, apex at the boat, down her apparent wind (#10): a hatch, faded as core's loss fades, drawn by a shader
+    /// (`ConeShader`) from the corners core cuts the shadow from, since its near edge follows her heading. A mask in the
+    /// fleet's `ConeLayer`, which draws it at `BoatStyle.coneAlpha`.
     let cone: SKSpriteNode
+    let coneShader: ConeShader
     /// The backwind trapezoid on her windward quarter (#298), its hatch fading from her stern to its far edge as
     /// its loss does; hidden for a class with #79's band.
     let backwind: SKSpriteNode
@@ -39,6 +42,8 @@ final class BoatEffects {
     private let ppm: CGFloat
     private let boatClass: BoatClass
     private let hasBackwind: Bool
+    /// The heading and apparent wind her cone and backwind were drawn along last frame, trailing hers (`follow`).
+    private var followed: (heading: Double, wind: Double)?
     /// The wake drawn last frame, eased towards each frame's (`BoatStyle.wakeEaseRate`).
     private(set) var shape: WakeShape?
     private var flare = FlareTimer()
@@ -53,15 +58,15 @@ final class BoatEffects {
         self.boatClass = boatClass
         let art = EffectArt.shared(shadow: boatClass.windShadow, pointsPerMeter: ppm, style: style)
 
-        cone = SKSpriteNode(texture: art.cone)
-        cone.anchorPoint = art.coneAnchor
+        coneShader = ConeShader(shadow: boatClass.windShadow, pointsPerMeter: ppm, style: style)
+        cone = SKSpriteNode(color: .white, size: coneShader.size)
+        cone.anchorPoint = coneShader.anchor
+        cone.shader = coneShader.shader
         backwind = SKSpriteNode(texture: art.backwind)
         backwind.anchorPoint = art.backwindAnchor
         hasBackwind = art.backwind != nil
-        for hatch in [cone, backwind] {
-            hatch.color = CuePalette.cueWhite.uiColor
-            hatch.colorBlendFactor = 1
-        }
+        backwind.color = CuePalette.cueWhite.uiColor
+        backwind.colorBlendFactor = 1
         backwind.isHidden = !hasBackwind
         trail.strokeColor = CuePalette.cueWhite.uiColor
         trail.lineWidth = CGFloat(style.wakeTrailWidth)
@@ -82,16 +87,31 @@ final class BoatEffects {
                 settled: Bool, isFlogging: Bool) {
         let point = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
 
+        // Her shadow and backwind trail her: they turn after her heading and her apparent wind, not with them, as the air
+        // she disturbed does (`BoatStyle.shadowFollowSeconds`). Drawn only; core's cone and backwind are cast at once.
+        let followed = follow(heading: boat.heading, wind: boat.apparentWind.direction, dt: dt,
+                              seconds: style.shadowFollowSeconds, settled: settled)
+        let core = ShadowCone(apex: boat.position, apparentWindDirection: followed.wind, heading: followed.heading,
+                              windwardSide: boat.tack, shadow: boatClass.windShadow, trueWindAngle: boat.twa,
+                              speed: boat.speedThroughWater)
+
         cone.isHidden = pose.isGhost
         cone.position = point
-        cone.zRotation = CGFloat(-(boat.apparentWind.direction + .pi)) // the cone follows her apparent wind (#10)
+        // The cone's axis down her apparent wind (#10), swung astern for a class that does (`BoatClass.WindShadow.coneSwing`).
+        cone.zRotation = CGFloat(atan2(-core.axis.x, core.axis.y))
+        coneShader.update(nearA: core.nearA, nearB: core.nearB, ppm: ppm)
 
         // Her windward side is starboard on starboard tack (`ShadowCone.windward`); it flips at the boom crossing.
-        backwind.isHidden = pose.isGhost || !hasBackwind
-        backwind.position = point
-        backwind.zRotation = CGFloat(-boat.heading)
+        // She casts less of it across a reach, and none while running (`ShadowCone.backwindPresence`).
+        let presence = core.backwindPresence
+        backwind.isHidden = pose.isGhost || !hasBackwind || presence <= 0
+        // Anchored on her stern line, so her speed lengthens and shortens it from there (`backwindScale(speed:)`).
+        let stern = boat.position + boat.forward * boatClass.windShadow.sternCorner.y
+        backwind.position = CGPoint(x: stern.x * ppm, y: stern.y * ppm)
+        backwind.zRotation = CGFloat(-followed.heading)
         backwind.xScale = boat.tack == .starboard ? 1 : -1
-        backwind.alpha = CGFloat(style.coneAlpha * style.backwindShare)
+        backwind.yScale = CGFloat(boatClass.windShadow.backwindScale(speed: boat.speedThroughWater))
+        backwind.alpha = CGFloat(style.coneAlpha * style.backwindShare * presence)
 
         // A roll miss kills the wake; a hit flares it, fading (#222).
         let flare = flare.flare(roll: pose.roll, time: time, seconds: style.wakeFlareSeconds)
@@ -101,7 +121,6 @@ final class BoatEffects {
         self.shape = shape
 
         // Her stern's track, in world space: the current bends it, as it bends the water.
-        let stern = boat.position + boat.forward * boatClass.windShadow.sternCorner.y
         let sternPoint = CGPoint(x: stern.x * ppm, y: stern.y * ppm)
         let seconds = quality == .short ? style.wakeTrailSeconds * max(style.wakeShortShare, 0) : style.wakeTrailSeconds
         record(sternPoint, boat: boat, time: time, seconds: seconds, ghost: pose.isGhost, settled: settled)
@@ -116,6 +135,21 @@ final class BoatEffects {
         trail.lineWidth = CGFloat(style.wakeTrailWidth)
         trail.alpha = CGFloat(shape.alpha) * (pose.isGhost ? CGFloat(style.ghostAlpha) : 1)
         trail.isHidden = history.isEmpty || trail.alpha < 0.005
+    }
+
+    /// Moves the heading and apparent wind her shadow is drawn along `dt` race seconds towards hers (exponential, over
+    /// `seconds`), the short way round; straight to hers when `settled` (a frozen fixture), with no time constant, or
+    /// the first time.
+    private func follow(heading: Double, wind: Double, dt: Double, seconds: Double, settled: Bool) -> (heading: Double, wind: Double) {
+        guard !settled, seconds > 0, let from = followed else {
+            followed = (heading, wind)
+            return (heading, wind)
+        }
+        let k = 1 - exp(-max(dt, 0) / seconds)
+        let next = (heading: wrapAngle(from.heading + wrapAngle(heading - from.heading) * k),
+                    wind: wrapAngle(from.wind + wrapAngle(wind - from.wind) * k))
+        followed = next
+        return next
     }
 
     /// Keeps `history`: a point every `sampleInterval` race seconds while she sails, the old ones dropped after
@@ -182,11 +216,8 @@ final class ConeLayer: SKCropNode {
 
 /// The effects' shared textures, per class's wind shadow, scale and hatch: drawn in white so each sprite is tinted.
 private struct EffectArt {
-    /// The cone's hatched trapezoid (`ShadowShapes.coneLocal`), apex at its anchor, widening along +y.
-    let cone: SKTexture
-    let coneAnchor: CGPoint
     /// The backwind's hatched trapezoid (`ShadowShapes.backwindLocal`) in the boat's frame on starboard tack, the
-    /// boat's centre at its anchor; nil for a class with #79's band.
+    /// centre of her stern line at its anchor (it scales with her speed from there); nil for a class with #79's band.
     let backwind: SKTexture?
     let backwindAnchor: CGPoint
     /// Everything the art is drawn from: every wind-shadow size baked in, the scale and the hatch, so a tuned class
@@ -202,8 +233,8 @@ private struct EffectArt {
     static func shared(shadow: BoatClass.WindShadow, pointsPerMeter ppm: CGFloat, style: BoatStyle) -> EffectArt {
         let key = Key(shadow: [shadow.coneLength, shadow.coneWidthAtBoat, shadow.coneWidthAtEnd,
                                shadow.backwindLength, shadow.backwindWidth, shadow.backwindInnerLength ?? -1,
-                               shadow.sternCorner.x, shadow.sternCorner.y],
-                      ppm: ppm, hatch: [style.hatchSpacing, style.hatchLineWidth])
+                               shadow.sternCorner.x, shadow.sternCorner.y, shadow.backwindSternSlant ? 1 : 0],
+                      ppm: ppm, hatch: [style.hatchSpacing, style.hatchLineWidth, style.backwindFeather])
         if let art = cache[key] { return art }
         let art = EffectArt(shadow: shadow, ppm: ppm, style: style)
         cache[key] = art
@@ -214,23 +245,20 @@ private struct EffectArt {
         let spacing = CGFloat(max(style.hatchSpacing, 1)), width = CGFloat(max(style.hatchLineWidth, 0.25))
         func points(_ corners: [Vec2]) -> [CGPoint] { corners.map { CGPoint(x: $0.x * ppm, y: $0.y * ppm) } }
 
-        let conePoints = points(ShadowShapes.coneLocal(shadow))
-        let coneBounds = Self.bounds(of: conePoints)
-        cone = Self.hatch(conePoints, bounds: coneBounds, spacing: spacing, width: width) { cg in
-            Self.fadeCone(cg, shadow: shadow, ppm: ppm)
-        }
-        coneAnchor = Self.anchor(coneBounds)
-
-        if let corners = ShadowShapes.backwindLocal(shadow), let inner = shadow.backwindInnerLength {
+        if let corners = ShadowShapes.backwindLocal(shadow) {
             let backwindPoints = points(corners)
-            // Taking in the boat's centre, so the anchor is inside the texture.
-            let bounds = Self.bounds(of: backwindPoints + [.zero])
+            // Taking in the centre of her stern line, so the anchor is inside the texture.
+            let sternCentre = CGPoint(x: 0, y: shadow.sternCorner.y * ppm)
+            // Room round it for the soft edge, which reaches that far out.
+            let feather = CGFloat(max(style.backwindFeather, 0)), margin = (feather * 3).rounded(.up)
+            let bounds = Self.bounds(of: backwindPoints + [sternCentre]).insetBy(dx: -margin, dy: -margin)
             // A light fill under the hatch makes the trapezoid read as a shape, not a patch of lines: the fade only
             // thins it (`backwindFadeFloor`), so its far edge stays seen.
-            backwind = Self.hatch(backwindPoints, bounds: bounds, spacing: spacing, width: width, fill: 0.22) { cg in
-                Self.fadeBackwind(cg, shadow: shadow, inner: inner, ppm: ppm)
+            backwind = Self.hatch(backwindPoints, bounds: bounds, spacing: spacing, width: width, fill: 0.22,
+                                  feather: feather) { cg in
+                Self.fadeBackwind(cg, shadow: shadow, ppm: ppm, margin: margin)
             }
-            backwindAnchor = Self.anchor(bounds)
+            backwindAnchor = CGPoint(x: -bounds.minX / bounds.width, y: (sternCentre.y - bounds.minY) / bounds.height)
         } else {
             backwind = nil
             backwindAnchor = CGPoint(x: 0.5, y: 0.5)
@@ -243,22 +271,23 @@ private struct EffectArt {
         return CGRect(x: minX, y: minY, width: max((xs.max() ?? 0) - minX, 1), height: max((ys.max() ?? 0) - minY, 1))
     }
 
-    /// The anchor that puts the art's origin at the sprite's position.
-    private static func anchor(_ bounds: CGRect) -> CGPoint {
-        CGPoint(x: -bounds.minX / bounds.width, y: -bounds.minY / bounds.height)
-    }
 
-    /// Diagonal lines `spacing` apart and `width` wide, clipped to `outline`: the cones' hatch (#15). `fade`, if
-    /// any, then fades it (drawing with `.destinationIn`).
+    /// Diagonal lines `spacing` apart and `width` wide over `outline` (#15), with a light `fill` under them. With no
+    /// `feather` the hatch is clipped to `outline`, hard edged; with one it is not, and a copy of the outline blurred by
+    /// `feather` points multiplies it (`featherMask`), so the zone's edge fades out over a few points either side of
+    /// where core's zone ends. `fade`, if any, then fades it (drawing with `.destinationIn`).
     private static func hatch(_ outline: [CGPoint], bounds: CGRect, spacing: CGFloat, width: CGFloat,
-                              fill: CGFloat = 0, fade: ((CGContext) -> Void)? = nil) -> SKTexture {
-        SpriteArt.texture(bounds: bounds) { cg in
+                              fill: CGFloat = 0, feather: CGFloat = 0, fade: ((CGContext) -> Void)? = nil) -> SKTexture {
+        let mask = feather > 0 ? featherMask(outline, bounds: bounds, radius: feather) : nil
+        return SpriteArt.texture(bounds: bounds) { cg in
             cg.saveGState()
-            let path = CGMutablePath()
-            path.addLines(between: outline)
-            path.closeSubpath()
-            cg.addPath(path)
-            cg.clip()
+            if mask == nil {
+                let path = CGMutablePath()
+                path.addLines(between: outline)
+                path.closeSubpath()
+                cg.addPath(path)
+                cg.clip()
+            }
             if fill > 0 {
                 cg.setFillColor(UIColor(white: 1, alpha: fill).cgColor)
                 cg.fill(bounds)
@@ -275,6 +304,10 @@ private struct EffectArt {
             cg.setLineWidth(width)
             cg.strokePath()
             cg.restoreGState()
+            if let mask {
+                cg.setBlendMode(.destinationIn)
+                cg.draw(mask, in: bounds)
+            }
             if let fade {
                 cg.setBlendMode(.destinationIn)
                 fade(cg)
@@ -282,48 +315,39 @@ private struct EffectArt {
         }
     }
 
-    /// The least the cone's hatch is faded to: core's loss reaches nothing at the cone's far end and edges, but drawn it
-    /// keeps a trace, so the cone's whole outline stays findable.
-    private static let coneFadeFloor: CGFloat = 0.04
-
-    /// Fades the cone's hatch exactly as core's loss fades (`ShadowCone`'s cone factor): the loss is
-    /// `(1 - along / length) * (1 - lateral / halfWidth)` of its full value, so the hatch is full at the apex on the
-    /// axis, straight down to nothing at the far end and to nothing at the edges, `coneFadeFloor` the least. The cone
-    /// layer composites the hatches as masks, so this alpha is what shows. Row by row, a texel tall, in the art's
-    /// frame (apex at the origin, widening along +y).
-    private static func fadeCone(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat) {
-        let space = CGColorSpaceCreateDeviceRGB()
-        let length = CGFloat(shadow.coneLength) * ppm
-        let step: CGFloat = 1.0 / 3
-        // Unblended strip edges, so the strips share each texel row exactly once.
-        cg.setShouldAntialias(false)
-        var y: CGFloat = -step
-        while y < length + step {
-            let along = Double(((y + step / 2) / length).clamped(to: 0...1))
-            let half = CGFloat(shadow.coneWidthAtBoat + (shadow.coneWidthAtEnd - shadow.coneWidthAtBoat) * along) / 2 * ppm
-            let centre = max(CGFloat(1 - along), Self.coneFadeFloor)
-            let edge = Self.coneFadeFloor
-            guard let gradient = CGGradient(colorsSpace: space, colors: [UIColor(white: 1, alpha: edge).cgColor,
-                                                                         UIColor(white: 1, alpha: centre).cgColor,
-                                                                         UIColor(white: 1, alpha: edge).cgColor] as CFArray,
-                                            locations: [0, 0.5, 1]) else { return }
-            cg.saveGState()
-            cg.clip(to: CGRect(x: -half - 1, y: y, width: 2 * half + 2, height: step))
-            cg.drawLinearGradient(gradient, start: CGPoint(x: -half, y: 0), end: CGPoint(x: half, y: 0),
-                                  options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
-            cg.restoreGState()
-            y += step
+    /// `outline` filled white on clear and blurred (Gaussian, `radius` points), over `bounds`, in the frame
+    /// `SpriteArt.texture` draws in: the soft-edged alpha a hatch is multiplied by. Nil if the blur can't be made.
+    private static func featherMask(_ outline: [CGPoint], bounds: CGRect, radius: CGFloat) -> CGImage? {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 3
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(size: bounds.size, format: format).image { context in
+            let cg = context.cgContext
+            cg.translateBy(x: -bounds.minX, y: bounds.maxY)
+            cg.scaleBy(x: 1, y: -1)
+            let path = CGMutablePath()
+            path.addLines(between: outline)
+            path.closeSubpath()
+            cg.addPath(path)
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.fillPath()
         }
+        guard let input = CIImage(image: image),
+              let blur = CIFilter(name: "CIGaussianBlur", parameters: [kCIInputImageKey: input.clampedToExtent(),
+                                                                       kCIInputRadiusKey: radius * format.scale]),
+              let output = blur.outputImage?.cropped(to: input.extent) else { return nil }
+        return CIContext().createCGImage(output, from: input.extent)
     }
 
     /// How much of the backwind's hatch is left at its far edge: core's loss fades to nothing there, but drawn it
     /// stops at a share, so the zone's whole shape stays readable on the water.
     private static let backwindFadeFloor: CGFloat = 0.35
 
-    /// Fades the backwind's hatch as core's loss fades (`ShadowCone`'s backwind factor, #298): full along her
-    /// stern edge, straight down to `backwindFadeFloor` at the far edge, which reaches `inner` astern on the inside and
-    /// `backwindLength` on the outside. Column by column, a texel wide, in the art's frame (starboard tack).
-    private static func fadeBackwind(_ cg: CGContext, shadow: BoatClass.WindShadow, inner: Double, ppm: CGFloat) {
+    /// Fades the backwind's hatch as core's loss fades (`ShadowCone`'s backwind factor, #298): full along its stern
+    /// edge, straight down to `backwindFadeFloor` at its far edge, each at the span `BoatClass.WindShadow.backwindSpan(out:)`
+    /// gives where it is (one edge slants, the far one or the stern one). Column by column, a texel wide, in the art's
+    /// frame (starboard tack).
+    private static func fadeBackwind(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat, margin: CGFloat) {
         let space = CGColorSpaceCreateDeviceRGB()
         guard let gradient = CGGradient(colorsSpace: space, colors: [UIColor.white.cgColor,
                                                                      UIColor(white: 1, alpha: Self.backwindFadeFloor).cgColor] as CFArray,
@@ -333,13 +357,14 @@ private struct EffectArt {
         let step: CGFloat = 1.0 / 3
         // Unblended strip edges, so the strips share each texel out exactly once.
         cg.setShouldAntialias(false)
-        var x: CGFloat = -step
-        while x < width + step {
-            let out = Double((x + step / 2) / width).clamped(to: 0...1)
-            let reach = CGFloat(inner + (shadow.backwindLength - inner) * out) * ppm
+        var x: CGFloat = -step - margin
+        while x < width + step + margin {
+            let out = Double((x + step / 2) / width).clamped(to: 0...1) * shadow.backwindWidth
+            guard let span = shadow.backwindSpan(out: out) else { break }
+            let top = stern - CGFloat(span.start) * ppm, bottom = stern - CGFloat(span.end) * ppm
             cg.saveGState()
-            cg.clip(to: CGRect(x: x0 + x, y: stern - reach - 2, width: step, height: reach + 4))
-            cg.drawLinearGradient(gradient, start: CGPoint(x: 0, y: stern), end: CGPoint(x: 0, y: stern - reach),
+            cg.clip(to: CGRect(x: x0 + x, y: bottom - margin - 2, width: step, height: top - bottom + 2 * margin + 4))
+            cg.drawLinearGradient(gradient, start: CGPoint(x: 0, y: top), end: CGPoint(x: 0, y: bottom),
                                   options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
             cg.restoreGState()
             x += step

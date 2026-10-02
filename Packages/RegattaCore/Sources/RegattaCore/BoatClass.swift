@@ -194,6 +194,38 @@ public struct BoatClass: DataFileContent, Equatable {
         /// Metres astern of the stern the trapezoid's inner edge reaches (#298; optional, `innerLengthHullLengths`),
         /// or nil for #79's band.
         public var backwindInnerLength: Double?
+        /// Which edge of the trapezoid slants (optional, `slantedAtStern`; false when absent, #298's shape): false, its
+        /// far edge, `backwindInnerLength` astern on the hull side to `backwindLength` outboard; true, its stern edge,
+        /// level with her stern on the hull side to `backwindLength - backwindInnerLength` astern outboard, with the far
+        /// edge flat `backwindLength` astern (`backwindSpan(out:)`).
+        public var backwindSternSlant = false
+        /// The true wind angle, radians, from which she is running and casts no backwind (optional,
+        /// `runningFromDegrees`): nil, she casts it on every point of sail (`ShadowCone`).
+        public var backwindRunningAngle: Double?
+        /// How far before `backwindRunningAngle` the backwind starts to fade, radians (optional,
+        /// `runningFadeDegrees`; 0 when absent, so it is switched off at the running angle with no fade): its loss falls
+        /// straight from full that far forward of it to nothing at it, so she loses it gradually bearing away
+        /// across a reach and gains it back coming up (`ShadowCone.backwindPresence`).
+        public var backwindRunningFade = 0.0
+        /// The speed, m/s, at which the backwind trapezoid is its full size (optional, `speedScale.referenceKnots`), and
+        /// the most it grows to (`speedScale.maxScale`, 1.5 when absent): the trapezoid's length astern scales with her
+        /// speed through the water, in proportion, from nothing when stopped (`backwindScale(speed:)`). Nil: it is
+        /// the same size at every speed.
+        public var backwindScaleSpeed: Double?
+        public var backwindMaxScale = 1.5
+        /// Whether the cone starts from her bow and stern (optional, `coneFromBowAndStern`; false when absent): its near
+        /// edge is the line from her bow to her stern, so it follows her heading across the wind, and its sides run from
+        /// those two points to the far end's corners. False: a line across her centre, square to the wind
+        /// (`coneWidthAtBoat` wide), as every class before skiff@5 (`ShadowCone`).
+        public var coneFromHull = false
+        /// How far the cone's axis is swung from straight downwind her apparent wind towards straight astern of her, a
+        /// share 0...1 of the angle between them (optional, `coneSwingAsternShare`; 0 when absent: along her apparent wind,
+        /// as every class before skiff@5). Close-hauled the wind is nearly over the bow and the cone already falls
+        /// astern; across a reach it would fall well to leeward, and the swing opens it behind her (`ShadowCone`).
+        public var coneSwing = 0.0
+        /// The hull outline's forwardmost point on the centreline in the boat's frame, metres (y forward of the centre):
+        /// where the cone starts at her bow. Not a file value: read off the hull outline at load.
+        public var bowY: Double
         /// The hull's starboard stern corner in the boat's frame, metres (x out from the centreline, y aft of the
         /// centre, negative): where the backwind trapezoid starts, mirrored to her windward side. Not a file value:
         /// read off the hull outline at load (its aftmost points, widest of them; outlines are symmetric).
@@ -206,6 +238,24 @@ public struct BoatClass: DataFileContent, Equatable {
 
         /// Whether the shadow slows the boat rather than the wind her polar reads (`slowingDown`).
         public var isSpeedLoss: Bool { slowingDown != nil }
+
+        /// The factor her backwind trapezoid is scaled by astern at `speed`, m/s through the water: 1 when the class has no
+        /// speed scale or her speed isn't known, else `speed / backwindScaleSpeed` on 0...`backwindMaxScale`.
+        public func backwindScale(speed: Double?) -> Double {
+            guard let reference = backwindScaleSpeed, let speed else { return 1 }
+            return (speed / reference).clamped(to: 0...backwindMaxScale)
+        }
+
+        /// The backwind trapezoid's extent astern of her stern line `out` metres out along it from the stern corner
+        /// (0 on the hull side, `backwindWidth` outboard): where it starts and where it ends, metres astern. Nil for a
+        /// class with #79's band. The slanted edge is the far one (`start` 0) or the stern one (`end` the full length).
+        public func backwindSpan(out: Double) -> (start: Double, end: Double)? {
+            guard let inner = backwindInnerLength else { return nil }
+            // `out` is on 0...backwindWidth (a class with an inner length has a positive width). The far-edge shape's
+            // operations are #298's exactly, so the classes sailed before this one replay bit for bit.
+            if backwindSternSlant { return ((backwindLength - inner) * out / backwindWidth, backwindLength) }
+            return (0, inner + (backwindLength - inner) * out / backwindWidth)
+        }
     }
 
     /// The roll tack (#222, #263): a second tack/gybe tap during a tack, timed on the boom crossing. A hit, within
@@ -341,6 +391,18 @@ private struct BoatClassSchema2: Decodable {
             /// #298: the trapezoid's inner length (`BoatClass.WindShadow.backwindInnerLength`). Optional: a file
             /// without it (every one before #298) casts #79's band.
             let innerLengthHullLengths: Double?
+            /// The trapezoid's stern edge slants, not its far one (`BoatClass.WindShadow.backwindSternSlant`). Optional.
+            let slantedAtStern: Bool?
+            /// The true wind angle from which she is running and casts none (`backwindRunningAngle`). Optional.
+            let runningFromDegrees: Double?
+            /// The backwind fades out over this many degrees before the running angle (`backwindRunningFade`). Optional.
+            let runningFadeDegrees: Double?
+            /// The trapezoid grows with her speed (`backwindScaleSpeed`, `backwindMaxScale`). Optional.
+            struct SpeedScale: Decodable {
+                let referenceKnots: Double
+                let maxScale: Double?
+            }
+            let speedScale: SpeedScale?
         }
 
         let coneLengthHullLengths: Double
@@ -348,6 +410,10 @@ private struct BoatClassSchema2: Decodable {
         let coneWidthAtEndHullLengths: Double
         let lossCloseIn: Double
         let stackingFloor: Double
+        /// The cone starts from her bow and stern (`BoatClass.WindShadow.coneFromHull`). Optional.
+        let coneFromBowAndStern: Bool?
+        /// The cone's axis swings this share of the way from downwind to astern (`BoatClass.WindShadow.coneSwing`). Optional.
+        let coneSwingAsternShare: Double?
         let backwind: Backwind
     }
 
@@ -431,6 +497,22 @@ private struct BoatClassSchema2: Decodable {
                       && positive(inner) && inner <= windShadow.backwind.lengthHullLengths,
                       "backwind trapezoid needs a positive length and width, and an inner length in 0 exclusive ... its length")
         }
+        try check(windShadow.backwind.slantedAtStern != true || windShadow.backwind.innerLengthHullLengths != nil,
+                  "a backwind slanted at the stern needs an inner length")
+        if let running = windShadow.backwind.runningFromDegrees {
+            try check(running > 0 && running <= 180, "backwind running angle must be above 0 and at most 180°")
+            try check((windShadow.backwind.runningFadeDegrees ?? 0) >= 0 && (windShadow.backwind.runningFadeDegrees ?? 0) <= running,
+                      "backwind running fade must be 0 up to the running angle")
+        }
+        try check(windShadow.backwind.runningFadeDegrees == nil || windShadow.backwind.runningFromDegrees != nil,
+                  "a backwind running fade needs a running angle")
+        if let scale = windShadow.backwind.speedScale {
+            try check(windShadow.backwind.innerLengthHullLengths != nil && positive(scale.referenceKnots)
+                      && (scale.maxScale ?? 1.5) >= 1, "a backwind speed scale needs an inner length, a positive reference speed and a max scale of 1 or more")
+        }
+        try check(fraction(windShadow.coneSwingAsternShare ?? 0), "the cone's swing astern must be a share, 0...1")
+        try check(windShadow.coneFromBowAndStern != true || windShadow.backwind.innerLengthHullLengths != nil,
+                  "a cone from the bow and stern needs a backwind inner length (the trapezoid class)")
         try check(fraction(contact.boatSpeedFactor) && fraction(contact.markSpeedFactor), "contact factors must be 0...1")
         try check(fraction(ease.speedFraction) && positive(ease.timeConstantSeconds), "ease needs a 0...1 fraction and a positive time")
 
@@ -468,6 +550,14 @@ private struct BoatClassSchema2: Decodable {
                 backwindWidth: windShadow.backwind.widthHullLengths * length,
                 backwindLoss: windShadow.backwind.loss,
                 backwindInnerLength: windShadow.backwind.innerLengthHullLengths.map { $0 * length },
+                backwindSternSlant: windShadow.backwind.slantedAtStern ?? false,
+                backwindRunningAngle: windShadow.backwind.runningFromDegrees.map(deg2rad),
+                backwindRunningFade: deg2rad(windShadow.backwind.runningFadeDegrees ?? 0),
+                backwindScaleSpeed: windShadow.backwind.speedScale.map { metresPerSecond(knots: $0.referenceKnots) },
+                backwindMaxScale: windShadow.backwind.speedScale?.maxScale ?? 1.5,
+                coneFromHull: windShadow.coneFromBowAndStern ?? false,
+                coneSwing: windShadow.coneSwingAsternShare ?? 0,
+                bowY: outline.map(\.y).max() ?? 0,
                 sternCorner: Self.sternCorner(of: outline),
                 slowingDown: nil
             ),

@@ -281,13 +281,18 @@ import Testing
     ///
     /// #329: the can-just-cross gate (`canJustCross`) is what separates the two, not a lee-bow that never fires: meeting
     /// the boat she can cross, her tack would land on its lee bow (`leeBowLands`) and she could cross it; meeting one 3.5
-    /// lengths ahead and 2 to leeward, her tack would land there too, but she could never cross it, and she ducks.
+    /// lengths ahead and 2 to leeward she could never cross it, and she ducks.
+    ///
+    /// skiff@5's backwind is narrow and starts at her stern, so wherever her tack lands the boat in it she can also cross
+    /// it (a 6 by 6 grid of starts, ahead 3 to 5.8 and leeward 1 to 3.5, on seeds 3, 11 and 20, found none that lands and
+    /// can't cross): the gate no longer has a landing to refuse there, so the scene asserts she ducks, not that her tack
+    /// would have landed (`LeeBowGates.landedNotCrossing` stays, as the grid's probe).
     @Test func leeBowsInsteadOfDuckingWhenPossible() throws {
         for seed in Self.fleetSeeds {
             let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.8)
             #expect(BotConductTests.calls(lee.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(lee.kinds))")
             let tacked = try #require(lee.tacked, "seed \(seed): she didn't lee-bow")
-            #expect(tacked.ahead > 1 && tacked.ahead < 3, "seed \(seed): her tack done, she's \(tacked.ahead) L ahead of her")
+            #expect(tacked.ahead > 1 && tacked.ahead < 3.5, "seed \(seed): her tack done, she's \(tacked.ahead) L ahead of her")
             #expect(tacked.leeward > 0 && tacked.leeward < 1.5, "seed \(seed): and \(tacked.leeward) L to leeward")
             #expect(lee.backwinded, "seed \(seed): the starboard boat sat in her backwind")
             #expect(lee.closest > 1, "seed \(seed): she came within \(lee.closest) L")
@@ -297,12 +302,11 @@ import Testing
             #expect(BotConductTests.calls(duck.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(duck.kinds))")
             #expect(duck.tapped == nil && duck.race.boats[0].tack == .port, "seed \(seed): she can't cross, so ducks")
 
-            // #329: closer still, 3.5 lengths ahead and 2 to leeward, her tack would land her on the starboard boat's
-            // lee bow, but she can't cross her clear of her keep-clear distance: she ducks, the crossing gate's doing.
+            // #329: closer still, 3.5 lengths ahead and 2 to leeward, she can't cross her clear of her keep-clear
+            // distance: she ducks.
             let gated = try Self.portMeetsStarboard(seed: seed, ahead: 3.5, leeward: 2, seconds: 7)
             #expect(BotConductTests.calls(gated.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(gated.kinds))")
-            #expect(gated.gates.landedNotCrossing, "seed \(seed): her tack would have landed on her lee bow")
-            #expect(!gated.gates.crossed, "seed \(seed): but she could never just cross her")
+            #expect(!gated.gates.crossed, "seed \(seed): she could never just cross her")
             #expect(gated.tapped == nil && gated.race.boats[0].tack == .port, "seed \(seed): so she ducks")
         }
     }
