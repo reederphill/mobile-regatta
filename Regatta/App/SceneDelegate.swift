@@ -10,6 +10,9 @@ import UIKit
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private let sceneState = SceneState()
+    /// Usage analytics (#128): sent at launch and on going to the background, never during a race.
+    private var analytics: Analytics?
+    private var metricKit: MetricKitForwarder?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
@@ -19,8 +22,13 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // signed out, until the real services arrive.
         let services = LaunchOptions.current.fakeServices.map(ServiceSet.fake)
             ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
+        let analytics = Analytics.app(transport: services.analytics)
+        let metricKit = MetricKitForwarder(analytics: analytics)
+        metricKit.start()
+        (self.analytics, self.metricKit) = (analytics, metricKit)
+        Task { await analytics.flush() }
         window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size,
-                                                          onlineStatus: OnlineStatus(services: services))
+                                                          onlineStatus: OnlineStatus(services: services), analytics: analytics)
         if let appearance = LaunchOptions.current.appearance {
             window.overrideUserInterfaceStyle = appearance == .dark ? .dark : .light
         }
@@ -31,7 +39,30 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneDidBecomeActive(_ scene: UIScene) { sceneState.phase = .active }
     func sceneWillResignActive(_ scene: UIScene) { sceneState.phase = .inactive }
     func sceneWillEnterForeground(_ scene: UIScene) { sceneState.phase = .inactive }
-    func sceneDidEnterBackground(_ scene: UIScene) { sceneState.phase = .background }
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        sceneState.phase = .background
+        guard let analytics else { return }
+        // A little background time to send what's waiting; whatever doesn't go waits for the next launch.
+        let background = BackgroundTime()
+        background.begin()
+        Task {
+            await analytics.flush()
+            background.end()
+        }
+    }
+}
+
+/// Background time asked for once and given back once, by the work or by the system's expiry.
+private final class BackgroundTime {
+    private var task = UIBackgroundTaskIdentifier.invalid
+
+    func begin() { task = UIApplication.shared.beginBackgroundTask(withName: "analytics") { [self] in end() } }
+
+    func end() {
+        guard task != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(task)
+        task = .invalid
+    }
 }
 
 /// The root view with the app-wide environment. Menus follow the system appearance; the race cover sets its own.
@@ -64,8 +95,8 @@ final class RootHostingController: UIHostingController<AppRoot> {
     }
 
     /// With no `onlineStatus`, online and signed out, as the placeholders were: for tests.
-    init(sceneState: SceneState, screenSize: CGSize, onlineStatus: OnlineStatus? = nil) {
-        let model = AppModel(sceneState: sceneState)
+    init(sceneState: SceneState, screenSize: CGSize, onlineStatus: OnlineStatus? = nil, analytics: Analytics = .discarding()) {
+        let model = AppModel(sceneState: sceneState, analytics: analytics)
         let onlineStatus = onlineStatus ?? OnlineStatus(services: .fake(.signedOut))
         super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize, onlineStatus: onlineStatus))
         isOrientationLocked = sceneState.isRaceSequenceShowing
