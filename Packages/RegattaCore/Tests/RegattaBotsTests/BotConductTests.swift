@@ -104,11 +104,11 @@ import RegattaCore
         var brain: BotBrain
 
         init(seat: Int, plannedTack: Tack?, race: Race, skill: Double = 1, weaknesses: BotWeaknesses? = nil,
-             caution: BotBrain.Caution? = nil) {
+             caution: BotBrain.Caution? = nil, profile: BotProfile? = nil) {
             self.seat = seat
             var style = BotConductTests.skill1
             style.skill = skill
-            brain = BotBrain(style: style, seed: UInt64(seat + 1), weaknesses: weaknesses, caution: caution)
+            brain = BotBrain(style: style, profile: profile, seed: UInt64(seat + 1), weaknesses: weaknesses, caution: caution)
             brain.plannedTack = plannedTack ?? race.boats[seat].tack
         }
 

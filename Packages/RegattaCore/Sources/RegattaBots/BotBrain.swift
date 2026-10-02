@@ -240,9 +240,17 @@ struct BotBrain: Sendable {
                     ? Aim(angle: max(sailingAngle(boat), Self.returnAngle), tack: boat.tack)
                     : .groove(.upwind, tack: boat.tack, angle: grooveAngle(.upwind, boat, view))
             }
-            return BotDecision(input: clearingQuarter(boat, view, holdingCourse(boat, view, helm(boat, to: own, view))))
+            return BotDecision(input: clearingQuarter(boat, view, holding(boat, view, helm(boat, to: own, view),
+                                                                          desired: own.heading(wind: boat.windDirection))))
         }
-        return BotDecision(input: clearingQuarter(boat, view, holdingCourse(boat, view, helm(boat, to: aim, view).eased(aim.ease))))
+        return BotDecision(input: clearingQuarter(boat, view, holding(boat, view, helm(boat, to: aim, view).eased(aim.ease),
+                                                                      desired: desired)))
+    }
+
+    /// Her held input as the right-of-way boat: holding her course (`holdingCourse`, #228), or for the suite's hunter
+    /// hunting (`hunting`, #355). `desired` is the heading her plan sails.
+    private func holding(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> BoatInput {
+        tactics.hunts ? hunting(b, view, input, desired: desired) : holdingCourse(b, view, input)
     }
 
     // MARK: - Penalty turns

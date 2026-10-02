@@ -65,7 +65,11 @@ _Avoid_: hold heading, stand on
 
 **Defend lane**:
 A right-of-way boat keeping the water she's sailing in rather than giving it up to a boat that must keep clear of her: she holds course, and luffs only within the room rule 16.1 leaves the other boat, and, as a leeward boat that came up from astern, no higher than her proper course less its tolerance (rule 17).
-_Avoid_: hunting (steering at a boat to force a foul, which bots never do)
+_Avoid_: hunting (steering at a boat to force a foul, which the bots players race never do; only the bot suite's **Hunter** does)
+
+**Hunter**:
+A bot-suite-only profile (#355) that sails to the edge of the rules as an aggressive player does: as the right-of-way boat racing she turns at a boat that must keep clear of her, slower than rule 16.1's course-change test, luffs a windward boat (within her proper course when restricted under rule 17), holds or bears down as the starboard boat, and takes all her mark-room. A measuring profile: no bot players race ever hunts.
+_Avoid_: aggressive bot (any bot players race)
 
 **Encounter**:
 Two boats coming within 2 hull lengths of each other while rules 10–13 name one of them to keep clear, counted once until they separate past that again. The bot suite's conduct gate is the share of encounters that end in a rule call.

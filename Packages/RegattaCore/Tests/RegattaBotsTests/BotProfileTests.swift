@@ -1,0 +1,236 @@
+import Foundation
+import Testing
+import RegattaCore
+@testable import RegattaBots
+
+/// #355: the bot suite's hunter (`BotProfile.hunter`), the tactician sailing to the edge of the rules. Two-boat scenes
+/// (`BotConductTests`' water and placements), the hunter in seat 0 against a live bot at skill 1 in seat 1: she turns
+/// at a boat that must keep clear of her, luffs a windward boat, holds starboard, and never turns faster than rule
+/// 16.1's course-change test, so she draws no 16.1 call.
+@Suite struct BotProfileTests {
+    /// What one scene sailed: its events, and seat 0's headings and seat 1's distance from her, tick by tick, with
+    /// whether seat 1 was keeping clear of her then.
+    struct Sailed {
+        var kinds: [RaceEvent.Kind] = []
+        var headings: [Double] = []
+        var rudders: [Double] = []
+        var gaps: [Double] = []
+        /// Whether seat 1 was to her starboard.
+        var otherToStarboard: [Bool] = []
+        var keepingClear: [Bool] = []
+        /// Her tack or gybe on the autohelm's tap (or tacking): a tack is rule 13's, not a course change she steers.
+        var tapping: [Bool] = []
+        /// Whether she owed seat 1 mark-room (rule 18): she gives it as she would keep clear, at any rate.
+        var owesMarkRoom: [Bool] = []
+        var sailingAngles: [Double] = []
+        var properCourseEdges: [Double?] = []
+        var otherSailingAngles: [Double] = []
+        var calls: [String] { BotConductTests.calls(kinds) }
+    }
+
+    /// Sails `encounter` for its seconds: seat 0 the `profile` (the hunter unless given), seat 1 a live bot.
+    static func sail(_ encounter: BotConductTests.Encounter, profile: BotProfile? = .hunter) throws -> Sailed {
+        let race = try encounter.race()
+        var pilots = [
+            BotConductTests.Pilot(seat: 0, plannedTack: encounter.planned[0], race: race, profile: profile),
+            BotConductTests.Pilot(seat: 1, plannedTack: encounter.planned[1], race: race),
+        ]
+        var sailed = Sailed()
+        for _ in 0..<Int(encounter.seconds * Double(Race.tickRate)) where !race.isOver {
+            for i in pilots.indices { _ = pilots[i].drive(race) }
+            race.step()
+            sailed.kinds += race.drainEvents().map(\.kind)
+            let a = race.boats[0], b = race.boats[1]
+            sailed.headings.append(a.heading)
+            sailed.rudders.append(a.rudder)
+            sailed.gaps.append((b.position - a.position).length)
+            sailed.otherToStarboard.append((b.position - a.position).dot(Vec2.heading(a.heading).rightPerp) > 0)
+            sailed.keepingClear.append(race.rightOfWay(0, 1)?.keepClear == 1)
+            sailed.tapping.append(a.autohelm?.isTapping == true || a.isTacking)
+            sailed.owesMarkRoom.append(race.seatView(for: 0).own.markRoom.contains { $0.owing == 0 })
+            sailed.sailingAngles.append(a.sailingAngle)
+            sailed.otherSailingAngles.append(b.sailingAngle)
+            sailed.properCourseEdges.append(race.seatView(for: 0).own.properCourse?.edgeSailingAngle)
+        }
+        return sailed
+    }
+
+    /// Her turn rate never passes rule 16.1's course-change test on any tick she steers with a boat keeping clear of her
+    /// (`EscapeSimulation`'s own reading: |Δheading| × tick rate; her tacks on the tap aside), and no 16.1 call is on her.
+    static func checkWithinRule16(_ sailed: Sailed, _ name: String) throws {
+        let race = try BotConductTests.Water(seed: 1).race
+        let changesCourse = try #require(race.rules.incidents.escape.changesCourse)
+        // The mirror the brain keeps of it (`BotBrain.Hunter.courseChangeRate`) is the rules file's.
+        #expect(abs(BotBrain.Hunter.courseChangeRate - changesCourse) < 1e-9, "\(name)")
+        // The tap's full rudder unwinds at the slew rate for a few ticks after it.
+        let afterTap = Int((1 / race.boatClass.steering.rudderSlew) * Double(Race.tickRate)) + 1
+        // And the right-of-way boat for as long before, so a rudder she held keeping clear herself (rule 12 astern, say)
+        // has unwound too.
+        let settled = afterTap + 2 * BotDriver.decisionInterval
+        for tick in 1..<sailed.headings.count where sailed.keepingClear[tick] && !sailed.owesMarkRoom[tick]
+            && !sailed.tapping[max(0, tick - afterTap)...tick].contains(true)
+            && !sailed.keepingClear[max(0, tick - settled)...tick].contains(false)
+            && sailed.gaps[tick] <= race.boatClass.hull.length * BotBrain.Hunter.rangeLengths {
+            let rate = abs(wrapAngle(sailed.headings[tick] - sailed.headings[tick - 1])) * Double(Race.tickRate)
+            #expect(rate <= changesCourse, "\(name): turned \(rate * 180 / .pi)°/s at tick \(tick)")
+        }
+        #expect(!sailed.calls.contains("16.1 on 0"), "\(name): \(sailed.calls)")
+    }
+
+    /// Ticks seat 0's rudder turned her towards seat 1 while seat 1 kept clear of her within her hunting range.
+    static func huntingTicks(_ sailed: Sailed, length: Double) -> Int {
+        sailed.rudders.indices.filter { tick in
+            sailed.keepingClear[tick] && abs(sailed.rudders[tick]) > Autohelm.deadBand && !sailed.tapping[tick]
+                && (sailed.rudders[tick] > 0) == sailed.otherToStarboard[tick]
+                && sailed.gaps[tick] <= length * BotBrain.Hunter.rangeLengths
+        }.count
+    }
+
+    @Test func hunterAltersCourseTowardsAGiveWayBoatWithinRule16() throws {
+        // Running on starboard, overlapped, the live bot to windward and keeping clear (rule 11): holding her course the
+        // hunter would leave her be; she turns at her gently instead, and the gap closes, with no 16.1 call on her.
+        // (Scenes whose tactician gybes away at once leave nothing to hunt: seeds 3 and 6 hold their tack.)
+        var closer = 0
+        for (seed, abeam, ahead) in [(UInt64(3), 2.5, 0.5), (3, 3.0, 1.0), (6, 3.0, 1.0)] {
+            let encounter = BotConductTests.windwardLeeward(seed: seed, running: true, abeam: abeam, ahead: ahead, converging: 0)
+            let hunted = try Self.sail(encounter)
+            let held = try Self.sail(encounter, profile: .tactician)
+            try Self.checkWithinRule16(hunted, encounter.name)
+            let length = try BotConductTests.Water(seed: seed).length
+            let ticks = Self.huntingTicks(hunted, length: length), heldTicks = Self.huntingTicks(held, length: length)
+            #expect(ticks >= Race.tickRate && ticks > heldTicks, "\(encounter.name): turned at her \(ticks) ticks, held \(heldTicks)")
+            // While the windward boat keeps clear of her, she came closer to it than holding her course did.
+            let near = Self.nearWhileKeepingClear(hunted), heldNear = Self.nearWhileKeepingClear(held)
+            if near < heldNear - 0.5 { closer += 1 }
+            #expect(near >= length * BotBrain.Hunter.noCloserLengths * 0.75, "\(encounter.name): she rammed her (\(near) m)")
+        }
+        // The windward boat answers her (it keeps clear, luffing away), so the gap needn't close every time.
+        #expect(closer >= 2, "she came closer than holding her course in \(closer) scenes")
+    }
+
+    /// The closest seat 1 came to her while keeping clear of her, before her first tack or gybe.
+    static func nearWhileKeepingClear(_ sailed: Sailed) -> Double {
+        let end = sailed.tapping.firstIndex(of: true) ?? sailed.tapping.count
+        return sailed.gaps.indices.prefix(end).filter { sailed.keepingClear[$0] }.map { sailed.gaps[$0] }.min() ?? .infinity
+    }
+
+    @Test func hunterLuffsAWindwardBoat() throws {
+        for seed: UInt64 in [1, 2, 3] {
+            let encounter = BotConductTests.windwardLeeward(seed: seed, running: false, abeam: 2, ahead: 0, converging: 0)
+            let hunted = try Self.sail(encounter)
+            try Self.checkWithinRule16(hunted, encounter.name)
+            // She luffed: her sailing angle fell below where she started, the windward boat's with it.
+            let start = hunted.sailingAngles[0], otherStart = hunted.otherSailingAngles[0]
+            let lowest = try #require(hunted.sailingAngles.min())
+            #expect(lowest < start - deg2rad(4), "\(encounter.name): she luffed only to \((start - lowest) * 180 / .pi)°")
+            #expect(try #require(hunted.otherSailingAngles.min()) < otherStart - deg2rad(2),
+                    "\(encounter.name): the windward boat never luffed")
+            #expect(!hunted.calls.contains { $0.hasSuffix("on 0") }, "\(encounter.name): \(hunted.calls)")
+        }
+    }
+
+    @Test func hunterLuffsWithinHerProperCourseFromAstern() throws {
+        // Rule 17: overlapped to leeward from clear astern, she luffs no higher than her proper course's edge.
+        var restricted = 0
+        for seed: UInt64 in [1, 2, 3] {
+            let encounter = BotConductTests.windwardLeeward(seed: seed, running: false, abeam: 1.5, ahead: 2.5,
+                                                            converging: 0, fromAstern: true)
+            // Seat 1 comes from astern here: make the hunter that boat, seat 0 the windward live bot.
+            let race = try encounter.race()
+            var pilots = [
+                BotConductTests.Pilot(seat: 0, plannedTack: .starboard, race: race),
+                BotConductTests.Pilot(seat: 1, plannedTack: .starboard, race: race, profile: .hunter),
+            ]
+            var kinds: [RaceEvent.Kind] = []
+            for _ in 0..<Int(encounter.seconds * Double(Race.tickRate)) where !race.isOver {
+                for i in pilots.indices { _ = pilots[i].drive(race) }
+                race.step()
+                kinds += race.drainEvents().map(\.kind)
+                guard let notice = race.seatView(for: 1).own.properCourse else { continue }
+                restricted += 1
+                #expect(race.boats[1].sailingAngle >= notice.edgeSailingAngle - deg2rad(0.5),
+                        "\(encounter.name): \((notice.edgeSailingAngle - race.boats[1].sailingAngle) * 180 / .pi)° above her edge")
+            }
+            let calls = BotConductTests.calls(kinds)
+            #expect(!calls.contains("17 on 1") && !calls.contains("16.1 on 1"), "\(encounter.name): \(calls)")
+        }
+        #expect(restricted > 0, "never restricted under rule 17: the scene tests nothing")
+    }
+
+    @Test func hunterHoldsStarboardAndForcesTheDuck() throws {
+        // On a collision course: the port boat must duck; the hunter never turns away from her, and draws no call.
+        var met = 0
+        for seed: UInt64 in [1, 2, 3] {
+            let encounter = BotConductTests.portStarboard(seed: seed, early: 0, running: false)
+            let hunted = try Self.sail(encounter)
+            try Self.checkWithinRule16(hunted, encounter.name)
+            #expect(!hunted.calls.contains { $0.hasSuffix("on 0") }, "\(encounter.name): \(hunted.calls)")
+            let race = try encounter.race()
+            let a = race.boats[0], b = race.boats[1]
+            // The way away from the port boat: the side she is not on.
+            let away: Double = (b.position - a.position).dot(Vec2.heading(a.heading).rightPerp) > 0 ? -1 : 1
+            // While the port boat keeps clear of her, before either tacks away.
+            let end = hunted.tapping.firstIndex(of: true) ?? hunted.tapping.count
+            let turnedAway = hunted.headings.indices.prefix(end).filter { hunted.keepingClear[$0] }
+                .map { away * wrapAngle(hunted.headings[$0] - a.heading) }.max() ?? 0
+            #expect(turnedAway < deg2rad(3), "\(encounter.name): she turned away \(turnedAway * 180 / .pi)°")
+            // Where they met, the port boat ducked: she passed astern of the hunter, not ahead. (One of them may tack
+            // away first: then they never meet.)
+            let closest = try Self.closest(encounter)
+            if closest.gap < 3 * (try BotConductTests.Water(seed: seed).length) {
+                met += 1
+                #expect(closest.along < 0, "\(encounter.name): the port boat crossed ahead")
+            }
+        }
+        #expect(met >= 2, "they met in \(met) scenes")
+    }
+
+    /// How close, in `encounter` with the hunter in seat 0, seat 1 came to her, and how far ahead of her (negative:
+    /// astern) seat 1 was then.
+    static func closest(_ encounter: BotConductTests.Encounter) throws -> (gap: Double, along: Double) {
+        let race = try encounter.race()
+        var pilots = [
+            BotConductTests.Pilot(seat: 0, plannedTack: encounter.planned[0], race: race, profile: .hunter),
+            BotConductTests.Pilot(seat: 1, plannedTack: encounter.planned[1], race: race),
+        ]
+        var closest = (gap: Double.infinity, along: 0.0)
+        for _ in 0..<Int(encounter.seconds * Double(Race.tickRate)) where !race.isOver {
+            for i in pilots.indices { _ = pilots[i].drive(race) }
+            race.step()
+            _ = race.drainEvents()
+            let offset = race.boats[1].position - race.boats[0].position
+            if offset.length < closest.gap { closest = (offset.length, offset.dot(Vec2.heading(race.boats[0].heading))) }
+        }
+        return closest
+    }
+
+    @Test func theHunterIsTheTacticianHunting() {
+        for skill in [0.0, 0.5, 1.0] {
+            var hunter = Tactics(profile: .hunter, skill: skill)
+            #expect(hunter.hunts)
+            hunter.hunts = false
+            #expect(hunter == Tactics(profile: .tactician, skill: skill))
+        }
+        for profile in [nil, BotProfile.baseline, .tactician, .blipTacker] {
+            #expect(!Tactics(profile: profile, skill: 1).hunts)
+        }
+    }
+
+    @Test func noBotPlayersRaceHunts() throws {
+        // The app's bots: `BotDriver(seat:raceSeed:)` sails no profile.
+        for seat in 0..<16 {
+            #expect(BotDriver(seat: seat, raceSeed: RaceSeed(7)).profile == nil)
+        }
+        // And no source outside RegattaBots and the suite names a profile.
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let sources = root.appendingPathComponent("Sources")
+        let dirs = try FileManager.default.contentsOfDirectory(atPath: sources.path).filter { $0 != "RegattaBots" && $0 != "BotSuite" }
+        for dir in dirs {
+            let path = sources.appendingPathComponent(dir)
+            for name in (try? FileManager.default.subpathsOfDirectory(atPath: path.path)) ?? [] where name.hasSuffix(".swift") {
+                let text = try String(contentsOf: path.appendingPathComponent(name), encoding: .utf8)
+                #expect(!text.contains("BotProfile"), "\(dir)/\(name) names BotProfile")
+            }
+        }
+    }
+}

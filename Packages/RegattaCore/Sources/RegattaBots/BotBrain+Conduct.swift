@@ -26,6 +26,8 @@ import RegattaCore
 // - Rule 17 (#346): held to her proper course, she sails within it by construction (`BotBrain+ProperCourse.swift`).
 // - Ghosts have no rights or obligations: she ignores them. She never steers at a boat to force a foul, and never
 //   protests: a `BotDecision` has no protest tap.
+// - The bot suite's hunter (#355, `BotProfile.hunter`, `BotBrain+Hunter.swift`) does steer at a boat that must keep
+//   clear of her, within rule 16.1's rate, in place of holding her course: a measuring profile, never a bot players race.
 //
 // Before her start (#99, #280) she keeps clear as `keepClear` has her (`BotBrain+Start.swift`): on port by the water
 // (`startKeepClear`), on starboard as the rule has her, the windward boat luffing as far as just outside the no-go zone
