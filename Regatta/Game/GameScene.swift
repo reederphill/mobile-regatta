@@ -65,6 +65,18 @@ final class GameScene: SKScene {
     /// The wakes' tier: the thermal ladder's (#127) seam. Every tier's wake is speed-scaled.
     var wakeQuality = WakeQuality.full
 
+    /// Whether SpriteKit draws the world and the camera's nodes: `-hideScene` turns it off for a UI test that only
+    /// waits for the results (#361), so a GPU-less CI runner rasterises nothing while `render(_:)` still moves every
+    /// node, and the race's pace no longer hangs on the runner's draw speed. The HUD and results are SwiftUI's.
+    var paintsWorld = true {
+        didSet {
+            world.isHidden = !paintsWorld
+            cam.isHidden = !paintsWorld
+        }
+    }
+    /// The race's pace since the first frame that stepped it (#361), for UI tests (`PaceProbe`).
+    private(set) var pace = PaceMeter()
+
     private let world = SKNode()
     private let cam = SKCameraNode()
     private let water = WaterNode(pointsPerMeter: Double(GameScene.pointsPerMeter))
@@ -251,9 +263,13 @@ final class GameScene: SKScene {
         let rudder = steering.advance(by: frameTime)
         // The driver latches it for the next tick. With `-demo` a bot sails your seat and ignores it.
         driver.submit(BoatInput(rudder: rudder, ease: session.isEasing))
-        driver.tick(frameTime, within: Self.tickBudget)
-
+        let clock = ContinuousClock()
+        let tickStart = clock.now
+        let ticks = driver.tick(frameTime, within: Self.tickBudget).count
+        let renderStart = clock.now
         Signpost.renderUpdate.measure { render(driver.renderWorld) }
+        let renderEnd = clock.now
+        pace.record(ticks: ticks, tickTime: renderStart - tickStart, renderTime: renderEnd - renderStart, at: renderEnd)
         session.consume(driver.drainEvents())
 
         hudCountdown -= frameTime
@@ -320,6 +336,9 @@ final class GameScene: SKScene {
         CameraRig.courseFraming(course.obstacles.map(\.position), sceneSize: sceneSize, zoom: zoom, margin: margin,
                                 pointsPerMeter: Double(pointsPerMeter))
     }
+
+    /// The pace line a UI test reads (`PaceProbe`, #361): `PaceMeter.summary` and the race clock's tick.
+    var paceSummary: String { "\(pace.summary), race tick \(driver.currentFrame.tick)" }
 
     // MARK: - Cues
 

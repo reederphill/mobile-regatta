@@ -187,6 +187,34 @@ import RegattaServices
         }
     }
 
+    /// `-startSeconds` (#361) gives a practice race its start sequence too, as it does an online dev race.
+    @Test func startSecondsOverridesThePracticeStartSequence() throws {
+        let settings = RaceSettings()
+        let config = try #require(parse("-autostart", "-seed", "1", "-startSeconds", "10").launchRaceConfig(from: settings))
+        #expect(config.prestartSeconds == 10)
+        #expect(config.setup.startSequenceTicks == 10 * Race.tickRate)
+        #expect(parse("-startSeconds", "10").raceConfig(from: settings).prestartSeconds == 10, "a restarted race too")
+        #expect(parse().raceConfig(from: settings).prestartSeconds == settings.prestartSeconds)
+        for bad in ["0", "61", "ten"] {
+            let options = parse("-startSeconds", bad)
+            #expect(options.startSeconds == nil)
+            #expect(options.problems.count == 1)
+            #expect(options.raceConfig(from: settings).prestartSeconds == settings.prestartSeconds)
+        }
+    }
+
+    /// `-hideScene` (#361) is a flag: it takes no value, and the argument after it is parsed as its own.
+    @Test func hideSceneIsAFlag() {
+        #expect(!parse().hidesScene)
+        let options = parse("-hideScene", "-seed", "1")
+        #expect(options.hidesScene)
+        #expect(options.seed == 1)
+        #expect(options.problems.isEmpty)
+        let missing = parse("-laps", "-hideScene")
+        #expect(missing.hidesScene && missing.laps == nil)
+        #expect(missing.problems == ["-laps needs a value"])
+    }
+
     @Test func autostartSailsTheSettingsRace() throws {
         let settings = RaceSettings()
         let config = try #require(parse("-autostart", "-seed", "1").launchRaceConfig(from: settings))
