@@ -243,14 +243,18 @@ extension BotBrain {
         let speed = b.speed * Self.tapSpeedShare
         let clear = view.boatClass.hull.length * tapClearanceLengths
         let ontoPort = b.tack == .starboard
-        let track = caution == nil ? [] : tapTrack(b, view, seconds: Self.tapOntoPortLookahead * tapLookaheadScale)
+        // Her track through the tap, sailed in her mind only once a boat is near enough to matter (the cautious bot's).
+        var track: [Vec2]?
         return view.others.allSatisfy { other in
             let gap = (other.position - b.position).length
             guard !other.isGhost, gap <= Self.tapRange else { return true }
             let lookahead = (ontoPort && other.tack == .starboard ? Self.tapOntoPortLookahead : Self.tapLookahead) * tapLookaheadScale
             let approach = Self.closestApproach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead)
-            return approach >= min(clear, gap)
-                && (track.isEmpty || tapApproach(of: other, track: track, lookahead: lookahead, view) >= min(clear, gap))
+            guard approach >= min(clear, gap) else { return false }
+            guard caution != nil else { return true }
+            let sailed = track ?? tapTrack(b, view, seconds: Self.tapOntoPortLookahead * tapLookaheadScale)
+            track = sailed
+            return tapApproach(of: other, track: sailed, lookahead: lookahead, view) >= min(clear, gap)
         }
     }
 }

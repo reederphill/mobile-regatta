@@ -126,14 +126,14 @@ extension BotBrain {
         let arrival = startArrival(view)
         let spot = reachableSpot(b, view, hold: hold, arrival: arrival)
         // Where her spot bears, as a sailing angle on starboard, and the broadest she can sail and still cross
-        // the line itself, clear of the pin end. Close below the line with less time left than a tack takes
-        // (`tackSeconds`), too little to sail round anywhere, she's set up where she is: her spot, a length or so
-        // off, swings round her as she slides along the line, and wherever it bears she reads it as fetched and not
-        // yet passed, and holds, waits or goes from there. Reading it passed, she bore away hard for her setup point
-        // with 1.7 s to the gun and swung her stern over the line (#350, seed 4 of `aBotTakingOverBeforeTheGunStarts`).
+        // the line itself, clear of the pin end. Set up where she is (`isSetUpWhereSheIs`), her spot's bearing is
+        // clamped to the range the checks below read as fetched and not yet passed: from `hold - fetchMargin` (on
+        // starboard, the least `joins` takes) to `.pi / 2 + waitOffLine` (the broadest the guard keeps); on port,
+        // `joins` holds there anyway, since with under a tack's time left the time is short. So she holds, waits or
+        // goes from there rather than sailing round to her setup point (`toSetup`).
         let bearing = wrapAngle(b.windDirection - (spot - b.position).bearing)
-        let setUp = view.time < 0 && arrival < Self.tackSeconds && -line.side(b.position) < view.boatClass.hull.length * 2
-        let toSpot = setUp ? min(max(bearing, hold - Self.fetchMargin), .pi / 2 + Self.waitOffLine) : bearing
+        let toSpot = isSetUpWhereSheIs(b, view, arrival: arrival)
+            ? min(max(bearing, hold - Self.fetchMargin), .pi / 2 + Self.waitOffLine) : bearing
         let pinEnd = line.pin.position + (line.committee.position - line.pin.position).normalized * view.boatClass.hull.length
         let toPin = wrapAngle(b.windDirection - (pinEnd - b.position).bearing)
         // Sheeted in at her spot, or close-hauled if it bears closer to the wind than that.
@@ -171,8 +171,25 @@ extension BotBrain {
             ?? toSetup(b, view, spot: spot, hold: hold, arrival: arrival)
     }
 
+    /// Hull lengths below the start line within which, late in the sequence, she is set up where she is
+    /// (`isSetUpWhereSheIs`).
+    static let setUpDepthLengths = 2.0
+
+    /// Whether, before the gun, she is set up where she is: less time left than a tack takes (`tackSeconds`), too
+    /// little to sail round anywhere, close below the line (`setUpDepthLengths`) and level with it between its ends.
+    /// Her spot, a length or so off, swings round her as she slides along the line; wherever it bears she reads it as
+    /// fetched and not yet passed (`startAim`). Reading it passed, she bore away hard for her setup point with 1.7 s to
+    /// the gun and swung her stern over the line (#350, seed 4 of `aBotTakingOverBeforeTheGunStarts`). Beyond an end
+    /// she isn't: there she still sails to her setup point.
+    func isSetUpWhereSheIs(_ b: SeatView.OwnBoat, _ view: SeatView, arrival: Double) -> Bool {
+        let line = view.course.startLine
+        return view.time < 0 && arrival < Self.tackSeconds
+            && -line.side(b.position) < view.boatClass.hull.length * Self.setUpDepthLengths
+            && nearestOnLine(b.position, line, clearOfEnds: 0).between
+    }
+
     /// Sailing to her setup point (`approachPoint`), sheeted in.
-    private mutating func toSetup(_ b: SeatView.OwnBoat, _ view: SeatView, spot: Vec2, hold: Double, arrival: Double) -> Aim {
+    mutating func toSetup(_ b: SeatView.OwnBoat, _ view: SeatView, spot: Vec2, hold: Double, arrival: Double) -> Aim {
         navigate(b, to: approachPoint(b, view, spot: spot, hold: hold, arrival: arrival), view)
     }
 

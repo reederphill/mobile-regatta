@@ -744,4 +744,36 @@ import RegattaCore
             #expect(national.misjudged.isEmpty, "skill \(skill)")
         }
     }
+
+    /// #350: the cautious bot looks before she taps sailing the tap through in her mind (`BotBrain.tapTrack`), every
+    /// boat going on turning as she saw it turn (`tapApproach`). Slow on a reach, the tack takes her seconds, sailing on
+    /// where she was going; a port boat ahead bearing away out of its own tack crosses her bow there, clear of her by
+    /// the straight-line reckoning every bot makes (seed 69 of `CautiousBotSuiteTests`). Seen sailing straight, it's
+    /// clear by both.
+    @Test func cautiousTapCheckCatchesABoatBearingAwayAcrossHerSlowTack() throws {
+        let water = Water(seed: 1)
+        let heading = water.heading(.starboard, deg2rad(63))
+        let forward = Vec2.heading(heading)
+        let port = water.beat(.port)
+        let race = try Self.place(water, [
+            Placement(position: water.centre, heading: heading, speed: 1.5),
+            Placement(position: water.centre + forward * 16 + forward.rightPerp * 4, heading: port, speed: water.up.speed),
+        ])
+        let view = race.seatView(for: 0)
+        let b = view.own
+        let other = try #require(view.others.first)
+        var brain = BotBrain(style: Self.skill1, caution: .standard)
+        let clear = view.boatClass.hull.length * brain.tapClearanceLengths
+        let gap = (other.position - b.position).length
+        let straight = BotBrain.closestApproach(of: other, to: b, heading: 2 * b.windDirection - b.heading,
+                                                speed: b.speed * BotBrain.tapSpeedShare,
+                                                lookahead: BotBrain.tapLookahead * brain.tapLookaheadScale)
+        #expect(gap <= BotBrain.tapRange)
+        #expect(straight >= min(clear, gap), "clear by the straight-line reckoning")
+        brain.seen = [nil, BotBrain.Seen(time: view.time - 0.1, heading: other.heading, speed: other.speed)]
+        #expect(brain.tapIsClear(b, view), "sailing straight, clear")
+        brain.seen = [nil, BotBrain.Seen(time: view.time - 0.1, heading: other.heading - BotBrain.guardTurnRate * 0.1,
+                                         speed: other.speed)]
+        #expect(!brain.tapIsClear(b, view), "bearing away across her tack")
+    }
 }

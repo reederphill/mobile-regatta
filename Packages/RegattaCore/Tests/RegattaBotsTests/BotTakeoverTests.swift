@@ -196,4 +196,61 @@ import RegattaCore
         controllers.handBack(seat: 1)
         #expect(controllers[1].isHuman)
     }
+
+    /// #350: turning a penalty turn on from the autohelm, its rudder over the other way by more than a tick's slew, she
+    /// leaves the boat to the autohelm (`BotBrain.turningOn`), but never for more than `penaltyHoldSeconds`: with the
+    /// rudder held there (settled on the wrong side), she then turns it on her way regardless. A rudder within a tick's
+    /// slew of centre she doesn't wait on, nor a turn not yet started within `penaltyStartMargin` of its start deadline.
+    @Test func turningOnFromTheAutohelmWaitsAtMostPenaltyHoldSeconds() throws {
+        /// Two seconds of her decisions on a penalty turn she turns to starboard (rudder +), `progress` into it, with
+        /// the autohelm holding her and its rudder at `rudder` every tick; the start deadline `startLeft` seconds off
+        /// (the rules' whole start time if nil). Each decision's time and rudder.
+        func decisions(progress: Double, rudder: Double, startLeft: Double? = nil) throws -> [(time: Double, rudder: Int8)] {
+            let water = BotConductTests.Water(seed: 1)
+            let heading = water.beat(.starboard)
+            let race = try BotConductTests.place(water, [
+                .init(position: water.centre, heading: heading, speed: water.up.speed),
+                .init(position: water.centre + water.race.course.upwind * 200, heading: heading, speed: water.up.speed),
+            ])
+            let startTicks = RulesConfig.ticks(race.rules.raceFormat.penalty.start)
+            let clock = race.tick - startTicks + (startLeft.map { RulesConfig.ticks($0) } ?? startTicks)
+            var brain = BotBrain(style: BotConductTests.skill1)
+            brain.penaltyTurn = 1
+            brain.penaltyProgress = progress
+            var out: [(time: Double, rudder: Int8)] = []
+            for tick in 0..<(2 * Race.tickRate) {
+                var snapshot = race.exportSnapshot()
+                snapshot.seats[0].boat.penaltyTurnsOwed = 1
+                snapshot.seats[0].boat.penaltyClockTick = clock
+                snapshot.seats[0].boat.penaltyProgress = progress
+                snapshot.seats[0].boat.rudder = rudder
+                snapshot.seats[0].boat.autohelm = Autohelm(target: .angle(water.up.twa))
+                try race.importSnapshot(snapshot)
+                if tick.isMultiple(of: BotDriver.decisionInterval) {
+                    let view = race.seatView(for: 0)
+                    let input = brain.decide(view).input
+                    out.append((view.time, input.rudder))
+                    race.apply(input, seat: 0, atTick: race.tick + 1)
+                }
+                race.step()
+            }
+            return out
+        }
+        let hold = BotBrain.penaltyHoldSeconds
+        for (name, progress) in [("started", deg2rad(90)), ("not started", deg2rad(10))] {
+            let held = try decisions(progress: progress, rudder: -0.6)
+            let first = try #require(held.first)
+            #expect(first.rudder == 0, "\(name): she leaves it to the autohelm first")
+            for d in held {
+                let waiting = d.time - first.time < hold - 1e-9
+                #expect(waiting ? d.rudder == 0 : d.rudder == BoatInput.rudderRange.upperBound,
+                        "\(name): at \(d.time - first.time) s rudder \(d.rudder)")
+            }
+            #expect(held.contains { $0.time - first.time >= hold }, "\(name): sailed past the bound")
+        }
+        let near = try decisions(progress: deg2rad(90), rudder: -0.1)
+        #expect(near.allSatisfy { $0.rudder == BoatInput.rudderRange.upperBound }, "within a tick's slew: \(near.map(\.rudder))")
+        let late = try decisions(progress: deg2rad(10), rudder: -0.6, startLeft: BotBrain.penaltyStartMargin / 2)
+        #expect(late.allSatisfy { $0.rudder == BoatInput.rudderRange.upperBound }, "near the start deadline: \(late.map(\.rudder))")
+    }
 }
