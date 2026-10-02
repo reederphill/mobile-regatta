@@ -145,6 +145,10 @@ struct BotBrain: Sendable {
     var penaltyRead: PenaltyRead?
     /// The boats around her as she saw them at her last decision, by seat (`guarded`): the cautious bot's only.
     var seen: [Seen?] = []
+    /// Whether she holds her aim within her proper course while told she is restricted under rule 17
+    /// (`properCourseLimited`, #346). A test seam: always true in play; only tests that compare her steering with the
+    /// limit left out set it false.
+    var limitsProperCourse = true
 
     /// The stream of her seed her own draws come from.
     static let brainStream: UInt64 = 0x6272_6169_6e64_7277 // "braindrw"
@@ -206,6 +210,8 @@ struct BotBrain: Sendable {
         if caution != nil, senses.tacking, aim.tack == boat.tack, aim.angle < closeHauled {
             aim = Aim(angle: closeHauled, tack: aim.tack, ease: aim.ease)
         }
+        // Held to her proper course under rule 17, she sails no higher than it allows (#346).
+        if limitsProperCourse { aim = Self.properCourseLimited(aim, boat) }
         // The autohelm is sailing the tap through the tack or gybe: hands off. Any rudder would cancel it
         // (#13) and leave her head to wind; it's over in a couple of seconds.
         if boat.autohelm?.isTapping == true { return BotDecision(input: .neutral) }
