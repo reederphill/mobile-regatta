@@ -38,8 +38,8 @@ import RegattaCore
         /// The leg boats sail there: to the windward mark, or running, to the gate.
         let leg: Int
 
-        init(seed: UInt64, running: Bool = false) {
-            race = botRace(seats: [.bot, .bot], seed: seed)
+        init(seed: UInt64, running: Bool = false, seats: Int = 2) {
+            race = botRace(seats: Array(repeating: .bot, count: seats), seed: seed)
             for _ in 0..<(race.setup.startSequenceTicks + Race.tickRate) { race.step() }
             let c = race.course
             centre = c.startLine.centre + c.upwind * (c.beat * (running ? 0.7 : 0.35))
@@ -575,12 +575,12 @@ import RegattaCore
         var twa: Double
     }
 
-    /// Sails `race` for `seconds` with only `seat`'s bot at the helm, the other boat holding what her autohelm holds:
-    /// every decision of the bot's, with the rule she keeps clear of the other boat under as she made it (nil: none),
-    /// the metres between them, centre to centre, how far she is ahead of the other boat along its heading, and her
-    /// wind angle, and every event.
+    /// Sails `race` for `seconds` with only `seat`'s bot at the helm, the other boats holding what their autohelms hold
+    /// unless `script` sends them input (#342: called before each step): every decision of the bot's, with the rule she
+    /// keeps clear of the first other boat under as she made it (nil: none), the metres between them, centre to centre,
+    /// how far she is ahead of that boat along its heading, and her wind angle, and every event.
     static func sailOne(_ race: Race, seat: Int, seconds: Double, skill: Double = 1, weaknesses: BotWeaknesses? = nil,
-                        planned: Tack? = nil) -> (decisions: [Sailed], kinds: [RaceEvent.Kind]) {
+                        planned: Tack? = nil, script: (Race) -> Void = { _ in }) -> (decisions: [Sailed], kinds: [RaceEvent.Kind]) {
         var pilot = Pilot(seat: seat, plannedTack: planned, race: race, skill: skill, weaknesses: weaknesses)
         var decisions: [Sailed] = []
         var kinds: [RaceEvent.Kind] = []
@@ -593,6 +593,7 @@ import RegattaCore
             if let decision = pilot.drive(race) {
                 decisions.append(Sailed(decision: decision, keepClear: keepClear, gap: gap, ahead: ahead, twa: view.own.twa))
             }
+            script(race)
             race.step()
             kinds += race.drainEvents().map(\.kind)
         }

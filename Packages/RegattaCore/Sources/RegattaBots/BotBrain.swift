@@ -211,6 +211,14 @@ struct BotBrain: Sendable {
         if boat.autohelm?.isTapping == true { return BotDecision(input: .neutral) }
         let desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
         if let evasion = evasion(boat, view, desired: desired) {
+            // Squeezed to windward with no way clear on her own tack, she tacks away (#342, `windwardEvasion`), as she
+            // taps any tack: and means to sail the new tack, so she doesn't tap straight back.
+            if evasion.tacks {
+                lastTapTime = view.time
+                planRoll(boat, view)
+                setTack(boat.tack.other, view)
+                return BotDecision(input: .neutral, tap: .tackGybe)
+            }
             let ease = aim.ease && aim.tack == boat.tack || evasion.dropsAstern
                 || easesKeepingClear(boat, view, heading: evasion.heading)
             let input = steer(boat, toHeading: evasion.heading, view, closest: evasion.closest)
@@ -713,11 +721,12 @@ struct BotBrain: Sendable {
 
     /// A heading she steers for instead of her desired one (`evasion`), and how: as close to the wind as `steer` goes
     /// unless `closest` says closer (a windward boat's luff before her start, `startLuff`, #280), and eased to drop
-    /// astern if `dropsAstern`.
+    /// astern if `dropsAstern`; or, racing, a tack away instead (`tacks`, #342, `windwardEvasion`).
     struct Evasion: Sendable {
         var heading: Double
         var closest: Double? = nil
         var dropsAstern = false
+        var tacks = false
     }
 
     /// `evasiveHeading`, with how she steers it (`Evasion`): only her keep-clear heading, when neither a mark nor the
@@ -766,6 +775,9 @@ struct BotBrain: Sendable {
             if b.status == .racing {
                 guard let rule = keepClearRule(b, view, other), !misjudges(other, rule),
                       isAboutToHit(other, b, view, desired: desired, lookahead: lookahead) else { continue }
+                if rule == .windwardLeeward {
+                    return windwardEvasion(b, view, from: other, desired: desired, lookahead: lookahead)
+                }
                 return Evasion(heading: racingKeepClear(b, view, from: other, rule: rule, desired: desired, lookahead: lookahead))
             }
             guard isAboutToHit(other, b, view, desired: desired, lookahead: lookahead) else { continue }
