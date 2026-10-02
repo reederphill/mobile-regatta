@@ -25,7 +25,7 @@ import RegattaCore
 
     /// The rows keep the core's display order (#30, #86): the sheet doesn't sort them again. Shared places kept; each
     /// code in the result column.
-    @Test func keepsTheCoresRowOrder() {
+    @Test func ordersFinishersByDistanceDSQOCSRET() {
         let results = RaceResults(rows: [
             SeatResult(seat: 1, place: 1, code: .finished, finishTick: 9_000),
             SeatResult(seat: 2, place: 2, code: .finished, finishTick: 9_030),
