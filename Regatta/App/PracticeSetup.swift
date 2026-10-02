@@ -34,6 +34,16 @@ struct PracticeSetup: Equatable, Sendable {
     /// Fixed (#8): a 60 s countdown.
     static let prestartSeconds = 60.0
 
+    /// The setup page's line on what's fixed, in words (owner, 2026-10-02: off-water screens say it short, words over
+    /// numbers): "Three laps. One-minute start."
+    static var fixedNote: String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .spellOut
+        formatter.locale = Locale(identifier: "en")
+        let laps = formatter.string(from: NSNumber(value: laps)) ?? "\(laps)"
+        return "\(laps.prefix(1).uppercased() + laps.dropFirst()) \(laps == "one" ? "lap" : "laps"). One-minute start."
+    }
+
     /// The defaults: what a new install starts with (Hollin Bay, Random conditions, Mixed, 10 boats).
     init() {}
 

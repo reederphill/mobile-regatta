@@ -8,7 +8,8 @@ struct PauseMenu: View {
     /// The device's settings the toggles change, or nil to leave them out.
     var settings: Binding<DeviceSettings>?
     var onResume: () -> Void
-    var onRestart: () -> Void
+    /// Restart race (#25: practice only), or nil to leave it out.
+    var onRestart: (() -> Void)?
     var onLeave: () -> Void
     /// Opens the Help page over the race.
     var onHelp: (() -> Void)?
@@ -41,9 +42,11 @@ struct PauseMenu: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("pause-help")
             }
-            Button(action: onRestart) { label("Restart race") }
-                .buttonStyle(.bordered)
-                .accessibilityIdentifier("pause-restart")
+            if let onRestart {
+                Button(action: onRestart) { label("Restart race") }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("pause-restart")
+            }
             if let onTuning {
                 Button(action: onTuning) { label("Tuning") }
                     .buttonStyle(.bordered)

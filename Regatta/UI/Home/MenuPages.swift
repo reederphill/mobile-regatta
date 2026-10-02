@@ -85,15 +85,16 @@ struct PracticeSetupView: View {
                             Spacer(minLength: 12)
                             Text("\(model.practiceSetup.fleetSize) boats")
                                 .font(MenuFont.number(.body))
-                                .accessibilityIdentifier("practice-fleet-count")
                         }
                     }
+                    // UI tests read the fleet off the stepper itself: SwiftUI folds the label's texts into it.
+                    .accessibilityValue("\(model.practiceSetup.fleetSize) boats")
                     .accessibilityIdentifier("practice-fleet")
                     .padding(16)
                 }
                 .background(ChromePalette.surface, in: .rect(cornerRadius: 16))
 
-                Text("\(PracticeSetup.laps) laps and a 60 s start sequence.")
+                Text(PracticeSetup.fixedNote)
                     .font(MenuFont.body(.footnote))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

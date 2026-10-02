@@ -77,6 +77,26 @@ import Testing
         }
     }
 
+    /// `-resetSettings` with `-uitesting` clears the device's settings at launch (#131: a UI test that switches the
+    /// steering scheme can't leave it switched for the next); without `-uitesting` it's ignored.
+    @Test func resetSettingsLaunchClearsTheDevicesSettings() throws {
+        try withDefaults { defaults in
+            var changed = DeviceSettings()
+            changed.steering = .tiller
+            changed.ladderLines = true
+            changed.save(to: defaults)
+
+            let ignored = AppModel(launchOptions: LaunchOptions(arguments: ["/path/to/Regatta", "-resetSettings"]),
+                                   defaults: defaults)
+            #expect(ignored.deviceSettings == changed, "-resetSettings without -uitesting cleared the settings")
+
+            let options = LaunchOptions(arguments: ["/path/to/Regatta", "-uitesting", "-resetSettings"])
+            let reset = AppModel(launchOptions: options, defaults: defaults)
+            #expect(reset.deviceSettings == DeviceSettings())
+            #expect(DeviceSettings(defaults: defaults) == DeviceSettings())
+        }
+    }
+
     /// Reset hints forgets every hint's progress, and nothing else.
     @Test func resetHintsClearsOnlyHints() throws {
         try withDefaults { defaults in

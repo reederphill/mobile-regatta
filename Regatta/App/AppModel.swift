@@ -120,6 +120,9 @@ final class AppModel {
         self.sceneState = sceneState
         self.launchOptions = launchOptions
         self.defaults = defaults
+        if launchOptions.uiTesting && launchOptions.resetSettings {
+            for key in DeviceSettings.Key.allCases { defaults.removeObject(forKey: key.rawValue) }
+        }
         let deviceSettings = DeviceSettings(defaults: defaults)
         self.deviceSettings = deviceSettings
         if launchOptions.uiTesting, let suite = UserDefaults(suiteName: Self.uiTestingPracticeSuite) {
@@ -203,7 +206,7 @@ final class AppModel {
     }
 
     /// `config` on the tuning panel's boat class and rules in a Debug build (#232), at the setup's venue and conditions
-    /// unless the panel tuned the conditions (`TuningModel.practiceFiles(over:)`); as it is otherwise.
+    /// unless the panel tuned or picked the conditions (`TuningModel.practiceFiles(over:)`); as it is otherwise.
     func tuned(_ config: RaceConfig) -> RaceConfig {
         #if DEBUG
         var config = config

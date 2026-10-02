@@ -27,6 +27,8 @@ import RegattaServices
         #expect(options.steeringScheme == .tiller)
         #expect(options.camera == .boat)
         #expect(options.problems.isEmpty)
+        #expect(!options.resetSettings)
+        #expect(parse("-uitesting", "-resetSettings").resetSettings)
     }
 
     @Test func parsesTheOtherSchemeAndCamera() {
