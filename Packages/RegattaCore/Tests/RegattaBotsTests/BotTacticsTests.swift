@@ -287,6 +287,8 @@ import Testing
     /// it (a 6 by 6 grid of starts, ahead 3 to 5.8 and leeward 1 to 3.5, on seeds 3, 11 and 20, found none that lands and
     /// can't cross): the gate no longer has a landing to refuse there, so the scene asserts she ducks, not that her tack
     /// would have landed (`LeeBowGates.landedNotCrossing` stays, as the grid's probe).
+    /// #349 widened the grid (312 starts, 0.5 to 6.5 ahead and 0.5 to 4 to leeward, same seeds): 46 landings, every one
+    /// crossable, so `canJustCross` stays as a safety gate that refuses nothing here today.
     @Test func leeBowsInsteadOfDuckingWhenPossible() throws {
         for seed in Self.fleetSeeds {
             let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.8)
@@ -384,6 +386,34 @@ import Testing
             #expect(lost >= 0.5, "seed \(seed): she cost her \(lost) L")
         }
     }
+
+    /// #349: `tackOnWindTarget`'s position gate lets her tack on a boat's wind while she is still up to
+    /// `FleetTactics.tackOnWindLeewardSlack` lengths to leeward of its track (skiff@5's swung cone covers it best there),
+    /// and still while she is to windward of it, as before #349. Read straight off her first decision's view, port bot
+    /// (seat 0, National) placed off a starboard boat (seat 1) in `crossingAhead`'s wind, her plan leaning by her full
+    /// threshold so the tack always pays (`paysToTackOnWind`) and only the gate and the shadow forecast decide: 4 lengths
+    /// ahead and 0.5 to leeward of its track she takes it; 4 ahead and 3 to leeward, past the slack, she doesn't (her cone
+    /// misses it there too); 6.25 ahead and 0.05 to windward she takes it (a forecast factor of 0.74–0.75 there, just
+    /// under `tackOnWindShadow`).
+    @Test func tackOnWindGateAllowsOnlyTheSlackToLeeward() throws {
+        for seed in Self.fleetSeeds {
+            func target(ahead: Double, leeward: Double) throws -> Int? {
+                let scene = Scene(seed: seed, veer: deg2rad(2))
+                let port = scene.offStarboardBoat(at: scene.centre, ahead: ahead, leeward: leeward)
+                try scene.place([scene.beating(.port, at: port), scene.beating(.starboard, at: scene.centre)])
+                scene.race.step()
+                let view = scene.race.seatView(for: 0)
+                var brain = Self.pilot(seat: 0, scene.race, planned: .port).brain
+                brain.observe(view.own, view)
+                let threshold = try #require(brain.tactics.headerThreshold)
+                return brain.tackOnWindTarget(view.own, view, lean: threshold, threshold: threshold)
+            }
+            #expect(try target(ahead: 4, leeward: 0.5) == 1, "seed \(seed): 0.5 L to leeward of his track, within the slack")
+            #expect(try target(ahead: 4, leeward: 3) == nil, "seed \(seed): 3 L to leeward of his track, past the slack")
+            #expect(try target(ahead: 6.25, leeward: -0.05) == 1, "seed \(seed): to windward of his track")
+        }
+    }
+
 
     /// #234 acceptance: in clear air with a boat on her tack astern and to windward of her (1.5 lengths astern and 2.5 to
     /// windward), a National bot holds her lane on a header past her threshold that would tack her with no boat there; a
