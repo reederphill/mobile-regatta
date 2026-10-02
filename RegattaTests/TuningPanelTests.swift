@@ -50,6 +50,32 @@ import RegattaCore
         #expect(atFellmere.venue == model.practiceFiles().venue, "Fellmere can't host classic-oscillating: the panel's venue")
     }
 
+    /// Conditions picked in the panel but not tuned still sail (#131 review): the panel's base file, not the setup's,
+    /// at the setup's venue when it can host them, else at the panel's venue.
+    @Test func panelsPickedUntunedConditionsSurviveTheSetup() throws {
+        let (model, root) = model()
+        defer { try? FileManager.default.removeItem(at: root) }
+        var setup = PracticeSetup()
+        setup.conditions = .named("sea-breeze")
+        let files = setup.config(seed: 1, windSeed: 1).files
+        let picked = DataFileKey(id: "classic-oscillating", version: 7)
+        model.setBase(.conditions, picked)
+        #expect(!model.tuning.isTuned)
+
+        let atHollin = model.practiceFiles(over: files)
+        #expect(atHollin.conditions.key == picked && atHollin.conditions.tune == nil)
+        #expect(atHollin.venue == files.venue, "Hollin Bay hosts classic-oscillating@7")
+        var config = setup.config(seed: 1, windSeed: 1)
+        config.files = atHollin
+        _ = try RaceFiles(resolving: config.setup, from: atHollin.catalog)
+
+        var fellmere = files
+        fellmere.venue = try #require(PracticeVenue.named("fellmere")).ref
+        let atFellmere = model.practiceFiles(over: fellmere)
+        #expect(atFellmere.conditions.key == picked)
+        #expect(atFellmere.venue == model.practiceFiles().venue, "Fellmere can't host classic-oscillating: the panel's venue")
+    }
+
     /// Untouched, the panel sails the bundled defaults, with no badge.
     @Test func untunedPanelSailsTheBundledFiles() {
         let (model, root) = model()

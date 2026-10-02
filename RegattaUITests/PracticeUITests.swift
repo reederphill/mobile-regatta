@@ -31,6 +31,11 @@ final class PracticeUITests: RaceUITestCase {
         XCTAssertTrue(app.otherElements["race-viewport"].waitForExistence(timeout: 30), "Ready didn't start the race")
     }
 
+    /// The setup's fleet stepper, by its own identifier; its value is the fleet ("10 boats").
+    @MainActor private func fleetStepper(_ app: XCUIApplication) -> XCUIElement {
+        app.steppers["practice-fleet"].firstMatch
+    }
+
     /// Taps the pause button and waits for the pause menu.
     @MainActor private func pause(_ app: XCUIApplication) {
         let pause = app.buttons["race-pause"]
@@ -43,10 +48,10 @@ final class PracticeUITests: RaceUITestCase {
     /// home, with no warning.
     @MainActor func testSetupReadyRacePauseLeaveReturnsHome() {
         let app = openSetup()
-        for id in ["practice-venue", "practice-conditions", "practice-tier", "practice-fleet-count"] {
+        for id in ["practice-venue", "practice-conditions", "practice-tier", "practice-fleet"] {
             XCTAssertTrue(app.descendants(matching: .any)[id].firstMatch.exists, "no \(id) on the practice setup")
         }
-        XCTAssertEqual(app.staticTexts["practice-fleet-count"].label, "10 boats", "the fleet isn't 10 by default")
+        XCTAssertEqual(fleetStepper(app).value as? String, "10 boats", "the fleet isn't 10 by default")
         startFromSetup(app)
 
         pause(app)
@@ -76,10 +81,21 @@ final class PracticeUITests: RaceUITestCase {
     }
 
     /// The steering scheme switched in the pause menu is the device's (#25, #112): Settings shows it after the app is
-    /// killed and launched again. No `-scheme`, which overrides the race's scheme but not the device's. The test
-    /// switches it back, so the next test starts from the defaults.
+    /// killed and launched again. No `-scheme`, which overrides the race's scheme but not the device's. The first
+    /// launch clears the device's settings (`-resetSettings`) and so does a launch at tear-down, whether or not the
+    /// test got that far, so no other test starts on Tiller.
     @MainActor func testSchemeSwitchInPauseMenuPersistsAcrossRelaunch() {
-        var app = launchRace()
+        addTeardownBlock {
+            // XCTest runs tear-down blocks on the main thread, as it does `tearDown`.
+            MainActor.assumeIsolated {
+                let app = XCUIApplication()
+                if app.state != .notRunning { app.terminate() }
+                app.launchArguments = ["-uitesting", "-resetSettings"]
+                app.launch()
+                app.terminate()
+            }
+        }
+        var app = launchRace(["-resetSettings"])
         pause(app)
         let steering = app.segmentedControls["pause-steering"].firstMatch
         XCTAssertTrue(steering.waitForExistence(timeout: 10), "no steering picker in the pause menu")
@@ -96,21 +112,19 @@ final class PracticeUITests: RaceUITestCase {
         settings.tap()
         let row = app.segmentedControls["settings-steering"].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 20), "no steering row in Settings")
-        let kept = row.buttons["Tiller"].isSelected
-        row.buttons["Halves"].tap()
-        XCTAssertTrue(row.buttons["Halves"].isSelected, "steering didn't switch back to Halves")
-        XCTAssertTrue(kept, "the pause menu's Tiller wasn't kept across the relaunch")
+        XCTAssertTrue(row.buttons["Tiller"].isSelected, "the pause menu's Tiller wasn't kept across the relaunch")
     }
 
     /// A sixteen-boat practice race (fifteen bots, the setup's largest fleet) runs to its results with every boat in
     /// them. One lap (`-laps 1`) at `-timescale 32`, as `RaceFinishUITests` sails, so it fits the 5 min CI gives a test.
     @MainActor func testFifteenBotRaceRunsFullLength() throws {
         let app = openSetup(["-laps", "1", "-timescale", "32"])
-        let stepper = app.steppers.firstMatch
+        let stepper = fleetStepper(app)
         XCTAssertTrue(stepper.waitForExistence(timeout: 10), "no fleet stepper")
-        let increment = stepper.buttons.element(boundBy: stepper.buttons.count - 1)
+        let increment = stepper.buttons["Increment"].exists
+            ? stepper.buttons["Increment"] : stepper.buttons.element(boundBy: stepper.buttons.count - 1)
         for _ in 0..<6 { increment.tap() }
-        XCTAssertEqual(app.staticTexts["practice-fleet-count"].label, "16 boats", "the fleet didn't reach 16")
+        XCTAssertEqual(stepper.value as? String, "16 boats", "the fleet didn't reach 16")
         startFromSetup(app)
 
         let results = app.staticTexts["race-results"]

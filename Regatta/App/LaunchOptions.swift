@@ -12,6 +12,8 @@ import RegattaServices
 /// - `-fixture <name>` names a render fixture to replay (#62).
 /// - `-timescale <n>` runs the simulation at `n`× real time.
 /// - `-uitesting` marks a UI test run.
+/// - `-resetSettings` (with `-uitesting`) clears the device's settings at launch, so a UI test that changes them starts
+///   and ends on the defaults even if an earlier run stopped before switching them back (#131).
 /// - `-scheme halves|tiller` overrides the device's steering scheme (#112).
 /// - `-camera course|boat` overrides the device's camera as course-up or boat-up (#113).
 /// - `-online` starts an online race on the dev server's instant race at launch (#68, Debug builds).
@@ -56,6 +58,8 @@ struct LaunchOptions: Equatable {
     var demo = false
     var perf = false
     var uiTesting = false
+    /// `-resetSettings`: honoured only with `-uitesting`.
+    var resetSettings = false
     var seed: UInt64?
     var fixture: String?
     var timescale = 1.0
@@ -91,6 +95,7 @@ struct LaunchOptions: Equatable {
             case "-demo": demo = true
             case "-perf": perf = true
             case "-uitesting": uiTesting = true
+            case "-resetSettings": resetSettings = true
             case "-online": online = true
             #if DEBUG
             case "-tuning": tuning = true
@@ -110,8 +115,8 @@ struct LaunchOptions: Equatable {
     }
 
     private static let flags: Set<String> = {
-        var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-online", "-seed", "-fixture", "-timescale",
-                          "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps", "-appearance",
+        var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-seed", "-fixture",
+                          "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps", "-appearance",
                           "-vision", "-fakeServices", "-briefing"]
         #if DEBUG
         flags.insert("-tuning")

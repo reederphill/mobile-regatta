@@ -150,7 +150,8 @@ struct RaceView: View {
                 PauseMenu(
                     settings: deviceSettings,
                     onResume: { session.setPaused(false) },
-                    onRestart: onRestart,
+                    // Restart is practice only (#25): an online race can't be sailed again from its start.
+                    onRestart: session.driver is PracticeDriver ? onRestart : nil,
                     onLeave: onExit,
                     onHelp: { showsHelp = true },
                     onTuning: tuningAction
