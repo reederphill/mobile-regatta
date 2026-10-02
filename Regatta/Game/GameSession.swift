@@ -145,6 +145,8 @@ final class GameSession {
         vision = LaunchOptions.current.raceVision
         scene = GameScene(driver: driver, roster: roster)
         scene.session = self
+        // `-hideScene` (#361): a live race only; a render fixture always paints.
+        scene.paintsWorld = driver.isFrozen || !LaunchOptions.current.hidesScene
         // The minimap's first pressure sample (up to ~170 ms on first use, #310) waits for the scene's first HUD
         // refresh, off the race's construction; a frozen fixture takes it here, as its render holds still.
         refreshHUD(samplesPressure: driver.isFrozen)

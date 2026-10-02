@@ -60,4 +60,26 @@ class RaceUITestCase: XCTestCase {
             Thread.sleep(forTimeInterval: min(interval, remaining))
         }
     }
+
+    /// Reads the race's pace line (`race-pace`, #361), logs it as an activity (`pace: …`, which reaches the
+    /// xcodebuild log) and attaches it as `name`, so a run says how far the race got and whether its ticks or its
+    /// frames were slow. One look, at the end of a watch: a query steals main-thread time from the race. Returns the
+    /// line and the ticks run, each nil if the look failed.
+    @MainActor @discardableResult func reportPace(_ app: XCUIApplication,
+                                                  named name: String) -> (line: String?, ticks: Int?) {
+        let probe = app.descendants(matching: .any)["race-pace"].firstMatch
+        guard let snapshot = try? probe.snapshot() else {
+            XCTContext.runActivity(named: "pace: the race-pace probe didn't answer") { _ in }
+            return (nil, nil)
+        }
+        let line = snapshot.label
+        let ticks = snapshot.value.flatMap { Int("\($0)") }
+        XCTContext.runActivity(named: line) { activity in
+            let attachment = XCTAttachment(string: line)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            activity.add(attachment)
+        }
+        return (line, ticks)
+    }
 }
