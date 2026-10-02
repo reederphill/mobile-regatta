@@ -126,7 +126,8 @@ extension BotBrain {
         /// grows with her speed through the water (`BoatClass.WindShadow.backwindScale(speed:)`), so a boat just out of
         /// a tack casts a smaller one than at full speed. The pick-up's share in force at `t`, else the carry's.
         static func tackSpeedShare(at t: Double) -> Double {
-            tackPickUp.first { t > $0.from && t <= $0.to }?.share ?? tackCarry.share
+            for phase in FleetTactics.tackPickUp where t > phase.from && t <= phase.to { return phase.share }
+            return tackCarry.share
         }
         /// Seconds early or late she reads a lee-bow or a tack on a boat's wind, at no tactical quality; none at full.
         static let timingError = 2.0
