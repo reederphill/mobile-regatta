@@ -78,6 +78,14 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     public var callsBeforeFirstRounding: Int = 0
     /// Her tacks while racing, penalty turns aside (#342).
     public var racingTacks: Int = 0
+    /// Of `callsByRule`, the calls before the gun, and the calls made while she already owed a turn (a cascade:
+    /// two or more owed after the call), by rule (#351).
+    public var preStartCallsByRule: [String: Int] = [:]
+    public var cascadeCallsByRule: [String: Int] = [:]
+    /// Unfinished at the race's close: metres she had to go (`Race.distanceToFinish(of:)`), and whether she was on the
+    /// last leg (#351). Nil and false once finished.
+    public var metresToFinish: Double?
+    public var onLastLeg: Bool = false
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
@@ -86,6 +94,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         "rowSpot", "startSpot", "onCourseSeconds", "encounters", "encountersEndingInFouls", "encountersToFoulsShare",
         "preStartEncounters", "preStartEncountersEndingInFouls", "closeEncounters", "crossings", "shadowGiven", "shadowReceived", "covers",
         "callsByRule", "callsBeforeFirstRounding", "racingTacks",
+        "preStartCallsByRule", "cascadeCallsByRule", "metresToFinish", "onLastLeg",
     ]
 
     private enum CodingKeys: String, CodingKey {
@@ -96,6 +105,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case encounters, encountersEndingInFouls, encountersToFoulsShare
         case preStartEncounters, preStartEncountersEndingInFouls, closeEncounters, crossings, shadowGiven, shadowReceived, covers
         case callsByRule, callsBeforeFirstRounding, racingTacks
+        case preStartCallsByRule, cascadeCallsByRule, metresToFinish, onLastLeg
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -138,6 +148,10 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(callsByRule, forKey: .callsByRule)
         try c.encode(callsBeforeFirstRounding, forKey: .callsBeforeFirstRounding)
         try c.encode(racingTacks, forKey: .racingTacks)
+        try c.encode(preStartCallsByRule, forKey: .preStartCallsByRule)
+        try c.encode(cascadeCallsByRule, forKey: .cascadeCallsByRule)
+        try c.encode(metresToFinish, forKey: .metresToFinish)
+        try c.encode(onLastLeg, forKey: .onLastLeg)
     }
 
     /// Whether her style means her to start in the line's pin third (#99).
@@ -710,6 +724,23 @@ public struct TierSummary: Codable, Hashable, Sendable {
     public var calledBeforeFirstRoundingShare: Double
     /// Its seats' tacks while racing, per boat (#342).
     public var racingTacksPerBoat: Double
+    /// Of `callsByRule`, the calls before the gun, and the cascades: calls on a boat that already owed a turn (#351).
+    public var preStartCallsByRule: [String: Int]
+    public var cascadeCallsByRule: [String: Int]
+    /// Its unfinished seats at the close by metres to go (#351), keyed by `DNFBucket.rawValue`; only buckets with any.
+    public var dnfByMetresToGo: [String: Int]
+    /// Of its unfinished seats, those on the last leg at the close, and those called at least once (#351).
+    public var dnfOnLastLeg: Int
+    public var dnfCalled: Int
+
+    /// Metres to go at the close of an unfinished boat, for the DNF line (#351).
+    public enum DNFBucket: String, CaseIterable, Sendable {
+        case within60 = "<=60", within150 = "<=150", within300 = "<=300", further = ">300"
+
+        init(metres: Double) {
+            self = metres <= 60 ? .within60 : metres <= 150 ? .within150 : metres <= 300 ? .within300 : .further
+        }
+    }
 
     init(_ seats: [SeatMetrics]) {
         let n = Double(max(seats.count, 1))
@@ -735,6 +766,14 @@ public struct TierSummary: Codable, Hashable, Sendable {
         callsByRule = seats.reduce(into: [:]) { sum, seat in sum.merge(seat.callsByRule, uniquingKeysWith: +) }
         calledBeforeFirstRoundingShare = share(seats.filter { $0.callsBeforeFirstRounding > 0 }.count, of: seats.count)
         racingTacksPerBoat = Double(seats.reduce(0) { $0 + $1.racingTacks }) / n
+        preStartCallsByRule = seats.reduce(into: [:]) { sum, seat in sum.merge(seat.preStartCallsByRule, uniquingKeysWith: +) }
+        cascadeCallsByRule = seats.reduce(into: [:]) { sum, seat in sum.merge(seat.cascadeCallsByRule, uniquingKeysWith: +) }
+        let unfinished = seats.filter { !$0.finished }
+        dnfByMetresToGo = unfinished.reduce(into: [:]) { sum, seat in
+            sum[DNFBucket(metres: seat.metresToFinish ?? .infinity).rawValue, default: 0] += 1
+        }
+        dnfOnLastLeg = unfinished.filter(\.onLastLeg).count
+        dnfCalled = unfinished.filter { $0.foulsAsOffender > 0 }.count
     }
 }
 
@@ -824,6 +863,13 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 + "edge \(fixed(s.meanEdgeSeconds)) s/boat, dsq \(s.dsqMissedPenalty), ocs \(s.ocsCount)")
             lines.append("  \(tier.rawValue) calls: \(callsLine(s.callsByRule)); called before the first rounding "
                 + "\(fixed(s.calledBeforeFirstRoundingShare)) of boats; tacks racing \(fixed(s.racingTacksPerBoat, 1))/boat")
+            lines.append("  \(tier.rawValue) calls pre-start: \(callsLine(s.preStartCallsByRule)); "
+                + "cascade (owing a turn already): \(callsLine(s.cascadeCallsByRule))")
+            if s.finished < s.seats {
+                let buckets = TierSummary.DNFBucket.allCases.map { "\($0.rawValue) m \(s.dnfByMetresToGo[$0.rawValue] ?? 0)" }
+                lines.append("  \(tier.rawValue) DNFs \(s.seats - s.finished) by metres to go: \(buckets.joined(separator: ", ")); "
+                    + "on the last leg \(s.dnfOnLastLeg), called at least once \(s.dnfCalled)")
+            }
         }
         for profile in BotProfile.allCases {
             guard let s = profiles[profile.rawValue] else { continue }

@@ -149,6 +149,10 @@ struct RaceTally {
     private var callsByRule: [[String: Int]]
     /// Each seat's rule calls as the offender before her first rounding: on her first leg, or before her start (#342).
     private var callsBeforeFirstRounding: [Int]
+    /// Of `callsByRule`, the calls made before the gun (tick < 0), and those made while she owed a turn already: two or
+    /// more owed after the step, as `record` sees it (a cascade, #351). By rule.
+    private var preStartCallsByRule: [[String: Int]]
+    private var cascadeCallsByRule: [[String: Int]]
     /// Each seat's tacks while racing, penalty turns aside (#342).
     private var racingTacks: [Int]
     private var disqualifications: [Int]
@@ -215,6 +219,8 @@ struct RaceTally {
         foulsAsOffender = zeros
         callsByRule = Array(repeating: [:], count: race.boats.count)
         callsBeforeFirstRounding = zeros
+        preStartCallsByRule = Array(repeating: [:], count: race.boats.count)
+        cascadeCallsByRule = Array(repeating: [:], count: race.boats.count)
         racingTacks = zeros
         disqualifications = zeros
         ocsNotices = zeros
@@ -267,6 +273,10 @@ struct RaceTally {
                 foulsAsOffender[call.offender] += 1
                 callsByRule[call.offender][call.rule.rawValue, default: 0] += 1
                 if call.leg == 0 { callsBeforeFirstRounding[call.offender] += 1 }
+                if race.tick < 0 { preStartCallsByRule[call.offender][call.rule.rawValue, default: 0] += 1 }
+                if race.boats[call.offender].penaltyTurnsOwed >= 2 {
+                    cascadeCallsByRule[call.offender][call.rule.rawValue, default: 0] += 1
+                }
                 recordFoul(SeatPair(call.offender, call.victim), race)
             case .markTouch(let seat, _): markContacts[seat] += 1
             case .obstructionContact(let seat, .land): landContacts[seat] += 1
@@ -473,7 +483,11 @@ struct RaceTally {
             covers: covers[seat],
             callsByRule: callsByRule[seat],
             callsBeforeFirstRounding: callsBeforeFirstRounding[seat],
-            racingTacks: racingTacks[seat]
+            racingTacks: racingTacks[seat],
+            preStartCallsByRule: preStartCallsByRule[seat],
+            cascadeCallsByRule: cascadeCallsByRule[seat],
+            metresToFinish: boat.status == .finished ? nil : race.distanceToFinish(of: boat),
+            onLastLeg: boat.status != .finished && race.course.legs.indices.last == boat.legIndex
         )
     }
 }

@@ -167,6 +167,18 @@ import Testing
         #expect(BoatStyle.standard.coneAlpha <= 0.4, "faint (#15), though seen: it is only this strong beside the boat")
     }
 
+    /// The fleet's cones share one shader (#354, #361): a shader per boat cost the CI simulator a frame's time over the
+    /// fleet and halved a practice race's pace. A cost guard with no wall clock, beside `RacePaceUITests`' floor.
+    @Test func fleetConesShareOneShader() throws {
+        let (scene, boats) = try DrawOrderTests.scene(fixture: "prestart")
+        let effects = try #require(scene.childNode(withName: "//effects"))
+        let layer = try #require(effects.children.compactMap { $0 as? ConeLayer }.first)
+        let shaders = layer.cones.compactMap { ($0 as? SKSpriteNode)?.shader }
+        #expect(boats > 1 && shaders.count == boats)
+        let first = try #require(shaders.first)
+        #expect(shaders.allSatisfy { $0 === first })
+    }
+
     /// The backwind's sprite covers exactly core's trapezoid (#298) on her windward quarter: at points just inside
     /// and outside each corner and edge, on both tacks, it draws where `isInBackwind` is true and nowhere else, and
     /// it flips side with her tack. A class with #79's band draws none.

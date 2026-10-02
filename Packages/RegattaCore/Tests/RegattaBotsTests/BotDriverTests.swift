@@ -253,11 +253,13 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     /// at `other` from her (far off unless given): the rudder her brain answers with, given the side she turns
     /// penalties to, and the race.
     func decide(atOffset offset: Vec2, penaltyDirection: Double, since: Double = 0, turned: Double = deg2rad(60),
-                other: Vec2? = nil) throws -> (rudder: Int8, race: Race) {
+                other: Vec2? = nil, inOpenWater: Bool = false, skill: Double = 0.8) throws -> (rudder: Int8, race: Race) {
         let race = botRace(seats: [.bot, .bot], seed: 5)
         for _ in 0..<(20 * Race.tickRate) { race.step() }
         var snapshot = race.exportSnapshot()
-        let position = race.course.obstacles[CourseLayout.windwardIndex].position + offset
+        // Open water: up the first beat, off to one side, offset ignored.
+        let position = inOpenWater ? race.course.startLine.centre + race.course.upwind * 150 + race.course.right * 60
+            : race.course.obstacles[CourseLayout.windwardIndex].position + offset
         snapshot.seats[0].boat.position = position
         snapshot.seats[0].boat.status = .racing
         snapshot.seats[0].boat.penaltyTurnsOwed = 1
@@ -269,7 +271,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         }
         try race.importSnapshot(snapshot)
         #expect(race.boats[0].isTakingPenalty == (turned > deg2rad(30)))
-        var brain = BotBrain(style: BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0,
+        var brain = BotBrain(style: BotStyle(skill: skill, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0,
                                              penaltyDirection: penaltyDirection))
         return (brain.decide(race.seatView(for: 0)).input.rudder, race)
     }
@@ -285,15 +287,48 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         #expect(try decide(atOffset: clear, penaltyDirection: -1).rudder == Self.hardOver(-1))
     }
 
-    /// #89: she starts her turn at once whoever is near. Waiting for clear water in the pre-start crowd
-    /// missed the start deadline: 11 of the smoke's 30 boats were disqualified. (Until she is 30° into it she keeps
-    /// her rights; from there she keeps clear of them, rule 21.2: `BotNavigationTests.penaltyTurningBotKeepsClearUnder21_2`.)
-    @Test func aBotStartsItsTurnAtOnceWhateverBoatsAreNear() throws {
-        let clear = Vec2(30, -30)
+    /// #89, #351: racing in the water she would sail to her next mark while putting her turn off, she starts it at
+    /// once whoever is near, away from the nearest boat: put off, it came due beside the mark
+    /// (`BotBrain.putOffEndsAtAMark`). (Until she is 30° into it she keeps her rights; from there she keeps clear of
+    /// them, rule 21.2: `BotNavigationTests.penaltyTurningBotKeepsClearUnder21_2`.)
+    @Test func nearHerNextMarkABotStartsItsTurnAtOnceWhateverBoatsAreNear() throws {
+        let clear = Vec2(30, -30), other = Vec2(3, 4)
         for direction in [1.0, -1.0] {
-            let (rudder, race) = try decide(atOffset: clear, penaltyDirection: direction, turned: 0, other: Vec2(3, 4))
+            let (rudder, race) = try decide(atOffset: clear, penaltyDirection: direction, turned: 0, other: other)
             #expect((race.boats[1].position - race.boats[0].position).length == 5)
+            let away: Double = other.dot(race.boats[0].forward.rightPerp) > 0 ? -1 : 1
+            #expect(rudder == Self.hardOver(away), "hard over away from the boat")
+        }
+    }
+
+    /// #351: below `penaltyPutOffSkill` (a Club or Regional bot) she starts her turn at once in the pack, her own way,
+    /// as before #351.
+    @Test func belowNationalSkillABotStartsItsTurnAtOnceInThePack() throws {
+        for direction in [1.0, -1.0] {
+            let (rudder, _) = try decide(atOffset: .zero, penaltyDirection: direction, turned: 0, other: Vec2(3, 4),
+                                         inOpenWater: true, skill: BotBrain.penaltyPutOffSkill - 0.01)
             #expect(rudder == Self.hardOver(direction))
+        }
+    }
+
+    /// #351: racing in open water (not on the last leg) with a boat within `penaltyBoatClearance`, she puts her turn
+    /// off and sails on (the same rudder whichever side she turns penalties to), until `penaltyStartMargin` before the
+    /// start deadline; then she turns hard over away from that boat.
+    @Test func inOpenWaterABotPutsHerTurnOffInThePackUntilItsDeadline() throws {
+        let start = RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.start
+        let late = start - BotBrain.penaltyStartMargin
+        let other = Vec2(3, 4)
+        let (rudder, race) = try decide(atOffset: .zero, penaltyDirection: 1, turned: 0, other: other, inOpenWater: true)
+        let boat = race.boats[0]
+        let windward = race.course.obstacles[CourseLayout.windwardIndex].position
+        #expect((windward - boat.position).length > 120, "her next mark is out of reach")
+        #expect(try decide(atOffset: .zero, penaltyDirection: -1, turned: 0, other: other, inOpenWater: true).rudder
+                == rudder, "she sails on, putting the turn off")
+        let away: Double = other.dot(boat.forward.rightPerp) > 0 ? -1 : 1
+        for direction in [1.0, -1.0] {
+            let due = try decide(atOffset: .zero, penaltyDirection: direction, since: late, turned: 0, other: other,
+                                 inOpenWater: true)
+            #expect(due.rudder == Self.hardOver(away), "at its deadline, hard over away from the boat")
         }
     }
 

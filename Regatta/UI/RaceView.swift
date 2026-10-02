@@ -140,6 +140,7 @@ struct RaceView: View {
             if LaunchOptions.current.uiTesting {
                 BoatSpeedProbe(session: session)
                 CueProbe(session: session)
+                PaceProbe(session: session)
                 RaceStatusProbe(hud: session.hud)
             }
 
