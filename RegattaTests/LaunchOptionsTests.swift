@@ -67,6 +67,20 @@ import RegattaServices
         #expect(options.problems.count == 4)
     }
 
+    /// `-briefing practice|online` opens on the briefing (#130); anything else is ignored with a launch problem.
+    @Test func parsesTheBriefing() {
+        #expect(parse("-briefing", "practice").briefing == .practice)
+        #expect(parse("-briefing", "online").briefing == .online)
+        #expect(parse().briefing == nil)
+        let bad = parse("-briefing", "lobby")
+        #expect(bad.briefing == nil)
+        #expect(bad.problems == ["-briefing lobby: expected practice or online"])
+        let missing = parse("-briefing", "-seed", "3")
+        #expect(missing.briefing == nil && missing.seed == 3)
+        #expect(missing.problems == ["-briefing needs a value"])
+        #expect(!parse("-briefing", "online").startsRace, "the briefing isn't a race launch")
+    }
+
     /// `-fakeServices` names a scenario of scripted fakes for UI tests (#242); an unknown one is ignored with a
     /// launch problem, and so is a missing value.
     @Test func parsesFakeServicesScenario() {

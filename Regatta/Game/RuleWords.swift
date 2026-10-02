@@ -87,6 +87,8 @@ enum SeenMark: Hashable {
     case rule(RacingRule)
     case ruleAgainst(RacingRule)
     case autohelmKeepClear
+    /// The briefing's one-off tide callouts (#130, #23): the first time a practice briefing shows a venue with current.
+    case tideCallouts
 }
 
 /// What this device has seen spelled out, for plain words (#23): kept with hint progress under
@@ -99,6 +101,8 @@ final class RuleSeenStore {
     static let rulesAgainstKey = DeviceSettings.hintKeyPrefix + "rulesSeenAgainst"
     /// #228's autohelm keep-clear words, once per device.
     static let autohelmKey = DeviceSettings.hintKeyPrefix + "autohelmKeepClear"
+    /// The briefing's tide callouts (#130), once per device.
+    static let tideCalloutsKey = DeviceSettings.hintKeyPrefix + "tideCallouts"
 
     private let defaults: UserDefaults?
     private var memory: [String: Any] = [:]
@@ -112,6 +116,7 @@ final class RuleSeenStore {
         case .rule(let rule): rules(Self.rulesKey).contains(rule.rawValue)
         case .ruleAgainst(let rule): rules(Self.rulesAgainstKey).contains(rule.rawValue)
         case .autohelmKeepClear: value(forKey: Self.autohelmKey) as? Bool ?? false
+        case .tideCallouts: value(forKey: Self.tideCalloutsKey) as? Bool ?? false
         }
     }
 
@@ -120,6 +125,7 @@ final class RuleSeenStore {
         case .rule(let rule): insert(rule, into: Self.rulesKey)
         case .ruleAgainst(let rule): insert(rule, into: Self.rulesAgainstKey)
         case .autohelmKeepClear: set(true, forKey: Self.autohelmKey)
+        case .tideCallouts: set(true, forKey: Self.tideCalloutsKey)
         }
     }
 

@@ -24,6 +24,8 @@ import RegattaServices
 /// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
 ///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
 /// - `-tuning` opens the debug tuning panel at launch (#232). Debug builds only: other builds don't know it.
+/// - `-briefing practice|online` opens on the briefing (#130) for a practice race on the settings (and `-seed`), with
+///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued` or
 ///   `cancelled-race` (`FakeServiceScenario`).
@@ -40,6 +42,11 @@ struct LaunchOptions: Equatable {
 
     enum Appearance: String, CaseIterable {
         case light, dark
+    }
+
+    /// `-briefing`'s variants (#130).
+    enum Briefing: String, CaseIterable {
+        case practice, online
     }
 
     /// Boats in the `-perf` race, the largest fleet.
@@ -62,6 +69,7 @@ struct LaunchOptions: Equatable {
     var appearance: Appearance?
     var vision: VisionFilter?
     var fakeServices: FakeServiceScenario?
+    var briefing: Briefing?
     #if DEBUG
     var tuning = false
     #endif
@@ -88,7 +96,7 @@ struct LaunchOptions: Equatable {
             case "-tuning": tuning = true
             #endif
             case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
-                 "-appearance", "-vision", "-fakeServices":
+                 "-appearance", "-vision", "-fakeServices", "-briefing":
                 guard let value = rest.first, !Self.flags.contains(value) else {
                     problems.append("\(argument) needs a value")
                     continue
@@ -104,7 +112,7 @@ struct LaunchOptions: Equatable {
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-online", "-seed", "-fixture", "-timescale",
                           "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps", "-appearance",
-                          "-vision", "-fakeServices"]
+                          "-vision", "-fakeServices", "-briefing"]
         #if DEBUG
         flags.insert("-tuning")
         #endif
@@ -148,6 +156,8 @@ struct LaunchOptions: Equatable {
             } else {
                 reject(argument, value, Self.visionNames)
             }
+        case "-briefing":
+            if let variant = Briefing(rawValue: value) { briefing = variant } else { reject(argument, value, "practice or online") }
         case "-fakeServices":
             if let scenario = FakeServiceScenario(rawValue: value) {
                 fakeServices = scenario
