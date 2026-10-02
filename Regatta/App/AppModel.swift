@@ -210,8 +210,7 @@ final class AppModel {
         let origin = Date()
         let timescale = launchOptions.timescale
         return BriefingModel(setup: setup, files: files, mySeat: mySeat, mode: mode,
-                             liveries: FleetLiveries(setup: setup, mySeat: mySeat), seen: rulesSeen,
-                             hintsOn: deviceSettings.hints, menuMusic: menuMusic,
+                             liveries: FleetLiveries(setup: setup, mySeat: mySeat), menuMusic: menuMusic,
                              now: { origin.addingTimeInterval(Date().timeIntervalSince(origin) * timescale) })
     }
 

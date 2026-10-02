@@ -1,9 +1,9 @@
 import RegattaCore
 import SwiftUI
 
-/// The briefing (#130, #16, #15): venue, conditions, the wind and tide forecasts, the course and the fleet, full
-/// screen in the race sequence's dark cover. A practice briefing waits for Ready (with Back to the setup); an online
-/// one counts down and advances itself, with no buttons and no callouts.
+/// The briefing (#130, #16, #15): venue, conditions, a short wind and current description, the course in a line and
+/// the fleet, full screen in the race sequence's dark cover. A practice briefing waits for Ready (with Back to the
+/// setup); an online one counts down and advances itself, with no buttons.
 ///
 /// Plain and scrolling, in the menus' chrome (`ChromePalette`, `MenuFont`), across the full window on iPad too.
 struct BriefingView: View {
@@ -18,26 +18,14 @@ struct BriefingView: View {
             VStack(alignment: .leading, spacing: 24) {
                 header
                 if model.mode != .practice { countdown }
-                section("Wind") {
+                section("Today") { // TODO-COPY (#171)
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(model.windLines, id: \.self) { Text($0).font(MenuFont.body()) }
-                    }
-                }
-                if let tide = model.tide {
-                    section("Tide") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            BriefingTideGraph(tide: tide)
-                                .frame(height: 120)
-                            ForEach(model.tideLines, id: \.self) { Text($0).font(MenuFont.body(.subheadline)) }
-                            if model.showsTideCallouts { callouts }
+                        if let current = model.currentLine {
+                            Text(current).font(MenuFont.body()).accessibilityIdentifier("briefing-current")
                         }
+                        Text(model.courseLine).font(MenuFont.body())
                     }
-                }
-                section("Course · \(model.laps) \(model.laps == 1 ? "lap" : "laps")") {
-                    BriefingCourseDiagram(course: model.course, turnsFirst: model.tide?.turnsFirst)
-                        .aspectRatio(1, contentMode: .fit)
-                        .frame(maxWidth: 360)
-                        .frame(maxWidth: .infinity)
                 }
                 section("Fleet") {
                     BriefingFleetList(rows: model.fleet)
@@ -92,22 +80,6 @@ struct BriefingView: View {
         }
     }
 
-    private var callouts: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(BriefingModel.tideCallouts.enumerated()), id: \.offset) { index, text in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("\(index + 1)").font(MenuFont.number(.subheadline))
-                    Text(text).font(MenuFont.body(.subheadline))
-                }
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ChromePalette.tint.opacity(0.18), in: .rect(cornerRadius: 12))
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("briefing-tide-callout")
-    }
-
     private var buttons: some View {
         HStack(spacing: 12) {
             Button(action: onBack) {
@@ -132,7 +104,8 @@ struct BriefingView: View {
         .padding(.vertical, 12)
         .frame(maxWidth: 640)
         .frame(maxWidth: .infinity)
-        .background(ChromePalette.background.opacity(0.95).ignoresSafeArea())
+        .background(ChromePalette.background.ignoresSafeArea())
+        .overlay(alignment: .top) { Divider().overlay(ChromePalette.text.opacity(0.15)) }
     }
 
     private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {

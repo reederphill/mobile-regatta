@@ -44,7 +44,7 @@ final class BriefingUITests: RaceUITestCase {
         XCTAssertLessThan(Date().timeIntervalSince(launched), 60, "the countdown didn't run at -timescale")
     }
 
-    /// At real time the online briefing stays up long enough to read its countdown: no Ready, no callouts.
+    /// At real time the online briefing stays up long enough to read its countdown, which starts at 15; no Ready.
     @MainActor func testOnlineCountdownShows() {
         let app = XCUIApplication()
         app.launchArguments = ["-uitesting", "-seed", "1", "-briefing", "online"]
@@ -52,6 +52,5 @@ final class BriefingUITests: RaceUITestCase {
         let countdown = app.descendants(matching: .any)["briefing-countdown"].firstMatch
         XCTAssertTrue(countdown.waitForExistence(timeout: 10), "no countdown on an online briefing")
         XCTAssertFalse(app.buttons["briefing-ready"].exists, "an online briefing has Ready")
-        XCTAssertFalse(app.descendants(matching: .any)["briefing-tide-callout"].firstMatch.exists, "online callouts")
     }
 }

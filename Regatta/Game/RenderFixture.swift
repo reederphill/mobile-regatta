@@ -116,11 +116,10 @@ struct RenderFixture: Codable, Equatable {
     /// A briefing render fixture (#130): the race it briefs, with no log, since a briefing needs only the setup.
     ///
     ///     { "raceSeed": 7, "venue": "saltings-reach@1", "conditions": "gusty-offshore@7", "opponents": 9,
-    ///       "mode": "practice", "callouts": true }
+    ///       "mode": "practice" }
     ///
     /// `venue` and `conditions` are bundled files as `id@version`; the boat class and rules are the practice defaults.
-    /// `callouts` turns the one-off tide callouts on (hints on, never seen); `mode` is `practice` or `online` (an online
-    /// briefing's countdown is frozen at its start).
+    /// `mode` is `practice` or `online` (an online briefing's countdown is frozen at its start).
     struct BriefingFixture: Codable, Equatable {
         var raceSeed: UInt64
         var venue: String
@@ -128,7 +127,6 @@ struct RenderFixture: Codable, Equatable {
         var opponents: Int
         var laps: Int? = nil
         var mode: LaunchOptions.Briefing
-        var callouts: Bool
 
         enum FixtureError: Error, Equatable {
             case badRef(String)
@@ -145,7 +143,7 @@ struct RenderFixture: Codable, Equatable {
             return config
         }
 
-        /// The fixture's briefing, at a fixed moment, on a seen store of its own.
+        /// The fixture's briefing, at a fixed moment.
         func model() throws -> BriefingModel {
             let config = try config()
             let setup = config.setup
@@ -153,8 +151,8 @@ struct RenderFixture: Codable, Equatable {
             let start = Date(timeIntervalSinceReferenceDate: 0)
             return BriefingModel(setup: setup, files: files, mySeat: 0,
                                  mode: mode == .online ? .online(seconds: BriefingModel.Mode.onlineSeconds) : .practice,
-                                 liveries: FleetLiveries(setup: setup, mySeat: 0), seen: RuleSeenStore(),
-                                 hintsOn: callouts, menuMusic: SilentMenuMusic(), now: { start })
+                                 liveries: FleetLiveries(setup: setup, mySeat: 0), menuMusic: SilentMenuMusic(),
+                                 now: { start })
         }
 
         private static func ref(_ text: String) throws -> (String, Int) {

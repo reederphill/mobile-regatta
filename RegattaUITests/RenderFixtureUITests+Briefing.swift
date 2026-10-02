@@ -1,7 +1,7 @@
 import UIKit
 import XCTest
 
-/// The briefing (#130): a tidal venue with its tide graph and the one-off callouts, and a venue without current, both
+/// The briefing (#130): a venue with current, with its current line, and a venue without current, both
 /// practice briefings frozen at their start (`BriefingGalleryView`). In a file of its own beside
 /// `RenderFixtureUITests`, as the camera's are. CI records the references; the owner approves them before adoption.
 extension RenderFixtureUITests {
@@ -12,7 +12,7 @@ extension RenderFixtureUITests {
         // reaches render-actuals in one CI run.
         continueAfterFailure = true
         defer { continueAfterFailure = false }
-        for name in ["briefing-tidal", "briefing-steady"] {
+        for name in ["briefing-current", "briefing-steady"] {
             try assertMatchesReference(name)
         }
     }
