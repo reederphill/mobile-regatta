@@ -101,7 +101,8 @@ import Testing
             // Its near corners are her bow and stern on the water, and the shader has them.
             let bow = boat.position + boat.forward * shadow.bowY, stern = boat.position + boat.forward * shadow.sternCorner.y
             #expect(corners.prefix(2).contains { ($0 - bow).length < 1e-9 } && corners.prefix(2).contains { ($0 - stern).length < 1e-9 }, "\(c)")
-            let given = [effects.coneShader.nearA.vectorFloat2Value, effects.coneShader.nearB.vectorFloat2Value]
+            let near = ConeShader.near(of: effects.cone)
+            let given = [near?.a, near?.b]
             for end in core.nearEdge {
                 let want = vector_float2(Float(end.x * Double(Self.ppm)), Float(end.y * Double(Self.ppm)))
                 #expect(given.contains(want), "\(c)")

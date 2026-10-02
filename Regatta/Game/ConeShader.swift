@@ -10,35 +10,72 @@ import RegattaCore
 /// (`ConeShading.fade` is the same arithmetic in Swift).
 ///
 /// The sprite is a fixed box, as large as the cone can be for her class, in the cone's frame (x across it, y down its
-/// axis from the apex, in points); only the two near corners move.
+/// axis from the apex, in points); only the two near corners move. They are the sprite's own attribute (`a_near`), not
+/// a uniform, so the fleet's cones share one shader, drawn in one pass: a shader per boat with its uniforms changed
+/// every frame cost the simulator a frame's time over the fleet and slowed a practice race at `-timescale 32` to half
+/// its pace (#354).
 final class ConeShader {
     /// The sprite's size, points, and where the apex is in it.
     let size: CGSize
     let anchor: CGPoint
+    /// Shared by every cone of the same class, scale and hatch (`shared`).
     let shader: SKShader
-    let nearA = SKUniform(name: "u_a", vectorFloat2: .zero)
-    let nearB = SKUniform(name: "u_b", vectorFloat2: .zero)
+    /// The attribute holding the near edge's ends, points in the cone's frame: (a.x, a.y, b.x, b.y).
+    static let nearAttribute = "a_near"
 
-    init(shadow: BoatClass.WindShadow, pointsPerMeter ppm: CGFloat, style: BoatStyle) {
-        let box = ConeShading.box(shadow)
-        size = CGSize(width: box.width * Double(ppm), height: box.height * Double(ppm))
-        anchor = CGPoint(x: 0.5, y: box.upwind / box.height)
+    private init(size: CGSize, anchor: CGPoint, shader: SKShader) {
+        self.size = size
+        self.anchor = anchor
+        self.shader = shader
+    }
+
+    /// The cone shader for `shadow` at `ppm` in `style`'s hatch, built once per class, scale and hatch and then shared.
+    static func shared(shadow: BoatClass.WindShadow, pointsPerMeter ppm: CGFloat, style: BoatStyle) -> ConeShader {
         let spacing = Float(max(style.hatchSpacing, 1)), width = Float(max(style.hatchLineWidth, 0.25))
-        shader = SKShader(source: ConeShading.source, uniforms: [
+        let key = Key(shadow: [shadow.coneLength, shadow.coneWidthAtBoat, shadow.coneWidthAtEnd, shadow.bowY,
+                               shadow.sternCorner.x, shadow.sternCorner.y],
+                      ppm: ppm, hatch: [spacing, width])
+        if let shared = cache[key] { return shared }
+        let box = ConeShading.box(shadow)
+        let size = CGSize(width: box.width * Double(ppm), height: box.height * Double(ppm))
+        let anchor = CGPoint(x: 0.5, y: box.upwind / box.height)
+        let shader = SKShader(source: ConeShading.source, uniforms: [
             SKUniform(name: "u_size", vectorFloat2: vector_float2(Float(size.width), Float(size.height))),
             SKUniform(name: "u_anchorY", float: Float(anchor.y)),
             SKUniform(name: "u_far", vectorFloat2: vector_float2(Float(shadow.coneWidthAtEnd / 2 * Double(ppm)),
                                                                  Float(shadow.coneLength * Double(ppm)))),
             SKUniform(name: "u_hatch", vectorFloat2: vector_float2(spacing * Float(2).squareRoot(), width)),
-            nearA, nearB,
         ])
+        shader.attributes = [SKAttribute(name: nearAttribute, type: .vectorFloat4)]
+        let made = ConeShader(size: size, anchor: anchor, shader: shader)
+        cache[key] = made
+        return made
     }
 
-    /// Moves the near edge's ends, in metres in the cone's frame.
-    func update(nearA a: Vec2, nearB b: Vec2, ppm: CGFloat) {
-        nearA.vectorFloat2Value = vector_float2(Float(a.x * Double(ppm)), Float(a.y * Double(ppm)))
-        nearB.vectorFloat2Value = vector_float2(Float(b.x * Double(ppm)), Float(b.y * Double(ppm)))
+    /// Moves `sprite`'s near edge's ends, in metres in the cone's frame.
+    static func update(_ sprite: SKSpriteNode, nearA a: Vec2, nearB b: Vec2, ppm: CGFloat) {
+        let near = vector_float4(Float(a.x * Double(ppm)), Float(a.y * Double(ppm)),
+                                 Float(b.x * Double(ppm)), Float(b.y * Double(ppm)))
+        if let value = sprite.value(forAttributeNamed: nearAttribute) {
+            value.vectorFloat4Value = near
+        } else {
+            sprite.setValue(SKAttributeValue(vectorFloat4: near), forAttribute: nearAttribute)
+        }
     }
+
+    /// `sprite`'s near edge's ends as the shader has them, points in the cone's frame.
+    static func near(of sprite: SKSpriteNode) -> (a: vector_float2, b: vector_float2)? {
+        guard let near = sprite.value(forAttributeNamed: nearAttribute)?.vectorFloat4Value else { return nil }
+        return (vector_float2(near.x, near.y), vector_float2(near.z, near.w))
+    }
+
+    private struct Key: Hashable {
+        var shadow: [Double]
+        var ppm: CGFloat
+        var hatch: [Float]
+    }
+
+    private static var cache: [Key: ConeShader] = [:]
 }
 
 /// The cone shader's source, and its arithmetic in Swift for the tests (the shader can't run in them).
@@ -74,9 +111,11 @@ nonisolated enum ConeShading {
 
     /// SpriteKit shader source, the same arithmetic as `fade` per pixel, times the diagonal hatch (lines `u_hatch.y`
     /// wide, `u_hatch.x` apart along the x axis, anti-aliased). The pixel's place in the cone's frame comes from the
-    /// sprite's size and anchor; the output is white at the strength, premultiplied.
+    /// sprite's size and anchor, the near edge's ends from its `a_near`; the output is white at the strength, premultiplied.
     static let source = """
     void main() {
+        vec2 u_a = a_near.xy;
+        vec2 u_b = a_near.zw;
         vec2 p = vec2((v_tex_coord.x - 0.5) * u_size.x, (v_tex_coord.y - u_anchorY) * u_size.y);
         float lo = 1.0e9;
         float hi = -1.0e9;

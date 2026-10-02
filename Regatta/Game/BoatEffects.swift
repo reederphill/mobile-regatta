@@ -58,10 +58,11 @@ final class BoatEffects {
         self.boatClass = boatClass
         let art = EffectArt.shared(shadow: boatClass.windShadow, pointsPerMeter: ppm, style: style)
 
-        coneShader = ConeShader(shadow: boatClass.windShadow, pointsPerMeter: ppm, style: style)
+        coneShader = ConeShader.shared(shadow: boatClass.windShadow, pointsPerMeter: ppm, style: style)
         cone = SKSpriteNode(color: .white, size: coneShader.size)
         cone.anchorPoint = coneShader.anchor
         cone.shader = coneShader.shader
+        ConeShader.update(cone, nearA: .zero, nearB: .zero, ppm: ppm)
         backwind = SKSpriteNode(texture: art.backwind)
         backwind.anchorPoint = art.backwindAnchor
         hasBackwind = art.backwind != nil
@@ -99,7 +100,7 @@ final class BoatEffects {
         cone.position = point
         // The cone's axis down her apparent wind (#10), swung astern for a class that does (`BoatClass.WindShadow.coneSwing`).
         cone.zRotation = CGFloat(atan2(-core.axis.x, core.axis.y))
-        coneShader.update(nearA: core.nearA, nearB: core.nearB, ppm: ppm)
+        ConeShader.update(cone, nearA: core.nearA, nearB: core.nearB, ppm: ppm)
 
         // Her windward side is starboard on starboard tack (`ShadowCone.windward`); it flips at the boom crossing.
         // She casts less of it across a reach, and none while running (`ShadowCone.backwindPresence`).
