@@ -61,7 +61,7 @@ public struct RaceSetup: Hashable, Sendable {
     public static let fleetSizes = 2...16
     /// Three laps by default (#245, overriding #8's two); the first race sails one (#23).
     public static let defaultLaps = 3
-    /// The default rules configuration's start sequence (60 s in `fleet-rules@4`), in ticks.
+    /// The default rules configuration's start sequence (60 s in `fleet-rules@5`), in ticks.
     public static let defaultStartSequenceTicks = RaceFiles.defaults.rulesConfiguration.content.raceFormat.startSequenceTicks
 
     /// The simulation version this race runs on; a replay needs a build with the same one (ADR 0002).

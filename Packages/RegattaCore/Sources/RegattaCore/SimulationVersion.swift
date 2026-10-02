@@ -194,7 +194,16 @@ import Glibc
 ///    through the water, full size at 6 knots, to 1.5 times at 9 and nothing when stopped (`backwindScale(speed:)`),
 ///    and she loses it gradually across a reach, full at 90 degrees true wind angle and none from 115, running (`ShadowCone.backwindPresence`). Files without
 ///    the new optional fields (skiff@4, ilca-dinghy@4 and before) sail as on 29, bit for bit.
-public let simulationRevision = 30
+/// 31: rule 17 (#345), on 30. Under a schema-5 rules file (fleet-rules@5, the new default) the umpire records each pair
+///    whose leeward boat became overlapped from clear astern within two hull lengths on the same tack
+///    (`UmpireState.updateProperCourse`), and an incident on such a pair is rule 17 on the leeward boat, the windward
+///    boat exonerated, when the leeward boat was above her proper course (`ProperCourse`: the upwind groove on a beat,
+///    the bearing to the mark on a reach, to the further gate mark or line end on a run, kept to the downwind groove)
+///    by more than the tolerance (5 degrees on a beat, 8 on a reach or run), not promptly sailing astern (both
+///    projected at their velocities, clear astern within 4 s), and the windward boat on her own track was clear of
+///    the leeward boat's proper-course path (`EscapeSimulation.verdict`). Rule 17 wins over rules 15 and 16.1; otherwise
+///    the chain runs as on 30. Rules files before schema 5 sail as on 30, bit for bit.
+public let simulationRevision = 31
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

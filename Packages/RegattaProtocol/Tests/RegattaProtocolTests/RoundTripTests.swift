@@ -109,8 +109,8 @@ import Testing
         #expect(throws: WireError.invalidValue("tap")) { try Frame(decoding: header(.inputTap) + [2]) }
         #expect(throws: WireError.invalidValue("ease")) { try Frame(decoding: header(.inputHeld) + [0, 2]) }
         #expect(throws: WireError.invalidValue("rudder")) { try Frame(decoding: header(.inputHeld) + [0x80, 0]) }
-        // A rule call: incident id (u16), tick (i32), then the rule's code; there are 16 rules.
-        #expect(throws: WireError.invalidValue("rule")) { try Frame(decoding: header(.event) + [12, 0, 0, 0, 0, 0, 0, 16]) }
+        // A rule call: incident id (u16), tick (i32), then the rule's code; there are 17 rules.
+        #expect(throws: WireError.invalidValue("rule")) { try Frame(decoding: header(.event) + [12, 0, 0, 0, 0, 0, 0, 17]) }
         // Obstruction kinds: land 0, boundary 1, mark 2 (#90).
         #expect(throws: WireError.invalidValue("obstruction")) { try Frame(decoding: header(.event) + [13, 0, 3]) }
         #expect(throws: WireError.invalidValue("contact")) { try Frame(decoding: header(.event) + [14, 3, 3]) }

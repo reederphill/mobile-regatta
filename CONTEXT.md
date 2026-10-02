@@ -47,6 +47,14 @@ _Avoid_: space, time to react
 The umpire's test of room: the keep-clear boat's candidate inputs sailed on with the real boat dynamics for 2 s against the right-of-way boat's recorded track. If none keeps her clear, room wasn't given.
 _Avoid_: avoidance check, track projection
 
+**Proper course**:
+The course a racing boat is held to under rule 17, defined by fiat from the leg she is sailing and the wind at her: the upwind groove on her tack on a beat, the bearing to the mark on a reach, the bearing to the further gate mark or finish line end on a run, never lower than the downwind groove. None before her start. "Above proper course" is closer to the wind than it less the leg's tolerance (5° on a beat, 8° on a reach or run).
+_Avoid_: best course, optimal heading
+
+**Rule 17 record**:
+The umpire's memory of a pair whose leeward boat came up from clear astern within two hull lengths on the same tack: while it holds (overlapped within two lengths, same tack, rule 18 not in force) she shall not sail above her proper course. An incident with her above it, the windward boat clear of her proper-course path and her not promptly dropping astern, is rule 17 on her, the windward boat exonerated; it wins over rules 15 and 16.1.
+_Avoid_: luffing rights, overtaking record
+
 **Exoneration**:
 A boat that broke a rule of Part 2 isn't penalised for it, because she was compelled to (43.1(a)) or was denied the room she was entitled to (43.1(b)). Recorded on the incident; the rule call names the boat that broke the rule.
 _Avoid_: acquittal, cleared
@@ -56,7 +64,7 @@ What a right-of-way boat does to keep her rights: rudder centred, the autohelm h
 _Avoid_: hold heading, stand on
 
 **Defend lane**:
-A right-of-way boat keeping the water she's sailing in rather than giving it up to a boat that must keep clear of her: she holds course, and luffs only within the room rule 16.1 leaves the other boat.
+A right-of-way boat keeping the water she's sailing in rather than giving it up to a boat that must keep clear of her: she holds course, and luffs only within the room rule 16.1 leaves the other boat, and, as a leeward boat that came up from astern, no higher than her proper course less its tolerance (rule 17).
 _Avoid_: hunting (steering at a boat to force a foul, which bots never do)
 
 **Encounter**:
@@ -399,7 +407,7 @@ A second tack/gybe tap during a tack, timed on the boom crossing. Close enough t
 _Avoid_: double tap (fine as UI copy), roll gybe (a gybe has no roll yet)
 
 **Pinch** / **foot**:
-Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). The autohelm holds either until the player changes it.
+Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). The autohelm holds either until the player changes it. On a beat the groove is proper course, so a pinch beyond 5° is above proper course (rule 17).
 _Avoid_: pinch for the two-finger zoom gesture; call that **pinch-zoom**
 
 **Livery**:

@@ -12,6 +12,8 @@ public struct RecordedBoat: Sendable, Equatable {
     public var autohelm: Autohelm?
     public var isTacking: Bool
     public var status: BoatStatus
+    /// The leg she was sailing: what her proper course reads (rule 17, #345).
+    public var legIndex: Int
     public var penaltyTurnsOwed: Int
     public var penaltyProgress: Double
     /// Where the wind she sailed in this tick blew from (`Boat.sailingWind`), radians.
@@ -35,6 +37,7 @@ public struct RecordedBoat: Sendable, Equatable {
         autohelm = boat.autohelm
         isTacking = boat.isTacking
         status = boat.status
+        legIndex = boat.legIndex
         penaltyTurnsOwed = boat.penaltyTurnsOwed
         penaltyProgress = boat.penaltyProgress
         windDirection = boat.sailingWind.direction
@@ -45,7 +48,7 @@ public struct RecordedBoat: Sendable, Equatable {
     }
 
     /// Her as seat `id`'s boat, with only the recorded fields set: every one the rules (`Rules.obligation`),
-    /// the near-miss sweep and the dynamics read: the sailing wind and her shadow as they were.
+    /// her proper course (`ProperCourse`), the near-miss sweep and the dynamics read: the sailing wind and her shadow as they were.
     public func boat(id: Int) -> Boat {
         var boat = Boat(id: id, isPlayer: false, colorIndex: 0, position: state.position, heading: state.heading,
                         speed: state.speed, boomSide: state.boomSide)
@@ -56,6 +59,7 @@ public struct RecordedBoat: Sendable, Equatable {
         boat.autohelm = autohelm
         boat.isTacking = isTacking
         boat.status = status
+        boat.legIndex = legIndex
         boat.penaltyTurnsOwed = penaltyTurnsOwed
         boat.penaltyProgress = penaltyProgress
         boat.sailingWind = Wind(direction: windDirection, speed: windSpeed)
@@ -114,6 +118,9 @@ public struct PairTrack: Sendable, Equatable {
 /// - A candidate escapes when, on every tick, the hulls neither touch nor would be hit by the right-of-way
 ///   boat's near-miss sweep (`RulesConfig.NearMissSweep.hits`): kept clear as the umpire calls it (#88).
 ///   Other boats, marks and land aren't in it: room is between the pair.
+///
+/// Rule 17 (#345) is judged on the same track, with the same test of keeping clear: given the pair's rule 17 record
+/// (`ProperCourseRecord`), the leeward boat is sailed on her proper course instead of her own (`verdict`).
 public struct EscapeSimulation: Sendable {
     public let track: PairTrack
     public let escape: RulesConfig.Escape
@@ -121,20 +128,28 @@ public struct EscapeSimulation: Sendable {
     public let changesCourse: Double
     public let sweep: RulesConfig.NearMissSweep
     public let boatClass: BoatClass
+    /// Rule 17's limits (schema 5), and the pair's rule 17 record now: nil for none, and rule 17 isn't tried.
+    public let properCourseLimits: RulesConfig.ProperCourseLimits?
+    public let properCourseRecord: ProperCourseRecord?
 
     /// Nil for a rules configuration with no "changes course" test (schema 1 to 3): no escape simulation.
-    public init?(track: PairTrack, rules: RulesConfig, boatClass: BoatClass) {
+    /// `properCourse` is the pair's rule 17 record (`UmpireState.properCourse(_:)`), if any.
+    public init?(track: PairTrack, rules: RulesConfig, boatClass: BoatClass, properCourse: ProperCourseRecord? = nil) {
         guard let changesCourse = rules.incidents.escape.changesCourse else { return nil }
         self.track = track
         escape = rules.incidents.escape
         self.changesCourse = changesCourse
         sweep = rules.incidents.nearMissSweep
         self.boatClass = boatClass
+        properCourseLimits = rules.incidents.properCourse
+        properCourseRecord = properCourse
     }
 
     /// The call for an incident whose Section A (or rule 21) call is `obligation` (`Rules.obligation`): the
-    /// right-of-way boat breaks rule 15 or 16.1 instead, the keep-clear boat exonerated (43.1(b)), when she
-    /// took the other's room; otherwise `obligation`. Ticks are counted back from now, the track's last.
+    /// right-of-way boat breaks rule 17 instead, the keep-clear boat exonerated (43.1), when she sailed above
+    /// her proper course into her (`properCourseVerdict`); otherwise rule 15 or 16.1, the keep-clear boat
+    /// exonerated (43.1(b)), when she took the other's room; otherwise `obligation`. Ticks are counted back from
+    /// now, the track's last. One call: rule 17, when it applies, wins over 15 and 16.1 (#343).
     ///
     /// - When the keep-clear boat began to have to keep clear is read off the track: the first tick of the
     ///   run through now on which `Rules.obligation` names her, or none if it names her all the way back.
@@ -151,6 +166,7 @@ public struct EscapeSimulation: Sendable {
         let keepClear = obligation.offender, rightOfWay = obligation.victim
         let last = track.count - 1
         guard last >= 1, track.seats == SeatPair(keepClear, rightOfWay) else { return obligation }
+        if let call = properCourseVerdict(obligation, course: course) { return call }
         let hull = boatClass.hull
         let horizon = RulesConfig.ticks(escape.horizon), offset = escape.startTickOffset
         func obliged(_ k: Int) -> Int? {
@@ -175,6 +191,98 @@ public struct EscapeSimulation: Sendable {
               canEscape(keepClear, from: start, of: rightOfWay, heldFrom: change - 1)
         else { return obligation }
         return Verdict(rule: .changingCourse, offender: rightOfWay, victim: keepClear, exonerated: [keepClear])
+    }
+
+    /// Rule 17 (#345): the leeward boat of the pair's rule 17 record (`ProperCourseRecord`) breaks it, and the windward
+    /// boat is exonerated, when `obligation` is rule 11 on the windward boat and, now:
+    ///
+    /// - the leeward boat is above her proper course (`ProperCourse.isAbove`) by more than the leg's tolerance, in her
+    ///   recorded wind, on her recorded leg;
+    /// - she isn't promptly sailing astern: both boats projected on at their velocities over the ground, hulls on their
+    ///   headings, she isn't clear astern of the windward boat on any tick within `promptlyAstern`; and
+    /// - the windward boat, on her own track, would have been clear of the leeward boat's proper-course path: the
+    ///   leeward boat sailed from her recorded state on the tick before her run above proper course through now began
+    ///   (or the track's first, if it began before it) with her autohelm set, each tick, to her proper course from
+    ///   where that path has her, in the wind and water she recorded (past now, now's); the windward boat on her
+    ///   recorded track, then sailed on as she was steering (`path(of:over:)`); on every tick through `escape.horizon`
+    ///   past now, no contact and no hit by the leeward boat's near-miss sweep (as `canEscape` keeps clear). Past now,
+    ///   so a windward boat steering into the leeward one is still seen to hit the path she would have sailed. If the windward boat would have hit that path too (she steered
+    ///   into the leeward boat), rule 11 stands: she is never blamed for failing to dodge the illegal path, and never
+    ///   excused by it either.
+    ///
+    /// Nil when any test fails, or with no record or limits: the 15 / 16.1 / 11 chain runs unchanged.
+    private func properCourseVerdict(_ obligation: Verdict, course: CourseLayout) -> Verdict? {
+        guard let limits = properCourseLimits, let record = properCourseRecord, obligation.rule == .windwardLeeward,
+              obligation.offender == record.windward, obligation.victim == record.leeward
+        else { return nil }
+        let (leeward, windward) = (record.leeward, record.windward)
+        let last = track.count - 1
+        func isAbove(_ k: Int) -> Bool {
+            let boat = track.boat(leeward, k)
+            guard let proper = boat.properCourse(on: course, boatClass: boatClass) else { return false }
+            return proper.isAbove(sailingAngle: boat.sailingAngle, tolerance: limits.tolerance(proper.kind))
+        }
+        guard isAbove(last), !isPromptlySailingAstern(leeward, of: windward, within: limits.promptlyAstern) else { return nil }
+        var first = last
+        while first > 0, isAbove(first - 1) { first -= 1 }
+        guard isClear(windward, ofProperCoursePathOf: leeward, from: max(first - 1, 0), course: course) else { return nil }
+        return Verdict(rule: .properCourse, offender: leeward, victim: windward, exonerated: [windward])
+    }
+
+    /// Rule 17's exception: projected on from now at their velocities over the ground, hulls on their headings,
+    /// `seat` is clear astern of `other` (`Rules.isClearAstern`) on some tick within `seconds`.
+    private func isPromptlySailingAstern(_ seat: Int, of other: Int, within seconds: Double) -> Bool {
+        let last = track.count - 1
+        let boat = track.boat(seat, last), ahead = track.boat(other, last)
+        let hull = boatClass.hull
+        return (1...max(RulesConfig.ticks(seconds), 1)).contains { n in
+            let t = Double(n) * Race.dt
+            var projected = boat, aheadProjected = ahead
+            projected.position += boat.velocityOverGround * t
+            aheadProjected.position += ahead.velocityOverGround * t
+            return Rules.isClearAstern(projected, of: aheadProjected, hull: hull)
+        }
+    }
+
+    /// Whether `keepClear`, on her track (`path(of:over:)`), kept clear on every tick from `start` through
+    /// `escape.horizon` past now of `seat`'s proper-course path from her recorded state on tick `start` (see
+    /// `properCourseVerdict`).
+    private func isClear(_ keepClear: Int, ofProperCoursePathOf seat: Int, from start: Int, course: CourseLayout) -> Bool {
+        let last = track.count - 1
+        let outline = boatClass.hull.outline
+        let ticks = start...(last + RulesConfig.ticks(escape.horizon))
+        let others = path(of: keepClear, over: ticks)
+        var boat = track.boat(seat, start)
+        for (n, k) in ticks.enumerated() {
+            if k > start {
+                let environment = track.recorded(seat, min(k, last))
+                if let proper = ProperCourse.of(
+                    position: boat.position, boomSide: boat.boomSide, status: environment.status,
+                    legIndex: environment.legIndex, windDirection: environment.windDirection,
+                    grooveTWS: environment.grooveWindSpeed, course: course, boatClass: boatClass) {
+                    boat.autohelm = Autohelm(target: .angle(proper.sailingAngle))
+                }
+                sail(&boat, ease: environment.ease, in: environment)
+            }
+            var swept: RulesConfig.NearMissSweep.Swept?
+            let other = others[n]
+            if !keepsClear(other, hull: other.hull(outline: outline), of: boat, hull: boat.hull(outline: outline),
+                           swept: &swept) {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// Whether `boat` (hull `hull`, world coordinates) keeps clear of `rightOfWay` (hull `rightOfWayHull`) as the
+    /// umpire calls it: no contact, and no hit by `rightOfWay`'s near-miss sweep, worked out into `swept` the first
+    /// time `boat` comes within its reach.
+    private func keepsClear(_ boat: Boat, hull: [Vec2], of rightOfWay: Boat, hull rightOfWayHull: [Vec2],
+                            swept: inout RulesConfig.NearMissSweep.Swept?) -> Bool {
+        if Collision.penetration(hull, rightOfWayHull) != nil { return false }
+        guard sweep.canReach(rightOfWay, boat, hull: boatClass.hull) else { return true }
+        if swept == nil { swept = sweep.swept(rightOfWay, hull: boatClass.hull) }
+        return !sweep.hits(swept!, boat, hull: boatClass.hull)
     }
 
     /// Radians a second `seat`'s heading turned through the step to tick `k` (k ≥ 1).
@@ -234,10 +342,7 @@ public struct EscapeSimulation: Sendable {
         var swept = [RulesConfig.NearMissSweep.Swept?](repeating: nil, count: others.count)
         // Kept clear on the `n`th of `ticks` as the umpire calls it: no contact, and no hit by the other's sweep.
         func isClear(_ boat: Boat, on n: Int) -> Bool {
-            if Collision.penetration(boat.hull(outline: outline), otherHulls[n]) != nil { return false }
-            guard sweep.canReach(others[n], boat, hull: boatClass.hull) else { return true }
-            if swept[n] == nil { swept[n] = sweep.swept(others[n], hull: boatClass.hull) }
-            return !sweep.hits(swept[n]!, boat, hull: boatClass.hull)
+            keepsClear(boat, hull: boat.hull(outline: outline), of: others[n], hull: otherHulls[n], swept: &swept[n])
         }
         guard waiting.enumerated().allSatisfy({ isClear($1, on: $0) }) else { return false }
         let from = waiting.last ?? track.boat(seat, start)
@@ -333,6 +438,22 @@ struct EscapeRecorder: Sendable, Equatable {
         let index = OverlapTracker.index(pair.low, pair.high, seats: boats.count)
         return PairTrack(seats: pair, low: slots.map { boats[pair.low][$0] }, high: slots.map { boats[pair.high][$0] },
                          overlapped: slots.map { overlaps[$0][index] })
+    }
+
+    /// Ticks recorded, through the newest.
+    var recordedCount: Int { count }
+
+    /// Seat `seat`'s boat as recorded `back` ticks before the newest; nil if that tick isn't recorded.
+    func recorded(_ seat: Int, ticksBack back: Int) -> RecordedBoat? {
+        guard back >= 0, back < count, boats.indices.contains(seat) else { return nil }
+        return boats[seat][slot(newestTick - back)]
+    }
+
+    /// Whether the pair at `OverlapTracker.index` `index` was overlapped as of the last point of certainty `back`
+    /// ticks before the newest; nil if that tick isn't recorded.
+    func overlapped(_ index: Int, ticksBack back: Int) -> Bool? {
+        guard back >= 0, back < count else { return nil }
+        return overlaps[slot(newestTick - back)][index]
     }
 
     private func slot(_ tick: Int) -> Int { ((tick % capacity) + capacity) % capacity }

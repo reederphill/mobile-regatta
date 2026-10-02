@@ -20,7 +20,7 @@ enum RuleWords {
         case .returningToStart: "A boat returning to start keeps clear of the boats that have started"
         case .takingAPenalty: "A boat taking a penalty turn keeps clear of the others"
         case .touchingMark: "Don't touch a mark of your course"
-        case .markRoomApplies, .givingMarkRoom, .tackingInTheZone, .sailingTheCourse, .individualRecall,
+        case .properCourse, .markRoomApplies, .givingMarkRoom, .tackingInTheZone, .sailingTheCourse, .individualRecall,
              .exoneratedCompelled, .exoneratedEntitledRoom:
             rule.title
         }

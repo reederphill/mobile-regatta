@@ -4,13 +4,13 @@ import Testing
 
 /// The rules configuration file (#73): its values, its hash, and where the race reads it.
 @Suite struct RulesConfigTests {
-    /// The bundled bytes of fleet-rules@`version`: by default the default file, @4.
-    static func bundledData(version: Int = 4) throws -> Data {
+    /// The bundled bytes of fleet-rules@`version`: by default the default file, @5.
+    static func bundledData(version: Int = 5) throws -> Data {
         try #require(try RulesConfigFile.bundledData(id: "fleet-rules", version: version))
     }
 
     /// The bundled bytes of fleet-rules@`version` with `old` replaced by `new` exactly once.
-    static func tampered(_ old: String, _ new: String, version: Int = 4) throws -> Data {
+    static func tampered(_ old: String, _ new: String, version: Int = 5) throws -> Data {
         let text = try #require(String(data: try bundledData(version: version), encoding: .utf8))
         #expect(text.components(separatedBy: old).count == 2, "\(old) must appear exactly once")
         return Data(text.replacingOccurrences(of: old, with: new).utf8)
@@ -195,13 +195,12 @@ import Testing
     }
 
     /// fleet-rules@4 (schema 4, #92) is @3 with the escape simulation's "changes course" rate, 12°/s, listed as a
-    /// builder value: every other value the same. It is the default. @1 to @3 still load, with none: their
+    /// builder value: every other value the same. @1 to @3 still load, with none: their
     /// races run no escape simulation, and never call rules 15 or 16.1, as before #92.
     @Test func version4IsVersion3WithTheChangesCourseRate() throws {
         let v3 = try RulesConfigFile.bundled(id: "fleet-rules", version: 3)
         let v4 = try RulesConfigFile.bundled(id: "fleet-rules", version: 4)
         #expect(v4.header.schemaVersion == 4)
-        #expect(v4.ref == RaceFiles.defaults.rulesConfiguration.ref && v4.ref == Race.defaultRulesConfiguration.ref)
         for version in 1...3 {
             #expect(try RulesConfigFile.bundled(id: "fleet-rules", version: version).content.incidents.escape.changesCourse == nil)
         }
@@ -233,7 +232,7 @@ import Testing
             }
         }
         // Schema 4 without it (and without its builder value, which would point at nothing).
-        var text = try #require(String(data: try Self.tampered(",\n      " + field, ""), encoding: .utf8))
+        var text = try #require(String(data: try Self.tampered(",\n      " + field, "", version: 4), encoding: .utf8))
         text = text.replacingOccurrences(of: "\n    \"/incidents/escape/changesCourseDegreesPerSecond\",", with: "")
         #expect(!text.contains(#""changesCourseDegreesPerSecond""#) && !text.contains(#"/changesCourseDegreesPerSecond""#))
         #expect(throws: DataFileError.malformed(kind: kind, reason: "schema 4 needs incidents.escape.changesCourseDegreesPerSecond")) {
@@ -246,10 +245,74 @@ import Testing
             try RulesConfigFile(data: Self.tampered(#""initiallySeconds": 2"#, #""initiallySeconds": 2, "# + field, version: 3))
         }
         #expect(throws: needsSchema4) {
-            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 4"#, #""schemaVersion": 3"#))
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 4"#, #""schemaVersion": 3"#, version: 4))
         }
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 5, supported: [1, 2, 3, 4])) {
-            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 4"#, #""schemaVersion": 5"#))
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 6, supported: [1, 2, 3, 4, 5])) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 5"#, #""schemaVersion": 6"#))
+        }
+    }
+
+    /// fleet-rules@5 (schema 5, #345) is @4 with rule 17's limits: 2 hull lengths, 5° on a beat, 8° on a reach or
+    /// run, a 4 s "promptly sails astern" window, the tolerances and window listed as builder values; every other
+    /// value the same. It is the default. @1 to @4 still load, with none: their races never call rule 17.
+    @Test func version5IsVersion4WithRule17Limits() throws {
+        let v4 = try RulesConfigFile.bundled(id: "fleet-rules", version: 4)
+        let v5 = try RulesConfigFile.bundled(id: "fleet-rules", version: 5)
+        #expect(v5.header.schemaVersion == 5)
+        #expect(v5.ref == RaceFiles.defaults.rulesConfiguration.ref && v5.ref == Race.defaultRulesConfiguration.ref)
+        for version in 1...4 {
+            #expect(try RulesConfigFile.bundled(id: "fleet-rules", version: version).content.incidents.properCourse == nil)
+        }
+        let limits = try #require(v5.content.incidents.properCourse)
+        #expect(limits == RulesConfig.ProperCourseLimits(distance: HullLengths(2), beatTolerance: deg2rad(5),
+                                                          reachRunTolerance: deg2rad(8), promptlyAstern: 4))
+        #expect(limits.tolerance(.beat) == deg2rad(5) && limits.tolerance(.reach) == deg2rad(8)
+            && limits.tolerance(.run) == deg2rad(8))
+        #expect(v5.header.placeholders == v4.header.placeholders)
+        let added = ["/incidents/properCourse/beatToleranceDegrees", "/incidents/properCourse/reachRunToleranceDegrees",
+                     "/incidents/properCourse/promptlyAsternSeconds"]
+        #expect(v5.content.builderValues.filter { !added.contains($0) } == v4.content.builderValues)
+        #expect(added.allSatisfy(v5.content.builderValues.contains))
+
+        var incidents = v5.content.incidents
+        incidents.properCourse = nil
+        #expect(incidents == v4.content.incidents)
+        #expect(v5.content.raceFormat == v4.content.raceFormat && v5.content.zone == v4.content.zone)
+        #expect(v5.content.markRoomGiven == v4.content.markRoomGiven && v5.content.onABeat == v4.content.onABeat)
+    }
+
+    /// Rule 17's limits are schema 5's: required there and checked, refused before it.
+    @Test func properCourseLimitsNeedSchema5() throws {
+        let kind = RulesConfig.kind
+        #expect(try RulesConfigFile(data: Self.tampered(#""beatToleranceDegrees": 5"#, #""beatToleranceDegrees": 7"#))
+            .content.incidents.properCourse?.beatTolerance == deg2rad(7))
+        for (old, new, reason) in [
+            (#""distanceHullLengths": 2"#, #""distanceHullLengths": 0"#, "incidents.properCourse.distanceHullLengths must be positive"),
+            (#""beatToleranceDegrees": 5"#, #""beatToleranceDegrees": 0"#,
+             "incidents.properCourse.beatToleranceDegrees must be in (0, 45] degrees"),
+            (#""reachRunToleranceDegrees": 8"#, #""reachRunToleranceDegrees": 50"#,
+             "incidents.properCourse.reachRunToleranceDegrees must be in (0, 45] degrees"),
+            (#""promptlyAsternSeconds": 4"#, #""promptlyAsternSeconds": 4.01"#,
+             "incidents.properCourse.promptlyAsternSeconds must be a whole number of ticks (1/30 s)"),
+        ] {
+            #expect(throws: DataFileError.invalidContent(kind: kind, id: "fleet-rules", reason: reason)) {
+                try RulesConfigFile(data: Self.tampered(old, new))
+            }
+        }
+        // Schema 5 without it (and without its builder values, which would point at nothing).
+        var text = try #require(String(data: try Self.bundledData(), encoding: .utf8))
+        let block = try #require(text.range(of: #",\n    "properCourse": \{[^}]*\}"#, options: .regularExpression))
+        text.removeSubrange(block)
+        for pointer in ["beatToleranceDegrees", "reachRunToleranceDegrees", "promptlyAsternSeconds"] {
+            text = text.replacingOccurrences(of: "\n    \"/incidents/properCourse/\(pointer)\",", with: "")
+        }
+        #expect(!text.contains(#""properCourse""#) && !text.contains("/incidents/properCourse/"))
+        #expect(throws: DataFileError.malformed(kind: kind, reason: "schema 5 needs incidents.properCourse")) {
+            try RulesConfigFile(data: Data(text.utf8))
+        }
+        // Before schema 5 with it: @5 claiming schema 4.
+        #expect(throws: DataFileError.invalidContent(kind: kind, id: "fleet-rules", reason: "incidents.properCourse needs schema 5")) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 5"#, #""schemaVersion": 4"#))
         }
     }
 
@@ -282,7 +345,7 @@ import Testing
         #expect(RacingRule(rawValue: "22") == nil)
         #expect(RacingRule.returningToStart.rawValue == "21.1")
         #expect(RacingRule.takingAPenalty.rawValue == "21.2")
-        #expect(numbers == ["10", "11", "12", "13", "15", "16.1", "18.1", "18.2", "18.3", "21.1", "21.2", "28", "29.1",
+        #expect(numbers == ["10", "11", "12", "13", "15", "16.1", "17", "18.1", "18.2", "18.3", "21.1", "21.2", "28", "29.1",
                             "31", "43.1(a)", "43.1(b)"])
         #expect(Set(RacingRule.allCases.map(\.title)).count == RacingRule.allCases.count)
     }
