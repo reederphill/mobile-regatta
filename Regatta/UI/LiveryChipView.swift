@@ -7,6 +7,7 @@ import SwiftUI
 struct LiveryChipView: View {
     let chip: LiveryChip
     var diameter: CGFloat = 16
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Circle()
@@ -14,8 +15,15 @@ struct LiveryChipView: View {
             .overlay {
                 Circle().strokeBorder(Color(uiColor: UIColor(rgb: LiveryArt.rgb(chip.sail))), lineWidth: diameter * 0.2)
             }
-            // A dark hairline outside the ring, so a white or pale ring still reads on a light background.
-            .overlay { Circle().strokeBorder(ChartPalette.markEdge.color, lineWidth: max(0.5, diameter * 0.04)) }
+            // An edge outside the ring that contrasts with the background: a dark hairline in light mode, so a white or
+            // pale ring still reads; a thin light ring in dark mode, so a charcoal deck and ring still read.
+            .overlay {
+                if colorScheme == .dark {
+                    Circle().strokeBorder(Color.white.opacity(0.7), lineWidth: max(1, diameter * 0.07))
+                } else {
+                    Circle().strokeBorder(ChartPalette.markEdge.color, lineWidth: max(0.5, diameter * 0.04))
+                }
+            }
             .frame(width: diameter, height: diameter)
             .accessibilityHidden(true)
     }

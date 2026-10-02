@@ -2,7 +2,7 @@ import RegattaServices
 import SwiftUI
 
 /// The results (#24, #132): a row per boat, then the Your race card, then the buttons. Over a race it is a sheet
-/// anchored to the bottom, about 60% of the height, with no dim: the race keeps running and drawing above it, and
+/// anchored to the bottom, about 60% of the height with a solid button bar, with no dim: the race keeps running and drawing above it, and
 /// touches above it still steer your boat. Reopened from home's Last race it fills its own sheet (`.page`).
 struct ResultsView: View {
     let model: RaceResultViewModel
@@ -24,37 +24,43 @@ struct ResultsView: View {
         case page
     }
 
-    /// The share of the race's height the sheet takes.
-    static let heightFraction = 0.6
+    /// The share of the screen's height the sheet takes, measured with the bottom safe area, which the sheet fills.
+    static let heightFraction = 0.62
 
     var body: some View {
         switch presentation {
         case .overRace:
             GeometryReader { proxy in
+                let insets = proxy.safeAreaInsets
+                let screenHeight = proxy.size.height + insets.top + insets.bottom
                 VStack(spacing: 0) {
                     Spacer(minLength: 0)
-                    panel
+                    panel(bottomInset: insets.bottom)
                         .frame(maxWidth: 640)
-                        .frame(height: proxy.size.height * Self.heightFraction)
+                        .frame(height: min(screenHeight * Self.heightFraction, proxy.size.height + insets.bottom))
                         .background(.ultraThinMaterial,
                                     in: UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24))
                 }
                 .frame(maxWidth: .infinity)
+                // The sheet runs to the screen's bottom edge; the button bar keeps its buttons above the home indicator.
+                .ignoresSafeArea(edges: .bottom)
             }
             .transition(.move(edge: .bottom))
         case .page:
-            panel
+            panel(bottomInset: 0)
                 .background(ChromePalette.background.ignoresSafeArea())
         }
     }
 
-    private var panel: some View {
-        VStack(spacing: 12) {
+    /// The title, then the rows and the card scrolling between it and a solid button bar, which never covers them.
+    private func panel(bottomInset: CGFloat) -> some View {
+        VStack(spacing: 0) {
             // TODO-COPY (#171)
             Text("Results").font(.title2.bold())
                 // UI tests wait for it: the results are up.
                 .accessibilityIdentifier("race-results")
-                .padding(.top, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 8)
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(model.rows) { row in
@@ -62,18 +68,24 @@ struct ResultsView: View {
                     }
                     if let card = model.card {
                         YourRaceCardView(card: card)
-                            .padding(.top, 16)
+                            .padding(.top, 12)
                     }
                 }
                 .padding(.horizontal, 12)
+                .padding(.bottom, 12)
             }
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { buttonRow }
-                VStack(spacing: 10) { buttonRow }
+            VStack(spacing: 0) {
+                Divider()
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { buttonRow }
+                    VStack(spacing: 10) { buttonRow }
+                }
+                .controlSize(.large)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 10 + bottomInset)
             }
-            .controlSize(.large)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 12)
+            .background(ChromePalette.surface.ignoresSafeArea(edges: .bottom))
         }
     }
 
@@ -89,7 +101,7 @@ struct ResultsView: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("results-changeSetup")
             }
-            Button("Sail again", action: sailAgain)
+            Button(action: sailAgain) { PrimaryLabel(title: "Sail again") }
                 .buttonStyle(.borderedProminent)
                 .tint(ChromePalette.tint)
                 .accessibilityIdentifier("results-sailAgain")
@@ -97,16 +109,26 @@ struct ResultsView: View {
             Button("Help", action: help)
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("results-help")
-            Button("Race online", action: raceOnline)
+            Button(action: raceOnline) { PrimaryLabel(title: "Race online") }
                 .buttonStyle(.borderedProminent)
                 .tint(ChromePalette.tint)
                 .accessibilityIdentifier("results-raceOnline")
         case .reopened(let close):
-            Button("Close", action: close)
+            Button(action: close) { PrimaryLabel(title: "Close") }
                 .buttonStyle(.borderedProminent)
                 .tint(ChromePalette.tint)
                 .accessibilityIdentifier("results-close")
         }
+    }
+}
+
+/// A prominent button's title in `onTint`: the inherited text colour (white in dark mode) is unreadable on the pale
+/// dark-mode tint, and the menu's navy text on the light-mode navy.
+private struct PrimaryLabel: View {
+    let title: String
+
+    var body: some View {
+        Text(title).foregroundStyle(ChromePalette.onTint)
     }
 }
 
@@ -145,7 +167,7 @@ private struct ResultRowView: View {
                 .font(.subheadline.monospacedDigit())
                 .foregroundStyle(.secondary)
         }
-        .padding(.vertical, 7)
+        .padding(.vertical, 4)
         .padding(.horizontal, 10)
         .background(row.isPlayer ? Color.white.opacity(0.12) : .clear, in: .rect(cornerRadius: 8))
         // UI tests count the rows.
@@ -164,7 +186,7 @@ private struct YourRaceCardView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             // TODO-COPY (#171)
             Text("Your race").font(.headline)
             ForEach(Array(phrases.enumerated()), id: \.offset) { _, phrase in
@@ -172,7 +194,7 @@ private struct YourRaceCardView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
+        .padding(12)
         .background(Color.white.opacity(0.08), in: .rect(cornerRadius: 12))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("results-yourRace")
