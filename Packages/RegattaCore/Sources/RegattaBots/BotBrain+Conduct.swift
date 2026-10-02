@@ -23,6 +23,7 @@ import RegattaCore
 //   as she would were she the right-of-way boat, so fails to keep clear. A misjudgement only ever leaves out her
 //   give-way manoeuvre: it never turns her towards a boat, and her hold-course under 16.1 is as ever. None from
 //   National's band up.
+// - Rule 17 (#346): held to her proper course, she sails within it by construction (`BotBrain+ProperCourse.swift`).
 // - Ghosts have no rights or obligations: she ignores them. She never steers at a boat to force a foul, and never
 //   protests: a `BotDecision` has no protest tap.
 //

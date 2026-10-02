@@ -194,7 +194,8 @@ import Testing
 
     /// The view is the race for its seat as it stands: her boat, her relation to each other boat, her place,
     /// her laylines as the scene draws them, the rule calls on show, and her mark's zone and the mark-room notices
-    /// told her (#101), each rule 18 record naming her while it lasts.
+    /// told her (#101), each rule 18 record naming her while it lasts, and the proper-course notice while a rule 17
+    /// record names her leeward (#346).
     @Test func aSeatSeesItsBoatAndItsRelationsAsTheRaceHasThem() throws {
         let race = botRace(seed: 3)
         var controllers = allBots(race)
@@ -226,6 +227,16 @@ import Testing
                 })
                 #expect(view.own.markRoom.allSatisfy { $0.entitled == seat || $0.owing == seat })
                 notices += view.own.markRoom.count
+                // The proper-course notice (#346): the rule 17 records naming her leeward, with her proper course.
+                let restricted = race.properCourseRestrictions(of: seat)
+                let proper = boat.properCourse(on: race.course, boatClass: race.boatClass)
+                if let notice = view.own.properCourse, let proper {
+                    #expect(notice.windward == restricted && notice.heading == proper.heading
+                            && notice.sailingAngle == proper.sailingAngle
+                            && notice.tolerance == race.rules.incidents.properCourse?.tolerance(proper.kind))
+                } else {
+                    #expect(view.own.properCourse == nil && (restricted.isEmpty || proper == nil))
+                }
                 for other in view.others {
                     #expect(other.rightOfWay == race.rightOfWay(seat, other.seat))
                     #expect(other.velocity == race.boats[other.seat].velocity && other.isGhost == race.isGhost(seat: other.seat))

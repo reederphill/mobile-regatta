@@ -11,9 +11,10 @@
 ///   forecast;
 /// - the course, the land, her laylines and the class every boat sails;
 /// - the other boats as they're drawn (#15), with her right-of-way relation to each and the rule calls on
-///   show. Never their held inputs (#19), rule 18 records beyond the notices told her own boat (#101), incident
-///   memory or names;
-/// - her own boat's zone, and the mark-room notices told her (#101);
+///   show. Never their held inputs (#19), rule 18 or rule 17 records beyond the notices told her own boat (#101,
+///   #346), incident memory or names;
+/// - her own boat's zone, the mark-room notices told her (#101), and the proper-course notice while rule 17 holds
+///   her to it (#346: the proper course and tolerance #347 draws for the player);
 /// - the clock, her place, the fleet's size and the finish window's countdown.
 ///
 /// Two equal views hold the same information.
@@ -83,7 +84,8 @@ public struct SeatView: Sendable, Equatable {
 
         let zone = shared.course.markZone(of: boat, hull: boat.hull(outline: boatClass.hull.outline))
         own = OwnBoat(boat, ease: race.heldInputs[seat].ease, boatClass: boatClass, penalty: race.rules.raceFormat.penalty,
-                      zone: zone.map(Zone.init), markRoom: race.markRoomNotices(of: seat))
+                      zone: zone.map(Zone.init), markRoom: race.markRoomNotices(of: seat),
+                      properCourse: race.properCourseNotice(of: seat, course: shared.course, boatClass: boatClass))
         let rights = race.rightsOfWay(of: seat)
         var others: [OtherBoat] = []
         others.reserveCapacity(boats.count - 1)
@@ -194,9 +196,13 @@ public struct SeatView: Sendable, Equatable {
         /// The mark-room notices told her (#91, #101): each rule 18 record naming her, while it lasts. The umpire's
         /// alone, so none in a prediction (ADR 0005).
         public let markRoom: [MarkRoomNotice]
+        /// The proper-course notice told her (rule 17, #346): while the umpire's rule 17 records name her the leeward
+        /// boat that came up from astern, the proper course she is held to and how far above it she may sail. The
+        /// umpire's alone, so nil in a prediction (ADR 0005), and nil while no record names her leeward.
+        public let properCourse: ProperCourseNotice?
 
         init(_ boat: Boat, ease: Bool, boatClass: BoatClass, penalty: RulesConfig.Penalty, zone: Zone?,
-             markRoom: [MarkRoomNotice]) {
+             markRoom: [MarkRoomNotice], properCourse: ProperCourseNotice?) {
             position = boat.position
             heading = boat.heading
             speed = boat.speed
@@ -217,6 +223,7 @@ public struct SeatView: Sendable, Equatable {
             speedShadow = boat.speedShadow(in: boatClass)
             self.zone = zone
             self.markRoom = markRoom
+            self.properCourse = properCourse
         }
 
         /// Where the sailing wind blows from, radians.
@@ -304,6 +311,33 @@ public struct SeatView: Sendable, Equatable {
             self.owing = owing
             self.rule = rule
         }
+    }
+
+    /// A proper-course notice (rule 17, #346): the umpire's rule 17 records naming her the leeward boat that became
+    /// overlapped from clear astern (`Race.properCourseRestrictions(of:)`), with the proper course they hold her to
+    /// now (`ProperCourse`, the umpire's own function, in the wind at her) and the rules file's tolerance for it.
+    /// "Above" it, which rule 17 forbids, is closer to the wind than `sailingAngle - tolerance`. Not on the wire and
+    /// no event: a bot reads it, the player's own screen has its own cue (#347).
+    public struct ProperCourseNotice: Sendable, Equatable {
+        /// The windward boats she is held to her proper course against, in seat order.
+        public let windward: [Int]
+        /// Her proper course as a sailing angle on her tack (`ProperCourse.sailingAngle`), radians.
+        public let sailingAngle: Double
+        /// Her proper course as a compass heading (`ProperCourse.heading`), radians.
+        public let heading: Double
+        /// How far closer to the wind than her proper course she may sail (`RulesConfig.ProperCourseLimits
+        /// .tolerance(_:)` for the leg), radians.
+        public let tolerance: Double
+
+        public init(windward: [Int], sailingAngle: Double, heading: Double, tolerance: Double) {
+            self.windward = windward
+            self.sailingAngle = sailingAngle
+            self.heading = heading
+            self.tolerance = tolerance
+        }
+
+        /// The highest she may sail, as a sailing angle on her tack (`ProperCourse.edgeSailingAngle(tolerance:)`).
+        public var edgeSailingAngle: Double { max(0, sailingAngle - tolerance) }
     }
 
     /// A rule call's line between its two boats (#15): who, under which rule, since when. The call alone,
@@ -443,6 +477,18 @@ extension Race {
             guard other != seat, let record = umpire.markRoom(SeatPair(seat, other)) else { return nil }
             return SeatView.MarkRoomNotice(entitled: record.entitled, owing: record.owing, rule: record.rule)
         }
+    }
+
+    /// The proper-course notice told `seat` (`SeatView.OwnBoat.properCourse`): while any rule 17 record names her the
+    /// leeward boat (`properCourseRestrictions(of:)`), her proper course on `course` in `boatClass` now and the rules
+    /// file's tolerance for it. Nil in a prediction, which holds no umpire (ADR 0005), under rules without rule 17's
+    /// limits, and while she has no proper course (`ProperCourse.of`).
+    func properCourseNotice(of seat: Int, course: CourseLayout, boatClass: BoatClass) -> SeatView.ProperCourseNotice? {
+        guard let limits = rules.incidents.properCourse else { return nil }
+        let windward = properCourseRestrictions(of: seat)
+        guard !windward.isEmpty, let proper = boats[seat].properCourse(on: course, boatClass: boatClass) else { return nil }
+        return SeatView.ProperCourseNotice(windward: windward, sailingAngle: proper.sailingAngle, heading: proper.heading,
+                                           tolerance: limits.tolerance(proper.kind))
     }
 
     /// What each of `seats` sees now, in order: each the view `seatView(for:)` gives, with what they see alike
