@@ -228,3 +228,24 @@ struct CueProbe: View {
         .allowsHitTesting(false)
     }
 }
+
+/// UI tests only: how fast the race runs (#361), as an accessibility element (`race-pace`) whose label is
+/// `GameScene.paceSummary` and whose value is the ticks run since the first frame. Read once a second: a UI test reads
+/// it at the end of a watch, as each query steals main-thread time from the race.
+struct PaceProbe: View {
+    let session: GameSession
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            let summary = session.scene.paceSummary
+            Text(summary)
+                .accessibilityLabel(summary)
+                .accessibilityValue(String(session.scene.pace.ticks))
+                .accessibilityIdentifier("race-pace")
+                .font(.system(size: 1))
+                .foregroundStyle(.clear)
+        }
+        .frame(width: 1, height: 1)
+        .allowsHitTesting(false)
+    }
+}

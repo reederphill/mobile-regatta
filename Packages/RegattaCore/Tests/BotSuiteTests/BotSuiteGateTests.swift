@@ -34,6 +34,22 @@ import Testing
         #expect(thresholds.breaches(tiers: ["club": TierSummary([seat(.club, finished: false)])], timings: calm).isEmpty)
     }
 
+    /// #351: a tier's summary adds up its seats' pre-start and cascade calls by rule, and buckets its unfinished seats
+    /// by metres to go at the close (a boat with none recorded goes furthest), on the last leg or not, called or not.
+    @Test func tierSummaryCountsCallPhasesAndDNFsByCause() {
+        var a = seat(.national, finished: false), b = seat(.national, finished: false), c = seat(.national, finished: false)
+        a.metresToFinish = 60; a.onLastLeg = true; a.foulsAsOffender = 2
+        a.preStartCallsByRule = ["11": 1]; a.cascadeCallsByRule = ["21.2": 1]
+        b.metresToFinish = 151; b.preStartCallsByRule = ["11": 2, "10": 1]
+        c.metresToFinish = nil; c.cascadeCallsByRule = ["21.2": 2]
+        let s = TierSummary([a, b, c, seat(.national)])
+        #expect(s.preStartCallsByRule == ["11": 3, "10": 1])
+        #expect(s.cascadeCallsByRule == ["21.2": 3])
+        #expect(s.dnfByMetresToGo == ["<=60": 1, "<=300": 1, ">300": 1])
+        #expect(s.dnfOnLastLeg == 1)
+        #expect(s.dnfCalled == 1)
+    }
+
     @Test func bundledThresholdsGateEveryTier() throws {
         let thresholds = try BotThresholds.bundled()
         #expect(Set(thresholds.tiers.keys) == Set(BotTier.allCases.map(\.rawValue)))
