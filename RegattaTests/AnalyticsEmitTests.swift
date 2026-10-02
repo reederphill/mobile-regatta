@@ -22,7 +22,7 @@ import Testing
                 AnalyticsEvent(sequence: 1, name: .practiceToOnline, time: 10, properties: ["step": .string("race_online_tapped"), "tuned": .bool(true)]),
                 AnalyticsEvent(sequence: 2, name: .performance, time: 11, properties: ["cpu_s": .double(1.5), "memory_limit_exits": .int(2)]),
             ])
-            storage.save(state)
+            try storage.save(state)
             #expect(UserDefaultsAnalyticsStorage(defaults: defaults).load() == state)
             #expect(defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("analytics.") }.count == 3)
 
@@ -31,9 +31,42 @@ import Testing
 
             var sent = state
             sent.pending = []
-            storage.save(sent)
+            try storage.save(sent)
             #expect(storage.load() == sent)
             #expect(defaults.object(forKey: UserDefaultsAnalyticsStorage.Key.pending) == nil)
+        }
+    }
+
+    /// A number JSON can't hold: the save throws and what was stored stays, and `Analytics` drops the event.
+    @Test func defaultsStorageRefusesNonFiniteNumbers() throws {
+        try withDefaults { defaults in
+            let storage = UserDefaultsAnalyticsStorage(defaults: defaults)
+            let state = AnalyticsState(installID: InstallID("abc"), nextSequence: 2,
+                                       pending: [AnalyticsEvent(sequence: 1, name: .firstRaceCompleted, time: 10)])
+            try storage.save(state)
+            var bad = state
+            bad.nextSequence = 3
+            bad.pending.append(AnalyticsEvent(sequence: 2, name: .performance, time: 11, properties: ["cpu_s": .double(.nan)]))
+            #expect(throws: (any Error).self) { try storage.save(bad) }
+            #expect(storage.load() == state)
+
+            let analytics = Analytics(transport: ScriptedAnalyticsTransport(), storage: storage, isSharing: true,
+                                      makeInstallID: { "unused" }, now: { 12 })
+            analytics.log(UsageEvent(name: .performance, properties: ["cpu_s": .double(.infinity)]))
+            #expect(analytics.pending == state.pending)
+            #expect(storage.load() == state)
+        }
+    }
+
+    /// AppModel's default analytics stays off whatever Settings says.
+    @Test func defaultAnalyticsStaysOff() throws {
+        try withDefaults { defaults in
+            let model = AppModel(launchOptions: LaunchOptions(), defaults: defaults)
+            model.deviceSettings.sharesUsageData = false
+            model.deviceSettings.sharesUsageData = true
+            #expect(!model.analytics.isSharing)
+            model.analytics.log(.firstRaceCompleted)
+            #expect(model.analytics.pending.isEmpty)
         }
     }
 

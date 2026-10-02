@@ -23,7 +23,8 @@ public struct AnalyticsState: Equatable, Sendable {
 /// Where `Analytics` keeps its state: the app's defaults, or memory.
 public protocol AnalyticsStorage: Sendable {
     func load() -> AnalyticsState
-    func save(_ state: AnalyticsState)
+    /// Throws when `state` couldn't be stored, leaving what was stored before.
+    func save(_ state: AnalyticsState) throws
 }
 
 /// Keeps the state in memory: tests and UI tests. A new one is a fresh install.
@@ -45,34 +46,44 @@ public final class Analytics: Sendable {
         var isSharing: Bool
         /// Bumped whenever the buffer is cleared, so a send in flight doesn't remove what came after.
         var generation = 0
-        var isFlushing = false
+        /// The flush running now, which a later `flush()` joins.
+        var flushing: Task<Void, Never>?
     }
 
     private let transport: any AnalyticsTransport
     private let storage: any AnalyticsStorage
     private let makeInstallID: @Sendable () -> String
     private let now: @Sendable () -> Int64
+    /// `discarding()`'s: off for good, whatever `setSharing` is told.
+    private let isDiscarding: Bool
     private let state: Mutex<State>
 
     /// `makeInstallID` makes a random id, once per install; `now` is seconds since the epoch.
-    public init(transport: any AnalyticsTransport, storage: any AnalyticsStorage, isSharing: Bool,
-                makeInstallID: @escaping @Sendable () -> String, now: @escaping @Sendable () -> Int64) {
+    public convenience init(transport: any AnalyticsTransport, storage: any AnalyticsStorage, isSharing: Bool,
+                            makeInstallID: @escaping @Sendable () -> String, now: @escaping @Sendable () -> Int64) {
+        self.init(transport: transport, storage: storage, isSharing: isSharing, isDiscarding: false,
+                  makeInstallID: makeInstallID, now: now)
+    }
+
+    private init(transport: any AnalyticsTransport, storage: any AnalyticsStorage, isSharing: Bool, isDiscarding: Bool,
+                 makeInstallID: @escaping @Sendable () -> String, now: @escaping @Sendable () -> Int64) {
         self.transport = transport
         self.storage = storage
         self.makeInstallID = makeInstallID
         self.now = now
+        self.isDiscarding = isDiscarding
         var stored = storage.load()
         if !isSharing && !stored.pending.isEmpty {
             stored.pending = []
-            storage.save(stored)
+            try? storage.save(stored)
         }
         state = Mutex(State(stored: stored, isSharing: isSharing))
     }
 
-    /// Logs nothing and sends nothing: for previews and tests that don't look.
+    /// Logs nothing and sends nothing, even told Share usage data is on: for previews and tests that don't look.
     public static func discarding() -> Analytics {
         Analytics(transport: ScriptedAnalyticsTransport(), storage: InMemoryAnalyticsStorage(), isSharing: false,
-                  makeInstallID: { "discarding" }, now: { 0 })
+                  isDiscarding: true, makeInstallID: { "discarding" }, now: { 0 })
     }
 
     /// Share usage data.
@@ -87,48 +98,59 @@ public final class Analytics: Sendable {
             if let id = state.stored.installID { return id }
             let id = InstallID(makeInstallID())
             state.stored.installID = id
-            storage.save(state.stored)
+            try? storage.save(state.stored)
             return id
         }
     }
 
-    /// Buffers an event, numbered and timed now, unless Share usage data is off.
+    /// Buffers an event, numbered and timed now, unless Share usage data is off. An event the storage can't keep is
+    /// dropped, so what's waiting is never ahead of what's stored.
     public func log(_ event: UsageEvent) {
         state.withLock { state in
             guard state.isSharing else { return }
-            let sequence = state.stored.nextSequence
-            state.stored.nextSequence += 1
-            state.stored.pending.append(AnalyticsEvent(sequence: sequence, name: event.name, time: now(), properties: event.properties))
-            if state.stored.pending.count > Self.bufferLimit {
-                state.stored.pending.removeFirst(state.stored.pending.count - Self.bufferLimit)
+            var stored = state.stored
+            let sequence = stored.nextSequence
+            stored.nextSequence += 1
+            stored.pending.append(AnalyticsEvent(sequence: sequence, name: event.name, time: now(), properties: event.properties))
+            if stored.pending.count > Self.bufferLimit {
+                stored.pending.removeFirst(stored.pending.count - Self.bufferLimit)
             }
-            storage.save(state.stored)
+            guard (try? storage.save(stored)) != nil else { return }
+            state.stored = stored
         }
     }
 
     /// Share usage data changed. Off clears the buffer, and a send in flight leaves nothing behind; the install id
-    /// and the sequence carry on.
+    /// and the sequence carry on. A `discarding()` analytics stays off.
     public func setSharing(_ isSharing: Bool) {
+        guard !isDiscarding else { return }
         state.withLock { state in
             guard state.isSharing != isSharing else { return }
             state.isSharing = isSharing
             guard !isSharing else { return }
             state.generation += 1
             state.stored.pending = []
-            storage.save(state.stored)
+            try? storage.save(state.stored)
         }
     }
 
     /// Sends the buffer oldest first, in batches of at most `AnalyticsBatch.maxEvents`, removing each batch once
-    /// it's sent. A failed send stops and keeps the rest for next time. One flush runs at a time; with Share usage
-    /// data off it never calls the transport.
+    /// it's sent. A failed send stops and keeps the rest for next time. One flush runs at a time: a call while one
+    /// runs waits for it to finish. With Share usage data off it never calls the transport.
     public func flush() async {
-        guard state.withLock({ state in
-            guard state.isSharing, !state.isFlushing else { return false }
-            state.isFlushing = true
-            return true
-        }) else { return }
-        defer { state.withLock { $0.isFlushing = false } }
+        let running = state.withLock { state -> Task<Void, Never> in
+            if let running = state.flushing { return running }
+            // The task can't take the lock to clear itself until this returns, so it's stored first.
+            let running = Task { await self.drain() }
+            state.flushing = running
+            return running
+        }
+        await running.value
+    }
+
+    private func drain() async {
+        defer { state.withLock { $0.flushing = nil } }
+        guard isSharing else { return }
         let id = installID
         while true {
             let next: (events: [AnalyticsEvent], generation: Int)? = state.withLock { state in
@@ -145,7 +167,8 @@ public final class Analytics: Sendable {
             let carryOn = state.withLock { state in
                 guard state.generation == next.generation else { return false }
                 state.stored.pending.removeAll { sent.contains($0.sequence) }
-                storage.save(state.stored)
+                // Removing only shrinks what was stored; were it to fail, a relaunch resends and the server dedupes.
+                try? storage.save(state.stored)
                 return true
             }
             guard carryOn else { return }

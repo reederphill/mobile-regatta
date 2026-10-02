@@ -25,6 +25,58 @@ import Testing
         }
     }
 
+    /// Holds each send until `release()` while `isHolding`, counting releases, so a test can act mid-send.
+    actor HeldTransport: AnalyticsTransport {
+        let base = ScriptedAnalyticsTransport()
+        private var isHolding = true
+        private var held: CheckedContinuation<Void, Never>?
+        private var waiting: CheckedContinuation<Void, Never>?
+        private(set) var calls = 0
+        private(set) var releases = 0
+
+        func send(_ batch: AnalyticsBatch) async throws -> AnalyticsReceipt {
+            calls += 1
+            if isHolding {
+                await withCheckedContinuation { continuation in
+                    held = continuation
+                    waiting?.resume()
+                    waiting = nil
+                }
+            }
+            return try await base.send(batch)
+        }
+
+        /// Returns once a send is held.
+        func sendHeld() async {
+            guard held == nil else { return }
+            await withCheckedContinuation { waiting = $0 }
+        }
+
+        func release() {
+            releases += 1
+            held?.resume()
+            held = nil
+        }
+
+        func stopHolding() {
+            isHolding = false
+            release()
+        }
+    }
+
+    /// Refuses to store a state with more than `limit` events waiting, as a store that can't encode one would.
+    final class RefusingStorage: AnalyticsStorage {
+        struct Refused: Error {}
+        let base = InMemoryAnalyticsStorage()
+        let limit: Int
+        init(limit: Int) { self.limit = limit }
+        func load() -> AnalyticsState { base.load() }
+        func save(_ state: AnalyticsState) throws {
+            guard state.pending.count <= limit else { throw Refused() }
+            base.save(state)
+        }
+    }
+
     /// A count that goes up by one per read.
     final class Counter: Sendable {
         private let value: Mutex<Int>
@@ -132,6 +184,83 @@ import Testing
         #expect(relaunched.pending.first?.sequence == 261)
     }
 
+    /// Share usage data turned off while a batch is on its way: nothing is left behind, and nothing more goes.
+    @Test func optingOutMidSendLeavesNothingBehind() async {
+        let transport = HeldTransport()
+        let storage = InMemoryAnalyticsStorage()
+        let analytics = Self.analytics(transport, storage: storage)
+        for _ in 0..<150 { analytics.log(.firstRaceCompleted) }
+        let flush = Task { await analytics.flush() }
+        await transport.sendHeld()
+        analytics.setSharing(false)
+        #expect(analytics.pending.isEmpty)
+        await transport.release()
+        await flush.value
+        // The second batch never went, and the first one's return removed nothing it shouldn't.
+        #expect(await transport.calls == 1)
+        #expect(analytics.pending.isEmpty)
+        #expect(storage.load().pending.isEmpty)
+
+        // On again with a send held, off and on mid-send: what's logged after survives the stale send's return.
+        analytics.setSharing(true)
+        analytics.log(.firstRaceSkipped)
+        let second = Task { await analytics.flush() }
+        await transport.sendHeld()
+        analytics.setSharing(false)
+        analytics.setSharing(true)
+        analytics.log(.gameCenterPrompt(accepted: true))
+        await transport.release()
+        await second.value
+        #expect(await transport.calls == 2)
+        #expect(analytics.pending.map(\.sequence) == [152])
+        #expect(storage.load().pending.map(\.sequence) == [152])
+
+        await transport.stopHolding()
+        await analytics.flush()
+        #expect(await transport.calls == 3)
+        #expect(analytics.pending.isEmpty)
+        #expect(await transport.base.recorded.map(\.sequence) == Array(1...100) + [151, 152])
+    }
+
+    /// A flush asked for while one runs (going to the background during the launch flush) waits for it.
+    @Test func flushWaitsForTheOneRunning() async {
+        let transport = HeldTransport()
+        let analytics = Self.analytics(transport)
+        analytics.log(.firstRaceCompleted)
+        let first = Task { await analytics.flush() }
+        await transport.sendHeld()
+        let second = Task {
+            await analytics.flush()
+            return await transport.releases
+        }
+        for _ in 0..<100 { await Task.yield() }
+        await transport.release()
+        #expect(await second.value == 1)
+        #expect(analytics.pending.isEmpty)
+        await first.value
+        #expect(await transport.calls == 1)
+    }
+
+    /// What AppModel's settings change does to the default it's given: nothing.
+    @Test func discardingStaysOff() {
+        let discarding = Analytics.discarding()
+        discarding.setSharing(true)
+        #expect(!discarding.isSharing)
+        discarding.log(.firstRaceCompleted)
+        #expect(discarding.pending.isEmpty)
+    }
+
+    /// An event the storage refuses is dropped: what's waiting is never ahead of what's stored.
+    @Test func eventTheStorageRefusesIsDropped() {
+        let storage = RefusingStorage(limit: 1)
+        let analytics = Self.analytics(ScriptedAnalyticsTransport(), storage: storage)
+        analytics.log(.firstRaceCompleted)
+        analytics.log(.firstRaceSkipped)
+        #expect(analytics.pending.map(\.sequence) == [1])
+        #expect(storage.load().pending.map(\.sequence) == [1])
+        #expect(storage.load().nextSequence == 2)
+    }
+
     @Test func tunedPracticeRaceCarriesTunedFlag() async {
         let tuned = UsageEvent.practiceToOnline(.practiceRaceFinished(tuned: true))
         #expect(tuned.properties == ["step": .string("practice_race_finished"), "tuned": .bool(true)])
@@ -166,14 +295,18 @@ import Testing
     @Test func metricSummaryFlattensToAPerformanceEvent() {
         var summary = MetricSummary(deviceModel: "iPhone17,1", osVersion: "iOS 26.0", appBuild: "42")
         summary.cpuSeconds = 12.5
-        summary.hangSeconds = 0.75
+        summary.estimatedHangSeconds = 0.75
         summary.memoryLimitExits = 1
         let event = UsageEvent.performance(summary)
         #expect(event.name.rawValue == "performance")
         #expect(event.properties == [
             "device_model": .string("iPhone17,1"), "os_version": .string("iOS 26.0"), "app_build": .string("42"),
-            "cpu_s": .double(12.5), "hang_s": .double(0.75), "memory_limit_exits": .int(1),
+            "cpu_s": .double(12.5), "hang_s_est": .double(0.75), "memory_limit_exits": .int(1),
         ])
+        // A number the stored buffer can't hold is left out.
+        summary.gpuSeconds = .nan
+        summary.estimatedLaunchSeconds = .infinity
+        #expect(UsageEvent.performance(summary).properties == event.properties)
         let histogram = MetricSummary.histogram([(start: 0, end: 1, count: 2), (start: 1, end: 3, count: 2)])
         #expect(histogram?.total == 5)
         #expect(histogram?.mean == 1.25)

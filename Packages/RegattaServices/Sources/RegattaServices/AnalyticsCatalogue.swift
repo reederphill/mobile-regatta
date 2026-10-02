@@ -48,11 +48,12 @@ public enum FunnelStep: Equatable, Sendable {
 }
 
 /// What MetricKit reported for a period (#28), as plain values: the app reads them off an `MXMetricPayload`, which
-/// tests can't build. A missing measurement is nil and leaves its property out. MetricKit has no frame rate or
-/// thermal state, so neither is here.
+/// tests can't build. A missing measurement is nil and leaves its property out, as does one that isn't finite (the
+/// stored buffer can't hold it). MetricKit has no frame rate or thermal state, so neither is here.
 public struct MetricSummary: Equatable, Sendable {
     public var deviceModel: String
     public var osVersion: String
+    /// `CFBundleVersion`, or "unknown": never the marketing version.
     public var appBuild: String
     /// The period the payload covers.
     public var periodSeconds: Double?
@@ -61,10 +62,10 @@ public struct MetricSummary: Equatable, Sendable {
     public var cpuSeconds: Double?
     public var gpuSeconds: Double?
     public var peakMemoryMegabytes: Double?
-    /// Total time hung, from the hang-time histogram.
-    public var hangSeconds: Double?
-    /// Mean time to first draw, from the launch histogram.
-    public var launchSeconds: Double?
+    /// An estimate of the total time hung: the hang-time histogram, each bucket counted at its midpoint.
+    public var estimatedHangSeconds: Double?
+    /// An estimate of the mean time to first draw: the launch histogram, each bucket counted at its midpoint.
+    public var estimatedLaunchSeconds: Double?
     public var foregroundAbnormalExits: Int?
     public var memoryLimitExits: Int?
 
@@ -74,7 +75,7 @@ public struct MetricSummary: Equatable, Sendable {
         self.appBuild = appBuild
     }
 
-    /// A histogram's total and mean, each bucket counted at its midpoint; nil when it's empty.
+    /// A histogram's estimated total and mean, each bucket counted at its midpoint; nil when it's empty.
     public static func histogram(_ buckets: [(start: Double, end: Double, count: Int)]) -> (total: Double, mean: Double)? {
         let count = buckets.reduce(0) { $0 + $1.count }
         guard count > 0 else { return nil }
@@ -109,7 +110,7 @@ extension UsageEvent {
         UsageEvent(name: .liveryTryOn, properties: ["design": .string(design.rawValue)])
     }
 
-    /// A MetricKit period, flattened.
+    /// A MetricKit period, flattened. The `_est` keys are histogram estimates; non-finite numbers are left out.
     public static func performance(_ summary: MetricSummary) -> UsageEvent {
         var properties: [String: AnalyticsValue] = [
             "device_model": .string(summary.deviceModel),
@@ -119,10 +120,10 @@ extension UsageEvent {
         let numbers: [(String, Double?)] = [
             ("period_s", summary.periodSeconds), ("foreground_s", summary.foregroundSeconds),
             ("background_s", summary.backgroundSeconds), ("cpu_s", summary.cpuSeconds), ("gpu_s", summary.gpuSeconds),
-            ("peak_memory_mb", summary.peakMemoryMegabytes), ("hang_s", summary.hangSeconds),
-            ("launch_s", summary.launchSeconds),
+            ("peak_memory_mb", summary.peakMemoryMegabytes), ("hang_s_est", summary.estimatedHangSeconds),
+            ("launch_s_est", summary.estimatedLaunchSeconds),
         ]
-        for case let (key, value?) in numbers { properties[key] = .double(value) }
+        for case let (key, value?) in numbers where value.isFinite { properties[key] = .double(value) }
         let counts: [(String, Int?)] = [
             ("foreground_abnormal_exits", summary.foregroundAbnormalExits), ("memory_limit_exits", summary.memoryLimitExits),
         ]

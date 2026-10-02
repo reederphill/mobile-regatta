@@ -10,25 +10,14 @@ import UIKit
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private let sceneState = SceneState()
-    /// Usage analytics (#128): sent at launch and on going to the background, never during a race.
-    private var analytics: Analytics?
-    private var metricKit: MetricKitForwarder?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
         sceneState.phase = SceneState.phase(for: windowScene.activationState)
         let window = UIWindow(windowScene: windowScene)
-        // `-fakeServices <scenario>` plays a scenario's scripted fakes (#242); otherwise the device's connectivity,
-        // signed out, until the real services arrive.
-        let services = LaunchOptions.current.fakeServices.map(ServiceSet.fake)
-            ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
-        let analytics = Analytics.app(transport: services.analytics)
-        let metricKit = MetricKitForwarder(analytics: analytics)
-        metricKit.start()
-        (self.analytics, self.metricKit) = (analytics, metricKit)
-        Task { await analytics.flush() }
+        guard let app = AppDelegate.current else { return }
         window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size,
-                                                          onlineStatus: OnlineStatus(services: services), analytics: analytics)
+                                                          onlineStatus: OnlineStatus(services: app.services), analytics: app.analytics)
         if let appearance = LaunchOptions.current.appearance {
             window.overrideUserInterfaceStyle = appearance == .dark ? .dark : .light
         }
@@ -41,8 +30,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneWillEnterForeground(_ scene: UIScene) { sceneState.phase = .inactive }
     func sceneDidEnterBackground(_ scene: UIScene) {
         sceneState.phase = .background
-        guard let analytics else { return }
-        // A little background time to send what's waiting; whatever doesn't go waits for the next launch.
+        guard let analytics = AppDelegate.current?.analytics else { return }
+        // A little background time to send what's waiting, after any flush already running; whatever doesn't go
+        // waits for the next launch.
         let background = BackgroundTime()
         background.begin()
         Task {

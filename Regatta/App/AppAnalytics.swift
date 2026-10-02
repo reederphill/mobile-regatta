@@ -47,13 +47,15 @@ nonisolated final class UserDefaultsAnalyticsStorage: AnalyticsStorage, @uncheck
                               nextSequence: max(1, defaults.integer(forKey: Key.nextSequence)), pending: pending)
     }
 
-    func save(_ state: AnalyticsState) {
+    /// Throws, writing nothing, when the events won't encode (a non-finite number).
+    func save(_ state: AnalyticsState) throws {
+        let pending = state.pending.isEmpty ? nil : try JSONEncoder().encode(state.pending.map(StoredEvent.init))
         if let id = state.installID { defaults.set(id.rawValue, forKey: Key.installID) }
         defaults.set(state.nextSequence, forKey: Key.nextSequence)
-        if state.pending.isEmpty {
+        if let pending {
+            defaults.set(pending, forKey: Key.pending)
+        } else {
             defaults.removeObject(forKey: Key.pending)
-        } else if let data = try? JSONEncoder().encode(state.pending.map(StoredEvent.init)) {
-            defaults.set(data, forKey: Key.pending)
         }
     }
 
@@ -115,16 +117,16 @@ nonisolated final class MetricKitForwarder: NSObject, MXMetricManagerSubscriber,
     static func summary(of payload: MXMetricPayload) -> MetricSummary {
         let meta = payload.metaData
         var summary = MetricSummary(deviceModel: meta?.deviceType ?? "unknown", osVersion: meta?.osVersion ?? "unknown",
-                                    appBuild: meta?.applicationBuildVersion ?? payload.latestApplicationVersion)
+                                    appBuild: meta?.applicationBuildVersion ?? "unknown")
         summary.periodSeconds = payload.timeStampEnd.timeIntervalSince(payload.timeStampBegin)
         summary.foregroundSeconds = payload.applicationTimeMetrics.map { seconds($0.cumulativeForegroundTime) }
         summary.backgroundSeconds = payload.applicationTimeMetrics.map { seconds($0.cumulativeBackgroundTime) }
         summary.cpuSeconds = payload.cpuMetrics.map { seconds($0.cumulativeCPUTime) }
         summary.gpuSeconds = payload.gpuMetrics.map { seconds($0.cumulativeGPUTime) }
         summary.peakMemoryMegabytes = payload.memoryMetrics.map { $0.peakMemoryUsage.converted(to: .megabytes).value }
-        summary.hangSeconds = payload.applicationResponsivenessMetrics
+        summary.estimatedHangSeconds = payload.applicationResponsivenessMetrics
             .flatMap { MetricSummary.histogram(buckets($0.histogrammedApplicationHangTime))?.total }
-        summary.launchSeconds = payload.applicationLaunchMetrics
+        summary.estimatedLaunchSeconds = payload.applicationLaunchMetrics
             .flatMap { MetricSummary.histogram(buckets($0.histogrammedTimeToFirstDraw))?.mean }
         summary.foregroundAbnormalExits = payload.applicationExitMetrics.map { $0.foregroundExitData.cumulativeAbnormalExitCount }
         summary.memoryLimitExits = payload.applicationExitMetrics.map {
