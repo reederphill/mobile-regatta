@@ -11,8 +11,7 @@ struct MenuPageView: View {
         case .practiceSetup:
             PracticeSetupView(model: model)
         case .myBoat:
-            PlaceholderPage(title: "My boat", systemImage: "sailboat", id: "page-myboat",
-                            message: "Your boat's livery and the shop arrive here.")
+            MyBoatView(model: model.myBoat)
         case .profile:
             PlaceholderPage(title: "Profile", systemImage: "person.crop.circle", id: "page-profile",
                             message: "Your rating, races and badges arrive here.")

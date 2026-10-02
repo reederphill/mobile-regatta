@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaServices
 import SwiftUI
 import UIKit
@@ -17,8 +18,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let window = UIWindow(windowScene: windowScene)
         // `-fakeServices <scenario>` plays a scenario's scripted fakes (#242); otherwise the device's connectivity,
         // signed out, until the real services arrive.
-        let services = LaunchOptions.current.fakeServices.map(ServiceSet.fake)
+        let launchOptions = LaunchOptions.current
+        var services = launchOptions.fakeServices.map(ServiceSet.fake)
             ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
+        // The shop sells every paid design from a stub until StoreKit (#137): see `StubStoreService`. Its defaults
+        // are My boat's, which UI tests empty at launch, so empty them first.
+        _ = MyBoatDefaults.defaults(for: launchOptions, standard: .standard)
+        services.store = StubStoreService(boatClass: RaceFiles.defaults.boatClass.ref.id,
+                                          suiteName: MyBoatDefaults.suiteName(for: launchOptions),
+                                          isOnline: launchOptions.fakeServices != .offline)
         window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size,
                                                           onlineStatus: OnlineStatus(services: services))
         if let appearance = LaunchOptions.current.appearance {
@@ -65,7 +73,8 @@ final class RootHostingController: UIHostingController<AppRoot> {
 
     /// With no `onlineStatus`, online and signed out, as the placeholders were: for tests.
     init(sceneState: SceneState, screenSize: CGSize, onlineStatus: OnlineStatus? = nil) {
-        let model = AppModel(sceneState: sceneState)
+        // My boat sells from the scene's store; with none given, the model's own stub.
+        let model = AppModel(sceneState: sceneState, store: onlineStatus?.services.store)
         let onlineStatus = onlineStatus ?? OnlineStatus(services: .fake(.signedOut))
         super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize, onlineStatus: onlineStatus))
         isOrientationLocked = sceneState.isRaceSequenceShowing

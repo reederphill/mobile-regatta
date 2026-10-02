@@ -8,10 +8,12 @@ import RegattaCore
 /// `FleetRoster`, which bot code reads. The same setup gives the same fleet everywhere.
 ///
 /// Until the wire carries liveries (a follow-up to #119), an online race draws the other players as bots are drawn,
-/// from their seat's seed; and until My boat stores yours (#136), yours is `yours`.
+/// from their seat's seed, and your own as `yours` until the wire carries it (#162). Practice races and briefings wear
+/// the livery My boat stores (`AppModel.myLivery`, #136); render fixtures keep `yours`.
 struct FleetLiveries: Equatable {
-    /// Your livery until My boat stores one (#136): one fixed livery, so practice races and render fixtures draw
-    /// the same boat every launch. The services fakes' livery: the plain skiff, sky-blue deck, white sail, 207.
+    /// The fixed livery render fixtures, UI tests' first launch and online races draw as yours, so they draw the same
+    /// boat every launch; My boat stores your own (#136). The services fakes' livery: the plain skiff, sky-blue deck,
+    /// white sail, 207.
     static let yours = Livery(design: DesignID("skiff-plain"), colours: [SwatchID("sky-blue"), SwatchID("white")],
                               sailNumber: 207)
 

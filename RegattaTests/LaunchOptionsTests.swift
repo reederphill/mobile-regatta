@@ -241,4 +241,19 @@ import RegattaServices
         #expect(valueless.problems == ["-seed needs a value"])
     }
     #endif
+    /// My boat's launch arguments (#136): `-myBoat` stands in for Try it's deep link.
+    @Test func parsesMyBoat() {
+        let options = parse("-uitesting", "-myBoat", "skiff-stars", "-keepMyBoat", "-completedRaces", "3")
+        #expect(options.myBoat == DesignID("skiff-stars"))
+        #expect(options.keepMyBoat)
+        #expect(options.completedRaces == 3)
+        #expect(options.problems.isEmpty)
+        #expect(!options.startsRace)
+        let bad = parse("-myBoat", "skiff-gone", "-completedRaces", "-1")
+        #expect(bad.myBoat == nil && bad.completedRaces == nil)
+        #expect(bad.problems.count == 2)
+        #expect(parse("-myBoat", "ilca-dinghy-plain").myBoat == nil, "another class's design")
+        #expect(parse("-myBoat", "-keepMyBoat").problems == ["-myBoat needs a value"])
+    }
+
 }

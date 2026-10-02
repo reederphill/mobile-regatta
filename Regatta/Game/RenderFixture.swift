@@ -118,6 +118,30 @@ struct RenderFixture: Codable, Equatable {
         /// The results sheet on a sample race (#132): `{ "gallery": "results", "results": "live" }` or `"closed"`
         /// (`ResultsGalleryView`).
         case results(ResultsStage)
+        /// My boat on a fixed livery (#136): `{ "gallery": "myBoat", "myBoat": { … } }` (`MyBoatFixture`).
+        case myBoat(MyBoatFixture)
+    }
+
+    /// A My boat render fixture (#136): the saved livery, the design tried on, and what's owned, earned and locked,
+    /// all from the file, never the device's store.
+    ///
+    ///     { "livery": { "design": "skiff-plain", "colours": ["sky-blue", "white"], "sailNumber": 207 },
+    ///       "trying": "skiff-stars", "completedRaces": 3, "locked": true, "owned": ["skiff-tiger"] }
+    struct MyBoatFixture: Codable, Equatable {
+        var livery: Livery
+        var trying: DesignID?
+        var completedRaces: Int?
+        var locked: Bool?
+        var owned: [DesignID]?
+
+        /// The page's model: no store, and Buy as a Debug build shows it, so a Release build renders the same.
+        func model() -> MyBoatModel {
+            let model = MyBoatModel(saved: livery, owned: Set(owned ?? []), completedRaces: completedRaces ?? 0,
+                                    canBuy: true)
+            model.open(trying: trying)
+            model.isFleetLocked = locked ?? false
+            return model
+        }
     }
 
     /// Which moment of the sample race a results fixture shows (#132).
@@ -179,17 +203,19 @@ struct RenderFixture: Codable, Equatable {
 
     private struct GalleryFile: Decodable {
         enum Kind: String, Decodable {
-            case livery, briefing, practiceSetup, pauseMenu, results
+            case livery, briefing, practiceSetup, pauseMenu, results, myBoat
         }
 
         var gallery: Kind?
         var briefing: BriefingFixture?
         var results: ResultsStage?
+        var myBoat: MyBoatFixture?
     }
 
     enum GalleryError: Error, Equatable {
         case briefingMissing
         case resultsStageMissing
+        case myBoatMissing
     }
 
     /// The gallery fixture `name` in `directory` shows, or nil for a race fixture.
@@ -208,6 +234,9 @@ struct RenderFixture: Codable, Equatable {
             case .briefing?:
                 guard let briefing = decoded.briefing else { throw GalleryError.briefingMissing }
                 return .briefing(briefing)
+            case .myBoat?:
+                guard let myBoat = decoded.myBoat else { throw GalleryError.myBoatMissing }
+                return .myBoat(myBoat)
             }
         } catch {
             throw LoadError.unreadable(file.path, error)

@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import RegattaCore
+import RegattaServices
 
 /// The app's navigation state (#25): one home screen, pages pushed on it, brief sheets over it, and the race
 /// sequence as a full-screen cover. There's no tab bar.
@@ -109,6 +110,24 @@ final class AppModel {
         }
     }
 
+    /// Your livery (#136, #21): what your boat wears in practice races and briefings, kept on the device as it changes
+    /// (`LiveryStore`). #162 sets it from the server's copy on sign-in.
+    var myLivery: Livery {
+        didSet {
+            guard myLivery != oldValue else { return }
+            LiveryStore(defaults: myBoatDefaults).save(myLivery)
+            if myBoat.saved != myLivery { myBoat.load(myLivery) }
+        }
+    }
+    /// My boat's editor and shop (#136): here, not on the page, so a purchase outlives the page.
+    let myBoat: MyBoatModel
+    /// After fleet lock (#25): My boat's controls are inert until the race is over. #140 sets it.
+    var isLiveryLocked = false {
+        didSet { myBoat.isFleetLocked = isLiveryLocked }
+    }
+    /// Where `myLivery`, the stub's owned designs and the completed races live (`MyBoatDefaults`).
+    @ObservationIgnored let myBoatDefaults: UserDefaults
+
     let launchOptions: LaunchOptions
     #if DEBUG
     /// The debug tuning panel's values (#232): the files the next practice race sails and the look it's drawn
@@ -118,7 +137,9 @@ final class AppModel {
     @ObservationIgnored private let sceneState: SceneState
 
     /// `sceneState` locks the orientation while the race sequence shows (G5).
-    init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current, defaults: UserDefaults = .standard) {
+    /// `store` sells paid designs (#136): the app's stub (`StubStoreService`) unless given.
+    init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current, defaults: UserDefaults = .standard,
+         store: (any StoreService)? = nil) {
         self.sceneState = sceneState
         self.launchOptions = launchOptions
         self.defaults = defaults
@@ -135,6 +156,17 @@ final class AppModel {
         }
         practiceSetup = PracticeSetup(defaults: practiceDefaults)
         lastRace = LastRaceStore(defaults: practiceDefaults).load()
+        let myBoatDefaults = MyBoatDefaults.defaults(for: launchOptions, standard: defaults)
+        self.myBoatDefaults = myBoatDefaults
+        let boatClass = RaceFiles.defaults.boatClass.ref.id
+        let completed = CompletedRacesStore(defaults: myBoatDefaults)
+        if let races = launchOptions.completedRaces { completed.count = races }
+        // UI tests start from the fixed livery, so every run draws the same boat.
+        let myLivery = LiveryStore(defaults: myBoatDefaults)
+            .load(boatClass: boatClass, fallback: launchOptions.uiTesting ? FleetLiveries.yours : nil)
+        self.myLivery = myLivery
+        let store = store ?? StubStoreService(boatClass: boatClass, suiteName: MyBoatDefaults.suiteName(for: launchOptions))
+        myBoat = MyBoatModel(saved: myLivery, completedRaces: completed.count, store: store)
         haptics = GatedHaptics(isOn: deviceSettings.haptics)
         controls = ControlSettings(deviceSettings, launchOptions: launchOptions)
         #if DEBUG
@@ -142,6 +174,14 @@ final class AppModel {
         #endif
         sceneState.isRaceSequenceShowing = false
         controls.savesZoomMultiplier = { [weak self] multiplier in self?.deviceSettings.zoomMultiplier = multiplier }
+        myBoat.onSave = { [weak self] livery in self?.myLivery = livery }
+    }
+
+    /// Opens My boat (#136) from home, with `design` tried on if given: results' Try it (#133, #24) and `-myBoat`.
+    func openMyBoat(trying design: DesignID? = nil) {
+        sheet = nil
+        myBoat.open(trying: design)
+        path = [.myBoat]
     }
 
     /// The UI tests' practice setup suite.
@@ -223,7 +263,7 @@ final class AppModel {
     /// A practice race on `config`, whose files are already the tuning panel's (`tuned(_:)`).
     private func session(tuned config: RaceConfig) -> GameSession {
         let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls,
-                                  rulesSeen: rulesSeen)
+                                  rulesSeen: rulesSeen, livery: myLivery)
         #if DEBUG
         tuning.attach(session, files: config.files)
         #endif
@@ -260,7 +300,7 @@ final class AppModel {
         let origin = Date()
         let timescale = launchOptions.timescale
         return BriefingModel(setup: setup, files: files, mySeat: mySeat, mode: mode,
-                             liveries: FleetLiveries(setup: setup, mySeat: mySeat), menuMusic: menuMusic,
+                             liveries: FleetLiveries(setup: setup, mySeat: mySeat, mine: myLivery), menuMusic: menuMusic,
                              now: { origin.addingTimeInterval(Date().timeIntervalSince(origin) * timescale) })
     }
 

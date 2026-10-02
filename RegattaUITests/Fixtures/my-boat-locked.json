@@ -1,0 +1,3 @@
+{ "gallery": "myBoat",
+  "myBoat": { "livery": { "design": "skiff-plain", "colours": ["sky-blue", "white"], "sailNumber": 207 },
+              "trying": "skiff-earned-10", "completedRaces": 3, "locked": true } }

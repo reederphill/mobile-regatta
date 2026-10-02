@@ -23,7 +23,7 @@ struct RootView: View {
             switch fixtureGallery {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
-            case .practiceSetup, .pauseMenu: MenuGalleryView(gallery: fixtureGallery, model: model)
+            case .practiceSetup, .pauseMenu, .myBoat: MenuGalleryView(gallery: fixtureGallery, model: model)
             case .results(let stage): ResultsGalleryView(stage: stage)
             }
         } else {
@@ -81,8 +81,8 @@ struct RootView: View {
     }
 
     /// Development launch arguments (`LaunchOptions`): `-autostart`, `-demo`, `-perf`, `-fixture`, `-online` and `-briefing` open
-    /// on the race sequence, and `-tuning` on the tuning panel (Debug builds). The cover appears without its animation,
-    /// so a render fixture's frame is the same as ever.
+    /// on the race sequence, `-myBoat` on My boat, and `-tuning` on the tuning panel (Debug builds). The cover appears
+    /// without its animation, so a render fixture's frame is the same as ever.
     private func autostartIfRequested() {
         guard !checkedLaunchArguments else { return }
         checkedLaunchArguments = true
@@ -102,6 +102,8 @@ struct RootView: View {
                                     mode: briefing == .online ? .online(seconds: BriefingModel.Mode.onlineSeconds) : .practice)
             } else if let config = launchOptions.launchRaceConfig() {
                 model.startRaceSequence(model.practiceSession(config: config))
+            } else if let design = launchOptions.myBoat {
+                model.openMyBoat(trying: design)
             }
             #if DEBUG
             if launchOptions.tuning { model.path = [.tuning] }
