@@ -104,6 +104,10 @@ struct BotBrain: Sendable {
     var lastTackTime = -1_000.0
     /// When she last tapped: she lets a tap finish before another.
     var lastTapTime = -1_000.0
+    /// Whether, this decision, her course would keep her on the other tack were she to tack now (`navigate`): beating
+    /// inside the corridor, out of `tacticalRange` of her mark and short of the other tack's layline. Only then does she
+    /// tack away from a squeeze (#342, `tacksAwayClear`).
+    var tackAwayOpen = false
     /// The rudder she holds hard over through her penalty turns, one way, from when she starts them until
     /// she owes none (`penaltyInput`); nil while she isn't turning one.
     var penaltyTurn: Double?
@@ -203,6 +207,7 @@ struct BotBrain: Sendable {
         guard boat.isOnCourse else { return BotDecision(input: .neutral) }
         judgeEncounters(boat, view)
         if let input = penaltyInput(boat, view) { return BotDecision(input: input) }
+        tackAwayOpen = false
         var aim = plan(boat, view)
         // Tacked before her start, she bears away to close-hauled before she holds any closer to the wind: until
         // she's there, rule 13 has her keep clear of every boat (#99).
@@ -223,6 +228,14 @@ struct BotBrain: Sendable {
         if boat.autohelm?.isTapping == true { return BotDecision(input: .neutral) }
         let desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
         if let evasion = evasion(boat, view, desired: desired) {
+            // Squeezed to windward with no way clear on her own tack, she tacks away (#342, `windwardEvasion`), as she
+            // taps any tack: and means to sail the new tack, so she doesn't tap straight back.
+            if evasion.tacks {
+                lastTapTime = view.time
+                planRoll(boat, view)
+                setTack(boat.tack.other, view)
+                return BotDecision(input: .neutral, tap: .tackGybe)
+            }
             let ease = aim.ease && aim.tack == boat.tack || evasion.dropsAstern
                 || easesKeepingClear(boat, view, heading: evasion.heading)
             let input = steer(boat, toHeading: evasion.heading, view, closest: evasion.closest)
@@ -696,6 +709,9 @@ struct BotBrain: Sendable {
             // Where the target bears from her: to the right of the wind positive.
             let relative = wrapAngle(bearing - w)
             var tack = plannedTack
+            let other = b.tack.other
+            tackAwayOpen = abs(lateral) <= corridor && distance > Self.tacticalRange
+                && !(other == .starboard ? relative >= up + overstand : relative <= -(up + overstand))
             if lateral < -corridor {
                 tack = .port
             } else if lateral > corridor {
@@ -766,11 +782,12 @@ struct BotBrain: Sendable {
 
     /// A heading she steers for instead of her desired one (`evasion`), and how: as close to the wind as `steer` goes
     /// unless `closest` says closer (a windward boat's luff before her start, `startLuff`, #280), and eased to drop
-    /// astern if `dropsAstern`.
+    /// astern if `dropsAstern`; or, racing, a tack away instead (`tacks`, #342, `windwardEvasion`).
     struct Evasion: Sendable {
         var heading: Double
         var closest: Double? = nil
         var dropsAstern = false
+        var tacks = false
     }
 
     /// `evasiveHeading`, with how she steers it (`Evasion`): only her keep-clear heading, when neither a mark nor the
@@ -819,6 +836,9 @@ struct BotBrain: Sendable {
             if b.status == .racing {
                 guard let rule = keepClearRule(b, view, other), !misjudges(other, rule),
                       isAboutToHit(other, b, view, desired: desired, lookahead: lookahead) else { continue }
+                if rule == .windwardLeeward {
+                    return windwardEvasion(b, view, from: other, desired: desired, lookahead: lookahead)
+                }
                 return Evasion(heading: racingKeepClear(b, view, from: other, rule: rule, desired: desired, lookahead: lookahead))
             }
             guard isAboutToHit(other, b, view, desired: desired, lookahead: lookahead) else { continue }
