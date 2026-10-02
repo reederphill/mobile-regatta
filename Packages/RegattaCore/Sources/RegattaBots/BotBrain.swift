@@ -277,13 +277,16 @@ struct BotBrain: Sendable {
     static let penaltyCompleteMargin = 15.0
 
     /// Her held input for her penalty turns (#9, #89), or nil while she has none to turn yet. She starts her
-    /// current turn as soon as it is hers (`SeatView.OwnBoat.penalty`), whoever is near: racing, she doesn't wait
-    /// for clear water to start it, since a turn that waits for it in a crowd misses its deadline. Two things hold
-    /// her off, each only until `penaltyStartMargin` before the start deadline, when she starts wherever she is
-    /// (`canPutOffTurn`): a mark closer than `penaltyMarkClearance` (she sails on, round it and away, and starts
-    /// once clear), and before her start, the crowd below the line within `penaltyBoatClearance` (#99). She turns
-    /// away from the nearest mark, so the circle she sweeps opens away from it: a boat spinning beside a mark she
-    /// had touched touched it again (and owed another turn) on every turn (#79).
+    /// current turn as soon as it is hers (`SeatView.OwnBoat.penalty`) in clear water. Two things hold her off, each
+    /// only until `penaltyStartMargin` before the start deadline, when she starts wherever she is (`canPutOffTurn`):
+    /// a mark closer than `penaltyMarkClearance` (she sails on, round it and away, and starts once clear), and
+    /// another boat within `penaltyBoatClearance`: the crowd below the line before her start (#99), and racing, for a
+    /// bot of `penaltyPutOffSkill` or more, the pack, except on the last leg, where she can't finish owing a turn, and where the put-off would end at a mark
+    /// (`putOffEndsAtAMark`) (#351: turning at once in the pack, a
+    /// penalised boat swept through it and was called 21.2 by boats that had nothing to do with her first foul). She
+    /// turns away from the nearest mark, so the circle she sweeps opens away from it: a boat spinning beside a mark
+    /// she had touched touched it again (and owed another turn) on every turn (#79); with none near, at
+    /// `penaltyPutOffSkill` or more, away from the nearest boat still in her water.
     ///
     /// Once started she holds the rudder hard over that way until she owes none: through head to wind,
     /// where letting go would hand her to the autohelm and a turn the other way would give the turn up, and
@@ -373,13 +376,18 @@ struct BotBrain: Sendable {
     /// The way she turns her current penalty turn, starting it now, or nil while she holds it off (`penaltyInput`).
     private mutating func startPenaltyTurn(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty) -> Double? {
         let mark = nearestMark(b, view)
-        let crowded = (b.status == .prestart || b.status == .ocs) && isCrowded(b, view)
+        let crowd = nearestCrowding(b, view)
+        let readsThePack = skill >= Self.penaltyPutOffSkill
+        let crowded = crowd != nil
+            && (b.status != .racing || (readsThePack && !isOnLastLeg(b, view) && !putOffEndsAtAMark(b, view, owed)))
         if crowded || mark.map({ $0.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance }) == true,
            canPutOffTurn(owed, view) {
             return nil
         }
-        // Away from the nearest mark, if one is near: turning to starboard (+) circles to her right.
-        let turn = mark.map { Self.away(from: $0.offset, b) } ?? style.penaltyDirection
+        // Away from the nearest mark, if one is near, else from the nearest boat in her water (#351): turning to
+        // starboard (+) circles to her right.
+        let turn = mark.map { Self.away(from: $0.offset, b) }
+            ?? crowd.flatMap { readsThePack ? Self.away(from: $0.position - b.position, b) : nil } ?? style.penaltyDirection
         penaltyTurn = turn
         return turn
     }
@@ -426,15 +434,44 @@ struct BotBrain: Sendable {
     /// run, against the start gate's 0.60.
     static let penaltyPutOffKeepClearSeconds = 30.0
 
-    /// Hull lengths of water around her, before her start, she waits for before a penalty turn (#99): the
-    /// crowd below the line holds, waits and crosses on every course, and a boat turning a penalty keeps clear
-    /// of all of it (rule 21.2).
+    /// Hull lengths of water around her she waits for before a penalty turn: before her start (#99), the crowd
+    /// below the line holds, waits and crosses on every course; racing (not on the last leg, #351), the pack; and a
+    /// boat turning a penalty keeps clear of all of it (rule 21.2).
     static let penaltyBoatClearance = 2.5
 
-    /// Whether another boat is within `penaltyBoatClearance` hull lengths of her.
-    private func isCrowded(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+    /// The least skill (National's band) at which she reads the pack around her penalty turn (#351): racing she puts it
+    /// off in company (`penaltyInput`), and in company she turns away from the nearest boat. Below it she turns as soon
+    /// as it is hers, her own way, as before #351: put off by Club and Regional bots, the mixed fleet's finish share
+    /// fell (0.903 to 0.894 over 12 seeds) and the Club fleet around the cautious bot caught her as the offender in 3
+    /// of `CautiousBotSuiteTests`' 100 races.
+    static let penaltyPutOffSkill = 0.8
+
+    /// The nearest other boat within `penaltyBoatClearance` hull lengths of her, or nil in clear water.
+    private func nearestCrowding(_ b: SeatView.OwnBoat, _ view: SeatView) -> SeatView.OtherBoat? {
         let room = view.boatClass.hull.length * Self.penaltyBoatClearance
-        return view.others.contains { !$0.isGhost && ($0.position - b.position).length < room }
+        return view.others
+            .filter { !$0.isGhost && ($0.position - b.position).length < room }
+            .min { ($0.position - b.position).length < ($1.position - b.position).length }
+    }
+
+    /// Whether the mark she is sailing to is in the water she would sail racing while she puts her turn off for the
+    /// pack: within `penaltyMarkClearance` hull lengths and a turn's circle more, plus what she sails at her speed
+    /// until she can no longer put it off (`canPutOffTurn`). There she starts at once in company, as before #351: put
+    /// off, the turn came due beside the mark she had sailed on to, and a touch there was another turn (the mixed
+    /// fleet's marks per boat rose from 0.07 to 0.13).
+    private func putOffEndsAtAMark(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty) -> Bool {
+        guard view.course.legs.indices.contains(b.legIndex), case .round(let index) = view.course.legs[b.legIndex]
+        else { return false }
+        let seconds = max(0, Double(owed.startDeadlineTick - view.tick) / Double(RulesConfig.ticks(1)) - Self.penaltyStartMargin)
+        let reach = view.boatClass.hull.length * (Self.penaltyMarkClearance + 3) + b.speed * seconds
+        return view.course.elements[index].marks.contains { ($0.position - b.position).length - $0.radius < reach }
+    }
+
+    /// Whether she is on the course's last leg, to the finish: there she starts a turn at once, crowd or not, since
+    /// she can't finish owing one (#351).
+    private func isOnLastLeg(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        if case .finish = view.course.legs[b.legIndex] { return true }
+        return false
     }
 
     /// The mark nearest her, within `penaltyMarkClearance` hull lengths and a turn's circle more: the way to
