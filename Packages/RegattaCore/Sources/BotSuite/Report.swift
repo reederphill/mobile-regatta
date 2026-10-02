@@ -71,6 +71,13 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     public var shadowReceived: Int = 0
     /// Her tacks onto the tack of a boat behind her within 10 hull lengths that had tacked onto it 10 s before or less.
     public var covers: Int = 0
+    /// Her rule calls as the offender by the rule called, keyed by `RacingRule.rawValue` (#342); `foulsAsOffender`
+    /// in all.
+    public var callsByRule: [String: Int] = [:]
+    /// Of `foulsAsOffender`, the calls made before her first rounding: on her first leg, or before her start (#342).
+    public var callsBeforeFirstRounding: Int = 0
+    /// Her tacks while racing, penalty turns aside (#342).
+    public var racingTacks: Int = 0
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
@@ -78,6 +85,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         "landContacts", "boundaryContacts", "beats", "preGunIronsSeconds", "startSeconds", "startLineSpot",
         "rowSpot", "startSpot", "onCourseSeconds", "encounters", "encountersEndingInFouls", "encountersToFoulsShare",
         "preStartEncounters", "preStartEncountersEndingInFouls", "closeEncounters", "crossings", "shadowGiven", "shadowReceived", "covers",
+        "callsByRule", "callsBeforeFirstRounding", "racingTacks",
     ]
 
     private enum CodingKeys: String, CodingKey {
@@ -87,6 +95,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case preGunIronsSeconds, startSeconds, startLineSpot, rowSpot, startSpot, onCourseSeconds
         case encounters, encountersEndingInFouls, encountersToFoulsShare
         case preStartEncounters, preStartEncountersEndingInFouls, closeEncounters, crossings, shadowGiven, shadowReceived, covers
+        case callsByRule, callsBeforeFirstRounding, racingTacks
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -126,6 +135,9 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(shadowGiven, forKey: .shadowGiven)
         try c.encode(shadowReceived, forKey: .shadowReceived)
         try c.encode(covers, forKey: .covers)
+        try c.encode(callsByRule, forKey: .callsByRule)
+        try c.encode(callsBeforeFirstRounding, forKey: .callsBeforeFirstRounding)
+        try c.encode(racingTacks, forKey: .racingTacks)
     }
 
     /// Whether her style means her to start in the line's pin third (#99).
@@ -231,6 +243,11 @@ public struct RaceResult: Codable, Hashable, Sendable {
     public var midFleetSeats: [Int]?
     public var midFleetCloseEncounters: Double?
     public var timings: TickTimings
+    /// Every rule call in the race, oldest first, in a race of the hunters mix (#355); nil otherwise.
+    public var ruleCalls: [RuleCallRecord]? = nil
+    /// The ticks its hunters held their hunting turn at a boat that must keep clear of them (`HuntTally`, a luff or a
+    /// turn bringing it closer), in a race of the hunters mix (#355); nil otherwise.
+    public var hunterTurnTicks: Int? = nil
 
     /// `ranks`: each seat's place in the race's order at the end (`Race.place(of:)`), finished or not.
     init(cell: BotRaceCell, finalTick: Int, capped: Bool, tideStateAtGun: Double?, seats: [SeatMetrics],
@@ -248,6 +265,21 @@ public struct RaceResult: Codable, Hashable, Sendable {
         midFleetCloseEncounters = middle.isEmpty ? nil
             : Double(middle.reduce(0) { $0 + seats[$1].closeEncounters }) / Double(middle.count)
         self.timings = timings
+    }
+}
+
+/// One rule call (#355): the rule (`RacingRule.rawValue`), on which seat, against which, and when.
+public struct RuleCallRecord: Codable, Hashable, Sendable {
+    public var rule: String
+    public var offender: Int
+    public var victim: Int
+    public var tick: Int
+
+    public init(rule: String, offender: Int, victim: Int, tick: Int) {
+        self.rule = rule
+        self.offender = offender
+        self.victim = victim
+        self.tick = tick
     }
 }
 
@@ -550,6 +582,102 @@ extension BotRaceCell {
     var isAllNationalLive: Bool { tierMix == .national && profileMix == .live }
 }
 
+/// The hunters scenario over a run (#355): how the live bots fare against hunters (`BotProfile.hunter`) that sail to
+/// the edge of the rules, and how the hunters fare under them. Over the races of the hunters mix, and their live
+/// twins: the same cell (seed, venue, conditions, tide, fleet, tier mix, laps) with every seat a live bot, when the run
+/// sailed it (`--profile-mix live --profile-mix hunters`). The hunters' own seats are `BotSuiteReport.profiles`'s.
+public struct HuntersSummary: Codable, Hashable, Sendable {
+    /// Races of the hunters mix.
+    public var races: Int
+    /// Of those, the ones whose live twin the run sailed.
+    public var twinRaces: Int
+    /// Rule calls on live bots with a hunter as the right-of-way boat or the victim, by rule (`RacingRule.rawValue`).
+    public var liveOnHunter: [String: Int]
+    /// Rule calls on hunters with a live bot as the victim, by rule.
+    public var hunterOnLive: [String: Int]
+    /// Rule calls between hunters, and between live bots, by rule: the control.
+    public var hunterOnHunter: [String: Int]
+    public var liveOnLive: [String: Int]
+    /// Calls on hunters under rule 16.1 or 17: her overdoing it. Reported, never gated.
+    public var overdoneCalls: Int
+    /// Ticks the hunters held their hunting turn at a boat that must keep clear of them (`RaceResult.hunterTurnTicks`):
+    /// that they hunted at all.
+    public var hunterTurnTicks: Int
+    /// The live seats of the hunters races.
+    public var live: TierSummary
+    /// The same seats of the live twins; nil without twins.
+    public var twinLive: TierSummary?
+    /// The live seats' mean finishing place in the hunters races, ranked by order of finish among the live seats that
+    /// finished only (hunters not counted), and the same seats' in their live twins, ranked among themselves; nil when
+    /// none finished. Each race's ranks run 1 to its finishers, so this reads with the DNFs beside it.
+    public var liveMeanPlace: Double?
+    public var twinLiveMeanPlace: Double?
+    /// The live seats of the hunters races that didn't finish, and the same seats of their live twins; nil without twins.
+    public var liveDNFs: Int
+    public var twinLiveDNFs: Int?
+
+    /// Nil when no race was of the hunters mix.
+    init?(_ races: [RaceResult]) {
+        let hunted = races.filter { $0.cell.profileMix == .hunters }
+        guard !hunted.isEmpty else { return nil }
+        var twins: [BotRaceCell: RaceResult] = [:]
+        for race in races where race.cell.profileMix == .live { twins[race.cell] = race }
+        self.races = hunted.count
+        var liveOnHunter: [String: Int] = [:], hunterOnLive: [String: Int] = [:]
+        var hunterOnHunter: [String: Int] = [:], liveOnLive: [String: Int] = [:]
+        var liveSeats: [SeatMetrics] = [], twinSeats: [SeatMetrics] = []
+        var places: [Int] = [], twinPlaces: [Int] = []
+        var twinRaces = 0, liveDNFs = 0, twinLiveDNFs = 0
+        // Ranks by order of finish among `seats` only, 1 for the first of them home, by their places in the race; and
+        // how many didn't finish.
+        func ranked(_ seats: [SeatMetrics]) -> (ranks: [Int], dnfs: Int) {
+            let home = seats.compactMap(\.place).sorted()
+            return (home.indices.map { $0 + 1 }, seats.count - home.count)
+        }
+        for race in hunted {
+            let isHunter = { (seat: Int) in race.seats[seat].profile == .hunter }
+            for call in race.ruleCalls ?? [] {
+                switch (isHunter(call.offender), isHunter(call.victim)) {
+                case (false, true): liveOnHunter[call.rule, default: 0] += 1
+                case (true, false): hunterOnLive[call.rule, default: 0] += 1
+                case (true, true): hunterOnHunter[call.rule, default: 0] += 1
+                case (false, false): liveOnLive[call.rule, default: 0] += 1
+                }
+            }
+            let live = race.seats.filter { $0.profile == nil }
+            liveSeats += live
+            let (ranks, dnfs) = ranked(live)
+            places += ranks
+            liveDNFs += dnfs
+            var twinCell = race.cell
+            twinCell.profileMix = .live
+            guard let twin = twins[twinCell] else { continue }
+            twinRaces += 1
+            let same = live.map { twin.seats[$0.seat] }
+            twinSeats += same
+            let (twinRanks, twinDNFs) = ranked(same)
+            twinPlaces += twinRanks
+            twinLiveDNFs += twinDNFs
+        }
+        self.twinRaces = twinRaces
+        self.liveOnHunter = liveOnHunter
+        self.hunterOnLive = hunterOnLive
+        self.hunterOnHunter = hunterOnHunter
+        self.liveOnLive = liveOnLive
+        overdoneCalls = [RacingRule.changingCourse, .properCourse].reduce(0) { sum, rule in
+            sum + (hunterOnLive[rule.rawValue] ?? 0) + (hunterOnHunter[rule.rawValue] ?? 0)
+        }
+        hunterTurnTicks = hunted.reduce(0) { $0 + ($1.hunterTurnTicks ?? 0) }
+        live = TierSummary(liveSeats)
+        twinLive = twinSeats.isEmpty ? nil : TierSummary(twinSeats)
+        let mean = { (places: [Int]) in places.isEmpty ? nil : Double(places.reduce(0, +)) / Double(places.count) }
+        liveMeanPlace = mean(places)
+        twinLiveMeanPlace = mean(twinPlaces)
+        self.liveDNFs = liveDNFs
+        self.twinLiveDNFs = twinRaces == 0 ? nil : twinLiveDNFs
+    }
+}
+
 /// One tier's seats over the whole run: what the thresholds hold it to.
 public struct TierSummary: Codable, Hashable, Sendable {
     public var seats: Int
@@ -576,6 +704,12 @@ public struct TierSummary: Codable, Hashable, Sendable {
     public var ocsCount: Int
     public var meanEdgeSeconds: Double
     public var maxEdgeSeconds: Double
+    /// The tier's rule calls as the offender by the rule called (#342), keyed by `RacingRule.rawValue`.
+    public var callsByRule: [String: Int]
+    /// The share of its seats called as the offender before their first rounding (#342): owing a penalty already.
+    public var calledBeforeFirstRoundingShare: Double
+    /// Its seats' tacks while racing, per boat (#342).
+    public var racingTacksPerBoat: Double
 
     init(_ seats: [SeatMetrics]) {
         let n = Double(max(seats.count, 1))
@@ -598,6 +732,9 @@ public struct TierSummary: Codable, Hashable, Sendable {
         ocsCount = seats.reduce(0) { $0 + $1.ocsCount }
         meanEdgeSeconds = seats.reduce(0) { $0 + $1.edgeSeconds } / n
         maxEdgeSeconds = seats.map(\.edgeSeconds).max() ?? 0
+        callsByRule = seats.reduce(into: [:]) { sum, seat in sum.merge(seat.callsByRule, uniquingKeysWith: +) }
+        calledBeforeFirstRoundingShare = share(seats.filter { $0.callsBeforeFirstRounding > 0 }.count, of: seats.count)
+        racingTacksPerBoat = Double(seats.reduce(0) { $0 + $1.racingTacks }) / n
     }
 }
 
@@ -624,6 +761,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var conduct: ConductSummary?
     /// Close encounters (#234) over the all-National live fleets; nil when none sailed.
     public var closeEncounters: CloseEncounterSummary?
+    /// The hunters scenario (#355) over its races; nil when none sailed.
+    public var hunters: HuntersSummary?
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -641,8 +780,10 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         self.thresholds = thresholds
         self.races = races
         let seats = races.flatMap(\.seats)
+        // The live bots the tiers gate: never those racing hunters (#355), whose numbers are `hunters`'.
+        let gated = races.filter { $0.cell.profileMix != .hunters }.flatMap(\.seats)
         tiers = Dictionary(uniqueKeysWithValues: BotTier.allCases.compactMap { tier in
-            let ofTier = seats.filter { $0.tier == tier && $0.profile == nil }
+            let ofTier = gated.filter { $0.tier == tier && $0.profile == nil }
             return ofTier.isEmpty ? nil : (tier.rawValue, TierSummary(ofTier))
         })
         profiles = Dictionary(uniqueKeysWithValues: BotProfile.allCases.compactMap { profile in
@@ -655,6 +796,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         navigation = NavigationSummary(races)
         conduct = ConductSummary(races)
         closeEncounters = CloseEncounterSummary(races)
+        hunters = HuntersSummary(races)
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
         breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start,
@@ -680,6 +822,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 + "pre-start \(s.preStartEncountersEndingInFouls)/\(s.preStartEncounters), "
                 + "racing \(s.encountersEndingInFouls - s.preStartEncountersEndingInFouls)/\(s.encounters - s.preStartEncounters)), "
                 + "edge \(fixed(s.meanEdgeSeconds)) s/boat, dsq \(s.dsqMissedPenalty), ocs \(s.ocsCount)")
+            lines.append("  \(tier.rawValue) calls: \(callsLine(s.callsByRule)); called before the first rounding "
+                + "\(fixed(s.calledBeforeFirstRoundingShare)) of boats; tacks racing \(fixed(s.racingTacksPerBoat, 1))/boat")
         }
         for profile in BotProfile.allCases {
             guard let s = profiles[profile.rawValue] else { continue }
@@ -722,11 +866,41 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 + "per race (crossings \(fixed(close.crossingsPerRace)), shadow given \(fixed(close.shadowGivenPerRace)), "
                 + "received \(fixed(close.shadowReceivedPerRace)), covers \(fixed(close.coversPerRace)))")
         }
+        if let hunters {
+            let profile = profiles[BotProfile.hunter.rawValue]
+            lines.append("hunters: \(hunters.races) races (\(hunters.twinRaces) with live twins), hunter turn ticks "
+                + "\(hunters.hunterTurnTicks), calls on hunters under 16.1/17 \(hunters.overdoneCalls)")
+            lines.append("  calls on live bots, hunter the victim: \(callsLine(hunters.liveOnHunter))")
+            lines.append("  calls on hunters, live bot the victim: \(callsLine(hunters.hunterOnLive)); hunter on hunter: "
+                + "\(callsLine(hunters.hunterOnHunter))")
+            lines.append("  calls between live bots: \(callsLine(hunters.liveOnLive))")
+            if let profile {
+                lines.append("  hunters: \(profile.finished)/\(profile.seats) finished, contacts \(profile.boatContacts), "
+                    + "calls \(callsLine(profile.callsByRule))")
+            }
+            func liveLine(_ name: String, _ s: TierSummary, place: Double?, dnfs: Int?) -> String {
+                "  \(name): \(s.finished)/\(s.seats) finished (\(fixed(s.finishShare, 3))), mean place among live seats "
+                    + "\(place.map { fixed($0) } ?? "-") (DNF \(dnfs.map(String.init) ?? "-")), contacts \(s.boatContacts), encounters \(s.encounters) "
+                    + "(\(fixed(s.encountersToFoulsShare, 3)) fouls), called before the first rounding "
+                    + "\(fixed(s.calledBeforeFirstRoundingShare)) of boats, tacks racing \(fixed(s.racingTacksPerBoat, 1))/boat, "
+                    + "calls \(callsLine(s.callsByRule))"
+            }
+            lines.append(liveLine("live with hunters", hunters.live, place: hunters.liveMeanPlace, dnfs: hunters.liveDNFs))
+            if let twin = hunters.twinLive {
+                lines.append(liveLine("same seats without", twin, place: hunters.twinLiveMeanPlace, dnfs: hunters.twinLiveDNFs))
+            }
+        }
         lines.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms, max \(fixed(timings.maxMs, 3)) ms")
         lines.append(passed ? "gate: pass" : "gate: FAIL")
         lines += breaches.map { "  \($0)" }
         return lines
     }
+}
+
+/// Rule calls by rule, in the rule book's order (`RacingRule.allCases`): "11 4, 10 2", or "none".
+func callsLine(_ calls: [String: Int]) -> String {
+    let parts = RacingRule.allCases.compactMap { rule in calls[rule.rawValue].map { "\(rule.rawValue) \($0)" } }
+    return parts.isEmpty ? "none" : parts.joined(separator: ", ")
 }
 
 func fixed(_ value: Double, _ places: Int = 2) -> String {

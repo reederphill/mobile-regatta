@@ -63,6 +63,9 @@ public enum BotRaceHarness {
                 : .bot(cell.tierMix.driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
         })
         var tally = RaceTally(race: race)
+        // #355: in a hunters race, every rule call (offender and victim), and the ticks each hunter turned at a boat she hunted.
+        let hunterSeats = cell.profileMix == .hunters ? profiles.indices.filter { profiles[$0] == .hunter } : []
+        var hunts = cell.profileMix == .hunters ? HuntTally(hunters: hunterSeats) : nil
         let lastTick = cell.capSecondsAfterGun * Race.tickRate
         var tickMs: [Double] = []
         tickMs.reserveCapacity(setup.startSequenceTicks + lastTick)
@@ -76,15 +79,19 @@ public enum BotRaceHarness {
             let drained = race.drainEvents()
             events(race, drained)
             tally.record(race, events: drained)
+            hunts?.record(race, events: drained, controllers: controllers)
         }
         let seats = tiers.indices.map { seat in
             tally.metrics(seat: seat, of: race, tier: tiers[seat], profile: profiles[seat],
                           style: controllers[seat].driver?.style)
         }
-        return RaceResult(cell: cell, finalTick: race.tick, capped: !race.isOver,
-                          tideStateAtGun: race.tideStateAtGun, seats: seats,
-                          ranks: race.boats.indices.map(race.place(of:)), hullLength: race.boatClass.hull.length,
-                          timings: TickTimings(samples: tickMs, cpuSeconds: threadCPUSeconds() - cpuStart))
+        var result = RaceResult(cell: cell, finalTick: race.tick, capped: !race.isOver,
+                                tideStateAtGun: race.tideStateAtGun, seats: seats,
+                                ranks: race.boats.indices.map(race.place(of:)), hullLength: race.boatClass.hull.length,
+                                timings: TickTimings(samples: tickMs, cpuSeconds: threadCPUSeconds() - cpuStart))
+        result.ruleCalls = hunts?.calls
+        result.hunterTurnTicks = hunts?.turnTicks
+        return result
     }
 
     /// CPU time the calling thread has used, seconds: what a race costs, however busy the machine.
@@ -98,6 +105,29 @@ public enum BotRaceHarness {
     static func milliseconds(_ duration: Duration) -> Double {
         let (seconds, attoseconds) = duration.components
         return Double(seconds) * 1_000 + Double(attoseconds) / 1e15
+    }
+}
+
+/// A hunters race's own tally (#355): every rule call, offender and victim, and the ticks a hunter held her hunting
+/// branch's turn at a boat (`BotDriver.isHuntingTurn`: a luff, or a turn bringing a boat that must keep clear of her
+/// closer), racing: so a scan of the mix can tell she hunted at all. Her other ticks (holding course, keeping clear,
+/// tacking, rounding) aren't counted.
+struct HuntTally {
+    let hunters: [Int]
+    private(set) var calls: [RuleCallRecord] = []
+    private(set) var turnTicks = 0
+
+    init(hunters: [Int]) { self.hunters = hunters }
+
+    /// After a tick: its events, and the hunters' decisions held through it (`controllers`).
+    mutating func record(_ race: Race, events: [RaceEvent], controllers: SeatControllers) {
+        for event in events {
+            guard case .ruleCall(let call) = event.kind else { continue }
+            calls.append(RuleCallRecord(rule: call.rule.rawValue, offender: call.offender, victim: call.victim, tick: call.tick))
+        }
+        for seat in hunters where race.boats[seat].status == .racing && controllers[seat].driver?.isHuntingTurn == true {
+            turnTicks += 1
+        }
     }
 }
 
@@ -115,6 +145,12 @@ struct RaceTally {
     private var landContacts: [Int]
     private var boundaryContacts: [Int]
     private var foulsAsOffender: [Int]
+    /// Each seat's rule calls as the offender, by the rule called (`RacingRule.rawValue`) (#342).
+    private var callsByRule: [[String: Int]]
+    /// Each seat's rule calls as the offender before her first rounding: on her first leg, or before her start (#342).
+    private var callsBeforeFirstRounding: [Int]
+    /// Each seat's tacks while racing, penalty turns aside (#342).
+    private var racingTacks: [Int]
     private var disqualifications: [Int]
     private var ocsNotices: [Int]
     /// Each seat's boat contacts, oldest first: the id of the incident each one belongs to (the one it
@@ -177,6 +213,9 @@ struct RaceTally {
         landContacts = zeros
         boundaryContacts = zeros
         foulsAsOffender = zeros
+        callsByRule = Array(repeating: [:], count: race.boats.count)
+        callsBeforeFirstRounding = zeros
+        racingTacks = zeros
         disqualifications = zeros
         ocsNotices = zeros
         contacts = Array(repeating: [], count: race.boats.count)
@@ -226,6 +265,8 @@ struct RaceTally {
             case .ocsNotice(let seat): ocsNotices[seat] += 1
             case .ruleCall(let call):
                 foulsAsOffender[call.offender] += 1
+                callsByRule[call.offender][call.rule.rawValue, default: 0] += 1
+                if call.leg == 0 { callsBeforeFirstRounding[call.offender] += 1 }
                 recordFoul(SeatPair(call.offender, call.victim), race)
             case .markTouch(let seat, _): markContacts[seat] += 1
             case .obstructionContact(let seat, .land): landContacts[seat] += 1
@@ -233,6 +274,7 @@ struct RaceTally {
             case .disqualified(let seat, _): disqualifications[seat] += 1
             case .tacked(let seat) where !race.boats[seat].isTakingPenalty:
                 legTacks[seat] += 1
+                if race.boats[seat].status == .racing { racingTacks[seat] += 1 }
                 recordCover(race, seat: seat)
             case .started(let seat): starts[seat] = (race.tick, lineSpot(race.boats[seat].position, on: startLine))
             case .contact(let pair):
@@ -428,7 +470,10 @@ struct RaceTally {
             crossings: crossings[seat],
             shadowGiven: shadowGiven[seat],
             shadowReceived: shadowReceived[seat],
-            covers: covers[seat]
+            covers: covers[seat],
+            callsByRule: callsByRule[seat],
+            callsBeforeFirstRounding: callsBeforeFirstRounding[seat],
+            racingTacks: racingTacks[seat]
         )
     }
 }

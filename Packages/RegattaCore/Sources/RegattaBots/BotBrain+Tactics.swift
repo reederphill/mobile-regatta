@@ -59,6 +59,9 @@ struct Tactics: Sendable, Equatable {
     /// She rolls her tacks (#263, `planRoll`), as well as her skill lets her. The groove-only profiles leave the tack
     /// to the autohelm's tap.
     var rollsTacks = true
+    /// As the right-of-way boat racing, she turns towards a boat that must keep clear of her, within rule 16.1's rate,
+    /// instead of holding her course (#355, `BotProfile.hunter`, `hunting`). Only the suite's hunter.
+    var hunts = false
 
     /// Metres ahead she notices puffs and lulls (`BotWeaknesses.puffPerception`), when she seeks them; she reads the
     /// pressure out to twice as far (`pressureLookAhead`).
@@ -91,7 +94,7 @@ struct Tactics: Sendable, Equatable {
             // The groove only: headers past a threshold, the corridor, and nothing off the groove.
             self.init(headerThreshold: deg2rad(5), tackInterval: 15)
             rollsTacks = false
-        case .tactician:
+        case .tactician, .hunter:
             // #263: a corridor a little wider than the baseline's and her tacks as close together as hers, measured in
             // the fun pass: with skiff@3's tack cost and momentum, 0.8 and 20 s cost her the edge (#300 retunes).
             self.init(headerThreshold: deg2rad(4), tackInterval: 15, anticipation: 6, corridor: 0.5,
@@ -105,6 +108,8 @@ struct Tactics: Sendable, Equatable {
                 leeBows = true
                 tacksOnWind = true
             }
+            // #355: the hunter is the tactician, hunting.
+            hunts = profile == .hunter
         case .blipTacker:
             // The baseline with a hair trigger: a 3° blip tacks her as a real header does.
             self.init(headerThreshold: deg2rad(3), tackInterval: 15)

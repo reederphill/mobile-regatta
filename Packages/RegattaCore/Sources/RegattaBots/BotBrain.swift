@@ -68,6 +68,9 @@ public struct BotStyle: Hashable, Sendable {
 public struct BotDecision: Hashable, Sendable {
     public var input: BoatInput
     public var tap: BoatTap?
+    /// What the suite's hunter's hunting made of `input` (#355, `BotBrain.hunting`); nil for every other bot, and for
+    /// her when she sailed as a live bot does.
+    var hunt: BotBrain.HuntStep? = nil
 
     public init(input: BoatInput, tap: BoatTap? = nil) {
         self.input = input
@@ -243,9 +246,20 @@ struct BotBrain: Sendable {
                     ? Aim(angle: max(sailingAngle(boat), Self.returnAngle), tack: boat.tack)
                     : .groove(.upwind, tack: boat.tack, angle: grooveAngle(.upwind, boat, view))
             }
-            return BotDecision(input: clearingQuarter(boat, view, holdingCourse(boat, view, helm(boat, to: own, view))))
+            return holding(boat, view, helm(boat, to: own, view), desired: own.heading(wind: boat.windDirection))
         }
-        return BotDecision(input: clearingQuarter(boat, view, holdingCourse(boat, view, helm(boat, to: aim, view).eased(aim.ease))))
+        return holding(boat, view, helm(boat, to: aim, view).eased(aim.ease), desired: desired)
+    }
+
+    /// Her decision as the right-of-way boat, `input` her plan's helm: holding her course (`holdingCourse`, #228), or for
+    /// the suite's hunter hunting (`hunting`, #355), then clearing her quarter. `desired` is the heading her plan sails.
+    private func holding(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> BotDecision {
+        guard tactics.hunts else { return BotDecision(input: clearingQuarter(b, view, holdingCourse(b, view, input))) }
+        let (held, step) = hunting(b, view, input, desired: desired)
+        var decision = BotDecision(input: clearingQuarter(b, view, held))
+        // What hunting did, unless clearing her quarter steered her otherwise.
+        decision.hunt = decision.input == held ? step : nil
+        return decision
     }
 
     // MARK: - Penalty turns
@@ -469,7 +483,8 @@ struct BotBrain: Sendable {
     /// taps only clear of every boat (`tapIsClear`, #101).
     func canTap(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         guard view.time - lastTapTime >= Self.tapInterval,
-              isClearOfMarks(b, view, lengths: Self.tapMarkClearance), tapIsClear(b, view) else { return false }
+              isClearOfMarks(b, view, lengths: Self.tapMarkClearance), tapIsClear(b, view),
+              !tapTurnsAtKeepClearBoat(b, view) else { return false }
         guard abs(sailingAngle(b)) < .pi / 2 else {
             let room = view.boatClass.hull.length * Self.gybeRoom.hullLengths + b.speed * Self.gybeRoom.seconds
             let leeward = -Vec2.heading(b.windDirection) * room

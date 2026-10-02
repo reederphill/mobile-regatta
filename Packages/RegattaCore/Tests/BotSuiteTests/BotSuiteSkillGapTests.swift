@@ -89,9 +89,9 @@ import Testing
     /// The skill-gap mix gives every seat a profile, the tactician on the odd seats for an even seed; the
     /// live mix gives none.
     @Test func skillGapMixAlternatesTheProfiles() throws {
-        #expect((0..<4).map { ProfileMix.skillGap.profile(ofSeat: $0, seed: 2) } == [.baseline, .tactician, .baseline, .tactician])
-        #expect((0..<4).map { ProfileMix.skillGap.profile(ofSeat: $0, seed: 3) } == [.tactician, .baseline, .tactician, .baseline])
-        #expect((0..<4).allSatisfy { ProfileMix.live.profile(ofSeat: $0, seed: 2) == nil })
+        #expect((0..<4).map { ProfileMix.skillGap.profile(ofSeat: $0, seed: 2, fleetSize: 4) } == [.baseline, .tactician, .baseline, .tactician])
+        #expect((0..<4).map { ProfileMix.skillGap.profile(ofSeat: $0, seed: 3, fleetSize: 4) } == [.tactician, .baseline, .tactician, .baseline])
+        #expect((0..<4).allSatisfy { ProfileMix.live.profile(ofSeat: $0, seed: 2, fleetSize: 4) == nil })
         let cells = BotMatrix(seeds: [1], fleetSizes: [2], profileMixes: [.live, .skillGap]).cells
         #expect(cells.map(\.profileMix) == [.live, .skillGap])
         // A matrix file from before #231 sails live bots only.

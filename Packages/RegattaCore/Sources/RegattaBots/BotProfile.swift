@@ -14,4 +14,14 @@ public enum BotProfile: String, Codable, CaseIterable, Hashable, Sendable {
     /// The baseline, but tacking on every header past 3° (#221, #238): a blip, the wobble that never outlasts
     /// its 30 s window, as readily as a real shift. Tacking on a blip is a mistake: the tactician should beat her.
     case blipTacker
+    /// The tactician, sailing to the edge of the rules (#355): a measuring profile for the suite only, never one of the
+    /// bots players race (`BotDriver(seat:raceSeed:)` gives none), which hold course and never hunt (#19). As the
+    /// right-of-way boat racing she turns towards a boat that must keep clear of her, at a rate under the umpire's
+    /// rule 16.1 course-change test, to make her keep clear and take her wind: as the leeward boat she luffs (rule 11),
+    /// within her proper course when she came from astern (rule 17); as the starboard boat she holds or bears down on
+    /// the port boat, never giving up her lane (rule 10); with mark-room she takes all of it. She tacks or gybes
+    /// only with no boat that must keep clear of her close on the side she turns to. She still keeps clear first
+    /// when it is hers to, and hunts only racing (pre-start fighting is #337's). Her tunables: `BotBrain.Hunter`
+    /// (`BotBrain+Hunter.swift`).
+    case hunter
 }

@@ -19,7 +19,9 @@ import Testing
         #expect(Set(matrix.tierMixes) == Set(TierMix.allCases))
         // #231: the live bots the tiers gate, and the skill-gap scenario; #238: the fun pass, in classic
         // oscillating conditions only.
-        #expect(Set(matrix.profileMixes) == Set(ProfileMix.allCases))
+        // #355: the hunters mix is sailed only when named (`--profile-mix hunters`), never in the bundle.
+        #expect(Set(matrix.profileMixes) == Set(ProfileMix.allCases).subtracting([.hunters]))
+        #expect(!matrix.cells.contains { $0.profileMix == .hunters })
         #expect(!matrix.seeds.isEmpty && !matrix.tideStatesDegrees.isEmpty)
         let perConditions = matrix.seeds.count * matrix.tideStatesDegrees.count * 4 * TierMix.allCases.count
         #expect(matrix.cells.count == perConditions * (4 * 2 + 1))
@@ -29,13 +31,13 @@ import Testing
     @Test func optionsOverrideTheMatrix() throws {
         let options = try BotSuiteOptions(arguments: ["--seeds", "2", "--fleet-size", "16", "--fleet-size", "2",
                                                       "--tier-mix", "national", "--profile-mix", "skillGap",
-                                                      "--profile-mix", "funPass", "--laps", "1",
+                                                      "--profile-mix", "funPass", "--profile-mix", "hunters", "--laps", "1",
                                                       "--json", "-"])
         let matrix = try options.matrix()
         #expect(matrix.seeds == [1, 2])
         #expect(matrix.fleetSizes == [16, 2])
         #expect(matrix.tierMixes == [.national])
-        #expect(matrix.profileMixes == [.skillGap, .funPass])
+        #expect(matrix.profileMixes == [.skillGap, .funPass, .hunters])
         #expect(matrix.laps == 1)
         #expect(options.jsonPath == "-")
 
