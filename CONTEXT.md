@@ -60,7 +60,7 @@ A boat that broke a rule of Part 2 isn't penalised for it, because she was compe
 _Avoid_: acquittal, cleared
 
 **Hold course**:
-What a right-of-way boat does to keep her rights: rudder centred, the autohelm holding her wind angle. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated.
+What a right-of-way boat does to keep her rights: rudder centred, the autohelm holding her wind angle. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course.
 _Avoid_: hold heading, stand on
 
 **Defend lane**:

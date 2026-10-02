@@ -123,7 +123,9 @@ public struct BotWeaknesses: Hashable, Sendable {
 
     /// The rules whose encounters she can misjudge (#103): the give-way rules, rules 10, 11 and 12, racing and before
     /// her start (#280), and the mark-room she owes (18.2). Not rule 13 (a tacking boat finishes her tack whatever she
-    /// believes) or rule 21 (her penalty turns and her return from OCS keep clear of every boat).
+    /// believes) or rule 21 (her penalty turns and her return from OCS keep clear of every boat). Not rule 17 either,
+    /// deliberately (#346): a bot held to her proper course sails within it by construction (`properCourseLimited`),
+    /// so never breaches it; add it here should weaker bots become catchable sailing above it.
     public static let misjudgeScope: Set<RacingRule> = [.portStarboard, .windwardLeeward, .clearAstern, .givingMarkRoom]
 
     /// How fast her misjudging grows with her skill deficit (#103, placeholder): her chance is this times the square of
