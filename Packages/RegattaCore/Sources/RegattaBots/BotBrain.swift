@@ -317,11 +317,29 @@ struct BotBrain: Sendable {
         let markAway = nearestMark(b, view).map { Self.away(from: $0.offset, b) }
         guard let keepClear, keepClear.away != turn, (markAway ?? keepClear.away) == keepClear.away, !penaltyGivenUp,
               owed.progress < .pi, canGiveUpTurn(owed, view) else {
-            return BoatInput(rudder: turn)
+            return turningOn(b, turn, owed, view)
         }
         penaltyTurn = keepClear.away
         penaltyGivenUp = true
         return BoatInput(rudder: keepClear.away)
+    }
+
+    /// One tick of the race, seconds, from the rules' tick count for a second (the brain holds no race, #98).
+    static let tickStep = 1 / Double(RulesConfig.ticks(1))
+
+    /// Her input turning her current penalty turn on `turn`'s way: the rudder hard over that way, unless the autohelm
+    /// has her (she let go, or took the boat over from a player who had, #219) with its rudder still over the other
+    /// way. The tick she takes the helm her rudder only slews part way back (the class's `rudderSlew`), so her heading
+    /// goes on turning back that tick, driven by her: the race gives the turn up (`penaltyReset`, #350). She leaves the
+    /// boat to the autohelm, which can never undo a turn, until one tick's slew brings the rudder to centre or her way;
+    /// but not past `penaltyStartMargin` before the start deadline of a turn not yet started.
+    private func turningOn(_ b: SeatView.OwnBoat, _ turn: Double, _ owed: OwedPenalty, _ view: SeatView) -> BoatInput {
+        if let helm = b.autohelm, !helm.isTapping, owed.progress > 0,
+           turn * b.rudder < -view.boatClass.steering.rudderSlew * Self.tickStep,
+           owed.isStarted || canPutOffTurn(owed, view) {
+            return .neutral
+        }
+        return BoatInput(rudder: turn)
     }
 
     /// The way she turns her current penalty turn, starting it now, or nil while she holds it off (`penaltyInput`).

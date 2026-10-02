@@ -234,18 +234,23 @@ extension BotBrain {
     /// a tack that only opens the gap between them. Two boats sailing side by side off the start would otherwise each
     /// wait on the other to tack, and sail on together into the race area's edge; the one whose tack takes her away
     /// tacks.
+    ///
+    /// The cautious bot looks for it as well sailing the tap through in her mind (`tapTrack`), every boat going on turning
+    /// as she saw it turn (`tapApproach`).
     func tapIsClear(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         guard b.status == .racing || b.status == .prestart else { return true }
         let heading = 2 * b.windDirection - b.heading
         let speed = b.speed * Self.tapSpeedShare
         let clear = view.boatClass.hull.length * tapClearanceLengths
         let ontoPort = b.tack == .starboard
+        let track = caution == nil ? [] : tapTrack(b, view, seconds: Self.tapOntoPortLookahead * tapLookaheadScale)
         return view.others.allSatisfy { other in
             let gap = (other.position - b.position).length
             guard !other.isGhost, gap <= Self.tapRange else { return true }
             let lookahead = (ontoPort && other.tack == .starboard ? Self.tapOntoPortLookahead : Self.tapLookahead) * tapLookaheadScale
             let approach = Self.closestApproach(of: other, to: b, heading: heading, speed: speed, lookahead: lookahead)
             return approach >= min(clear, gap)
+                && (track.isEmpty || tapApproach(of: other, track: track, lookahead: lookahead, view) >= min(clear, gap))
         }
     }
 }

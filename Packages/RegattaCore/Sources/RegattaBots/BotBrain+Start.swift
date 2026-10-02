@@ -126,8 +126,14 @@ extension BotBrain {
         let arrival = startArrival(view)
         let spot = reachableSpot(b, view, hold: hold, arrival: arrival)
         // Where her spot bears, as a sailing angle on starboard, and the broadest she can sail and still cross
-        // the line itself, clear of the pin end.
-        let toSpot = wrapAngle(b.windDirection - (spot - b.position).bearing)
+        // the line itself, clear of the pin end. Close below the line with less time left than a tack takes
+        // (`tackSeconds`), too little to sail round anywhere, she's set up where she is: her spot, a length or so
+        // off, swings round her as she slides along the line, and wherever it bears she reads it as fetched and not
+        // yet passed, and holds, waits or goes from there. Reading it passed, she bore away hard for her setup point
+        // with 1.7 s to the gun and swung her stern over the line (#350, seed 4 of `aBotTakingOverBeforeTheGunStarts`).
+        let bearing = wrapAngle(b.windDirection - (spot - b.position).bearing)
+        let setUp = view.time < 0 && arrival < Self.tackSeconds && -line.side(b.position) < view.boatClass.hull.length * 2
+        let toSpot = setUp ? min(max(bearing, hold - Self.fetchMargin), .pi / 2 + Self.waitOffLine) : bearing
         let pinEnd = line.pin.position + (line.committee.position - line.pin.position).normalized * view.boatClass.hull.length
         let toPin = wrapAngle(b.windDirection - (pinEnd - b.position).bearing)
         // Sheeted in at her spot, or close-hauled if it bears closer to the wind than that.
