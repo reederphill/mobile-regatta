@@ -71,6 +71,13 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     public var shadowReceived: Int = 0
     /// Her tacks onto the tack of a boat behind her within 10 hull lengths that had tacked onto it 10 s before or less.
     public var covers: Int = 0
+    /// Her rule calls as the offender by the rule called, keyed by `RacingRule.rawValue` (#342); `foulsAsOffender`
+    /// in all.
+    public var callsByRule: [String: Int] = [:]
+    /// Of `foulsAsOffender`, the calls made before her first rounding: on her first leg, or before her start (#342).
+    public var callsBeforeFirstRounding: Int = 0
+    /// Her tacks while racing, penalty turns aside (#342).
+    public var racingTacks: Int = 0
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
@@ -78,6 +85,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         "landContacts", "boundaryContacts", "beats", "preGunIronsSeconds", "startSeconds", "startLineSpot",
         "rowSpot", "startSpot", "onCourseSeconds", "encounters", "encountersEndingInFouls", "encountersToFoulsShare",
         "preStartEncounters", "preStartEncountersEndingInFouls", "closeEncounters", "crossings", "shadowGiven", "shadowReceived", "covers",
+        "callsByRule", "callsBeforeFirstRounding", "racingTacks",
     ]
 
     private enum CodingKeys: String, CodingKey {
@@ -87,6 +95,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case preGunIronsSeconds, startSeconds, startLineSpot, rowSpot, startSpot, onCourseSeconds
         case encounters, encountersEndingInFouls, encountersToFoulsShare
         case preStartEncounters, preStartEncountersEndingInFouls, closeEncounters, crossings, shadowGiven, shadowReceived, covers
+        case callsByRule, callsBeforeFirstRounding, racingTacks
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -126,6 +135,9 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(shadowGiven, forKey: .shadowGiven)
         try c.encode(shadowReceived, forKey: .shadowReceived)
         try c.encode(covers, forKey: .covers)
+        try c.encode(callsByRule, forKey: .callsByRule)
+        try c.encode(callsBeforeFirstRounding, forKey: .callsBeforeFirstRounding)
+        try c.encode(racingTacks, forKey: .racingTacks)
     }
 
     /// Whether her style means her to start in the line's pin third (#99).
@@ -576,6 +588,12 @@ public struct TierSummary: Codable, Hashable, Sendable {
     public var ocsCount: Int
     public var meanEdgeSeconds: Double
     public var maxEdgeSeconds: Double
+    /// The tier's rule calls as the offender by the rule called (#342), keyed by `RacingRule.rawValue`.
+    public var callsByRule: [String: Int]
+    /// The share of its seats called as the offender before their first rounding (#342): owing a penalty already.
+    public var calledBeforeFirstRoundingShare: Double
+    /// Its seats' tacks while racing, per boat (#342).
+    public var racingTacksPerBoat: Double
 
     init(_ seats: [SeatMetrics]) {
         let n = Double(max(seats.count, 1))
@@ -598,6 +616,9 @@ public struct TierSummary: Codable, Hashable, Sendable {
         ocsCount = seats.reduce(0) { $0 + $1.ocsCount }
         meanEdgeSeconds = seats.reduce(0) { $0 + $1.edgeSeconds } / n
         maxEdgeSeconds = seats.map(\.edgeSeconds).max() ?? 0
+        callsByRule = seats.reduce(into: [:]) { sum, seat in sum.merge(seat.callsByRule, uniquingKeysWith: +) }
+        calledBeforeFirstRoundingShare = share(seats.filter { $0.callsBeforeFirstRounding > 0 }.count, of: seats.count)
+        racingTacksPerBoat = Double(seats.reduce(0) { $0 + $1.racingTacks }) / n
     }
 }
 
@@ -680,6 +701,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 + "pre-start \(s.preStartEncountersEndingInFouls)/\(s.preStartEncounters), "
                 + "racing \(s.encountersEndingInFouls - s.preStartEncountersEndingInFouls)/\(s.encounters - s.preStartEncounters)), "
                 + "edge \(fixed(s.meanEdgeSeconds)) s/boat, dsq \(s.dsqMissedPenalty), ocs \(s.ocsCount)")
+            lines.append("  \(tier.rawValue) calls: \(callsLine(s.callsByRule)); called before the first rounding "
+                + "\(fixed(s.calledBeforeFirstRoundingShare)) of boats; tacks racing \(fixed(s.racingTacksPerBoat, 1))/boat")
         }
         for profile in BotProfile.allCases {
             guard let s = profiles[profile.rawValue] else { continue }
@@ -727,6 +750,12 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         lines += breaches.map { "  \($0)" }
         return lines
     }
+}
+
+/// Rule calls by rule, in the rule book's order (`RacingRule.allCases`): "11 4, 10 2", or "none".
+func callsLine(_ calls: [String: Int]) -> String {
+    let parts = RacingRule.allCases.compactMap { rule in calls[rule.rawValue].map { "\(rule.rawValue) \($0)" } }
+    return parts.isEmpty ? "none" : parts.joined(separator: ", ")
 }
 
 func fixed(_ value: Double, _ places: Int = 2) -> String {
