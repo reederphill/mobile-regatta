@@ -92,12 +92,13 @@ extension BotBrain {
         static let tacticianLeeBowsAndTacksOnWind = true
         /// She tacks on a boat's wind within this many lengths of her ...
         static let tackOnWindRange = 8.0
-        /// ... no more than this many lengths to leeward of its track (#349): to windward of it in the wind's frame,
-        /// not past its track. skiff@5's cone, swung half astern (#339), covers a boat best while she is still 0.1 to
-        /// 0.5 L to leeward of its track and lets go as she crosses it (`BotTacticsTests.crossingAhead`, seeds 3, 11
-        /// and 20: a forecast factor of 0.69–0.74 to leeward, 0.75–0.79 at best once across), so a gate at its track
-        /// hid the window. Measured: 0.5, 1.0 and no slack at all tap at the same moment in that scene; 1.0 clears the
-        /// 0.4 L the first good decision needs with room.
+        /// ... and she no more than this many hull lengths to leeward of its track (#349): her distance from its track,
+        /// measured from her position perpendicular to its heading; to windward of its track always passes. skiff@5's
+        /// cone, swung half astern (#339), covers a boat best while she is still 0.1 to 0.5 L to leeward of its track and
+        /// lets go as she crosses it (`BotTacticsTests.crossingAhead`, seeds 3, 11 and 20: a forecast factor of
+        /// 0.69–0.74 to leeward, 0.75–0.79 at best once across), so a gate at its track hid the window. Measured: 0.5,
+        /// 1.0 and no slack at all tap at the same moment in that scene; 1.0 clears the 0.4 L the first good decision
+        /// needs with room (`BotTacticsTests.tackOnWindGateAllowsOnlyTheSlackToLeeward`).
         static let tackOnWindLeewardSlack = 1.0
         /// ... when, her tack done, the boat sits in her wind shadow these seconds on, at a factor under
         /// `tackOnWindShadow` on average ...
@@ -269,16 +270,17 @@ extension BotBrain {
     }
 
     /// The boat she tacks on the wind of (`Tactics.tacksOnWind`): the nearest one beating on the other tack within
-    /// `tackOnWindRange`, upwind of it (to windward in the wind's frame, up to `tackOnWindLeewardSlack` lengths to
-    /// leeward of its track, #349), that her tack now would leave in her wind shadow, clear astern of her (`tackForecast`), at a factor under `FleetTactics.tackOnWindShadow` on average, when
-    /// that pays against her own plan (`paysToTackOnWind`).
+    /// `tackOnWindRange`, upwind of it (to windward of its track, or up to `tackOnWindLeewardSlack` lengths to leeward
+    /// of it, #349), that her tack now would leave in her wind shadow, clear astern of her (`tackForecast`), at a factor
+    /// under `FleetTactics.tackOnWindShadow` on average, when that pays against her own plan (`paysToTackOnWind`).
     func tackOnWindTarget(_ b: SeatView.OwnBoat, _ view: SeatView, lean: Double, threshold: Double) -> Int? {
         guard isBeating(b) else { return nil }
         let length = view.boatClass.hull.length
         return nearest(view, within: length * FleetTactics.tackOnWindRange, of: b) { other, offset in
             // Upwind of her: to windward of her track, or no more than the slack to leeward of it (#349).
             let windward = other.tack == .starboard ? other.forward.rightPerp : -other.forward.rightPerp
-            guard other.tack != b.tack, -offset.dot(windward) > -length * FleetTactics.tackOnWindLeewardSlack, let forecast = tackForecast(b, view, on: other),
+            guard other.tack != b.tack, -offset.dot(windward) > -length * FleetTactics.tackOnWindLeewardSlack,
+                  let forecast = tackForecast(b, view, on: other),
                   forecast.allSatisfy({ $0.astern >= length * FleetTactics.tackOnWindAstern }) else { return false }
             let factor = forecast.reduce(0) { $0 + $1.factor } / Double(forecast.count)
             return factor < FleetTactics.tackOnWindShadow
