@@ -246,13 +246,16 @@ import UIKit
         }
     }
 
-    /// The fleet fixture (#117) is a bot race on the default files, frozen after the first finish and before the
+    /// The fleet fixture (#117) is a bot race recorded on skiff@4 (the default class when it was recorded; a log replays
+    /// on the class it names, so it stays skiff@4 when the default moves on), frozen after the first finish and before the
     /// close, with a ghost and at least three racing boats in the boat camera's view; its five twins are the same
     /// frame through each other filter.
     @Test func fleetFixtureShowsAGhostAmongTheFleet() throws {
         let (fixture, log) = try RenderFixture.load(named: "fleet", in: Self.fixtures)
         #expect(fixture.camera == .boat && fixture.vision == VisionFilter.none)
-        #expect(log.header.setup.boatClass.key == RaceFiles.defaults.boatClass.ref.key)
+        // Its recorded class, not today's default: the log predates skiff@5 (#339). Re-recording it on the default moves
+        // every fleet, cues and hud reference that shares it, which is the owner's call (#354).
+        #expect(log.header.setup.boatClass.id == "skiff" && log.header.setup.boatClass.version == 4)
         let world = try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
         #expect(!world.frame.isOver)
         #expect(!world.isGhost(ofSeat: world.myBoatIndex))

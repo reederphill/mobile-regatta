@@ -170,6 +170,23 @@ import RegattaServices
         #expect(first.windSeed == RaceConfig.windSeed(pinnedTo: 1))
     }
 
+    /// `-laps` sails every practice race that many laps (#354: the race-finish UI test sails one); bad values are
+    /// refused and the settings' laps stand.
+    @Test func lapsOverridesTheSettingsLaps() throws {
+        let settings = RaceSettings()
+        let config = try #require(parse("-autostart", "-seed", "1", "-laps", "1").launchRaceConfig(from: settings))
+        #expect(config.laps == 1)
+        #expect(config.setup.laps == 1)
+        #expect(parse("-laps", "1").raceConfig(from: settings).laps == 1, "a restarted race too")
+        #expect(parse().raceConfig(from: settings).laps == settings.laps)
+        for bad in ["0", "10", "two"] {
+            let options = parse("-laps", bad)
+            #expect(options.laps == nil)
+            #expect(options.problems.count == 1)
+            #expect(options.raceConfig(from: settings).laps == settings.laps)
+        }
+    }
+
     @Test func autostartSailsTheSettingsRace() throws {
         let settings = RaceSettings()
         let config = try #require(parse("-autostart", "-seed", "1").launchRaceConfig(from: settings))
