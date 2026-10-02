@@ -154,32 +154,21 @@ private struct ResultRowView: View {
     }
 }
 
-/// The Your race card (#24): calls against you, in your favour, and your protests.
+/// The Your race card (#24): one short phrase per call against you, call in your favour, and protest of yours. The
+/// model leaves the card out when nothing involved you.
 private struct YourRaceCardView: View {
     let card: YourRaceCard
 
-    // TODO-COPY (#171): every heading and line here.
+    private var phrases: [String] {
+        card.against.map(\.phrase) + card.inFavour.map(\.phrase) + card.protests.map(\.phrase)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            // TODO-COPY (#171)
             Text("Your race").font(.headline)
-            if card.isEmpty {
-                Text("No rule calls or protests involved you.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            section("Calls against you", card.against)
-            section("Calls in your favour", card.inFavour)
-            if !card.protests.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Your protests").font(.subheadline.bold())
-                    ForEach(Array(card.protests.enumerated()), id: \.offset) { _, protest in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("\(protest.protested) · \(protest.legText)").font(.subheadline)
-                            Text(YourRaceCard.ProtestEntry.note).font(.caption).foregroundStyle(.secondary)
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                }
+            ForEach(Array(phrases.enumerated()), id: \.offset) { _, phrase in
+                Text(phrase).font(.subheadline)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -187,23 +176,5 @@ private struct YourRaceCardView: View {
         .background(Color.white.opacity(0.08), in: .rect(cornerRadius: 12))
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("results-yourRace")
-    }
-
-    @ViewBuilder private func section(_ title: String, _ calls: [YourRaceCard.Call]) -> some View {
-        if !calls.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(title).font(.subheadline.bold())
-                ForEach(Array(calls.enumerated()), id: \.offset) { _, call in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(call.title).font(.subheadline)
-                        Text(([call.other, call.legText, call.outcome.text] as [String?]).compactMap { $0 }
-                            .joined(separator: " · "))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
     }
 }

@@ -160,11 +160,14 @@ struct RaceView: View {
 
             // About 3 s after your finish horn the results slide up over the race, which keeps running and drawing
             // above them (#24, #132).
-            if session.showsResults, let results = session.results {
-                ResultsView(model: results, buttons: resultsButtons)
+            // Only the sheet animates: the HUD and controls under it don't pick up its transaction.
+            ZStack {
+                if session.showsResults, let results = session.results {
+                    ResultsView(model: results, buttons: resultsButtons)
+                }
             }
+            .animation(.easeOut(duration: 0.35), value: session.showsResults)
         }
-        .animation(.easeOut(duration: 0.35), value: session.showsResults)
     }
 
     /// Practice: Home, Change setup, Sail again; the first race: Race online and Help (#24).

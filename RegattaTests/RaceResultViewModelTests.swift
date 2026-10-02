@@ -23,18 +23,18 @@ import RegattaCore
         index.update(incident)
     }
 
-    /// Finishers by finish, then by distance, DSQ, OCS, RET (#30), whatever order the rows come in; shared places
-    /// kept; each code in the result column.
-    @Test func ordersFinishersByDistanceDSQOCSRET() {
+    /// The rows keep the core's display order (#30, #86): the sheet doesn't sort them again. Shared places kept; each
+    /// code in the result column.
+    @Test func keepsTheCoresRowOrder() {
         let results = RaceResults(rows: [
-            SeatResult(seat: 6, place: 7, code: .ret),
-            SeatResult(seat: 4, place: 5, code: .dsq),
-            SeatResult(seat: 2, place: 2, code: .finished, finishTick: 9_030),
-            SeatResult(seat: 5, place: 6, code: .ocs),
-            SeatResult(seat: 3, place: 4, code: .byDistance),
             SeatResult(seat: 1, place: 1, code: .finished, finishTick: 9_000),
+            SeatResult(seat: 2, place: 2, code: .finished, finishTick: 9_030),
             SeatResult(seat: 0, place: 3, code: .byDistance),
+            SeatResult(seat: 3, place: 4, code: .byDistance),
+            SeatResult(seat: 4, place: 5, code: .dsq),
             SeatResult(seat: 7, place: 5, code: .dsq),
+            SeatResult(seat: 5, place: 6, code: .ocs),
+            SeatResult(seat: 6, place: 7, code: .ret),
         ], rated: false)
         let model = RaceResultViewModel(results: results, live: [], entrants: Self.entrants, mySeat: 0, incidents: nil)
         #expect(model.isFinal)
@@ -45,6 +45,11 @@ import RegattaCore
         #expect(model.rows[1].isBot && !model.rows[2].isBot)
         #expect(model.summary == "3 of 8")
         #expect(model.card == nil, "no incident index, no card")
+        // Whatever order the core gives is the order shown.
+        let swapped = RaceResults(rows: [results.rows[1], results.rows[0]] + results.rows.dropFirst(2), rated: false)
+        let swappedModel = RaceResultViewModel(results: swapped, live: [], entrants: Self.entrants, mySeat: 0,
+                                               incidents: nil)
+        #expect(swappedModel.rows.map(\.seat) == [2, 1, 0, 3, 4, 7, 5, 6])
     }
 
     /// The gap to the winner is "+m:ss", whole seconds rounded up, so no finisher behind the winner reads "+0:00"; the
@@ -104,9 +109,9 @@ import RegattaCore
         #expect(Set(model.rows.filter(\.flagged).map(\.seat)) == [2, 5])
     }
 
-    /// The card lists only incidents involving you: calls against you with the rule number and plain words, the other
-    /// boat, the leg and the outcome; calls in your favour alike; your mark touches as rule 31; your protests, recorded
-    /// and never changing a result. Others' calls and protests aren't listed.
+    /// The card lists only incidents involving you, one short phrase each, no leg: calls against you with the rule
+    /// and the outcome; calls in your favour with the other boat and the rule; your mark touches; your protests.
+    /// Others' calls and protests aren't listed.
     @Test func yourRaceCardListsCallsAgainstInFavourAndProtests() throws {
         var index = IncidentIndex()
         Self.call(&index, .portStarboard, offender: 0, victim: 2, tick: 1_000, leg: 0)
@@ -125,17 +130,19 @@ import RegattaCore
                                         served: [0: 2])
         let card = try #require(model.card)
         #expect(card.against.map(\.rule) == ["10", "31", "13"])
-        #expect(card.against[0].title == "Rule 10: \(RuleWords.plain(.portStarboard))")
         #expect(card.against[0].other == "\(BotGlyph.text) Bot 2")
-        #expect(card.against[0].legText == "Leg 1")
         #expect(card.against.map(\.outcome) == [.penaltyDone, .penaltyDone, .notDone])
-        #expect(card.against[1].other == nil && card.against[1].title == "Rule 31: touched the windward mark")
+        #expect(card.against.map(\.phrase) == [
+            "Rule 10 against you, penalty done",
+            "Touched the windward mark, penalty done",
+            "Rule 13 against you, penalty not done",
+        ])
         #expect(card.inFavour.count == 1)
-        #expect(card.inFavour[0].rule == "11" && card.inFavour[0].other == "\(BotGlyph.text) Bot 4")
-        #expect(card.inFavour[0].legText == "Leg 2" && card.inFavour[0].outcome == .dsq)
-        #expect(card.protests.map(\.protested) == ["\(BotGlyph.text) Bot 3"])
-        #expect(card.protests[0].legText == "Leg 3")
-        #expect(YourRaceCard.ProtestEntry.note == "Recorded, doesn't change results")
+        #expect(card.inFavour[0].rule == "11" && card.inFavour[0].outcome == .dsq)
+        #expect(card.inFavour[0].phrase == "\(BotGlyph.text) Bot 4 fouled you (rule 11)")
+        #expect(card.protests.map(\.phrase) == ["You protested \(BotGlyph.text) Bot 3"])
+        let phrases = card.against.map(\.phrase) + card.inFavour.map(\.phrase) + card.protests.map(\.phrase)
+        #expect(!phrases.contains { $0.contains("Leg") })
         #expect(model.rows.first { $0.seat == 0 }?.flagged == true)
     }
 
@@ -151,7 +158,7 @@ import RegattaCore
         #expect(model.leftBeforeClose().card?.against.map(\.outcome) == [.noTurn, .notDone])
         let quiet = RaceResultViewModel(results: nil, live: live, entrants: Self.entrants, mySeat: 7,
                                         incidents: IncidentIndex())
-        #expect(quiet.card?.isEmpty == true)
+        #expect(quiet.card == nil, "no card when nothing involved you")
     }
 
     /// Practice results offer Home, Change setup and Sail again; the first race Race online and Help (#24).
@@ -236,6 +243,31 @@ import RegattaCore
         #expect(model.lastRace != kept && model.lastRace?.isFinal == true, "the next race's close replaces it")
         let replaced = try #require(model.lastRace)
         #expect(replaced.rows.filter { $0.result != .byDistance }.isEmpty)
+
+        model.beginPractice()
+        model.finishBriefing()
+        let retired = try #require(model.session)
+        let mySeat = retired.driver.myBoatIndex
+        let withRET = RaceResults(rows: (0..<model.practiceSetup.fleetSize).map {
+            SeatResult(seat: $0, place: $0 + 1, code: $0 == mySeat ? .ret : .finished,
+                       finishTick: $0 == mySeat ? nil : 9_000 + $0)
+        }, rated: false)
+        retired.consume([RaceEvent(tick: 10, kind: .raceClosed(results: withRET))])
+        #expect(model.lastRace == replaced, "a race you retired from doesn't replace it")
+        model.leaveRace()
+        #expect(model.lastRace == replaced)
+    }
+
+    /// Results you retired from aren't kept as Last race; any other result of yours is.
+    @Test func retiredResultsArentKeptAsLastRace() {
+        let rows = [SeatResult(seat: 1, place: 1, code: .finished, finishTick: 9_000),
+                    SeatResult(seat: 0, place: 2, code: .ret)]
+        let retired = RaceResultViewModel(results: RaceResults(rows: rows, rated: false), live: [],
+                                          entrants: Self.entrants, mySeat: 0, incidents: nil)
+        #expect(!retired.keepsAsLastRace)
+        let dsq = [rows[0], SeatResult(seat: 0, place: 2, code: .dsq)]
+        #expect(RaceResultViewModel(results: RaceResults(rows: dsq, rated: false), live: [], entrants: Self.entrants,
+                                    mySeat: 0, incidents: nil).keepsAsLastRace)
     }
 
     /// The results galleries are render fixtures (`ResultsGalleryView`).

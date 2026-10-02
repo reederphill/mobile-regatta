@@ -72,7 +72,8 @@ struct RaceResultViewModel: Equatable, Codable {
     }
 
     var rows: [Row]
-    /// The "Your race" card: nil where the race has no incident index on the device (online, a render fixture).
+    /// The "Your race" card: nil when nothing involved you, or where the race has no incident index on the device
+    /// (online, a render fixture).
     var card: YourRaceCard?
     /// The rows are final: the race closed, or you left it (`leftBeforeClose`). False while boats still sail.
     var isFinal: Bool
@@ -80,6 +81,9 @@ struct RaceResultViewModel: Equatable, Codable {
 
     /// Your row.
     var myRow: Row? { rows.first { $0.isPlayer } }
+
+    /// Home's Last race keeps these results (#132): not a race you retired from, which is no result of yours.
+    var keepsAsLastRace: Bool { myRow.map { $0.result != .ret } ?? false }
 
     /// The home screen's Last race summary: "3 of 8", or your code.
     // TODO-COPY (#171)
@@ -106,13 +110,9 @@ struct RaceResultViewModel: Equatable, Codable {
         let codes: [Int: ResultCode]
         if let results, !results.rows.isEmpty {
             isFinal = true
-            // The earliest finish, whatever order the rows come in.
-            let winner = results.rows.compactMap { $0.code == .finished ? $0.finishTick : nil }.min()
-            let ordered = results.rows.enumerated().sorted {
-                (Self.rank($0.element.code), $0.element.place, $0.offset)
-                    < (Self.rank($1.element.code), $1.element.place, $1.offset)
-            }.map(\.element)
-            rows = ordered.map { seat in
+            // The core's rows are already in display order (#30, #86).
+            let winner = results.winningTick
+            rows = results.rows.map { seat in
                 let result: Result
                 switch seat.code {
                 case .finished:
@@ -152,7 +152,7 @@ struct RaceResultViewModel: Equatable, Codable {
                 let entrant = entrants[seat]
                 return entrant.isBot && seat != mySeat ? "\(BotGlyph.text) \(entrant.name)" : entrant.name
             }, served: served, codes: codes, isFinal: isFinal)
-        }
+        }.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     init(rows: [Row], card: YourRaceCard?, isFinal: Bool, mySeat: Int) {
@@ -189,17 +189,6 @@ struct RaceResultViewModel: Equatable, Codable {
         return snapshot
     }
 
-    /// The order codes are shown in (#30): finishers, by distance, DSQ, OCS, RET.
-    private static func rank(_ code: ResultCode) -> Int {
-        switch code {
-        case .finished: 0
-        case .byDistance: 1
-        case .dsq: 2
-        case .ocs: 3
-        case .ret: 4
-        }
-    }
-
     /// Every seat with a foul called against her (#24's ⚑). Rule 31 mark touches aren't calls (ruling 5, #132).
     private static func flaggedSeats(_ incidents: IncidentIndex?) -> Set<Int> {
         guard let incidents else { return [] }
@@ -216,25 +205,29 @@ struct RaceResultViewModel: Equatable, Codable {
     }
 }
 
-/// The "Your race" card under the results (#24): only incidents involving you. Rule calls against you and in your
-/// favour, with the rule number and plain words, the other boat, the leg and the outcome; and your protests, which
-/// never change a result (CONTEXT.md **Protest**). Rule 31 mark touches are listed against you (ruling 5, #132).
+/// The "Your race" card under the results (#24): only incidents involving you, one short phrase each (the owner's
+/// sparse off-water screens, 2026-10-02): calls against you with their outcome, calls in your favour, your mark
+/// touches (listed against you, ruling 5, #132), and your protests, which never change a result (CONTEXT.md
+/// **Protest**).
 struct YourRaceCard: Equatable, Codable {
     struct Call: Equatable, Codable {
         var tick: Int
         /// "10", "31".
         var rule: String
-        /// The rule in plain words (`RuleWords.plain`), or the mark touched for rule 31.
-        var words: String
         /// The other boat's label, nil for a mark touch.
         var other: String?
-        var leg: Int
+        /// The mark touched, for a rule 31 entry.
+        var mark: String?
+        /// A call against the other boat, in your favour.
+        var inFavour: Bool
         var outcome: Outcome
 
         // TODO-COPY (#171)
-        var title: String { "Rule \(rule): \(words)" }
-        // TODO-COPY (#171)
-        var legText: String { "Leg \(leg + 1)" }
+        var phrase: String {
+            if inFavour { return "\(other ?? "A boat") fouled you (rule \(rule))" }
+            if let mark { return "Touched the \(mark), \(outcome.text)" }
+            return "Rule \(rule) against you, \(outcome.text)"
+        }
     }
 
     /// What became of the penalty the call owed (#24: "penalty done, or DSQ").
@@ -251,11 +244,11 @@ struct YourRaceCard: Equatable, Codable {
         // TODO-COPY (#171)
         var text: String {
             switch self {
-            case .penaltyDone: "Penalty done"
+            case .penaltyDone: "penalty done"
             case .dsq: "DSQ"
-            case .notDone: "Penalty not done"
-            case .owed: "Penalty owed"
-            case .noTurn: "No penalty owed"
+            case .notDone: "penalty not done"
+            case .owed: "penalty owed"
+            case .noTurn: "no penalty"
             }
         }
     }
@@ -263,12 +256,9 @@ struct YourRaceCard: Equatable, Codable {
     struct ProtestEntry: Equatable, Codable {
         var tick: Int
         var protested: String
-        var leg: Int
 
         // TODO-COPY (#171)
-        var legText: String { "Leg \(leg + 1)" }
-        // TODO-COPY (#171)
-        static let note = "Recorded, doesn't change results"
+        var phrase: String { "You protested \(protested)" }
     }
 
     /// Calls against you and your mark touches, oldest first.
@@ -317,20 +307,19 @@ struct YourRaceCard: Equatable, Codable {
                 }
             }
         }
-        func entry(_ call: RuleCall, other: Int) -> Call {
-            Call(tick: call.tick, rule: call.rule.rawValue, words: RuleWords.plain(call.rule), other: label(other),
-                 leg: call.leg, outcome: outcomes[.call(call.incidentId)] ?? .noTurn)
+        func entry(_ call: RuleCall, other: Int, inFavour: Bool) -> Call {
+            Call(tick: call.tick, rule: call.rule.rawValue, other: label(other), mark: nil, inFavour: inFavour,
+                 outcome: outcomes[.call(call.incidentId)] ?? .noTurn)
         }
-        var against = calls.filter { $0.offender == mySeat }.map { entry($0, other: $0.victim) }
+        var against = calls.filter { $0.offender == mySeat }.map { entry($0, other: $0.victim, inFavour: false) }
         against += touches.filter { $0.element.seat == mySeat }.map { index, touch in
-            // TODO-COPY (#171)
-            Call(tick: touch.tick, rule: RacingRule.touchingMark.rawValue, words: "touched the \(touch.mark)", other: nil,
-                 leg: touch.leg, outcome: outcomes[.touch(index)] ?? .owed)
+            Call(tick: touch.tick, rule: RacingRule.touchingMark.rawValue, other: nil, mark: touch.mark, inFavour: false,
+                 outcome: outcomes[.touch(index)] ?? .owed)
         }
         self.against = against.sorted { $0.tick < $1.tick }
-        inFavour = calls.filter { $0.victim == mySeat && $0.offender != mySeat }.map { entry($0, other: $0.offender) }
-        protests = incidents.protests(by: mySeat).map {
-            ProtestEntry(tick: $0.tick, protested: label($0.protested), leg: $0.leg)
+        inFavour = calls.filter { $0.victim == mySeat && $0.offender != mySeat }.map {
+            entry($0, other: $0.offender, inFavour: true)
         }
+        protests = incidents.protests(by: mySeat).map { ProtestEntry(tick: $0.tick, protested: label($0.protested)) }
     }
 }

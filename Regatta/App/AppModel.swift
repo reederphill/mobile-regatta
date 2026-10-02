@@ -227,7 +227,7 @@ final class AppModel {
         #if DEBUG
         tuning.attach(session, files: config.files)
         #endif
-        session.onResultsFinal = { [weak self] results in self?.lastRace = results }
+        session.onResultsFinal = { [weak self] results in self?.keepAsLastRace(results) }
         return session
     }
 
@@ -277,10 +277,15 @@ final class AppModel {
         race = nil
     }
 
+    /// Home's Last race takes `results` unless you retired from that race (#132): a RET leaves the one before.
+    private func keepAsLastRace(_ results: RaceResultViewModel) {
+        if results.keepsAsLastRace { lastRace = results }
+    }
+
     /// Keeps a practice race sailed on tuned copies, with them beside its log, as it leaves (#232, ADR 0004); and its
     /// results for home's Last race if you were done in it (#132).
     private func archiveRace() {
-        if let kept = session?.resultsToKeep() { lastRace = kept }
+        if let kept = session?.resultsToKeep() { keepAsLastRace(kept) }
         #if DEBUG
         if let session { tuning.archive(session) }
         #endif
