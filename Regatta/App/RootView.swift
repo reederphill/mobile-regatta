@@ -23,7 +23,7 @@ struct RootView: View {
             switch fixtureGallery {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
-            case .practiceSetup, .pauseMenu, .myBoat: MenuGalleryView(gallery: fixtureGallery, model: model)
+            case .practiceSetup, .pauseMenu, .myBoat, .help: MenuGalleryView(gallery: fixtureGallery, model: model)
             case .results(let stage): ResultsGalleryView(stage: stage)
             }
         } else {

@@ -27,14 +27,6 @@ struct MenuPageView: View {
     }
 }
 
-/// The Help page (#135 builds it): pushed from home, and over a paused race from the pause menu (#25).
-struct HelpPage: View {
-    var body: some View {
-        PlaceholderPage(title: "Help", systemImage: "questionmark.circle", id: "page-help",
-                        message: "How to steer, start and keep clear arrives here.")
-    }
-}
-
 /// A practice race's setup (#25, #131): the venue, its conditions or Random, the bot tier or a Mixed fleet, and the
 /// fleet size, then Start, which goes to the briefing. Laps and the start sequence are fixed. The choices are kept on
 /// the device for the next race (`AppModel.practiceSetup`).

@@ -18,12 +18,13 @@ struct RaceControls: View {
     var body: some View {
         HStack(alignment: .bottom) {
             // Ease holds boats on the line before the gun too (#99).
-            HoldButton(title: "EASE", width: 96, identifier: "race-ease", isEnabled: isRacing, isPaused: session.isPaused,
+            HoldButton(title: "EASE", width: 96, identifier: "race-ease", isEnabled: isRacing,
+                       releases: session.controlReleases,
                        onPress: { session.setEase(true) }, onRelease: { session.setEase(false) },
                        accessibilityToggle: .init(isOn: session.isEasing, toggle: { session.toggleEase() }))
             Spacer()
             HoldButton(title: session.hud.isUpwind ? "TACK" : "GYBE", width: 120, identifier: "race-tack",
-                       isEnabled: isRacing, isPaused: session.isPaused,
+                       isEnabled: isRacing, releases: session.controlReleases,
                        onPress: { session.pressTack(at: Self.now) }, onRelease: { session.releaseTack(at: Self.now) })
             Spacer()
             // A placeholder until #125 wires it to the protest picker: it brightens under the finger like the others.
@@ -78,7 +79,8 @@ private struct HoldButton: View {
     let width: CGFloat
     let identifier: String
     let isEnabled: Bool
-    let isPaused: Bool
+    /// `GameSession.controlReleases`: a change lets go without releasing (an overlay took the touches).
+    let releases: Int
     let onPress: () -> Void
     let onRelease: () -> Void
     /// VoiceOver can't hold a button, so a hold that is a mode (Ease) is a toggle there, its value On or Off; nil
@@ -108,7 +110,7 @@ private struct HoldButton: View {
                     }
             )
             .disabled(!isEnabled)
-            .onChange(of: isPaused) { _, paused in if paused { isHeld = false } }
+            .onChange(of: releases) { isHeld = false }
             .onChange(of: isEnabled) { _, enabled in
                 guard !enabled, isHeld else { return }
                 isHeld = false

@@ -154,7 +154,7 @@ struct RaceView: View {
                     // Restart is practice only (#25): an online race can't be sailed again from its start.
                     onRestart: session.driver is PracticeDriver ? onRestart : nil,
                     onLeave: onExit,
-                    onHelp: { showsHelp = true },
+                    onHelp: openHelp,
                     onTuning: tuningAction
                 )
             }
@@ -171,13 +171,20 @@ struct RaceView: View {
         }
     }
 
+    /// Help over the race (#135): a sheet, the controls let go first. A paused race stays paused; an online one keeps
+    /// running with the rudder centred.
+    private func openHelp() {
+        session.releaseControls()
+        showsHelp = true
+    }
+
     /// Practice: Home, Change setup, Sail again; the first race: Race online and Help (#24).
     private var resultsButtons: ResultsView.Buttons {
         switch session.resultsButtons {
         case .practice:
             .practice(home: onExit, changeSetup: onChangeSetup, sailAgain: onSailAgain ?? onRestart)
         case .firstRace:
-            .firstRace(raceOnline: onRaceOnline ?? onExit, help: { showsHelp = true })
+            .firstRace(raceOnline: onRaceOnline ?? onExit, help: openHelp)
         }
     }
 
