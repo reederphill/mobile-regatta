@@ -21,12 +21,15 @@ enum Rule17Fixture {
     /// `leewardSpeed`, seat 1 (windward) `windwardBelow` radians below it (towards seat 0) at `windwardSpeed`. Seat 1's
     /// centre is `ahead` metres ahead of seat 0's along seat 0's heading, and to windward of it by as much as leaves
     /// `gap` metres between the hulls (`gap` nil: `abeam` metres, centre to centre). Overlapped as of the last point
-    /// of certainty when `overlapped`. `at` defaults to mid-beat; `edit` has the last word.
-    static func place(_ race: Race, tick: Int = 300, at: Vec2? = nil, leewardAbove: Double, windwardBelow: Double = 0,
+    /// of certainty when `overlapped`. `at` defaults to mid-beat; `edit` has the last word. Off the wind, `leg` is the
+    /// leg both sail and `proper` the leeward boat's proper course there as a sailing angle, which takes the groove's
+    /// place: the windward boat then holds `proper` less `windwardBelow` by her autohelm, not the groove.
+    static func place(_ race: Race, tick: Int = 300, at: Vec2? = nil, leg: Int = 0, proper: Double? = nil,
+                      leewardAbove: Double, windwardBelow: Double = 0,
                       gap: Double? = nil, abeam: Double = 0, ahead: Double = 0, leewardSpeed: Double = F.speed,
                       windwardSpeed: Double = F.speed, overlapped: Bool = true,
                       edit: (inout WorldSnapshot) -> Void = { _ in }) throws {
-        let groove = groove(race)
+        let groove = proper ?? groove(race)
         let at = at ?? F.midBeat(race)
         let leewardAngle = groove - leewardAbove, windwardAngle = groove + windwardBelow
         let leewardHeading = F.starboard(race, offWind: leewardAngle)
@@ -35,7 +38,7 @@ enum Rule17Fixture {
         try jump(race, to: tick) { snapshot in
             for seat in 0..<2 {
                 var boat = snapshot.seats[seat].boat
-                placeRacing(&boat, leg: 0, at: at)
+                placeRacing(&boat, leg: leg, at: at)
                 boat.boomSide = .port
                 boat.rudder = 0
                 boat.desiredRudder = 0
@@ -52,7 +55,7 @@ enum Rule17Fixture {
                     boat.position = at + forward.rightPerp * across + forward * ahead
                     boat.heading = F.starboard(race, offWind: windwardAngle)
                     boat.speed = windwardSpeed
-                    boat.autohelm = windwardBelow == 0 ? Autohelm(target: .groove(.upwind)) : Autohelm(target: .angle(windwardAngle))
+                    boat.autohelm = windwardBelow == 0 && proper == nil ? Autohelm(target: .groove(.upwind)) : Autohelm(target: .angle(windwardAngle))
                 }
                 snapshot.seats[seat].boat = boat
                 snapshot.seats[seat].heldInput = .neutral
@@ -66,7 +69,7 @@ enum Rule17Fixture {
     /// Gives the pair the rule 17 record of seat 0 (leeward) against seat 1, as if she had come up from astern:
     /// placing by snapshot forgets the umpire's memory.
     static func record(_ race: Race) {
-        race.umpire?.setProperCourse(ProperCourseRecord(leeward: 0, windward: 1, tick: race.tick), for: pair)
+        race.umpire?.setProperCourse(ProperCourseRecord(leeward: 0, windward: 1), for: pair)
     }
 
     /// Seat 0 sailing up from clear astern and to leeward of seat 1, both on the groove: her bow `behind` metres behind
@@ -119,7 +122,7 @@ enum Rule17Fixture {
             return R.record(of: race) != nil
         })
         let record = try #require(R.record(of: race))
-        #expect(record.leeward == 0 && record.windward == 1 && record.tick == overlappedAt)
+        #expect(record.leeward == 0 && record.windward == 1 && race.tick == overlappedAt)
         #expect(race.properCourseRestrictions(of: 0) == [1] && race.properCourseRestrictions(of: 1) == [])
         // A prediction holds no umpire, so no record.
         #expect(try F.prediction(of: race).properCourseRestrictions(of: 0) == [])
@@ -155,6 +158,19 @@ enum Rule17Fixture {
         #expect(race.overlaps.isOverlapped(0, 1))
         R.sail(race, within: Race.tickRate) { R.record(of: $0) != nil }
         #expect(R.record(of: race) == nil)
+    }
+
+    /// The leeward boat ahead of the windward one, not clear astern of her, dropping back until they overlap: she
+    /// didn't come up from clear astern, so no record, however long they sail overlapped.
+    @Test func noRecordWhenLeewardWasAhead() throws {
+        let race = try F.race()
+        try R.overtake(race, abeam: 2.5, leewardSpeed: 1.5, windwardSpeed: F.speed, windwardFromAstern: true)
+        #expect(!Rules.isClearAstern(race.boats[0], of: race.boats[1], hull: race.boatClass.hull))
+        #expect(Rules.isClearAstern(race.boats[1], of: race.boats[0], hull: race.boatClass.hull))
+        #expect(R.sail(race, within: 5 * Race.tickRate) { race in race.overlaps.isOverlapped(0, 1) })
+        #expect(F.gap(race) <= 2 * race.boatClass.hull.length)
+        R.sail(race, within: 2 * Race.tickRate) { R.record(of: $0) != nil }
+        #expect(race.overlaps.isOverlapped(0, 1) && R.record(of: race) == nil)
     }
 
     /// A record opened by sailing up from astern.
@@ -324,7 +340,15 @@ enum Rule17Fixture {
         try R.place(race, at: mark - race.course.upwind * (2 * length) + race.course.right * (1.5 * length),
                     leewardAbove: deg2rad(10), gap: 1.2)
         R.record(race)
-        let outcome = try #require(E.sailToCall(race, within: 5 * Race.tickRate))
+        // The record ends because rule 18 took over: on the tick it ends they are still overlapped within two
+        // hull lengths, on the same tack.
+        var endedOverlapped: Bool?
+        let outcome = try #require(E.sailToCall(race, within: 5 * Race.tickRate) { race in
+            guard endedOverlapped == nil, R.record(of: race) == nil else { return }
+            endedOverlapped = race.overlaps.isOverlapped(0, 1) && F.gap(race) <= 2 * length
+                && race.boats[0].boomSide == race.boats[1].boomSide && !race.boats.contains(where: \.isTacking)
+        })
+        #expect(endedOverlapped == true)
         #expect(outcome.call.rule != .properCourse, "\(outcome.call.rule)")
         #expect(R.record(of: race) == nil)
     }
@@ -356,5 +380,63 @@ enum Rule17Fixture {
         let outcome = try #require(E.sailToCall(race, within: 5 * Race.tickRate))
         #expect(outcome.call.rule == .properCourse && outcome.call.offender == 0 && outcome.call.victim == 1)
         #expect(outcome.exonerated == [1])
+    }
+
+    // MARK: - Off the wind
+
+    /// Where to set the pair sailing on a reach (the leg to the offset mark, half way to it from the windward
+    /// mark) or a run (the leg to the gate, half way down to it): the leg, the place, and the leeward boat's proper
+    /// course there on starboard tack.
+    static func offWind(_ kind: ProperCourse.Kind, _ race: Race) throws -> (leg: Int, at: Vec2, proper: ProperCourse) {
+        let course = race.course
+        let windward = course.elements[CourseLayout.windwardIndex].marks[0].position
+        let leg: Int, at: Vec2
+        switch kind {
+        case .reach:
+            leg = try #require(course.legs.firstIndex(of: .round(CourseLayout.offsetIndex)))
+            at = (windward + course.elements[CourseLayout.offsetIndex].marks[0].position) / 2
+        default:
+            leg = try #require(course.legs.firstIndex(of: .round(CourseLayout.gateIndex)))
+            at = windward - course.upwind * (course.beat / 2)
+        }
+        let proper = try #require(ProperCourse.of(position: at, boomSide: .port, status: .racing, legIndex: leg,
+                                                  windDirection: course.axis, grooveTWS: metresPerSecond(knots: F.knots),
+                                                  course: course, boatClass: race.boatClass))
+        #expect(proper.kind == kind)
+        return (leg, at, proper)
+    }
+
+    /// On a reach and on a run, through `Race.step`: the leeward boat 12° above her proper course, past the 8°
+    /// tolerance, converging on the windward boat holding hers: rule 17 on her, the windward boat exonerated. At 6°,
+    /// above by the beat's 5° but inside the 8°: no rule 17, rule 11 on the windward boat.
+    @Test(arguments: [ProperCourse.Kind.reach, .run])
+    func offTheWindToleranceIsEightDegrees(kind: ProperCourse.Kind) throws {
+        func converge(above: Double, gap: Double, within seconds: Int) throws -> (Race, E.Outcome) {
+            let race = try F.race()
+            let (leg, at, proper) = try Rule17Tests.offWind(kind, race)
+            try R.place(race, at: at, leg: leg, proper: proper.sailingAngle, leewardAbove: above, gap: gap)
+            R.record(race)
+            let limits = try #require(race.rules.incidents.properCourse)
+            #expect(limits.tolerance(kind) == deg2rad(8))
+            var sailed: [Bool] = []
+            let outcome = try #require(E.sailToCall(race, within: seconds * Race.tickRate) { race in
+                guard R.record(of: race) != nil,
+                      let now = race.boats[0].properCourse(on: race.course, boatClass: race.boatClass)
+                else { return }
+                #expect(now.kind == kind)
+                sailed.append(now.isAbove(sailingAngle: race.boats[0].sailingAngle, tolerance: limits.tolerance(kind)))
+                #expect(now.isAbove(sailingAngle: race.boats[0].sailingAngle, tolerance: limits.beatTolerance))
+            })
+            #expect(R.record(of: race) != nil, "the record held through the incident")
+            #expect(sailed.last == (above > limits.tolerance(kind)))
+            return (race, outcome)
+        }
+        let (race, above) = try converge(above: deg2rad(12), gap: 1.2, within: 10)
+        #expect(above.call.rule == .properCourse && above.call.offender == 0 && above.call.victim == 1)
+        #expect(above.exonerated == [1])
+        #expect(race.boats[0].penaltyTurnsOwed == 1 && race.boats[1].penaltyTurnsOwed == 0)
+
+        let (_, within) = try converge(above: deg2rad(6), gap: 0.4, within: 20)
+        #expect(within.call.rule == .windwardLeeward && within.call.offender == 1 && within.exonerated.isEmpty)
     }
 }

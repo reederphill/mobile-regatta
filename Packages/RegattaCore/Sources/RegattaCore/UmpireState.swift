@@ -184,7 +184,7 @@ public struct UmpireState: Sendable, Equatable {
               Collision.distance(convex: leewardFirst.boat(id: leeward).hull(outline: outline),
                                  simplePolygon: windwardFirst.boat(id: windward).hull(outline: outline)) <= reach
         else { return nil }
-        return ProperCourseRecord(leeward: leeward, windward: windward, tick: tick.tick)
+        return ProperCourseRecord(leeward: leeward, windward: windward)
     }
 
     // MARK: - Rule 18 (#91)
@@ -280,13 +280,10 @@ public struct UmpireState: Sendable, Equatable {
 public struct ProperCourseRecord: Sendable, Equatable {
     public let leeward: Int
     public let windward: Int
-    /// The tick it opened.
-    public let tick: Int
 
-    public init(leeward: Int, windward: Int, tick: Int) {
+    public init(leeward: Int, windward: Int) {
         self.leeward = leeward
         self.windward = windward
-        self.tick = tick
     }
 }
 

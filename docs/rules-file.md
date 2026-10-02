@@ -159,7 +159,7 @@ showed the overlap; it holds while they stay so, and ends for good otherwise (se
 incident (contact or near miss) between such a pair that is rule 11 on the windward boat, the call is rule 17 on
 the leeward boat, the windward boat exonerated, when she is above proper course by more than the leg's tolerance,
 isn't promptly sailing astern, and the windward boat, on her own track (then sailed on as she was steering for
-`horizonSeconds`), would have been clear of the leeward boat's proper-course path: the leeward boat sailed from the
+`escape.horizonSeconds`), would have been clear of the leeward boat's proper-course path: the leeward boat sailed from the
 tick before her run above proper course began (or the track's first) with her autohelm set to her proper course each
 tick. Rule 17 is tried first: when it applies it is the one call, over rules 15 and 16.1. Otherwise the chain above
 runs unchanged. No penalty tier of its own: one turn.
