@@ -18,13 +18,13 @@ import RegattaServices
 /// - `-onlineHost <host:port>` is the dev race server, instead of the Settings page's field (Debug builds).
 /// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override).
 /// - `-startSeconds <n>` gives an online dev race an `n`-second start sequence, 1…60.
-/// - `-laps <n>` sails every practice race `n` laps, 1…9, instead of the settings' (#354: a UI test that waits for the
+/// - `-laps <n>` sails every practice race `n` laps, 1…9, instead of the setup's (#354: a UI test that waits for the
 ///   results sails a short race, so a slow simulator still reaches them).
 /// - `-appearance light|dark` overrides the system appearance, for UI tests of the menus in both (#108).
 /// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
 ///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
 /// - `-tuning` opens the debug tuning panel at launch (#232). Debug builds only: other builds don't know it.
-/// - `-briefing practice|online` opens on the briefing (#130) for a practice race on the settings (and `-seed`), with
+/// - `-briefing practice|online` opens on the briefing (#130) for the launch race (`RaceConfig.launch()`, and `-seed`), with
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued` or
@@ -190,10 +190,24 @@ struct LaunchOptions: Equatable {
     /// Whether launch skips the menu and starts a race.
     var startsRace: Bool { autostart || demo || perf }
 
-    /// A race started from the menu or restarted: the player's settings, on the pinned seed if there is one, and
-    /// `-laps`' laps if given.
-    func raceConfig(from settings: RaceSettings) -> RaceConfig {
-        var config = settings.config
+    /// A race's seeds: fresh ones, drawn independently (ADR 0001: online races get the race seed from the server, which
+    /// keeps the wind seed to itself), or `-seed`'s with the wind seed pinned to it.
+    func seeds() -> (seed: UInt64, windSeed: UInt64) {
+        if let seed { return (seed, RaceConfig.windSeed(pinnedTo: seed)) }
+        return (.random(in: .min ... .max), .random(in: .min ... .max))
+    }
+
+    /// A practice race on `setup` (Start, Sail again): on fresh seeds or the pinned one, and `-laps`' laps if given.
+    func raceConfig(from setup: PracticeSetup) -> RaceConfig {
+        let (seed, windSeed) = seeds()
+        var config = setup.config(seed: seed, windSeed: windSeed)
+        if let laps { config.laps = laps }
+        return config
+    }
+
+    /// `config` on the pinned seed if there is one, and `-laps`' laps if given.
+    func raceConfig(from config: RaceConfig) -> RaceConfig {
+        var config = config
         if let laps { config.laps = laps }
         if let seed {
             config.seed = seed
@@ -202,10 +216,11 @@ struct LaunchOptions: Equatable {
         return config
     }
 
-    /// The race started at launch, or nil to show the menu.
-    func launchRaceConfig(from settings: RaceSettings) -> RaceConfig? {
+    /// The race started at launch, or nil to show the menu: `config`, the launch race (`RaceConfig.launch()`) unless a
+    /// test gives another.
+    func launchRaceConfig(from config: RaceConfig = .launch()) -> RaceConfig? {
         guard startsRace else { return nil }
-        var config = raceConfig(from: settings)
+        var config = raceConfig(from: config)
         config.botSailsYourBoat = demo || perf
         if perf { config.opponents = Self.perfFleetSize - 1 }
         return config

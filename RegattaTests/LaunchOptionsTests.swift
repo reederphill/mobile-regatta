@@ -14,7 +14,7 @@ import RegattaServices
         #expect(options == LaunchOptions())
         #expect(!options.startsRace)
         #expect(options.timescale == 1)
-        #expect(options.launchRaceConfig(from: RaceSettings()) == nil)
+        #expect(options.launchRaceConfig() == nil)
     }
 
     @Test func parsesEveryOption() {
@@ -156,7 +156,7 @@ import RegattaServices
         #expect(options.startSeconds == 5)
         #expect(options.raceSeconds == 20)
         #expect(options.problems.isEmpty)
-        #expect(options.launchRaceConfig(from: RaceSettings()) == nil)
+        #expect(options.launchRaceConfig() == nil)
         #expect(RaceServer(address: options.onlineHost!).raceURL?.absoluteString == "ws://127.0.0.1:50123/race")
     }
 
@@ -176,8 +176,8 @@ import RegattaServices
 
     @Test func aPinnedSeedSailsEveryRace() {
         let options = parse("-seed", "1")
-        let first = options.raceConfig(from: RaceSettings())
-        let second = options.raceConfig(from: RaceSettings())
+        let first = options.raceConfig(from: PracticeSetup())
+        let second = options.raceConfig(from: PracticeSetup())
         #expect(first.seed == 1)
         #expect(second.seed == 1)
         #expect(first.windSeed == second.windSeed, "the wind seed is pinned too")
@@ -185,32 +185,36 @@ import RegattaServices
     }
 
     /// `-laps` sails every practice race that many laps (#354: the race-finish UI test sails one); bad values are
-    /// refused and the settings' laps stand.
+    /// refused and the setup's fixed laps stand.
     @Test func lapsOverridesTheSettingsLaps() throws {
-        let settings = RaceSettings()
-        let config = try #require(parse("-autostart", "-seed", "1", "-laps", "1").launchRaceConfig(from: settings))
+        let setup = PracticeSetup()
+        let config = try #require(parse("-autostart", "-seed", "1", "-laps", "1").launchRaceConfig())
         #expect(config.laps == 1)
         #expect(config.setup.laps == 1)
-        #expect(parse("-laps", "1").raceConfig(from: settings).laps == 1, "a restarted race too")
-        #expect(parse().raceConfig(from: settings).laps == settings.laps)
+        #expect(parse("-laps", "1").raceConfig(from: setup).laps == 1, "a practice race too")
+        #expect(parse().raceConfig(from: setup).laps == PracticeSetup.laps)
         for bad in ["0", "10", "two"] {
             let options = parse("-laps", bad)
             #expect(options.laps == nil)
             #expect(options.problems.count == 1)
-            #expect(options.raceConfig(from: settings).laps == settings.laps)
+            #expect(options.raceConfig(from: setup).laps == PracticeSetup.laps)
         }
     }
 
+    /// `-autostart` sails the frozen launch race, whatever the practice setup: seven Mixed bots, two laps, the
+    /// bundled default files (the UI tests' eight-boat, seed-1 numbers count on it).
     @Test func autostartSailsTheSettingsRace() throws {
-        let settings = RaceSettings()
-        let config = try #require(parse("-autostart", "-seed", "1").launchRaceConfig(from: settings))
+        let config = try #require(parse("-autostart", "-seed", "1").launchRaceConfig())
         #expect(config.seed == 1)
-        #expect(config.opponents == settings.opponents)
+        #expect(config.opponents == 7)
+        #expect(config.laps == 2)
+        #expect(config.botTier == nil)
+        #expect(config.files == .defaults)
         #expect(!config.botSailsYourBoat)
     }
 
     @Test func demoLetsABotSailThePlayer() throws {
-        let config = try #require(parse("-demo").launchRaceConfig(from: RaceSettings()))
+        let config = try #require(parse("-demo").launchRaceConfig())
         #expect(config.botSailsYourBoat)
         #expect(config.seatControllers[0].driver?.seat == 0, "a bot controller is attached to seat 0")
         #expect(config.seatControllers.seats.allSatisfy { !$0.isHuman })
@@ -218,7 +222,7 @@ import RegattaServices
     }
 
     @Test func perfIsASixteenBoatDemoRace() throws {
-        let config = try #require(parse("-perf").launchRaceConfig(from: RaceSettings()))
+        let config = try #require(parse("-perf").launchRaceConfig())
         #expect(config.botSailsYourBoat)
         #expect(PracticeDriver(config: config).currentFrame.boats.count == 16)
     }

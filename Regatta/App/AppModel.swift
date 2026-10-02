@@ -61,8 +61,19 @@ final class AppModel {
     }
     var path: [Page] = []
     var sheet: Sheet?
-    /// The practice race setup, kept between races.
-    var settings = RaceSettings()
+    /// The practice setup (#131), kept on the device as it changes: the last choices are the next race's.
+    var practiceSetup: PracticeSetup {
+        didSet {
+            guard practiceSetup != oldValue else { return }
+            practiceSetup.save(to: practiceDefaults)
+        }
+    }
+    /// Where `practiceSetup` lives: `defaults`, or in UI tests a suite emptied at each launch, so every test starts
+    /// from the defaults.
+    @ObservationIgnored let practiceDefaults: UserDefaults
+    /// The practice race the race sequence shows or briefs, as set up, before the tuning panel's files: what Restart
+    /// replays.
+    @ObservationIgnored private(set) var practiceConfig: RaceConfig?
     /// The device's settings (#110): the Settings page's rows, saved to `defaults` as they change.
     var deviceSettings: DeviceSettings {
         didSet {
@@ -111,6 +122,13 @@ final class AppModel {
         self.defaults = defaults
         let deviceSettings = DeviceSettings(defaults: defaults)
         self.deviceSettings = deviceSettings
+        if launchOptions.uiTesting, let suite = UserDefaults(suiteName: Self.uiTestingPracticeSuite) {
+            suite.removePersistentDomain(forName: Self.uiTestingPracticeSuite)
+            practiceDefaults = suite
+        } else {
+            practiceDefaults = defaults
+        }
+        practiceSetup = PracticeSetup(defaults: practiceDefaults)
         haptics = GatedHaptics(isOn: deviceSettings.haptics)
         controls = ControlSettings(deviceSettings, launchOptions: launchOptions)
         #if DEBUG
@@ -119,6 +137,9 @@ final class AppModel {
         sceneState.isRaceSequenceShowing = false
         controls.savesZoomMultiplier = { [weak self] multiplier in self?.deviceSettings.zoomMultiplier = multiplier }
     }
+
+    /// The UI tests' practice setup suite.
+    static let uiTestingPracticeSuite = "com.phillreeder.regatta.uitesting.practice"
 
     /// The rule numbers this device has seen called (#23), kept with hint progress in `defaults`: Reset hints clears it.
     /// UI tests keep it in memory, a race's own, so every run reads the same words.
@@ -136,8 +157,8 @@ final class AppModel {
     }
 
     /// Shows `race` in the race sequence, replacing any race there. The one way into a race, whether it's a
-    /// practice race, a restart, a launch argument or an online race. The pushed pages stay under the cover, so
-    /// quitting a practice race returns to its setup.
+    /// practice race, a restart, a launch argument or an online race. The pushed pages stay under the cover until
+    /// the race sequence routes elsewhere (`leaveRace`, `changeSetup`).
     func startRaceSequence(_ race: Race) {
         archiveRace()
         sheet = nil
@@ -150,22 +171,43 @@ final class AppModel {
         startRaceSequence(.practice(session))
     }
 
-    /// A practice race on the current settings.
-    func startPractice() {
-        startRaceSequence(practiceSession(config: launchOptions.raceConfig(from: settings)))
+    /// The pause menu's Restart (#25): the same race again, same seeds and setup, straight to the gun's countdown with
+    /// no briefing. The tuning panel's files apply afresh, as at any race start.
+    func restartPractice() {
+        guard let practiceConfig else { return }
+        startRaceSequence(practiceSession(config: practiceConfig))
+    }
+
+    /// The results' Sail again: a new race on the practice setup, on a new seed, through its briefing.
+    func sailAgain() {
+        beginPractice()
+    }
+
+    /// The results' Change setup: back to the practice setup page (#25).
+    func changeSetup() {
+        endRaceSequence()
+        path = [.practiceSetup]
+    }
+
+    /// The pause menu's Leave race (practice: no warning) and the results' Menu: home (#25).
+    func leaveRace() {
+        endRaceSequence()
+        dismissAll()
     }
 
     /// A practice race on `config`, sailed on the tuning panel's files and drawn with its look in a Debug build
     /// (#232): tuned values apply at the next race start, never during one.
     func practiceSession(config: RaceConfig) -> GameSession {
-        session(tuned: tuned(config))
+        practiceConfig = config
+        return session(tuned: tuned(config))
     }
 
-    /// `config` on the tuning panel's files in a Debug build (#232); as it is otherwise.
+    /// `config` on the tuning panel's boat class and rules in a Debug build (#232), at the setup's venue and conditions
+    /// unless the panel tuned the conditions (`TuningModel.practiceFiles(over:)`); as it is otherwise.
     func tuned(_ config: RaceConfig) -> RaceConfig {
         #if DEBUG
         var config = config
-        config.files = tuning.practiceFiles()
+        config.files = tuning.practiceFiles(over: config.files)
         return config
         #else
         return config
@@ -182,16 +224,17 @@ final class AppModel {
         return session
     }
 
-    /// The practice setup's Start (#25, #130): the briefing for a race on the current settings, which waits for Ready.
-    /// #131's setup page calls it.
+    /// The practice setup's Start (#25, #130): the briefing for a race on the setup, on a new seed, which waits for
+    /// Ready.
     func beginPractice() {
-        startBriefing(config: launchOptions.raceConfig(from: settings), mode: .practice)
+        startBriefing(config: launchOptions.raceConfig(from: practiceSetup), mode: .practice)
     }
 
     /// Shows the briefing for a practice race on `config` (on the tuning panel's files in a Debug build), resolved
     /// once so the briefing and the race it leads to sail the same files. `mode` `.online` is the online briefing's
     /// countdown, which #141 wires to the online race; here it leads to a practice race on `config`.
     func startBriefing(config: RaceConfig, mode: BriefingModel.Mode) {
+        practiceConfig = config
         let config = tuned(config)
         startRaceSequence(.briefing(briefingModel(config: config, mode: mode), config))
     }

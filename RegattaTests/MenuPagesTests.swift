@@ -24,7 +24,7 @@ import UIKit
         }
     }
 
-    /// Pushing Practice shows its setup (the opponents stepper and the two segmented pickers), and the main thread
+    /// Pushing Practice shows its setup (the fleet stepper and the bot tier's segmented picker), and the main thread
     /// settles, after the push, after the setup changes and after popping back.
     @Test func practiceSetupPushesAndSettles() throws {
         let (window, model) = try host()
@@ -32,12 +32,14 @@ import UIKit
 
         model.path.append(.practiceSetup)
         #expect(settle(window), "the main thread didn't settle after pushing practice setup")
-        #expect(subviews(of: UIStepper.self, in: window).count == 1, "no opponents stepper")
-        #expect(subviews(of: UISegmentedControl.self, in: window).count == 2, "no laps and start sequence pickers")
+        #expect(subviews(of: UIStepper.self, in: window).count == 1, "no fleet stepper")
+        #expect(subviews(of: UISegmentedControl.self, in: window).count == 1, "no bot tier picker")
 
-        model.settings.opponents = 9
-        model.settings.laps = 3
-        model.settings.prestartSeconds = 90
+        model.practiceSetup.fleetSize = 16
+        model.practiceSetup.botTier = .national
+        model.practiceSetup.venue = "fellmere"
+        model.practiceSetup.conditions = .named("light-and-patchy")
+        defer { model.practiceSetup = PracticeSetup() } // the test host's device keeps it
         #expect(settle(window), "the main thread didn't settle after changing the setup")
 
         model.path.removeAll()

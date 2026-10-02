@@ -111,6 +111,10 @@ struct RenderFixture: Codable, Equatable {
         case livery
         /// The briefing for a race the fixture describes (#130): `{ "gallery": "briefing", "briefing": { … } }`.
         case briefing(BriefingFixture)
+        /// The practice setup page on a fresh install's choices (#131): `{ "gallery": "practiceSetup" }`.
+        case practiceSetup
+        /// The pause menu over the race's chrome (#131): `{ "gallery": "pauseMenu" }`.
+        case pauseMenu
     }
 
     /// A briefing render fixture (#130): the race it briefs, with no log, since a briefing needs only the setup.
@@ -136,7 +140,7 @@ struct RenderFixture: Codable, Equatable {
 
         /// The practice race this briefing is for, pinned to `raceSeed`.
         func config() throws -> RaceConfig {
-            var config = RaceConfig(opponents: opponents, laps: laps ?? RaceSettings().laps, seed: raceSeed,
+            var config = RaceConfig(opponents: opponents, laps: laps ?? RaceConfig.launchLaps, seed: raceSeed,
                                     windSeed: RaceConfig.windSeed(pinnedTo: raceSeed))
             let (venueID, venueVersion) = try Self.ref(venue)
             let (conditionsID, conditionsVersion) = try Self.ref(conditions)
@@ -166,7 +170,7 @@ struct RenderFixture: Codable, Equatable {
 
     private struct GalleryFile: Decodable {
         enum Kind: String, Decodable {
-            case livery, briefing
+            case livery, briefing, practiceSetup, pauseMenu
         }
 
         var gallery: Kind?
@@ -185,6 +189,8 @@ struct RenderFixture: Codable, Equatable {
             switch decoded.gallery {
             case nil: return nil
             case .livery?: return .livery
+            case .practiceSetup?: return .practiceSetup
+            case .pauseMenu?: return .pauseMenu
             case .briefing?:
                 guard let briefing = decoded.briefing else { throw GalleryError.briefingMissing }
                 return .briefing(briefing)
