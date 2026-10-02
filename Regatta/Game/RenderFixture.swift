@@ -105,6 +105,32 @@ struct RenderFixture: Codable, Equatable {
         }
     }
 
+    /// An off-water gallery a fixture shows in place of a race (#119): `{ "gallery": "livery" }` names no log.
+    enum Gallery: String, Codable, CaseIterable {
+        /// Each free starter design's large render and chip, in fixed colours (`LiveryGalleryView`).
+        case livery
+    }
+
+    private struct GalleryFile: Decodable {
+        var gallery: Gallery?
+    }
+
+    /// The gallery fixture `name` in `directory` shows, or nil for a race fixture.
+    static func gallery(named name: String, in directory: URL) throws -> Gallery? {
+        let file = directory.appendingPathComponent("\(name).json")
+        do {
+            return try JSONDecoder().decode(GalleryFile.self, from: Data(contentsOf: file)).gallery
+        } catch {
+            throw LoadError.unreadable(file.path, error)
+        }
+    }
+
+    /// The gallery fixture `name` shows, from the directory `environment` names; nil for a race fixture.
+    static func gallery(named name: String, environment: [String: String] = ProcessInfo.processInfo.environment) throws -> Gallery? {
+        guard let path = environment[directoryVariable], !path.isEmpty else { throw LoadError.noDirectory }
+        return try gallery(named: name, in: URL(fileURLWithPath: path, isDirectory: true))
+    }
+
     /// Loads fixture `name` from the directory `environment` names.
     static func load(named name: String, environment: [String: String] = ProcessInfo.processInfo.environment) throws -> (fixture: RenderFixture, log: RaceLog) {
         guard let path = environment[directoryVariable], !path.isEmpty else { throw LoadError.noDirectory }
@@ -176,6 +202,7 @@ final class FixtureDriver: RaceDriver {
     let isPausable = false
     let isFrozen = true
     let roster: FleetRoster
+    let liveries: FleetLiveries
     let currentFrame: TickFrame
     var previousFrame: TickFrame { currentFrame }
     let alpha = 1.0
@@ -197,6 +224,7 @@ final class FixtureDriver: RaceDriver {
         venue = race.files.venue.content
         boatClass = race.boatClass
         roster = FleetRoster(setup: setup)
+        liveries = FleetLiveries(setup: setup, mySeat: myBoatIndex)
         currentFrame = TickFrame(race: race, keepClearOf: myBoatIndex)
         ruleCalls = race.incidents.incidents.compactMap { if case .called(let call) = $0.outcome { call } else { nil } }
     }
