@@ -6,7 +6,7 @@ import Testing
 
 /// The app's turbulence trails (#376 follow-on A) are the prototype's (`TurbulenceTrailPrototypeTests` in RegattaCore's
 /// tests, the reference): the same scene gives the same factors, printed from the prototype's model once. And the layer
-/// draws a sprite a live sample.
+/// draws a ribbon a caster and kind.
 @MainActor @Suite struct TurbulenceTrailsTests {
     /// Printed from the prototype's `TurbulenceTrails` on `TrailParity`'s scene (the default class).
     static let prototype: [Double] = [1, 0.82444011624698443, 0.92180166715991441, 0.85173926921858512, 1, 141]
@@ -17,28 +17,42 @@ import Testing
         for (got, want) in zip(factors, Self.prototype) { #expect(abs(got - want) < 1e-9, "\(got) vs \(want)") }
     }
 
+    /// A ribbon a caster and kind: samples − ribbons segments, plus a cap on each ribbon's newest end (a lone sample
+    /// is just its disc), so as many sprites as samples; the rest hidden.
     @Test func layerDrawsASpriteASample() {
         let shadow = Race.defaultBoatClass.windShadow
         let layer = TurbulenceTrailLayer(pointsPerMeter: 8)
-        func samples(_ n: Int) -> [TurbulenceTrails.Sample] {
-            (0..<n).map { i in
-                TurbulenceTrails.Sample(position: Vec2(Double(i), 0), drift: Vec2(0, -1), born: 0, caster: 0,
-                                        peak: shadow.lossCloseIn, radius: 2, growth: 0.5, life: 10, isBackwind: i == 0)
-            }
+        func sample(_ x: Double, caster: Int = 0, backwind: Bool = false) -> TurbulenceTrails.Sample {
+            TurbulenceTrails.Sample(position: Vec2(x, 0), drift: Vec2(0, -1), born: 0, caster: caster,
+                                    peak: backwind ? shadow.backwindLoss : shadow.lossCloseIn, radius: 2, growth: 0.5,
+                                    life: 10, isBackwind: backwind)
         }
-        layer.update(samples: samples(7), time: 1, shadow: shadow, style: .standard)
-        #expect(layer.visibleCount == 7)
-        layer.update(samples: samples(3), time: 1, shadow: shadow, style: .standard)
-        #expect(layer.sprites.count == 7 && layer.visibleCount == 3)
-        // Drifted, grown and faded: at 1 s of 10, 2.5 m wide a side, 1 m down, at 90% of the hatch.
-        let sprite = layer.sprites[1]
-        #expect(abs(sprite.position.y - -8) < 1e-6 && abs(sprite.size.width - 40) < 1e-6)
-        #expect(abs(Double(sprite.alpha) - BoatStyle.standard.coneAlpha * 0.9) < 1e-6)
+        // Caster 0: a cone ribbon of three (two segments and a cap) and a lone backwind; caster 1: a lone cone.
+        let five = [sample(0), sample(4), sample(8), sample(0, backwind: true), sample(20, caster: 1)]
+        layer.update(samples: five, time: 1, shadow: shadow, style: .standard)
+        #expect(layer.visibleCount == 5)
+        // Drifted, grown and faded: at 1 s of 10, 2.5 m a side, 1 m down, at 90% of the hatch.
+        let hatch = BoatStyle.standard.coneAlpha * 0.9
+        let segment = layer.sprites[0], cap = layer.sprites[2]
+        #expect(segment.texture === TurbulenceTrailLayer.band && cap.texture === TurbulenceTrailLayer.disc)
+        #expect(abs(segment.position.x - 16) < 1e-6 && abs(segment.position.y - -8) < 1e-6)
+        #expect(abs(segment.size.width - (32 + TurbulenceTrailLayer.seam)) < 1e-6 && abs(segment.size.height - 40) < 1e-6)
+        #expect(abs(Double(segment.alpha) - hatch) < 1e-6)
+        #expect(abs(layer.sprites[1].position.x - 48) < 1e-6)
+        #expect(abs(cap.position.x - 64) < 1e-6 && abs(cap.size.width - 40) < 1e-6)
+        #expect(abs(Double(cap.alpha) - hatch / 2) < 1e-6)
+        // The lone backwind at the backwind's share and z; the lone cone at full alpha.
+        let backwind = layer.sprites[3]
+        #expect(abs(Double(backwind.alpha) - hatch * BoatStyle.standard.backwindShare) < 1e-6)
         // SpriteKit keeps a z in single precision.
-        #expect(abs(layer.sprites[0].zPosition - BoatEffects.Layer.backwind) < 1e-6)
-        #expect(abs(sprite.zPosition - BoatEffects.Layer.cones) < 1e-6)
+        #expect(abs(backwind.zPosition - BoatEffects.Layer.backwind) < 1e-6)
+        #expect(abs(segment.zPosition - BoatEffects.Layer.cones) < 1e-6)
+        #expect(abs(Double(layer.sprites[4].alpha) - hatch) < 1e-6)
+        // Fewer samples: the pool stays, the rest hide.
+        layer.update(samples: Array(five.prefix(2)), time: 1, shadow: shadow, style: .standard)
+        #expect(layer.sprites.count == 5 && layer.visibleCount == 2)
         // Past their life, none.
-        layer.update(samples: samples(3), time: 11, shadow: shadow, style: .standard)
+        layer.update(samples: five, time: 11, shadow: shadow, style: .standard)
         #expect(layer.visibleCount == 0)
     }
 
