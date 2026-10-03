@@ -34,6 +34,11 @@ import RegattaServices
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued` or
 ///   `cancelled-race` (`FakeServiceScenario`).
+/// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
+/// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
+///   tests otherwise empty at launch: a relaunch that checks what was saved.
+/// - `-completedRaces <n>` (with `-uitesting`) sets the online races you've completed, which earned designs count (#136).
+///   Kept in the UI tests' own suite; without `-uitesting` it's ignored, so it never unlocks a design for real.
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -78,6 +83,10 @@ struct LaunchOptions: Equatable {
     var vision: VisionFilter?
     var fakeServices: FakeServiceScenario?
     var briefing: Briefing?
+    /// `-myBoat`: a design in the bundled catalogue for the practice boat class.
+    var myBoat: DesignID?
+    var keepMyBoat = false
+    var completedRaces: Int?
     #if DEBUG
     var tuning = false
     #endif
@@ -101,12 +110,13 @@ struct LaunchOptions: Equatable {
             case "-uitesting": uiTesting = true
             case "-resetSettings": resetSettings = true
             case "-online": online = true
+            case "-keepMyBoat": keepMyBoat = true
             case "-hideScene": hidesScene = true
             #if DEBUG
             case "-tuning": tuning = true
             #endif
             case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
-                 "-appearance", "-vision", "-fakeServices", "-briefing":
+                 "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-completedRaces":
                 guard let value = rest.first, !Self.flags.contains(value) else {
                     problems.append("\(argument) needs a value")
                     continue
@@ -122,8 +132,7 @@ struct LaunchOptions: Equatable {
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
                           "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
-                          "-appearance",
-                          "-vision", "-fakeServices", "-briefing"]
+                          "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces"]
         #if DEBUG
         flags.insert("-tuning")
         #endif
@@ -169,6 +178,15 @@ struct LaunchOptions: Equatable {
             }
         case "-briefing":
             if let variant = Briefing(rawValue: value) { briefing = variant } else { reject(argument, value, "practice or online") }
+        case "-myBoat":
+            let id = DesignID(value)
+            if LiveryCatalogue.bundled.design(id)?.boatClass == RaceFiles.defaults.boatClass.ref.id {
+                myBoat = id
+            } else {
+                reject(argument, value, "a design id of the practice boat class")
+            }
+        case "-completedRaces":
+            if let n = Int(value), n >= 0 { completedRaces = n } else { reject(argument, value, "a whole number ≥ 0") }
         case "-fakeServices":
             if let scenario = FakeServiceScenario(rawValue: value) {
                 fakeServices = scenario

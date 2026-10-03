@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaServices
 import SwiftUI
 import UIKit
@@ -86,7 +87,8 @@ final class RootHostingController: UIHostingController<AppRoot> {
 
     /// With no `onlineStatus`, online and signed out, as the placeholders were: for tests.
     init(sceneState: SceneState, screenSize: CGSize, onlineStatus: OnlineStatus? = nil, analytics: Analytics = .discarding()) {
-        let model = AppModel(sceneState: sceneState, analytics: analytics)
+        // My boat sells from the app's store; with none given, the model's own stub.
+        let model = AppModel(sceneState: sceneState, store: onlineStatus?.services.store, analytics: analytics)
         let onlineStatus = onlineStatus ?? OnlineStatus(services: .fake(.signedOut))
         super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize, onlineStatus: onlineStatus))
         isOrientationLocked = sceneState.isRaceSequenceShowing

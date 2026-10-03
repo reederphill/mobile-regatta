@@ -39,7 +39,8 @@ final class PracticeDriver: RaceDriver {
     /// A practice race from the app's settings, with you in the setup's human seat, sailed on the config's
     /// files: the bundled defaults (`RaceFiles.defaults`), or the tuning panel's, whose tuned copies resolve from
     /// the config's catalog (#232). `timescale` runs it that many times real time (`-timescale`).
-    init(config: RaceConfig, timescale: Double = 1) {
+    /// Your boat wears `livery` (#136).
+    init(config: RaceConfig, timescale: Double = 1, livery: Livery = FleetLiveries.yours) {
         let setup = config.setup
         do {
             race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: config.files.catalog),
@@ -51,7 +52,7 @@ final class PracticeDriver: RaceDriver {
         seats = config.seatControllers
         roster = config.roster
         myBoatIndex = setup.seats.firstIndex(of: .human) ?? 0
-        liveries = FleetLiveries(setup: setup, mySeat: myBoatIndex)
+        liveries = FleetLiveries(setup: setup, mySeat: myBoatIndex, mine: livery)
         course = race.course
         venue = race.files.venue.content
         boatClass = race.boatClass

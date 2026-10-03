@@ -197,4 +197,23 @@ import RegattaCore
         #expect(try RenderFixture.gallery(named: "practice-setup", in: RenderFixtureTests.fixtures) == .practiceSetup)
         #expect(try RenderFixture.gallery(named: "pause-menu", in: RenderFixtureTests.fixtures) == .pauseMenu)
     }
+
+    /// My boat's fixtures (#136) carry their own livery, races and lock: a saved free design, and a starter after
+    /// fleet lock. Paid and earned designs have no art until #169, which brings back a shop fixture.
+    @Test func theMyBoatFixturesAreGalleries() throws {
+        func model(_ name: String) throws -> MyBoatModel {
+            guard case .myBoat(let fixture)? = try RenderFixture.gallery(named: name, in: RenderFixtureTests.fixtures) else {
+                Issue.record("\(name) isn't a My boat gallery")
+                throw CancellationError()
+            }
+            return fixture.model()
+        }
+        let saved = try model("my-boat")
+        #expect(saved.action == .saved)
+        #expect(saved.section == .colours)
+        let locked = try model("my-boat-locked")
+        #expect(locked.action == .fleetLocked)
+        #expect(locked.section == .decal)
+        #expect(locked.listedDesigns.contains { $0.id == locked.design }, "the starter is listed")
+    }
 }

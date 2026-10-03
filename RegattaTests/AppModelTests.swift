@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import Testing
 import UIKit
@@ -155,5 +156,56 @@ import RegattaCore
         status.hidesChat = false
         status.canChat = false
         #expect(LobbyPanelState(isOnline: true, status: status) == .chatHidden(queuedPlayers: 5))
+    }
+    /// A model on defaults of its own, so your livery is the test's.
+    private static func isolatedModel() -> (AppModel, UserDefaults) {
+        let name = "AppModelTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        return (AppModel(launchOptions: LaunchOptions(), defaults: defaults), defaults)
+    }
+
+    /// My boat's saved livery (#136) is kept on the device and is what your boat wears in the briefing and the race.
+    @Test func theSavedLiveryReachesTheBriefingAndTheRace() throws {
+        let (model, defaults) = Self.isolatedModel()
+        let mine = Livery(design: DesignID("skiff-stripe"),
+                          colours: [SwatchID("lavender"), SwatchID("white"), SwatchID("charcoal")], sailNumber: 4321)
+        #expect(model.myLivery != mine)
+        model.myBoat.select(mine.design)
+        model.myBoat.setColour(SwatchID("lavender"), for: .deck)
+        model.myBoat.setColour(SwatchID("white"), for: .accent)
+        model.myBoat.setColour(SwatchID("charcoal"), for: .sail)
+        model.myBoat.numberText = "4321"
+        model.myBoat.save()
+        #expect(model.myLivery == mine)
+        #expect(LiveryStore(defaults: defaults).load(boatClass: "skiff") == mine)
+
+        let config = PracticeSetup().config(seed: 1, windSeed: 1)
+        let briefing = model.briefingModel(config: config, mode: .practice)
+        #expect(briefing.fleet[briefing.mySeat].livery == mine)
+        let session = model.practiceSession(config: config)
+        #expect(session.driver.liveries[session.driver.myBoatIndex] == mine)
+    }
+
+    /// Try it and `-myBoat` open My boat with the design tried on, the draft otherwise the saved livery; an undrawn
+    /// design opens on the saved one (#169 draws it).
+    @Test func openMyBoatTriesTheDesignOn() throws {
+        let (model, _) = Self.isolatedModel()
+        model.sheet = .lastRace
+        let other = try #require(model.myBoat.listedDesigns.first { $0.id != model.myLivery.design }).id
+        model.openMyBoat(trying: other)
+        #expect(model.path == [.myBoat])
+        #expect(model.sheet == nil)
+        #expect(model.myBoat.design == other)
+        #expect(model.myBoat.saved == model.myLivery)
+        model.openMyBoat(trying: DesignID("skiff-tiger"))
+        #expect(model.myBoat.design == model.myLivery.design, "an undrawn design isn't tried on")
+    }
+
+    /// Fleet lock (#140 sets it) makes My boat inert.
+    @Test func liveryLockReachesMyBoat() {
+        let (model, _) = Self.isolatedModel()
+        model.isLiveryLocked = true
+        #expect(model.myBoat.action == .fleetLocked)
     }
 }

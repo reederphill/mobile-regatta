@@ -99,11 +99,12 @@ final class GameSession {
     /// The Tack/Gybe button's hold and release (#222).
     @ObservationIgnored private var tackHold = TackHold()
 
-    /// A practice race on the device. `timescale` runs the simulation that many times real time
-    /// (`-timescale`, for tests).
+    /// A practice race on the device, your boat in `livery` (#136). `timescale` runs the simulation that many times real
+    /// time (`-timescale`, for tests).
     convenience init(config: RaceConfig, timescale: Double = 1, haptics: any Haptics = GatedHaptics(),
-                     controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore()) {
-        let driver = PracticeDriver(config: config, timescale: timescale)
+                     controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
+                     livery: Livery = FleetLiveries.yours) {
+        let driver = PracticeDriver(config: config, timescale: timescale, livery: livery)
         self.init(driver: driver, roster: driver.roster, haptics: haptics, controls: controls, rulesSeen: rulesSeen)
     }
 
