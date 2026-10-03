@@ -65,14 +65,15 @@ final class TurbulenceTrailLayer: SKNode {
     }()
 
     /// The shimmer's world frame (`setView`): a pixel's world metres are `u_origin + u_dx · x + u_dy · y` for its
-    /// `gl_FragCoord` (pixels from the drawable's bottom left: SpriteKit keeps GL's y-up on Metal,
-    /// `TurbulenceTrailsTests`), wrapped (`setView`).
+    /// `gl_FragCoord` (pixels from the drawable's top left: Metal's, `TurbulenceTrailsTests`), wrapped (`setView`).
     private static let origin = SKUniform(name: "u_origin", vectorFloat2: .zero)
     private static let dx = SKUniform(name: "u_dx", vectorFloat2: vector_float2(1, 0))
     private static let dy = SKUniform(name: "u_dy", vectorFloat2: vector_float2(0, 1))
     /// Metres a pixel, and the ripples' pulse phase (radians, wrapped).
     private static let metresPerPixel = SKUniform(name: "u_mpp", float: 1)
     private static let phase = SKUniform(name: "u_phase", vectorFloat2: .zero)
+    /// Every frame uniform (`setView`), for another shader in the same frame (the tests').
+    static var frameUniforms: [SKUniform] { [origin, dx, dy, metresPerPixel, phase] }
 
     /// The period, metres, the shimmer repeats over in the water: 264 fleck cells of 1/2.2 m, and a whole number of
     /// every ripple's wavelengths, so the frame wraps by it with no seam.
@@ -113,12 +114,33 @@ final class TurbulenceTrailLayer: SKNode {
             gl_FragColor = vec4(a, a, a, a);
         }
         """
-        return SKShader(source: source, uniforms: [origin, dx, dy, metresPerPixel, phase])
+        return SKShader(source: source, uniforms: frameUniforms)
     }()
 
+    /// The world point (metres: `layer`'s points × `metresPerPoint`) a drawable pixel (x, y) from its top left
+    /// shows, through `camera`: the drawable is `viewSize` points × `pixelScale`, the scene (`sceneSize`) fitted
+    /// in it (aspect-fit, centred) with the camera at its centre. Only the camera's and the nodes' transforms, read
+    /// when called, so it holds the frame they are set for.
+    static func pixelFrame(viewSize: CGSize, pixelScale: CGFloat, sceneSize: CGSize, camera: SKNode, layer: SKNode,
+                           metresPerPoint: Double) -> (Double, Double) -> Vec2 {
+        let fit = min(viewSize.width / sceneSize.width, viewSize.height / sceneSize.height)
+        let perPixel = 1 / (Double(pixelScale) * Double(fit))
+        let halfWidth = Double(viewSize.width * pixelScale) / 2, halfHeight = Double(viewSize.height * pixelScale) / 2
+        // The camera's own points to the layer's: affine, so three points give it.
+        let o = layer.convert(CGPoint.zero, from: camera)
+        let ex = layer.convert(CGPoint(x: 1, y: 0), from: camera), ey = layer.convert(CGPoint(x: 0, y: 1), from: camera)
+        let ax = Vec2(Double(ex.x - o.x), Double(ex.y - o.y)), ay = Vec2(Double(ey.x - o.x), Double(ey.y - o.y))
+        let origin = Vec2(Double(o.x), Double(o.y))
+        return { x, y in
+            // Camera points: x right, y up from the centre.
+            let cx = (x - halfWidth) * perPixel, cy = (halfHeight - y) * perPixel
+            return (origin + ax * cx + ay * cy) * metresPerPoint
+        }
+    }
+
     /// Points the shimmer's world frame for this frame, shared by every strip: `pixel(x, y)` is the world point
-    /// (metres) the drawable's pixel (x, y) from its bottom left shows, at race time `time` (seconds). Everything is
-    /// wrapped by `period`, so the floats stay small.
+    /// (metres) the drawable's pixel (x, y) from its top left shows (`pixelFrame`), at race time `time` (seconds).
+    /// Everything is wrapped by `period`, so the floats stay small.
     static func setView(pixel: (Double, Double) -> Vec2, time: Double) {
         let o = pixel(0, 0), ex = pixel(1, 0) - o, ey = pixel(0, 1) - o
         func wrap(_ x: Double) -> Double { x - period * (x / period).rounded(.down) }

@@ -1,4 +1,5 @@
 import Foundation
+import Metal
 import RegattaCore
 import SpriteKit
 import Testing
@@ -208,33 +209,97 @@ import Testing
         #expect(layer.visibleCount == 0)
     }
 
-    /// The shimmer's frame: `gl_FragCoord` counts pixels from the bottom of what's drawn (SpriteKit keeps GL's y-up
-    /// even on Metal), as `setView`'s `pixel` assumes.
-    @Test func fragCoordCountsFromTheBottom() throws {
-        let view = SKView(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
-        let scene = SKScene(size: CGSize(width: 64, height: 64))
-        view.presentScene(scene)
-        let sprite = SKSpriteNode(color: .white, size: CGSize(width: 64, height: 64))
-        sprite.anchorPoint = .zero
-        sprite.shader = SKShader(source: """
+    /// The shimmer's frame (`pixelFrame`, `setView`) puts a world point where the nodes draw it, through a camera
+    /// that's moved, zoomed and turned, on a 3× drawable, in a scene under a moved layer: a shader disc around each
+    /// of three world points lands on a node disc there within a pixel. Rendered through Metal (`SKRenderer`, like the
+    /// screen: `gl_FragCoord` from the top left), not `texture(from:)`, which counts from the bottom.
+    @Test func shimmerFrameSitsOnTheWater() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let queue = try #require(device.makeCommandQueue())
+        let viewSize = CGSize(width: 100, height: 200), pixelScale: CGFloat = 3, ppm: CGFloat = 8
+        let width = Int(viewSize.width * pixelScale), height = Int(viewSize.height * pixelScale)
+        let scene = SKScene(size: viewSize)
+        scene.scaleMode = .aspectFit
+        scene.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        scene.backgroundColor = .clear
+        let layer = SKNode()
+        layer.position = CGPoint(x: 7, y: -3)
+        scene.addChild(layer)
+        let camera = SKCameraNode()
+        camera.position = CGPoint(x: 40, y: -25)
+        camera.setScale(1.6)
+        camera.zRotation = 0.5
+        scene.addChild(camera)
+        scene.camera = camera
+        let target = SKUniform(name: "u_target", vectorFloat2: .zero)
+        let shaderDisc = SKSpriteNode(color: .white, size: CGSize(width: 2000, height: 2000))
+        shaderDisc.shader = SKShader(source: """
         void main() {
-            float a = gl_FragCoord.y < 8.0 ? 1.0 : 0.0;
+            vec2 d = u_origin + u_dx * gl_FragCoord.x + u_dy * gl_FragCoord.y - u_target;
+            d -= \(TurbulenceTrailLayer.period) * floor(d / \(TurbulenceTrailLayer.period) + 0.5);
+            float a = length(d) < 0.6 ? 1.0 : 0.0;
             gl_FragColor = vec4(a, a, a, a);
         }
-        """)
-        scene.addChild(sprite)
-        let texture = try #require(view.texture(from: sprite))
-        let image = texture.cgImage()
-        let width = image.width, height = image.height
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        let context = try #require(CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8,
-                                             bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
-        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-        // The context's first row is the image's top.
-        let top = pixels[3], bottom = pixels[((height - 1) * width) * 4 + 3]
-        print("fragCoord: \(width)x\(height) top alpha \(top), bottom alpha \(bottom)")
-        #expect(top < 128 && bottom > 128)
+        """, uniforms: TurbulenceTrailLayer.frameUniforms + [target])
+        let nodeDisc = SKShapeNode(circleOfRadius: 0.6 * ppm)
+        nodeDisc.fillColor = .white
+        nodeDisc.strokeColor = .clear
+        layer.addChild(nodeDisc)
+        camera.addChild(shaderDisc)
+
+        let renderer = SKRenderer(device: device)
+        renderer.scene = scene
+        // The centroid, pixels from the top left, of what draws; nil when nothing does (the shader compiles in the
+        // background: a frame drawn before it's ready draws nothing at all).
+        func render() throws -> CGPoint? {
+            renderer.update(atTime: CACurrentMediaTime())
+            let frame = TurbulenceTrailLayer.pixelFrame(viewSize: viewSize, pixelScale: pixelScale, sceneSize: scene.size,
+                                                        camera: camera, layer: layer, metresPerPoint: 1 / Double(ppm))
+            TurbulenceTrailLayer.setView(pixel: frame, time: 0)
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width,
+                                                                      height: height, mipmapped: false)
+            descriptor.usage = [.renderTarget, .shaderRead]
+            descriptor.storageMode = .shared
+            let texture = try #require(device.makeTexture(descriptor: descriptor))
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = texture
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+            pass.colorAttachments[0].storeAction = .store
+            let buffer = try #require(queue.makeCommandBuffer())
+            renderer.render(withViewport: CGRect(x: 0, y: 0, width: width, height: height), commandBuffer: buffer,
+                            renderPassDescriptor: pass)
+            buffer.commit()
+            buffer.waitUntilCompleted()
+            var pixels = [UInt8](repeating: 0, count: width * height * 4)
+            texture.getBytes(&pixels, bytesPerRow: width * 4, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+            var sum = CGPoint.zero, count = 0.0
+            for y in 0..<height {
+                for x in 0..<width where pixels[(y * width + x) * 4 + 3] > 127 {
+                    sum.x += CGFloat(x) + 0.5; sum.y += CGFloat(y) + 0.5; count += 1
+                }
+            }
+            return count > 20 ? CGPoint(x: sum.x / count, y: sum.y / count) : nil
+        }
+        func renderWhenReady() async throws -> CGPoint {
+            for _ in 0..<200 {
+                if let centroid = try render() { return centroid }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            return try #require(nil as CGPoint?, "nothing drew")
+        }
+        // Points around the screen, in the camera's own points (the frame wraps by the shimmer's period).
+        for local in [CGPoint(x: -20, y: 30), CGPoint(x: 25, y: -40), CGPoint(x: 0, y: 0)] {
+            let at = layer.convert(local, from: camera)
+            nodeDisc.position = at
+            target.vectorFloat2Value = vector_float2(Float(at.x / ppm), Float(at.y / ppm))
+            nodeDisc.isHidden = false; shaderDisc.isHidden = true
+            let node = try await renderWhenReady()
+            nodeDisc.isHidden = true; shaderDisc.isHidden = false
+            let shader = try await renderWhenReady()
+            print("shimmer frame at \(local): node \(node), shader \(shader)")
+            #expect(hypot(node.x - shader.x, node.y - shader.y) < 1, "\(local): node \(node), shader \(shader)")
+        }
     }
 
     /// The sail's angle to her apparent wind, as drawn: about the default full angle sailing the upwind groove (so

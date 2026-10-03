@@ -338,17 +338,13 @@ final class GameScene: SKScene {
     }
 
     /// Points the trails' shimmer at the water this frame (`TurbulenceTrailLayer.setView`): a drawable pixel's world
-    /// metres through the camera.
+    /// metres through the camera as just set.
     private func pointShimmer(_ world: RenderWorld) {
         guard let view else { return }
-        let scale = Double(view.contentScaleFactor), height = Double(view.bounds.height)
-        let metres = 1 / Double(ppm)
-        // `gl_FragCoord` counts up from the bottom; the view's points count down from the top.
-        TurbulenceTrailLayer.setView(pixel: { x, y in
-            let at = CGPoint(x: x / scale, y: height - y / scale)
-            let p = trailLayer.convert(convertPoint(fromView: at), from: self)
-            return Vec2(Double(p.x) * metres, Double(p.y) * metres)
-        }, time: world.time)
+        let frame = TurbulenceTrailLayer.pixelFrame(viewSize: view.bounds.size, pixelScale: view.contentScaleFactor,
+                                                    sceneSize: size, camera: cam, layer: trailLayer,
+                                                    metresPerPoint: 1 / Double(ppm))
+        TurbulenceTrailLayer.setView(pixel: frame, time: world.time)
     }
 
     /// Draws `world`. `settled` draws it as if it had been standing still forever: the camera on its
