@@ -415,6 +415,9 @@ struct LogFeeder {
         "seatEvents": "the race log, not world state",
         "pressureMapDrawn": "the seat views' pressure map kept until its next refresh (#290): drawn from the wind, not world state; import drops it",
         "scriptedWind": "a test's wind in place of the keyed wind, fixed at construction like the setup (`Race.init(setup:files:mode:current:wind:)`)",
+        "shadowSettings": "Debug practice setting, not race data; in no log, snapshot or digest (ADR 0004 caveat)",
+        "wake": "derived ribbon points; a restored race regrows them, importSnapshot clears them",
+        "headerState": "derived header lag; importSnapshot resets it",
     ]
 
     /// The start state (#85) travels in the snapshot: OCS and started are the boat's status, and returning
