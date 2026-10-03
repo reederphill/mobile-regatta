@@ -382,11 +382,22 @@ import Testing
         for _ in 0..<(3 * Race.tickRate) { race.step() }
         #expect(race.backwindSail(ofSeat: 1) == 1 && race.shadowCone(ofSeat: 1)?.backwindSail == 1)
         #expect(race.header(ofSeat: 0) > 0)
-        // She eases: from the next tick her backwind is gone, and seat 0's header decays through its lag.
+        // She eases: her backwind fades over `backwindFadeSeconds` (1.5 s), not at once, and seat 0's header with it.
         _ = race.apply(BoatInput(rudder: 0 as Int8, ease: true), seat: 1, atTick: race.tick + 1)
         race.step()
         race.step()
-        #expect(race.backwindSail(ofSeat: 1) == 0 && race.shadowCone(ofSeat: 1)?.backwindSail == 0)
+        let fall = Race.dt / settings.backwindFadeSeconds
+        #expect(abs(race.backwindSail(ofSeat: 1) - (1 - fall)) < 1e-9, "one tick of the fade: \(race.backwindSail(ofSeat: 1))")
+        #expect(race.shadowCone(ofSeat: 1)?.backwindSail == race.backwindSail(ofSeat: 1))
+        let early = race.boats.indices.map(race.shadowCone(ofSeat:))
+        #expect(Race.headerTarget(at: race.boats[0].position, receiver: 0, cones: early, settings: settings) > 0,
+                "still headed the tick after she eases")
+        let fadeTicks = Int((settings.backwindFadeSeconds / Race.dt).rounded())
+        for _ in 0..<(fadeTicks - 2) { race.step() }
+        #expect(race.backwindSail(ofSeat: 1) > 0, "not yet gone just short of 1.5 s")
+        race.step()
+        race.step()
+        #expect(race.backwindSail(ofSeat: 1) == 0 && race.shadowCone(ofSeat: 1)?.backwindSail == 0, "gone by 1.5 s")
         let cones = race.boats.indices.map(race.shadowCone(ofSeat:))
         #expect(Race.headerTarget(at: race.boats[0].position, receiver: 0, cones: cones, settings: settings) == 0)
         for _ in 0..<(5 * Race.tickRate) { race.step() }
@@ -394,35 +405,77 @@ import Testing
         #expect(race.boats[0].shadow == 1, "no lull either")
     }
 
-    /// Through a tack her sail is head to wind, so her multiplier is 0 when her windward side flips at the boom
-    /// crossing (#71), and it builds back linearly over the ribbons' 2 s on the new side: the backwind doesn't pop
-    /// across (one of #377's items, for the header model).
+    /// Through a tack her sail goes head to wind and her windward side flips at the boom crossing (#71). Her backwind
+    /// fades out over `backwindFadeSeconds` on the side it was cast on, never jumping across, and once it is gone builds
+    /// on the new side linearly over the ribbons' 2 s: no pop either way (one of #377's items, for the header model).
     @Test func backwindRebuildsAfterATack() throws {
         let race = try LeeBowTests().race(ahead: 3, leeward: 1.5, together: true)
-        race.shadowSettings = Self.settings(.boxes, .headerAndLull)
+        let settings = Self.settings(.boxes, .headerAndLull)
+        race.shadowSettings = settings
         race.step()
+        let before = try #require(race.backwindSide(ofSeat: 1))
         #expect(race.backwindSail(ofSeat: 1) == 1, "close-hauled, trimmed")
+        #expect(before == race.boats[1].tack)
         _ = race.tap(.tackGybe, seat: 1, atTick: race.tick + 1)
-        var levels: [Double] = [], flip: Int?, tackEnd: Int?
+        var levels: [Double] = [], sides: [Tack] = [], flip: Int?, tackEnd: Int?
         for i in 0..<(8 * Race.tickRate) {
             let side = race.boats[1].boomSide
             race.step()
             levels.append(race.backwindSail(ofSeat: 1))
+            sides.append(try #require(race.backwindSide(ofSeat: 1)))
+            #expect(race.shadowCone(ofSeat: 1)?.backwindSide == sides[i] && race.shadowCone(ofSeat: 1)?.backwindSail == levels[i])
             if flip == nil && race.boats[1].boomSide != side { flip = i }
             if flip != nil && tackEnd == nil && !race.boats[1].isTacking { tackEnd = i }
         }
         let f = try #require(flip), end = try #require(tackEnd)
-        let rise = Race.dt / ShadowSettings().ribbons.buildSeconds
-        let per = stride(from: f, to: levels.count, by: Race.tickRate / 2).map { String(format: "%.2f", levels[$0]) }
-        print("TACK REBUILD flip at \(f), tack ends at \(end) (ticks from the tap); level each 0.5 s from the flip: \(per.joined(separator: " "))")
-        #expect(levels[f] == 0, "head to wind at the boom crossing: no backwind")
-        for i in (f + 1)..<levels.count {
+        let rise = Race.dt / ShadowSettings().ribbons.buildSeconds, fall = Race.dt / settings.backwindFadeSeconds
+        let swap = try #require(sides.firstIndex { $0 != before })
+        let per = stride(from: 0, to: levels.count, by: Race.tickRate / 2).map { String(format: "%.2f", levels[$0]) }
+        print("TACK REBUILD flip at \(f), side swaps at \(swap), tack ends at \(end) (ticks from the tap); level each 0.5 s: \(per.joined(separator: " "))")
+        #expect(levels[f] > 0, "still fading at the boom crossing: \(levels[f])")
+        #expect(sides[f] == before, "a fading zone keeps her old side past the boom crossing")
+        #expect(levels[swap] == 0 && levels[swap - 1] > 0, "the side changes only once the old zone is gone")
+        #expect(sides[swap...].allSatisfy { $0 != before }, "and stays on the new side")
+        for i in 1..<levels.count {
             #expect(levels[i] - levels[i - 1] <= rise + 1e-12, "builds, never pops, at tick \(i)")
+            #expect(levels[i - 1] - levels[i] <= fall + 1e-12, "fades, never drops, at tick \(i)")
         }
-        let firstUp = try #require(levels[f...].firstIndex { $0 > 0 })
+        let firstUp = try #require(levels[swap...].firstIndex { $0 > 0 })
         let full = try #require(levels[firstUp...].firstIndex { $0 >= 1 })
         #expect(Double(full - firstUp + 1) * Race.dt >= ShadowSettings().ribbons.buildSeconds - Race.dt, "over 2 s")
         #expect(levels.last == 1, "full again on the new side")
+    }
+
+    /// Easing fades her backwind linearly over its slider (`ShadowSettings.backwindFadeSeconds`), whatever it is set to:
+    /// 0 cuts it at once, as before the fade; trimming in again builds it back over the ribbons' `buildSeconds`.
+    @Test func backwindFadesOutOverItsSlider() throws {
+        for fade in [0.0, 0.5, 1.5, 3.0] {
+            var settings = Self.settings(.boxes, .headerAndLull)
+            settings.backwindFadeSeconds = fade
+            let race = try Self.leeBow(settings).leeBowed
+            for _ in 0..<(3 * Race.tickRate) { race.step() }
+            #expect(race.backwindSail(ofSeat: 1) == 1)
+            let side = race.backwindSide(ofSeat: 1)
+            _ = race.apply(BoatInput(rudder: 0 as Int8, ease: true), seat: 1, atTick: race.tick + 1)
+            race.step()
+            var ticks = 0
+            while race.backwindSail(ofSeat: 1) > 0 && ticks < 10 * Race.tickRate {
+                race.step()
+                ticks += 1
+                #expect(race.backwindSide(ofSeat: 1) == side)
+            }
+            let expected = max(1, Int((fade / Race.dt).rounded(.up)))
+            print(String(format: "BACKWIND FADE %.1f s: gone in %d ticks (%.2f s)", fade, ticks, Double(ticks) * Race.dt))
+            #expect(abs(ticks - expected) <= 1, "fade \(fade) s: \(ticks) ticks, expected about \(expected)")
+            _ = race.apply(BoatInput(rudder: 0 as Int8, ease: false), seat: 1, atTick: race.tick + 1)
+            race.step()
+            var up = 0
+            while race.backwindSail(ofSeat: 1) < 1 && up < 10 * Race.tickRate {
+                race.step()
+                up += 1
+            }
+            #expect(Double(up) * Race.dt >= settings.ribbons.buildSeconds - 2 * Race.dt, "builds back over 2 s: \(up) ticks")
+        }
     }
 
     /// The box ignores her sail: at `.box` an eased caster casts her trapezoid as before, her cone's `backwindSail` stays

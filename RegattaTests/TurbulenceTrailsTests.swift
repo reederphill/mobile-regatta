@@ -317,27 +317,75 @@ import Testing
     }
 
     /// The backwind stripes show what the sim does (#376 B): at the header-and-lull model a boat's backwind is scaled by
-    /// her sail multiplier, so her stripes' alpha takes the scene's ribbon level for her seat (none eased, head to wind,
-    /// building back after a tack); at the box, and before a level is known, they draw as before.
+    /// her backwind level (`BackwindSails`), so her stripes' alpha takes the scene's level for her seat (none eased, head
+    /// to wind, building back after a tack); at the box, and before a level is known, they draw as before.
     @Test func backwindStripesFollowTheSail() {
-        #expect(GameScene.backwindSail(model: .box, levels: [0, 0.5], seat: 1) == 1)
-        #expect(GameScene.backwindSail(model: .headerAndLull, levels: [0, 0.5], seat: 1) == 0.5)
-        #expect(GameScene.backwindSail(model: .headerAndLull, levels: [0, 0.5], seat: 0) == 0)
-        #expect(GameScene.backwindSail(model: .headerAndLull, levels: nil, seat: 0) == 1)
-        #expect(GameScene.backwindSail(model: .headerAndLull, levels: [0.5], seat: 3) == 1)
-        let boatClass = ShadowConeTests.boatClass
-        let boat = ShadowConeTests.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
-        func stripes(_ sail: Double) -> (alpha: CGFloat, hidden: Bool) {
-            let effects = BoatEffects(seat: 2, boatClass: boatClass, pointsPerMeter: ShadowConeTests.ppm, style: .standard)
-            effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass),
-                           style: .standard, quality: .full, time: 0, dt: 0, settled: true, isFlogging: false,
-                           backwindSail: sail)
-            return (effects.backwind.alpha, effects.backwind.isHidden)
-        }
-        let full = stripes(1), half = stripes(0.5), none = stripes(0)
+        var sails = BackwindSails()
+        let port = ShadowConeTests.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
+        sails.step(boats: [port, port], scales: [0, 0.5], buildSeconds: 2, fadeSeconds: 1.5)
+        #expect(GameScene.backwindStripes(model: .box, sails: sails, seat: 1) == (1, nil))
+        #expect(GameScene.backwindStripes(model: .headerAndLull, sails: sails, seat: 1) == (0.5, port.tack))
+        #expect(GameScene.backwindStripes(model: .headerAndLull, sails: sails, seat: 0) == (0, port.tack))
+        #expect(GameScene.backwindStripes(model: .headerAndLull, sails: nil, seat: 0) == (1, nil))
+        #expect(GameScene.backwindStripes(model: .headerAndLull, sails: sails, seat: 3) == (1, nil))
+        let full = Self.stripes(port, sail: 1, side: nil), half = Self.stripes(port, sail: 0.5, side: nil)
+        let none = Self.stripes(port, sail: 0, side: nil)
         #expect(!full.hidden && full.alpha > 0)
         #expect(!half.hidden && abs(half.alpha - full.alpha / 2) < 1e-6)
         #expect(none.hidden, "no working sail: no stripes")
+    }
+
+    /// `boat`'s backwind stripes drawn settled with `sail` and `side`: their alpha, whether hidden, and their side
+    /// (the sprite's x scale, 1 on starboard tack's windward side).
+    static func stripes(_ boat: Boat, sail: Double, side: Tack?) -> (alpha: CGFloat, hidden: Bool, xScale: CGFloat) {
+        let boatClass = ShadowConeTests.boatClass
+        let effects = BoatEffects(seat: 2, boatClass: boatClass, pointsPerMeter: ShadowConeTests.ppm, style: .standard)
+        effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass),
+                       style: .standard, quality: .full, time: 0, dt: 0, settled: true, isFlogging: false,
+                       backwindSail: sail, backwindSide: side)
+        return (effects.backwind.alpha, effects.backwind.isHidden, effects.backwind.xScale)
+    }
+
+    /// Through a tack the stripes fade out on the side they were cast on, never jumping across at the boom crossing, and
+    /// once gone build on the new side (#376 B, the owner: "it disappears too abruptly"): the scene's `BackwindSails`
+    /// stepped through a luff, a boom crossing and the new tack, drawn each tick.
+    @Test func backwindStripesFadeOnTheirSideThroughATack() {
+        let starboard = ShadowConeTests.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
+        let port = ShadowConeTests.boat(headingDegrees: 45, boomSide: .starboard, apparentDegrees: 18)
+        #expect(starboard.tack == .starboard && port.tack == .port)
+        var sails = BackwindSails()
+        func step(_ boat: Boat, _ scale: Double) -> (alpha: CGFloat, hidden: Bool, xScale: CGFloat, level: Double) {
+            sails.step(boats: [boat], scales: [scale], buildSeconds: 2, fadeSeconds: 1.5)
+            let s = GameScene.backwindStripes(model: .headerAndLull, sails: sails, seat: 0)
+            let drawn = Self.stripes(boat, sail: s.sail, side: s.side)
+            return (drawn.alpha, drawn.hidden, drawn.xScale, s.sail)
+        }
+        let trimmed = step(starboard, 1)
+        #expect(!trimmed.hidden && trimmed.xScale == 1)
+        // Head to wind for 0.5 s, then the boom crosses: the stripes have faded a third and stay on starboard's side.
+        var last = trimmed
+        for _ in 0..<(Race.tickRate / 2) {
+            let now = step(starboard, 0)
+            #expect(now.alpha < last.alpha && now.xScale == 1)
+            last = now
+        }
+        var ticks = 0, sides: [CGFloat] = []
+        while last.level > 0 && ticks < 3 * Race.tickRate {
+            // On port now, trimmed in again, but the old zone fades out first, where it was.
+            last = step(port, 1)
+            ticks += 1
+            if last.level > 0 { sides.append(last.xScale) }
+        }
+        #expect(last.level == 0 && last.hidden)
+        #expect(!sides.isEmpty && sides.allSatisfy { $0 == 1 }, "faded on the old side past the boom crossing")
+        #expect(abs(Double(ticks + Race.tickRate / 2) * Race.dt - 1.5) <= 2 * Race.dt, "gone over 1.5 s: \(ticks) ticks after the crossing")
+        // Then it builds on the new side over 2 s.
+        let first = step(port, 1)
+        #expect(!first.hidden && first.xScale == -1 && first.alpha < trimmed.alpha / 10)
+        var up = 1
+        while step(port, 1).level < 1 && up < 3 * Race.tickRate { up += 1 }
+        #expect(abs(Double(up + 1) * Race.dt - 2) <= 2 * Race.dt, "full on port in 2 s: \(up) ticks")
+        #expect(Self.stripes(port, sail: 1, side: .port).xScale == -1)
     }
 
     /// The sail's angle to her apparent wind, as drawn: about the default full angle sailing the upwind groove (so
@@ -456,7 +504,7 @@ import Testing
         let d = ShadowSettings()
         #expect(settings.shadowModel == .boxes && settings.backwindModel == .box && settings.lullLoss == d.lullLoss)
         #expect(settings.headerDegrees == d.headerDegrees && settings.headerCapDegrees == d.headerCapDegrees
-                && settings.headerTimeConstant == d.headerTimeConstant)
+                && settings.headerTimeConstant == d.headerTimeConstant && settings.backwindFadeSeconds == d.backwindFadeSeconds)
         #expect(settings.ribbons == R.Parameters(style: .standard, shadow: boatClass.windShadow))
         var tuned = Tuning()
         tuned.simShadow.shadowModel = .both

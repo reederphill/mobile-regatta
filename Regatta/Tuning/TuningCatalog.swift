@@ -248,6 +248,7 @@ enum TuningCatalog {
                     sim("headerCapDegrees", "Stacked headers cap (not measured)", \.headerCapDegrees, 0...20, 0.5, unit: "°"),
                     sim("lullShare", "Lull, of the loss above (not measured)", \.lullShare, 0...2, 0.05, unit: "×"),
                     sim("headerTimeConstant", "Header follows in (not measured)", \.headerTimeConstant, 0...4, 0.1, unit: " s"),
+                    sim("backwindFadeSeconds", "Fades off a slack sail over (not measured)", \.backwindFadeSeconds, 0...4, 0.1, unit: " s"),
                     TuningSlider(.boatClass, "/windShadow/backwind/lengthHullLengths", "Long edge length", 0.5...4, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/widthHullLengths", "Width at her stern", 0.25...3, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/runningFromDegrees", "Off running from", unit: "°", 60...180, step: 1),

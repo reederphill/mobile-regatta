@@ -112,6 +112,7 @@ struct SimShadowTuning: Codable, Equatable {
     /// header carries the cost).
     var lullShare = 0.0
     var headerTimeConstant = ShadowSettings().headerTimeConstant
+    var backwindFadeSeconds = ShadowSettings().backwindFadeSeconds
 
     init() {}
 
@@ -125,11 +126,12 @@ struct SimShadowTuning: Codable, Equatable {
         s.headerCapDegrees = headerCapDegrees
         s.lullLoss = lullShare == 1 ? nil : lullShare * boatClass.windShadow.backwindLoss
         s.headerTimeConstant = headerTimeConstant
+        s.backwindFadeSeconds = backwindFadeSeconds
         return s
     }
 
     private enum CodingKeys: String, CodingKey {
-        case shadowModel, backwindModel, headerDegrees, headerCapDegrees, lullShare, headerTimeConstant
+        case shadowModel, backwindModel, headerDegrees, headerCapDegrees, lullShare, headerTimeConstant, backwindFadeSeconds
     }
 
     /// Lenient, as `Tuning`'s: a field saved before it existed, or a model this build doesn't know, is the default.
@@ -142,6 +144,7 @@ struct SimShadowTuning: Codable, Equatable {
         headerCapDegrees = (try? c.decode(Double.self, forKey: .headerCapDegrees)) ?? d.headerCapDegrees
         lullShare = (try? c.decode(Double.self, forKey: .lullShare)) ?? d.lullShare
         headerTimeConstant = (try? c.decode(Double.self, forKey: .headerTimeConstant)) ?? d.headerTimeConstant
+        backwindFadeSeconds = (try? c.decode(Double.self, forKey: .backwindFadeSeconds)) ?? d.backwindFadeSeconds
     }
 }
 

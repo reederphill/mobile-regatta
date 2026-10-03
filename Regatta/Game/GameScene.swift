@@ -101,6 +101,12 @@ final class GameScene: SKScene {
     private var drawing = ShadowDrawing.standard
     /// The turbulence ribbons (#376 follow-on A), stepped each tick only while they draw; nil otherwise.
     private var trails: TurbulenceRibbons?
+    /// Each seat's backwind level and side (#376 B, `BackwindSails`), stepped each tick only while the sim reads the
+    /// header-and-lull backwind; nil otherwise. The sim steps its own from the same ticks.
+    private var backwindSails: BackwindSails?
+    /// The ribbons' parameters the sail multipliers read (`BoatStyle.trailTuning`'s), kept for the backwind levels
+    /// while the trails don't draw.
+    private var sailParameters: TurbulenceRibbons.Parameters?
     /// The `BoatStyle.trailTuning` the ribbons' parameters were last built from: a slider's change rebuilds them.
     private var trailTuning: [Double] = []
     /// The trails drawn, in the effects layer beside the cones.
@@ -308,44 +314,48 @@ final class GameScene: SKScene {
     /// `-backwindModel` launch or the tuning panel through the driver. `.box` online and in a fixture.
     var backwindModel: BackwindModel { (driver as? PracticeDriver)?.shadowSettings.backwindModel ?? .box }
 
-    /// How strongly a boat's backwind stripes draw, 0...1 (#376 B): at `.headerAndLull` the sim scales her backwind
-    /// by her sail multiplier (`Race.backwindSail(ofSeat:)`), so the stripes take the scene's own ribbon level for her
-    /// seat (`TurbulenceRibbons.levels`, stepped with the same scale); 1 at `.box`, or before a level is known.
-    static func backwindSail(model: BackwindModel, levels: [Double]?, seat: Int) -> Double {
-        guard model == .headerAndLull, let levels, levels.indices.contains(seat) else { return 1 }
-        return levels[seat]
+    /// How strongly a boat's backwind stripes draw, 0...1, and the side they lie on (#376 B): at `.headerAndLull` the
+    /// sim scales her backwind by her backwind level and casts it on its held side (`Race.backwindSail(ofSeat:)`,
+    /// `backwindSide(ofSeat:)`), so the stripes take the scene's own (`BackwindSails`, stepped from the same frames):
+    /// fading out on the side it was cast on, building on her new one. At `.box`, or before a level is known, they
+    /// draw as before: full, on her windward side now (nil).
+    static func backwindStripes(model: BackwindModel, sails: BackwindSails?, seat: Int) -> (sail: Double, side: Tack?) {
+        guard model == .headerAndLull, let sails, sails.levels.indices.contains(seat) else { return (1, nil) }
+        return (sails.levels[seat], sails.sides[seat])
     }
 
-    /// Steps the turbulence trails through `frames`, each tick's fleet, while they draw (#376 follow-on A), or only
-    /// their levels while the backwind stripes read them (`backwindSail(model:levels:seat:)`).
+    /// Steps the turbulence trails through `frames`, each tick's fleet, while they draw (#376 follow-on A), and the
+    /// backwind levels while the sim reads the header-and-lull model (`backwindStripes(model:sails:seat:)`).
     private func stepTrails(_ frames: [TickFrame]) {
         let drawsTrails = drawing.drawsTrails
-        guard drawsTrails || backwindModel == .headerAndLull else {
-            trails = nil
-            return
-        }
+        let settings = (driver as? PracticeDriver)?.shadowSettings
+        let stepsBackwind = settings?.backwindModel == .headerAndLull
+        if !stepsBackwind { backwindSails = nil }
+        guard drawsTrails || stepsBackwind else { return }
         let boatClass = driver.boatClass, style = boatStyle
         let parameters = { TurbulenceRibbons.Parameters(style: style, shadow: boatClass.windShadow) }
-        var trails = trails ?? TurbulenceRibbons(shadow: boatClass.windShadow, parameters: parameters())
         if style.trailTuning != trailTuning {
             // Live: points already shed keep their own.
-            trails.parameters = parameters()
+            trails?.parameters = parameters()
+            sailParameters = parameters()
             trailTuning = style.trailTuning
         }
-        let sail = trails.parameters
+        let sail = sailParameters ?? parameters()
+        sailParameters = sail
+        var trails = drawsTrails ? (trails ?? TurbulenceRibbons(shadow: boatClass.windShadow, parameters: sail)) : nil
+        var sails = stepsBackwind ? (backwindSails ?? BackwindSails()) : nil
+        let fade = settings?.backwindFadeSeconds ?? ShadowSettings().backwindFadeSeconds
         for frame in frames {
             // Each boat's sail-angle scale every tick, so her level builds back at the same rate whenever she sheds.
             let scales = frame.boats.enumerated().map { seat, boat in
                 TurbulenceRibbons.scale(of: boat, ease: seat < frame.heldInputs.count && frame.heldInputs[seat].ease,
                                        boatClass: boatClass, parameters: sail)
             }
-            if drawsTrails {
-                trails.step(boats: frame.boats, tick: frame.tick, scales: scales)
-            } else {
-                trails.stepLevels(seats: frame.boats.count, scales: scales)
-            }
+            trails?.step(boats: frame.boats, tick: frame.tick, scales: scales)
+            sails?.step(boats: frame.boats, scales: scales, buildSeconds: sail.buildSeconds, fadeSeconds: fade)
         }
-        self.trails = trails
+        if drawsTrails { self.trails = trails }
+        if stepsBackwind { backwindSails = sails }
     }
 
     /// The cones, the trails, or both (`shadowDrawing`). The backwind is always the original zone stripes
@@ -383,13 +393,14 @@ final class GameScene: SKScene {
         // Simulated seconds since the last frame drawn.
         let dt = settled ? 0 : max(0, world.time - (lastRenderTime ?? world.time))
         lastRenderTime = world.time
-        let backwindModel = backwindModel
+        let backwindModel = backwindModel, backwindSails = backwindSails
         for (i, boat) in world.boats.enumerated() {
+            let stripes = Self.backwindStripes(model: backwindModel, sails: backwindSails, seat: i)
             let pose = BoatPose(boat, ease: world.ease(ofSeat: i), isGhost: world.isGhost(ofSeat: i),
                                 boatClass: world.boatClass, style: boatStyle, autohelm: world.autohelm(ofSeat: i))
             boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality, time: world.time,
                                 dt: dt, settled: settled,
-                                backwindSail: Self.backwindSail(model: backwindModel, levels: trails?.levels, seat: i))
+                                backwindSail: stripes.sail, backwindSide: stripes.side)
         }
         coneLayer.update(style: boatStyle)
         drawShadows(world)

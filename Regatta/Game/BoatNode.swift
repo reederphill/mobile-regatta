@@ -125,16 +125,18 @@ final class BoatNode: SKNode {
 
     /// Draws `boat` in `pose` at race time `time` (seconds; every flutter swings on it, never the wall clock).
     /// `settled` trims the sail straight to its target rather than easing it there (a frozen render fixture).
-    /// `wakeQuality` is the wake's tier (#127). `backwindSail` scales her backwind stripes (`GameScene.backwindSail`).
+    /// `wakeQuality` is the wake's tier (#127). `backwindSail` scales her backwind stripes and `backwindSide` (nil: her
+    /// windward side now) places them (`GameScene.backwindStripes`).
     func update(with boat: Boat, pose: BoatPose, style: BoatStyle, wakeQuality: WakeQuality = .full, time: Double,
-                dt: Double, settled: Bool = false, backwindSail: Double = 1) {
+                dt: Double, settled: Bool = false, backwindSail: Double = 1, backwindSide: Tack? = nil) {
         position = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
         body.zRotation = CGFloat(-boat.heading)
 
         updateHeel(pose, style: style)
         let isFlogging = updateSail(pose, style: style, time: time, dt: dt, settled: settled)
         effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
-                       settled: settled, isFlogging: isFlogging, backwindSail: backwindSail)
+                       settled: settled, isFlogging: isFlogging, backwindSail: backwindSail,
+                       backwindSide: backwindSide)
 
         updateRing(boat, style: style, time: time)
 

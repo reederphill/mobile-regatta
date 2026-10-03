@@ -139,7 +139,15 @@ public struct TurbulenceRibbons: Sendable {
     public mutating func step(boats: [Boat], tick: Int, scales: [Double]? = nil) {
         while points.count < boats.count { points.append([]) }
         for c in points.indices { points[c].removeAll { Double(tick - $0.born) * Race.dt >= $0.life } }
-        stepLevels(seats: boats.count, scales: scales)
+        let rise = parameters.buildSeconds > 0 ? Race.dt / parameters.buildSeconds : 1
+        for seat in boats.indices {
+            let target = (scales.map { seat < $0.count ? $0[seat] : 1 } ?? 1).clamped(to: 0...1)
+            if seat >= levels.count {
+                levels.append(target)
+            } else {
+                levels[seat] = target < levels[seat] ? target : min(target, levels[seat] + rise)
+            }
+        }
         guard tick % every == 0 else { return }
         for (seat, b) in boats.enumerated() where !b.isGhost && b.speedThroughWater >= parameters.stoppedSpeed {
             let m = levels[seat]
@@ -150,20 +158,6 @@ public struct TurbulenceRibbons: Sendable {
             points[seat].append(Point(position: b.position, drift: drift(of: b), born: tick,
                                       peak: (parameters.peak ?? shadow.lossCloseIn) * m, scale: s0 * m,
                                       growth: (s1 - s0) / life.squareRoot() * m, life: life))
-        }
-    }
-
-    /// Steps `levels` alone, as `step(boats:tick:scales:)` does, shedding no points: the sail multiplier for a reader
-    /// that needs it without the wake (`Race`'s backwind at `BackwindModel.headerAndLull`, the app's backwind stripes).
-    public mutating func stepLevels(seats: Int, scales: [Double]?) {
-        let rise = parameters.buildSeconds > 0 ? Race.dt / parameters.buildSeconds : 1
-        for seat in 0..<seats {
-            let target = (scales.map { seat < $0.count ? $0[seat] : 1 } ?? 1).clamped(to: 0...1)
-            if seat >= levels.count {
-                levels.append(target)
-            } else {
-                levels[seat] = target < levels[seat] ? target : min(target, levels[seat] + rise)
-            }
         }
     }
 
@@ -374,9 +368,56 @@ public struct ShadowSettings: Equatable, Sendable {
     /// Seconds: her header follows the envelope she sits in through a first-order lag of this time constant, so a
     /// boat crossing the trapezoid's stern edge isn't turned in one tick (tuning, not measured). 0: at once.
     public var headerTimeConstant = 1.0
+    /// Seconds: her backwind fades out linearly over this when her sail stops working (eased, luffing, head to wind
+    /// through a tack or gybe), on the side it was cast on (`BackwindSails`), where it builds back over the ribbons'
+    /// `buildSeconds` (tuning, not measured). 0: at once.
+    public var backwindFadeSeconds = 1.5
 
     public init(shadowModel: ShadowModel = .boxes, backwindModel: BackwindModel = .box) {
         self.shadowModel = shadowModel
         self.backwindModel = backwindModel
+    }
+}
+
+/// Each seat's backwind level and the side it is cast on (#376 B, `BackwindModel.headerAndLull`): the backwind is
+/// upwash off a working sail, so it follows her sail multiplier (`TurbulenceRibbons.scale`), smoothed its own way,
+/// apart from the ribbons' emission `levels`: it rises towards the target linearly over `buildSeconds` and falls towards
+/// it linearly over `fadeSeconds`, so easing or luffing fades it rather than cutting it.
+///
+/// It sits on her windward side (`Boat.tack`), which flips at the boom crossing (#71). A fading zone keeps the side it
+/// was cast on (`sides`): when her side changes it falls to 0 on the old one, whatever her sail does, and only then
+/// takes her side now and builds there. The race steps one (`Race.backwindSail(ofSeat:)`, `backwindSide(ofSeat:)`),
+/// the scene another from the same frames (its stripes), so the sim and the drawing agree. Stepped a tick at a time:
+/// deterministic. A seat's first level is its target, on her side then.
+public struct BackwindSails: Equatable, Sendable {
+    /// Each seat's level now, 0...1. Empty until the first step.
+    public private(set) var levels: [Double] = []
+    /// The side each seat's backwind is cast on now.
+    public private(set) var sides: [Tack] = []
+
+    public init() {}
+
+    /// Call every tick with `boats` and each one's sail multiplier target (`scales`, by seat; missing = 1).
+    public mutating func step(boats: [Boat], scales: [Double], buildSeconds: Double, fadeSeconds: Double) {
+        let rise = buildSeconds > 0 ? Race.dt / buildSeconds : 1
+        let fall = fadeSeconds > 0 ? Race.dt / fadeSeconds : 1
+        for (seat, b) in boats.enumerated() {
+            let target = (seat < scales.count ? scales[seat] : 1).clamped(to: 0...1)
+            guard seat < levels.count else {
+                levels.append(target)
+                sides.append(b.tack)
+                continue
+            }
+            let level = levels[seat]
+            if sides[seat] != b.tack {
+                // Her side has flipped: the old zone fades out where it is, then the new one starts from nothing.
+                levels[seat] = max(0, level - fall)
+                if levels[seat] == 0 { sides[seat] = b.tack }
+            } else if target < level {
+                levels[seat] = max(target, level - fall)
+            } else {
+                levels[seat] = min(target, level + rise)
+            }
+        }
     }
 }

@@ -84,9 +84,11 @@ final class BoatEffects {
     /// Draws `boat`'s effects in `pose` at race time `time`. `isFlogging` is her sail's roll-miss flog this frame
     /// (`FlogTimer`): her wake dies while it lasts and comes back with it (#222). `settled` draws the wake straight
     /// at its target, with no easing (a frozen render fixture). `backwindSail`, 0...1, scales her backwind stripes'
-    /// alpha (#376 B, `GameScene.backwindSail(model:levels:seat:)`): 1, as before, but at the header-and-lull model.
+    /// alpha and `backwindSide` (nil: her windward side now) the side they lie on (#376 B,
+    /// `GameScene.backwindStripes(model:sails:seat:)`): 1 and nil, as before, but at the header-and-lull model, where a
+    /// fading zone keeps the side it was cast on past her boom crossing.
     func update(with boat: Boat, pose: BoatPose, style: BoatStyle, quality: WakeQuality, time: Double, dt: Double,
-                settled: Bool, isFlogging: Bool, backwindSail: Double = 1) {
+                settled: Bool, isFlogging: Bool, backwindSail: Double = 1, backwindSide: Tack? = nil) {
         let point = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
 
         // Her shadow and backwind trail her: they turn after her heading and her apparent wind, not with them, as the air
@@ -105,14 +107,15 @@ final class BoatEffects {
 
         // Her windward side is starboard on starboard tack (`ShadowCone.windward`); it flips at the boom crossing.
         // She casts less of it across a reach, and none while running (`ShadowCone.backwindPresence`).
-        // At the header-and-lull backwind, only off a working sail (#376 B): `backwindSail`, her ribbon level, 1 at the box.
+        // At the header-and-lull backwind, only off a working sail (#376 B): `backwindSail`, her backwind level (1 at the
+        // box), on `backwindSide`, held on the old side while it fades out past the boom crossing.
         let presence = core.backwindPresence * backwindSail
         backwind.isHidden = pose.isGhost || !hasBackwind || presence <= 0
         // Anchored on her stern line, so her speed lengthens and shortens it from there (`backwindScale(speed:)`).
         let stern = boat.position + boat.forward * boatClass.windShadow.sternCorner.y
         backwind.position = CGPoint(x: stern.x * ppm, y: stern.y * ppm)
         backwind.zRotation = CGFloat(-followed.heading)
-        backwind.xScale = boat.tack == .starboard ? 1 : -1
+        backwind.xScale = (backwindSide ?? boat.tack) == .starboard ? 1 : -1
         backwind.yScale = CGFloat(boatClass.windShadow.backwindScale(speed: boat.speedThroughWater))
         backwind.alpha = CGFloat(style.coneAlpha * style.backwindShare * presence)
 
