@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import RegattaCore
+import RegattaServices
 
 /// The app's navigation state (#25): one home screen, pages pushed on it, brief sheets over it, and the race
 /// sequence as a full-screen cover. There's no tab bar.
@@ -77,6 +78,7 @@ final class AppModel {
             deviceSettings.save(to: defaults)
             haptics.isOn = deviceSettings.haptics
             controls.update(deviceSettings, launchOptions: launchOptions)
+            analytics.setSharing(deviceSettings.sharesUsageData)
         }
     }
     /// Every race's haptics, on while Settings' Haptics is (#110): set here once per change, not read per haptic.
@@ -86,6 +88,8 @@ final class AppModel {
     @ObservationIgnored let controls: ControlSettings
     /// Where `deviceSettings` lives.
     @ObservationIgnored let defaults: UserDefaults
+    /// Usage analytics (#128), on while Settings' Share usage data is.
+    @ObservationIgnored let analytics: Analytics
     /// The race the cover shows, while `phase` is `.raceSequence`.
     private(set) var race: Race?
     /// The practice race the cover shows, if it's one.
@@ -118,8 +122,10 @@ final class AppModel {
     @ObservationIgnored private let sceneState: SceneState
 
     /// `sceneState` locks the orientation while the race sequence shows (G5).
-    init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current, defaults: UserDefaults = .standard) {
+    init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current, defaults: UserDefaults = .standard,
+         analytics: Analytics = .discarding()) {
         self.sceneState = sceneState
+        self.analytics = analytics
         self.launchOptions = launchOptions
         self.defaults = defaults
         if launchOptions.uiTesting && launchOptions.resetSettings {
