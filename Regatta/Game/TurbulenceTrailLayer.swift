@@ -85,7 +85,9 @@ final class TurbulenceTrailLayer: SKNode {
     /// as falling rain (owner, #376 A), so each fleck circles in place at its own rate and way round, and the ripples
     /// pulse where they are. Many fragments near the base, a few bright. A fleck sits jittered in its cell and is round
     /// on screen: its distance is in pixels
-    /// (the frame is conformal, `u_mpp` metres a pixel). Cell indices wrap (264) before an arithmetic hash
+    /// (the frame is conformal, `u_mpp` metres a pixel). Each caster's sprites carry their own seed (`a_seed`): it
+    /// shifts her fleck lattice, their hashes and her ripples' phase, so where boats' ribbons overlap their flecks are
+    /// independent, not one pattern twinkling in step (owner, #376 A). Cell indices wrap (264) before an arithmetic hash
     /// (Hoskins' `hash12`), so no lattice shows far from the origin; the twinkle's time wraps at 600 s.
     static let shimmer: SKShader = {
         let source = """
@@ -98,8 +100,8 @@ final class TurbulenceTrailLayer: SKNode {
             float envelope = texture2D(u_texture, v_tex_coord).a * v_color_mix.a;
             float t = mod(u_time, 600.0);
             vec2 m = u_origin + u_dx * gl_FragCoord.x + u_dy * gl_FragCoord.y;
-            vec2 q = m * 2.2;
-            vec2 cell = mod(floor(q), 264.0);
+            vec2 q = m * 2.2 + fract(a_seed * vec2(0.618034, 0.754878));
+            vec2 cell = mod(floor(q), 264.0) + a_seed * vec2(113.0, 71.0);
             float h = trailHash(cell);
             vec2 centre = 0.5 + 0.5 * (vec2(trailHash(cell + vec2(17.0, 3.0)), trailHash(cell + vec2(5.0, 29.0))) - 0.5);
             float turn = t * (trailHash(cell + vec2(11.0, 7.0)) - 0.5) * 6.0 + h * 40.0;
@@ -108,13 +110,16 @@ final class TurbulenceTrailLayer: SKNode {
             float twinkle = 0.5 + 0.5 * sin(t * (4.0 + 8.0 * h) + h * 40.0);
             float fleck = smoothstep(4.0, 1.0, d) * pow(twinkle, 4.0) * step(0.55, h);
             vec2 k = m * 0.0523598776;
-            float wave = sin(k.x * 59.0 + k.y * 32.0) * sin(k.y * 82.0 - k.x * 21.0) * sin(u_phase.x);
+            float wave = sin(k.x * 59.0 + k.y * 32.0 + a_seed * 2.4) * sin(k.y * 82.0 - k.x * 21.0 + a_seed * 1.3)
+                * sin(u_phase.x + a_seed * 0.9);
             float ripple = pow(max(wave, 0.0), 6.0);
             float a = envelope * (0.22 + 1.5 * max(fleck, 0.5 * ripple));
             gl_FragColor = vec4(a, a, a, a);
         }
         """
-        return SKShader(source: source, uniforms: frameUniforms)
+        let shader = SKShader(source: source, uniforms: frameUniforms)
+        shader.attributes = [SKAttribute(name: "a_seed", type: .float)]
+        return shader
     }()
 
     /// The world point (metres: `layer`'s points × `metresPerPoint`) a drawable pixel (x, y) from its top left
@@ -174,8 +179,9 @@ final class TurbulenceTrailLayer: SKNode {
     static let taperShare = 0.05
 
     /// Draws `runs` (each a caster's unbroken run of live points, oldest first), alpha = strength / `peak` × the
-    /// style's cone alpha. A run of one is a disc; one with no strength or scale draws nothing.
-    func update(runs: [[TurbulenceRibbons.Live]], peak: Double, style: BoatStyle) {
+    /// style's cone alpha. A run of one is a disc; one with no strength or scale draws nothing. `casters` (one per
+    /// run; nil = all 0) seeds each run's flecks, so different boats' flecks don't move in step where they overlap.
+    func update(runs: [[TurbulenceRibbons.Live]], casters: [Int]? = nil, peak: Double, style: BoatStyle) {
         var used = 0
         func next() -> SKSpriteNode {
             if used == sprites.count { grow() }
@@ -186,14 +192,18 @@ final class TurbulenceTrailLayer: SKNode {
             return sprite
         }
         let base = min(1, style.coneAlpha)
-        for run in runs {
+        for (index, run) in runs.enumerated() {
+            let seed = SKAttributeValue(float: Float(casters.map { index < $0.count ? $0[index] : 0 } ?? 0))
             if run.count >= 2 {
                 guard run.contains(where: { $0.strength > 0 && $0.scale > 0 }) else { continue }
-                ribbon(next(), along: run, peak: peak, alpha: base)
+                let sprite = next()
+                sprite.setValue(seed, forAttribute: "a_seed")
+                ribbon(sprite, along: run, peak: peak, alpha: base)
                 continue
             }
             guard let lone = run.first, lone.strength > 0, lone.scale > 0, peak > 0 else { continue }
             let sprite = next()
+            sprite.setValue(seed, forAttribute: "a_seed")
             if sprite.texture !== Self.disc { sprite.texture = Self.disc }
             sprite.warpGeometry = nil
             sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
@@ -323,6 +333,7 @@ final class TurbulenceTrailLayer: SKNode {
     private func grow() {
         let sprite = SKSpriteNode(texture: Self.disc)
         sprite.shader = Self.shimmer
+        sprite.setValue(SKAttributeValue(float: 0), forAttribute: "a_seed")
         sprite.color = CuePalette.cueWhite.uiColor
         sprite.colorBlendFactor = 1
         sprite.isHidden = true

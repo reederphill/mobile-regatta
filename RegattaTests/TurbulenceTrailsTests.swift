@@ -209,6 +209,20 @@ import Testing
         #expect(layer.visibleCount == 0)
     }
 
+    /// Each caster's ribbons carry her own fleck seed, so where boats' ribbons overlap their flecks don't move in step
+    /// (owner, #376 A); a run without a caster gets seed 0.
+    @Test func castersSeedTheirOwnFlecks() throws {
+        func live(_ x: Double, _ y: Double) -> R.Live { R.Live(position: Vec2(x, y), strength: 0.3, scale: 2) }
+        let a = [live(0, 0), live(4, 0)], b = [live(0, 1), live(4, 1)], lone = [live(10, 0)]
+        let layer = TurbulenceTrailLayer(pointsPerMeter: 8)
+        layer.update(runs: [a, b, lone], casters: [0, 5, 5], peak: 0.4, style: .standard)
+        #expect(layer.visibleCount == 3)
+        let seeds = try layer.sprites.prefix(3).map { try #require($0.value(forAttributeNamed: "a_seed")).floatValue }
+        #expect(seeds == [0, 5, 5])
+        layer.update(runs: [b], peak: 0.4, style: .standard)
+        #expect(try #require(layer.sprites[0].value(forAttributeNamed: "a_seed")).floatValue == 0)
+    }
+
     /// The shimmer's frame (`pixelFrame`, `setView`) puts a world point where the nodes draw it, through a camera
     /// that's moved, zoomed and turned, on a 3× drawable, in a scene under a moved layer: a shader disc around each
     /// of three world points lands on a node disc there within a pixel. Rendered through Metal (`SKRenderer`, like the

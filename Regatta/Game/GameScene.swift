@@ -332,8 +332,16 @@ final class GameScene: SKScene {
         coneLayer.isHidden = !drawing.drawsCones
         trailLayer.isHidden = !drawing.drawsTrails
         if drawing.drawsTrails {
-            let runs = trails.map { t in t.points.indices.flatMap { t.ribbons(of: $0, time: world.time) } } ?? []
-            trailLayer.update(runs: runs, peak: trails?.peak ?? world.boatClass.windShadow.lossCloseIn, style: boatStyle)
+            var runs: [[TurbulenceRibbons.Live]] = [], casters: [Int] = []
+            if let trails {
+                for seat in trails.points.indices {
+                    let own = trails.ribbons(of: seat, time: world.time)
+                    runs += own
+                    casters += Array(repeating: seat, count: own.count)
+                }
+            }
+            trailLayer.update(runs: runs, casters: casters, peak: trails?.peak ?? world.boatClass.windShadow.lossCloseIn,
+                              style: boatStyle)
         }
     }
 
