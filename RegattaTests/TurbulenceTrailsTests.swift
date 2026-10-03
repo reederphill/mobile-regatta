@@ -363,12 +363,12 @@ import Testing
     }
 
     /// A saved tuning from before the drawing loads as the cones.
-    @Test func savedTuningsLoadAsCones() throws {
+    @Test func savedTuningsLoadAsTheRibbons() throws {
         let tuning = try JSONDecoder().decode(Tuning.self, from: Data("{}".utf8))
-        #expect(tuning.shadowDrawing == .cones)
-        var trails = Tuning()
-        trails.shadowDrawing = .trails
-        #expect(try JSONDecoder().decode(Tuning.self, from: trails.jsonData()).shadowDrawing == .trails)
+        #expect(tuning.shadowDrawing == .trails && ShadowDrawing.standard == .trails)
+        var cones = Tuning()
+        cones.shadowDrawing = .cones
+        #expect(try JSONDecoder().decode(Tuning.self, from: cones.jsonData()).shadowDrawing == .cones)
     }
     #endif
 }

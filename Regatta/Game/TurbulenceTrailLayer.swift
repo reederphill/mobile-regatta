@@ -3,10 +3,14 @@ import UIKit
 import RegattaCore
 
 /// How the wind shadow is drawn (#376 follow-on A): the cones and backwinds of today (`BoatEffects`), the
-/// turbulence-trail ribbons (`TurbulenceRibbons`, `TurbulenceTrailLayer`), or both over each other. A Debug look
-/// (the tuning panel's, and `-shadowDrawing`); Release always draws the cones.
+/// turbulence-trail ribbons (`TurbulenceRibbons`, `TurbulenceTrailLayer`), or both over each other. The ribbons are
+/// the game's (`standard`, adopted by the owner, #376 A); the cones and both stay a Debug comparison (the tuning panel's,
+/// and `-shadowDrawing`). The backwind is the zone stripes in every one.
 enum ShadowDrawing: String, Codable, CaseIterable {
     case cones, trails, both
+
+    /// What every build draws unless a Debug choice says otherwise.
+    static let standard = ShadowDrawing.trails
 
     var drawsCones: Bool { self != .trails }
     var drawsTrails: Bool { self != .cones }

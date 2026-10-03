@@ -29,9 +29,9 @@ import RegattaServices
 /// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
 ///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
 /// - `-tuning` opens the debug tuning panel at launch (#232). Debug builds only: other builds don't know it.
-/// - `-shadowDrawing cones|trails|both` draws the wind shadow as today's cones and backwinds, the turbulence-trail
-///   prototype (#376), or both, over the tuning panel's choice for this launch. Debug builds only: other builds don't
-///   know it and always draw the cones.
+/// - `-shadowDrawing cones|trails|both` draws the wind shadow as the old cones, the turbulence-trail ribbons (#376, the
+///   game's), or both, over the tuning panel's choice for this launch. Debug builds only: other builds don't know it
+///   and always draw the ribbons.
 /// - `-briefing practice|online` opens on the briefing (#130) for the launch race (`RaceConfig.launch()`, and `-seed`), with
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):

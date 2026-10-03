@@ -97,8 +97,8 @@ final class GameScene: SKScene {
     private let effectsLayer = SKNode()
     /// The fleet's wind-shadow cones, one faint layer in the effects layer (#121).
     private let coneLayer = ConeLayer()
-    /// How the wind shadow draws (`shadowDrawing`): always the cones in Release.
-    private var drawing = ShadowDrawing.cones
+    /// How the wind shadow draws (`shadowDrawing`): the ribbons (`ShadowDrawing.standard`), always in Release.
+    private var drawing = ShadowDrawing.standard
     /// The turbulence ribbons (#376 follow-on A), stepped each tick only while they draw; nil otherwise.
     private var trails: TurbulenceRibbons?
     /// The `BoatStyle.trailTuning` the ribbons' parameters were last built from: a slider's change rebuilds them.
