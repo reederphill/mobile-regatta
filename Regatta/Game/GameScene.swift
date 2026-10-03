@@ -306,7 +306,15 @@ final class GameScene: SKScene {
     private func stepTrails(_ frames: [TickFrame]) {
         guard drawing.drawsTrails else { return }
         var trails = trails ?? TurbulenceTrails(shadow: driver.boatClass.windShadow)
-        for frame in frames { trails.step(boats: frame.boats, tick: frame.tick) }
+        let boatClass = driver.boatClass, style = boatStyle
+        for frame in frames {
+            // Each boat's sail-angle scale, only on the ticks that shed.
+            let scales = frame.tick % trails.every == 0 ? frame.boats.enumerated().map { seat, boat in
+                TurbulenceTrails.scale(of: boat, ease: seat < frame.heldInputs.count && frame.heldInputs[seat].ease,
+                                       boatClass: boatClass, style: style)
+            } : nil
+            trails.step(boats: frame.boats, tick: frame.tick, scales: scales)
+        }
         self.trails = trails
     }
 

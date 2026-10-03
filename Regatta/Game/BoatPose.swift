@@ -68,8 +68,8 @@ nonisolated struct BoatPose: Equatable, Sendable {
         let twa = boat.twa
         // The sail trims to the wind it feels: the apparent wind off the bow, or the sailing wind's before the
         // race has given her one.
-        let awa = boat.apparentWind.speed > 0.01 ? abs(wrapAngle(boat.apparentWind.direction - boat.heading)) : twa
-        let headToWind = twa < BoatDynamics.noGoAngle(boatClass.polar) + deg2rad(style.headToWindMarginDegrees)
+        let awa = Self.apparentAngle(boat)
+        let headToWind = Self.isHeadToWind(boat, boatClass: boatClass, style: style)
 
         var flutter = 0.0
         if ease {
@@ -105,6 +105,28 @@ nonisolated struct BoatPose: Equatable, Sendable {
         self.flutter = flutter.clamped(to: 0...1)
 
         heel = ease || headToWind ? 0 : Self.heel(felt: Self.feltWind(boat), twa: twa, style: style)
+    }
+
+    /// The apparent wind off her bow, radians (0...π), as her sail trims to it: the sailing wind's angle before the race
+    /// has given her an apparent wind.
+    static func apparentAngle(_ boat: Boat) -> Double {
+        boat.apparentWind.speed > 0.01 ? abs(wrapAngle(boat.apparentWind.direction - boat.heading)) : boat.twa
+    }
+
+    /// Head to wind: so close past the class's no-go angle (`BoatStyle.headToWindMarginDegrees`) her sail doesn't draw.
+    static func isHeadToWind(_ boat: Boat, boatClass: BoatClass, style: BoatStyle) -> Bool {
+        boat.twa < BoatDynamics.noGoAngle(boatClass.polar) + deg2rad(style.headToWindMarginDegrees)
+    }
+
+    /// The angle between her drawn sail and her apparent wind, radians, 0 up (#376 follow-on A, drawn only): how hard the
+    /// sail she shows turns the air, for the turbulence she sheds. 0 head to wind (the sail lies along the wind and
+    /// flaps) and with her sheets out (it weathervanes, `sailTrim` = the apparent angle, until it can go no further);
+    /// otherwise the apparent angle less `sailTrim`. Running or by the lee, the sail at its widest, it is large (stalled).
+    /// Without her autohelm's footed ease (#219), which the trails don't see.
+    static func angleOfAttack(_ boat: Boat, ease: Bool, boatClass: BoatClass, style: BoatStyle = .standard) -> Double {
+        guard !isHeadToWind(boat, boatClass: boatClass, style: style) else { return 0 }
+        let pose = BoatPose(boat, ease: ease, isGhost: false, boatClass: boatClass, style: style)
+        return max(0, apparentAngle(boat) - pose.sailTrim)
     }
 
     /// How far the autohelm pinches and foots (#219), each 0 to 1: its offset from the groove past
@@ -279,6 +301,10 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// How far the backwind's edge is softened, points: its hatch and fill fade out over about this far either side of where
     /// core's zone ends, not a hard cut. Baked in when the fleet is built. 0 draws it hard edged.
     var backwindFeather = 3.0
+    /// The turbulence trails (#376 follow-on A, Debug): the sail's angle to the apparent wind (`BoatPose.angleOfAttack`),
+    /// degrees, at which a boat sheds her full turbulence; less, less, in proportion (a sail along the wind sheds none).
+    /// The default is her upwind groove's in the default class at 10 kn (`TurbulenceTrailsTests`).
+    var trailFullAngleDegrees = 12.5
     /// The hatch both are drawn in: its lines' spacing and width, points. Baked in when the fleet is built.
     var hatchSpacing = 5.0
     var hatchLineWidth = 1.25
@@ -363,7 +389,7 @@ nonisolated extension BoatStyle {
             (.wakeStreakShare, \.wakeStreakShare), (.wakeStreakWidth, \.wakeStreakWidth),
             (.wakeStreakAlpha, \.wakeStreakAlpha), (.wakeEaseRate, \.wakeEaseRate),
             (.wakeFlareGain, \.wakeFlareGain), (.wakeFlareSeconds, \.wakeFlareSeconds),
-            (.wakeShortShare, \.wakeShortShare), (.coneAlpha, \.coneAlpha), (.backwindShare, \.backwindShare), (.shadowFollowSeconds, \.shadowFollowSeconds), (.backwindFeather, \.backwindFeather),
+            (.wakeShortShare, \.wakeShortShare), (.coneAlpha, \.coneAlpha), (.backwindShare, \.backwindShare), (.shadowFollowSeconds, \.shadowFollowSeconds), (.backwindFeather, \.backwindFeather), (.trailFullAngleDegrees, \.trailFullAngleDegrees),
             (.hatchSpacing, \.hatchSpacing), (.hatchLineWidth, \.hatchLineWidth),
             (.vaneLengthHulls, \.vaneLengthHulls),
             (.vaneLockDegrees, \.vaneLockDegrees), (.grooveCueDeadbandDegrees, \.grooveCueDeadbandDegrees),

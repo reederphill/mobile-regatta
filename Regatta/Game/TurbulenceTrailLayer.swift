@@ -16,14 +16,17 @@ enum ShadowDrawing: String, Codable, CaseIterable {
 /// samples' drifted centres from oldest to newest. A ribbon is one sprite (`strip`) warped along the track
 /// (`SKWarpGeometryGrid`, a column a sample, three rows: one edge, the centreline, the other edge), so it has no seams.
 /// Its texture carries both falloffs: across the width white along the middle, clear at the edges (as a sample's loss
-/// falls from its centre), and along the length each sample's column sits at its life left (`1 − age/life`), so it fades
-/// as the model's loss does. The newest end is capped with a soft disc at half its alpha so the ribbon doesn't start
-/// square at the boat; a lone sample draws as the disc. Different casters overlap and blend, as they stack in the model.
+/// falls from its centre), and along the length each sample's column sits at u = its life left (`1 − age/life`) times its
+/// strength (its peak as a share of the ribbon's strongest), so it fades as the model's loss does. Both ends feather out
+/// over about a radius past the end samples, narrowing (a quarter circle) and fading to nothing, so even a short
+/// backwind ribbon is a soft lozenge with no straight edge; a lone sample draws as a soft disc. Different casters overlap
+/// and blend, as they stack in the model. Every sprite shimmers (`shimmer`): the texture's alpha is only the envelope,
+/// filled with fine flickering flecks and broken ripples drifting downwind, so it reads as disturbed air, not a lull.
 /// Cone ribbons draw at the cone's hatch alpha (`BoatStyle.coneAlpha`) and z, backwind ones at the backwind's share of
 /// it (`BoatStyle.backwindShare`) and z, both in the cues' white, as `BoatEffects` draws them. The sprites are pooled:
 /// grown on demand, the unused ones hidden. Drawn only; the race never reads the trails.
 final class TurbulenceTrailLayer: SKNode {
-    /// The disc a lone sample, or a ribbon's newest end, draws with, made once.
+    /// The soft disc a lone sample draws with, made once.
     static let disc: SKTexture = {
         let side: CGFloat = 64
         let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
@@ -60,6 +63,39 @@ final class TurbulenceTrailLayer: SKNode {
         return texture
     }()
 
+    /// The shimmer every trail sprite draws with, shared (one shader, so the sprites batch). The texture's alpha
+    /// (times the node's) is the envelope; inside it a faint base plus sparse flecks, each twinkling at its own rate,
+    /// and broken ripples, all in metres of the sprite's own frame (`a_scale`: metres a unit of texture x and y) and
+    /// drifting towards its dead end (low x) with time. Many fragments near the base, a few bright.
+    static let shimmer: SKShader = {
+        let source = """
+        float trailHash(vec2 p) {
+            p = fract(p * vec2(123.34, 456.21));
+            p += dot(p, p + 45.32);
+            return fract(p.x * p.y);
+        }
+        void main() {
+            float envelope = texture2D(u_texture, v_tex_coord).a * v_color_mix.a;
+            float t = mod(u_time, 600.0);
+            vec2 m = vec2(v_tex_coord.x * a_scale.x + t * 0.8, (v_tex_coord.y - 0.5) * a_scale.y);
+            vec2 q = m * 2.2;
+            vec2 cell = floor(q);
+            float h = trailHash(cell);
+            vec2 offset = vec2(trailHash(cell + 11.3), trailHash(cell + 27.1)) - 0.5;
+            float d = length(fract(q) - 0.5 - offset * 0.5);
+            float twinkle = 0.5 + 0.5 * sin(t * (4.0 + 8.0 * h) + h * 40.0);
+            float fleck = smoothstep(0.34, 0.04, d) * pow(twinkle, 4.0) * step(0.55, h);
+            float wave = sin(m.x * 3.1 + m.y * 1.7 - t * 2.3) * sin(m.y * 4.3 - m.x * 1.1 + t * 1.6);
+            float ripple = pow(max(wave, 0.0), 6.0);
+            float a = envelope * (0.22 + 1.5 * max(fleck, 0.5 * ripple));
+            gl_FragColor = vec4(a, a, a, a);
+        }
+        """
+        let shader = SKShader(source: source)
+        shader.attributes = [SKAttribute(name: "a_scale", type: .vectorFloat2)]
+        return shader
+    }()
+
     private let ppm: CGFloat
     private(set) var sprites: [SKSpriteNode] = []
 
@@ -85,7 +121,8 @@ final class TurbulenceTrailLayer: SKNode {
     }
 
     /// Draws `samples` at race time `time` (seconds; between ticks, so they drift smoothly), in `shadow`'s class and
-    /// `style`'s alphas: a ribbon a caster and kind and its cap. A sample past its life, or not yet born, draws nothing.
+    /// `style`'s alphas: a ribbon a caster and kind, or a disc for a lone sample. A sample past its life, or not yet
+    /// born, draws nothing.
     func update(samples: [TurbulenceTrails.Sample], time: Double, shadow: BoatClass.WindShadow, style: BoatStyle) {
         struct Key: Hashable, Comparable {
             var caster: Int
@@ -120,40 +157,68 @@ final class TurbulenceTrailLayer: SKNode {
             let z = key.isBackwind ? BoatEffects.Layer.backwind : BoatEffects.Layer.cones
             if points.count >= 2 {
                 let base = key.isBackwind ? style.coneAlpha * style.backwindShare : style.coneAlpha
-                let strength = points.map(\.strength).reduce(0, +) / Double(points.count)
-                let alpha = min(1, base * strength)
-                if alpha > 0 { ribbon(next(z: z), along: points, alpha: alpha) }
+                let strongest = points.map(\.strength).max() ?? 0
+                let alpha = min(1, base * strongest)
+                if alpha > 0, points.contains(where: { $0.radius > 0 }) {
+                    ribbon(next(z: z), along: points, strongest: strongest, alpha: alpha)
+                }
+                continue
             }
-            guard let newest = points.last else { continue }
-            let alpha = points.count == 1 ? newest.alpha : newest.alpha / 2
-            guard alpha > 0 else { continue }
+            guard let lone = points.first, lone.alpha > 0, lone.radius > 0 else { continue }
             let sprite = next(z: z)
             if sprite.texture !== Self.disc { sprite.texture = Self.disc }
             sprite.warpGeometry = nil
             sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-            let diameter = CGFloat(2 * newest.radius) * ppm
-            sprite.position = CGPoint(x: newest.centre.x * ppm, y: newest.centre.y * ppm)
+            let diameter = CGFloat(2 * lone.radius) * ppm
+            sprite.position = CGPoint(x: lone.centre.x * ppm, y: lone.centre.y * ppm)
             sprite.size = CGSize(width: diameter, height: diameter)
-            sprite.alpha = CGFloat(alpha)
+            sprite.alpha = CGFloat(lone.alpha)
+            let metres = Float(2 * lone.radius)
+            sprite.setValue(SKAttributeValue(vectorFloat2: vector_float2(metres, metres)), forAttribute: "a_scale")
         }
         for sprite in sprites[used...] where !sprite.isHidden { sprite.isHidden = true }
     }
 
-    /// Warps `sprite` into the ribbon along `points` (oldest first, at least two): sized to their edges' bounding box,
-    /// anchored at its bottom-left, column i drawn from `strip` at u = the sample's life left, its three rows at the
-    /// centre − normal × radius, the centre, and the centre + normal × radius, the normal across the local track.
-    private func ribbon(_ sprite: SKSpriteNode, along points: [Point], alpha: Double) {
+    /// The columns a feathered end adds past its end sample, as a share of its radius out: each narrower (a quarter
+    /// circle, so the end is round) and fainter, to nothing at the tip.
+    static let featherSteps: [Double] = [0.35, 0.7, 1]
+
+    /// Warps `sprite` into the ribbon along `points` (oldest first, at least two), feathered at both ends
+    /// (`featherSteps`): sized to its edges' bounding box, anchored at its bottom-left, each column drawn from `strip`
+    /// at u = the sample's life left × its strength over `strongest`, its three rows at the centre − normal × radius,
+    /// the centre, and the centre + normal × radius, the normal across the local track.
+    private func ribbon(_ sprite: SKSpriteNode, along points: [Point], strongest: Double, alpha: Double) {
+        func u(_ p: Point) -> Double { strongest > 0 ? min(1, max(0, p.left)) * p.strength / strongest : 0 }
+        // The columns: (centre, half width, u, direction along the track for the normal).
+        var columns: [(centre: Vec2, radius: Double, u: Double)] = []
         let n = points.count
+        func direction(_ from: Vec2, _ to: Vec2) -> Vec2? {
+            let d = to - from
+            let length = d.length
+            return length > 1e-9 ? d * (1 / length) : nil
+        }
+        let back = direction(points[1].centre, points[0].centre) ?? Vec2(-1, 0)
+        let ahead = direction(points[n - 2].centre, points[n - 1].centre) ?? Vec2(1, 0)
+        for t in Self.featherSteps.reversed() {
+            let p = points[0]
+            columns.append((p.centre + back * (p.radius * t), p.radius * (1 - t * t).squareRoot(), u(p) * (1 - t)))
+        }
+        for p in points { columns.append((p.centre, p.radius, u(p))) }
+        for t in Self.featherSteps {
+            let p = points[n - 1]
+            columns.append((p.centre + ahead * (p.radius * t), p.radius * (1 - t * t).squareRoot(), u(p) * (1 - t)))
+        }
+        let count = columns.count
         var lower: [Vec2] = [], upper: [Vec2] = []
-        lower.reserveCapacity(n); upper.reserveCapacity(n)
+        lower.reserveCapacity(count); upper.reserveCapacity(count)
         var lastNormal = Vec2(0, 1)
-        for i in 0..<n {
-            let tangent = points[min(i + 1, n - 1)].centre - points[max(i - 1, 0)].centre
+        for i in 0..<count {
+            let tangent = columns[min(i + 1, count - 1)].centre - columns[max(i - 1, 0)].centre
             let length = tangent.length
             let normal = length > 1e-9 ? Vec2(-tangent.y / length, tangent.x / length) : lastNormal
             lastNormal = normal
-            lower.append(points[i].centre - normal * points[i].radius)
-            upper.append(points[i].centre + normal * points[i].radius)
+            lower.append(columns[i].centre - normal * columns[i].radius)
+            upper.append(columns[i].centre + normal * columns[i].radius)
         }
         var minX = Double.infinity, minY = Double.infinity, maxX = -Double.infinity, maxY = -Double.infinity
         for p in lower + upper {
@@ -164,20 +229,14 @@ final class TurbulenceTrailLayer: SKNode {
         func normalized(_ p: Vec2) -> vector_float2 {
             vector_float2(Float((p.x * ppm - origin.x) / size.width), Float((p.y * ppm - origin.y) / size.height))
         }
-        // Source u rising oldest to newest (lives differ a little sample to sample, so nudge a tie or a dip).
-        var u = [Float](repeating: 0, count: n)
-        for i in 0..<n {
-            let left = Float(min(1, max(0, points[i].left)))
-            u[i] = i == 0 ? left : max(left, u[i - 1] + 1e-4)
-        }
         var source: [vector_float2] = [], destination: [vector_float2] = []
-        source.reserveCapacity(3 * n); destination.reserveCapacity(3 * n)
+        source.reserveCapacity(3 * count); destination.reserveCapacity(3 * count)
         for (row, v) in [Float(0), 0.5, 1].enumerated() {
-            for i in 0..<n {
-                source.append(vector_float2(u[i], v))
+            for i in 0..<count {
+                source.append(vector_float2(Float(columns[i].u), v))
                 switch row {
                 case 0: destination.append(normalized(lower[i]))
-                case 1: destination.append(normalized(points[i].centre))
+                case 1: destination.append(normalized(columns[i].centre))
                 default: destination.append(normalized(upper[i]))
                 }
             }
@@ -186,9 +245,16 @@ final class TurbulenceTrailLayer: SKNode {
         sprite.anchorPoint = .zero
         sprite.position = origin
         sprite.size = size
-        sprite.warpGeometry = SKWarpGeometryGrid(columns: n - 1, rows: 2, sourcePositions: source,
+        sprite.warpGeometry = SKWarpGeometryGrid(columns: count - 1, rows: 2, sourcePositions: source,
                                                  destinationPositions: destination)
         sprite.alpha = CGFloat(alpha)
+        // The shimmer's frame: metres a unit of life left along the track, and the ribbon's mean width.
+        var arc = 0.0
+        for i in 1..<n { arc += (points[i].centre - points[i - 1].centre).length }
+        let span = max(points[n - 1].left - points[0].left, 0.05)
+        let width = 2 * points.map(\.radius).reduce(0, +) / Double(n)
+        sprite.setValue(SKAttributeValue(vectorFloat2: vector_float2(Float(arc / span), Float(width))),
+                        forAttribute: "a_scale")
     }
 
     /// Hides every sprite.
@@ -210,6 +276,7 @@ final class TurbulenceTrailLayer: SKNode {
 
     private func grow() {
         let sprite = SKSpriteNode(texture: Self.disc)
+        sprite.shader = Self.shimmer
         sprite.color = CuePalette.cueWhite.uiColor
         sprite.colorBlendFactor = 1
         sprite.isHidden = true

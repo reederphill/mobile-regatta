@@ -8,8 +8,9 @@ import RegattaCore
 /// samples at her position; casters stack as the cones do (product, floored). The race never reads it: core's cones
 /// still slow the boats.
 ///
-/// The one change from the prototype: each sample says whether it is a cone or a backwind sample (`isBackwind`), for
-/// the drawing; the loss is the prototype's exactly (`TurbulenceTrailsTests`).
+/// The changes from the prototype: each sample says whether it is a cone or a backwind sample (`isBackwind`), for the
+/// drawing; and `step` can scale each boat's samples by her sail's angle to the wind (`scales`). Unscaled, the loss is
+/// the prototype's exactly (`TurbulenceTrailsTests`).
 struct TurbulenceTrails {
     struct Sample {
         var position: Vec2
@@ -34,18 +35,23 @@ struct TurbulenceTrails {
         self.every = every
     }
 
-    mutating func step(boats: [Boat], tick: Int) {
+    /// Sheds this tick's samples. `scales`, by seat (nil = 1 for all), is how much turbulence each boat's sail sheds now,
+    /// 0...1 (`scale(of:ease:boatClass:style:)`, drawn only): it multiplies a sample's peak, radius and growth, so a sail
+    /// along the wind sheds none and a half-angle sail a half-strength, half-size sample.
+    mutating func step(boats: [Boat], tick: Int, scales: [Double]? = nil) {
         samples.removeAll { Double(tick - $0.born) * Race.dt >= $0.life }
         guard tick % every == 0 else { return }
         for (seat, b) in boats.enumerated() where !b.isGhost {
+            let k = (scales.map { seat < $0.count ? $0[seat] : 1 } ?? 1).clamped(to: 0...1)
+            guard k > 0 else { continue }
             let apparent = max(b.apparentWind.speed, 0.5)
             let drift = b.windOverGround.velocity
             // Her cone: shed at her centre, reaching `coneLength` in the time her own apparent wind takes to carry
             // air that far astern of her (the trail's length in her frame is her apparent wind × the sample's life).
             let life = shadow.coneLength / apparent
             let r0 = shadow.coneWidthAtBoat / 2, r1 = shadow.coneWidthAtEnd / 2
-            samples.append(Sample(position: b.position, drift: drift, born: tick, caster: seat, peak: shadow.lossCloseIn,
-                                  radius: r0, growth: (r1 - r0) / life, life: life))
+            samples.append(Sample(position: b.position, drift: drift, born: tick, caster: seat, peak: shadow.lossCloseIn * k,
+                                  radius: r0 * k, growth: (r1 - r0) / life * k, life: life))
             // Her backwind: shed at the middle of the trapezoid, a short-lived patch.
             let cone = ShadowCone(caster: b, shadow: shadow)
             guard shadow.backwindInnerLength != nil, cone.backwindPresence > 0,
@@ -53,9 +59,16 @@ struct TurbulenceTrails {
             let scale = shadow.backwindScale(speed: b.speedThroughWater)
             guard scale > 0 else { continue }
             samples.append(Sample(position: at, drift: drift, born: tick, caster: seat,
-                                  peak: 1 - cone.backwindFactor(at: at), radius: shadow.backwindWidth / 2,
+                                  peak: (1 - cone.backwindFactor(at: at)) * k, radius: shadow.backwindWidth / 2 * k,
                                   growth: 0, life: shadow.backwindLength * scale / apparent, isBackwind: true))
         }
+    }
+
+    /// How much turbulence `boat`'s sail sheds now, 0...1: the angle between her drawn sail and her apparent wind
+    /// (`BoatPose.angleOfAttack`) over `BoatStyle.trailFullAngleDegrees`, capped at 1 (a stalled or running sail).
+    static func scale(of boat: Boat, ease: Bool, boatClass: BoatClass, style: BoatStyle) -> Double {
+        let full = deg2rad(max(style.trailFullAngleDegrees, 0.1))
+        return (BoatPose.angleOfAttack(boat, ease: ease, boatClass: boatClass, style: style) / full).clamped(to: 0...1)
     }
 
     /// The middle of the trapezoid (#298) the box casts now.
