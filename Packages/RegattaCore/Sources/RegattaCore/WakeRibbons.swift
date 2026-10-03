@@ -139,15 +139,7 @@ public struct TurbulenceRibbons: Sendable {
     public mutating func step(boats: [Boat], tick: Int, scales: [Double]? = nil) {
         while points.count < boats.count { points.append([]) }
         for c in points.indices { points[c].removeAll { Double(tick - $0.born) * Race.dt >= $0.life } }
-        let rise = parameters.buildSeconds > 0 ? Race.dt / parameters.buildSeconds : 1
-        for seat in boats.indices {
-            let target = (scales.map { seat < $0.count ? $0[seat] : 1 } ?? 1).clamped(to: 0...1)
-            if seat >= levels.count {
-                levels.append(target)
-            } else {
-                levels[seat] = target < levels[seat] ? target : min(target, levels[seat] + rise)
-            }
-        }
+        stepLevels(seats: boats.count, scales: scales)
         guard tick % every == 0 else { return }
         for (seat, b) in boats.enumerated() where !b.isGhost && b.speedThroughWater >= parameters.stoppedSpeed {
             let m = levels[seat]
@@ -158,6 +150,20 @@ public struct TurbulenceRibbons: Sendable {
             points[seat].append(Point(position: b.position, drift: drift(of: b), born: tick,
                                       peak: (parameters.peak ?? shadow.lossCloseIn) * m, scale: s0 * m,
                                       growth: (s1 - s0) / life.squareRoot() * m, life: life))
+        }
+    }
+
+    /// Steps `levels` alone, as `step(boats:tick:scales:)` does, shedding no points: the sail multiplier for a reader
+    /// that needs it without the wake (`Race`'s backwind at `BackwindModel.headerAndLull`, the app's backwind stripes).
+    public mutating func stepLevels(seats: Int, scales: [Double]?) {
+        let rise = parameters.buildSeconds > 0 ? Race.dt / parameters.buildSeconds : 1
+        for seat in 0..<seats {
+            let target = (scales.map { seat < $0.count ? $0[seat] : 1 } ?? 1).clamped(to: 0...1)
+            if seat >= levels.count {
+                levels.append(target)
+            } else {
+                levels[seat] = target < levels[seat] ? target : min(target, levels[seat] + rise)
+            }
         }
     }
 

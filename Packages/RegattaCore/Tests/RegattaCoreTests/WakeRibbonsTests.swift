@@ -164,9 +164,22 @@ import Testing
 
     // MARK: 4. Header and lull
 
+    /// With no header and the class's loss, the header-and-lull backwind is the box's bit for bit while the caster's
+    /// sail works: here set once the lee-bower's tack is over and she is trimmed. Set before her tack, it differs, as
+    /// meant: her backwind builds back over 2 s after the tack (`backwindRebuildsAfterATack`), where the box's pops.
     @Test func headerAndLullWithZeroHeaderEqualsTheBox() throws {
+        let zeroSettings = Self.settings(.boxes, .headerAndLull, header: 0, lull: Self.shadow.backwindLoss)
         let box = try Self.leeBow(ShadowSettings()).leeBowed
-        let zero = try Self.leeBow(Self.settings(.boxes, .headerAndLull, header: 0, lull: Self.shadow.backwindLoss)).leeBowed
+        let zero = try Self.leeBow(ShadowSettings()).leeBowed
+        zero.shadowSettings = zeroSettings
+        let early = try Self.leeBow(zeroSettings).leeBowed, earlyBox = try Self.leeBow(ShadowSettings()).leeBowed
+        var lighter = 0
+        for _ in 0..<Race.tickRate {
+            early.step()
+            earlyBox.step()
+            if early.boats[0].shadow > earlyBox.boats[0].shadow { lighter += 1 }
+        }
+        #expect(lighter > 0, "set before the tack: her sail is still building back")
         var worst = 0.0, backwinded = 0
         for _ in 0..<(20 * Race.tickRate) {
             box.step()
@@ -334,6 +347,101 @@ import Testing
                 #expect(rad2deg(steps.heading) < 1, "no visible snap")
             }
         }
+    }
+
+    // MARK: 5b. The backwind needs a working sail (header and lull)
+
+    /// The backwind is upwash off a loaded sail (docs/research/yacht-wake-and-backwind-aerodynamics.md): at
+    /// `.headerAndLull` a caster's envelope is scaled by her sail multiplier, so her sheets out or head to wind cast no
+    /// header, and trimmed in the groove her full one. In a race too: the lee-bower eases and the header goes.
+    @Test func backwindNeedsAWorkingSail() throws {
+        let boatClass = OpenWater.boatClass, p = ShadowSettings().ribbons
+        let settings = Self.settings(.boxes, .headerAndLull)
+        func header(_ caster: Boat, ease: Bool) -> (header: Double, full: Double) {
+            var cone = ShadowCone(caster: caster, shadow: Self.shadow)
+            let at = Self.inTrapezoid(cone, share: 0.25)
+            let full = Race.headerTarget(at: at, receiver: 1, cones: [cone, nil], settings: settings)
+            cone.backwindSail = R.scale(of: caster, ease: ease, boatClass: boatClass, parameters: p)
+            return (Race.headerTarget(at: at, receiver: 1, cones: [cone, nil], settings: settings), full)
+        }
+        let groove = Self.upwindCaster
+        let trimmed = header(groove, ease: false), eased = header(groove, ease: true)
+        var head = groove
+        head.heading = TrailScene.windDirection
+        TrailScene.refresh(&head)
+        let headToWind = header(head, ease: false)
+        print(String(format: "WORKING SAIL header deg: trimmed %.2f of %.2f, eased %.2f of %.2f, head to wind %.2f of %.2f",
+                     rad2deg(trimmed.header), rad2deg(trimmed.full), rad2deg(eased.header), rad2deg(eased.full),
+                     rad2deg(headToWind.header), rad2deg(headToWind.full)))
+        #expect(trimmed.full > 0 && trimmed.header == trimmed.full, "trimmed: the full header")
+        #expect(eased.full > 0 && eased.header == 0, "sheets out: none")
+        #expect(headToWind.full > 0 && headToWind.header == 0, "head to wind: none")
+
+        // The race: seat 1 has tacked onto seat 0's lee bow; 3 s on, her sail has built back and seat 0 is headed.
+        let race = try Self.leeBow(settings).leeBowed
+        for _ in 0..<(3 * Race.tickRate) { race.step() }
+        #expect(race.backwindSail(ofSeat: 1) == 1 && race.shadowCone(ofSeat: 1)?.backwindSail == 1)
+        #expect(race.header(ofSeat: 0) > 0)
+        // She eases: from the next tick her backwind is gone, and seat 0's header decays through its lag.
+        _ = race.apply(BoatInput(rudder: 0 as Int8, ease: true), seat: 1, atTick: race.tick + 1)
+        race.step()
+        race.step()
+        #expect(race.backwindSail(ofSeat: 1) == 0 && race.shadowCone(ofSeat: 1)?.backwindSail == 0)
+        let cones = race.boats.indices.map(race.shadowCone(ofSeat:))
+        #expect(Race.headerTarget(at: race.boats[0].position, receiver: 0, cones: cones, settings: settings) == 0)
+        for _ in 0..<(5 * Race.tickRate) { race.step() }
+        #expect(race.header(ofSeat: 0) < deg2rad(0.1), "\(rad2deg(race.header(ofSeat: 0))) deg left")
+        #expect(race.boats[0].shadow == 1, "no lull either")
+    }
+
+    /// Through a tack her sail is head to wind, so her multiplier is 0 when her windward side flips at the boom
+    /// crossing (#71), and it builds back linearly over the ribbons' 2 s on the new side: the backwind doesn't pop
+    /// across (one of #377's items, for the header model).
+    @Test func backwindRebuildsAfterATack() throws {
+        let race = try LeeBowTests().race(ahead: 3, leeward: 1.5, together: true)
+        race.shadowSettings = Self.settings(.boxes, .headerAndLull)
+        race.step()
+        #expect(race.backwindSail(ofSeat: 1) == 1, "close-hauled, trimmed")
+        _ = race.tap(.tackGybe, seat: 1, atTick: race.tick + 1)
+        var levels: [Double] = [], flip: Int?, tackEnd: Int?
+        for i in 0..<(8 * Race.tickRate) {
+            let side = race.boats[1].boomSide
+            race.step()
+            levels.append(race.backwindSail(ofSeat: 1))
+            if flip == nil && race.boats[1].boomSide != side { flip = i }
+            if flip != nil && tackEnd == nil && !race.boats[1].isTacking { tackEnd = i }
+        }
+        let f = try #require(flip), end = try #require(tackEnd)
+        let rise = Race.dt / ShadowSettings().ribbons.buildSeconds
+        let per = stride(from: f, to: levels.count, by: Race.tickRate / 2).map { String(format: "%.2f", levels[$0]) }
+        print("TACK REBUILD flip at \(f), tack ends at \(end) (ticks from the tap); level each 0.5 s from the flip: \(per.joined(separator: " "))")
+        #expect(levels[f] == 0, "head to wind at the boom crossing: no backwind")
+        for i in (f + 1)..<levels.count {
+            #expect(levels[i] - levels[i - 1] <= rise + 1e-12, "builds, never pops, at tick \(i)")
+        }
+        let firstUp = try #require(levels[f...].firstIndex { $0 > 0 })
+        let full = try #require(levels[firstUp...].firstIndex { $0 >= 1 })
+        #expect(Double(full - firstUp + 1) * Race.dt >= ShadowSettings().ribbons.buildSeconds - Race.dt, "over 2 s")
+        #expect(levels.last == 1, "full again on the new side")
+    }
+
+    /// The box ignores her sail: at `.box` an eased caster casts her trapezoid as before, her cone's `backwindSail` stays
+    /// 1, and the trapezoid's factor reads no sail anyway.
+    @Test func boxBackwindIsUnchanged() throws {
+        var cone = ShadowCone(caster: Self.upwindCaster, shadow: Self.shadow)
+        let at = Self.inTrapezoid(cone, share: 0.25)
+        let before = (cone.factor(at: at), cone.backwindFactor(at: at))
+        cone.backwindSail = 0
+        #expect(before.0 < 1 && cone.factor(at: at) == before.0 && cone.backwindFactor(at: at) == before.1)
+
+        let race = try Self.leeBow(ShadowSettings()).leeBowed
+        for _ in 0..<(3 * Race.tickRate) { race.step() }
+        _ = race.apply(BoatInput(rudder: 0 as Int8, ease: true), seat: 1, atTick: race.tick + 1)
+        for _ in 0..<Race.tickRate { race.step() }
+        #expect(race.backwindSail(ofSeat: 1) == 1 && race.shadowCone(ofSeat: 1)?.backwindSail == 1)
+        let cones = race.boats.indices.compactMap(race.shadowCone(ofSeat:))
+        #expect(race.boats[0].shadow < 1, "eased, she still casts the box (the adoption ticket's to fix)")
+        #expect(cones[1].backwindFactor(at: race.boats[0].position) < 1)
     }
 
     // MARK: 6. The sail multiplier and the cadence

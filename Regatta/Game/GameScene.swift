@@ -304,9 +304,26 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Steps the turbulence trails through `frames`, each tick's fleet, while they draw (#376 follow-on A).
+    /// The practice race's backwind model (#376 B, `Race.shadowSettings`): the same the sim reads, from the
+    /// `-backwindModel` launch or the tuning panel through the driver. `.box` online and in a fixture.
+    var backwindModel: BackwindModel { (driver as? PracticeDriver)?.shadowSettings.backwindModel ?? .box }
+
+    /// How strongly a boat's backwind stripes draw, 0...1 (#376 B): at `.headerAndLull` the sim scales her backwind
+    /// by her sail multiplier (`Race.backwindSail(ofSeat:)`), so the stripes take the scene's own ribbon level for her
+    /// seat (`TurbulenceRibbons.levels`, stepped with the same scale); 1 at `.box`, or before a level is known.
+    static func backwindSail(model: BackwindModel, levels: [Double]?, seat: Int) -> Double {
+        guard model == .headerAndLull, let levels, levels.indices.contains(seat) else { return 1 }
+        return levels[seat]
+    }
+
+    /// Steps the turbulence trails through `frames`, each tick's fleet, while they draw (#376 follow-on A), or only
+    /// their levels while the backwind stripes read them (`backwindSail(model:levels:seat:)`).
     private func stepTrails(_ frames: [TickFrame]) {
-        guard drawing.drawsTrails else { return }
+        let drawsTrails = drawing.drawsTrails
+        guard drawsTrails || backwindModel == .headerAndLull else {
+            trails = nil
+            return
+        }
         let boatClass = driver.boatClass, style = boatStyle
         let parameters = { TurbulenceRibbons.Parameters(style: style, shadow: boatClass.windShadow) }
         var trails = trails ?? TurbulenceRibbons(shadow: boatClass.windShadow, parameters: parameters())
@@ -322,13 +339,17 @@ final class GameScene: SKScene {
                 TurbulenceRibbons.scale(of: boat, ease: seat < frame.heldInputs.count && frame.heldInputs[seat].ease,
                                        boatClass: boatClass, parameters: sail)
             }
-            trails.step(boats: frame.boats, tick: frame.tick, scales: scales)
+            if drawsTrails {
+                trails.step(boats: frame.boats, tick: frame.tick, scales: scales)
+            } else {
+                trails.stepLevels(seats: frame.boats.count, scales: scales)
+            }
         }
         self.trails = trails
     }
 
     /// The cones, the trails, or both (`shadowDrawing`). The backwind is always the original zone stripes
-    /// (`BoatEffects.backwind`): the trails draw only the shadow (owner, #376 A).
+    /// (`BoatEffects.backwind`, scaled by her sail at the header-and-lull model): the trails draw only the shadow (owner, #376 A).
     private func drawShadows(_ world: RenderWorld) {
         coneLayer.isHidden = !drawing.drawsCones
         trailLayer.isHidden = !drawing.drawsTrails
@@ -362,11 +383,13 @@ final class GameScene: SKScene {
         // Simulated seconds since the last frame drawn.
         let dt = settled ? 0 : max(0, world.time - (lastRenderTime ?? world.time))
         lastRenderTime = world.time
+        let backwindModel = backwindModel
         for (i, boat) in world.boats.enumerated() {
             let pose = BoatPose(boat, ease: world.ease(ofSeat: i), isGhost: world.isGhost(ofSeat: i),
                                 boatClass: world.boatClass, style: boatStyle, autohelm: world.autohelm(ofSeat: i))
             boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality, time: world.time,
-                                dt: dt, settled: settled)
+                                dt: dt, settled: settled,
+                                backwindSail: Self.backwindSail(model: backwindModel, levels: trails?.levels, seat: i))
         }
         coneLayer.update(style: boatStyle)
         drawShadows(world)

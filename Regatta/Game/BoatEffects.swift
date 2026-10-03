@@ -83,9 +83,10 @@ final class BoatEffects {
 
     /// Draws `boat`'s effects in `pose` at race time `time`. `isFlogging` is her sail's roll-miss flog this frame
     /// (`FlogTimer`): her wake dies while it lasts and comes back with it (#222). `settled` draws the wake straight
-    /// at its target, with no easing (a frozen render fixture).
+    /// at its target, with no easing (a frozen render fixture). `backwindSail`, 0...1, scales her backwind stripes'
+    /// alpha (#376 B, `GameScene.backwindSail(model:levels:seat:)`): 1, as before, but at the header-and-lull model.
     func update(with boat: Boat, pose: BoatPose, style: BoatStyle, quality: WakeQuality, time: Double, dt: Double,
-                settled: Bool, isFlogging: Bool) {
+                settled: Bool, isFlogging: Bool, backwindSail: Double = 1) {
         let point = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
 
         // Her shadow and backwind trail her: they turn after her heading and her apparent wind, not with them, as the air
@@ -104,7 +105,8 @@ final class BoatEffects {
 
         // Her windward side is starboard on starboard tack (`ShadowCone.windward`); it flips at the boom crossing.
         // She casts less of it across a reach, and none while running (`ShadowCone.backwindPresence`).
-        let presence = core.backwindPresence
+        // At the header-and-lull backwind, only off a working sail (#376 B): `backwindSail`, her ribbon level, 1 at the box.
+        let presence = core.backwindPresence * backwindSail
         backwind.isHidden = pose.isGhost || !hasBackwind || presence <= 0
         // Anchored on her stern line, so her speed lengthens and shortens it from there (`backwindScale(speed:)`).
         let stern = boat.position + boat.forward * boatClass.windShadow.sternCorner.y

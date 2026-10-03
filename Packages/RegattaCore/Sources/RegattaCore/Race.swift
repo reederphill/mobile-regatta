@@ -131,9 +131,13 @@ public final class Race {
     /// race with other settings does not replay from its log (ADR 0004's tuned-log caveat, extended).
     public var shadowSettings = ShadowSettings() {
         didSet {
-            if shadowSettings.ribbons != oldValue.ribbons { wake?.parameters = shadowSettings.ribbons }
+            if shadowSettings.ribbons != oldValue.ribbons {
+                wake?.parameters = shadowSettings.ribbons
+                sailLevels?.parameters = shadowSettings.ribbons
+            }
             if shadowSettings.backwindModel == .box { headerState = [] }
             if shadowSettings.shadowModel == .boxes { wake = nil }
+            if shadowSettings.backwindModel == .box || shadowSettings.shadowModel != .boxes { sailLevels = nil }
         }
     }
     /// The ribbon wake (#376 B): stepped only while `shadowSettings.shadowModel` isn't `.boxes`, nil otherwise (a
@@ -144,6 +148,9 @@ public final class Race {
     /// Each seat's header now, radians, the lag's state (`applyBackwindHeaders`); empty at `BackwindModel.box`. Not in
     /// a snapshot or digest: a restored race starts at 0.
     private var headerState: [Double] = []
+    /// The sail multipliers alone (`TurbulenceRibbons.stepLevels`), for the backwind at `BackwindModel.headerAndLull`
+    /// while there is no wake (`ShadowModel.boxes`); nil otherwise (the wake's `levels` serve). Not in a snapshot.
+    private var sailLevels: TurbulenceRibbons?
 
     /// Builds the race at the start of its sequence, tick −`setup.startSequenceTicks`, from `files`, which
     /// must be exactly the ones `setup` names (`RaceFiles(resolving:)`); throws `RaceFilesError` if not.
@@ -458,7 +465,7 @@ public final class Race {
         // own header never feeds her cone.
         let cones = boats.indices.map(shadowCone(ofSeat:))
         if shadowSettings.backwindModel == .headerAndLull { applyBackwindHeaders(cones) }
-        if shadowSettings.shadowModel != .boxes { stepWake() }
+        if shadowSettings.shadowModel != .boxes { stepWake() } else if shadowSettings.backwindModel == .headerAndLull { stepSailLevels() }
         applyWindShadows(cones)
         averageGrooveWinds()
 
@@ -578,12 +585,35 @@ public final class Race {
     /// her sail's angle to her apparent wind with her held ease (`TurbulenceRibbons.scale`), from this tick's winds.
     private func stepWake() {
         var ribbons = wake ?? TurbulenceRibbons(shadow: boatClass.windShadow, parameters: shadowSettings.ribbons)
-        let parameters = ribbons.parameters, boatClass = boatClass
-        let scales = boats.indices.map { i in
+        ribbons.step(boats: boats, tick: tick, scales: sailScales(ribbons.parameters))
+        wake = ribbons
+    }
+
+    /// Steps the sail multipliers alone (`sailLevels`) as `stepWake` steps the wake's, for the backwind at
+    /// `BackwindModel.headerAndLull` with no wake (#376 B).
+    private func stepSailLevels() {
+        var levels = sailLevels ?? TurbulenceRibbons(shadow: boatClass.windShadow, parameters: shadowSettings.ribbons)
+        levels.stepLevels(seats: boats.count, scales: sailScales(levels.parameters))
+        sailLevels = levels
+    }
+
+    /// Every boat's emission multiplier target now: her sail's angle to her apparent wind with her held ease.
+    private func sailScales(_ parameters: TurbulenceRibbons.Parameters) -> [Double] {
+        let boatClass = boatClass
+        return boats.indices.map { i in
             TurbulenceRibbons.scale(of: boats[i], ease: heldInputs[i].ease, boatClass: boatClass, parameters: parameters)
         }
-        ribbons.step(boats: boats, tick: tick, scales: scales)
-        wake = ribbons
+    }
+
+    /// How much `seat`'s sail is working, 0...1, for her backwind at `BackwindModel.headerAndLull` (#376 B): her sail
+    /// multiplier as the ribbons smooth it (`TurbulenceRibbons.levels`: falls at once, builds back over
+    /// `buildSeconds`), as of the last tick stepped (the wake's, or `sailLevels` with no wake); before the first, or
+    /// after a restore, her multiplier's target now. 1 at `BackwindModel.box`: the box ignores her sail.
+    public func backwindSail(ofSeat seat: Int) -> Double {
+        guard shadowSettings.backwindModel == .headerAndLull, boats.indices.contains(seat) else { return 1 }
+        if let levels = (wake ?? sailLevels)?.levels, levels.indices.contains(seat) { return levels[seat] }
+        return TurbulenceRibbons.scale(of: boats[seat], ease: heldInputs[seat].ease, boatClass: boatClass,
+                                       parameters: shadowSettings.ribbons)
     }
 
     /// The backwind as a header (#376 B, `BackwindModel.headerAndLull`): each boat's wind over the ground is turned
@@ -646,7 +676,10 @@ public final class Race {
     /// ghost, which casts none, or an unknown seat.
     public func shadowCone(ofSeat seat: Int) -> ShadowCone? {
         guard boats.indices.contains(seat), !boats[seat].isGhost else { return nil }
-        return ShadowCone(caster: boats[seat], shadow: boatClass.windShadow)
+        var cone = ShadowCone(caster: boats[seat], shadow: boatClass.windShadow)
+        // The backwind is upwash off a working sail (#376 B): at `.headerAndLull` only, so the box's sim is untouched.
+        if shadowSettings.backwindModel == .headerAndLull { cone.backwindSail = backwindSail(ofSeat: seat) }
+        return cone
     }
 
     private func integrate(_ i: Int, _ dt: Double) {
@@ -1825,6 +1858,7 @@ extension Race {
         // Derived state a snapshot doesn't carry (#376 B): the wake regrows over a point's life, the headers from 0.
         wake = nil
         headerState = []
+        sailLevels = nil
     }
 
     /// The first field of `boat` the race couldn't step from at `tick`, or nil.

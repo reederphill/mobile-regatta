@@ -316,6 +316,30 @@ import Testing
         }
     }
 
+    /// The backwind stripes show what the sim does (#376 B): at the header-and-lull model a boat's backwind is scaled by
+    /// her sail multiplier, so her stripes' alpha takes the scene's ribbon level for her seat (none eased, head to wind,
+    /// building back after a tack); at the box, and before a level is known, they draw as before.
+    @Test func backwindStripesFollowTheSail() {
+        #expect(GameScene.backwindSail(model: .box, levels: [0, 0.5], seat: 1) == 1)
+        #expect(GameScene.backwindSail(model: .headerAndLull, levels: [0, 0.5], seat: 1) == 0.5)
+        #expect(GameScene.backwindSail(model: .headerAndLull, levels: [0, 0.5], seat: 0) == 0)
+        #expect(GameScene.backwindSail(model: .headerAndLull, levels: nil, seat: 0) == 1)
+        #expect(GameScene.backwindSail(model: .headerAndLull, levels: [0.5], seat: 3) == 1)
+        let boatClass = ShadowConeTests.boatClass
+        let boat = ShadowConeTests.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
+        func stripes(_ sail: Double) -> (alpha: CGFloat, hidden: Bool) {
+            let effects = BoatEffects(seat: 2, boatClass: boatClass, pointsPerMeter: ShadowConeTests.ppm, style: .standard)
+            effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass),
+                           style: .standard, quality: .full, time: 0, dt: 0, settled: true, isFlogging: false,
+                           backwindSail: sail)
+            return (effects.backwind.alpha, effects.backwind.isHidden)
+        }
+        let full = stripes(1), half = stripes(0.5), none = stripes(0)
+        #expect(!full.hidden && full.alpha > 0)
+        #expect(!half.hidden && abs(half.alpha - full.alpha / 2) < 1e-6)
+        #expect(none.hidden, "no working sail: no stripes")
+    }
+
     /// The sail's angle to her apparent wind, as drawn: about the default full angle sailing the upwind groove (so
     /// she sheds her full turbulence there), none with the sheets out on a beat or head to wind, full on a run.
     @Test func sailAngleScalesTheTurbulence() {
