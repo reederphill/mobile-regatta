@@ -2,219 +2,21 @@ import Foundation
 import Testing
 @testable import RegattaCore
 
-/// #376 prototype (investigation only, nothing here ships; the model lives in this test file on purpose).
-///
-/// The ribbon model of the wind shadow (owner, 2026-10-03). Every boat leaves points in space at a fixed interval,
-/// each with a strength and a scale (its radius of influence). A point drifts with the true wind; with age its scale
-/// grows (as √age, so the growth slows) and its strength fades smoothly to exactly 0 at the end of its life. A
-/// caster's consecutive points are joined into a ribbon whose strength and scale interpolate along each segment; the
-/// ribbon breaks where an end has no strength or no scale, where an emission was skipped (stopped, ghost) or where
-/// neighbours have drifted apart past a length cap. A boat's loss from one caster is the strongest ribbon reaching her;
-/// casters stack as the cones do (product, floored). The backwind is a bound field around the boat (research, §2):
-/// it is not trailed here.
-///
-/// The scenarios drive one scripted caster (a tack, a gybe, an ease, a run) past fixed and co-moving probe points and
-/// print what the cone-and-trapezoid boxes say against what the ribbon says there. Read the output with
-/// `swift test --filter TurbulenceTrailPrototypeTests` (it prints).
-struct TurbulenceRibbons {
-    /// Every value here is tuning, not measured: the research (docs/research/yacht-wake-and-backwind-aerodynamics.md)
-    /// gives the wake's direction (along the apparent wind, a few degrees astern of it) and nothing on its reach,
-    /// growth or decay beyond "felt for up to ten boat lengths" (Marchaj, second-hand).
-    struct Parameters {
-        /// Seconds between a boat's points (tuning, not measured). Default 0.5 s: 15 ticks, so a 10 L trail at a
-        /// close-hauled apparent wind is ~14 points, few enough for bots to read as a point map.
-        var emitSeconds = 0.5
-        /// A point's life in seconds at emission, given the caster's apparent wind speed (tuning, not measured).
-        /// Default nil: `coneLength / apparent`, the time her own apparent wind takes to carry air one cone length
-        /// astern of her, so a steady boat's ribbon is as long as her box.
-        var life: ((_ apparent: Double) -> Double)? = nil
-        /// Half the width at the boat and at the end of life, metres (tuning, not measured). Default nil: half the
-        /// class's `coneWidthAtBoat` and `coneWidthAtEnd`, so the steady ribbon is as wide as her box at both ends.
-        var startScale: Double? = nil
-        var endScale: Double? = nil
-        /// Strength at emission (tuning, not measured). Default nil: the class's `lossCloseIn`, the box's loss
-        /// close in.
-        var peak: Double? = nil
-        /// Below this speed through the water a boat sheds nothing, which breaks her ribbon (tuning, not measured).
-        /// Default 0.3 m/s: a boat that's stopped or head to wind isn't driving air off her sails.
-        var stoppedSpeed = 0.3
-        /// Neighbouring points further apart than this, metres, aren't joined (tuning, not measured). Default
-        /// 2 × the travel of a 10 kn apparent wind in one emission interval: 2 × 5.14 m/s × 0.5 s = 5.14 m, about
-        /// 1 L. A steady boat's neighbours sit her apparent wind × `emitSeconds` apart (3.5 m close-hauled at 10 kn)
-        /// and keep that spacing in a uniform wind, so the cap only bites where the pressure field (ADR 0008) drifts
-        /// them apart, or where her apparent wind is over 20 kn.
-        var lengthCap = 2 * metresPerSecond(knots: 10) * 0.5
-        /// Extra turning of the trail astern of the apparent-wind line, degrees (tuning; the research measures
-        /// ~5° upwind, ~9° on a spinnaker reach). Default 0, inert. Applied to the drift: a point's velocity relative
-        /// to her (true wind minus her velocity over ground, which streams astern along her apparent wind) is turned
-        /// by this much towards her stern line (never past it), so a steady ribbon lies this far off the apparent
-        /// wind towards her centreline. Its drift over the ground is then no longer exactly the true wind.
-        var extraTurnDegrees = 0.0
-        /// The sail-angle build-up: an emission multiplier falls to a boat's scale at once and rises linearly, 0 to 1
-        /// over this many seconds (as the app's `TurbulenceTrails.levels`). Default 0: at once.
-        var buildSeconds = 0.0
-    }
-
-    struct Point {
-        /// Where she was at emission, and how it drifts (ground frame).
-        var position: Vec2
-        var drift: Vec2
-        var born: Int
-        /// Strength and scale at emission (already × the emission multiplier), the scale's √age growth rate, life.
-        var peak: Double
-        var scale: Double
-        var growth: Double
-        var life: Double
-    }
-
-    /// A point now: what a bot would read from the point map.
-    struct Live: Equatable {
-        var position: Vec2
-        var strength: Double
-        var scale: Double
-    }
-
-    let shadow: BoatClass.WindShadow
-    let parameters: Parameters
-    /// Ticks between emissions.
-    let every: Int
-    /// Each caster's live points, oldest first.
-    private(set) var points: [[Point]] = []
-    /// Each seat's emission multiplier now, 0...1 (the app's `levels`). Empty until the first step.
-    private(set) var levels: [Double] = []
-
-    init(shadow: BoatClass.WindShadow, parameters: Parameters = Parameters()) {
-        self.shadow = shadow
-        self.parameters = parameters
-        self.every = max(1, Int((parameters.emitSeconds / Race.dt).rounded()))
-    }
-
-    var pointCount: Int { points.reduce(0) { $0 + $1.count } }
-
-    /// Call every tick. `scales`, by seat (nil = 1 for all), is each boat's emission multiplier target (the sail-angle
-    /// scale), smoothed into `levels` as the app does: a level falls to its target at once and rises towards it
-    /// linearly over `buildSeconds`. A seat's first level is its target.
-    mutating func step(boats: [Boat], tick: Int, scales: [Double]? = nil) {
-        while points.count < boats.count { points.append([]) }
-        for c in points.indices { points[c].removeAll { Double(tick - $0.born) * Race.dt >= $0.life } }
-        let rise = parameters.buildSeconds > 0 ? Race.dt / parameters.buildSeconds : 1
-        for seat in boats.indices {
-            let target = (scales.map { seat < $0.count ? $0[seat] : 1 } ?? 1).clamped(to: 0...1)
-            if seat >= levels.count {
-                levels.append(target)
-            } else {
-                levels[seat] = target < levels[seat] ? target : min(target, levels[seat] + rise)
-            }
-        }
-        guard tick % every == 0 else { return }
-        for (seat, b) in boats.enumerated() where !b.isGhost && b.speedThroughWater >= parameters.stoppedSpeed {
-            let m = levels[seat]
-            let apparent = max(b.apparentWind.speed, 0.5)
-            let life = parameters.life?(apparent) ?? shadow.coneLength / apparent
-            let s0 = parameters.startScale ?? shadow.coneWidthAtBoat / 2
-            let s1 = parameters.endScale ?? shadow.coneWidthAtEnd / 2
-            points[seat].append(Point(position: b.position, drift: drift(of: b), born: tick,
-                                      peak: (parameters.peak ?? shadow.lossCloseIn) * m, scale: s0 * m,
-                                      growth: (s1 - s0) / life.squareRoot() * m, life: life))
-        }
-    }
-
-    /// The true wind at her, turned `extraTurnDegrees` towards her stern line in her frame.
-    func drift(of b: Boat) -> Vec2 {
-        let wind = b.windOverGround.velocity
-        guard parameters.extraTurnDegrees != 0 else { return wind }
-        let v = b.velocityOverGround
-        let relative = wind - v, astern = -b.forward
-        let towards = atan2(relative.cross(astern), relative.dot(astern))
-        let turn = (towards < 0 ? -1.0 : 1.0) * min(abs(towards), deg2rad(parameters.extraTurnDegrees))
-        let (s, c) = (Foundation.sin(turn), Foundation.cos(turn))
-        return v + Vec2(relative.x * c - relative.y * s, relative.x * s + relative.y * c)
-    }
-
-    static func smoothstep(_ x: Double) -> Double { let t = x.clamped(to: 0...1); return t * t * (3 - 2 * t) }
-
-    func live(_ p: Point, tick: Int) -> Live {
-        let age = max(0, Double(tick - p.born) * Race.dt)
-        return Live(position: p.position + p.drift * age, strength: p.peak * (1 - Self.smoothstep(age / p.life)),
-                    scale: p.scale + p.growth * age.squareRoot())
-    }
-
-    /// The caster's live points now, oldest first: the short list a bot could read.
-    func pointMap(of caster: Int, tick: Int) -> [Live] {
-        guard caster < points.count else { return [] }
-        return points[caster].filter { Double(tick - $0.born) * Race.dt < $0.life }.map { live($0, tick: tick) }
-    }
-
-    /// Whether two consecutive points (by emission) are joined into a segment now.
-    func joined(_ a: Point, _ la: Live, _ b: Point, _ lb: Live) -> Bool {
-        b.born - a.born == every && la.strength > 0 && lb.strength > 0 && la.scale > 0 && lb.scale > 0
-            && (lb.position - la.position).length <= parameters.lengthCap
-    }
-
-    /// The caster's ribbons now: runs of joined points (a lone point is a run of one).
-    func ribbons(of caster: Int, tick: Int) -> [[Live]] {
-        guard caster < points.count else { return [] }
-        let ps = points[caster].filter { Double(tick - $0.born) * Race.dt < $0.life }
-        var runs: [[Live]] = []
-        for (i, p) in ps.enumerated() {
-            let l = live(p, tick: tick)
-            if i > 0, joined(ps[i - 1], live(ps[i - 1], tick: tick), p, l) { runs[runs.count - 1].append(l) } else { runs.append([l]) }
-        }
-        return runs
-    }
-
-    /// The loss (0...1) caster `c`'s ribbons leave at `p`: the strongest ribbon reaching it. The same as the max of
-    /// `loss(along:at:)` over `ribbons(of:tick:)`, walked without building them.
-    func loss(of c: Int, at p: Vec2, tick: Int) -> Double {
-        guard c < points.count else { return 0 }
-        var best = 0.0
-        var prev: (point: Point, live: Live, joinedBack: Bool)? = nil
-        for q in points[c] where Double(tick - q.born) * Race.dt < q.life {
-            let l = live(q, tick: tick)
-            var joinedBack = false
-            if let pr = prev {
-                if joined(pr.point, pr.live, q, l) {
-                    best = max(best, Self.segmentLoss(pr.live, l, at: p))
-                    joinedBack = true
-                } else if !pr.joinedBack {
-                    best = max(best, Self.discLoss(pr.live, at: p))
-                }
-            }
-            prev = (q, l, joinedBack)
-        }
-        if let pr = prev, !pr.joinedBack { best = max(best, Self.discLoss(pr.live, at: p)) }
-        return best
-    }
-
-    /// The loss one ribbon leaves at `p`: the strongest of its segments. A lone point is a disc.
-    static func loss(along run: [Live], at p: Vec2) -> Double {
-        guard run.count > 1 else { return run.first.map { discLoss($0, at: p) } ?? 0 }
-        return (1..<run.count).reduce(0) { max($0, segmentLoss(run[$1 - 1], run[$1], at: p)) }
-    }
-
-    static func discLoss(_ a: Live, at p: Vec2) -> Double {
-        guard a.scale > 0 else { return 0 }
-        return a.strength * max(0, 1 - (p - a.position).length / a.scale)
-    }
-
-    /// strength × (1 − d/scale) at the clamped projection of `p` on the segment, strength and scale linear between
-    /// the ends.
-    static func segmentLoss(_ a: Live, _ b: Live, at p: Vec2) -> Double {
-        let ab = b.position - a.position
-        let t = ab.lengthSquared > 1e-12 ? ((p - a.position).dot(ab) / ab.lengthSquared).clamped(to: 0...1) : 0
-        let r = a.scale + (b.scale - a.scale) * t
-        guard r > 0 else { return 0 }
-        let d = (p - (a.position + ab * t)).length
-        guard d < r else { return 0 }
-        return (a.strength + (b.strength - a.strength) * t) * (1 - d / r)
-    }
-
-    func factor(at p: Vec2, tick: Int, receiver: Int) -> Double {
-        var f = 1.0
-        for c in points.indices where c != receiver { f *= 1 - loss(of: c, at: p, tick: tick) }
-        return max(f, shadow.stackingFloor)
-    }
-}
+// #376 prototype's tests and its scenario harness. The model moved to RegattaCore in follow-on B
+// (`TurbulenceRibbons`, WakeRibbons.swift); these hold it to the prototype's behaviour.
+//
+// The ribbon model of the wind shadow (owner, 2026-10-03). Every boat leaves points in space at a fixed interval,
+// each with a strength and a scale (its radius of influence). A point drifts with the true wind; with age its scale
+// grows (as √age, so the growth slows) and its strength fades smoothly to exactly 0 at the end of its life. A
+// caster's consecutive points are joined into a ribbon whose strength and scale interpolate along each segment; the
+// ribbon breaks where an end has no strength or no scale, where an emission was skipped (stopped, ghost) or where
+// neighbours have drifted apart past a length cap. A boat's loss from one caster is the strongest ribbon reaching her;
+// casters stack as the cones do (product, floored). The backwind is a bound field around the boat (research, §2):
+// it is not trailed here.
+//
+// The scenarios drive one scripted caster (a tack, a gybe, an ease, a run) past fixed and co-moving probe points and
+// print what the cone-and-trapezoid boxes say against what the ribbon says there. Read the output with
+// `swift test --filter TurbulenceTrailPrototypeTests` (it prints).
 
 /// A scripted caster in a steady 10 kn wind from 0 in still water.
 struct TrailScene {
@@ -313,7 +115,7 @@ struct TrailScene {
     /// fully formed when the scenario starts.
     static func warmUpSeconds(_ caster: Boat, parameters: TurbulenceRibbons.Parameters) -> Double {
         let apparent = max(caster.apparentWind.speed, 0.5)
-        return 1.2 * (parameters.life?(apparent) ?? shadow.coneLength / apparent)
+        return 1.2 * (parameters.life(apparent: apparent, shadow: shadow))
     }
 
     /// `warmUp` (default on): before t = 0 the caster sails her t = 0 heading and speed for `warmUpSeconds`
@@ -458,7 +260,7 @@ struct TrailScene {
     @Test func strengthFadesSmoothlyToNothing() {
         // A life of exactly 3 s, so half and whole lives fall on ticks.
         var params = R.Parameters()
-        params.life = { _ in 3 }
+        params.lifeSeconds = 3
         let (r, _) = Self.sail(seconds: 0.1, parameters: params)
         let p = r.points[0][0]
         #expect(r.live(p, tick: p.born).strength == S.shadow.lossCloseIn)

@@ -194,6 +194,56 @@ public struct ShadowCone: Sendable, Equatable {
         return 1 - shadow.backwindLoss * presence * (1 - (astern - span.start) / (span.end - span.start))
     }
 
+    // MARK: #376 follow-on B (`ShadowSettings`): the cone and the backwind apart, and the backwind as an envelope
+
+    /// The multiplier this boat's cone alone leaves at `p`, without her backwind (trapezoid or band): 1 outside it.
+    func coneFactor(at p: Vec2) -> Double {
+        let offset = p - apex
+        let along = offset.dot(axis)
+        if shadow.backwindInnerLength != nil && shadow.coneFromHull {
+            return hullConeFactor(along: along, across: offset.dot(axis.rightPerp))
+        }
+        return along > 0 ? coneFactor(along: along, lateral: abs(offset.cross(axis))) : 1
+    }
+
+    /// How much of her backwind trapezoid reaches `p`, 0...1 (#376 follow-on B): 1 at its stern edge, falling straight
+    /// to 0 at its far edge, times `backwindPresence`; 0 outside it, and everywhere for a class with #79's band. The
+    /// trapezoid's own loss is `backwindLoss` × this (`trapezoidFactor(at:)`, which stays as it was).
+    func backwindEnvelope(at p: Vec2) -> Double {
+        guard shadow.backwindInnerLength != nil else { return 0 }
+        let offset = p - apex
+        let presence = backwindPresence
+        guard presence > 0 else { return 0 }
+        let out = offset.dot(windward) - shadow.sternCorner.x
+        let scale = shadow.backwindScale(speed: speed)
+        guard scale > 0 else { return 0 }
+        let astern = (shadow.sternCorner.y - offset.dot(forward)) / scale
+        guard out > 0, out < shadow.backwindWidth, astern > 0, let span = shadow.backwindSpan(out: out) else { return 0 }
+        guard astern > span.start, astern < span.end else { return 0 }
+        return presence * (1 - (astern - span.start) / (span.end - span.start))
+    }
+
+    /// The multiplier her backwind alone leaves at `p` with `lull` its loss at the full envelope: the trapezoid's
+    /// `1 - lull × envelope`, exactly `backwindFactor(at:)` at the class's own loss; #79's band as it is (no envelope).
+    func backwindOnlyFactor(at p: Vec2, lull: Double) -> Double {
+        guard shadow.backwindInnerLength != nil else {
+            let offset = p - apex
+            let upwind = -offset.dot(axis), lateral = abs(offset.cross(axis))
+            let width = shadow.backwindWidth / 2
+            guard upwind > 0, upwind < shadow.backwindLength, lateral < width else { return 1 }
+            return 1 - shadow.backwindLoss * (1 - upwind / shadow.backwindLength) * (1 - lateral / width)
+        }
+        if lull == shadow.backwindLoss { return trapezoidFactor(at: p - apex) }
+        return 1 - lull * backwindEnvelope(at: p)
+    }
+
+    /// `factor(at:)` with the backwind's loss `lull` (`BackwindModel.headerAndLull`): exactly `factor(at:)` at the
+    /// class's own loss, and for a class with #79's band.
+    func factor(at p: Vec2, lull: Double) -> Double {
+        guard shadow.backwindInnerLength != nil, lull != shadow.backwindLoss else { return factor(at: p) }
+        return coneFactor(at: p) * (1 - lull * backwindEnvelope(at: p))
+    }
+
     /// The wind multiplier `cones` leave at `p` together: each one's factor multiplied, never below
     /// the class's stacking floor (`floor`).
     public static func factor(at p: Vec2, of cones: [ShadowCone], floor: Double) -> Double {
