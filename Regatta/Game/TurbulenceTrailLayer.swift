@@ -13,15 +13,15 @@ enum ShadowDrawing: String, Codable, CaseIterable {
 }
 
 /// The turbulence trails drawn (#376 follow-on A): one soft ribbon a caster and kind (cone or backwind), along her live
-/// samples' drifted centres from oldest to newest. Each pair of neighbours draws one segment between them, as wide as
-/// the wider has grown, white along its middle and clear at its edges (as a sample's loss falls from its centre), and
-/// faded by the two ends' losses now. Neighbouring segments abut instead of overlapping, so a caster's ribbon shows the
-/// strongest of her samples, as the model's loss takes it, rather than a sum. The newest end is capped with a soft disc
-/// at half its alpha so the ribbon doesn't start square at the boat; a lone sample draws as the disc. Different casters
-/// overlap and blend, as they stack in the model. Cone ribbons draw at the cone's hatch alpha (`BoatStyle.coneAlpha`)
-/// and z, backwind ones at the backwind's share of it (`BoatStyle.backwindShare`) and z, both in the cues' white, as
-/// `BoatEffects` draws them. The sprites are pooled: grown on demand, the unused ones hidden. Drawn only; the race
-/// never reads the trails.
+/// samples' drifted centres from oldest to newest. A ribbon is one sprite (`strip`) warped along the track
+/// (`SKWarpGeometryGrid`, a column a sample, three rows: one edge, the centreline, the other edge), so it has no seams.
+/// Its texture carries both falloffs: across the width white along the middle, clear at the edges (as a sample's loss
+/// falls from its centre), and along the length each sample's column sits at its life left (`1 − age/life`), so it fades
+/// as the model's loss does. The newest end is capped with a soft disc at half its alpha so the ribbon doesn't start
+/// square at the boat; a lone sample draws as the disc. Different casters overlap and blend, as they stack in the model.
+/// Cone ribbons draw at the cone's hatch alpha (`BoatStyle.coneAlpha`) and z, backwind ones at the backwind's share of
+/// it (`BoatStyle.backwindShare`) and z, both in the cues' white, as `BoatEffects` draws them. The sprites are pooled:
+/// grown on demand, the unused ones hidden. Drawn only; the race never reads the trails.
 final class TurbulenceTrailLayer: SKNode {
     /// The disc a lone sample, or a ribbon's newest end, draws with, made once.
     static let disc: SKTexture = {
@@ -37,25 +37,28 @@ final class TurbulenceTrailLayer: SKNode {
         return SKTexture(image: image)
     }()
 
-    /// The band a ribbon's segments draw with, made once: flat along its length (x), clear to white to clear across
-    /// its width (y), falling linearly to the edges as a sample's loss does.
-    static let band: SKTexture = {
-        let size = CGSize(width: 4, height: 64)
-        let image = UIGraphicsImageRenderer(size: size).image { context in
-            let clear = UIColor.white.withAlphaComponent(0).cgColor
-            let colors = [clear, UIColor.white.cgColor, clear] as CFArray
-            guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors,
-                                            locations: [0, 0.5, 1]) else { return }
-            context.cgContext.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: size.height),
-                                                 options: [])
+    /// The texture a ribbon is warped from, made once: along its length (u, x) alpha = u, clear at the dead end to
+    /// white at the newest; across its width (v, y) clear to white to clear, linearly, as a sample's loss falls.
+    static let strip: SKTexture = {
+        let width = 64, height = 32
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            let v = (Double(y) + 0.5) / Double(height)
+            let across = max(0, 1 - abs(2 * v - 1))
+            for x in 0..<width {
+                let u = Double(x) / Double(width - 1)
+                // Premultiplied white.
+                let a = UInt8((u * across * 255).rounded())
+                let i = (y * width + x) * 4
+                pixels[i] = a; pixels[i + 1] = a; pixels[i + 2] = a; pixels[i + 3] = a
+            }
         }
-        return SKTexture(image: image)
+        let texture = pixels.withUnsafeBytes { bytes in
+            SKTexture(data: Data(bytes), size: CGSize(width: width, height: height))
+        }
+        texture.filteringMode = .linear
+        return texture
     }()
-
-    /// Points each segment runs past its ends. Abutting rotated quads leave hairline seams either way: at 0 thin dark
-    /// lines of water, at 0.5 thin bright doubled lines (iPhone 17 simulator). 0 reads quieter; a ribbon drawn as one
-    /// strip would have none.
-    static let seam: CGFloat = 0
 
     private let ppm: CGFloat
     private(set) var sprites: [SKSpriteNode] = []
@@ -71,16 +74,18 @@ final class TurbulenceTrailLayer: SKNode {
         name = "turbulenceTrails"
     }
 
-    /// A live sample where it is now: its drifted centre and grown radius (metres) and its alpha.
+    /// A live sample where it is now: its drifted centre and grown radius (metres), the life it has left (0...1), its
+    /// strength (its peak as a share of its kind's strongest) and its alpha.
     private struct Point {
         var centre: Vec2
         var radius: Double
+        var left: Double
+        var strength: Double
         var alpha: Double
     }
 
     /// Draws `samples` at race time `time` (seconds; between ticks, so they drift smoothly), in `shadow`'s class and
-    /// `style`'s alphas: a ribbon a caster and kind, segment by segment, and its cap. A sample past its life, or not
-    /// yet born, draws nothing.
+    /// `style`'s alphas: a ribbon a caster and kind and its cap. A sample past its life, or not yet born, draws nothing.
     func update(samples: [TurbulenceTrails.Sample], time: Double, shadow: BoatClass.WindShadow, style: BoatStyle) {
         struct Key: Hashable, Comparable {
             var caster: Int
@@ -93,16 +98,17 @@ final class TurbulenceTrailLayer: SKNode {
         for sample in samples {
             let age = max(0, time - Double(sample.born) * Race.dt)
             guard age < sample.life else { continue }
+            let strongest = sample.isBackwind ? shadow.backwindLoss : shadow.lossCloseIn
             let point = Point(centre: sample.position + sample.drift * age, radius: sample.radius + sample.growth * age,
+                              left: 1 - age / sample.life, strength: strongest > 0 ? sample.peak / strongest : 0,
                               alpha: Self.alpha(of: sample, age: age, shadow: shadow, style: style))
             ribbons[Key(caster: sample.caster, isBackwind: sample.isBackwind), default: []].append((sample.born, point))
         }
         var used = 0
-        func next(_ texture: SKTexture, z: CGFloat) -> SKSpriteNode {
+        func next(z: CGFloat) -> SKSpriteNode {
             if used == sprites.count { grow() }
             let sprite = sprites[used]
             used += 1
-            if sprite.texture !== texture { sprite.texture = texture }
             sprite.zPosition = z
             sprite.isHidden = false
             return sprite
@@ -112,28 +118,77 @@ final class TurbulenceTrailLayer: SKNode {
             let points = ribbons[key]!.enumerated().sorted { ($0.element.born, $0.offset) < ($1.element.born, $1.offset) }
                 .map(\.element.point)
             let z = key.isBackwind ? BoatEffects.Layer.backwind : BoatEffects.Layer.cones
-            for (a, b) in zip(points, points.dropFirst()) {
-                let alpha = (a.alpha + b.alpha) / 2
-                guard alpha > 0 else { continue }
-                let sprite = next(Self.band, z: z)
-                let along = b.centre - a.centre
-                let mid = (a.centre + b.centre) * 0.5
-                sprite.position = CGPoint(x: mid.x * ppm, y: mid.y * ppm)
-                sprite.zRotation = CGFloat(atan2(along.y, along.x))
-                sprite.size = CGSize(width: CGFloat(along.length) * ppm + Self.seam, height: CGFloat(2 * max(a.radius, b.radius)) * ppm)
-                sprite.alpha = CGFloat(alpha)
+            if points.count >= 2 {
+                let base = key.isBackwind ? style.coneAlpha * style.backwindShare : style.coneAlpha
+                let strength = points.map(\.strength).reduce(0, +) / Double(points.count)
+                let alpha = min(1, base * strength)
+                if alpha > 0 { ribbon(next(z: z), along: points, alpha: alpha) }
             }
             guard let newest = points.last else { continue }
             let alpha = points.count == 1 ? newest.alpha : newest.alpha / 2
             guard alpha > 0 else { continue }
-            let sprite = next(Self.disc, z: z)
+            let sprite = next(z: z)
+            if sprite.texture !== Self.disc { sprite.texture = Self.disc }
+            sprite.warpGeometry = nil
+            sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
             let diameter = CGFloat(2 * newest.radius) * ppm
             sprite.position = CGPoint(x: newest.centre.x * ppm, y: newest.centre.y * ppm)
-            sprite.zRotation = 0
             sprite.size = CGSize(width: diameter, height: diameter)
             sprite.alpha = CGFloat(alpha)
         }
         for sprite in sprites[used...] where !sprite.isHidden { sprite.isHidden = true }
+    }
+
+    /// Warps `sprite` into the ribbon along `points` (oldest first, at least two): sized to their edges' bounding box,
+    /// anchored at its bottom-left, column i drawn from `strip` at u = the sample's life left, its three rows at the
+    /// centre − normal × radius, the centre, and the centre + normal × radius, the normal across the local track.
+    private func ribbon(_ sprite: SKSpriteNode, along points: [Point], alpha: Double) {
+        let n = points.count
+        var lower: [Vec2] = [], upper: [Vec2] = []
+        lower.reserveCapacity(n); upper.reserveCapacity(n)
+        var lastNormal = Vec2(0, 1)
+        for i in 0..<n {
+            let tangent = points[min(i + 1, n - 1)].centre - points[max(i - 1, 0)].centre
+            let length = tangent.length
+            let normal = length > 1e-9 ? Vec2(-tangent.y / length, tangent.x / length) : lastNormal
+            lastNormal = normal
+            lower.append(points[i].centre - normal * points[i].radius)
+            upper.append(points[i].centre + normal * points[i].radius)
+        }
+        var minX = Double.infinity, minY = Double.infinity, maxX = -Double.infinity, maxY = -Double.infinity
+        for p in lower + upper {
+            minX = min(minX, p.x); maxX = max(maxX, p.x); minY = min(minY, p.y); maxY = max(maxY, p.y)
+        }
+        let origin = CGPoint(x: minX * ppm, y: minY * ppm)
+        let size = CGSize(width: max(1, (maxX - minX) * ppm), height: max(1, (maxY - minY) * ppm))
+        func normalized(_ p: Vec2) -> vector_float2 {
+            vector_float2(Float((p.x * ppm - origin.x) / size.width), Float((p.y * ppm - origin.y) / size.height))
+        }
+        // Source u rising oldest to newest (lives differ a little sample to sample, so nudge a tie or a dip).
+        var u = [Float](repeating: 0, count: n)
+        for i in 0..<n {
+            let left = Float(min(1, max(0, points[i].left)))
+            u[i] = i == 0 ? left : max(left, u[i - 1] + 1e-4)
+        }
+        var source: [vector_float2] = [], destination: [vector_float2] = []
+        source.reserveCapacity(3 * n); destination.reserveCapacity(3 * n)
+        for (row, v) in [Float(0), 0.5, 1].enumerated() {
+            for i in 0..<n {
+                source.append(vector_float2(u[i], v))
+                switch row {
+                case 0: destination.append(normalized(lower[i]))
+                case 1: destination.append(normalized(points[i].centre))
+                default: destination.append(normalized(upper[i]))
+                }
+            }
+        }
+        if sprite.texture !== Self.strip { sprite.texture = Self.strip }
+        sprite.anchorPoint = .zero
+        sprite.position = origin
+        sprite.size = size
+        sprite.warpGeometry = SKWarpGeometryGrid(columns: n - 1, rows: 2, sourcePositions: source,
+                                                 destinationPositions: destination)
+        sprite.alpha = CGFloat(alpha)
     }
 
     /// Hides every sprite.
