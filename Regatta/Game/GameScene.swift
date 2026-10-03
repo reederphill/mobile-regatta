@@ -315,11 +315,12 @@ final class GameScene: SKScene {
             trails.parameters = parameters()
             trailTuning = style.trailTuning
         }
+        let sail = trails.parameters
         for frame in frames {
             // Each boat's sail-angle scale every tick, so her level builds back at the same rate whenever she sheds.
             let scales = frame.boats.enumerated().map { seat, boat in
                 TurbulenceRibbons.scale(of: boat, ease: seat < frame.heldInputs.count && frame.heldInputs[seat].ease,
-                                       boatClass: boatClass, style: style)
+                                       boatClass: boatClass, parameters: sail)
             }
             trails.step(boats: frame.boats, tick: frame.tick, scales: scales)
         }

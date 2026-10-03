@@ -293,6 +293,29 @@ import RegattaCore
         #expect(!session.scene.showsPressureOverlay)
     }
 
+    /// The sim's shadow models and header-and-lull sliders (#376 follow-on B) reach the live practice race from the
+    /// next tick: a look to tune by, never the TUNED badge or a tuned file; reset, the race is back on `ShadowSettings()`.
+    @Test func simShadowSettingsReachThePracticeRace() throws {
+        let (model, root) = model()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = GameSession(config: Self.config)
+        let driver = try #require(session.driver as? PracticeDriver)
+        model.attach(session, files: .defaults)
+        #expect(driver.shadowSettings.shadowModel == .boxes && driver.shadowSettings.backwindModel == .box)
+        #expect(model.groups.contains { $0.id == TuningCatalog.backwindModelGroup })
+        model.shadowModel = .ribbons
+        model.backwindModel = .headerAndLull
+        model.set(try slider("sim.headerDegrees", in: model), to: 4)
+        model.set(try slider("sim.lullShare", in: model), to: 0.5)
+        let s = driver.shadowSettings
+        #expect(s.shadowModel == .ribbons && s.backwindModel == .headerAndLull && s.headerDegrees == 4)
+        #expect(s.lullLoss == 0.5 * driver.boatClass.windShadow.backwindLoss)
+        #expect(!session.isTuned && !model.tuning.isTuned && model.practiceFiles() == .defaults)
+        model.resetAll()
+        #expect(driver.shadowSettings.shadowModel == .boxes && driver.shadowSettings.backwindModel == .box)
+        #expect(driver.shadowSettings.lullLoss == nil && driver.shadowSettings.headerDegrees == ShadowSettings().headerDegrees)
+    }
+
     /// Values a file can't hold (a wobble past the amplitude) show why on the panel, and the race sails that
     /// slot's bundled file.
     @Test func valuesAFileRefusesSailTheBundledFile() throws {

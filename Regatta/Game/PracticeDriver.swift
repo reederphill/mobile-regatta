@@ -58,6 +58,22 @@ final class PracticeDriver: RaceDriver {
         clock = TickClock(timescale: timescale)
         currentFrame = TickFrame(race: race, keepClearOf: myBoatIndex)
         previousFrame = currentFrame
+        #if DEBUG
+        // `-shadowModel`, `-backwindModel` (#376 B); the tuning panel's once it attaches.
+        let launch = LaunchOptions.current
+        if launch.shadowModel != nil || launch.backwindModel != nil {
+            race.shadowSettings = ShadowSettings(shadowModel: launch.shadowModel ?? .boxes,
+                                                 backwindModel: launch.backwindModel ?? .box)
+        }
+        #endif
+    }
+
+    /// The sim's wind-shadow and backwind models (#376 follow-on B, `Race.shadowSettings`): the defaults, today's sim,
+    /// unless a Debug launch or the tuning panel sets others; a change applies from the next tick. Not in the log, so
+    /// a race sailed with other settings doesn't replay from it.
+    var shadowSettings: ShadowSettings {
+        get { race.shadowSettings }
+        set { race.shadowSettings = newValue }
     }
 
     /// Whether you sail your own seat: false while a bot does (`-demo`).

@@ -183,6 +183,22 @@ private struct TuningGroupView: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("tuning-shadow-drawing")
+                // #376 B: what the practice race's sim reads, live.
+                Picker("The sim reads", selection: Binding(get: { model.shadowModel }, set: { model.shadowModel = $0 })) {
+                    Text("Cones").tag(ShadowModel.boxes)
+                    Text("Ribbons").tag(ShadowModel.ribbons)
+                    Text("Both").tag(ShadowModel.both)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("tuning-shadow-model")
+            }
+            if group.id == TuningCatalog.backwindModelGroup {
+                Picker("Backwind acts as", selection: Binding(get: { model.backwindModel }, set: { model.backwindModel = $0 })) {
+                    Text("Box").tag(BackwindModel.box)
+                    Text("Header and lull").tag(BackwindModel.headerAndLull)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("tuning-backwind-model")
             }
             ForEach(group.sliders) { slider in
                 TuningSliderRow(slider: slider, model: model)

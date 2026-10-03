@@ -22,6 +22,9 @@ struct Tuning: Codable, Equatable {
     var showsPressure = false
     /// How the wind shadow draws (#376 follow-on A): a look for tuning by, so never the TUNED badge either.
     var shadowDrawing = ShadowDrawing.standard
+    /// The sim's wind-shadow and backwind models and their sliders (#376 follow-on B), for the practice race: a
+    /// look-for-tuning, never the TUNED badge, and never in a log (`Race.shadowSettings`).
+    var simShadow = SimShadowTuning()
 
     init() {}
 
@@ -68,7 +71,7 @@ struct Tuning: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case name, boatClass, conditions, rulesConfiguration, boatClassValues, conditionsValues, rulesValues, water, camera, boat, showsPressure,
-             shadowDrawing
+             shadowDrawing, simShadow
     }
 
     /// Lenient: a value this build no longer has, or a render style saved before it gained a field, falls back
@@ -87,12 +90,57 @@ struct Tuning: Codable, Equatable {
         boat = (try? c.decode(BoatStyle.self, forKey: .boat)) ?? .standard
         showsPressure = (try? c.decode(Bool.self, forKey: .showsPressure)) ?? false
         shadowDrawing = (try? c.decode(ShadowDrawing.self, forKey: .shadowDrawing)) ?? .standard
+        simShadow = (try? c.decode(SimShadowTuning.self, forKey: .simShadow)) ?? SimShadowTuning()
     }
 
     func jsonData() throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(self)
+    }
+}
+
+/// The tuning panel's sim shadow settings (#376 follow-on B): which models the practice race's sim reads
+/// (`ShadowModel`, `BackwindModel`) and the header-and-lull sliders, every value tuning, not measured. The ribbons'
+/// own sliders are the drawing's (`BoatStyle.trail…`). The defaults are `ShadowSettings()`'s: today's sim.
+struct SimShadowTuning: Codable, Equatable {
+    var shadowModel = ShadowModel.boxes
+    var backwindModel = BackwindModel.box
+    var headerDegrees = ShadowSettings().headerDegrees
+    var headerCapDegrees = ShadowSettings().headerCapDegrees
+    /// The lull, a multiple of the class's backwind loss: 1, the box's exactly.
+    var lullShare = 1.0
+    var headerTimeConstant = ShadowSettings().headerTimeConstant
+
+    init() {}
+
+    /// The race's settings with these, the ribbons built from `style`'s sliders for `boatClass`, and the launch's
+    /// models (`-shadowModel`, `-backwindModel`) over these until the panel picks one.
+    func settings(style: BoatStyle, boatClass: BoatClass, shadowModel: ShadowModel? = nil,
+                  backwindModel: BackwindModel? = nil) -> ShadowSettings {
+        var s = ShadowSettings(shadowModel: shadowModel ?? self.shadowModel, backwindModel: backwindModel ?? self.backwindModel)
+        s.ribbons = TurbulenceRibbons.Parameters(style: style, shadow: boatClass.windShadow)
+        s.headerDegrees = headerDegrees
+        s.headerCapDegrees = headerCapDegrees
+        s.lullLoss = lullShare == 1 ? nil : lullShare * boatClass.windShadow.backwindLoss
+        s.headerTimeConstant = headerTimeConstant
+        return s
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case shadowModel, backwindModel, headerDegrees, headerCapDegrees, lullShare, headerTimeConstant
+    }
+
+    /// Lenient, as `Tuning`'s: a field saved before it existed, or a model this build doesn't know, is the default.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = SimShadowTuning()
+        shadowModel = (try? c.decode(ShadowModel.self, forKey: .shadowModel)) ?? d.shadowModel
+        backwindModel = (try? c.decode(BackwindModel.self, forKey: .backwindModel)) ?? d.backwindModel
+        headerDegrees = (try? c.decode(Double.self, forKey: .headerDegrees)) ?? d.headerDegrees
+        headerCapDegrees = (try? c.decode(Double.self, forKey: .headerCapDegrees)) ?? d.headerCapDegrees
+        lullShare = (try? c.decode(Double.self, forKey: .lullShare)) ?? d.lullShare
+        headerTimeConstant = (try? c.decode(Double.self, forKey: .headerTimeConstant)) ?? d.headerTimeConstant
     }
 }
 

@@ -27,6 +27,8 @@ struct TuningSlider: Identifiable {
         case water(WritableKeyPath<WaterStyle, Double>)
         case camera(WritableKeyPath<CameraStyle, Double>)
         case boat(WritableKeyPath<BoatStyle, Double>)
+        /// The sim's shadow settings (#376 follow-on B): the practice race's, never logged.
+        case sim(WritableKeyPath<SimShadowTuning, Double>)
     }
 
     let id: String
@@ -55,7 +57,7 @@ struct TuningSlider: Identifiable {
         switch target {
         case .file(_, let pointer): pointer
         case .groove(let column): TuningSlider.grooveKey(column)
-        case .water, .camera, .boat: nil
+        case .water, .camera, .boat, .sim: nil
         }
     }
 
@@ -63,7 +65,7 @@ struct TuningSlider: Identifiable {
         switch target {
         case .file(let slot, _): slot
         case .groove: .boatClass
-        case .water, .camera, .boat: nil
+        case .water, .camera, .boat, .sim: nil
         }
     }
 
@@ -230,6 +232,8 @@ enum TuningCatalog {
                     boat("trailLengthCap", "Trail length cap (not measured)", \.trailLengthCap, 1...20, 0.1, unit: " m"),
                     boat("trailStoppedSpeed", "Trail stopped below (not measured)", \.trailStoppedSpeed, 0...2, 0.05, unit: " m/s"),
                     boat("trailExtraTurnDegrees", "Trail extra turning (not measured)", \.trailExtraTurnDegrees, 0...9, 0.5, unit: "°"),
+                    // #376 follow-on B: the sim reads the ribbons with the picker's "Ribbons" or "Both" (the trail
+                    // sliders above are its parameters too), live on the practice race.
                 ]),
             TuningGroup(
                 id: "backwind", title: "Backwind",
@@ -238,6 +242,12 @@ enum TuningCatalog {
                 sliders: [
                     TuningSlider(.boatClass, "/windShadow/backwind/loss", "Loss at her stern", 0...0.6, step: 0.01),
                     TuningSlider(.boatClass, "/windShadow/backwind/innerLengthHullLengths", "Short edge length", 0.25...4, step: 0.05),
+                    // #376 follow-on B: the backwind as a header and a lull (the picker's "Header and lull"), live on the
+                    // practice race, all tuning.
+                    sim("headerDegrees", "Header at her stern (not measured)", \.headerDegrees, 0...10, 0.25, unit: "°"),
+                    sim("headerCapDegrees", "Stacked headers cap (not measured)", \.headerCapDegrees, 0...20, 0.5, unit: "°"),
+                    sim("lullShare", "Lull, of the loss above (not measured)", \.lullShare, 0...2, 0.05, unit: "×"),
+                    sim("headerTimeConstant", "Header follows in (not measured)", \.headerTimeConstant, 0...4, 0.1, unit: " s"),
                     TuningSlider(.boatClass, "/windShadow/backwind/lengthHullLengths", "Long edge length", 0.5...4, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/widthHullLengths", "Width at her stern", 0.25...3, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/runningFromDegrees", "Off running from", unit: "°", 60...180, step: 1),
@@ -382,8 +392,15 @@ enum TuningCatalog {
 
     /// The group whose panel carries the pressure overlay's toggle (#289).
     static let pressureOverlayGroup = "water"
-    /// The group the shadow drawing's picker (#376 follow-on A) sits in.
+    /// The group the shadow drawing's picker (#376 follow-on A) and the sim's shadow model's (follow-on B) sit in.
     static let shadowDrawingGroup = "shadow"
+    /// The group the sim's backwind model's picker (#376 follow-on B) sits in.
+    static let backwindModelGroup = "backwind"
+
+    private static func sim(_ name: String, _ title: String, _ path: WritableKeyPath<SimShadowTuning, Double>,
+                            _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {
+        TuningSlider(id: "sim.\(name)", title: title, unit: unit, range: range, step: step, target: .sim(path))
+    }
 
     private static func water(_ name: String, _ title: String, _ path: WritableKeyPath<WaterStyle, Double>,
                               _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {

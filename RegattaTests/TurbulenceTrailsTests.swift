@@ -47,11 +47,11 @@ import Testing
         #expect(p.emitSeconds == d.emitSeconds && p.stoppedSpeed == d.stoppedSpeed && p.lengthCap == d.lengthCap)
         #expect(p.extraTurnDegrees == 0 && p.buildSeconds == style.trailBuildSeconds)
         #expect(p.startScale == shadow.coneWidthAtBoat / 2 && p.endScale == shadow.coneWidthAtEnd / 2)
-        #expect(p.peak == shadow.lossCloseIn && p.life?(4.2) == shadow.coneLength / 4.2)
+        #expect(p.peak == shadow.lossCloseIn && p.life(apparent: 4.2, shadow: shadow) == shadow.coneLength / 4.2)
         style.trailLifeScale = 2
         style.trailEmitSeconds = 1
         let changed = R.Parameters(style: style, shadow: shadow)
-        #expect(changed.life?(4.2) == 2 * shadow.coneLength / 4.2)
+        #expect(changed.life(apparent: 4.2, shadow: shadow) == 2 * shadow.coneLength / 4.2)
         // A live change: `every` follows, the points already shed keep theirs.
         var ribbons = R(shadow: shadow)
         ribbons.step(boats: [TrailParity.fleet(boatClass: Race.defaultBoatClass)[0]], tick: 0)
@@ -321,22 +321,60 @@ import Testing
     @Test func sailAngleScalesTheTurbulence() {
         let boatClass = Race.defaultBoatClass
         let style = BoatStyle.standard
+        let sail = R.Parameters(style: style, shadow: boatClass.windShadow)
         let groove = TrailParity.fleet(boatClass: boatClass)[0]
         let aoa = rad2deg(BoatPose.angleOfAttack(groove, ease: false, boatClass: boatClass, style: style))
         #expect(abs(aoa - style.trailFullAngleDegrees) < 1)
         #expect(BoatPose.angleOfAttack(groove, ease: true, boatClass: boatClass, style: style) == 0)
-        #expect(abs(R.scale(of: groove, ease: false, boatClass: boatClass, style: style) - 1) < 0.02)
+        #expect(abs(R.scale(of: groove, ease: false, boatClass: boatClass, parameters: sail) - 1) < 0.02)
         var head = groove
         head.heading = 0
         TrailParity.refresh(&head)
-        #expect(R.scale(of: head, ease: false, boatClass: boatClass, style: style) == 0)
+        #expect(R.scale(of: head, ease: false, boatClass: boatClass, parameters: sail) == 0)
         var run = groove
         run.heading = .pi * 0.9
         TrailParity.refresh(&run)
-        #expect(R.scale(of: run, ease: false, boatClass: boatClass, style: style) == 1)
+        #expect(R.scale(of: run, ease: false, boatClass: boatClass, parameters: sail) == 1)
         var half = style
         half.trailFullAngleDegrees = 2 * aoa
-        #expect(abs(R.scale(of: groove, ease: false, boatClass: boatClass, style: half) - 0.5) < 1e-9)
+        #expect(abs(R.scale(of: groove, ease: false, boatClass: boatClass, parameters: R.Parameters(style: half, shadow: boatClass.windShadow)) - 0.5) < 1e-9)
+    }
+
+    /// Core's emission target (`TurbulenceRibbons.angleOfAttack`, which the sim's wake reads, #376 B) is the drawn
+    /// sail's angle (`BoatPose.angleOfAttack`) on a grid of true wind angles, both sides, eased or not, head to wind
+    /// and by the lee: the two can't drift apart.
+    @Test func sailMultiplierMatchesTheDrawnAngle() {
+        let boatClass = Race.defaultBoatClass
+        var styles = [BoatStyle.standard]
+        var other = BoatStyle.standard
+        other.trimPerApparentAngle = 0.4
+        other.minTrimDegrees = 6
+        other.maxTrimDegrees = 80
+        other.headToWindMarginDegrees = 4
+        styles.append(other)
+        var checked = 0, headToWind = 0, byTheLee = 0
+        for style in styles {
+            let sail = R.Parameters(style: style, shadow: boatClass.windShadow)
+            for twaDegrees in stride(from: 20.0, through: 185, by: 2.5) {
+                for side in [-1.0, 1.0] {
+                    for ease in [false, true] {
+                        // Sailing at the twa, the boom on her leeward side; past 180 the boom stays: by the lee.
+                        var boat = TrailParity.boat(0, .zero, heading: side * deg2rad(twaDegrees), speed: 3)
+                        if twaDegrees > 180 { boat.boomSide = side > 0 ? .starboard : .port }
+                        let drawn = BoatPose.angleOfAttack(boat, ease: ease, boatClass: boatClass, style: style)
+                        let core = R.angleOfAttack(boat, ease: ease, boatClass: boatClass, parameters: sail)
+                        #expect(abs(drawn - core) < 1e-12, "twa \(twaDegrees) side \(side) ease \(ease): \(drawn) vs \(core)")
+                        let full = deg2rad(style.trailFullAngleDegrees)
+                        #expect(abs(R.scale(of: boat, ease: ease, boatClass: boatClass, parameters: sail)
+                                    - (drawn / full).clamped(to: 0...1)) < 1e-12)
+                        checked += 1
+                        if drawn == 0 && !ease { headToWind += 1 }
+                        if boat.isByTheLee { byTheLee += 1 }
+                    }
+                }
+            }
+        }
+        #expect(checked > 200 && headToWind > 0 && byTheLee > 0)
     }
 
     /// A style saved before the ribbon sliders loads with the prototype's defaults.
@@ -369,6 +407,42 @@ import Testing
         var cones = Tuning()
         cones.shadowDrawing = .cones
         #expect(try JSONDecoder().decode(Tuning.self, from: cones.jsonData()).shadowDrawing == .cones)
+    }
+
+    /// `-shadowModel boxes|ribbons|both` and `-backwindModel box|headerAndLull` (#376 B, Debug builds).
+    @Test func launchArgumentsPickTheSimModels() {
+        func parse(_ arguments: String...) -> LaunchOptions { LaunchOptions(arguments: ["Regatta"] + arguments) }
+        #expect(parse().shadowModel == nil && parse().backwindModel == nil)
+        let both = parse("-shadowModel", "ribbons", "-backwindModel", "headerAndLull", "-demo")
+        #expect(both.shadowModel == .ribbons && both.backwindModel == .headerAndLull && both.demo && both.problems.isEmpty)
+        let bad = parse("-shadowModel", "cones", "-backwindModel", "header")
+        #expect(bad.shadowModel == nil && bad.backwindModel == nil)
+        #expect(bad.problems == ["-shadowModel cones: expected boxes, ribbons or both",
+                                 "-backwindModel header: expected box or headerAndLull"])
+        #expect(parse("-backwindModel", "-demo").problems == ["-backwindModel needs a value"])
+    }
+
+    /// A tuning saved before the sim's models loads them at the defaults, today's sim; a saved choice comes back; and
+    /// the defaults make `ShadowSettings()`'s models, header and lull.
+    @Test func savedTuningsLoadAsTheDefaultSettings() throws {
+        let old = try JSONDecoder().decode(Tuning.self, from: Data(#"{"shadowDrawing": "cones"}"#.utf8))
+        #expect(old.simShadow == SimShadowTuning() && !old.isTuned)
+        let boatClass = Race.defaultBoatClass
+        let settings = old.simShadow.settings(style: .standard, boatClass: boatClass)
+        let d = ShadowSettings()
+        #expect(settings.shadowModel == .boxes && settings.backwindModel == .box && settings.lullLoss == nil)
+        #expect(settings.headerDegrees == d.headerDegrees && settings.headerCapDegrees == d.headerCapDegrees
+                && settings.headerTimeConstant == d.headerTimeConstant)
+        #expect(settings.ribbons == R.Parameters(style: .standard, shadow: boatClass.windShadow))
+        var tuned = Tuning()
+        tuned.simShadow.shadowModel = .both
+        tuned.simShadow.backwindModel = .headerAndLull
+        tuned.simShadow.lullShare = 0.5
+        let back = try JSONDecoder().decode(Tuning.self, from: tuned.jsonData())
+        #expect(back.simShadow == tuned.simShadow && !back.isTuned)
+        #expect(back.simShadow.settings(style: .standard, boatClass: boatClass).lullLoss == 0.5 * boatClass.windShadow.backwindLoss)
+        let partial = try JSONDecoder().decode(SimShadowTuning.self, from: Data(#"{"backwindModel": "headerAndLull", "shadowModel": "fog"}"#.utf8))
+        #expect(partial.backwindModel == .headerAndLull && partial.shadowModel == .boxes && partial.headerDegrees == d.headerDegrees)
     }
     #endif
 }
@@ -424,7 +498,7 @@ import Testing
         var series = probes.map { _ in [Double]() }
         var ribbons = TurbulenceRibbons(shadow: shadow, parameters: parameters)
         let apparent = max(caster.apparentWind.speed, 0.5)
-        let warm = 1.2 * (parameters.life?(apparent) ?? shadow.coneLength / apparent)
+        let warm = 1.2 * (parameters.life(apparent: apparent, shadow: shadow))
         let ticks = Int((warm * Double(Race.tickRate)).rounded(.up))
         caster.position = v0 * (-Double(ticks) * Race.dt)
         for tick in -ticks..<0 {

@@ -85,6 +85,9 @@ struct LaunchOptions: Equatable {
     var tuning = false
     /// `-shadowDrawing` (#376).
     var shadowDrawing: ShadowDrawing?
+    /// `-shadowModel boxes|ribbons|both`, `-backwindModel box|headerAndLull` (#376 B): what a practice race's sim reads.
+    var shadowModel: ShadowModel?
+    var backwindModel: BackwindModel?
     #endif
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
@@ -120,6 +123,17 @@ struct LaunchOptions: Equatable {
                 } else {
                     reject(argument, value, "cones, trails or both")
                 }
+            case "-shadowModel", "-backwindModel":
+                guard let value = rest.first, !Self.flags.contains(value) else {
+                    problems.append("\(argument) needs a value")
+                    continue
+                }
+                rest.removeFirst()
+                if argument == "-shadowModel" {
+                    if let model = ShadowModel(rawValue: value) { shadowModel = model } else { reject(argument, value, "boxes, ribbons or both") }
+                } else {
+                    if let model = BackwindModel(rawValue: value) { backwindModel = model } else { reject(argument, value, "box or headerAndLull") }
+                }
             #endif
             case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
                  "-appearance", "-vision", "-fakeServices", "-briefing":
@@ -143,6 +157,8 @@ struct LaunchOptions: Equatable {
         #if DEBUG
         flags.insert("-tuning")
         flags.insert("-shadowDrawing")
+        flags.insert("-shadowModel")
+        flags.insert("-backwindModel")
         #endif
         return flags
     }()

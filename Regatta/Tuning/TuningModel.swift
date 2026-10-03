@@ -34,6 +34,9 @@ final class TuningModel {
     @ObservationIgnored private var memoryTunes: [Data: Int] = [:]
     /// `-shadowDrawing` (#376): the launch's drawing, over the tuning's until the panel picks one.
     @ObservationIgnored private var shadowDrawingOverride = LaunchOptions.current.shadowDrawing
+    /// `-shadowModel`, `-backwindModel` (#376 B): the launch's sim models, over the tuning's until the panel picks one.
+    @ObservationIgnored private var shadowModelOverride = LaunchOptions.current.shadowModel
+    @ObservationIgnored private var backwindModelOverride = LaunchOptions.current.backwindModel
     @ObservationIgnored private var baseCache: [String: Data] = [:]
     @ObservationIgnored private var optionsCache: [TuningSlot: [DataFileKey]] = [:]
     /// File values by slider and base file, and the groups by boat class: the page reads them every time it draws.
@@ -166,6 +169,7 @@ final class TuningModel {
         case .water(let path): return WaterStyle.standard[keyPath: path]
         case .camera(let path): return CameraStyle.standard[keyPath: path]
         case .boat(let path): return BoatStyle.standard[keyPath: path]
+        case .sim(let path): return SimShadowTuning()[keyPath: path]
         }
     }
 
@@ -175,6 +179,7 @@ final class TuningModel {
         case .water(let path): return tuning.water[keyPath: path]
         case .camera(let path): return tuning.camera[keyPath: path]
         case .boat(let path): return tuning.boat[keyPath: path]
+        case .sim(let path): return tuning.simShadow[keyPath: path]
         case .file, .groove:
             guard let slot = slider.slot, let key = slider.valueKey else { return nil }
             return tuning[values: slot][key] ?? fileValue(slider)
@@ -195,6 +200,7 @@ final class TuningModel {
         case .water(let path): tuning.water[keyPath: path] = same ? file ?? value : value
         case .camera(let path): tuning.camera[keyPath: path] = same ? file ?? value : value
         case .boat(let path): tuning.boat[keyPath: path] = same ? file ?? value : value
+        case .sim(let path): tuning.simShadow[keyPath: path] = same ? file ?? value : value
         case .file, .groove:
             guard let slot = slider.slot, let key = slider.valueKey, file != nil else { return }
             tuning[values: slot][key] = same ? nil : value
@@ -209,6 +215,7 @@ final class TuningModel {
             case .water(let path): tuning.water[keyPath: path] = WaterStyle.standard[keyPath: path]
             case .camera(let path): tuning.camera[keyPath: path] = CameraStyle.standard[keyPath: path]
             case .boat(let path): tuning.boat[keyPath: path] = BoatStyle.standard[keyPath: path]
+            case .sim(let path): tuning.simShadow[keyPath: path] = SimShadowTuning()[keyPath: path]
             case .file, .groove:
                 if let slot = slider.slot, let key = slider.valueKey { tuning[values: slot][key] = nil }
             }
@@ -238,6 +245,27 @@ final class TuningModel {
         set {
             tuning.shadowDrawing = newValue
             shadowDrawingOverride = nil
+            changed()
+        }
+    }
+
+    /// What the practice race's sim reads for the wind shadow (#376 follow-on B): the cones, the ribbons or both,
+    /// live from the next tick.
+    var shadowModel: ShadowModel {
+        get { shadowModelOverride ?? tuning.simShadow.shadowModel }
+        set {
+            tuning.simShadow.shadowModel = newValue
+            shadowModelOverride = nil
+            changed()
+        }
+    }
+
+    /// How the backwind acts in the practice race's sim (#376 follow-on B): the box, or a header and a lull.
+    var backwindModel: BackwindModel {
+        get { backwindModelOverride ?? tuning.simShadow.backwindModel }
+        set {
+            tuning.simShadow.backwindModel = newValue
+            backwindModelOverride = nil
             changed()
         }
     }
@@ -320,6 +348,12 @@ final class TuningModel {
         if session.scene.showsPressureOverlay != tuning.showsPressure { session.scene.showsPressureOverlay = tuning.showsPressure }
         // `-shadowDrawing` stands over the panel's until the panel changes it.
         if session.scene.shadowDrawing != shadowDrawing { session.scene.shadowDrawing = shadowDrawing }
+        // The sim's shadow models (#376 B), from the next tick: a practice race's only, never logged.
+        if let driver = session.driver as? PracticeDriver {
+            let settings = tuning.simShadow.settings(style: tuning.boat, boatClass: driver.boatClass,
+                                                     shadowModel: shadowModel, backwindModel: backwindModel)
+            if driver.shadowSettings != settings { driver.shadowSettings = settings }
+        }
         session.isTuned = liveSessionSailsTunedFiles || tuning.water != .standard || tuning.camera != .standard
             || tuning.boat != .standard
     }
