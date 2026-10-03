@@ -56,15 +56,6 @@ final class GameScene: SKScene {
             needsPausedRender = true
         }
     }
-    /// What fills the trails (#376 follow-on A, Debug builds): the tuning panel's and `-trailLook`'s.
-    var trailLook: TrailLook {
-        get { trailLayer.look }
-        set {
-            guard newValue != trailLayer.look else { return }
-            trailLayer.look = newValue
-            needsPausedRender = true
-        }
-    }
     /// How the wind shadow draws (#376 follow-on A, Debug builds): the tuning panel's and `-shadowDrawing`'s. Off the
     /// trails, they stop and empty, so the cones alone cost nothing more.
     var shadowDrawing: ShadowDrawing {
