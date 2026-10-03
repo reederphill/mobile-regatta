@@ -64,7 +64,7 @@ private struct PracticeSetupView: View {
                 }
                 .background(ChromePalette.surface, in: .rect(cornerRadius: 16))
 
-                Button(action: model.startPractice) {
+                Button(action: model.beginPractice) {
                     Text("Start race")
                         .font(MenuFont.heading(.title3))
                         .frame(maxWidth: .infinity)

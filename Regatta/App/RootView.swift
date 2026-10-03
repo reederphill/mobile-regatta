@@ -36,6 +36,7 @@ struct RootView: View {
         } else if let fixtureGallery {
             switch fixtureGallery {
             case .livery: LiveryGalleryView()
+            case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
             }
         } else {
             HomeView(model: model, onRaceOnline: raceOnline)
@@ -63,6 +64,9 @@ struct RootView: View {
                 case .online(let launch):
                     OnlineLaunchView(launch: launch, onRestart: startOnlineRace, onExit: model.endRaceSequence)
                         .id(ObjectIdentifier(launch))
+                case .briefing(let briefing, _):
+                    BriefingView(model: briefing, onAdvance: model.finishBriefing, onBack: model.endRaceSequence)
+                        .id(ObjectIdentifier(briefing))
                 }
             }
             // UI tests swipe on it and check it stays. A full-size element behind the race, not a container
@@ -85,7 +89,7 @@ struct RootView: View {
         }
     }
 
-    /// Development launch arguments (`LaunchOptions`): `-autostart`, `-demo`, `-perf`, `-fixture` and `-online` open
+    /// Development launch arguments (`LaunchOptions`): `-autostart`, `-demo`, `-perf`, `-fixture`, `-online` and `-briefing` open
     /// on the race sequence, and `-tuning` on the tuning panel (Debug builds). The cover appears without its animation,
     /// so a render fixture's frame is the same as ever.
     private func autostartIfRequested() {
@@ -102,6 +106,9 @@ struct RootView: View {
                 startFixture(named: name)
             } else if launchOptions.online {
                 startOnlineRace()
+            } else if let briefing = launchOptions.briefing {
+                model.startBriefing(config: launchOptions.raceConfig(from: model.settings),
+                                    mode: briefing == .online ? .online(seconds: BriefingModel.Mode.onlineSeconds) : .practice)
             } else if let config = launchOptions.launchRaceConfig(from: model.settings) {
                 model.startRaceSequence(model.practiceSession(config: config))
             }

@@ -95,6 +95,50 @@ import RegattaCore
         #expect(model.phase == .raceSequence)
     }
 
+    /// The setup's Start goes to the briefing (#25, #130), which waits for Ready; Ready starts the race it briefed, on
+    /// the same seed and files.
+    @Test func beginPracticeBriefsThenReadyStartsThatRace() throws {
+        let options = LaunchOptions(arguments: ["/path/to/Regatta", "-uitesting", "-seed", "7"])
+        let model = AppModel(launchOptions: options)
+        model.settings.opponents = 3
+        model.settings.laps = 1
+
+        model.beginPractice()
+        #expect(model.phase == .raceSequence)
+        #expect(model.session == nil)
+        let briefing = try #require(model.briefing)
+        #expect(briefing.mode == .practice)
+        #expect(briefing.fleet.count == 4)
+        #expect(briefing.laps == 1)
+        #expect(briefing.setup.raceSeed == RaceSeed(7))
+
+        model.finishBriefing()
+        let session = try #require(model.session)
+        #expect(model.briefing == nil)
+        #expect(session.roster.entries.count == 4)
+        #expect(model.phase == .raceSequence)
+
+        model.finishBriefing()
+        #expect(model.session === session, "no briefing, nothing to finish")
+    }
+
+    /// The briefing fades the menu music as it starts (#126, #130), through the model's injected music.
+    @Test func briefingFadesTheAppsMenuMusic() throws {
+        final class Music: MenuMusic {
+            var fadeOuts = 0
+            func fadeOut() { fadeOuts += 1 }
+        }
+        let model = AppModel(launchOptions: LaunchOptions(arguments: ["/path/to/Regatta", "-uitesting"]))
+        let music = Music()
+        model.menuMusic = music
+        model.startBriefing(config: Self.config, mode: .online(seconds: 15))
+        let briefing = try #require(model.briefing)
+        #expect(music.fadeOuts == 0)
+        briefing.begin()
+        #expect(music.fadeOuts == 1)
+        #expect(briefing.displayedSeconds == 15)
+    }
+
     @Test func lobbyPanelFollowsConnectivityThenAccount() {
         var status = LobbyStatus()
         #expect(LobbyPanelState(isOnline: false, status: status) == .offline)

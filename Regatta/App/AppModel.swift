@@ -40,6 +40,9 @@ final class AppModel {
         case practice(GameSession)
         /// An online race, from joining to its close (#68).
         case online(OnlineLaunch)
+        /// The briefing before a race (#130), and the race it leads to: Ready (practice) or the countdown (online)
+        /// starts `config`, the same seed and files the briefing showed.
+        case briefing(BriefingModel, RaceConfig)
     }
 
     /// A message at the top of the home screen.
@@ -86,6 +89,12 @@ final class AppModel {
     var session: GameSession? {
         if case .practice(let session) = race { session } else { nil }
     }
+    /// The briefing the cover shows, if it's one.
+    var briefing: BriefingModel? {
+        if case .briefing(let briefing, _) = race { briefing } else { nil }
+    }
+    /// The menus' music, faded out as a briefing starts (#126, #130).
+    @ObservationIgnored var menuMusic: any MenuMusic = SilentMenuMusic()
     /// Home's notice slot. Nothing posts one yet.
     var notice: Notice?
     /// Home's last-race slot. Filled once results are kept (#24).
@@ -155,17 +164,66 @@ final class AppModel {
     /// A practice race on `config`, sailed on the tuning panel's files and drawn with its look in a Debug build
     /// (#232): tuned values apply at the next race start, never during one.
     func practiceSession(config: RaceConfig) -> GameSession {
+        session(tuned: tuned(config))
+    }
+
+    /// `config` on the tuning panel's files in a Debug build (#232); as it is otherwise.
+    func tuned(_ config: RaceConfig) -> RaceConfig {
         #if DEBUG
         var config = config
         config.files = tuning.practiceFiles()
+        return config
+        #else
+        return config
+        #endif
+    }
+
+    /// A practice race on `config`, whose files are already the tuning panel's (`tuned(_:)`).
+    private func session(tuned config: RaceConfig) -> GameSession {
         let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls,
                                   rulesSeen: rulesSeen)
+        #if DEBUG
         tuning.attach(session, files: config.files)
-        return session
-        #else
-        return GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls,
-                           rulesSeen: rulesSeen)
         #endif
+        return session
+    }
+
+    /// The practice setup's Start (#25, #130): the briefing for a race on the current settings, which waits for Ready.
+    /// #131's setup page calls it.
+    func beginPractice() {
+        startBriefing(config: launchOptions.raceConfig(from: settings), mode: .practice)
+    }
+
+    /// Shows the briefing for a practice race on `config` (on the tuning panel's files in a Debug build), resolved
+    /// once so the briefing and the race it leads to sail the same files. `mode` `.online` is the online briefing's
+    /// countdown, which #141 wires to the online race; here it leads to a practice race on `config`.
+    func startBriefing(config: RaceConfig, mode: BriefingModel.Mode) {
+        let config = tuned(config)
+        startRaceSequence(.briefing(briefingModel(config: config, mode: mode), config))
+    }
+
+    /// The briefing for `config`, whose files are already resolved for the race.
+    func briefingModel(config: RaceConfig, mode: BriefingModel.Mode) -> BriefingModel {
+        let setup = config.setup
+        let files: RaceFiles
+        do {
+            files = try RaceFiles(resolving: setup, from: config.files.catalog)
+        } catch {
+            preconditionFailure("a practice setup names files it can resolve: \(error)")
+        }
+        let mySeat = setup.seats.firstIndex(of: .human) ?? 0
+        // The briefing's countdown runs at `-timescale` too, so a UI test can sail through it quickly.
+        let origin = Date()
+        let timescale = launchOptions.timescale
+        return BriefingModel(setup: setup, files: files, mySeat: mySeat, mode: mode,
+                             liveries: FleetLiveries(setup: setup, mySeat: mySeat), menuMusic: menuMusic,
+                             now: { origin.addingTimeInterval(Date().timeIntervalSince(origin) * timescale) })
+    }
+
+    /// The briefing's Ready, or its countdown run out: the race it briefed.
+    func finishBriefing() {
+        guard case .briefing(_, let config) = race else { return }
+        startRaceSequence(session(tuned: config))
     }
 
     /// Quits the race sequence back to the menus.

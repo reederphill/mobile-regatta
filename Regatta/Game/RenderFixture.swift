@@ -106,20 +106,87 @@ struct RenderFixture: Codable, Equatable {
     }
 
     /// An off-water gallery a fixture shows in place of a race (#119): `{ "gallery": "livery" }` names no log.
-    enum Gallery: String, Codable, CaseIterable {
+    enum Gallery: Equatable {
         /// Each free starter design's large render and chip, in fixed colours (`LiveryGalleryView`).
         case livery
+        /// The briefing for a race the fixture describes (#130): `{ "gallery": "briefing", "briefing": { … } }`.
+        case briefing(BriefingFixture)
+    }
+
+    /// A briefing render fixture (#130): the race it briefs, with no log, since a briefing needs only the setup.
+    ///
+    ///     { "raceSeed": 7, "venue": "saltings-reach@1", "conditions": "gusty-offshore@7", "opponents": 9,
+    ///       "mode": "practice" }
+    ///
+    /// `venue` and `conditions` are bundled files as `id@version`; the boat class and rules are the practice defaults.
+    /// `mode` is `practice` or `online` (an online briefing's countdown is frozen at its start).
+    struct BriefingFixture: Codable, Equatable {
+        var raceSeed: UInt64
+        var venue: String
+        var conditions: String
+        var opponents: Int
+        var laps: Int? = nil
+        var mode: LaunchOptions.Briefing
+
+        enum FixtureError: Error, Equatable {
+            case badRef(String)
+        }
+
+        /// The practice race this briefing is for, pinned to `raceSeed`.
+        func config() throws -> RaceConfig {
+            var config = RaceConfig(opponents: opponents, laps: laps ?? RaceSettings().laps, seed: raceSeed,
+                                    windSeed: RaceConfig.windSeed(pinnedTo: raceSeed))
+            let (venueID, venueVersion) = try Self.ref(venue)
+            let (conditionsID, conditionsVersion) = try Self.ref(conditions)
+            config.files.venue = try VenueFile.bundled(id: venueID, version: venueVersion).ref
+            config.files.conditions = try ConditionsFile.bundled(id: conditionsID, version: conditionsVersion).ref
+            return config
+        }
+
+        /// The fixture's briefing, at a fixed moment.
+        func model() throws -> BriefingModel {
+            let config = try config()
+            let setup = config.setup
+            let files = try RaceFiles(resolving: setup)
+            let start = Date(timeIntervalSinceReferenceDate: 0)
+            return BriefingModel(setup: setup, files: files, mySeat: 0,
+                                 mode: mode == .online ? .online(seconds: BriefingModel.Mode.onlineSeconds) : .practice,
+                                 liveries: FleetLiveries(setup: setup, mySeat: 0), menuMusic: SilentMenuMusic(),
+                                 now: { start })
+        }
+
+        private static func ref(_ text: String) throws -> (String, Int) {
+            let parts = text.split(separator: "@")
+            guard parts.count == 2, let version = Int(parts[1]) else { throw FixtureError.badRef(text) }
+            return (String(parts[0]), version)
+        }
     }
 
     private struct GalleryFile: Decodable {
-        var gallery: Gallery?
+        enum Kind: String, Decodable {
+            case livery, briefing
+        }
+
+        var gallery: Kind?
+        var briefing: BriefingFixture?
+    }
+
+    enum GalleryError: Error, Equatable {
+        case briefingMissing
     }
 
     /// The gallery fixture `name` in `directory` shows, or nil for a race fixture.
     static func gallery(named name: String, in directory: URL) throws -> Gallery? {
         let file = directory.appendingPathComponent("\(name).json")
         do {
-            return try JSONDecoder().decode(GalleryFile.self, from: Data(contentsOf: file)).gallery
+            let decoded = try JSONDecoder().decode(GalleryFile.self, from: Data(contentsOf: file))
+            switch decoded.gallery {
+            case nil: return nil
+            case .livery?: return .livery
+            case .briefing?:
+                guard let briefing = decoded.briefing else { throw GalleryError.briefingMissing }
+                return .briefing(briefing)
+            }
         } catch {
             throw LoadError.unreadable(file.path, error)
         }
@@ -139,6 +206,7 @@ struct RenderFixture: Codable, Equatable {
 }
 
 extension LaunchOptions.CameraMode: Codable {}
+extension LaunchOptions.Briefing: Codable {}
 
 /// A colour-vision or viewing-condition filter over the whole race view (#22, #15), so a fixture can check that
 /// every tone still reads. Each is a colour matrix on sRGB components, applied by `View.vision`:
