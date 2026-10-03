@@ -56,6 +56,20 @@ final class GameScene: SKScene {
             needsPausedRender = true
         }
     }
+    /// How the wind shadow draws (#376 follow-on A, Debug builds): the tuning panel's and `-shadowDrawing`'s. Off the
+    /// trails, they stop and empty, so the cones alone cost nothing more.
+    var shadowDrawing: ShadowDrawing {
+        get { drawing }
+        set {
+            guard newValue != drawing else { return }
+            drawing = newValue
+            if !newValue.drawsTrails {
+                trails = nil
+                trailLayer.clear()
+            }
+            needsPausedRender = true
+        }
+    }
 #endif
     /// The water's tier: the thermal ladder's (#127) seam. Puff shading and the pressure draw in every tier.
     var waterQuality: WaterQuality {
@@ -83,6 +97,12 @@ final class GameScene: SKScene {
     private let effectsLayer = SKNode()
     /// The fleet's wind-shadow cones, one faint layer in the effects layer (#121).
     private let coneLayer = ConeLayer()
+    /// How the wind shadow draws (`shadowDrawing`): always the cones in Release.
+    private var drawing = ShadowDrawing.cones
+    /// The turbulence trails (#376 follow-on A), stepped each tick only while they draw; nil otherwise.
+    private var trails: TurbulenceTrails?
+    /// The trails drawn, in the effects layer beside the cones.
+    private(set) lazy var trailLayer = TurbulenceTrailLayer(pointsPerMeter: ppm)
     private let courseLayer = SKNode()
     private let boatLayer = SKNode()
     /// The boat-side cues (#122) in the world, under the fleet: laylines, ladder lines and your wind vane with its
@@ -215,6 +235,7 @@ final class GameScene: SKScene {
     private func buildBoats() {
         let me = driver.myBoatIndex
         effectsLayer.addChild(coneLayer)
+        effectsLayer.addChild(trailLayer)
         for boat in driver.currentFrame.boats {
             let node = BoatNode(boat: boat, isMine: boat.id == me, color: Palette.boat(boat.colorIndex),
                                 boatClass: driver.boatClass, pointsPerMeter: ppm, style: boatStyle)
@@ -265,7 +286,9 @@ final class GameScene: SKScene {
         driver.submit(BoatInput(rudder: rudder, ease: session.isEasing))
         let clock = ContinuousClock()
         let tickStart = clock.now
-        let ticks = driver.tick(frameTime, within: Self.tickBudget).count
+        let frames = driver.tick(frameTime, within: Self.tickBudget)
+        let ticks = frames.count
+        stepTrails(frames)
         let renderStart = clock.now
         Signpost.renderUpdate.measure { render(driver.renderWorld) }
         let renderEnd = clock.now
@@ -276,6 +299,27 @@ final class GameScene: SKScene {
         if hudCountdown <= 0 {
             hudCountdown = 1.0 / 15
             Signpost.hudRefresh.measure { session.refreshHUD() }
+        }
+    }
+
+    /// Steps the turbulence trails through `frames`, each tick's fleet, while they draw (#376 follow-on A).
+    private func stepTrails(_ frames: [TickFrame]) {
+        guard drawing.drawsTrails else { return }
+        var trails = trails ?? TurbulenceTrails(shadow: driver.boatClass.windShadow)
+        for frame in frames { trails.step(boats: frame.boats, tick: frame.tick) }
+        self.trails = trails
+    }
+
+    /// The cones and backwinds, the trails, or both (`shadowDrawing`).
+    private func drawShadows(_ world: RenderWorld) {
+        coneLayer.isHidden = !drawing.drawsCones
+        if !drawing.drawsCones {
+            for node in boatNodes { node.effects.backwind.isHidden = true }
+        }
+        trailLayer.isHidden = !drawing.drawsTrails
+        if drawing.drawsTrails {
+            trailLayer.update(samples: trails?.samples ?? [], time: world.time, shadow: world.boatClass.windShadow,
+                              style: boatStyle)
         }
     }
 
@@ -292,6 +336,7 @@ final class GameScene: SKScene {
                                 dt: dt, settled: settled)
         }
         coneLayer.update(style: boatStyle)
+        drawShadows(world)
 
         syncCamera()
         rig.visibleInsets = viewInsets

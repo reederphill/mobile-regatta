@@ -175,6 +175,15 @@ private struct TuningGroupView: View {
                     .tint(ChromePalette.tint)
                     .accessibilityIdentifier("tuning-shows-pressure")
             }
+            if group.id == TuningCatalog.shadowDrawingGroup {
+                Picker("Draw the shadow as", selection: Binding(get: { model.shadowDrawing }, set: { model.shadowDrawing = $0 })) {
+                    Text("Cones").tag(ShadowDrawing.cones)
+                    Text("Trails").tag(ShadowDrawing.trails)
+                    Text("Both").tag(ShadowDrawing.both)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("tuning-shadow-drawing")
+            }
             ForEach(group.sliders) { slider in
                 TuningSliderRow(slider: slider, model: model)
             }

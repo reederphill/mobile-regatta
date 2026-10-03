@@ -32,6 +32,8 @@ final class TuningModel {
     @ObservationIgnored let store: TuningStore
     /// Tune numbers given out by a store with no root.
     @ObservationIgnored private var memoryTunes: [Data: Int] = [:]
+    /// `-shadowDrawing` (#376): the launch's drawing, over the tuning's until the panel picks one.
+    @ObservationIgnored private var shadowDrawingOverride = LaunchOptions.current.shadowDrawing
     @ObservationIgnored private var baseCache: [String: Data] = [:]
     @ObservationIgnored private var optionsCache: [TuningSlot: [DataFileKey]] = [:]
     /// File values by slider and base file, and the groups by boat class: the page reads them every time it draws.
@@ -230,6 +232,16 @@ final class TuningModel {
         }
     }
 
+    /// How the wind shadow draws (#376 follow-on A): the cones, the turbulence trails, or both, live on the practice race.
+    var shadowDrawing: ShadowDrawing {
+        get { shadowDrawingOverride ?? tuning.shadowDrawing }
+        set {
+            tuning.shadowDrawing = newValue
+            shadowDrawingOverride = nil
+            changed()
+        }
+    }
+
     /// Back to the bundled defaults and the standard look.
     func resetAll() {
         tuning = Tuning()
@@ -306,6 +318,8 @@ final class TuningModel {
         if session.scene.cameraStyle != tuning.camera { session.scene.cameraStyle = tuning.camera }
         if session.scene.boatStyle != tuning.boat { session.scene.boatStyle = tuning.boat }
         if session.scene.showsPressureOverlay != tuning.showsPressure { session.scene.showsPressureOverlay = tuning.showsPressure }
+        // `-shadowDrawing` stands over the panel's until the panel changes it.
+        if session.scene.shadowDrawing != shadowDrawing { session.scene.shadowDrawing = shadowDrawing }
         session.isTuned = liveSessionSailsTunedFiles || tuning.water != .standard || tuning.camera != .standard
             || tuning.boat != .standard
     }

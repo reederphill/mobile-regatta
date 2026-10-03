@@ -29,6 +29,9 @@ import RegattaServices
 /// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
 ///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
 /// - `-tuning` opens the debug tuning panel at launch (#232). Debug builds only: other builds don't know it.
+/// - `-shadowDrawing cones|trails|both` draws the wind shadow as today's cones and backwinds, the turbulence-trail
+///   prototype (#376), or both, over the tuning panel's choice for this launch. Debug builds only: other builds don't
+///   know it and always draw the cones.
 /// - `-briefing practice|online` opens on the briefing (#130) for the launch race (`RaceConfig.launch()`, and `-seed`), with
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
@@ -80,6 +83,8 @@ struct LaunchOptions: Equatable {
     var briefing: Briefing?
     #if DEBUG
     var tuning = false
+    /// `-shadowDrawing` (#376).
+    var shadowDrawing: ShadowDrawing?
     #endif
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
@@ -104,6 +109,17 @@ struct LaunchOptions: Equatable {
             case "-hideScene": hidesScene = true
             #if DEBUG
             case "-tuning": tuning = true
+            case "-shadowDrawing":
+                guard let value = rest.first, !Self.flags.contains(value) else {
+                    problems.append("\(argument) needs a value")
+                    continue
+                }
+                rest.removeFirst()
+                if let drawing = ShadowDrawing(rawValue: value) {
+                    shadowDrawing = drawing
+                } else {
+                    reject(argument, value, "cones, trails or both")
+                }
             #endif
             case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
                  "-appearance", "-vision", "-fakeServices", "-briefing":
@@ -126,6 +142,7 @@ struct LaunchOptions: Equatable {
                           "-vision", "-fakeServices", "-briefing"]
         #if DEBUG
         flags.insert("-tuning")
+        flags.insert("-shadowDrawing")
         #endif
         return flags
     }()

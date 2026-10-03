@@ -146,6 +146,10 @@ final class GameSession {
         vision = LaunchOptions.current.raceVision
         scene = GameScene(driver: driver, roster: roster)
         scene.session = self
+        #if DEBUG
+        // `-shadowDrawing` (#376); the tuning panel's, once it attaches, unless the launch named one.
+        if let drawing = LaunchOptions.current.shadowDrawing { scene.shadowDrawing = drawing }
+        #endif
         // `-hideScene` (#361): a live race only; a render fixture always paints.
         scene.paintsWorld = driver.isFrozen || !LaunchOptions.current.hidesScene
         // The minimap's first pressure sample (up to ~170 ms on first use, #310) waits for the scene's first HUD

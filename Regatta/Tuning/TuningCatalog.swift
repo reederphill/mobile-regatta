@@ -370,6 +370,8 @@ enum TuningCatalog {
 
     /// The group whose panel carries the pressure overlay's toggle (#289).
     static let pressureOverlayGroup = "water"
+    /// The group the shadow drawing's picker (#376 follow-on A) sits in.
+    static let shadowDrawingGroup = "shadow"
 
     private static func water(_ name: String, _ title: String, _ path: WritableKeyPath<WaterStyle, Double>,
                               _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {
