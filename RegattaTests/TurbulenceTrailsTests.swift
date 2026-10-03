@@ -102,39 +102,6 @@ import Testing
         #expect(none.samples.filter { $0.caster == 1 }.count == full.samples.filter { $0.caster == 1 }.count)
     }
 
-    /// The app's backwind starts at her windward stern: on either tack a boat sheds her backwind sample on the stern
-    /// corner nearer the wind (within 1 cm), small at birth and widening with age to the trapezoid's half width by the
-    /// end of its life, as strong as the prototype's.
-    @Test func backwindShedsAtTheWindwardStern() throws {
-        let boatClass = Race.defaultBoatClass, shadow = boatClass.windShadow
-        let starboard = TrailParity.fleet(boatClass: boatClass)[0]
-        var port = starboard
-        port.heading = -starboard.heading
-        TrailParity.refresh(&port)
-        #expect(starboard.tack != port.tack)
-        for boat in [starboard, port] {
-            var trails = TurbulenceTrails(shadow: shadow)
-            var middle = TurbulenceTrails(shadow: shadow, backwindOrigin: .trapezoidMiddle)
-            trails.step(boats: [boat], tick: 0)
-            middle.step(boats: [boat], tick: 0)
-            let sample = try #require(trails.samples.first { $0.isBackwind })
-            let reference = try #require(middle.samples.first { $0.isBackwind })
-            // Her two stern corners, from her heading alone; the windward one is further up the true wind.
-            let forward = Vec2.heading(boat.heading), right = forward.rightPerp
-            let corners = [1.0, -1.0].map { side in
-                boat.position + right * (side * shadow.sternCorner.x) + forward * shadow.sternCorner.y
-            }
-            let downwind = TrailParity.wind.velocity
-            let windward = try #require(corners.min { $0.dot(downwind) < $1.dot(downwind) })
-            #expect((sample.position - windward).length < 0.01, "\(sample.position) vs \(windward)")
-            #expect((sample.position - reference.position).length > shadow.backwindWidth / 4)
-            let full = shadow.backwindWidth / 2
-            #expect(sample.radius < 0.3 * full && sample.growth > 0)
-            #expect(abs(sample.radius + sample.growth * sample.life - full) < 1e-9)
-            #expect(sample.life == reference.life && sample.peak == reference.peak && sample.peak > 0)
-        }
-    }
-
     /// The level builds back: an ease drops a boat's level at once; sheeted in again it rises linearly over
     /// `buildSeconds` (half way at half the time), so the first samples shed after the release are small.
     @Test func trailBuildsBackAfterAnEase() throws {
@@ -283,7 +250,7 @@ import Testing
         let fleet = fleet(boatClass: boatClass)
         var caster = fleet[0]
         var other = fleet[1]
-        var trails = TurbulenceTrails(shadow: shadow, backwindOrigin: .trapezoidMiddle)
+        var trails = TurbulenceTrails(shadow: shadow)
         let ticks = 8 * Race.tickRate
         for tick in 0..<ticks {
             let t = Double(tick) * Race.dt

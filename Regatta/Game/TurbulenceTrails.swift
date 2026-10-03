@@ -26,28 +26,13 @@ struct TurbulenceTrails {
         var isBackwind = false
     }
 
-    /// Where a boat sheds her backwind samples.
-    enum BackwindOrigin {
-        /// The prototype's: at the middle of the trapezoid, full size from birth.
-        case trapezoidMiddle
-        /// At her windward stern corner (`BoatClass.WindShadow.sternCorner`), small at birth and widening as her
-        /// apparent wind carries it astern, so her backwind reads as air coming off her windward quarter.
-        case windwardStern
-    }
-
-    /// A windward-stern backwind sample's radius at birth, a share of the trapezoid's half width; it grows to the
-    /// whole half width by the end of its life.
-    static let backwindBirthShare = 0.25
-
     private(set) var samples: [Sample] = []
     let shadow: BoatClass.WindShadow
     let every: Int
-    let backwindOrigin: BackwindOrigin
 
-    init(shadow: BoatClass.WindShadow, every: Int = 3, backwindOrigin: BackwindOrigin = .windwardStern) {
+    init(shadow: BoatClass.WindShadow, every: Int = 3) {
         self.shadow = shadow
         self.every = every
-        self.backwindOrigin = backwindOrigin
     }
 
     /// Each seat's shedding level now, 0...1: her sail-angle scale smoothed (`step`'s `buildSeconds`). Empty until the
@@ -83,26 +68,15 @@ struct TurbulenceTrails {
             let r0 = shadow.coneWidthAtBoat / 2, r1 = shadow.coneWidthAtEnd / 2
             samples.append(Sample(position: b.position, drift: drift, born: tick, caster: seat, peak: shadow.lossCloseIn * k,
                                   radius: r0 * k, growth: (r1 - r0) / life * k, life: life))
-            // Her backwind: reaching the trapezoid's far edge in the time her apparent wind carries air that far
-            // astern, as strong as the box at the trapezoid's middle. Shed at her windward stern corner, small and
-            // widening to the trapezoid's width (the app's), or at the trapezoid's middle full size (the prototype's).
+            // Her backwind: shed at the middle of the trapezoid, a short-lived patch.
             let cone = ShadowCone(caster: b, shadow: shadow)
             guard shadow.backwindInnerLength != nil, cone.backwindPresence > 0,
-                  let middle = Self.backwindCentre(of: cone) else { continue }
+                  let at = Self.backwindCentre(of: cone) else { continue }
             let scale = shadow.backwindScale(speed: b.speedThroughWater)
             guard scale > 0 else { continue }
-            let backLife = shadow.backwindLength * scale / apparent
-            let peak = (1 - cone.backwindFactor(at: middle)) * k, full = shadow.backwindWidth / 2 * k
-            switch backwindOrigin {
-            case .trapezoidMiddle:
-                samples.append(Sample(position: middle, drift: drift, born: tick, caster: seat, peak: peak, radius: full,
-                                      growth: 0, life: backLife, isBackwind: true))
-            case .windwardStern:
-                let birth = Self.backwindBirthShare * full
-                samples.append(Sample(position: Self.windwardStern(of: cone), drift: drift, born: tick, caster: seat,
-                                      peak: peak, radius: birth, growth: (full - birth) / backLife, life: backLife,
-                                      isBackwind: true))
-            }
+            samples.append(Sample(position: at, drift: drift, born: tick, caster: seat,
+                                  peak: (1 - cone.backwindFactor(at: at)) * k, radius: shadow.backwindWidth / 2 * k,
+                                  growth: 0, life: shadow.backwindLength * scale / apparent, isBackwind: true))
         }
     }
 
@@ -111,11 +85,6 @@ struct TurbulenceTrails {
     static func scale(of boat: Boat, ease: Bool, boatClass: BoatClass, style: BoatStyle) -> Double {
         let full = deg2rad(max(style.trailFullAngleDegrees, 0.1))
         return (BoatPose.angleOfAttack(boat, ease: ease, boatClass: boatClass, style: style) / full).clamped(to: 0...1)
-    }
-
-    /// Her windward stern corner, where the trapezoid (#298) hangs from (`ShadowCone`'s P1).
-    static func windwardStern(of cone: ShadowCone) -> Vec2 {
-        cone.apex + cone.windward * cone.shadow.sternCorner.x + cone.forward * cone.shadow.sternCorner.y
     }
 
     /// The middle of the trapezoid (#298) the box casts now.
