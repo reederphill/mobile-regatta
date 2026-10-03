@@ -32,6 +32,8 @@ import RegattaServices
 /// - `-shadowDrawing cones|trails|both` draws the wind shadow as today's cones and backwinds, the turbulence-trail
 ///   prototype (#376), or both, over the tuning panel's choice for this launch. Debug builds only: other builds don't
 ///   know it and always draw the cones.
+/// - `-trailLook flecks|swirl|eddies|shimmer` fills the turbulence trails (#376) with that look (`TrailLook`), over the
+///   tuning panel's choice for this launch. Debug builds only.
 /// - `-briefing practice|online` opens on the briefing (#130) for the launch race (`RaceConfig.launch()`, and `-seed`), with
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
@@ -85,6 +87,8 @@ struct LaunchOptions: Equatable {
     var tuning = false
     /// `-shadowDrawing` (#376).
     var shadowDrawing: ShadowDrawing?
+    /// `-trailLook` (#376).
+    var trailLook: TrailLook?
     #endif
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
@@ -120,6 +124,17 @@ struct LaunchOptions: Equatable {
                 } else {
                     reject(argument, value, "cones, trails or both")
                 }
+            case "-trailLook":
+                guard let value = rest.first, !Self.flags.contains(value) else {
+                    problems.append("\(argument) needs a value")
+                    continue
+                }
+                rest.removeFirst()
+                if let look = TrailLook(rawValue: value) {
+                    trailLook = look
+                } else {
+                    reject(argument, value, "flecks, swirl, eddies or shimmer")
+                }
             #endif
             case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
                  "-appearance", "-vision", "-fakeServices", "-briefing":
@@ -143,6 +158,7 @@ struct LaunchOptions: Equatable {
         #if DEBUG
         flags.insert("-tuning")
         flags.insert("-shadowDrawing")
+        flags.insert("-trailLook")
         #endif
         return flags
     }()

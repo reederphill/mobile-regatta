@@ -22,6 +22,8 @@ struct Tuning: Codable, Equatable {
     var showsPressure = false
     /// How the wind shadow draws (#376 follow-on A): a look for tuning by, so never the TUNED badge either.
     var shadowDrawing = ShadowDrawing.cones
+    /// What fills the trails (#376 follow-on A): a look too.
+    var trailLook = TrailLook.standard
 
     init() {}
 
@@ -68,7 +70,7 @@ struct Tuning: Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case name, boatClass, conditions, rulesConfiguration, boatClassValues, conditionsValues, rulesValues, water, camera, boat, showsPressure,
-             shadowDrawing
+             shadowDrawing, trailLook
     }
 
     /// Lenient: a value this build no longer has, or a render style saved before it gained a field, falls back
@@ -87,6 +89,7 @@ struct Tuning: Codable, Equatable {
         boat = (try? c.decode(BoatStyle.self, forKey: .boat)) ?? .standard
         showsPressure = (try? c.decode(Bool.self, forKey: .showsPressure)) ?? false
         shadowDrawing = (try? c.decode(ShadowDrawing.self, forKey: .shadowDrawing)) ?? .cones
+        trailLook = (try? c.decode(TrailLook.self, forKey: .trailLook)) ?? .standard
     }
 
     func jsonData() throws -> Data {

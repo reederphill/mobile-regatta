@@ -183,6 +183,14 @@ private struct TuningGroupView: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("tuning-shadow-drawing")
+                Picker("Trail look", selection: Binding(get: { model.trailLook }, set: { model.trailLook = $0 })) {
+                    Text("Flecks").tag(TrailLook.flecks)
+                    Text("Swirl").tag(TrailLook.swirl)
+                    Text("Eddies").tag(TrailLook.eddies)
+                    Text("Shimmer").tag(TrailLook.shimmer)
+                }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("tuning-trail-look")
             }
             ForEach(group.sliders) { slider in
                 TuningSliderRow(slider: slider, model: model)

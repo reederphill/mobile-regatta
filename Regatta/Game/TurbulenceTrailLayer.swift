@@ -12,6 +12,16 @@ enum ShadowDrawing: String, Codable, CaseIterable {
     var drawsTrails: Bool { self != .cones }
 }
 
+/// What fills the turbulence ribbons (#376 follow-on A): curling wisps of domain-warped noise (`swirl`), little
+/// spiral whirls carried down the wind (`eddies`), a fast heat-haze web (`shimmer`), or the first look's twinkling
+/// flecks (`flecks`), for comparing. A Debug look (the tuning panel's, and `-trailLook`).
+enum TrailLook: String, Codable, CaseIterable {
+    case flecks, swirl, eddies, shimmer
+
+    /// The look a tuning without one, and a launch without `-trailLook`, draws.
+    static let standard = TrailLook.swirl
+}
+
 /// The turbulence ribbons drawn (#376 follow-on A): each unbroken run of a caster's points (`TurbulenceRibbons`'s
 /// `ribbons(of:time:)`) is one sprite (`strip`) warped along it (`SKWarpGeometryGrid`, three rows: one edge, the
 /// centreline, the other edge), so it has no seams. Its columns are the run's points plus `subColumns` between each two,
@@ -21,8 +31,8 @@ enum ShadowDrawing: String, Codable, CaseIterable {
 /// u = its strength over the model's peak, so a column's alpha is its strength's share. An end that already tapers to
 /// nothing (the oldest end fading out, a run building back in after an ease) stops there; any other end gets a round
 /// feathered cap (`featherSteps`). A lone point draws as a soft disc. Different casters overlap and blend, as they stack
-/// in the model. Every sprite shimmers (`shimmer`): the texture's alpha is only the envelope, filled with sparse
-/// twinkling flecks and broken ripples fixed in the water and drifting with the true wind (`setView`), so it reads as
+/// in the model. Every sprite is filled by its look's shader (`look`, `shader(for:)`): the texture's alpha is only the
+/// envelope, filled with a pattern fixed in the water and drifting with the true wind (`setView`), so it reads as
 /// disturbed air, not a lull. Drawn at the cone's hatch alpha (`BoatStyle.coneAlpha`) and z in the cues' white, as
 /// `BoatEffects` draws the cones. The sprites are pooled: grown on demand, the unused ones hidden. Drawn only; the race
 /// never reads the trails.
@@ -64,68 +74,212 @@ final class TurbulenceTrailLayer: SKNode {
         return texture
     }()
 
-    /// The shimmer's world frame (`setView`): a pixel's world metres are `u_origin + u_dx · x + u_dy · y` for its
-    /// `gl_FragCoord` (pixels from the drawable's bottom left: SpriteKit keeps GL's y-up on Metal,
-    /// `TurbulenceTrailsTests`), wrapped and shifted down the wind (`setView`).
-    private static let origin = SKUniform(name: "u_origin", vectorFloat2: .zero)
-    private static let dx = SKUniform(name: "u_dx", vectorFloat2: vector_float2(1, 0))
-    private static let dy = SKUniform(name: "u_dy", vectorFloat2: vector_float2(0, 1))
-    /// Metres a pixel, and the ripples' two phases (radians, wrapped).
-    private static let metresPerPixel = SKUniform(name: "u_mpp", float: 1)
-    private static let phase = SKUniform(name: "u_phase", vectorFloat2: .zero)
+    /// The fill's world frame (`setView`), one set per look's shader: a pixel's world metres are
+    /// `u_origin + u_dx · x + u_dy · y` for its `gl_FragCoord` (pixels from the drawable's bottom left: SpriteKit keeps
+    /// GL's y-up on Metal, `TurbulenceTrailsTests`), wrapped and shifted down the wind (`setView`); `u_mpp` metres a
+    /// pixel; `u_phase` the flecks' ripples' two phases (radians, wrapped).
+    private struct Frame {
+        let origin = SKUniform(name: "u_origin", vectorFloat2: .zero)
+        let dx = SKUniform(name: "u_dx", vectorFloat2: vector_float2(1, 0))
+        let dy = SKUniform(name: "u_dy", vectorFloat2: vector_float2(0, 1))
+        let metresPerPixel = SKUniform(name: "u_mpp", float: 1)
+        let phase = SKUniform(name: "u_phase", vectorFloat2: .zero)
 
-    /// The period, metres, the shimmer repeats over in the water: 264 fleck cells of 1/2.2 m, and a whole number of
-    /// every ripple's wavelengths, so the frame wraps by it with no seam.
+        var all: [SKUniform] { [origin, dx, dy, metresPerPixel, phase] }
+    }
+
+    /// The period, metres, every look repeats over in the water: 264 fleck cells of 1/2.2 m, a whole number of every
+    /// ripple's and wave's wavelengths, of every noise lattice's cells (4, 2 and 1 m) and the eddies' (3 m), so the frame
+    /// wraps by it with no seam. Every look's time is `u_time` wrapped at 600 s, and everything that moves with it
+    /// (the noise fields' slides, the waves' and whirls' turns) comes back to where it started after 600 s, so that wrap
+    /// is seamless too.
     static let period = 120.0
 
-    /// The shimmer every trail sprite draws with, shared (one shader, so the sprites batch). The texture's alpha
-    /// (times the node's) is the envelope; inside it a faint base plus sparse flecks, each twinkling at its own rate,
-    /// and broken ripples, all in metres of the water (`setView`), drifting with the true wind. Many fragments near
-    /// the base, a few bright. A fleck sits jittered in its cell and is round on screen: its distance is in pixels
-    /// (the frame is conformal, `u_mpp` metres a pixel). Cell indices wrap (264) before an arithmetic hash
-    /// (Hoskins' `hash12`), so no lattice shows far from the origin; the twinkle's time wraps at 600 s.
-    static let shimmer: SKShader = {
-        let source = """
-        float trailHash(vec2 p) {
-            vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-            p3 += dot(p3, p3.yzx + 33.33);
-            return fract((p3.x + p3.y) * p3.z);
-        }
-        void main() {
-            float envelope = texture2D(u_texture, v_tex_coord).a * v_color_mix.a;
-            float t = mod(u_time, 600.0);
-            vec2 m = u_origin + u_dx * gl_FragCoord.x + u_dy * gl_FragCoord.y;
-            vec2 q = m * 2.2;
-            vec2 cell = mod(floor(q), 264.0);
-            float h = trailHash(cell);
-            vec2 centre = 0.5 + 0.5 * (vec2(trailHash(cell + vec2(17.0, 3.0)), trailHash(cell + vec2(5.0, 29.0))) - 0.5);
-            float d = length(fract(q) - centre) / (2.2 * u_mpp);
-            float twinkle = 0.5 + 0.5 * sin(t * (4.0 + 8.0 * h) + h * 40.0);
-            float fleck = smoothstep(4.0, 1.0, d) * pow(twinkle, 4.0) * step(0.55, h);
-            vec2 k = m * 0.0523598776;
-            float wave = sin(k.x * 59.0 + k.y * 32.0 - u_phase.x) * sin(k.y * 82.0 - k.x * 21.0 + u_phase.y);
-            float ripple = pow(max(wave, 0.0), 6.0);
-            float a = envelope * (0.22 + 1.5 * max(fleck, 0.5 * ripple));
-            gl_FragColor = vec4(a, a, a, a);
-        }
-        """
-        return SKShader(source: source, uniforms: [origin, dx, dy, metresPerPixel, phase])
-    }()
+    /// Shared by every look: Hoskins' `hash12`; a gradient noise (quintic fade, about −0.7 … 0.7) whose lattice repeats
+    /// every `period` cells (its inputs are wrapped before the hash, so no lattice shows and the 120 m wrap is seamless).
+    /// Each `main` works out its pixel's world point itself: SpriteKit hands the uniforms and `gl_FragCoord` to `main`
+    /// only, not to these.
+    private static let prelude = """
+    float trailHash(vec2 p) {
+        vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+        p3 += dot(p3, p3.yzx + 33.33);
+        return fract((p3.x + p3.y) * p3.z);
+    }
+    float trailGrad(vec2 cell, vec2 f, float period) {
+        float h = trailHash(mod(cell, period)) * 6.2831853;
+        return dot(vec2(cos(h), sin(h)), f);
+    }
+    float trailNoise(vec2 x, float period) {
+        vec2 i = floor(x);
+        vec2 f = x - i;
+        vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+        float a = trailGrad(i, f, period);
+        float b = trailGrad(i + vec2(1.0, 0.0), f - vec2(1.0, 0.0), period);
+        float c = trailGrad(i + vec2(0.0, 1.0), f - vec2(0.0, 1.0), period);
+        float d = trailGrad(i + vec2(1.0, 1.0), f - vec2(1.0, 1.0), period);
+        return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+    }
 
-    /// Points the shimmer's world frame for this frame, shared by every strip: `pixel(x, y)` is the world point
+    """
+
+    /// Each look's `main`. The texture's alpha (times the node's) is the envelope; inside it a faint base and the look's
+    /// pattern, in metres of the water, drifting with the true wind (`setView`).
+    private static func body(_ look: TrailLook) -> String {
+        switch look {
+        // Sparse flecks, each twinkling at its own rate, and broken ripples (#376 A's first look). A fleck sits jittered
+        // in its cell and is round on screen: its distance is in pixels. Cell indices wrap (264) before the hash.
+        case .flecks: """
+            void main() {
+                float envelope = texture2D(u_texture, v_tex_coord).a * v_color_mix.a;
+                float t = mod(u_time, 600.0);
+                vec2 m = u_origin + u_dx * gl_FragCoord.x + u_dy * gl_FragCoord.y;
+                vec2 q = m * 2.2;
+                vec2 cell = mod(floor(q), 264.0);
+                float h = trailHash(cell);
+                vec2 centre = 0.5 + 0.5 * (vec2(trailHash(cell + vec2(17.0, 3.0)), trailHash(cell + vec2(5.0, 29.0))) - 0.5);
+                float d = length(fract(q) - centre) / (2.2 * u_mpp);
+                float twinkle = 0.5 + 0.5 * sin(t * (4.0 + 8.0 * h) + h * 40.0);
+                float fleck = smoothstep(4.0, 1.0, d) * pow(twinkle, 4.0) * step(0.55, h);
+                vec2 k = m * 0.0523598776;
+                float wave = sin(k.x * 59.0 + k.y * 32.0 - u_phase.x) * sin(k.y * 82.0 - k.x * 21.0 + u_phase.y);
+                float ripple = pow(max(wave, 0.0), 6.0);
+                float a = envelope * (0.22 + 1.5 * max(fleck, 0.5 * ripple));
+                gl_FragColor = vec4(a, a, a, a);
+            }
+            """
+        // Domain warping (Quilez): a two-octave warp field of 4 m and 2 m noise, its layers sliding against each other
+        // (0.2 and 0.4 m/s, so 600 s is a whole number of lattice periods) so the curls turn over, bends the 2 m and
+        // 1 m filament noise; its zero lines are the filaments, about 2 px wide at every zoom (the line's width in noise
+        // units scales with `u_mpp`), with a soft halo in metres that fades as the features grow past ~40 px, broken into
+        // wisps by the warp field itself.
+        case .swirl: """
+            void main() {
+                float envelope = texture2D(u_texture, v_tex_coord).a * v_color_mix.a;
+                float t = mod(u_time, 600.0);
+                vec2 m = u_origin + u_dx * gl_FragCoord.x + u_dy * gl_FragCoord.y;
+                vec2 q = vec2(trailNoise(m * 0.25 + vec2(0.05, 0.0) * t, 30.0)
+                              + 0.5 * trailNoise(m * 0.5 + vec2(3.1, 0.0) - vec2(0.1, 0.0) * t, 60.0),
+                              trailNoise(m * 0.25 + vec2(13.0, 7.0) - vec2(0.0, 0.05) * t, 30.0)
+                              + 0.5 * trailNoise(m * 0.5 + vec2(9.7, 2.3) + vec2(0.0, 0.1) * t, 60.0));
+                vec2 r = m + 3.0 * q;
+                float fine = smoothstep(2.0, 4.0, 1.0 / u_mpp);
+                float n = trailNoise(r * 0.5, 60.0) + 0.2 * fine * trailNoise(r + vec2(5.3, 1.1), 120.0);
+                float w = clamp(1.6 * u_mpp, 0.015, 0.3);
+                float line = 1.0 - smoothstep(0.0, w, abs(n));
+                float big = smoothstep(40.0, 160.0, 2.0 / u_mpp);
+                float glow = pow(max(0.0, 1.0 - abs(n) * 2.5), 5.0) * (1.0 - 0.7 * big);
+                float wisps = smoothstep(-0.3, 0.4, q.x - 0.6 * q.y);
+                float pattern = (0.8 * line + 0.35 * glow) * wisps;
+                float a = envelope * min(1.0, 0.15 + 0.9 * pattern);
+                gl_FragColor = vec4(a, a, a, a);
+            }
+            """
+        // A jittered grid of 3 m cells (40 to the period), three in five holding a whirl: a two-armed logarithmic
+        // spiral band (2·angle + k·log r) turning at its own rate and sense (a whole number of turns in 600 s), fading
+        // to nothing at its radius (inside the neighbouring cells' reach, so the 3 × 3 sum shows no cell edge) and
+        // hollow at its core where the arms would crowd under a few pixels.
+        case .eddies: """
+            void main() {
+                float envelope = texture2D(u_texture, v_tex_coord).a * v_color_mix.a;
+                float t = mod(u_time, 600.0);
+                vec2 m = u_origin + u_dx * gl_FragCoord.x + u_dy * gl_FragCoord.y;
+                vec2 g = m / 3.0;
+                vec2 base = floor(g);
+                float cellPx = 3.0 / u_mpp;
+                float core = 5.0 / cellPx;
+                float sum = 0.0;
+                for (int j = -1; j <= 1; j++) {
+                    for (int i = -1; i <= 1; i++) {
+                        vec2 cell = base + vec2(float(i), float(j));
+                        vec2 id = mod(cell, 40.0);
+                        float h = trailHash(id);
+                        float h2 = trailHash(id + vec2(17.0, 3.0));
+                        float h3 = trailHash(id + vec2(5.0, 29.0));
+                        vec2 centre = cell + 0.5 + 0.6 * (vec2(h2, h3) - 0.5);
+                        vec2 d = g - centre;
+                        float r = max(length(d), 1e-4);
+                        float radius = 0.45 + 0.3 * h3;
+                        float sense = h2 > 0.5 ? 1.0 : -1.0;
+                        float omega = sense * 6.2831853 * floor(15.0 + 30.0 * h) / 600.0;
+                        float s = sin(2.0 * (atan(d.y, d.x) - omega * t) + sense * 5.0 * log(r));
+                        float band = pow(0.5 + 0.5 * s, 3.0);
+                        float fade = smoothstep(radius, 0.35 * radius, r) * smoothstep(core, 3.0 * core, r);
+                        sum += band * fade * (0.55 + 0.45 * h) * step(0.4, h);
+                    }
+                }
+                float big = smoothstep(60.0, 240.0, cellPx);
+                float pattern = min(sum, 1.0) * (1.0 - 0.4 * big);
+                float a = envelope * min(1.0, 0.15 + 0.85 * pattern);
+                gl_FragColor = vec4(a, a, a, a);
+            }
+            """
+        // Heat haze: three crossed waves (~1.9 m, whole numbers of wavelengths in the period) on water warped by a 2 m
+        // noise sliding at 1 m/s, each turning fast (a whole number of cycles in 600 s); the bright lines are where their
+        // sum crosses zero, a caustic web about 2 px wide at every zoom, flickering with the first two waves' product.
+        case .shimmer: """
+            void main() {
+                float envelope = texture2D(u_texture, v_tex_coord).a * v_color_mix.a;
+                float t = mod(u_time, 600.0);
+                vec2 m = u_origin + u_dx * gl_FragCoord.x + u_dy * gl_FragCoord.y;
+                vec2 warp = 0.5 * vec2(trailNoise(m * 0.5 + vec2(0.5, 0.0) * t, 60.0),
+                                       trailNoise(m * 0.5 + vec2(4.3, 8.1) - vec2(0.0, 0.5) * t, 60.0));
+                vec2 p = (m + warp) * 0.0523598776;
+                float s1 = sin(dot(p, vec2(60.0, 21.0)) + t * 2.6179939);
+                float s2 = sin(dot(p, vec2(-25.0, 58.0)) - t * 3.4557519);
+                float s3 = sin(dot(p, vec2(-41.0, -47.0)) + t * 4.1887902);
+                float v = abs(s1 + s2 + s3);
+                float w = clamp(6.0 * u_mpp, 0.05, 0.9);
+                float line = 1.0 - smoothstep(0.0, w, v);
+                float flicker = 0.4 + 0.6 * (0.5 + 0.5 * s1 * s2);
+                float big = smoothstep(40.0, 160.0, 1.9 / u_mpp);
+                float pattern = line * flicker * (1.0 - 0.4 * big);
+                float a = envelope * min(1.0, 0.15 + 0.85 * pattern);
+                gl_FragColor = vec4(a, a, a, a);
+            }
+            """
+        }
+    }
+
+    private static let frames: [TrailLook: Frame] = Dictionary(uniqueKeysWithValues: TrailLook.allCases.map { ($0, Frame()) })
+
+    /// Each look's shader, shared by every trail sprite (one shader, so the sprites batch), its own frame's uniforms.
+    private static let shaders: [TrailLook: SKShader] = Dictionary(uniqueKeysWithValues: TrailLook.allCases.map { look in
+        (look, SKShader(source: prelude + body(look), uniforms: frames[look]!.all))
+    })
+
+    /// The shader the sprites fill with for `look`.
+    static func shader(for look: TrailLook) -> SKShader { shaders[look]! }
+
+    /// Points every look's world frame for this frame, shared by every strip: `pixel(x, y)` is the world point
     /// (metres) the drawable's pixel (x, y) from its bottom left shows; `wind` the true wind's velocity (m/s), which the
-    /// flecks drift with over race time `time` (seconds). Everything is wrapped by `period`, so the floats stay small.
+    /// pattern drifts with over race time `time` (seconds). The origin is wrapped by `period` and the phases by 2π,
+    /// so the floats stay small.
     static func setView(pixel: (Double, Double) -> Vec2, wind: Vec2, time: Double) {
         let o = pixel(0, 0), ex = pixel(1, 0) - o, ey = pixel(0, 1) - o
         func wrap(_ x: Double) -> Double { x - period * (x / period).rounded(.down) }
         let shifted = o - wind * time
-        origin.vectorFloat2Value = vector_float2(Float(wrap(shifted.x)), Float(wrap(shifted.y)))
-        dx.vectorFloat2Value = vector_float2(Float(ex.x), Float(ex.y))
-        dy.vectorFloat2Value = vector_float2(Float(ey.x), Float(ey.y))
-        metresPerPixel.floatValue = Float(max(ex.length, 1e-6))
         let twoPi = 2 * Double.pi
-        phase.vectorFloat2Value = vector_float2(Float((time * 2.3).truncatingRemainder(dividingBy: twoPi)),
-                                                Float((time * 1.6).truncatingRemainder(dividingBy: twoPi)))
+        let origin = vector_float2(Float(wrap(shifted.x)), Float(wrap(shifted.y)))
+        let dx = vector_float2(Float(ex.x), Float(ex.y)), dy = vector_float2(Float(ey.x), Float(ey.y))
+        let mpp = Float(max(ex.length, 1e-6))
+        let phase = vector_float2(Float((time * 2.3).truncatingRemainder(dividingBy: twoPi)),
+                                  Float((time * 1.6).truncatingRemainder(dividingBy: twoPi)))
+        for frame in frames.values {
+            frame.origin.vectorFloat2Value = origin
+            frame.dx.vectorFloat2Value = dx
+            frame.dy.vectorFloat2Value = dy
+            frame.metresPerPixel.floatValue = mpp
+            frame.phase.vectorFloat2Value = phase
+        }
+    }
+
+    /// The look the sprites fill with (`TrailLook`): swapping it swaps every sprite's shader.
+    var look = TrailLook.standard {
+        didSet {
+            guard look != oldValue else { return }
+            let shader = Self.shader(for: look)
+            for sprite in sprites { sprite.shader = shader }
+        }
     }
 
     private let ppm: CGFloat
@@ -297,7 +451,7 @@ final class TurbulenceTrailLayer: SKNode {
 
     private func grow() {
         let sprite = SKSpriteNode(texture: Self.disc)
-        sprite.shader = Self.shimmer
+        sprite.shader = Self.shader(for: look)
         sprite.color = CuePalette.cueWhite.uiColor
         sprite.colorBlendFactor = 1
         sprite.isHidden = true

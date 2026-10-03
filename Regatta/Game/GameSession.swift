@@ -149,6 +149,7 @@ final class GameSession {
         #if DEBUG
         // `-shadowDrawing` (#376); the tuning panel's, once it attaches, unless the launch named one.
         if let drawing = LaunchOptions.current.shadowDrawing { scene.shadowDrawing = drawing }
+        if let look = LaunchOptions.current.trailLook { scene.trailLook = look }
         #endif
         // `-hideScene` (#361): a live race only; a render fixture always paints.
         scene.paintsWorld = driver.isFrozen || !LaunchOptions.current.hidesScene

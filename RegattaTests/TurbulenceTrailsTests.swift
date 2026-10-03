@@ -173,7 +173,7 @@ import Testing
         layer.update(runs: [run, [live(20, 0.2, 2)], [live(30, 0, 0)]], peak: peak, style: .standard)
         #expect(layer.visibleCount == 2)
         let strip = layer.sprites[0]
-        #expect(strip.texture === TurbulenceTrailLayer.strip && strip.shader === TurbulenceTrailLayer.shimmer)
+        #expect(strip.texture === TurbulenceTrailLayer.strip && strip.shader === TurbulenceTrailLayer.shader(for: .standard))
         #expect(abs(Double(strip.alpha) - BoatStyle.standard.coneAlpha) < 1e-6)
         #expect(abs(strip.zPosition - BoatEffects.Layer.cones) < 1e-6)
         let grid = try #require(strip.warpGeometry as? SKWarpGeometryGrid)
@@ -283,6 +283,28 @@ import Testing
         #expect(parse("-shadowDrawing", "-demo").problems == ["-shadowDrawing needs a value"])
     }
 
+    /// `-trailLook flecks|swirl|eddies|shimmer` (Debug builds): each look by its name, a bad one rejected.
+    @Test func launchArgumentPicksTheTrailLook() {
+        func parse(_ arguments: String...) -> LaunchOptions { LaunchOptions(arguments: ["Regatta"] + arguments) }
+        #expect(parse().trailLook == nil)
+        for look in TrailLook.allCases {
+            #expect(parse("-autostart", "-trailLook", look.rawValue, "-demo").trailLook == look)
+        }
+        let bad = parse("-trailLook", "rain")
+        #expect(bad.trailLook == nil && bad.problems == ["-trailLook rain: expected flecks, swirl, eddies or shimmer"])
+        #expect(parse("-trailLook", "-shadowDrawing", "trails").problems == ["-trailLook needs a value"])
+    }
+
+    /// A layer's sprites swap to the look's shader, the ones it grows after too.
+    @Test func layerSwapsTheLook() {
+        let layer = TurbulenceTrailLayer(pointsPerMeter: 8)
+        let lone = [R.Live(position: Vec2(0, 0), strength: 0.2, scale: 2)]
+        layer.update(runs: [lone], peak: 0.4, style: .standard)
+        layer.look = .eddies
+        layer.update(runs: [lone, lone], peak: 0.4, style: .standard)
+        #expect(layer.sprites.allSatisfy { $0.shader === TurbulenceTrailLayer.shader(for: .eddies) })
+    }
+
     /// A saved tuning from before the drawing loads as the cones.
     @Test func savedTuningsLoadAsCones() throws {
         let tuning = try JSONDecoder().decode(Tuning.self, from: Data("{}".utf8))
@@ -290,6 +312,15 @@ import Testing
         var trails = Tuning()
         trails.shadowDrawing = .trails
         #expect(try JSONDecoder().decode(Tuning.self, from: trails.jsonData()).shadowDrawing == .trails)
+    }
+
+    /// A saved tuning from before the trail look, or with a look this build no longer has, loads the standard one.
+    @Test func savedTuningsLoadTheStandardTrailLook() throws {
+        #expect(try JSONDecoder().decode(Tuning.self, from: Data("{}".utf8)).trailLook == .standard)
+        #expect(try JSONDecoder().decode(Tuning.self, from: Data(#"{"trailLook": "rain"}"#.utf8)).trailLook == .standard)
+        var eddies = Tuning()
+        eddies.trailLook = .eddies
+        #expect(try JSONDecoder().decode(Tuning.self, from: eddies.jsonData()).trailLook == .eddies)
     }
     #endif
 }
