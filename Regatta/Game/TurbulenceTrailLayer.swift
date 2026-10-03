@@ -19,7 +19,7 @@ enum TrailLook: String, Codable, CaseIterable {
     case flecks, swirl, eddies, shimmer
 
     /// The look a tuning without one, and a launch without `-trailLook`, draws.
-    static let standard = TrailLook.swirl
+    static let standard = TrailLook.flecks
 }
 
 /// The turbulence ribbons drawn (#376 follow-on A): each unbroken run of a caster's points (`TurbulenceRibbons`'s
@@ -32,7 +32,7 @@ enum TrailLook: String, Codable, CaseIterable {
 /// nothing (the oldest end fading out, a run building back in after an ease) stops there; any other end gets a round
 /// feathered cap (`featherSteps`). A lone point draws as a soft disc. Different casters overlap and blend, as they stack
 /// in the model. Every sprite is filled by its look's shader (`look`, `shader(for:)`): the texture's alpha is only the
-/// envelope, filled with a pattern fixed in the water and drifting with the true wind (`setView`), so it reads as
+/// envelope, filled with a pattern fixed in the water (`setView`; a pattern sliding with the wind reads as rain), so it reads as
 /// disturbed air, not a lull. Drawn at the cone's hatch alpha (`BoatStyle.coneAlpha`) and z in the cues' white, as
 /// `BoatEffects` draws the cones. The sprites are pooled: grown on demand, the unused ones hidden. Drawn only; the race
 /// never reads the trails.
@@ -76,8 +76,8 @@ final class TurbulenceTrailLayer: SKNode {
 
     /// The fill's world frame (`setView`), one set per look's shader: a pixel's world metres are
     /// `u_origin + u_dx · x + u_dy · y` for its `gl_FragCoord` (pixels from the drawable's bottom left: SpriteKit keeps
-    /// GL's y-up on Metal, `TurbulenceTrailsTests`), wrapped and shifted down the wind (`setView`); `u_mpp` metres a
-    /// pixel; `u_phase` the flecks' ripples' two phases (radians, wrapped).
+    /// GL's y-up on Metal, `TurbulenceTrailsTests`), wrapped (`setView`); `u_mpp` metres a
+    /// pixel; `u_phase` the flecks' ripples' pulse phases (radians, wrapped).
     private struct Frame {
         let origin = SKUniform(name: "u_origin", vectorFloat2: .zero)
         let dx = SKUniform(name: "u_dx", vectorFloat2: vector_float2(1, 0))
@@ -123,7 +123,7 @@ final class TurbulenceTrailLayer: SKNode {
     """
 
     /// Each look's `main`. The texture's alpha (times the node's) is the envelope; inside it a faint base and the look's
-    /// pattern, in metres of the water, drifting with the true wind (`setView`).
+    /// pattern, in metres of the water, fixed in it (`setView`).
     private static func body(_ look: TrailLook) -> String {
         switch look {
         // Sparse flecks, each twinkling at its own rate, and broken ripples (#376 A's first look). A fleck sits jittered
@@ -137,11 +137,16 @@ final class TurbulenceTrailLayer: SKNode {
                 vec2 cell = mod(floor(q), 264.0);
                 float h = trailHash(cell);
                 vec2 centre = 0.5 + 0.5 * (vec2(trailHash(cell + vec2(17.0, 3.0)), trailHash(cell + vec2(5.0, 29.0))) - 0.5);
+                // It circles in place (no drift: a steady slide reads as rain), at its own rate and way round.
+                float spin = (trailHash(cell + vec2(11.0, 7.0)) - 0.5) * 6.0;
+                float turn = t * spin + h * 40.0;
+                centre += 0.14 * vec2(cos(turn), sin(turn));
                 float d = length(fract(q) - centre) / (2.2 * u_mpp);
                 float twinkle = 0.5 + 0.5 * sin(t * (4.0 + 8.0 * h) + h * 40.0);
                 float fleck = smoothstep(4.0, 1.0, d) * pow(twinkle, 4.0) * step(0.55, h);
                 vec2 k = m * 0.0523598776;
-                float wave = sin(k.x * 59.0 + k.y * 32.0 - u_phase.x) * sin(k.y * 82.0 - k.x * 21.0 + u_phase.y);
+                // Standing, not travelling: it pulses where it is.
+                float wave = sin(k.x * 59.0 + k.y * 32.0) * sin(k.y * 82.0 - k.x * 21.0) * sin(u_phase.x);
                 float ripple = pow(max(wave, 0.0), 6.0);
                 float a = envelope * (0.22 + 1.5 * max(fleck, 0.5 * ripple));
                 gl_FragColor = vec4(a, a, a, a);
@@ -251,15 +256,14 @@ final class TurbulenceTrailLayer: SKNode {
     static func shader(for look: TrailLook) -> SKShader { shaders[look]! }
 
     /// Points every look's world frame for this frame, shared by every strip: `pixel(x, y)` is the world point
-    /// (metres) the drawable's pixel (x, y) from its bottom left shows; `wind` the true wind's velocity (m/s), which the
-    /// pattern drifts with over race time `time` (seconds). The origin is wrapped by `period` and the phases by 2π,
-    /// so the floats stay small.
-    static func setView(pixel: (Double, Double) -> Vec2, wind: Vec2, time: Double) {
+    /// (metres) the drawable's pixel (x, y) from its bottom left shows, at race time `time` (seconds). The pattern is
+    /// fixed in the water: a steady slide down the wind reads as falling rain (owner, #376 A); the flecks circle in
+    /// place instead. The origin is wrapped by `period` and the phases by 2π, so the floats stay small.
+    static func setView(pixel: (Double, Double) -> Vec2, time: Double) {
         let o = pixel(0, 0), ex = pixel(1, 0) - o, ey = pixel(0, 1) - o
         func wrap(_ x: Double) -> Double { x - period * (x / period).rounded(.down) }
-        let shifted = o - wind * time
         let twoPi = 2 * Double.pi
-        let origin = vector_float2(Float(wrap(shifted.x)), Float(wrap(shifted.y)))
+        let origin = vector_float2(Float(wrap(o.x)), Float(wrap(o.y)))
         let dx = vector_float2(Float(ex.x), Float(ex.y)), dy = vector_float2(Float(ey.x), Float(ey.y))
         let mpp = Float(max(ex.length, 1e-6))
         let phase = vector_float2(Float((time * 2.3).truncatingRemainder(dividingBy: twoPi)),
