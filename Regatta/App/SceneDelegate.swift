@@ -16,18 +16,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
         sceneState.phase = SceneState.phase(for: windowScene.activationState)
         let window = UIWindow(windowScene: windowScene)
-        // `-fakeServices <scenario>` plays a scenario's scripted fakes (#242); otherwise the device's connectivity,
-        // signed out, until the real services arrive.
-        let launchOptions = LaunchOptions.current
-        var services = launchOptions.fakeServices.map(ServiceSet.fake)
-            ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
-        // The shop sells every paid design from a stub until StoreKit (#137): see `StubStoreService`. Its defaults
-        // are My boat's (UI tests' own suite, emptied at launch).
-        services.store = StubStoreService(boatClass: RaceFiles.defaults.boatClass.ref.id,
-                                          defaults: .init(MyBoatDefaults.defaults(for: launchOptions, standard: .standard)),
-                                          isOnline: launchOptions.fakeServices != .offline)
+        guard let app = AppDelegate.current else { return }
         window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size,
-                                                          onlineStatus: OnlineStatus(services: services))
+                                                          onlineStatus: OnlineStatus(services: app.services), analytics: app.analytics)
         if let appearance = LaunchOptions.current.appearance {
             window.overrideUserInterfaceStyle = appearance == .dark ? .dark : .light
         }
@@ -38,7 +29,31 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     func sceneDidBecomeActive(_ scene: UIScene) { sceneState.phase = .active }
     func sceneWillResignActive(_ scene: UIScene) { sceneState.phase = .inactive }
     func sceneWillEnterForeground(_ scene: UIScene) { sceneState.phase = .inactive }
-    func sceneDidEnterBackground(_ scene: UIScene) { sceneState.phase = .background }
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        sceneState.phase = .background
+        guard let analytics = AppDelegate.current?.analytics else { return }
+        // A little background time to send what's waiting, after any flush already running; whatever doesn't go
+        // waits for the next launch.
+        let background = BackgroundTime()
+        background.begin()
+        Task {
+            await analytics.flush()
+            background.end()
+        }
+    }
+}
+
+/// Background time asked for once and given back once, by the work or by the system's expiry.
+private final class BackgroundTime {
+    private var task = UIBackgroundTaskIdentifier.invalid
+
+    func begin() { task = UIApplication.shared.beginBackgroundTask(withName: "analytics") { [self] in end() } }
+
+    func end() {
+        guard task != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(task)
+        task = .invalid
+    }
 }
 
 /// The root view with the app-wide environment. Menus follow the system appearance; the race cover sets its own.
@@ -71,9 +86,9 @@ final class RootHostingController: UIHostingController<AppRoot> {
     }
 
     /// With no `onlineStatus`, online and signed out, as the placeholders were: for tests.
-    init(sceneState: SceneState, screenSize: CGSize, onlineStatus: OnlineStatus? = nil) {
-        // My boat sells from the scene's store; with none given, the model's own stub.
-        let model = AppModel(sceneState: sceneState, store: onlineStatus?.services.store)
+    init(sceneState: SceneState, screenSize: CGSize, onlineStatus: OnlineStatus? = nil, analytics: Analytics = .discarding()) {
+        // My boat sells from the app's store; with none given, the model's own stub.
+        let model = AppModel(sceneState: sceneState, store: onlineStatus?.services.store, analytics: analytics)
         let onlineStatus = onlineStatus ?? OnlineStatus(services: .fake(.signedOut))
         super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize, onlineStatus: onlineStatus))
         isOrientationLocked = sceneState.isRaceSequenceShowing
