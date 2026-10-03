@@ -34,36 +34,41 @@ import RegattaCore
 
     private static let online = BriefingModel.Mode.online(seconds: BriefingModel.Mode.onlineSeconds)
 
-    /// #15, #10, owner review: each conditions file's wind is a phrase or two in words, never numbers: this race's
+    /// #15, #10, owner review: each conditions file's wind is a phrase or two in words, never numbers: the conditions'
     /// strength and the seeded direction, then the shift and puff character, and a trend only by its direction.
     @Test func forecastTextForEachConditions() throws {
-        let cases: [(venue: String, conditions: String, name: String, character: String)] = [
-            ("fellmere@1", "light-and-patchy@7", "Light and patchy", "Moderate shifts, strong puffs"),
-            ("hollin-bay@1", "classic-oscillating@7", "Classic oscillating", "Moderate shifts, moderate puffs"),
-            ("hollin-bay@1", "sea-breeze@7", "Sea breeze", "Small shifts, mild puffs, "),
-            ("fellmere@1", "gusty-offshore@7", "Gusty offshore", "Big shifts, strong puffs"),
+        // The breeze word is the conditions' own (its strength range), never this race's draw: light-and-patchy
+        // reads light in every race (owner, 2026-10-02: a ~8 kn Fellmere race read "Moderate").
+        let cases: [(venue: String, conditions: String, name: String, strength: String, character: String)] = [
+            ("fellmere@1", "light-and-patchy@7", "Light and patchy", "Light", "Moderate shifts, strong puffs"),
+            ("hollin-bay@1", "classic-oscillating@7", "Classic oscillating", "Moderate", "Moderate shifts, moderate puffs"),
+            ("hollin-bay@1", "sea-breeze@7", "Sea breeze", "Fresh", "Small shifts, mild puffs, "),
+            ("fellmere@1", "gusty-offshore@7", "Gusty offshore", "Strong", "Big shifts, strong puffs"),
         ]
         for item in cases {
-            let model = try Self.model(venue: item.venue, conditions: item.conditions)
-            let lines = model.windLines
-            #expect(model.conditionsName == item.name)
-            #expect(lines.count == 2, "\(item.conditions): \(lines)")
-            let strength = BriefingModel.strengthWord(knots: model.forecast.baseStrengthKnots)
-            let direction = BriefingModel.compassWord(model.forecast.meanDirectionDegrees)
-            #expect(lines[0] == "\(strength) breeze from the \(direction)", "\(item.conditions): \(lines[0])")
-            #expect(lines[1].hasPrefix(item.character), "\(item.conditions): \(lines[1])")
-            // Only the sea breeze has a trend: its direction alone, never its size or timing (#10).
-            let trend = lines[1].contains("veering") || lines[1].contains("backing")
-            #expect(trend == (item.conditions == "sea-breeze@7"), "\(item.conditions): \(lines)")
-            #expect(!lines.joined().contains { $0.isNumber }, "no numbers: \(lines)")
+            for seed: UInt64 in [7, 31, 1, 2, 3, 4, 5] {
+                let model = try Self.model(venue: item.venue, conditions: item.conditions, seed: seed)
+                let lines = model.windLines
+                #expect(model.conditionsName == item.name)
+                #expect(lines.count == 2, "\(item.conditions): \(lines)")
+                let direction = BriefingModel.compassWord(model.forecast.meanDirectionDegrees)
+                #expect(lines[0] == "\(item.strength) breeze from the \(direction)",
+                        "\(item.conditions) seed \(seed), \(model.forecast.baseStrengthKnots) kn: \(lines[0])")
+                #expect(lines[1].hasPrefix(item.character), "\(item.conditions): \(lines[1])")
+                // Only the sea breeze has a trend: its direction alone, never its size or timing (#10).
+                let trend = lines[1].contains("veering") || lines[1].contains("backing")
+                #expect(trend == (item.conditions == "sea-breeze@7"), "\(item.conditions): \(lines)")
+                #expect(!lines.joined().contains { $0.isNumber }, "no numbers: \(lines)")
+            }
         }
     }
 
     @Test func wordsForStrengthShiftsAndPuffs() {
-        #expect(BriefingModel.strengthWord(knots: 6) == "Light")
-        #expect(BriefingModel.strengthWord(knots: 10) == "Moderate")
-        #expect(BriefingModel.strengthWord(knots: 15) == "Fresh")
-        #expect(BriefingModel.strengthWord(knots: 19) == "Strong")
+        // From the conditions' range (its middle), so the word never contradicts the conditions' name.
+        #expect(BriefingModel.strengthWord(range: 6...9) == "Light")
+        #expect(BriefingModel.strengthWord(range: 9...14) == "Moderate")
+        #expect(BriefingModel.strengthWord(range: 11...16) == "Fresh")
+        #expect(BriefingModel.strengthWord(range: 14...20) == "Strong")
         #expect(BriefingModel.shiftWord(degrees: 5) == "Small")
         #expect(BriefingModel.shiftWord(degrees: 12) == "Big")
         #expect(BriefingModel.puffWord(gain: 0.24) == "mild")
