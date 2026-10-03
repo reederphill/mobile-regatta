@@ -159,10 +159,9 @@ final class MyBoatModel {
     }
 
     /// The designs listed under Decal: one plain list, owned first, then earned, then paid, in catalogue order within
-    /// each (owner review of #382). A design with no art yet is left out (#169 draws them) unless it's the one tried
-    /// on, so Try it still shows what it opened.
+    /// each (owner review of #382). A design with no art yet is never listed (#169 draws them).
     var listedDesigns: [LiveryDesign] {
-        let shown = designs.filter { isDrawn($0) || $0.id == design }
+        let shown = designs.filter(isDrawn)
         return shown.enumerated().sorted { a, b in
             let (ra, rb) = (rank(a.element), rank(b.element))
             return ra != rb ? ra < rb : a.offset < b.offset
@@ -257,9 +256,12 @@ final class MyBoatModel {
         return draft == saved ? .saved : .save
     }
 
-    /// Tries `id` on in your colours. #128: try-on emitter
+    /// Tries `id` on in your colours: the class's, and drawn (an undrawn design isn't shown, even by Try it). #128:
+    /// try-on emitter
     func select(_ id: DesignID) {
-        guard !isFleetLocked, catalogue.design(id)?.boatClass == boatClass else { return }
+        guard !isFleetLocked, let picked = catalogue.design(id), picked.boatClass == boatClass, isDrawn(picked) else {
+            return
+        }
         design = id
         purchaseNote = nil
     }
@@ -296,7 +298,7 @@ final class MyBoatModel {
         discardDraft()
     }
 
-    /// Opens on `id` tried on (Try it, `-myBoat`), from the saved livery.
+    /// Opens on `id` tried on (Try it, `-myBoat`), from the saved livery; on the saved design if `id` isn't drawn.
     func open(trying id: DesignID?) {
         discardDraft()
         if let id { select(id) }

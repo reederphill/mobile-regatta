@@ -198,8 +198,8 @@ import RegattaCore
         #expect(try RenderFixture.gallery(named: "pause-menu", in: RenderFixtureTests.fixtures) == .pauseMenu)
     }
 
-    /// My boat's fixtures (#136) carry their own livery, races and lock: a saved free design, a paid one tried on
-    /// (Buy), and an earned one tried on after fleet lock.
+    /// My boat's fixtures (#136) carry their own livery, races and lock: a saved free design, and a starter after
+    /// fleet lock. Paid and earned designs have no art until #169, which brings back a shop fixture.
     @Test func theMyBoatFixturesAreGalleries() throws {
         func model(_ name: String) throws -> MyBoatModel {
             guard case .myBoat(let fixture)? = try RenderFixture.gallery(named: name, in: RenderFixtureTests.fixtures) else {
@@ -211,13 +211,9 @@ import RegattaCore
         let saved = try model("my-boat")
         #expect(saved.action == .saved)
         #expect(saved.section == .colours)
-        let shop = try model("my-boat-shop")
-        #expect(shop.action == .buy(price: "$2.99"))
-        #expect(shop.section == .decal)
-        #expect(shop.listedDesigns.contains { $0.id == shop.design }, "the design tried on is listed")
         let locked = try model("my-boat-locked")
         #expect(locked.action == .fleetLocked)
         #expect(locked.section == .decal)
-        #expect(locked.caption(for: try #require(locked.selectedDesign)) == "3 / 10 races")
+        #expect(locked.listedDesigns.contains { $0.id == locked.design }, "the starter is listed")
     }
 }

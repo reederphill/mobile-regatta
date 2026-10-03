@@ -187,15 +187,19 @@ import RegattaCore
         #expect(session.driver.liveries[session.driver.myBoatIndex] == mine)
     }
 
-    /// Try it and `-myBoat` open My boat with the design tried on, the draft otherwise the saved livery.
-    @Test func openMyBoatTriesTheDesignOn() {
+    /// Try it and `-myBoat` open My boat with the design tried on, the draft otherwise the saved livery; an undrawn
+    /// design opens on the saved one (#169 draws it).
+    @Test func openMyBoatTriesTheDesignOn() throws {
         let (model, _) = Self.isolatedModel()
         model.sheet = .lastRace
-        model.openMyBoat(trying: DesignID("skiff-tiger"))
+        let other = try #require(model.myBoat.listedDesigns.first { $0.id != model.myLivery.design }).id
+        model.openMyBoat(trying: other)
         #expect(model.path == [.myBoat])
         #expect(model.sheet == nil)
-        #expect(model.myBoat.design == DesignID("skiff-tiger"))
+        #expect(model.myBoat.design == other)
         #expect(model.myBoat.saved == model.myLivery)
+        model.openMyBoat(trying: DesignID("skiff-tiger"))
+        #expect(model.myBoat.design == model.myLivery.design, "an undrawn design isn't tried on")
     }
 
     /// Fleet lock (#140 sets it) makes My boat inert.

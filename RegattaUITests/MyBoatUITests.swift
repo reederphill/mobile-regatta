@@ -3,7 +3,8 @@ import XCTest
 /// My boat (#136): the livery editor and shop. UI tests keep My boat's livery in a suite of their own, emptied at
 /// launch (`MyBoatDefaults`), starting from the fixed livery (plain skiff, sky-blue deck, white sail, 207); a relaunch
 /// passes `-keepMyBoat` to keep what was saved. The render is pinned; a segmented control shows one part at a time
-/// (Decal, Colours, Sail, Number).
+/// (Decal, Colours, Sail, Number). Paid and earned designs have no art until #169, so Buy and the earned lock are
+/// checked in `MyBoatModelTests`; #169 brings back the Buy UI test.
 final class MyBoatUITests: RaceUITestCase {
     /// Launches with `-uitesting` and `extra`; opens My boat from home unless `extra` already opens it.
     @MainActor private func openMyBoat(_ extra: [String] = []) -> XCUIApplication {
@@ -77,25 +78,6 @@ final class MyBoatUITests: RaceUITestCase {
         show("Number", in: app)
         XCTAssertEqual(element("myboat-number", in: app).value as? String, "42", "the sail number wasn't kept")
         XCTAssertEqual(action(app).label, "Saved")
-    }
-
-    /// A paid design you don't own can be tried on: the button is Buy, never Save, and leaving keeps your livery.
-    /// Paid designs with no art yet aren't listed (#169), so Try it (`-myBoat`) opens one.
-    @MainActor func testUnownedDesignShowsBuyAndCannotBeSaved() {
-        var app = openMyBoat(["-myBoat", "skiff-stars"])
-        XCTAssertEqual(element("myboat-design-skiff-stars", in: app).value as? String, "selected")
-        XCTAssertTrue(action(app).label.hasPrefix("Buy $"), "an unowned design's button is \(action(app).label)")
-        // Change a colour too: still Buy, not Save.
-        show("Colours", in: app)
-        element("myboat-colour-deck-lavender", in: app).tap()
-        XCTAssertTrue(action(app).label.hasPrefix("Buy $"), "an unowned design's button is \(action(app).label)")
-
-        app.terminate()
-        app = openMyBoat(["-keepMyBoat"])
-        XCTAssertEqual(element("myboat-design-skiff-plain", in: app).value as? String, "selected",
-                       "the unowned design was saved")
-        let stars = app.descendants(matching: .any)["myboat-design-skiff-stars"].firstMatch
-        XCTAssertFalse(stars.exists && stars.value as? String == "selected", "the unowned design was saved")
     }
 
     /// `-myBoat <design>` (the Try it deep link) opens on that design; numbers 0 and 10000 are refused. Letters

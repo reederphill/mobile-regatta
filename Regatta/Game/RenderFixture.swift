@@ -126,7 +126,7 @@ struct RenderFixture: Codable, Equatable {
     /// all from the file, never the device's store.
     ///
     ///     { "livery": { "design": "skiff-plain", "colours": ["sky-blue", "white"], "sailNumber": 207 },
-    ///       "trying": "skiff-stars", "completedRaces": 3, "locked": true, "owned": ["skiff-tiger"],
+    ///       "trying": "skiff-stripe", "completedRaces": 3, "locked": true, "owned": ["skiff-tiger"],
     ///       "section": "colours" }
     struct MyBoatFixture: Codable, Equatable {
         var livery: Livery
