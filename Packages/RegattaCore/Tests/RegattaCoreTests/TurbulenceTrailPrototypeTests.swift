@@ -309,8 +309,19 @@ struct TrailScene {
         func seconds(above level: Double, _ series: [Double]) -> Double { Double(series.filter { 1 - $0 > level }.count) * Race.dt }
     }
 
+    /// How long the warm-up sails before t = 0: 1.2 × a point's life at her t = 0 apparent wind, so her trail is
+    /// fully formed when the scenario starts.
+    static func warmUpSeconds(_ caster: Boat, parameters: TurbulenceRibbons.Parameters) -> Double {
+        let apparent = max(caster.apparentWind.speed, 0.5)
+        return 1.2 * (parameters.life?(apparent) ?? shadow.coneLength / apparent)
+    }
+
+    /// `warmUp` (default on): before t = 0 the caster sails her t = 0 heading and speed for `warmUpSeconds`
+    /// (negative ticks), stepping the ribbons, so she arrives at her t = 0 start with the trail the box assumes she
+    /// always had. Off, the trail starts empty at t = 0 (the step 1 cold start). Probes and the box are the same
+    /// either way.
     static func run(_ m: Manoeuvre, seconds: Double = 25,
-                    parameters: TurbulenceRibbons.Parameters = .init()) -> [Result] {
+                    parameters: TurbulenceRibbons.Parameters = .init(), warmUp: Bool = true) -> [Result] {
         var caster = boat(position: .zero, heading: m.steer(0).heading, speed: m.steer(0).speed)
         let start = ShadowCone(caster: caster, shadow: shadow)
         let v0 = caster.velocity
@@ -318,6 +329,17 @@ struct TrailScene {
         let offsets = ps.map { $0.offset(start, caster) }
         var results = ps.map { _ in Result(box: [], trail: []) }
         var ribbons = TurbulenceRibbons(shadow: shadow, parameters: parameters)
+        if warmUp {
+            let ticks = Int((warmUpSeconds(caster, parameters: parameters) * Double(Race.tickRate)).rounded(.up))
+            // The loop below moves her before stepping, so start her `ticks` steps short of .zero.
+            caster.position = v0 * (-Double(ticks) * Race.dt)
+            for tick in -ticks..<0 {
+                caster.position += caster.velocity * Race.dt
+                refresh(&caster)
+                ribbons.step(boats: [caster], tick: tick)
+            }
+            caster.position = .zero
+        }
         for tick in 0..<Int(seconds * Double(Race.tickRate)) {
             let t = Double(tick) * Race.dt
             let (h, s) = m.steer(t)
@@ -366,6 +388,18 @@ struct TrailScene {
             }
             for r in results { #expect(r.trail.allSatisfy { $0 >= S.shadow.stackingFloor && $0 <= 1 }) }
         }
+        // Cold (trail empty at t = 0, step 1) against warm (the default): how much of each ribbon number was the
+        // cold start. The box is the same both ways.
+        print("== cold against warm: peak / loss-s, box | ribbon cold | ribbon warm")
+        for m in S.manoeuvres {
+            print("== \(m.name), warm-up \(String(format: "%.1f", S.warmUpSeconds(S.boat(position: .zero, heading: m.steer(0).heading, speed: m.steer(0).speed), parameters: .init()))) s")
+            let cold = S.run(m, warmUp: false), warm = S.run(m)
+            for (p, (c, w)) in zip(S.probes, zip(cold, warm)) {
+                #expect(c.box == w.box)
+                print(String(format: "  %-38@ box %.2f / %4.1f | cold %.2f / %4.1f | warm %.2f / %4.1f", p.name as NSString,
+                             c.boxLoss, c.boxSeconds, c.trailLoss, c.trailSeconds, w.trailLoss, w.trailSeconds))
+            }
+        }
         // The extra turn, for comparison: 5 degrees (Richards, upwind) on the steady boat and the tack.
         var turned = R.Parameters()
         turned.extraTurnDegrees = 5
@@ -379,13 +413,13 @@ struct TrailScene {
 
     /// The ribbon reproduces the box when nothing manoeuvres: print-only, as the disc prototype's was (no tolerance).
     @Test func steadyTrailMatchesTheBoxRoughly() {
-        let steady = S.run(S.manoeuvres[0])
-        // Skip the first 12 s while the ribbon fills (it is `coneLength / apparent` long).
+        let warm = S.run(S.manoeuvres[0]), cold = S.run(S.manoeuvres[0], warmUp: false)
+        // Cold: skip the first 12 s while the ribbon fills (it is `coneLength / apparent` long). Warm: all of it.
         let skip = 12 * Race.tickRate
-        for (p, r) in zip(S.probes, steady) {
-            let box = r.box.dropFirst(skip).map { 1 - $0 }.reduce(0, +) / Double(r.box.count - skip)
-            let trail = r.trail.dropFirst(skip).map { 1 - $0 }.reduce(0, +) / Double(r.trail.count - skip)
-            print(String(format: "STEADY %-38@ mean loss box %.3f ribbon %.3f", p.name as NSString, box, trail))
+        func mean(_ xs: ArraySlice<Double>) -> Double { xs.map { 1 - $0 }.reduce(0, +) / Double(xs.count) }
+        for (p, (c, w)) in zip(S.probes, zip(cold, warm)) {
+            print(String(format: "STEADY %-38@ mean loss box %.3f ribbon cold (from 12 s) %.3f warm %.3f", p.name as NSString,
+                         mean(w.box[...]), mean(c.trail.dropFirst(skip)), mean(w.trail[...])))
         }
     }
 
