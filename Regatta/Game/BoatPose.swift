@@ -308,6 +308,21 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// The trails (#376 follow-on A, Debug): how long, seconds, a boat's trail takes to build back from nothing to full
     /// once her sail sheds again (sheeting in after an ease, out of a tack or gybe); an ease drops it at once.
     var trailBuildSeconds = 2.0
+    /// The trails' ribbon model (#376 follow-on A, Debug; `TurbulenceRibbons.Parameters(style:shadow:)`), every value
+    /// tuning, not measured, the defaults the prototype's: seconds between a boat's points; a point's life, a multiple
+    /// of the class's (`coneLength` over her apparent wind); its half width at the boat and at the end of its life,
+    /// multiples of half the class's `coneWidthAtBoat` and `coneWidthAtEnd` (the end sets the √age growth); its
+    /// strength at emission, a multiple of the class's `lossCloseIn`; the distance, metres, past which neighbours aren't
+    /// joined (2 × a 10 kn wind's travel in 0.5 s); the speed through the water, m/s, below which a boat sheds nothing;
+    /// and the extra turning of the trail astern of her apparent wind, degrees.
+    var trailEmitSeconds = 0.5
+    var trailLifeScale = 1.0
+    var trailStartWidth = 1.0
+    var trailEndWidth = 1.0
+    var trailPeak = 1.0
+    var trailLengthCap = 2 * metresPerSecond(knots: 10) * 0.5
+    var trailStoppedSpeed = 0.3
+    var trailExtraTurnDegrees = 0.0
     /// The hatch both are drawn in: its lines' spacing and width, points. Baked in when the fleet is built.
     var hatchSpacing = 5.0
     var hatchLineWidth = 1.25
@@ -393,6 +408,10 @@ nonisolated extension BoatStyle {
             (.wakeStreakAlpha, \.wakeStreakAlpha), (.wakeEaseRate, \.wakeEaseRate),
             (.wakeFlareGain, \.wakeFlareGain), (.wakeFlareSeconds, \.wakeFlareSeconds),
             (.wakeShortShare, \.wakeShortShare), (.coneAlpha, \.coneAlpha), (.backwindShare, \.backwindShare), (.shadowFollowSeconds, \.shadowFollowSeconds), (.backwindFeather, \.backwindFeather), (.trailFullAngleDegrees, \.trailFullAngleDegrees), (.trailBuildSeconds, \.trailBuildSeconds),
+            (.trailEmitSeconds, \.trailEmitSeconds), (.trailLifeScale, \.trailLifeScale),
+            (.trailStartWidth, \.trailStartWidth), (.trailEndWidth, \.trailEndWidth), (.trailPeak, \.trailPeak),
+            (.trailLengthCap, \.trailLengthCap), (.trailStoppedSpeed, \.trailStoppedSpeed),
+            (.trailExtraTurnDegrees, \.trailExtraTurnDegrees),
             (.hatchSpacing, \.hatchSpacing), (.hatchLineWidth, \.hatchLineWidth),
             (.vaneLengthHulls, \.vaneLengthHulls),
             (.vaneLockDegrees, \.vaneLockDegrees), (.grooveCueDeadbandDegrees, \.grooveCueDeadbandDegrees),

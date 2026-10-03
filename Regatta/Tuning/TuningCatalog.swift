@@ -221,6 +221,15 @@ enum TuningCatalog {
                     // #376 follow-on A: the trails' sail-angle scale (drawn only, Debug).
                     boat("trailFullAngleDegrees", "Trail full at sail angle", \.trailFullAngleDegrees, 2...60, 0.5, unit: "°"),
                     boat("trailBuildSeconds", "Trail builds in", \.trailBuildSeconds, 0.2...6, 0.1, unit: " s"),
+                    // The ribbon model's (#376 A step 2), all tuning: none of it is measured.
+                    boat("trailEmitSeconds", "Trail point every (not measured)", \.trailEmitSeconds, 0.1...2, 0.05, unit: " s"),
+                    boat("trailLifeScale", "Trail life (not measured)", \.trailLifeScale, 0.25...3, 0.05, unit: "×"),
+                    boat("trailStartWidth", "Trail start width (not measured)", \.trailStartWidth, 0.1...3, 0.05, unit: "×"),
+                    boat("trailEndWidth", "Trail end width (not measured)", \.trailEndWidth, 0.1...3, 0.05, unit: "×"),
+                    boat("trailPeak", "Trail peak (not measured)", \.trailPeak, 0.1...2, 0.05, unit: "×"),
+                    boat("trailLengthCap", "Trail length cap (not measured)", \.trailLengthCap, 1...20, 0.1, unit: " m"),
+                    boat("trailStoppedSpeed", "Trail stopped below (not measured)", \.trailStoppedSpeed, 0...2, 0.05, unit: " m/s"),
+                    boat("trailExtraTurnDegrees", "Trail extra turning (not measured)", \.trailExtraTurnDegrees, 0...9, 0.5, unit: "°"),
                 ]),
             TuningGroup(
                 id: "backwind", title: "Backwind",

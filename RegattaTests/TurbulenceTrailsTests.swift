@@ -4,183 +4,237 @@ import SpriteKit
 import Testing
 @testable import Regatta
 
-/// The app's turbulence trails (#376 follow-on A) are the prototype's (`TurbulenceTrailPrototypeTests` in RegattaCore's
-/// tests, the reference): the same scene gives the same factors, printed from the prototype's model once. And the layer
-/// draws a ribbon a caster and kind.
+/// The app's turbulence ribbons (#376 follow-on A) are the prototype's (`TurbulenceRibbons` in
+/// `TurbulenceTrailPrototypeTests`, RegattaCore's tests, the reference): the same scene gives the same factors, printed
+/// from the prototype once. And the layer draws each unbroken run as one strip, alpha = strength / peak.
 @MainActor @Suite struct TurbulenceTrailsTests {
-    /// Printed from the prototype's `TurbulenceTrails` on `TrailParity`'s scene (the default class).
-    static let prototype: [Double] = [1, 0.82444011624698443, 0.92180166715991441, 0.85173926921858512, 1, 141]
+    typealias R = TurbulenceRibbons
+
+    /// Printed from the prototype's `TrailScene.run` on its "tack at t=2" with the warm-up (default parameters):
+    /// (probe, seconds, factor).
+    static let prototype: [(probe: Int, seconds: Int, factor: Double)] = [
+        (0, 0, 0.7580929552922151), (0, 6, 0.68281999487032663), (1, 6, 0.81160100310441541),
+        (2, 8, 0.72594514564129708), (3, 8, 0.88764498484913923), (5, 2, 0.75214529488490056),
+        (5, 10, 0.95262520307814524), (6, 12, 0.9984005869185798), (0, 8, 1),
+    ]
+    /// The same with `extraTurnDegrees` 5.
+    static let prototypeTurned: [(probe: Int, seconds: Int, factor: Double)] = [
+        (0, 6, 0.63530947194774212), (1, 6, 0.76023583542515549), (5, 2, 0.80111472010530738),
+        (6, 2, 0.97285132215606318),
+    ]
 
     @Test func factorsMatchThePrototype() {
-        let factors = TrailParity.factors(boatClass: Race.defaultBoatClass)
-        #expect(factors.count == Self.prototype.count)
-        for (got, want) in zip(factors, Self.prototype) { #expect(abs(got - want) < 1e-9, "\(got) vs \(want)") }
+        let plain = TrailParity.tack(parameters: .init())
+        for want in Self.prototype {
+            let got = plain[want.probe][want.seconds * Race.tickRate]
+            #expect(abs(got - want.factor) < 1e-9, "probe \(want.probe) at \(want.seconds) s: \(got) vs \(want.factor)")
+        }
+        var turned = R.Parameters()
+        turned.extraTurnDegrees = 5
+        let turnedRun = TrailParity.tack(parameters: turned)
+        for want in Self.prototypeTurned {
+            let got = turnedRun[want.probe][want.seconds * Race.tickRate]
+            #expect(abs(got - want.factor) < 1e-9, "turned probe \(want.probe) at \(want.seconds) s: \(got) vs \(want.factor)")
+        }
     }
 
-    /// A ribbon a caster and kind, feathered at both ends; a lone sample is its disc; the rest hidden.
-    @Test func layerDrawsARibbonACasterAndKind() throws {
+    /// The standard style's sliders are the prototype's defaults, so the game's ribbons are the reference's.
+    @Test func standardSlidersAreThePrototypeDefaults() {
         let shadow = Race.defaultBoatClass.windShadow
-        let layer = TurbulenceTrailLayer(pointsPerMeter: 8)
-        func sample(_ x: Double, caster: Int = 0, backwind: Bool = false) -> TurbulenceTrails.Sample {
-            TurbulenceTrails.Sample(position: Vec2(x, 0), drift: Vec2(0, -1), born: 0, caster: caster,
-                                    peak: backwind ? shadow.backwindLoss : shadow.lossCloseIn, radius: 2, growth: 0.5,
-                                    life: 10, isBackwind: backwind)
+        var style = BoatStyle.standard
+        let p = R.Parameters(style: style, shadow: shadow), d = R.Parameters()
+        #expect(p.emitSeconds == d.emitSeconds && p.stoppedSpeed == d.stoppedSpeed && p.lengthCap == d.lengthCap)
+        #expect(p.extraTurnDegrees == 0 && p.buildSeconds == style.trailBuildSeconds)
+        #expect(p.startScale == shadow.coneWidthAtBoat / 2 && p.endScale == shadow.coneWidthAtEnd / 2)
+        #expect(p.peak == shadow.lossCloseIn && p.life?(4.2) == shadow.coneLength / 4.2)
+        style.trailLifeScale = 2
+        style.trailEmitSeconds = 1
+        let changed = R.Parameters(style: style, shadow: shadow)
+        #expect(changed.life?(4.2) == 2 * shadow.coneLength / 4.2)
+        // A live change: `every` follows, the points already shed keep theirs.
+        var ribbons = R(shadow: shadow)
+        ribbons.step(boats: [TrailParity.fleet(boatClass: Race.defaultBoatClass)[0]], tick: 0)
+        let before = ribbons.points[0]
+        ribbons.parameters = changed
+        #expect(ribbons.every == Race.tickRate && ribbons.points[0].map(\.life) == before.map(\.life))
+    }
+
+    /// A stopped boat (under `stoppedSpeed`) and a ghost shed nothing.
+    @Test func stoppedBoatEmitsNothing() {
+        var boat = TrailParity.fleet(boatClass: Race.defaultBoatClass)[0]
+        boat.speed = 0.1
+        TrailParity.refresh(&boat)
+        var ribbons = R(shadow: Race.defaultBoatClass.windShadow)
+        for tick in 0..<(4 * Race.tickRate) { ribbons.step(boats: [boat], tick: tick) }
+        #expect(ribbons.pointCount == 0 && ribbons.pointMap(of: 0, tick: 4 * Race.tickRate).isEmpty)
+        boat.speed = 3
+        TrailParity.refresh(&boat)
+        ribbons.step(boats: [boat], tick: 4 * Race.tickRate)
+        #expect(ribbons.pointCount == 1)
+    }
+
+    /// The emission multiplier: 0 sheds a point with no strength and no scale (it joins nothing); a half halves its
+    /// peak, scale and growth, its life and drift unchanged.
+    @Test func scaleShrinksAndWeakensWhatABoatSheds() {
+        let shadow = Race.defaultBoatClass.windShadow
+        let fleet = TrailParity.fleet(boatClass: Race.defaultBoatClass)
+        var full = R(shadow: shadow), half = R(shadow: shadow), none = R(shadow: shadow)
+        full.step(boats: fleet, tick: 0)
+        half.step(boats: fleet, tick: 0, scales: [0.5, 0.5])
+        none.step(boats: fleet, tick: 0, scales: [0, 1])
+        #expect(full.pointCount == 2 && half.pointCount == 2)
+        for (h, f) in zip(half.points.joined(), full.points.joined()) {
+            #expect(abs(h.peak - f.peak / 2) < 1e-12 && abs(h.scale - f.scale / 2) < 1e-12)
+            #expect(abs(h.growth - f.growth / 2) < 1e-12 && h.life == f.life && h.drift == f.drift)
         }
-        // Caster 0: a cone ribbon of three and a lone backwind; caster 1: a lone cone.
-        let five = [sample(0), sample(4), sample(8), sample(0, backwind: true), sample(20, caster: 1)]
-        layer.update(samples: five, time: 1, shadow: shadow, style: .standard)
-        #expect(layer.visibleCount == 3)
-        // Drifted, grown and faded: at 1 s of 10, 2.5 m a side, 1 m down, at 90% of the hatch.
-        let hatch = BoatStyle.standard.coneAlpha * 0.9
+        #expect(none.points[0].allSatisfy { $0.peak == 0 && $0.scale == 0 })
+        #expect(none.points[1].map(\.peak) == full.points[1].map(\.peak))
+    }
+
+    /// The level builds back: an ease drops a boat's level at once; sheeted in again it rises linearly over
+    /// `buildSeconds` (half way at half the time), so the first points shed after the release are small.
+    @Test func trailBuildsBackAfterAnEase() throws {
+        let shadow = Race.defaultBoatClass.windShadow
+        let boat = TrailParity.fleet(boatClass: Race.defaultBoatClass)[0]
+        let build = 2.0
+        var parameters = R.Parameters()
+        parameters.buildSeconds = build
+        var ribbons = R(shadow: shadow, parameters: parameters)
+        let full = Race.tickRate, eased = 2 * Race.tickRate
+        for tick in 0..<full { ribbons.step(boats: [boat], tick: tick, scales: [1]) }
+        #expect(ribbons.levels == [1])
+        ribbons.step(boats: [boat], tick: full, scales: [0])
+        #expect(ribbons.levels == [0])
+        for tick in full + 1..<eased { ribbons.step(boats: [boat], tick: tick, scales: [0]) }
+        #expect(ribbons.points[0].filter { $0.born > full }.allSatisfy { $0.peak == 0 })
+        // Released at `eased`: after half of `build` the level is a half.
+        let half = Int(build / 2 * Double(Race.tickRate))
+        for tick in eased..<eased + half { ribbons.step(boats: [boat], tick: tick, scales: [1]) }
+        #expect(abs(ribbons.levels[0] - 0.5) < 1e-9)
+        let first = try #require(ribbons.points[0].first { $0.born >= eased })
+        #expect(first.born == eased && first.scale < 0.05 * shadow.coneWidthAtBoat / 2)
+        for tick in eased + half..<eased + 2 * half + 1 { ribbons.step(boats: [boat], tick: tick, scales: [1]) }
+        #expect(ribbons.levels == [1])
+        // A tack's head to wind (scale 0) drops it again at once.
+        ribbons.step(boats: [boat], tick: eased + 2 * half + 1, scales: [0])
+        #expect(ribbons.levels == [0])
+    }
+
+    /// A boat that eases, then sheets in, draws as two strips: one shed before the ease, ending in a round cap, and
+    /// one building back in from nothing after it (no cap at its oldest end), nothing bridging the gap.
+    @Test func runBreaksAtAnEase() throws {
+        let boatClass = Race.defaultBoatClass
+        let shadow = boatClass.windShadow
+        var boat = TrailParity.fleet(boatClass: boatClass)[0]
+        var parameters = R.Parameters()
+        parameters.buildSeconds = 1
+        var ribbons = R(shadow: shadow, parameters: parameters)
+        // At shares of a point's life, so the points shed before the ease are still alive at the end.
+        let life = shadow.coneLength / boat.apparentWind.speed
+        // On emission ticks, so the first point after the release is shed at the level's first step up.
+        let ticks = { (share: Double) in Int(share * life * Double(Race.tickRate)) / ribbons.every * ribbons.every }
+        let ease = ticks(0.3), sheet = ticks(0.5), end = ticks(0.85)
+        for tick in 0...end {
+            boat.position += boat.velocity * Race.dt
+            TrailParity.refresh(&boat)
+            ribbons.step(boats: [boat], tick: tick, scales: [tick >= ease && tick < sheet ? 0 : 1])
+        }
+        let runs = ribbons.ribbons(of: 0, tick: end)
+        let strips = runs.filter { $0.count >= 2 }
+        #expect(strips.count == 2)
+        // The eased points: lone, with nothing.
+        #expect(runs.filter { $0.count == 1 }.allSatisfy { $0[0].strength == 0 && $0[0].scale == 0 })
+        let after = try #require(strips.last)
+        #expect(after[0].strength < 0.1 * ribbons.peak && after[after.count - 1].strength > 0.9 * ribbons.peak)
+        let layer = TurbulenceTrailLayer(pointsPerMeter: 8)
+        layer.update(runs: runs, peak: ribbons.peak, style: .standard)
+        #expect(layer.visibleCount == 2)
+        let feather = TurbulenceTrailLayer.featherSteps.count
+        let before = TurbulenceTrailLayer.columns(along: strips[0], peak: ribbons.peak)
+        let building = TurbulenceTrailLayer.columns(along: after, peak: ribbons.peak)
+        let sub = TurbulenceTrailLayer.subColumns + 1
+        // Before the ease: capped at its newest end, where the ease cut it off (shed at full strength, faded since).
+        #expect(before.last?.u == 0 && before[before.count - 1 - feather].u > TurbulenceTrailLayer.taperShare)
+        // Building back: tapers in from nothing at its oldest end, capped at the boat.
+        #expect(building.count == (after.count - 1) * sub + 1 + feather)
+        #expect(building[0].u < TurbulenceTrailLayer.taperShare && building.last?.u == 0)
+    }
+
+    /// The strip's vertex alpha (its source u) is strength / peak at every point, the sub-columns linear between, and
+    /// its rows sit the point's scale either side of the centre; a lone point is a disc; the rest hidden.
+    @Test func stripAlphaIsStrengthOverPeak() throws {
+        let peak = 0.4
+        func live(_ x: Double, _ strength: Double, _ scale: Double) -> R.Live {
+            R.Live(position: Vec2(x, 0), strength: strength, scale: scale)
+        }
+        // A run fading out at its oldest end, strong at its newest; a lone point; an empty point.
+        let run = [live(0, 0.01, 4), live(4, 0.2, 3), live(8, 0.4, 2)]
+        let layer = TurbulenceTrailLayer(pointsPerMeter: 8)
+        layer.update(runs: [run, [live(20, 0.2, 2)], [live(30, 0, 0)]], peak: peak, style: .standard)
+        #expect(layer.visibleCount == 2)
         let strip = layer.sprites[0]
         #expect(strip.texture === TurbulenceTrailLayer.strip && strip.shader === TurbulenceTrailLayer.shimmer)
-        // The strip's own alpha is the hatch; its texture carries the fade (u = life left).
         #expect(abs(Double(strip.alpha) - BoatStyle.standard.coneAlpha) < 1e-6)
+        #expect(abs(strip.zPosition - BoatEffects.Layer.cones) < 1e-6)
         let grid = try #require(strip.warpGeometry as? SKWarpGeometryGrid)
-        // Three samples and three feather columns at each end.
-        let columns = 3 + 2 * TurbulenceTrailLayer.featherSteps.count
+        let sub = TurbulenceTrailLayer.subColumns + 1, feather = TurbulenceTrailLayer.featherSteps.count
+        // No cap at the faded end, a cap at the strong one.
+        let columns = 2 * sub + 1 + feather
         #expect(grid.numberOfColumns == columns - 1 && grid.numberOfRows == 2)
-        #expect(abs(Double(grid.sourcePosition(at: 3).x) - 0.9) < 1e-6)
+        for (i, point) in run.enumerated() {
+            for row in 0..<3 {
+                #expect(abs(Double(grid.sourcePosition(at: row * columns + i * sub).x) - point.strength / peak) < 1e-6)
+            }
+        }
+        // Half way between the first two points: linear.
+        #expect(abs(Double(grid.sourcePosition(at: 2).x) - (0.01 + 0.2) / 2 / peak) < 1e-6)
         func point(_ index: Int) -> CGPoint {
             let p = grid.destPosition(at: index)
             return CGPoint(x: strip.position.x + CGFloat(p.x) * strip.size.width,
                            y: strip.position.y + CGFloat(p.y) * strip.size.height)
         }
         func near(_ a: CGPoint, _ x: CGFloat, _ y: CGFloat) -> Bool { abs(a.x - x) < 1e-3 && abs(a.y - y) < 1e-3 }
-        // The oldest and newest samples' edges, ± the radius, across the track (points), and the centreline between.
-        #expect(near(point(3), 0, -28) && near(point(2 * columns + 3), 0, 12))
-        #expect(near(point(5), 64, -28) && near(point(2 * columns + 5), 64, 12))
-        #expect(near(point(columns + 4), 32, -8))
-        // Feathered: each end a radius past its sample, closed to a point and clear, no square edge.
-        #expect(near(point(0), -20, -8) && near(point(2 * columns), -20, -8))
-        #expect(near(point(columns - 1), 84, -8) && near(point(3 * columns - 1), 84, -8))
-        #expect(grid.sourcePosition(at: 0).x == 0 && grid.sourcePosition(at: columns - 1).x == 0)
-        #expect(grid.sourcePosition(at: 2).x < grid.sourcePosition(at: 3).x)
-        // The lone backwind at the backwind's share and z, a disc; the lone cone at full alpha.
-        let backwind = layer.sprites[1]
-        #expect(backwind.warpGeometry == nil && backwind.texture === TurbulenceTrailLayer.disc)
-        #expect(abs(Double(backwind.alpha) - hatch * BoatStyle.standard.backwindShare) < 1e-6)
-        // SpriteKit keeps a z in single precision.
-        #expect(abs(backwind.zPosition - BoatEffects.Layer.backwind) < 1e-6)
-        #expect(abs(strip.zPosition - BoatEffects.Layer.cones) < 1e-6)
-        #expect(abs(Double(layer.sprites[2].alpha) - hatch) < 1e-6)
-        // u is life left only, a weaker sample's column too (its strength shows in its width); one far weaker than
-        // the strongest breaks the ribbon into two discs.
-        var weak = five
-        weak[1].peak /= 2
-        layer.update(samples: weak, time: 1, shadow: shadow, style: .standard)
-        let weakGrid = try #require(layer.sprites[0].warpGeometry as? SKWarpGeometryGrid)
-        #expect(abs(Double(weakGrid.sourcePosition(at: 4).x) - 0.9) < 1e-6)
-        weak[1].peak = shadow.lossCloseIn * 0.1
-        layer.update(samples: weak, time: 1, shadow: shadow, style: .standard)
-        #expect(layer.visibleCount == 4 && layer.sprites[0].warpGeometry == nil && layer.sprites[1].warpGeometry == nil)
-        // Fewer samples: the pool stays, the rest hide.
-        layer.update(samples: Array(five.prefix(2)), time: 1, shadow: shadow, style: .standard)
-        #expect(layer.sprites.count == 4 && layer.visibleCount == 1)
-        // Past their life, none.
-        layer.update(samples: five, time: 11, shadow: shadow, style: .standard)
+        // The middle point's edges ± its scale across the track, in points (8 a metre).
+        #expect(near(point(sub), 32, -24) && near(point(2 * columns + sub), 32, 24) && near(point(columns + sub), 32, 0))
+        // The cap: a scale past the newest point, closed and clear.
+        #expect(near(point(columns - 1), 80, 0) && grid.sourcePosition(at: columns - 1).x == 0)
+        let disc = layer.sprites[1]
+        #expect(disc.warpGeometry == nil && disc.texture === TurbulenceTrailLayer.disc)
+        #expect(abs(Double(disc.alpha) - BoatStyle.standard.coneAlpha * 0.5) < 1e-6)
+        // Fewer runs: the pool stays, the rest hide.
+        layer.update(runs: [run], peak: peak, style: .standard)
+        #expect(layer.sprites.count == 2 && layer.visibleCount == 1)
+        layer.update(runs: [], peak: peak, style: .standard)
         #expect(layer.visibleCount == 0)
     }
 
-    /// The sail-angle scale: k = 0 sheds nothing; k = 0.5 halves every sample's peak, radius and growth (cone and
-    /// backwind), its life and drift unchanged.
-    @Test func scaleShrinksAndWeakensWhatABoatSheds() {
-        let shadow = Race.defaultBoatClass.windShadow
-        let fleet = TrailParity.fleet(boatClass: Race.defaultBoatClass)
-        var full = TurbulenceTrails(shadow: shadow), half = TurbulenceTrails(shadow: shadow)
-        var none = TurbulenceTrails(shadow: shadow)
-        full.step(boats: fleet, tick: 0)
-        half.step(boats: fleet, tick: 0, scales: [0.5, 0.5])
-        none.step(boats: fleet, tick: 0, scales: [0, 1])
-        #expect(full.samples.count >= 3 && full.samples.contains(where: \.isBackwind))
-        #expect(half.samples.count == full.samples.count)
-        for (h, f) in zip(half.samples, full.samples) {
-            #expect(abs(h.peak - f.peak / 2) < 1e-12 && abs(h.radius - f.radius / 2) < 1e-12)
-            #expect(abs(h.growth - f.growth / 2) < 1e-12 && h.life == f.life && h.drift == f.drift)
+    /// The shimmer's frame: `gl_FragCoord` counts pixels from the bottom of what's drawn (SpriteKit keeps GL's y-up
+    /// even on Metal), as `setView`'s `pixel` assumes.
+    @Test func fragCoordCountsFromTheBottom() throws {
+        let view = SKView(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
+        let scene = SKScene(size: CGSize(width: 64, height: 64))
+        view.presentScene(scene)
+        let sprite = SKSpriteNode(color: .white, size: CGSize(width: 64, height: 64))
+        sprite.anchorPoint = .zero
+        sprite.shader = SKShader(source: """
+        void main() {
+            float a = gl_FragCoord.y < 8.0 ? 1.0 : 0.0;
+            gl_FragColor = vec4(a, a, a, a);
         }
-        #expect(!none.samples.contains { $0.caster == 0 })
-        #expect(none.samples.filter { $0.caster == 1 }.count == full.samples.filter { $0.caster == 1 }.count)
-    }
-
-    /// The game's trails shed only the shadow: its backwind stays the original zone stripes (owner, #376 A).
-    @Test func gameTrailsShedNoBackwind() {
-        let shadow = Race.defaultBoatClass.windShadow
-        let fleet = TrailParity.fleet(boatClass: Race.defaultBoatClass)
-        var prototype = TurbulenceTrails(shadow: shadow), game = TurbulenceTrails(shadow: shadow, shedsBackwind: false)
-        prototype.step(boats: fleet, tick: 0)
-        game.step(boats: fleet, tick: 0)
-        #expect(prototype.samples.contains { $0.isBackwind })
-        #expect(!game.samples.contains { $0.isBackwind })
-        #expect(game.samples.count == prototype.samples.filter { !$0.isBackwind }.count)
-    }
-
-    /// The level builds back: an ease drops a boat's level at once; sheeted in again it rises linearly over
-    /// `buildSeconds` (half way at half the time), so the first samples shed after the release are small.
-    @Test func trailBuildsBackAfterAnEase() throws {
-        let shadow = Race.defaultBoatClass.windShadow
-        let boat = TrailParity.fleet(boatClass: Race.defaultBoatClass)[0]
-        let build = 2.0
-        var trails = TurbulenceTrails(shadow: shadow)
-        let full = Race.tickRate, eased = 2 * Race.tickRate
-        for tick in 0..<full { trails.step(boats: [boat], tick: tick, scales: [1], buildSeconds: build) }
-        #expect(trails.levels == [1])
-        trails.step(boats: [boat], tick: full, scales: [0], buildSeconds: build)
-        #expect(trails.levels == [0])
-        for tick in full + 1..<eased { trails.step(boats: [boat], tick: tick, scales: [0], buildSeconds: build) }
-        #expect(!trails.samples.contains { $0.born > full })
-        // Released at `eased`: after half of `build` the level is a half.
-        let half = Int(build / 2 * Double(Race.tickRate))
-        for tick in eased..<eased + half { trails.step(boats: [boat], tick: tick, scales: [1], buildSeconds: build) }
-        #expect(abs(trails.levels[0] - 0.5) < 1e-9)
-        let first = try #require(trails.samples.filter { $0.born >= eased && !$0.isBackwind }.min { $0.born < $1.born })
-        #expect(first.born == eased && first.radius < 0.05 * shadow.coneWidthAtBoat / 2)
-        for tick in eased + half..<eased + 2 * half + 1 {
-            trails.step(boats: [boat], tick: tick, scales: [1], buildSeconds: build)
-        }
-        #expect(trails.levels == [1])
-        // A tack's head to wind (scale 0) drops it again at once.
-        trails.step(boats: [boat], tick: eased + 2 * half + 1, scales: [0], buildSeconds: build)
-        #expect(trails.levels == [0])
-    }
-
-    /// A boat that eases, then sheets in, draws as two ribbon pieces: one shed before the ease, one building back after
-    /// it, nothing bridging the gap, and no column pinched below a tenth of its piece's widest (bar the feathered tips).
-    @Test func easeThenSheetInDrawsTwoPieces() throws {
-        let boatClass = Race.defaultBoatClass
-        let shadow = boatClass.windShadow
-        var boat = TrailParity.fleet(boatClass: boatClass)[0]
-        var trails = TurbulenceTrails(shadow: shadow)
-        var probe = TurbulenceTrails(shadow: shadow)
-        probe.step(boats: [boat], tick: 0)
-        let life = try #require(probe.samples.first { !$0.isBackwind }).life
-        let ticks = { (share: Double) in Int(share * life * Double(Race.tickRate)) }
-        let ease = ticks(0.3), sheet = ticks(0.5), end = ticks(0.85)
-        for tick in 0...end {
-            boat.position += boat.velocity * Race.dt
-            TrailParity.refresh(&boat)
-            let scale: Double = tick >= ease && tick < sheet ? 0 : 1
-            trails.step(boats: [boat], tick: tick, scales: [scale], buildSeconds: 2)
-        }
-        let layer = TurbulenceTrailLayer(pointsPerMeter: 8)
-        layer.update(samples: trails.samples.filter { !$0.isBackwind }, time: Double(end) * Race.dt, every: trails.every,
-                     shadow: shadow, style: .standard)
-        #expect(layer.visibleCount == 2)
-        let feather = TurbulenceTrailLayer.featherSteps.count
-        for sprite in layer.sprites.prefix(layer.visibleCount) {
-            let grid = try #require(sprite.warpGeometry as? SKWarpGeometryGrid)
-            let columns = grid.numberOfColumns + 1
-            func point(_ index: Int) -> CGPoint {
-                let p = grid.destPosition(at: index)
-                return CGPoint(x: CGFloat(p.x) * sprite.size.width, y: CGFloat(p.y) * sprite.size.height)
-            }
-            let widths = (0..<columns).map { i in
-                let a = point(i), b = point(2 * columns + i)
-                return Double(hypot(a.x - b.x, a.y - b.y))
-            }
-            let widest = widths.max() ?? 0
-            let inner = widths[feather..<(columns - feather)]
-            #expect(inner.allSatisfy { $0 >= 0.1 * widest }, "\(widths)")
-        }
+        """)
+        scene.addChild(sprite)
+        let texture = try #require(view.texture(from: sprite))
+        let image = texture.cgImage()
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try #require(CGContext(data: &pixels, width: width, height: height, bitsPerComponent: 8,
+                                             bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                                             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        // The context's first row is the image's top.
+        let top = pixels[3], bottom = pixels[((height - 1) * width) * 4 + 3]
+        print("fragCoord: \(width)x\(height) top alpha \(top), bottom alpha \(bottom)")
+        #expect(top < 128 && bottom > 128)
     }
 
     /// The sail's angle to her apparent wind, as drawn: about the default full angle sailing the upwind groove (so
@@ -190,21 +244,31 @@ import Testing
         let style = BoatStyle.standard
         let groove = TrailParity.fleet(boatClass: boatClass)[0]
         let aoa = rad2deg(BoatPose.angleOfAttack(groove, ease: false, boatClass: boatClass, style: style))
-        print("upwind groove angle of attack: \(aoa)°")
         #expect(abs(aoa - style.trailFullAngleDegrees) < 1)
         #expect(BoatPose.angleOfAttack(groove, ease: true, boatClass: boatClass, style: style) == 0)
-        #expect(abs(TurbulenceTrails.scale(of: groove, ease: false, boatClass: boatClass, style: style) - 1) < 0.02)
+        #expect(abs(R.scale(of: groove, ease: false, boatClass: boatClass, style: style) - 1) < 0.02)
         var head = groove
         head.heading = 0
         TrailParity.refresh(&head)
-        #expect(TurbulenceTrails.scale(of: head, ease: false, boatClass: boatClass, style: style) == 0)
+        #expect(R.scale(of: head, ease: false, boatClass: boatClass, style: style) == 0)
         var run = groove
         run.heading = .pi * 0.9
         TrailParity.refresh(&run)
-        #expect(TurbulenceTrails.scale(of: run, ease: false, boatClass: boatClass, style: style) == 1)
+        #expect(R.scale(of: run, ease: false, boatClass: boatClass, style: style) == 1)
         var half = style
         half.trailFullAngleDegrees = 2 * aoa
-        #expect(abs(TurbulenceTrails.scale(of: groove, ease: false, boatClass: boatClass, style: half) - 0.5) < 1e-9)
+        #expect(abs(R.scale(of: groove, ease: false, boatClass: boatClass, style: half) - 0.5) < 1e-9)
+    }
+
+    /// A style saved before the ribbon sliders loads with the prototype's defaults.
+    @Test func savedStyleLoadsTheRibbonDefaults() throws {
+        let style = try JSONDecoder().decode(BoatStyle.self, from: Data(#"{"trailBuildSeconds": 3}"#.utf8))
+        #expect(style.trailBuildSeconds == 3 && style.trailTuning.dropLast() == BoatStyle.standard.trailTuning.dropLast())
+        var tuned = BoatStyle.standard
+        tuned.trailExtraTurnDegrees = 5
+        tuned.trailLengthCap = 9
+        let back = try JSONDecoder().decode(BoatStyle.self, from: JSONEncoder().encode(tuned))
+        #expect(back.trailExtraTurnDegrees == 5 && back.trailLengthCap == 9)
     }
 
     #if DEBUG
@@ -231,8 +295,7 @@ import Testing
 }
 
 @MainActor enum TrailParity {
-    /// Two boats close-hauled in a steady 10 kn from 0 in still water: seat 0 tacks at t=2 (the prototype's tack), seat 1
-    /// sails on 3 hull lengths down seat 0's shadow at the start. 8 s, then the factor at a few probes.
+    /// A steady 10 kn from 0 in still water (the prototype's `TrailScene`).
     static let wind = Wind(direction: 0, speed: metresPerSecond(knots: 10))
 
     static func refresh(_ b: inout Boat) {
@@ -240,52 +303,69 @@ import Testing
         b.boomSide = b.relativeWind > 0 ? .port : .starboard
     }
 
-    /// The scene's two boats at the start: seat 0 on her upwind groove, seat 1 3 hull lengths down her shadow.
-    static func fleet(boatClass: BoatClass) -> [Boat] {
-        let best = boatClass.polar.bestUpwind(tws: wind.speed)
-        func boat(_ id: Int, _ position: Vec2) -> Boat {
-            var b = Boat(id: id, isPlayer: false, colorIndex: id, position: position, heading: -best.twa, speed: best.speed)
-            b.windOverGround = wind
-            b.sailingWind = wind
-            refresh(&b)
-            return b
-        }
-        let caster = boat(0, .zero)
-        return [caster, boat(1, ShadowCone(caster: caster, shadow: boatClass.windShadow).axis * (3 * boatClass.hull.length))]
+    static func boat(_ id: Int, _ position: Vec2, heading: Double, speed: Double) -> Boat {
+        var b = Boat(id: id, isPlayer: false, colorIndex: id, position: position, heading: heading, speed: speed)
+        b.windOverGround = wind
+        b.sailingWind = wind
+        refresh(&b)
+        return b
     }
 
-    static func factors(boatClass: BoatClass) -> [Double] {
-        let shadow = boatClass.windShadow
-        let hull = boatClass.hull.length
+    /// Two boats on the upwind groove: seat 0 at the origin, seat 1 3 hull lengths down her shadow.
+    static func fleet(boatClass: BoatClass) -> [Boat] {
+        let best = boatClass.polar.bestUpwind(tws: wind.speed)
+        let caster = boat(0, .zero, heading: -best.twa, speed: best.speed)
+        let other = ShadowCone(caster: caster, shadow: boatClass.windShadow).axis * (3 * boatClass.hull.length)
+        return [caster, boat(1, other, heading: -best.twa, speed: best.speed)]
+    }
+
+    /// The prototype's `TrailScene.run` on its "tack at t=2" in the default class, warmed up: the ribbon factor at each
+    /// of its seven probes (in its order), every tick for `seconds`.
+    static func tack(parameters: TurbulenceRibbons.Parameters, seconds: Double = 15) -> [[Double]] {
+        let boatClass = Race.defaultBoatClass
+        let shadow = boatClass.windShadow, hull = boatClass.hull.length
         let best = boatClass.polar.bestUpwind(tws: wind.speed)
         let twa = best.twa, fast = best.speed
-        let fleet = fleet(boatClass: boatClass)
-        var caster = fleet[0]
-        var other = fleet[1]
-        var trails = TurbulenceTrails(shadow: shadow)
-        let ticks = 8 * Race.tickRate
-        for tick in 0..<ticks {
-            let t = Double(tick) * Race.dt
-            let x = ((t - 2) / 3).clamped(to: 0...1)
-            let k = x * x * (3 - 2 * x)
-            caster.heading = -twa + k * 2 * twa
-            caster.speed = fast * (1 - 0.45 * Foundation.sin(Double.pi * ((t - 2) / 7).clamped(to: 0...1)))
+        func smooth(_ x: Double) -> Double { let t = x.clamped(to: 0...1); return t * t * (3 - 2 * t) }
+        func steer(_ t: Double) -> (heading: Double, speed: Double) {
+            let k = smooth((t - 2) / 3)
+            let dip = 1 - 0.45 * Foundation.sin(Double.pi * ((t - 2) / 7).clamped(to: 0...1))
+            return (-twa + k * 2 * twa, fast * dip)
+        }
+        var caster = boat(0, .zero, heading: steer(0).heading, speed: steer(0).speed)
+        let start = ShadowCone(caster: caster, shadow: shadow)
+        let v0 = caster.velocity
+        let downwind = Vec2.heading(.pi)
+        let apparentLine = -Vec2.heading(start.apparentWindDirection)
+        let probes: [(offset: Vec2, sailsOn: Bool)] = [
+            (start.axis * (3 * hull), true), (apparentLine * (3 * hull), true),
+            (start.axis * (6 * hull), true), (apparentLine * (6 * hull), true),
+            (start.axis * (6 * hull), false), (downwind * (3 * hull), false), (downwind * (6 * hull), false),
+        ]
+        var series = probes.map { _ in [Double]() }
+        var ribbons = TurbulenceRibbons(shadow: shadow, parameters: parameters)
+        let apparent = max(caster.apparentWind.speed, 0.5)
+        let warm = 1.2 * (parameters.life?(apparent) ?? shadow.coneLength / apparent)
+        let ticks = Int((warm * Double(Race.tickRate)).rounded(.up))
+        caster.position = v0 * (-Double(ticks) * Race.dt)
+        for tick in -ticks..<0 {
             caster.position += caster.velocity * Race.dt
             refresh(&caster)
-            other.position += other.velocity * Race.dt
-            refresh(&other)
-            trails.step(boats: [caster, other], tick: tick)
+            ribbons.step(boats: [caster], tick: tick)
         }
-        let tick = ticks - 1
-        let cone = ShadowCone(caster: caster, shadow: shadow)
-        let start = Vec2.heading(-twa) * (fast * 2)
-        return [
-            trails.factor(at: other.position, tick: tick, receiver: 1, casters: 2),
-            trails.factor(at: caster.position + cone.axis * (2 * hull), tick: tick, receiver: 1, casters: 2),
-            trails.factor(at: TurbulenceTrails.backwindCentre(of: cone) ?? cone.apex, tick: tick, receiver: 1, casters: 2),
-            trails.factor(at: start + Vec2(0, -3 * hull), tick: tick, receiver: 1, casters: 2),
-            trails.factor(at: caster.position, tick: tick, receiver: 0, casters: 2),
-            Double(trails.samples.count),
-        ]
+        caster.position = .zero
+        for tick in 0..<Int(seconds * Double(Race.tickRate)) {
+            let t = Double(tick) * Race.dt
+            let (h, s) = steer(t)
+            caster.heading = h
+            caster.speed = s
+            caster.position += caster.velocity * Race.dt
+            refresh(&caster)
+            ribbons.step(boats: [caster], tick: tick)
+            for (i, p) in probes.enumerated() {
+                series[i].append(ribbons.factor(at: p.offset + (p.sailsOn ? v0 * t : .zero), tick: tick, receiver: 1))
+            }
+        }
+        return series
     }
 }

@@ -99,8 +99,10 @@ final class GameScene: SKScene {
     private let coneLayer = ConeLayer()
     /// How the wind shadow draws (`shadowDrawing`): always the cones in Release.
     private var drawing = ShadowDrawing.cones
-    /// The turbulence trails (#376 follow-on A), stepped each tick only while they draw; nil otherwise.
-    private var trails: TurbulenceTrails?
+    /// The turbulence ribbons (#376 follow-on A), stepped each tick only while they draw; nil otherwise.
+    private var trails: TurbulenceRibbons?
+    /// The `BoatStyle.trailTuning` the ribbons' parameters were last built from: a slider's change rebuilds them.
+    private var trailTuning: [Double] = []
     /// The trails drawn, in the effects layer beside the cones.
     private(set) lazy var trailLayer = TurbulenceTrailLayer(pointsPerMeter: ppm)
     private let courseLayer = SKNode()
@@ -305,15 +307,21 @@ final class GameScene: SKScene {
     /// Steps the turbulence trails through `frames`, each tick's fleet, while they draw (#376 follow-on A).
     private func stepTrails(_ frames: [TickFrame]) {
         guard drawing.drawsTrails else { return }
-        var trails = trails ?? TurbulenceTrails(shadow: driver.boatClass.windShadow, shedsBackwind: false)
         let boatClass = driver.boatClass, style = boatStyle
+        let parameters = { TurbulenceRibbons.Parameters(style: style, shadow: boatClass.windShadow) }
+        var trails = trails ?? TurbulenceRibbons(shadow: boatClass.windShadow, parameters: parameters())
+        if style.trailTuning != trailTuning {
+            // Live: points already shed keep their own.
+            trails.parameters = parameters()
+            trailTuning = style.trailTuning
+        }
         for frame in frames {
             // Each boat's sail-angle scale every tick, so her level builds back at the same rate whenever she sheds.
             let scales = frame.boats.enumerated().map { seat, boat in
-                TurbulenceTrails.scale(of: boat, ease: seat < frame.heldInputs.count && frame.heldInputs[seat].ease,
+                TurbulenceRibbons.scale(of: boat, ease: seat < frame.heldInputs.count && frame.heldInputs[seat].ease,
                                        boatClass: boatClass, style: style)
             }
-            trails.step(boats: frame.boats, tick: frame.tick, scales: scales, buildSeconds: style.trailBuildSeconds)
+            trails.step(boats: frame.boats, tick: frame.tick, scales: scales)
         }
         self.trails = trails
     }
@@ -324,9 +332,23 @@ final class GameScene: SKScene {
         coneLayer.isHidden = !drawing.drawsCones
         trailLayer.isHidden = !drawing.drawsTrails
         if drawing.drawsTrails {
-            trailLayer.update(samples: trails?.samples ?? [], time: world.time, every: trails?.every ?? 3,
-                              shadow: world.boatClass.windShadow, style: boatStyle)
+            let runs = trails.map { t in t.points.indices.flatMap { t.ribbons(of: $0, time: world.time) } } ?? []
+            trailLayer.update(runs: runs, peak: trails?.peak ?? world.boatClass.windShadow.lossCloseIn, style: boatStyle)
         }
+    }
+
+    /// Points the trails' shimmer at the water this frame (`TurbulenceTrailLayer.setView`): a drawable pixel's world
+    /// metres through the camera, and the true wind at you.
+    private func pointShimmer(_ world: RenderWorld) {
+        guard let view else { return }
+        let scale = Double(view.contentScaleFactor), height = Double(view.bounds.height)
+        let metres = 1 / Double(ppm)
+        // `gl_FragCoord` counts up from the bottom; the view's points count down from the top.
+        TurbulenceTrailLayer.setView(pixel: { x, y in
+            let at = CGPoint(x: x / scale, y: height - y / scale)
+            let p = trailLayer.convert(convertPoint(fromView: at), from: self)
+            return Vec2(Double(p.x) * metres, Double(p.y) * metres)
+        }, wind: world.me.windOverGround.velocity, time: world.time)
     }
 
     /// Draws `world`. `settled` draws it as if it had been standing still forever: the camera on its
@@ -352,6 +374,7 @@ final class GameScene: SKScene {
         cam.position = rig.center
         cam.setScale(rig.cameraScale)
         cam.zRotation = rig.cameraRotation
+        if drawing.drawsTrails { pointShimmer(world) }
 
         let view = WaterView(center: cam.position, sceneSize: size, scale: cam.xScale, rotation: cam.zRotation)
         Signpost.waterUpdate.measure { water.update(WaterWorld(world), view: view, dt: dt) }
