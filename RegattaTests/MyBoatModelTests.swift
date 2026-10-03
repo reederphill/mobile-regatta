@@ -52,9 +52,15 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
 
 /// My boat's editor and shop (#136, #21).
 @MainActor @Suite struct MyBoatModelTests {
+    /// Paid and earned designs the tests treat as drawn: none has art until #169, and an undrawn design can't be
+    /// tried on, so the shop and the earned lock are checked here rather than in the UI tests.
+    private static let drawnForTests: Set<DesignID> = [DesignID("skiff-stars"), DesignID("skiff-band"),
+                                                       DesignID("skiff-earned-10")]
+
     private func model(_ saved: Livery = stripe, owned: Set<DesignID> = [], completed: Int = 0,
                        store: (any StoreService)? = nil, canBuy: Bool = true) -> MyBoatModel {
-        MyBoatModel(saved: saved, owned: owned, completedRaces: completed, store: store, canBuy: canBuy)
+        MyBoatModel(saved: saved, owned: owned, completedRaces: completed, store: store, canBuy: canBuy,
+                    isDrawn: { MyBoatModel.hasArt($0) || Self.drawnForTests.contains($0.id) })
     }
 
     @Test func opensOnTheSavedLiveryWithNothingToSave() {
@@ -122,15 +128,23 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         #expect(model.draft.colours == stripe.colours, "tried on in your colours")
         #expect(model.action == .buy(price: "$2.99"))
         #expect(model.action.title == "Buy $2.99")
+        model.setColour(SwatchID("lavender"), for: .deck)
+        #expect(model.action == .buy(price: "$2.99"), "a colour change is still Buy, not Save")
         model.save()
         #expect(saves == 0)
         #expect(model.saved == stripe)
-        #expect(model.caption(for: LiveryCatalogue.bundled.design(DesignID("skiff-band"))!) == "$0.99")
+        model.discardDraft()
+        #expect(model.draft == stripe, "leaving keeps your livery")
+        let band = LiveryCatalogue.bundled.design(DesignID("skiff-band"))!
+        #expect(model.mark(for: band) == .price)
+        #expect(model.price(of: band) == "$0.99")
+        #expect(model.caption(for: band) == nil, "a paid design's price is on Buy, not under it")
 
         let owned = self.model(owned: [DesignID("skiff-stars")])
         owned.select(DesignID("skiff-stars"))
         #expect(owned.action == .save)
-        #expect(owned.caption(for: LiveryCatalogue.bundled.design(DesignID("skiff-stars"))!) == nil)
+        #expect(owned.mark(for: owned.selectedDesign!) == nil)
+        #expect(owned.price(of: owned.selectedDesign!) == nil)
     }
 
     /// A build that can't buy yet (Release until #137) shows the price and a disabled Soon.
@@ -151,6 +165,10 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         #expect(model.action.title == "3 / 10 races")
         #expect(!model.action.isEnabled)
         #expect(model.caption(for: model.selectedDesign!) == "3 / 10 races")
+        #expect(model.mark(for: model.selectedDesign!) == .lock)
+        let fifty = LiveryCatalogue.bundled.design(DesignID("skiff-earned-50"))!
+        #expect(model.mark(for: fifty) == .lock)
+        #expect(model.caption(for: fifty) == nil, "races show only on the selected design")
         model.save()
         #expect(model.saved == stripe)
 
@@ -158,6 +176,46 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         earned.select(DesignID("skiff-earned-10"))
         #expect(earned.action == .save)
         #expect(earned.caption(for: earned.selectedDesign!) == nil)
+        #expect(earned.mark(for: earned.selectedDesign!) == nil)
+    }
+
+    /// Decal lists one plain list: owned first, then earned, then paid, in catalogue order within each (owner review
+    /// of #382).
+    @Test func designsListOwnedThenEarnedThenPaid() {
+        let model = MyBoatModel(saved: stripe, owned: [DesignID("skiff-tiger")], completedRaces: 10, canBuy: true,
+                                isDrawn: { _ in true })
+        let ids = model.listedDesigns.map(\.id.rawValue)
+        #expect(ids == ["skiff-plain", "skiff-stripe", "skiff-sheer", "skiff-split", "skiff-earned-10", "skiff-tiger",
+                        "skiff-earned-50", "skiff-earned-200",
+                        "skiff-band", "skiff-pinstripe", "skiff-checker-bow", "skiff-dash", "skiff-wave-hull",
+                        "skiff-arrow", "skiff-chevron-sail", "skiff-diagonal", "skiff-race-stripes", "skiff-stars",
+                        "skiff-swirl"])
+    }
+
+    /// A design with neither its pattern nor its graphic drawn yet would look plain, so it's never listed or tried on
+    /// (#169 draws them); Try it on one opens the saved design.
+    @Test func designsWithNoArtAreNeverShown() {
+        let model = MyBoatModel(saved: stripe, canBuy: true)
+        #expect(model.listedDesigns.map(\.id.rawValue) == ["skiff-plain", "skiff-stripe", "skiff-sheer", "skiff-split"])
+        model.select(DesignID("skiff-stars"))
+        #expect(model.design == stripe.design, "an undrawn design isn't tried on")
+        model.open(trying: DesignID("skiff-stars"))
+        #expect(model.design == stripe.design, "Try it on an undrawn design opens the saved one")
+        #expect(!model.listedDesigns.contains { $0.id == DesignID("skiff-stars") })
+        #expect(MyBoatModel.hasArt(LiveryCatalogue.bundled.design(DesignID("skiff-sheer"))!))
+        #expect(MyBoatModel.hasArt(LiveryCatalogue.bundled.design(DesignID("skiff-plain"))!))
+        #expect(!MyBoatModel.hasArt(LiveryCatalogue.bundled.design(DesignID("skiff-stars"))!))
+        #expect(!MyBoatModel.hasArt(LiveryCatalogue.bundled.design(DesignID("skiff-band"))!), "an undrawn pattern on a plain sail")
+    }
+
+    /// The page opens on Decal, and leaving it goes back there.
+    @Test func sectionsOpenOnDecal() {
+        let model = model()
+        #expect(model.section == .decal)
+        model.section = .number
+        model.discardDraft()
+        #expect(model.section == .decal)
+        #expect(MyBoatModel.Section.allCases.map(\.title) == ["Decal", "Colours", "Sail", "Number"])
     }
 
     /// After fleet lock every control is inert (#25).
@@ -214,8 +272,8 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         model.discardDraft()
         #expect(model.draft == stripe)
         #expect(model.numberText == "42")
-        model.open(trying: DesignID("skiff-tiger"))
-        #expect(model.design == DesignID("skiff-tiger"))
+        model.open(trying: DesignID("skiff-sheer"))
+        #expect(model.design == DesignID("skiff-sheer"))
         model.open(trying: DesignID("ilca-dinghy-plain"))
         #expect(model.design == stripe.design, "another class's design isn't tried on")
     }

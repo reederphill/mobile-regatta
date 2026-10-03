@@ -1,9 +1,10 @@
 import RegattaCore
 import SwiftUI
 
-/// My boat (#136, #25): the livery editor and shop on one page, pushed from home. A large render of the draft, the
-/// designs (starter, earned, shop), the colour slots from the safe palette and the sail number, then one button: Save,
-/// or Buy for a paid design you don't own. Sparse and short words (owner, 2026-10-02); copy is TODO-COPY (#171).
+/// My boat (#136, #25): the livery editor and shop on one page, pushed from home. The draft's render stays pinned at
+/// the top; under it a segmented control picks one part at a time (Decal, Colours, Sail, Number), and only that part
+/// scrolls. One button at the bottom: Save, or Buy for a paid design you don't own. Sparse and short words (owner,
+/// 2026-10-02; owner review of #382); copy is TODO-COPY (#171).
 struct MyBoatView: View {
     @Bindable var model: MyBoatModel
     @FocusState private var numberFocused: Bool
@@ -13,8 +14,9 @@ struct MyBoatView: View {
     private static let thumbnailSize = CGSize(width: 84, height: 40)
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+        VStack(spacing: 0) {
+            // Pinned: the render and the part picker never scroll away.
+            VStack(spacing: 12) {
                 LiveryRenderView(livery: model.draft)
                     .accessibilityIdentifier("myboat-render")
                     .frame(maxWidth: .infinity)
@@ -23,28 +25,38 @@ struct MyBoatView: View {
                     note("Locked for this race")  // TODO-COPY (#171)
                 }
 
-                Group {
-                    designSection("Starter") { $0.acquisition.isFree }
-                    designSection("Earned") { if case .earned = $0.acquisition { true } else { false } }
-                    designSection("Shop") { if case .paid = $0.acquisition { true } else { false } }
-
-                    if let design = model.selectedDesign {
-                        ForEach(LiverySlot.allCases.filter(design.slots.contains), id: \.self) { slot in
-                            colourRow(slot)
-                        }
+                Picker("Part", selection: $model.section) {  // TODO-COPY (#171)
+                    ForEach(MyBoatModel.Section.allCases, id: \.self) { section in
+                        Text(section.title).tag(section)
                     }
-
-                    numberRow
                 }
+                .pickerStyle(.segmented)
+                .accessibilityIdentifier("myboat-section")
                 .disabled(model.isFleetLocked)
             }
-            .padding(.vertical, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 8)
             .readableColumn()
-            // UI tests check the page was pushed.
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("page-myboat")
+
+            ScrollView {
+                Group {
+                    switch model.section {
+                    case .decal: designList
+                    case .colours: coloursSection
+                    case .sail: sailSection
+                    case .number: numberRow
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 12)
+                .readableColumn()
+                .disabled(model.isFleetLocked)
+            }
+            .scrollDismissesKeyboard(.interactively)
         }
-        .scrollDismissesKeyboard(.interactively)
+        // UI tests check the page was pushed.
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("page-myboat")
         .safeAreaInset(edge: .bottom) { actionBar }
         .menuBackground()
         .navigationTitle("My boat")
@@ -59,15 +71,13 @@ struct MyBoatView: View {
         .onDisappear { model.discardDraft() }
     }
 
-    // MARK: - Designs
+    // MARK: - Decal
 
-    private func designSection(_ title: String, _ includes: (LiveryDesign) -> Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(MenuFont.heading(.headline))
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.thumbnailSize.width), spacing: 10)], spacing: 10) {
-                ForEach(model.designs.filter(includes), id: \.id) { design in
-                    designButton(design)
-                }
+    /// One plain list, no headings: owned, then earned, then paid (`MyBoatModel.listedDesigns`).
+    private var designList: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.thumbnailSize.width), spacing: 10)], spacing: 10) {
+            ForEach(model.listedDesigns, id: \.id) { design in
+                designButton(design)
             }
         }
     }
@@ -75,6 +85,7 @@ struct MyBoatView: View {
     private func designButton(_ design: LiveryDesign) -> some View {
         let selected = design.id == model.design
         let caption = model.caption(for: design)
+        let mark = model.mark(for: design)
         return Button { model.select(design.id) } label: {
             VStack(spacing: 4) {
                 LiveryRenderView(livery: model.draft(on: design, sailNumber: Self.thumbnailNumber),
@@ -82,6 +93,14 @@ struct MyBoatView: View {
                     .overlay {
                         RoundedRectangle(cornerRadius: 6)
                             .strokeBorder(ChromePalette.tint, lineWidth: selected ? 3 : 0)
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if let mark {
+                            Image(systemName: mark == .price ? "tag.fill" : "lock.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .padding(4)
+                        }
                     }
                     .accessibilityHidden(true)
                 Text(caption ?? " ")
@@ -93,13 +112,53 @@ struct MyBoatView: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel([MyBoatModel.name(of: design), caption].compactMap(\.self).joined(separator: ", "))
+        .accessibilityLabel(accessibilityLabel(design, mark: mark))
         .accessibilityValue(selected ? "selected" : "")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("myboat-design-\(design.id.rawValue)")
     }
 
-    // MARK: - Colours
+    /// The design's name, then its price or "Locked" and its races.
+    private func accessibilityLabel(_ design: LiveryDesign, mark: MyBoatModel.Mark?) -> String {
+        var parts = [MyBoatModel.name(of: design)]
+        switch mark {
+        case .price: parts += model.price(of: design).map { [$0] } ?? []
+        case .lock:
+            parts.append("Locked")  // TODO-COPY (#171)
+            if case .earned(let needed) = design.acquisition {
+                parts.append("\(min(model.completedRaces, needed)) / \(needed) races")
+            }
+        case nil: break
+        }
+        return parts.joined(separator: ", ")
+    }
+
+    // MARK: - Colours and sail
+
+    /// Deck and accent (three-slot designs only).
+    private var coloursSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach([LiverySlot.deck, .accent].filter { model.selectedDesign?.slots.contains($0) == true },
+                    id: \.self) { slot in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(Self.title(slot)).font(MenuFont.heading(.headline))
+                    swatches(slot)
+                }
+            }
+        }
+    }
+
+    /// The sail colour, and the design's sail graphic, which comes with its decal.
+    private var sailSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            swatches(.sail)
+            if let graphic = model.selectedDesign?.sailGraphic, graphic != LiveryArt.SailGraphic.plain.rawValue {
+                note("Graphic: \(MyBoatModel.name(ofGraphic: graphic))")  // TODO-COPY (#171)
+                    .accessibilityIdentifier("myboat-graphic")
+            }
+        }
+    }
+
 
     /// A slot's name. TODO-COPY (#171)
     private static func title(_ slot: LiverySlot) -> String {
@@ -110,26 +169,24 @@ struct MyBoatView: View {
         }
     }
 
-    private func colourRow(_ slot: LiverySlot) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(Self.title(slot)).font(MenuFont.heading(.headline))
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 36), spacing: 8)], alignment: .leading, spacing: 8) {
-                ForEach(model.swatches(for: slot), id: \.id) { swatch in
-                    let selected = model.colours[slot] == swatch.id
-                    Button { model.setColour(swatch.id, for: slot) } label: {
-                        Circle()
-                            .fill(Color(uiColor: UIColor(rgb: swatch.rgb)))
-                            .overlay { Circle().strokeBorder(ChartPalette.markEdge.color, lineWidth: 1) }
-                            .padding(4)
-                            .overlay { Circle().strokeBorder(ChromePalette.tint, lineWidth: selected ? 3 : 0) }
-                            .frame(width: 36, height: 36)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(MyBoatModel.name(of: swatch.id))
-                    .accessibilityValue(selected ? "selected" : "")
-                    .accessibilityAddTraits(selected ? .isSelected : [])
-                    .accessibilityIdentifier("myboat-colour-\(slot.rawValue)-\(swatch.id.rawValue)")
+    /// `slot`'s safe-palette swatches.
+    private func swatches(_ slot: LiverySlot) -> some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 36), spacing: 8)], alignment: .leading, spacing: 8) {
+            ForEach(model.swatches(for: slot), id: \.id) { swatch in
+                let selected = model.colours[slot] == swatch.id
+                Button { model.setColour(swatch.id, for: slot) } label: {
+                    Circle()
+                        .fill(Color(uiColor: UIColor(rgb: swatch.rgb)))
+                        .overlay { Circle().strokeBorder(ChartPalette.markEdge.color, lineWidth: 1) }
+                        .padding(4)
+                        .overlay { Circle().strokeBorder(ChromePalette.tint, lineWidth: selected ? 3 : 0) }
+                        .frame(width: 36, height: 36)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(MyBoatModel.name(of: swatch.id))
+                .accessibilityValue(selected ? "selected" : "")
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                .accessibilityIdentifier("myboat-colour-\(slot.rawValue)-\(swatch.id.rawValue)")
             }
         }
     }
@@ -138,7 +195,6 @@ struct MyBoatView: View {
 
     private var numberRow: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Number").font(MenuFont.heading(.headline))  // TODO-COPY (#171)
             TextField("Number", text: $model.numberText)
                 .keyboardType(.numberPad)
                 .focused($numberFocused)
@@ -157,6 +213,7 @@ struct MyBoatView: View {
 
     private var actionBar: some View {
         let action = model.action
+        let enabled = action.isEnabled && !model.isBuying
         return VStack(spacing: 6) {
             if let note = model.purchaseNote {
                 self.note(note).accessibilityIdentifier("myboat-note")
@@ -171,12 +228,14 @@ struct MyBoatView: View {
             } label: {
                 Text(action.title)
                     .font(MenuFont.heading(.title3))
+                    // The page's `menuBackground` text colour would otherwise reach the label: navy on the navy fill.
+                    .foregroundStyle(enabled ? AnyShapeStyle(ChromePalette.onTint) : AnyShapeStyle(.secondary))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .disabled(!action.isEnabled || model.isBuying)
+            .disabled(!enabled)
             .accessibilityIdentifier("myboat-action")
         }
         .padding(.vertical, 12)

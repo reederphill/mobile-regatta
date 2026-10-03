@@ -78,6 +78,7 @@ final class AppModel {
             deviceSettings.save(to: defaults)
             haptics.isOn = deviceSettings.haptics
             controls.update(deviceSettings, launchOptions: launchOptions)
+            analytics.setSharing(deviceSettings.sharesUsageData)
         }
     }
     /// Every race's haptics, on while Settings' Haptics is (#110): set here once per change, not read per haptic.
@@ -87,6 +88,8 @@ final class AppModel {
     @ObservationIgnored let controls: ControlSettings
     /// Where `deviceSettings` lives.
     @ObservationIgnored let defaults: UserDefaults
+    /// Usage analytics (#128), on while Settings' Share usage data is.
+    @ObservationIgnored let analytics: Analytics
     /// The race the cover shows, while `phase` is `.raceSequence`.
     private(set) var race: Race?
     /// The practice race the cover shows, if it's one.
@@ -139,8 +142,9 @@ final class AppModel {
     /// `sceneState` locks the orientation while the race sequence shows (G5).
     /// `store` sells paid designs (#136): the app's stub (`StubStoreService`) unless given.
     init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current, defaults: UserDefaults = .standard,
-         store: (any StoreService)? = nil) {
+         store: (any StoreService)? = nil, analytics: Analytics = .discarding()) {
         self.sceneState = sceneState
+        self.analytics = analytics
         self.launchOptions = launchOptions
         self.defaults = defaults
         if launchOptions.uiTesting && launchOptions.resetSettings {
