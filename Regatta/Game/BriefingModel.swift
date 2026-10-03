@@ -146,7 +146,7 @@ final class BriefingModel {
     var windLines: [String] { Self.windLines(forecast) }
 
     static func windLines(_ forecast: WindForecast) -> [String] {
-        let first = "\(strengthWord(knots: forecast.baseStrengthKnots)) breeze from the "
+        let first = "\(strengthWord(range: forecast.strengthRangeKnots)) breeze from the "
             + compassWord(forecast.meanDirectionDegrees)
         var second = "\(shiftWord(degrees: forecast.shiftAmplitudeDegrees)) shifts, "
             + "\(puffWord(gain: forecast.puffs.gain.upperBound)) puffs"
@@ -154,9 +154,12 @@ final class BriefingModel {
         return [first, second]
     }
 
-    /// This race's base strength in a word.
-    static func strengthWord(knots: Double) -> String {
-        knots < 8 ? "Light" : knots < 13 ? "Moderate" : knots < 17 ? "Fresh" : "Strong"
+    /// The conditions' strength in a word, from the middle of its own range rather than this race's draw, so a
+    /// light-air conditions never reads "Moderate" and a strong-wind one never reads "Light" (owner, 2026-10-02).
+    /// The bundled four: 6-9 kn Light, 9-14 Moderate, 11-16 Fresh, 14-20 Strong.
+    static func strengthWord(range: ClosedRange<Double>) -> String {
+        let middle = (range.lowerBound + range.upperBound) / 2
+        return middle < 9 ? "Light" : middle < 13 ? "Moderate" : middle < 16 ? "Fresh" : "Strong"
     }
 
     /// The oscillating shift's swing in a word.
