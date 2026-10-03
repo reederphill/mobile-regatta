@@ -66,25 +66,34 @@ final class TurbulenceTrailLayer: SKNode {
     /// The shimmer every trail sprite draws with, shared (one shader, so the sprites batch). The texture's alpha
     /// (times the node's) is the envelope; inside it a faint base plus sparse flecks, each twinkling at its own rate,
     /// and broken ripples, all in metres of the sprite's own frame (`a_scale`: metres a unit of texture x and y) and
-    /// drifting towards its dead end (low x) with time. Many fragments near the base, a few bright.
+    /// drifting towards its dead end (low x) with time. Many fragments near the base, a few bright. A fleck sits jittered
+    /// in its cell and is round on screen however the ribbon is warped: its distance is in pixels, through the inverse of
+    /// the texture-to-screen Jacobian (`dfdx`, `dfdy`: SpriteKit hands those to Metal as written, so Metal's names, not
+    /// GLSL's). Time and cell indices wrap (600 s; 264 cells, which the drift over the wrap is a whole multiple of)
+    /// before an arithmetic hash (Hoskins' `hash12`), so no lattice shows late in a run.
     static let shimmer: SKShader = {
         let source = """
         float trailHash(vec2 p) {
-            p = fract(p * vec2(123.34, 456.21));
-            p += dot(p, p + 45.32);
-            return fract(p.x * p.y);
+            vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+            p3 += dot(p3, p3.yzx + 33.33);
+            return fract((p3.x + p3.y) * p3.z);
         }
         void main() {
             float envelope = texture2D(u_texture, v_tex_coord).a * v_color_mix.a;
             float t = mod(u_time, 600.0);
             vec2 m = vec2(v_tex_coord.x * a_scale.x + t * 0.8, (v_tex_coord.y - 0.5) * a_scale.y);
             vec2 q = m * 2.2;
-            vec2 cell = floor(q);
+            vec2 cell = mod(floor(q), 264.0);
             float h = trailHash(cell);
-            vec2 offset = vec2(trailHash(cell + 11.3), trailHash(cell + 27.1)) - 0.5;
-            float d = length(fract(q) - 0.5 - offset * 0.5);
+            vec2 centre = 0.5 + 0.5 * (vec2(trailHash(cell + vec2(17.0, 3.0)), trailHash(cell + vec2(5.0, 29.0))) - 0.5);
+            vec2 dq = fract(q) - centre;
+            vec2 jx = dfdx(q);
+            vec2 jy = dfdy(q);
+            float det = jx.x * jy.y - jy.x * jx.y;
+            vec2 px = abs(det) > 1e-9 ? vec2(dq.x * jy.y - jy.x * dq.y, jx.x * dq.y - dq.x * jx.y) / det : vec2(1e4);
+            float d = length(px);
             float twinkle = 0.5 + 0.5 * sin(t * (4.0 + 8.0 * h) + h * 40.0);
-            float fleck = smoothstep(0.34, 0.04, d) * pow(twinkle, 4.0) * step(0.55, h);
+            float fleck = smoothstep(4.0, 1.0, d) * pow(twinkle, 4.0) * step(0.55, h);
             float wave = sin(m.x * 3.1 + m.y * 1.7 - t * 2.3) * sin(m.y * 4.3 - m.x * 1.1 + t * 1.6);
             float ripple = pow(max(wave, 0.0), 6.0);
             float a = envelope * (0.22 + 1.5 * max(fleck, 0.5 * ripple));
