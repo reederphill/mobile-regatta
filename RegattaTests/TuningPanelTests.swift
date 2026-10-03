@@ -313,7 +313,7 @@ import RegattaCore
         #expect(!session.isTuned && !model.tuning.isTuned && model.practiceFiles() == .defaults)
         model.resetAll()
         #expect(driver.shadowSettings.shadowModel == .boxes && driver.shadowSettings.backwindModel == .box)
-        #expect(driver.shadowSettings.lullLoss == nil && driver.shadowSettings.headerDegrees == ShadowSettings().headerDegrees)
+        #expect(driver.shadowSettings.lullLoss == ShadowSettings().lullLoss && driver.shadowSettings.headerDegrees == ShadowSettings().headerDegrees)
     }
 
     /// Values a file can't hold (a wobble past the amplitude) show why on the panel, and the race sails that

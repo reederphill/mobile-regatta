@@ -430,7 +430,7 @@ import Testing
         let boatClass = Race.defaultBoatClass
         let settings = old.simShadow.settings(style: .standard, boatClass: boatClass)
         let d = ShadowSettings()
-        #expect(settings.shadowModel == .boxes && settings.backwindModel == .box && settings.lullLoss == nil)
+        #expect(settings.shadowModel == .boxes && settings.backwindModel == .box && settings.lullLoss == d.lullLoss)
         #expect(settings.headerDegrees == d.headerDegrees && settings.headerCapDegrees == d.headerCapDegrees
                 && settings.headerTimeConstant == d.headerTimeConstant)
         #expect(settings.ribbons == R.Parameters(style: .standard, shadow: boatClass.windShadow))

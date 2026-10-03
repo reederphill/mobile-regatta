@@ -11,10 +11,11 @@ import Testing
     static var hull: Double { OpenWater.hullLength }
 
     static func settings(_ shadowModel: ShadowModel = .boxes, _ backwindModel: BackwindModel = .box,
-                         header: Double? = nil, lull: Double? = nil, tau: Double? = nil) -> ShadowSettings {
+                         header: Double? = nil, cap: Double? = nil, lull: Double? = nil, tau: Double? = nil) -> ShadowSettings {
         var s = ShadowSettings(shadowModel: shadowModel, backwindModel: backwindModel)
         if let header { s.headerDegrees = header }
-        s.lullLoss = lull
+        if let cap { s.headerCapDegrees = cap }
+        if let lull { s.lullLoss = lull }
         if let tau { s.headerTimeConstant = tau }
         return s
     }
@@ -44,9 +45,9 @@ import Testing
     /// `LeeBowTests`' lee-bow (seat 1 tacks onto seat 0's lee bow from 3 L ahead, 1.5 L to leeward) and its clean
     /// twin, stepped together until her tack ends; seat 0 is in her backwind from there on. The twin sails the
     /// default settings: nothing reaches her either way.
-    static func leeBow(_ settings: ShadowSettings) throws -> (leeBowed: Race, clean: Race) {
-        let leeBowed = try LeeBowTests().race(ahead: 3, leeward: 1.5, together: true)
-        let clean = try LeeBowTests().race(ahead: 3, leeward: 1.5, together: false)
+    static func leeBow(_ settings: ShadowSettings, ahead: Double = 3, leeward: Double = 1.5) throws -> (leeBowed: Race, clean: Race) {
+        let leeBowed = try LeeBowTests().race(ahead: ahead, leeward: leeward, together: true)
+        let clean = try LeeBowTests().race(ahead: ahead, leeward: leeward, together: false)
         leeBowed.shadowSettings = settings
         leeBowed.step()
         clean.step()
@@ -76,7 +77,7 @@ import Testing
             races[1].shadowSettings = ShadowSettings()
             races[2].shadowSettings = Self.settings(.both, .headerAndLull, header: 5, lull: 0.5)
             races[2].shadowSettings = ShadowSettings()
-            races[3].shadowSettings = Self.settings(.boxes, .headerAndLull, header: 0)
+            races[3].shadowSettings = Self.settings(.boxes, .headerAndLull, header: 0, lull: Self.shadow.backwindLoss)
             var shadowed = 0
             for _ in 0..<600 {
                 for race in races { race.step() }
@@ -165,7 +166,7 @@ import Testing
 
     @Test func headerAndLullWithZeroHeaderEqualsTheBox() throws {
         let box = try Self.leeBow(ShadowSettings()).leeBowed
-        let zero = try Self.leeBow(Self.settings(.boxes, .headerAndLull, header: 0)).leeBowed
+        let zero = try Self.leeBow(Self.settings(.boxes, .headerAndLull, header: 0, lull: Self.shadow.backwindLoss)).leeBowed
         var worst = 0.0, backwinded = 0
         for _ in 0..<(20 * Race.tickRate) {
             box.step()
@@ -303,10 +304,12 @@ import Testing
     }
 
     /// Crossing into her backwind the header follows through its lag: her wind turns no faster than
-    /// header / (τ × 30) a tick. The heading steps it causes are printed (none over 1 degree a tick).
+    /// header / (τ × 30) a tick. The heading steps it causes are printed (none over 1 degree a tick), at the default
+    /// header.
     @Test func headerIsLowPassed() throws {
-        for tau in [1.5, 0.0] {
-            let s = Self.settings(.boxes, .headerAndLull, header: 3, tau: tau)
+        let headerDegrees = ShadowSettings().headerDegrees
+        for tau in [ShadowSettings().headerTimeConstant, 0.5, 0.0] {
+            let s = Self.settings(.boxes, .headerAndLull, tau: tau)
             // From before the tack, so she crosses into the trapezoid.
             let leeBowed = try LeeBowTests().race(ahead: 3, leeward: 1.5, together: true)
             leeBowed.shadowSettings = s
@@ -326,7 +329,7 @@ import Testing
             print(String(format: "HEADER LAG tau %.1f s: largest step a tick header %.3f deg, her wind %.3f deg, her heading %.3f deg",
                          tau, rad2deg(steps.header), rad2deg(steps.wind), rad2deg(steps.heading)))
             if tau > 0 {
-                let bound = deg2rad(3) / (tau * Double(Race.tickRate)) + 1e-12
+                let bound = deg2rad(headerDegrees) / (tau * Double(Race.tickRate)) + 1e-12
                 #expect(steps.header <= bound && steps.wind <= bound)
                 #expect(rad2deg(steps.heading) < 1, "no visible snap")
             }
@@ -468,13 +471,18 @@ import Testing
             return Double((early.firstIndex { $0 >= half } ?? early.count) + 1) * Race.dt
         }
         var heightHalf: Double { Self.halfTime(height) }
+        /// Height's share of the VMG lost over the first 10 s (the sums of the two series).
+        var heightShare: Double {
+            let h = height.prefix(10 * Race.tickRate).reduce(0, +), v = speed.prefix(10 * Race.tickRate).reduce(0, +)
+            return h / (h + v)
+        }
         var speedHalf: Double { Self.halfTime(speed) }
     }
 
     /// 20 s from the end of seat 1's tack: seat 0's upwind distance made good against the clean twin's, and how she
     /// loses it, to height (her angle to the true wind, at the twin's speed) or to speed.
-    static func leeBowRun(_ settings: ShadowSettings) throws -> LeeBowRun {
-        let (leeBowed, clean) = try Self.leeBow(settings)
+    static func leeBowRun(_ settings: ShadowSettings, ahead: Double = 3, leeward: Double = 1.5) throws -> LeeBowRun {
+        let (leeBowed, clean) = try Self.leeBow(settings, ahead: ahead, leeward: leeward)
         let field = try OpenWater.windDirection()
         let upwind = Vec2.heading(field)
         let (from, twinFrom) = (leeBowed.boats[0].position, clean.boats[0].position)
@@ -492,36 +500,40 @@ import Testing
         return run
     }
 
-    /// The table: lee-bow DMG lost over 20 s at the box, and header × lull. The defaults (`ShadowSettings()`'s
-    /// header, lull and lag) come out within 10% of the box's.
+    /// The table: lee-bow DMG lost over 20 s at the box, and header × lull (τ 1 s, cap twice the header so one caster
+    /// is never capped), on `LeeBowTests`' geometry (3 L ahead, 1.5 L to leeward) and a second (3.25 L ahead). The
+    /// defaults (`ShadowSettings()`'s header, cap, lull and lag) come out within 10% of the box's on both.
     @Test func leeBowDistanceMadeGoodOver20s() throws {
-        let box = try Self.leeBowRun(ShadowSettings())
-        print(String(format: "LEE-BOW box (loss %.2f): DMG lost over 20 s %.3f L; at 5 s %.3f L", Self.shadow.backwindLoss,
-                     box.lost20, box.lost(at: 5)))
-        for model in [ShadowModel.ribbons, .both] {
-            let run = try Self.leeBowRun(Self.settings(model))
-            print(String(format: "LEE-BOW %@ with the box backwind: %.3f L (%+.0f%%)", model.rawValue, run.lost20, (run.lost20 / box.lost20 - 1) * 100))
-        }
-        for header in [0.0, 2, 3, 4, 6] {
-            var row = String(format: "LEE-BOW header %3.0f deg:", header)
-            for lull in [0.2, 0.15, 0.1, 0.05, 0.0] {
-                let run = try Self.leeBowRun(Self.settings(.boxes, .headerAndLull, header: header, lull: lull))
-                row += String(format: "  lull %.2f %.3f L (%+4.0f%%)", lull, run.lost20, (run.lost20 / box.lost20 - 1) * 100)
+        for (ahead, leeward) in [(3.0, 1.5), (3.25, 1.5)] {
+            let box = try Self.leeBowRun(ShadowSettings(), ahead: ahead, leeward: leeward)
+            print(String(format: "LEE-BOW %.2f L ahead, %.2f L to leeward: box (loss %.2f) DMG lost over 20 s %.3f L; at 5 s %.3f L",
+                         ahead, leeward, Self.shadow.backwindLoss, box.lost20, box.lost(at: 5)))
+            for model in [ShadowModel.ribbons, .both] {
+                let run = try Self.leeBowRun(Self.settings(model), ahead: ahead, leeward: leeward)
+                print(String(format: "LEE-BOW %@ with the box backwind: %.3f L (%+.0f%%)", model.rawValue, run.lost20, (run.lost20 / box.lost20 - 1) * 100))
             }
-            print(row)
+            for header in [4.0, 5, 6, 7, 8, 9, 10] {
+                var row = String(format: "LEE-BOW header %4.1f deg:", header)
+                for lull in [0.0, 0.02, 0.04, 0.08] {
+                    let run = try Self.leeBowRun(Self.settings(.boxes, .headerAndLull, header: header, cap: 2 * header, lull: lull, tau: 1),
+                                                 ahead: ahead, leeward: leeward)
+                    row += String(format: "  lull %.2f %.3f L (%+4.0f%%)", lull, run.lost20, (run.lost20 / box.lost20 - 1) * 100)
+                }
+                print(row)
+            }
+            let d = ShadowSettings()
+            let defaults = try Self.leeBowRun(Self.settings(.boxes, .headerAndLull), ahead: ahead, leeward: leeward)
+            print(String(format: "LEE-BOW defaults (header %.1f deg, cap %.1f deg, lull %@, tau %.1f s): %.3f L (%+.0f%% of the box)",
+                         d.headerDegrees, d.headerCapDegrees, d.lullLoss.map { String(format: "%.2f", $0) } ?? "class",
+                         d.headerTimeConstant, defaults.lost20, (defaults.lost20 / box.lost20 - 1) * 100))
+            #expect(abs(defaults.lost20 / box.lost20 - 1) < 0.1, "\(ahead) L ahead")
         }
-        let d = ShadowSettings()
-        let defaults = try Self.leeBowRun(Self.settings(.boxes, .headerAndLull))
-        print(String(format: "LEE-BOW defaults (header %.1f deg, lull %@, tau %.1f s): %.3f L (%+.0f%% of the box)",
-                     d.headerDegrees, d.lullLoss.map { String(format: "%.2f", $0) } ?? "class", d.headerTimeConstant,
-                     defaults.lost20, (defaults.lost20 / box.lost20 - 1) * 100))
-        #expect(abs(defaults.lost20 / box.lost20 - 1) < 0.1)
     }
 
-    /// How she loses it: the box takes only speed; with the header she loses height too. Printed: each part's VMG loss
-    /// each second and the time each takes to reach half its peak, by the header's lag. At the defaults she loses
-    /// height no later than speed.
-    @Test func headerLosesHeightBeforeSpeed() throws {
+    /// The backwind is a shift, not a lull (the owner, 2026-10-03): the box takes only speed; at the defaults most of
+    /// the VMG she loses over the first 10 s is height, and she loses it before speed. Printed: each part's VMG loss
+    /// each second, and by header and lag the height share and the time each part takes to reach half its peak.
+    @Test func backwindIsMostlyAShift() throws {
         let box = try Self.leeBowRun(ShadowSettings())
         let headed = try Self.leeBowRun(Self.settings(.boxes, .headerAndLull))
         func row(_ name: String, _ r: LeeBowRun) -> String {
@@ -531,16 +543,16 @@ import Testing
             return "  \(name) VMG lost to height m/s: \(f(r.height))\n  \(name) VMG lost to speed  m/s: \(f(r.speed))\n  \(name) DMG lost L:            \(f(r.lost))"
         }
         print("LEE-BOW first 10 s, each second\n\(row("box   ", box))\n\(row("header", headed))")
-        for header in [2.0, 3, 3.5, 4, 5] {
-            for tau in [0.0, 0.5, 0.75, 1.0, 1.5] {
-                let lull: Double? = nil
-                let r = try Self.leeBowRun(Self.settings(.boxes, .headerAndLull, header: header, lull: lull, tau: tau))
-                print(String(format: "LEE-BOW header %.1f deg, lull %@, tau %.2f s: half the height lost by %.2f s, half the speed by %.2f s; DMG lost 5 s %.3f L, 20 s %.3f L (%+.0f%% of the box)",
-                             header, lull.map { String(format: "%.2f", $0) } ?? "class", tau, r.heightHalf, r.speedHalf,
-                             r.lost(at: 5), r.lost20, (r.lost20 / box.lost20 - 1) * 100))
+        for header in [6.0, 7, 8, 9] {
+            for tau in [0.5, 0.75, 1.0, 1.25, 1.5] {
+                let r = try Self.leeBowRun(Self.settings(.boxes, .headerAndLull, header: header, cap: 2 * header, tau: tau))
+                print(String(format: "LEE-BOW header %.1f deg, lull %.2f, tau %.2f s: height %.0f%% of the VMG lost in 10 s; half the height lost by %.2f s, half the speed by %.2f s; DMG lost 5 s %.3f L, 20 s %.3f L (%+.0f%% of the box)",
+                             header, ShadowSettings().lullLoss ?? Self.shadow.backwindLoss, tau, r.heightShare * 100, r.heightHalf,
+                             r.speedHalf, r.lost(at: 5), r.lost20, (r.lost20 / box.lost20 - 1) * 100))
             }
         }
-        print(String(format: "LEE-BOW box: half the speed lost by %.2f s", box.speedHalf))
+        print(String(format: "LEE-BOW box: half the speed lost by %.2f s; defaults: height %.0f%%", box.speedHalf, headed.heightShare * 100))
+        #expect(headed.heightShare > 0.5, "height \(headed.heightShare) of the VMG lost")
         #expect(headed.heightHalf <= headed.speedHalf, "height first: \(headed.heightHalf) s against \(headed.speedHalf) s")
         #expect(box.height.allSatisfy { abs($0) < 1e-3 }, "the box takes only speed")
     }

@@ -335,8 +335,9 @@ public enum ShadowModel: String, CaseIterable, Codable, Sendable {
 public enum BackwindModel: String, CaseIterable, Codable, Sendable {
     /// The box (#298's trapezoid, or #79's band): a loss of wind speed (or, for a speed-loss class, of speed).
     case box
-    /// The trapezoid as an envelope (`ShadowCone.backwindEnvelope(at:)`): a lull (the box's loss, `lullLoss`) and a
-    /// header (her wind turned towards her bow). A class with #79's band has no envelope and sails as `.box`.
+    /// The trapezoid as an envelope (`ShadowCone.backwindEnvelope(at:)`): a header (her wind turned towards her bow),
+    /// which carries the cost, and a lull (`lullLoss`, none by default): the backwind is a shift, not a lull (the owner,
+    /// 2026-10-03). A class with #79's band has no envelope and sails as `.box`.
     case headerAndLull
 }
 
@@ -354,14 +355,16 @@ public struct ShadowSettings: Equatable, Sendable {
     /// The ribbons' parameters (`.ribbons`, `.both`).
     public var ribbons = TurbulenceRibbons.Parameters.game
     /// The header at the full envelope (at the trapezoid's stern edge), degrees (tuning, not measured): her wind turned
-    /// this far towards her bow. Several casters' headers add, up to `headerCapDegrees`. With the class's lull and
-    /// `headerTimeConstant`'s 1 s, 2° costs the lee-bowed boat about what the box does over 20 s (+6%), losing height
-    /// before speed (`WakeRibbonsTests.leeBowDistanceMadeGoodOver20s`, `headerLosesHeightBeforeSpeed`).
-    public var headerDegrees = 2.0
-    public var headerCapDegrees = 4.0
+    /// this far towards her bow. Several casters' headers add, up to `headerCapDegrees`. With no lull and
+    /// `headerTimeConstant`'s 1 s, 8° costs the lee-bowed boat about what the box does over 20 s (+5%), most of it in
+    /// height, lost before speed (`WakeRibbonsTests.leeBowDistanceMadeGoodOver20s`, `backwindIsMostlyAShift`).
+    public var headerDegrees = 8.0
+    /// One and a half full headers.
+    public var headerCapDegrees = 12.0
     /// The lull at the full envelope, a fraction of her wind speed (or speed, for a speed-loss class), stacked as the
-    /// boxes' (product, floored); nil, the class's `backwindLoss`, the box's exactly (tuning, not measured).
-    public var lullLoss: Double? = nil
+    /// boxes' (product, floored); nil, the class's `backwindLoss`, the box's exactly (tuning, not measured). None by
+    /// default: the header carries the cost.
+    public var lullLoss: Double? = 0
     /// Seconds: her header follows the envelope she sits in through a first-order lag of this time constant, so a
     /// boat crossing the trapezoid's stern edge isn't turned in one tick (tuning, not measured). 0: at once.
     public var headerTimeConstant = 1.0

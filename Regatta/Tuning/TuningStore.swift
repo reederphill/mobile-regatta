@@ -108,8 +108,9 @@ struct SimShadowTuning: Codable, Equatable {
     var backwindModel = BackwindModel.box
     var headerDegrees = ShadowSettings().headerDegrees
     var headerCapDegrees = ShadowSettings().headerCapDegrees
-    /// The lull, a multiple of the class's backwind loss: 1, the box's exactly.
-    var lullShare = 1.0
+    /// The lull, a multiple of the class's backwind loss: 1, the box's exactly; 0, `ShadowSettings()`'s none (the
+    /// header carries the cost).
+    var lullShare = 0.0
     var headerTimeConstant = ShadowSettings().headerTimeConstant
 
     init() {}

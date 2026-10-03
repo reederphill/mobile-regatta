@@ -244,7 +244,7 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/windShadow/backwind/innerLengthHullLengths", "Short edge length", 0.25...4, step: 0.05),
                     // #376 follow-on B: the backwind as a header and a lull (the picker's "Header and lull"), live on the
                     // practice race, all tuning.
-                    sim("headerDegrees", "Header at her stern (not measured)", \.headerDegrees, 0...10, 0.25, unit: "°"),
+                    sim("headerDegrees", "Header at her stern (not measured)", \.headerDegrees, 0...15, 0.25, unit: "°"),
                     sim("headerCapDegrees", "Stacked headers cap (not measured)", \.headerCapDegrees, 0...20, 0.5, unit: "°"),
                     sim("lullShare", "Lull, of the loss above (not measured)", \.lullShare, 0...2, 0.05, unit: "×"),
                     sim("headerTimeConstant", "Header follows in (not measured)", \.headerTimeConstant, 0...4, 0.1, unit: " s"),
