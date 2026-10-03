@@ -1,2 +1,3 @@
 { "gallery": "myBoat",
-  "myBoat": { "livery": { "design": "skiff-stripe", "colours": ["sky-blue", "white", "charcoal"], "sailNumber": 207 } } }
+  "myBoat": { "livery": { "design": "skiff-stripe", "colours": ["sky-blue", "white", "charcoal"], "sailNumber": 207 },
+              "section": "colours" } }

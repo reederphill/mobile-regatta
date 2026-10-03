@@ -126,10 +126,13 @@ struct RenderFixture: Codable, Equatable {
     /// all from the file, never the device's store.
     ///
     ///     { "livery": { "design": "skiff-plain", "colours": ["sky-blue", "white"], "sailNumber": 207 },
-    ///       "trying": "skiff-stars", "completedRaces": 3, "locked": true, "owned": ["skiff-tiger"] }
+    ///       "trying": "skiff-stars", "completedRaces": 3, "locked": true, "owned": ["skiff-tiger"],
+    ///       "section": "colours" }
     struct MyBoatFixture: Codable, Equatable {
         var livery: Livery
         var trying: DesignID?
+        /// The part open under the render; Decal if absent.
+        var section: MyBoatModel.Section?
         var completedRaces: Int?
         var locked: Bool?
         var owned: [DesignID]?
@@ -139,6 +142,7 @@ struct RenderFixture: Codable, Equatable {
             let model = MyBoatModel(saved: livery, owned: Set(owned ?? []), completedRaces: completedRaces ?? 0,
                                     canBuy: true)
             model.open(trying: trying)
+            model.section = section ?? .decal
             model.isFleetLocked = locked ?? false
             return model
         }

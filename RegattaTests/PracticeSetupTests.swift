@@ -208,10 +208,16 @@ import RegattaCore
             }
             return fixture.model()
         }
-        #expect(try model("my-boat").action == .saved)
-        #expect(try model("my-boat-shop").action == .buy(price: "$2.99"))
+        let saved = try model("my-boat")
+        #expect(saved.action == .saved)
+        #expect(saved.section == .colours)
+        let shop = try model("my-boat-shop")
+        #expect(shop.action == .buy(price: "$2.99"))
+        #expect(shop.section == .decal)
+        #expect(shop.listedDesigns.contains { $0.id == shop.design }, "the design tried on is listed")
         let locked = try model("my-boat-locked")
         #expect(locked.action == .fleetLocked)
+        #expect(locked.section == .decal)
         #expect(locked.caption(for: try #require(locked.selectedDesign)) == "3 / 10 races")
     }
 }

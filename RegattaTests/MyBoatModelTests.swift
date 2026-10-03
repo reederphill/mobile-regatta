@@ -125,12 +125,16 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         model.save()
         #expect(saves == 0)
         #expect(model.saved == stripe)
-        #expect(model.caption(for: LiveryCatalogue.bundled.design(DesignID("skiff-band"))!) == "$0.99")
+        let band = LiveryCatalogue.bundled.design(DesignID("skiff-band"))!
+        #expect(model.mark(for: band) == .price)
+        #expect(model.price(of: band) == "$0.99")
+        #expect(model.caption(for: band) == nil, "a paid design's price is on Buy, not under it")
 
         let owned = self.model(owned: [DesignID("skiff-stars")])
         owned.select(DesignID("skiff-stars"))
         #expect(owned.action == .save)
-        #expect(owned.caption(for: LiveryCatalogue.bundled.design(DesignID("skiff-stars"))!) == nil)
+        #expect(owned.mark(for: owned.selectedDesign!) == nil)
+        #expect(owned.price(of: owned.selectedDesign!) == nil)
     }
 
     /// A build that can't buy yet (Release until #137) shows the price and a disabled Soon.
@@ -151,6 +155,10 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         #expect(model.action.title == "3 / 10 races")
         #expect(!model.action.isEnabled)
         #expect(model.caption(for: model.selectedDesign!) == "3 / 10 races")
+        #expect(model.mark(for: model.selectedDesign!) == .lock)
+        let fifty = LiveryCatalogue.bundled.design(DesignID("skiff-earned-50"))!
+        #expect(model.mark(for: fifty) == .lock)
+        #expect(model.caption(for: fifty) == nil, "races show only on the selected design")
         model.save()
         #expect(model.saved == stripe)
 
@@ -158,6 +166,43 @@ private let stripe = Livery(design: DesignID("skiff-stripe"),
         earned.select(DesignID("skiff-earned-10"))
         #expect(earned.action == .save)
         #expect(earned.caption(for: earned.selectedDesign!) == nil)
+        #expect(earned.mark(for: earned.selectedDesign!) == nil)
+    }
+
+    /// Decal lists one plain list: owned first, then earned, then paid, in catalogue order within each (owner review
+    /// of #382).
+    @Test func designsListOwnedThenEarnedThenPaid() {
+        let model = MyBoatModel(saved: stripe, owned: [DesignID("skiff-tiger")], completedRaces: 10, canBuy: true,
+                                isDrawn: { _ in true })
+        let ids = model.listedDesigns.map(\.id.rawValue)
+        #expect(ids == ["skiff-plain", "skiff-stripe", "skiff-sheer", "skiff-split", "skiff-earned-10", "skiff-tiger",
+                        "skiff-earned-50", "skiff-earned-200",
+                        "skiff-band", "skiff-pinstripe", "skiff-checker-bow", "skiff-dash", "skiff-wave-hull",
+                        "skiff-arrow", "skiff-chevron-sail", "skiff-diagonal", "skiff-race-stripes", "skiff-stars",
+                        "skiff-swirl"])
+    }
+
+    /// A design with neither its pattern nor its graphic drawn yet would look plain, so it isn't listed (#169 draws
+    /// them), unless it's the one tried on.
+    @Test func designsWithNoArtAreHiddenUnlessTriedOn() {
+        let model = model()
+        #expect(model.listedDesigns.map(\.id.rawValue) == ["skiff-plain", "skiff-stripe", "skiff-sheer", "skiff-split"])
+        model.select(DesignID("skiff-stars"))
+        #expect(model.listedDesigns.map(\.id.rawValue).last == "skiff-stars")
+        #expect(MyBoatModel.hasArt(LiveryCatalogue.bundled.design(DesignID("skiff-sheer"))!))
+        #expect(MyBoatModel.hasArt(LiveryCatalogue.bundled.design(DesignID("skiff-plain"))!))
+        #expect(!MyBoatModel.hasArt(LiveryCatalogue.bundled.design(DesignID("skiff-stars"))!))
+        #expect(!MyBoatModel.hasArt(LiveryCatalogue.bundled.design(DesignID("skiff-band"))!), "an undrawn pattern on a plain sail")
+    }
+
+    /// The page opens on Decal, and leaving it goes back there.
+    @Test func sectionsOpenOnDecal() {
+        let model = model()
+        #expect(model.section == .decal)
+        model.section = .number
+        model.discardDraft()
+        #expect(model.section == .decal)
+        #expect(MyBoatModel.Section.allCases.map(\.title) == ["Decal", "Colours", "Sail", "Number"])
     }
 
     /// After fleet lock every control is inert (#25).

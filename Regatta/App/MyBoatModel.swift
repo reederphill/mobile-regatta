@@ -48,11 +48,40 @@ final class MyBoatModel {
         }
     }
 
+    /// The page's parts, one shown at a time under the pinned render (owner review of #382). A catalogue design bundles
+    /// a deck pattern and a sail graphic, so Decal picks the design and Sail shows its graphic with the sail colour
+    /// (#169 may split them). TODO-COPY (#171)
+    enum Section: String, CaseIterable, Codable {
+        case decal, colours, sail, number
+
+        var title: String {
+            switch self {
+            case .decal: "Decal"
+            case .colours: "Colours"
+            case .sail: "Sail"
+            case .number: "Number"
+            }
+        }
+    }
+
+    /// The small symbol on a design you can't race in yet.
+    enum Mark: Equatable {
+        /// Paid, not owned.
+        case price
+        /// Earned, not enough races.
+        case lock
+    }
+
     let catalogue: LiveryCatalogue
     /// The boat class every design comes from: v1.0's one (CONTEXT: skiff).
     let boatClass: String
     /// Whether Buy completes a purchase (`StubStoreService.completesPurchases`); else it reads Soon.
     let canBuy: Bool
+    /// Whether a design has art to show (`hasArt`); one without draws as a plain duplicate, so it isn't listed.
+    let isDrawn: @MainActor (LiveryDesign) -> Bool
+
+    /// The part shown under the render.
+    var section: Section = .decal
 
     /// Your livery as saved.
     private(set) var saved: Livery
@@ -85,8 +114,10 @@ final class MyBoatModel {
 
     init(saved: Livery, owned: Set<DesignID> = [], completedRaces: Int = 0, store: (any StoreService)? = nil,
          canBuy: Bool = StubStoreService.completesPurchases, catalogue: LiveryCatalogue = .bundled,
-         boatClass: String = RaceFiles.defaults.boatClass.ref.id) {
+         boatClass: String = RaceFiles.defaults.boatClass.ref.id,
+         isDrawn: @escaping @MainActor (LiveryDesign) -> Bool = MyBoatModel.hasArt) {
         self.catalogue = catalogue
+        self.isDrawn = isDrawn
         self.boatClass = boatClass
         self.canBuy = canBuy
         self.saved = saved
@@ -127,24 +158,68 @@ final class MyBoatModel {
         }
     }
 
-    /// What shows under a design's thumbnail: its price unowned, its races earned and locked, else nothing.
-    func caption(for design: LiveryDesign) -> String? {
-        switch design.acquisition {
-        case .free: nil
-        case .earned(let needed): owns(design) ? nil : "\(min(completedRaces, needed)) / \(needed) races"
-        case .paid(_, let tier): owns(design) ? nil : StubStoreService.displayPrice(tier: tier)
+    /// The designs listed under Decal: one plain list, owned first, then earned, then paid, in catalogue order within
+    /// each (owner review of #382). A design with no art yet is left out (#169 draws them) unless it's the one tried
+    /// on, so Try it still shows what it opened.
+    var listedDesigns: [LiveryDesign] {
+        let shown = designs.filter { isDrawn($0) || $0.id == design }
+        return shown.enumerated().sorted { a, b in
+            let (ra, rb) = (rank(a.element), rank(b.element))
+            return ra != rb ? ra < rb : a.offset < b.offset
+        }.map(\.element)
+    }
+
+    private func rank(_ design: LiveryDesign) -> Int {
+        switch mark(for: design) {
+        case nil: 0
+        case .lock: 1
+        case .price: 2
         }
     }
 
-    /// A placeholder name until #169/#171 name the designs: the pattern, in words.
-    static func name(of design: LiveryDesign) -> String {
-        let words = design.pattern.replacingOccurrences(of: "-", with: " ")
-        return words.prefix(1).uppercased() + words.dropFirst()
+    /// Whether `design` draws as itself (`LiveryArt`): its pattern or its sail graphic has art, or it's meant to be
+    /// plain. A name with no art yet draws plain, so such a design would look like the plain one.
+    static func hasArt(_ design: LiveryDesign) -> Bool {
+        let pattern = LiveryArt.Pattern(named: design.pattern), graphic = LiveryArt.SailGraphic(named: design.sailGraphic)
+        if pattern != .plain || graphic != .plain { return true }
+        return design.pattern == LiveryArt.Pattern.plain.rawValue && design.sailGraphic == LiveryArt.SailGraphic.plain.rawValue
     }
 
+    /// The symbol on a design you can't race in yet: a price tag unowned, a lock earned and short of races.
+    func mark(for design: LiveryDesign) -> Mark? {
+        guard !owns(design) else { return nil }
+        switch design.acquisition {
+        case .free: return nil
+        case .earned: return .lock
+        case .paid: return .price
+        }
+    }
+
+    /// A paid design's price if you don't own it.
+    func price(of design: LiveryDesign) -> String? {
+        guard case .paid(_, let tier) = design.acquisition, !owns(design) else { return nil }
+        return StubStoreService.displayPrice(tier: tier)
+    }
+
+    /// What shows under a design's thumbnail: "n / N races" for an earned design short of races, only while it's
+    /// selected; else nothing. TODO-COPY (#171)
+    func caption(for design: LiveryDesign) -> String? {
+        guard design.id == self.design, case .earned(let needed) = design.acquisition, !owns(design) else { return nil }
+        return "\(min(completedRaces, needed)) / \(needed) races"
+    }
+
+    /// A placeholder name until #169/#171 name the designs: the pattern, in words.
+    static func name(of design: LiveryDesign) -> String { words(design.pattern) }
+
+    /// A sail graphic's name in words (Sail shows the design's graphic). TODO-COPY (#171)
+    static func name(ofGraphic graphic: String) -> String { words(graphic) }
+
     /// A swatch's name in words, for VoiceOver.
-    static func name(of swatch: SwatchID) -> String {
-        let words = swatch.rawValue.replacingOccurrences(of: "-", with: " ")
+    static func name(of swatch: SwatchID) -> String { words(swatch.rawValue) }
+
+    /// A catalogue name in words: "sheer-line" reads "Sheer line".
+    private static func words(_ name: String) -> String {
+        let words = name.replacingOccurrences(of: "-", with: " ")
         return words.prefix(1).uppercased() + words.dropFirst()
     }
 
@@ -212,6 +287,7 @@ final class MyBoatModel {
         colours = Self.colours(of: saved, catalogue: catalogue, keeping: colours)
         typedNumber = String(saved.sailNumber)
         purchaseNote = nil
+        section = .decal
     }
 
     /// `livery` saved elsewhere (#162's server copy): the draft starts over from it.
