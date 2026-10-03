@@ -59,6 +59,8 @@ struct HomeView: View {
                     Text("Practice races only").font(MenuFont.body(.subheadline))
                 }
             }
+            // The page's `menuBackground` text colour would otherwise reach the label: navy on the navy fill.
+            .foregroundStyle(ChromePalette.onTint)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
         }
