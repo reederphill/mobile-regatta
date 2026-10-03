@@ -308,12 +308,12 @@ final class GameScene: SKScene {
         var trails = trails ?? TurbulenceTrails(shadow: driver.boatClass.windShadow)
         let boatClass = driver.boatClass, style = boatStyle
         for frame in frames {
-            // Each boat's sail-angle scale, only on the ticks that shed.
-            let scales = frame.tick % trails.every == 0 ? frame.boats.enumerated().map { seat, boat in
+            // Each boat's sail-angle scale every tick, so her level builds back at the same rate whenever she sheds.
+            let scales = frame.boats.enumerated().map { seat, boat in
                 TurbulenceTrails.scale(of: boat, ease: seat < frame.heldInputs.count && frame.heldInputs[seat].ease,
                                        boatClass: boatClass, style: style)
-            } : nil
-            trails.step(boats: frame.boats, tick: frame.tick, scales: scales)
+            }
+            trails.step(boats: frame.boats, tick: frame.tick, scales: scales, buildSeconds: style.trailBuildSeconds)
         }
         self.trails = trails
     }
@@ -326,8 +326,8 @@ final class GameScene: SKScene {
         }
         trailLayer.isHidden = !drawing.drawsTrails
         if drawing.drawsTrails {
-            trailLayer.update(samples: trails?.samples ?? [], time: world.time, shadow: world.boatClass.windShadow,
-                              style: boatStyle)
+            trailLayer.update(samples: trails?.samples ?? [], time: world.time, every: trails?.every ?? 3,
+                              shadow: world.boatClass.windShadow, style: boatStyle)
         }
     }
 

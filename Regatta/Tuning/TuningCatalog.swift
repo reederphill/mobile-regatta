@@ -220,6 +220,7 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/windShadow/coneWidthAtEndHullLengths", "Cone width at its end", 0.5...10, step: 0.1),
                     // #376 follow-on A: the trails' sail-angle scale (drawn only, Debug).
                     boat("trailFullAngleDegrees", "Trail full at sail angle", \.trailFullAngleDegrees, 2...60, 0.5, unit: "°"),
+                    boat("trailBuildSeconds", "Trail builds in", \.trailBuildSeconds, 0.2...6, 0.1, unit: " s"),
                 ]),
             TuningGroup(
                 id: "backwind", title: "Backwind",

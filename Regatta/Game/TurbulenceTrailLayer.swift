@@ -12,12 +12,13 @@ enum ShadowDrawing: String, Codable, CaseIterable {
     var drawsTrails: Bool { self != .cones }
 }
 
-/// The turbulence trails drawn (#376 follow-on A): one soft ribbon a caster and kind (cone or backwind), along her live
-/// samples' drifted centres from oldest to newest. A ribbon is one sprite (`strip`) warped along the track
+/// The turbulence trails drawn (#376 follow-on A): soft ribbons a caster and kind (cone or backwind), along her live
+/// samples' drifted centres from oldest to newest, broken where she shed nothing (an ease, a tack) or only a wisp
+/// (`update`). A ribbon is one sprite (`strip`) warped along the track
 /// (`SKWarpGeometryGrid`, a column a sample, three rows: one edge, the centreline, the other edge), so it has no seams.
 /// Its texture carries both falloffs: across the width white along the middle, clear at the edges (as a sample's loss
-/// falls from its centre), and along the length each sample's column sits at u = its life left (`1 − age/life`) times its
-/// strength (its peak as a share of the ribbon's strongest), so it fades as the model's loss does. Both ends feather out
+/// falls from its centre), and along the length each sample's column sits at u = its life left (`1 − age/life`), so it
+/// fades as the model's loss does; a weaker sample is narrower (her radius scales with her strength). Both ends feather out
 /// over about a radius past the end samples, narrowing (a quarter circle) and fading to nothing, so even a short
 /// backwind ribbon is a soft lozenge with no straight edge; a lone sample draws as a soft disc. Different casters overlap
 /// and blend, as they stack in the model. Every sprite shimmers (`shimmer`): the texture's alpha is only the envelope,
@@ -129,10 +130,16 @@ final class TurbulenceTrailLayer: SKNode {
         var alpha: Double
     }
 
+    /// A sample weaker than this share of its caster's and kind's strongest live sample draws nothing and breaks her
+    /// ribbon there, so the strip never pinches to a thread (the shimmer would fan out through it).
+    static let minimumStrength = 0.15
+
     /// Draws `samples` at race time `time` (seconds; between ticks, so they drift smoothly), in `shadow`'s class and
-    /// `style`'s alphas: a ribbon a caster and kind, or a disc for a lone sample. A sample past its life, or not yet
-    /// born, draws nothing.
-    func update(samples: [TurbulenceTrails.Sample], time: Double, shadow: BoatClass.WindShadow, style: BoatStyle) {
+    /// `style`'s alphas: a caster's and kind's samples, oldest to newest, as ribbons, broken into pieces wherever she shed
+    /// nothing for a while (consecutive samples more than `every` ticks apart: an ease, a tack) or a sample is weaker than
+    /// `minimumStrength` (dropped); a piece of one sample is a disc. A sample past its life, or not yet born, draws nothing.
+    func update(samples: [TurbulenceTrails.Sample], time: Double, every: Int = 3, shadow: BoatClass.WindShadow,
+                style: BoatStyle) {
         struct Key: Hashable, Comparable {
             var caster: Int
             var isBackwind: Bool
@@ -161,31 +168,50 @@ final class TurbulenceTrailLayer: SKNode {
         }
         for key in ribbons.keys.sorted() {
             // Oldest to newest; samples born on one tick keep their order.
-            let points = ribbons[key]!.enumerated().sorted { ($0.element.born, $0.offset) < ($1.element.born, $1.offset) }
-                .map(\.element.point)
+            let group = ribbons[key]!.enumerated().sorted { ($0.element.born, $0.offset) < ($1.element.born, $1.offset) }
+                .map(\.element)
             let z = key.isBackwind ? BoatEffects.Layer.backwind : BoatEffects.Layer.cones
-            if points.count >= 2 {
-                let base = key.isBackwind ? style.coneAlpha * style.backwindShare : style.coneAlpha
-                let strongest = points.map(\.strength).max() ?? 0
-                let alpha = min(1, base * strongest)
-                if alpha > 0, points.contains(where: { $0.radius > 0 }) {
-                    ribbon(next(z: z), along: points, strongest: strongest, alpha: alpha)
+            let base = key.isBackwind ? style.coneAlpha * style.backwindShare : style.coneAlpha
+            let floor = Self.minimumStrength * (group.map(\.point.strength).max() ?? 0)
+            for piece in Self.pieces(of: group, every: every, floor: floor) {
+                if piece.count >= 2 {
+                    let alpha = min(1, base * (piece.map(\.strength).max() ?? 0))
+                    if alpha > 0, piece.contains(where: { $0.radius > 0 }) { ribbon(next(z: z), along: piece, alpha: alpha) }
+                    continue
                 }
-                continue
+                guard let lone = piece.first, lone.alpha > 0, lone.radius > 0 else { continue }
+                let sprite = next(z: z)
+                if sprite.texture !== Self.disc { sprite.texture = Self.disc }
+                sprite.warpGeometry = nil
+                sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+                let diameter = CGFloat(2 * lone.radius) * ppm
+                sprite.position = CGPoint(x: lone.centre.x * ppm, y: lone.centre.y * ppm)
+                sprite.size = CGSize(width: diameter, height: diameter)
+                sprite.alpha = CGFloat(lone.alpha)
+                let metres = Float(2 * lone.radius)
+                sprite.setValue(SKAttributeValue(vectorFloat2: vector_float2(metres, metres)), forAttribute: "a_scale")
             }
-            guard let lone = points.first, lone.alpha > 0, lone.radius > 0 else { continue }
-            let sprite = next(z: z)
-            if sprite.texture !== Self.disc { sprite.texture = Self.disc }
-            sprite.warpGeometry = nil
-            sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-            let diameter = CGFloat(2 * lone.radius) * ppm
-            sprite.position = CGPoint(x: lone.centre.x * ppm, y: lone.centre.y * ppm)
-            sprite.size = CGSize(width: diameter, height: diameter)
-            sprite.alpha = CGFloat(lone.alpha)
-            let metres = Float(2 * lone.radius)
-            sprite.setValue(SKAttributeValue(vectorFloat2: vector_float2(metres, metres)), forAttribute: "a_scale")
         }
         for sprite in sprites[used...] where !sprite.isHidden { sprite.isHidden = true }
+    }
+
+    /// `group` (oldest first) split into the runs drawn: a sample weaker than `floor` is dropped and ends its run, and a
+    /// gap of more than `every` ticks between consecutive samples starts a new one.
+    private static func pieces(of group: [(born: Int, point: Point)], every: Int, floor: Double) -> [[Point]] {
+        var pieces: [[Point]] = [], current: [Point] = []
+        var lastBorn: Int?
+        for (born, point) in group {
+            if point.strength < floor || point.strength <= 0 {
+                if !current.isEmpty { pieces.append(current); current = [] }
+                lastBorn = nil
+                continue
+            }
+            if let last = lastBorn, born - last > every, !current.isEmpty { pieces.append(current); current = [] }
+            current.append(point)
+            lastBorn = born
+        }
+        if !current.isEmpty { pieces.append(current) }
+        return pieces
     }
 
     /// The columns a feathered end adds past its end sample, as a share of its radius out: each narrower (a quarter
@@ -194,10 +220,12 @@ final class TurbulenceTrailLayer: SKNode {
 
     /// Warps `sprite` into the ribbon along `points` (oldest first, at least two), feathered at both ends
     /// (`featherSteps`): sized to its edges' bounding box, anchored at its bottom-left, each column drawn from `strip`
-    /// at u = the sample's life left × its strength over `strongest`, its three rows at the centre − normal × radius,
-    /// the centre, and the centre + normal × radius, the normal across the local track.
-    private func ribbon(_ sprite: SKSpriteNode, along points: [Point], strongest: Double, alpha: Double) {
-        func u(_ p: Point) -> Double { strongest > 0 ? min(1, max(0, p.left)) * p.strength / strongest : 0 }
+    /// at u = the sample's life left (only, so the shimmer's metres per unit of u hold along the whole strip), its three
+    /// rows at the centre − normal × radius, the centre, and the centre + normal × radius, the normal across the local
+    /// track. A sample's strength shows as its width (the model's radius scales with it) and the piece's alpha (its
+    /// strongest), not in u.
+    private func ribbon(_ sprite: SKSpriteNode, along points: [Point], alpha: Double) {
+        func u(_ p: Point) -> Double { min(1, max(0, p.left)) }
         // The columns: (centre, half width, u, direction along the track for the normal).
         var columns: [(centre: Vec2, radius: Double, u: Double)] = []
         let n = points.count

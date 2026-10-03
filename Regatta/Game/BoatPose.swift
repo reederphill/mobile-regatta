@@ -305,6 +305,9 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// degrees, at which a boat sheds her full turbulence; less, less, in proportion (a sail along the wind sheds none).
     /// The default is her upwind groove's in the default class at 10 kn (`TurbulenceTrailsTests`).
     var trailFullAngleDegrees = 12.5
+    /// The trails (#376 follow-on A, Debug): how long, seconds, a boat's trail takes to build back from nothing to full
+    /// once her sail sheds again (sheeting in after an ease, out of a tack or gybe); an ease drops it at once.
+    var trailBuildSeconds = 2.0
     /// The hatch both are drawn in: its lines' spacing and width, points. Baked in when the fleet is built.
     var hatchSpacing = 5.0
     var hatchLineWidth = 1.25
@@ -389,7 +392,7 @@ nonisolated extension BoatStyle {
             (.wakeStreakShare, \.wakeStreakShare), (.wakeStreakWidth, \.wakeStreakWidth),
             (.wakeStreakAlpha, \.wakeStreakAlpha), (.wakeEaseRate, \.wakeEaseRate),
             (.wakeFlareGain, \.wakeFlareGain), (.wakeFlareSeconds, \.wakeFlareSeconds),
-            (.wakeShortShare, \.wakeShortShare), (.coneAlpha, \.coneAlpha), (.backwindShare, \.backwindShare), (.shadowFollowSeconds, \.shadowFollowSeconds), (.backwindFeather, \.backwindFeather), (.trailFullAngleDegrees, \.trailFullAngleDegrees),
+            (.wakeShortShare, \.wakeShortShare), (.coneAlpha, \.coneAlpha), (.backwindShare, \.backwindShare), (.shadowFollowSeconds, \.shadowFollowSeconds), (.backwindFeather, \.backwindFeather), (.trailFullAngleDegrees, \.trailFullAngleDegrees), (.trailBuildSeconds, \.trailBuildSeconds),
             (.hatchSpacing, \.hatchSpacing), (.hatchLineWidth, \.hatchLineWidth),
             (.vaneLengthHulls, \.vaneLengthHulls),
             (.vaneLockDegrees, \.vaneLockDegrees), (.grooveCueDeadbandDegrees, \.grooveCueDeadbandDegrees),

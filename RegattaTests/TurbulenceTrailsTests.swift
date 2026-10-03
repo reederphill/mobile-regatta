@@ -64,15 +64,19 @@ import Testing
         #expect(abs(backwind.zPosition - BoatEffects.Layer.backwind) < 1e-6)
         #expect(abs(strip.zPosition - BoatEffects.Layer.cones) < 1e-6)
         #expect(abs(Double(layer.sprites[2].alpha) - hatch) < 1e-6)
-        // A weaker sample's column sits lower in the texture: u = life left × strength over the ribbon's strongest.
+        // u is life left only, a weaker sample's column too (its strength shows in its width); one far weaker than
+        // the strongest breaks the ribbon into two discs.
         var weak = five
         weak[1].peak /= 2
         layer.update(samples: weak, time: 1, shadow: shadow, style: .standard)
         let weakGrid = try #require(layer.sprites[0].warpGeometry as? SKWarpGeometryGrid)
-        #expect(abs(Double(weakGrid.sourcePosition(at: 4).x) - 0.45) < 1e-6)
+        #expect(abs(Double(weakGrid.sourcePosition(at: 4).x) - 0.9) < 1e-6)
+        weak[1].peak = shadow.lossCloseIn * 0.1
+        layer.update(samples: weak, time: 1, shadow: shadow, style: .standard)
+        #expect(layer.visibleCount == 4 && layer.sprites[0].warpGeometry == nil && layer.sprites[1].warpGeometry == nil)
         // Fewer samples: the pool stays, the rest hide.
         layer.update(samples: Array(five.prefix(2)), time: 1, shadow: shadow, style: .standard)
-        #expect(layer.sprites.count == 3 && layer.visibleCount == 1)
+        #expect(layer.sprites.count == 4 && layer.visibleCount == 1)
         // Past their life, none.
         layer.update(samples: five, time: 11, shadow: shadow, style: .standard)
         #expect(layer.visibleCount == 0)
@@ -96,6 +100,75 @@ import Testing
         }
         #expect(!none.samples.contains { $0.caster == 0 })
         #expect(none.samples.filter { $0.caster == 1 }.count == full.samples.filter { $0.caster == 1 }.count)
+    }
+
+    /// The level builds back: an ease drops a boat's level at once; sheeted in again it rises linearly over
+    /// `buildSeconds` (half way at half the time), so the first samples shed after the release are small.
+    @Test func trailBuildsBackAfterAnEase() throws {
+        let shadow = Race.defaultBoatClass.windShadow
+        let boat = TrailParity.fleet(boatClass: Race.defaultBoatClass)[0]
+        let build = 2.0
+        var trails = TurbulenceTrails(shadow: shadow)
+        let full = Race.tickRate, eased = 2 * Race.tickRate
+        for tick in 0..<full { trails.step(boats: [boat], tick: tick, scales: [1], buildSeconds: build) }
+        #expect(trails.levels == [1])
+        trails.step(boats: [boat], tick: full, scales: [0], buildSeconds: build)
+        #expect(trails.levels == [0])
+        for tick in full + 1..<eased { trails.step(boats: [boat], tick: tick, scales: [0], buildSeconds: build) }
+        #expect(!trails.samples.contains { $0.born > full })
+        // Released at `eased`: after half of `build` the level is a half.
+        let half = Int(build / 2 * Double(Race.tickRate))
+        for tick in eased..<eased + half { trails.step(boats: [boat], tick: tick, scales: [1], buildSeconds: build) }
+        #expect(abs(trails.levels[0] - 0.5) < 1e-9)
+        let first = try #require(trails.samples.filter { $0.born >= eased && !$0.isBackwind }.min { $0.born < $1.born })
+        #expect(first.born == eased && first.radius < 0.05 * shadow.coneWidthAtBoat / 2)
+        for tick in eased + half..<eased + 2 * half + 1 {
+            trails.step(boats: [boat], tick: tick, scales: [1], buildSeconds: build)
+        }
+        #expect(trails.levels == [1])
+        // A tack's head to wind (scale 0) drops it again at once.
+        trails.step(boats: [boat], tick: eased + 2 * half + 1, scales: [0], buildSeconds: build)
+        #expect(trails.levels == [0])
+    }
+
+    /// A boat that eases, then sheets in, draws as two ribbon pieces: one shed before the ease, one building back after
+    /// it, nothing bridging the gap, and no column pinched below a tenth of its piece's widest (bar the feathered tips).
+    @Test func easeThenSheetInDrawsTwoPieces() throws {
+        let boatClass = Race.defaultBoatClass
+        let shadow = boatClass.windShadow
+        var boat = TrailParity.fleet(boatClass: boatClass)[0]
+        var trails = TurbulenceTrails(shadow: shadow)
+        var probe = TurbulenceTrails(shadow: shadow)
+        probe.step(boats: [boat], tick: 0)
+        let life = try #require(probe.samples.first { !$0.isBackwind }).life
+        let ticks = { (share: Double) in Int(share * life * Double(Race.tickRate)) }
+        let ease = ticks(0.3), sheet = ticks(0.5), end = ticks(0.85)
+        for tick in 0...end {
+            boat.position += boat.velocity * Race.dt
+            TrailParity.refresh(&boat)
+            let scale: Double = tick >= ease && tick < sheet ? 0 : 1
+            trails.step(boats: [boat], tick: tick, scales: [scale], buildSeconds: 2)
+        }
+        let layer = TurbulenceTrailLayer(pointsPerMeter: 8)
+        layer.update(samples: trails.samples.filter { !$0.isBackwind }, time: Double(end) * Race.dt, every: trails.every,
+                     shadow: shadow, style: .standard)
+        #expect(layer.visibleCount == 2)
+        let feather = TurbulenceTrailLayer.featherSteps.count
+        for sprite in layer.sprites.prefix(layer.visibleCount) {
+            let grid = try #require(sprite.warpGeometry as? SKWarpGeometryGrid)
+            let columns = grid.numberOfColumns + 1
+            func point(_ index: Int) -> CGPoint {
+                let p = grid.destPosition(at: index)
+                return CGPoint(x: CGFloat(p.x) * sprite.size.width, y: CGFloat(p.y) * sprite.size.height)
+            }
+            let widths = (0..<columns).map { i in
+                let a = point(i), b = point(2 * columns + i)
+                return Double(hypot(a.x - b.x, a.y - b.y))
+            }
+            let widest = widths.max() ?? 0
+            let inner = widths[feather..<(columns - feather)]
+            #expect(inner.allSatisfy { $0 >= 0.1 * widest }, "\(widths)")
+        }
     }
 
     /// The sail's angle to her apparent wind, as drawn: about the default full angle sailing the upwind groove (so

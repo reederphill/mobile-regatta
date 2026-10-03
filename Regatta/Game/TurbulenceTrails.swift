@@ -35,14 +35,30 @@ struct TurbulenceTrails {
         self.every = every
     }
 
-    /// Sheds this tick's samples. `scales`, by seat (nil = 1 for all), is how much turbulence each boat's sail sheds now,
-    /// 0...1 (`scale(of:ease:boatClass:style:)`, drawn only): it multiplies a sample's peak, radius and growth, so a sail
-    /// along the wind sheds none and a half-angle sail a half-strength, half-size sample.
-    mutating func step(boats: [Boat], tick: Int, scales: [Double]? = nil) {
+    /// Each seat's shedding level now, 0...1: her sail-angle scale smoothed (`step`'s `buildSeconds`). Empty until the
+    /// first step.
+    private(set) var levels: [Double] = []
+
+    /// Sheds this tick's samples; call it every tick. `scales`, by seat (nil = 1 for all), is how much turbulence each
+    /// boat's sail sheds now, 0...1 (`scale(of:ease:boatClass:style:)`, drawn only), smoothed into `levels`: a level falls
+    /// to its scale at once (an ease drops the trail) and rises towards it linearly, 0 to 1 over `buildSeconds` (0 = at
+    /// once), so after an ease, a tack or a gybe the trail builds back from nothing. A seat's first level is its scale.
+    /// The level multiplies a sample's peak, radius and growth, so a sail along the wind sheds none and a half-angle sail
+    /// a half-strength, half-size sample.
+    mutating func step(boats: [Boat], tick: Int, scales: [Double]? = nil, buildSeconds: Double = 0) {
         samples.removeAll { Double(tick - $0.born) * Race.dt >= $0.life }
+        let rise = buildSeconds > 0 ? Race.dt / buildSeconds : 1
+        for seat in boats.indices {
+            let target = (scales.map { seat < $0.count ? $0[seat] : 1 } ?? 1).clamped(to: 0...1)
+            if seat >= levels.count {
+                levels.append(target)
+            } else {
+                levels[seat] = target < levels[seat] ? target : min(target, levels[seat] + rise)
+            }
+        }
         guard tick % every == 0 else { return }
         for (seat, b) in boats.enumerated() where !b.isGhost {
-            let k = (scales.map { seat < $0.count ? $0[seat] : 1 } ?? 1).clamped(to: 0...1)
+            let k = levels[seat]
             guard k > 0 else { continue }
             let apparent = max(b.apparentWind.speed, 0.5)
             let drift = b.windOverGround.velocity
