@@ -11,7 +11,6 @@ struct MyBoatView: View {
 
     /// Thumbnails draw one fixed number, illegible at their size, so typing one redraws only the large render.
     private static let thumbnailNumber = 1
-    private static let thumbnailSize = CGSize(width: 84, height: 40)
 
     var body: some View {
         VStack(spacing: 0) {
@@ -75,7 +74,7 @@ struct MyBoatView: View {
 
     /// One plain list, no headings: owned, then earned, then paid (`MyBoatModel.listedDesigns`).
     private var designList: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: Self.thumbnailSize.width), spacing: 10)], spacing: 10) {
+        TileGrid {
             ForEach(model.listedDesigns, id: \.id) { design in
                 designButton(design)
             }
@@ -88,26 +87,17 @@ struct MyBoatView: View {
         let mark = model.mark(for: design)
         return Button { model.select(design.id) } label: {
             VStack(spacing: 4) {
-                LiveryRenderView(livery: model.draft(on: design, sailNumber: Self.thumbnailNumber),
-                                 size: Self.thumbnailSize)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 6)
-                            .strokeBorder(ChromePalette.tint, lineWidth: selected ? 3 : 0)
-                    }
-                    .overlay(alignment: .topTrailing) {
-                        if let mark {
-                            Image(systemName: mark == .price ? "tag.fill" : "lock.fill")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .padding(4)
-                        }
-                    }
-                    .accessibilityHidden(true)
+                Tile(selected: selected, mark: mark) {
+                    LiveryRenderView(livery: model.draft(on: design, sailNumber: Self.thumbnailNumber),
+                                     size: CGSize(width: TileMetrics.side, height: TileMetrics.side))
+                }
+                .accessibilityHidden(true)
                 Text(caption ?? " ")
                     .font(MenuFont.body(.caption))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
+                    .frame(width: TileMetrics.side)
             }
         }
         .buttonStyle(.plain)
@@ -137,11 +127,11 @@ struct MyBoatView: View {
 
     /// Deck and accent (three-slot designs only).
     private var coloursSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: TileMetrics.spacing * 2) {
             ForEach([LiverySlot.deck, .accent].filter { model.selectedDesign?.slots.contains($0) == true },
                     id: \.self) { slot in
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(Self.title(slot)).font(MenuFont.heading(.headline))
+                VStack(alignment: .leading, spacing: TileMetrics.spacing) {
+                    note(Self.title(slot))
                     swatches(slot)
                 }
             }
@@ -150,7 +140,7 @@ struct MyBoatView: View {
 
     /// The sail colour, and the design's sail graphic, which comes with its decal.
     private var sailSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: TileMetrics.spacing) {
             swatches(.sail)
             if let graphic = model.selectedDesign?.sailGraphic, graphic != LiveryArt.SailGraphic.plain.rawValue {
                 note("Graphic: \(MyBoatModel.name(ofGraphic: graphic))")  // TODO-COPY (#171)
@@ -158,7 +148,6 @@ struct MyBoatView: View {
             }
         }
     }
-
 
     /// A slot's name. TODO-COPY (#171)
     private static func title(_ slot: LiverySlot) -> String {
@@ -169,18 +158,15 @@ struct MyBoatView: View {
         }
     }
 
-    /// `slot`'s safe-palette swatches.
+    /// `slot`'s safe-palette swatches: square tiles in the Decal grid.
     private func swatches(_ slot: LiverySlot) -> some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 36), spacing: 8)], alignment: .leading, spacing: 8) {
+        TileGrid {
             ForEach(model.swatches(for: slot), id: \.id) { swatch in
                 let selected = model.colours[slot] == swatch.id
                 Button { model.setColour(swatch.id, for: slot) } label: {
-                    Circle()
-                        .fill(Color(uiColor: UIColor(rgb: swatch.rgb)))
-                        .overlay { Circle().strokeBorder(ChartPalette.markEdge.color, lineWidth: 1) }
-                        .padding(4)
-                        .overlay { Circle().strokeBorder(ChromePalette.tint, lineWidth: selected ? 3 : 0) }
-                        .frame(width: 36, height: 36)
+                    Tile(selected: selected, mark: nil) {
+                        Color(uiColor: UIColor(rgb: swatch.rgb))
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(MyBoatModel.name(of: swatch.id))
@@ -248,5 +234,49 @@ struct MyBoatView: View {
             .font(MenuFont.body(.footnote))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// One tile of My boat's box grid (owner review of #382): every section's choices, designs and colours alike, are
+/// square tiles (`TileMetrics`) of one size, corner, edge, selection ring and mark corner.
+private enum TileMetrics {
+    static let side: CGFloat = 72
+    static let spacing: CGFloat = 10
+    static let cornerRadius: CGFloat = 8
+}
+
+private struct Tile<Content: View>: View {
+    let selected: Bool
+    let mark: MyBoatModel.Mark?
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: TileMetrics.cornerRadius)
+        content
+            .frame(width: TileMetrics.side, height: TileMetrics.side)
+            .clipShape(shape)
+            .overlay { shape.strokeBorder(ChartPalette.markEdge.color, lineWidth: 1) }
+            .overlay { shape.strokeBorder(ChromePalette.tint, lineWidth: selected ? 3 : 0) }
+            .overlay(alignment: .topTrailing) {
+                if let mark {
+                    Image(systemName: mark == .price ? "tag.fill" : "lock.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .padding(5)
+                }
+            }
+    }
+}
+
+/// The box grid every section's tiles sit in: fixed-size columns from the leading edge.
+private struct TileGrid<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: TileMetrics.side, maximum: TileMetrics.side),
+                                     spacing: TileMetrics.spacing)],
+                  alignment: .leading, spacing: TileMetrics.spacing) {
+            content
+        }
     }
 }
