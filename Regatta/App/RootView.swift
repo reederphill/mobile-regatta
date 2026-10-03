@@ -1,6 +1,7 @@
 import os
 import SwiftUI
 import RegattaCore
+import RegattaServices
 
 /// The home screen, with the race sequence as a full-screen cover over it (#25).
 struct RootView: View {
@@ -110,6 +111,7 @@ struct RootView: View {
     /// Home's Race online: a stub until matchmaking, except that a Debug build joins the dev server's instant
     /// race (#68).
     private func raceOnline() {
+        model.analytics.log(.practiceToOnline(.raceOnlineTapped))
         #if DEBUG
         startOnlineRace()
         #else
