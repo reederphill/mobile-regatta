@@ -4,18 +4,6 @@ import RegattaBots
 import RegattaCore
 import UIKit
 
-struct ResultRow: Identifiable {
-    let id: Int
-    let place: String
-    let name: String
-    let detail: String
-    /// Her livery (#21, #119): the chip and sail number beside the name.
-    let livery: Livery
-    let isPlayer: Bool
-    /// Marked with the bot glyph (#19).
-    let isBot: Bool
-}
-
 /// Hosts one race's driver and bridges it to SwiftUI: HUD snapshots, the notice slot (#114),
 /// haptics and results. It never holds a `Race`: a practice race is a `PracticeDriver`, an online one
 /// an `OnlineDriver`.
@@ -42,15 +30,44 @@ final class GameSession {
     var hud = HUDState()
     /// The one notice line under the top readouts (#114), what `noticeSlot` shows now.
     private(set) var notice: Notice?
-    var results: [ResultRow] = []
+    /// The results (#132): built once you're done (`playerDone`), and rebuilt as the race ticks on behind them.
+    private(set) var results: RaceResultViewModel?
+    /// The results sheet is up (#24): `resultsDelay` after your own finish, at once on your DSQ or the race's close.
+    private(set) var showsResults = false
+    /// How long after your finish horn the results slide up, in wall-clock seconds (#24: "About 3 s").
+    static let resultsDelay: TimeInterval = 3
     var isPaused = false
+    /// You're done racing: finished, disqualified, or the race closed.
     var playerDone = false
+    /// The race's results, from its `raceClosed` (#86); nil until then, and online, where the close has none yet.
+    @ObservationIgnored private var closedResults: RaceResults?
+    /// Each seat's completed penalty turns (`penaltyServed`): the Your race card's outcomes (#132).
+    @ObservationIgnored private var servedTurns: [Int: Int] = [:]
+    /// When your finish horn sounded, wall-clock, until the results show.
+    @ObservationIgnored private var finishedAt: Date?
+    /// The tick `results` was built at, so they're rebuilt once a tick, not every display frame.
+    @ObservationIgnored private var resultsTick: Int?
+    /// Told once with the final results as the race closes (#132): the home screen's Last race.
+    @ObservationIgnored var onResultsFinal: ((RaceResultViewModel) -> Void)?
     /// The Ease button is held (#99, #112): the scene sends it with the rudder every frame.
     var isEasing = false
     /// The tiller's track and knob while a tiller drag is held (#112): the scene sets it, `RaceView` draws it.
     var tillerKnob: SteeringInterpreter.TillerKnob?
-    /// This is the player's first race: the halves edge labels show (#23). #134 sets it; nothing does yet.
+    /// This is the player's first race: the halves edge labels show (#23), and the results offer Race online and Help
+    /// (#24). #134 sets it; nothing does yet.
     var isFirstRace = false
+
+    /// Which buttons the results show (#24).
+    enum ResultsButtons: Equatable {
+        /// Home, Change setup and Sail again.
+        case practice
+        /// Race online (primary) and Help.
+        case firstRace
+    }
+
+    var resultsButtons: ResultsButtons { Self.resultsButtons(isFirstRace: isFirstRace) }
+
+    static func resultsButtons(isFirstRace: Bool) -> ResultsButtons { isFirstRace ? .firstRace : .practice }
     /// The device's steering scheme, live (#112, #131).
     let controls: ControlSettings
 
@@ -258,7 +275,7 @@ final class GameSession {
         settleMarks()
         if current != notice { notice = current }
         closeLeaderboardIfDue()
-        if playerDone { results = makeResults() }
+        refreshResults()
         // The RTT warning (#18, #68): once as it starts.
         if let lag = presenter.lag(isWarning: driver.lagWarning) { post(lag.kind, lag.text) }
         if let online = driver as? OnlineDriver, case .updateRequired = online.connection, !toldUpdateRequired {
@@ -282,19 +299,55 @@ final class GameSession {
         let me = driver.myBoatIndex
         for event in events {
             switch event.kind {
-            case .finished(me, _), .disqualified(me, _), .raceClosed:
-                finishForPlayer()
+            case .penaltyServed(let seat):
+                servedTurns[seat, default: 0] += 1
+            case .finished(me, _):
+                finishForPlayer(showsAt: now().addingTimeInterval(Self.resultsDelay))
+            case .disqualified(me, _):
+                finishForPlayer(showsAt: nil)
+            case .raceClosed(let results):
+                if !results.rows.isEmpty { closedResults = results }
+                finishForPlayer(showsAt: nil)
+                resultsTick = nil
+                refreshResults()
+                if let final = self.results, final.isFinal { onResultsFinal?(final) }
             default:
                 break
             }
         }
     }
 
-    private func finishForPlayer() {
-        guard !playerDone else { return }
-        playerDone = true
-        isEasing = false
-        results = makeResults()
+    /// You're done: the results build now and show at `showsAt`, or at once when nil. A later call can only bring
+    /// the sheet forward (the close after your finish).
+    private func finishForPlayer(showsAt: Date?) {
+        if !playerDone {
+            playerDone = true
+            isEasing = false
+            finishedAt = showsAt
+        }
+        if showsAt == nil { finishedAt = nil; showsResults = true }
+        refreshResults()
+    }
+
+    /// Rebuilds the results once a tick while you're done, and slides them up once their delay has passed.
+    private func refreshResults() {
+        guard playerDone else { return }
+        if resultsTick != driver.currentFrame.tick || results == nil {
+            results = makeResults()
+            resultsTick = driver.currentFrame.tick
+        }
+        if !showsResults, let finishedAt, now() >= finishedAt {
+            showsResults = true
+            self.finishedAt = nil
+        }
+    }
+
+    /// The results to keep for the home screen's Last race as you leave the race (#132): nil when you weren't done
+    /// (left mid-race) or it's a render fixture. Before the close, a snapshot with boats still sailing placed by
+    /// distance (ruling 4).
+    func resultsToKeep() -> RaceResultViewModel? {
+        guard playerDone, !driver.isFrozen else { return nil }
+        return makeResults().leftBeforeClose()
     }
 
     private func post(_ kind: NoticeKind, _ text: String, marks: [SeenMark] = []) {
@@ -317,32 +370,22 @@ final class GameSession {
         }
     }
 
-    private func makeResults() -> [ResultRow] {
+    private func makeResults() -> RaceResultViewModel {
         let frame = driver.currentFrame
         let me = driver.myBoatIndex
         let liveries = driver.liveries
-        return frame.standings.enumerated().map { rank, i in
-            let b = frame.boats[i]
-            let place: String
-            let detail: String
-            switch b.status {
-            case .finished:
-                place = "\(b.place ?? rank + 1)"
-                detail = formatClock(b.finishTime ?? 0)
-            case .dsq:
-                place = "DSQ"
-                detail = "Unserved penalty"
-            case .racing:
-                // Once the race has closed, a boat still racing is placed by ladder distance (#86, #267).
-                place = "\(rank + 1)"
-                detail = frame.isOver ? "By distance" : "Racing · leg \(b.legIndex + 1)"
-            case .prestart, .ocs:
-                place = frame.isOver ? "OCS" : "\(rank + 1)"
-                detail = "Not started"
-            }
-            return ResultRow(id: b.id, place: place, name: roster.name(of: i, playerSeat: me), detail: detail,
-                             livery: liveries[i], isPlayer: i == me, isBot: roster[i].isBot)
+        let live = frame.standings.map { seat in
+            let boat = frame.boats[seat]
+            return RaceResultViewModel.LiveStanding(
+                seat: seat, status: boat.status, place: boat.place,
+                finishTick: boat.finishTime.map { Int(($0 * Double(Race.tickRate)).rounded()) })
         }
+        let entrants = frame.boats.indices.map { seat in
+            RaceResultViewModel.Entrant(name: roster.name(of: seat, playerSeat: me), isBot: roster[seat].isBot,
+                                        livery: liveries[seat])
+        }
+        return RaceResultViewModel(results: closedResults, live: live, entrants: entrants, mySeat: me,
+                                   incidents: driver.incidents, served: servedTurns)
     }
 }
 

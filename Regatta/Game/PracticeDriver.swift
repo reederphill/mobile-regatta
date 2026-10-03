@@ -69,6 +69,9 @@ final class PracticeDriver: RaceDriver {
         return log
     }
 
+    /// The race's incident index (#94): the results' Your race card (#132).
+    var incidents: IncidentIndex? { race.incidents }
+
     /// The race's state digest, to compare with a replay of `log`.
     func digest() -> UInt64 { race.digest() }
 

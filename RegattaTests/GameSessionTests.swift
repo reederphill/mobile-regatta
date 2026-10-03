@@ -33,8 +33,10 @@ import RegattaCore
         #expect(driver.log.inputs.contains { $0.seat == me }, "the bot's inputs went through the input API")
         #expect(session.roster[1].isBot && !session.roster[me].isBot)
         #expect(session.playerDone)
-        #expect(session.results.count == RaceConfig.launchOpponents + 1)
-        #expect(session.results.filter(\.isPlayer).map(\.id) == [me])
+        let results = try #require(session.results)
+        #expect(results.isFinal && session.showsResults)
+        #expect(results.rows.count == RaceConfig.launchOpponents + 1)
+        #expect(results.rows.filter(\.isPlayer).map(\.id) == [me])
     }
 
     /// Under `-demo` the tack button doesn't reach the bot-sailed seat; in a normal race it does. The bot taps

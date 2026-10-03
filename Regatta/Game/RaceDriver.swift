@@ -56,6 +56,10 @@ protocol RaceDriver: AnyObject {
 
     /// Each seat's livery (#21, #119): presentation only, never the simulation's.
     var liveries: FleetLiveries { get }
+
+    /// The race's incident index (#94), for the results' Your race card (#132): a practice race's own. Nil where the
+    /// device holds none: online, the server's stream carries it (#133); a render fixture.
+    var incidents: IncidentIndex? { get }
 }
 
 extension RaceDriver {
@@ -64,6 +68,7 @@ extension RaceDriver {
     var lagWarning: Bool { false }
     /// A driver with no fleet liveries draws every seat in `FleetLiveries.yours`.
     var liveries: FleetLiveries { FleetLiveries(liveries: []) }
+    var incidents: IncidentIndex? { nil }
 
     /// A driver that keeps real time (online) or runs no ticks (a fixture) runs them all.
     @discardableResult func tick(_ dt: Double, within budget: Duration?) -> [TickFrame] { tick(dt) }

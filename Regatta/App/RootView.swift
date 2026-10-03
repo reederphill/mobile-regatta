@@ -25,6 +25,7 @@ struct RootView: View {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
             case .practiceSetup, .pauseMenu: MenuGalleryView(gallery: fixtureGallery, model: model)
+            case .results(let stage): ResultsGalleryView(stage: stage)
             }
         } else {
             HomeView(model: model, onRaceOnline: raceOnline)
@@ -49,7 +50,8 @@ struct RootView: View {
                 case .practice(let session):
                     RaceView(session: session, onRestart: model.restartPractice, onExit: model.leaveRace,
                              deviceSettings: Bindable(model).deviceSettings, onSailAgain: model.sailAgain,
-                             onChangeSetup: model.changeSetup)
+                             onChangeSetup: model.changeSetup,
+                             onRaceOnline: { model.leaveRace(); raceOnline() })
                         .id(ObjectIdentifier(session))
                 case .online(let launch):
                     OnlineLaunchView(launch: launch, onRestart: startOnlineRace, onExit: model.endRaceSequence)

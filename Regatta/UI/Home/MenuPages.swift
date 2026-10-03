@@ -223,6 +223,7 @@ struct MenuSheetView: View {
         switch sheet {
         case .signIn: "Sign in"
         case .boatCard: "Boat card"
+        case .lastRace: "Last race"
         }
     }
 
@@ -230,6 +231,8 @@ struct MenuSheetView: View {
         switch sheet {
         case .signIn: "Game Center sign-in arrives here."
         case .boatCard: "A sailor's boat card arrives here."
+        // `HomeView` shows the results themselves; this only when there are none to show.
+        case .lastRace: "No last race yet."
         }
     }
 }
