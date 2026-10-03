@@ -236,9 +236,19 @@ final class GameSession {
     /// touches: steering and Ease let go.
     func setPaused(_ paused: Bool) {
         isPaused = paused && driver.isPausable
+        releaseControls()
+    }
+
+    /// Lets go of steering and Ease, and tells the held buttons (`controlReleases`): an overlay is taking the touches,
+    /// the pause menu or Help (#135), which an online race keeps running under with the rudder centred.
+    func releaseControls() {
         isEasing = false
         scene.resetInput()
+        controlReleases += 1
     }
+
+    /// How many times the controls have been let go (`releaseControls`): Ease and Tack/Gybe let go on each.
+    private(set) var controlReleases = 0
 
     /// The app went to the background (`SceneState.phase`, #25): a practice race pauses, so the pause menu is up on
     /// return. Not a finished race or a render fixture; an online race keeps running (#141).

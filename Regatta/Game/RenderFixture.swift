@@ -120,6 +120,9 @@ struct RenderFixture: Codable, Equatable {
         case results(ResultsStage)
         /// My boat on a fixed livery (#136): `{ "gallery": "myBoat", "myBoat": { … } }` (`MyBoatFixture`).
         case myBoat(MyBoatFixture)
+        /// Help as pushed from home (#135): `{ "gallery": "help" }` its topics, `{ "gallery": "help", "help": "symbols" }`
+        /// one topic's page (`HelpTopic`).
+        case help(HelpTopic?)
     }
 
     /// A My boat render fixture (#136): the saved livery, the design tried on, and what's owned, earned and locked,
@@ -207,13 +210,14 @@ struct RenderFixture: Codable, Equatable {
 
     private struct GalleryFile: Decodable {
         enum Kind: String, Decodable {
-            case livery, briefing, practiceSetup, pauseMenu, results, myBoat
+            case livery, briefing, practiceSetup, pauseMenu, results, myBoat, help
         }
 
         var gallery: Kind?
         var briefing: BriefingFixture?
         var results: ResultsStage?
         var myBoat: MyBoatFixture?
+        var help: HelpTopic?
     }
 
     enum GalleryError: Error, Equatable {
@@ -241,6 +245,8 @@ struct RenderFixture: Codable, Equatable {
             case .myBoat?:
                 guard let myBoat = decoded.myBoat else { throw GalleryError.myBoatMissing }
                 return .myBoat(myBoat)
+            case .help?:
+                return .help(decoded.help)
             }
         } catch {
             throw LoadError.unreadable(file.path, error)
