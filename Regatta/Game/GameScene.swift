@@ -305,7 +305,7 @@ final class GameScene: SKScene {
     /// Steps the turbulence trails through `frames`, each tick's fleet, while they draw (#376 follow-on A).
     private func stepTrails(_ frames: [TickFrame]) {
         guard drawing.drawsTrails else { return }
-        var trails = trails ?? TurbulenceTrails(shadow: driver.boatClass.windShadow)
+        var trails = trails ?? TurbulenceTrails(shadow: driver.boatClass.windShadow, shedsBackwind: false)
         let boatClass = driver.boatClass, style = boatStyle
         for frame in frames {
             // Each boat's sail-angle scale every tick, so her level builds back at the same rate whenever she sheds.
@@ -318,12 +318,10 @@ final class GameScene: SKScene {
         self.trails = trails
     }
 
-    /// The cones and backwinds, the trails, or both (`shadowDrawing`).
+    /// The cones, the trails, or both (`shadowDrawing`). The backwind is always the original zone stripes
+    /// (`BoatEffects.backwind`): the trails draw only the shadow (owner, #376 A).
     private func drawShadows(_ world: RenderWorld) {
         coneLayer.isHidden = !drawing.drawsCones
-        if !drawing.drawsCones {
-            for node in boatNodes { node.effects.backwind.isHidden = true }
-        }
         trailLayer.isHidden = !drawing.drawsTrails
         if drawing.drawsTrails {
             trailLayer.update(samples: trails?.samples ?? [], time: world.time, every: trails?.every ?? 3,

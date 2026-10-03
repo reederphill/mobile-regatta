@@ -102,6 +102,18 @@ import Testing
         #expect(none.samples.filter { $0.caster == 1 }.count == full.samples.filter { $0.caster == 1 }.count)
     }
 
+    /// The game's trails shed only the shadow: its backwind stays the original zone stripes (owner, #376 A).
+    @Test func gameTrailsShedNoBackwind() {
+        let shadow = Race.defaultBoatClass.windShadow
+        let fleet = TrailParity.fleet(boatClass: Race.defaultBoatClass)
+        var prototype = TurbulenceTrails(shadow: shadow), game = TurbulenceTrails(shadow: shadow, shedsBackwind: false)
+        prototype.step(boats: fleet, tick: 0)
+        game.step(boats: fleet, tick: 0)
+        #expect(prototype.samples.contains { $0.isBackwind })
+        #expect(!game.samples.contains { $0.isBackwind })
+        #expect(game.samples.count == prototype.samples.filter { !$0.isBackwind }.count)
+    }
+
     /// The level builds back: an ease drops a boat's level at once; sheeted in again it rises linearly over
     /// `buildSeconds` (half way at half the time), so the first samples shed after the release are small.
     @Test func trailBuildsBackAfterAnEase() throws {

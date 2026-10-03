@@ -29,10 +29,14 @@ struct TurbulenceTrails {
     private(set) var samples: [Sample] = []
     let shadow: BoatClass.WindShadow
     let every: Int
+    /// Whether boats shed backwind samples (the prototype's). The game draws the backwind as the original zone stripes
+    /// instead (owner, #376 A), so it sheds only the shadow's trail.
+    let shedsBackwind: Bool
 
-    init(shadow: BoatClass.WindShadow, every: Int = 3) {
+    init(shadow: BoatClass.WindShadow, every: Int = 3, shedsBackwind: Bool = true) {
         self.shadow = shadow
         self.every = every
+        self.shedsBackwind = shedsBackwind
     }
 
     /// Each seat's shedding level now, 0...1: her sail-angle scale smoothed (`step`'s `buildSeconds`). Empty until the
@@ -69,6 +73,7 @@ struct TurbulenceTrails {
             samples.append(Sample(position: b.position, drift: drift, born: tick, caster: seat, peak: shadow.lossCloseIn * k,
                                   radius: r0 * k, growth: (r1 - r0) / life * k, life: life))
             // Her backwind: shed at the middle of the trapezoid, a short-lived patch.
+            guard shedsBackwind else { continue }
             let cone = ShadowCone(caster: b, shadow: shadow)
             guard shadow.backwindInnerLength != nil, cone.backwindPresence > 0,
                   let at = Self.backwindCentre(of: cone) else { continue }
