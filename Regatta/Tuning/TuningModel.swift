@@ -275,6 +275,23 @@ final class TuningModel {
         }
     }
 
+    /// The files a practice race set up on `setup`'s venue and conditions sails (#131): the panel's boat class and
+    /// rules, at the setup's venue on its conditions, unless the panel's conditions are its own (a tuned copy, or a
+    /// base file other than the default chosen in the panel, tuned or not), which the race sails at the setup's venue
+    /// if it can host them, else at the venue `practiceFiles()` picks.
+    func practiceFiles(over setup: PracticeFiles) -> PracticeFiles {
+        var files = practiceFiles()
+        let panelPicksConditions = files.conditions.tune != nil || tuning.conditions != Tuning().conditions
+        if !panelPicksConditions {
+            files.venue = setup.venue
+            files.conditions = setup.conditions
+        } else if let venue = venues.last(where: { $0.ref == setup.venue }),
+                  venue.content.pairing(for: files.conditions.key) != nil {
+            files.venue = setup.venue
+        }
+        return files
+    }
+
     /// A practice session starts on this tuning: its render values, live from now on, and the TUNED badge.
     func attach(_ session: GameSession, files: PracticeFiles) {
         liveSession = session

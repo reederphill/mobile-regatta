@@ -89,13 +89,13 @@ final class AppShellUITests: RaceUITestCase {
         XCTAssertTrue(app.descendants(matching: .any)["race-cover"].firstMatch.exists, "-autostart's race isn't in the cover")
     }
 
-    /// Quit to menu ends the race sequence and returns to the home screen.
+    /// The pause menu's Leave race ends the race sequence and returns to the home screen (#25: no warning in practice).
     @MainActor func testQuitToMenuReturnsHome() {
         let app = launchRace()
         let pause = app.buttons["race-pause"]
         XCTAssertTrue(pause.waitForExistence(timeout: 10), "no pause button")
         pause.tap()
-        app.buttons["Quit to menu"].tap()
+        app.buttons["pause-leave"].tap()
         XCTAssertTrue(app.buttons["race-online"].waitForExistence(timeout: 10), "quitting didn't return home")
         XCTAssertTrue(app.descendants(matching: .any)["race-cover"].firstMatch.waitForNonExistence(timeout: 10))
     }

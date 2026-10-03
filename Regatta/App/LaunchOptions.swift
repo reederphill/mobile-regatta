@@ -12,6 +12,8 @@ import RegattaServices
 /// - `-fixture <name>` names a render fixture to replay (#62).
 /// - `-timescale <n>` runs the simulation at `n`× real time.
 /// - `-uitesting` marks a UI test run.
+/// - `-resetSettings` (with `-uitesting`) clears the device's settings at launch, so a UI test that changes them starts
+///   and ends on the defaults even if an earlier run stopped before switching them back (#131).
 /// - `-scheme halves|tiller` overrides the device's steering scheme (#112).
 /// - `-camera course|boat` overrides the device's camera as course-up or boat-up (#113).
 /// - `-online` starts an online race on the dev server's instant race at launch (#68, Debug builds).
@@ -19,7 +21,7 @@ import RegattaServices
 /// - `-raceSeconds <n>` closes an online dev race `n` seconds after the gun (the server's e2e override).
 /// - `-startSeconds <n>` gives an online dev race's, and every practice race's, start sequence `n` seconds, 1…60
 ///   (#361: a UI test that waits for the results spends less of its watch before the gun).
-/// - `-laps <n>` sails every practice race `n` laps, 1…9, instead of the settings' (#354: a UI test that waits for the
+/// - `-laps <n>` sails every practice race `n` laps, 1…9, instead of the setup's (#354: a UI test that waits for the
 ///   results sails a short race, so a slow simulator still reaches them).
 /// - `-hideScene` draws none of a live race's world (#361): the scene still moves every node, and the HUD and results
 ///   show, but SpriteKit rasterises nothing, so a UI test waiting for the results doesn't hang on the runner's GPU.
@@ -27,7 +29,7 @@ import RegattaServices
 /// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
 ///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
 /// - `-tuning` opens the debug tuning panel at launch (#232). Debug builds only: other builds don't know it.
-/// - `-briefing practice|online` opens on the briefing (#130) for a practice race on the settings (and `-seed`), with
+/// - `-briefing practice|online` opens on the briefing (#130) for the launch race (`RaceConfig.launch()`, and `-seed`), with
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued` or
@@ -59,6 +61,8 @@ struct LaunchOptions: Equatable {
     var demo = false
     var perf = false
     var uiTesting = false
+    /// `-resetSettings`: honoured only with `-uitesting`.
+    var resetSettings = false
     var seed: UInt64?
     var fixture: String?
     var timescale = 1.0
@@ -95,6 +99,7 @@ struct LaunchOptions: Equatable {
             case "-demo": demo = true
             case "-perf": perf = true
             case "-uitesting": uiTesting = true
+            case "-resetSettings": resetSettings = true
             case "-online": online = true
             case "-hideScene": hidesScene = true
             #if DEBUG
@@ -115,8 +120,9 @@ struct LaunchOptions: Equatable {
     }
 
     private static let flags: Set<String> = {
-        var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-online", "-hideScene", "-seed", "-fixture", "-timescale",
-                          "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps", "-appearance",
+        var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
+                          "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
+                          "-appearance",
                           "-vision", "-fakeServices", "-briefing"]
         #if DEBUG
         flags.insert("-tuning")
@@ -195,10 +201,23 @@ struct LaunchOptions: Equatable {
     /// Whether launch skips the menu and starts a race.
     var startsRace: Bool { autostart || demo || perf }
 
-    /// A race started from the menu or restarted: the player's settings, on the pinned seed if there is one, and
-    /// `-laps`' laps and `-startSeconds`' start sequence if given.
-    func raceConfig(from settings: RaceSettings) -> RaceConfig {
-        var config = settings.config
+    /// A race's seeds: fresh ones, drawn independently (ADR 0001: online races get the race seed from the server, which
+    /// keeps the wind seed to itself), or `-seed`'s with the wind seed pinned to it.
+    func seeds() -> (seed: UInt64, windSeed: UInt64) {
+        if let seed { return (seed, RaceConfig.windSeed(pinnedTo: seed)) }
+        return (.random(in: .min ... .max), .random(in: .min ... .max))
+    }
+
+    /// A practice race on `setup` (Start, Sail again): on fresh seeds or the pinned one, and `-laps`' laps and
+    /// `-startSeconds`' start sequence if given.
+    func raceConfig(from setup: PracticeSetup) -> RaceConfig {
+        let (seed, windSeed) = seeds()
+        return raceConfig(from: setup.config(seed: seed, windSeed: windSeed))
+    }
+
+    /// `config` on the pinned seed if there is one, and `-laps`' laps and `-startSeconds`' start sequence if given.
+    func raceConfig(from config: RaceConfig) -> RaceConfig {
+        var config = config
         if let laps { config.laps = laps }
         if let startSeconds { config.prestartSeconds = Double(startSeconds) }
         if let seed {
@@ -208,10 +227,11 @@ struct LaunchOptions: Equatable {
         return config
     }
 
-    /// The race started at launch, or nil to show the menu.
-    func launchRaceConfig(from settings: RaceSettings) -> RaceConfig? {
+    /// The race started at launch, or nil to show the menu: `config`, the launch race (`RaceConfig.launch()`) unless a
+    /// test gives another.
+    func launchRaceConfig(from config: RaceConfig = .launch()) -> RaceConfig? {
         guard startsRace else { return nil }
-        var config = raceConfig(from: settings)
+        var config = raceConfig(from: config)
         config.botSailsYourBoat = demo || perf
         if perf { config.opponents = Self.perfFleetSize - 1 }
         return config

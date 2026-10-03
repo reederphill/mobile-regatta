@@ -67,6 +67,9 @@ struct RaceConfig: Equatable {
     var botSailsYourBoat = false
     /// The bundled defaults, or the tuning panel's files (#232, Debug builds). Bots sail them too (#19).
     var files = PracticeFiles.defaults
+    /// The practice setup's bot tier (#131): every bot's skill drawn inside its band. Nil is a Mixed fleet, the bots
+    /// drawn from all three tiers (`SeatControllers(setup:)`).
+    var botTier: BotTier?
 
     init(opponents: Int = 7, laps: Int = RaceSetup.defaultLaps, prestartSeconds: Double = 60,
          seed: UInt64, windSeed: UInt64, botSailsYourBoat: Bool = false) {
@@ -86,7 +89,7 @@ struct RaceConfig: Equatable {
         return rng.next()
     }
 
-    /// The menu keeps opponents in 1...15 and `-perf` sails 15, so the fleet is always a valid 2...16. It
+    /// The practice setup keeps the fleet in 2...16 and `-perf` sails 16, so the fleet is always valid. It
     /// names `files`: the bundled defaults (`RaceFiles.defaults`) unless the tuning panel chose others (#232).
     var setup: RaceSetup {
         try! RaceSetup(
@@ -101,12 +104,29 @@ struct RaceConfig: Equatable {
         )
     }
 
-    /// A bot for each bot seat and you in seat 0, or, for `-demo`, a bot attached to seat 0 as well.
+    /// A bot for each bot seat, of `botTier` if there is one, and you in seat 0, or, for `-demo`, a bot attached to
+    /// seat 0 as well.
     var seatControllers: SeatControllers {
+        let setup = setup
         var controllers = SeatControllers(setup: setup)
+        if let botTier {
+            for seat in setup.seats.indices where setup.seats[seat] == .bot {
+                controllers[seat] = .bot(BotDriver(seat: seat, raceSeed: setup.raceSeed, tier: botTier))
+            }
+        }
         if botSailsYourBoat { controllers[0] = .bot(BotDriver(seat: 0, raceSeed: RaceSeed(seed))) }
         return controllers
     }
 
     var roster: FleetRoster { FleetRoster(setup: setup) }
+
+    /// The race the development launch arguments start (`-autostart`, `-demo`, `-perf`, `-briefing`): seven bots of a
+    /// Mixed fleet, two laps, on the bundled defaults, with fresh seeds. Frozen apart from the practice setup, since UI
+    /// tests count on its eight-boat fleet and seed-1 timings.
+    static func launch() -> RaceConfig {
+        RaceConfig(opponents: launchOpponents, laps: launchLaps, seed: .random(in: .min ... .max), windSeed: .random(in: .min ... .max))
+    }
+
+    static let launchOpponents = 7
+    static let launchLaps = 2
 }

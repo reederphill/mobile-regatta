@@ -19,7 +19,7 @@ import RegattaCore
     /// on seed 1 your bot is still racing when the 2 min finish window closes (#86), placed by distance.
     @Test func demoSailsAFullRace() throws {
         let options = LaunchOptions(arguments: ["/path/to/Regatta", "-demo", "-seed", "2"])
-        let session = GameSession(config: try #require(options.launchRaceConfig(from: RaceSettings())))
+        let session = GameSession(config: try #require(options.launchRaceConfig()))
         let driver = try #require(session.driver as? PracticeDriver)
         var seconds = 0
         while !driver.currentFrame.isOver && seconds < 1_500 {
@@ -33,7 +33,7 @@ import RegattaCore
         #expect(driver.log.inputs.contains { $0.seat == me }, "the bot's inputs went through the input API")
         #expect(session.roster[1].isBot && !session.roster[me].isBot)
         #expect(session.playerDone)
-        #expect(session.results.count == RaceSettings().opponents + 1)
+        #expect(session.results.count == RaceConfig.launchOpponents + 1)
         #expect(session.results.filter(\.isPlayer).map(\.id) == [me])
     }
 

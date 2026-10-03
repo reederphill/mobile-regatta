@@ -32,7 +32,7 @@ import RegattaCore
         _ = settle(window) { false }
 
         // Without the slide, as the launch-argument path presents it, so each step completes promptly.
-        withoutAnimation { model.startRaceSequence(GameSession(config: Self.config)) }
+        withoutAnimation { model.startRaceSequence(model.practiceSession(config: Self.config)) }
         #expect(settle(window) { controller.presentedViewController is RaceCoverController }, "no race cover")
         let cover = try #require(controller.presentedViewController as? RaceCoverController)
         if #available(iOS 26.0, *) {
@@ -40,7 +40,7 @@ import RegattaCore
             #expect(controller.prefersInterfaceOrientationLocked)
         }
 
-        withoutAnimation { model.startPractice() }
+        withoutAnimation { model.restartPractice() }
         _ = settle(window) { false }
         #expect(controller.presentedViewController === cover, "a restart replaced the cover")
 

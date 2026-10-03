@@ -3,19 +3,6 @@ import SwiftUI
 import RegattaCore
 import RegattaServices
 
-struct RaceSettings {
-    var opponents = 7
-    var laps = 2
-    var prestartSeconds = 60.0
-
-    var config: RaceConfig {
-        // A practice race draws both seeds on the device, independently; online races get the race
-        // seed from the server, which keeps the wind seed to itself (ADR 0001).
-        RaceConfig(opponents: opponents, laps: laps, prestartSeconds: prestartSeconds,
-                   seed: .random(in: .min ... .max), windSeed: .random(in: .min ... .max))
-    }
-}
-
 /// The home screen, with the race sequence as a full-screen cover over it (#25).
 struct RootView: View {
     let model: AppModel
@@ -37,6 +24,7 @@ struct RootView: View {
             switch fixtureGallery {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
+            case .practiceSetup, .pauseMenu: MenuGalleryView(gallery: fixtureGallery, model: model)
             }
         } else {
             HomeView(model: model, onRaceOnline: raceOnline)
@@ -59,7 +47,9 @@ struct RootView: View {
             Group {
                 switch race {
                 case .practice(let session):
-                    RaceView(session: session, onRestart: model.startPractice, onExit: model.endRaceSequence)
+                    RaceView(session: session, onRestart: model.restartPractice, onExit: model.leaveRace,
+                             deviceSettings: Bindable(model).deviceSettings, onSailAgain: model.sailAgain,
+                             onChangeSetup: model.changeSetup)
                         .id(ObjectIdentifier(session))
                 case .online(let launch):
                     OnlineLaunchView(launch: launch, onRestart: startOnlineRace, onExit: model.endRaceSequence)
@@ -107,9 +97,9 @@ struct RootView: View {
             } else if launchOptions.online {
                 startOnlineRace()
             } else if let briefing = launchOptions.briefing {
-                model.startBriefing(config: launchOptions.raceConfig(from: model.settings),
+                model.startBriefing(config: launchOptions.raceConfig(from: RaceConfig.launch()),
                                     mode: briefing == .online ? .online(seconds: BriefingModel.Mode.onlineSeconds) : .practice)
-            } else if let config = launchOptions.launchRaceConfig(from: model.settings) {
+            } else if let config = launchOptions.launchRaceConfig() {
                 model.startRaceSequence(model.practiceSession(config: config))
             }
             #if DEBUG

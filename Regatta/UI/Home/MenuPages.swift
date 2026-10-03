@@ -1,3 +1,4 @@
+import RegattaBots
 import SwiftUI
 
 /// A page pushed on the home screen.
@@ -16,8 +17,7 @@ struct MenuPageView: View {
             PlaceholderPage(title: "Profile", systemImage: "person.crop.circle", id: "page-profile",
                             message: "Your rating, races and badges arrive here.")
         case .help:
-            PlaceholderPage(title: "Help", systemImage: "questionmark.circle", id: "page-help",
-                            message: "How to steer, start and keep clear arrives here.")
+            HelpPage()
         case .settings:
             SettingsView(model: model)
         #if DEBUG
@@ -28,45 +28,82 @@ struct MenuPageView: View {
     }
 }
 
-/// A practice race's setup, then Start. The setup is kept for the next race.
+/// The Help page (#135 builds it): pushed from home, and over a paused race from the pause menu (#25).
+struct HelpPage: View {
+    var body: some View {
+        PlaceholderPage(title: "Help", systemImage: "questionmark.circle", id: "page-help",
+                        message: "How to steer, start and keep clear arrives here.")
+    }
+}
+
+/// A practice race's setup (#25, #131): the venue, its conditions or Random, the bot tier or a Mixed fleet, and the
+/// fleet size, then Start, which goes to the briefing. Laps and the start sequence are fixed. The choices are kept on
+/// the device for the next race (`AppModel.practiceSetup`).
 ///
 /// A scroll view and a column, like the other pages, rather than a `Form`: an identifier on a `Form` doesn't
 /// reach the accessibility tree, and UI tests find the page by its column's `page-practiceSetup`.
-private struct PracticeSetupView: View {
+struct PracticeSetupView: View {
     @Bindable var model: AppModel
 
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
                 VStack(spacing: 0) {
-                    Stepper(value: $model.settings.opponents, in: 1...15) {
-                        HStack {
-                            Text("Opponents").font(MenuFont.body())
-                            Spacer(minLength: 12)
-                            Text("\(model.settings.opponents)").font(MenuFont.number(.body))
+                    menuRow("Venue") {
+                        Picker("Venue", selection: $model.practiceSetup.venue) {
+                            ForEach(PracticeVenue.all) { Text($0.name).tag($0.id) }
                         }
+                        .accessibilityIdentifier("practice-venue")
+                    }
+                    Divider()
+                    menuRow("Conditions") {
+                        Picker("Conditions", selection: $model.practiceSetup.conditions) {
+                            Text("Random").tag(PracticeSetup.ConditionsChoice.random)
+                            ForEach(model.practiceSetup.practiceVenue.conditions) { option in
+                                Text(option.name).tag(PracticeSetup.ConditionsChoice.named(option.id))
+                            }
+                        }
+                        .accessibilityIdentifier("practice-conditions")
+                    }
+                    Divider()
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Bots").font(MenuFont.body())
+                        Picker("Bots", selection: $model.practiceSetup.botTier) {
+                            Text("Mixed").tag(BotTier?.none)
+                            Text("Club").tag(BotTier?.some(.club))
+                            Text("Regional").tag(BotTier?.some(.regional))
+                            Text("National").tag(BotTier?.some(.national))
+                        }
+                        .pickerStyle(.segmented)
+                        .accessibilityIdentifier("practice-tier")
                     }
                     .padding(16)
                     Divider()
-                    row("Laps") {
-                        Picker("Laps", selection: $model.settings.laps) {
-                            ForEach(1...3, id: \.self) { Text("\($0)").tag($0) }
+                    Stepper(value: $model.practiceSetup.fleetSize, in: PracticeSetup.fleetSizes) {
+                        HStack {
+                            Text("Fleet").font(MenuFont.body())
+                            Spacer(minLength: 12)
+                            Text("\(model.practiceSetup.fleetSize) boats")
+                                .font(MenuFont.number(.body))
                         }
                     }
-                    Divider()
-                    row("Start sequence") {
-                        Picker("Start sequence", selection: $model.settings.prestartSeconds) {
-                            Text("30s").tag(30.0)
-                            Text("60s").tag(60.0)
-                            Text("90s").tag(90.0)
-                        }
-                    }
+                    // UI tests read the fleet off the stepper itself: SwiftUI folds the label's texts into it.
+                    .accessibilityValue("\(model.practiceSetup.fleetSize) boats")
+                    .accessibilityIdentifier("practice-fleet")
+                    .padding(16)
                 }
                 .background(ChromePalette.surface, in: .rect(cornerRadius: 16))
+
+                Text(PracticeSetup.fixedNote)
+                    .font(MenuFont.body(.footnote))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 Button(action: model.beginPractice) {
                     Text("Start race")
                         .font(MenuFont.heading(.title3))
+                        // The page's `menuBackground` text colour would otherwise reach the label: navy on the navy fill.
+                        .foregroundStyle(ChromePalette.onTint)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
                 }
@@ -84,16 +121,16 @@ private struct PracticeSetupView: View {
         .navigationTitle("Practice")
     }
 
-    /// A setup row: its label, then a segmented picker.
-    private func row(_ label: String, @ViewBuilder picker: () -> some View) -> some View {
+    /// A setup row: its label, then a menu picker, which fits a long name at 402 pt where a segmented one can't.
+    private func menuRow(_ label: String, @ViewBuilder picker: () -> some View) -> some View {
         HStack {
             Text(label).font(MenuFont.body())
             Spacer(minLength: 12)
             picker()
-                .pickerStyle(.segmented)
-                .fixedSize()
+                .pickerStyle(.menu)
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
     }
 }
 

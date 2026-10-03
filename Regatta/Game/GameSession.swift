@@ -222,6 +222,13 @@ final class GameSession {
         scene.resetInput()
     }
 
+    /// The app went to the background (`SceneState.phase`, #25): a practice race pauses, so the pause menu is up on
+    /// return. Not a finished race or a render fixture; an online race keeps running (#141).
+    func pauseForBackground() {
+        guard driver.isPausable, !driver.isFrozen, !playerDone, !isPaused else { return }
+        setPaused(true)
+    }
+
     func refreshHUD() { refreshHUD(samplesPressure: true) }
 
     /// A tap on the place or the live leaderboard (#268): opens it to the whole fleet, or closes it.

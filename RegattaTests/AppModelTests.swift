@@ -78,20 +78,21 @@ import RegattaCore
         #expect(!state.isRaceSequenceShowing)
     }
 
-    /// Practice and restarts use the setup, on the pinned seed when there is one.
-    @Test func practiceUsesTheSetup() throws {
-        let options = LaunchOptions(arguments: ["/path/to/Regatta", "-seed", "7"])
+    /// Restart replays the practice race shown, a new session on the same setup and seed.
+    @Test func restartReplaysThePracticeRace() throws {
+        let options = LaunchOptions(arguments: ["/path/to/Regatta", "-uitesting", "-seed", "7"])
         let model = AppModel(launchOptions: options)
-        model.settings.opponents = 3
-        model.settings.laps = 1
+        model.practiceSetup.fleetSize = 4
 
-        model.startPractice()
+        model.beginPractice()
+        model.finishBriefing()
         let first = try #require(model.session)
         #expect(first.roster.entries.count == 4)
 
-        model.startPractice()
+        model.restartPractice()
         let second = try #require(model.session)
         #expect(second !== first)
+        #expect(second.roster.entries.count == 4)
         #expect(model.phase == .raceSequence)
     }
 
@@ -100,8 +101,7 @@ import RegattaCore
     @Test func beginPracticeBriefsThenReadyStartsThatRace() throws {
         let options = LaunchOptions(arguments: ["/path/to/Regatta", "-uitesting", "-seed", "7"])
         let model = AppModel(launchOptions: options)
-        model.settings.opponents = 3
-        model.settings.laps = 1
+        model.practiceSetup.fleetSize = 4
 
         model.beginPractice()
         #expect(model.phase == .raceSequence)
@@ -109,7 +109,7 @@ import RegattaCore
         let briefing = try #require(model.briefing)
         #expect(briefing.mode == .practice)
         #expect(briefing.fleet.count == 4)
-        #expect(briefing.laps == 1)
+        #expect(briefing.laps == PracticeSetup.laps)
         #expect(briefing.setup.raceSeed == RaceSeed(7))
 
         model.finishBriefing()

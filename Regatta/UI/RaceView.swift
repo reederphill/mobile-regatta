@@ -4,8 +4,19 @@ import SwiftUI
 
 struct RaceView: View {
     let session: GameSession
+    /// The pause menu's Restart race, and the results' Sail again unless `onSailAgain` is given.
     var onRestart: () -> Void
+    /// The pause menu's Leave race and the results' Menu.
     var onExit: () -> Void
+    /// The device's settings the pause menu's toggles change (#25), or nil to leave the toggles out.
+    var deviceSettings: Binding<DeviceSettings>? = nil
+    /// The results' Sail again (#25): a new race through its briefing.
+    var onSailAgain: (() -> Void)? = nil
+    /// The results' Change setup (#25), or nil to leave it out.
+    var onChangeSetup: (() -> Void)? = nil
+    /// Sending the app to the background pauses a practice race (#25), read from the scene (`SceneState`).
+    @Environment(\.sceneState) private var sceneState
+    @State private var showsHelp = false
     #if DEBUG
     /// The debug tuning panel (#232), over a paused practice race: its render values show live behind it.
     @Environment(TuningModel.self) private var tuning: TuningModel?
@@ -28,6 +39,20 @@ struct RaceView: View {
         // One colour-vision filter over everything the race draws, live or a fixture: the scene at any camera
         // scale, the HUD and overlays, and the letterbox (#111).
         .vision(session.vision)
+        .onChange(of: sceneState.phase) { _, phase in
+            if phase == .background { session.pauseForBackground() }
+        }
+        .sheet(isPresented: $showsHelp) {
+            NavigationStack {
+                HelpPage()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showsHelp = false }
+                        }
+                    }
+            }
+            .tint(ChromePalette.tint)
+        }
         #if DEBUG
         .sheet(isPresented: $showsTuning) {
             if let tuning {
@@ -122,15 +147,19 @@ struct RaceView: View {
             // The tuning panel hides the pause menu, so the water shows undimmed behind it.
             if session.isPaused && !showsTuningPanel {
                 PauseMenu(
+                    settings: deviceSettings,
                     onResume: { session.setPaused(false) },
-                    onRestart: onRestart,
-                    onExit: onExit,
+                    // Restart is practice only (#25): an online race can't be sailed again from its start.
+                    onRestart: session.driver is PracticeDriver ? onRestart : nil,
+                    onLeave: onExit,
+                    onHelp: { showsHelp = true },
                     onTuning: tuningAction
                 )
             }
 
             if session.playerDone {
-                ResultsView(rows: session.results, onRestart: onRestart, onExit: onExit)
+                ResultsView(rows: session.results, onSailAgain: onSailAgain ?? onRestart, onChangeSetup: onChangeSetup,
+                            onExit: onExit)
             }
         }
     }
@@ -188,34 +217,6 @@ struct RaceView: View {
             Spacer()
 
             RaceControls(session: session)
-        }
-    }
-}
-
-private struct PauseMenu: View {
-    var onResume: () -> Void
-    var onRestart: () -> Void
-    var onExit: () -> Void
-    /// The debug tuning panel (#232), when the race offers it.
-    var onTuning: (() -> Void)?
-
-    var body: some View {
-        ZStack {
-            Color.black.opacity(0.5).ignoresSafeArea()
-            VStack(spacing: 14) {
-                Text("Paused").font(.title.bold())
-                Button("Resume", action: onResume).buttonStyle(.borderedProminent)
-                Button("Restart race", action: onRestart).buttonStyle(.bordered)
-                if let onTuning {
-                    Button("Tuning", action: onTuning)
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("pause-tuning")
-                }
-                Button("Quit to menu", role: .destructive, action: onExit).buttonStyle(.bordered)
-            }
-            .controlSize(.large)
-            .padding(28)
-            .background(.ultraThinMaterial, in: .rect(cornerRadius: 24))
         }
     }
 }

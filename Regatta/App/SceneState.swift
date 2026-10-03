@@ -5,7 +5,7 @@ import UIKit
 /// Scene state that UIKit owns and the SwiftUI tree reads, from `\.sceneState`.
 ///
 /// Because `SceneDelegate` owns the window, `@Environment(\.scenePhase)` isn't reliable. Read `phase` instead:
-/// sending the app to the background leaves the queue (#131), pauses a practice race (#140), and counts as a
+/// sending the app to the background pauses a practice race (#131), leaves the queue (#140), and counts as a
 /// disconnect in an online race (#141).
 @Observable
 final class SceneState {
