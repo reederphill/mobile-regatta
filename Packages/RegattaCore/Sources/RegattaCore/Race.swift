@@ -635,7 +635,10 @@ public final class Race {
 
     /// Who must keep clear between `seat` and every other seat, in seat order, nil at `seat` itself and for
     /// any pair with a ghost: `Rules.obligation` (rule 21 over rules 10–13), so a returning or penalised boat
-    /// keeps clear. Mark-room never changes it (Case 25). What the right-of-way glyphs show (#123); read-only.
+    /// keeps clear. Where the umpire holds a mark-room record for the pair (#91), the boat owing mark-room is
+    /// the one that keeps clear: the glow is the only mark-room cue the player gets, so it shows who owes room
+    /// as well as who keeps clear (owner, 2026-10-03). Rule 18 is not right of way (Case 25): this is what the
+    /// glyphs show (#123), never what the umpire calls. Read-only.
     public func keepClearRelations(of seat: Int) -> [RightOfWay?] {
         guard boats.indices.contains(seat) else { return [] }
         let hull = boatClass.hull
@@ -644,6 +647,9 @@ public final class Race {
             guard other != seat,
                   let verdict = Rules.obligation(boat, boats[other], overlapped: overlaps.isOverlapped(seat, other),
                                                  course: course, hull: hull) else { return nil }
+            if let record = umpire?.markRoom(SeatPair(seat, other)) {
+                return RightOfWay(keepClear: record.owing, rule: record.rule)
+            }
             return RightOfWay(keepClear: verdict.offender, rule: verdict.rule)
         }
     }

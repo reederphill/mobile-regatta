@@ -162,26 +162,13 @@ import RegattaCore
         #expect(recorder.calls == ["impact 0.5"])
     }
 
-    /// A mark-room notice is one short line (#15), to its two boats only, whichever side of it you are, however long
-    /// the other boat's name.
-    @Test func markRoomNoticeIsOneLine() {
-        let marks = ["pin", "committee boat", "windward mark", "offset mark", "gate left", "gate right"]
-        for long in [false, true] {
-            let name: (Int) -> String = { long ? "A Very Long Sailor Name Indeed \($0)" : "Boat \($0)" }
-            for mark in marks {
-                for (boat, over) in [(Self.me, 1), (1, Self.me)] {
-                    var presenter = RaceEventPresenter(me: Self.me, name: name)
-                    let shown = presenter.present([Self.event(.markRoomNotice(boat: boat, entitledOver: over, mark: mark))])
-                    #expect(shown.notices.count == 1 && shown.notices[0].kind == .markRoom)
-                    let text = shown.notices.first?.text ?? ""
-                    #expect(text.count <= RuleWords.markRoomLimit && !text.contains("\n") && !text.isEmpty, "\(text)")
-                    #expect(text.contains("yours") == (boat == Self.me), "\(text)")
-                }
-            }
+    /// Mark-room has no notice: the right-of-way glow shows who owes it (`Race.keepClearRelations(of:)`), so the
+    /// record's event presents nothing, to either boat or to a third.
+    @Test func markRoomNoticeIsSilent() {
+        for (boat, over) in [(Self.me, 1), (1, Self.me), (1, 2)] {
+            var presenter = RaceEventPresenter(me: Self.me)
+            #expect(presenter.present([Self.event(.markRoomNotice(boat: boat, entitledOver: over, mark: "pin"))]) == Presentation())
         }
-        var presenter = RaceEventPresenter(me: Self.me)
-        #expect(presenter.present([Self.event(.markRoomNotice(boat: 1, entitledOver: 2, mark: "pin"))]) == Presentation(),
-                "not to a third boat")
     }
 
     /// Your roll tap's hit plays a haptic (#222); a miss plays none, and nor does another boat's hit.

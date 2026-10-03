@@ -1,7 +1,8 @@
 /// The right-of-way cue a player sees on another boat (#15, #123): a red glow on a boat she must keep clear of,
 /// a green glow on a boat that must keep clear of her (the app draws the glow; the name predates it, when these
 /// were a ⚠ and a chevron). No words.
-/// Mark-room is never a glow (it is a notice): only who keeps clear (`Race.keepClearRelations(of:)`) decides.
+/// Mark-room has no words of its own: a boat owing it glows red and the boat owed it green, as a keep-clear
+/// boat and a right-of-way boat do (`Race.keepClearRelations(of:)` decides).
 public enum RightOfWayGlyph: Sendable, Equatable {
     /// I must keep clear of her: the red glow.
     case giveWay

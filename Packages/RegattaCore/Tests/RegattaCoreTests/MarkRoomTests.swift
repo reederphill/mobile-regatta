@@ -90,6 +90,10 @@ enum MarkRoomFixture {
         #expect(record == MarkRoomRecord(mark: "windward mark", entitled: 1, owing: 0, rule: .givingMarkRoom,
                                          firstInZone: 1, overlappedAtZoneEntry: false))
         #expect(M.notices(race.drainEvents()) == [.markRoomNotice(boat: 1, entitledOver: 0, mark: "windward mark")])
+        // The glow is the player's only cue (owner, 2026-10-03): the boat owing mark-room is the one that keeps clear,
+        // whatever Section A says (seat 0 is clear ahead), and both boats agree.
+        let seen = race.keepClearRelations(of: 0)[1]
+        #expect(seen == RightOfWay(keepClear: 0, rule: .givingMarkRoom) && seen == race.keepClearRelations(of: 1)[0])
 
         // Seat 0 comes alongside, to leeward and so inside her at a mark left to port, a metre off: once the
         // overlap has held for the last point of certainty the pair are overlapped, and the record is still

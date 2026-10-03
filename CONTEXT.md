@@ -253,7 +253,7 @@ The thin vermillion arrow under your hull, one hull length, pointing to the wind
 _Avoid_: wind arrow, wind indicator
 
 **Right-of-way glow**:
-The wordless halo round another boat that says who keeps clear: red on a boat you must keep clear of, green on a boat that must keep clear of you. It fades in from nothing as she comes within a short range, to full strength close in; mark-room is never a glow (it is a notice), and a ghost has none. The core's `RightOfWayGlyph` is its red/green kind (the name dates from when these were a ⚠ and a chevron).
+The wordless halo round another boat that says who keeps clear: red on a boat you must keep clear of, green on a boat that must keep clear of you. It fades in from nothing as she comes within a short range, to full strength close in; a boat owing mark-room glows red and the boat owed it green (mark-room has no notice of its own), and a ghost has none. The core's `RightOfWayGlyph` is its red/green kind (the name dates from when these were a ⚠ and a chevron).
 _Avoid_: boat label, rights icon, glyph
 
 **Penalty arc**:
