@@ -498,6 +498,10 @@ import Testing
         let box = try Self.leeBowRun(ShadowSettings())
         print(String(format: "LEE-BOW box (loss %.2f): DMG lost over 20 s %.3f L; at 5 s %.3f L", Self.shadow.backwindLoss,
                      box.lost20, box.lost(at: 5)))
+        for model in [ShadowModel.ribbons, .both] {
+            let run = try Self.leeBowRun(Self.settings(model))
+            print(String(format: "LEE-BOW %@ with the box backwind: %.3f L (%+.0f%%)", model.rawValue, run.lost20, (run.lost20 / box.lost20 - 1) * 100))
+        }
         for header in [0.0, 2, 3, 4, 6] {
             var row = String(format: "LEE-BOW header %3.0f deg:", header)
             for lull in [0.2, 0.15, 0.1, 0.05, 0.0] {
@@ -539,6 +543,35 @@ import Testing
         print(String(format: "LEE-BOW box: half the speed lost by %.2f s", box.speedHalf))
         #expect(headed.heightHalf <= headed.speedHalf, "height first: \(headed.heightHalf) s against \(headed.speedHalf) s")
         #expect(box.height.allSatisfy { abs($0) < 1e-3 }, "the box takes only speed")
+    }
+
+    // MARK: #378: where the ribbon lies downwind
+
+    /// For #378: the angle off her stern, degrees, at which a steady boat's ribbon streams (along her apparent wind,
+    /// to leeward), where the cone's axis lies (`coneSwing` part of the way to astern), and where a point she shed drifts
+    /// over the ground (straight downwind), at polar speed. Printed; no tolerance.
+    @Test func ribbonAngleDownwind() {
+        let polar = OpenWater.boatClass.polar
+        print("RIBBON ANGLE off her stern, degrees: ribbon (her apparent wind) | cone axis | ground drift (true wind)")
+        for knots in [8.0, 12, 16] {
+            let tws = metresPerSecond(knots: knots)
+            var row = String(format: "  %2.0f kn:", knots)
+            for twa in [120.0, 135, 150, 165] {
+                let wind = Wind(direction: 0, speed: tws)
+                var b = Boat(id: 0, isPlayer: false, colorIndex: 0, position: .zero, heading: deg2rad(twa),
+                             speed: polar.speed(twa: deg2rad(twa), tws: tws))
+                b.windOverGround = wind
+                b.sailingWind = wind
+                b.apparentWind = BoatWinds.resolve(ground: wind, current: .zero, velocityThroughWater: b.velocity).apparent
+                b.boomSide = b.relativeWind > 0 ? .port : .starboard
+                let astern = -b.forward
+                let off = { (v: Vec2) in rad2deg(abs(atan2(v.cross(astern), v.dot(astern)))) }
+                let cone = ShadowCone(caster: b, shadow: Self.shadow)
+                row += String(format: "  twa %3.0f: %5.1f | %5.1f | %5.1f", twa, off(-Vec2.heading(b.apparentWind.direction)),
+                              off(cone.axis), off(wind.velocity))
+            }
+            print(row)
+        }
     }
 
     // MARK: 10. Cost
