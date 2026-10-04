@@ -1,4 +1,5 @@
 import Foundation
+import RegattaBots
 import RegattaCore
 
 /// One race's results as the results sheet shows them (#24, #30, #132): a row per boat in display order, and the
@@ -19,8 +20,41 @@ struct RaceResultViewModel: Equatable, Codable {
         var result: Result
         /// ⚑: the rules called at least one foul against this boat (#24).
         var flagged: Bool
+        /// A practice rival (#235): "Rival" beside her name. Decoded if present, so a Last race kept before rivals
+        /// still loads.
+        var isRival = false
 
         var id: Int { seat }
+
+        init(seat: Int, place: Int, name: String, isBot: Bool, isPlayer: Bool, livery: Livery, result: Result,
+             flagged: Bool, isRival: Bool = false) {
+            self.seat = seat
+            self.place = place
+            self.name = name
+            self.isBot = isBot
+            self.isPlayer = isPlayer
+            self.livery = livery
+            self.result = result
+            self.flagged = flagged
+            self.isRival = isRival
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case seat, place, name, isBot, isPlayer, livery, result, flagged, isRival
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            seat = try c.decode(Int.self, forKey: .seat)
+            place = try c.decode(Int.self, forKey: .place)
+            name = try c.decode(String.self, forKey: .name)
+            isBot = try c.decode(Bool.self, forKey: .isBot)
+            isPlayer = try c.decode(Bool.self, forKey: .isPlayer)
+            livery = try c.decode(Livery.self, forKey: .livery)
+            result = try c.decode(Result.self, forKey: .result)
+            flagged = try c.decode(Bool.self, forKey: .flagged)
+            isRival = try c.decodeIfPresent(Bool.self, forKey: .isRival) ?? false
+        }
     }
 
     /// The result column (#24, #30).
@@ -59,6 +93,8 @@ struct RaceResultViewModel: Equatable, Codable {
         var name: String
         var isBot: Bool
         var livery: Livery
+        /// A practice rival (#235).
+        var isRival = false
     }
 
     /// One boat as the live frame stands, before the close, in `TickFrame.standings` order.
@@ -81,6 +117,17 @@ struct RaceResultViewModel: Equatable, Codable {
 
     /// Your row.
     var myRow: Row? { rows.first { $0.isPlayer } }
+
+    /// Your finish as the practice history counts it (#235, `Rivals`): your place in the fleet if you finished or were
+    /// placed by distance; nil for DSQ, OCS, RET (not pace), results not yet final, or a fleet under
+    /// `Rivals.minFleetSize`. `tier` is the race's bot tier.
+    func practiceFinish(tier: BotTier?) -> PracticeFinish? {
+        guard isFinal, rows.count >= Rivals.minFleetSize, let row = myRow else { return nil }
+        switch row.result {
+        case .raceTime, .gap, .byDistance: return PracticeFinish(place: row.place, fleetSize: rows.count, tier: tier)
+        default: return nil
+        }
+    }
 
     /// Home's Last race keeps these results (#132): not a race you retired from, which is no result of yours.
     var keepsAsLastRace: Bool { myRow.map { $0.result != .ret } ?? false }
@@ -105,7 +152,8 @@ struct RaceResultViewModel: Equatable, Codable {
         func row(_ seat: Int, place: Int, result: Result) -> Row {
             let entrant = entrants[seat]
             return Row(seat: seat, place: place, name: entrant.name, isBot: entrant.isBot, isPlayer: seat == mySeat,
-                       livery: entrant.livery, result: result, flagged: flagged.contains(seat))
+                       livery: entrant.livery, result: result, flagged: flagged.contains(seat),
+                       isRival: entrant.isRival && seat != mySeat)
         }
         let codes: [Int: ResultCode]
         if let results, !results.rows.isEmpty {

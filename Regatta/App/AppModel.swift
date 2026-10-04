@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import RegattaBots
 import RegattaCore
 import RegattaServices
 
@@ -274,14 +275,21 @@ final class AppModel {
         #if DEBUG
         tuning.attach(session, files: config.files)
         #endif
-        session.onResultsFinal = { [weak self] results in self?.keepAsLastRace(results) }
+        session.practiceTier = config.botTier
+        session.onResultsFinal = { [weak self, weak session] results in
+            self?.keepAsLastRace(results, from: session)
+        }
         return session
     }
 
     /// The practice setup's Start (#25, #130): the briefing for a race on the setup, on a new seed, which waits for
     /// Ready.
+    /// Its rivals' skill comes from your practice history (#235): none without one.
     func beginPractice() {
-        startBriefing(config: launchOptions.raceConfig(from: practiceSetup), mode: .practice)
+        let history = PracticeHistoryStore(defaults: practiceDefaults).load()
+        startBriefing(config: launchOptions.raceConfig(from: practiceSetup,
+                                                        rivalSkill: practiceSetup.rivalSkill(history: history)),
+                      mode: .practice)
     }
 
     /// Shows the briefing for a practice race on `config` (on the tuning panel's files in a Debug build), resolved
@@ -308,6 +316,7 @@ final class AppModel {
         let timescale = launchOptions.timescale
         return BriefingModel(setup: setup, files: files, mySeat: mySeat, mode: mode,
                              liveries: FleetLiveries(setup: setup, mySeat: mySeat, mine: myLivery), menuMusic: menuMusic,
+                             rivals: config.rivalSeats,
                              now: { origin.addingTimeInterval(Date().timeIntervalSince(origin) * timescale) })
     }
 
@@ -324,15 +333,31 @@ final class AppModel {
         race = nil
     }
 
-    /// Home's Last race takes `results` unless you retired from that race (#132): a RET leaves the one before.
-    private func keepAsLastRace(_ results: RaceResultViewModel) {
+    /// Home's Last race takes `results` unless you retired from that race (#132): a RET leaves the one before. Your
+    /// finish in `session` goes into the practice history the rivals' skill is set from (#235), once per race.
+    private func keepAsLastRace(_ results: RaceResultViewModel, from session: GameSession?) {
         if results.keepsAsLastRace { lastRace = results }
+        recordPracticeFinish(results, from: session)
+    }
+
+    /// The race whose finish the practice history last took (#235): a race closes (`onResultsFinal`) and is left
+    /// (`archiveRace`), and counts once.
+    @ObservationIgnored private weak var recordedSession: GameSession?
+
+    /// Adds your finish in `session`'s race to the practice history (#235, `RaceResultViewModel.practiceFinish`), at
+    /// that race's tier, once per race.
+    private func recordPracticeFinish(_ results: RaceResultViewModel, from session: GameSession?) {
+        guard let session, session !== recordedSession,
+              let finish = results.practiceFinish(tier: session.practiceTier) else { return }
+        recordedSession = session
+        let store = PracticeHistoryStore(defaults: practiceDefaults)
+        store.save(Rivals.recording(finish, in: store.load()))
     }
 
     /// Keeps a practice race sailed on tuned copies, with them beside its log, as it leaves (#232, ADR 0004); and its
     /// results for home's Last race if you were done in it (#132).
     private func archiveRace() {
-        if let kept = session?.resultsToKeep() { keepAsLastRace(kept) }
+        if let session, let kept = session.resultsToKeep() { keepAsLastRace(kept, from: session) }
         #if DEBUG
         if let session { tuning.archive(session) }
         #endif
@@ -352,6 +377,23 @@ struct LastRaceStore {
 
     func save(_ results: RaceResultViewModel) {
         guard let data = try? JSONEncoder().encode(results) else { return }
+        defaults.set(data, forKey: Self.key)
+    }
+}
+
+/// Your practice history (#235): your recent practice finishes, oldest first (`Rivals.kept` of them), as JSON in the
+/// practice defaults, so UI tests, which empty those at launch, start with none and race without rivals.
+struct PracticeHistoryStore {
+    let defaults: UserDefaults
+    static let key = "practiceHistory"
+
+    func load() -> [PracticeFinish] {
+        guard let data = defaults.data(forKey: Self.key) else { return [] }
+        return (try? JSONDecoder().decode([PracticeFinish].self, from: data)) ?? []
+    }
+
+    func save(_ history: [PracticeFinish]) {
+        guard let data = try? JSONEncoder().encode(history) else { return }
         defaults.set(data, forKey: Self.key)
     }
 }

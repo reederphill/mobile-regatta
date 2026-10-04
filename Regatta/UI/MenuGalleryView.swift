@@ -30,8 +30,8 @@ struct MenuGalleryView: View {
             PauseMenu(settings: .constant(DeviceSettings()), onResume: {}, onRestart: {}, onLeave: {}, onHelp: {})
                 .background(ChromePalette.background.ignoresSafeArea())
                 .environment(\.colorScheme, .dark)
-        case .results(let stage):
-            ResultsGalleryView(stage: stage)
+        case .results(let stage, let rivalSkill):
+            ResultsGalleryView(stage: stage, rivalSkill: rivalSkill)
         case .myBoat(let fixture):
             MyBoatGallery(fixture: fixture)
         case .help(let topic):
