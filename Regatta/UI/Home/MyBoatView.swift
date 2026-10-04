@@ -20,10 +20,6 @@ struct MyBoatView: View {
                     .accessibilityIdentifier("myboat-render")
                     .frame(maxWidth: .infinity)
 
-                if model.isFleetLocked {
-                    note("Locked for this race")  // TODO-COPY (#171)
-                }
-
                 Picker("Part", selection: $model.section) {  // TODO-COPY (#171)
                     ForEach(MyBoatModel.Section.allCases, id: \.self) { section in
                         Text(section.title).tag(section)
