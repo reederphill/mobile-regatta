@@ -56,7 +56,7 @@ The umpire's memory of a pair whose leeward boat came up from clear astern withi
 _Avoid_: luffing rights, overtaking record
 
 **Exoneration**:
-A boat that broke a rule of Part 2 isn't penalised for it, because she was compelled to (43.1(a)) or was denied the room she was entitled to (43.1(b)). Recorded on the incident; the rule call names the boat that broke the rule.
+A boat that broke a rule of Part 2 isn't penalised for it, because she was compelled to (43.1(a)) or was denied the room she was entitled to (43.1(b)). Recorded on the incident; the rule call names the boat that broke the rule. An exonerated boat gets no call: when the only boat that broke a rule was compelled (43.1(a)), the incident has no call at all.
 _Avoid_: acquittal, cleared
 
 **Hold course**:
