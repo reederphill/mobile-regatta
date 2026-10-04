@@ -1,8 +1,10 @@
 // Rule 18, mark-room (#91; RRS Part 2 Section C in 2025 numbering, as #9 resolved it). Mark-room is not right
 // of way (Case 25): Section A (`Rules.rightOfWay`) still decides which boat keeps clear, and a record here says
 // only which boat must give the other room to sail to the mark, round it and leave it astern (18.2). The umpire
-// keeps the records (`UmpireState`, the authoritative race's alone); calling a boat that fails to give it
-// (18.2(d)) and exonerating one sailing within it (43.1(b)) are #93's.
+// keeps the records (`UmpireState`, the authoritative race's alone). An incident between the pair reads the
+// record (`EscapeSimulation.verdict`, #93): the owing boat breaks 18.2 (or 18.3) when Section A names the entitled
+// boat to keep clear, who is exonerated (43.1(b)), unless the owing boat has been unable to give room since an
+// inside overlap gained from clear astern or by tacking began (18.2(d)).
 
 /// The mark whose zone rule 18 tests a boat against on one tick, and how near it her hull is
 /// (`CourseLayout.markZone(of:hull:)`, #91).

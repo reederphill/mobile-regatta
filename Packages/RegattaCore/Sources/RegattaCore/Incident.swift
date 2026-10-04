@@ -62,7 +62,8 @@ public struct Incident: Sendable, Hashable, Codable {
     public enum Outcome: Sendable, Hashable, Codable {
         /// Not decided yet.
         case pending
-        /// Decided: no rule was broken.
+        /// Decided with no call: no rule was broken, or the boat that broke one is exonerated (`exonerated`):
+        /// compelled by another boat's breach (43.1(a), #93). No penalty and no event.
         case noCall
         /// Decided by this call (`call.incidentId` is the incident's id).
         case called(RuleCall)
