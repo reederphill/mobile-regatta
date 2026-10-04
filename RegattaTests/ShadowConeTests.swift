@@ -112,12 +112,13 @@ import Testing
         #expect(BoatStyle.standard.coneAlpha <= 0.4, "faint (#15), though seen: it is only this strong at a ribbon's peak")
     }
 
-    /// The backwind's sprite covers exactly core's trapezoid (#298) on her windward quarter: at points just inside
-    /// and outside each corner and edge, on both tacks, it draws where `isInBackwind` is true and nowhere else, and
-    /// it flips side with her tack. A class with #79's band draws none.
+    /// The backwind's sprite covers exactly core's zone: on skiff@6 (#377) the header's upwash beside her sail, from her
+    /// mast back to her stern on her windward side (#298's trapezoid on her windward quarter before it): at points just
+    /// inside and outside each corner and edge, on both tacks, it draws where `isInBackwind` is true and nowhere else,
+    /// and it flips side with her tack. A class with #79's band draws none.
     @Test func backwindZoneMatchesCoreZone() throws {
         let shadow = Self.boatClass.windShadow
-        #expect(shadow.backwindInnerLength != nil, "the default class casts #298's trapezoid")
+        #expect(shadow.backwindInnerLength != nil && shadow.backwindUpwash != nil, "the default class casts the upwash zone")
         var sides: Set<Bool> = []
         for c in Self.cases {
             let boat = Self.boat(headingDegrees: c.heading, boomSide: c.boom, apparentDegrees: c.apparent)
@@ -143,9 +144,11 @@ import Testing
                 #expect(core.isInBackwind(p) == inside, "\(c): core at \(p)")
                 #expect(Self.draws(effects.backwind, local: local, at: p, in: scene) == inside, "\(c): sprite at \(p)")
             }
-            // On her windward side, astern.
+            // On her windward side, beside her between her stern and her mast (#377: no longer astern of her stern).
             let centre = corners.reduce(Vec2.zero, +) / 4 - core.apex
             #expect(centre.dot(core.windward) > 0 && centre.dot(core.forward) < 0, "\(c)")
+            #expect(corners.allSatisfy { ($0 - core.apex).dot(core.forward) >= shadow.sternCorner.y - 1e-9
+                && ($0 - core.apex).dot(core.forward) <= shadow.bowY }, "\(c): from her stern to her mast")
             sides.insert(effects.backwind.xScale > 0)
         }
         #expect(sides == [true, false], "drawn on both sides")
@@ -227,11 +230,10 @@ import Testing
     @Test func backwindEdgeIsSoft() throws {
         let shadow = Self.boatClass.windShadow
         let boat = Self.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
-        // Mean alpha over a strip of the art a pixel wide and 24 points tall, half a hull length astern of her stern line on
-        // her hull-side edge (x = her stern corner), `across` points out from it (negative: outside the zone). Not further
-        // astern: the hatch fades towards the far edge (`backwindFadeFloor`), and 1 hull length astern, half way down
-        // skiff@5's 2 hull lengths, a hatch column's mean sat at the 0.2 below (#354). Nearer, the strip reaches her steep
-        // stern edge.
+        // Mean alpha over a strip of the art a pixel wide and 24 points tall, 0.3 hull lengths forward of her stern line
+        // (half way between her stern and her mast: skiff@6's upwash zone, #377; it was half a length astern of her stern
+        // in #298's trapezoid) on her hull-side edge (x = her stern corner), `across` points out from it (negative:
+        // outside the zone). Mid-zone, clear of its end fades.
         func alpha(_ effects: BoatEffects, across: CGFloat) throws -> Double {
             let sprite = effects.backwind
             let texture = try #require(sprite.texture)
@@ -239,7 +241,7 @@ import Testing
             let size = texture.size()
             let sx = CGFloat(image.width) / size.width, sy = CGFloat(image.height) / size.height
             let x = shadow.sternCorner.x * Double(Self.ppm) + Double(across) + Double(sprite.anchorPoint.x * size.width)
-            let y0 = -0.5 * Self.boatClass.hull.length * Double(Self.ppm) + Double(sprite.anchorPoint.y * size.height)
+            let y0 = 0.3 * Self.boatClass.hull.length * Double(Self.ppm) + Double(sprite.anchorPoint.y * size.height)
             guard x >= 0, x < Double(size.width) else { return 0 }
             var data = [UInt8](repeating: 0, count: image.width * image.height * 4)
             let context = try #require(CGContext(data: &data, width: image.width, height: image.height, bitsPerComponent: 8,

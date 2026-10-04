@@ -3,7 +3,7 @@ import Testing
 @testable import RegattaCore
 
 /// #298 acceptance: a lee-bow pays. A boat on port tacks onto the lee bow of a boat close-hauled on starboard, so the
-/// starboard boat sits in her backwind (to windward of her and astern, `ShadowCone`'s trapezoid), and loses speed
+/// starboard boat sits in her backwind (to windward of her; since #377 the upwash beside her sail), and loses speed
 /// against a twin sailing on with no lee-bower. Twin races in open water and a steady wind (`OpenWater`, the default
 /// class). What she loses is set by the class's placeholder backwind loss (skiff@4, #232's slider), and sized so a
 /// lee-bow costs clearly less than sitting in a wind shadow (`ShadowCostTests`: 0.7–1.5 L over 5 s).
@@ -32,17 +32,20 @@ import Testing
         }
     }
 
-    /// Seat 1 starts 3 L ahead of seat 0 and 1.5 L to leeward on port and tacks at once; she is on starboard about
-    /// 1.6 L ahead of her and 0.6 L to leeward when her tack ends, seat 0 in her backwind from there on. At 10 kn
-    /// seat 0 loses 0.36 L in the next 5 s against her twin with skiff@4's placeholder loss (0.2): a lee-bow pays,
-    /// but less than 5 s in a wind shadow (1.2–1.5 L, `ShadowCostTests`). Since #377 (skiff@6) the backwind is a header
-    /// (8°, a 1 s lag): she is headed from the end of the tack, and her loss is measured upwind. Her autohelm holds her
-    /// heading through the header rather than bearing away onto the lee-bower's stern, so she keeps clear and pays in
-    /// pinching instead: little in the first 5 s, while she still closes on the slow, just-tacked lee-bower (0.2 L), then
-    /// more as the lee-bower builds speed and she drops back into the backwind. So the cost is measured over 10 s, the
-    /// band doubled with it: still clearly less than 10 s in a wind shadow (`ShadowCostTests`, about 1.6 L per 5 s).
+    /// Seat 1 starts 2.5 L ahead of seat 0 and 1.5 L to leeward on port and tacks at once; she is on starboard about
+    /// 1 L ahead of her and 0.5 L to leeward when her tack ends. Since #377 (skiff@6) the backwind is a header (8°, a
+    /// 1 s lag) and its zone is the upwash beside her sail, from her mast back to her stern and 1 L out to windward (the
+    /// owner's renders review): seat 0 is headed only while overlapped with her. Holding her heading (her autohelm
+    /// pinches through the header rather than bearing away onto the lee-bower's stern, so she keeps clear), she sails up
+    /// into the zone from astern on the slow, just-tacked lee-bower within 2 s and sits in it for several seconds, until
+    /// the lee-bower has built her speed and pulls clear ahead. Her loss is measured upwind over 10 s.
+    ///
+    /// Before the reshape this started from 3 L ahead, seat 0 then 1–2.5 L astern of the lee-bower in #298's trapezoid
+    /// and headed on every tick of the 10 s. From there she is now never in the zone (it ends at the lee-bower's stern),
+    /// so the scene moved to the overlapped lee-bow, and "headed every tick" became "in the zone for 4 s or more": a
+    /// bound zone beside the hull is crossed, not sat in. The loss band (0.6–1.2 L) is unchanged.
     @Test func leeBowedBoatLosesSpeedAgainstACleanTwin() throws {
-        let (ahead, leeward) = (3.0, 1.5)
+        let (ahead, leeward) = (2.5, 1.5)
         let leeBowed = try race(ahead: ahead, leeward: leeward, together: true)
         let clean = try race(ahead: ahead, leeward: leeward, together: false)
         // One step so both autohelms engage on their grooves, then seat 1 tacks.
@@ -59,23 +62,31 @@ import Testing
         #expect(!lee.isTacking && lee.tack == .starboard, "she has tacked onto starboard, seat 0's tack")
         let offset = leeBowed.boats[0].position - lee.position
         let (astern, toWindward) = (-offset.dot(lee.forward) / hullLength, offset.dot(lee.forward.rightPerp) / hullLength)
-        #expect(astern > 1 && astern < 2.5 && toWindward > 0 && toWindward < 1.2,
+        #expect(astern > 0.75 && astern < 1.5 && toWindward > 0 && toWindward < 1.2,
                 "the lee-bowed boat is \(astern) L astern of her and \(toWindward) L to windward")
-        let cone = try #require(leeBowed.shadowCone(ofSeat: 1))
-        #expect(cone.isInBackwind(leeBowed.boats[0].position), "in her backwind")
 
         // 10 s from there, against the twin.
         let (from, twinFrom) = (leeBowed.boats[0].position, clean.boats[0].position)
         // Upwind: since #377 the backwind is a header, so she loses height as well as speed.
         let course = try OpenWater.windDirection()
-        var backwindedTicks = 0
-        for _ in 0..<(10 * Race.tickRate) {
+        var inZoneTicks = 0, firstInZone: Int?
+        for tick in 0..<(10 * Race.tickRate) {
             leeBowed.step()
             clean.step()
-            if leeBowed.header(ofSeat: 0) > 0 { backwindedTicks += 1 }
+            let zone = try #require(leeBowed.shadowCone(ofSeat: 1))
+            if zone.isInBackwind(leeBowed.boats[0].position) {
+                inZoneTicks += 1
+                if firstInZone == nil { firstInZone = tick }
+                // Beside her, between her mast and her stern, and to windward: the upwash zone.
+                let off = leeBowed.boats[0].position - leeBowed.boats[1].position
+                let along = off.dot(leeBowed.boats[1].forward), shadow = leeBowed.boatClass.windShadow
+                #expect(along > shadow.sternCorner.y && along < shadow.bowY - (shadow.backwindUpwash?.mastFromBow ?? 0))
+                #expect(off.dot(leeBowed.boats[1].forward.rightPerp) > 0)
+            }
             #expect(clean.boats[0].shadow == 1 && clean.header(ofSeat: 0) == 0)
         }
-        #expect(backwindedTicks == 10 * Race.tickRate, "backwinded \(backwindedTicks) of \(10 * Race.tickRate) ticks")
+        #expect((firstInZone ?? .max) < 2 * Race.tickRate, "she sails into the zone within 2 s: \(String(describing: firstInZone))")
+        #expect(inZoneTicks >= 4 * Race.tickRate, "in her backwind \(inZoneTicks) of \(10 * Race.tickRate) ticks")
         let events = leeBowed.drainEvents()
         // She keeps clear (#377): her autohelm never follows the header down onto the lee-bower's stern.
         #expect(!events.contains { if case .ruleCall = $0.kind { true } else { false } }, "no contact, no call")
@@ -90,7 +101,9 @@ import Testing
     /// default class (skiff@6: ribbons, header 8°) and in a tuned copy whose header turns nothing (0°; at lull 0 the
     /// backwind then costs nothing, so what is left is the ribbons and the tack). The owner's reference (#377, from
     /// #376): today's box cost 1.50 L, and the header about +5% of it. Print only, under the fleet runs' switch
-    /// (`ShadowModelFleetTests`, `REGATTA_SHADOW_FLEET=1`).
+    /// (`ShadowModelFleetTests`, `REGATTA_SHADOW_FLEET=1`). Since the header's zone is the upwash beside the lee-bower's
+    /// sail, the 3 L geometries leave seat 0 astern of it (the header costs nothing there); 2.5 and 2.25 L are the
+    /// overlapped lee-bows, where it acts (`leeBowedBoatLosesSpeedAgainstACleanTwin`).
     @Test(.enabled(if: ProcessInfo.processInfo.environment["REGATTA_SHADOW_FLEET"] == "1"))
     func leeBowCostOverTwentySeconds() throws {
         let data = try #require(try BoatClassFile.bundledData(id: "skiff", version: 6))
@@ -101,7 +114,7 @@ import Testing
                                          tune: 1)
         let box = 1.50
         let course = try OpenWater.windDirection()
-        for (ahead, leeward) in [(3.0, 1.5), (3.25, 1.5)] {
+        for (ahead, leeward) in [(3.0, 1.5), (3.25, 1.5), (2.5, 1.5), (2.25, 1.5)] {
             var lost: [String: (at5: Double, at20: Double, cleanDMG: Double, calls: Int)] = [:]
             for (name, file) in [("header 8°", nil), ("header 0°", unheaded)] as [(String, BoatClassFile?)] {
                 let leeBowed = try race(ahead: ahead, leeward: leeward, together: true, boatClassFile: file)

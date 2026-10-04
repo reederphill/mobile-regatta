@@ -96,7 +96,7 @@ final class BoatEffects {
         backwind.position = CGPoint(x: stern.x * ppm, y: stern.y * ppm)
         backwind.zRotation = CGFloat(-followed.heading)
         backwind.xScale = (backwindSide ?? boat.tack) == .starboard ? 1 : -1
-        backwind.yScale = CGFloat(boatClass.windShadow.backwindScale(speed: boat.speedThroughWater))
+        backwind.yScale = CGFloat(ShadowShapes.backwindScale(boatClass.windShadow, speed: boat.speedThroughWater))
         backwind.alpha = CGFloat(style.coneAlpha * style.backwindShare * presence)
 
         // A roll miss kills the wake; a hit flares it, fading (#222).
@@ -187,7 +187,9 @@ private struct EffectArt {
     static func shared(shadow: BoatClass.WindShadow, pointsPerMeter ppm: CGFloat, style: BoatStyle) -> EffectArt {
         let key = Key(shadow: [shadow.coneLength, shadow.coneWidthAtBoat, shadow.coneWidthAtEnd,
                                shadow.backwindLength, shadow.backwindWidth, shadow.backwindInnerLength ?? -1,
-                               shadow.sternCorner.x, shadow.sternCorner.y, shadow.backwindSternSlant ? 1 : 0],
+                               shadow.sternCorner.x, shadow.sternCorner.y, shadow.backwindSternSlant ? 1 : 0,
+                               shadow.bowY, shadow.upwashExtent == nil ? -1 : 1, shadow.backwindUpwash?.mastFromBow ?? -1, shadow.backwindUpwash?.reach ?? -1,
+                               shadow.backwindUpwash?.endFade ?? -1],
                       ppm: ppm, hatch: [style.hatchSpacing, style.hatchLineWidth, style.backwindFeather])
         if let art = cache[key] { return art }
         let art = EffectArt(shadow: shadow, ppm: ppm, style: style)
@@ -295,13 +297,14 @@ private struct EffectArt {
 
     /// How much of the backwind's hatch is left at its far edge: core's loss fades to nothing there, but drawn it
     /// stops at a share, so the zone's whole shape stays readable on the water.
-    private static let backwindFadeFloor: CGFloat = 0.35
+    fileprivate static let backwindFadeFloor: CGFloat = 0.35
 
     /// Fades the backwind's hatch as core's loss fades (`ShadowCone`'s backwind factor, #298): full along its stern
     /// edge, straight down to `backwindFadeFloor` at its far edge, each at the span `BoatClass.WindShadow.backwindSpan(out:)`
     /// gives where it is (one edge slants, the far one or the stern one). Column by column, a texel wide, in the art's
     /// frame (starboard tack).
     private static func fadeBackwind(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat, margin: CGFloat) {
+        if shadow.upwashExtent != nil { return fadeUpwash(cg, shadow: shadow, ppm: ppm, margin: margin) }
         let space = CGColorSpaceCreateDeviceRGB()
         guard let gradient = CGGradient(colorsSpace: space, colors: [UIColor.white.cgColor,
                                                                      UIColor(white: 1, alpha: Self.backwindFadeFloor).cgColor] as CFArray,
@@ -321,6 +324,48 @@ private struct EffectArt {
             cg.drawLinearGradient(gradient, start: CGPoint(x: 0, y: top), end: CGPoint(x: 0, y: bottom),
                                   options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
             cg.restoreGState()
+            x += step
+        }
+    }
+}
+
+extension EffectArt {
+    /// Fades the upwash zone's hatch (#377) as core's envelope fades (`BoatClass.WindShadow.upwashShare(out:along:)`):
+    /// full at her side, straight down to `backwindFadeFloor` at its reach out, and down to it over the end fades at her
+    /// mast and her stern. Column by column out from her side, a texel wide, each a gradient along her through the
+    /// share's knots (its ends, and the ends of its fades), in the art's frame (starboard tack).
+    fileprivate static func fadeUpwash(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat, margin: CGFloat) {
+        guard let zone = shadow.upwashExtent, let upwash = shadow.backwindUpwash else { return }
+        let space = CGColorSpaceCreateDeviceRGB()
+        let floor = Double(backwindFadeFloor)
+        let middle = (zone.aft + zone.fore) / 2
+        // The share is straight between these along her: nothing at her stern, full past the fade, full to the fade
+        // before her mast, nothing at it (the fades meet in the middle on a short zone).
+        let knots = [zone.aft, min(zone.aft + upwash.endFade, middle), max(zone.fore - upwash.endFade, middle), zone.fore]
+        let length = zone.fore - zone.aft
+        guard length > 0 else { return }
+        let step: CGFloat = 1.0 / 3
+        let x0 = CGFloat(zone.out) * ppm, width = CGFloat(zone.reach) * ppm
+        cg.setShouldAntialias(false)
+        var x: CGFloat = -step - margin
+        while x < width + step + margin {
+            let out = (Double((x + step / 2) / width) * zone.reach).clamped(to: 1e-9...(zone.reach * (1 - 1e-9)))
+            // Drawn, the share's 0...1 maps onto the floor...1, so the whole zone stays readable.
+            let alphas = knots.map { along -> CGFloat in
+                let inside = along.clamped(to: (zone.aft + 1e-9)...(zone.fore - 1e-9))
+                return CGFloat(floor + (1 - floor) * shadow.upwashShare(out: out, along: inside))
+            }
+            let colors = alphas.map { UIColor(white: 1, alpha: $0).cgColor } as CFArray
+            let locations = knots.map { CGFloat(($0 - zone.aft) / length) }
+            if let gradient = CGGradient(colorsSpace: space, colors: colors, locations: locations) {
+                cg.saveGState()
+                cg.clip(to: CGRect(x: x0 + x, y: CGFloat(zone.aft) * ppm - margin - 2, width: step,
+                                   height: CGFloat(length) * ppm + 2 * margin + 4))
+                cg.drawLinearGradient(gradient, start: CGPoint(x: 0, y: CGFloat(zone.aft) * ppm),
+                                      end: CGPoint(x: 0, y: CGFloat(zone.fore) * ppm),
+                                      options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+                cg.restoreGState()
+            }
             x += step
         }
     }

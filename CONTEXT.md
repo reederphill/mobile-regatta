@@ -315,7 +315,7 @@ The disturbed, weaker air a boat leaves behind her sails: ribbons of turbulence 
 _Avoid_: dirty air (fine as UI copy)
 
 **Backwind**:
-Air deflected off a boat's working sail onto a boat just to windward of her and astern: it heads her, turning her wind towards her bow (a shift, not a lull). What makes a safe leeward position safe. It reaches further astern the faster she sails; she casts none while running, below a floor speed, or without a working sail (eased, luffing, head to wind, mid-tack or mid-gybe). It fades out on the side it was cast on and only then builds on her new side.
+Air deflected off a boat's working sail onto a boat just to windward of her: it heads her, turning her wind towards her bow (a shift, not a lull). What makes a safe leeward position safe. It lies beside her, on her windward side from her mast back to her stern, strongest at her side and gone about a hull length out; it goes where she goes and doesn't linger on the water. She casts none while running, below a floor speed, or without a working sail (eased, luffing, head to wind, mid-tack or mid-gybe). It fades out on the side it was cast on and only then builds on her new side. (Older boat classes cast it as a zone astern of her windward quarter that reaches further astern the faster she sails.)
 
 **Lee-bow**:
 To put your boat to leeward of another boat and just ahead of her, on the same tack and close enough that she sits in your backwind. She can only sink back or tack away. Usually done by crossing her bow and tacking onto her lee bow, which needs room to cross. She is then _lee-bowed_.

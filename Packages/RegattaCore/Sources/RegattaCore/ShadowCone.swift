@@ -9,7 +9,9 @@
 /// her true wind angle at or past it. A class without an inner length casts #79's band straight up her apparent wind,
 /// tapering at the edges. A ghost casts neither (`Race.shadowCone(ofSeat:)`).
 ///
-/// A class with a `header` (#377) sails the trapezoid as an envelope (`backwindEnvelope(at:)`): a boat in it has her
+/// A class with a `header` (#377) sails an envelope (`backwindEnvelope(at:)`): the upwash beside her sail, from her
+/// mast back to her stern on her windward side and reaching about a length out, for a class with one
+/// (`BoatClass.WindShadow.backwindUpwash`, the owner's renders review), else the trapezoid. A boat in it has her
 /// wind turned towards her bow (`Race`), plus the header's lull, if any; the envelope is scaled by how hard her sail is
 /// working (`backwindSail`), held on the side it was cast on while it fades (`backwindSide`), and faded out below the
 /// class's floor speed. A class without one loses wind (or speed) in it, as #298 built it. Never a cone: the type keeps
@@ -134,14 +136,22 @@ public struct ShadowCone: Sendable, Equatable {
         return backwindSide == .starboard ? forward.rightPerp : -forward.rightPerp
     }
 
-    /// How much of her backwind trapezoid reaches `p`, 0...1 (#377): 1 at its stern edge, falling straight to 0 at its
-    /// far edge, on `backwindSide`, times `backwindPresence` (running), the class's floor (`backwindFloorFactor`) and
-    /// `backwindSail` (her sail working); 0 outside it, and everywhere for a class with #79's band.
+    /// How much of her backwind zone reaches `p`, 0...1 (#377), on `backwindSide`, times `backwindPresence` (running),
+    /// the class's floor (`backwindFloorFactor`) and `backwindSail` (her sail working); 0 outside it, and everywhere for
+    /// a class with #79's band. The zone is the upwash beside her sail for a class with one
+    /// (`BoatClass.WindShadow.upwashShare(out:along:)`: from her mast back to her stern, full at her side and nothing
+    /// its reach out, bound to her, not scaled by her speed); else her trapezoid, 1 at its stern edge, falling straight
+    /// to 0 at its far edge.
     public func backwindEnvelope(at p: Vec2) -> Double {
         guard shadow.backwindInnerLength != nil, backwindSail > 0 else { return 0 }
         // Out to windward first: most boats aren't, and the rest is dearer (the result is the same in any order).
         let offset = p - apex
         let out = offset.dot(backwindWindward) - shadow.sternCorner.x
+        if shadow.upwashExtent != nil {
+            let share = shadow.upwashShare(out: out, along: offset.dot(forward))
+            guard share > 0 else { return 0 }
+            return backwindSail * backwindPresence * shadow.backwindFloorFactor(speed: speed) * share
+        }
         guard out > 0, out < shadow.backwindWidth else { return 0 }
         let presence = backwindPresence * shadow.backwindFloorFactor(speed: speed)
         guard presence > 0 else { return 0 }

@@ -16,7 +16,7 @@ enum Fixtures {
         2: "f5c8f1677a45f76c2ffe27914671ea0ce615614944f331027c506cafb6caa12d",
         3: "0796b93570fb9723697162f3da4617b28ee0100f693116f1574a198c4c3bf792",
         4: "bd90cabe38cfea22c88dd0a6e4c462e04691dec0c5b90420d416bd8555f05bdf",
-        5: "74dafe68bd0047152abb136d81925d8e59f88adcb2f8c97197d8becb1e668705",
+        5: "e946b1d0041c4ffd473cc35f7d05f50edea152ec9a363bc9e5f2b5b3311b16ce",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -56,7 +56,7 @@ enum SkiffFixtures {
         3: "3a6e6b7bf037bc496a9fdddfa45d7000ab41dd1801a08cece1bc2d3a76092c81",
         4: "4e2d1a94d1c90ac80aa88bdaa4890fc68095b16de61324c6fdaa19f54ee3a9a1",
         5: "ce105fbd37ca455498592ea9ae4e47a34a5e255617b2490019a1360330261b80",
-        6: "03eb42860071a0a15db47c9877467bea0809e663f0ca0158901fb2d1f86dce64",
+        6: "95d21293ea5abb39076f00ecb0d046bb0d524cbb264703684e1511c43d05cf31",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -767,6 +767,7 @@ enum SkiffFixtures {
         shadow.backwindFadeSeconds = 0
         shadow.backwindFloorSpeed = nil
         shadow.backwindFloorSpan = 0
+        shadow.backwindUpwash = nil
         #expect(shadow == a.windShadow, "only the new blocks differ")
         #expect(a.windShadow.header == nil && a.windShadow.backwindFloorSpeed == nil)
         let r = b.windShadow.ribbons
@@ -777,6 +778,12 @@ enum SkiffFixtures {
         #expect(b.windShadow.header == .init(angle: deg2rad(8), cap: deg2rad(12), lull: 0, lagSeconds: 1))
         #expect(b.windShadow.backwindFadeSeconds == 1.5)
         #expect(b.windShadow.backwindFloorSpeed == metresPerSecond(knots: 2) && b.windShadow.backwindFloorSpan == metresPerSecond(knots: 2))
+        // The header's zone is the upwash beside her sail (the owner's renders review): her mast 0.4 L (skiff) or 0.25 L
+        // (ilca) back from her bow, reaching 1 L out, fading in over 0.1 L at each end.
+        #expect(a.windShadow.backwindUpwash == nil)
+        let upwash = try #require(b.windShadow.backwindUpwash)
+        #expect(abs(upwash.mastFromBow - (skiff ? 0.4 : 0.25) * length) < 1e-12)
+        #expect(abs(upwash.reach - length) < 1e-12 && abs(upwash.endFade - 0.1 * length) < 1e-12)
     }
 
     @Test(arguments: [
@@ -786,6 +793,12 @@ enum SkiffFixtures {
         (#""capDegrees": 12,"#, #""capDegrees": 95,"#, "backwind header"),
         (#""lullLoss": 0,"#, #""lullLoss": -1,"#, "backwind header lull"),
         (#""floorKnots": 2,"#, #""floorKnots": -2,"#, "backwind floor"),
+        (#""mastStationFromBow": 0.4,"#, #""mastStationFromBow": 1.2,"#, "backwind upwash mast station"),
+        (#""upwashReachHullLengths": 1.0,"#, #""upwashReachHullLengths": 0,"#, "backwind upwash mast station"),
+        (#""upwashEndFadeHullLengths": 0.1,"#, #""upwashEndFadeHullLengths": -0.1,"#, "backwind upwash mast station"),
+        (#""upwashEndFadeHullLengths": 0.1,"#, "", "together"),
+        (#""header": { "degrees": 8, "capDegrees": 12, "lullLoss": 0, "lagSeconds": 1 }"#, #""renamed": {}"#,
+         "a backwind upwash needs a header"),
     ])
     func ribbonAndHeaderValuesAreChecked(of: String, with: String, reason expected: String) throws {
         let data = try SkiffFixtures.edited([(of: of, with: with)], version: 6)

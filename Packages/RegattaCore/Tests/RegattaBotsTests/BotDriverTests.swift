@@ -5,9 +5,9 @@ import Testing
 /// A race for bot tests: `seats` (by default seat 0 human and seven bots) and the wind seed derived
 /// from `seed`, as RegattaCoreTests does.
 func botRace(seats: [SeatKind] = [.human] + Array(repeating: .bot, count: 7), laps: Int = 2,
-             prestartSeconds: Int = 45, seed: UInt64) -> Race {
+             prestartSeconds: Int = 45, seed: UInt64, boatClass: FileRef = RaceFiles.defaults.boatClass.ref) -> Race {
     let setup = try! RaceSetup(raceSeed: RaceSeed(seed), seats: seats, laps: laps,
-                               startSequenceTicks: prestartSeconds * Race.tickRate)
+                               startSequenceTicks: prestartSeconds * Race.tickRate, boatClass: boatClass)
     return Race(setup: setup, windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1))
 }
 

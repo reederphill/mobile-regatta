@@ -209,7 +209,11 @@ import Glibc
 ///    them from their cone fields). Backwind casts only from a working sail above a floor speed (`BackwindSails`), fades
 ///    out over 1.5 s on its old side before building over 2 s on the new one, and turns the receiver's wind towards her
 ///    bow (8 degrees, 12 stacked, lagged 1 s) instead of slowing her; the groove autohelm holds her heading through it.
-///    The ribbons, emission levels, headers and backwind levels and sides are race state in `WorldSnapshot`.
+///    Its zone is the upwash beside her sail, not #298's trapezoid: on her windward side along her hull from her mast
+///    (0.4 L back from her bow on skiff@6, 0.25 L on ilca-dinghy@5) to her stern, full at her side and fading to nothing
+///    1 L out, fading in over 0.1 L at each end, bound to her and not scaled by her speed (`backwindUpwash`); class
+///    files without those fields keep the trapezoid. The ribbons, emission levels, headers and backwind levels and sides
+///    are race state in `WorldSnapshot`.
 public let simulationRevision = 32
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`

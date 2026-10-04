@@ -224,10 +224,11 @@ enum WakeScene {
     /// The backwind is a header: seat 0, lee-bowed, has her wind turned towards her bow, its speed unchanged (no lull),
     /// while her clean twin's isn't. Headers from several casters add, capped at 12°.
     @Test func backwindTurnsTheReceiversWindTowardsHerBow() throws {
-        let (leeBowed, clean) = try Self.leeBow()
-        // 2 s on: she holds her heading through the header (her autohelm), and from about 2.5 s she has closed on the
-        // slow, just-tacked lee-bower past the front of her backwind for a while.
-        for _ in 0..<(2 * Race.tickRate) {
+        // The header's zone is the upwash beside the lee-bower's sail, from her mast to her stern (skiff@6): seat 0 has
+        // to be overlapped with her to be in it. From 2.5 L ahead (`LeeBowTests`' overlapped lee-bow) she ends her tack
+        // about 1 L ahead of seat 0, who sails up into it beside her within 2 s and is in it at 4 s.
+        let (leeBowed, clean) = try Self.leeBow(ahead: 2.5)
+        for _ in 0..<(4 * Race.tickRate) {
             leeBowed.step()
             clean.step()
         }
@@ -247,10 +248,9 @@ enum WakeScene {
         let header = try #require(Self.shadow.header)
         let caster = WakeScene.upwindCaster
         let zone = ShadowCone(caster: caster, shadow: Self.shadow)
-        let s = Self.shadow, out = s.backwindWidth / 2
-        let span = try #require(s.backwindSpan(out: out))
-        let astern = span.start + 1e-6 * (span.end - span.start)
-        let p = zone.apex + zone.windward * (s.sternCorner.x + out) + zone.forward * (s.sternCorner.y - astern * s.backwindScale(speed: zone.speed))
+        // Full at her side, half way between her stern and her mast.
+        let extent = try #require(Self.shadow.upwashExtent)
+        let p = zone.apex + zone.windward * (extent.out + 1e-6 * extent.reach) + zone.forward * ((extent.aft + extent.fore) / 2)
         #expect(abs(zone.backwindEnvelope(at: p) - 1) < 1e-5)
         #expect(abs(Race.headerTarget(at: p, receiver: 9, zones: [zone], header: header) - deg2rad(8)) < 1e-6)
         #expect(Race.headerTarget(at: p, receiver: 9, zones: [zone, zone], header: header) == deg2rad(12))
@@ -265,15 +265,13 @@ enum WakeScene {
     /// working scale is 0, so her level falls to 0 over the fade); trimmed in the groove she casts it all.
     @Test func noBackwindWithoutAWorkingSail() throws {
         let boatClass = WakeScene.boatClass, trim = SailTrim.standard
-        let s = Self.shadow, out = s.backwindWidth / 2
+        // A point in her upwash zone: a quarter of its reach out from her side, half way between her stern and her mast.
+        let extent = try #require(Self.shadow.upwashExtent)
+        let (out, along) = (extent.out + 0.25 * extent.reach, (extent.aft + extent.fore) / 2)
         func envelope(_ caster: Boat, ease: Bool) -> Double {
-            var zone = ShadowCone(caster: caster, shadow: s)
+            var zone = ShadowCone(caster: caster, shadow: Self.shadow)
             zone.backwindSail = trim.workingScale(of: caster, ease: ease, boatClass: boatClass)
-            guard let span = s.backwindSpan(out: out) else { return 0 }
-            let astern = span.start + 0.25 * (span.end - span.start)
-            let scale = s.backwindScale(speed: zone.speed)
-            return zone.backwindEnvelope(at: zone.apex + zone.windward * (s.sternCorner.x + out)
-                                         + zone.forward * (s.sternCorner.y - astern * scale))
+            return zone.backwindEnvelope(at: zone.apex + zone.windward * out + zone.forward * along)
         }
         let groove = WakeScene.upwindCaster
         #expect(envelope(groove, ease: false) > 0.5, "trimmed in the groove")
@@ -321,7 +319,7 @@ enum WakeScene {
             let zone = try #require(gybe.shadowCone(ofSeat: 0))
             let b = gybe.boats[0]
             for side in [1.0, -1.0] {
-                let q = b.position + b.forward.rightPerp * (side * (s.sternCorner.x + out)) + b.forward * (s.sternCorner.y - 0.3 * s.backwindLength)
+                let q = b.position + b.forward.rightPerp * (side * out) + b.forward * along
                 #expect(zone.backwindEnvelope(at: q) == 0)
             }
             if b.tack != startSide { gybed = true }

@@ -161,6 +161,10 @@ import RegattaCore
         model.set(try slider("boatClass:/windShadow/header/lagSeconds", in: model), to: 0.5)
         model.set(try slider("boatClass:/windShadow/backwind/fadeSeconds", in: model), to: 1)
         model.set(try slider("boatClass:/windShadow/backwind/floorKnots", in: model), to: 3)
+        // The header's upwash zone (#377, the owner's renders review).
+        model.set(try slider("boatClass:/windShadow/backwind/mastStationFromBow", in: model), to: 0.3)
+        model.set(try slider("boatClass:/windShadow/backwind/upwashReachHullLengths", in: model), to: 1.5)
+        model.set(try slider("boatClass:/windShadow/backwind/upwashEndFadeHullLengths", in: model), to: 0.2)
         #expect(model.tuning.isTuned && model.problems.isEmpty)
 
         var config = Self.config
@@ -173,6 +177,10 @@ import RegattaCore
         #expect(abs(header.angle - deg2rad(10)) < 1e-12 && abs(header.lagSeconds - 0.5) < 1e-12)
         #expect(abs(shadow.backwindFadeSeconds - 1) < 1e-12)
         #expect(abs((shadow.backwindFloorSpeed ?? 0) - metresPerSecond(knots: 3)) < 1e-12)
+        let length = try #require(session.driver as? PracticeDriver).boatClass.hull.length
+        let upwash = try #require(shadow.backwindUpwash)
+        #expect(abs(upwash.mastFromBow - 0.3 * length) < 1e-12 && abs(upwash.reach - 1.5 * length) < 1e-12
+                && abs(upwash.endFade - 0.2 * length) < 1e-12)
     }
 
     /// The same values give the same tuned copy, under the same tune number, race after race; new values take

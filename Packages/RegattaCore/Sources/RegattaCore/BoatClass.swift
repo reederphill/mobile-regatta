@@ -251,6 +251,11 @@ public struct BoatClass: DataFileContent, Equatable {
         /// floor, the trapezoid's length scale fading it from rest as before (`backwindScale(speed:)`).
         public var backwindFloorSpeed: Double?
         public var backwindFloorSpan = 0.0
+        /// The backwind zone as the upwash beside her sail (#377, the owner's renders review; optional `backwind`
+        /// fields `mastStationFromBow`, `upwashReachHullLengths`, `upwashEndFadeHullLengths`, all three or none, with a
+        /// `header` only): it replaces the trapezoid as a header class's envelope (`upwashShare(out:along:)`). Nil: a
+        /// header class sails the trapezoid as its envelope; a class without a header never reads it.
+        public var backwindUpwash: Upwash?
 
         /// The ribbon wake's sizes (#377, `TurbulenceRibbons`), in code units. Every value is tuning, not measured
         /// (docs/research/yacht-wake-and-backwind-aerodynamics.md gives the wake's direction and little else).
@@ -317,6 +322,45 @@ public struct BoatClass: DataFileContent, Equatable {
                 self.lull = lull
                 self.lagSeconds = lagSeconds
             }
+        }
+
+        /// The backwind as the upwash off her sail (#377; docs/research/yacht-wake-and-backwind-aerodynamics.md §2: the
+        /// header on a boat to windward is a bound field off the leeward boat's sail, negligible by about 1 L out): on
+        /// her windward side, along her hull from her mast back to her stern, reaching `reach` out from her side. In
+        /// code units; tuning, not measured.
+        public struct Upwash: Sendable, Equatable {
+            /// Metres from her bow (`bowY`) back to her mast, the zone's forward end.
+            public var mastFromBow: Double
+            /// Metres out to windward from her side (`sternCorner.x`) at which the zone has faded to nothing.
+            public var reach: Double
+            /// Metres over which it fades in from nothing at each end, its mast end and its stern end, inside it.
+            public var endFade: Double
+
+            public init(mastFromBow: Double, reach: Double, endFade: Double) {
+                self.mastFromBow = mastFromBow
+                self.reach = reach
+                self.endFade = endFade
+            }
+        }
+
+        /// The upwash zone's extent in her frame, metres: from `out` (her side, `sternCorner.x`) to `out + reach` out to
+        /// windward, and from `aft` (her stern, `sternCorner.y`) forward to `fore` (her mast). Nil without
+        /// `backwindUpwash`, and for a class it doesn't shape: one without a `header` and the trapezoid's inner length
+        /// (the envelope's class, `ShadowCone.backwindEnvelope(at:)`). The drawn zone is this rectangle (`ShadowShapes`).
+        public var upwashExtent: (out: Double, reach: Double, aft: Double, fore: Double)? {
+            guard let u = backwindUpwash, header != nil, backwindInnerLength != nil else { return nil }
+            return (sternCorner.x, u.reach, sternCorner.y, bowY - u.mastFromBow)
+        }
+
+        /// How much of the upwash reaches a point `out` metres out to windward of her side and `along` metres forward of
+        /// her centre, 0...1 (#377): full at her side, falling straight to nothing `reach` out; between her stern and
+        /// her mast, fading in over `endFade` from nothing at each; 0 elsewhere, and without `upwashExtent`. Before
+        /// her presence, floor and sail (`ShadowCone.backwindEnvelope(at:)`).
+        public func upwashShare(out: Double, along: Double) -> Double {
+            guard let zone = upwashExtent, let u = backwindUpwash else { return 0 }
+            guard out > 0, out < zone.reach, along > zone.aft, along < zone.fore else { return 0 }
+            let ends = u.endFade > 0 ? min(1, (zone.fore - along) / u.endFade, (along - zone.aft) / u.endFade) : 1
+            return (1 - out / zone.reach) * ends
         }
 
         /// Whether the shadow slows the boat rather than the wind her polar reads (`slowingDown`).
@@ -505,6 +549,12 @@ private struct BoatClassSchema2: Decodable {
             /// (`backwindFloorSpeed`, `backwindFloorSpan`). Optional.
             let floorKnots: Double?
             let floorBuildKnots: Double?
+            /// #377: the header's zone as the upwash beside her sail (`BoatClass.WindShadow.Upwash`): her mast's
+            /// station back from her bow, a share of her length; how far out it reaches and its end fades, hull lengths.
+            /// Optional, all three or none, with a header only.
+            let mastStationFromBow: Double?
+            let upwashReachHullLengths: Double?
+            let upwashEndFadeHullLengths: Double?
         }
 
         /// #377: the ribbon wake (`BoatClass.WindShadow.Ribbons`). Optional: without it, seeded from the cone.
@@ -654,6 +704,15 @@ private struct BoatClassSchema2: Decodable {
             try check(fraction(h.lullLoss) && h.lagSeconds.isFinite && h.lagSeconds >= 0,
                       "backwind header lull must be 0...1 and its lag not negative")
         }
+        let upwash = [windShadow.backwind.mastStationFromBow, windShadow.backwind.upwashReachHullLengths,
+                      windShadow.backwind.upwashEndFadeHullLengths]
+        try check(upwash.allSatisfy { $0 == nil } || upwash.allSatisfy { $0 != nil },
+                  "a backwind upwash needs its mast station, reach and end fade together")
+        if let station = upwash[0], let reach = upwash[1], let fade = upwash[2] {
+            try check(windShadow.header != nil, "a backwind upwash needs a header")
+            try check(station >= 0 && station < 1 && positive(reach) && fade.isFinite && fade >= 0,
+                      "backwind upwash mast station must be 0..<1 of her length, its reach positive and its end fade not negative")
+        }
         try check(windShadow.backwind.fadeSeconds == nil || windShadow.header != nil, "a backwind fade needs a header")
         try check((windShadow.backwind.fadeSeconds ?? 0).isFinite && (windShadow.backwind.fadeSeconds ?? 0) >= 0,
                   "backwind fade must not be negative")
@@ -723,7 +782,14 @@ private struct BoatClassSchema2: Decodable {
                 },
                 backwindFadeSeconds: windShadow.backwind.fadeSeconds ?? 0,
                 backwindFloorSpeed: windShadow.backwind.floorKnots.map { metresPerSecond(knots: $0) },
-                backwindFloorSpan: metresPerSecond(knots: windShadow.backwind.floorBuildKnots ?? 0)
+                backwindFloorSpan: metresPerSecond(knots: windShadow.backwind.floorBuildKnots ?? 0),
+                backwindUpwash: windShadow.backwind.mastStationFromBow.flatMap { station in
+                    windShadow.backwind.upwashReachHullLengths.flatMap { reach in
+                        windShadow.backwind.upwashEndFadeHullLengths.map { fade in
+                            .init(mastFromBow: station * length, reach: reach * length, endFade: fade * length)
+                        }
+                    }
+                }
             ),
             contact: .init(boat: contact.boatSpeedFactor, mark: contact.markSpeedFactor),
             ease: .init(speedFraction: ease.speedFraction, timeConstant: ease.timeConstantSeconds)
