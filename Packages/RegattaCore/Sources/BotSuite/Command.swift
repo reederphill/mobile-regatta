@@ -28,7 +28,8 @@ public struct BotSuiteOptions: Hashable, Sendable {
           --seeds <n>            sail seeds 1...n instead of the matrix's
           --fleet-size <n>       sail only this fleet size (repeatable)
           --tier-mix <mix>       sail only this tier mix: club, regional, national, mixed (repeatable)
-          --profile-mix <mix>    sail only this profile mix: live, skillGap, funPass, hunters (repeatable)
+          --profile-mix <mix>    sail only this profile mix: live, skillGap, funPass, hunters, execution,
+                                 cautious, rivals, rankStability (repeatable)
           --laps <n>             laps per race instead of the matrix's
           --json <path|->        write the JSON report there (- for stdout)
         Exits 1 when the run misses the thresholds, 2 on a usage or setup error.

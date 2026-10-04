@@ -1,0 +1,60 @@
+# The bot-race quality gate (#19, #105): the full regatta-botsuite matrix (Packages/RegattaCore/Sources/BotSuite/
+# matrix.json) against thresholds.json, on the pinned Linux replay platform (scripts/linux-test.sh's IMAGE), where the
+# server runs. Its exit status is the gate: any threshold or tick-budget breach fails it. Never on a pull request: it
+# stays red on main until #389 tunes the placeholder thresholds (owner, 2026-10-04), and no merge waits on it. The tick
+# times on a hosted runner are noisy; the authoritative tick budget is the Bench workflow's on the reference server.
+name: Bot suite
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "Packages/RegattaCore/**"
+      - ".github/workflows/botsuite.yml"
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: botsuite-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  botsuite:
+    name: regatta-botsuite (${{ matrix.mix }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      image: swift:6.3.3-noble@sha256:8de8ea332a61e961ead4ef41029c2552b18e1a70dd5942d25ecf7d8de2eec5b5
+    strategy:
+      fail-fast: false
+      # One job per profile mix of the bundled matrix.json (keep in step with its profileMixes): each mix's summaries
+      # and gates read its own races alone, so the jobs together gate exactly what one run of the matrix would.
+      matrix:
+        mix: [live, skillGap, funPass, execution, cautious, rivals, rankStability]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build regatta-botsuite (release)
+        run: swift build -c release --package-path Packages/RegattaCore --product regatta-botsuite
+      - name: Bot suite and gate
+        shell: bash  # explicit, so the step runs with pipefail and a gate failure isn't hidden by tee
+        run: |
+          bin="$(swift build -c release --package-path Packages/RegattaCore --show-bin-path)"
+          "$bin/regatta-botsuite" --profile-mix "${{ matrix.mix }}" --json "botsuite-${{ matrix.mix }}.json" \
+            2>&1 | tee "botsuite-${{ matrix.mix }}.txt"
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          { echo "### ${{ matrix.mix }}"; echo '```'; cat "botsuite-${{ matrix.mix }}.txt" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: botsuite-${{ matrix.mix }}-${{ github.run_id }}
+          path: |
+            botsuite-${{ matrix.mix }}.json
+            botsuite-${{ matrix.mix }}.txt
+          if-no-files-found: warn

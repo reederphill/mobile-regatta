@@ -28,17 +28,96 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// one further along for each seed, as the fun pass's. Sailed only when named (`--profile-mix hunters`), never in
     /// the bundled matrix; its races stay out of the live tiers the thresholds gate (`BotSuiteReport.tiers`).
     case hunters
+    /// Execution against tactics (#222, #105): the executor (`BotProfile.executor`: the baseline's tactics, every roll
+    /// hit) and the tactician at Club-level execution (`BotProfile.tacticianClubExecution`: half her rolls miss) by turns,
+    /// as the skill gap's seats alternate. Sailed in all-National fleets only (`tierMix`): profiles take no tier, but
+    /// their skill, drawn in the tier's band, must clear the roll floor (`BotWeaknesses.rollSkillFloor`) to roll at all.
+    case execution
+    /// One cautious bot (CONTEXT.md **Cautious bot**, #104, `BotDriver.cautious`) among live bots of the cell's tier mix
+    /// (#105: "1 cautious + rest"): seat `seed % fleetSize`, rotating with the seed as `CautiousBotSuiteTests` rotates
+    /// it. Its races stay out of the live tiers the thresholds gate (`gatesLiveTiers`); `BotSuiteReport.cautious`
+    /// reports the cautious seats.
+    case cautious
+    /// Practice rivals (#235, #105): seat 0 stands in for the player, a bot at skill s, and the race's rivals
+    /// (`Rivals.seats`) sail at the same s; the rest are a Mixed fleet (`tierMix`). s cycles through `rivalSkills` with
+    /// the seed. Reported as `BotSuiteReport.rivals`, the rival pace band (`RivalLimits`).
+    case rivals
+    /// Rank stability (#105): every seat at a fixed skill (`rankSkills`, the centres of the tiers' bands, by turns,
+    /// one seat further along for each seed), so a fleet of a fixed mix of skills races over the seeds. Reported as
+    /// `BotSuiteReport.rank`: how well skill orders the finish (Spearman), and how far boats of one skill spread.
+    case rankStability
 
     /// The profile sailing `seat` in a race of `fleetSize` boats with race seed `seed`, or nil for a live bot. Only the
     /// hunters mix reads the fleet size, but every mix needs it: a seat of the fleet.
     public func profile(ofSeat seat: Int, seed: UInt64, fleetSize: Int) -> BotProfile? {
         precondition(fleetSize > 0 && (0..<fleetSize).contains(seat), "seat \(seat) of a fleet of \(fleetSize)")
         return switch self {
-        case .live: nil
+        case .live, .cautious, .rivals, .rankStability: nil
         case .skillGap: (seat + Int(seed % 2)).isMultiple(of: 2) ? .baseline : .tactician
         case .funPass: [BotProfile.baseline, .tactician, .blipTacker][(seat + Int(seed % 3)) % 3]
         case .hunters:
             ProfileMix.isHunterSeat(seat, seed: seed, fleetSize: fleetSize) ? .hunter : nil
+        case .execution: (seat + Int(seed % 2)).isMultiple(of: 2) ? .executor : .tacticianClubExecution
+        }
+    }
+
+    /// The seat the cautious bot sails in the cautious mix (#105), or none in another mix.
+    public func cautiousSeats(seed: UInt64, fleetSize: Int) -> Set<Int> {
+        self == .cautious ? [Int(seed % UInt64(fleetSize))] : []
+    }
+
+    /// The skills seats sail at in place of their tier mix's draw (`BotRaceHarness.run(_:cautiousSeats:seatSkills:)`):
+    /// the rivals mix's seat 0 and rivals, and every seat of the rank-stability mix; none in another mix.
+    public func seatSkills(seed: UInt64, fleetSize: Int) -> [Int: Double] {
+        switch self {
+        case .rivals:
+            let skill = ProfileMix.rivalSkill(seed: seed)
+            var skills = [0: skill]
+            for rival in ProfileMix.rivalSeats(seed: seed, fleetSize: fleetSize) { skills[rival] = skill }
+            return skills
+        case .rankStability:
+            return Dictionary(uniqueKeysWithValues: (0..<fleetSize).map { ($0, ProfileMix.rankSkill(ofSeat: $0, seed: seed)) })
+        default:
+            return [:]
+        }
+    }
+
+    /// The skills the rivals mix's player stand-in and her rivals sail at, by turns with the seed: #235's acceptance's.
+    public static let rivalSkills = [0.45, 0.7, 0.9]
+
+    static func rivalSkill(seed: UInt64) -> Double { rivalSkills[Int(seed % UInt64(rivalSkills.count))] }
+
+    /// The rivals mix's rivals of seat 0 (`Rivals.seats`, as the app picks them): drawn from the race seed among the
+    /// other seats.
+    static func rivalSeats(seed: UInt64, fleetSize: Int) -> Set<Int> {
+        fleetSize < 2 ? [] : Rivals.seats(raceSeed: RaceSeed(seed), botSeats: Array(1..<fleetSize))
+    }
+
+    /// The rank-stability mix's skills: the centre of each tier's band, Club to National.
+    public static var rankSkills: [Double] { BotTier.allCases.map { $0.skill(at: 0.5) } }
+
+    static func rankSkill(ofSeat seat: Int, seed: UInt64) -> Double {
+        let skills = rankSkills
+        return skills[(seat + Int(seed % UInt64(skills.count))) % skills.count]
+    }
+
+    /// Whether the live seats of the mix's races are the live tiers' the thresholds gate (`BotSuiteReport.tiers`): not
+    /// those racing hunters, a cautious bot, or at a skill set by the mix.
+    public var gatesLiveTiers: Bool {
+        switch self {
+        case .live, .skillGap, .funPass, .execution: true
+        case .hunters, .cautious, .rivals, .rankStability: false
+        }
+    }
+
+    /// The tier mix the mix is sailed in, of those the matrix names; nil for any the matrix names. A mix whose seats
+    /// take no tier from it (profiles, or skills it sets) would only repeat its races in each. A matrix without it
+    /// sails none of the mix's races (`--tier-mix club` leaves the execution mix out), rather than refuse.
+    public var tierMix: TierMix? {
+        switch self {
+        case .live, .skillGap, .funPass, .hunters, .cautious: nil
+        case .execution: .national
+        case .rivals, .rankStability: .mixed
         }
     }
 
@@ -53,10 +132,13 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// The fun pass's numbers (#221) are for an oscillating breeze: a matrix sails it in no other conditions.
     public var conditionsID: String? {
         switch self {
-        case .live, .skillGap, .hunters: nil
+        case .live, .skillGap, .hunters, .execution, .cautious, .rivals, .rankStability: nil
         case .funPass: "classic-oscillating"
         }
     }
+
+    /// Whether the mix is sailed in `tierMix` (`ProfileMix.tierMix`).
+    public func sails(in tierMix: TierMix) -> Bool { self.tierMix.map { $0 == tierMix } ?? true }
 
     /// Whether the mix is sailed in `conditions`, a data file named `id@version`.
     public func sails(in conditions: String) -> Bool {
@@ -158,7 +240,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                     tideStatesDegrees.flatMap { tide in
                         fleetSizes.flatMap { fleetSize in
                             tierMixes.flatMap { mix in
-                                profileMixes.filter { $0.sails(in: conditions) }.map { profiles in
+                                profileMixes.filter { $0.sails(in: conditions) && $0.sails(in: mix) }.map { profiles in
                                     BotRaceCell(seed: seed, venue: venue, conditions: conditions, tideStateDegrees: tide,
                                                 fleetSize: fleetSize, tierMix: mix, profileMix: profiles, laps: laps,
                                                 capSecondsAfterGun: capSecondsAfterGun)
@@ -200,6 +282,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
             guard let id = mix.conditionsID, !conditions.contains(where: mix.sails(in:)) else { continue }
             throw BotSuiteError.matrix("\(mix.rawValue) sails only in \(id) conditions, which the matrix doesn't name")
         }
+
     }
 
     public static func load(from url: URL) throws -> BotMatrix {
@@ -229,6 +312,10 @@ public struct BotRaceCell: Codable, Hashable, Sendable {
 
     /// The profile sailing `seat`, or nil for a live bot.
     public func profile(ofSeat seat: Int) -> BotProfile? { profileMix.profile(ofSeat: seat, seed: seed, fleetSize: fleetSize) }
+    /// The seats the cautious bot sails (`ProfileMix.cautiousSeats`).
+    public var cautiousSeats: Set<Int> { profileMix.cautiousSeats(seed: seed, fleetSize: fleetSize) }
+    /// The seats sailing at a skill the mix sets (`ProfileMix.seatSkills`).
+    public var seatSkills: [Int: Double] { profileMix.seatSkills(seed: seed, fleetSize: fleetSize) }
 }
 
 /// `id@version`, as the matrix and report name a data file.

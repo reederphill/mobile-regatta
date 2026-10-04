@@ -101,6 +101,9 @@ struct BotBrain: Sendable {
     /// What she plays beyond sailing the groove to the marks.
     let tactics: Tactics
     var plannedTack: Tack = .starboard
+    /// The tactician's spot on the start line as she reads its bias (#105, `Tactics.startsAtFavouredEnd`, `readLineBias`),
+    /// 0 the pin … 1 the committee boat; nil until she has read it, or for any other bot.
+    var favouredEndSpot: Double?
     var lastTackTime = -1_000.0
     /// When she last tapped: she lets a tap finish before another.
     var lastTapTime = -1_000.0
@@ -165,7 +168,7 @@ struct BotBrain: Sendable {
          caution: Caution? = nil) {
         self.style = style
         self.caution = caution
-        self.weaknesses = weaknesses ?? (profile == nil ? BotWeaknesses(skill: style.skill) : .none(skill: style.skill))
+        self.weaknesses = weaknesses ?? profile?.weaknesses(skill: style.skill) ?? BotWeaknesses(skill: style.skill)
         tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
         rng = SplitMix64(seed: seed, stream: Self.brainStream)
         tacticsRng = SplitMix64(seed: seed, stream: Self.tacticsStream)

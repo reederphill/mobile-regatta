@@ -20,11 +20,17 @@ import Testing
         // #231: the live bots the tiers gate, and the skill-gap scenario; #238: the fun pass, in classic
         // oscillating conditions only.
         // #355: the hunters mix is sailed only when named (`--profile-mix hunters`), never in the bundle.
+        // #105: execution, the cautious bot among live bots, rivals and rank stability join it.
         #expect(Set(matrix.profileMixes) == Set(ProfileMix.allCases).subtracting([.hunters]))
         #expect(!matrix.cells.contains { $0.profileMix == .hunters })
         #expect(!matrix.seeds.isEmpty && !matrix.tideStatesDegrees.isEmpty)
         let perConditions = matrix.seeds.count * matrix.tideStatesDegrees.count * 4 * TierMix.allCases.count
-        #expect(matrix.cells.count == perConditions * (4 * 2 + 1))
+        // Live, skill gap and cautious in every conditions and tier mix; the fun pass in one conditions; execution, rivals
+        // and rank stability in every conditions but one tier mix each (`ProfileMix.tierMix`).
+        let pinned = perConditions / TierMix.allCases.count
+        #expect(matrix.cells.count == perConditions * (4 * 3 + 1) + pinned * 4 * 3)
+        #expect(Set(matrix.cells.filter { $0.profileMix == .execution }.map(\.tierMix)) == [.national])
+        #expect(Set(matrix.cells.filter { $0.profileMix == .rankStability }.map(\.tierMix)) == [.mixed])
         #expect(Set(matrix.cells.filter { $0.profileMix == .funPass }.map(\.conditions)) == ["classic-oscillating@7"])
     }
 
