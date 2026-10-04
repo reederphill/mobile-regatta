@@ -24,6 +24,13 @@ extension FleetRoster {
     }
 }
 
+/// A practice rival's mark (#235, CONTEXT.md **Rival**): the short word beside her name in the briefing's fleet list
+/// and the results, after the bot glyph. Words only, never her skill.
+enum RivalMark {
+    // TODO-COPY (#171)
+    static let word = "Rival"
+}
+
 /// The data files a practice race is sailed on (ADR 0004): the bundled defaults, or the debug tuning panel's
 /// choice (#232), whose tuned copies (#229) resolve from `catalog` and are saved beside the race's log with
 /// `tunedFiles`' bytes so it replays. Two are equal when they name the same files.
@@ -70,6 +77,11 @@ struct RaceConfig: Equatable {
     /// The practice setup's bot tier (#131): every bot's skill drawn inside its band. Nil is a Mixed fleet, the bots
     /// drawn from all three tiers (`SeatControllers(setup:)`).
     var botTier: BotTier?
+    /// The practice rivals' skill (#235, CONTEXT.md **Rival**), set from your recent practice results
+    /// (`Rivals.skill(history:tier:)`): `rivalSeats` sail at it. Nil, no rivals: the first race, a fresh history, every
+    /// launch-argument race. Only seats are derived here, from the setup's race seed, so a re-pinned `seed` keeps them
+    /// consistent.
+    var rivalSkill: Double?
 
     init(opponents: Int = 7, laps: Int = RaceSetup.defaultLaps, prestartSeconds: Double = 60,
          seed: UInt64, windSeed: UInt64, botSailsYourBoat: Bool = false) {
@@ -114,11 +126,17 @@ struct RaceConfig: Equatable {
                 controllers[seat] = .bot(BotDriver(seat: seat, raceSeed: setup.raceSeed, tier: botTier))
             }
         }
+        for seat in rivalSeats {
+            controllers[seat] = .bot(BotDriver(seat: seat, raceSeed: setup.raceSeed, skill: rivalSkill ?? 0))
+        }
         if botSailsYourBoat { controllers[0] = .bot(BotDriver(seat: 0, raceSeed: RaceSeed(seed))) }
         return controllers
     }
 
-    var roster: FleetRoster { FleetRoster(setup: setup) }
+    /// The practice rivals' seats (#235): picked from the race seed among the bot seats, none without `rivalSkill`.
+    var rivalSeats: Set<Int> { rivalSkill == nil ? [] : Rivals.seats(setup: setup) }
+
+    var roster: FleetRoster { FleetRoster(setup: setup, rivals: rivalSeats) }
 
     /// The race the development launch arguments start (`-autostart`, `-demo`, `-perf`, `-briefing`): seven bots of a
     /// Mixed fleet, two laps, on the bundled defaults, with fresh seeds. Frozen apart from the practice setup, since UI

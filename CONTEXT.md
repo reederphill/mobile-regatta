@@ -134,7 +134,7 @@ A dropped player taking their boat back from the cautious bot. The boat keeps ev
 _Avoid_: resume (the server's word for the player rejoining), takeover (the bot taking the boat)
 
 **Rival**:
-One of the 1–2 bots in a practice race whose skill is set from the player's recent practice results, so the player usually finishes near them. A rival races like any other bot and never targets the player. Practice only.
+One of the 1–2 bots in a practice race whose skill is set from the player's recent practice results, so the player usually finishes near them. A rival races like any other bot and never targets the player. When the player picks a tier, a rival's skill stays inside that tier's band. The briefing's fleet list and the results mark a rival with the short word "Rival" beside her name (she keeps the bot glyph); never a number. Practice only, so never in a rated race.
 _Avoid_: nemesis; "rival" for just any nearby boat
 
 **Mixed fleet**:

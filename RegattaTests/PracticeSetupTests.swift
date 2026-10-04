@@ -217,3 +217,38 @@ import RegattaCore
         #expect(locked.listedDesigns.contains { $0.id == locked.design }, "the starter is listed")
     }
 }
+
+extension PracticeSetupTests {
+    /// #235: the setup's rivals' skill comes from your practice history, clamped to its tier's band (the Mixed union
+    /// for a Mixed fleet); none without a history. A config with a rival skill has two rivals among its bots, sailing
+    /// exactly that skill; one without has none and its bots are the setup's draw.
+    @Test func rivalSkillFromHistoryClampedToTheTier() throws {
+        var setup = PracticeSetup()
+        #expect(setup.rivalSkill(history: []) == nil)
+        let wins = (0..<5).map { _ in PracticeFinish(place: 1, fleetSize: 10, tier: nil) }
+        #expect(setup.rivalSkill(history: wins) == BotTier.mixedBand.upperBound)
+        setup.botTier = .club
+        #expect(setup.rivalSkill(history: wins) == BotTier.club.skillBand.upperBound)
+        let lasts = (0..<5).map { _ in PracticeFinish(place: 10, fleetSize: 10, tier: nil) }
+        setup.botTier = .national
+        #expect(setup.rivalSkill(history: lasts) == BotTier.national.skillBand.lowerBound)
+
+        let plain = setup.config(seed: 4, windSeed: 5)
+        #expect(plain.rivalSkill == nil && plain.rivalSeats.isEmpty && plain.roster.rivals.isEmpty)
+        let config = setup.config(seed: 4, windSeed: 5, rivalSkill: 0.85)
+        #expect(config.rivalSkill == 0.85)
+        #expect(config.rivalSeats.count == 2)
+        #expect(config.roster.rivals == config.rivalSeats)
+        let setupOfRace = config.setup
+        for seat in setupOfRace.seats.indices where setupOfRace.seats[seat] == .bot {
+            let style = config.seatControllers[seat].driver?.style
+            if config.rivalSeats.contains(seat) {
+                #expect(style == BotDriver(seat: seat, raceSeed: setupOfRace.raceSeed, skill: 0.85).style)
+            } else {
+                #expect(style == plain.seatControllers[seat].driver?.style)
+            }
+        }
+        #expect(options().raceConfig(from: setup, rivalSkill: 0.7).rivalSkill == 0.7)
+        #expect(options().raceConfig(from: setup).rivalSkill == nil)
+    }
+}

@@ -49,6 +49,11 @@ final class GameSession {
     @ObservationIgnored private var resultsTick: Int?
     /// Told once with the final results as the race closes (#132): the home screen's Last race.
     @ObservationIgnored var onResultsFinal: ((RaceResultViewModel) -> Void)?
+    /// The practice race's bot tier, nil a Mixed fleet: what your finish counts at in the practice history (#235).
+    @ObservationIgnored var practiceTier: BotTier?
+    /// A race from the practice setup (#235): your finish goes into the practice history. A launch argument's or an
+    /// online race doesn't.
+    @ObservationIgnored var recordsPracticeHistory = false
     /// The Ease button is held (#99, #112): the scene sends it with the rudder every frame.
     var isEasing = false
     /// The tiller's track and knob while a tiller drag is held (#112): the scene sets it, `RaceView` draws it.
@@ -393,7 +398,7 @@ final class GameSession {
         }
         let entrants = frame.boats.indices.map { seat in
             RaceResultViewModel.Entrant(name: roster.name(of: seat, playerSeat: me), isBot: roster[seat].isBot,
-                                        livery: liveries[seat])
+                                        livery: liveries[seat], isRival: roster[seat].isRival)
         }
         return RaceResultViewModel(results: closedResults, live: live, entrants: entrants, mySeat: me,
                                    incidents: driver.incidents, served: servedTurns)

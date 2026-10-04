@@ -93,15 +93,23 @@ struct PracticeSetup: Equatable, Sendable {
     }
 
     /// The practice race this setup starts on `seed` and `windSeed`: you and `fleetSize - 1` bots of `botTier` (or a
-    /// Mixed fleet), at the venue on its conditions, with the fixed laps and start sequence.
-    func config(seed: UInt64, windSeed: UInt64) -> RaceConfig {
+    /// Mixed fleet), at the venue on its conditions, with the fixed laps and start sequence. `rivalSkill` (#235,
+    /// `PracticeSetup.rivalSkill(history:)`) gives the race its rivals; nil, none.
+    func config(seed: UInt64, windSeed: UInt64, rivalSkill: Double? = nil) -> RaceConfig {
         let fleet = min(max(fleetSize, Self.fleetSizes.lowerBound), Self.fleetSizes.upperBound)
         var config = RaceConfig(opponents: fleet - 1, laps: Self.laps, prestartSeconds: Self.prestartSeconds,
                                 seed: seed, windSeed: windSeed)
         config.botTier = botTier
+        config.rivalSkill = rivalSkill
         config.files.venue = practiceVenue.ref
         config.files.conditions = conditionsOption(seed: seed).ref
         return config
+    }
+
+    /// The rivals' skill for a race on this setup from your practice `history` (#235): set from your recent results,
+    /// clamped to `botTier`'s band (or the Mixed union). Nil with no counted result: no rivals.
+    func rivalSkill(history: [PracticeFinish]) -> Double? {
+        Rivals.skill(history: history, tier: botTier)
     }
 }
 

@@ -4,13 +4,15 @@ import SwiftUI
 /// The results sheet as a render fixture (#62, #132): `{ "gallery": "results", "results": "live" }` shows a sample
 /// race's results while boats still sail, `"closed"` the same race's at its close, both with the Your race card, over
 /// the race's dark chrome. Like the race fixture (`RaceView`), it's one `render-fixture` element whose value is the
-/// bottom safe-area inset in points.
+/// bottom safe-area inset in points. A `"rivalSkill"` gives the sample race practice rivals (#235): "Rival" on
+/// their rows.
 struct ResultsGalleryView: View {
     let stage: RenderFixture.ResultsStage
+    var rivalSkill: Double? = nil
 
     var body: some View {
         GeometryReader { proxy in
-            ResultsView(model: RaceResultViewModel.gallerySample(final: stage == .closed),
+            ResultsView(model: RaceResultViewModel.gallerySample(final: stage == .closed, rivalSkill: rivalSkill),
                         buttons: .practice(home: {}, changeSetup: {}, sailAgain: {}))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ChromePalette.background.ignoresSafeArea())
@@ -28,14 +30,17 @@ extension RaceResultViewModel {
     /// A sample eight-boat practice race, you in seat 0, on fixed seeds (#132): three finishers (you second, +0:42),
     /// boats still sailing (by distance at the close), a DSQ and an OCS. Its incidents: a rule 10 call against you
     /// (penalty done), a rule 11 call in your favour (the other boat DSQ, so ⚑), a rule 31 mark touch of yours (done)
-    /// and your protest. `final` is the race at its close, else a moment before it.
-    static func gallerySample(final: Bool) -> RaceResultViewModel {
-        let config = RaceConfig(opponents: 7, seed: 7, windSeed: RaceConfig.windSeed(pinnedTo: 7))
+    /// and your protest. `final` is the race at its close, else a moment before it. `rivalSkill` gives it practice
+    /// rivals (#235).
+    static func gallerySample(final: Bool, rivalSkill: Double? = nil) -> RaceResultViewModel {
+        var config = RaceConfig(opponents: 7, seed: 7, windSeed: RaceConfig.windSeed(pinnedTo: 7))
+        config.rivalSkill = rivalSkill
         let setup = config.setup
         let roster = config.roster
         let liveries = FleetLiveries(setup: setup, mySeat: 0)
         let entrants = setup.seats.indices.map { seat in
-            Entrant(name: roster.name(of: seat, playerSeat: 0), isBot: roster[seat].isBot, livery: liveries[seat])
+            Entrant(name: roster.name(of: seat, playerSeat: 0), isBot: roster[seat].isBot, livery: liveries[seat],
+                    isRival: roster[seat].isRival)
         }
         let winner = 18_000
         let results = RaceResults(rows: [

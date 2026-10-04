@@ -116,8 +116,8 @@ struct RenderFixture: Codable, Equatable {
         /// The pause menu over the race's chrome (#131): `{ "gallery": "pauseMenu" }`.
         case pauseMenu
         /// The results sheet on a sample race (#132): `{ "gallery": "results", "results": "live" }` or `"closed"`
-        /// (`ResultsGalleryView`).
-        case results(ResultsStage)
+        /// (`ResultsGalleryView`), with practice rivals (#235) if the file gives a `"rivalSkill"`.
+        case results(ResultsStage, rivalSkill: Double? = nil)
         /// My boat on a fixed livery (#136): `{ "gallery": "myBoat", "myBoat": { … } }` (`MyBoatFixture`).
         case myBoat(MyBoatFixture)
         /// Help as pushed from home (#135): `{ "gallery": "help" }` its topics, `{ "gallery": "help", "help": "symbols" }`
@@ -165,7 +165,8 @@ struct RenderFixture: Codable, Equatable {
     ///       "mode": "practice" }
     ///
     /// `venue` and `conditions` are bundled files as `id@version`; the boat class and rules are the practice defaults.
-    /// `mode` is `practice` or `online` (an online briefing's countdown is frozen at its start).
+    /// `mode` is `practice` or `online` (an online briefing's countdown is frozen at its start). An optional
+    /// `rivalSkill` gives the race practice rivals (#235, `RaceConfig.rivalSkill`).
     struct BriefingFixture: Codable, Equatable {
         var raceSeed: UInt64
         var venue: String
@@ -173,6 +174,7 @@ struct RenderFixture: Codable, Equatable {
         var opponents: Int
         var laps: Int? = nil
         var mode: LaunchOptions.Briefing
+        var rivalSkill: Double? = nil
 
         enum FixtureError: Error, Equatable {
             case badRef(String)
@@ -186,6 +188,7 @@ struct RenderFixture: Codable, Equatable {
             let (conditionsID, conditionsVersion) = try Self.ref(conditions)
             config.files.venue = try VenueFile.bundled(id: venueID, version: venueVersion).ref
             config.files.conditions = try ConditionsFile.bundled(id: conditionsID, version: conditionsVersion).ref
+            config.rivalSkill = rivalSkill
             return config
         }
 
@@ -198,7 +201,7 @@ struct RenderFixture: Codable, Equatable {
             return BriefingModel(setup: setup, files: files, mySeat: 0,
                                  mode: mode == .online ? .online(seconds: BriefingModel.Mode.onlineSeconds) : .practice,
                                  liveries: FleetLiveries(setup: setup, mySeat: 0), menuMusic: SilentMenuMusic(),
-                                 now: { start })
+                                 rivals: config.rivalSeats, now: { start })
         }
 
         private static func ref(_ text: String) throws -> (String, Int) {
@@ -216,6 +219,8 @@ struct RenderFixture: Codable, Equatable {
         var gallery: Kind?
         var briefing: BriefingFixture?
         var results: ResultsStage?
+        /// A results gallery's practice rivals' skill (#235).
+        var rivalSkill: Double?
         var myBoat: MyBoatFixture?
         var help: HelpTopic?
     }
@@ -238,7 +243,7 @@ struct RenderFixture: Codable, Equatable {
             case .pauseMenu?: return .pauseMenu
             case .results?:
                 guard let stage = decoded.results else { throw GalleryError.resultsStageMissing }
-                return .results(stage)
+                return .results(stage, rivalSkill: decoded.rivalSkill)
             case .briefing?:
                 guard let briefing = decoded.briefing else { throw GalleryError.briefingMissing }
                 return .briefing(briefing)
