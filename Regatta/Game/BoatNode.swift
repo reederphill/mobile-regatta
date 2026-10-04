@@ -38,6 +38,14 @@ final class BoatNode: SKNode {
     private var ringTimer = RollRingTimer()
     private let rollWindow: Double?
     private let length: CGFloat
+    /// Her sailors (#120): each a buoyancy aid and a helmet, the helm first. None for a class without
+    /// (`CrewTable`).
+    private let sailors: [(aid: SKSpriteNode, helmet: SKSpriteNode)]
+    private var crewTimer = CrewTimer()
+    private let crewArt: CrewArt?
+    /// The hull's beam and length, metres, that the sailors are placed on.
+    private let hullBeam: Double
+    private let hullLength: Double
 
     /// The z's a boat's parts draw at, each boat a `DrawOrder` slot above the last by seat: in the fleet's layer
     /// every drop shadow under your glow, the glow under every hull, every hull under its outline and every
@@ -46,14 +54,18 @@ final class BoatNode: SKNode {
         static let fleet: CGFloat = 5, mine: CGFloat = 10
         static let heelShadow: CGFloat = 0, rightOfWayGlow: CGFloat = 0.05, glow: CGFloat = 0.1, hull: CGFloat = 0.2
         static let outline: CGFloat = 0.3, sail: CGFloat = 1
+        /// Her sailors (#120) over her hull and under her sail (so they duck under the boom): each a buoyancy
+        /// aid and its helmet over it, a z apart.
+        static let crew: CGFloat = 0.4, crewStep: CGFloat = 0.02
         static let ring: CGFloat = 2
     }
 
     /// `isMine` marks your boat (the driver's `myBoatIndex`): a soft white glow under her hull, and drawn on top.
     /// Every hull is the same size and every hull has the same outline. `style`'s baked-in art values (glow blur,
-    /// outline width, hatch) are drawn into the textures here.
+    /// outline width, hatch) are drawn into the textures here. `crewAid` is her sailors' buoyancy aids' tint (#120):
+    /// a neutral grey until #372's on-water livery may pass the livery's accent.
     init(boat: Boat, isMine: Bool, color: UIColor, boatClass: BoatClass, pointsPerMeter ppm: CGFloat,
-         style: BoatStyle = .standard) {
+         style: BoatStyle = .standard, crewAid: UIColor = CuePalette.crewAid.uiColor) {
         self.ppm = ppm
         beam = CGFloat(boatClass.hull.beam) * ppm
         seat = boat.id
@@ -98,6 +110,26 @@ final class BoatNode: SKNode {
         rollRing?.isHidden = true
         ring = rollRing
 
+        hullBeam = boatClass.hull.beam
+        hullLength = boatClass.hull.length
+        let sailorCount = CrewTable.sailors(in: boatClass)
+        let crewArt = sailorCount > 0 ? CrewArt.shared(pointsPerMeter: ppm) : nil
+        self.crewArt = crewArt
+        sailors = crewArt.map { art in
+            (0..<sailorCount).map { i in
+                let aid = SKSpriteNode(texture: art.aid)
+                aid.anchorPoint = CGPoint(x: 0, y: 0.5)
+                aid.color = crewAid
+                aid.colorBlendFactor = 1
+                aid.zPosition = Layer.crew + CGFloat(2 * i) * Layer.crewStep
+                let helmet = SKSpriteNode(texture: art.helmet)
+                helmet.color = CuePalette.crewHelmet.uiColor
+                helmet.colorBlendFactor = 1
+                helmet.zPosition = Layer.crew + CGFloat(2 * i + 1) * Layer.crewStep
+                return (aid, helmet)
+            }
+        } ?? []
+
         effects = BoatEffects(seat: boat.id, boatClass: boatClass, pointsPerMeter: ppm, style: style)
         fade.shouldEnableEffects = false
         fade.shouldRasterize = false
@@ -110,6 +142,10 @@ final class BoatNode: SKNode {
         hullGroup.addChild(hull)
         hullGroup.addChild(outline)
         body.addChild(hullGroup)
+        for sailor in sailors {
+            body.addChild(sailor.aid)
+            body.addChild(sailor.helmet)
+        }
         body.addChild(sail)
         fade.addChild(body)
         addChild(fade)
@@ -125,14 +161,15 @@ final class BoatNode: SKNode {
 
     /// Draws `boat` in `pose` at race time `time` (seconds; every flutter swings on it, never the wall clock).
     /// `settled` trims the sail straight to its target rather than easing it there (a frozen render fixture).
-    /// `wakeQuality` is the wake's tier (#127).
-    func update(with boat: Boat, pose: BoatPose, style: BoatStyle, wakeQuality: WakeQuality = .full, time: Double,
-                dt: Double, settled: Bool = false) {
+    /// `wakeQuality` is the wake's tier (#127), `crewDetail` her sailors' and sail's (#120, #127).
+    func update(with boat: Boat, pose: BoatPose, style: BoatStyle, wakeQuality: WakeQuality = .full,
+                crewDetail: CrewDetail = .full, time: Double, dt: Double, settled: Bool = false) {
         position = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
         body.zRotation = CGFloat(-boat.heading)
 
         updateHeel(pose, style: style)
-        let isFlogging = updateSail(pose, style: style, time: time, dt: dt, settled: settled)
+        updateCrew(boat, pose: pose, style: style, detail: crewDetail, time: time, settled: settled)
+        let isFlogging = updateSail(pose, style: style, detail: crewDetail, time: time, dt: dt, settled: settled)
         effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
                        settled: settled, isFlogging: isFlogging)
 
@@ -184,9 +221,51 @@ final class BoatNode: SKNode {
         heelShadow.alpha = heel * CGFloat(style.heelShadowAlpha)
     }
 
-    /// Returns whether a roll miss's flog is on (the wake dies with it, #222).
+    /// Her sailors (#120): from her sim state only (`CrewTarget`), over race time (`CrewTimer`); a frozen fixture
+    /// draws them settled. Hidden in the reduced tier, though her crew timer keeps time.
+    private func updateCrew(_ boat: Boat, pose: BoatPose, style: BoatStyle, detail: CrewDetail, time: Double,
+                            settled: Bool) {
+        guard let crewArt, !sailors.isEmpty else { return }
+        let target = CrewTarget(boat, pose: pose, style: style)
+        let crew = settled ? CrewTimer.settled(target, time: time, style: style)
+            : crewTimer.advance(target, time: time, style: style)
+        lastCrew = crew
+        let hidden = detail == .reduced
+        let placements = SailorPlacement.placements(crew, beam: hullBeam, length: hullLength, heel: pose.heel,
+                                                    style: style)
+        let bodyScale = CGFloat(style.crewBodyMetres / CrewArt.bodyMetres)
+        for (sailor, placement) in zip(sailors, placements) {
+            sailor.aid.isHidden = hidden
+            sailor.helmet.isHidden = hidden
+            guard !hidden else { continue }
+            let hip = CGPoint(x: CGFloat(placement.hip.x) * ppm, y: CGFloat(placement.hip.y) * ppm)
+            let facing = CGFloat(placement.facing)
+            let reach = CGFloat(placement.reach) * bodyScale
+            sailor.aid.position = hip
+            sailor.aid.xScale = facing * reach
+            // The helmet at her body's end, its rim just over her shoulders.
+            let shoulders = crewArt.bodyLength * reach - crewArt.helmetRadius * 0.6
+            sailor.helmet.position = CGPoint(x: hip.x + facing * max(shoulders, 0), y: hip.y)
+        }
+    }
+
+    /// The crew last drawn (#120), for tests; nil for a class with no sailors or before the first frame.
+    private(set) var lastCrew: CrewPose?
+    /// Whether her sailors are drawn (#120): none in the reduced tier or for a class without.
+    var sailorsShown: Bool { sailors.contains { !$0.aid.isHidden } }
+    /// Her sailors' sprites, aid then helmet each, for tests: the textures are shared across the fleet.
+    var sailorSprites: [SKSpriteNode] { sailors.flatMap { [$0.aid, $0.helmet] } }
+    /// What heel and trim draw (#127's reduced tier keeps them): the hull's narrowing, the drop shadow's offset
+    /// and alpha, and the sail's angle, for tests.
+    var heelAndBoom: (hullXScale: CGFloat, shadow: CGPoint, shadowAlpha: CGFloat, sail: CGFloat, sailSide: CGFloat) {
+        (hullGroup.xScale, heelShadow.position, heelShadow.alpha, sailAngle, sail.xScale < 0 ? -1 : 1)
+    }
+
+    /// Returns whether a roll miss's flog is on (the wake dies with it, #222). The reduced tier (#127) stills the
+    /// sail: no flutter, flap, luff shiver or flog swing, its side and trim kept.
     @discardableResult
-    private func updateSail(_ pose: BoatPose, style: BoatStyle, time: Double, dt: Double, settled: Bool) -> Bool {
+    private func updateSail(_ pose: BoatPose, style: BoatStyle, detail: CrewDetail = .full, time: Double, dt: Double,
+                            settled: Bool) -> Bool {
         // The sail sits on the boom side, to leeward except by the lee, eased out as far as the pose says.
         let side: CGFloat = pose.sailSide == .port ? -1 : 1
         let target = CGFloat(pose.sailTrim) * side
@@ -206,7 +285,12 @@ final class BoatNode: SKNode {
             flap = 1
         }
         // Pinched (#219): the leading edge lifts, a small quick shiver at the luff on top of any flutter.
-        let luff = sin(time * 37 + flutterPhase) * deg2rad(style.pinchLuffDegrees) * pose.luffLift
+        var luff = sin(time * 37 + flutterPhase) * deg2rad(style.pinchLuffDegrees) * pose.luffLift
+        if detail == .reduced {
+            amplitude = 0
+            flap = 0
+            luff = 0
+        }
         sail.zRotation = sailAngle + CGFloat(swing * amplitude + luff)
         // A flapping sail loses its belly; a ghost's hangs limp. Pinched it flattens, footed it fills (#219).
         let belly = pose.isGhost
@@ -377,6 +461,60 @@ struct BoatArt {
         }
         let anchor = CGPoint(x: -bounds.minX / bounds.width, y: -bounds.minY / bounds.height)
         return (texture, anchor)
+    }
+}
+
+/// The sailors' textures (#120), drawn in white with a dark rim so each sprite is tinted and still reads on a pale
+/// hull or on the water: a buoyancy aid (a body lying flat out on the wire, from the hips along +x, scaled at use)
+/// and a helmet. One pair per scale, shared by the whole fleet; nothing is rebuilt as she sails.
+struct CrewArt {
+    /// The body the aid's texture is drawn for, metres: `BoatStyle.crewBodyMetres` scales it at use.
+    static let bodyMetres = 1.4
+    static let widthMetres = 0.42
+    static let helmetMetres = 0.32
+
+    let aid: SKTexture
+    let helmet: SKTexture
+    /// The aid's length and the helmet's radius, points.
+    let bodyLength: CGFloat
+    let helmetRadius: CGFloat
+
+    private static var cache: [CGFloat: CrewArt] = [:]
+
+    static func shared(pointsPerMeter ppm: CGFloat) -> CrewArt {
+        if let art = cache[ppm] { return art }
+        let art = CrewArt(ppm: ppm)
+        cache[ppm] = art
+        return art
+    }
+
+    private init(ppm: CGFloat) {
+        let length = CGFloat(Self.bodyMetres) * ppm, width = CGFloat(Self.widthMetres) * ppm
+        let radius = CGFloat(Self.helmetMetres) * ppm / 2
+        bodyLength = length
+        helmetRadius = radius
+        let rim = UIColor(white: 0.12, alpha: 1).cgColor
+        let rimWidth: CGFloat = 0.5
+        let body = CGRect(x: 0, y: -width / 2, width: length, height: width).insetBy(dx: rimWidth / 2, dy: rimWidth / 2)
+        aid = SpriteArt.texture(bounds: CGRect(x: 0, y: -width / 2, width: length, height: width), scale: 3) { cg in
+            let path = CGPath(roundedRect: body, cornerWidth: width * 0.45, cornerHeight: width * 0.45, transform: nil)
+            cg.addPath(path)
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.fillPath()
+            cg.addPath(path)
+            cg.setStrokeColor(rim)
+            cg.setLineWidth(rimWidth)
+            cg.strokePath()
+        }
+        let disc = CGRect(x: -radius, y: -radius, width: radius * 2, height: radius * 2)
+        helmet = SpriteArt.texture(bounds: disc, scale: 3) { cg in
+            let inner = disc.insetBy(dx: rimWidth / 2, dy: rimWidth / 2)
+            cg.setFillColor(UIColor.white.cgColor)
+            cg.fillEllipse(in: inner)
+            cg.setStrokeColor(rim)
+            cg.setLineWidth(rimWidth)
+            cg.strokeEllipse(in: inner)
+        }
     }
 }
 

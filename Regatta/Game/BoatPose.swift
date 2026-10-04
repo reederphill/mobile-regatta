@@ -40,6 +40,8 @@ nonisolated struct BoatPose: Equatable, Sendable {
     /// leeward (`leeSide`).
     var heel: Double
     var isGhost: Bool
+    /// Whether her sheets are let out (her held ease): her sailors (#120) sit in.
+    var isEased = false
     /// Pinched (#219), 0 to 1: how far her sail's leading edge lifts. 0 on the groove, footing or hand steering.
     var luffLift = 0.0
     /// The sail's belly, 1 for its base shape: flatter pinched, fuller footed (#219). Footed, `sailTrim` is
@@ -54,6 +56,7 @@ nonisolated struct BoatPose: Equatable, Sendable {
         sailSide = boat.boomSide
         leeSide = BoomSide.leeward(ofRelativeWind: boat.relativeWind)
         self.isGhost = isGhost
+        isEased = ease
         guard !isGhost else {
             // Limp, amidships: she isn't sailing any more.
             sailTrim = 0
@@ -332,6 +335,32 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var penaltyArcRadiusHulls = 0.9
     var penaltyArcWidth = 4.0
 
+    // MARK: Sailors (#120)
+
+    /// The power that puts the skiff's two sailors out on the wire, and below which they come back in: her heel, or
+    /// `crewPlaningPower` on the plane (heel alone is nothing dead downwind), 0 to 1. Apart, so they don't flicker.
+    var crewOutPower = 0.2
+    var crewInPower = 0.12
+    /// At this power they are full out on the wire; less, part out.
+    var crewFullPower = 0.5
+    /// What planing counts as, so a planing skiff's crew stays out on a run.
+    var crewPlaningPower = 0.6
+    /// A tack's crossing, race seconds from the boom crossing; a gybe ducks under the boom first, then crosses.
+    var crewCrossSeconds = 0.9
+    var crewDuckSeconds = 0.5
+    /// The crew moves this share of a crossing after the helm.
+    var crewStagger = 0.3
+    /// Sitting in: how far out to her side they sit, a share of her half beam, and how far they lean out, a
+    /// share of a body lying flat out on the wire. Ducking and crossing, they crouch to `crewDuckReach`.
+    var crewSitShare = 0.7
+    var crewSitReach = 0.4
+    var crewDuckReach = 0.25
+    /// A sailor's body lying out on the wire, metres from the rail to the top of the helmet.
+    var crewBodyMetres = 1.4
+    /// Where the helm and the crew stand, hull lengths forward of her centre (aft is negative).
+    var crewHelmFore = -0.3
+    var crewForwardFore = -0.1
+
     /// The shipped placeholders.
     static let standard = BoatStyle()
 }
@@ -377,6 +406,11 @@ nonisolated extension BoatStyle {
             (.rightOfWayGlowBlur, \.rightOfWayGlowBlur),
             (.ruleCallLineSeconds, \.ruleCallLineSeconds), (.ruleCallFadeSeconds, \.ruleCallFadeSeconds),
             (.penaltyArcRadiusHulls, \.penaltyArcRadiusHulls), (.penaltyArcWidth, \.penaltyArcWidth),
+            (.crewOutPower, \.crewOutPower), (.crewInPower, \.crewInPower), (.crewFullPower, \.crewFullPower),
+            (.crewPlaningPower, \.crewPlaningPower), (.crewCrossSeconds, \.crewCrossSeconds),
+            (.crewDuckSeconds, \.crewDuckSeconds), (.crewStagger, \.crewStagger), (.crewSitShare, \.crewSitShare),
+            (.crewSitReach, \.crewSitReach), (.crewDuckReach, \.crewDuckReach), (.crewBodyMetres, \.crewBodyMetres),
+            (.crewHelmFore, \.crewHelmFore), (.crewForwardFore, \.crewForwardFore),
         ]
         for (key, path) in fields {
             if let value = try c.decodeIfPresent(Double.self, forKey: key) { style[keyPath: path] = value }

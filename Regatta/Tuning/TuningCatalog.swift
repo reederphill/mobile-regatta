@@ -306,7 +306,7 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "boat", title: "Boat",
-                note: "How boats heel, flutter and flog, their wakes and shadow hatches, and the boat-side cues and rule cues (#117, #121, #122, #123, #220, #222). Drawn only: never logged.",
+                note: "How boats heel, flutter and flog, their sailors, their wakes and shadow hatches, and the boat-side cues and rule cues (#117, #120, #121, #122, #123, #220, #222). Drawn only: never logged.",
                 applies: .live,
                 sliders: [
                     // Past 1 still counts: heel is capped at 1 after the gain, so more heels her sooner and
@@ -320,6 +320,12 @@ enum TuningCatalog {
                     boat("rollRingHulls", "Roll ring size", \.rollRingHulls, 0.5...3, 0.1, unit: " hulls"),
                     boat("rollRingSeconds", "Roll result shows", \.rollRingSeconds, 0.2...2, 0.1, unit: " s"),
                     boat("ghostAlpha", "Ghost fade", \.ghostAlpha, 0.1...0.9, 0.05),
+                    // #120: the skiff's sailors, out on the wire when powered (fun before realism).
+                    boat("crewOutPower", "Crew out at", \.crewOutPower, 0...1, 0.02),
+                    boat("crewInPower", "Crew in below", \.crewInPower, 0...1, 0.02),
+                    boat("crewPlaningPower", "Crew power planing", \.crewPlaningPower, 0...1, 0.05),
+                    boat("crewCrossSeconds", "Crew crossing", \.crewCrossSeconds, 0.2...3, 0.1, unit: " s"),
+                    boat("crewDuckSeconds", "Gybe duck", \.crewDuckSeconds, 0...2, 0.1, unit: " s"),
                     // #121: wakes, cones and backwind.
                     boat("wakeMaxHulls", "Wake length", \.wakeMaxHulls, 0...10, 0.25, unit: " hulls"),
                     boat("wakeTrailSeconds", "Wake string length", \.wakeTrailSeconds, 0.5...8, 0.1, unit: " s"),

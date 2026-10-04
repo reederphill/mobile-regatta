@@ -64,6 +64,8 @@ final class GameScene: SKScene {
     }
     /// The wakes' tier: the thermal ladder's (#127) seam. Every tier's wake is speed-scaled.
     var wakeQuality = WakeQuality.full
+    /// The sailors' and sails' tier (#120): #127's far-boat seam. `reduced` draws no sailors and a still sail.
+    var crewDetail = CrewDetail.full
 
     /// Whether SpriteKit draws the world and the camera's nodes: `-hideScene` turns it off for a UI test that only
     /// waits for the results (#361), so a GPU-less CI runner rasterises nothing while `render(_:)` still moves every
@@ -288,8 +290,8 @@ final class GameScene: SKScene {
         for (i, boat) in world.boats.enumerated() {
             let pose = BoatPose(boat, ease: world.ease(ofSeat: i), isGhost: world.isGhost(ofSeat: i),
                                 boatClass: world.boatClass, style: boatStyle, autohelm: world.autohelm(ofSeat: i))
-            boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality, time: world.time,
-                                dt: dt, settled: settled)
+            boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality,
+                                crewDetail: crewDetail, time: world.time, dt: dt, settled: settled)
         }
         coneLayer.update(style: boatStyle)
 
