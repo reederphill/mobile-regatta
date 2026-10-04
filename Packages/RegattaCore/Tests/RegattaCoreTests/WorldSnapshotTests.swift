@@ -418,6 +418,7 @@ struct LogFeeder {
         "shadowSettings": "Debug practice setting, not race data; in no log, snapshot or digest (ADR 0004 caveat)",
         "wake": "derived ribbon points; a restored race regrows them, importSnapshot clears them",
         "headerState": "derived header lag; importSnapshot resets it",
+        "backwindSails": "derived backwind level and cast side; importSnapshot clears it",
     ]
 
     /// The start state (#85) travels in the snapshot: OCS and started are the boat's status, and returning
