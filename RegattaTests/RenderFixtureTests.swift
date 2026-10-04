@@ -126,7 +126,8 @@ import UIKit
         }
     }
 
-    /// The rule-cue fixtures (#123) through every filter: `rules-call` draws two rule-call lines, the arc counting
+    /// The rule-cue fixtures (#123) through every filter, on `rules.racelog.json` (the bot race the fleet fixtures sailed
+    /// until #377, whose prestart still replays to these calls): `rules-call` draws two rule-call lines, the arc counting
     /// your started turn's complete deadline and glows; `rules-penalty` your unstarted turn's arc, both glows and
     /// the HUD's live Turn notice. Every older fixture draws no rule cue, so its reference doesn't move.
     @Test func ruleFixturesShowTheRuleCues() throws {
@@ -150,7 +151,7 @@ import UIKit
         #expect(call.scene.shownGlows.contains { $0?.kind == .giveWay })
         #expect(!call.showsFixtureHUD, "no HUD in this fixture")
         let calls = call.ruleCalls.active(at: call.driver.currentFrame.time, seconds: 8, fadeSeconds: 1.5)
-        #expect(calls.map(\.badge) == ["11", "10"])
+        #expect(calls.map(\.badge) == ["16.1", "10"])
 
         let penalty = try session("rules-penalty")
         #expect(penalty.scene.ruleCueSummary.hasSuffix("lines=1 arc=1"), "\(penalty.scene.ruleCueSummary)")
@@ -181,7 +182,7 @@ import UIKit
             }
         }
         // The log's own seat, 4th of 6 at the tick: the leader, a skip, the boat ahead, you and the boat behind.
-        #expect(lines == ["1:Leader", "sep", "3:+6 m", "4:+10 m*", "5:+32 m"])
+        #expect(lines == ["1:Leader", "sep", "3:+76 m", "4:+84 m*", "5:+88 m"])
 
         for vision in VisionFilter.allCases where vision != .none {
             let (fixture, _) = try RenderFixture.load(named: "hud-leaderboard-\(vision.rawValue)", in: Self.fixtures)
@@ -246,7 +247,8 @@ import UIKit
         }
     }
 
-    /// The fleet fixture (#117) is a bot race recorded on skiff@4 (the default class when it was recorded; a log replays
+    /// The fleet fixture (#117) is a bot race recorded on skiff@4 (re-recorded on seed 8 for #377: the ribbons' shadow left
+    /// the old log's replayed inputs in a wreck; skiff@4 still, the default class when it was first recorded; a log replays
     /// on the class it names, so it stays skiff@4 when the default moves on), frozen after the first finish and before the
     /// close, with a ghost and at least three racing boats in the boat camera's view; its five twins are the same
     /// frame through each other filter.

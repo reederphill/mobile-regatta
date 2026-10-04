@@ -4,11 +4,13 @@ import XCTest
 /// Change setup returns to the practice setup; home's Last race reopens the results until the next race ends.
 /// CI only, like every UI test.
 final class ResultsUITests: RaceUITestCase {
-    /// `-demo` sails your boat. On seed 2 at one lap it finishes at tick 8,279 and the race closes at tick 10,267
-    /// (measured headless): 1,988 ticks after your finish. `-timescale 8` holds the race to at most 240 ticks/s, so the
-    /// close comes at least 8 s of wall-clock time after your finish and the 3 s delay is the sheet's, not the close's.
+    /// `-demo` sails your boat. On seed 13 at one lap it finishes at tick 7,939 and the race closes at tick 10,925
+    /// (measured headless, simulation revision 32): 2,986 ticks after your finish. (Seed 2's fleet all finished 270
+    /// ticks after you from #377 on, so its clock stopped under the sheet.) `-timescale 8` holds the race to at most
+    /// 240 ticks/s, so the close comes at least 12 s of wall-clock time after your finish and the 3 s delay is the
+    /// sheet's, not the close's.
     @MainActor func testSheetAppearsAbout3sAfterFinishWhileSceneRenders() throws {
-        let app = launchRace(["-demo", "-seed", "2", "-laps", "1", "-timescale", "8"])
+        let app = launchRace(["-demo", "-seed", "13", "-laps", "1", "-timescale", "8"])
         let status = app.staticTexts["race-status"]
         let finished = watch(status, every: 0.5, until: .now.addingTimeInterval(200)) { $0.label.hasPrefix("Finished") }
         XCTAssertTrue(finished.seen, "your boat never finished: \(finished.last?.label ?? "no status")")
