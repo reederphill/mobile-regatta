@@ -117,7 +117,7 @@ import Testing
         #expect(layer.visibleCount == 2)
         let strip = layer.sprites[0]
         #expect(strip.texture === TurbulenceTrailLayer.strip && strip.shader === TurbulenceTrailLayer.shimmer)
-        #expect(abs(Double(strip.alpha) - BoatStyle.standard.coneAlpha) < 1e-6)
+        #expect(abs(TurbulenceTrailLayer.paint(of: strip).alpha - BoatStyle.standard.coneAlpha) < 1e-6 && strip.alpha == 1)
         #expect(abs(strip.zPosition - BoatEffects.Layer.ribbons) < 1e-6, "the pool's first slot")
         let grid = try #require(strip.warpGeometry as? SKWarpGeometryGrid)
         let sub = TurbulenceTrailLayer.subColumns + 1, feather = TurbulenceTrailLayer.featherSteps.count
@@ -143,7 +143,7 @@ import Testing
         #expect(near(point(columns - 1), 80, 0) && grid.sourcePosition(at: columns - 1).x == 0)
         let disc = layer.sprites[1]
         #expect(disc.warpGeometry == nil && disc.texture === TurbulenceTrailLayer.disc)
-        #expect(abs(Double(disc.alpha) - BoatStyle.standard.coneAlpha * 0.5) < 1e-6)
+        #expect(abs(TurbulenceTrailLayer.paint(of: disc).alpha - BoatStyle.standard.coneAlpha * 0.5) < 1e-6)
         // Fewer runs: the pool stays, the rest hide.
         layer.update(runs: [run], peak: peak, style: .standard)
         #expect(layer.sprites.count == 2 && layer.visibleCount == 1)
@@ -159,10 +159,10 @@ import Testing
         let layer = TurbulenceTrailLayer(pointsPerMeter: 8)
         layer.update(runs: [a, b, lone], casters: [0, 5, 5], peak: 0.4, style: .standard)
         #expect(layer.visibleCount == 3)
-        let seeds = try layer.sprites.prefix(3).map { try #require($0.value(forAttributeNamed: "a_seed")).floatValue }
+        let seeds = layer.sprites.filter { !$0.isHidden }.map { TurbulenceTrailLayer.paint(of: $0).seed }
         #expect(seeds == [0, 5, 5])
         layer.update(runs: [b], peak: 0.4, style: .standard)
-        #expect(try #require(layer.sprites[0].value(forAttributeNamed: "a_seed")).floatValue == 0)
+        #expect(TurbulenceTrailLayer.paint(of: layer.sprites[0]).seed == 0)
     }
 
     /// The shimmer's frame (`pixelFrame`, `setView`) puts a world point where the nodes draw it, through a camera
@@ -256,6 +256,92 @@ import Testing
             print("shimmer frame at \(local): node \(node), shader \(shader)")
             #expect(hypot(node.x - shader.x, node.y - shader.y) < 1, "\(local): node \(node), shader \(shader)")
         }
+    }
+
+    /// A fleet's ribbons draw through Metal (`SKRenderer`, like the screen): many long strips and discs, changing
+    /// frame to frame, in one batch. The app crashed in a race copying a per-sprite shader attribute (the seed) for
+    /// the warped strips (#377's first CI run: `SKAttributeValue copyValueTo` in SpriteKit's batching; it didn't
+    /// reproduce here), so each caster's seed rides on the sprite's colour instead (`paint`): the same strip drawn for
+    /// another caster draws other flecks.
+    @Test func fleetRibbonsRenderThroughMetal() async throws {
+        let device = try #require(MTLCreateSystemDefaultDevice())
+        let queue = try #require(device.makeCommandQueue())
+        let ppm: CGFloat = 8
+        let scene = SKScene(size: CGSize(width: 200, height: 200))
+        scene.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        scene.backgroundColor = .clear
+        let layer = TurbulenceTrailLayer(pointsPerMeter: ppm)
+        scene.addChild(layer)
+        let renderer = SKRenderer(device: device)
+        renderer.scene = scene
+        func live(_ x: Double, _ y: Double, _ strength: Double) -> R.Live {
+            R.Live(position: Vec2(x, y), strength: strength, scale: 1.5)
+        }
+        // 16 casters, each long wavy strips (their lengths changing frame to frame) and discs, all over the view; the
+        // mix of strips and discs changes every frame.
+        func fleet(_ frame: Int) -> (runs: [[R.Live]], casters: [Int]) {
+            let shift = Double(frame) * 0.1
+            var runs: [[R.Live]] = [], casters: [Int] = []
+            for c in 0..<16 {
+                for k in 0..<(1 + (c + frame) % 3) {
+                    let y = Double(c) * 1.5 - 12 + Double(k) * 0.7
+                    let count = (c + k + frame) % 4 == 0 ? 1 : 10 + (7 * c + 13 * k + frame) % 110
+                    runs.append((0..<count).map { i in
+                        live(Double(i) * 0.3 - 15 + shift, y + sin(Double(i) * 0.4 + shift),
+                             0.1 + 0.3 * Double(i) / Double(max(1, count - 1)))
+                    })
+                    casters.append(c)
+                }
+                runs.append([live(Double(c) - 8, 10, 0.4)])
+                casters.append(c)
+            }
+            return (runs, casters)
+        }
+        // The pixels drawn; nil when nothing does (the shader compiles in the background).
+        func render() throws -> [UInt8]? {
+            renderer.update(atTime: CACurrentMediaTime())
+            TurbulenceTrailLayer.setView(pixel: { x, y in Vec2((x - 100) / Double(ppm), (100 - y) / Double(ppm)) },
+                                         time: 3)
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: 200, height: 200,
+                                                                      mipmapped: false)
+            descriptor.usage = [.renderTarget, .shaderRead]
+            descriptor.storageMode = .shared
+            let texture = try #require(device.makeTexture(descriptor: descriptor))
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = texture
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+            pass.colorAttachments[0].storeAction = .store
+            let buffer = try #require(queue.makeCommandBuffer())
+            renderer.render(withViewport: CGRect(x: 0, y: 0, width: 200, height: 200), commandBuffer: buffer,
+                            renderPassDescriptor: pass)
+            buffer.commit()
+            buffer.waitUntilCompleted()
+            var pixels = [UInt8](repeating: 0, count: 200 * 200 * 4)
+            texture.getBytes(&pixels, bytesPerRow: 200 * 4, from: MTLRegionMake2D(0, 0, 200, 200), mipmapLevel: 0)
+            return pixels.contains { $0 > 0 } ? pixels : nil
+        }
+        func renderWhenReady() async throws -> [UInt8] {
+            for _ in 0..<200 {
+                if let pixels = try render() { return pixels }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            return try #require(nil as [UInt8]?, "nothing drew")
+        }
+        let peak = 0.4
+        for frame in 0..<120 {
+            let f = fleet(frame)
+            layer.update(runs: f.runs, casters: f.casters, peak: peak, style: .standard)
+            _ = try await renderWhenReady()
+        }
+        // One strip, drawn for caster 0 and then for caster 5: the same envelope, other flecks.
+        let strip = (0..<20).map { i in live(Double(i) - 10, 0, peak) }
+        layer.update(runs: [strip], casters: [0], peak: peak, style: .standard)
+        let a = try await renderWhenReady()
+        layer.update(runs: [strip], casters: [5], peak: peak, style: .standard)
+        let b = try await renderWhenReady()
+        let differing = zip(a, b).filter { abs(Int($0) - Int($1)) > 8 }.count
+        #expect(differing > 100, "\(differing) bytes differ between casters' flecks")
     }
 
     /// The backwind stripes show what the sim does (#377): a boat's stripes' alpha is her backwind level

@@ -108,7 +108,7 @@ import Testing
         #expect(layer.visibleCount == showing.count)
         let drawn = layer.sprites.filter { !$0.isHidden }
         #expect(drawn.allSatisfy { $0.shader === TurbulenceTrailLayer.shimmer })
-        #expect(drawn.allSatisfy { Double($0.alpha) <= BoatStyle.standard.coneAlpha + 1e-6 })
+        #expect(drawn.allSatisfy { TurbulenceTrailLayer.paint(of: $0).alpha <= BoatStyle.standard.coneAlpha + 1e-6 })
         #expect(BoatStyle.standard.coneAlpha <= 0.4, "faint (#15), though seen: it is only this strong at a ribbon's peak")
     }
 

@@ -79,7 +79,7 @@ final class TurbulenceTrailLayer: SKNode {
     /// as falling rain (owner, #376 A), so each fleck circles in place at its own rate and way round, and the ripples
     /// pulse where they are. Many fragments near the base, a few bright. A fleck sits jittered in its cell and is round
     /// on screen: its distance is in pixels
-    /// (the frame is conformal, `u_mpp` metres a pixel). Each caster's sprites carry their own seed (`a_seed`): it
+    /// (the frame is conformal, `u_mpp` metres a pixel). Each caster's sprites carry their own seed (`seed`): it
     /// shifts her fleck lattice, their hashes and her ripples' phase, so where boats' ribbons overlap their flecks are
     /// independent, not one pattern twinkling in step (owner, #376 A). Cell indices wrap (264) before an arithmetic hash
     /// (Hoskins' `hash12`), so no lattice shows far from the origin; the twinkle's time is race time (`u_clock`), wrapped
@@ -92,11 +92,14 @@ final class TurbulenceTrailLayer: SKNode {
             return fract((p3.x + p3.y) * p3.z);
         }
         void main() {
-            float envelope = texture2D(u_texture, v_tex_coord).a * v_color_mix.a;
+            // The sprite's colour carries its alpha (red) and its caster's seed (green × 255, over the inherited
+            // alpha): see `paint`.
+            float envelope = texture2D(u_texture, v_tex_coord).a * v_color_mix.r;
+            float seed = floor(v_color_mix.g / max(v_color_mix.a, 0.001) * 255.0 + 0.5);
             float t = u_clock;
             vec2 m = u_origin + u_dx * gl_FragCoord.x + u_dy * gl_FragCoord.y;
-            vec2 q = m * 2.2 + fract(a_seed * vec2(0.618034, 0.754878));
-            vec2 cell = mod(floor(q), 264.0) + a_seed * vec2(113.0, 71.0);
+            vec2 q = m * 2.2 + fract(seed * vec2(0.618034, 0.754878));
+            vec2 cell = mod(floor(q), 264.0) + seed * vec2(113.0, 71.0);
             float h = trailHash(cell);
             vec2 centre = 0.5 + 0.5 * (vec2(trailHash(cell + vec2(17.0, 3.0)), trailHash(cell + vec2(5.0, 29.0))) - 0.5);
             float turn = t * (trailHash(cell + vec2(11.0, 7.0)) - 0.5) * 6.0 + h * 40.0;
@@ -105,17 +108,34 @@ final class TurbulenceTrailLayer: SKNode {
             float twinkle = 0.5 + 0.5 * sin(t * (4.0 + 8.0 * h) + h * 40.0);
             float fleck = smoothstep(4.0, 1.0, d) * pow(twinkle, 4.0) * step(0.55, h);
             vec2 k = m * 0.0523598776;
-            float wave = sin(k.x * 59.0 + k.y * 32.0 + a_seed * 2.4) * sin(k.y * 82.0 - k.x * 21.0 + a_seed * 1.3)
-                * sin(u_phase.x + a_seed * 0.9);
+            float wave = sin(k.x * 59.0 + k.y * 32.0 + seed * 2.4) * sin(k.y * 82.0 - k.x * 21.0 + seed * 1.3)
+                * sin(u_phase.x + seed * 0.9);
             float ripple = pow(max(wave, 0.0), 6.0);
             float a = envelope * (0.22 + 1.5 * max(fleck, 0.5 * ripple));
             gl_FragColor = vec4(a, a, a, a);
         }
         """
-        let shader = SKShader(source: source, uniforms: frameUniforms)
-        shader.attributes = [SKAttribute(name: "a_seed", type: .float)]
-        return shader
+        return SKShader(source: source, uniforms: frameUniforms)
     }()
+
+    /// Seeds wrap at this: the colour's 8 bits.
+    static let seeds = 256
+
+    /// Sets a sprite's alpha and its caster's fleck seed, both on its colour (the node's own alpha stays 1): red is the
+    /// alpha, green the seed / 255. Not a shader attribute: the app crashed in a race in SpriteKit's batching, copying
+    /// the warped strips' per-sprite attribute (#377's first CI run, `fleetRibbonsRenderThroughMetal`). Nor a uniform:
+    /// a shader per caster draws a pass each (#354).
+    static func paint(_ sprite: SKSpriteNode, alpha: Double, seed: Int) {
+        let green = CGFloat(((seed % seeds) + seeds) % seeds) / 255
+        sprite.color = UIColor(red: CGFloat(min(1, max(0, alpha))), green: green, blue: 0, alpha: 1)
+    }
+
+    /// A sprite's alpha and seed (`paint`).
+    static func paint(of sprite: SKSpriteNode) -> (alpha: Double, seed: Int) {
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        sprite.color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return (Double(red), Int((green * 255).rounded()))
+    }
 
     /// The world point (metres: `layer`'s points × `metresPerPoint`) a drawable pixel (x, y) from its top left
     /// shows, through `camera`: the drawable is `viewSize` points × `pixelScale`, the scene (`sceneSize`) fitted
@@ -155,10 +175,26 @@ final class TurbulenceTrailLayer: SKNode {
     }
 
     private let ppm: CGFloat
-    private(set) var sprites: [SKSpriteNode] = []
+    /// Two pools, each sprite on one texture for good (`strip` or `disc`), so a frame never swaps a texture; they
+    /// grow, never shrink (unused ones hide), and `reserve` sizes them for the fleet up front, so the layer's nodes
+    /// stay the same from the first frame (`WakeTests`).
+    private var strips: [SKSpriteNode] = [], discs: [SKSpriteNode] = []
+    /// Every sprite: the strips, then the discs.
+    var sprites: [SKSpriteNode] { strips + discs }
 
     /// The sprites drawing now.
-    var visibleCount: Int { sprites.filter { !$0.isHidden }.count }
+    var visibleCount: Int { (strips + discs).filter { !$0.isHidden }.count }
+
+    /// Sprites for a fleet of `boats`: a few strips and discs a boat (a run breaks where her sail stops working or she
+    /// stops, so a tack, an ease or a luff before the gun starts another while the last lives; 16 boats before the
+    /// gun drew up to 43 discs at once, `WakeTests`). More grow if a race ever needs them.
+    static func reserve(boats: Int) -> (strips: Int, discs: Int) { (4 * boats, 4 * boats) }
+
+    /// Grows the pools to at least `strips` and `discs` sprites, hidden.
+    func reserve(strips: Int, discs: Int) {
+        while self.strips.count < strips { self.strips.append(grow(texture: Self.strip)) }
+        while self.discs.count < discs { self.discs.append(grow(texture: Self.disc)) }
+    }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -191,36 +227,33 @@ final class TurbulenceTrailLayer: SKNode {
     /// style's cone alpha. A run of one is a disc; one with no strength or scale draws nothing. `casters` (one per
     /// run; nil = all 0) seeds each run's flecks, so different boats' flecks don't move in step where they overlap.
     func update(runs: [[TurbulenceRibbons.Live]], casters: [Int]? = nil, peak: Double, style: BoatStyle) {
-        var used = 0
-        func next() -> SKSpriteNode {
-            if used == sprites.count { grow() }
-            let sprite = sprites[used]
-            used += 1
+        var usedStrips = 0, usedDiscs = 0
+        func next(disc: Bool) -> SKSpriteNode {
+            reserve(strips: usedStrips + (disc ? 0 : 1), discs: usedDiscs + (disc ? 1 : 0))
+            let sprite = disc ? discs[usedDiscs] : strips[usedStrips]
+            if disc { usedDiscs += 1 } else { usedStrips += 1 }
             sprite.isHidden = false
             return sprite
         }
         let base = min(1, style.coneAlpha)
         for (index, run) in runs.enumerated() {
-            let seed = SKAttributeValue(float: Float(casters.map { index < $0.count ? $0[index] : 0 } ?? 0))
+            let seed = casters.map { index < $0.count ? $0[index] : 0 } ?? 0
             if run.count >= 2 {
                 guard run.contains(where: { $0.strength > 0 && $0.scale > 0 }) else { continue }
-                let sprite = next()
-                sprite.setValue(seed, forAttribute: "a_seed")
-                ribbon(sprite, along: run, peak: peak, alpha: base)
+                let sprite = next(disc: false)
+                ribbon(sprite, along: run, peak: peak)
+                Self.paint(sprite, alpha: base, seed: seed)
                 continue
             }
             guard let lone = run.first, lone.strength > 0, lone.scale > 0, peak > 0 else { continue }
-            let sprite = next()
-            sprite.setValue(seed, forAttribute: "a_seed")
-            if sprite.texture !== Self.disc { sprite.texture = Self.disc }
-            sprite.warpGeometry = nil
-            sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            let sprite = next(disc: true)
             let diameter = CGFloat(2 * lone.scale) * ppm
             sprite.position = CGPoint(x: lone.position.x * ppm, y: lone.position.y * ppm)
             sprite.size = CGSize(width: diameter, height: diameter)
-            sprite.alpha = CGFloat(base * min(1, lone.strength / peak))
+            Self.paint(sprite, alpha: base * min(1, lone.strength / peak), seed: seed)
         }
-        for sprite in sprites[used...] where !sprite.isHidden { sprite.isHidden = true }
+        for sprite in strips[usedStrips...] where !sprite.isHidden { sprite.isHidden = true }
+        for sprite in discs[usedDiscs...] where !sprite.isHidden { sprite.isHidden = true }
     }
 
     /// The columns a feathered end adds past its end point, as a share of its scale out: each narrower (a quarter
@@ -289,7 +322,7 @@ final class TurbulenceTrailLayer: SKNode {
     /// Warps `sprite` into the strip along `run` (`columns(along:peak:)`): sized to its edges' bounding box, anchored
     /// at its bottom-left, each column's three rows at the centre − normal × half width, the centre, and the centre +
     /// normal × half width, the normal across the local track, drawn from `strip` at u = the column's alpha share.
-    private func ribbon(_ sprite: SKSpriteNode, along run: [TurbulenceRibbons.Live], peak: Double, alpha: Double) {
+    private func ribbon(_ sprite: SKSpriteNode, along run: [TurbulenceRibbons.Live], peak: Double) {
         let columns = Self.columns(along: run, peak: peak)
         let count = columns.count
         var lower: [Vec2] = [], upper: [Vec2] = []
@@ -324,31 +357,29 @@ final class TurbulenceTrailLayer: SKNode {
                 }
             }
         }
-        if sprite.texture !== Self.strip { sprite.texture = Self.strip }
         sprite.anchorPoint = .zero
         sprite.position = origin
         sprite.size = size
         sprite.warpGeometry = SKWarpGeometryGrid(columns: count - 1, rows: 2, sourcePositions: source,
                                                  destinationPositions: destination)
-        sprite.alpha = CGFloat(alpha)
     }
 
     /// Hides every sprite.
     func clear() {
-        for sprite in sprites where !sprite.isHidden { sprite.isHidden = true }
+        for sprite in strips + discs where !sprite.isHidden { sprite.isHidden = true }
     }
 
-    private func grow() {
-        let sprite = SKSpriteNode(texture: Self.disc)
+    private func grow(texture: SKTexture) -> SKSpriteNode {
+        let sprite = SKSpriteNode(texture: texture)
+        if texture === Self.disc { sprite.anchorPoint = CGPoint(x: 0.5, y: 0.5) }
         sprite.shader = Self.shimmer
-        sprite.setValue(SKAttributeValue(float: 0), forAttribute: "a_seed")
-        sprite.color = CuePalette.cueWhite.uiColor
+        Self.paint(sprite, alpha: 0, seed: 0)
         sprite.colorBlendFactor = 1
         sprite.isHidden = true
         // Each sprite its own z, in pool order, all under every boat's effects (`BoatEffects.Layer`): overlapping
         // ribbons blend in the same order every launch (#62, `DrawOrderTests`).
-        sprite.zPosition = BoatEffects.Layer.ribbons + DrawOrder.z(sprites.count)
-        sprites.append(sprite)
+        sprite.zPosition = BoatEffects.Layer.ribbons + DrawOrder.z(strips.count + discs.count)
         addChild(sprite)
+        return sprite
     }
 }

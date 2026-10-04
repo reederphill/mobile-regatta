@@ -216,6 +216,8 @@ final class GameScene: SKScene {
     private func buildBoats() {
         let me = driver.myBoatIndex
         effectsLayer.addChild(trailLayer)
+        let pool = TurbulenceTrailLayer.reserve(boats: driver.currentFrame.boats.count)
+        trailLayer.reserve(strips: pool.strips, discs: pool.discs)
         for boat in driver.currentFrame.boats {
             let node = BoatNode(boat: boat, isMine: boat.id == me, color: Palette.boat(boat.colorIndex),
                                 boatClass: driver.boatClass, pointsPerMeter: ppm, style: boatStyle)
