@@ -35,6 +35,23 @@ import RegattaCore
                                    mySeat: 0, incidents: nil)
     }
 
+    /// Closes `session`'s race with you `place`d and every boat a finisher.
+    private static func close(_ session: GameSession, placingMe place: Int) {
+        let fleet = session.roster.entries.count
+        let me = session.driver.myBoatIndex
+        var others = Array((0..<fleet).filter { $0 != me })
+        let rows = (1...fleet).map { rank -> SeatResult in
+            SeatResult(seat: rank == place ? me : others.removeFirst(), place: rank, code: .finished,
+                       finishTick: 9_000 + rank)
+        }
+        session.consume([RaceEvent(tick: 10, kind: .raceClosed(results: RaceResults(rows: rows, rated: false)))])
+    }
+
+    private static func model(_ defaults: UserDefaults, _ arguments: String...) -> AppModel {
+        AppModel(launchOptions: LaunchOptions(arguments: ["/path/to/Regatta", "-seed", "3"] + arguments),
+                 defaults: defaults)
+    }
+
     @Test func storeRoundTripsAndKeepsTheNewest() throws {
         try withDefaults { defaults in
             let store = PracticeHistoryStore(defaults: defaults)
@@ -85,13 +102,7 @@ import RegattaCore
             let first = try #require(model.session)
             #expect(first.roster.rivals.isEmpty)
             let fleet = model.practiceSetup.fleetSize
-            let me = first.driver.myBoatIndex
-            var others = Array((0..<fleet).filter { $0 != me })
-            let rows = (1...fleet).map { place -> SeatResult in
-                SeatResult(seat: place == 2 ? me : others.removeFirst(), place: place, code: .finished,
-                           finishTick: 9_000 + place)
-            }
-            first.consume([RaceEvent(tick: 10, kind: .raceClosed(results: RaceResults(rows: rows, rated: false)))])
+            Self.close(first, placingMe: 2)
             model.leaveRace()
             let history = PracticeHistoryStore(defaults: defaults).load()
             #expect(history == [PracticeFinish(place: 2, fleetSize: fleet, tier: model.practiceSetup.botTier)])
@@ -111,6 +122,79 @@ import RegattaCore
             #expect(Set(kept.rows.filter(\.isRival).map(\.seat)) == rivals)
             model.leaveRace()
             #expect(PracticeHistoryStore(defaults: defaults).load().count == 2, "left after finishing: it counts")
+        }
+    }
+
+    /// Sail again from the results before the race closes: your finish there counts before the next race's rivals are
+    /// drawn, so a fresh install's second race has rivals; and it counts once, not again as the race is left.
+    @Test func sailAgainBeforeTheCloseCountsTheRaceJustSailed() throws {
+        try withDefaults { defaults in
+            let model = Self.model(defaults)
+            model.beginPractice()
+            model.finishBriefing()
+            let first = try #require(model.session)
+            first.consume([RaceEvent(tick: 10, kind: .finished(seat: first.driver.myBoatIndex, place: 1))])
+            #expect(first.playerDone)
+            model.sailAgain()
+            let history = PracticeHistoryStore(defaults: defaults).load()
+            #expect(history.count == 1)
+            #expect(model.practiceConfig?.rivalSkill != nil)
+            #expect(model.practiceConfig?.rivalSkill == model.practiceSetup.rivalSkill(history: history))
+            #expect(try #require(model.briefing).fleet.contains(where: \.isRival))
+            model.leaveRace()
+            #expect(PracticeHistoryStore(defaults: defaults).load() == history, "counted once")
+        }
+    }
+
+    /// A race left before you're done (mid-race, no close) leaves the history as it was, whether you go home or
+    /// start another.
+    @Test func aRaceLeftMidRaceLeavesTheHistoryUnchanged() throws {
+        try withDefaults { defaults in
+            let model = Self.model(defaults)
+            model.beginPractice()
+            model.finishBriefing()
+            let first = try #require(model.session)
+            #expect(!first.playerDone)
+            model.leaveRace()
+            #expect(PracticeHistoryStore(defaults: defaults).load().isEmpty)
+            model.beginPractice()
+            model.finishBriefing()
+            model.beginPractice()
+            #expect(PracticeHistoryStore(defaults: defaults).load().isEmpty)
+            #expect(model.practiceConfig?.rivalSkill == nil)
+        }
+    }
+
+    /// Only the practice setup's races (Start, Sail again, Restart of one) go into the history: `-autostart`, `-demo`
+    /// and `-perf` races and `-briefing`'s race don't.
+    @Test func onlyThePracticeSetupsRacesRecord() throws {
+        for argument in ["-autostart", "-demo", "-perf"] {
+            try withDefaults { defaults in
+                let model = Self.model(defaults, argument)
+                let config = try #require(model.launchOptions.launchRaceConfig(
+                    from: model.launchOptions.raceConfig(from: model.practiceSetup)))
+                model.startRaceSequence(model.practiceSession(config: config))
+                Self.close(try #require(model.session), placingMe: 1)
+                model.leaveRace()
+                #expect(PracticeHistoryStore(defaults: defaults).load().isEmpty, "\(argument)")
+            }
+        }
+        try withDefaults { defaults in
+            let model = Self.model(defaults)
+            model.startBriefing(config: model.launchOptions.raceConfig(from: model.practiceSetup), mode: .practice)
+            model.finishBriefing()
+            Self.close(try #require(model.session), placingMe: 1)
+            model.restartPractice()
+            Self.close(try #require(model.session), placingMe: 1)
+            model.leaveRace()
+            #expect(PracticeHistoryStore(defaults: defaults).load().isEmpty, "-briefing's race and its restart")
+
+            model.beginPractice()
+            model.finishBriefing()
+            model.restartPractice()
+            Self.close(try #require(model.session), placingMe: 1)
+            model.leaveRace()
+            #expect(PracticeHistoryStore(defaults: defaults).load().count == 1, "a practice race's restart records")
         }
     }
 }

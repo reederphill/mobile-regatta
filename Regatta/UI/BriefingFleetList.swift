@@ -25,7 +25,7 @@ struct BriefingFleetList: View {
                             Text(row.name)
                                 .font(row.isMe ? MenuFont.heading(.headline) : MenuFont.body())
                                 .lineLimit(1)
-                                .layoutPriority(1)
+                                .layoutPriority(row.isRival ? 1 : 0)
                             if row.isRival {
                                 Text(RivalMark.word)
                                     .font(MenuFont.body(.caption))

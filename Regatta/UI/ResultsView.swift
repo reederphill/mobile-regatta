@@ -133,7 +133,8 @@ private struct PrimaryLabel: View {
 }
 
 /// One boat's row (#24): place, livery chip and sail number, the bot glyph and name, "Rival" for a practice rival
-/// (#235), ⚑, the result. The name keeps priority over the word at 375 pt.
+/// (#235), ⚑, the result. On a rival's row the name keeps priority over the word at 375 pt; other rows lay out as
+/// they always have.
 private struct ResultRowView: View {
     let row: RaceResultViewModel.Row
 
@@ -156,7 +157,7 @@ private struct ResultRowView: View {
             Text(row.name)
                 .font(.body.weight(row.isPlayer ? .bold : .regular))
                 .lineLimit(1)
-                .layoutPriority(1)
+                .layoutPriority(row.isRival ? 1 : 0)
             if row.isRival {
                 Text(RivalMark.word)
                     .font(.caption)

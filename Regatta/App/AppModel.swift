@@ -229,7 +229,7 @@ final class AppModel {
     /// no briefing. The tuning panel's files apply afresh, as at any race start.
     func restartPractice() {
         guard let practiceConfig else { return }
-        startRaceSequence(practiceSession(config: practiceConfig))
+        startRaceSequence(session(tuned: tuned(practiceConfig)))
     }
 
     /// The results' Sail again: a new race on the practice setup, on a new seed, through its briefing.
@@ -251,8 +251,11 @@ final class AppModel {
 
     /// A practice race on `config`, sailed on the tuning panel's files and drawn with its look in a Debug build
     /// (#232): tuned values apply at the next race start, never during one.
+    /// A launch argument's race (`-autostart`, `-demo`, `-perf`): not from the practice setup, so it never goes into
+    /// the practice history (#235).
     func practiceSession(config: RaceConfig) -> GameSession {
         practiceConfig = config
+        practiceRecordsHistory = false
         return session(tuned: tuned(config))
     }
 
@@ -276,6 +279,7 @@ final class AppModel {
         tuning.attach(session, files: config.files)
         #endif
         session.practiceTier = config.botTier
+        session.recordsPracticeHistory = practiceRecordsHistory
         session.onResultsFinal = { [weak self, weak session] results in
             self?.keepAsLastRace(results, from: session)
         }
@@ -285,18 +289,28 @@ final class AppModel {
     /// The practice setup's Start (#25, #130): the briefing for a race on the setup, on a new seed, which waits for
     /// Ready.
     /// Its rivals' skill comes from your practice history (#235): none without one.
+    /// Sail again leaves a race you're done in before its close: your finish there counts first, so this race's rivals
+    /// know it.
     func beginPractice() {
+        if let session, let kept = session.resultsToKeep() { recordPracticeFinish(kept, from: session) }
         let history = PracticeHistoryStore(defaults: practiceDefaults).load()
         startBriefing(config: launchOptions.raceConfig(from: practiceSetup,
                                                         rivalSkill: practiceSetup.rivalSkill(history: history)),
-                      mode: .practice)
+                      mode: .practice, recordsHistory: true)
     }
 
     /// Shows the briefing for a practice race on `config` (on the tuning panel's files in a Debug build), resolved
     /// once so the briefing and the race it leads to sail the same files. `mode` `.online` is the online briefing's
     /// countdown, which #141 wires to the online race; here it leads to a practice race on `config`.
+    /// Only the practice setup's races (`beginPractice`, and Restart of one) go into the practice history (#235), not
+    /// `-briefing`'s.
     func startBriefing(config: RaceConfig, mode: BriefingModel.Mode) {
+        startBriefing(config: config, mode: mode, recordsHistory: false)
+    }
+
+    private func startBriefing(config: RaceConfig, mode: BriefingModel.Mode, recordsHistory: Bool) {
         practiceConfig = config
+        practiceRecordsHistory = recordsHistory
         let config = tuned(config)
         startRaceSequence(.briefing(briefingModel(config: config, mode: mode), config))
     }
@@ -344,10 +358,14 @@ final class AppModel {
     /// (`archiveRace`), and counts once.
     @ObservationIgnored private weak var recordedSession: GameSession?
 
+    /// `practiceConfig` came from the practice setup, so its races go into the practice history (#235); a launch
+    /// argument's race doesn't.
+    @ObservationIgnored private var practiceRecordsHistory = false
+
     /// Adds your finish in `session`'s race to the practice history (#235, `RaceResultViewModel.practiceFinish`), at
     /// that race's tier, once per race.
     private func recordPracticeFinish(_ results: RaceResultViewModel, from session: GameSession?) {
-        guard let session, session !== recordedSession,
+        guard let session, session.recordsPracticeHistory, session !== recordedSession,
               let finish = results.practiceFinish(tier: session.practiceTier) else { return }
         recordedSession = session
         let store = PracticeHistoryStore(defaults: practiceDefaults)
