@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Adopts CI's renders as the render-fixture references (#215). When a reference compare fails in CI (or a
-# reference is missing), the app job uploads the render as the render-actuals artifact. This downloads it,
+# reference is missing), the render job uploads the render as the render-actuals artifact. This downloads it,
 # copies each <device>/<name>.png into RegattaUITests/References/<device>/, and prints what changed. Look at
 # the renders (the artifact also holds each <name>-diff.png), commit them, and the next CI run compares against
 # them. References come from CI, never from a local simulator run (docs/agents/validation.md).
@@ -11,7 +11,7 @@
 #                                                to: iPhone 17, iOS 26.5); a bare number of 8 or more digits
 #                                                is taken as a run id too
 #
-# The artifact is uploaded only when the app job fails, and kept 5 days. Needs the gh CLI signed in; the
+# The artifact is uploaded only when the render job fails, and kept 5 days. Needs the gh CLI signed in; the
 # repository is this checkout's (or GH_REPO). Exits 1 when there's nothing to adopt, 2 on a usage error.
 set -euo pipefail
 
@@ -53,7 +53,7 @@ fi
 expired="$(gh api "repos/{owner}/{repo}/actions/runs/$run/artifacts?name=$artifact" \
     --jq '[.artifacts[] | .expired | tostring] | join(" ")')"
 if [[ -z "$expired" ]]; then
-    echo "adopt-references.sh: run $run has no $artifact artifact: no reference compare failed there, or its app" >&2
+    echo "adopt-references.sh: run $run has no $artifact artifact: no reference compare failed there, or its render" >&2
     echo "job hasn't finished yet. Nothing to adopt." >&2
     exit 1
 fi
