@@ -718,6 +718,93 @@ import Testing
         #expect(box.height.allSatisfy { abs($0) < 1e-3 }, "the box takes only speed")
     }
 
+    // MARK: The owner's scenarios under the header model
+
+    /// The owner's scenarios (steady, tack, ease, gybe, run, a boat just downwind, the lee-bow) under the box and under
+    /// `.headerAndLull` at its defaults. Print only. The scripted caster is `TrailScene`'s; the probes are points: two
+    /// inside her backwind sailing on beside her, one down her apparent wind, one stopped just downwind. Her backwind
+    /// level and side step as the race's (`BackwindSails`; the ease case holds the ease from 2 s), the header is the
+    /// race's (`Race.headerTarget`, lagged by `headerTimeConstant`, starting in step). The box column is the box's
+    /// speed loss in loss-seconds; the header column is the lull's loss-seconds plus the cone's, which the header
+    /// model keeps (lull 0 at the defaults), so it is the cone alone; then her header: peak, mean over the 25 s, and
+    /// seconds above 0.5 degree. A probe has no heading or dynamics, so no distance made good: the lee-bow row is the race.
+    @Test func headerModelScenarios() throws {
+        let settings = Self.settings(.boxes, .headerAndLull)
+        let params = settings.ribbons, boatClass = OpenWater.boatClass, shadow = Self.shadow
+        let lull = settings.lullLoss ?? shadow.backwindLoss
+        let follow = min(1, Race.dt / settings.headerTimeConstant)
+        print(String(format: "HEADER SCENARIOS defaults: header %.1f deg, cap %.1f, lull %.2f, tau %.1f s, fade %.1f s, build %.1f s; 25 s, loss-seconds box | header model (lull), header peak / mean / seconds above 0.5 deg",
+                     settings.headerDegrees, settings.headerCapDegrees, lull, settings.headerTimeConstant,
+                     settings.backwindFadeSeconds, params.buildSeconds))
+        for m in TrailScene.manoeuvres {
+            var caster = TrailScene.boat(position: .zero, heading: m.steer(0).heading, speed: m.steer(0).speed)
+            let start = ShadowCone(caster: caster, shadow: shadow)
+            let v0 = caster.velocity
+            let hull = Self.hull
+            let probes: [(name: String, at: Vec2, sailsOn: Bool)] = [
+                ("in her backwind 25% back, sails on", Self.inTrapezoid(start, share: 0.25), true),
+                ("in her backwind 60% back, sails on", Self.inTrapezoid(start, share: 0.6), true),
+                ("3L down her apparent wind, sails on", -Vec2.heading(start.apparentWindDirection) * (3 * hull), true),
+                ("3L downwind (true), stopped", Vec2.heading(TrailScene.windDirection + .pi) * (3 * hull), false),
+            ]
+            var box = probes.map { _ in 0.0 }, model = box, peak = box, sum = box, above = box, state = box
+            var sails = BackwindSails()
+            let ticks = 25 * Race.tickRate
+            for tick in 0..<ticks {
+                let t = Double(tick) * Race.dt
+                let (h, speed) = m.steer(t)
+                caster.heading = h
+                caster.speed = speed
+                caster.position += caster.velocity * Race.dt
+                TrailScene.refresh(&caster)
+                let ease = m.name.hasPrefix("ease") && t >= 2
+                sails.step(boats: [caster], scales: [R.scale(of: caster, ease: ease, boatClass: boatClass, parameters: params)],
+                           buildSeconds: params.buildSeconds, fadeSeconds: settings.backwindFadeSeconds)
+                let boxCone = ShadowCone(caster: caster, shadow: shadow)
+                var cone = boxCone
+                cone.backwindSail = sails.levels[0]
+                cone.backwindSide = sails.sides[0]
+                for (i, p) in probes.enumerated() {
+                    let at = p.at + (p.sailsOn ? v0 * t : .zero)
+                    box[i] += (1 - max(boxCone.factor(at: at), shadow.stackingFloor)) * Race.dt
+                    model[i] += (1 - max(cone.coneFactor(at: at) * (1 - lull * cone.backwindEnvelope(at: at)), shadow.stackingFloor)) * Race.dt
+                    let target = Race.headerTarget(at: at, receiver: 1, cones: [cone, nil], settings: settings)
+                    state[i] = tick == 0 ? target : state[i] + (target - state[i]) * follow
+                    let degrees = rad2deg(state[i])
+                    peak[i] = max(peak[i], degrees)
+                    sum[i] += degrees
+                    if degrees > 0.5 { above[i] += Race.dt }
+                }
+            }
+            print("== \(m.name)")
+            for (i, p) in probes.enumerated() {
+                print(String(format: "  %-38@ loss-s %.1f | %.1f; header peak %.1f deg, mean %.2f deg, %.1f s above 0.5",
+                             p.name as NSString, box[i], model[i], peak[i], sum[i] / Double(ticks), above[i]))
+                #expect(peak[i] <= settings.headerCapDegrees + 1e-9)
+            }
+        }
+        // The lee-bow, in the race: seat 0 lee-bowed on `LeeBowTests`' geometry against her clean twin; the header is hers.
+        func leeBow(_ settings: ShadowSettings) throws -> (lossSeconds: Double, dmg: Double, peak: Double, mean: Double, above: Double) {
+            let run = try Self.leeBowRun(settings)
+            let (race, _) = try Self.leeBow(settings)
+            var loss = 0.0, peak = 0.0, sum = 0.0, above = 0.0
+            for _ in 0..<(20 * Race.tickRate) {
+                race.step()
+                loss += (1 - race.boats[0].shadow) * Race.dt
+                let degrees = rad2deg(race.header(ofSeat: 0))
+                peak = max(peak, degrees)
+                sum += degrees
+                if degrees > 0.5 { above += Race.dt }
+            }
+            return (loss, run.lost20, peak, sum / Double(20 * Race.tickRate), above)
+        }
+        let boxRun = try leeBow(ShadowSettings()), headed = try leeBow(settings)
+        print("== lee-bow (race, seat 0 over 20 s; loss-seconds = speed-factor loss, DMG lost against the clean twin)")
+        print(String(format: "  box          loss-s %.1f, DMG lost %.3f L", boxRun.lossSeconds, boxRun.dmg))
+        print(String(format: "  header model loss-s %.1f, DMG lost %.3f L (%+.0f%%); header peak %.1f deg, mean %.2f deg, %.1f s above 0.5",
+                     headed.lossSeconds, headed.dmg, (headed.dmg / boxRun.dmg - 1) * 100, headed.peak, headed.mean, headed.above))
+    }
+
     // MARK: #378: where the ribbon lies downwind
 
     /// For #378: the angle off her stern, degrees, at which a steady boat's ribbon streams (along her apparent wind,
