@@ -98,6 +98,9 @@ public struct PairTrack: Sendable, Equatable {
 
     /// `recorded(seat, k)` as her boat (`RecordedBoat.boat(id:)`).
     func boat(_ seat: Int, _ k: Int) -> Boat { recorded(seat, k).boat(id: seat) }
+
+    /// `seat`'s recorded boat on every tick, oldest first.
+    func recorded(_ seat: Int) -> [RecordedBoat] { seat == seats.low ? low : high }
 }
 
 /// The escape simulation (#9, #92): whether the boat that had to keep clear could have, sailing her best
@@ -117,10 +120,13 @@ public struct PairTrack: Sendable, Equatable {
 ///   rudder or her autohelm, in the wind and water of now: a luff under way goes on.
 /// - A candidate escapes when, on every tick, the hulls neither touch nor would be hit by the right-of-way
 ///   boat's near-miss sweep (`RulesConfig.NearMissSweep.hits`): kept clear as the umpire calls it (#88).
-///   Other boats, marks and land aren't in it: room is between the pair.
+///   Other boats, marks and land aren't in it: room is between the pair. Only rule 43.1(a) (#93, `isCompelled`)
+///   adds one more thing not to hit, a third boat or a mark.
 ///
 /// Rule 17 (#345) is judged on the same track, with the same test of keeping clear: given the pair's rule 17 record
-/// (`ProperCourseRecord`), the leeward boat is sailed on her proper course instead of her own (`verdict`).
+/// (`ProperCourseRecord`), the leeward boat is sailed on her proper course instead of her own (`verdict`). Rule 18.2
+/// (#93) is judged on it too, given the pair's rule 18 record (`MarkRoomRecord`): whether the boat owing mark-room
+/// could have given it (`markRoomVerdict`).
 public struct EscapeSimulation: Sendable {
     public let track: PairTrack
     public let escape: RulesConfig.Escape
@@ -131,10 +137,16 @@ public struct EscapeSimulation: Sendable {
     /// Rule 17's limits (schema 5), and the pair's rule 17 record now: nil for none, and rule 17 isn't tried.
     public let properCourseLimits: RulesConfig.ProperCourseLimits?
     public let properCourseRecord: ProperCourseRecord?
+    /// The pair's rule 18 record now (#93): nil for none, and rule 18.2 isn't tried.
+    public let markRoomRecord: MarkRoomRecord?
+    /// The last point of certainty, ticks: how far before an overlap was first certain its hulls began to overlap.
+    let lastPointOfCertaintyTicks: Int
 
     /// Nil for a rules configuration with no "changes course" test (schema 1 to 3): no escape simulation.
-    /// `properCourse` is the pair's rule 17 record (`UmpireState.properCourse(_:)`), if any.
-    public init?(track: PairTrack, rules: RulesConfig, boatClass: BoatClass, properCourse: ProperCourseRecord? = nil) {
+    /// `properCourse` is the pair's rule 17 record (`UmpireState.properCourse(_:)`), and `markRoom` its rule 18
+    /// record (`UmpireState.markRoom(_:)`), if any.
+    public init?(track: PairTrack, rules: RulesConfig, boatClass: BoatClass, properCourse: ProperCourseRecord? = nil,
+                 markRoom: MarkRoomRecord? = nil) {
         guard let changesCourse = rules.incidents.escape.changesCourse else { return nil }
         self.track = track
         escape = rules.incidents.escape
@@ -143,13 +155,16 @@ public struct EscapeSimulation: Sendable {
         self.boatClass = boatClass
         properCourseLimits = rules.incidents.properCourse
         properCourseRecord = properCourse
+        markRoomRecord = markRoom
+        lastPointOfCertaintyTicks = RulesConfig.ticks(rules.incidents.lastPointOfCertainty)
     }
 
     /// The call for an incident whose Section A (or rule 21) call is `obligation` (`Rules.obligation`): the
     /// right-of-way boat breaks rule 17 instead, the keep-clear boat exonerated (43.1), when she sailed above
     /// her proper course into her (`properCourseVerdict`); otherwise rule 15 or 16.1, the keep-clear boat
-    /// exonerated (43.1(b)), when she took the other's room; otherwise `obligation`. Ticks are counted back from
-    /// now, the track's last. One call: rule 17, when it applies, wins over 15 and 16.1 (#343).
+    /// exonerated (43.1(b)), when she took the other's room; otherwise, with a rule 18 record between them, the
+    /// mark-room call (`markRoomVerdict`, #93); otherwise `obligation`. Ticks are counted back from now, the
+    /// track's last. One call: rule 17, when it applies, wins over 15 and 16.1 (#343), and those over 18.2.
     ///
     /// - When the keep-clear boat began to have to keep clear is read off the track: the first tick of the
     ///   run through now on which `Rules.obligation` names her, or none if it names her all the way back.
@@ -167,6 +182,14 @@ public struct EscapeSimulation: Sendable {
         let last = track.count - 1
         guard last >= 1, track.seats == SeatPair(keepClear, rightOfWay) else { return obligation }
         if let call = properCourseVerdict(obligation, course: course) { return call }
+        if let call = roomVerdict(obligation, course: course) { return call }
+        return markRoomVerdict(obligation)
+    }
+
+    /// Rules 15 and 16.1 (see `verdict`): the right-of-way boat's call, the keep-clear boat exonerated, or nil.
+    private func roomVerdict(_ obligation: Verdict, course: CourseLayout) -> Verdict? {
+        let keepClear = obligation.offender, rightOfWay = obligation.victim
+        let last = track.count - 1
         let hull = boatClass.hull
         let horizon = RulesConfig.ticks(escape.horizon), offset = escape.startTickOffset
         func obliged(_ k: Int) -> Int? {
@@ -185,12 +208,97 @@ public struct EscapeSimulation: Sendable {
 
         let first = max(acquired ?? 1, last - horizon - offset + 1, 1)
         guard first <= last, let change = (first...last).first(where: { turnRate(of: rightOfWay, at: $0) > changesCourse })
-        else { return obligation }
+        else { return nil }
         let start = change + offset - 1
         guard !canEscape(keepClear, from: start, of: rightOfWay),
               canEscape(keepClear, from: start, of: rightOfWay, heldFrom: change - 1)
-        else { return obligation }
+        else { return nil }
         return Verdict(rule: .changingCourse, offender: rightOfWay, victim: keepClear, exonerated: [keepClear])
+    }
+
+    /// Rule 18.2 (#93): mark-room is not right of way (Case 25), so it matters only when Section A (or rule 21)
+    /// names the boat entitled to mark-room by the pair's record (`markRoomRecord`) as the one to keep clear of
+    /// the boat owing it. Then:
+    ///
+    /// - 18.2(d): if the entitled boat gained her inside overlap from clear astern or by tacking to windward
+    ///   (`insideOverlapGained`) and the owing boat had no escape (`canEscape`, the entitled boat on her track) from
+    ///   the tick the overlap began, the owing boat has been unable to give mark-room since: the overlap gives no
+    ///   entitlement. `obligation` stands, the owing boat exonerated.
+    /// - Otherwise the owing boat failed to give mark-room: she breaks the record's rule (18.2, or 18.3), and the
+    ///   entitled boat, sailing within her mark-room, is exonerated (43.1(b)).
+    ///
+    /// Any other incident: `obligation`. So too when the entitled boat is taking a penalty (`Boat.isTakingPenalty`,
+    /// now): she is neither sailing to the mark nor rounding it, so mark-room gives her nothing (the definition of
+    /// Mark-Room). Rule 21.2 reaches here only with both boats taking one; then Section A decides between them.
+    private func markRoomVerdict(_ obligation: Verdict) -> Verdict {
+        guard let record = markRoomRecord, obligation.offender == record.entitled, obligation.victim == record.owing,
+              !track.boat(record.entitled, track.count - 1).isTakingPenalty
+        else { return obligation }
+        if let began = insideOverlapGained(by: record.entitled, on: record.owing),
+           !canEscape(record.owing, from: began + escape.startTickOffset - 1, of: record.entitled) {
+            return Verdict(rule: obligation.rule, offender: obligation.offender, victim: obligation.victim,
+                           exonerated: [record.owing])
+        }
+        return Verdict(rule: record.rule, offender: record.owing, victim: record.entitled, exonerated: [record.entitled])
+    }
+
+    /// Rule 18.2(d): the track tick `entitled`'s overlap with `owing` began on, when she gained it from clear astern
+    /// or by tacking: overlapped now as of the last point of certainty, that run of the track's overlap beginning
+    /// at tick `certain`, the hulls began to overlap the last point of certainty before it (as rule 17 reads an
+    /// overlap's start, `UmpireState.updateProperCourse`), and on the tick before that she was clear astern of
+    /// `owing` (`Rules.isClearAstern`), or she was tacking (or changed tack) between it and `certain`. Nil if not, or
+    /// if the overlap began before the track's first tick: then the owing boat is taken to have been able to give room.
+    private func insideOverlapGained(by entitled: Int, on owing: Int) -> Int? {
+        let last = track.count - 1
+        guard track.overlapped[last] else { return nil }
+        var certain = last
+        while certain > 0, track.overlapped[certain - 1] { certain -= 1 }
+        let before = certain - lastPointOfCertaintyTicks
+        guard certain > 0, before >= 0 else { return nil }
+        let fromAstern = Rules.isClearAstern(track.boat(entitled, before), of: track.boat(owing, before), hull: boatClass.hull)
+        let tacked = (before...certain).contains { track.recorded(entitled, $0).isTacking }
+            || track.boat(entitled, before).tack != track.boat(entitled, certain).tack
+        return fromAstern || tacked ? before + 1 : nil
+    }
+
+    /// Something besides the other boat of the pair that a boat sailing the escape candidates mustn't hit, for rule
+    /// 43.1(a) (#93, `isCompelled`).
+    public enum Hazard: Sendable {
+        /// A third boat (seat `seat`), on her recorded track over the same ticks as the simulation's (oldest first,
+        /// through now: `PairTrack.recorded(_:)` of a pair of hers), sailed on past now as she was steering. A
+        /// candidate keeps clear of her as the umpire calls it: no contact, and no hit by her near-miss sweep.
+        case boat(seat: Int, track: [RecordedBoat])
+        /// A mark, its centre and radius: a candidate's hull mustn't touch it.
+        case mark(centre: Vec2, radius: Double)
+    }
+
+    /// Rule 43.1(a) (#93): whether `seat`, whom `other` (the pair's other boat) broke a rule against on track tick
+    /// `breach`, was compelled by that breach to hit `hazard`. From her recorded state `escape.startTickOffset`
+    /// ticks after the breach less one (as rule 15 answers from right of way acquired), over `escape.horizon`:
+    ///
+    /// - no candidate keeps her off `other`'s hull (on her `path`) and clear of `hazard`: the breach left her no
+    ///   way out; and
+    /// - with `other` gone, one keeps her clear of `hazard`: without the breach she wasn't bound to hit it anyway.
+    ///
+    /// The boat that broke the rule is only a hull not to hit, never a sweep: she had to keep clear of `seat`, not
+    /// `seat` of her. False if that tick isn't before now (no tick to answer in, and nothing to compare), or
+    /// `hazard`'s track doesn't match the simulation's.
+    func isCompelled(_ seat: Int, by other: Int, breach: Int, into hazard: Hazard) -> Bool {
+        let last = track.count - 1
+        let start = breach + escape.startTickOffset - 1
+        guard track.seats == SeatPair(seat, other), start >= 0, start < last else { return false }
+        let ticks = (start + 1)...(start + RulesConfig.ticks(escape.horizon))
+        let hazardous: Avoiding
+        switch hazard {
+        case .boat(let third, let recorded):
+            guard recorded.count == track.count, third != seat, third != other else { return false }
+            hazardous = .boat(path: path(of: third, recorded: { recorded[$0] }, over: ticks), sweeping: true)
+        case .mark(let centre, let radius):
+            hazardous = .mark(centre: centre, radius: radius)
+        }
+        let breaching = Avoiding.boat(path: path(of: other, over: ticks), sweeping: false)
+        return !canEscape(seat, from: start, avoiding: [breaching, hazardous])
+            && canEscape(seat, from: start, avoiding: [hazardous])
     }
 
     /// Rule 17 (#345): the leeward boat of the pair's rule 17 record (`ProperCourseRecord`) breaks it, and the windward
@@ -303,11 +411,16 @@ public struct EscapeSimulation: Sendable {
     /// `seat`'s boat on each of `ticks` (ascending, from one recorded): recorded through now, then sailed on
     /// from now as she was steering (her held rudder or her autohelm, and her ease) in the wind and water of now.
     private func path(of seat: Int, over ticks: ClosedRange<Int>) -> [Boat] {
+        path(of: seat, recorded: { track.recorded(seat, $0) }, over: ticks)
+    }
+
+    /// `path(of:over:)` for seat `seat` recorded as `recorded` on each tick of the track (a third boat's, #93).
+    private func path(of seat: Int, recorded: (Int) -> RecordedBoat, over ticks: ClosedRange<Int>) -> [Boat] {
         let last = track.count - 1
-        let now = track.recorded(seat, last)
+        let now = recorded(last)
         var ahead = now.boat(id: seat)
         return ticks.map { k in
-            guard k > last else { return track.boat(seat, k) }
+            guard k > last else { return recorded(k).boat(id: seat) }
             sail(&ahead, ease: now.ease, in: now)
             return ahead
         }
@@ -347,7 +460,53 @@ public struct EscapeSimulation: Sendable {
         guard waiting.enumerated().allSatisfy({ isClear($1, on: $0) }) else { return false }
         let from = waiting.last ?? track.boat(seat, start)
         let environments = ticks.dropFirst(waiting.count).map { track.recorded(seat, min($0, last)) }
-        return escape.candidates.contains { candidate in
+        return sailsClear(from, through: environments) { isClear($0, on: waiting.count + $1) }
+    }
+
+    /// What a candidate escape must keep clear of, on each tick of the horizon (#93): a boat on her path (one a
+    /// tick), her hull and, `sweeping`, her near-miss sweep as `keepsClear` reads it; or a mark's circle.
+    private enum Avoiding {
+        case boat(path: [Boat], sweeping: Bool)
+        case mark(centre: Vec2, radius: Double)
+    }
+
+    /// Whether any candidate sails `seat` from her recorded state on tick `start` (before now) clear of all of
+    /// `obstacles` on every tick of the horizon after it (#93: `isCompelled`).
+    private func canEscape(_ seat: Int, from start: Int, avoiding obstacles: [Avoiding]) -> Bool {
+        let last = track.count - 1
+        guard start >= 0, start < last else { return false }
+        let ticks = (start + 1)...(start + RulesConfig.ticks(escape.horizon))
+        let outline = boatClass.hull.outline
+        let hulls: [[[Vec2]]] = obstacles.map { obstacle in
+            guard case .boat(let path, _) = obstacle else { return [] }
+            return path.map { $0.hull(outline: outline) }
+        }
+        var swept = obstacles.map { _ in [RulesConfig.NearMissSweep.Swept?](repeating: nil, count: ticks.count) }
+        func isClear(_ boat: Boat, on n: Int) -> Bool {
+            let hull = boat.hull(outline: outline)
+            for (o, obstacle) in obstacles.enumerated() {
+                switch obstacle {
+                case .boat(let path, let sweeping):
+                    if sweeping {
+                        guard keepsClear(boat, hull: hull, of: path[n], hull: hulls[o][n], swept: &swept[o][n]) else { return false }
+                    } else if Collision.penetration(hull, hulls[o][n]) != nil {
+                        return false
+                    }
+                case .mark(let centre, let radius):
+                    if Collision.penetration(polygon: hull, circle: centre, radius: radius) != nil { return false }
+                }
+            }
+            return true
+        }
+        let environments = ticks.map { track.recorded(seat, min($0, last)) }
+        return sailsClear(track.boat(seat, start), through: environments, isClear: isClear)
+    }
+
+    /// Whether any of the rules configuration's candidates, in order, sails `from` through `environments` (one a
+    /// tick) with `isClear(boat, n)` on the `n`th: a held rudder, or centred her autohelm (engaged at her angle
+    /// if she had none), and her ease.
+    private func sailsClear(_ from: Boat, through environments: [RecordedBoat], isClear: (Boat, Int) -> Bool) -> Bool {
+        escape.candidates.contains { candidate in
             var boat = from
             let rudder = candidate.rudderValue
             if abs(rudder) > Autohelm.deadBand {
@@ -363,7 +522,7 @@ public struct EscapeSimulation: Sendable {
             }
             for n in environments.indices {
                 sail(&boat, ease: candidate.ease, in: environments[n])
-                if !isClear(boat, on: waiting.count + n) { return false }
+                if !isClear(boat, n) { return false }
             }
             return true
         }

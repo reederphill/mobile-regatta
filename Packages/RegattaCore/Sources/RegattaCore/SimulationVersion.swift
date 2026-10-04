@@ -203,7 +203,18 @@ import Glibc
 ///    projected at their velocities, clear astern within 4 s), and the windward boat on her own track was clear of
 ///    the leeward boat's proper-course path (`EscapeSimulation.verdict`). Rule 17 wins over rules 15 and 16.1; otherwise
 ///    the chain runs as on 30. Rules files before schema 5 sail as on 30, bit for bit.
-public let simulationRevision = 31
+/// 32: compelled breaches and mark-room calls (#93), on 31. Under a rules file with an escape simulation (schema 4 and
+///    later): a boat compelled by another's breach is exonerated (43.1(a)): when the boat she breaks a rule against, or
+///    the mark of her leg she touches, is one the escape simulation finds she had no way clear of without hitting the
+///    boat that fouled her (an open incident, called on that boat with her the victim, within the recorded track), yet
+///    a way clear of it alone. The incident is then no call (no penalty, no event), or the touch an obstruction contact
+///    with her exonerated on the foul's incident. An incident whose Section A call names the boat entitled to
+///    mark-room by the pair's rule 18 record is rule 18.2 (or 18.3) on the owing boat, the entitled boat exonerated
+///    (43.1(b)), unless the entitled boat gained her inside overlap from clear astern or by tacking and the owing boat
+///    had no escape from the tick it began (18.2(d)): then the Section A call stands, the owing boat exonerated. A mark
+///    touch in an open mark-room incident called on the other boat is exonerated (Case 95). Rules files before
+///    schema 4 sail as on 31, bit for bit.
+public let simulationRevision = 32
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
