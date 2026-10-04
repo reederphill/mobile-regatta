@@ -53,7 +53,7 @@ fi
 expired="$(gh api "repos/{owner}/{repo}/actions/runs/$run/artifacts?name=$artifact" \
     --jq '[.artifacts[] | .expired | tostring] | join(" ")')"
 if [[ -z "$expired" ]]; then
-    echo "adopt-references.sh: run $run has no $artifact artifact: no reference compare failed there, or its app" >&2
+    echo "adopt-references.sh: run $run has no $artifact artifact: no reference compare failed there, or its render" >&2
     echo "job hasn't finished yet. Nothing to adopt." >&2
     exit 1
 fi
