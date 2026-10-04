@@ -235,15 +235,111 @@ public struct BoatClass: DataFileContent, Equatable {
         /// multiplier (`Boat.shadow`), approached at this. Nil (every class before skiff@3): the shadow slows the
         /// wind her polar reads (`Boat.polarWindSpeed(in:)`), as #10 built it.
         public var slowingDown: Double?
+        /// The wind shadow as a ribbon wake (#377, `TurbulenceRibbons`): every boat's shadow is the ribbons, not a cone.
+        /// From the file's `ribbons` block (optional, skiff@6 and ilca-dinghy@5 on); a file without one (every class
+        /// before them) seeds it from its cone (`Ribbons.seeded(coneWidthAtBoat:coneWidthAtEnd:lossCloseIn:)`).
+        public var ribbons: Ribbons
+        /// The backwind as a header (#377; optional `header` block): a boat in another's backwind trapezoid has her wind
+        /// turned towards her bow, and the backwind needs a working sail. Nil (every class before skiff@6 and
+        /// ilca-dinghy@5): the backwind is #298's loss (or #79's band), as before.
+        public var header: Header?
+        /// Seconds the backwind fades out over when her sail stops working or her side changes (#377; optional
+        /// `backwind.fadeSeconds`, 0 when absent: at once). Read only with a `header`.
+        public var backwindFadeSeconds = 0.0
+        /// The speed through the water, m/s, below which she casts no backwind (#377; optional `backwind.floorKnots`),
+        /// building in straight over `backwindFloorSpan` above it (`backwind.floorBuildKnots`, 0 when absent). Nil: no
+        /// floor, the trapezoid's length scale fading it from rest as before (`backwindScale(speed:)`).
+        public var backwindFloorSpeed: Double?
+        public var backwindFloorSpan = 0.0
+
+        /// The ribbon wake's sizes (#377, `TurbulenceRibbons`), in code units. Every value is tuning, not measured
+        /// (docs/research/yacht-wake-and-backwind-aerodynamics.md gives the wake's direction and little else).
+        public struct Ribbons: Sendable, Equatable {
+            /// Seconds between a boat's points.
+            public var emitSeconds: Double
+            /// A point's life, a multiple of `coneLength` over the caster's apparent wind at emission: 1, the time her
+            /// apparent wind takes to carry air one cone length astern.
+            public var lifeScale: Double
+            /// Full width at the boat and at the end of a point's life, metres (a point's scale is half of it).
+            public var startWidth: Double
+            public var endWidth: Double
+            /// Loss at emission, a fraction of her speed (or wind), at the full emission level.
+            public var peak: Double
+            /// Neighbouring points further apart than this, metres, aren't joined.
+            public var lengthCap: Double
+            /// Below this speed through the water, m/s, a boat sheds nothing.
+            public var stoppedSpeed: Double
+            /// Seconds the emission level (and the backwind, with a `header`) takes to build from nothing to full.
+            public var buildSeconds: Double
+            /// The sail's angle to her apparent wind, radians, at which she sheds her full turbulence (and casts her
+            /// full backwind); less, less, in proportion (`SailTrim.workingScale`).
+            public var fullAngle: Double
+
+            public init(emitSeconds: Double, lifeScale: Double, startWidth: Double, endWidth: Double, peak: Double,
+                        lengthCap: Double, stoppedSpeed: Double, buildSeconds: Double, fullAngle: Double) {
+                self.emitSeconds = emitSeconds
+                self.lifeScale = lifeScale
+                self.startWidth = startWidth
+                self.endWidth = endWidth
+                self.peak = peak
+                self.lengthCap = lengthCap
+                self.stoppedSpeed = stoppedSpeed
+                self.buildSeconds = buildSeconds
+                self.fullAngle = fullAngle
+            }
+
+            /// A class without a `ribbons` block (#377): #376's prototype values, its widths and loss its cone's, so a
+            /// steady boat's ribbon is about as long, wide and strong as her cone was.
+            public static func seeded(coneWidthAtBoat: Double, coneWidthAtEnd: Double, lossCloseIn: Double) -> Ribbons {
+                Ribbons(emitSeconds: 0.5, lifeScale: 1, startWidth: coneWidthAtBoat, endWidth: coneWidthAtEnd,
+                        peak: lossCloseIn, lengthCap: 2 * metresPerSecond(knots: 10) * 0.5, stoppedSpeed: 0.3,
+                        buildSeconds: 2, fullAngle: deg2rad(12.5))
+            }
+
+            /// A point's life, seconds, shed with `apparent` m/s of apparent wind by a class with cone length `coneLength`.
+            public func life(apparent: Double, coneLength: Double) -> Double { lifeScale * coneLength / apparent }
+        }
+
+        /// The backwind as a header (#377), in code units. Tuning, not measured.
+        public struct Header: Sendable, Equatable {
+            /// Her wind is turned this far towards her bow at the full backwind envelope, radians; several casters'
+            /// headers add, up to `cap`.
+            public var angle: Double
+            public var cap: Double
+            /// The backwind's loss of speed (or wind) at the full envelope, as well as the header: 0, a pure shift.
+            public var lull: Double
+            /// Seconds: her header follows the envelope she sits in through a first-order lag of this time constant.
+            public var lagSeconds: Double
+
+            public init(angle: Double, cap: Double, lull: Double, lagSeconds: Double) {
+                self.angle = angle
+                self.cap = cap
+                self.lull = lull
+                self.lagSeconds = lagSeconds
+            }
+        }
 
         /// Whether the shadow slows the boat rather than the wind her polar reads (`slowingDown`).
         public var isSpeedLoss: Bool { slowingDown != nil }
 
         /// The factor her backwind trapezoid is scaled by astern at `speed`, m/s through the water: 1 when the class has no
-        /// speed scale or her speed isn't known, else `speed / backwindScaleSpeed` on 0...`backwindMaxScale`.
+        /// speed scale or her speed isn't known, else `speed / backwindScaleSpeed` on 0...`backwindMaxScale`. With a floor
+        /// speed (#377) it never shrinks below its size at the end of the floor's build-in: the floor
+        /// (`backwindFloorFactor(speed:)`) fades a slow boat's backwind out, not the trapezoid's length.
         public func backwindScale(speed: Double?) -> Double {
             guard let reference = backwindScaleSpeed, let speed else { return 1 }
-            return (speed / reference).clamped(to: 0...backwindMaxScale)
+            let sized = backwindFloorSpeed.map { max(speed, $0 + backwindFloorSpan) } ?? speed
+            return (sized / reference).clamped(to: 0...backwindMaxScale)
+        }
+
+        /// How much of her backwind she casts at `speed`, m/s through the water (#377): none at or below
+        /// `backwindFloorSpeed`, building straight to all of it `backwindFloorSpan` above it; 1 without a floor or when
+        /// her speed isn't known.
+        public func backwindFloorFactor(speed: Double?) -> Double {
+            guard let floor = backwindFloorSpeed, let speed else { return 1 }
+            guard speed > floor else { return 0 }
+            guard backwindFloorSpan > 0 else { return 1 }
+            return min(1, (speed - floor) / backwindFloorSpan)
         }
 
         /// The backwind trapezoid's extent astern of her stern line `out` metres out along it from the stern corner
@@ -403,6 +499,33 @@ private struct BoatClassSchema2: Decodable {
                 let maxScale: Double?
             }
             let speedScale: SpeedScale?
+            /// #377: the backwind fades out over this when her sail stops working (`backwindFadeSeconds`). Optional.
+            let fadeSeconds: Double?
+            /// #377: the floor speed below which she casts none, and the speed span it builds in over
+            /// (`backwindFloorSpeed`, `backwindFloorSpan`). Optional.
+            let floorKnots: Double?
+            let floorBuildKnots: Double?
+        }
+
+        /// #377: the ribbon wake (`BoatClass.WindShadow.Ribbons`). Optional: without it, seeded from the cone.
+        struct Ribbons: Decodable {
+            let emitSeconds: Double
+            let lifeConeLengths: Double
+            let startWidthHullLengths: Double
+            let endWidthHullLengths: Double
+            let peakLoss: Double
+            let joinCapHullLengths: Double
+            let stoppedKnots: Double
+            let buildSeconds: Double
+            let fullAngleDegrees: Double
+        }
+
+        /// #377: the backwind as a header (`BoatClass.WindShadow.Header`). Optional: without it, the backwind is a loss.
+        struct Header: Decodable {
+            let degrees: Double
+            let capDegrees: Double
+            let lullLoss: Double
+            let lagSeconds: Double
         }
 
         let coneLengthHullLengths: Double
@@ -415,6 +538,8 @@ private struct BoatClassSchema2: Decodable {
         /// The cone's axis swings this share of the way from downwind to astern (`BoatClass.WindShadow.coneSwing`). Optional.
         let coneSwingAsternShare: Double?
         let backwind: Backwind
+        let ribbons: Ribbons?
+        let header: Header?
     }
 
     struct Contact: Decodable {
@@ -513,6 +638,30 @@ private struct BoatClassSchema2: Decodable {
         try check(fraction(windShadow.coneSwingAsternShare ?? 0), "the cone's swing astern must be a share, 0...1")
         try check(windShadow.coneFromBowAndStern != true || windShadow.backwind.innerLengthHullLengths != nil,
                   "a cone from the bow and stern needs a backwind inner length (the trapezoid class)")
+        if let r = windShadow.ribbons {
+            try check(positive(r.emitSeconds) && positive(r.lifeConeLengths), "ribbon emission interval and life must be positive")
+            try check(positive(r.startWidthHullLengths) && positive(r.endWidthHullLengths) && positive(r.joinCapHullLengths),
+                      "ribbon widths and join cap must be positive")
+            try check(fraction(r.peakLoss), "ribbon peak loss must be 0...1")
+            try check(r.stoppedKnots.isFinite && r.stoppedKnots >= 0 && r.buildSeconds.isFinite && r.buildSeconds >= 0,
+                      "ribbon stopped speed and build time must not be negative")
+            try check(r.fullAngleDegrees > 0 && r.fullAngleDegrees < 90, "ribbon full sail angle must be in 0 exclusive ..<90°")
+        }
+        if let h = windShadow.header {
+            try check(windShadow.backwind.innerLengthHullLengths != nil, "a backwind header needs a backwind inner length (the trapezoid class)")
+            try check(h.degrees >= 0 && h.degrees < 90 && h.capDegrees >= 0 && h.capDegrees < 90,
+                      "backwind header and its cap must be 0..<90°")
+            try check(fraction(h.lullLoss) && h.lagSeconds.isFinite && h.lagSeconds >= 0,
+                      "backwind header lull must be 0...1 and its lag not negative")
+        }
+        try check(windShadow.backwind.fadeSeconds == nil || windShadow.header != nil, "a backwind fade needs a header")
+        try check((windShadow.backwind.fadeSeconds ?? 0).isFinite && (windShadow.backwind.fadeSeconds ?? 0) >= 0,
+                  "backwind fade must not be negative")
+        try check((windShadow.backwind.floorKnots ?? 0).isFinite && (windShadow.backwind.floorKnots ?? 0) >= 0
+                  && (windShadow.backwind.floorBuildKnots ?? 0).isFinite && (windShadow.backwind.floorBuildKnots ?? 0) >= 0,
+                  "backwind floor speed and build span must not be negative")
+        try check(windShadow.backwind.floorBuildKnots == nil || windShadow.backwind.floorKnots != nil,
+                  "a backwind floor build span needs a floor speed")
         try check(fraction(contact.boatSpeedFactor) && fraction(contact.markSpeedFactor), "contact factors must be 0...1")
         try check(fraction(ease.speedFraction) && positive(ease.timeConstantSeconds), "ease needs a 0...1 fraction and a positive time")
 
@@ -559,7 +708,22 @@ private struct BoatClassSchema2: Decodable {
                 coneSwing: windShadow.coneSwingAsternShare ?? 0,
                 bowY: outline.map(\.y).max() ?? 0,
                 sternCorner: Self.sternCorner(of: outline),
-                slowingDown: nil
+                slowingDown: nil,
+                ribbons: windShadow.ribbons.map { r in
+                    .init(emitSeconds: r.emitSeconds, lifeScale: r.lifeConeLengths,
+                          startWidth: r.startWidthHullLengths * length, endWidth: r.endWidthHullLengths * length,
+                          peak: r.peakLoss, lengthCap: r.joinCapHullLengths * length,
+                          stoppedSpeed: metresPerSecond(knots: r.stoppedKnots), buildSeconds: r.buildSeconds,
+                          fullAngle: deg2rad(r.fullAngleDegrees))
+                } ?? .seeded(coneWidthAtBoat: windShadow.coneWidthAtBoatHullLengths * length,
+                             coneWidthAtEnd: windShadow.coneWidthAtEndHullLengths * length,
+                             lossCloseIn: windShadow.lossCloseIn),
+                header: windShadow.header.map {
+                    .init(angle: deg2rad($0.degrees), cap: deg2rad($0.capDegrees), lull: $0.lullLoss, lagSeconds: $0.lagSeconds)
+                },
+                backwindFadeSeconds: windShadow.backwind.fadeSeconds ?? 0,
+                backwindFloorSpeed: windShadow.backwind.floorKnots.map { metresPerSecond(knots: $0) },
+                backwindFloorSpan: metresPerSecond(knots: windShadow.backwind.floorBuildKnots ?? 0)
             ),
             contact: .init(boat: contact.boatSpeedFactor, mark: contact.markSpeedFactor),
             ease: .init(speedFraction: ease.speedFraction, timeConstant: ease.timeConstantSeconds)

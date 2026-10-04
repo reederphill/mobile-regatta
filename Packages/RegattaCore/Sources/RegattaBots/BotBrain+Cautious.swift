@@ -185,7 +185,13 @@ extension BotBrain {
             (i.marks > max(chosen.marks, 0) + 0.01 ? 1 : 0, (i.boats * 100).rounded(), change)
         }
         var best: (input: BoatInput, rank: (Int, Double, Double))?
+        // Mid-tack (past the boom crossing, short of close-hauled) she finishes it: a luff now turns her back through
+        // the wind, a second tack at the speed the first left her (#377: slowed in a ribbon, she tacked back at 0.8 m/s
+        // and fouled under rule 13 a boat she had tacked clear of). Turning to starboard (+) is a luff with the wind
+        // over her starboard side (`rudder`).
+        let luffSign: Double = b.boomSide == .port ? 1 : -1
         for rudder in Self.guardRudders {
+            if senses.tacking, rudder * luffSign > 0 { continue }
             if rudder != 0, holdsRight.contains(true), turnsTowardsKeepClearBoat(b, view, turn: rudder > 0 ? 1 : -1) { continue }
             for ease in [false, true] {
                 let change = abs(rudder - input.rudderValue) + (ease == input.ease ? 0 : 0.25)

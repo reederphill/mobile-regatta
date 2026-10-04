@@ -45,14 +45,6 @@
 			);
 			target = AA0000000000000000000005 /* Regatta */;
 		};
-		AA0000000000000000000031 /* Exceptions for "RegattaUITests" folder in "RegattaUITests" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Fixtures,
-				References,
-			);
-			target = AA000000000000000000001C /* RegattaUITests */;
-		};
 		AA0000000000000000000032 /* Exceptions for "RegattaUITests" folder in "RegattaTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -80,7 +72,6 @@
 		AA000000000000000000001A /* RegattaUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				AA0000000000000000000031 /* Exceptions for "RegattaUITests" folder in "RegattaUITests" target */,
 				AA0000000000000000000032 /* Exceptions for "RegattaUITests" folder in "RegattaTests" target */,
 			);
 			path = RegattaUITests;

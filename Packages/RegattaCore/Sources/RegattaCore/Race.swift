@@ -125,6 +125,19 @@ public final class Race {
     private var appliedInputs: [InputRecord] = []
     private var seatEvents: [SeatEvent] = []
 
+    /// The wind shadow (#377): every boat's ribbon wake, stepped each tick from the boats' states
+    /// (`TurbulenceRibbons`, the class's `ribbons`). Race state, carried whole in a snapshot.
+    public private(set) var wake: TurbulenceRibbons
+    /// Each seat's backwind header now, radians, the lag's state (`applyBackwindHeaders`): empty until the first step,
+    /// and always for a class without a header. Race state, in a snapshot.
+    private var headerState: [Double] = []
+    /// Each seat's backwind level and side (`BackwindSails`), for a class with a header: empty until the first step,
+    /// and always for a class without one. Race state, in a snapshot.
+    private var backwindSails = BackwindSails()
+    /// Each seat's sailing wind direction this tick before any backwind header turned it (`applyBackwindHeaders`), what
+    /// her autohelm steers a groove by (`helmSailingAngle`). Not state: set again every step before anything reads it.
+    private var unheadedWindDirections: [Double] = []
+
     /// Builds the race at the start of its sequence, tick −`setup.startSequenceTicks`, from `files`, which
     /// must be exactly the ones `setup` names (`RaceFiles(resolving:)`); throws `RaceFilesError` if not.
     ///
@@ -211,6 +224,7 @@ public final class Race {
         }
         boats = fleet
         overlaps = OverlapTracker(seats: fleet.count)
+        wake = TurbulenceRibbons(shadow: boatClass.windShadow)
         heldInputs = Array(repeating: .neutral, count: fleet.count)
         makeWindKeys()
         if windKeys != nil || (try? wind.requireKeys(atTick: tick)) != nil { refreshWind() }
@@ -379,7 +393,8 @@ public final class Race {
     /// this tick (`Boat.grooveWindSpeed(in:)`), and announces a snap to the groove (#124).
     private func engageAutohelm(_ i: Int) {
         let b = boats[i]
-        let engaged = Autohelm.engage(sailingAngle: b.sailingAngle, tws: b.grooveWindSpeed(in: boatClass), boatClass: boatClass)
+        let engaged = Autohelm.engage(sailingAngle: b.sailingAngle, tws: b.grooveWindSpeed(in: boatClass),
+                                      boatClass: boatClass)
         boats[i].autohelm = engaged.autohelm
         if engaged.snapped { emit(.grooveSnap(seat: i)) }
     }
@@ -434,7 +449,18 @@ public final class Race {
         if tick == 0 { fireGun() }
 
         refreshWind()
-        applyWindShadows()
+        // The order is fixed (#377): every caster's backwind zone from the tick-start states and the backwind levels as
+        // of the last tick, before any header turns a boat's wind (so a caster's own header never feeds her zone); the
+        // headers from those zones; then the ribbons and the backwind levels step from the headed winds; then each
+        // boat's shadow from the ribbons now and the zones.
+        let backwinds = boats.indices.map(shadowCone(ofSeat:))
+        let header = boatClass.windShadow.header
+        if let header { applyBackwindHeaders(backwinds, header: header) }
+        // Every boat's working scale, from the headed winds: the same for the wake and the backwind levels.
+        let scales = sailScales()
+        stepWake(scales: scales)
+        if header != nil { stepBackwindSails(scales: scales) }
+        applyWindShadows(backwinds)
         averageGrooveWinds()
 
         let protests = applyInputs()
@@ -506,18 +532,133 @@ public final class Race {
     }
 
     /// Every boat on the course takes the shadow and backwind of every other one on it (#10); a ghost
-    /// takes none and casts none (#30).
-    private func applyWindShadows() {
-        let cones = boats.indices.map(shadowCone(ofSeat:))
+    /// takes none and casts none (#30). The shadow is every other caster's ribbons (`wake`, #377), times each one's
+    /// backwind loss (`ShadowCone.factor(at:)`: #298's or #79's, or the header's lull, none by default), floored at the
+    /// class's stacking floor. `zones` are every seat's backwind (`shadowCone(ofSeat:)`) this tick.
+    private func applyWindShadows(_ zones: [ShadowCone?]) {
+        let shadow = boatClass.windShadow
+        let floor = shadow.stackingFloor
+        let backwindIsPureShift = shadow.backwindInnerLength != nil && shadow.header.map { $0.lull == 0 } ?? false
+        let wake = wake.frame(tick: tick)
         for i in boats.indices {
             guard !boats[i].isGhost else {
                 boats[i].shadow = 1
                 continue
             }
-            let others = cones.indices.compactMap { $0 == i ? nil : cones[$0] }
-            boats[i].shadow = ShadowCone.factor(at: boats[i].position, of: others, floor: boatClass.windShadow.stackingFloor)
+            let p = boats[i].position
+            var f = wake.unflooredFactor(at: p, receiver: i)
+            // A header's backwind at lull 0 (the default) leaves every factor exactly 1: nothing to multiply.
+            if !backwindIsPureShift {
+                for (c, zone) in zones.enumerated() where c != i {
+                    if let zone { f *= zone.factor(at: p) }
+                }
+            }
+            boats[i].shadow = max(f, floor)
         }
     }
+
+    /// Steps the ribbon wake (#377): every boat's emission level target is how hard her sail is working, with her held
+    /// ease (`SailTrim.workingScale`), from this tick's (headed) winds.
+    private func stepWake(scales: [Double]) {
+        wake.step(boats: boats, tick: tick, scales: scales)
+    }
+
+    /// Steps each seat's backwind level and side (`backwindSails`), for a class with a header (#377): built over the
+    /// ribbons' `buildSeconds`, faded over the class's `backwindFadeSeconds`.
+    private func stepBackwindSails(scales: [Double]) {
+        let shadow = boatClass.windShadow
+        backwindSails.step(boats: boats, scales: scales, buildSeconds: shadow.ribbons.buildSeconds,
+                           fadeSeconds: shadow.backwindFadeSeconds)
+    }
+
+    /// Every boat's working scale now: her sail's angle to her apparent wind with her held ease (`SailTrim`).
+    private func sailScales() -> [Double] {
+        let boatClass = boatClass
+        return boats.indices.map { SailTrim.standard.workingScale(of: boats[$0], ease: heldInputs[$0].ease, boatClass: boatClass) }
+    }
+
+    /// How much `seat`'s backwind is cast, 0...1, for a class with a header (#377): her backwind level (`BackwindSails`)
+    /// as of the last tick stepped; before the first, her working scale now. 1 for a class without a header (#298's
+    /// loss ignores her sail) or an unknown seat.
+    public func backwindSail(ofSeat seat: Int) -> Double {
+        guard boatClass.windShadow.header != nil, boats.indices.contains(seat) else { return 1 }
+        if backwindSails.levels.indices.contains(seat) { return backwindSails.levels[seat] }
+        return SailTrim.standard.workingScale(of: boats[seat], ease: heldInputs[seat].ease, boatClass: boatClass)
+    }
+
+    /// The side `seat`'s backwind is cast on, for a class with a header (#377, `BackwindSails.sides`): her windward side,
+    /// held while a zone fades out past her boom crossing; nil (her side now) before the first tick stepped, for a class
+    /// without a header, or for an unknown seat.
+    public func backwindSide(ofSeat seat: Int) -> Tack? {
+        guard boatClass.windShadow.header != nil, backwindSails.sides.indices.contains(seat) else { return nil }
+        return backwindSails.sides[seat]
+    }
+
+    /// The backwind as a header (#377): each boat's wind over the ground is turned towards her bow by the header's angle
+    /// × the envelope of every other boat's backwind she sits in (`ShadowCone.backwindEnvelope(at:)`, from `zones`, this
+    /// tick's from the tick-start states), summed and capped, through a first-order lag of `lagSeconds`
+    /// (`headerState`); never past her bow line. Her three winds are then resolved again from it, so her polar,
+    /// apparent wind, drawing and everything after see the headed wind; nobody else's changes. Her autohelm (ADR 0007)
+    /// holds her heading through it (`helmSailingAngle`).
+    /// The backwind is the one thing that turns a boat's wind: #10 had shadows never turn it.
+    private func applyBackwindHeaders(_ zones: [ShadowCone?], header: BoatClass.WindShadow.Header) {
+        if headerState.count != boats.count { headerState = Array(repeating: 0, count: boats.count) }
+        if unheadedWindDirections.count != boats.count { unheadedWindDirections = Array(repeating: 0, count: boats.count) }
+        let follow = header.lagSeconds > 0 ? min(1, Race.dt / header.lagSeconds) : 1
+        for i in boats.indices {
+            unheadedWindDirections[i] = boats[i].sailingWind.direction
+            guard !boats[i].isGhost else {
+                headerState[i] = 0
+                continue
+            }
+            let target = Self.headerTarget(at: boats[i].position, receiver: i, zones: zones, header: header)
+            headerState[i] += (target - headerState[i]) * follow
+            guard headerState[i] > 0 else { continue }
+            let headed = Self.headed(boats[i].windOverGround, heading: boats[i].heading, by: headerState[i])
+            let winds = BoatWinds.resolve(ground: headed, current: boats[i].current, velocityThroughWater: boats[i].velocity)
+            boats[i].windOverGround = winds.overGround
+            boats[i].sailingWind = winds.sailing
+            boats[i].apparentWind = winds.apparent
+        }
+    }
+
+    /// The header every caster but `receiver` puts on a boat at `p`, radians: the header's angle × each one's backwind
+    /// envelope there, summed, capped at the header's cap.
+    static func headerTarget(at p: Vec2, receiver: Int, zones: [ShadowCone?], header: BoatClass.WindShadow.Header) -> Double {
+        var sum = 0.0
+        for (c, zone) in zones.enumerated() where c != receiver {
+            if let zone { sum += header.angle * zone.backwindEnvelope(at: p) }
+        }
+        return min(header.cap, sum)
+    }
+
+    /// `ground` turned `header` radians towards `heading` (a header for a boat sailing it), never past it.
+    static func headed(_ ground: Wind, heading: Double, by header: Double) -> Wind {
+        let off = wrapAngle(heading - ground.direction)
+        let turn = (off < 0 ? -1.0 : 1.0) * min(header, abs(off))
+        return Wind(direction: wrapAngle(ground.direction + turn), speed: ground.speed)
+    }
+
+    /// The sailing angle seat `i`'s autohelm steers a groove by: against her wind before this tick's backwind header
+    /// (#377). A backwind header comes off a boat on her lee bow, so following it down would bear her away onto that
+    /// boat's stern (rule 11 against her): like a sailor with a boat on her lee bow she holds her heading and pinches
+    /// instead, and tacking away is hers to choose. Never into the no-go zone: she holds only as much of the header as
+    /// keeps her headed angle out of it, so a slow or luffed boat headed hard isn't pinned in irons. Unheaded, her plain
+    /// sailing angle. Only a groove holds through it: an angle the autohelm holds (`Autohelm.Target.angle`), and its
+    /// engaging, read her headed angle, the one the player's screen and a bot's view (`SeatView`) show, so an angle a
+    /// bot asked for is the angle she sails (held against the unheaded wind, a bot steering by its view fought the
+    /// autohelm through every header).
+    private func helmSailingAngle(_ b: Boat, seat i: Int) -> Double {
+        guard header(ofSeat: i) > 0, unheadedWindDirections.indices.contains(i) else { return b.sailingAngle }
+        let unheaded = b.boomSide.sailingAngle(relativeWind: wrapAngle(unheadedWindDirections[i] - b.heading))
+        // Never pinched into the no-go zone: she holds only as much as keeps her headed angle out of it.
+        let room = max(0, abs(b.sailingAngle) - BoatDynamics.noGoAngle(boatClass.polar))
+        let turn = wrapAngle(unheaded - b.sailingAngle)
+        return b.sailingAngle + (turn < 0 ? -1 : 1) * min(abs(turn), room)
+    }
+
+    /// Each seat's backwind header now, radians (`applyBackwindHeaders`): 0 for every seat of a class without a header.
+    public func header(ofSeat seat: Int) -> Double { headerState.indices.contains(seat) ? headerState[seat] : 0 }
 
     /// Moves every boat's average of the wind speed her polar reads a tick on (`Boat.averagedWindSpeed`):
     /// what her autohelm's grooves follow (#245), once the wind and shadows are sampled this tick.
@@ -529,7 +670,13 @@ public final class Race {
     /// ghost, which casts none, or an unknown seat.
     public func shadowCone(ofSeat seat: Int) -> ShadowCone? {
         guard boats.indices.contains(seat), !boats[seat].isGhost else { return nil }
-        return ShadowCone(caster: boats[seat], shadow: boatClass.windShadow)
+        var zone = ShadowCone(caster: boats[seat], shadow: boatClass.windShadow)
+        // The backwind is upwash off a working sail (#377): for a class with a header only.
+        if boatClass.windShadow.header != nil {
+            zone.backwindSail = backwindSail(ofSeat: seat)
+            zone.backwindSide = backwindSide(ofSeat: seat)
+        }
+        return zone
     }
 
     private func integrate(_ i: Int, _ dt: Double) {
@@ -544,7 +691,9 @@ public final class Race {
         let playerDriven = b.autohelm?.isTapping ?? true
 
         if let helm = b.autohelm {
-            b.desiredRudder = helm.rudder(sailingAngle: b.sailingAngle, boomSide: b.boomSide, tws: tws,
+            // A groove holds her heading through a backwind header (`helmSailingAngle`); a held angle is her headed one.
+            let sailingAngle = helm.target.groove != nil ? helmSailingAngle(b, seat: i) : b.sailingAngle
+            b.desiredRudder = helm.rudder(sailingAngle: sailingAngle, boomSide: b.boomSide, tws: tws,
                                           grooveTWS: grooveTWS, boatClass: boatClass)
         }
 
@@ -1554,7 +1703,8 @@ extension Race {
             touchingBoats: boatPairs, touchingObstacles: obstacles, touchingEdges: edges,
             incidents: incidents,
             firstFinishTime: firstFinishTime, isOver: isOver, results: results, windKeys: wind.keys,
-            overlaps: overlaps.memory
+            overlaps: overlaps.memory, ribbonPoints: wake.points, emissionLevels: wake.levels, headers: headerState,
+            backwind: backwindSails
         )
     }
 
@@ -1654,6 +1804,8 @@ extension Race {
             }
         }
 
+        try validateShadowState(of: snapshot)
+
         let snapshotWind = WindField(setup: windSetup, windows: wind.windows, keys: snapshot.windKeys)
         do {
             try snapshotWind.requireKeys(atTick: snapshot.tick)
@@ -1705,6 +1857,27 @@ extension Race {
         finishers = boats.filter { $0.status == .finished }.count
         pending.removeAll()
         events.removeAll()
+        wake = TurbulenceRibbons(shadow: boatClass.windShadow, points: snapshot.ribbonPoints, levels: snapshot.emissionLevels)
+        headerState = snapshot.headers
+        backwindSails = snapshot.backwind
+    }
+
+    /// Throws `invalidShadowState` unless the snapshot's ribbons, headers and backwind (#377) are each empty or one
+    /// per seat, with values the race can step from.
+    private func validateShadowState(of snapshot: WorldSnapshot) throws {
+        let n = boats.count
+        let sizeOK = { (count: Int) in count == 0 || count == n }
+        let level = { (x: Double) in x >= 0 && x <= 1 }
+        let pointOK = { (p: TurbulenceRibbons.Point) in
+            [p.position.x, p.position.y, p.drift.x, p.drift.y, p.peak, p.scale, p.growth].allSatisfy(\.isFinite)
+                && p.life.isFinite && p.life > 0 && p.born <= snapshot.tick
+        }
+        guard sizeOK(snapshot.ribbonPoints.count), sizeOK(snapshot.emissionLevels.count), sizeOK(snapshot.headers.count),
+              sizeOK(snapshot.backwind.levels.count),
+              snapshot.ribbonPoints.allSatisfy({ $0.allSatisfy(pointOK) }),
+              snapshot.emissionLevels.allSatisfy(level), snapshot.backwind.levels.allSatisfy(level),
+              snapshot.headers.allSatisfy({ $0.isFinite && $0 >= 0 })
+        else { throw WorldSnapshotError.invalidShadowState }
     }
 
     /// The first field of `boat` the race couldn't step from at `tick`, or nil.

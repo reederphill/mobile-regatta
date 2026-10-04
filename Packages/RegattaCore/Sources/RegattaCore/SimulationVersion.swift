@@ -203,7 +203,14 @@ import Glibc
 ///    projected at their velocities, clear astern within 4 s), and the windward boat on her own track was clear of
 ///    the leeward boat's proper-course path (`EscapeSimulation.verdict`). Rule 17 wins over rules 15 and 16.1; otherwise
 ///    the chain runs as on 30. Rules files before schema 5 sail as on 30, bit for bit.
-public let simulationRevision = 31
+/// 32: the wind shadow is the turbulence ribbons, the backwind a header (#377), on 31. Races sail skiff@6 by default.
+///    Each boat sheds ribbon points while her sail works (`TurbulenceRibbons`): they drift with the wind, grow and fade
+///    over their life, and slow a boat inside them (the cone and its loss are gone; files without the ribbon fields take
+///    them from their cone fields). Backwind casts only from a working sail above a floor speed (`BackwindSails`), fades
+///    out over 1.5 s on its old side before building over 2 s on the new one, and turns the receiver's wind towards her
+///    bow (8 degrees, 12 stacked, lagged 1 s) instead of slowing her; the groove autohelm holds her heading through it.
+///    The ribbons, emission levels, headers and backwind levels and sides are race state in `WorldSnapshot`.
+public let simulationRevision = 32
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

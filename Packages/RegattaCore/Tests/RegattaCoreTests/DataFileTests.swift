@@ -16,6 +16,7 @@ enum Fixtures {
         2: "f5c8f1677a45f76c2ffe27914671ea0ce615614944f331027c506cafb6caa12d",
         3: "0796b93570fb9723697162f3da4617b28ee0100f693116f1574a198c4c3bf792",
         4: "bd90cabe38cfea22c88dd0a6e4c462e04691dec0c5b90420d416bd8555f05bdf",
+        5: "74dafe68bd0047152abb136d81925d8e59f88adcb2f8c97197d8becb1e668705",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -45,7 +46,7 @@ enum Fixtures {
 /// and edited copies of its bytes.
 enum SkiffFixtures {
     static let classID = "skiff"
-    static let version = 5
+    static let version = 6
     /// SHA-256 of each bundled `Resources/boat-classes/skiff@<version>.json`. A released file never changes
     /// (ADR 0004): if one fails, ship the change as the next version instead of editing it. Version 1 stays
     /// bundled for the logs sailed on it (ADR 0002).
@@ -55,6 +56,7 @@ enum SkiffFixtures {
         3: "3a6e6b7bf037bc496a9fdddfa45d7000ab41dd1801a08cece1bc2d3a76092c81",
         4: "4e2d1a94d1c90ac80aa88bdaa4890fc68095b16de61324c6fdaa19f54ee3a9a1",
         5: "ce105fbd37ca455498592ea9ae4e47a34a5e255617b2490019a1360330261b80",
+        6: "03eb42860071a0a15db47c9877467bea0809e663f0ca0158901fb2d1f86dce64",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -152,7 +154,7 @@ enum SkiffFixtures {
         }
         #expect(BoatClass.supportedSchemaVersions == [2, 3])
         #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version)).ref,
-                "races sail skiff@5 unless told otherwise (#248, #89, #263, #298)")
+                "races sail skiff@6 unless told otherwise (#248, #89, #263, #298, #377)")
     }
 
     @Test func missingHeaderIsMalformed() throws {
@@ -682,6 +684,7 @@ enum SkiffFixtures {
         shadow.lossCloseIn = a.windShadow.lossCloseIn
         shadow.stackingFloor = a.windShadow.stackingFloor
         shadow.slowingDown = nil
+        shadow.ribbons = a.windShadow.ribbons // seeded from the cone's loss (#377)
         #expect(shadow == a.windShadow)
         #expect(!a.windShadow.isSpeedLoss && a.rollTack == nil)
         #expect(b.windShadow.isSpeedLoss && b.windShadow.slowingDown == 2)
@@ -735,6 +738,7 @@ enum SkiffFixtures {
         shadow.coneSwing = 0
         shadow.coneLength = a.windShadow.coneLength
         shadow.coneWidthAtEnd = a.windShadow.coneWidthAtEnd
+        shadow.ribbons = a.windShadow.ribbons // seeded from the cone's width (#377)
         #expect(shadow == a.windShadow, "only the new values and the trapezoid's steeper edge differ")
         #expect(!a.windShadow.backwindSternSlant && a.windShadow.backwindRunningAngle == nil)
         #expect(a.windShadow.backwindScaleSpeed == nil && !a.windShadow.coneFromHull)
@@ -743,6 +747,56 @@ enum SkiffFixtures {
         #expect(abs(b.windShadow.backwindRunningFade - deg2rad(25)) < 1e-12 && a.windShadow.backwindRunningFade == 0)
         #expect(b.windShadow.backwindScaleSpeed == metresPerSecond(knots: 6) && b.windShadow.backwindMaxScale == 1.5)
         #expect(b.windShadow.backwindInnerLength == 0.75 * a.hull.length && b.windShadow.backwindLoss == 0.2)
+    }
+
+    /// #377: skiff@6 and ilca-dinghy@5 are their previous version with the shadow a ribbon wake and the backwind a
+    /// header off a working sail, faded, above a floor speed (the new optional blocks). Every other value is unchanged.
+    @Test(arguments: [(SkiffFixtures.classID, 5), (Fixtures.classID, 4)])
+    func nextVersionAddsTheRibbonsAndTheHeader(classID: String, previous: Int) throws {
+        let old = try BoatClassFile.bundled(id: classID, version: previous)
+        let new = try BoatClassFile.bundled(id: classID, version: previous + 1)
+        #expect(new.schemaVersion == old.schemaVersion)
+        let (a, b) = (old.content, new.content)
+        #expect(b.name == a.name && b.hull == a.hull && b.polar == a.polar && b.momentum == a.momentum && b.steering == a.steering)
+        #expect(b.contact == a.contact && b.ease == a.ease && b.rollTack == a.rollTack)
+        #expect(b.planing == a.planing && b.spinnaker == a.spinnaker && b.byTheLee == a.byTheLee)
+        let length = a.hull.length, skiff = classID == SkiffFixtures.classID
+        var shadow = b.windShadow
+        shadow.ribbons = a.windShadow.ribbons
+        shadow.header = nil
+        shadow.backwindFadeSeconds = 0
+        shadow.backwindFloorSpeed = nil
+        shadow.backwindFloorSpan = 0
+        #expect(shadow == a.windShadow, "only the new blocks differ")
+        #expect(a.windShadow.header == nil && a.windShadow.backwindFloorSpeed == nil)
+        let r = b.windShadow.ribbons
+        #expect(r.emitSeconds == 0.5 && r.lifeScale == 1 && r.buildSeconds == 2)
+        #expect(r.startWidth == 1.0 * length && r.endWidth == (skiff ? 6 : 3.8) * length)
+        #expect(r.peak == (skiff ? 0.48 : 0.25) && r.lengthCap == (skiff ? 1.05 : 1.2) * length)
+        #expect(r.stoppedSpeed == metresPerSecond(knots: 0.6) && r.fullAngle == deg2rad(12.5))
+        #expect(b.windShadow.header == .init(angle: deg2rad(8), cap: deg2rad(12), lull: 0, lagSeconds: 1))
+        #expect(b.windShadow.backwindFadeSeconds == 1.5)
+        #expect(b.windShadow.backwindFloorSpeed == metresPerSecond(knots: 2) && b.windShadow.backwindFloorSpan == metresPerSecond(knots: 2))
+    }
+
+    @Test(arguments: [
+        (#""peakLoss": 0.48,"#, #""peakLoss": 1.5,"#, "ribbon peak loss"),
+        (#""emitSeconds": 0.5,"#, #""emitSeconds": 0,"#, "ribbon emission interval"),
+        (#""fullAngleDegrees": 12.5"#, #""fullAngleDegrees": 0"#, "ribbon full sail angle"),
+        (#""capDegrees": 12,"#, #""capDegrees": 95,"#, "backwind header"),
+        (#""lullLoss": 0,"#, #""lullLoss": -1,"#, "backwind header lull"),
+        (#""floorKnots": 2,"#, #""floorKnots": -2,"#, "backwind floor"),
+    ])
+    func ribbonAndHeaderValuesAreChecked(of: String, with: String, reason expected: String) throws {
+        let data = try SkiffFixtures.edited([(of: of, with: with)], version: 6)
+        #expect {
+            try BoatClassFile(data: data)
+        } throws: { error in
+            if case .invalidContent(kind: "boat class", id: "skiff", reason: let reason) = error as? DataFileError {
+                return reason.contains(expected)
+            }
+            return false
+        }
     }
 
     @Test func schemaThreeValuesAreConvertedToCodeUnits() throws {

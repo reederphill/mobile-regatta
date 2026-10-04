@@ -515,7 +515,9 @@ import Testing
         ])
         let counts: [Int] = [first.incidents.count, first.incidents.contacts.count, first.incidents.obstructionContacts.count,
                   first.incidents.markTouches.count]
-        #expect(counts == [6, 6, 9, 0])
+        // #377: the shadow is the ribbons for every class, skiff@1 too (its ribbons seeded from its cone), so the scripted
+        // fleet, sailing fixed inputs, meets differently: 5 incidents and 4 contacts, where the cone gave 6 and 6.
+        #expect(counts == [5, 4, 9, 0])
         #expect(first.incidents.contacts.allSatisfy { $0.incidentId != nil }, "every contact of racing boats is in an incident")
     }
 

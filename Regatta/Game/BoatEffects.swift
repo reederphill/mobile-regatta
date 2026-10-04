@@ -2,21 +2,15 @@ import CoreImage
 import SpriteKit
 import RegattaCore
 
-/// What one boat draws on the water beneath the fleet (#15, #10, #298, #121): her wind-shadow cone and backwind
-/// zone, hatches in white, and her wake, a string of her recent track from her stern. The cone and backwind are
-/// sprites sharing a few textures per class and scale (`EffectArt`), sized and turned each frame; the wake is one
-/// stroked path a boat, rebuilt each frame from a short history.
+/// What one boat draws on the water beneath the fleet (#15, #10, #298, #121): her backwind zone, a hatch in white, and
+/// her wake, a string of her recent track from her stern. The backwind is a sprite sharing a texture per class and
+/// scale (`EffectArt`), sized and turned each frame; the wake is one stroked path a boat, rebuilt each frame from a
+/// short history. Her wind shadow is the fleet's turbulence ribbons (#377, `TurbulenceTrailLayer`), not hers to draw.
 ///
 /// The nodes live in the scene's effects layer, in world space (`nodes`), not under the boat's node, so they turn
-/// with the water and the boat's ghost fade doesn't reach them: a ghost's wake drains away, and her cone and
-/// backwind are hidden (#30: she casts neither). Her cone goes into the fleet's one `ConeLayer`
-/// instead, so the fleet's overlapping cones don't darken into a mat.
+/// with the water and the boat's ghost fade doesn't reach them: a ghost's wake drains away, and her backwind is
+/// hidden (#30: she casts none).
 final class BoatEffects {
-    /// The cone, apex at the boat, down her apparent wind (#10): a hatch, faded as core's loss fades, drawn by a shader
-    /// (`ConeShader`) from the corners core cuts the shadow from, since its near edge follows her heading. A mask in the
-    /// fleet's `ConeLayer`, which draws it at `BoatStyle.coneAlpha`.
-    let cone: SKSpriteNode
-    let coneShader: ConeShader
     /// The backwind trapezoid on her windward quarter (#298), its hatch fading from her stern to its far edge as
     /// its loss does; hidden for a class with #79's band.
     let backwind: SKSpriteNode
@@ -25,24 +19,24 @@ final class BoatEffects {
     /// pressure's (`WakeShape`): a roll miss kills it, a hit flares it.
     let trail = SKShapeNode()
 
-    /// The nodes the scene adds to its effects layer; the cone goes into its `ConeLayer`.
+    /// The nodes the scene adds to its effects layer.
     var nodes: [SKNode] { [backwind, trail] }
 
-    /// How many nodes she draws on the water: her cone, `nodes` and their children (the `-perf` log).
-    var nodeCount: Int { nodes.reduce(1) { $0 + 1 + $1.children.count } }
+    /// How many nodes she draws on the water: `nodes` and their children (the `-perf` log).
+    var nodeCount: Int { nodes.reduce(0) { $0 + 1 + $1.children.count } }
 
-    /// The z's within a boat's effects, each boat a `DrawOrder` slot above the last by seat: every cone under
+    /// The z's within a boat's effects, each boat a `DrawOrder` slot above the last by seat: the fleet's ribbons under
     /// every backwind under every wake; the streak over its V.
     enum Layer {
-        /// The fleet's `ConeLayer`, under every boat's slot.
-        static let cones: CGFloat = -0.5
+        /// The fleet's ribbons (`TurbulenceTrailLayer`), under every boat's slot.
+        static let ribbons: CGFloat = -0.5
         static let backwind: CGFloat = 0.1, wake: CGFloat = 0.5
     }
 
     private let ppm: CGFloat
     private let boatClass: BoatClass
     private let hasBackwind: Bool
-    /// The heading and apparent wind her cone and backwind were drawn along last frame, trailing hers (`follow`).
+    /// The heading and apparent wind her backwind was drawn along last frame, trailing hers (`follow`).
     private var followed: (heading: Double, wind: Double)?
     /// The wake drawn last frame, eased towards each frame's (`BoatStyle.wakeEaseRate`).
     private(set) var shape: WakeShape?
@@ -58,11 +52,6 @@ final class BoatEffects {
         self.boatClass = boatClass
         let art = EffectArt.shared(shadow: boatClass.windShadow, pointsPerMeter: ppm, style: style)
 
-        coneShader = ConeShader.shared(shadow: boatClass.windShadow, pointsPerMeter: ppm, style: style)
-        cone = SKSpriteNode(color: .white, size: coneShader.size)
-        cone.anchorPoint = coneShader.anchor
-        cone.shader = coneShader.shader
-        ConeShader.update(cone, nearA: .zero, nearB: .zero, ppm: ppm)
         backwind = SKSpriteNode(texture: art.backwind)
         backwind.anchorPoint = art.backwindAnchor
         hasBackwind = art.backwind != nil
@@ -76,41 +65,37 @@ final class BoatEffects {
         trail.alpha = 0
 
         let slot = DrawOrder.z(seat)
-        cone.zPosition = slot
         backwind.zPosition = Layer.backwind + slot
         trail.zPosition = Layer.wake + slot
     }
 
     /// Draws `boat`'s effects in `pose` at race time `time`. `isFlogging` is her sail's roll-miss flog this frame
     /// (`FlogTimer`): her wake dies while it lasts and comes back with it (#222). `settled` draws the wake straight
-    /// at its target, with no easing (a frozen render fixture).
+    /// at its target, with no easing (a frozen render fixture). `backwindSail`, 0...1, her backwind level, scales her
+    /// backwind's alpha and `backwindSide` (nil: her windward side now) is the side it lies on (#377,
+    /// `RenderWorld.backwind(ofSeat:)`): a fading zone keeps the side it was cast on past her boom crossing.
     func update(with boat: Boat, pose: BoatPose, style: BoatStyle, quality: WakeQuality, time: Double, dt: Double,
-                settled: Bool, isFlogging: Bool) {
-        let point = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
-
-        // Her shadow and backwind trail her: they turn after her heading and her apparent wind, not with them, as the air
-        // she disturbed does (`BoatStyle.shadowFollowSeconds`). Drawn only; core's cone and backwind are cast at once.
+                settled: Bool, isFlogging: Bool, backwindSail: Double = 1, backwindSide: Tack? = nil) {
+        // Her backwind trails her: it turns after her heading and her apparent wind, not with them, as the air she
+        // disturbed does (`BoatStyle.shadowFollowSeconds`). Drawn only; core's backwind is cast at once.
         let followed = follow(heading: boat.heading, wind: boat.apparentWind.direction, dt: dt,
                               seconds: style.shadowFollowSeconds, settled: settled)
         let core = ShadowCone(apex: boat.position, apparentWindDirection: followed.wind, heading: followed.heading,
                               windwardSide: boat.tack, shadow: boatClass.windShadow, trueWindAngle: boat.twa,
                               speed: boat.speedThroughWater)
 
-        cone.isHidden = pose.isGhost
-        cone.position = point
-        // The cone's axis down her apparent wind (#10), swung astern for a class that does (`BoatClass.WindShadow.coneSwing`).
-        cone.zRotation = CGFloat(atan2(-core.axis.x, core.axis.y))
-        ConeShader.update(cone, nearA: core.nearA, nearB: core.nearB, ppm: ppm)
-
         // Her windward side is starboard on starboard tack (`ShadowCone.windward`); it flips at the boom crossing.
-        // She casts less of it across a reach, and none while running (`ShadowCone.backwindPresence`).
-        let presence = core.backwindPresence
+        // She casts less of it across a reach, and none while running (`ShadowCone.backwindPresence`); for a class with a
+        // header (#377) none below its floor speed (`backwindFloorFactor`) and only as hard as her sail works
+        // (`backwindSail`, held on `backwindSide` while it fades out past her boom crossing).
+        let presence = core.backwindPresence * boatClass.windShadow.backwindFloorFactor(speed: boat.speedThroughWater)
+            * backwindSail.clamped(to: 0...1)
         backwind.isHidden = pose.isGhost || !hasBackwind || presence <= 0
         // Anchored on her stern line, so her speed lengthens and shortens it from there (`backwindScale(speed:)`).
         let stern = boat.position + boat.forward * boatClass.windShadow.sternCorner.y
         backwind.position = CGPoint(x: stern.x * ppm, y: stern.y * ppm)
         backwind.zRotation = CGFloat(-followed.heading)
-        backwind.xScale = boat.tack == .starboard ? 1 : -1
+        backwind.xScale = (backwindSide ?? boat.tack) == .starboard ? 1 : -1
         backwind.yScale = CGFloat(boatClass.windShadow.backwindScale(speed: boat.speedThroughWater))
         backwind.alpha = CGFloat(style.coneAlpha * style.backwindShare * presence)
 
@@ -180,38 +165,6 @@ final class BoatEffects {
             }
         }
         history.removeAll { time - $0.time > seconds }
-    }
-}
-
-/// The fleet's wind-shadow cones as one layer (#15: hatched cones, white to read on dark water). Each boat's cone hatch is a
-/// mask here, and one white sheet shows through their union at `BoatStyle.coneAlpha`: so a cone's lines are
-/// just readable on the water, and where ten cones overlap no line is darker than one cone's, only the hatch
-/// denser. The mask and the sheet sit at the layer's origin, so each cone lands where its own transform puts it.
-final class ConeLayer: SKCropNode {
-    /// The sheet the cones show: big enough to cover any course.
-    let sheet = SKSpriteNode(color: CuePalette.cueWhite.uiColor, size: CGSize(width: 400_000, height: 400_000))
-    private let masks = SKNode()
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override init() {
-        super.init()
-        zPosition = BoatEffects.Layer.cones
-        maskNode = masks
-        addChild(sheet)
-    }
-
-    /// The cones it shows.
-    var cones: [SKNode] { masks.children }
-
-    /// Shows `effects`' cone.
-    func add(_ effects: BoatEffects) {
-        masks.addChild(effects.cone)
-    }
-
-    /// Draws the cones at `style`'s alpha.
-    func update(style: BoatStyle) {
-        sheet.alpha = CGFloat(style.coneAlpha)
     }
 }
 

@@ -91,6 +91,11 @@ import RegattaCore
             snapshot.seats[seat].boat.isTacking = false
             snapshot.seats[seat].heldInput = .neutral
         }
+        // Placed boats start in clean air (#377): no ribbons, headers or backwind from where they were.
+        snapshot.ribbonPoints = []
+        snapshot.emissionLevels = []
+        snapshot.headers = []
+        snapshot.backwind = BackwindSails()
         edit(&snapshot)
         try race.importSnapshot(snapshot)
         _ = race.drainEvents()

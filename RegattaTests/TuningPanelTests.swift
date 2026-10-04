@@ -145,6 +145,36 @@ import RegattaCore
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("files/conditions/classic-oscillating@3+tune1.json").path))
     }
 
+    /// The wind shadow's ribbons and the backwind's header, fade and floor (#377) are sliders on the class file's
+    /// numbers: set, the next practice race's class sails them. The cone's sliders that no longer move the sim (its end
+    /// width and loss only seed a class without ribbons; the backwind's loss is the header's lull now) are gone.
+    @Test func ribbonAndHeaderSlidersTuneTheClass() throws {
+        let (model, root) = model()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let ids = Set(model.groups.flatMap(\.sliders).map(\.id))
+        for gone in ["/windShadow/lossCloseIn", "/windShadow/coneWidthAtEndHullLengths", "/windShadow/backwind/loss"] {
+            #expect(!ids.contains("boatClass:" + gone), "\(gone) moves nothing in skiff@6")
+        }
+        model.set(try slider("boatClass:/windShadow/ribbons/peakLoss", in: model), to: 0.3)
+        model.set(try slider("boatClass:/windShadow/ribbons/buildSeconds", in: model), to: 1.5)
+        model.set(try slider("boatClass:/windShadow/header/degrees", in: model), to: 10)
+        model.set(try slider("boatClass:/windShadow/header/lagSeconds", in: model), to: 0.5)
+        model.set(try slider("boatClass:/windShadow/backwind/fadeSeconds", in: model), to: 1)
+        model.set(try slider("boatClass:/windShadow/backwind/floorKnots", in: model), to: 3)
+        #expect(model.tuning.isTuned && model.problems.isEmpty)
+
+        var config = Self.config
+        config.files = model.practiceFiles()
+        #expect(config.files.boatClass.tune == 1)
+        let session = GameSession(config: config)
+        let shadow = try #require(session.driver as? PracticeDriver).boatClass.windShadow
+        #expect(abs(shadow.ribbons.peak - 0.3) < 1e-12 && abs(shadow.ribbons.buildSeconds - 1.5) < 1e-12)
+        let header = try #require(shadow.header)
+        #expect(abs(header.angle - deg2rad(10)) < 1e-12 && abs(header.lagSeconds - 0.5) < 1e-12)
+        #expect(abs(shadow.backwindFadeSeconds - 1) < 1e-12)
+        #expect(abs((shadow.backwindFloorSpeed ?? 0) - metresPerSecond(knots: 3)) < 1e-12)
+    }
+
     /// The same values give the same tuned copy, under the same tune number, race after race; new values take
     /// the next number, and the old copy stays as it was for the logs that name it.
     @Test func sameValuesKeepTheirTuneNumber() throws {

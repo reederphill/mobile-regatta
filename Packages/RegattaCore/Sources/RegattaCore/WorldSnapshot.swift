@@ -101,6 +101,16 @@ public struct WorldSnapshot: Sendable {
     public var windKeys: WindKeyChain
     /// The pairs overlapped or changing, by `a` then `b`; every pair not listed is neither.
     public var overlaps: [OverlapMemory]
+    /// The wind shadow and backwind state the step reads (#377), exactly: every caster's ribbon points
+    /// (`TurbulenceRibbons.points`, by seat, oldest first), each seat's emission level (`TurbulenceRibbons.levels`),
+    /// each seat's header (radians, the lag's state) and each seat's backwind level and side (`BackwindSails`). Each
+    /// array is empty before the race's first step (and the headers and backwind for a class without a header), else
+    /// one entry for every seat. In memory only: never on the wire (#18's budget), so a client's wake regrows from
+    /// its own prediction, and a wire import keeps the base world's.
+    public var ribbonPoints: [[TurbulenceRibbons.Point]]
+    public var emissionLevels: [Double]
+    public var headers: [Double]
+    public var backwind: BackwindSails
 
     /// The latest tick an import accepts: three hours after the gun, far past any race's time limit.
     /// It bounds the work of bringing the wind to the snapshot's tick.
@@ -110,7 +120,9 @@ public struct WorldSnapshot: Sendable {
         tick: Int, seats: [Seat], touchingBoats: [SeatPair] = [], touchingObstacles: [ObstacleContact] = [],
         touchingEdges: [EdgeContact] = [], incidents: IncidentIndex = IncidentIndex(),
         firstFinishTime: Double? = nil, isOver: Bool = false, results: RaceResults? = nil,
-        windKeys: WindKeyChain = WindKeyChain(), overlaps: [OverlapMemory] = []
+        windKeys: WindKeyChain = WindKeyChain(), overlaps: [OverlapMemory] = [],
+        ribbonPoints: [[TurbulenceRibbons.Point]] = [], emissionLevels: [Double] = [], headers: [Double] = [],
+        backwind: BackwindSails = BackwindSails()
     ) {
         self.tick = tick
         self.seats = seats
@@ -123,6 +135,10 @@ public struct WorldSnapshot: Sendable {
         self.results = results
         self.windKeys = windKeys
         self.overlaps = overlaps
+        self.ribbonPoints = ribbonPoints
+        self.emissionLevels = emissionLevels
+        self.headers = headers
+        self.backwind = backwind
     }
 }
 
@@ -165,4 +181,7 @@ public enum WorldSnapshotError: Error, Equatable, Sendable {
     case invalidOverlap
     /// Results for a race that isn't over, or that aren't exactly one row for each seat.
     case invalidResults
+    /// Ribbon points, emission levels, headers or backwind levels that aren't empty or one per seat, or hold a value
+    /// the race can't step from (not finite, a level outside 0...1, a point born after the snapshot's tick) (#377).
+    case invalidShadowState
 }

@@ -135,7 +135,10 @@ extension BotBrain {
         static let tackCarry = (seconds: 2.0, share: 0.58)
         /// ... and on her new heading, at these shares of her speed now between these seconds after her tap; at her
         /// speed now after the last.
-        static let tackPickUp: [(from: Double, to: Double, share: Double)] = [(0.75, 3.5, 0.55), (3.5, 6, 0.75), (6, .infinity, 1)]
+        /// One phase of her reckoned pick-up (an array element, not a dictionary: the determinism scan reads a
+        /// `[label: Type]` annotation as one).
+        typealias PickUpPhase = (from: Double, to: Double, share: Double)
+        static let tackPickUp: [PickUpPhase] = [(0.75, 3.5, 0.55), (3.5, 6, 0.75), (6, .infinity, 1)]
         /// The share of her speed now she is making `t` seconds after her tap, as she reckons it: her cone's backwind
         /// grows with her speed through the water (`BoatClass.WindShadow.backwindScale(speed:)`), so a boat just out of
         /// a tack casts a smaller one than at full speed. The pick-up's share in force at `t`, else the carry's.
@@ -340,31 +343,84 @@ extension BotBrain {
 
     /// Where `other` would sit from her were she to tack now, as she reckons her tack (`tackCarry`, `tackPickUp`) and
     /// it sailing on, as she reads it (`timing`), at each of `tackOnWindSeconds`: metres astern of her along her new
-    /// heading, her shadow's factor on it (wind shadow or backwind), and whether that is her backwind. Nil without her
-    /// shadow (`ownCone`).
+    /// heading, her shadow's factor on it, and whether that is her backwind. Nil without her backwind zone (`ownCone`).
+    ///
+    /// Her shadow is her ribbons (#377): the wake she has left on the water (`SeatView.wake`, her points drifting on) and
+    /// the new one she lays from her new tack, building from nothing as her sail works again (`ribbonForecast`), the
+    /// stronger of the two; times her backwind's loss there (none for a class with a header). Her backwind is her zone on
+    /// her new side, there once her old one has faded out and her new one has started to build
+    /// (`backwindLevelForecast`): as the race steps it.
     func tackForecast(_ b: SeatView.OwnBoat, _ view: SeatView, on other: SeatView.OtherBoat)
         -> [(astern: Double, factor: Double, backwind: Bool)]? {
         guard let cone = ownCone(b, view) else { return nil }
         let w = b.windDirection
         let heading = 2 * w - b.heading
-        // Her apparent wind now, mirrored about the true wind as her tack mirrors it: its own direction when her cone's axis is
-        // swung astern of it (`BoatClass.WindShadow.coneSwing`), else read back off the axis as before.
-        let apparent = 2 * w - (cone.shadow.coneSwing > 0 ? cone.apparentWindDirection : (-cone.axis).bearing)
+        // Her apparent wind now, mirrored about the true wind as her tack mirrors it.
+        let apparent = 2 * w - cone.apparentWindDirection
         let forward = Vec2.heading(heading)
         let carry = FleetTactics.tackCarry
         let read = timing(other)
-        return FleetTactics.tackOnWindSeconds.map { t in
+        let shadow = view.boatClass.windShadow
+        func her(at t: Double) -> Vec2 {
             var her = b.position + b.forward * (b.speed * carry.share * min(t, carry.seconds))
             for phase in FleetTactics.tackPickUp where t > phase.from {
                 her += forward * (b.speed * phase.share * (min(t, phase.to) - phase.from))
             }
+            return her
+        }
+        let apparentSpeed = max((b.sailingWind.velocity - b.velocity).length, 0.5)
+        return FleetTactics.tackOnWindSeconds.map { t in
+            let at = her(at: t)
             let them = other.position + other.velocity * (t + read)
             // Her tack keeps her true wind angle (mirrored); her speed is her reckoned one at `t`, not her speed now.
-            let after = ShadowCone(apex: her, apparentWindDirection: apparent, heading: heading,
-                                   windwardSide: b.tack.other, shadow: view.boatClass.windShadow, trueWindAngle: b.twa,
+            var after = ShadowCone(apex: at, apparentWindDirection: apparent, heading: heading,
+                                   windwardSide: b.tack.other, shadow: shadow, trueWindAngle: b.twa,
                                    speed: b.speed * FleetTactics.tackSpeedShare(at: t))
-            return ((her - them).dot(forward), after.factor(at: them), after.isInBackwind(them))
+            if shadow.header != nil { after.backwindSail = Self.backwindLevelForecast(at: t, shadow: shadow) }
+            let tick = TurbulenceRibbons.tick(after: t, from: view.tick)
+            let old = view.wake.loss(of: view.seat, at: them, tick: tick)
+            let new = TurbulenceRibbons.loss(along: Self.ribbonForecast(at: t, track: her(at:), drift: b.windOverGround.velocity,
+                                                                        apparentSpeed: apparentSpeed, shadow: shadow), at: them)
+            return ((at - them).dot(forward), (1 - max(old, new)) * after.factor(at: them), after.isInBackwind(them))
         }
+    }
+
+    /// Her new ribbon `t` seconds after her tap, as she reckons it (#377): a point every emission interval along her
+    /// reckoned track (`track`), shed once her sail works again on her new heading (`tackPickUp`'s first phase), its
+    /// level building from nothing over the class's `buildSeconds`, drifting with the wind `drift` and living as the
+    /// race's do at her apparent wind now.
+    static func ribbonForecast(at t: Double, track: (Double) -> Vec2, drift: Vec2, apparentSpeed: Double,
+                               shadow: BoatClass.WindShadow) -> [TurbulenceRibbons.Live] {
+        let p = shadow.ribbons
+        let working = FleetTactics.tackPickUp.first?.from ?? 0
+        let life = p.life(apparent: apparentSpeed, coneLength: shadow.coneLength)
+        let s0 = p.startWidth / 2, s1 = p.endWidth / 2
+        var run: [TurbulenceRibbons.Live] = []
+        var tau = p.emitSeconds
+        while tau <= t {
+            let level = p.buildSeconds > 0 ? ((tau - working) / p.buildSeconds).clamped(to: 0...1) : (tau > working ? 1 : 0)
+            let age = t - tau
+            if level > 0, age < life {
+                let point = TurbulenceRibbons.Point(position: track(tau), drift: drift, born: 0, peak: p.peak * level,
+                                                    scale: s0 * level, growth: (s1 - s0) / life.squareRoot() * level, life: life)
+                run.append(TurbulenceRibbons.Live(position: point.position + point.drift * age,
+                                                  strength: point.peak * (1 - TurbulenceRibbons.smoothstep(age / life)),
+                                                  scale: point.scale + point.growth * age.squareRoot()))
+            }
+            tau += p.emitSeconds
+        }
+        return run
+    }
+
+    /// Her backwind's level on her new side `t` seconds after her tap, as she reckons it (#377, a class with a header):
+    /// her old side's zone fades out over the class's `backwindFadeSeconds` from her boom crossing (`tackPickUp`'s first
+    /// phase), then her new one builds over the ribbons' `buildSeconds` (`BackwindSails`).
+    static func backwindLevelForecast(at t: Double, shadow: BoatClass.WindShadow) -> Double {
+        let crossing = FleetTactics.tackPickUp.first?.from ?? 0
+        let start = crossing + shadow.backwindFadeSeconds
+        let build = shadow.ribbons.buildSeconds
+        guard build > 0 else { return t > start ? 1 : 0 }
+        return ((t - start) / build).clamped(to: 0...1)
     }
 
     /// Seconds early (positive) or late she reads `other` (`FleetTactics.timingError`): none at full tactical quality.

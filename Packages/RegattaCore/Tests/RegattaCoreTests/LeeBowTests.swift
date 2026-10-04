@@ -14,8 +14,8 @@ import Testing
     /// Seat 0 close-hauled on starboard (`OpenWater.race`); seat 1 close-hauled on port `ahead` hull lengths ahead of
     /// her and `leeward` to leeward, in her frame, about to tack onto her lee bow. With `together` false seat 1 is
     /// 400 m further to leeward, out of her way.
-    func race(ahead: Double, leeward: Double, together: Bool) throws -> Race {
-        try OpenWater.race(knots: knots) { snapshot, _ in
+    func race(ahead: Double, leeward: Double, together: Bool, boatClassFile: BoatClassFile? = nil) throws -> Race {
+        try OpenWater.race(knots: knots, boatClassFile: boatClassFile) { snapshot, _ in
             let starboard = snapshot.seats[0].boat
             // Her leeward side is to port on starboard tack.
             let toLeeward = -starboard.forward.rightPerp
@@ -35,7 +35,12 @@ import Testing
     /// Seat 1 starts 3 L ahead of seat 0 and 1.5 L to leeward on port and tacks at once; she is on starboard about
     /// 1.6 L ahead of her and 0.6 L to leeward when her tack ends, seat 0 in her backwind from there on. At 10 kn
     /// seat 0 loses 0.36 L in the next 5 s against her twin with skiff@4's placeholder loss (0.2): a lee-bow pays,
-    /// but less than 5 s in a wind shadow (1.2–1.5 L, `ShadowCostTests`).
+    /// but less than 5 s in a wind shadow (1.2–1.5 L, `ShadowCostTests`). Since #377 (skiff@6) the backwind is a header
+    /// (8°, a 1 s lag): she is headed from the end of the tack, and her loss is measured upwind. Her autohelm holds her
+    /// heading through the header rather than bearing away onto the lee-bower's stern, so she keeps clear and pays in
+    /// pinching instead: little in the first 5 s, while she still closes on the slow, just-tacked lee-bower (0.2 L), then
+    /// more as the lee-bower builds speed and she drops back into the backwind. So the cost is measured over 10 s, the
+    /// band doubled with it: still clearly less than 10 s in a wind shadow (`ShadowCostTests`, about 1.6 L per 5 s).
     @Test func leeBowedBoatLosesSpeedAgainstACleanTwin() throws {
         let (ahead, leeward) = (3.0, 1.5)
         let leeBowed = try race(ahead: ahead, leeward: leeward, together: true)
@@ -58,24 +63,83 @@ import Testing
                 "the lee-bowed boat is \(astern) L astern of her and \(toWindward) L to windward")
         let cone = try #require(leeBowed.shadowCone(ofSeat: 1))
         #expect(cone.isInBackwind(leeBowed.boats[0].position), "in her backwind")
-        #expect(cone.factor(at: leeBowed.boats[0].position) == cone.backwindFactor(at: leeBowed.boats[0].position),
-                "and not in her cone")
 
-        // 5 s from there, against the twin.
+        // 10 s from there, against the twin.
         let (from, twinFrom) = (leeBowed.boats[0].position, clean.boats[0].position)
-        let course = leeBowed.boats[0].heading
+        // Upwind: since #377 the backwind is a header, so she loses height as well as speed.
+        let course = try OpenWater.windDirection()
         var backwindedTicks = 0
-        for _ in 0..<(5 * Race.tickRate) {
+        for _ in 0..<(10 * Race.tickRate) {
             leeBowed.step()
             clean.step()
-            if leeBowed.boats[0].shadow < 1 { backwindedTicks += 1 }
-            #expect(clean.boats[0].shadow == 1)
+            if leeBowed.header(ofSeat: 0) > 0 { backwindedTicks += 1 }
+            #expect(clean.boats[0].shadow == 1 && clean.header(ofSeat: 0) == 0)
         }
-        #expect(backwindedTicks == 5 * Race.tickRate, "backwinded \(backwindedTicks) of \(5 * Race.tickRate) ticks")
-        #expect(!leeBowed.drainEvents().contains { if case .ruleCall = $0.kind { true } else { false } }, "no contact, no call")
+        #expect(backwindedTicks == 10 * Race.tickRate, "backwinded \(backwindedTicks) of \(10 * Race.tickRate) ticks")
+        let events = leeBowed.drainEvents()
+        // She keeps clear (#377): her autohelm never follows the header down onto the lee-bower's stern.
+        #expect(!events.contains { if case .ruleCall = $0.kind { true } else { false } }, "no contact, no call")
         let madeGood = (leeBowed.boats[0].position - from).dot(.heading(course))
         let twinMadeGood = (clean.boats[0].position - twinFrom).dot(.heading(course))
         let lost = (twinMadeGood - madeGood) / hullLength
-        #expect(lost >= 0.3 && lost <= 0.6, "5 s lee-bowed cost \(lost) L")
+        #expect(lost >= 0.6 && lost <= 1.2, "10 s lee-bowed cost \(lost) L upwind")
+    }
+
+    /// The lee-bow's cost in distance made good (#376's measure, `LeeBowTests`' geometry, 3 L ahead and 1.5 L to leeward):
+    /// seat 0's distance made good upwind over the 20 s from the end of seat 1's tack, lost against the clean twin, in the
+    /// default class (skiff@6: ribbons, header 8°) and in a tuned copy whose header turns nothing (0°; at lull 0 the
+    /// backwind then costs nothing, so what is left is the ribbons and the tack). The owner's reference (#377, from
+    /// #376): today's box cost 1.50 L, and the header about +5% of it. Print only, under the fleet runs' switch
+    /// (`ShadowModelFleetTests`, `REGATTA_SHADOW_FLEET=1`).
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["REGATTA_SHADOW_FLEET"] == "1"))
+    func leeBowCostOverTwentySeconds() throws {
+        let data = try #require(try BoatClassFile.bundledData(id: "skiff", version: 6))
+        let text = String(decoding: data, as: UTF8.self)
+        let header = #""header": { "degrees": 8,"#
+        #expect(text.contains(header))
+        let unheaded = try BoatClassFile(data: Data(text.replacingOccurrences(of: header, with: #""header": { "degrees": 0,"#).utf8),
+                                         tune: 1)
+        let box = 1.50
+        let course = try OpenWater.windDirection()
+        for (ahead, leeward) in [(3.0, 1.5), (3.25, 1.5)] {
+            var lost: [String: (at5: Double, at20: Double, cleanDMG: Double, calls: Int)] = [:]
+            for (name, file) in [("header 8°", nil), ("header 0°", unheaded)] as [(String, BoatClassFile?)] {
+                let leeBowed = try race(ahead: ahead, leeward: leeward, together: true, boatClassFile: file)
+                let clean = try race(ahead: ahead, leeward: leeward, together: false, boatClassFile: file)
+                leeBowed.step()
+                clean.step()
+                leeBowed.tap(.tackGybe, seat: 1, atTick: leeBowed.tick + 1)
+                clean.tap(.tackGybe, seat: 1, atTick: clean.tick + 1)
+                for _ in 0..<(10 * Race.tickRate) {
+                    leeBowed.step()
+                    clean.step()
+                    if leeBowed.boats[1].boomSide == .port && !leeBowed.boats[1].isTacking { break }
+                }
+                _ = leeBowed.drainEvents()
+                let (from, twinFrom) = (leeBowed.boats[0].position, clean.boats[0].position)
+                var at5 = 0.0
+                for tick in 1...(20 * Race.tickRate) {
+                    leeBowed.step()
+                    clean.step()
+                    if tick == 5 * Race.tickRate {
+                        at5 = (OpenWater.madeGood(clean, from: twinFrom, direction: course)
+                               - OpenWater.madeGood(leeBowed, from: from, direction: course)) / hullLength
+                    }
+                }
+                let twin = OpenWater.madeGood(clean, from: twinFrom, direction: course)
+                let at20 = (twin - OpenWater.madeGood(leeBowed, from: from, direction: course)) / hullLength
+                let calls = leeBowed.drainEvents().filter { if case .ruleCall = $0.kind { true } else { false } }.count
+                lost[name] = (at5, at20, twin / hullLength, calls)
+            }
+            for name in ["header 8°", "header 0°"] {
+                let l = lost[name]!
+                print(String(format: "LEE-BOW %.2f L ahead, %.2f L to leeward, %@: DMG lost at 5 s %.3f L, over 20 s %.3f L "
+                             + "(%.1f%% of the clean twin's %.2f L; %+.0f%% of #376's box %.2f L); rule calls %d",
+                             ahead, leeward, name, l.at5, l.at20, l.at20 / l.cleanDMG * 100, l.cleanDMG, (l.at20 / box - 1) * 100, box, l.calls))
+            }
+            let header = lost["header 8°"]!.at20 - lost["header 0°"]!.at20
+            print(String(format: "LEE-BOW %.2f L ahead: the header's own cost over 20 s %.3f L (%.1f%% of the clean twin's DMG)",
+                         ahead, header, header / lost["header 8°"]!.cleanDMG * 100))
+        }
     }
 }

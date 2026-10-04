@@ -4,8 +4,9 @@ import SpriteKit
 import Testing
 @testable import Regatta
 
-/// The wind-shadow cone and backwind zone are drawn where core's `ShadowCone` slows boats (#10, #298, #121): from
-/// the same class file, checked at sample points through the sprites' own transforms, not only `ShadowShapes`.
+/// The backwind zone is drawn where core's `ShadowCone` casts it (#10, #298, #121): from the same class file, checked at
+/// sample points through the sprite's own transforms, not only `ShadowShapes`. The wind shadow is the sim's ribbons
+/// since #377 (`TurbulenceTrailsTests`), drawn as one faint layer under the fleet's effects.
 @MainActor @Suite struct ShadowConeTests {
     static let boatClass = Race.defaultBoatClass
     static let ppm: CGFloat = 8
@@ -35,7 +36,6 @@ import Testing
         let scene = SKScene(size: CGSize(width: 400, height: 800))
         let effects = BoatEffects(seat: boat.id, boatClass: boatClass, pointsPerMeter: ppm, style: .standard)
         effects.nodes.forEach(scene.addChild)
-        scene.addChild(effects.cone) // in a race, a mask in the `ConeLayer` at the effects layer's origin
         let pose = BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass)
         effects.update(with: boat, pose: pose, style: .standard, quality: .full, time: 0, dt: 0, settled: true,
                        isFlogging: false)
@@ -64,24 +64,6 @@ import Testing
         return inside
     }
 
-    /// The convex hull of `points`, anticlockwise (monotone chain). Core's cone is the hull of its near edge and the far
-    /// end's corners (`ShadowCone.span(at:)`, and the shader's crossings): close-hauled her near edge runs almost along
-    /// the axis and the ring of the four corners is not convex, so the hull, not the ring, is the shape core slows in.
-    static func convexHull(_ points: [Vec2]) -> [Vec2] {
-        let sorted = points.sorted { ($0.x, $0.y) < ($1.x, $1.y) }
-        func turn(_ o: Vec2, _ a: Vec2, _ b: Vec2) -> Double { (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x) }
-        var lower: [Vec2] = [], upper: [Vec2] = []
-        for p in sorted {
-            while lower.count >= 2, turn(lower[lower.count - 2], lower[lower.count - 1], p) <= 0 { lower.removeLast() }
-            lower.append(p)
-        }
-        for p in sorted.reversed() {
-            while upper.count >= 2, turn(upper[upper.count - 2], upper[upper.count - 1], p) <= 0 { upper.removeLast() }
-            upper.append(p)
-        }
-        return Array(lower.dropLast() + upper.dropLast())
-    }
-
     /// Points just inside and just outside each corner and edge midpoint of `corners`: (point, inside).
     static func samples(_ corners: [Vec2], nudge: Double = 0.15) -> [(Vec2, Bool)] {
         let centre = corners.reduce(Vec2.zero, +) / Double(corners.count)
@@ -98,85 +80,36 @@ import Testing
         return points
     }
 
-    /// The cone's sprite is cut from the corners core cuts the shadow from, and its shader's strength is core's loss. Its
-    /// corners land where `ShadowShapes` puts them (its near edge her bow and stern, for skiff@5, whichever way she
-    /// points), the shader is given those near ends, and at points just inside and outside each corner and edge of their
-    /// convex hull (the cone core and the shader cut, #354) core slows a boat where the polygon says it does, with its loss the shader's arithmetic (`ConeShading.fade`), on both
-    /// tacks with the apparent wind bent.
-    @Test func coneGeometryMatchesCoreShadow() {
-        let shadow = Self.boatClass.windShadow
-        #expect(shadow.coneFromHull, "the default class casts its cone from her bow and stern")
-        for c in Self.cases {
-            let boat = Self.boat(headingDegrees: c.heading, boomSide: c.boom, apparentDegrees: c.apparent)
-            let core = ShadowCone(caster: boat, shadow: shadow)
-            let (scene, effects) = Self.drawn(boat, boatClass: Self.boatClass)
-            let corners = ShadowShapes.coneCorners(core)
-            let far = shadow.coneWidthAtEnd / 2
-            let local = core.nearEdge.sorted { $0.x < $1.x } + [Vec2(far, shadow.coneLength), Vec2(-far, shadow.coneLength)]
-
-            // The corners through the sprite land on the world corners.
-            for (l, world) in zip(local, corners) {
-                let p = scene.convert(CGPoint(x: l.x * Double(Self.ppm), y: l.y * Double(Self.ppm)), from: effects.cone)
-                #expect(abs(p.x / Self.ppm - world.x) < 1e-3 && abs(p.y / Self.ppm - world.y) < 1e-3, "\(c)")
-            }
-            // Its near corners are her bow and stern on the water, and the shader has them.
-            let bow = boat.position + boat.forward * shadow.bowY, stern = boat.position + boat.forward * shadow.sternCorner.y
-            #expect(corners.prefix(2).contains { ($0 - bow).length < 1e-9 } && corners.prefix(2).contains { ($0 - stern).length < 1e-9 }, "\(c)")
-            let near = ConeShader.near(of: effects.cone)
-            let given = [near?.a, near?.b]
-            for end in core.nearEdge {
-                let want = vector_float2(Float(end.x * Double(Self.ppm)), Float(end.y * Double(Self.ppm)))
-                #expect(given.contains(want), "\(c)")
-            }
-
-            var checked = 0
-            for (p, inside) in Self.samples(Self.convexHull(corners)) where !core.isInBackwind(p) {
-                let slowed = core.factor(at: p) < 1
-                #expect(slowed == inside, "\(c): core at \(p)")
-                let offset = p - core.apex
-                let fade = ConeShading.fade(across: offset.dot(core.axis.rightPerp), along: offset.dot(core.axis),
-                                            nearA: core.nearA, nearB: core.nearB, halfEnd: far, length: shadow.coneLength)
-                #expect(abs((1 - core.factor(at: p)) - shadow.lossCloseIn * fade) < 1e-9, "\(c): the loss is the shader's at \(p)")
-                checked += 1
-            }
-            #expect(checked >= 12, "\(c)")
-            #expect(!effects.cone.isHidden && effects.cone.alpha > 0)
-        }
-        // A ghost casts none (#30), so draws none.
+    /// A ghost casts no backwind (#30), so draws none; her wake string drains away as before.
+    @Test func ghostDrawsNoBackwind() {
         let boat = Self.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
         let effects = BoatEffects(seat: 2, boatClass: Self.boatClass, pointsPerMeter: Self.ppm, style: .standard)
         effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: true, boatClass: Self.boatClass),
                        style: .standard, quality: .full, time: 0, dt: 0, settled: true, isFlogging: false)
-        #expect(effects.cone.isHidden && effects.backwind.isHidden && !effects.trail.isHidden)
+        #expect(effects.backwind.isHidden && !effects.trail.isHidden)
+        #expect(effects.nodes.count == 2, "her backwind and wake string; no cone (#377)")
     }
 
-    /// The fleet's cones draw as one faint layer (#15): every boat's cone a mask in the scene's one `ConeLayer`,
-    /// at the effects layer's origin with no turn or scale, so each lands where its own transform puts it, and
-    /// one sheet shows through them all at `BoatStyle.coneAlpha`, so overlapping cones darken no line.
-    @Test func conesDrawAsOneFaintLayer() throws {
+    /// The fleet's wind shadow draws as one faint layer (#15, #377): the sim's ribbons (`TickFrame.wake`) in the scene's
+    /// one `TurbulenceTrailLayer`, at the effects layer's origin with no turn or scale, each sprite no brighter than
+    /// `BoatStyle.coneAlpha`, all sharing one shader (#354, #361: a shader per sprite cost the CI simulator a frame's
+    /// time over the fleet), and as many drawn as the frame's ribbons have runs that show.
+    @Test func ribbonsDrawAsOneFaintLayer() throws {
         let (scene, boats) = try DrawOrderTests.scene(fixture: "prestart")
         let effects = try #require(scene.childNode(withName: "//effects"))
-        let layers = effects.children.compactMap { $0 as? ConeLayer }
+        let layers = effects.children.compactMap { $0 as? TurbulenceTrailLayer }
         let layer = try #require(layers.first)
-        #expect(layers.count == 1)
-        #expect(layer.cones.count == boats && layer.cones.allSatisfy { $0 is SKSpriteNode && $0.alpha == 1 })
-        for node in [layer, layer.maskNode] as [SKNode?] {
-            #expect(node?.position == .zero && node?.zRotation == 0 && node?.xScale == 1 && node?.yScale == 1)
-        }
-        #expect(abs(layer.sheet.alpha - CGFloat(BoatStyle.standard.coneAlpha)) < 1e-6) // SpriteKit's Float alpha
-        #expect(BoatStyle.standard.coneAlpha <= 0.4, "faint (#15), though seen: it is only this strong beside the boat")
-    }
-
-    /// The fleet's cones share one shader (#354, #361): a shader per boat cost the CI simulator a frame's time over the
-    /// fleet and halved a practice race's pace. A cost guard with no wall clock, beside `RacePaceUITests`' floor.
-    @Test func fleetConesShareOneShader() throws {
-        let (scene, boats) = try DrawOrderTests.scene(fixture: "prestart")
-        let effects = try #require(scene.childNode(withName: "//effects"))
-        let layer = try #require(effects.children.compactMap { $0 as? ConeLayer }.first)
-        let shaders = layer.cones.compactMap { ($0 as? SKSpriteNode)?.shader }
-        #expect(boats > 1 && shaders.count == boats)
-        let first = try #require(shaders.first)
-        #expect(shaders.allSatisfy { $0 === first })
+        #expect(layers.count == 1 && boats > 1)
+        #expect(layer.position == .zero && layer.zRotation == 0 && layer.xScale == 1 && layer.yScale == 1)
+        let wake = try #require(scene.driver.currentFrame.wake, "a replayed race carries its wake")
+        let runs = wake.points.indices.flatMap { wake.ribbons(of: $0, time: scene.driver.renderWorld.time) }
+        let showing = runs.filter { run in run.contains { $0.strength > 0 && $0.scale > 0 } }
+        #expect(!showing.isEmpty, "the prestart fixture's boats shed ribbons")
+        #expect(layer.visibleCount == showing.count)
+        let drawn = layer.sprites.filter { !$0.isHidden }
+        #expect(drawn.allSatisfy { $0.shader === TurbulenceTrailLayer.shimmer })
+        #expect(drawn.allSatisfy { Double($0.alpha) <= BoatStyle.standard.coneAlpha + 1e-6 })
+        #expect(BoatStyle.standard.coneAlpha <= 0.4, "faint (#15), though seen: it is only this strong at a ribbon's peak")
     }
 
     /// The backwind's sprite covers exactly core's trapezoid (#298) on her windward quarter: at points just inside
@@ -225,9 +158,9 @@ import Testing
         #expect(Self.drawn(boat, boatClass: banded).effects.backwind.isHidden)
     }
 
-    /// Her cone and backwind trail her (`BoatStyle.shadowFollowSeconds`): after she turns they turn after her, over the
-    /// time constant, the short way round, and settle on hers; a settled fixture, or no time constant, draws them at hers.
-    @Test func shadowAndBackwindTrailHerTurn() {
+    /// Her backwind trails her (`BoatStyle.shadowFollowSeconds`): after she turns it turns after her, over the time
+    /// constant, the short way round, and settles on hers; a settled fixture, or no time constant, draws it at hers.
+    @Test func backwindTrailsHerTurn() {
         let boatClass = Self.boatClass
         let before = Self.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
         var after = before
@@ -237,20 +170,13 @@ import Testing
             effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass), style: style,
                            quality: .full, time: 0, dt: dt, settled: settled, isFlogging: false)
         }
-        // The sprite's turn that draws the cone along `boat`'s own cone (its axis, swung astern for skiff@5).
-        func turn(_ boat: Boat) -> CGFloat {
-            let axis = ShadowCone(caster: boat, shadow: boatClass.windShadow).axis
-            return CGFloat(atan2(-axis.x, axis.y))
-        }
-        func apart(_ a: CGFloat, _ b: CGFloat) -> CGFloat { abs(CGFloat(wrapAngle(Double(a - b)))) }
         let effects = BoatEffects(seat: 2, boatClass: boatClass, pointsPerMeter: Self.ppm, style: .standard)
         draw(effects, before, dt: 0) // the first frame draws at hers
-        let (cone0, backwind0) = (effects.cone.zRotation, effects.backwind.zRotation)
+        let backwind0 = effects.backwind.zRotation
         #expect(abs(backwind0 - CGFloat(-before.heading)) < Self.rotationTolerance)
 
         draw(effects, after, dt: 0.1)
-        let (cone1, backwind1) = (effects.cone.zRotation, effects.backwind.zRotation)
-        #expect(apart(cone1, cone0) > 1e-3 && apart(cone1, turn(after)) > 1e-3, "partway: the cone")
+        let backwind1 = effects.backwind.zRotation
         #expect(abs(backwind1 - backwind0) > 1e-3 && abs(backwind1 - CGFloat(-after.heading)) > 1e-3, "partway: the backwind")
         // Towards hers, not away: each step closes on the target.
         let target = CGFloat(-after.heading)
@@ -262,7 +188,7 @@ import Testing
             #expect(now <= last + Self.rotationTolerance)
             last = now
         }
-        #expect(last < 1e-3 && apart(effects.cone.zRotation, turn(after)) < 1e-3, "settles on hers")
+        #expect(last < 1e-3, "settles on hers")
 
         // Settled, or with no time constant, it is at hers at once.
         let rigid = BoatEffects(seat: 3, boatClass: boatClass, pointsPerMeter: Self.ppm, style: .standard)

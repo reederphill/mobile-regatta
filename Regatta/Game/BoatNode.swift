@@ -2,12 +2,11 @@ import SpriteKit
 import RegattaCore
 
 /// Draws one boat (#117) from her pose (`BoatPose`): her drop shadow, hull, outline and sail, your boat's glow
-/// under her hull, plus her wake, wind-shadow cone and backwind (`BoatEffects`, #121) that live in the world's
+/// under her hull, plus her wake and backwind (`BoatEffects`, #121) that live in the world's
 /// effects layer beneath the fleet. No name and no badge: boat names are never shown on the water (#15), and
 /// penalties are #123's and #124's.
 final class BoatNode: SKNode {
-    /// Her wake, cone and backwind: the scene adds `effects.nodes` to its effects layer and her cone to its
-    /// `ConeLayer`.
+    /// Her wake and backwind: the scene adds `effects.nodes` to its effects layer.
     let effects: BoatEffects
 
     /// A ghost fades as one flat image (#30): her hull, outline and sail composited first, then faded together,
@@ -125,16 +124,18 @@ final class BoatNode: SKNode {
 
     /// Draws `boat` in `pose` at race time `time` (seconds; every flutter swings on it, never the wall clock).
     /// `settled` trims the sail straight to its target rather than easing it there (a frozen render fixture).
-    /// `wakeQuality` is the wake's tier (#127).
+    /// `wakeQuality` is the wake's tier (#127). `backwindSail` scales her backwind stripes and `backwindSide` (nil: her
+    /// windward side now) places them (`RenderWorld.backwind(ofSeat:)`, #377).
     func update(with boat: Boat, pose: BoatPose, style: BoatStyle, wakeQuality: WakeQuality = .full, time: Double,
-                dt: Double, settled: Bool = false) {
+                dt: Double, settled: Bool = false, backwindSail: Double = 1, backwindSide: Tack? = nil) {
         position = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
         body.zRotation = CGFloat(-boat.heading)
 
         updateHeel(pose, style: style)
         let isFlogging = updateSail(pose, style: style, time: time, dt: dt, settled: settled)
         effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
-                       settled: settled, isFlogging: isFlogging)
+                       settled: settled, isFlogging: isFlogging, backwindSail: backwindSail,
+                       backwindSide: backwindSide)
 
         updateRing(boat, style: style, time: time)
 

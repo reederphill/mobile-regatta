@@ -144,6 +144,11 @@ import Testing
                 snapshot.seats[seat].boat.queuedPenaltyCallTicks = []
                 snapshot.seats[seat].heldInput = .neutral
             }
+            // Placed boats start in clean air (#377): no ribbons, headers or backwind from where they were.
+            snapshot.ribbonPoints = []
+            snapshot.emissionLevels = []
+            snapshot.headers = []
+            snapshot.backwind = BackwindSails()
             try race.importSnapshot(snapshot)
             _ = race.drainEvents()
         }
@@ -353,7 +358,8 @@ import Testing
         var pilot = Self.pilot(seat: 0, scene.race, planned: .port)
         if justTacked { pilot.brain.lastTackTime = scene.race.time - 1 }
         let sailed = Self.sail(scene.race, pilot, seconds: seconds, others: [Self.victim(scene.race)]) { race in
-            if let cone = race.shadowCone(ofSeat: 0), cone.factor(at: race.boats[1].position) < 1 { shadowed = true }
+            // Her ribbons over the starboard boat (#377).
+            if race.wake.loss(of: 0, at: race.boats[1].position, tick: race.tick) > 0 { shadowed = true }
             closest = min(closest, (race.boats[0].position - race.boats[1].position).length / scene.length)
         }
         return (sailed.tapped, sailed.kinds, (scene.race.boats[1].position - from).dot(course), shadowed, closest, scene.length)
@@ -391,10 +397,11 @@ import Testing
     /// `FleetTactics.tackOnWindLeewardSlack` lengths to leeward of its track (skiff@5's swung cone covers it best there),
     /// and still while she is to windward of it, as before #349. Read straight off her first decision's view, port bot
     /// (seat 0, National) placed off a starboard boat (seat 1) in `crossingAhead`'s wind, her plan leaning by her full
-    /// threshold so the tack always pays (`paysToTackOnWind`) and only the gate and the shadow forecast decide: 4 lengths
-    /// ahead and 0.5 to leeward of its track she takes it; 4 ahead and 3 to leeward, past the slack, she doesn't (her cone
-    /// misses it there too); 6.25 ahead and 0.05 to windward she takes it (a forecast factor of 0.74–0.75 there, just
-    /// under `tackOnWindShadow`).
+    /// threshold so the tack always pays (`paysToTackOnWind`) and only the gate and the shadow forecast decide: 3.5 lengths
+    /// ahead and 0.5 to leeward of its track she takes it; 3.5 ahead and 3 to leeward, past the slack, she doesn't (her
+    /// ribbon misses it there too); 4 ahead and 0.05 to windward she takes it. #377: her shadow is her ribbon, which a
+    /// fresh tack lays from nothing, so the forecast reaches less far astern than skiff@5's cone did (at 6.25 ahead,
+    /// 0.90–0.94 now): the scenes moved closer (forecast 0.59–0.67 at 3.5 / 0.5, 0.63–0.66 at 4 / −0.05).
     @Test func tackOnWindGateAllowsOnlyTheSlackToLeeward() throws {
         for seed in Self.fleetSeeds {
             func target(ahead: Double, leeward: Double) throws -> Int? {
@@ -408,9 +415,9 @@ import Testing
                 let threshold = try #require(brain.tactics.headerThreshold)
                 return brain.tackOnWindTarget(view.own, view, lean: threshold, threshold: threshold)
             }
-            #expect(try target(ahead: 4, leeward: 0.5) == 1, "seed \(seed): 0.5 L to leeward of his track, within the slack")
-            #expect(try target(ahead: 4, leeward: 3) == nil, "seed \(seed): 3 L to leeward of his track, past the slack")
-            #expect(try target(ahead: 6.25, leeward: -0.05) == 1, "seed \(seed): to windward of his track")
+            #expect(try target(ahead: 3.5, leeward: 0.5) == 1, "seed \(seed): 0.5 L to leeward of his track, within the slack")
+            #expect(try target(ahead: 3.5, leeward: 3) == nil, "seed \(seed): 3 L to leeward of his track, past the slack")
+            #expect(try target(ahead: 4, leeward: -0.05) == 1, "seed \(seed): to windward of his track")
         }
     }
 
@@ -518,5 +525,57 @@ import Testing
         #expect(!BotBrain.isCone(cone, castFrom: scene.race.boats[0].position, heading: boat.heading))
         #expect(!BotBrain.isCone(cone, castFrom: boat.position, heading: boat.heading + 0.01))
         #expect(!BotBrain.isCone(cone, castFrom: boat.position, heading: boat.heading + .pi))
+    }
+}
+
+extension BotTacticsTests {
+    /// #377: her tack forecast reads her ribbons and her backwind as the sim then applies them. A National port bot
+    /// sailing at a starboard boat (to tack on its wind: from 7 ahead and 2 to leeward; to lee-bow it: from 5.8 ahead and
+    /// 3.5 to leeward), her forecast at 4, 5 and 6 s once it says her tack would land; then she taps at once and the race
+    /// sails it: at each of those seconds its factor is her ribbons' and zone's within 0.2; from 5 s on its backwind flag
+    /// is what the race's zone says, and at 6 s both have her in her shadow or neither.
+    @Test func tackForecastReadsRibbonsAndBackwind() throws {
+        for seed in Self.fleetSeeds {
+            for (ahead, leeward, backwind) in [(7.0, 2.0, false), (5.8, 3.5, true)] {
+                let scene = Scene(seed: seed)
+                let port = scene.offStarboardBoat(at: scene.centre, ahead: ahead, leeward: leeward)
+                try scene.place([scene.beating(.port, at: port), scene.beating(.starboard, at: scene.centre)])
+                let race = scene.race
+                var brain = Self.pilot(seat: 0, race, planned: .port).brain
+                // Sail on (her ribbon forming on port) until her forecast says her tack would land the boat in her
+                // backwind (the lee-bow) or in her shadow (tacking on its wind), as a bot would tap there.
+                var forecast: [(astern: Double, factor: Double, backwind: Bool)] = []
+                for _ in 0..<(10 * Race.tickRate) {
+                    race.step()
+                    guard race.tick.isMultiple(of: BotDriver.decisionInterval) else { continue }
+                    let view = race.seatView(for: 0)
+                    brain.observe(view.own, view)
+                    let other = try #require(view.others.first { $0.seat == 1 })
+                    forecast = try #require(brain.tackForecast(view.own, view, on: other))
+                    let lands = backwind ? brain.leeBowLands(view.own, view, other)
+                        : forecast.reduce(0) { $0 + $1.factor } / Double(forecast.count) < 0.9
+                    if lands { break }
+                }
+                let from = race.tick
+                race.tap(.tackGybe, seat: 0, atTick: race.tick + 1)
+                var actual: [(factor: Double, backwind: Bool)] = []
+                for t in BotBrain.FleetTactics.tackOnWindSeconds {
+                    while race.tick < from + Int((t * Double(Race.tickRate)).rounded()) { race.step() }
+                    let zone = try #require(race.shadowCone(ofSeat: 0))
+                    let them = race.boats[1].position
+                    actual.append(((1 - race.wake.loss(of: 0, at: them, tick: race.tick)) * zone.factor(at: them), zone.isInBackwind(them)))
+                }
+                let note = "seed \(seed), \(ahead) ahead \(leeward) leeward: forecast \(forecast.map { ($0.factor, $0.backwind) }), sim \(actual)"
+                // Her reckoning runs about a second ahead of her real tack (seeds 3, 11, 20: the ribbon's leading edge and
+                // her new backwind arrive up to a second later than reckoned), so the edges agree from 5 s on.
+                for (k, (f, a)) in zip(forecast, actual).enumerated() {
+                    #expect(abs(f.factor - a.factor) <= 0.2, "\(note)")
+                    guard k > 0 else { continue }
+                    #expect(f.backwind == a.backwind, "\(note)")
+                }
+                if let f = forecast.last, let a = actual.last { #expect((f.factor < 1) == (a.factor < 1), "\(note)") }
+                #expect(actual.contains { $0.backwind } == backwind, "\(note)")
+            }
+        }
     }
 }
