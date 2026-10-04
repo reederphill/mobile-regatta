@@ -282,3 +282,43 @@ import RegattaCore
         #expect(!flagged.isEmpty)
     }
 }
+
+extension RaceResultViewModelTests {
+    /// #235: a rival's row is marked from her entrant (never yours), and a Last race kept before rivals, with no
+    /// `isRival` key, still loads, unmarked.
+    @Test func rivalRowsAndOldLastRaceDecode() throws {
+        var entrants = (0..<4).map { seat in
+            RaceResultViewModel.Entrant(name: seat == 0 ? "You" : "Bot \(seat)", isBot: seat != 0,
+                                        livery: FleetLiveries.yours, isRival: seat == 2 || seat == 0)
+        }
+        entrants[0].isBot = false
+        let rows = (0..<4).map { SeatResult(seat: $0, place: $0 + 1, code: .finished, finishTick: 9_000 + $0) }
+        let model = RaceResultViewModel(results: RaceResults(rows: rows, rated: false), live: [], entrants: entrants,
+                                        mySeat: 0, incidents: nil)
+        #expect(model.rows.filter(\.isRival).map(\.seat) == [2])
+
+        let encoded = try JSONEncoder().encode(model)
+        var json = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let oldRows = try #require(json["rows"] as? [[String: Any]]).map { row in
+            var row = row
+            row["isRival"] = nil
+            return row
+        }
+        json["rows"] = oldRows
+        let old = try JSONDecoder().decode(RaceResultViewModel.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(old.rows.allSatisfy { !$0.isRival })
+        #expect(old.rows.map(\.seat) == model.rows.map(\.seat))
+        #expect(try JSONDecoder().decode(RaceResultViewModel.self, from: encoded) == model)
+
+        // The rival results fixture: the closed sample with two rival rows.
+        let gallery = try RenderFixture.gallery(named: "results-rival", in: RenderFixtureTests.fixtures)
+        guard case .results(.closed, let rivalSkill?)? = gallery else {
+            Issue.record("results-rival isn't a closed results gallery with rivals")
+            return
+        }
+        let sample = RaceResultViewModel.gallerySample(final: true, rivalSkill: rivalSkill)
+        #expect(sample.rows.filter(\.isRival).count == 2)
+        #expect(sample.rows.filter(\.isRival).allSatisfy { $0.isBot && !$0.isPlayer })
+        #expect(RaceResultViewModel.gallerySample(final: true).rows.allSatisfy { !$0.isRival })
+    }
+}

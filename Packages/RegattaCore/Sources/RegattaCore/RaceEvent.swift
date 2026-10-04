@@ -4,7 +4,8 @@ public enum ObstructionKind: String, Sendable, CaseIterable, Codable {
     /// The race area's drawn boundary.
     case boundary
     /// A mark that isn't a mark of her leg (rule 31, #90: `CourseLayout.isRule31Mark`), or one of her leg
-    /// touched in an incident whose call already carries her turn (44.1(a)).
+    /// touched in an incident whose call already carries her turn (44.1(a)), or touched exonerated: put on it by
+    /// another boat's breach (43.1(a)), or by the boat owing her mark-room failing to give it (43.1(b), #93).
     case mark
 
     /// The race area's edges (#82), in the order an edge touch lists them: the kinds `RaceEdges` resolves.

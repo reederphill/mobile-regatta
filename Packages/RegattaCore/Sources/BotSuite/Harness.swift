@@ -48,8 +48,10 @@ public enum BotRaceHarness {
     /// Sails `cell`, with the cautious bot (#104, `BotDriver.cautious`) in `cautiousSeats` in place of the cell's bots:
     /// a dropped player's boat among them, from the start. Her metrics give her seat's tier as the cell's. `events`
     /// sees the race after each tick and that tick's events as the tally does: for tests that look for one kind of
-    /// call, or the state behind it (#346).
-    public static func run(_ cell: BotRaceCell, cautiousSeats: Set<Int>,
+    /// call, or the state behind it (#346). The seats in `seatSkills` sail at the skill given there
+    /// (`BotDriver(seat:raceSeed:skill:)`, as the app's practice rivals do, #235) in place of the cell's draw; their
+    /// metrics still give the cell's tier for the seat.
+    public static func run(_ cell: BotRaceCell, cautiousSeats: Set<Int>, seatSkills: [Int: Double] = [:],
                            events: (Race, [RaceEvent]) -> Void = { _, _ in }) throws -> RaceResult {
         let setup = try raceSetup(for: cell)
         // Assembled as the server assembles a race (#81): the files the setup names, the race of record.
@@ -58,9 +60,11 @@ public enum BotRaceHarness {
         let tiers = setup.seats.indices.map { cell.tierMix.tier(ofSeat: $0, raceSeed: setup.raceSeed) }
         let profiles = setup.seats.indices.map { cell.profile(ofSeat: $0) }
         var controllers = SeatControllers(tiers.indices.map {
-            cautiousSeats.contains($0)
-                ? .dropped(.cautious(seat: $0, raceSeed: setup.raceSeed))
-                : .bot(cell.tierMix.driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
+            if cautiousSeats.contains($0) { return .dropped(.cautious(seat: $0, raceSeed: setup.raceSeed)) }
+            if let skill = seatSkills[$0] {
+                return .bot(BotDriver(seat: $0, raceSeed: setup.raceSeed, skill: skill, profile: profiles[$0]))
+            }
+            return .bot(cell.tierMix.driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
         })
         var tally = RaceTally(race: race)
         // #355: in a hunters race, every rule call (offender and victim), and the ticks each hunter turned at a boat she hunted.

@@ -227,10 +227,10 @@ struct LaunchOptions: Equatable {
     }
 
     /// A practice race on `setup` (Start, Sail again): on fresh seeds or the pinned one, and `-laps`' laps and
-    /// `-startSeconds`' start sequence if given.
-    func raceConfig(from setup: PracticeSetup) -> RaceConfig {
+    /// `-startSeconds`' start sequence if given, with rivals at `rivalSkill` if given (#235).
+    func raceConfig(from setup: PracticeSetup, rivalSkill: Double? = nil) -> RaceConfig {
         let (seed, windSeed) = seeds()
-        return raceConfig(from: setup.config(seed: seed, windSeed: windSeed))
+        return raceConfig(from: setup.config(seed: seed, windSeed: windSeed, rivalSkill: rivalSkill))
     }
 
     /// `config` on the pinned seed if there is one, and `-laps`' laps and `-startSeconds`' start sequence if given.

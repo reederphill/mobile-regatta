@@ -798,11 +798,16 @@ public final class Race {
     }
 
     /// Boats touching: a contact costs both boats speed and is announced (`RaceEvent.Kind.contact`) on the
-    /// tick it begins, and opens an incident unless the pair has one open (`call`). The pushes part them.
+    /// tick it begins, and opens an incident unless the pair has one open (`call`), its offender exonerated when
+    /// another boat's breach compelled her (`exoneratingCompelled`, 43.1(a)): every pair judged first, then called
+    /// (`callCompelledLast`). The pushes part them.
     /// A pair not touching whose open incident the umpire holds closes it once their hulls are more than
     /// the rules configuration's `incidents.separation` apart. A ghost can't be touched.
     private func resolveBoatContacts() {
         var touching = Set<Pair>()
+        // Contacts begun this tick, and the calls they make: called once every pair is judged (`callCompelledLast`).
+        var begun: [(Int, Int)] = []
+        var verdicts: [Verdict] = []
         let hull = boatClass.hull
         let hulls = boats.map { $0.hull(outline: hull.outline) }
         let separation = rules.incidents.separation.metres(hullLength: hull.length)
@@ -828,15 +833,30 @@ public final class Race {
                     if !isIncidentOpen(i, j),
                        let verdict = Rules.judge(boats[i], boats[j], overlapped: overlaps.isOverlapped(i, j),
                                                  course: course, hull: hull, escape: escapeSimulation(i, j)) {
-                        call(verdict, trigger: .contact)
+                        verdicts.append(verdict)
                     }
-                    recordBoatContact(i, j)
+                    begun.append((i, j))
                 }
                 boats[i].position += push * 0.5
                 boats[j].position -= push * 0.5
             }
         }
         boatContacts = touching
+        callCompelledLast(verdicts, trigger: .contact)
+        for (i, j) in begun { recordBoatContact(i, j) }
+    }
+
+    /// Calls this tick's `verdicts` (`call`), each offender exonerated when another boat's breach compelled her
+    /// (`exoneratingCompelled`, 43.1(a)), whatever the seats' order: first those whose offender is the victim of none
+    /// of the others, then the rest, all judged before any of them is called. So a boat's 43.1(a) never turns on
+    /// whether the pair that compelled her comes before hers in seat order; each phase keeps seat order.
+    private func callCompelledLast(_ verdicts: [Verdict], trigger: Incident.Trigger) {
+        let victims = Set(verdicts.map(\.victim))
+        for verdict in verdicts where !victims.contains(verdict.offender) {
+            call(exoneratingCompelled(verdict), trigger: trigger)
+        }
+        let compelled = verdicts.filter { victims.contains($0.offender) }.map(exoneratingCompelled)
+        for verdict in compelled { call(verdict, trigger: trigger) }
     }
 
     /// Records seats `i` and `j`'s contact, begun this tick, in the incident index (#94) with the incident it is
@@ -859,6 +879,7 @@ public final class Race {
         guard umpire != nil else { return }
         let hull = boatClass.hull
         let sweep = rules.incidents.nearMissSweep
+        var verdicts: [Verdict] = []
         for i in boats.indices where !boats[i].isGhost {
             for j in (i + 1)..<boats.count where !boats[j].isGhost && overlaps.isOverlapped(i, j) {
                 guard sweep.canReach(boats[i], boats[j], hull: hull), !boatContacts.contains(Pair(a: i, b: j)),
@@ -866,9 +887,10 @@ public final class Race {
                       let obligation = Rules.obligation(boats[i], boats[j], overlapped: true, course: course, hull: hull),
                       sweep.hits(boats[obligation.victim], boats[obligation.offender], hull: hull)
                 else { continue }
-                call(escapeSimulation(i, j)?.verdict(obligation, course: course) ?? obligation, trigger: .nearMiss)
+                verdicts.append(escapeSimulation(i, j)?.verdict(obligation, course: course) ?? obligation)
             }
         }
+        callCompelledLast(verdicts, trigger: .nearMiss)
     }
 
     /// The umpire's recorded track (#92): every boat and every pair's certain overlap this tick, for the escape
@@ -883,11 +905,43 @@ public final class Race {
     }
 
     /// The escape simulation for seats `a` and `b` on the umpire's recorded track, with the pair's rule 17 record
-    /// (#345), or nil in a prediction or under a rules configuration without one.
+    /// (#345) and rule 18 record (#93), or nil in a prediction or under a rules configuration without one.
     private func escapeSimulation(_ a: Int, _ b: Int) -> EscapeSimulation? {
         guard let umpire, let track = umpire.track(a, b) else { return nil }
         return EscapeSimulation(track: track, rules: rules, boatClass: boatClass,
-                                properCourse: umpire.properCourse(SeatPair(a, b)))
+                                properCourse: umpire.properCourse(SeatPair(a, b)), markRoom: umpire.markRoom(SeatPair(a, b)))
+    }
+
+    /// Rule 43.1(a) (#93): `verdict` with its offender exonerated too when another boat's breach compelled her
+    /// into the victim (`compellingIncident`, the victim a third boat on her recorded track). `call` then makes no
+    /// call on the incident. Unchanged when she is already exonerated, in a prediction, or under a rules
+    /// configuration without an escape simulation.
+    private func exoneratingCompelled(_ verdict: Verdict) -> Verdict {
+        let (offender, victim) = (verdict.offender, verdict.victim)
+        guard !verdict.exonerated.contains(offender), let track = umpire?.track(offender, victim),
+              compellingIncident(of: offender, into: .boat(seat: victim, track: track.recorded(victim))) != nil
+        else { return verdict }
+        return Verdict(rule: verdict.rule, offender: offender, victim: victim, exonerated: verdict.exonerated + [offender])
+    }
+
+    /// Rule 43.1(a) (#93): the incident whose breach compelled seat `seat` into `hazard`, if any: one the umpire
+    /// holds open between her and another boat (not the hazard), called against that boat with `seat` the victim,
+    /// its call within the recorded track, after which the escape simulation finds she had no way clear of both
+    /// that boat and the hazard, but would have had one clear of the hazard alone (`EscapeSimulation.isCompelled`).
+    /// One hop: a boat compelled by a boat that was herself compelled isn't followed further. Looked up in seat
+    /// order. Nil in a prediction, which holds no umpire.
+    private func compellingIncident(of seat: Int, into hazard: EscapeSimulation.Hazard) -> Int? {
+        guard let umpire else { return nil }
+        var excluded = seat
+        if case .boat(let third, _) = hazard { excluded = third }
+        for other in boats.indices where other != seat && other != excluded {
+            guard let id = umpire.openIncident(SeatPair(seat, other)), case .called(let call)? = incidents[id]?.outcome,
+                  call.offender == other, call.victim == seat, let escape = escapeSimulation(seat, other)
+            else { continue }
+            let breach = escape.track.count - 1 - (tick - call.tick)
+            if breach >= 0, escape.isCompelled(seat, by: other, breach: breach, into: hazard) { return id }
+        }
+        return nil
     }
 
     /// Rule 17 (#345): the umpire's records of leeward boats that came up from clear astern
@@ -926,7 +980,8 @@ public final class Race {
     /// Rule 18 (#91): the umpire's records of who is entitled to mark-room from whom
     /// (`UmpireState.updateMarkRoom`), each new one announced to its two boats (`markRoomNotice`). The
     /// authoritative race's alone: a client never shows a notice the server hasn't sent (ADR 0005). Mark-room
-    /// is not right of way: no call reads the records yet (18.2(d) and 43.1(b) are #93's).
+    /// is not right of way: an incident's call reads the record only through the escape simulation
+    /// (`EscapeSimulation.verdict`: 18.2, 18.2(d) and 43.1(b), #93).
     private func updateMarkRoom(previous: [Boat], hulls: [[Vec2]], zones: [MarkZone?], markRoomApplies: [Bool]) {
         guard umpire != nil else { return }
         let notices = umpire?.updateMarkRoom(MarkRoomTick(
@@ -941,7 +996,7 @@ public final class Race {
     /// Marks (#90): a boat touching a mark loses speed by the class's mark factor on the tick the touch begins,
     /// and is pushed off it. Touching a mark of her leg (rule 31, `CourseLayout.isRule31Mark`) costs her one
     /// penalty turn (`penalize`) and is announced (`markTouch`), unless the turn is already owed for the same
-    /// incident (`markTouchVerdict`). Any other touch is an obstruction contact of kind `.mark`: no penalty,
+    /// incident or she is exonerated (`markTouchVerdict`). Any other touch is an obstruction contact of kind `.mark`: no penalty,
     /// announced and recorded (`IncidentIndex.obstructionContacts`), as an edge's is. A ghost sails through.
     private func resolveObstacleContacts() {
         var touching = Set<Pair>()
@@ -966,7 +1021,7 @@ public final class Race {
     /// What seat `i`'s touch of `obstacle`, begun this tick, costs her (rule 31, #90).
     private func touchMark(_ i: Int, _ obstacle: Obstacle) {
         if course.isRule31Mark(obstacle.name, status: boats[i].status, legIndex: boats[i].legIndex) {
-            switch markTouchVerdict(i) {
+            switch markTouchVerdict(i, obstacle) {
             case .turn:
                 penalize(i)
                 if umpire != nil {
@@ -978,6 +1033,12 @@ public final class Race {
                 return
             case .sameIncident:
                 break
+            case .exonerated(let id):
+                // Recorded on the incident she was compelled in (43.1, #93): no call or event of its own.
+                if var incident = incidents[id] {
+                    incident.exonerate(i)
+                    incidents.update(incident)
+                }
             }
         }
         incidents.recordObstructionContact(ObstructionContact(tick: tick, leg: boats[i].legIndex, seat: i, kind: .mark))
@@ -990,15 +1051,19 @@ public final class Race {
         case turn
         /// Nothing more (44.1(a)): she has an open incident whose call already carries her turn.
         case sameIncident
-        // 43.1 (#93): a boat compelled onto the mark by another's foul is exonerated, `.exonerated(incidentId)`,
-        // decided in `markTouchVerdict`.
+        /// Nothing (43.1, #93): another boat's breach in the open incident `incidentId` put her on the mark.
+        case exonerated(incidentId: Int)
     }
 
     /// Rule 44.1(a): whether seat `i`'s touch of a mark of her leg is in the same incident as a foul she is
     /// already called for: one the umpire holds open (the pair hasn't separated), whose call she is the
-    /// offender of. One turn for the incident, the call's. In a prediction no incident is open, so it predicts
-    /// the turn until the server's snapshot (as #88's calls).
-    private func markTouchVerdict(_ i: Int) -> MarkTouchVerdict {
+    /// offender of. One turn for the incident, the call's. Otherwise rule 43.1 (#93), in an incident the umpire
+    /// holds open whose call names her the victim: 43.1(b) when the call is the other boat failing to give her
+    /// mark-room (18.2 or 18.3) at `obstacle`, the mark of the pair's rule 18 record, which still has her entitled,
+    /// and she touches it on the call's tick or after (Case 95: forced onto the mark she was owed room at), and
+    /// 43.1(a) when that boat's breach compelled her onto `obstacle` (`compellingIncident`). Then she is exonerated, with no turn. In a prediction no
+    /// incident is open, so it predicts the turn until the server's snapshot (as #88's calls).
+    private func markTouchVerdict(_ i: Int, _ obstacle: Obstacle) -> MarkTouchVerdict {
         guard let umpire else { return .turn }
         for other in boats.indices where other != i {
             if let id = umpire.openIncident(SeatPair(i, other)), case .called(let call)? = incidents[id]?.outcome,
@@ -1006,7 +1071,17 @@ public final class Race {
                 return .sameIncident
             }
         }
-        // 43.1 (#93) decides `.exonerated` here.
+        for other in boats.indices where other != i {
+            if let id = umpire.openIncident(SeatPair(i, other)), case .called(let call)? = incidents[id]?.outcome,
+               call.offender == other, call.victim == i, call.rule == .givingMarkRoom || call.rule == .tackingInTheZone,
+               call.tick <= tick, let record = umpire.markRoom(SeatPair(i, other)), record.entitled == i,
+               record.owing == other, record.mark == obstacle.name {
+                return .exonerated(incidentId: id)
+            }
+        }
+        if let id = compellingIncident(of: i, into: .mark(centre: obstacle.position, radius: obstacle.radius)) {
+            return .exonerated(incidentId: id)
+        }
         return .turn
     }
 
@@ -1077,7 +1152,8 @@ public final class Race {
     }
 
     /// Opens an incident for `verdict`, records whom it exonerates (rule 43.1: the incident's `exonerated`,
-    /// never a call or an event of their own, #92), decides it with a rule call, penalises the offender one
+    /// never a call or an event of their own, #92), and, when that is its offender (compelled, 43.1(a), #93),
+    /// decides it `.noCall`: no penalty, no event. Otherwise it decides it with a rule call, penalises the offender one
     /// turn (`penalize`; none, `turnsOwed` 0, when her penalised mark touch was in this incident, 44.1(a), #90)
     /// and announces the call, with the turn's deadlines when its clock is fixed at the call.
     /// The umpire holds the incident open until the pair separates (`resolveBoatContacts`): one incident
@@ -1086,6 +1162,12 @@ public final class Race {
         let leg = boats[verdict.offender].legIndex
         var incident = incidents.open(between: verdict.offender, and: verdict.victim, tick: tick, leg: leg, trigger: trigger)
         for seat in verdict.exonerated { incident.exonerate(seat) }
+        if verdict.exonerated.contains(verdict.offender) {
+            incident.outcome = .noCall
+            incidents.update(incident)
+            umpire?.open(incident.id, for: incident.parties)
+            return
+        }
         let penalty = rules.raceFormat.penalty
         // 44.1(a) (#90): a foul in the same incident as her penalised mark touch costs no second turn.
         let touchNeighbours = umpire?.markTouchNeighbours(of: verdict.offender) ?? []

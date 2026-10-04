@@ -56,7 +56,7 @@ The umpire's memory of a pair whose leeward boat came up from clear astern withi
 _Avoid_: luffing rights, overtaking record
 
 **Exoneration**:
-A boat that broke a rule of Part 2 isn't penalised for it, because she was compelled to (43.1(a)) or was denied the room she was entitled to (43.1(b)). Recorded on the incident; the rule call names the boat that broke the rule.
+A boat that broke a rule of Part 2 isn't penalised for it, because she was compelled to (43.1(a)) or was denied the room she was entitled to (43.1(b)). Recorded on the incident; the rule call names the boat that broke the rule. An exonerated boat gets no call: when the only boat that broke a rule was compelled (43.1(a)), the incident has no call at all.
 _Avoid_: acquittal, cleared
 
 **Hold course**:
@@ -134,7 +134,7 @@ A dropped player taking their boat back from the cautious bot. The boat keeps ev
 _Avoid_: resume (the server's word for the player rejoining), takeover (the bot taking the boat)
 
 **Rival**:
-One of the 1–2 bots in a practice race whose skill is set from the player's recent practice results, so the player usually finishes near them. A rival races like any other bot and never targets the player. Practice only.
+One of the 1–2 bots in a practice race whose skill is set from the player's recent practice results, so the player usually finishes near them. A rival races like any other bot and never targets the player. When the player picks a tier, a rival's skill stays inside that tier's band. The briefing's fleet list and the results mark a rival with the short word "Rival" beside her name (she keeps the bot glyph); never a number. Practice only, so never in a rated race.
 _Avoid_: nemesis; "rival" for just any nearby boat
 
 **Mixed fleet**:
