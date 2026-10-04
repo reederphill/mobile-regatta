@@ -224,8 +224,12 @@ public struct EscapeSimulation: Sendable {
     ///   (`insideOverlapGained`) and the owing boat had no escape (`canEscape`, the entitled boat on her track) from
     ///   the tick the overlap began, the owing boat has been unable to give mark-room since: the overlap gives no
     ///   entitlement. `obligation` stands, the owing boat exonerated.
-    /// - Otherwise the owing boat failed to give mark-room: she breaks the record's rule (18.2, or 18.3), and the
-    ///   entitled boat, sailing within her mark-room, is exonerated (43.1(b)).
+    /// - Otherwise, if the owing boat could have given the room, an escape from the entitled boat on her track from
+    ///   the start of the latest window that reaches now (`escape.horizon` and `startTickOffset` back, as rule 16.1
+    ///   looks; from the overlap's start if later), she failed to give mark-room: she breaks the record's rule (18.2,
+    ///   or 18.3), and the entitled boat, sailing within her mark-room, is exonerated (43.1(b)).
+    /// - Otherwise the entitled boat sailed beyond her mark-room into a boat that couldn't get out of her way, and
+    ///   43.1(b) doesn't cover her: `obligation` stands, no one exonerated.
     ///
     /// Any other incident: `obligation`. So too when the entitled boat is taking a penalty (`Boat.isTakingPenalty`,
     /// now): she is neither sailing to the mark nor rounding it, so mark-room gives her nothing (the definition of
@@ -234,11 +238,14 @@ public struct EscapeSimulation: Sendable {
         guard let record = markRoomRecord, obligation.offender == record.entitled, obligation.victim == record.owing,
               !track.boat(record.entitled, track.count - 1).isTakingPenalty
         else { return obligation }
-        if let began = insideOverlapGained(by: record.entitled, on: record.owing),
-           !canEscape(record.owing, from: began + escape.startTickOffset - 1, of: record.entitled) {
+        let offset = escape.startTickOffset
+        let began = insideOverlapGained(by: record.entitled, on: record.owing)
+        if let began, !canEscape(record.owing, from: began + offset - 1, of: record.entitled) {
             return Verdict(rule: obligation.rule, offender: obligation.offender, victim: obligation.victim,
                            exonerated: [record.owing])
         }
+        let window = max(track.count - RulesConfig.ticks(escape.horizon) - offset, 1, began ?? 0)
+        guard canEscape(record.owing, from: window + offset - 1, of: record.entitled) else { return obligation }
         return Verdict(rule: record.rule, offender: record.owing, victim: record.entitled, exonerated: [record.entitled])
     }
 
@@ -246,8 +253,9 @@ public struct EscapeSimulation: Sendable {
     /// or by tacking: overlapped now as of the last point of certainty, that run of the track's overlap beginning
     /// at tick `certain`, the hulls began to overlap the last point of certainty before it (as rule 17 reads an
     /// overlap's start, `UmpireState.updateProperCourse`), and on the tick before that she was clear astern of
-    /// `owing` (`Rules.isClearAstern`), or she was tacking (or changed tack) between it and `certain`. Nil if not, or
-    /// if the overlap began before the track's first tick: then the owing boat is taken to have been able to give room.
+    /// `owing` (`Rules.isClearAstern`), or she gained it by tacking to windward of `owing` (`tackedToWindward`).
+    /// Nil if not, or if the overlap began before the track's first tick: then the owing boat is taken to have been
+    /// able to give room.
     private func insideOverlapGained(by entitled: Int, on owing: Int) -> Int? {
         let last = track.count - 1
         guard track.overlapped[last] else { return nil }
@@ -255,10 +263,25 @@ public struct EscapeSimulation: Sendable {
         while certain > 0, track.overlapped[certain - 1] { certain -= 1 }
         let before = certain - lastPointOfCertaintyTicks
         guard certain > 0, before >= 0 else { return nil }
-        let fromAstern = Rules.isClearAstern(track.boat(entitled, before), of: track.boat(owing, before), hull: boatClass.hull)
-        let tacked = (before...certain).contains { track.recorded(entitled, $0).isTacking }
-            || track.boat(entitled, before).tack != track.boat(entitled, certain).tack
-        return fromAstern || tacked ? before + 1 : nil
+        let hull = boatClass.hull
+        let fromAstern = Rules.isClearAstern(track.boat(entitled, before), of: track.boat(owing, before), hull: hull)
+        return fromAstern || tackedToWindward(entitled, of: owing, from: before, overlapping: certain) ? before + 1 : nil
+    }
+
+    /// Rule 18.2(d)'s "by tacking to windward": `entitled` was tacking on a tick from `from` through `certain` (the
+    /// overlap's start and the tick it was first certain), and on the first tick after that tack, through now, she is
+    /// to windward of `owing`: the same tack, overlapped, and `owing` the leeward boat (`Rules.rightOfWay`, rule 11).
+    /// A tack that leaves her to leeward, on the other tack or still tacking now gains her the overlap some other way.
+    private func tackedToWindward(_ entitled: Int, of owing: Int, from: Int, overlapping certain: Int) -> Bool {
+        let last = track.count - 1
+        guard let tacking = (from...certain).last(where: { track.recorded(entitled, $0).isTacking }),
+              let after = (tacking...last).first(where: { !track.recorded(entitled, $0).isTacking })
+        else { return false }
+        let e = track.boat(entitled, after), o = track.boat(owing, after)
+        guard e.tack == o.tack, !o.isTacking,
+              let rightOfWay = Rules.rightOfWay(e, o, overlapped: true, hull: boatClass.hull)
+        else { return false }
+        return rightOfWay.keepClear == entitled && rightOfWay.rule == .windwardLeeward
     }
 
     /// Something besides the other boat of the pair that a boat sailing the escape candidates mustn't hit, for rule
