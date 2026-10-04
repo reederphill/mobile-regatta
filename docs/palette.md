@@ -40,7 +40,7 @@ Sources: #22 (art direction), #29 (safe palette), G7 (#37), #53 (values). Consum
 | `inactiveGrey` | `#9AA0A6` | 0.70 / 0.011 / — | inactive marks |
 | `cueWhite` | `#FFFFFF` | 1.00 / 0 / — | player glow, wakes, ladder lines (#122); alpha set at use site |
 | `hullOutline` | `#F5F5F2` | 0.97 / 0.004 / — | every hull's thin outline, 1 pt inside the edge (#117, #21); #169 restyles |
-| `crewAid` | `#7E848C` | 0.61 / 0.014 / — | the skiff's sailors' buoyancy aids (#120), dark-rimmed; neutral until #372 may use the livery accent |
+| `crewAid` | `#7E848C` | 0.61 / 0.014 / — | the skiff's sailors' buoyancy aids (#120), neutral until #372 may use the livery accent; its 0.5 pt dark rim carries the contrast against lull (ΔL ~0.09 alone) |
 | `crewHelmet` | `#D9DCDF` | 0.89 / 0.005 / — | the sailors' helmets (#120), dark-rimmed; pale grey, not the reserved white |
 
 Cue-to-cue hue separation: vermillion–orange 29°, orange–yellow 28°, chevron–water 29°, chevron–puff 25°.

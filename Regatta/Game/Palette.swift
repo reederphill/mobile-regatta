@@ -29,11 +29,12 @@ nonisolated enum CuePalette {
     /// #169 restyles it.
     static let hullOutline = PaletteToken("hullOutline", 0xF5F5F2)
 
-    /// The hues nothing else may come near. Grey and white have no hue to reserve.
     /// The sailors' buoyancy aids (#120): a neutral mid grey until #372's on-water livery may take the livery's accent.
     static let crewAid = PaletteToken("crewAid", 0x7E848C)
     /// The sailors' helmets (#120): a pale grey, not the reserved white of your glow and the wakes.
     static let crewHelmet = PaletteToken("crewHelmet", 0xD9DCDF)
+
+    /// The hues nothing else may come near. Grey and white have no hue to reserve.
     static let reserved = [vermillion, orange, yellow, chevronBlue]
     static let all = reserved + [giveWayRed, hasRightGreen, inactiveGrey, cueWhite, hullOutline, crewAid, crewHelmet]
 }

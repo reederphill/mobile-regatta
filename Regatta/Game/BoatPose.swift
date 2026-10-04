@@ -42,6 +42,9 @@ nonisolated struct BoatPose: Equatable, Sendable {
     var isGhost: Bool
     /// Whether her sheets are let out (her held ease): her sailors (#120) sit in.
     var isEased = false
+    /// Whether she is in her no-go zone, head to wind (`BoatStyle.headToWindMarginDegrees` past the class's
+    /// no-go angle): her sailors (#120) sit in, planing or not. False for a ghost.
+    var isHeadToWind = false
     /// Pinched (#219), 0 to 1: how far her sail's leading edge lifts. 0 on the groove, footing or hand steering.
     var luffLift = 0.0
     /// The sail's belly, 1 for its base shape: flatter pinched, fuller footed (#219). Footed, `sailTrim` is
@@ -73,6 +76,7 @@ nonisolated struct BoatPose: Equatable, Sendable {
         // race has given her one.
         let awa = boat.apparentWind.speed > 0.01 ? abs(wrapAngle(boat.apparentWind.direction - boat.heading)) : twa
         let headToWind = twa < BoatDynamics.noGoAngle(boatClass.polar) + deg2rad(style.headToWindMarginDegrees)
+        isHeadToWind = headToWind
 
         var flutter = 0.0
         if ease {
@@ -345,11 +349,17 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var crewFullPower = 0.5
     /// What planing counts as, so a planing skiff's crew stays out on a run.
     var crewPlaningPower = 0.6
+    /// Planing counts for nothing when her felt wind (shadowed, ruling 1) is this share of her sailing wind or less,
+    /// rising to all of `crewPlaningPower` in clean air: a planing boat in someone's air sits in.
+    var crewDirtyAirShare = 0.75
     /// A tack's crossing, race seconds from the boom crossing; a gybe ducks under the boom first, then crosses.
     var crewCrossSeconds = 0.9
     var crewDuckSeconds = 0.5
     /// The crew moves this share of a crossing after the helm.
     var crewStagger = 0.3
+    /// From one posture to the next (out to a duck or a crossing, a duck to a crossing, a crossing to out or in),
+    /// race seconds: they move there over this, never in one frame.
+    var crewBlendSeconds = 0.2
     /// Sitting in: how far out to her side they sit, a share of her half beam, and how far they lean out, a
     /// share of a body lying flat out on the wire. Ducking and crossing, they crouch to `crewDuckReach`.
     var crewSitShare = 0.7
@@ -407,7 +417,8 @@ nonisolated extension BoatStyle {
             (.ruleCallLineSeconds, \.ruleCallLineSeconds), (.ruleCallFadeSeconds, \.ruleCallFadeSeconds),
             (.penaltyArcRadiusHulls, \.penaltyArcRadiusHulls), (.penaltyArcWidth, \.penaltyArcWidth),
             (.crewOutPower, \.crewOutPower), (.crewInPower, \.crewInPower), (.crewFullPower, \.crewFullPower),
-            (.crewPlaningPower, \.crewPlaningPower), (.crewCrossSeconds, \.crewCrossSeconds),
+            (.crewPlaningPower, \.crewPlaningPower), (.crewDirtyAirShare, \.crewDirtyAirShare),
+            (.crewBlendSeconds, \.crewBlendSeconds), (.crewCrossSeconds, \.crewCrossSeconds),
             (.crewDuckSeconds, \.crewDuckSeconds), (.crewStagger, \.crewStagger), (.crewSitShare, \.crewSitShare),
             (.crewSitReach, \.crewSitReach), (.crewDuckReach, \.crewDuckReach), (.crewBodyMetres, \.crewBodyMetres),
             (.crewHelmFore, \.crewHelmFore), (.crewForwardFore, \.crewForwardFore),

@@ -326,6 +326,8 @@ enum TuningCatalog {
                     boat("crewPlaningPower", "Crew power planing", \.crewPlaningPower, 0...1, 0.05),
                     boat("crewCrossSeconds", "Crew crossing", \.crewCrossSeconds, 0.2...3, 0.1, unit: " s"),
                     boat("crewDuckSeconds", "Gybe duck", \.crewDuckSeconds, 0...2, 0.1, unit: " s"),
+                    boat("crewDirtyAirShare", "Crew in, dirty air under", \.crewDirtyAirShare, 0...0.95, 0.05),
+                    boat("crewBlendSeconds", "Crew move blend", \.crewBlendSeconds, 0...0.6, 0.05, unit: " s"),
                     // #121: wakes, cones and backwind.
                     boat("wakeMaxHulls", "Wake length", \.wakeMaxHulls, 0...10, 0.25, unit: " hulls"),
                     boat("wakeTrailSeconds", "Wake string length", \.wakeTrailSeconds, 0.5...8, 0.1, unit: " s"),

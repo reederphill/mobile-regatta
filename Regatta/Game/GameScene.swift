@@ -64,7 +64,7 @@ final class GameScene: SKScene {
     }
     /// The wakes' tier: the thermal ladder's (#127) seam. Every tier's wake is speed-scaled.
     var wakeQuality = WakeQuality.full
-    /// The sailors' and sails' tier (#120): #127's far-boat seam. `reduced` draws no sailors and a still sail.
+    /// The sailors' and sails' tier (#120): #127's far-boat seam. `reduced` draws no sailors and stills the sail's flutter, flap and luff (its belly still follows ghost, pinch and foot).
     var crewDetail = CrewDetail.full
 
     /// Whether SpriteKit draws the world and the camera's nodes: `-hideScene` turns it off for a UI test that only

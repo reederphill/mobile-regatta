@@ -42,6 +42,9 @@ final class BoatNode: SKNode {
     /// (`CrewTable`).
     private let sailors: [(aid: SKSpriteNode, helmet: SKSpriteNode)]
     private var crewTimer = CrewTimer()
+    private var crewBlend = CrewBlend()
+    /// Whether her sailors are hidden (the reduced tier): set only when the tier changes.
+    private var crewHidden = false
     private let crewArt: CrewArt?
     /// The hull's beam and length, metres, that the sailors are placed on.
     private let hullBeam: Double
@@ -221,23 +224,32 @@ final class BoatNode: SKNode {
         heelShadow.alpha = heel * CGFloat(style.heelShadowAlpha)
     }
 
-    /// Her sailors (#120): from her sim state only (`CrewTarget`), over race time (`CrewTimer`); a frozen fixture
-    /// draws them settled. Hidden in the reduced tier, though her crew timer keeps time.
+    /// Her sailors (#120): from her sim state only (`CrewTarget`), over race time (`CrewTimer`), moved between
+    /// postures smoothly (`CrewBlend`); a frozen fixture draws them settled. The reduced tier hides them and returns
+    /// before any of that, forgetting her crew's timing so they come back drawn as she is then, not mid-manoeuvre.
+    /// Nothing is allocated per frame.
     private func updateCrew(_ boat: Boat, pose: BoatPose, style: BoatStyle, detail: CrewDetail, time: Double,
                             settled: Bool) {
         guard let crewArt, !sailors.isEmpty else { return }
+        guard detail == .full else {
+            if !crewHidden { setCrewHidden(true) }
+            return
+        }
+        if crewHidden { setCrewHidden(false) }
         let target = CrewTarget(boat, pose: pose, style: style)
-        let crew = settled ? CrewTimer.settled(target, time: time, style: style)
-            : crewTimer.advance(target, time: time, style: style)
-        lastCrew = crew
-        let hidden = detail == .reduced
-        let placements = SailorPlacement.placements(crew, beam: hullBeam, length: hullLength, heel: pose.heel,
-                                                    style: style)
+        let crew: CrewPose
+        if settled {
+            crewTimer = CrewTimer()
+            crew = CrewTimer.settled(target, time: time, style: style)
+        } else {
+            crew = crewTimer.advance(target, time: time, style: style)
+        }
+        let placements = crewBlend.drawn(
+            SailorPlacement.placements(crew, beam: hullBeam, length: hullLength, heel: pose.heel, style: style),
+            crew: crew, time: time, settled: settled, style: style)
         let bodyScale = CGFloat(style.crewBodyMetres / CrewArt.bodyMetres)
-        for (sailor, placement) in zip(sailors, placements) {
-            sailor.aid.isHidden = hidden
-            sailor.helmet.isHidden = hidden
-            guard !hidden else { continue }
+        for index in sailors.indices {
+            let sailor = sailors[index], placement = placements[index]
             let hip = CGPoint(x: CGFloat(placement.hip.x) * ppm, y: CGFloat(placement.hip.y) * ppm)
             let facing = CGFloat(placement.facing)
             let reach = CGFloat(placement.reach) * bodyScale
@@ -249,8 +261,18 @@ final class BoatNode: SKNode {
         }
     }
 
-    /// The crew last drawn (#120), for tests; nil for a class with no sailors or before the first frame.
-    private(set) var lastCrew: CrewPose?
+    private func setCrewHidden(_ hidden: Bool) {
+        crewHidden = hidden
+        for sailor in sailors {
+            sailor.aid.isHidden = hidden
+            sailor.helmet.isHidden = hidden
+        }
+        if hidden {
+            crewTimer = CrewTimer()
+            crewBlend = CrewBlend()
+        }
+    }
+
     /// Whether her sailors are drawn (#120): none in the reduced tier or for a class without.
     var sailorsShown: Bool { sailors.contains { !$0.aid.isHidden } }
     /// Her sailors' sprites, aid then helmet each, for tests: the textures are shared across the fleet.
@@ -262,7 +284,9 @@ final class BoatNode: SKNode {
     }
 
     /// Returns whether a roll miss's flog is on (the wake dies with it, #222). The reduced tier (#127) stills the
-    /// sail: no flutter, flap, luff shiver or flog swing, its side and trim kept.
+    /// sail: no flutter, flap, luff shiver or flog swing, its side and trim kept; its belly still follows a ghost,
+    /// a pinch or a foot (`BoatPose.sailFullness`), only without the flap's pulse (the cheaper choice: no extra
+    /// branch for the belly).
     @discardableResult
     private func updateSail(_ pose: BoatPose, style: BoatStyle, detail: CrewDetail = .full, time: Double, dt: Double,
                             settled: Bool) -> Bool {

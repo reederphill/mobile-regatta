@@ -13,8 +13,10 @@ import Testing
     /// A boat at `twa` degrees off a northerly of `knots`, her boom on `boom` (to leeward: heading to port of the
     /// wind with the boom to port).
     static func boat(id: Int = 1, colorIndex: Int = 1, twa: Double, boom: BoomSide = .port, knots: Double = 16,
-                     planing: Bool = false, tacking: Bool = false, crossingTick: Int? = nil) -> Boat {
-        var boat = BoatPoseTests.boat(id: id, colorIndex: colorIndex, twaDegrees: twa, windKnots: knots)
+                     planing: Bool = false, tacking: Bool = false, crossingTick: Int? = nil,
+                     shadow: Double = 1) -> Boat {
+        var boat = BoatPoseTests.boat(id: id, colorIndex: colorIndex, twaDegrees: twa, windKnots: knots,
+                                      shadow: shadow)
         boat.heading = deg2rad(boom == .port ? -twa : twa)
         boat.boomSide = boom
         boat.apparentWind = Wind(direction: deg2rad(boom == .port ? -twa : twa) * 0.7,
@@ -72,9 +74,9 @@ import Testing
         #expect(poses.map(\.side) == [.starboard, .starboard, .port, .port, .port, .port])
         // Ducking, they crouch on the old side; crossing, they go over to the new.
         let ducked = SailorPlacement.placements(poses[3], beam: 1.8, length: 4.9, heel: 0, style: Self.style)
-        #expect(ducked.allSatisfy { $0.hip.x > 0 && $0.reach == Self.style.crewDuckReach })
+        #expect([ducked.helm, ducked.crew].allSatisfy { $0.hip.x > 0 && $0.reach == Self.style.crewDuckReach })
         let out = SailorPlacement.placements(poses[5], beam: 1.8, length: 4.9, heel: 0, style: Self.style)
-        #expect(out.allSatisfy { $0.hip.x < 0 && $0.facing == -1 })
+        #expect([out.helm, out.crew].allSatisfy { $0.hip.x < 0 && $0.facing == -1 })
     }
 
     /// Light air, eased sheets and a ghost all sit in; eased sits in even on the plane.
@@ -95,6 +97,73 @@ import Testing
         let planing = CrewTimer.settled(Self.target(Self.boat(twa: 178, planing: true)), time: 0, style: Self.style)
         #expect(slow.posture == .sittingIn)
         #expect(Self.kind(planing.posture) == "out")
+    }
+
+    /// The planing power never puts them out head to wind, while she tacks (from her boom's crossing until
+    /// close-hauled), or in someone's dirty air: it reads the shadowed felt wind (ruling 1).
+    @Test func planingSitsInHeadToWindTackingOrInDirtyAir() {
+        func settled(_ boat: Boat) -> CrewPose { CrewTimer.settled(Self.target(boat), time: 5, style: Self.style) }
+
+        // Head to wind, planing still flagged: in.
+        let headToWind = Self.boat(twa: 10, planing: true)
+        #expect(BoatPose(headToWind, ease: false, isGhost: false, boatClass: Self.boatClass, style: Self.style)
+            .isHeadToWind)
+        #expect(settled(headToWind).posture == .sittingIn)
+
+        // Light, barely heeled: planing alone puts them out, but not while she is tacking.
+        let reaching = Self.boat(twa: 50, knots: 8, planing: true)
+        let tacking = Self.boat(twa: 50, knots: 8, planing: true, tacking: true, crossingTick: 0)
+        #expect(Self.target(reaching).power == Self.style.crewPlaningPower)
+        #expect(Self.kind(settled(reaching).posture) == "out")
+        #expect(Self.target(tacking).power < Self.style.crewOutPower)
+        #expect(settled(tacking).posture == .sittingIn)
+
+        // A planing run in clean air is out; deep in someone's shadow it sits in, part way it's part out.
+        #expect(Self.kind(settled(Self.boat(twa: 160, planing: true)).posture) == "out")
+        #expect(settled(Self.boat(twa: 160, planing: true, shadow: 0.6)).posture == .sittingIn)
+        let partly = Self.target(Self.boat(twa: 160, planing: true, shadow: 0.9)).power
+        #expect(partly > 0 && partly < Self.style.crewPlaningPower)
+    }
+
+    /// Where a sailor's helmet sits, metres in her frame: her hips plus her body's reach to her facing side.
+    static func helmet(_ placement: SailorPlacement) -> Vec2 {
+        Vec2(placement.hip.x + placement.facing * placement.reach * Self.style.crewBodyMetres, placement.hip.y)
+    }
+
+    /// The largest move of any sailor's hips or helmet from one frame to the next, metres.
+    static func largestStep(_ frames: [SailorPair]) -> Double {
+        zip(frames, frames.dropFirst()).map { a, b in
+            (0...1).map { i in
+                max((a[i].hip - b[i].hip).length, (helmet(a[i]) - helmet(b[i])).length)
+            }.max() ?? 0
+        }.max() ?? 0
+    }
+
+    /// Live, they move from one posture to the next over `crewBlendSeconds` (out to a duck, a duck to a crossing,
+    /// a crossing to out): through a whole gybe at 60 frames a second no frame moves a sailor more than a bound,
+    /// though the postures' own places jump further than that at each boundary. Settled frames draw the target.
+    @Test func posturesBlendAcrossBoundaries() {
+        var timer = CrewTimer()
+        var blend = CrewBlend()
+        let before = Self.boat(twa: 160, planing: true)
+        let after = Self.boat(twa: 160, boom: .starboard, planing: true)
+        var drawn: [SailorPair] = [], targets: [SailorPair] = []
+        for frame in 0...180 {
+            let time = Double(frame) / 60
+            let target = Self.target(time < 0.5 ? before : after)
+            let crew = timer.advance(target, time: time, style: Self.style)
+            let place = SailorPlacement.placements(crew, beam: 1.8, length: 4.9, heel: 0, style: Self.style)
+            targets.append(place)
+            drawn.append(blend.drawn(place, crew: crew, time: time, settled: false, style: Self.style))
+        }
+        let bound = 0.25
+        #expect(Self.largestStep(targets) > bound)
+        #expect(Self.largestStep(drawn) < bound)
+        #expect(drawn.last == targets.last)
+        // A settled frame (a frozen fixture) draws the target, whatever came before.
+        let crew = CrewTimer.settled(Self.target(after), time: 3, style: Self.style)
+        let place = SailorPlacement.placements(crew, beam: 1.8, length: 4.9, heel: 0, style: Self.style)
+        #expect(blend.drawn(place, crew: crew, time: 3, settled: true, style: Self.style) == place)
     }
 
     /// Power between the in and out thresholds never flickers them: out stays out, in stays in.
