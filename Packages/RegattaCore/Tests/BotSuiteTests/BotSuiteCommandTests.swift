@@ -27,8 +27,12 @@ import Testing
         let perConditions = matrix.seeds.count * matrix.tideStatesDegrees.count * 4 * TierMix.allCases.count
         // Live, skill gap and cautious in every conditions and tier mix; the fun pass in one conditions; execution, rivals
         // and rank stability in every conditions but one tier mix each (`ProfileMix.tierMix`).
+        // Rivals and rank stability in fleets of 10 alone (`mixFleetSizes`), so their summaries pool no other size.
         let pinned = perConditions / TierMix.allCases.count
-        #expect(matrix.cells.count == perConditions * (4 * 3 + 1) + pinned * 4 * 3)
+        let oneFleet = pinned / matrix.fleetSizes.count
+        #expect(matrix.mixFleetSizes == [.rivals: 10, .rankStability: 10])
+        #expect(matrix.cells.count == perConditions * (4 * 3 + 1) + pinned * 4 + oneFleet * 4 * 2)
+        #expect(Set(matrix.cells.filter { [.rivals, .rankStability].contains($0.profileMix) }.map(\.fleetSize)) == [10])
         #expect(Set(matrix.cells.filter { $0.profileMix == .execution }.map(\.tierMix)) == [.national])
         #expect(Set(matrix.cells.filter { $0.profileMix == .rankStability }.map(\.tierMix)) == [.mixed])
         #expect(Set(matrix.cells.filter { $0.profileMix == .funPass }.map(\.conditions)) == ["classic-oscillating@7"])

@@ -40,7 +40,8 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     case cautious
     /// Practice rivals (#235, #105): seat 0 stands in for the player, a bot at skill s, and the race's rivals
     /// (`Rivals.seats`) sail at the same s; the rest are a Mixed fleet (`tierMix`). s cycles through `rivalSkills` with
-    /// the seed. Reported as `BotSuiteReport.rivals`, the rival pace band (`RivalLimits`).
+    /// the seed. Reported as `BotSuiteReport.rivals`, the rival pace band (`RivalLimits`). The bundled matrix sails it in
+    /// fleets of 10 alone (`BotMatrix.mixFleetSizes`), as is rank stability.
     case rivals
     /// Rank stability (#105): every seat at a fixed skill (`rankSkills`, the centres of the tiers' bands, by turns,
     /// one seat further along for each seed), so a fleet of a fixed mix of skills races over the seeds. Reported as
@@ -111,8 +112,9 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     }
 
     /// The tier mix the mix is sailed in, of those the matrix names; nil for any the matrix names. A mix whose seats
-    /// take no tier from it (profiles, or skills it sets) would only repeat its races in each. A matrix without it
-    /// sails none of the mix's races (`--tier-mix club` leaves the execution mix out), rather than refuse.
+    /// take no tier from it (profiles, or skills it sets) would only repeat its races in each. A matrix that names the
+    /// mix but not its tier mix sails none of its races, so `validate` refuses it; the command line's `--tier-mix`
+    /// leaves out the mixes it can't sail unless `--profile-mix` names them (`BotSuiteOptions.matrix`).
     public var tierMix: TierMix? {
         switch self {
         case .live, .skillGap, .funPass, .hunters, .cautious: nil
@@ -146,6 +148,8 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
         return (try? dataFileKey(conditions))?.id == id
     }
 }
+
+extension ProfileMix: CodingKeyRepresentable {}
 
 /// Which tier sails each seat of a race.
 public enum TierMix: String, Codable, CaseIterable, Hashable, Sendable {
@@ -192,6 +196,10 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     public var tierMixes: [TierMix]
     /// Which seats sail a scripted profile (#231); `[.live]` when a matrix file has none.
     public var profileMixes: [ProfileMix]
+    /// The one fleet size a profile mix is sailed in, of `fleetSizes`, for a mix whose summary must not pool fleets
+    /// (#105: the rank correlation and the rival mean place, which a two-boat race would skew); every fleet size for a
+    /// mix not in it. Empty when a matrix file has none.
+    public var mixFleetSizes: [ProfileMix: Int]
     public var laps: Int
     /// Seconds after the gun a race may sail before the harness stops it; its unfinished boats count
     /// as not finished.
@@ -199,7 +207,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
 
     public init(seeds: [UInt64], venues: [String] = ["dev-venue@3"], conditions: [String] = ["classic-oscillating@3"],
                 tideStatesDegrees: [Double] = [0], fleetSizes: [Int], tierMixes: [TierMix] = [.mixed],
-                profileMixes: [ProfileMix] = [.live], laps: Int = RaceSetup.defaultLaps,
+                profileMixes: [ProfileMix] = [.live], mixFleetSizes: [ProfileMix: Int] = [:], laps: Int = RaceSetup.defaultLaps,
                 capSecondsAfterGun: Int = BotMatrix.defaultCapSecondsAfterGun) {
         self.seeds = seeds
         self.venues = venues
@@ -208,12 +216,14 @@ public struct BotMatrix: Codable, Hashable, Sendable {
         self.fleetSizes = fleetSizes
         self.tierMixes = tierMixes
         self.profileMixes = profileMixes
+        self.mixFleetSizes = mixFleetSizes
         self.laps = laps
         self.capSecondsAfterGun = capSecondsAfterGun
     }
 
     private enum CodingKeys: String, CodingKey {
-        case seeds, venues, conditions, tideStatesDegrees, fleetSizes, tierMixes, profileMixes, laps, capSecondsAfterGun
+        case seeds, venues, conditions, tideStatesDegrees, fleetSizes, tierMixes, profileMixes, mixFleetSizes, laps
+        case capSecondsAfterGun
     }
 
     public init(from decoder: Decoder) throws {
@@ -225,6 +235,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                   fleetSizes: try c.decode([Int].self, forKey: .fleetSizes),
                   tierMixes: try c.decode([TierMix].self, forKey: .tierMixes),
                   profileMixes: try c.decodeIfPresent([ProfileMix].self, forKey: .profileMixes) ?? [.live],
+                  mixFleetSizes: try c.decodeIfPresent([ProfileMix: Int].self, forKey: .mixFleetSizes) ?? [:],
                   laps: try c.decode(Int.self, forKey: .laps),
                   capSecondsAfterGun: try c.decode(Int.self, forKey: .capSecondsAfterGun))
     }
@@ -240,7 +251,9 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                     tideStatesDegrees.flatMap { tide in
                         fleetSizes.flatMap { fleetSize in
                             tierMixes.flatMap { mix in
-                                profileMixes.filter { $0.sails(in: conditions) && $0.sails(in: mix) }.map { profiles in
+                                profileMixes.filter {
+                                    $0.sails(in: conditions) && $0.sails(in: mix) && sails($0, inFleetOf: fleetSize)
+                                }.map { profiles in
                                     BotRaceCell(seed: seed, venue: venue, conditions: conditions, tideStateDegrees: tide,
                                                 fleetSize: fleetSize, tierMix: mix, profileMix: profiles, laps: laps,
                                                 capSecondsAfterGun: capSecondsAfterGun)
@@ -253,9 +266,18 @@ public struct BotMatrix: Codable, Hashable, Sendable {
         }
     }
 
+    /// Whether `mix` is sailed in fleets of `size` (`mixFleetSizes`).
+    public func sails(_ mix: ProfileMix, inFleetOf size: Int) -> Bool { mixFleetSizes[mix].map { $0 == size } ?? true }
+
+    /// Whether the matrix sails any race of `mix`: it names conditions, a tier mix and a fleet size the mix is sailed in.
+    public func sailsAny(_ mix: ProfileMix) -> Bool {
+        conditions.contains(where: mix.sails(in:)) && tierMixes.contains(where: mix.sails(in:))
+            && fleetSizes.contains { sails(mix, inFleetOf: $0) }
+    }
+
     /// Throws unless every axis has a value, every fleet size is one a race can have, every data file
-    /// is bundled, every venue has a pairing for every conditions, and every profile mix has conditions to
-    /// sail in.
+    /// is bundled, every venue has a pairing for every conditions, and every profile mix sails at least one race:
+    /// a gate that sails nothing would pass without measuring anything (#105), so it fails loudly instead.
     public func validate() throws {
         for (axis, count) in [("seeds", seeds.count), ("venues", venues.count), ("conditions", conditions.count),
                               ("tideStatesDegrees", tideStatesDegrees.count), ("fleetSizes", fleetSizes.count),
@@ -279,10 +301,16 @@ public struct BotMatrix: Codable, Hashable, Sendable {
             }
         }
         for mix in profileMixes {
-            guard let id = mix.conditionsID, !conditions.contains(where: mix.sails(in:)) else { continue }
-            throw BotSuiteError.matrix("\(mix.rawValue) sails only in \(id) conditions, which the matrix doesn't name")
+            if let id = mix.conditionsID, !conditions.contains(where: mix.sails(in:)) {
+                throw BotSuiteError.matrix("\(mix.rawValue) sails only in \(id) conditions, which the matrix doesn't name")
+            }
+            if let tierMix = mix.tierMix, !tierMixes.contains(tierMix) {
+                throw BotSuiteError.matrix("\(mix.rawValue) sails only in a \(tierMix.rawValue) fleet, which the matrix doesn't name")
+            }
+            if let size = mixFleetSizes[mix], !fleetSizes.contains(size) {
+                throw BotSuiteError.matrix("\(mix.rawValue) sails only in a fleet of \(size), which the matrix doesn't name")
+            }
         }
-
     }
 
     public static func load(from url: URL) throws -> BotMatrix {

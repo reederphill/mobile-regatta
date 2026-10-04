@@ -1,5 +1,6 @@
 @testable import BotSuite
 import RegattaBots
+import RegattaCore
 import Foundation
 import Testing
 
@@ -161,6 +162,71 @@ import Testing
         #expect(summary.centredRudder161Calls == 3)
         #expect(WatchdogLimits(maxCentredRudder161Calls: 3).breaches(summary).isEmpty)
         #expect(WatchdogLimits(maxCentredRudder161Calls: 2).breaches(summary) == ["watchdog: centred-rudder 16.1 calls 3 > 2"])
+    }
+
+    /// #105: the watchdog reads a rudder as `Race` does: inside `Autohelm.deadBand` it is centred, the autohelm holding;
+    /// and its window is the ticks the escape simulation searches for her course change (`roomVerdict`: `last - horizon
+    /// - offset + 1 ... last`), so steering on the window's first tick is steering in it, and on the tick before is not.
+    @Test func watchdogReadsTheDeadBandAndTheEscapeWindow() {
+        let window = 30, call = 100
+        let inside = BoatInput(rudder: Int8((Autohelm.deadBand * 127).rounded(.down)))
+        let outside = BoatInput(rudder: Int8((Autohelm.deadBand * 127).rounded(.up)))
+        #expect(abs(inside.rudderValue) <= Autohelm.deadBand && abs(outside.rudderValue) > Autohelm.deadBand)
+        func calls(_ held: BoatInput, at tick: Int, tapping: Bool = false) -> Rule161Calls {
+            var watchdog = Rule161Watchdog(seats: 2, windowTicks: window)
+            watchdog.note(seat: 0, held: held, tapping: tapping, tick: tick)
+            watchdog.note(seat: 1, held: outside, tapping: false, tick: call)
+            watchdog.record(offender: 0, tick: call)
+            return watchdog.calls
+        }
+        #expect(calls(inside, at: call) == Rule161Calls(calls: 1, centredRudder: 1), "a rudder inside the dead band is centred")
+        #expect(calls(BoatInput(rudder: -inside.rudder), at: call).centredRudder == 1)
+        #expect(calls(outside, at: call) == Rule161Calls(calls: 1, centredRudder: 0))
+        #expect(calls(BoatInput(rudder: -outside.rudder), at: call).centredRudder == 0)
+        let first = call - window + 1
+        #expect(calls(outside, at: first).centredRudder == 0, "steering on the window's first tick is in it")
+        #expect(calls(outside, at: first - 1).centredRudder == 1, "steering the tick before the window isn't")
+        #expect(calls(.neutral, at: first, tapping: true) == Rule161Calls(calls: 1, centredRudder: 1, centredRudderWithTap: 1))
+        #expect(calls(.neutral, at: first - 1, tapping: true) == Rule161Calls(calls: 1, centredRudder: 1))
+    }
+
+    /// #105: a requested mix that sails no race fails the run loudly rather than passing its gate unmeasured: execution
+    /// without an all-National fleet, rivals or rank stability without a Mixed one or without their fleet size. The
+    /// command line's `--tier-mix` and `--fleet-size` leave out the mixes they can't sail unless `--profile-mix` names them.
+    @Test func aRequestedMixThatSailsNothingIsRefused() throws {
+        #expect(throws: BotSuiteError.self) {
+            try BotMatrix(seeds: [1], fleetSizes: [2], tierMixes: [.club], profileMixes: [.live, .execution]).validate()
+        }
+        for mix in [ProfileMix.rivals, .rankStability] {
+            #expect(throws: BotSuiteError.self) {
+                try BotMatrix(seeds: [1], fleetSizes: [10], tierMixes: [.national], profileMixes: [mix]).validate()
+            }
+            #expect(throws: BotSuiteError.self) {
+                try BotMatrix(seeds: [1], fleetSizes: [2, 5], tierMixes: [.mixed], profileMixes: [mix],
+                              mixFleetSizes: [mix: 10]).validate()
+            }
+            let pinned = BotMatrix(seeds: [1], fleetSizes: [2, 10], tierMixes: [.mixed], profileMixes: [mix],
+                                   mixFleetSizes: [mix: 10])
+            try pinned.validate()
+            #expect(pinned.cells.map(\.fleetSize) == [10])
+        }
+        try BotMatrix(seeds: [1], fleetSizes: [2], tierMixes: [.national], profileMixes: [.execution]).validate()
+
+        let club = try BotSuiteOptions(arguments: ["--tier-mix", "club"]).matrix()
+        #expect(!club.profileMixes.contains(.execution) && !club.profileMixes.contains(.rivals))
+        #expect(club.profileMixes.contains(.live))
+        let small = try BotSuiteOptions(arguments: ["--fleet-size", "2"]).matrix()
+        #expect(!small.profileMixes.contains(.rivals) && !small.profileMixes.contains(.rankStability))
+        #expect(small.profileMixes.contains(.execution))
+        #expect(throws: BotSuiteError.self) {
+            try BotSuiteOptions(arguments: ["--tier-mix", "club", "--profile-mix", "execution"]).matrix()
+        }
+        #expect(throws: BotSuiteError.self) {
+            try BotSuiteOptions(arguments: ["--fleet-size", "2", "--profile-mix", "rankStability"]).matrix()
+        }
+        #expect(throws: BotSuiteError.self) {
+            try BotSuiteOptions(arguments: ["--tier-mix", "national", "--profile-mix", "rivals"]).matrix()
+        }
     }
 
     /// #105: the new mixes' seats. Execution alternates its two profiles; the cautious mix puts the cautious bot in seat
@@ -360,6 +426,7 @@ import Testing
         let report = try JSONDecoder().decode(BotSuiteReport.self, from: Data(run.stdout.utf8))
         let summary = try #require(report.rank)
         #expect(summary.races == 2 && summary.correlatedRaces == 2)
+        #expect(summary.fleetSizes == [4] && rank["fleetSizes"] as? [Int] == [4])
         for race in report.races {
             let rank = try #require(race.rank)
             #expect(Set(rank.skills).isSubset(of: Set(ProfileMix.rankSkills)))

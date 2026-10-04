@@ -621,6 +621,9 @@ public struct RaceRivals: Codable, Hashable, Sendable {
 public struct RivalPaceSummary: Codable, Hashable, Sendable {
     /// Races of the rivals mix.
     public var races: Int
+    /// The fleet sizes they were sailed in, ascending: one in the bundled matrix (`BotMatrix.mixFleetSizes`), so the
+    /// mean places aren't pooled over fleets of different sizes.
+    public var fleetSizes: [Int]
     /// By skill (`fixed`, two places): the stand-in's mean place, her rivals' mean place, and the gap between them.
     public var seatMeanPlace: [String: Double]
     public var rivalMeanPlace: [String: Double]
@@ -628,8 +631,9 @@ public struct RivalPaceSummary: Codable, Hashable, Sendable {
     /// The widest of those gaps: what `maxMeanPlaceGap` holds.
     public var maxMeanPlaceGap: Double
 
-    public init(races: Int, seatMeanPlace: [String: Double], rivalMeanPlace: [String: Double]) {
+    public init(races: Int, fleetSizes: [Int] = [], seatMeanPlace: [String: Double], rivalMeanPlace: [String: Double]) {
         self.races = races
+        self.fleetSizes = fleetSizes
         self.seatMeanPlace = seatMeanPlace
         self.rivalMeanPlace = rivalMeanPlace
         meanPlaceGap = seatMeanPlace.reduce(into: [:]) { gaps, entry in
@@ -642,13 +646,14 @@ public struct RivalPaceSummary: Codable, Hashable, Sendable {
     init?(_ races: [RaceResult]) {
         let rivals = races.compactMap(\.rivals)
         guard !rivals.isEmpty else { return nil }
+        let fleetSizes = Set(races.filter { $0.rivals != nil }.map(\.cell.fleetSize)).sorted()
         var seat: [String: [Int]] = [:], rival: [String: [Int]] = [:]
         for race in rivals {
             seat[fixed(race.skill), default: []].append(race.seatPlace)
             rival[fixed(race.skill), default: []] += race.rivalPlaces
         }
         let mean = { (places: [Int]) in Double(places.reduce(0, +)) / Double(max(places.count, 1)) }
-        self.init(races: rivals.count, seatMeanPlace: seat.mapValues(mean), rivalMeanPlace: rival.mapValues(mean))
+        self.init(races: rivals.count, fleetSizes: fleetSizes, seatMeanPlace: seat.mapValues(mean), rivalMeanPlace: rival.mapValues(mean))
     }
 }
 
@@ -704,6 +709,9 @@ public struct RankSummary: Codable, Hashable, Sendable {
     /// Races of the rank-stability mix, and of them those with a correlation.
     public var races: Int
     public var correlatedRaces: Int
+    /// The fleet sizes they were sailed in, ascending: one in the bundled matrix (`BotMatrix.mixFleetSizes`), so the
+    /// correlation isn't averaged over fleets of different sizes.
+    public var fleetSizes: [Int]
     /// The mean over those races of each one's Spearman correlation (`RaceRank.spearman`).
     public var meanSkillRankCorrelation: Double
     /// The luck floor: by skill (`fixed`, two places), the mean gap in places between two seats of that skill in one
@@ -711,10 +719,11 @@ public struct RankSummary: Codable, Hashable, Sendable {
     public var sameSkillPlaceGap: [String: Double]
     public var meanSameSkillPlaceGap: Double?
 
-    public init(races: Int, correlatedRaces: Int, meanSkillRankCorrelation: Double,
+    public init(races: Int, correlatedRaces: Int, fleetSizes: [Int] = [], meanSkillRankCorrelation: Double,
                 sameSkillPlaceGap: [String: Double] = [:], meanSameSkillPlaceGap: Double? = nil) {
         self.races = races
         self.correlatedRaces = correlatedRaces
+        self.fleetSizes = fleetSizes
         self.meanSkillRankCorrelation = meanSkillRankCorrelation
         self.sameSkillPlaceGap = sameSkillPlaceGap
         self.meanSameSkillPlaceGap = meanSameSkillPlaceGap
@@ -735,6 +744,7 @@ public struct RankSummary: Codable, Hashable, Sendable {
         }
         let all = gaps.values.flatMap { $0 }
         self.init(races: ranks.count, correlatedRaces: correlations.count,
+                  fleetSizes: Set(races.filter { $0.rank != nil }.map(\.cell.fleetSize)).sorted(),
                   meanSkillRankCorrelation: correlations.isEmpty ? 0 : correlations.reduce(0, +) / Double(correlations.count),
                   sameSkillPlaceGap: gaps.mapValues { Double($0.reduce(0, +)) / Double($0.count) },
                   meanSameSkillPlaceGap: all.isEmpty ? nil : Double(all.reduce(0, +)) / Double(all.count))
@@ -1305,12 +1315,12 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
             let parts = rivals.meanPlaceGap.keys.sorted().map { skill in
                 "s \(skill) seat \(fixed(rivals.seatMeanPlace[skill] ?? 0)) rivals \(fixed(rivals.rivalMeanPlace[skill] ?? 0))"
             }
-            lines.append("rivals: \(rivals.races) races, \(parts.joined(separator: ", ")); widest gap \(fixed(rivals.maxMeanPlaceGap)) places")
+            lines.append("rivals: \(rivals.races) races, fleet \(fleetText(rivals.fleetSizes)), \(parts.joined(separator: ", ")); widest gap \(fixed(rivals.maxMeanPlaceGap)) places")
         }
         if let rank {
             let spread = rank.sameSkillPlaceGap.keys.sorted().map { "s \($0) \(fixed(rank.sameSkillPlaceGap[$0] ?? 0))" }
-            lines.append("rank: skill vs finishing order \(fixed(rank.meanSkillRankCorrelation)) (Spearman, mean of "
-                + "\(rank.correlatedRaces) races); same-skill place gap \(rank.meanSameSkillPlaceGap.map { fixed($0) } ?? "-") "
+            lines.append("rank: fleet \(fleetText(rank.fleetSizes)), skill vs finishing order \(fixed(rank.meanSkillRankCorrelation)) "
+                + "(Spearman, mean of \(rank.correlatedRaces) races); same-skill place gap \(rank.meanSameSkillPlaceGap.map { fixed($0) } ?? "-") "
                 + "(\(spread.joined(separator: ", ")))")
         }
         if let cautious {
@@ -1335,3 +1345,6 @@ func callsLine(_ calls: [String: Int]) -> String {
 func fixed(_ value: Double, _ places: Int = 2) -> String {
     String(format: "%.\(places)f", value)
 }
+
+/// Fleet sizes as the summary prints them: `10`, or `2/5` when a run pooled several.
+func fleetText(_ sizes: [Int]) -> String { sizes.isEmpty ? "-" : sizes.map(String.init).joined(separator: "/") }

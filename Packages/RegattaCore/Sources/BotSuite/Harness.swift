@@ -247,14 +247,9 @@ struct RaceTally {
     private let isRun: [Bool]
     /// Each seat's runs sailed, in order (#105).
     private var runs: [[RunSplit]]
-    /// The 16.1 watchdog (#228, #105): the tick each seat last held her rudder off centre, and last had the autohelm
-    /// sailing a tack or gybe tap; and the race's rule 16.1 calls so far.
-    private var lastSteeredTicks: [Int]
-    private var lastTapTicks: [Int]
-    /// Ticks the escape simulation behind a 16.1 call looks back over (`EscapeSimulation.verdict`): its horizon and
-    /// start offset.
-    private let escapeWindowTicks: Int
-    private(set) var rule161 = Rule161Calls()
+    /// The 16.1 watchdog (#228, #105).
+    private var watchdog: Rule161Watchdog
+    var rule161: Rule161Calls { watchdog.calls }
     private let upwind: Vec2
     /// Where each racing seat entered the leg she's sailing: the leg, the tick and her position.
     private var legEntries: [(leg: Int, tick: Int, position: Vec2)?]
@@ -312,10 +307,9 @@ struct RaceTally {
         isBeat = race.course.legs.map { $0 == .round(CourseLayout.windwardIndex) }
         isRun = race.course.legs.map { $0 == .round(CourseLayout.gateIndex) || $0 == .finish }
         runs = Array(repeating: [], count: race.boats.count)
-        lastSteeredTicks = Array(repeating: Int.min, count: race.boats.count)
-        lastTapTicks = lastSteeredTicks
         let escape = race.rules.incidents.escape
-        escapeWindowTicks = RulesConfig.ticks(escape.horizon) + escape.startTickOffset
+        watchdog = Rule161Watchdog(seats: race.boats.count,
+                                   windowTicks: RulesConfig.ticks(escape.horizon) + escape.startTickOffset)
         upwind = race.course.upwind
         legEntries = Array(repeating: nil, count: race.boats.count)
         legTacks = zeros
@@ -350,14 +344,14 @@ struct RaceTally {
     mutating func record(_ race: Race, events: [RaceEvent]) {
         let near = openEncounters(race)
         for seat in race.boats.indices {
-            if race.heldInputs[seat].rudder != 0 { lastSteeredTicks[seat] = race.tick }
-            if race.boats[seat].autohelm?.isTapping == true { lastTapTicks[seat] = race.tick }
+            watchdog.note(seat: seat, held: race.heldInputs[seat], tapping: race.boats[seat].autohelm?.isTapping == true,
+                          tick: race.tick)
         }
         for event in events {
             switch event.kind {
             case .ocsNotice(let seat): ocsNotices[seat] += 1
             case .ruleCall(let call):
-                if call.rule == .changingCourse { recordRule161(call) }
+                if call.rule == .changingCourse { watchdog.record(offender: call.offender, tick: call.tick) }
                 foulsAsOffender[call.offender] += 1
                 callsByRule[call.offender][call.rule.rawValue, default: 0] += 1
                 if call.leg == 0 { callsBeforeFirstRounding[call.offender] += 1 }
@@ -515,17 +509,6 @@ struct RaceTally {
         }
     }
 
-    /// A rule 16.1 call (#228, #105): its offender, the right-of-way boat, held her rudder centred throughout the window
-    /// the escape simulation read (`escapeWindowTicks` back from the call), so the course change it called was the
-    /// autohelm's; and of those, whether a tack or gybe tap of hers fell in the window.
-    private mutating func recordRule161(_ call: RuleCall) {
-        rule161.calls += 1
-        let windowStart = call.tick - escapeWindowTicks
-        guard lastSteeredTicks[call.offender] < windowStart else { return }
-        rule161.centredRudder += 1
-        if lastTapTicks[call.offender] >= windowStart { rule161.centredRudderWithTap += 1 }
-    }
-
     /// A beat ends when she moves on from it, and a leg begins as she starts or rounds into it. Her tacks
     /// count from the leg's beginning, so none she made before her start does.
     private mutating func recordLeg(_ seat: Int, _ boat: Boat, tick: Int) {
@@ -608,4 +591,39 @@ func lineSpot(_ p: Vec2, on line: CourseLayout.Line) -> Double {
 /// `part / whole`, or 0 when `whole` is 0, so a report never holds a NaN.
 func share(_ part: Int, of whole: Int) -> Double {
     whole == 0 ? 0 : Double(part) / Double(whole)
+}
+
+/// The 16.1 watchdog (#228, #105): per seat, the tick she last steered (held her rudder outside
+/// `Autohelm.deadBand`, as `Race` lets go of the autohelm: a rudder inside it is centred, the autohelm holding) and the
+/// tick the autohelm last sailed a tack or gybe tap of hers; and the race's rule 16.1 calls so far.
+struct Rule161Watchdog {
+    private var lastSteeredTicks: [Int]
+    private var lastTapTicks: [Int]
+    /// Ticks the escape simulation behind a 16.1 call searches for the right-of-way boat's course change
+    /// (`EscapeSimulation.roomVerdict`: `last - horizon - offset + 1 ... last`): its horizon plus its start offset,
+    /// the call's own tick included.
+    let windowTicks: Int
+    private(set) var calls = Rule161Calls()
+
+    init(seats: Int, windowTicks: Int) {
+        lastSteeredTicks = Array(repeating: Int.min, count: seats)
+        lastTapTicks = lastSteeredTicks
+        self.windowTicks = windowTicks
+    }
+
+    /// Call each tick, after the step, with the input `seat` held on it and whether her autohelm is tapping.
+    mutating func note(seat: Int, held: BoatInput, tapping: Bool, tick: Int) {
+        if abs(held.rudderValue) > Autohelm.deadBand { lastSteeredTicks[seat] = tick }
+        if tapping { lastTapTicks[seat] = tick }
+    }
+
+    /// A rule 16.1 call against `offender` (the right-of-way boat) on `tick`: centred if she didn't steer on any tick
+    /// of the window, so the course change it called was the autohelm's; and of those, whether a tap of hers fell in it.
+    mutating func record(offender: Int, tick: Int) {
+        calls.calls += 1
+        let windowStart = tick - windowTicks + 1
+        guard lastSteeredTicks[offender] < windowStart else { return }
+        calls.centredRudder += 1
+        if lastTapTicks[offender] >= windowStart { calls.centredRudderWithTap += 1 }
+    }
 }

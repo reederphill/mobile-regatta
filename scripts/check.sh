@@ -215,6 +215,9 @@ if (( status_only )); then
     exit "$missing"
 fi
 
+# The bot-suite workflow's image pin is linux-test.sh's (#105).
+scripts/check-image-pins.sh || { echo "check.sh: FAIL image pins" >&2; exit 1; }
+
 export LOCK_HOLDER="$root (pid $$)"
 app_build=(xcodebuild -project Regatta.xcodeproj -scheme Regatta -destination "$destination"
            -derivedDataPath "$scratch/DerivedData" -only-testing:RegattaTests -quiet

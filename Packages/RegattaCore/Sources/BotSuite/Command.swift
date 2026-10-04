@@ -76,7 +76,15 @@ public struct BotSuiteOptions: Hashable, Sendable {
         if let seedCount { matrix.seeds = (1...seedCount).map(UInt64.init) }
         if !fleetSizes.isEmpty { matrix.fleetSizes = fleetSizes }
         if !tierMixes.isEmpty { matrix.tierMixes = tierMixes }
-        if !profileMixes.isEmpty { matrix.profileMixes = profileMixes }
+        if !profileMixes.isEmpty {
+            matrix.profileMixes = profileMixes
+        } else if !fleetSizes.isEmpty || !tierMixes.isEmpty {
+            // Narrowed to fleets or tiers some of the matrix's mixes aren't sailed in (`ProfileMix.tierMix`,
+            // `BotMatrix.mixFleetSizes`): those mixes weren't asked for by name, so leave them out. A mix named with
+            // `--profile-mix` that sails nothing is refused (`validate`).
+            let narrowed = matrix
+            matrix.profileMixes = matrix.profileMixes.filter(narrowed.sailsAny)
+        }
         if let laps { matrix.laps = laps }
         try matrix.validate()
         return matrix
