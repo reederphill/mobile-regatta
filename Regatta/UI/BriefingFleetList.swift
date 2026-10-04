@@ -2,7 +2,7 @@ import RegattaCore
 import SwiftUI
 
 /// The briefing's fleet list (#130, #21, #19): each boat's large livery render, its name, and its rating or, for a bot,
-/// the bot glyph. Yours is marked. Rival names are #235's.
+/// the bot glyph. Yours is marked; a practice rival has the word "Rival" beside her name (#235, `RivalMark`).
 struct BriefingFleetList: View {
     let rows: [BriefingModel.FleetRow]
 
@@ -25,6 +25,14 @@ struct BriefingFleetList: View {
                             Text(row.name)
                                 .font(row.isMe ? MenuFont.heading(.headline) : MenuFont.body())
                                 .lineLimit(1)
+                                .layoutPriority(row.isRival ? 1 : 0)
+                            if row.isRival {
+                                Text(RivalMark.word)
+                                    .font(MenuFont.body(.caption))
+                                    .foregroundStyle(ChromePalette.text.opacity(0.7))
+                                    .lineLimit(1)
+                                    .accessibilityIdentifier("briefing-rival-\(row.seat)")
+                            }
                         }
                         if let rating = row.rating {
                             Text(rating).font(MenuFont.number(.subheadline))

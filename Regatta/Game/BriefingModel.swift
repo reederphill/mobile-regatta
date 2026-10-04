@@ -34,6 +34,8 @@ final class BriefingModel {
         var livery: Livery
         /// The player's rating, once the services carry one; nil for now, and always for a bot.
         var rating: String?
+        /// A practice rival (#235): "Rival" beside her name, the bot glyph kept.
+        var isRival = false
 
         var id: Int { seat }
     }
@@ -70,9 +72,11 @@ final class BriefingModel {
     private(set) var hasBegun = false
     private(set) var hasAdvanced = false
 
-    /// `files` are the files `setup` names; `ratings` gives a seat's rating text (nil until the services carry them).
+    /// `files` are the files `setup` names; `ratings` gives a seat's rating text (nil until the services carry them);
+    /// `rivals` are the practice rivals' seats (#235, `RaceConfig.rivalSeats`), none online.
     init(setup: RaceSetup, files: RaceFiles, mySeat: Int, mode: Mode, liveries: FleetLiveries,
-         menuMusic: any MenuMusic, ratings: (Int) -> String? = { _ in nil }, now: @escaping () -> Date = Date.init) {
+         menuMusic: any MenuMusic, ratings: (Int) -> String? = { _ in nil }, rivals: Set<Int> = [],
+         now: @escaping () -> Date = Date.init) {
         self.mode = mode
         self.setup = setup
         self.mySeat = mySeat
@@ -94,11 +98,12 @@ final class BriefingModel {
         } else {
             current = nil
         }
-        let roster = FleetRoster(setup: setup)
+        let roster = FleetRoster(setup: setup, rivals: rivals)
         fleet = setup.seats.indices.map { seat in
             let isBot = roster[seat].isBot && seat != mySeat
             return FleetRow(seat: seat, name: roster.name(of: seat, playerSeat: mySeat), isMe: seat == mySeat,
-                            isBot: isBot, livery: liveries[seat], rating: isBot ? nil : ratings(seat))
+                            isBot: isBot, livery: liveries[seat], rating: isBot ? nil : ratings(seat),
+                            isRival: isBot && roster[seat].isRival)
         }
     }
 
