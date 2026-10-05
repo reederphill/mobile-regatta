@@ -250,8 +250,10 @@ public struct EventState: Equatable, Sendable {
     public var finishes: [Finish]
     public var firstFinishTick: Int?
     public var isOver: Bool
-    /// Client-visible rules and incident state. Placeholder until the rules tickets (#96) define
-    /// schema 1: `.none`. Never umpire memory, which stays on the server (#18, #96).
+    /// Client-visible rules and incident state: `.none`. #96 needs nothing here: a seat's penalty state
+    /// (turns owed, progress, clock), status and ghosting travel in its `WireSeat`, the umpire's relations
+    /// in each `Snapshot`, and rule calls as reliable events. Kept for a later schema. Never umpire memory,
+    /// which stays on the server (#18, #96).
     public var rules: VersionedPayload
 
     public init(nextEventSeq: UInt32, finishes: [Finish] = [], firstFinishTick: Int? = nil, isOver: Bool = false,
@@ -392,17 +394,23 @@ public struct InputAck: Equatable, Sendable {
     }
 }
 
-/// Server → client, every 3rd tick (#18): the whole fleet at the frame's tick, quantised, and this
-/// client's input feedback. Full, never a delta. Bots and humans are indistinguishable in it.
+/// Server → client, every 3rd tick (#18): the whole fleet at the frame's tick, quantised, this
+/// client's input feedback, and the server umpire's relations of this client's seat to the fleet (#96). Full,
+/// never a delta. Bots and humans are indistinguishable in it.
 public struct Snapshot: Equatable, Sendable {
     /// By seat.
     public var seats: [WireSeat]
     /// Nil until the server has applied an input from this client.
     public var ack: InputAck?
+    /// The server umpire's relations of the recipient's seat to each seat (`WireRelation.relations(of:in:)`), by
+    /// seat, one for each of `seats`: the right-of-way glows and rule 17 restrictions a client shows (#96, ADR 0005),
+    /// never worked out from its own world. Nil when not sent (a spectator, a test).
+    public var relations: [WireRelation]?
 
-    public init(seats: [WireSeat], ack: InputAck? = nil) {
+    public init(seats: [WireSeat], ack: InputAck? = nil, relations: [WireRelation]? = nil) {
         self.seats = seats
         self.ack = ack
+        self.relations = relations
     }
 
     /// Quantises `world`'s seats.
@@ -689,20 +697,29 @@ extension Resync {
     }
 }
 
+// A snapshot's first byte is its flags: bit 0 an ack follows, bit 1 relations follow the seats (#96), one
+// `WireRelation` a seat, packed six bits each (`WireRelation.byteCount`). Other bits are 0.
 extension Snapshot {
     func encode(to w: inout WireWriter) throws {
-        w.bool(ack != nil)
+        w.u8((ack != nil ? 1 : 0) | (relations != nil ? 2 : 0))
         if let ack {
             w.u32(ack.seq)
             try w.i32(ack.appliedTick, "ack.appliedTick")
             w.i16(ack.margin)
         }
         try encodeSeats(seats, to: &w)
+        if let relations {
+            guard relations.count == seats.count else { throw WireError.outOfRange("relations") }
+            try encodeRelations(relations, to: &w)
+        }
     }
 
     init(from r: inout WireReader) throws {
-        ack = try r.bool("ack") ? InputAck(seq: try r.u32(), appliedTick: try r.i32(), margin: Int(try r.i16())) : nil
+        let flags = try r.u8()
+        guard flags & ~0b11 == 0 else { throw WireError.invalidValue("snapshot flags") }
+        ack = flags & 1 != 0 ? InputAck(seq: try r.u32(), appliedTick: try r.i32(), margin: Int(try r.i16())) : nil
         seats = try decodeSeats(from: &r)
+        relations = flags & 2 != 0 ? try decodeRelations(seats: seats.count, from: &r) : nil
     }
 }
 

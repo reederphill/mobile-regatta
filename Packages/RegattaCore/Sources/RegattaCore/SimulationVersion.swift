@@ -203,7 +203,32 @@ import Glibc
 ///    projected at their velocities, clear astern within 4 s), and the windward boat on her own track was clear of
 ///    the leeward boat's proper-course path (`EscapeSimulation.verdict`). Rule 17 wins over rules 15 and 16.1; otherwise
 ///    the chain runs as on 30. Rules files before schema 5 sail as on 30, bit for bit.
-public let simulationRevision = 31
+/// 32: compelled breaches and mark-room calls (#93), on 31. Under a rules file with an escape simulation (schema 4 and
+///    later): a boat compelled by another's breach is exonerated (43.1(a)): when the boat she breaks a rule against, or
+///    the mark of her leg she touches, is one the escape simulation finds she had no way clear of without hitting the
+///    boat that fouled her (an open incident, called on that boat with her the victim, within the recorded track), yet
+///    a way clear of it alone. The incident is then no call (no penalty, no event), or the touch an obstruction contact
+///    with her exonerated on the foul's incident. An incident whose Section A call names the boat entitled to
+///    mark-room by the pair's rule 18 record is rule 18.2 (or 18.3) on the owing boat, the entitled boat exonerated
+///    (43.1(b)), unless the entitled boat gained her inside overlap from clear astern or by tacking and the owing boat
+///    had no escape from the tick it began (18.2(d)): then the Section A call stands, the owing boat exonerated. A mark
+///    touch in an open mark-room incident called on the other boat is exonerated (Case 95). Rules files before
+///    schema 4 sail as on 31, bit for bit.
+/// 33: the wind shadow is the turbulence ribbons, the backwind a header (#377), on 32. Races sail skiff@6 by default.
+///    Each boat sheds ribbon points while her sail works (`TurbulenceRibbons`): they drift with the wind, grow and fade
+///    over their life, and slow a boat inside them (the cone and its loss are gone; files without the ribbon fields take
+///    them from their cone fields). Backwind casts only from a working sail above a floor speed (`BackwindSails`), fades
+///    out over 1.5 s on its old side before building over 2 s on the new one, and turns the receiver's wind towards her
+///    bow (8 degrees, 12 stacked, lagged 1 s) instead of slowing her; the groove autohelm holds her heading through it.
+///    Its zone is the upwash beside her sail, not #298's trapezoid: on her windward side along her hull from her mast
+///    (0.4 L back from her bow on skiff@6, 0.25 L on ilca-dinghy@5) past her stern to 1.5 L astern of it, a wedge (the
+///    owner's renders reviews 2 and 3) from a point at her mast widening straight to 1.5 L out at its aft end, full at her side
+///    and fading to nothing at its width out (`upwashWidthAtMastHullLengths`, `upwashWidthAftHullLengths`), fading in over 0.1 L at her mast and straight from full at her stern to
+///    nothing at its aft end (the owner's lengthening, so a boat lee-bowed from 2.5-3 L ahead is headed), bound to her
+///    and not scaled by her speed (`backwindUpwash`, `upwashAftHullLengths`); class files without those fields keep
+///    the trapezoid. The ribbons, emission levels, headers and backwind levels and sides
+///    are race state in `WorldSnapshot`.
+public let simulationRevision = 33
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

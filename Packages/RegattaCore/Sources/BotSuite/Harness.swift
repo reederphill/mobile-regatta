@@ -41,15 +41,19 @@ public enum BotRaceHarness {
         )
     }
 
+    /// Sails `cell` with the cautious bot and the set skills its profile mix gives (`BotRaceCell.cautiousSeats`,
+    /// `seatSkills`): none but in the cautious (#105), rivals and rank-stability mixes.
     public static func run(_ cell: BotRaceCell) throws -> RaceResult {
-        try run(cell, cautiousSeats: [])
+        try run(cell, cautiousSeats: cell.cautiousSeats, seatSkills: cell.seatSkills)
     }
 
     /// Sails `cell`, with the cautious bot (#104, `BotDriver.cautious`) in `cautiousSeats` in place of the cell's bots:
     /// a dropped player's boat among them, from the start. Her metrics give her seat's tier as the cell's. `events`
     /// sees the race after each tick and that tick's events as the tally does: for tests that look for one kind of
-    /// call, or the state behind it (#346).
-    public static func run(_ cell: BotRaceCell, cautiousSeats: Set<Int>,
+    /// call, or the state behind it (#346). The seats in `seatSkills` sail at the skill given there
+    /// (`BotDriver(seat:raceSeed:skill:)`, as the app's practice rivals do, #235) in place of the cell's draw; their
+    /// metrics still give the cell's tier for the seat.
+    public static func run(_ cell: BotRaceCell, cautiousSeats: Set<Int>, seatSkills: [Int: Double] = [:],
                            events: (Race, [RaceEvent]) -> Void = { _, _ in }) throws -> RaceResult {
         let setup = try raceSetup(for: cell)
         // Assembled as the server assembles a race (#81): the files the setup names, the race of record.
@@ -58,14 +62,19 @@ public enum BotRaceHarness {
         let tiers = setup.seats.indices.map { cell.tierMix.tier(ofSeat: $0, raceSeed: setup.raceSeed) }
         let profiles = setup.seats.indices.map { cell.profile(ofSeat: $0) }
         var controllers = SeatControllers(tiers.indices.map {
-            cautiousSeats.contains($0)
-                ? .dropped(.cautious(seat: $0, raceSeed: setup.raceSeed))
-                : .bot(cell.tierMix.driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
+            if cautiousSeats.contains($0) { return .dropped(.cautious(seat: $0, raceSeed: setup.raceSeed)) }
+            if let skill = seatSkills[$0] {
+                return .bot(BotDriver(seat: $0, raceSeed: setup.raceSeed, skill: skill, profile: profiles[$0]))
+            }
+            return .bot(cell.tierMix.driver(seat: $0, raceSeed: setup.raceSeed, profile: profiles[$0]))
         })
         var tally = RaceTally(race: race)
         // #355: in a hunters race, every rule call (offender and victim), and the ticks each hunter turned at a boat she hunted.
         let hunterSeats = cell.profileMix == .hunters ? profiles.indices.filter { profiles[$0] == .hunter } : []
         var hunts = cell.profileMix == .hunters ? HuntTally(hunters: hunterSeats) : nil
+        // #105: in a race with the tactician and the baseline, each pair's lead at their first cross after the gun.
+        var crosses = StartCrossTally(race: race, tacticians: profiles.indices.filter { profiles[$0] == .tactician },
+                                      baselines: profiles.indices.filter { profiles[$0] == .baseline })
         let lastTick = cell.capSecondsAfterGun * Race.tickRate
         var tickMs: [Double] = []
         tickMs.reserveCapacity(setup.startSequenceTicks + lastTick)
@@ -80,10 +89,11 @@ public enum BotRaceHarness {
             events(race, drained)
             tally.record(race, events: drained)
             hunts?.record(race, events: drained, controllers: controllers)
+            crosses?.record(race)
         }
         let seats = tiers.indices.map { seat in
             tally.metrics(seat: seat, of: race, tier: tiers[seat], profile: profiles[seat],
-                          style: controllers[seat].driver?.style)
+                          style: controllers[seat].driver?.style, cautious: cautiousSeats.contains(seat))
         }
         var result = RaceResult(cell: cell, finalTick: race.tick, capped: !race.isOver,
                                 tideStateAtGun: race.tideStateAtGun, seats: seats,
@@ -91,6 +101,8 @@ public enum BotRaceHarness {
                                 timings: TickTimings(samples: tickMs, cpuSeconds: threadCPUSeconds() - cpuStart))
         result.ruleCalls = hunts?.calls
         result.hunterTurnTicks = hunts?.turnTicks
+        result.rule161 = tally.rule161
+        result.skillGap?.startGainLengths = crosses?.meanLead
         return result
     }
 
@@ -128,6 +140,59 @@ struct HuntTally {
         for seat in hunters where race.boats[seat].status == .racing && controllers[seat].driver?.isHuntingTurn == true {
             turnTicks += 1
         }
+    }
+}
+
+/// A race's tactician–baseline crosses (#105, `RaceSkillGap.startGainLengths`): how far the tactician seat of each pair
+/// was ahead of the baseline seat, along the course axis in hull lengths, at the first tick after the gun their tracks
+/// cross (the orchestrator's ruling on #105): her offset across the course from the baseline changes sign, one passing
+/// ahead of or behind the other. Looked for while both sail their first leg; a pair that never crosses on it takes
+/// its lead at `fallbackSeconds` after the gun instead.
+struct StartCrossTally {
+    private let pairs: [(tactician: Int, baseline: Int)]
+    private let upwind: Vec2
+    private let hullLength: Double
+    private var sides: [Double?]
+    private var leads: [Double?]
+    private var fallbacks: [Double?]
+
+    /// Seconds after the gun a pair that hasn't crossed takes its lead at.
+    static let fallbackSeconds = 60
+
+    /// Nil without a tactician and a baseline seat.
+    init?(race: Race, tacticians: [Int], baselines: [Int]) {
+        guard !tacticians.isEmpty, !baselines.isEmpty else { return nil }
+        pairs = tacticians.flatMap { t in baselines.map { (t, $0) } }
+        upwind = race.course.upwind
+        hullLength = race.boatClass.hull.length
+        sides = Array(repeating: nil, count: pairs.count)
+        leads = sides
+        fallbacks = sides
+    }
+
+    /// After a tick.
+    mutating func record(_ race: Race) {
+        guard race.tick >= 0 else { return }
+        let atFallback = race.tick == Self.fallbackSeconds * Race.tickRate
+        for (i, pair) in pairs.enumerated() where leads[i] == nil {
+            let t = race.boats[pair.tactician], b = race.boats[pair.baseline]
+            let offset = t.position - b.position
+            let lead = offset.dot(upwind) / hullLength
+            if atFallback { fallbacks[i] = lead }
+            guard t.isOnCourse, b.isOnCourse, t.legIndex == 0, b.legIndex == 0 else {
+                sides[i] = nil
+                continue
+            }
+            let side = offset.dot(upwind.rightPerp)
+            if let previous = sides[i], previous * side <= 0, previous != 0 { leads[i] = lead }
+            sides[i] = side
+        }
+    }
+
+    /// The mean over the pairs of each one's lead at its cross, or at `fallbackSeconds`; nil when none has either.
+    var meanLead: Double? {
+        let values = pairs.indices.compactMap { leads[$0] ?? fallbacks[$0] }
+        return values.isEmpty ? nil : values.reduce(0, +) / Double(values.count)
     }
 }
 
@@ -178,6 +243,13 @@ struct RaceTally {
     private let hullRadius: Double
     /// Which legs are beats: those rounding the windward mark.
     private let isBeat: [Bool]
+    /// Which legs are runs (#105): those to the leeward gate or the finish.
+    private let isRun: [Bool]
+    /// Each seat's runs sailed, in order (#105).
+    private var runs: [[RunSplit]]
+    /// The 16.1 watchdog (#228, #105).
+    private var watchdog: Rule161Watchdog
+    var rule161: Rule161Calls { watchdog.calls }
     private let upwind: Vec2
     /// Where each racing seat entered the leg she's sailing: the leg, the tick and her position.
     private var legEntries: [(leg: Int, tick: Int, position: Vec2)?]
@@ -233,6 +305,11 @@ struct RaceTally {
         outline = race.boatClass.hull.outline
         hullRadius = race.boatClass.hull.outline.reduce(0) { max($0, $1.length) }
         isBeat = race.course.legs.map { $0 == .round(CourseLayout.windwardIndex) }
+        isRun = race.course.legs.map { $0 == .round(CourseLayout.gateIndex) || $0 == .finish }
+        runs = Array(repeating: [], count: race.boats.count)
+        let escape = race.rules.incidents.escape
+        watchdog = Rule161Watchdog(seats: race.boats.count,
+                                   windowTicks: RulesConfig.ticks(escape.horizon) + escape.startTickOffset)
         upwind = race.course.upwind
         legEntries = Array(repeating: nil, count: race.boats.count)
         legTacks = zeros
@@ -256,7 +333,7 @@ struct RaceTally {
     /// A boat whose wind one caster's shadow or backwind leaves under this factor is in it (#234), as a bot reads
     /// dirty air (`BotBrain.dirtyAir`) ...
     static let shadowFactor = 0.85
-    /// ... and an episode of it counts once it lasts this long, seconds: a boat sailing through a cone doesn't.
+    /// ... and an episode of it counts once it lasts this long, seconds: a boat sailing through a ribbon doesn't.
     static let shadowSeconds = 2.0
     /// A tack covers a boat (#234) that tacked onto the same tack this many seconds before or less ...
     static let coverSeconds = 10.0
@@ -266,10 +343,15 @@ struct RaceTally {
     /// Call once after each `race.step()`, with the events it emitted.
     mutating func record(_ race: Race, events: [RaceEvent]) {
         let near = openEncounters(race)
+        for seat in race.boats.indices {
+            watchdog.note(seat: seat, held: race.heldInputs[seat], tapping: race.boats[seat].autohelm?.isTapping == true,
+                          tick: race.tick)
+        }
         for event in events {
             switch event.kind {
             case .ocsNotice(let seat): ocsNotices[seat] += 1
             case .ruleCall(let call):
+                if call.rule == .changingCourse { watchdog.record(offender: call.offender, tick: call.tick) }
                 foulsAsOffender[call.offender] += 1
                 callsByRule[call.offender][call.rule.rawValue, default: 0] += 1
                 if call.leg == 0 { callsBeforeFirstRounding[call.offender] += 1 }
@@ -356,8 +438,11 @@ struct RaceTally {
         let episode = Int(RaceTally.shadowSeconds * Double(Race.tickRate))
         for receiver in boats.indices {
             for caster in boats.indices where caster != receiver {
+                // Her ribbons (#377) and her backwind's loss (none for a class with a header, whose backwind turns
+                // the wind instead).
                 guard racing[receiver], let cone = cones[caster],
-                      cone.factor(at: boats[receiver].position) < RaceTally.shadowFactor else {
+                      (1 - race.wake.loss(of: caster, at: boats[receiver].position, tick: race.tick))
+                        * cone.factor(at: boats[receiver].position) < RaceTally.shadowFactor else {
                     shadowTicks[receiver][caster] = 0
                     continue
                 }
@@ -438,12 +523,17 @@ struct RaceTally {
             beats[seat].append(BeatSplit(seconds: Double(tick - entry.tick) / Double(Race.tickRate),
                                          metres: (boat.position - entry.position).dot(upwind), tacks: legTacks[seat]))
         }
+        if let entry, isRun[entry.leg] {
+            runs[seat].append(RunSplit(seconds: Double(tick - entry.tick) / Double(Race.tickRate),
+                                       metres: (entry.position - boat.position).dot(upwind), gybes: legTacks[seat]))
+        }
         legEntries[seat] = (leg, tick, boat.position)
         legTacks[seat] = 0
     }
 
     /// `style` is the style of the bot sailing the seat; nil for none.
-    func metrics(seat: Int, of race: Race, tier: BotTier, profile: BotProfile?, style: BotStyle?) -> SeatMetrics {
+    func metrics(seat: Int, of race: Race, tier: BotTier, profile: BotProfile?, style: BotStyle?,
+                 cautious: Bool = false) -> SeatMetrics {
         let boat = race.boats[seat]
         let fouls = contacts[seat].filter { id in
             guard let id, case .called = race.incidents[id]?.outcome else { return false }
@@ -487,7 +577,9 @@ struct RaceTally {
             preStartCallsByRule: preStartCallsByRule[seat],
             cascadeCallsByRule: cascadeCallsByRule[seat],
             metresToFinish: boat.status == .finished ? nil : race.distanceToFinish(of: boat),
-            onLastLeg: boat.status != .finished && race.course.legs.indices.last == boat.legIndex
+            onLastLeg: boat.status != .finished && race.course.legs.indices.last == boat.legIndex,
+            cautious: cautious,
+            runs: runs[seat]
         )
     }
 }
@@ -502,4 +594,39 @@ func lineSpot(_ p: Vec2, on line: CourseLayout.Line) -> Double {
 /// `part / whole`, or 0 when `whole` is 0, so a report never holds a NaN.
 func share(_ part: Int, of whole: Int) -> Double {
     whole == 0 ? 0 : Double(part) / Double(whole)
+}
+
+/// The 16.1 watchdog (#228, #105): per seat, the tick she last steered (held her rudder outside
+/// `Autohelm.deadBand`, as `Race` lets go of the autohelm: a rudder inside it is centred, the autohelm holding) and the
+/// tick the autohelm last sailed a tack or gybe tap of hers; and the race's rule 16.1 calls so far.
+struct Rule161Watchdog {
+    private var lastSteeredTicks: [Int]
+    private var lastTapTicks: [Int]
+    /// Ticks the escape simulation behind a 16.1 call searches for the right-of-way boat's course change
+    /// (`EscapeSimulation.roomVerdict`: `last - horizon - offset + 1 ... last`): its horizon plus its start offset,
+    /// the call's own tick included.
+    let windowTicks: Int
+    private(set) var calls = Rule161Calls()
+
+    init(seats: Int, windowTicks: Int) {
+        lastSteeredTicks = Array(repeating: Int.min, count: seats)
+        lastTapTicks = lastSteeredTicks
+        self.windowTicks = windowTicks
+    }
+
+    /// Call each tick, after the step, with the input `seat` held on it and whether her autohelm is tapping.
+    mutating func note(seat: Int, held: BoatInput, tapping: Bool, tick: Int) {
+        if abs(held.rudderValue) > Autohelm.deadBand { lastSteeredTicks[seat] = tick }
+        if tapping { lastTapTicks[seat] = tick }
+    }
+
+    /// A rule 16.1 call against `offender` (the right-of-way boat) on `tick`: centred if she didn't steer on any tick
+    /// of the window, so the course change it called was the autohelm's; and of those, whether a tap of hers fell in it.
+    mutating func record(offender: Int, tick: Int) {
+        calls.calls += 1
+        let windowStart = tick - windowTicks + 1
+        guard lastSteeredTicks[offender] < windowStart else { return }
+        calls.centredRudder += 1
+        if lastTapTicks[offender] >= windowStart { calls.centredRudderWithTap += 1 }
+    }
 }

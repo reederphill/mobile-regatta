@@ -8,7 +8,7 @@ import Testing
 /// launch to launch, and where they overlapped their blends rounded differently: the water's streak tiles did
 /// (#116, `WaterTests.waterDrawsTheSameEveryTime`), then the start row's fleet (#85).
 @MainActor @Suite struct DrawOrderTests {
-    /// Each fixture's scene, drawn settled, draws no two nodes at one z: not the fleet's shadow cones, backwinds,
+    /// Each fixture's scene, drawn settled, draws no two nodes at one z: not the fleet's wind-shadow ribbons (#377), backwinds,
     /// wakes, heel shadows, right-of-way glows (#348), hulls, outlines or sails, nor your glow (#117), nor the course, the cues (#122: laylines, ladder
     /// lines, your vane, its tick and arc, and the edge arrow on the camera), the water or its pressure. A second scene from the same fixture, as a second launch makes, draws
     /// the same nodes in the same order, and so does the first drawn again.
@@ -20,11 +20,14 @@ import Testing
             let shared = Dictionary(grouping: drawn, by: \.z).filter { $0.value.count > 1 }
             let layers = Set(shared.values.flatMap { $0.map(\.layer) }).sorted()
             #expect(shared.isEmpty, "\(name): \(shared.count) z's drawn by more than one node, in \(layers)")
-            // Each boat's backwind and wake string (#121), hidden ones too, and the cones' one sheet (each
-            // cone is a mask in it, not drawn itself); each boat's heel shadow, right-of-way glow (#348, drawn hidden or
-            // not), hull, outline and sail; your glow and roll ring too.
+            // Each boat's backwind and wake string (#121), hidden ones too (the ribbons are their own layer, under
+            // them); each boat's heel shadow, right-of-way glow (#348, drawn hidden or not), hull, outline and sail;
+            // your glow and roll ring too.
             #expect(boats > 1, "\(name)")
-            #expect(drawn.filter { $0.layer == "effects" }.count == 2 * boats + 1, "\(name)")
+            #expect(drawn.filter { $0.layer == "effects" }.count == 2 * boats, "\(name)")
+            let ribbons = drawn.filter { $0.layer == "turbulenceTrails" }
+            let effectsBottom = drawn.filter { $0.layer == "effects" }.map(\.z).min() ?? 0
+            #expect(ribbons.allSatisfy { $0.z < effectsBottom }, "\(name): the ribbons under every boat's effects")
             #expect(drawn.filter { $0.layer == "fleet" }.count == 5 * boats + 2, "\(name)")
             #expect(drawn.filter { $0.layer == "course" }.count > 4, "\(name)")
             // The chart (#115): the boundary's band and line, the land and its relief, a landmark; shallows where

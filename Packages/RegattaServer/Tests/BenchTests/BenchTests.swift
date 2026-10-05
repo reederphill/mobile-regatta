@@ -87,6 +87,36 @@ import Testing
         #expect(race.setup.seats.allSatisfy { $0 == .bot })
     }
 
+    /// #105 acceptance: the bench also times the keyed wind with the gustiest puffs (#76), an estuary's current (#78)
+    /// and the worst-case escape simulation (#92): sixteen bots each, at the venues and conditions they name.
+    @Test func bundledScenariosIncludeKeyedWindCurrentAndEscape() throws {
+        let scenarios = Dictionary(uniqueKeysWithValues: try Scenario.bundled().map { ($0.name, $0) })
+        #expect(Set(scenarios.keys) == ["fleet-16-bots", "keyed-wind-puffs", "estuary-current", "escape-worst-case"])
+        for scenario in scenarios.values {
+            #expect(scenario.boats == 16, "\(scenario.name)")
+            let race = try scenario.race()
+            #expect(race.boats.count == 16 && race.setup.seats.allSatisfy { $0 == .bot })
+        }
+        // The original row sails the race it always did: the default files.
+        let fleet = try #require(scenarios["fleet-16-bots"])
+        #expect(fleet.venue == nil && fleet.conditions == nil)
+        #expect(try fleet.setup().venue == RaceFiles.defaults.venue.ref)
+
+        let puffs = try #require(scenarios["keyed-wind-puffs"]).race()
+        #expect(puffs.files.conditions.ref.id == "gusty-offshore")
+        #expect(puffs.files.conditions.content.puffs.coverage > 0)
+
+        let estuary = try #require(scenarios["estuary-current"]).race()
+        #expect(estuary.files.venue.ref.id == "saltings-reach")
+        #expect(estuary.tideStateAtGun != nil, "a venue with a current draws a tide state at the gun")
+
+        let escape = try #require(scenarios["escape-worst-case"])
+        #expect(escape.startSequenceTicks < RaceSetup.defaultStartSequenceTicks, "the fleet still on the start row at the gun")
+        #expect(escape.warmupTicks < escape.startSequenceTicks && escape.ticks > escape.startSequenceTicks,
+                "timed through the gun")
+        #expect(escape.note != nil, "the pinned seed says how it was picked")
+    }
+
     @Test func runTimesTicksAndEncodesSnapshots() throws {
         let scenario = Scenario(name: "short", raceSeed: 1, windSeed: 2, startSequenceTicks: 300, warmupTicks: 3, ticks: 12)
         let result = try Bench.run(scenario, races: 3)

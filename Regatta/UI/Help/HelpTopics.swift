@@ -1,13 +1,15 @@
 import RegattaCore
 import SwiftUI
 
-/// A page of Help (#135, #23), each one short screen. The protest picker (#125) and the committee sounds (#126) add
-/// their own when they land: Help never describes what the game doesn't have yet.
+/// A page of Help (#135, #23), each one short screen. The protest picker (#125) adds its own when it lands: Help
+/// never describes what the game doesn't have yet.
 enum HelpTopic: String, CaseIterable, Identifiable, Codable, Sendable {
     case symbols
     case steering
     case rules
     case current
+    /// What the committee's and your boat's sounds mean (#126).
+    case sounds
 
     var id: String { rawValue }
 
@@ -18,6 +20,7 @@ enum HelpTopic: String, CaseIterable, Identifiable, Codable, Sendable {
         case .steering: "Steering"
         case .rules: "Rules"
         case .current: "Current"
+        case .sounds: "Sounds"
         }
     }
 
@@ -27,6 +30,7 @@ enum HelpTopic: String, CaseIterable, Identifiable, Codable, Sendable {
         case .steering: "hand.draw"
         case .rules: "flag"
         case .current: "arrow.right.circle"
+        case .sounds: "speaker.wave.2"
         }
     }
 }
@@ -43,6 +47,7 @@ struct HelpTopicView: View {
                 case .steering: SteeringHelp()
                 case .rules: RulesHelp()
                 case .current: CurrentHelp()
+                case .sounds: SoundsHelp()
                 }
             }
             .padding(.vertical, 20)
@@ -206,6 +211,30 @@ private struct CurrentHelp: View {
         HelpSection(heading: "On the water", lines: [
             "The current carries every boat.",
             "Sail where it helps you, and out of it where it doesn't.",
+        ])
+    }
+}
+
+// MARK: - Sounds
+
+/// What the sounds mean (#126), text only and number-free: the committee's start, then your own boat's. Every sound
+/// has something on screen too, so the page is short.
+private struct SoundsHelp: View {
+    var body: some View {
+        // TODO-COPY (#171): every line on this page.
+        HelpSection(heading: "The start", lines: [
+            "Horns: the start is coming.",
+            "Beeps: the last seconds.",
+            "The gun: go.",
+        ])
+        HelpSection(heading: "Your boat", lines: [
+            "A horn just after the gun: you were over the line. Dip back below it, then start.",
+            "A whistle: a rule call with you in it.",
+            "A soft bell: you rounded a mark.",
+            "A horn at the end: you finished.",
+        ])
+        HelpSection(heading: "On the water", lines: [
+            "Wind and water follow the breeze and your speed. Hold Ease and the sail flaps.",
         ])
     }
 }

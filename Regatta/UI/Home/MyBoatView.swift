@@ -20,10 +20,6 @@ struct MyBoatView: View {
                     .accessibilityIdentifier("myboat-render")
                     .frame(maxWidth: .infinity)
 
-                if model.isFleetLocked {
-                    note("Locked for this race")  // TODO-COPY (#171)
-                }
-
                 Picker("Part", selection: $model.section) {  // TODO-COPY (#171)
                     ForEach(MyBoatModel.Section.allCases, id: \.self) { section in
                         Text(section.title).tag(section)
@@ -87,9 +83,9 @@ struct MyBoatView: View {
         let mark = model.mark(for: design)
         return Button { model.select(design.id) } label: {
             VStack(spacing: 4) {
-                Tile(selected: selected, mark: mark) {
+                Tile(selected: selected, mark: mark) { side in
                     LiveryRenderView(livery: model.draft(on: design, sailNumber: Self.thumbnailNumber),
-                                     size: CGSize(width: TileMetrics.side, height: TileMetrics.side))
+                                     size: CGSize(width: side, height: side))
                 }
                 .accessibilityHidden(true)
                 Text(caption ?? " ")
@@ -97,7 +93,7 @@ struct MyBoatView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .frame(width: TileMetrics.side)
+                    .frame(maxWidth: .infinity)
             }
         }
         .buttonStyle(.plain)
@@ -164,7 +160,7 @@ struct MyBoatView: View {
             ForEach(model.swatches(for: slot), id: \.id) { swatch in
                 let selected = model.colours[slot] == swatch.id
                 Button { model.setColour(swatch.id, for: slot) } label: {
-                    Tile(selected: selected, mark: nil) {
+                    Tile(selected: selected, mark: nil) { _ in
                         Color(uiColor: UIColor(rgb: swatch.rgb))
                     }
                 }
@@ -240,20 +236,29 @@ struct MyBoatView: View {
 /// One tile of My boat's box grid (owner review of #382): every section's choices, designs and colours alike, are
 /// square tiles (`TileMetrics`) of one size, corner, edge, selection ring and mark corner.
 private enum TileMetrics {
-    static let side: CGFloat = 72
-    static let spacing: CGFloat = 10
+    /// Every row has this many tiles, edge to edge across the column, so all sections line up.
+    static let columns = 4
+    /// The gap between tiles, across and down.
+    static let spacing: CGFloat = 12
     static let cornerRadius: CGFloat = 8
 }
 
+/// A square tile as wide as its grid column; `content` gets the side in whole points.
 private struct Tile<Content: View>: View {
     let selected: Bool
     let mark: MyBoatModel.Mark?
-    @ViewBuilder let content: Content
+    @ViewBuilder let content: (CGFloat) -> Content
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: TileMetrics.cornerRadius)
-        content
-            .frame(width: TileMetrics.side, height: TileMetrics.side)
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                GeometryReader { proxy in
+                    content(proxy.size.width.rounded(.down))
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                }
+            }
             .clipShape(shape)
             .overlay { shape.strokeBorder(ChartPalette.markEdge.color, lineWidth: 1) }
             .overlay { shape.strokeBorder(ChromePalette.tint, lineWidth: selected ? 3 : 0) }
@@ -268,13 +273,14 @@ private struct Tile<Content: View>: View {
     }
 }
 
-/// The box grid every section's tiles sit in: fixed-size columns from the leading edge.
+/// The box grid every section's tiles sit in: `TileMetrics.columns` equal columns filling the readable column, so the
+/// outer tiles sit on the page margins and every gap is `TileMetrics.spacing`.
 private struct TileGrid<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: TileMetrics.side, maximum: TileMetrics.side),
-                                     spacing: TileMetrics.spacing)],
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: TileMetrics.spacing),
+                                 count: TileMetrics.columns),
                   alignment: .leading, spacing: TileMetrics.spacing) {
             content
         }

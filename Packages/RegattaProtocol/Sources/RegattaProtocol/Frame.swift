@@ -138,10 +138,12 @@ public struct Frame: Equatable, Sendable {
         self.init(seq: seq, tick: event.tick, message: .event(event.kind))
     }
 
-    /// The race event an `Event` frame carries, with the frame's tick.
+    /// The race event an `Event` frame carries, with the frame's tick, and its reliable-stream number as its id:
+    /// the server numbers a seat's reliable frames once for the whole race, across rejoins (#96), so a client
+    /// dedupes events on it.
     public var raceEvent: RaceEvent? {
         guard case .event(let kind) = message else { return nil }
-        return RaceEvent(tick: tick, kind: kind)
+        return RaceEvent(tick: tick, kind: kind, id: seq)
     }
 
     public func encoded() throws -> [UInt8] {

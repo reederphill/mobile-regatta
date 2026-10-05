@@ -1,8 +1,9 @@
 /// The right-of-way cue a player sees on another boat (#15, #123): a red glow on a boat she must keep clear of,
 /// a green glow on a boat that must keep clear of her (the app draws the glow; the name predates it, when these
 /// were a ⚠ and a chevron). No words.
-/// Mark-room has no words of its own: a boat owing it glows red and the boat owed it green, as a keep-clear
-/// boat and a right-of-way boat do (`Race.keepClearRelations(of:)` decides).
+/// Mark-room has no words of its own (#386): within the glow range a boat owing it glows red and the boat owed it
+/// green, as a keep-clear boat and a right-of-way boat do (`Race.keepClearRelation(of:to:)` decides, and online the
+/// server's relations carry it). Display only: the umpire's calls are unchanged (Case 25).
 public enum RightOfWayGlyph: Sendable, Equatable {
     /// I must keep clear of her: the red glow.
     case giveWay
@@ -10,7 +11,8 @@ public enum RightOfWayGlyph: Sendable, Equatable {
     case hasRight
 
     /// How far away, in hull lengths centre to centre, a boat's glow starts to show: a placeholder the app's
-    /// `BoatStyle.glowRangeHulls` slider defaults to, and the server's in-range pairs can reuse (#96).
+    /// `BoatStyle.glowRangeHulls` slider defaults to. The server sends relations a little further out
+    /// (`WireRelation.rangeHulls`, #96).
     public static let defaultRangeHulls = 6.0
 
     /// The glyph `me` sees on the other boat of `relation`, or nil when there is none (a ghost in the pair).

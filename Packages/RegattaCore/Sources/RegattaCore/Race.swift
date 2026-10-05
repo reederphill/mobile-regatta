@@ -18,7 +18,10 @@ public final class Race {
         case authoritative(windSeed: WindSeed)
         /// How an online client predicts (#64, ADR 0005): no wind seed, only the revealed keys, which later
         /// keys join through `addRevealedWindKey(_:)`. It has no `log` and no umpire, and never emits a rule
-        /// event (`RaceEvent.Kind.isRuleEvent`): rule calls come only from the server.
+        /// event (`RaceEvent.Kind.isRuleEvent`): rule calls come only from the server. It judges nothing,
+        /// owes, serves and enforces no penalty turn and disqualifies nobody (#96): the server's events
+        /// (`apply(authoritative:)`) and snapshots bring those, and its right-of-way relations are the server
+        /// umpire's (`umpireRelations`).
         case prediction(revealedWindKeys: [WindKey])
     }
 
@@ -125,6 +128,19 @@ public final class Race {
     private var appliedInputs: [InputRecord] = []
     private var seatEvents: [SeatEvent] = []
 
+    /// The wind shadow (#377): every boat's ribbon wake, stepped each tick from the boats' states
+    /// (`TurbulenceRibbons`, the class's `ribbons`). Race state, carried whole in a snapshot.
+    public private(set) var wake: TurbulenceRibbons
+    /// Each seat's backwind header now, radians, the lag's state (`applyBackwindHeaders`): empty until the first step,
+    /// and always for a class without a header. Race state, in a snapshot.
+    private var headerState: [Double] = []
+    /// Each seat's backwind level and side (`BackwindSails`), for a class with a header: empty until the first step,
+    /// and always for a class without one. Race state, in a snapshot.
+    private var backwindSails = BackwindSails()
+    /// Each seat's sailing wind direction this tick before any backwind header turned it (`applyBackwindHeaders`), what
+    /// her autohelm steers a groove by (`helmSailingAngle`). Not state: set again every step before anything reads it.
+    private var unheadedWindDirections: [Double] = []
+
     /// Builds the race at the start of its sequence, tick −`setup.startSequenceTicks`, from `files`, which
     /// must be exactly the ones `setup` names (`RaceFiles(resolving:)`); throws `RaceFilesError` if not.
     ///
@@ -211,6 +227,7 @@ public final class Race {
         }
         boats = fleet
         overlaps = OverlapTracker(seats: fleet.count)
+        wake = TurbulenceRibbons(shadow: boatClass.windShadow)
         heldInputs = Array(repeating: .neutral, count: fleet.count)
         makeWindKeys()
         if windKeys != nil || (try? wind.requireKeys(atTick: tick)) != nil { refreshWind() }
@@ -379,7 +396,8 @@ public final class Race {
     /// this tick (`Boat.grooveWindSpeed(in:)`), and announces a snap to the groove (#124).
     private func engageAutohelm(_ i: Int) {
         let b = boats[i]
-        let engaged = Autohelm.engage(sailingAngle: b.sailingAngle, tws: b.grooveWindSpeed(in: boatClass), boatClass: boatClass)
+        let engaged = Autohelm.engage(sailingAngle: b.sailingAngle, tws: b.grooveWindSpeed(in: boatClass),
+                                      boatClass: boatClass)
         boats[i].autohelm = engaged.autohelm
         if engaged.snapped { emit(.grooveSnap(seat: i)) }
     }
@@ -434,7 +452,18 @@ public final class Race {
         if tick == 0 { fireGun() }
 
         refreshWind()
-        applyWindShadows()
+        // The order is fixed (#377): every caster's backwind zone from the tick-start states and the backwind levels as
+        // of the last tick, before any header turns a boat's wind (so a caster's own header never feeds her zone); the
+        // headers from those zones; then the ribbons and the backwind levels step from the headed winds; then each
+        // boat's shadow from the ribbons now and the zones.
+        let backwinds = boats.indices.map(shadowCone(ofSeat:))
+        let header = boatClass.windShadow.header
+        if let header { applyBackwindHeaders(backwinds, header: header) }
+        // Every boat's working scale, from the headed winds: the same for the wake and the backwind levels.
+        let scales = sailScales()
+        stepWake(scales: scales)
+        if header != nil { stepBackwindSails(scales: scales) }
+        applyWindShadows(backwinds)
         averageGrooveWinds()
 
         let protests = applyInputs()
@@ -506,18 +535,133 @@ public final class Race {
     }
 
     /// Every boat on the course takes the shadow and backwind of every other one on it (#10); a ghost
-    /// takes none and casts none (#30).
-    private func applyWindShadows() {
-        let cones = boats.indices.map(shadowCone(ofSeat:))
+    /// takes none and casts none (#30). The shadow is every other caster's ribbons (`wake`, #377), times each one's
+    /// backwind loss (`ShadowCone.factor(at:)`: #298's or #79's, or the header's lull, none by default), floored at the
+    /// class's stacking floor. `zones` are every seat's backwind (`shadowCone(ofSeat:)`) this tick.
+    private func applyWindShadows(_ zones: [ShadowCone?]) {
+        let shadow = boatClass.windShadow
+        let floor = shadow.stackingFloor
+        let backwindIsPureShift = shadow.backwindInnerLength != nil && shadow.header.map { $0.lull == 0 } ?? false
+        let wake = wake.frame(tick: tick)
         for i in boats.indices {
             guard !boats[i].isGhost else {
                 boats[i].shadow = 1
                 continue
             }
-            let others = cones.indices.compactMap { $0 == i ? nil : cones[$0] }
-            boats[i].shadow = ShadowCone.factor(at: boats[i].position, of: others, floor: boatClass.windShadow.stackingFloor)
+            let p = boats[i].position
+            var f = wake.unflooredFactor(at: p, receiver: i)
+            // A header's backwind at lull 0 (the default) leaves every factor exactly 1: nothing to multiply.
+            if !backwindIsPureShift {
+                for (c, zone) in zones.enumerated() where c != i {
+                    if let zone { f *= zone.factor(at: p) }
+                }
+            }
+            boats[i].shadow = max(f, floor)
         }
     }
+
+    /// Steps the ribbon wake (#377): every boat's emission level target is how hard her sail is working, with her held
+    /// ease (`SailTrim.workingScale`), from this tick's (headed) winds.
+    private func stepWake(scales: [Double]) {
+        wake.step(boats: boats, tick: tick, scales: scales)
+    }
+
+    /// Steps each seat's backwind level and side (`backwindSails`), for a class with a header (#377): built over the
+    /// ribbons' `buildSeconds`, faded over the class's `backwindFadeSeconds`.
+    private func stepBackwindSails(scales: [Double]) {
+        let shadow = boatClass.windShadow
+        backwindSails.step(boats: boats, scales: scales, buildSeconds: shadow.ribbons.buildSeconds,
+                           fadeSeconds: shadow.backwindFadeSeconds)
+    }
+
+    /// Every boat's working scale now: her sail's angle to her apparent wind with her held ease (`SailTrim`).
+    private func sailScales() -> [Double] {
+        let boatClass = boatClass
+        return boats.indices.map { SailTrim.standard.workingScale(of: boats[$0], ease: heldInputs[$0].ease, boatClass: boatClass) }
+    }
+
+    /// How much `seat`'s backwind is cast, 0...1, for a class with a header (#377): her backwind level (`BackwindSails`)
+    /// as of the last tick stepped; before the first, her working scale now. 1 for a class without a header (#298's
+    /// loss ignores her sail) or an unknown seat.
+    public func backwindSail(ofSeat seat: Int) -> Double {
+        guard boatClass.windShadow.header != nil, boats.indices.contains(seat) else { return 1 }
+        if backwindSails.levels.indices.contains(seat) { return backwindSails.levels[seat] }
+        return SailTrim.standard.workingScale(of: boats[seat], ease: heldInputs[seat].ease, boatClass: boatClass)
+    }
+
+    /// The side `seat`'s backwind is cast on, for a class with a header (#377, `BackwindSails.sides`): her windward side,
+    /// held while a zone fades out past her boom crossing; nil (her side now) before the first tick stepped, for a class
+    /// without a header, or for an unknown seat.
+    public func backwindSide(ofSeat seat: Int) -> Tack? {
+        guard boatClass.windShadow.header != nil, backwindSails.sides.indices.contains(seat) else { return nil }
+        return backwindSails.sides[seat]
+    }
+
+    /// The backwind as a header (#377): each boat's wind over the ground is turned towards her bow by the header's angle
+    /// × the envelope of every other boat's backwind she sits in (`ShadowCone.backwindEnvelope(at:)`, from `zones`, this
+    /// tick's from the tick-start states), summed and capped, through a first-order lag of `lagSeconds`
+    /// (`headerState`); never past her bow line. Her three winds are then resolved again from it, so her polar,
+    /// apparent wind, drawing and everything after see the headed wind; nobody else's changes. Her autohelm (ADR 0007)
+    /// holds her heading through it (`helmSailingAngle`).
+    /// The backwind is the one thing that turns a boat's wind: #10 had shadows never turn it.
+    private func applyBackwindHeaders(_ zones: [ShadowCone?], header: BoatClass.WindShadow.Header) {
+        if headerState.count != boats.count { headerState = Array(repeating: 0, count: boats.count) }
+        if unheadedWindDirections.count != boats.count { unheadedWindDirections = Array(repeating: 0, count: boats.count) }
+        let follow = header.lagSeconds > 0 ? min(1, Race.dt / header.lagSeconds) : 1
+        for i in boats.indices {
+            unheadedWindDirections[i] = boats[i].sailingWind.direction
+            guard !boats[i].isGhost else {
+                headerState[i] = 0
+                continue
+            }
+            let target = Self.headerTarget(at: boats[i].position, receiver: i, zones: zones, header: header)
+            headerState[i] += (target - headerState[i]) * follow
+            guard headerState[i] > 0 else { continue }
+            let headed = Self.headed(boats[i].windOverGround, heading: boats[i].heading, by: headerState[i])
+            let winds = BoatWinds.resolve(ground: headed, current: boats[i].current, velocityThroughWater: boats[i].velocity)
+            boats[i].windOverGround = winds.overGround
+            boats[i].sailingWind = winds.sailing
+            boats[i].apparentWind = winds.apparent
+        }
+    }
+
+    /// The header every caster but `receiver` puts on a boat at `p`, radians: the header's angle × each one's backwind
+    /// envelope there, summed, capped at the header's cap.
+    static func headerTarget(at p: Vec2, receiver: Int, zones: [ShadowCone?], header: BoatClass.WindShadow.Header) -> Double {
+        var sum = 0.0
+        for (c, zone) in zones.enumerated() where c != receiver {
+            if let zone { sum += header.angle * zone.backwindEnvelope(at: p) }
+        }
+        return min(header.cap, sum)
+    }
+
+    /// `ground` turned `header` radians towards `heading` (a header for a boat sailing it), never past it.
+    static func headed(_ ground: Wind, heading: Double, by header: Double) -> Wind {
+        let off = wrapAngle(heading - ground.direction)
+        let turn = (off < 0 ? -1.0 : 1.0) * min(header, abs(off))
+        return Wind(direction: wrapAngle(ground.direction + turn), speed: ground.speed)
+    }
+
+    /// The sailing angle seat `i`'s autohelm steers a groove by: against her wind before this tick's backwind header
+    /// (#377). A backwind header comes off a boat on her lee bow, so following it down would bear her away onto that
+    /// boat's stern (rule 11 against her): like a sailor with a boat on her lee bow she holds her heading and pinches
+    /// instead, and tacking away is hers to choose. Never into the no-go zone: she holds only as much of the header as
+    /// keeps her headed angle out of it, so a slow or luffed boat headed hard isn't pinned in irons. Unheaded, her plain
+    /// sailing angle. Only a groove holds through it: an angle the autohelm holds (`Autohelm.Target.angle`), and its
+    /// engaging, read her headed angle, the one the player's screen and a bot's view (`SeatView`) show, so an angle a
+    /// bot asked for is the angle she sails (held against the unheaded wind, a bot steering by its view fought the
+    /// autohelm through every header).
+    private func helmSailingAngle(_ b: Boat, seat i: Int) -> Double {
+        guard header(ofSeat: i) > 0, unheadedWindDirections.indices.contains(i) else { return b.sailingAngle }
+        let unheaded = b.boomSide.sailingAngle(relativeWind: wrapAngle(unheadedWindDirections[i] - b.heading))
+        // Never pinched into the no-go zone: she holds only as much as keeps her headed angle out of it.
+        let room = max(0, abs(b.sailingAngle) - BoatDynamics.noGoAngle(boatClass.polar))
+        let turn = wrapAngle(unheaded - b.sailingAngle)
+        return b.sailingAngle + (turn < 0 ? -1 : 1) * min(abs(turn), room)
+    }
+
+    /// Each seat's backwind header now, radians (`applyBackwindHeaders`): 0 for every seat of a class without a header.
+    public func header(ofSeat seat: Int) -> Double { headerState.indices.contains(seat) ? headerState[seat] : 0 }
 
     /// Moves every boat's average of the wind speed her polar reads a tick on (`Boat.averagedWindSpeed`):
     /// what her autohelm's grooves follow (#245), once the wind and shadows are sampled this tick.
@@ -529,7 +673,13 @@ public final class Race {
     /// ghost, which casts none, or an unknown seat.
     public func shadowCone(ofSeat seat: Int) -> ShadowCone? {
         guard boats.indices.contains(seat), !boats[seat].isGhost else { return nil }
-        return ShadowCone(caster: boats[seat], shadow: boatClass.windShadow)
+        var zone = ShadowCone(caster: boats[seat], shadow: boatClass.windShadow)
+        // The backwind is upwash off a working sail (#377): for a class with a header only.
+        if boatClass.windShadow.header != nil {
+            zone.backwindSail = backwindSail(ofSeat: seat)
+            zone.backwindSide = backwindSide(ofSeat: seat)
+        }
+        return zone
     }
 
     private func integrate(_ i: Int, _ dt: Double) {
@@ -544,7 +694,9 @@ public final class Race {
         let playerDriven = b.autohelm?.isTapping ?? true
 
         if let helm = b.autohelm {
-            b.desiredRudder = helm.rudder(sailingAngle: b.sailingAngle, boomSide: b.boomSide, tws: tws,
+            // A groove holds her heading through a backwind header (`helmSailingAngle`); a held angle is her headed one.
+            let sailingAngle = helm.target.groove != nil ? helmSailingAngle(b, seat: i) : b.sailingAngle
+            b.desiredRudder = helm.rudder(sailingAngle: sailingAngle, boomSide: b.boomSide, tws: tws,
                                           grooveTWS: grooveTWS, boatClass: boatClass)
         }
 
@@ -637,29 +789,48 @@ public final class Race {
     /// any pair with a ghost: `Rules.obligation` (rule 21 over rules 10–13), so a returning or penalised boat
     /// keeps clear. Where the umpire holds a mark-room record for the pair (#91), the boat owing mark-room is
     /// the one that keeps clear: the glow is the only mark-room cue the player gets, so it shows who owes room
-    /// as well as who keeps clear (owner, 2026-10-03). Rule 18 is not right of way (Case 25): this is what the
-    /// glyphs show (#123), never what the umpire calls. Read-only.
+    /// as well as who keeps clear (owner, 2026-10-03, #386). Rule 18 is not right of way (Case 25): this is what
+    /// the glyphs show (#123), never what the umpire calls. Read-only.
+    /// A prediction never works it out from its own world (#96, ADR 0005): it returns the server umpire's
+    /// (`umpireRelations`) for the seat they are for, and none for any other seat or before they come.
     public func keepClearRelations(of seat: Int) -> [RightOfWay?] {
         guard boats.indices.contains(seat) else { return [] }
-        let hull = boatClass.hull
-        let boat = boats[seat]
-        return boats.indices.map { other in
-            guard other != seat,
-                  let verdict = Rules.obligation(boat, boats[other], overlapped: overlaps.isOverlapped(seat, other),
-                                                 course: course, hull: hull) else { return nil }
-            if let record = umpire?.markRoom(SeatPair(seat, other)) {
-                return RightOfWay(keepClear: record.owing, rule: record.rule)
+        if umpire == nil {
+            guard let relations = umpireRelations, relations.seat == seat else {
+                return Array(repeating: nil, count: boats.count)
             }
-            return RightOfWay(keepClear: verdict.offender, rule: verdict.rule)
+            return relations.keepClear
         }
+        return boats.indices.map { keepClearRelation(of: seat, to: $0) }
+    }
+
+    /// `keepClearRelations(of: seat)[other]`, for the one pair: the server works out only the pairs in range of
+    /// a seat (#96). Nil for a seat out of the fleet.
+    public func keepClearRelation(of seat: Int, to other: Int) -> RightOfWay? {
+        guard boats.indices.contains(seat), boats.indices.contains(other), other != seat else { return nil }
+        if umpire == nil {
+            guard let relations = umpireRelations, relations.seat == seat else { return nil }
+            return relations.keepClear[other]
+        }
+        guard let verdict = Rules.obligation(boats[seat], boats[other], overlapped: overlaps.isOverlapped(seat, other),
+                                             course: course, hull: boatClass.hull) else { return nil }
+        if let record = umpire?.markRoom(SeatPair(seat, other)) {
+            return RightOfWay(keepClear: record.owing, rule: record.rule)
+        }
+        return RightOfWay(keepClear: verdict.offender, rule: verdict.rule)
     }
 
     /// Boats touching: a contact costs both boats speed and is announced (`RaceEvent.Kind.contact`) on the
-    /// tick it begins, and opens an incident unless the pair has one open (`call`). The pushes part them.
+    /// tick it begins, and opens an incident unless the pair has one open (`call`), its offender exonerated when
+    /// another boat's breach compelled her (`exoneratingCompelled`, 43.1(a)): every pair judged first, then called
+    /// (`callCompelledLast`). The pushes part them.
     /// A pair not touching whose open incident the umpire holds closes it once their hulls are more than
     /// the rules configuration's `incidents.separation` apart. A ghost can't be touched.
     private func resolveBoatContacts() {
         var touching = Set<Pair>()
+        // Contacts begun this tick, and the calls they make: called once every pair is judged (`callCompelledLast`).
+        var begun: [(Int, Int)] = []
+        var verdicts: [Verdict] = []
         let hull = boatClass.hull
         let hulls = boats.map { $0.hull(outline: hull.outline) }
         let separation = rules.incidents.separation.metres(hullLength: hull.length)
@@ -682,18 +853,34 @@ public final class Race {
                     boats[i].speed = BoatDynamics.speed(after: .boat, speed: boats[i].speed, boatClass: boatClass)
                     boats[j].speed = BoatDynamics.speed(after: .boat, speed: boats[j].speed, boatClass: boatClass)
                     emit(.contact(SeatPair(i, j)))
-                    if !isIncidentOpen(i, j),
+                    // Only the umpire judges (#96): a prediction's contact costs speed and pushes, never a call.
+                    if umpire != nil, !isIncidentOpen(i, j),
                        let verdict = Rules.judge(boats[i], boats[j], overlapped: overlaps.isOverlapped(i, j),
                                                  course: course, hull: hull, escape: escapeSimulation(i, j)) {
-                        call(verdict, trigger: .contact)
+                        verdicts.append(verdict)
                     }
-                    recordBoatContact(i, j)
+                    begun.append((i, j))
                 }
                 boats[i].position += push * 0.5
                 boats[j].position -= push * 0.5
             }
         }
         boatContacts = touching
+        callCompelledLast(verdicts, trigger: .contact)
+        for (i, j) in begun { recordBoatContact(i, j) }
+    }
+
+    /// Calls this tick's `verdicts` (`call`), each offender exonerated when another boat's breach compelled her
+    /// (`exoneratingCompelled`, 43.1(a)), whatever the seats' order: first those whose offender is the victim of none
+    /// of the others, then the rest, all judged before any of them is called. So a boat's 43.1(a) never turns on
+    /// whether the pair that compelled her comes before hers in seat order; each phase keeps seat order.
+    private func callCompelledLast(_ verdicts: [Verdict], trigger: Incident.Trigger) {
+        let victims = Set(verdicts.map(\.victim))
+        for verdict in verdicts where !victims.contains(verdict.offender) {
+            call(exoneratingCompelled(verdict), trigger: trigger)
+        }
+        let compelled = verdicts.filter { victims.contains($0.offender) }.map(exoneratingCompelled)
+        for verdict in compelled { call(verdict, trigger: trigger) }
     }
 
     /// Records seats `i` and `j`'s contact, begun this tick, in the incident index (#94) with the incident it is
@@ -716,6 +903,7 @@ public final class Race {
         guard umpire != nil else { return }
         let hull = boatClass.hull
         let sweep = rules.incidents.nearMissSweep
+        var verdicts: [Verdict] = []
         for i in boats.indices where !boats[i].isGhost {
             for j in (i + 1)..<boats.count where !boats[j].isGhost && overlaps.isOverlapped(i, j) {
                 guard sweep.canReach(boats[i], boats[j], hull: hull), !boatContacts.contains(Pair(a: i, b: j)),
@@ -723,9 +911,10 @@ public final class Race {
                       let obligation = Rules.obligation(boats[i], boats[j], overlapped: true, course: course, hull: hull),
                       sweep.hits(boats[obligation.victim], boats[obligation.offender], hull: hull)
                 else { continue }
-                call(escapeSimulation(i, j)?.verdict(obligation, course: course) ?? obligation, trigger: .nearMiss)
+                verdicts.append(escapeSimulation(i, j)?.verdict(obligation, course: course) ?? obligation)
             }
         }
+        callCompelledLast(verdicts, trigger: .nearMiss)
     }
 
     /// The umpire's recorded track (#92): every boat and every pair's certain overlap this tick, for the escape
@@ -740,11 +929,43 @@ public final class Race {
     }
 
     /// The escape simulation for seats `a` and `b` on the umpire's recorded track, with the pair's rule 17 record
-    /// (#345), or nil in a prediction or under a rules configuration without one.
+    /// (#345) and rule 18 record (#93), or nil in a prediction or under a rules configuration without one.
     private func escapeSimulation(_ a: Int, _ b: Int) -> EscapeSimulation? {
         guard let umpire, let track = umpire.track(a, b) else { return nil }
         return EscapeSimulation(track: track, rules: rules, boatClass: boatClass,
-                                properCourse: umpire.properCourse(SeatPair(a, b)))
+                                properCourse: umpire.properCourse(SeatPair(a, b)), markRoom: umpire.markRoom(SeatPair(a, b)))
+    }
+
+    /// Rule 43.1(a) (#93): `verdict` with its offender exonerated too when another boat's breach compelled her
+    /// into the victim (`compellingIncident`, the victim a third boat on her recorded track). `call` then makes no
+    /// call on the incident. Unchanged when she is already exonerated, in a prediction, or under a rules
+    /// configuration without an escape simulation.
+    private func exoneratingCompelled(_ verdict: Verdict) -> Verdict {
+        let (offender, victim) = (verdict.offender, verdict.victim)
+        guard !verdict.exonerated.contains(offender), let track = umpire?.track(offender, victim),
+              compellingIncident(of: offender, into: .boat(seat: victim, track: track.recorded(victim))) != nil
+        else { return verdict }
+        return Verdict(rule: verdict.rule, offender: offender, victim: victim, exonerated: verdict.exonerated + [offender])
+    }
+
+    /// Rule 43.1(a) (#93): the incident whose breach compelled seat `seat` into `hazard`, if any: one the umpire
+    /// holds open between her and another boat (not the hazard), called against that boat with `seat` the victim,
+    /// its call within the recorded track, after which the escape simulation finds she had no way clear of both
+    /// that boat and the hazard, but would have had one clear of the hazard alone (`EscapeSimulation.isCompelled`).
+    /// One hop: a boat compelled by a boat that was herself compelled isn't followed further. Looked up in seat
+    /// order. Nil in a prediction, which holds no umpire.
+    private func compellingIncident(of seat: Int, into hazard: EscapeSimulation.Hazard) -> Int? {
+        guard let umpire else { return nil }
+        var excluded = seat
+        if case .boat(let third, _) = hazard { excluded = third }
+        for other in boats.indices where other != seat && other != excluded {
+            guard let id = umpire.openIncident(SeatPair(seat, other)), case .called(let call)? = incidents[id]?.outcome,
+                  call.offender == other, call.victim == seat, let escape = escapeSimulation(seat, other)
+            else { continue }
+            let breach = escape.track.count - 1 - (tick - call.tick)
+            if breach >= 0, escape.isCompelled(seat, by: other, breach: breach, into: hazard) { return id }
+        }
+        return nil
     }
 
     /// Rule 17 (#345): the umpire's records of leeward boats that came up from clear astern
@@ -758,12 +979,27 @@ public final class Race {
     }
 
     /// The windward boats seat `seat` is held to her proper course against now (rule 17, #345: the umpire's records
-    /// naming her the leeward boat), in seat order. None in a prediction, which holds no umpire (ADR 0005).
+    /// naming her the leeward boat), in seat order. A prediction holds no umpire (ADR 0005): it returns the server
+    /// umpire's word (`umpireRelations`, #96) for the seat it is for, and none for any other.
     public func properCourseRestrictions(of seat: Int) -> [Int] {
-        guard let umpire else { return [] }
+        guard let umpire else {
+            guard let relations = umpireRelations, relations.seat == seat else { return [] }
+            return relations.restrictedBy
+        }
         return boats.indices.filter { other in
             other != seat && umpire.properCourse(SeatPair(seat, other))?.leeward == seat
         }
+    }
+
+    /// Whether `properCourseRestrictions(of: seat)` holds `other`, for the one pair: the server works out only the
+    /// pairs in range of a seat (#96).
+    public func isHeldToProperCourse(_ seat: Int, against other: Int) -> Bool {
+        guard boats.indices.contains(seat), boats.indices.contains(other), other != seat else { return false }
+        guard let umpire else {
+            guard let relations = umpireRelations, relations.seat == seat else { return false }
+            return relations.restrictedBy.contains(other)
+        }
+        return umpire.properCourse(SeatPair(seat, other))?.leeward == seat
     }
 
     /// Whether rule 18 applies between each pair now (`Rules.markRoomApplies`), by `OverlapTracker.index`,
@@ -783,7 +1019,8 @@ public final class Race {
     /// Rule 18 (#91): the umpire's records of who is entitled to mark-room from whom
     /// (`UmpireState.updateMarkRoom`), each new one announced to its two boats (`markRoomNotice`). The
     /// authoritative race's alone: a client never shows a notice the server hasn't sent (ADR 0005). Mark-room
-    /// is not right of way: no call reads the records yet (18.2(d) and 43.1(b) are #93's).
+    /// is not right of way: an incident's call reads the record only through the escape simulation
+    /// (`EscapeSimulation.verdict`: 18.2, 18.2(d) and 43.1(b), #93).
     private func updateMarkRoom(previous: [Boat], hulls: [[Vec2]], zones: [MarkZone?], markRoomApplies: [Bool]) {
         guard umpire != nil else { return }
         let notices = umpire?.updateMarkRoom(MarkRoomTick(
@@ -798,7 +1035,7 @@ public final class Race {
     /// Marks (#90): a boat touching a mark loses speed by the class's mark factor on the tick the touch begins,
     /// and is pushed off it. Touching a mark of her leg (rule 31, `CourseLayout.isRule31Mark`) costs her one
     /// penalty turn (`penalize`) and is announced (`markTouch`), unless the turn is already owed for the same
-    /// incident (`markTouchVerdict`). Any other touch is an obstruction contact of kind `.mark`: no penalty,
+    /// incident or she is exonerated (`markTouchVerdict`). Any other touch is an obstruction contact of kind `.mark`: no penalty,
     /// announced and recorded (`IncidentIndex.obstructionContacts`), as an edge's is. A ghost sails through.
     private func resolveObstacleContacts() {
         var touching = Set<Pair>()
@@ -821,9 +1058,12 @@ public final class Race {
     }
 
     /// What seat `i`'s touch of `obstacle`, begun this tick, costs her (rule 31, #90).
+    /// A prediction never penalises a touch of a mark of her leg (#96, ADR 0005): the server's `markTouch` owes
+    /// the turn (`apply(authoritative:)`).
     private func touchMark(_ i: Int, _ obstacle: Obstacle) {
         if course.isRule31Mark(obstacle.name, status: boats[i].status, legIndex: boats[i].legIndex) {
-            switch markTouchVerdict(i) {
+            guard umpire != nil else { return }
+            switch markTouchVerdict(i, obstacle) {
             case .turn:
                 penalize(i)
                 if umpire != nil {
@@ -835,6 +1075,12 @@ public final class Race {
                 return
             case .sameIncident:
                 break
+            case .exonerated(let id):
+                // Recorded on the incident she was compelled in (43.1, #93): no call or event of its own.
+                if var incident = incidents[id] {
+                    incident.exonerate(i)
+                    incidents.update(incident)
+                }
             }
         }
         incidents.recordObstructionContact(ObstructionContact(tick: tick, leg: boats[i].legIndex, seat: i, kind: .mark))
@@ -847,15 +1093,19 @@ public final class Race {
         case turn
         /// Nothing more (44.1(a)): she has an open incident whose call already carries her turn.
         case sameIncident
-        // 43.1 (#93): a boat compelled onto the mark by another's foul is exonerated, `.exonerated(incidentId)`,
-        // decided in `markTouchVerdict`.
+        /// Nothing (43.1, #93): another boat's breach in the open incident `incidentId` put her on the mark.
+        case exonerated(incidentId: Int)
     }
 
     /// Rule 44.1(a): whether seat `i`'s touch of a mark of her leg is in the same incident as a foul she is
     /// already called for: one the umpire holds open (the pair hasn't separated), whose call she is the
-    /// offender of. One turn for the incident, the call's. In a prediction no incident is open, so it predicts
-    /// the turn until the server's snapshot (as #88's calls).
-    private func markTouchVerdict(_ i: Int) -> MarkTouchVerdict {
+    /// offender of. One turn for the incident, the call's. Otherwise rule 43.1 (#93), in an incident the umpire
+    /// holds open whose call names her the victim: 43.1(b) when the call is the other boat failing to give her
+    /// mark-room (18.2 or 18.3) at `obstacle`, the mark of the pair's rule 18 record, which still has her entitled,
+    /// and she touches it on the call's tick or after (Case 95: forced onto the mark she was owed room at), and
+    /// 43.1(a) when that boat's breach compelled her onto `obstacle` (`compellingIncident`). Then she is exonerated, with no turn. The
+    /// authoritative race's alone (`touchMark`): a prediction penalises no touch (#96).
+    private func markTouchVerdict(_ i: Int, _ obstacle: Obstacle) -> MarkTouchVerdict {
         guard let umpire else { return .turn }
         for other in boats.indices where other != i {
             if let id = umpire.openIncident(SeatPair(i, other)), case .called(let call)? = incidents[id]?.outcome,
@@ -863,7 +1113,17 @@ public final class Race {
                 return .sameIncident
             }
         }
-        // 43.1 (#93) decides `.exonerated` here.
+        for other in boats.indices where other != i {
+            if let id = umpire.openIncident(SeatPair(i, other)), case .called(let call)? = incidents[id]?.outcome,
+               call.offender == other, call.victim == i, call.rule == .givingMarkRoom || call.rule == .tackingInTheZone,
+               call.tick <= tick, let record = umpire.markRoom(SeatPair(i, other)), record.entitled == i,
+               record.owing == other, record.mark == obstacle.name {
+                return .exonerated(incidentId: id)
+            }
+        }
+        if let id = compellingIncident(of: i, into: .mark(centre: obstacle.position, radius: obstacle.radius)) {
+            return .exonerated(incidentId: id)
+        }
         return .turn
     }
 
@@ -934,15 +1194,22 @@ public final class Race {
     }
 
     /// Opens an incident for `verdict`, records whom it exonerates (rule 43.1: the incident's `exonerated`,
-    /// never a call or an event of their own, #92), decides it with a rule call, penalises the offender one
+    /// never a call or an event of their own, #92), and, when that is its offender (compelled, 43.1(a), #93),
+    /// decides it `.noCall`: no penalty, no event. Otherwise it decides it with a rule call, penalises the offender one
     /// turn (`penalize`; none, `turnsOwed` 0, when her penalised mark touch was in this incident, 44.1(a), #90)
     /// and announces the call, with the turn's deadlines when its clock is fixed at the call.
     /// The umpire holds the incident open until the pair separates (`resolveBoatContacts`): one incident
-    /// per pair (#9). A prediction has no umpire, so every contact it sails opens one.
+    /// per pair (#9). The authoritative race's alone: a prediction judges nothing (#96, ADR 0005).
     private func call(_ verdict: Verdict, trigger: Incident.Trigger) {
         let leg = boats[verdict.offender].legIndex
         var incident = incidents.open(between: verdict.offender, and: verdict.victim, tick: tick, leg: leg, trigger: trigger)
         for seat in verdict.exonerated { incident.exonerate(seat) }
+        if verdict.exonerated.contains(verdict.offender) {
+            incident.outcome = .noCall
+            incidents.update(incident)
+            umpire?.open(incident.id, for: incident.parties)
+            return
+        }
         let penalty = rules.raceFormat.penalty
         // 44.1(a) (#90): a foul in the same incident as her penalised mark touch costs no second turn.
         let touchNeighbours = umpire?.markTouchNeighbours(of: verdict.offender) ?? []
@@ -974,9 +1241,11 @@ public final class Race {
     /// and its clock starts now; otherwise it queues behind the turns she owes, and its clock starts when it
     /// becomes current (`startNextPenaltyClock`). Returns the turn's clock tick when it is fixed now, for the
     /// rule call's deadlines: always under `fromCall` stacking, and under `sequential` only when she owed none.
-    /// Internal for tests, which call it as a call on the current tick would.
+    /// Internal for tests, which call it as a call on the current tick would. A prediction owes the turn the
+    /// server called at `callTick`, the event's (`apply(authoritative:)`, #96).
     @discardableResult
-    func penalize(_ i: Int) -> Int? {
+    func penalize(_ i: Int, calledAt callTick: Int? = nil) -> Int? {
+        let tick = callTick ?? self.tick
         if boats[i].penaltyTurnsOwed == 0 {
             boats[i].penaltyTurnsOwed = 1
             boats[i].penaltyProgress = 0
@@ -1007,10 +1276,19 @@ public final class Race {
     /// turn up or serves it, so the start deadline reads it off the progress), and never onto the full turn
     /// (`heldPenaltyProgress`), so the next tick the player drives turning on completes it. Before the player
     /// has set a direction the autohelm's turning counts for nothing.
+    ///
+    /// A prediction (#96) turns as the player drives it but never completes a turn: its progress runs on past a
+    /// full turn, up to the turns she owes, and the server's `penaltyServed` (`apply(authoritative:)`) takes each
+    /// full turn off as the server served it, carrying the rest into the next. So a turn is never served twice, and
+    /// the arc (`OwedPenalty.progress`) waits just short of a full turn until the server's word comes. The turns
+    /// past the full ones (the server served them, its word is on the way) count as the autohelm's start.
     private func turnPenalty(_ b: inout Boat, seat i: Int, turn: Double, playerDriven: Bool) {
         let before = b.penaltyProgress
         let direction: Double = before > 0 ? 1 : before < 0 ? -1 : 0
         let startedTurn = rules.raceFormat.penalty.startedTurn
+        // A prediction's full turns the server has served and not yet said so (always 0 in the authoritative race).
+        let served = umpire == nil
+            ? min((abs(before) / (2 * .pi)).rounded(.down), Double(max(b.penaltyTurnsOwed - 1, 0))) * 2 * .pi : 0
         var progress: Double
         if playerDriven {
             if direction * turn < 0 {
@@ -1021,10 +1299,15 @@ public final class Race {
             progress = before + turn
         } else {
             guard direction != 0 else { return }
-            let floor = abs(before) >= startedTurn ? startedTurn : 0
-            progress = direction * min(max(direction * (before + turn), floor), Race.heldPenaltyProgress)
+            let floor = served + (abs(before) - served >= startedTurn ? startedTurn : 0)
+            progress = direction * min(max(direction * (before + turn), floor), served + Race.heldPenaltyProgress)
         }
         if abs(before) < startedTurn && abs(progress) >= startedTurn { emit(.penaltyStarted(seat: i)) }
+        if umpire == nil {
+            let owed = Double(b.penaltyTurnsOwed) * 2 * .pi
+            b.penaltyProgress = min(max(progress, -owed), owed)
+            return
+        }
         if abs(progress) >= 2 * .pi {
             progress -= (progress < 0 ? -2 : 2) * .pi
             b.penaltyTurnsOwed -= 1
@@ -1034,7 +1317,7 @@ public final class Race {
                 b.penaltyClockTick = nil
                 b.queuedPenaltyCallTicks = []
             } else {
-                startNextPenaltyClock(&b)
+                startNextPenaltyClock(&b, now: tick)
             }
         }
         b.penaltyProgress = progress
@@ -1043,7 +1326,7 @@ public final class Race {
     /// Starts the clock of the owed turn that has just become current, now, as the rules' stacking says (G4):
     /// under `sequential` at the later of its call and now, the previous turn's completion; under `fromCall`
     /// at its call. A queued turn whose call the boat doesn't hold (`Boat.queuedPenaltyCallTicks`) starts now.
-    private func startNextPenaltyClock(_ b: inout Boat) {
+    private func startNextPenaltyClock(_ b: inout Boat, now tick: Int) {
         let call = b.queuedPenaltyCallTicks.isEmpty ? nil : b.queuedPenaltyCallTicks.removeFirst()
         switch rules.raceFormat.penalty.stackedPenaltyDeadlines {
         case .sequential: b.penaltyClockTick = max(call ?? tick, tick)
@@ -1080,6 +1363,109 @@ public final class Race {
     /// `RaceEvent.Kind.disqualified`'s reason for a penalty turn not completed by its complete deadline (#89).
     public static let missedComplete = "missedComplete"
 
+    // MARK: - The server's word, in a prediction (#96)
+
+    /// Whether `apply(authoritative:)` can change a prediction for `event`: a rule call with a turn, a mark touch,
+    /// a penalty reset or served, a disqualification, an OCS notice or clearing, a finish (#96). A client re-sails
+    /// for these alone (`PredictedRace`).
+    public static func isRuling(_ event: RaceEvent) -> Bool {
+        switch event.kind {
+        case .ruleCall(let call): call.turnsOwed > 0
+        case .markTouch, .penaltyReset, .penaltyServed, .disqualified, .ocsNotice, .cleared, .finished: true
+        default: false
+        }
+    }
+
+    /// Applies one of the server's authoritative events to a prediction (#96, ADR 0005), as the authoritative race
+    /// changed its state when it emitted it, with the event's tick as the call's: a rule call with a turn and a mark
+    /// touch owe a turn (`penalize`), `penaltyReset` gives the current turn up, `penaltyServed` serves it (the turning
+    /// past the full turn carried into the next owed turn, whose clock starts at the event's tick), `disqualified`
+    /// makes her DSQ and a ghost, owing nothing, `ocsNotice` makes her OCS, `cleared` puts her back in the
+    /// pre-start, and `finished` finishes her if the prediction hasn't. Every other event, `markRoomNotice`
+    /// included, changes nothing (`isRuling`). The caller applies each event once, in the server's order, at the
+    /// end of its tick (`PredictedRace`); a prediction makes none of these changes itself. A prediction's alone:
+    /// the authoritative race is the server.
+    public func apply(authoritative event: RaceEvent) {
+        precondition(umpire == nil, "only a prediction applies the server's events")
+        func has(_ seat: Int) -> Bool { boats.indices.contains(seat) }
+        switch event.kind {
+        case .ruleCall(let call) where call.turnsOwed > 0 && has(call.offender):
+            for _ in 0..<call.turnsOwed { penalize(call.offender, calledAt: event.tick) }
+        case .markTouch(let seat, _) where has(seat):
+            penalize(seat, calledAt: event.tick)
+        case .penaltyReset(let seat) where has(seat):
+            boats[seat].penaltyProgress = 0
+        case .penaltyServed(let seat) where has(seat) && boats[seat].penaltyTurnsOwed > 0:
+            var b = boats[seat]
+            b.penaltyTurnsOwed -= 1
+            if b.penaltyTurnsOwed == 0 {
+                b.penaltyProgress = 0
+                b.penaltyClockTick = nil
+                b.queuedPenaltyCallTicks = []
+            } else {
+                // The turning past the full turn carries into the next, as `turnPenalty` serves it.
+                let progress = b.penaltyProgress
+                let direction: Double = progress < 0 ? -1 : 1
+                b.penaltyProgress = abs(progress) >= 2 * .pi ? progress - direction * 2 * .pi : 0
+                startNextPenaltyClock(&b, now: event.tick)
+            }
+            boats[seat] = b
+        case .disqualified(let seat, _) where has(seat):
+            boats[seat].status = .dsq
+            boats[seat].penaltyTurnsOwed = 0
+            boats[seat].penaltyProgress = 0
+            boats[seat].penaltyClockTick = nil
+            boats[seat].queuedPenaltyCallTicks = []
+        case .ocsNotice(let seat) where has(seat) && boats[seat].status == .prestart:
+            boats[seat].status = .ocs
+        case .cleared(let seat) where has(seat) && boats[seat].status == .ocs:
+            boats[seat].status = .prestart
+        case .finished(let seat, let place) where has(seat) && boats[seat].status != .finished:
+            let time = Double(event.tick) / Double(Race.tickRate)
+            boats[seat].status = .finished
+            boats[seat].place = place
+            boats[seat].finishTime = time
+            finishers = max(finishers, place)
+            if firstFinishTime.map({ time < $0 }) ?? true { firstFinishTime = time }
+        default:
+            break
+        }
+    }
+
+    /// The server umpire's word on one seat's pairs, as a prediction holds it from the last snapshot (#96): who
+    /// keeps clear (`keepClearRelations(of:)`) and the windward boats she is held to her proper course against
+    /// (`properCourseRestrictions(of:)`), for the pairs the server sent (those in range of her). Never the
+    /// prediction's own world: the umpire is the server's (ADR 0005).
+    public struct UmpireRelations: Equatable, Sendable {
+        /// The seat the relations are for: the client's own.
+        public var seat: Int
+        /// Who keeps clear between `seat` and each seat, by seat; nil at `seat`, out of range, or with no relation.
+        public var keepClear: [RightOfWay?]
+        /// The windward boats `seat` is held to her proper course against (rule 17), in seat order.
+        public var restrictedBy: [Int]
+
+        public init(seat: Int, keepClear: [RightOfWay?], restrictedBy: [Int]) {
+            self.seat = seat
+            self.keepClear = keepClear
+            self.restrictedBy = restrictedBy
+        }
+    }
+
+    /// The server umpire's relations a prediction last took (`setUmpireRelations`), nil before the first or
+    /// after a resync. Always nil in the authoritative race, which has the umpire itself.
+    public private(set) var umpireRelations: UmpireRelations?
+
+    /// Takes the server umpire's `relations` (#96), or forgets them with nil. A prediction's alone. Relations
+    /// for a fleet of another size are dropped.
+    public func setUmpireRelations(_ relations: UmpireRelations?) {
+        precondition(umpire == nil, "only a prediction takes the server umpire's relations")
+        guard let relations, relations.keepClear.count == boats.count, boats.indices.contains(relations.seat) else {
+            umpireRelations = nil
+            return
+        }
+        umpireRelations = relations
+    }
+
     /// Seat `seat`'s owed penalty turns as the HUD shows them (G4, #114), or nil while she owes none.
     public func owedPenalty(ofSeat seat: Int) -> OwedPenalty? {
         guard boats.indices.contains(seat) else { return nil }
@@ -1089,8 +1475,9 @@ public final class Race {
     // MARK: - Start, roundings, finish
 
     /// OCS (#9, rule 29.1): any point of her hull on the course side of the line or its extensions at the gun.
+    /// A prediction (#96) judges no OCS: its boats are OCS by the server's `ocsNotice` or snapshot.
     private func fireGun() {
-        for i in boats.indices where boats[i].status == .prestart && isOverStartLine(boats[i]) {
+        for i in boats.indices where umpire != nil && boats[i].status == .prestart && isOverStartLine(boats[i]) {
             boats[i].status = .ocs
             emit(.ocsNotice(recipient: i))
         }
@@ -1560,7 +1947,8 @@ extension Race {
             touchingBoats: boatPairs, touchingObstacles: obstacles, touchingEdges: edges,
             incidents: incidents,
             firstFinishTime: firstFinishTime, isOver: isOver, results: results, windKeys: wind.keys,
-            overlaps: overlaps.memory
+            overlaps: overlaps.memory, ribbonPoints: wake.points, emissionLevels: wake.levels, headers: headerState,
+            backwind: backwindSails
         )
     }
 
@@ -1660,6 +2048,8 @@ extension Race {
             }
         }
 
+        try validateShadowState(of: snapshot)
+
         let snapshotWind = WindField(setup: windSetup, windows: wind.windows, keys: snapshot.windKeys)
         do {
             try snapshotWind.requireKeys(atTick: snapshot.tick)
@@ -1711,6 +2101,27 @@ extension Race {
         finishers = boats.filter { $0.status == .finished }.count
         pending.removeAll()
         events.removeAll()
+        wake = TurbulenceRibbons(shadow: boatClass.windShadow, points: snapshot.ribbonPoints, levels: snapshot.emissionLevels)
+        headerState = snapshot.headers
+        backwindSails = snapshot.backwind
+    }
+
+    /// Throws `invalidShadowState` unless the snapshot's ribbons, headers and backwind (#377) are each empty or one
+    /// per seat, with values the race can step from.
+    private func validateShadowState(of snapshot: WorldSnapshot) throws {
+        let n = boats.count
+        let sizeOK = { (count: Int) in count == 0 || count == n }
+        let level = { (x: Double) in x >= 0 && x <= 1 }
+        let pointOK = { (p: TurbulenceRibbons.Point) in
+            [p.position.x, p.position.y, p.drift.x, p.drift.y, p.peak, p.scale, p.growth].allSatisfy(\.isFinite)
+                && p.life.isFinite && p.life > 0 && p.born <= snapshot.tick
+        }
+        guard sizeOK(snapshot.ribbonPoints.count), sizeOK(snapshot.emissionLevels.count), sizeOK(snapshot.headers.count),
+              sizeOK(snapshot.backwind.levels.count),
+              snapshot.ribbonPoints.allSatisfy({ $0.allSatisfy(pointOK) }),
+              snapshot.emissionLevels.allSatisfy(level), snapshot.backwind.levels.allSatisfy(level),
+              snapshot.headers.allSatisfy({ $0.isFinite && $0 >= 0 })
+        else { throw WorldSnapshotError.invalidShadowState }
     }
 
     /// The first field of `boat` the race couldn't step from at `tick`, or nil.

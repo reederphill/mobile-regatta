@@ -76,6 +76,23 @@ import RegattaCore
         #expect(!world.isHidden && !cam.isHidden)
     }
 
+    /// A hidden world (`-hideScene`) builds no ribbons, the bulk of a big fleet's render (#377); painted again, the
+    /// next frame draws them.
+    @Test func aHiddenWorldDrawsNoRibbons() {
+        let painted = Self.presented()
+        let hidden = Self.presented()
+        hidden.scene.paintsWorld = false
+        for frame in 0...150 {
+            painted.scene.update(Double(frame) / 10)
+            hidden.scene.update(Double(frame) / 10)
+        }
+        #expect(painted.scene.trailLayer.visibleCount > 0, "the painted race has ribbons by now")
+        #expect(hidden.scene.trailLayer.visibleCount == 0)
+        hidden.scene.paintsWorld = true
+        hidden.scene.update(15.1)
+        #expect(hidden.scene.trailLayer.visibleCount > 0)
+    }
+
     /// Each frame that steps the race counts its ticks, and the pace line names the race clock's tick.
     @Test func framesThatStepTheRaceRecordTheirPace() {
         let session = Self.presented()

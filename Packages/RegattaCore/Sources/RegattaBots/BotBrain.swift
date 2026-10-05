@@ -101,6 +101,9 @@ struct BotBrain: Sendable {
     /// What she plays beyond sailing the groove to the marks.
     let tactics: Tactics
     var plannedTack: Tack = .starboard
+    /// The tactician's spot on the start line as she reads its bias (#105, `Tactics.startsAtFavouredEnd`, `readLineBias`),
+    /// 0 the pin … 1 the committee boat; nil until she has read it, or for any other bot.
+    var favouredEndSpot: Double?
     var lastTackTime = -1_000.0
     /// When she last tapped: she lets a tap finish before another.
     var lastTapTime = -1_000.0
@@ -165,7 +168,7 @@ struct BotBrain: Sendable {
          caution: Caution? = nil) {
         self.style = style
         self.caution = caution
-        self.weaknesses = weaknesses ?? (profile == nil ? BotWeaknesses(skill: style.skill) : .none(skill: style.skill))
+        self.weaknesses = weaknesses ?? profile?.weaknesses(skill: style.skill) ?? BotWeaknesses(skill: style.skill)
         tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
         rng = SplitMix64(seed: seed, stream: Self.brainStream)
         tacticsRng = SplitMix64(seed: seed, stream: Self.tacticsStream)
@@ -680,6 +683,11 @@ struct BotBrain: Sendable {
     /// Metres more than that by which a starboard boat's close-hauled course must clear the windward mark
     /// for her to hold on and round it: room for a small header on the way in.
     static let layMargin = 0.5
+    /// Metres right of and below the windward mark a boat above it, unrounded and right of it, sails back to
+    /// (`windwardApproach`).
+    static let belowRight = (side: 8.0, down: 6.0)
+    /// Metres left of and below it one left of it sails to first, round its foot.
+    static let belowLeft = (side: 7.0, down: 7.0)
 
     /// The point to beat to for the windward mark at `mark`, rounded to port: `fetch`, beside and above it,
     /// on the starboard layline. A boat that can't fetch it yet, and is below the layline's lead point, sails
@@ -689,8 +697,19 @@ struct BotBrain: Sendable {
     /// fetch point and rounds: close in, the lead point is abeam of her, and sailing for it would be a tack,
     /// a reach and a tack back (#231). `tack` is her tack, `wind` the wind's direction, `groove` her upwind
     /// groove angle to it, `upwind` the course's upwind direction.
+    ///
+    /// A boat above the mark that hasn't rounded it (#377's fixer: one that bore away past it on its wrong side, in a
+    /// crowd at the mark) can't round from there: the rounding counts only crossing the line out to the mark's right
+    /// going upwind (`CourseLayout.roundingStages(of:)`), and the fetch point is above that line, so she circled it
+    /// for the rest of the race. She sails back below the mark first: to `belowRight` from its right, to `belowLeft`
+    /// round its foot from its left; below it, the approach is the beat's.
     static func windwardApproach(from position: Vec2, tack: Tack, mark: Vec2, room: Double, fetch: Vec2,
                                  wind w: Double, groove up: Double, upwind: Vec2, overstand: Double = overstand) -> Vec2 {
+        let fromMark = position - mark
+        if fromMark.dot(upwind) > 0 {
+            return fromMark.dot(upwind.rightPerp) >= 0 ? mark + upwind.rightPerp * belowRight.side - upwind * belowRight.down
+                : mark - upwind.rightPerp * belowLeft.side - upwind * belowLeft.down
+        }
         if wrapAngle((fetch - position).bearing - w) <= -(up - overstand) { return fetch }
         let closeHauled = Vec2.heading(w - up)
         let toMark = mark - position

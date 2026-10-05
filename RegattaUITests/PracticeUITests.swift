@@ -116,9 +116,10 @@ final class PracticeUITests: RaceUITestCase {
     }
 
     /// A sixteen-boat practice race (fifteen bots, the setup's largest fleet) runs to its results with every boat in
-    /// them. One lap (`-laps 1`) at `-timescale 32`, as `RaceFinishUITests` sails, so it fits the 5 min CI gives a test.
+    /// them. One lap (`-laps 1`) from a 10 s start (`-startSeconds 10`) at `-timescale 32` with the scene hidden
+    /// (`-hideScene`), as `RaceFinishUITests` sails: painting on the GPU-less runner held the race past this watch.
     @MainActor func testFifteenBotRaceRunsFullLength() throws {
-        let app = openSetup(["-laps", "1", "-timescale", "32"])
+        let app = openSetup(["-laps", "1", "-startSeconds", "10", "-timescale", "32", "-hideScene"])
         let stepper = fleetStepper(app)
         XCTAssertTrue(stepper.waitForExistence(timeout: 10), "no fleet stepper")
         let increment = stepper.buttons["Increment"].exists

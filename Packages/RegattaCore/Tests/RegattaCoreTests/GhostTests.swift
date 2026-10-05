@@ -56,14 +56,19 @@ import Testing
         #expect(race.shadowCone(ofSeat: 0) == nil)
         #expect(race.seatView(for: 1).others[0].isGhost)
 
-        // Two lengths down her cone: shadowed by her racing, clean air behind her finished.
+        // Two lengths down her apparent wind, in her ribbon: shadowed by her racing, clean air behind her finished.
         let shadowed = try pair(.racing) { at, downwind, _, length in at + downwind * 2 * length }
         let clean = try pair(.finished) { at, downwind, _, length in at + downwind * 2 * length }
-        shadowed.step()
-        clean.step()
-        #expect(shadowed.boats[1].shadow < 1)
-        #expect(clean.boats[1].shadow == 1, "a ghost casts no shadow")
-        #expect(clean.boats[0].shadow == 1, "and takes none")
+        // The ribbon forms as her air drifts down to the boat astern (#377): give it a few seconds.
+        var shadowedTicks = 0
+        for _ in 0..<(4 * Race.tickRate) {
+            shadowed.step()
+            clean.step()
+            if shadowed.boats[1].shadow < 1 { shadowedTicks += 1 }
+            #expect(clean.boats[1].shadow == 1, "a ghost casts no shadow")
+            #expect(clean.boats[0].shadow == 1, "and takes none")
+        }
+        #expect(shadowedTicks > 0)
 
         // Hulls overlapping side by side: a contact with her racing, none with her finished.
         let touching = try pair(.racing) { at, _, abeam, _ in at + abeam * 0.3 }

@@ -1,0 +1,80 @@
+# The bot-race quality gate (#19, #105): the full regatta-botsuite matrix (Packages/RegattaCore/Sources/BotSuite/
+# matrix.json) against thresholds.json, on the pinned Linux replay platform (scripts/linux-test.sh's IMAGE), where the
+# server runs. Its exit status is the gate: any threshold or tick-budget breach fails it. Never on a pull request: it
+# stays red on main until #389 tunes the placeholder thresholds (owner, 2026-10-04), and no merge waits on it. The tick
+# times on a hosted runner are noisy; the authoritative tick budget is the Bench workflow's on the reference server.
+# The image pin is linux-test.sh's IMAGE; scripts/check-image-pins.sh (run by check.sh) holds them equal.
+#
+# The matrix is split into one job per profile mix (keep in step with matrix.json's profileMixes), and each job's
+# summaries and gates read its own races alone:
+#   live            the live tier tables (finish share, irons, contacts, edge time), the start, navigation, conduct
+#                   and close-encounter gates, and the 16.1 watchdog: all read the live fleets, which only this job sails.
+#   skillGap+funPass  the tactician's skill-gap gates (win share, gain per beat and per run, start gain) over both
+#                   mixes' races pooled, as one run of the matrix pools them, and the fun pass's (tacks per beat,
+#                   beats the blip-tacker). One job, so no skill-gap gate runs twice on two different samples.
+#   execution       tactics beats execution.     cautious  the cautious bot (reported, no gate).
+#   rivals          the rival pace band.         rankStability  skill vs finishing order.
+#                   Both are sailed in fleets of 10 only (matrix.json mixFleetSizes), never pooled across fleet sizes.
+# Every job gates the worst p99 tick of its own races, so together they gate the worst of the whole matrix.
+name: Bot suite
+
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "Packages/RegattaCore/**"
+      - ".github/workflows/botsuite.yml"
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: botsuite-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  botsuite:
+    name: regatta-botsuite (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    container:
+      image: swift:6.3.3-noble@sha256:8de8ea332a61e961ead4ef41029c2552b18e1a70dd5942d25ecf7d8de2eec5b5
+    strategy:
+      fail-fast: false
+      # See the header: one job per profile mix, but the skill gap and the fun pass together.
+      matrix:
+        include:
+          - { name: live, mixes: "live" }
+          - { name: skillGap-funPass, mixes: "skillGap funPass" }
+          - { name: execution, mixes: "execution" }
+          - { name: cautious, mixes: "cautious" }
+          - { name: rivals, mixes: "rivals" }
+          - { name: rankStability, mixes: "rankStability" }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build regatta-botsuite (release)
+        run: swift build -c release --package-path Packages/RegattaCore --product regatta-botsuite
+      - name: Bot suite and gate
+        shell: bash  # explicit, so the step runs with pipefail and a gate failure isn't hidden by tee
+        run: |
+          bin="$(swift build -c release --package-path Packages/RegattaCore --show-bin-path)"
+          mixes=()
+          for mix in ${{ matrix.mixes }}; do mixes+=(--profile-mix "$mix"); done
+          "$bin/regatta-botsuite" "${mixes[@]}" --json "botsuite-${{ matrix.name }}.json" \
+            2>&1 | tee "botsuite-${{ matrix.name }}.txt"
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          { echo "### ${{ matrix.name }}"; echo '```'; cat "botsuite-${{ matrix.name }}.txt" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: botsuite-${{ matrix.name }}-${{ github.run_id }}
+          path: |
+            botsuite-${{ matrix.name }}.json
+            botsuite-${{ matrix.name }}.txt
+          if-no-files-found: warn

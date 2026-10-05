@@ -27,6 +27,8 @@ struct TuningSlider: Identifiable {
         case water(WritableKeyPath<WaterStyle, Double>)
         case camera(WritableKeyPath<CameraStyle, Double>)
         case boat(WritableKeyPath<BoatStyle, Double>)
+        /// A hint threshold (#129): app-side, live, never logged.
+        case hint(WritableKeyPath<HintTuning, Double>)
     }
 
     let id: String
@@ -55,7 +57,7 @@ struct TuningSlider: Identifiable {
         switch target {
         case .file(_, let pointer): pointer
         case .groove(let column): TuningSlider.grooveKey(column)
-        case .water, .camera, .boat: nil
+        case .water, .camera, .boat, .hint: nil
         }
     }
 
@@ -63,7 +65,7 @@ struct TuningSlider: Identifiable {
         switch target {
         case .file(let slot, _): slot
         case .groove: .boatClass
-        case .water, .camera, .boat: nil
+        case .water, .camera, .boat, .hint: nil
         }
     }
 
@@ -210,26 +212,44 @@ enum TuningCatalog {
                 } ?? [])),
             TuningGroup(
                 id: "shadow", title: "Wind shadow",
-                note: "What sailing in another boat's shadow costs, and how far it reaches (hull lengths). From skiff@3 (#263) the loss is off her speed, not the wind, and she slows to it at the shadow's own rate.",
+                note: "The turbulence ribbons a boat leaves (#377, from skiff@6): a point every few tenths of a second, drifting down her apparent wind and widening as it ages, joined into ribbons. A boat in one loses speed, not wind, at the shadow's own rate. Strength and widths at her and at the end of a point's life (hull lengths), how long a point lives (cone lengths over her apparent wind), how far apart two points still join, the speed below which she sheds none, and how long her shedding takes to build back after an ease or a tack, full at the sail angle below.",
                 applies: .nextRace,
                 sliders: [
-                    TuningSlider(.boatClass, "/windShadow/lossCloseIn", "Loss close in", 0...0.9, step: 0.01),
-                    TuningSlider(.boatClass, "/windShadow/stackingFloor", "Stacked cones floor", 0.1...1, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/ribbons/peakLoss", "Loss at its strongest", 0...0.9, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/stackingFloor", "Stacked ribbons floor", 0.1...1, step: 0.01),
                     TuningSlider(.boatClass, "/windShadow/slowingDownSeconds", "Slowing down in it", unit: " s", 0.5...10, step: 0.1),
                     TuningSlider(.boatClass, "/windShadow/coneLengthHullLengths", "Cone length", 1...20, step: 0.5),
-                    TuningSlider(.boatClass, "/windShadow/coneWidthAtEndHullLengths", "Cone width at its end", 0.5...10, step: 0.1),
+                    TuningSlider(.boatClass, "/windShadow/ribbons/lifeConeLengths", "Point life", unit: " cones", 0.1...3, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/ribbons/emitSeconds", "Point every", unit: " s", 0.1...2, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/ribbons/startWidthHullLengths", "Width at her", 0.1...4, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/ribbons/endWidthHullLengths", "Width at its end", 0.5...12, step: 0.1),
+                    TuningSlider(.boatClass, "/windShadow/ribbons/joinCapHullLengths", "Joins points within", 0.2...4, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/ribbons/stoppedKnots", "Sheds none below", unit: " kn", 0...3, step: 0.1),
+                    TuningSlider(.boatClass, "/windShadow/ribbons/buildSeconds", "Builds back over", unit: " s", 0...6, step: 0.1),
+                    TuningSlider(.boatClass, "/windShadow/ribbons/fullAngleDegrees", "Full at sail angle", unit: "°", 2...45, step: 0.5),
                 ]),
             TuningGroup(
                 id: "backwind", title: "Backwind",
-                note: "The zone astern of a boat on her windward quarter that slows a boat she lee-bows (#298, from skiff@4; skiff@5 turns it so its stern edge slants and turns it off running): its loss at her stern edge, fading to nothing at its far edge, how far astern it reaches (hull lengths; its length scales with her speed, full size at the speed below), and the true wind angle from which she is running and casts none.",
+                note: "The zone astern of a boat on her windward quarter (#298), from skiff@6 a header (#377): a boat in it has her wind turned towards her bow, stacked up to a cap, after a lag, with an optional lull. Cast only off a working sail, as hard as it works; it fades out on its old side over the fade time before building on the new one, and she casts none below the floor speed, building in over the span above it. Its shape: how far astern it reaches (hull lengths; its length scales with her speed, full size at the speed below), and the true wind angle from which she is running and casts none. From skiff@6 the header's zone is the upwash beside her sail instead: on her windward side from her mast (a share of her length back from her bow) past her stern to its length astern of her stern (hull lengths), a fan narrow at her mast and widening straight to its aft end (its widths out from her side at each, hull lengths), full at her side and fading to nothing at its width out, fading in at its mast end and from full at her stern to nothing at its aft end; it doesn't grow with her speed.",
                 applies: .nextRace,
                 sliders: [
-                    TuningSlider(.boatClass, "/windShadow/backwind/loss", "Loss at her stern", 0...0.6, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/header/degrees", "Header", unit: "°", 0...20, step: 0.5),
+                    TuningSlider(.boatClass, "/windShadow/header/capDegrees", "Stacked header cap", unit: "°", 0...30, step: 0.5),
+                    TuningSlider(.boatClass, "/windShadow/header/lullLoss", "Lull in it", 0...0.6, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/header/lagSeconds", "Header lag", unit: " s", 0...4, step: 0.1),
+                    TuningSlider(.boatClass, "/windShadow/backwind/fadeSeconds", "Fades out over", unit: " s", 0...5, step: 0.1),
+                    TuningSlider(.boatClass, "/windShadow/backwind/floorKnots", "None below", unit: " kn", 0...8, step: 0.1),
+                    TuningSlider(.boatClass, "/windShadow/backwind/floorBuildKnots", "Builds in over", unit: " kn", 0...6, step: 0.1),
+                    TuningSlider(.boatClass, "/windShadow/backwind/mastStationFromBow", "Mast back from bow", 0...0.9, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/backwind/upwashWidthAtMastHullLengths", "Width at her mast", 0...3, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/backwind/upwashWidthAftHullLengths", "Width at its aft end", 0.1...4, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/backwind/upwashEndFadeHullLengths", "Fades in at its mast over", 0...0.5, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/backwind/upwashAftHullLengths", "Runs on astern of her stern", 0.1...3, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/innerLengthHullLengths", "Short edge length", 0.25...4, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/lengthHullLengths", "Long edge length", 0.5...4, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/widthHullLengths", "Width at her stern", 0.25...3, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/runningFromDegrees", "Off running from", unit: "°", 60...180, step: 1),
-                    TuningSlider(.boatClass, "/windShadow/backwind/runningFadeDegrees", "Fades out over", unit: "°", 0...60, step: 1),
+                    TuningSlider(.boatClass, "/windShadow/backwind/runningFadeDegrees", "Off over", unit: "°", 0...60, step: 1),
                     TuningSlider(.boatClass, "/windShadow/backwind/speedScale/referenceKnots", "Full size at", unit: "kn", 2...16, step: 0.5),
                 ]),
             TuningGroup(
@@ -360,6 +380,18 @@ enum TuningCatalog {
                     boat("penaltyArcWidth", "Penalty arc width", \.penaltyArcWidth, 1...10, 0.5, unit: " pt"),
                 ]),
             TuningGroup(
+                id: "hints", title: "Hints",
+                note: "When the hints fire (#129): letting go after this long steering, sooner in the first race; the wind-shift hint's turn and smoothing; how long a situation is off before its hint may show again.",
+                applies: .live,
+                sliders: [
+                    hint("lettingGoSeconds", "Letting go after", \.lettingGoSeconds, 5...60, 1, unit: " s"),
+                    hint("lettingGoFirstRaceSeconds", "Letting go, first race", \.lettingGoFirstRaceSeconds, 1...30, 0.5,
+                         unit: " s"),
+                    hint("shiftDegrees", "Shift hint past", \.shiftDegrees, 2...20, 0.5, unit: "°"),
+                    hint("shiftSmoothingSeconds", "Shift smoothing", \.shiftSmoothingSeconds, 0...30, 1, unit: " s"),
+                    hint("rearmSeconds", "Hint again after off", \.rearmSeconds, 1...30, 0.5, unit: " s"),
+                ]),
+            TuningGroup(
                 id: "later", title: "Later",
                 note: "Values later tickets bring, tuned here once they're in a file.",
                 applies: .later, sliders: [],
@@ -379,6 +411,11 @@ enum TuningCatalog {
     private static func boat(_ name: String, _ title: String, _ path: WritableKeyPath<BoatStyle, Double>,
                              _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {
         TuningSlider(id: "boat.\(name)", title: title, unit: unit, range: range, step: step, target: .boat(path))
+    }
+
+    private static func hint(_ name: String, _ title: String, _ path: WritableKeyPath<HintTuning, Double>,
+                             _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {
+        TuningSlider(id: "hint.\(name)", title: title, unit: unit, range: range, step: step, target: .hint(path))
     }
 
     private static func camera(_ name: String, _ title: String, _ path: WritableKeyPath<CameraStyle, Double>,

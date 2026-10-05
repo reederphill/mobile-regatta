@@ -5,7 +5,8 @@ import RegattaProtocol
 
 /// One race stepped as `RaceHost` steps it each tick (#65), without the actor, clock or seat plumbing:
 /// the bots decide (#19, 10 Hz), the race steps, its events are encoded, and every `snapshotEvery` ticks
-/// the fleet snapshot is built and encoded once per seat, as for a race where every seat is attached.
+/// the fleet snapshot is built once and, with each seat's umpire relations (#96), encoded once per seat, as for a
+/// race where every seat is attached.
 /// The encoded bytes go to a sink that only counts them.
 final class BenchRace {
     let race: Race
@@ -30,7 +31,11 @@ final class BenchRace {
             for seat in seq.indices { send(Frame(seq: seq[seat], event: event), to: seat) }
         }
         if race.tick % snapshotEvery == 0, let fleet = try? Snapshot(world: race.exportSnapshot()) {
-            for seat in seq.indices { send(Frame(seq: seq[seat], tick: race.tick, message: .snapshot(fleet)), to: seat) }
+            for seat in seq.indices {
+                var snapshot = fleet
+                snapshot.relations = WireRelation.relations(of: seat, in: race)
+                send(Frame(seq: seq[seat], tick: race.tick, message: .snapshot(snapshot)), to: seat)
+            }
         }
     }
 

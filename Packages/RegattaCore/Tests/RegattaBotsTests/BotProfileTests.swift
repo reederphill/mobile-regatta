@@ -89,9 +89,11 @@ import RegattaCore
     @Test func hunterAltersCourseTowardsAGiveWayBoatWithinRule16() throws {
         // Running on starboard, overlapped, the live bot to windward and keeping clear (rule 11): holding her course the
         // hunter would leave her be; she turns at her gently instead, and the gap closes, with no 16.1 call on her.
-        // (Scenes whose tactician gybes away at once leave nothing to hunt: seeds 3 and 6 hold their tack.)
+        // (Scenes whose tactician gybes away at once leave nothing to hunt: seeds 3 and 6 hold their tack. Seed 6 starts
+        // half a length ahead, overlapped (#377): from a length ahead, on the edge of clear astern, the windward boat's
+        // ribbons drifting downwind ahead of her slow the leeward one back clear astern, where rule 12 has her keep clear.)
         var closer = 0
-        for (seed, abeam, ahead) in [(UInt64(3), 2.5, 0.5), (3, 3.0, 1.0), (6, 3.0, 1.0)] {
+        for (seed, abeam, ahead) in [(UInt64(3), 2.5, 0.5), (3, 3.0, 1.0), (6, 3.0, 0.5)] {
             let encounter = BotConductTests.windwardLeeward(seed: seed, running: true, abeam: abeam, ahead: ahead, converging: 0)
             let hunted = try Self.sail(encounter)
             let held = try Self.sail(encounter, profile: .tactician)
@@ -130,10 +132,13 @@ import RegattaCore
     }
 
     @Test func hunterLuffsWithinHerProperCourseFromAstern() throws {
-        // Rule 17: overlapped to leeward from clear astern, she luffs no higher than her proper course's edge.
+        // Rule 17: overlapped to leeward from clear astern, she luffs no higher than her proper course's edge. She comes up
+        // from 1.5 lengths astern, 1.8 to leeward (#377): from 2.5 astern, 1.5 to leeward, she sails in the windward
+        // boat's ribbons, which drift to leeward and astern of it, slows to about half her speed and never reaches the
+        // overlap. 1.8 is still inside rule 17's two lengths.
         var restricted = 0
         for seed: UInt64 in [1, 2, 3] {
-            let encounter = BotConductTests.windwardLeeward(seed: seed, running: false, abeam: 1.5, ahead: 2.5,
+            let encounter = BotConductTests.windwardLeeward(seed: seed, running: false, abeam: 1.8, ahead: 1.5,
                                                             converging: 0, fromAstern: true)
             // Seat 1 comes from astern here: make the hunter that boat, seat 0 the windward live bot.
             let race = try encounter.race()
@@ -273,10 +278,48 @@ import RegattaCore
             var hunter = Tactics(profile: .hunter, skill: skill)
             #expect(hunter.hunts)
             hunter.hunts = false
-            #expect(hunter == Tactics(profile: .tactician, skill: skill))
+            // #355's tactician: #105's run and line tactics are the tactician's alone, not the hunter's.
+            var tactician = Tactics(profile: .tactician, skill: skill)
+            #expect(tactician.runsToPressure && tactician.gybesOutOfShadow && tactician.startsAtFavouredEnd)
+            tactician.runsToPressure = false
+            tactician.gybesOutOfShadow = false
+            tactician.startsAtFavouredEnd = false
+            #expect(hunter == tactician)
         }
         for profile in [nil, BotProfile.baseline, .tactician, .blipTacker] {
             #expect(!Tactics(profile: profile, skill: 1).hunts)
+        }
+    }
+
+    /// #105 (#222): the executor is the baseline's tactics executed perfectly, rolling every tack and hitting every roll;
+    /// the tactician at Club-level execution is the tactician whose rolls hit half the time (rolls only, the ruling).
+    @Test func executorAndClubTacticianDifferInExecutionOnly() {
+        var executor = Tactics(profile: .executor, skill: 0.9)
+        #expect(executor.rollsTacks)
+        executor.rollsTacks = false
+        #expect(executor == Tactics(profile: .baseline, skill: 0.9))
+        #expect(Tactics(profile: .tacticianClubExecution, skill: 0.9) == Tactics(profile: .tactician, skill: 0.9))
+        let perfect = BotProfile.executor.weaknesses(skill: 0.9)
+        #expect(perfect == BotWeaknesses.none(skill: 0.9))
+        #expect(perfect.rollHitRate == 1 && perfect.angleMissRate == 0)
+        var club = BotProfile.tacticianClubExecution.weaknesses(skill: 0.9)
+        #expect(club.rollHitRate == 0.5)
+        club.rollHitRate = 1
+        #expect(club == perfect, "only her rolls differ")
+    }
+
+    /// #105: the tactician's downwind and start tactics are hers (and the Club-execution tactician's) alone; no live
+    /// bot or other profile plays them. Not the hunter: she stays #355's tactician, hunting (#105 fix round 1).
+    @Test func onlyTheTacticianPlaysTheRunAndTheLine() {
+        for profile in [BotProfile.tactician, .tacticianClubExecution] {
+            let tactics = Tactics(profile: profile, skill: 0.9)
+            #expect(tactics.runsToPressure && tactics.gybesOutOfShadow && tactics.startsAtFavouredEnd, "\(profile)")
+        }
+        for profile in [nil, BotProfile.baseline, .blipTacker, .executor, .hunter] {
+            for skill in [0.0, 0.5, 1.0] {
+                let tactics = Tactics(profile: profile, skill: skill)
+                #expect(!tactics.runsToPressure && !tactics.gybesOutOfShadow && !tactics.startsAtFavouredEnd)
+            }
         }
     }
 

@@ -201,3 +201,22 @@ import RegattaCore
         #expect(model.courseLine == "Course: windward–leeward, \(setup.laps) \(setup.laps == 1 ? "lap" : "laps")")
     }
 }
+
+extension BriefingModelTests {
+    /// #235: the briefing marks its practice rivals' rows (bots still, the glyph kept), never yours; none by default.
+    @Test func rivalRowsAreMarked() throws {
+        let plain = try Self.model()
+        #expect(plain.fleet.allSatisfy { !$0.isRival })
+        guard case .briefing(let fixture)? = try RenderFixture.gallery(named: "briefing-rival", in: RenderFixtureTests.fixtures) else {
+            Issue.record("briefing-rival isn't a briefing gallery")
+            return
+        }
+        let config = try fixture.config()
+        #expect(config.rivalSkill != nil)
+        let model = try fixture.model()
+        let rivals = model.fleet.filter(\.isRival)
+        #expect(Set(rivals.map(\.seat)) == config.rivalSeats)
+        #expect(rivals.count == 2)
+        #expect(rivals.allSatisfy { $0.isBot && !$0.isMe && $0.rating == nil })
+    }
+}

@@ -68,8 +68,8 @@ nonisolated struct BoatPose: Equatable, Sendable {
         let twa = boat.twa
         // The sail trims to the wind it feels: the apparent wind off the bow, or the sailing wind's before the
         // race has given her one.
-        let awa = boat.apparentWind.speed > 0.01 ? abs(wrapAngle(boat.apparentWind.direction - boat.heading)) : twa
-        let headToWind = twa < BoatDynamics.noGoAngle(boatClass.polar) + deg2rad(style.headToWindMarginDegrees)
+        let awa = Self.apparentAngle(boat)
+        let headToWind = Self.isHeadToWind(boat, boatClass: boatClass, style: style)
 
         var flutter = 0.0
         if ease {
@@ -105,6 +105,25 @@ nonisolated struct BoatPose: Equatable, Sendable {
         self.flutter = flutter.clamped(to: 0...1)
 
         heel = ease || headToWind ? 0 : Self.heel(felt: Self.feltWind(boat), twa: twa, style: style)
+    }
+
+    /// The apparent wind off her bow, radians (0...π), as her sail trims to it: the sailing wind's angle before the race
+    /// has given her an apparent wind (`SailTrim.apparentAngle`, the sim's).
+    static func apparentAngle(_ boat: Boat) -> Double { SailTrim.apparentAngle(boat) }
+
+    /// Head to wind: so close past the class's no-go angle (`BoatStyle.headToWindMarginDegrees`) her sail doesn't draw.
+    static func isHeadToWind(_ boat: Boat, boatClass: BoatClass, style: BoatStyle) -> Bool {
+        boat.twa < BoatDynamics.noGoAngle(boatClass.polar) + deg2rad(style.headToWindMarginDegrees)
+    }
+
+    /// The angle between her drawn sail and her apparent wind, radians, 0 up (#377): how hard the sail she shows turns
+    /// the air. 0 head to wind and with her sheets out; otherwise the apparent angle less `sailTrim`. Without her
+    /// autohelm's footed ease (#219). At `BoatStyle.standard` it is the sim's `SailTrim.standard.angleOfAttack`, which
+    /// sets her ribbons' emission and her backwind (`BoatPoseTests`' parity test).
+    static func angleOfAttack(_ boat: Boat, ease: Bool, boatClass: BoatClass, style: BoatStyle = .standard) -> Double {
+        guard !isHeadToWind(boat, boatClass: boatClass, style: style) else { return 0 }
+        let pose = BoatPose(boat, ease: ease, isGhost: false, boatClass: boatClass, style: style)
+        return max(0, apparentAngle(boat) - pose.sailTrim)
     }
 
     /// How far the autohelm pinches and foots (#219), each 0 to 1: its offset from the groove past
@@ -179,13 +198,15 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
 
     // MARK: Sail
 
-    /// The sail's trim off the centreline for each radian of apparent wind off the bow.
-    var trimPerApparentAngle = 0.5
+    /// The sail's trim off the centreline for each radian of apparent wind off the bow. The four trim values default
+    /// to the sim's (`SailTrim.standard`, #377), which reads the sail's angle for the ribbons and backwind; a Debug
+    /// slider moves the drawing only.
+    var trimPerApparentAngle = SailTrim.standard.perApparentAngle
     /// The least and most the sail is let out, degrees.
-    var minTrimDegrees = 4.0
-    var maxTrimDegrees = 85.0
+    var minTrimDegrees = SailTrim.standard.minTrimDegrees
+    var maxTrimDegrees = SailTrim.standard.maxTrimDegrees
     /// Head to wind: this close past the class's no-go angle the sail doesn't draw; it lies this far out, degrees.
-    var headToWindMarginDegrees = 2.0
+    var headToWindMarginDegrees = SailTrim.standard.headToWindMarginDegrees
     var headToWindTrimDegrees = 3.0
     /// A flapping sail's swing either side of its trim, degrees.
     var flutterDegrees = 6.0
@@ -266,9 +287,9 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
 
     // MARK: Wind shadow, backwind (#10, #298)
 
-    /// The shadow cones' hatch alpha at its strongest, beside the boat (white, to read on dark water): faint (#15) but
-    /// seen. The hatch fades with distance and to its sides as core's loss does, so most of a cone is a fraction of
-    /// this. The fleet's cones draw as one layer (`ConeLayer`), so overlapping cones never draw a line brighter than this.
+    /// The wind shadow's alpha at its strongest (white, to read on dark water): faint (#15) but seen. The turbulence
+    /// ribbons (#377, `TurbulenceTrailLayer`) draw at it where a ribbon is at its peak, less as its strength fades; the
+    /// backwind's is a share of it (`backwindShare`). Named for the cones it drew before #377.
     var coneAlpha = 0.3
     /// The backwind zone's alpha, a share of the cone's (0.5 of full alpha at 0.3): much stronger than the cone's
     /// average, as it is small and sits over the cone's own hatch. Its hatch thins towards its far edge as its loss does (#298); its outline and fill stay.
@@ -317,7 +338,8 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     // MARK: Rule cues (#123)
 
     /// A boat's right-of-way glow starts to fade in when her centre is this many hull lengths from yours: a debug
-    /// slider (fun before realism), its default the core's placeholder the server can reuse (#96).
+    /// slider (fun before realism), its default the core's (`RightOfWayGlyph.defaultRangeHulls`); online the server
+    /// sends relations a little further out (#96).
     var glowRangeHulls = RightOfWayGlyph.defaultRangeHulls
     /// The glow is at full strength from this many hull lengths in, and its alpha there.
     var glowFullHulls = 1.5

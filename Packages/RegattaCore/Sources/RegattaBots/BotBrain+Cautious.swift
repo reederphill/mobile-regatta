@@ -108,9 +108,10 @@ extension BotBrain {
     /// `guardHorizon` seconds, the boats around her going on as she saw them going (turning and slowing as they were
     /// since her last decision), and keeps the one she chose unless it brings her within `guardLengths` of a boat she
     /// would have to keep clear of then (rules 10–13 on the boats as they would be: her own tack and tack change
-    /// included), or of one she would have just gained the right of way over (rule 15). Then she holds the helm that
-    /// keeps furthest from them, nearest the one she chose; as the right-of-way boat never one turning towards a boat
-    /// keeping clear of her (#101). Nil when she keeps the one she chose.
+    /// included), of one she owes mark-room to (rule 18, #93), or of one she would have just gained the right of way
+    /// over (rule 15). Then she holds the helm that keeps furthest from them, nearest the one she chose; as the
+    /// right-of-way boat never one turning towards a boat keeping clear of her (#101). Nil when she keeps the one she
+    /// chose.
     func guarded(_ view: SeatView, _ input: BoatInput) -> BoatInput? {
         let b = view.own
         guard caution != nil, b.isOnCourse, b.penaltyTurnsOwed == 0,
@@ -139,7 +140,12 @@ extension BotBrain {
                 return boat
             }
         }
-        let holdsRight = near.map { $0.rightOfWay?.keepClear == $0.seat }
+        // A boat she owes mark-room to (rule 18, `OwnBoat.markRoom`) she keeps clear of whatever rules 10–13 give her,
+        // as her conduct does (`keepClearRule`): she holds no right over her (#93).
+        let holdsRight = near.map { other in
+            other.rightOfWay?.keepClear == other.seat
+                && !b.markRoom.contains(where: { $0.owing == view.seat && $0.entitled == other.seat })
+        }
         let env = BoatDynamics.Environment(windDirection: b.windDirection, windSpeed: b.polarWindSpeed,
                                            shadow: b.speedShadow)
         let closeHauled = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).twa - deg2rad(5)
@@ -185,7 +191,13 @@ extension BotBrain {
             (i.marks > max(chosen.marks, 0) + 0.01 ? 1 : 0, (i.boats * 100).rounded(), change)
         }
         var best: (input: BoatInput, rank: (Int, Double, Double))?
+        // Mid-tack (past the boom crossing, short of close-hauled) she finishes it: a luff now turns her back through
+        // the wind, a second tack at the speed the first left her (#377: slowed in a ribbon, she tacked back at 0.8 m/s
+        // and fouled under rule 13 a boat she had tacked clear of). Turning to starboard (+) is a luff with the wind
+        // over her starboard side (`rudder`).
+        let luffSign: Double = b.boomSide == .port ? 1 : -1
         for rudder in Self.guardRudders {
+            if senses.tacking, rudder * luffSign > 0 { continue }
             if rudder != 0, holdsRight.contains(true), turnsTowardsKeepClearBoat(b, view, turn: rudder > 0 ? 1 : -1) { continue }
             for ease in [false, true] {
                 let change = abs(rudder - input.rudderValue) + (ease == input.ease ? 0 : 0.25)

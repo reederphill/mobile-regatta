@@ -24,4 +24,24 @@ public enum BotProfile: String, Codable, CaseIterable, Hashable, Sendable {
     /// when it is hers to, and hunts only racing (pre-start fighting is #337's). Her tunables: `BotBrain.Hunter`
     /// (`BotBrain+Hunter.swift`).
     case hunter
+    /// Execution without tactics (#222, #105): the baseline's tactics, but rolling every tack and hitting every roll,
+    /// with no angle noise (`BotWeaknesses.none`). A measuring profile for the suite only: the "execution never beats
+    /// tactics" check races her against `tacticianClubExecution`.
+    case executor
+    /// The tactician at Club-level execution (#222, #105): her tactics, but half her rolls miss
+    /// (`clubExecutionRollHitRate`; rolls only, the orchestrator's ruling on #105). A measuring profile for the suite only.
+    case tacticianClubExecution
+}
+
+extension BotProfile {
+    /// The share of `tacticianClubExecution`'s rolls that hit (#105: "half its rolls miss").
+    static let clubExecutionRollHitRate = 0.5
+
+    /// What she sails with at `skill`: no weaknesses (`BotWeaknesses.none`, #102), but for `tacticianClubExecution`,
+    /// whose rolls hit only `clubExecutionRollHitRate` of the time.
+    func weaknesses(skill: Double) -> BotWeaknesses {
+        var weaknesses = BotWeaknesses.none(skill: skill)
+        if self == .tacticianClubExecution { weaknesses.rollHitRate = Self.clubExecutionRollHitRate }
+        return weaknesses
+    }
 }

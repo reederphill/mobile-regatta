@@ -374,6 +374,50 @@ struct LogFeeder {
         #expect(race.digest() == digest)
         for _ in 0..<30 { race.step() }
     }
+
+    /// #377: the ribbon points, the emission levels, the headers and the backwind levels and sides travel in the
+    /// snapshot exactly. Exported with a wake formed, seat 0 headed by the lee-bower and the lee-bower's backwind fading
+    /// as she eases, the import continues bit for bit.
+    @Test func ribbonsAndBackwindStateRoundTrip() throws {
+        // The lee-bow (3 L ahead): seat 0 in the lee-bower's upwash zone, astern of her, 3 s on (#377).
+        let original = try WakeRibbonsTests.leeBow().leeBowed
+        for _ in 0..<(3 * Race.tickRate) { original.step() }
+        _ = original.apply(BoatInput(rudder: 0 as Int8, ease: true), seat: 1, atTick: original.tick + 1)
+        for _ in 0..<10 { original.step() }
+        #expect(original.header(ofSeat: 0) > 0)
+        #expect(original.backwindSail(ofSeat: 1) > 0 && original.backwindSail(ofSeat: 1) < 1, "fading")
+        #expect(original.wake.pointCount > 0)
+        _ = original.drainEvents()
+        let snapshot = original.exportSnapshot()
+        #expect(snapshot.ribbonPoints == original.wake.points && snapshot.emissionLevels == original.wake.levels)
+        #expect(snapshot.headers.count == 2 && snapshot.backwind.levels.count == 2)
+
+        let copy = try WakeRibbonsTests.leeBow().clean
+        try copy.importSnapshot(snapshot)
+        #expect(copy.wake == original.wake)
+        #expect(copy.header(ofSeat: 0) == original.header(ofSeat: 0))
+        #expect(copy.backwindSail(ofSeat: 1) == original.backwindSail(ofSeat: 1))
+        #expect(copy.backwindSide(ofSeat: 1) == original.backwindSide(ofSeat: 1))
+        #expect(copy.digest() == original.digest(), "at import")
+        copy.umpire = original.umpire
+        for _ in 0..<(6 * Race.tickRate) {
+            original.step()
+            copy.step()
+            guard copy.digest() == original.digest(), copy.wake == original.wake,
+                  copy.header(ofSeat: 0) == original.header(ofSeat: 0) else {
+                Issue.record("diverged at tick \(original.tick): digest \(copy.digest() == original.digest()) wake \(copy.wake == original.wake) header \(copy.header(ofSeat: 0) == original.header(ofSeat: 0)) pos \(copy.boats.map(\.position) == original.boats.map(\.position))")
+                return
+            }
+        }
+
+        // A snapshot whose shadow state the race can't step from is refused.
+        var bad = snapshot
+        bad.headers = [0]
+        #expect(throws: WorldSnapshotError.invalidShadowState) { try copy.importSnapshot(bad) }
+        bad = snapshot
+        bad.emissionLevels[0] = 2
+        #expect(throws: WorldSnapshotError.invalidShadowState) { try copy.importSnapshot(bad) }
+    }
 }
 
 /// The world snapshot must hold everything `Race` keeps that its future depends on. Every stored
@@ -389,6 +433,9 @@ struct LogFeeder {
         "results", // a closed race can't score itself again: the seat events it reads aren't world state
         "overlaps", // as the pairs overlapped or changing
         "wind", // as its keys, `windKeys`; its setup and window grid are fixed for the race
+        "wake", // as each caster's points and each seat's emission level, `ribbonPoints` and `emissionLevels` (#377)
+        "headerState", // as `headers` (#377)
+        "backwindSails", // as `backwind` (#377)
     ]
 
     /// Race properties deliberately left out, and why.
@@ -406,6 +453,7 @@ struct LogFeeder {
         "current": "fixed for the race, derived from the venue and the public race seed",
         "tideStateAtGun": "fixed for the race, drawn from the venue and the public race seed (ADR 0003)",
         "umpire": "umpire memory (which incidents are open, #88; rule 18 records and zone presence, #91; the recorded track the escape simulation reads, #92), the authoritative race's own, never sent to clients, in a snapshot or in the digest",
+        "umpireRelations": "the server umpire's relations a prediction takes from each snapshot (#96): not world state, never in the digest; a resync drops them",
         "windSetup": "fixed for the race, drawn from the public race seed",
         "windKeys": "the key generator: it holds the wind seed, never in a snapshot (ADR 0001); import moves it past the snapshot's keys",
         "finishers": "derived on import: the count of finished boats",
@@ -414,6 +462,7 @@ struct LogFeeder {
         "appliedInputs": "the race log, not world state",
         "seatEvents": "the race log, not world state",
         "pressureMapDrawn": "the seat views' pressure map kept until its next refresh (#290): drawn from the wind, not world state; import drops it",
+        "unheadedWindDirections": "each boat's wind before this tick's backwind header (#377), what her autohelm steers by: set again every step before anything reads it, not state",
         "scriptedWind": "a test's wind in place of the keyed wind, fixed at construction like the setup (`Race.init(setup:files:mode:current:wind:)`)",
     ]
 

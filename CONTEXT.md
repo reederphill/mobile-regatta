@@ -18,6 +18,10 @@ _Avoid_: tournament, event
 The countdown before the gun, during which boats manoeuvre below the start line.
 _Avoid_: pre-race, lobby countdown
 
+**Committee sounds**:
+The start sequence's horns (60 s and 30 s), beeps (5 to 1) and gun, played from the race clock the player sees, never from a server event.
+_Avoid_: alarms, countdown sounds
+
 **OCS** (On Course Side):
 A boat with any part of her hull on the course side of the start line at the gun. She must return until her whole hull is on the pre-start side before starting. A boat that never comes back is scored OCS, and so is a boat that never started: behind every boat placed by ladder distance and every DSQ, and ahead of RET.
 _Avoid_: false start, early
@@ -56,7 +60,7 @@ The umpire's memory of a pair whose leeward boat came up from clear astern withi
 _Avoid_: luffing rights, overtaking record
 
 **Exoneration**:
-A boat that broke a rule of Part 2 isn't penalised for it, because she was compelled to (43.1(a)) or was denied the room she was entitled to (43.1(b)). Recorded on the incident; the rule call names the boat that broke the rule.
+A boat that broke a rule of Part 2 isn't penalised for it, because she was compelled to (43.1(a)) or was denied the room she was entitled to (43.1(b)). Recorded on the incident; the rule call names the boat that broke the rule. An exonerated boat gets no call: when the only boat that broke a rule was compelled (43.1(a)), the incident has no call at all.
 _Avoid_: acquittal, cleared
 
 **Hold course**:
@@ -129,12 +133,20 @@ _Avoid_: difficulty, level
 The bot that sails a dropped player's boat until they come back: a Club bot at the bottom of Club's band, not a fourth tier. It takes the boat from wherever she is, always gives way, early and wide, and never attacks, so dropping never helps.
 _Avoid_: easy bot, autopilot
 
+**Executor**:
+A bot-suite profile only: the groove-only bot's tactics with perfect execution, every roll tack hit. The suite checks she loses to a good tactician with average execution, so decisions stay the main skill.
+_Avoid_: perfect bot
+
+**Watchdog**:
+The bot suite's count of rule 16.1 calls where the right-of-way boat's rudder was centred throughout the escape window: the autohelm's own course change following a shift, called against her.
+_Avoid_: 16.1 monitor
+
 **Handback**:
 A dropped player taking their boat back from the cautious bot. The boat keeps everything she had: a penalty turn part turned, the autohelm's target. The player's inputs apply from the next tick.
 _Avoid_: resume (the server's word for the player rejoining), takeover (the bot taking the boat)
 
 **Rival**:
-One of the 1–2 bots in a practice race whose skill is set from the player's recent practice results, so the player usually finishes near them. A rival races like any other bot and never targets the player. Practice only.
+One of the 1–2 bots in a practice race whose skill is set from the player's recent practice results, so the player usually finishes near them. A rival races like any other bot and never targets the player. When the player picks a tier, a rival's skill stays inside that tier's band. The briefing's fleet list and the results mark a rival with the short word "Rival" beside her name (she keeps the bot glyph); never a number. Practice only, so never in a rated race.
 _Avoid_: nemesis; "rival" for just any nearby boat
 
 **Mixed fleet**:
@@ -253,7 +265,7 @@ The thin vermillion arrow under your hull, one hull length, pointing to the wind
 _Avoid_: wind arrow, wind indicator
 
 **Right-of-way glow**:
-The wordless halo round another boat that says who keeps clear: red on a boat you must keep clear of, green on a boat that must keep clear of you. It fades in from nothing as she comes within a short range, to full strength close in; a boat owing mark-room glows red and the boat owed it green (mark-room has no notice of its own), and a ghost has none. The core's `RightOfWayGlyph` is its red/green kind (the name dates from when these were a ⚠ and a chevron).
+The wordless halo round another boat that says who keeps clear: red on a boat you must keep clear of, green on a boat that must keep clear of you. It fades in from nothing as she comes within a short range, to full strength close in; mark-room shows the same way within that range, a boat owing it red and the boat owed it green (mark-room has no notice of its own, and the umpire's calls don't change: rule 18 isn't right of way), and a ghost has none. Online the glows are the server umpire's, mark-room included. The core's `RightOfWayGlyph` is its red/green kind (the name dates from when these were a ⚠ and a chevron).
 _Avoid_: boat label, rights icon, glyph
 
 **Penalty arc**:
@@ -311,11 +323,11 @@ A small, short-lived patch of stronger wind moving down the course, found mostly
 _Avoid_: gust (for a moving patch)
 
 **Wind shadow**:
-The disturbed, weaker air downwind of a boat's sails: a cone from her bow and stern that fades with distance down the wind and towards its sides.
+The disturbed, weaker air a boat leaves behind her sails: ribbons of turbulence shed from her while her sail works, drifting down her apparent wind, widening and fading as they age. A boat in them loses speed; stacked ribbons slow her more, down to a floor. Easing, luffing or tacking stops the shedding (the old air drifts off) and it builds back once she sheets in. Drawn as the ribbons, never a cone.
 _Avoid_: dirty air (fine as UI copy)
 
 **Backwind**:
-Air deflected off a boat's sails that slows a boat just to windward of her and astern. What makes a safe leeward position safe. It reaches further astern the faster she sails, and she casts none while running, only close-hauled and reaching.
+Air deflected off a boat's working sail onto a boat just to windward of her: it heads her, turning her wind towards her bow (a shift, not a lull). What makes a safe leeward position safe. It lies beside her and on astern of her, on her windward side from her mast back past her stern, a wedge: a point at her mast, opening straight back and out behind her sail, strongest at her side and gone at its outer edge, fading away behind her stern over a length or two; it goes where she goes and doesn't linger on the water. She casts none while running, below a floor speed, or without a working sail (eased, luffing, head to wind, mid-tack or mid-gybe). It fades out on the side it was cast on and only then builds on her new side. (Older boat classes cast it as a zone astern of her windward quarter that reaches further astern the faster she sails.)
 
 **Lee-bow**:
 To put your boat to leeward of another boat and just ahead of her, on the same tack and close enough that she sits in your backwind. She can only sink back or tack away. Usually done by crossing her bow and tacking onto her lee bow, which needs room to cross. She is then _lee-bowed_.

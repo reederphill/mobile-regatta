@@ -507,7 +507,8 @@ func wireSeats(of world: WorldSnapshot) throws -> [WireSeat] {
 
 /// `base` with `seats` merged in at `tick`. Race-level state stays as the base has it, but for the
 /// obstruction contacts it began after `tick` (#82): the receiver's own prediction ahead of the server,
-/// which it sails again from here (and a snapshot can't hold contacts from after its tick).
+/// which it sails again from here (and a snapshot can't hold contacts from after its tick). Likewise the wake's
+/// ribbon points it shed after `tick` (#377): the ribbons aren't on the wire, so the receiver keeps its own.
 func merge(_ seats: [WireSeat], into base: WorldSnapshot, tick: Int) throws -> WorldSnapshot {
     guard seats.count == base.seats.count else {
         throw WorldSnapshotError.seatCount(expected: base.seats.count, found: seats.count)
@@ -515,6 +516,7 @@ func merge(_ seats: [WireSeat], into base: WorldSnapshot, tick: Int) throws -> W
     var world = base
     world.tick = tick
     world.incidents.forgetObstructionContacts(after: tick)
+    world.ribbonPoints = world.ribbonPoints.map { $0.filter { $0.born <= tick } }
     for i in seats.indices { seats[i].apply(to: &world.seats[i], tick: tick) }
     return world
 }

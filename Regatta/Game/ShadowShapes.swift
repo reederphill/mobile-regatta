@@ -1,34 +1,30 @@
 import Foundation
 import RegattaCore
 
-/// The outlines a boat's wind shadow and backwind are drawn in (#10, #298, #121), from the same numbers core's
-/// `ShadowCone` slows boats with: the class file's sizes (ADR 0004), never constants of the app's. Pure.
+/// The outline a boat's backwind is drawn in (#10, #298, #121), from the same numbers core's `ShadowCone` casts it
+/// with: the class file's sizes (ADR 0004), never constants of the app's. Pure. (Her wind shadow is the ribbons since
+/// #377, drawn by `TurbulenceTrailLayer`.)
 ///
-/// Each has a local outline, in metres, which the sprite's texture is drawn from, and a world outline, where that
+/// It has a local outline, in metres, which the sprite's texture is drawn from, and a world outline, where that
 /// outline lands once the sprite is placed as `BoatEffects` places it.
 nonisolated enum ShadowShapes {
-    /// The cone in its own frame, metres: x across it, y down its axis from the apex. Its corners: the apex's
-    /// two, then the far end's two.
-    static func coneLocal(_ shadow: BoatClass.WindShadow) -> [Vec2] {
-        let near = shadow.coneWidthAtBoat / 2, far = shadow.coneWidthAtEnd / 2
-        return [Vec2(-near, 0), Vec2(near, 0), Vec2(far, shadow.coneLength), Vec2(-far, shadow.coneLength)]
-    }
-
-    /// The cone's four corners on the water: its near edge's two ends (`ShadowCone.nearEdge`, left to right across the
-    /// axis), then the far end's, along `cone.axis` from `cone.apex`.
-    static func coneCorners(_ cone: ShadowCone) -> [Vec2] {
-        let across = cone.axis.rightPerp, far = cone.shadow.coneWidthAtEnd / 2
-        let near = cone.nearEdge.sorted { $0.x < $1.x }
-        let local = near + [Vec2(far, cone.shadow.coneLength), Vec2(-far, cone.shadow.coneLength)]
-        return local.map { cone.apex + across * $0.x + cone.axis * $0.y }
-    }
-
     /// The backwind trapezoid (#298) in the boat's frame on starboard tack, metres, its length astern of her stern
     /// line scaled by `scale`: x out to starboard (her windward side on starboard tack), y forward. Its corners, from `BoatClass.WindShadow.backwindSpan(out:)`: P1,
     /// her windward stern corner offset by the span's start on the hull side; P2, `backwindWidth` out along her stern, by
     /// the start there; P3 and P4, the far edge's ends, outboard then hull side. One edge slants: the far one for
     /// skiff@4's shape, the stern one for skiff@5's. Nil for a class with #79's band, which draws no zone.
+    ///
+    /// For a class whose header's zone is the upwash beside her sail (#377, `BoatClass.WindShadow.upwashExtent`), the
+    /// fan of it, a quad: along her side from its aft end (astern of her stern, or her stern) forward to her mast, out
+    /// to its width at her mast, and slanting straight out to its width at its aft end; not scaled (it is bound to her,
+    /// her speed doesn't stretch it). With no width at her mast (a wedge from a point there, the owner's renders review
+    /// 3) the quad's two mast corners are one, so it is a triangle: its aft end's two corners and her mast's point.
     static func backwindLocal(_ shadow: BoatClass.WindShadow, scale: Double = 1) -> [Vec2]? {
+        if let zone = shadow.upwashExtent {
+            let aft = [Vec2(zone.out, zone.aft), Vec2(zone.out + zone.widthAft, zone.aft)]
+            guard zone.widthAtMast > 0 else { return aft + [Vec2(zone.out, zone.fore)] }
+            return aft + [Vec2(zone.out + zone.widthAtMast, zone.fore), Vec2(zone.out, zone.fore)]
+        }
         guard let hullSide = shadow.backwindSpan(out: 0), let outboard = shadow.backwindSpan(out: shadow.backwindWidth) else {
             return nil
         }
@@ -40,8 +36,15 @@ nonisolated enum ShadowShapes {
 
     /// The backwind trapezoid's corners on the water: `backwindLocal`, its length astern scaled by her speed
     /// (`BoatClass.WindShadow.backwindScale(speed:)`), turned to her heading and mirrored to her windward side
-    /// (`cone.windward`). Nil for a class with #79's band.
+    /// (`cone.windward`). Nil for a class with #79's band. The upwash zone (#377) isn't scaled.
     static func backwindCorners(_ cone: ShadowCone) -> [Vec2]? {
-        backwindLocal(cone.shadow, scale: cone.shadow.backwindScale(speed: cone.speed))?.map { cone.apex + cone.windward * $0.x + cone.forward * $0.y }
+        backwindLocal(cone.shadow, scale: backwindScale(cone.shadow, speed: cone.speed))?
+            .map { cone.apex + cone.windward * $0.x + cone.forward * $0.y }
+    }
+
+    /// The scale `backwindLocal`'s length astern is drawn at for a boat at `speed`: her trapezoid's speed scale
+    /// (`BoatClass.WindShadow.backwindScale(speed:)`), or 1 for the upwash zone (#377), which her speed doesn't stretch.
+    static func backwindScale(_ shadow: BoatClass.WindShadow, speed: Double?) -> Double {
+        shadow.upwashExtent != nil ? 1 : shadow.backwindScale(speed: speed)
     }
 }

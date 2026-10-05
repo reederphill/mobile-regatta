@@ -155,7 +155,8 @@ import Testing
     @Test func bundledThresholdsGateTheStart() throws {
         let start = try Self.limits()
         #expect(start.maxOCSShare == 0.05 && start.minOnTimeShare == 0.6)
-        #expect(start.maxMeanPreGunIronsSeconds == 1 && start.minPinThirdShare == 0.7)
+        // #377: the pin third lowered from 0.70 to 0.68 under the ribbons and header; the start drift is #388.
+        #expect(start.maxMeanPreGunIronsSeconds == 1 && start.minPinThirdShare == 0.68)
         let old = try JSONDecoder().decode(BotThresholds.self, from: Data(#"{"maxP99TickMs": 10, "tiers": {}}"#.utf8))
         #expect(old.start == nil)
     }

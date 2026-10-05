@@ -24,10 +24,13 @@ final class ControlSettings {
 
     /// Whether the HUD shows the live leaderboard (#268).
     var showsLeaderboard: Bool
+    /// Whether hints show (#23, #129): on by default. Off, none is posted and their progress stands still; plain words
+    /// and the OCS notice still show.
+    var showsHints: Bool
 
     init(steering: DeviceSettings.Steering = .halves, camera: DeviceSettings.Camera = .courseUp, autoZoom: Bool = true,
          zoomMultiplier: Double = 1, showsLaylines: Bool = true, showsLadderLines: Bool = false,
-         showsLeaderboard: Bool = true) {
+         showsLeaderboard: Bool = true, showsHints: Bool = true) {
         self.steering = steering
         self.camera = camera
         self.autoZoom = autoZoom
@@ -35,6 +38,7 @@ final class ControlSettings {
         self.showsLaylines = showsLaylines
         self.showsLadderLines = showsLadderLines
         self.showsLeaderboard = showsLeaderboard
+        self.showsHints = showsHints
     }
 
     /// The device's controls from `settings`, with a test launch's `-scheme` and `-camera` over them.
@@ -43,7 +47,7 @@ final class ControlSettings {
                   camera: Self.camera(settings.camera, override: launchOptions.camera),
                   autoZoom: settings.autoZoom, zoomMultiplier: settings.zoomMultiplier,
                   showsLaylines: settings.laylines, showsLadderLines: settings.ladderLines,
-                  showsLeaderboard: settings.liveLeaderboard)
+                  showsLeaderboard: settings.liveLeaderboard, showsHints: settings.hints)
     }
 
     /// Takes `settings`, with a test launch's `-scheme` and `-camera` over them: once per Settings change.
@@ -55,6 +59,7 @@ final class ControlSettings {
         showsLaylines = settings.laylines
         showsLadderLines = settings.ladderLines
         showsLeaderboard = settings.liveLeaderboard
+        showsHints = settings.hints
     }
 
     /// A pinch or a two-finger double tap set a new multiplier: it's kept across races.

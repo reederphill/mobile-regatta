@@ -25,7 +25,7 @@ struct RootView: View {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
             case .practiceSetup, .pauseMenu, .myBoat, .help: MenuGalleryView(gallery: fixtureGallery, model: model)
-            case .results(let stage): ResultsGalleryView(stage: stage)
+            case .results(let stage, let rivalSkill): ResultsGalleryView(stage: stage, rivalSkill: rivalSkill)
             }
         } else {
             HomeView(model: model, onRaceOnline: raceOnline)
@@ -131,8 +131,9 @@ struct RootView: View {
         let server = RaceServer(address: launchOptions.onlineHost
             ?? UserDefaults.standard.string(forKey: RaceServer.addressDefaultsKey) ?? RaceServer.defaultAddress)
         let (raceSeconds, startSeconds) = (launchOptions.raceSeconds, launchOptions.startSeconds)
-        let launch = OnlineLaunch(server: server, haptics: model.haptics, controls: model.controls,
-                                  rulesSeen: model.rulesSeen) {
+        let launch = OnlineLaunch(server: server, haptics: model.haptics, sound: model.sound, controls: model.controls,
+                                  rulesSeen: model.rulesSeen, hints: model.hintEngine,
+                                  onHintRetired: model.logsHintRetired) {
             try await DevInstantRace.ticket(server: server, raceSeconds: raceSeconds, startSeconds: startSeconds)
         }
         model.startRaceSequence(.online(launch))

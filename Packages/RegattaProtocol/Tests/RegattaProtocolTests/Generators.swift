@@ -126,6 +126,15 @@ struct Gen {
         return world
     }
 
+    /// A relation to each of `n` seats, every rule and direction, some restricted, some none (#96).
+    mutating func relations(_ n: Int) -> [WireRelation] {
+        (0..<n).map { _ in
+            WireRelation(keepClear: bool() ? WireRelation.KeepClear(recipientKeepsClear: bool(),
+                                                                     rule: WireRelation.wireRules[int(0...7)]) : nil,
+                         isRestricted: bool())
+        }
+    }
+
     mutating func wireSeats(_ n: Int) -> [WireSeat] {
         (0..<n).map { _ in
             WireSeat(
@@ -282,7 +291,8 @@ struct Gen {
                                        isOver: bool(), rules: payload())))
         case .snapshot:
             let ack = bool() ? InputAck(seq: u32(), appliedTick: tick(), margin: int(-32_768...32_767)) : nil
-            message = .snapshot(Snapshot(seats: wireSeats(int(2...16)), ack: ack))
+            let n = int(2...16)
+            message = .snapshot(Snapshot(seats: wireSeats(n), ack: ack, relations: bool() ? relations(n) : nil))
         case .event: message = .event(eventKind(int(0...(eventKindCount - 1))))
         case .windKey: message = .windKey(windKey())
         case .pong: message = .pong(Pong(clientTime: u64(), sinceTickMicros: u16()))
