@@ -16,6 +16,8 @@ import RegattaProtocol
 ///   stream (all of them reach every seat but the notices), and wind key k at tick `windowStart(k) − 30`.
 /// - Answers `RequestResync` with a `Resync`.
 /// - With `collisionCourse`, sets two seats nobody helms head to head, for a foul at a known time.
+/// - With `markRoomAt`, sets the client's boat and a seat nobody helms by the windward mark at that tick, the other
+///   boat owed mark-room by hers (#386).
 ///
 /// It records when it sent each event, and every client input it applied.
 nonisolated final class FakeRaceServer {
@@ -44,20 +46,28 @@ nonisolated final class FakeRaceServer {
     private(set) var sentEvents: [(time: UInt64, event: RaceEvent)] = []
     /// The umpire relations each snapshot carried to the client, by the snapshot's tick (#96).
     private(set) var sentRelations: [Int: [WireRelation]] = [:]
+    /// The client's boat's keep-clear relations as an offline race shows them (`Race.keepClearRelations(of:)` on the
+    /// authoritative race), at each snapshot's tick (#386).
+    private(set) var offlineRelations: [Int: [RightOfWay?]] = [:]
+    private let markRoomAt: Int?
     /// Each held input of the client's applied: its rudder and the tick.
     private(set) var appliedHeld: [(tick: Int, rudder: Int8)] = []
     private(set) var resyncsSent = 0
     private(set) var joins = 0
 
     /// Seat 0 is the client's and the rest are bots, but with `collisionCourse` seats 1 and 2 are human seats
-    /// nobody helms, set on a collision course (`setCollisionCourse`).
+    /// nobody helms, set on a collision course (`setCollisionCourse`); with `markRoomAt`, seat 1 is a human seat
+    /// nobody helms, set by the mark with the client's (`setMarkRoom`).
     init(seats: Int = 10, seed: UInt64, startSequenceTicks: Int = 300, collisionCourse: Bool = false,
-         transport: RaceTransport, clock: VirtualClock) throws {
-        let kinds: [SeatKind] = (0..<seats).map { $0 == 0 || (collisionCourse && $0 <= 2) ? .human : .bot }
+         markRoomAt: Int? = nil, transport: RaceTransport, clock: VirtualClock) throws {
+        let kinds: [SeatKind] = (0..<seats).map {
+            $0 == 0 || (collisionCourse && $0 <= 2) || (markRoomAt != nil && $0 == 1) ? .human : .bot
+        }
         let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: kinds, laps: 1, startSequenceTicks: startSequenceTicks)
         let race = Race(setup: setup, windSeed: WindSeed(seed &* 7))
         if collisionCourse { try Self.setCollisionCourse(race) }
         self.race = race
+        self.markRoomAt = markRoomAt
         bots = SeatControllers(setup: setup)
         self.transport = transport
         self.clock = clock
@@ -81,6 +91,38 @@ nonisolated final class FakeRaceServer {
             world.seats[seat].boat.heading = heading
             world.seats[seat].boat.boomSide = .leeward(ofRelativeWind: wrapAngle(race.windSetup.meanDirection - heading))
         }
+        try race.importSnapshot(world)
+    }
+
+    /// Moves the client's boat (seat 0) and seat 1 by the windward mark, racing on the beat, as `MarkRoomTests`'
+    /// Case 2 does: seat 1 sails straight at the mark on starboard, her bow just inside the zone; the client's is clear
+    /// ahead of her but 14 m to leeward, outside it. Seat 1 reaches the zone first, so she is owed mark-room and the
+    /// client's boat owes it, though Section A has seat 1 keep clear (clear astern).
+    private static func setMarkRoom(_ race: Race) throws {
+        var world = race.exportSnapshot()
+        let course = race.course, hull = race.boatClass.hull
+        let mark = course.elements[CourseLayout.windwardIndex].marks[0].position
+        let heading = wrapAngle(course.axis - .pi / 4)
+        let ahead = Vec2.heading(heading)
+        let astern = mark - ahead * (course.zoneRadius + hull.length / 2 - 0.3)
+        let clearAhead = astern + ahead * (hull.length + 1) - ahead.rightPerp * 14
+        for (seat, position) in [(0, clearAhead), (1, astern)] {
+            var boat = world.seats[seat].boat
+            boat.status = .racing
+            boat.legIndex = 0
+            boat.roundingStage = 0
+            boat.position = position
+            boat.heading = heading
+            boat.boomSide = .leeward(ofRelativeWind: wrapAngle(course.axis - heading))
+            boat.speed = 3
+            boat.rudder = 0
+            boat.desiredRudder = 0
+            boat.autohelm = nil
+            boat.isTacking = false
+            world.seats[seat].boat = boat
+        }
+        world.touchingBoats = []
+        world.overlaps = []
         try race.importSnapshot(world)
     }
 
@@ -157,6 +199,7 @@ nonisolated final class FakeRaceServer {
     }
 
     private func step() {
+        if race.tick == markRoomAt { try? Self.setMarkRoom(race) }
         bots.drive(race)
         race.step()
         let applied = queued.filter { $0.tick <= race.tick }
@@ -173,6 +216,7 @@ nonisolated final class FakeRaceServer {
             // As the host does (#96): the umpire's relations of the client's boat.
             snapshot.relations = WireRelation.relations(of: clientSeat, in: race)
             sentRelations[race.tick] = snapshot.relations
+            offlineRelations[race.tick] = race.keepClearRelations(of: clientSeat)
             send(.snapshot(snapshot), tick: race.tick)
         }
     }

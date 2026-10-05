@@ -176,7 +176,7 @@ import RegattaCore
     @Test func anEventWithAnIdSeenBeforeIsNotPresentedAgain() {
         let me = Self.me
         var presenter = RaceEventPresenter(me: me)
-        let kinds: [RaceEvent.Kind] = [.ocsNotice(recipient: me), .markRoomNotice(boat: me, entitledOver: 1, mark: "pin"),
+        let kinds: [RaceEvent.Kind] = [.ocsNotice(recipient: me), .rollMissed(seat: me),
                                        .markTouch(seat: me, mark: "pin"), .penaltyServed(seat: me), .finished(seat: me, place: 1)]
         for (k, kind) in kinds.enumerated() {
             let event = RaceEvent(tick: 10 + k, kind: kind, id: UInt32(k + 1))
@@ -184,7 +184,7 @@ import RegattaCore
             #expect(presenter.present([event]) == Presentation(), "\(kind) again")
         }
         #expect(presenter.present([RaceEvent(tick: 20, kind: .ocsNotice(recipient: me), id: 9)]) != Presentation())
-        let offline = RaceEvent(tick: 30, kind: .markRoomNotice(boat: me, entitledOver: 1, mark: "pin"))
+        let offline = RaceEvent(tick: 30, kind: .rollMissed(seat: me))
         #expect(presenter.present([offline]) != Presentation())
         #expect(presenter.present([offline]) != Presentation())
     }

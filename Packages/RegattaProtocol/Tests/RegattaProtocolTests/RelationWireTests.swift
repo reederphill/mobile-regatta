@@ -9,7 +9,7 @@ import Testing
     /// for every pair within the wire range, and none for a pair outside it, through a whole bot race.
     @Test func snapshotRelationBitsAreTheServersForEveryPairInRange() throws {
         let race = botRace()
-        var inRange = 0, outOfRange = 0
+        var inRange = 0, outOfRange = 0, markRoom = 0
         let hull = race.race.boatClass.hull.length
         while !race.isOver && race.tick < 6000 {
             for _ in 0..<3 { race.step() }
@@ -29,6 +29,9 @@ import Testing
                                                          rangeHulls: WireRelation.rangeHulls, hullLength: hull)
                     if near {
                         if server[other] != nil { inRange += 1 }
+                        if let rule = server[other]?.rule, rule == .givingMarkRoom || rule == .tackingInTheZone {
+                            markRoom += 1
+                        }
                         #expect(decoded.keepClear[other] == server[other], "tick \(race.tick) \(seat)-\(other)")
                         #expect(decoded.restrictedBy.contains(other) == restricted.contains(other))
                     } else {
@@ -40,6 +43,34 @@ import Testing
             }
         }
         #expect(inRange > 0 && outOfRange > 0)
+        // #386: the boats rounding together owe each other mark-room, and those pairs' glows come through too.
+        #expect(markRoom > 0)
+    }
+
+    /// #386: a mark-room relation (wire rules 6 and 7) round-trips in its six bits, either boat owing, restricted
+    /// or not, beside a fleet's other relations, in no more bytes.
+    @Test func markRoomRelationBitsRoundTrip() throws {
+        for rule in [RacingRule.givingMarkRoom, .tackingInTheZone] {
+            for recipientKeepsClear in [true, false] {
+                for isRestricted in [false, true] {
+                    let relation = WireRelation(keepClear: .init(recipientKeepsClear: recipientKeepsClear, rule: rule),
+                                                isRestricted: isRestricted)
+                    #expect(try WireRelation(bits: relation.bits()) == relation)
+                    let fleet = [WireRelation.none, relation,
+                                 WireRelation(keepClear: .init(recipientKeepsClear: true, rule: .portStarboard),
+                                              isRestricted: false)]
+                    var w = WireWriter()
+                    try encodeRelations(fleet, to: &w)
+                    #expect(w.bytes.count == WireRelation.byteCount(seats: fleet.count))
+                    var r = WireReader(w.bytes)
+                    #expect(try decodeRelations(seats: fleet.count, from: &r) == fleet)
+                }
+            }
+        }
+        #expect(try WireRelation(keepClear: .init(recipientKeepsClear: true, rule: .givingMarkRoom), isRestricted: false)
+            .bits() == 0b01_1001)
+        #expect(try WireRelation(keepClear: .init(recipientKeepsClear: false, rule: .tackingInTheZone), isRestricted: false)
+            .bits() == 0b01_1111)
     }
 
     /// Each relation has one encoding: no rule outside `wireRules`, no direction or rule bits without a relation,
