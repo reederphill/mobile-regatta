@@ -19,11 +19,13 @@ func steadyCurrent(knots: Double, towards bearing: Double) -> CurrentField {
 /// `Race.init(setup:files:mode:current:wind:)` says. Every boat is let go where she's placed: her autohelm
 /// engages on the next step, on the angle she sails then (ADR 0007). The race is at `venue` if one is given.
 func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: ((_ tick: Int) -> GroundWind)? = nil,
-                boatClass: FileRef? = nil, venue: VenueFile? = nil,
+                boatClass: FileRef? = nil, boatClassFile: BoatClassFile? = nil, venue: VenueFile? = nil,
                 _ place: (inout WorldSnapshot, Race) -> Void) throws -> Race {
     // ilca-dinghy@3 unless told otherwise: the schema-2 class these tests' expectations (`Fixtures.boatClass()`) come from.
-    let boatClass = try boatClass ?? BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
+    // A `boatClassFile` (a tuned copy, say) is sailed from the race's own catalog.
+    let boatClass = try boatClassFile?.ref ?? boatClass ?? BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
     var catalog = RaceFileCatalog()
+    if let boatClassFile { try catalog.boatClasses.add(boatClassFile) }
     let venue = try venue.map { try catalog.venues.add($0) } ?? RaceFiles.defaults.venue.ref
     let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .human, count: seats), laps: 2,
                               startSequenceTicks: 60 * Race.tickRate, boatClass: boatClass, venue: venue)
@@ -33,6 +35,11 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: (
     for _ in 0..<10 { race.step() }
     var snapshot = race.exportSnapshot()
     for seat in snapshot.seats.indices { snapshot.seats[seat].boat.autohelm = nil }
+    // Placed boats start in clean air (#377): no ribbons, headers or backwind carried over from where they were.
+    snapshot.ribbonPoints = []
+    snapshot.emissionLevels = []
+    snapshot.headers = []
+    snapshot.backwind = BackwindSails()
     place(&snapshot, race)
     try race.importSnapshot(snapshot)
     return race
@@ -111,10 +118,29 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: (
                 snapshot.seats[1].boat.position = caster.position + downwind * 1.5 * 4.2
             }
         }
-        let sailing = try race(ghost: false)
-        sailing.step()
+        // On the course and sailing she shadows the boat astern down her apparent wind once her ribbon forms (#377;
+        // stopped, she sheds none).
+        let polar = try Fixtures.boatClass().polar
+        let sailing = try placedRace(current: current) { snapshot, _ in
+            var caster = snapshot.seats[0].boat
+            let best = polar.bestUpwind(tws: caster.windSpeed)
+            caster.heading = wrapAngle(caster.windDirection - best.twa)
+            caster.speed = best.speed
+            caster.boomSide = .port
+            snapshot.seats[0].boat = caster
+            let apparent = BoatWinds.resolve(ground: caster.windOverGround, current: .zero, velocityThroughWater: caster.velocity).apparent
+            snapshot.seats[1].boat.position = caster.position - Vec2.heading(apparent.direction) * 1.5 * 4.2
+            snapshot.seats[1].boat.heading = caster.heading
+            snapshot.seats[1].boat.speed = caster.speed
+            snapshot.seats[1].boat.boomSide = .port
+        }
         #expect(sailing.shadowCone(ofSeat: 0) != nil)
-        #expect(sailing.boats[1].shadow < 1, "on the course she shadows the boat behind her")
+        var shadowed = false
+        for _ in 0..<(4 * Race.tickRate) {
+            sailing.step()
+            if sailing.boats[1].shadow < 1 { shadowed = true }
+        }
+        #expect(shadowed, "on the course she shadows the boat behind her")
 
         let ghostRace = try race(ghost: true)
         #expect(ghostRace.shadowCone(ofSeat: 0) == nil)

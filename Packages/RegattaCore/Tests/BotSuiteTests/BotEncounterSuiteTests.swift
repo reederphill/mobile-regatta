@@ -40,6 +40,11 @@ import Testing
             snapshot.seats[seat].boat.isTacking = false
             snapshot.seats[seat].heldInput = .neutral
         }
+        // Placed boats start in clean air (#377): no ribbons, headers or backwind from where they were.
+        snapshot.ribbonPoints = []
+        snapshot.emissionLevels = []
+        snapshot.headers = []
+        snapshot.backwind = BackwindSails()
         try race.importSnapshot(snapshot)
         _ = race.drainEvents()
     }
@@ -81,13 +86,12 @@ import Testing
                              (centre + toWindward * (6 * length) - Vec2.heading(port) * 20, port)])
         #expect(tally(wide, seconds: 12).map(\.crossings) == [0, 0])
 
-        // Seat 1 two lengths down seat 0's shadow cone, sailing with her: one episode, given by seat 0 and received by
-        // seat 1; the same tack, so no crossing.
+        // Seat 1 two lengths down seat 0's apparent wind, sailing with her: once seat 0's ribbon has formed over her
+        // (#377), one episode, given by seat 0 and received by seat 1; the same tack, so no crossing.
         let shadowed = try race([(centre, starboard), (centre, starboard)])
         let cone = try #require(shadowed.shadowCone(ofSeat: 0))
         try place(shadowed, [(centre, starboard), (centre + cone.axis * (2 * length), starboard)])
-        #expect(try #require(shadowed.shadowCone(ofSeat: 0)).factor(at: shadowed.boats[1].position) < RaceTally.shadowFactor)
-        let shade = tally(shadowed, seconds: 4)
+        let shade = tally(shadowed, seconds: 8)
         #expect(shade.map(\.shadowGiven) == [1, 0] && shade.map(\.shadowReceived) == [0, 1])
         #expect(shade.map(\.crossings) == [0, 0])
         #expect(shade.map(\.closeEncounters) == [1, 1])

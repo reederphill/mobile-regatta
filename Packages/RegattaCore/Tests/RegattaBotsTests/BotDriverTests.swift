@@ -5,9 +5,9 @@ import Testing
 /// A race for bot tests: `seats` (by default seat 0 human and seven bots) and the wind seed derived
 /// from `seed`, as RegattaCoreTests does.
 func botRace(seats: [SeatKind] = [.human] + Array(repeating: .bot, count: 7), laps: Int = 2,
-             prestartSeconds: Int = 45, seed: UInt64) -> Race {
+             prestartSeconds: Int = 45, seed: UInt64, boatClass: FileRef = RaceFiles.defaults.boatClass.ref) -> Race {
     let setup = try! RaceSetup(raceSeed: RaceSeed(seed), seats: seats, laps: laps,
-                               startSequenceTicks: prestartSeconds * Race.tickRate)
+                               startSequenceTicks: prestartSeconds * Race.tickRate, boatClass: boatClass)
     return Race(setup: setup, windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1))
 }
 
@@ -71,7 +71,9 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     }
 
     /// Bots draw from their own seeds, never the race's: a retuned style moves neither the placement
-    /// nor the wind of the same race seed (and needs no simulation version bump, ADR 0002).
+    /// nor the wind of the same race seed (and needs no simulation version bump, ADR 0002). Over the first 30 s of the
+    /// sequence: seat 3's start spot and timing first steer her about 22 s in (#377's upwash run astern; 20 s was
+    /// enough before it).
     @Test func changingAStyleLeavesPlacementAndWindUnchanged() throws {
         let a = botRace(seed: 11)
         let b = botRace(seed: 11)
@@ -84,7 +86,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
 
         #expect(a.boats.map(\.position) == b.boats.map(\.position))
         #expect(a.boats.map(\.heading) == b.boats.map(\.heading))
-        for _ in 0..<600 {
+        for _ in 0..<(30 * Race.tickRate) {
             sail(a, &original, ticks: 1)
             sail(b, &retuned, ticks: 1)
             #expect(a.wind == b.wind)

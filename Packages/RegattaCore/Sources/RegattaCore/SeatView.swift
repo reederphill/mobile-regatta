@@ -46,8 +46,14 @@ public struct SeatView: Sendable, Equatable {
     /// The wind speed now away from any puff or lull, m/s: what the puffs are toned against (#15). Nil
     /// only in a race without the key for now.
     public let courseWindSpeed: Double?
-    /// The wind shadow and backwind every boat casts now, in seat order, hers included; a ghost casts none.
+    /// The backwind every boat casts now, in seat order, hers included, each with its level and held side (#377); a
+    /// ghost casts none.
     public let shadowCones: [ShadowCone]
+    /// The wind shadow (#377): every boat's ribbon wake now, as the race steps it (`Race.wake`): a bot reads the point
+    /// map (`TurbulenceRibbons.pointMap(of:tick:)`) or the loss it leaves anywhere.
+    public let wake: TurbulenceRibbons
+    /// Each seat's backwind header now, radians (`Race.header(ofSeat:)`), by seat: 0 for a class without a header.
+    public let headers: [Double]
     /// The pressure over the race area, as the water and the minimap draw it (#290, ADR 0008): a coarse grid of the
     /// field as it was at most `PressureMap.refreshTicks` ago, and never later. Nil in a race without the keys for it.
     public internal(set) var pressure: PressureMap?
@@ -98,6 +104,8 @@ public struct SeatView: Sendable, Equatable {
         puffs = shared.puffs
         courseWindSpeed = shared.courseWindSpeed
         shadowCones = shared.shadowCones
+        wake = shared.wake
+        headers = shared.headers
         pressure = shared.pressure
 
         current = shared.current
@@ -119,6 +127,8 @@ public struct SeatView: Sendable, Equatable {
         let puffs: [DrawnPuff]
         let courseWindSpeed: Double?
         let shadowCones: [ShadowCone]
+        let wake: TurbulenceRibbons
+        let headers: [Double]
         let pressure: PressureMap?
         let current: CurrentField
         let course: CourseLayout
@@ -141,6 +151,8 @@ public struct SeatView: Sendable, Equatable {
             cones.reserveCapacity(race.boats.count)
             for caster in race.boats.indices { if let cone = race.shadowCone(ofSeat: caster) { cones.append(cone) } }
             shadowCones = cones
+            wake = race.wake
+            headers = race.boats.indices.map(race.header(ofSeat:))
             pressure = race.pressureMap()
             current = race.current
             course = race.course

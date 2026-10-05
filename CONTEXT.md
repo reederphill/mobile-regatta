@@ -323,11 +323,11 @@ A small, short-lived patch of stronger wind moving down the course, found mostly
 _Avoid_: gust (for a moving patch)
 
 **Wind shadow**:
-The disturbed, weaker air downwind of a boat's sails: a cone from her bow and stern that fades with distance down the wind and towards its sides.
+The disturbed, weaker air a boat leaves behind her sails: ribbons of turbulence shed from her while her sail works, drifting down her apparent wind, widening and fading as they age. A boat in them loses speed; stacked ribbons slow her more, down to a floor. Easing, luffing or tacking stops the shedding (the old air drifts off) and it builds back once she sheets in. Drawn as the ribbons, never a cone.
 _Avoid_: dirty air (fine as UI copy)
 
 **Backwind**:
-Air deflected off a boat's sails that slows a boat just to windward of her and astern. What makes a safe leeward position safe. It reaches further astern the faster she sails, and she casts none while running, only close-hauled and reaching.
+Air deflected off a boat's working sail onto a boat just to windward of her: it heads her, turning her wind towards her bow (a shift, not a lull). What makes a safe leeward position safe. It lies beside her and on astern of her, on her windward side from her mast back past her stern, a wedge: a point at her mast, opening straight back and out behind her sail, strongest at her side and gone at its outer edge, fading away behind her stern over a length or two; it goes where she goes and doesn't linger on the water. She casts none while running, below a floor speed, or without a working sail (eased, luffing, head to wind, mid-tack or mid-gybe). It fades out on the side it was cast on and only then builds on her new side. (Older boat classes cast it as a zone astern of her windward quarter that reaches further astern the faster she sails.)
 
 **Lee-bow**:
 To put your boat to leeward of another boat and just ahead of her, on the same tack and close enough that she sits in your backwind. She can only sink back or tack away. Usually done by crossing her bow and tacking onto her lee bow, which needs room to cross. She is then _lee-bowed_.

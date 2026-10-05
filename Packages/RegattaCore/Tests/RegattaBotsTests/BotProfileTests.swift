@@ -89,9 +89,11 @@ import RegattaCore
     @Test func hunterAltersCourseTowardsAGiveWayBoatWithinRule16() throws {
         // Running on starboard, overlapped, the live bot to windward and keeping clear (rule 11): holding her course the
         // hunter would leave her be; she turns at her gently instead, and the gap closes, with no 16.1 call on her.
-        // (Scenes whose tactician gybes away at once leave nothing to hunt: seeds 3 and 6 hold their tack.)
+        // (Scenes whose tactician gybes away at once leave nothing to hunt: seeds 3 and 6 hold their tack. Seed 6 starts
+        // half a length ahead, overlapped (#377): from a length ahead, on the edge of clear astern, the windward boat's
+        // ribbons drifting downwind ahead of her slow the leeward one back clear astern, where rule 12 has her keep clear.)
         var closer = 0
-        for (seed, abeam, ahead) in [(UInt64(3), 2.5, 0.5), (3, 3.0, 1.0), (6, 3.0, 1.0)] {
+        for (seed, abeam, ahead) in [(UInt64(3), 2.5, 0.5), (3, 3.0, 1.0), (6, 3.0, 0.5)] {
             let encounter = BotConductTests.windwardLeeward(seed: seed, running: true, abeam: abeam, ahead: ahead, converging: 0)
             let hunted = try Self.sail(encounter)
             let held = try Self.sail(encounter, profile: .tactician)
@@ -130,10 +132,13 @@ import RegattaCore
     }
 
     @Test func hunterLuffsWithinHerProperCourseFromAstern() throws {
-        // Rule 17: overlapped to leeward from clear astern, she luffs no higher than her proper course's edge.
+        // Rule 17: overlapped to leeward from clear astern, she luffs no higher than her proper course's edge. She comes up
+        // from 1.5 lengths astern, 1.8 to leeward (#377): from 2.5 astern, 1.5 to leeward, she sails in the windward
+        // boat's ribbons, which drift to leeward and astern of it, slows to about half her speed and never reaches the
+        // overlap. 1.8 is still inside rule 17's two lengths.
         var restricted = 0
         for seed: UInt64 in [1, 2, 3] {
-            let encounter = BotConductTests.windwardLeeward(seed: seed, running: false, abeam: 1.5, ahead: 2.5,
+            let encounter = BotConductTests.windwardLeeward(seed: seed, running: false, abeam: 1.8, ahead: 1.5,
                                                             converging: 0, fromAstern: true)
             // Seat 1 comes from astern here: make the hunter that boat, seat 0 the windward live bot.
             let race = try encounter.race()

@@ -333,7 +333,7 @@ struct RaceTally {
     /// A boat whose wind one caster's shadow or backwind leaves under this factor is in it (#234), as a bot reads
     /// dirty air (`BotBrain.dirtyAir`) ...
     static let shadowFactor = 0.85
-    /// ... and an episode of it counts once it lasts this long, seconds: a boat sailing through a cone doesn't.
+    /// ... and an episode of it counts once it lasts this long, seconds: a boat sailing through a ribbon doesn't.
     static let shadowSeconds = 2.0
     /// A tack covers a boat (#234) that tacked onto the same tack this many seconds before or less ...
     static let coverSeconds = 10.0
@@ -438,8 +438,11 @@ struct RaceTally {
         let episode = Int(RaceTally.shadowSeconds * Double(Race.tickRate))
         for receiver in boats.indices {
             for caster in boats.indices where caster != receiver {
+                // Her ribbons (#377) and her backwind's loss (none for a class with a header, whose backwind turns
+                // the wind instead).
                 guard racing[receiver], let cone = cones[caster],
-                      cone.factor(at: boats[receiver].position) < RaceTally.shadowFactor else {
+                      (1 - race.wake.loss(of: caster, at: boats[receiver].position, tick: race.tick))
+                        * cone.factor(at: boats[receiver].position) < RaceTally.shadowFactor else {
                     shadowTicks[receiver][caster] = 0
                     continue
                 }

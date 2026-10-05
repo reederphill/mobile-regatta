@@ -114,4 +114,190 @@ import Testing
         }
         #expect(crossed, "the boom crossed")
     }
+
+    // MARK: #377: the backwind off a working sail, faded, above a floor speed (skiff@6, the default class)
+
+    /// Through a tack her sail goes head to wind and her windward side flips at the boom crossing (#71). Her backwind
+    /// fades out over the class's 1.5 s on the side it was cast on, never jumping across, and once it is gone builds on
+    /// the new side over 2 s: no jump either way. The fade follows the class's value (the Debug slider), 0 cutting it.
+    @Test func zoneFadesOutOnItsOldSideThenBuildsOnTheNew() throws {
+        let race = try LeeBowTests().race(ahead: 3, leeward: 1.5, together: true)
+        let shadow = race.boatClass.windShadow
+        #expect(shadow.header != nil && shadow.backwindFadeSeconds == 1.5 && shadow.ribbons.buildSeconds == 2)
+        race.step()
+        let before = try #require(race.backwindSide(ofSeat: 1))
+        #expect(race.backwindSail(ofSeat: 1) == 1, "close-hauled, trimmed")
+        #expect(before == race.boats[1].tack)
+        _ = race.tap(.tackGybe, seat: 1, atTick: race.tick + 1)
+        var levels: [Double] = [], sides: [Tack] = [], flip: Int?
+        for i in 0..<(8 * Race.tickRate) {
+            let side = race.boats[1].boomSide
+            race.step()
+            levels.append(race.backwindSail(ofSeat: 1))
+            sides.append(try #require(race.backwindSide(ofSeat: 1)))
+            let zone = try #require(race.shadowCone(ofSeat: 1))
+            #expect(zone.backwindSide == sides[i] && zone.backwindSail == levels[i])
+            if flip == nil && race.boats[1].boomSide != side { flip = i }
+        }
+        let f = try #require(flip)
+        let rise = Race.dt / shadow.ribbons.buildSeconds, fall = Race.dt / shadow.backwindFadeSeconds
+        let swap = try #require(sides.firstIndex { $0 != before })
+        #expect(sides[f] == before, "a fading zone keeps her old side past the boom crossing")
+        #expect(levels[swap] == 0 && (swap == 0 || levels[swap - 1] > 0), "the side changes only once the old zone is gone")
+        #expect(sides[swap...].allSatisfy { $0 != before }, "and stays on the new side")
+        for i in 1..<levels.count {
+            #expect(levels[i] - levels[i - 1] <= rise + 1e-12, "builds, never jumps, at tick \(i)")
+            #expect(levels[i - 1] - levels[i] <= fall + 1e-12, "fades, never drops, at tick \(i)")
+        }
+        let firstUp = try #require(levels[swap...].firstIndex { $0 > 0 })
+        let full = try #require(levels[firstUp...].firstIndex { $0 >= 1 })
+        #expect(Double(full - firstUp + 1) * Race.dt >= shadow.ribbons.buildSeconds - Race.dt, "over 2 s")
+        #expect(levels.last == 1, "full again on the new side")
+
+        // The fade is the class's value: easing fades her level out over it, whatever it is (0: at once).
+        let boat = WakeScene.upwindCaster
+        for fade in [0.0, 0.5, 1.5, 3.0] {
+            var sails = BackwindSails()
+            sails.step(boats: [boat], scales: [1], buildSeconds: 2, fadeSeconds: fade)
+            var ticks = 0
+            repeat {
+                sails.step(boats: [boat], scales: [0], buildSeconds: 2, fadeSeconds: fade)
+                ticks += 1
+            } while sails.levels[0] > 0 && ticks < 10 * Race.tickRate
+            let expected = max(1, Int((fade / Race.dt).rounded(.up)))
+            #expect(abs(ticks - expected) <= 1, "fade \(fade) s: \(ticks) ticks, expected about \(expected)")
+        }
+    }
+
+    /// The header's zone on skiff@6 is the upwash beside her sail (the owner's renders review; research note §2), run on
+    /// astern (the owner's lengthening), a wedge (renders reviews 2 and 3): on her windward side, along her hull from her
+    /// mast (0.4 L back from her bow) to her stern and on 1.5 L astern of it; a point on her side line at her mast, its
+    /// outer edge slanting straight back and out to 1.5 L out at its aft end; full at her side and fading straight to
+    /// nothing at its width out (a share of the local width); fading in over 0.1 L at her mast, and straight from full at
+    /// her stern to nothing 1.5 L astern of it. Nothing to leeward, ahead of her mast, more than 1.5 L astern of her stern
+    /// or past its outer edge; bound to her (her speed doesn't stretch it), and it flips with her windward side.
+    @Test func headerZoneIsTheUpwashBesideHerSail() throws {
+        let shadow = RaceFiles.defaults.boatClass.content.windShadow
+        let length = RaceFiles.defaults.boatClass.content.hull.length
+        let upwash = try #require(shadow.backwindUpwash)
+        #expect(shadow.header != nil)
+        #expect(abs(upwash.mastFromBow - 0.4 * length) < 1e-12 && upwash.widthAtMast == 0
+                && abs(upwash.widthAft - 1.5 * length) < 1e-12
+                && abs(upwash.endFade - 0.1 * length) < 1e-12 && abs((upwash.astern ?? 0) - 1.5 * length) < 1e-12)
+        let side = shadow.sternCorner.x, stern = shadow.sternCorner.y, mast = shadow.bowY - 0.4 * length
+        let astern = 1.5 * length
+        let extent = try #require(shadow.upwashExtent)
+        #expect(abs(extent.aft - (stern - astern)) < 1e-12 && extent.stern == stern && abs(extent.fore - mast) < 1e-12)
+        // The wedge's width out from her side: nothing at her mast, straight to 1.5 L at its aft end.
+        func width(_ y: Double) -> Double { 1.5 * length * (mast - y) / (mast - (stern - astern)) }
+        #expect(shadow.upwashWidth(along: mast) == 0)
+        #expect(abs(shadow.upwashWidth(along: stern - astern) - 1.5 * length) < 1e-9)
+        #expect(abs(shadow.upwashWidth(along: stern) - width(stern)) < 1e-9)
+        // Well defined at its apex: a point at her mast on her side line, or a hair aft of it, is a number, never NaN.
+        for (out, along) in [(0.0, mast), (1e-12, mast), (0.0, mast - 1e-12), (1e-15, mast - 1e-12), (-1e-12, mast)] {
+            let share = shadow.upwashShare(out: out, along: along)
+            #expect(share.isFinite && share >= 0 && share < 1e-6, "at the apex: \(out), \(along)")
+        }
+        let e = 1e-6
+        for speed in [metresPerSecond(knots: 6), metresPerSecond(knots: 9), metresPerSecond(knots: 14)] {
+            for windward in [Tack.starboard, .port] {
+                // Off a caster somewhere on the course, heading 30°, so the frame is hers and not the world's.
+                let (apex, heading) = (Vec2(120, -40), deg2rad(30))
+                let wind = heading + (windward == .starboard ? 1 : -1) * deg2rad(30)
+                let cone = ShadowCone(apex: apex, apparentWindDirection: wind, heading: heading, windwardSide: windward,
+                                      shadow: shadow, trueWindAngle: deg2rad(45), speed: speed)
+                func at(_ x: Double, _ y: Double) -> Double {
+                    cone.backwindEnvelope(at: point(x, y, apex: apex, heading: heading, windward: windward))
+                }
+                let middle = (stern + mast) / 2, w = width(middle)
+                // Full at her windward side from her stern to the fade before her mast.
+                for y in [stern, stern + 0.1 * length, middle, mast - 0.1 * length - e] {
+                    #expect(abs(at(side + e, y) - 1) < 1e-5, "full at her side, \(y) m forward")
+                }
+                // Fading straight out to windward, to nothing at the wedge's width there.
+                #expect(abs(at(side + 0.25 * w, middle) - 0.75) < 1e-9)
+                #expect(abs(at(side + 0.5 * w, middle) - 0.5) < 1e-9)
+                #expect(at(side + w - e, middle) > 0 && at(side + w - e, middle) < 1e-5)
+                #expect(at(side + w + e, middle) == 0 && at(side + 2 * length, middle) == 0, "nothing past its outer edge")
+                // A point at her mast, no square front edge: just outboard of her side beside her mast is outside; at
+                // her mast on her side line it is nothing.
+                #expect(at(side + 0.02 * length, mast - 0.01 * length) == 0, "beside her mast, just outboard: outside")
+                #expect(at(side + 0.1 * length, mast - 0.05 * length) == 0 && at(side + 0.25 * length, mast - 0.1 * length) == 0)
+                // (Through her frame's turn the apex lands a rounding off it: nothing to within that, never NaN.)
+                #expect(at(side, mast).isFinite && at(side, mast) < 1e-9 && at(side + e, mast) < 1e-9, "nothing at the apex")
+                // Just inside its slanted edge near her mast it is in (0.1 L aft of the mast, half its width there).
+                let near = mast - 0.1 * length
+                #expect(abs(at(side + 0.5 * width(near), near) - 0.5) < 1e-9, "inside the wedge near her mast")
+                // Fading in at her mast: half 0.05 L inside it, at her side.
+                #expect(abs(at(side + e, mast - 0.05 * length) - 0.5) < 1e-4)
+                // Inside the wedge aft: half its width out at her stern, exactly half.
+                #expect(abs(at(side + 0.5 * width(stern), stern) - 0.5) < 1e-9, "inside the wedge at her stern")
+                // Wide aft: 1 L out, 1 L astern of her stern, is inside, at the local share times the aft fade.
+                let wide = at(side + length, stern - length)
+                #expect(wide > 0 && abs(wide - (1 - length / width(stern - length)) * (1 - length / astern)) < 1e-9,
+                        "wide aft: 1 L out at her stern + 1 L")
+                #expect(at(side + width(stern - length) + e, stern - length) == 0, "nothing past its outer edge aft")
+                // Near its aft end the fan reaches almost 1.5 L out.
+                #expect(at(side + 1.4 * length, stern - astern + 0.01 * length) > 0)
+                #expect(at(side + 1.5 * length + e, stern - astern + e) == 0)
+                // Astern of her stern, fading straight to nothing 1.5 L astern: half at 0.75 L, a quarter at 1.125 L; out
+                // to windward as alongside, a share of the local width.
+                #expect(abs(at(side + e, stern - 0.5 * astern) - 0.5) < 1e-5, "half 0.75 L astern of her stern")
+                #expect(abs(at(side + e, stern - 0.75 * astern) - 0.25) < 1e-5, "a quarter 1.125 L astern")
+                #expect(abs(at(side + 0.5 * width(stern - 0.5 * astern), stern - 0.5 * astern) - 0.25) < 1e-9,
+                        "half out, half way astern")
+                #expect(at(side + e, stern - astern + e) > 0 && at(side + e, stern - astern + e) < 1e-5)
+                // Nothing ahead of her mast, more than 1.5 L astern of her stern, to leeward, or inside her side line.
+                #expect(at(side + 0.1 * length, mast + e) == 0 && at(side + 0.1 * length, shadow.bowY) == 0, "ahead of the mast")
+                #expect(at(side + e, stern - astern - e) == 0 && at(side + 0.5 * length, stern - 2 * length) == 0,
+                        "more than 1.5 L astern of her stern")
+                #expect(at(-side - 0.1 * length, middle) == 0 && at(-side - e, middle) == 0, "to leeward")
+                #expect(at(-side - 0.5 * length, stern - length) == 0, "to leeward astern of her")
+                #expect(at(side - e, middle) == 0 && at(0, middle) == 0, "inside her side line")
+                #expect(at(side - e, stern - 0.5 * length) == 0, "inside her side line astern of her")
+                #expect(cone.isInBackwind(point(side + 0.2 * length, middle, apex: apex, heading: heading, windward: windward)))
+                #expect(!cone.isInBackwind(point(side + 0.5 * length, middle, apex: apex, heading: heading, windward: windward)))
+                #expect(cone.isInBackwind(point(side + 0.5 * length, stern - 0.5 * length, apex: apex, heading: heading, windward: windward)))
+                #expect(!cone.isInBackwind(point(side + 0.5 * length, stern - 2 * length, apex: apex, heading: heading, windward: windward)))
+            }
+        }
+        // Its header: 8° full at her side, 4° half way out, none past its outer edge.
+        let header = try #require(shadow.header)
+        let cone = ShadowCone(apex: .zero, apparentWindDirection: deg2rad(30), heading: 0, windwardSide: .starboard,
+                              shadow: shadow, trueWindAngle: deg2rad(45), speed: metresPerSecond(knots: 6))
+        let middle = (stern + mast) / 2
+        #expect(abs(Race.headerTarget(at: point(side + 0.5 * width(middle), middle), receiver: 1, zones: [cone], header: header)
+                    - deg2rad(4)) < 1e-9)
+        #expect(Race.headerTarget(at: point(side + 1.01 * width(middle), middle), receiver: 1, zones: [cone], header: header) == 0)
+    }
+
+    /// Below the class's floor speed (2 kn on skiff@6) she casts no backwind; above it it builds in straight over the
+    /// next 2 kn. The trapezoid's length, which only a class without the upwash zone sails, is held at its size there
+    /// (`BoatClass.WindShadow.backwindScale(speed:)`).
+    @Test func boatBelowTheFloorSpeedCastsNoBackwind() throws {
+        let shadow = RaceFiles.defaults.boatClass.content.windShadow
+        let floor = try #require(shadow.backwindFloorSpeed), span = shadow.backwindFloorSpan
+        #expect(floor == metresPerSecond(knots: 2) && span == metresPerSecond(knots: 2))
+        func zone(speed: Double) -> ShadowCone {
+            ShadowCone(apex: .zero, apparentWindDirection: .pi / 2, heading: 0, windwardSide: .starboard, shadow: shadow,
+                       trueWindAngle: deg2rad(45), speed: speed)
+        }
+        // A quarter of the upwash's width out from her side, half way between her stern and her mast: 0.75 of it.
+        let extent = try #require(shadow.upwashExtent)
+        let middle = (extent.stern + extent.fore) / 2
+        func p(_ z: ShadowCone) -> Vec2 {
+            z.apex + z.windward * (extent.out + 0.25 * shadow.upwashWidth(along: middle)) + z.forward * middle
+        }
+        for speed in [0, 0.5, floor - 1e-9, floor] {
+            let z = zone(speed: speed)
+            #expect(z.backwindEnvelope(at: p(z)) == 0 && !z.isInBackwind(p(z)), "\(speed) m/s")
+            #expect(shadow.backwindFloorFactor(speed: speed) == 0)
+        }
+        let full = zone(speed: floor + span), half = zone(speed: floor + span / 2)
+        #expect(shadow.backwindScale(speed: floor) == shadow.backwindScale(speed: floor + span), "the length holds below the build-in's end")
+        #expect(abs(full.backwindEnvelope(at: p(full)) - 0.75) < 1e-9)
+        #expect(abs(half.backwindEnvelope(at: p(half)) - 0.375) < 1e-9, "half built in")
+        // A class without a floor (ilca-dinghy@4) fades it from rest by its length scale alone, as before.
+        #expect(self.shadow.backwindFloorSpeed == nil && self.shadow.backwindFloorFactor(speed: 0) == 1)
+    }
 }
