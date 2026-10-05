@@ -223,10 +223,11 @@ import RegattaCore
 
 @MainActor @Suite struct PracticeDriverTests {
     /// A bot sails every seat (`-demo`), so the race runs headless to its finish; its log replays to the same world.
-    /// Seed 4, where the whole fleet finishes: since the bots sail with skill weaknesses (#102), your bot is
-    /// still racing when the 2 min finish window closes on seeds 2, 5, 8 and 11 (seed 2 was #86's pick, when seed 1 missed).
+    /// Seed 6: your bot finishes at tick 17,250 and the race closes at 20,143 (measured headless with the ribbon wake,
+    /// #377). Since the bots sail with skill weaknesses (#102) your bot is still racing at the close on some seeds
+    /// (with #377: 1, 2, 3, 8, 9 and 16; seed 4, the pick before, has her finish last, closing the race).
     @Test func runsHeadlessToTheFinishAndReplaysToTheSameDigest() throws {
-        let config = RaceConfig(opponents: 7, seed: 4, windSeed: RaceConfig.windSeed(pinnedTo: 4), botSailsYourBoat: true)
+        let config = RaceConfig(opponents: 7, seed: 6, windSeed: RaceConfig.windSeed(pinnedTo: 6), botSailsYourBoat: true)
         let driver = PracticeDriver(config: config)
         var seconds = 0
         while !driver.currentFrame.isOver && seconds < 1_500 {
