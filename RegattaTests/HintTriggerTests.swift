@@ -83,16 +83,13 @@ import Testing
         #expect(fires(.lettingGo, racing { $0.steeringSeconds = 19 }) == nil)
         #expect(fires(.lettingGo, racing { $0.steeringSeconds = 21 }) != nil)
         #expect(fires(.lettingGo, racing { $0.steeringSeconds = 21; $0.hasLetGo = true }) == nil)
-        // Hands off (never steered): on racing time alone, so a first race's player who never touches the water
-        // still hears about the autohelm (#134).
-        #expect(fires(.lettingGo, racing { $0.sinceGunSeconds = 5.5; $0.isFirstRace = true }) != nil)
-        #expect(fires(.lettingGo, racing { $0.sinceGunSeconds = 5.5 }) == nil)
-        #expect(fires(.lettingGo, racing { $0.sinceGunSeconds = 21 }) != nil)
-        #expect(fires(.lettingGo, racing { $0.sinceGunSeconds = 21; $0.hasSteered = true }) == nil)
+        // Only once relevant (owner ruling 2026-10-05): never on racing time alone, without steering.
+        #expect(fires(.lettingGo, racing { $0.raceTime = 120; $0.racingSeconds = 120; $0.isFirstRace = true }) == nil)
+        #expect(fires(.lettingGo, racing { $0.raceTime = 120; $0.racingSeconds = 120 }) == nil)
         // After the gun, whether or not you've started yet; never before it.
         var behind = HintSnapshot()
         behind.raceTime = 6
-        behind.sinceGunSeconds = 6
+        behind.steeringSeconds = 6
         behind.isFirstRace = true
         #expect(fires(.lettingGo, behind) != nil)
         behind.raceTime = -30
