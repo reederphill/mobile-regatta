@@ -52,6 +52,17 @@ class RenderFixtureTestCase: RaceUITestCase {
         /// indicator on its own timer (`persistentSystemOverlays(.hidden)`), so its pixels depend on when the
         /// screenshot lands and on the machine; every diff of a fixture ignores them.
         let homeIndicatorRows: Int
+        /// A gallery fixture draws the system status bar, whose clock shows the wall-clock time, so diffs of it
+        /// leave the clock's box out (`ImageDiff.ignoredClock`). A race fixture hides the status bar and draws
+        /// its own HUD clock there, which diffs must compare.
+        let showsStatusBar: Bool
+    }
+
+    /// Whether fixture `name` is a gallery (its JSON has a `gallery` key), which shows the status bar.
+    private static func isGallery(_ name: String) -> Bool {
+        guard let data = try? Data(contentsOf: fixtures.appendingPathComponent("\(name).json")),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return object["gallery"] != nil
     }
 
     /// The rows of a screenshot of `scene` under the home indicator, from the bottom inset the app reports.
@@ -62,8 +73,24 @@ class RenderFixtureTestCase: RaceUITestCase {
         return ImageDiff.rows(coveringBottom: inset, ofFrame: Double(scene.frame.height), imageRows: imageRows)
     }
 
+    /// Dismisses a system notification banner (a "Ready for Apple Intelligence" one has covered the top of a
+    /// render in CI) and returns whether there was one. SpringBoard owns banners, so they are in its
+    /// accessibility tree rather than the app's; querying it doesn't launch or activate it. A banner times out
+    /// on its own after a few seconds, so when the swipe doesn't take, waiting for it to go is the fallback.
+    @MainActor private func dismissSystemBanner() -> Bool {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let banner = springboard.otherElements["NotificationShortLookView"].firstMatch
+        guard banner.exists else { return false }
+        banner.swipeUp()
+        let gone = NSPredicate(format: "exists == false")
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: banner)], timeout: 15)
+        return true
+    }
+
     /// Launches `-fixture <name>` and returns its render once two screenshots in a row agree outside the
-    /// home-indicator band, so the launch animation is over and the frozen frame is on screen.
+    /// home-indicator band, so the launch animation is over and the frozen frame is on screen, and no system
+    /// banner was up before the first screenshot or after the last (one that stays across both would pass the
+    /// two-in-a-row check, so a banner seen means starting the comparison over).
     @MainActor func renderFixture(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws -> FixtureRender {
         let app = XCUIApplication()
         if app.state != .notRunning { app.terminate() }
@@ -78,13 +105,17 @@ class RenderFixtureTestCase: RaceUITestCase {
             throw FixtureFailure(description: "fixture \(name) didn't render: \(reason)")
         }
 
+        let showsStatusBar = Self.isGallery(name)
         var last: PixelImage?
-        for _ in 0..<20 {
+        for _ in 0..<40 {
+            if dismissSystemBanner() { last = nil }
             let data = scene.screenshot().pngRepresentation
             let image = try XCTUnwrap(PixelImage(pngData: data), "screenshot isn't a PNG", file: file, line: line)
             let rows = try homeIndicatorRows(of: scene, imageRows: image.height)
-            if let last, ImageDiff(actual: image, reference: last, tolerance: .exact, ignoringBottomRows: rows).differingPixels == 0 {
-                return FixtureRender(image: image, homeIndicatorRows: rows)
+            if let last, ImageDiff(actual: image, reference: last, tolerance: .exact, ignoringBottomRows: rows,
+                                           ignoringStatusBarClock: showsStatusBar).differingPixels == 0,
+               !dismissSystemBanner() {
+                return FixtureRender(image: image, homeIndicatorRows: rows, showsStatusBar: showsStatusBar)
             }
             last = image
             Thread.sleep(forTimeInterval: 0.25)
@@ -96,8 +127,10 @@ class RenderFixtureTestCase: RaceUITestCase {
     /// reference and diff PNGs when it fails.
     @discardableResult @MainActor
     func assertMatches(_ actual: PixelImage, _ reference: PixelImage, named name: String, tolerance: DiffTolerance = .standard,
-                       ignoringBottomRows: Int = 0, file: StaticString = #filePath, line: UInt = #line) -> ImageDiff {
-        let diff = compare(actual, reference, named: name, tolerance: tolerance, ignoringBottomRows: ignoringBottomRows)
+                       ignoringBottomRows: Int = 0, ignoringStatusBarClock: Bool = false, file: StaticString = #filePath,
+                       line: UInt = #line) -> ImageDiff {
+        let diff = compare(actual, reference, named: name, tolerance: tolerance, ignoringBottomRows: ignoringBottomRows,
+                           ignoringStatusBarClock: ignoringStatusBarClock)
         if !diff.passes { XCTFail(Self.differsMessage(name, diff), file: file, line: line) }
         return diff
     }
@@ -105,8 +138,10 @@ class RenderFixtureTestCase: RaceUITestCase {
     /// `assertMatches` without the failure: diffs and, when the diff fails, attaches the actual, reference and
     /// diff PNGs, leaving the caller to fail the test once it has done whatever must come first.
     @MainActor func compare(_ actual: PixelImage, _ reference: PixelImage, named name: String,
-                            tolerance: DiffTolerance = .standard, ignoringBottomRows: Int = 0) -> ImageDiff {
-        let diff = ImageDiff(actual: actual, reference: reference, tolerance: tolerance, ignoringBottomRows: ignoringBottomRows)
+                            tolerance: DiffTolerance = .standard, ignoringBottomRows: Int = 0,
+                            ignoringStatusBarClock: Bool = false) -> ImageDiff {
+        let diff = ImageDiff(actual: actual, reference: reference, tolerance: tolerance, ignoringBottomRows: ignoringBottomRows,
+                             ignoringStatusBarClock: ignoringStatusBarClock)
         if !diff.passes { attachDiff(diff, actual: actual, reference: reference, named: name) }
         return diff
     }
@@ -190,8 +225,10 @@ class RenderFixtureTestCase: RaceUITestCase {
                     file: file, line: line)
             return
         }
-        // A reference recorded on any machine matches CI's render whatever state the home indicator was in.
-        let diff = compare(actual, reference, named: name, ignoringBottomRows: render.homeIndicatorRows)
+        // A reference recorded on any machine matches CI's render whatever state the home indicator was in and
+        // whatever time the status bar's clock showed.
+        let diff = compare(actual, reference, named: name, ignoringBottomRows: render.homeIndicatorRows,
+                           ignoringStatusBarClock: render.showsStatusBar)
         saveActuals(name, outcome: diff.passes ? .matched : .differed, render: actual, diff: diff.image,
                     file: file, line: line)
         if !diff.passes { XCTFail(Self.differsMessage(name, diff), file: file, line: line) }

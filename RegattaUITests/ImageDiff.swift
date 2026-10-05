@@ -101,6 +101,10 @@ struct ImageDiff {
     /// system dims and hides on its own timer, so no two screenshots agree on it. They count neither as
     /// differing nor towards `totalPixels`.
     let ignoredBottomRows: Int
+    /// The status-bar clock's box, left out of the comparison too (`statusBarClock(width:height:)`): the system draws
+    /// the wall-clock time, so a render and its reference, taken at different times, never agree on it. `nil` when
+    /// the diff compares it.
+    let ignoredClock: PixelBox?
     /// The images differ in size: nothing lines up, so every pixel counts as differing.
     let sizeMismatch: Bool
     let differingPixels: Int
@@ -117,16 +121,20 @@ struct ImageDiff {
     var summary: String {
         if sizeMismatch { return "size mismatch" }
         let percent = (differingFraction * 100).formatted(.number.precision(.fractionLength(4)))
-        let ignored = ignoredBottomRows > 0 ? "; bottom \(ignoredBottomRows) rows not compared" : ""
+        var ignored = ignoredBottomRows > 0 ? "; bottom \(ignoredBottomRows) rows not compared" : ""
+        if ignoredClock != nil { ignored += "; status-bar clock not compared" }
         return "\(differingPixels) of \(totalPixels) pixels differ by more than \(tolerance.channel)/255 (\(percent)%, "
             + "limit \((tolerance.maxDifferingFraction * 100).formatted(.number.precision(.fractionLength(4))))%\(ignored))"
     }
 
     /// The diff of `actual` against `reference`, leaving out their bottom `ignoringBottomRows` rows (see
-    /// `ignoredBottomRows`), which the diff image shows in pale blue.
-    init(actual: PixelImage, reference: PixelImage, tolerance: DiffTolerance = .standard, ignoringBottomRows: Int = 0) {
+    /// `ignoredBottomRows`), and the status-bar clock's box when `ignoringStatusBarClock` is set; the diff image
+    /// shows both in pale blue.
+    init(actual: PixelImage, reference: PixelImage, tolerance: DiffTolerance = .standard, ignoringBottomRows: Int = 0,
+         ignoringStatusBarClock: Bool = false) {
         self.tolerance = tolerance
         ignoredBottomRows = min(max(0, ignoringBottomRows), actual.height)
+        ignoredClock = ignoringStatusBarClock ? Self.statusBarClock(width: actual.width, height: actual.height) : nil
         guard actual.width == reference.width, actual.height == reference.height else {
             sizeMismatch = true
             totalPixels = actual.width * actual.height
@@ -136,7 +144,18 @@ struct ImageDiff {
         }
         sizeMismatch = false
         let compared = actual.width * (actual.height - ignoredBottomRows)
-        totalPixels = compared
+        // Which of the compared pixels the clock's box covers.
+        var skipped = [Bool](repeating: false, count: compared)
+        var skippedCount = 0
+        if let box = ignoredClock {
+            for y in box.y..<min(box.y + box.height, actual.height - ignoredBottomRows) {
+                for x in box.x..<min(box.x + box.width, actual.width) {
+                    skipped[y * actual.width + x] = true
+                    skippedCount += 1
+                }
+            }
+        }
+        totalPixels = compared - skippedCount
         var diff = [UInt8](repeating: 255, count: actual.pixels.count)
         for i in stride(from: compared * 4, to: diff.count, by: 4) {
             diff[i] = 190
@@ -149,6 +168,12 @@ struct ImageDiff {
             reference.pixels.withUnsafeBufferPointer { r in
                 for p in 0..<compared {
                     let i = p * 4
+                    if skipped[p] {
+                        diff[i] = 190
+                        diff[i + 1] = 215
+                        diff[i + 2] = 245
+                        continue
+                    }
                     var worst = 0
                     for c in 0..<4 { worst = max(worst, abs(Int(a[i + c]) - Int(r[i + c]))) }
                     if worst > limit {
@@ -172,7 +197,20 @@ struct ImageDiff {
     }
 }
 
+/// A rectangle of pixels, from the image's top-left corner.
+struct PixelBox: Equatable {
+    let x: Int, y: Int, width: Int, height: Int
+}
+
 extension ImageDiff {
+    /// Where the status bar draws its clock in a screenshot `width` × `height` pixels, with room for any time
+    /// ("9:41" to "12:40"): the clock is centred in the leading third of the bar, its box from 11% to 28% of the
+    /// width and 2.2% to 5.5% of the height (iPhone 17: 1206 × 2622, the clock at about x 157-290, y 80-118).
+    static func statusBarClock(width: Int, height: Int) -> PixelBox {
+        let x = Int(Double(width) * 0.11), y = Int(Double(height) * 0.022)
+        return PixelBox(x: x, y: y, width: Int(Double(width) * 0.28) - x, height: Int(Double(height) * 0.055) - y)
+    }
+
     /// How many pixel rows at the bottom of a screenshot `imageRows` pixels tall cover a band `bandPoints`
     /// tall, when the screenshot shows `framePoints` of height: the band rounded out to whole rows.
     static func rows(coveringBottom bandPoints: Double, ofFrame framePoints: Double, imageRows: Int) -> Int {
