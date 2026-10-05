@@ -136,6 +136,16 @@ struct NoticeSlot: Equatable {
         return showing
     }
 
+    /// The race came on screen at `now` (#129): the notice showing gets its full time from here and every wait starts
+    /// again, so what was posted as the race was set up (the steering hint) isn't spent before it could be seen.
+    mutating func restartClock(at now: Date) {
+        if var shown = showing, !shown.isLive {
+            shown.expires = now.addingTimeInterval(NoticeTable.rule(shown.kind).seconds)
+            showing = shown
+        }
+        restartWaits(at: now)
+    }
+
     /// A live notice stopped holding the slot at `now`: every wait starts again from there.
     private mutating func restartWaits(at now: Date) {
         for i in waiting.indices { waiting[i].waitStart = now }

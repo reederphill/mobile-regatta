@@ -253,6 +253,8 @@ final class GameScene: SKScene {
         let frameTime = min(currentTime - (lastUpdate ?? currentTime), 0.1)
         lastUpdate = currentTime
         guard let session else { return }
+        // The notices posted as the race was set up get their time from its first frame (#129).
+        session.sceneStarted()
         guard !session.isPaused else {
             // The tuning panel's render-only values show over a paused race (#232). Nothing steps: no time passes.
             if needsPausedRender {

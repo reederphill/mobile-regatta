@@ -286,6 +286,15 @@ final class GameSession {
 
     func refreshHUD() { refreshHUD(samplesPressure: true) }
 
+    /// The scene steps the live race for the first time (`GameScene.update`): the notice slot's clock starts again
+    /// from here (#129). The steering hint is posted as the race is set up, before its clock shows, and setting up
+    /// and presenting the scene can take seconds; its time on screen starts once the race does. Once a session.
+    func sceneStarted() {
+        guard !hasSceneStarted else { return }
+        hasSceneStarted = true
+        noticeSlot.restartClock(at: now())
+    }
+    @ObservationIgnored private var hasSceneStarted = false
 
     /// A tap on the place or the live leaderboard (#268): opens it to the whole fleet, or closes it.
     func toggleLeaderboard() {

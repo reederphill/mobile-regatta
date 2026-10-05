@@ -196,6 +196,38 @@ import Testing
         #expect(GameSession(config: config).notice == nil)
     }
 
+    /// A fresh session posts the steering hint at tick 0, before the clock shows, and it is still up however long the
+    /// scene takes to start: its 4 s run from the race's first frame (`sceneStarted`), then it goes for the race (the
+    /// first race's "within 2 s" UI test, #129, where launching took longer than the hint's 4 s).
+    @Test func theSteeringHintPostedAtSetUpShowsItsTimeOnceTheSceneStarts() throws {
+        let config = RaceConfig(opponents: 2, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+        let session = GameSession(config: config, hints: HintEngine(progress: HintProgressStore()))
+        let steering = HintCatalogue.hint(.raceStart).text.text(for: session.controls.steering)
+        #expect(session.driver.currentFrame.time == -30, "set up, nothing stepped")
+        #expect(session.notice?.kind == .hint && session.notice?.text == steering)
+        #expect(steering.contains("Settings"))
+
+        // The scene's first frame comes 10 s after setting up: the hint is still up, for its full time from there.
+        var time = Date.now.addingTimeInterval(10)
+        session.now = { time }
+        session.sceneStarted()
+        session.refreshHUD()
+        #expect(session.notice?.text == steering, "\(String(describing: session.notice))")
+        time += 3.9
+        session.refreshHUD()
+        #expect(session.notice?.text == steering)
+        time += 0.2
+        session.refreshHUD()
+        #expect(session.notice?.text != steering, "gone after its 4 s")
+        // Once a race: not again, and a later sceneStarted (the scene can't restart) changes nothing.
+        for _ in 0..<40 {
+            time += 0.5
+            session.sceneStarted()
+            session.refreshHUD()
+            #expect(session.notice?.text != steering)
+        }
+    }
+
     /// A session's hint retirements reach `onHintRetired` with the catalogue's id (#128).
     @Test func sessionForwardsRetirements() {
         let config = RaceConfig(opponents: 2, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
