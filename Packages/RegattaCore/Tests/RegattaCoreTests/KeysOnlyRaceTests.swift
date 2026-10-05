@@ -52,6 +52,8 @@ import Testing
             Self.steerBots(seeded, keysOnly, rng: &rng)
             seeded.step()
             try keysOnly.tryStep()
+            // A keys-only race is a prediction: it judges no OCS, so it takes the seeded race's word (#96).
+            for event in seeded.drainEvents() where Race.isRuling(event) { keysOnly.apply(authoritative: event) }
             guard seeded.boats.allSatisfy({ $0.penaltyTurnsOwed == 0 && $0.status != .dsq }) else {
                 Issue.record("the umpire called a boat at tick \(seeded.tick): pick steering it makes no call on")
                 return

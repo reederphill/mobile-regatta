@@ -81,7 +81,7 @@ final class OnlineDriver: RaceDriver {
         roster = FleetRoster(setup: start.setup)
         liveries = FleetLiveries(setup: start.setup, mySeat: start.yourSeat)
         corrections = race.boats.map { _ in VisualCorrection(snapDistance: race.boatClass.hull.length) }
-        currentFrame = TickFrame(race: race, isOver: false)
+        currentFrame = TickFrame(race: race, isOver: false, keepClearOf: start.yourSeat)
         previousFrame = currentFrame
     }
 
@@ -111,7 +111,9 @@ final class OnlineDriver: RaceDriver {
         let corrected = predicted !== before || (predicted.snapshotsImported, client.stats.resyncsApplied) != imported
         var frames: [TickFrame] = []
         if predicted.tick != lastTick || corrected || isOver != currentFrame.isOver {
-            let frame = TickFrame(race: predicted.race, isOver: isOver)
+            // The glows are the server umpire's relations from the last snapshot (#96, ADR 0005), never the
+            // prediction's own world: `Race.keepClearRelations(of:)` in a prediction returns the server's.
+            let frame = TickFrame(race: predicted.race, isOver: isOver, keepClearOf: myBoatIndex)
             previousFrame = !corrected && frame.tick == lastTick + 1 ? currentFrame : frame.extrapolatedBackOneTick()
             currentFrame = frame
             if frame.tick != lastTick { frames.append(frame) }

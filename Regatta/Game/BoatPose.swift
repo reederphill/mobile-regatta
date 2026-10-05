@@ -317,7 +317,8 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     // MARK: Rule cues (#123)
 
     /// A boat's right-of-way glow starts to fade in when her centre is this many hull lengths from yours: a debug
-    /// slider (fun before realism), its default the core's placeholder the server can reuse (#96).
+    /// slider (fun before realism), its default the core's (`RightOfWayGlyph.defaultRangeHulls`); online the server
+    /// sends relations a little further out (#96).
     var glowRangeHulls = RightOfWayGlyph.defaultRangeHulls
     /// The glow is at full strength from this many hull lengths in, and its alpha there.
     var glowFullHulls = 1.5

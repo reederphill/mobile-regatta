@@ -9,7 +9,8 @@ public enum RightOfWayGlyph: Sendable, Equatable {
     case hasRight
 
     /// How far away, in hull lengths centre to centre, a boat's glow starts to show: a placeholder the app's
-    /// `BoatStyle.glowRangeHulls` slider defaults to, and the server's in-range pairs can reuse (#96).
+    /// `BoatStyle.glowRangeHulls` slider defaults to. The server sends relations a little further out
+    /// (`WireRelation.rangeHulls`, #96).
     public static let defaultRangeHulls = 6.0
 
     /// The glyph `me` sees on the other boat of `relation`, or nil when there is none (a ghost in the pair).

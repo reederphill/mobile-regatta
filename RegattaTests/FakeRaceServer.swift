@@ -42,6 +42,8 @@ nonisolated final class FakeRaceServer {
 
     /// Each event sent, and when.
     private(set) var sentEvents: [(time: UInt64, event: RaceEvent)] = []
+    /// The umpire relations each snapshot carried to the client, by the snapshot's tick (#96).
+    private(set) var sentRelations: [Int: [WireRelation]] = [:]
     /// Each held input of the client's applied: its rudder and the tick.
     private(set) var appliedHeld: [(tick: Int, rudder: Int8)] = []
     private(set) var resyncsSent = 0
@@ -167,7 +169,10 @@ nonisolated final class FakeRaceServer {
             if seated { sentEvents.append((clock.now, event)) }
         }
         revealKeys(send: true)
-        if seated, race.tick % Self.snapshotEvery == 0, let snapshot = try? Snapshot(world: race.exportSnapshot(), ack: ack) {
+        if seated, race.tick % Self.snapshotEvery == 0, var snapshot = try? Snapshot(world: race.exportSnapshot(), ack: ack) {
+            // As the host does (#96): the umpire's relations of the client's boat.
+            snapshot.relations = WireRelation.relations(of: clientSeat, in: race)
+            sentRelations[race.tick] = snapshot.relations
             send(.snapshot(snapshot), tick: race.tick)
         }
     }

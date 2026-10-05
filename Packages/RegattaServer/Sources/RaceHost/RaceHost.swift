@@ -79,7 +79,8 @@ public actor RaceHost {
         var queued: [(seq: UInt32, tick: Int)] = []
         var ack: InputAck?
         var latestMargin = 0
-        /// The reliable stream (`Event`, `WindKey`): the next sequence number, and frames not yet sent.
+        /// The reliable stream (`Event`, `WindKey`): the next sequence number, and frames not yet sent. The number
+        /// runs on across a rejoin (`attach`), so it is the seat's stable id for an event for the whole race (#96).
         var reliableSeq: UInt32 = 1
         var reliableQueue: [Frame] = []
         var otherSeq: UInt32 = 1
@@ -234,12 +235,16 @@ public actor RaceHost {
         seats[seat].queued.removeAll { $0.tick <= race.tick }
     }
 
+    /// The fleet, quantised once, to every attached seat with its ack and the server umpire's relations of its
+    /// boat to the fleet in range (#96, `WireRelation.relations(of:in:)`): a client's right-of-way glows and rule 17
+    /// restrictions are the umpire's, never worked out from its own world (ADR 0005).
     private func sendSnapshots() {
         let world = race.exportSnapshot()
         guard let fleet = try? Snapshot(world: world) else { return }
         for seat in seats.indices where seats[seat].transport != nil {
             var snapshot = fleet
             snapshot.ack = seats[seat].ack
+            snapshot.relations = WireRelation.relations(of: seat, in: race)
             send(.snapshot(snapshot), to: seat)
         }
     }
@@ -297,7 +302,11 @@ public actor RaceHost {
     public func attach(seat: Int, transport: any SeatTransport) -> Bool {
         guard outcome == nil, humanSeats.contains(seat), gone[seat]?.kind != .left else { return false }
         let rejoin = seats[seat].hasJoined
+        // The reliable numbering runs on (#96): an event's seq is its id for the whole race, so a rejoined client
+        // never takes a new event for one it showed before. The resync restarts its stream there.
+        let reliableSeq = seats[seat].reliableSeq
         seats[seat] = Seat(caps: options.caps)
+        seats[seat].reliableSeq = reliableSeq
         seats[seat].transport = transport
         seats[seat].hasJoined = true
         seats[seat].holdDeadline = race.tick + options.firstInputHoldTicks

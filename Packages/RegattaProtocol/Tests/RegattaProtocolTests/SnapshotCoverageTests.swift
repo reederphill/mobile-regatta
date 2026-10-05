@@ -237,29 +237,37 @@ struct SeatWithProbe: CustomReflectable {
     }
 }
 
-/// #18: a 16-boat snapshot is about 0.5 KB. 512 bytes is a hard ceiling, with room left for the rules
-/// fields #96 adds (per-pair right-of-way bits, penalty deadlines, ghost, OCS returning).
+/// #18: a 16-boat snapshot is about 0.5 KB. 512 bytes is a hard ceiling. #96 adds the server umpire's relations
+/// to the recipient's seat, six bits a seat (`WireRelation`, 12 B at 16 boats); the rest of the rules fields
+/// (penalty progress and clock, status, ghost, OCS returning) were already in the seat record (#86, #89).
 @Suite struct SnapshotBudgetTests {
     static let ceiling = 512
-    /// Frame header, the ack (flag, seq, applied tick, margin) and the seat count.
+    /// Frame header, the flags, the ack (seq, applied tick, margin) and the seat count.
     static let fixedBytes = Frame.headerSize + 1 + 4 + 4 + 2 + 1
 
+    /// Acceptance (#96): with its relations, a 16-boat snapshot still fits in 512 bytes.
     @Test func sixteenBoatSnapshotFitsIn512Bytes() throws {
         let race = botRace()
         var largest = 0
         var gen = Gen(seed: 512)
-        // Real states through a whole race, and random ones over every field's full range.
+        // Real states through a whole race, with a seat's relations as the server sends them, and random ones over
+        // every field's full range.
         while !race.isOver && race.tick < 9000 {
             for _ in 0..<3 { race.step() }
             let snapshot = try Snapshot(world: race.exportSnapshot(), ack: InputAck(seq: .max, appliedTick: race.tick, margin: -32_768))
-            largest = max(largest, try Frame(seq: .max, tick: race.tick, message: .snapshot(snapshot)).encoded().count)
+            for seat in [0, 7, 15] {
+                var sent = snapshot
+                sent.relations = WireRelation.relations(of: seat, in: race.race)
+                largest = max(largest, try Frame(seq: .max, tick: race.tick, message: .snapshot(sent)).encoded().count)
+            }
         }
         for _ in 0..<500 {
-            let snapshot = Snapshot(seats: gen.wireSeats(16), ack: InputAck(seq: gen.u32(), appliedTick: gen.tick(), margin: 5))
+            let snapshot = Snapshot(seats: gen.wireSeats(16), ack: InputAck(seq: gen.u32(), appliedTick: gen.tick(), margin: 5),
+                                    relations: gen.relations(16))
             largest = max(largest, try Frame(seq: gen.u32(), tick: gen.tick(), message: .snapshot(snapshot)).encoded().count)
         }
-        let expected = Self.fixedBytes + 16 * SnapshotQuantisation.bytesPerSeat
-        print("BUDGET 16-boat snapshot: \(largest) B of \(Self.ceiling) B (\(Self.ceiling - largest) B headroom); \(SnapshotQuantisation.bytesPerSeat) B per seat + \(Self.fixedBytes) B fixed")
+        let expected = Self.fixedBytes + 16 * SnapshotQuantisation.bytesPerSeat + WireRelation.byteCount(seats: 16)
+        print("BUDGET 16-boat snapshot: \(largest) B of \(Self.ceiling) B (\(Self.ceiling - largest) B headroom); \(SnapshotQuantisation.bytesPerSeat) B per seat + \(WireRelation.byteCount(seats: 16)) B relations + \(Self.fixedBytes) B fixed")
         #expect(largest == expected)
         #expect(largest <= Self.ceiling)
     }
@@ -269,6 +277,9 @@ struct SeatWithProbe: CustomReflectable {
         for n in 2...16 {
             let bytes = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: gen.wireSeats(n)))).encoded()
             #expect(bytes.count == Frame.headerSize + 1 + 1 + n * SnapshotQuantisation.bytesPerSeat)
+            let related = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: gen.wireSeats(n), relations: gen.relations(n))))
+                .encoded()
+            #expect(related.count == bytes.count + (6 * n + 7) / 8)
         }
     }
 }

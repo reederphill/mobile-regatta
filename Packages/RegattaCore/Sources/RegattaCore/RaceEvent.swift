@@ -62,12 +62,12 @@ public struct RaceEvent: Sendable, Equatable {
         /// The seat's roll tap missed, outside the window (#263, `RollTack.missed`): her speed took the miss factor.
         case rollMissed(seat: Int)
 
-        /// A decision of the umpire or race committee under the rules: a rule call, a recall, a
-        /// disqualification, a mark-room notice, a protest recorded. Only the authoritative race emits
-        /// them; a prediction never does (`Race.Mode`).
+        /// A decision of the umpire or race committee under the rules: a rule call, a mark touch's penalty
+        /// (rule 31), a recall, a disqualification, a mark-room notice, a protest recorded. Only the
+        /// authoritative race emits them; a prediction never does (`Race.Mode`, #96).
         public var isRuleEvent: Bool {
             switch self {
-            case .ruleCall, .ocsNotice, .disqualified, .markRoomNotice, .protestRecorded: true
+            case .ruleCall, .markTouch, .ocsNotice, .disqualified, .markRoomNotice, .protestRecorded: true
             default: false
             }
         }
@@ -75,9 +75,20 @@ public struct RaceEvent: Sendable, Equatable {
 
     public let tick: Int
     public let kind: Kind
+    /// The server's stable id for the event, online (#96, #124): its reliable-stream number, unique for the
+    /// recipient for the whole race, so a client shows it once however it is delivered. Nil offline, where the
+    /// race's own events are shown as they happen.
+    public let id: UInt32?
 
-    public init(tick: Int, kind: Kind) {
+    public init(tick: Int, kind: Kind, id: UInt32? = nil) {
         self.tick = tick
         self.kind = kind
+        self.id = id
+    }
+
+    /// The same event: the same tick and kind. The id is how a client tells one delivery of it from another
+    /// (`id`), not part of what happened, so an event the server sent equals the race's own.
+    public static func == (lhs: RaceEvent, rhs: RaceEvent) -> Bool {
+        lhs.tick == rhs.tick && lhs.kind == rhs.kind
     }
 }

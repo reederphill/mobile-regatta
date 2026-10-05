@@ -22,10 +22,11 @@ public struct OwedPenalty: Sendable, Equatable {
         self.isStarted = isStarted
     }
 
-    /// `boat`'s owed penalty under `penalty`, or nil while she owes none.
+    /// `boat`'s owed penalty under `penalty`, or nil while she owes none. A prediction's progress past a full turn
+    /// (#96: the server serves it) shows just short of one until the server's word comes.
     public init?(_ boat: Boat, penalty: RulesConfig.Penalty) {
         guard boat.penaltyTurnsOwed > 0, let clock = boat.penaltyClockTick else { return nil }
-        let progress = abs(boat.penaltyProgress)
+        let progress = min(abs(boat.penaltyProgress), Race.heldPenaltyProgress)
         self.init(turnsOwed: boat.penaltyTurnsOwed, startDeadlineTick: clock + RulesConfig.ticks(penalty.start),
                   completeDeadlineTick: clock + RulesConfig.ticks(penalty.complete), progress: progress,
                   isStarted: progress >= penalty.startedTurn)

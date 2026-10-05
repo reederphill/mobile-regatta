@@ -139,7 +139,9 @@ final class ScriptedHost {
             sendReliable(Frame(seq: reliableSeq, event: event))
         }
         revealKeys(send: true)
-        if race.tick % Self.snapshotEvery == 0, let snapshot = try? Snapshot(world: race.exportSnapshot(), ack: ack) {
+        if race.tick % Self.snapshotEvery == 0, var snapshot = try? Snapshot(world: race.exportSnapshot(), ack: ack) {
+            // As the host does (#96): the umpire's relations of the client's boat.
+            snapshot.relations = WireRelation.relations(of: clientSeat, in: race)
             send(.snapshot(snapshot), tick: race.tick)
         }
     }

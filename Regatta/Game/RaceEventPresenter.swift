@@ -114,6 +114,9 @@ struct RaceEventPresenter {
     let seen: RuleSeenStore
 
     private var presentedCalls: Set<RuleCall> = []
+    /// The server's ids of the events presented (`RaceEvent.id`, #96): online, an event delivered again is never
+    /// presented twice. Offline events have none.
+    private var presentedIds: Set<UInt32> = []
     /// Marks of notices posted and not yet shown or dropped, counted by notice.
     private var pending: [SeenMark: Int] = [:]
     private var lastCountdownSecond = Int.max
@@ -136,6 +139,7 @@ struct RaceEventPresenter {
 
     // An exhaustive switch: a new `RaceEvent.Kind` doesn't compile until it has a row here.
     private mutating func present(_ event: RaceEvent, autohelmHolding: Bool, into out: inout Presentation) {
+        if let id = event.id, !presentedIds.insert(id).inserted { return }
         switch event.kind {
         case .gun:
             out.cues.append(.gun)
