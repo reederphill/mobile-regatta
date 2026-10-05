@@ -88,7 +88,8 @@ final class RootHostingController: UIHostingController<AppRoot> {
     /// With no `onlineStatus`, online and signed out, as the placeholders were: for tests.
     init(sceneState: SceneState, screenSize: CGSize, onlineStatus: OnlineStatus? = nil, analytics: Analytics = .discarding()) {
         // My boat sells from the app's store; with none given, the model's own stub.
-        let model = AppModel(sceneState: sceneState, store: onlineStatus?.services.store, analytics: analytics)
+        let model = AppModel(sceneState: sceneState, store: onlineStatus?.services.store, analytics: analytics,
+                             audio: .live())
         let onlineStatus = onlineStatus ?? OnlineStatus(services: .fake(.signedOut))
         super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize, onlineStatus: onlineStatus))
         isOrientationLocked = sceneState.isRaceSequenceShowing

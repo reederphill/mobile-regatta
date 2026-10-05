@@ -85,9 +85,11 @@ import UIKit
         #expect(!frozen.isPaused && !frozen.isEasing, "a race that can't pause runs on, its controls let go")
     }
 
-    /// Help's topics: never one for what the game doesn't have yet (the protest picker, the committee sounds).
+    /// Help's topics: never one for what the game doesn't have yet (the protest picker); the sounds once #126 plays
+    /// them.
     @Test func helpTopicsAreTheBuiltOnes() {
-        #expect(HelpTopic.allCases == [.symbols, .steering, .rules, .current])
+        #expect(HelpTopic.allCases == [.symbols, .steering, .rules, .current, .sounds])
+        #expect(HelpTopic.sounds.title == "Sounds")
     }
 
     /// The Help galleries (#135): its topics, and one topic's page.

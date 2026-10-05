@@ -79,7 +79,7 @@ Sources: #21 (liveries), #22 (art direction, audio), #36 (venues, icon), #53. De
 
 | Name | File | Format | Source | Plays |
 |---|---|---|---|---|
-| `horn` | `horn.caf` | LPCM 16-bit 44.1 kHz mono | licensed | 60 s, 30 s, OCS (repeated), finish; patterns in code |
+| `horn` | `horn.caf` | LPCM 16-bit 44.1 kHz mono | licensed | 60 s, 30 s, OCS (one horn), finish; patterns in code |
 | `gun` | `gun.caf` | LPCM 16-bit 44.1 kHz mono | licensed | start |
 | `beep` | `beep.caf` | LPCM 16-bit 44.1 kHz mono | synthesised | 5-4-3-2-1 (one asset, played 5×) |
 | `whistle` | `whistle.caf` | LPCM 16-bit 44.1 kHz mono | recorded | rule call involving you |
@@ -92,6 +92,8 @@ Sources: #21 (liveries), #22 (art direction, audio), #36 (venues, icon), #53. De
 | `sail-flog` | `sail-flog.caf` | LPCM 16-bit 44.1 kHz mono, seamless loop ≥ 10 s | recorded (dinghy sail, not yacht) | while easing |
 | `menu-music` | `menu-music.m4a` | AAC 160 kbps stereo | licensed (game distribution rights) | menus + lobby; fades at briefing |
 
+- until #169 bundles these files, each name plays a placeholder generated in code (`Regatta/Sound/SoundLibrary.swift`); a bundled `Regatta/Audio/<name>.caf` / `.m4a` replaces it with no code change
+- OCS is one horn (individual recall, RRS 29.1), not a repeated pattern (#126 ruling)
 - loops are LPCM, not AAC: AAC encoder padding leaves a gap at the loop point
 - licence exclusions: CC-BY-NC, BBC Sound Effects (RemArc, non-commercial)
 - size estimate: 5 × 30 s loops ≈ 13 MB, flog ≈ 1 MB, one-shots < 1 MB, 3 min music ≈ 3.6 MB; total ≈ 18 MB (#54 budget: download < 150 MB)
