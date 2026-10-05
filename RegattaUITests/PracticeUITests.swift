@@ -118,6 +118,11 @@ final class PracticeUITests: RaceUITestCase {
     /// A sixteen-boat practice race (fifteen bots, the setup's largest fleet) runs to its results with every boat in
     /// them. One lap (`-laps 1`) from a 10 s start (`-startSeconds 10`) at `-timescale 32` with the scene hidden
     /// (`-hideScene`), as `RaceFinishUITests` sails: painting on the GPU-less runner held the race past this watch.
+    /// Sixteen boats' ticks fill the scene's tick budget at about two a frame, so the race runs at 40-56 ticks a
+    /// second whatever the timescale, and it closes about 9,700 ticks in (the first finish plus the finish window; no
+    /// launch option shortens a practice race's close). The watch is 250 s: at 44 ticks/s (main, 2026-10-05) the
+    /// close comes at about 220 s. With about 25 s of launch and setup that stays inside CI's 300 s allowance, past
+    /// `RaceUITestCase`'s usual 3.5 min of waits: this one test needs it.
     @MainActor func testFifteenBotRaceRunsFullLength() throws {
         let app = openSetup(["-laps", "1", "-startSeconds", "10", "-timescale", "32", "-hideScene"])
         let stepper = fleetStepper(app)
@@ -129,7 +134,7 @@ final class PracticeUITests: RaceUITestCase {
         startFromSetup(app)
 
         let results = app.staticTexts["race-results"]
-        let finish = watch(results, until: .now.addingTimeInterval(200)) { _ in true }
+        let finish = watch(results, until: .now.addingTimeInterval(250)) { _ in true }
         XCTAssertTrue(finish.seen, "the sixteen-boat race never reached its results")
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "results-row").count, 16,
                        "the results don't hold all sixteen boats")

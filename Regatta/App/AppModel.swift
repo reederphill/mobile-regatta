@@ -222,7 +222,8 @@ final class AppModel {
 
     /// A fresh hint engine (#129) over `hintProgress`, one per race's session.
     func hintEngine() -> HintEngine {
-        HintEngine(progress: hintProgress)
+        let progress = hintProgress
+        return HintEngine(progress: progress, isFirstRaceOnDevice: HintEngine.isFirstRace(progress))
     }
 
     /// Logs a hint's retirement (#128's `hint_retired`): every race's session, practice or online, is told it.

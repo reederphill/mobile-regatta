@@ -147,27 +147,56 @@ final class HintEngine {
     private var offSince: [HintID: Date] = [:]
     /// The once-a-race hints posted this race.
     private var postedThisRace: Set<HintID> = []
+    /// The held steering hint's notice (owner ruling 2026-10-05): in the first race it stays up until you first steer.
+    private(set) var heldNoticeID: Int?
+    /// A held notice the session is to take down: you've steered, or hints went off.
+    private var pendingTakeDown: Int?
 
     /// The rows it schedules, in priority order: the catalogue's engine rows (tests pass their own).
     let catalogue: [Hint]
 
-    init(progress: HintProgressStore, thresholds: HintTuning = .standard, catalogue: [Hint] = HintCatalogue.engine) {
+    /// This race is the device's first: the steering hint has never shown on it. The app's engines say so (`AppModel`),
+    /// until #134's first race sets `GameSession.isFirstRace`; tests' don't unless they ask.
+    let isFirstRaceOnDevice: Bool
+
+    init(progress: HintProgressStore, thresholds: HintTuning = .standard, catalogue: [Hint] = HintCatalogue.engine,
+         isFirstRaceOnDevice: Bool = false) {
         self.progress = progress
         self.thresholds = thresholds
         self.catalogue = catalogue
+        self.isFirstRaceOnDevice = isFirstRaceOnDevice
+    }
+
+    /// Whether `progress` is a device's before its first race: the steering hint has never shown.
+    static func isFirstRace(_ progress: HintProgressStore) -> Bool {
+        progress.timesShown(.raceStart) == 0
+    }
+
+    /// Whether the steering hint, posted now, is held up until you steer (owner ruling 2026-10-05): in the first
+    /// race, the one `isFirstRace` marks or the device's first (`isFirstRaceOnDevice`). It still gives way to rule
+    /// calls and OCS and comes back after them. Later races show it for its usual time, until you've steered both
+    /// ways or it has shown twice.
+    func holdsSteeringHint(isFirstRace: Bool) -> Bool {
+        isFirstRace || isFirstRaceOnDevice
     }
 
     /// One HUD refresh at `now`: settles the posted hint with `slot`, takes `world`'s tick, retires what you've
-    /// learned, and returns the hint to post now, if any, with its leader. With hints off it only settles: nothing
-    /// is observed, learned or picked.
+    /// learned, and returns the hint to post now, if any, with its leader and whether it is held (shown until it is
+    /// learned, `takeDownDue`). With hints off it only settles: nothing is observed, learned or picked.
     func refresh(world: RenderWorld, slot: NoticeSlot, now: Date, hintsOn: Bool, showsLaylines: Bool,
-                 isFirstRace: Bool) -> (hint: Hint, leader: HintTarget?)? {
+                 isFirstRace: Bool) -> (hint: Hint, leader: HintTarget?, held: Bool)? {
         if let retired = scheduler.settle(slot: slot, now: now, progress: progress) { onRetired?(retired, .shownTwice) }
         guard hintsOn else {
             observations.pause()
+            releaseHeld()
             return nil
         }
         observations.observe(world, tuning: thresholds)
+        // The held steering hint goes on your first steer, and retires as learned.
+        if heldNoticeID != nil, observations.hasSteered {
+            if scheduler.learn(.raceStart, hintsOn: hintsOn, progress: progress) { onRetired?(.raceStart, .learned) }
+            releaseHeld()
+        }
         if observations.steeredBothWays(thresholds) { learn(.steeredBothWays, hintsOn: hintsOn) }
         if observations.hasLetGo { learn(.autohelmHeld, hintsOn: hintsOn) }
 
@@ -179,7 +208,7 @@ final class HintEngine {
         let snapshot = HintSnapshot(world: world, observations: observations, showsLaylines: showsLaylines,
                                     isFirstRace: isFirstRace, lettingGoRetired: progress.isRetired(.lettingGo),
                                     tuning: thresholds)
-        var chosen: (hint: Hint, leader: HintTarget?)?
+        var chosen: (hint: Hint, leader: HintTarget?, held: Bool)?
         for hint in catalogue {
             let id = hint.id
             if progress.isRetired(id) {
@@ -193,9 +222,23 @@ final class HintEngine {
                 rearm(id, firing: firing != nil, now: now)
                 continue
             }
-            if canPick, chosen == nil, let firing { chosen = (hint, firing.leader) }
+            if canPick, chosen == nil, let firing {
+                chosen = (hint, firing.leader, id == .raceStart && holdsSteeringHint(isFirstRace: isFirstRace))
+            }
         }
         return chosen
+    }
+
+    /// The held notice to take down now, once: you've steered, or hints went off.
+    func takeDownDue() -> Int? {
+        defer { pendingTakeDown = nil }
+        return pendingTakeDown
+    }
+
+    private func releaseHeld() {
+        guard let held = heldNoticeID else { return }
+        pendingTakeDown = held
+        heldNoticeID = nil
     }
 
     /// A spent hint whose trigger has been off `rearmSeconds` may post again.
@@ -214,9 +257,10 @@ final class HintEngine {
         }
     }
 
-    /// The hint `id` was posted as notice `noticeID`.
-    func posted(_ id: HintID, noticeID: Int) {
+    /// The hint `id` was posted as notice `noticeID`, `held` as `refresh` said.
+    func posted(_ id: HintID, noticeID: Int, held: Bool = false) {
         scheduler.posted(id, noticeID: noticeID)
+        if held { heldNoticeID = noticeID }
         if Self.oncePerRace.contains(id) {
             postedThisRace.insert(id)
         } else {

@@ -70,10 +70,13 @@ struct NoticeSlot: Equatable {
     /// The id the next notice posted gets.
     private(set) var nextID = 0
 
-    /// Posts `text` as a `kind` notice at `now`, with a hint's `leader`, and returns what shows.
+    /// Posts `text` as a `kind` notice at `now`, with a hint's `leader`, and returns what shows. A `held` notice is
+    /// live (`isLive`): it shows until `takeDown`, never going stale, and one a higher-priority notice replaces
+    /// waits to show again (the first race's steering hint, #129).
     @discardableResult mutating func post(_ kind: NoticeKind, _ text: String, at now: Date,
-                                          leader: HintTarget? = nil) -> Notice? {
-        let notice = Notice(id: nextID, kind: kind, text: text, posted: now, expires: now, leader: leader)
+                                          leader: HintTarget? = nil, held: Bool = false) -> Notice? {
+        let notice = Notice(id: nextID, kind: kind, text: text, posted: now, expires: now, isLive: held,
+                            leader: leader)
         nextID += 1
         if let current = showing, NoticeTable.rule(kind).priority > NoticeTable.rule(current.kind).priority {
             if current.isLive { restartWaits(at: now) }
@@ -112,6 +115,15 @@ struct NoticeSlot: Equatable {
             showing = nil
         }
         waiting.append(notice)
+    }
+
+    /// Takes notice `id` down at `now`, showing or waiting (a held notice once it has done its job).
+    mutating func takeDown(_ id: Int, at now: Date) {
+        if let shown = showing, shown.id == id {
+            showing = nil
+            if shown.isLive { restartWaits(at: now) }
+        }
+        waiting.removeAll { $0.id == id }
     }
 
     /// Shows `notice` as it is, expiry included: a render fixture's, which never expires.
