@@ -53,15 +53,19 @@ final class OnlineLaunch {
     @ObservationIgnored private let clock = MonotonicClock()
     /// The race's haptics: the app passes `AppModel.haptics`, gated by Settings (#110).
     @ObservationIgnored private let haptics: any Haptics
+    /// The race's sounds: the app passes `AppModel.sound`, gated by Settings' Effects (#126).
+    @ObservationIgnored private let sound: any SoundOutput
     /// The race's steering scheme: the app passes `AppModel.controls` (#112).
     @ObservationIgnored private let controls: ControlSettings
     /// The rule numbers this device has seen called (#23): the app passes `AppModel.rulesSeen`.
     @ObservationIgnored private let rulesSeen: RuleSeenStore
 
-    init(server: RaceServer, haptics: any Haptics = GatedHaptics(), controls: ControlSettings = ControlSettings(),
-         rulesSeen: RuleSeenStore = RuleSeenStore(), ticket: @escaping () async throws -> [UInt8]) {
+    init(server: RaceServer, haptics: any Haptics = GatedHaptics(), sound: any SoundOutput = SilentSoundOutput(),
+         controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
+         ticket: @escaping () async throws -> [UInt8]) {
         self.server = server
         self.haptics = haptics
+        self.sound = sound
         self.rulesSeen = rulesSeen
         self.controls = controls
         self.ticket = ticket
@@ -99,7 +103,8 @@ final class OnlineLaunch {
             let clock = clock
             let driver = OnlineDriver(start: start, transport: joined, token: token, clientBuild: Self.clientBuild,
                                       now: clock.now, connect: { WebSocketTransport(url: url) })
-            phase = .racing(GameSession(online: driver, haptics: haptics, controls: controls, rulesSeen: rulesSeen))
+            phase = .racing(GameSession(online: driver, haptics: haptics, sound: sound, controls: controls,
+                                              rulesSeen: rulesSeen))
         case .updateRequired(let reason):
             transport.close()
             phase = .updateRequired(reason)

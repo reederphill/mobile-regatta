@@ -18,6 +18,10 @@ _Avoid_: tournament, event
 The countdown before the gun, during which boats manoeuvre below the start line.
 _Avoid_: pre-race, lobby countdown
 
+**Committee sounds**:
+The start sequence's horns (60 s and 30 s), beeps (5 to 1) and gun, played from the race clock the player sees, never from a server event.
+_Avoid_: alarms, countdown sounds
+
 **OCS** (On Course Side):
 A boat with any part of her hull on the course side of the start line at the gun. She must return until her whole hull is on the pre-start side before starting. A boat that never comes back is scored OCS, and so is a boat that never started: behind every boat placed by ladder distance and every DSQ, and ahead of RET.
 _Avoid_: false start, early
