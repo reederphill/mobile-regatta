@@ -56,7 +56,7 @@ public final class PredictedRace {
     private var lastWorld: WorldSnapshot
     /// The server's events newer than `lastWorld` that change a prediction (`Race.isRuling`), by reliable seq, in
     /// the order they came: applied at their ticks as the race sails them (`Race.apply(authoritative:)`, #96).
-    private var rulings: [(seq: UInt32, event: RaceEvent)] = []
+    private var rulings: [Ruling] = []
     /// Those of `rulings` that came for a tick the race had already sailed, for the next `advance(to:)` to take in.
     private var late: [RaceEvent] = []
     /// How many of `unacked` the race has queued since it last imported.
@@ -99,7 +99,7 @@ public final class PredictedRace {
         guard Race.isRuling(event), event.tick > lastWorld.tick, !rulings.contains(where: { $0.seq == seq }) else {
             return
         }
-        rulings.append((seq, event))
+        rulings.append(Ruling(seq: seq, event: event))
         if event.tick <= race.tick { late.append(event) }
     }
 
@@ -242,4 +242,10 @@ public final class PredictedRace {
         queued = 0
         advance(to: tick)
     }
+}
+
+/// A server event that changes a prediction, with the reliable seq it came under.
+private struct Ruling {
+    let seq: UInt32
+    let event: RaceEvent
 }
