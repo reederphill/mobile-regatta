@@ -787,10 +787,10 @@ public final class Race {
 
     /// Who must keep clear between `seat` and every other seat, in seat order, nil at `seat` itself and for
     /// any pair with a ghost: `Rules.obligation` (rule 21 over rules 10–13), so a returning or penalised boat
-    /// keeps clear. Where the umpire holds a mark-room record for the pair (#91), the boat owing mark-room is
-    /// the one that keeps clear: the glow is the only mark-room cue the player gets, so it shows who owes room
-    /// as well as who keeps clear (owner, 2026-10-03, #386). Rule 18 is not right of way (Case 25): this is what
-    /// the glyphs show (#123), never what the umpire calls. Read-only.
+    /// keeps clear. Where the umpire holds a mark-room record for the pair (#91) and neither boat is under rule 21,
+    /// the boat owing mark-room is the one that keeps clear: the glow is the only mark-room cue the player gets, so
+    /// it shows who owes room as well as who keeps clear (owner, 2026-10-03, #386). Rule 18 is not right of way
+    /// (Case 25): this is what the glyphs show (#123), never what the umpire calls. Read-only.
     /// A prediction never works it out from its own world (#96, ADR 0005): it returns the server umpire's
     /// (`umpireRelations`) for the seat they are for, and none for any other seat or before they come.
     public func keepClearRelations(of seat: Int) -> [RightOfWay?] {
@@ -814,7 +814,10 @@ public final class Race {
         }
         guard let verdict = Rules.obligation(boats[seat], boats[other], overlapped: overlaps.isOverlapped(seat, other),
                                              course: course, hull: boatClass.hull) else { return nil }
-        if let record = umpire?.markRoom(SeatPair(seat, other)) {
+        // Rule 21 stands over mark-room: a boat owed room that is taking a penalty or returning gets none and keeps
+        // clear, as the umpire holds her to (`EscapeSimulation.markRoomVerdict`); with both under it, Section A decides.
+        let underRule21 = [seat, other].contains { boats[$0].isTakingPenalty || course.isReturning(boats[$0]) }
+        if !underRule21, let record = umpire?.markRoom(SeatPair(seat, other)) {
             return RightOfWay(keepClear: record.owing, rule: record.rule)
         }
         return RightOfWay(keepClear: verdict.offender, rule: verdict.rule)

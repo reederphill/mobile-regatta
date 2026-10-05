@@ -124,6 +124,21 @@ import Testing
         #expect(BoatStyle.standard.glowFullHulls < BoatStyle.standard.glowRangeHulls)
     }
 
+    /// Mark-room glows as right of way does (#386), and only within the glow range: the boat owing room red, the
+    /// boat owed it green, nothing past the range however the umpire holds the pair.
+    @Test func markRoomGlowsWithinRangeOnly() {
+        let positions = [Vec2(0, 0), Vec2(0, 12), Vec2(0, 32)]
+        func glows(_ keepClear: [RightOfWay?]) -> [RightOfWayGlyph?] {
+            GlowSelection.glows(keepClear: keepClear, positions: positions, me: 0, isGhost: false, rangeHulls: 6,
+                                fullHulls: 2, hullLength: 4).map { $0?.kind }
+        }
+        // Seat 1 is 3 hulls off, seat 2 8 hulls off: past a 6-hull range.
+        #expect(glows([nil, RightOfWay(keepClear: 1, rule: .givingMarkRoom),
+                       RightOfWay(keepClear: 2, rule: .givingMarkRoom)]) == [nil, .hasRight, nil])
+        #expect(glows([nil, RightOfWay(keepClear: 0, rule: .tackingInTheZone),
+                       RightOfWay(keepClear: 0, rule: .tackingInTheZone)]) == [nil, .giveWay, nil])
+    }
+
     /// The glow fades in from nothing at the range's edge to full at the full distance, easing at both ends, and
     /// stays full inside it.
     @Test func glowFadesInWithDistance() {
