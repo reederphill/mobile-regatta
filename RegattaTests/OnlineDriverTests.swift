@@ -120,16 +120,24 @@ import RegattaProtocol
                 "a call between two other boats takes no notice: \(String(describing: rig.session.notice))")
     }
 
-    /// Online the right-of-way glows stay hidden until the server sends its own (#96, ADR 0005): no frame carries
-    /// a keep-clear row from the client's world. The rule-call lines still draw, from the server's events (#123).
-    @Test func onlineFramesShowNoGlowsButDrawTheServersRuleCallLines() throws {
+    /// Online the right-of-way glows are the server umpire's (#96, ADR 0005): every frame's keep-clear row is the
+    /// relations the server's last imported snapshot carried, never one worked out from the client's world; none
+    /// before the first. The rule-call lines still draw, from the server's events (#123).
+    @Test func onlineGlowsAreTheServerUmpiresAndTheRuleCallLinesDraw() throws {
         let rig = try OnlineRig(collisionCourse: true)
-        var framesWithGlows = 0
+        var framesWithGlows = 0, mismatches = 0
         rig.run(for: 8_000_000) { _ in
-            if rig.driver.currentFrame.keepClear != nil { framesWithGlows += 1 }
+            let frame = rig.driver.currentFrame
+            let predicted = rig.driver.client.predicted
+            let sent = predicted.serverTick.flatMap { rig.server.sentRelations[$0] }
+            let expected = sent.map { WireRelation.umpireRelations($0, seat: rig.driver.myBoatIndex).keepClear }
+                ?? Array(repeating: nil, count: frame.boats.count)
+            if frame.tick == predicted.tick, frame.keepClear != expected { mismatches += 1 }
+            if frame.keepClear?.contains(where: { $0 != nil }) == true { framesWithGlows += 1 }
             return false
         }
-        #expect(framesWithGlows == 0)
+        #expect(framesWithGlows > 0, "the collision course brings boats into range")
+        #expect(mismatches == 0)
         #expect(rig.driver.currentFrame.penalty != nil, "the arc's windows are the rules'")
         let sent = rig.server.sentEvents.compactMap { if case .ruleCall(let call) = $0.event.kind { call } else { nil } }
         let first = try #require(sent.first, "the server's race makes a rule call")

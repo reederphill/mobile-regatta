@@ -21,10 +21,16 @@ public enum PredictedRaceError: Error, Equatable, Sendable {
 /// the key comes, by a `WindKey` event or the resync.
 ///
 /// The race's own events are drained and dropped: online, rule calls, finishes and penalties are shown
-/// only from the server's reliable events (#18, #68); #96 stops the prediction making them at all. The
-/// app (#68) reads finishes, places and whether the race is over from `events`, the server's event
-/// state, which a `Resync` can restore without replaying the events that built it; the events
-/// `RaceClient.drainServerEvents()` hands out are for showing calls as they happen.
+/// only from the server's reliable events (#18, #68), and the prediction makes no rule call, penalty or
+/// disqualification at all (#96, `Race.Mode.prediction`). The server's events change it instead
+/// (`Race.apply(authoritative:)`), each at its own tick: one newer than the last server world is kept until a
+/// snapshot at or past its tick holds it, and applied as the prediction sails that tick, sailing again from the
+/// last server world when it comes for a tick already sailed. Each snapshot's relations (`Snapshot.relations`)
+/// become the race's umpire relations (`Race.setUmpireRelations`): the right-of-way glows and rule 17
+/// restrictions are the server umpire's, never worked out from the client's world (ADR 0005); a resync forgets
+/// them until the next snapshot. The app (#68) reads finishes, places and whether the race is over from
+/// `events`, the server's event state, which a `Resync` can restore without replaying the events that built it;
+/// the events `RaceClient.drainServerEvents()` hands out are for showing calls as they happen.
 public final class PredictedRace {
     public let start: RaceStart
     /// The keys-only race, at the client's predicted tick (or before it, while a key is missing).
@@ -43,6 +49,12 @@ public final class PredictedRace {
 
     /// Inputs sent and not yet known applied, in the order sent (so by tick).
     private var unacked: [StampedInput] = []
+    /// The last server world imported (or the race's start), for sailing again from it when a server event comes
+    /// for a tick already predicted (#96).
+    private var lastWorld: WorldSnapshot
+    /// The server's events newer than `lastWorld`, in the order they came: applied at their ticks as the race
+    /// sails them (`Race.apply(authoritative:)`, #96).
+    private var rulings: [RaceEvent] = []
     /// How many of `unacked` the race has queued since it last imported.
     private var queued = 0
     private var highestSent: UInt32 = 0
@@ -54,6 +66,7 @@ public final class PredictedRace {
         self.start = start
         race = Race(setup: start.setup, revealedWindKeys: start.windKeys)
         events = EventState(nextEventSeq: 1)
+        lastWorld = race.exportSnapshot()
         missingWindKey = missingKeyNow()
     }
 
@@ -63,10 +76,31 @@ public final class PredictedRace {
         highestSent = max(highestSent, input.seq)
     }
 
-    /// A reliable event, in order; `seq` is its reliable-stream number.
+    /// A reliable event, in order; `seq` is its reliable-stream number. One newer than the last server world
+    /// changes the prediction at its tick (#96): if the race has sailed that tick already, it sails again from the
+    /// last server world with the event in.
     public func record(_ event: RaceEvent, seq: UInt32) {
         events.record(event)
         events.nextEventSeq = seq &+ 1
+        guard event.tick > lastWorld.tick else { return }
+        rulings.append(event)
+        if event.tick <= race.tick { resail() }
+    }
+
+    /// Sails the race again from the last server world to where it was, applying the server's events on the way.
+    private func resail() {
+        let resumeAt = race.tick
+        var world = lastWorld
+        world.windKeys = race.exportSnapshot().windKeys
+        do {
+            try race.importSnapshot(world)
+        } catch {
+            // Never: the world imported before, and the keys are the race's own. Apply it where the race is.
+            for event in rulings where event.tick <= race.tick { race.apply(authoritative: event) }
+            rulings.removeAll { $0.tick <= race.tick }
+            return
+        }
+        repredict(to: resumeAt)
     }
 
     /// A revealed wind key, in order; `seq` is its reliable-stream number.
@@ -88,7 +122,8 @@ public final class PredictedRace {
         let resumeAt = race.tick
         let world = try snapshot.applied(to: race.exportSnapshot(), tick: tick, events: events)
         try race.importSnapshot(world)
-        serverTick = tick
+        imported(world)
+        race.setUmpireRelations(snapshot.relations.map { WireRelation.umpireRelations($0, seat: seat) })
         snapshotsImported += 1
         if let ack = snapshot.ack { acknowledge(through: ack.seq, snapshotTick: tick) }
         repredict(to: resumeAt)
@@ -105,7 +140,9 @@ public final class PredictedRace {
         let world = try resync.world(base: race.exportSnapshot(), tick: tick)
         try race.importSnapshot(world)
         events = resync.eventState
-        serverTick = tick
+        imported(world)
+        // The relations were the last snapshot's: none until the next one.
+        race.setUmpireRelations(nil)
         unacked.removeAll { $0.tick <= tick }
         repredict(to: resumeAt)
     }
@@ -137,8 +174,17 @@ public final class PredictedRace {
                 }
             }
             _ = race.drainEvents()
+            // The server's events of this tick, after the tick as the server emitted them (#96).
+            for event in rulings where event.tick == race.tick { race.apply(authoritative: event) }
         }
         missingWindKey = missingKeyNow()
+    }
+
+    /// The server's `world` is in: the events it holds are dropped (#96).
+    private func imported(_ world: WorldSnapshot) {
+        lastWorld = world
+        serverTick = world.tick
+        rulings.removeAll { $0.tick <= world.tick }
     }
 
     /// The key the wind at the race's own tick needs and the race doesn't hold, if any: only before the

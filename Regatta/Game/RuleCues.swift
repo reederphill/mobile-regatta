@@ -105,7 +105,7 @@ nonisolated struct RightOfWayGlow: Equatable, Sendable {
 
 /// Which boats glow to `me` this frame, and how strongly (#123): every other boat within `rangeHulls` of her with a
 /// keep-clear relation, fading in from nothing at `rangeHulls` to full at `fullHulls` (centre to centre); none while
-/// the frame carries no relations (online until #96) or she is a ghost.
+/// the frame carries no relations or she is a ghost. Online the relations are the server umpire's (#96).
 nonisolated enum GlowSelection {
     static func glows(keepClear: [RightOfWay?]?, positions: [Vec2], me: Int, isGhost: Bool, rangeHulls: Double,
                       fullHulls: Double, hullLength: Double) -> [RightOfWayGlow?] {

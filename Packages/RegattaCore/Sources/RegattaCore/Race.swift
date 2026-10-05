@@ -18,7 +18,10 @@ public final class Race {
         case authoritative(windSeed: WindSeed)
         /// How an online client predicts (#64, ADR 0005): no wind seed, only the revealed keys, which later
         /// keys join through `addRevealedWindKey(_:)`. It has no `log` and no umpire, and never emits a rule
-        /// event (`RaceEvent.Kind.isRuleEvent`): rule calls come only from the server.
+        /// event (`RaceEvent.Kind.isRuleEvent`): rule calls come only from the server. It judges nothing,
+        /// owes, serves and enforces no penalty turn and disqualifies nobody (#96): the server's events
+        /// (`apply(authoritative:)`) and snapshots bring those, and its right-of-way relations are the server
+        /// umpire's (`umpireRelations`).
         case prediction(revealedWindKeys: [WindKey])
     }
 
@@ -636,8 +639,16 @@ public final class Race {
     /// Who must keep clear between `seat` and every other seat, in seat order, nil at `seat` itself and for
     /// any pair with a ghost: `Rules.obligation` (rule 21 over rules 10–13), so a returning or penalised boat
     /// keeps clear. Mark-room never changes it (Case 25). What the right-of-way glyphs show (#123); read-only.
+    /// A prediction never works it out from its own world (#96, ADR 0005): it returns the server umpire's
+    /// (`umpireRelations`) for the seat they are for, and none for any other seat or before they come.
     public func keepClearRelations(of seat: Int) -> [RightOfWay?] {
         guard boats.indices.contains(seat) else { return [] }
+        if umpire == nil {
+            guard let relations = umpireRelations, relations.seat == seat else {
+                return Array(repeating: nil, count: boats.count)
+            }
+            return relations.keepClear
+        }
         let hull = boatClass.hull
         let boat = boats[seat]
         return boats.indices.map { other in
@@ -681,7 +692,8 @@ public final class Race {
                     boats[i].speed = BoatDynamics.speed(after: .boat, speed: boats[i].speed, boatClass: boatClass)
                     boats[j].speed = BoatDynamics.speed(after: .boat, speed: boats[j].speed, boatClass: boatClass)
                     emit(.contact(SeatPair(i, j)))
-                    if !isIncidentOpen(i, j),
+                    // Only the umpire judges (#96): a prediction's contact costs speed and pushes, never a call.
+                    if umpire != nil, !isIncidentOpen(i, j),
                        let verdict = Rules.judge(boats[i], boats[j], overlapped: overlaps.isOverlapped(i, j),
                                                  course: course, hull: hull, escape: escapeSimulation(i, j)) {
                         verdicts.append(verdict)
@@ -806,9 +818,13 @@ public final class Race {
     }
 
     /// The windward boats seat `seat` is held to her proper course against now (rule 17, #345: the umpire's records
-    /// naming her the leeward boat), in seat order. None in a prediction, which holds no umpire (ADR 0005).
+    /// naming her the leeward boat), in seat order. A prediction holds no umpire (ADR 0005): it returns the server
+    /// umpire's word (`umpireRelations`, #96) for the seat it is for, and none for any other.
     public func properCourseRestrictions(of seat: Int) -> [Int] {
-        guard let umpire else { return [] }
+        guard let umpire else {
+            guard let relations = umpireRelations, relations.seat == seat else { return [] }
+            return relations.restrictedBy
+        }
         return boats.indices.filter { other in
             other != seat && umpire.properCourse(SeatPair(seat, other))?.leeward == seat
         }
@@ -870,8 +886,11 @@ public final class Race {
     }
 
     /// What seat `i`'s touch of `obstacle`, begun this tick, costs her (rule 31, #90).
+    /// A prediction never penalises a touch of a mark of her leg (#96, ADR 0005): the server's `markTouch` owes
+    /// the turn (`apply(authoritative:)`).
     private func touchMark(_ i: Int, _ obstacle: Obstacle) {
         if course.isRule31Mark(obstacle.name, status: boats[i].status, legIndex: boats[i].legIndex) {
+            guard umpire != nil else { return }
             switch markTouchVerdict(i, obstacle) {
             case .turn:
                 penalize(i)
@@ -912,8 +931,8 @@ public final class Race {
     /// holds open whose call names her the victim: 43.1(b) when the call is the other boat failing to give her
     /// mark-room (18.2 or 18.3) at `obstacle`, the mark of the pair's rule 18 record, which still has her entitled,
     /// and she touches it on the call's tick or after (Case 95: forced onto the mark she was owed room at), and
-    /// 43.1(a) when that boat's breach compelled her onto `obstacle` (`compellingIncident`). Then she is exonerated, with no turn. In a prediction no
-    /// incident is open, so it predicts the turn until the server's snapshot (as #88's calls).
+    /// 43.1(a) when that boat's breach compelled her onto `obstacle` (`compellingIncident`). Then she is exonerated, with no turn. The
+    /// authoritative race's alone (`touchMark`): a prediction penalises no touch (#96).
     private func markTouchVerdict(_ i: Int, _ obstacle: Obstacle) -> MarkTouchVerdict {
         guard let umpire else { return .turn }
         for other in boats.indices where other != i {
@@ -1008,7 +1027,7 @@ public final class Race {
     /// turn (`penalize`; none, `turnsOwed` 0, when her penalised mark touch was in this incident, 44.1(a), #90)
     /// and announces the call, with the turn's deadlines when its clock is fixed at the call.
     /// The umpire holds the incident open until the pair separates (`resolveBoatContacts`): one incident
-    /// per pair (#9). A prediction has no umpire, so every contact it sails opens one.
+    /// per pair (#9). The authoritative race's alone: a prediction judges nothing (#96, ADR 0005).
     private func call(_ verdict: Verdict, trigger: Incident.Trigger) {
         let leg = boats[verdict.offender].legIndex
         var incident = incidents.open(between: verdict.offender, and: verdict.victim, tick: tick, leg: leg, trigger: trigger)
@@ -1050,9 +1069,11 @@ public final class Race {
     /// and its clock starts now; otherwise it queues behind the turns she owes, and its clock starts when it
     /// becomes current (`startNextPenaltyClock`). Returns the turn's clock tick when it is fixed now, for the
     /// rule call's deadlines: always under `fromCall` stacking, and under `sequential` only when she owed none.
-    /// Internal for tests, which call it as a call on the current tick would.
+    /// Internal for tests, which call it as a call on the current tick would. A prediction owes the turn the
+    /// server called at `callTick`, the event's (`apply(authoritative:)`, #96).
     @discardableResult
-    func penalize(_ i: Int) -> Int? {
+    func penalize(_ i: Int, calledAt callTick: Int? = nil) -> Int? {
+        let tick = callTick ?? self.tick
         if boats[i].penaltyTurnsOwed == 0 {
             boats[i].penaltyTurnsOwed = 1
             boats[i].penaltyProgress = 0
@@ -1083,6 +1104,10 @@ public final class Race {
     /// turn up or serves it, so the start deadline reads it off the progress), and never onto the full turn
     /// (`heldPenaltyProgress`), so the next tick the player drives turning on completes it. Before the player
     /// has set a direction the autohelm's turning counts for nothing.
+    ///
+    /// A prediction (#96) turns the arc as the player drives it but never completes a turn: its progress stops
+    /// at `heldPenaltyProgress` until the server's `penaltyServed` arrives (`apply(authoritative:)`), so a turn is
+    /// never served twice.
     private func turnPenalty(_ b: inout Boat, seat i: Int, turn: Double, playerDriven: Bool) {
         let before = b.penaltyProgress
         let direction: Double = before > 0 ? 1 : before < 0 ? -1 : 0
@@ -1100,6 +1125,7 @@ public final class Race {
             let floor = abs(before) >= startedTurn ? startedTurn : 0
             progress = direction * min(max(direction * (before + turn), floor), Race.heldPenaltyProgress)
         }
+        if umpire == nil { progress = min(max(progress, -Race.heldPenaltyProgress), Race.heldPenaltyProgress) }
         if abs(before) < startedTurn && abs(progress) >= startedTurn { emit(.penaltyStarted(seat: i)) }
         if abs(progress) >= 2 * .pi {
             progress -= (progress < 0 ? -2 : 2) * .pi
@@ -1110,7 +1136,7 @@ public final class Race {
                 b.penaltyClockTick = nil
                 b.queuedPenaltyCallTicks = []
             } else {
-                startNextPenaltyClock(&b)
+                startNextPenaltyClock(&b, now: tick)
             }
         }
         b.penaltyProgress = progress
@@ -1119,7 +1145,7 @@ public final class Race {
     /// Starts the clock of the owed turn that has just become current, now, as the rules' stacking says (G4):
     /// under `sequential` at the later of its call and now, the previous turn's completion; under `fromCall`
     /// at its call. A queued turn whose call the boat doesn't hold (`Boat.queuedPenaltyCallTicks`) starts now.
-    private func startNextPenaltyClock(_ b: inout Boat) {
+    private func startNextPenaltyClock(_ b: inout Boat, now tick: Int) {
         let call = b.queuedPenaltyCallTicks.isEmpty ? nil : b.queuedPenaltyCallTicks.removeFirst()
         switch rules.raceFormat.penalty.stackedPenaltyDeadlines {
         case .sequential: b.penaltyClockTick = max(call ?? tick, tick)
@@ -1155,6 +1181,93 @@ public final class Race {
     public static let missedStart = "missedStart"
     /// `RaceEvent.Kind.disqualified`'s reason for a penalty turn not completed by its complete deadline (#89).
     public static let missedComplete = "missedComplete"
+
+    // MARK: - The server's word, in a prediction (#96)
+
+    /// Applies one of the server's authoritative events to a prediction (#96, ADR 0005), as the authoritative race
+    /// changed its state when it emitted it, with the event's tick as the call's: a rule call with a turn and a mark
+    /// touch owe a turn (`penalize`), `penaltyReset` gives the current turn up, `penaltyServed` serves it (the next
+    /// owed turn's clock starting at the event's tick), `disqualified` makes her DSQ and a ghost, owing nothing,
+    /// `ocsNotice` makes her OCS, `cleared` puts her back in the pre-start, and `finished` finishes her if the
+    /// prediction hasn't. Every other event, `markRoomNotice` included, changes nothing. The caller applies each
+    /// event once, in the server's order, at the end of its tick (`PredictedRace`); a prediction makes none of
+    /// these changes itself. A prediction's alone: the authoritative race is the server.
+    public func apply(authoritative event: RaceEvent) {
+        precondition(umpire == nil, "only a prediction applies the server's events")
+        func has(_ seat: Int) -> Bool { boats.indices.contains(seat) }
+        switch event.kind {
+        case .ruleCall(let call) where call.turnsOwed > 0 && has(call.offender):
+            for _ in 0..<call.turnsOwed { penalize(call.offender, calledAt: event.tick) }
+        case .markTouch(let seat, _) where has(seat):
+            penalize(seat, calledAt: event.tick)
+        case .penaltyReset(let seat) where has(seat):
+            boats[seat].penaltyProgress = 0
+        case .penaltyServed(let seat) where has(seat) && boats[seat].penaltyTurnsOwed > 0:
+            var b = boats[seat]
+            b.penaltyTurnsOwed -= 1
+            b.penaltyProgress = 0
+            if b.penaltyTurnsOwed == 0 {
+                b.penaltyClockTick = nil
+                b.queuedPenaltyCallTicks = []
+            } else {
+                startNextPenaltyClock(&b, now: event.tick)
+            }
+            boats[seat] = b
+        case .disqualified(let seat, _) where has(seat):
+            boats[seat].status = .dsq
+            boats[seat].penaltyTurnsOwed = 0
+            boats[seat].penaltyProgress = 0
+            boats[seat].penaltyClockTick = nil
+            boats[seat].queuedPenaltyCallTicks = []
+        case .ocsNotice(let seat) where has(seat) && boats[seat].status == .prestart:
+            boats[seat].status = .ocs
+        case .cleared(let seat) where has(seat) && boats[seat].status == .ocs:
+            boats[seat].status = .prestart
+        case .finished(let seat, let place) where has(seat) && boats[seat].status != .finished:
+            let time = Double(event.tick) / Double(Race.tickRate)
+            boats[seat].status = .finished
+            boats[seat].place = place
+            boats[seat].finishTime = time
+            finishers = max(finishers, place)
+            if firstFinishTime.map({ time < $0 }) ?? true { firstFinishTime = time }
+        default:
+            break
+        }
+    }
+
+    /// The server umpire's word on one seat's pairs, as a prediction holds it from the last snapshot (#96): who
+    /// keeps clear (`keepClearRelations(of:)`) and the windward boats she is held to her proper course against
+    /// (`properCourseRestrictions(of:)`), for the pairs the server sent (those in range of her). Never the
+    /// prediction's own world: the umpire is the server's (ADR 0005).
+    public struct UmpireRelations: Equatable, Sendable {
+        /// The seat the relations are for: the client's own.
+        public var seat: Int
+        /// Who keeps clear between `seat` and each seat, by seat; nil at `seat`, out of range, or with no relation.
+        public var keepClear: [RightOfWay?]
+        /// The windward boats `seat` is held to her proper course against (rule 17), in seat order.
+        public var restrictedBy: [Int]
+
+        public init(seat: Int, keepClear: [RightOfWay?], restrictedBy: [Int]) {
+            self.seat = seat
+            self.keepClear = keepClear
+            self.restrictedBy = restrictedBy
+        }
+    }
+
+    /// The server umpire's relations a prediction last took (`setUmpireRelations`), nil before the first or
+    /// after a resync. Always nil in the authoritative race, which has the umpire itself.
+    public private(set) var umpireRelations: UmpireRelations?
+
+    /// Takes the server umpire's `relations` (#96), or forgets them with nil. A prediction's alone. Relations
+    /// for a fleet of another size are dropped.
+    public func setUmpireRelations(_ relations: UmpireRelations?) {
+        precondition(umpire == nil, "only a prediction takes the server umpire's relations")
+        guard let relations, relations.keepClear.count == boats.count, boats.indices.contains(relations.seat) else {
+            umpireRelations = nil
+            return
+        }
+        umpireRelations = relations
+    }
 
     /// Seat `seat`'s owed penalty turns as the HUD shows them (G4, #114), or nil while she owes none.
     public func owedPenalty(ofSeat seat: Int) -> OwedPenalty? {

@@ -184,6 +184,24 @@ import RegattaCore
                 "not to a third boat")
     }
 
+    /// Online every server event carries a stable id (#96, #124 review): one delivered again, of any kind, presents
+    /// nothing a second time; a new id presents again, and offline events (no id) always present.
+    @Test func anEventWithAnIdSeenBeforeIsNotPresentedAgain() {
+        let me = Self.me
+        var presenter = RaceEventPresenter(me: me)
+        let kinds: [RaceEvent.Kind] = [.ocsNotice(recipient: me), .markRoomNotice(boat: me, entitledOver: 1, mark: "pin"),
+                                       .markTouch(seat: me, mark: "pin"), .penaltyServed(seat: me), .finished(seat: me, place: 1)]
+        for (k, kind) in kinds.enumerated() {
+            let event = RaceEvent(tick: 10 + k, kind: kind, id: UInt32(k + 1))
+            #expect(presenter.present([event]) != Presentation(), "\(kind)")
+            #expect(presenter.present([event]) == Presentation(), "\(kind) again")
+        }
+        #expect(presenter.present([RaceEvent(tick: 20, kind: .ocsNotice(recipient: me), id: 9)]) != Presentation())
+        let offline = RaceEvent(tick: 30, kind: .markRoomNotice(boat: me, entitledOver: 1, mark: "pin"))
+        #expect(presenter.present([offline]) != Presentation())
+        #expect(presenter.present([offline]) != Presentation())
+    }
+
     /// Your roll tap's hit plays a haptic (#222); a miss plays none, and nor does another boat's hit.
     @Test func rollHitGivesHapticMissDoesNot() {
         let recorder = HapticsTests.RecordingGenerator()

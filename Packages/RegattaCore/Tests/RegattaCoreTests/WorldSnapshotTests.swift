@@ -406,6 +406,7 @@ struct LogFeeder {
         "current": "fixed for the race, derived from the venue and the public race seed",
         "tideStateAtGun": "fixed for the race, drawn from the venue and the public race seed (ADR 0003)",
         "umpire": "umpire memory (which incidents are open, #88; rule 18 records and zone presence, #91; the recorded track the escape simulation reads, #92), the authoritative race's own, never sent to clients, in a snapshot or in the digest",
+        "umpireRelations": "the server umpire's relations a prediction takes from each snapshot (#96): not world state, never in the digest; a resync drops them",
         "windSetup": "fixed for the race, drawn from the public race seed",
         "windKeys": "the key generator: it holds the wind seed, never in a snapshot (ADR 0001); import moves it past the snapshot's keys",
         "finishers": "derived on import: the count of finished boats",

@@ -165,7 +165,7 @@ import Testing
     // MARK: - Modes
 
     /// Two boats in contact: the authoritative race calls it; a prediction on the same keys sails the
-    /// same but emits no rule event, and has no umpire.
+    /// same but emits no rule event, has no umpire, and owes no turn (#96).
     @Test func predictionModeNeverEmitsRuleEvents() throws {
         let setup = try Self.setup(seats: [.human, .bot])
         let authoritative = Race(setup: setup, windSeed: Self.windSeed)
@@ -199,7 +199,13 @@ import Testing
         #expect(!predicted.contains { $0.kind.isRuleEvent })
         // Otherwise it sails exactly the same: the umpire's calls are all it leaves out.
         #expect(predicted == calls.filter { !$0.kind.isRuleEvent })
-        #expect(prediction.digest() == authoritative.digest())
+        // It judges nothing (#96): no turn owed, no incident opened; but for that its boats are the authoritative ones.
+        #expect(prediction.boats.allSatisfy { $0.penaltyTurnsOwed == 0 } && prediction.incidents.count == 0)
+        #expect(authoritative.boats.contains { $0.penaltyTurnsOwed > 0 })
+        #expect(prediction.boats.map(\.position) == authoritative.boats.map(\.position))
+        #expect(prediction.boats.map(\.heading) == authoritative.boats.map(\.heading))
+        #expect(prediction.boats.map(\.speed) == authoritative.boats.map(\.speed))
+        #expect(prediction.boats.map(\.status) == authoritative.boats.map(\.status))
     }
 
     // MARK: - Wind
