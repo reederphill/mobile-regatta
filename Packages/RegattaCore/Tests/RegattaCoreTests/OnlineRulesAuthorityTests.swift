@@ -67,16 +67,51 @@ import Testing
         #expect(dsqPredicted == 0)
     }
 
+    /// A prediction judges no OCS either (#96): a boat over the line at the gun is OCS in the authoritative race,
+    /// and in the prediction only once the server's `ocsNotice` comes. Starting stays the prediction's own.
+    @Test func aPredictionJudgesNoOCS() throws {
+        let setup = try RaceSetup(raceSeed: RaceSeed(96), seats: [.human, .human], startSequenceTicks: 60)
+        let authoritative = Race(setup: setup, windSeed: WindSeed(96))
+        let prediction = try Self.prediction(of: authoritative, through: 120, windSeed: WindSeed(96))
+        while authoritative.tick < -10 {
+            authoritative.step()
+            try prediction.tryStep()
+        }
+        var snapshot = authoritative.exportSnapshot()
+        snapshot.seats[0].boat.position = authoritative.course.startLine.centre + authoritative.course.upwind * 30
+        try authoritative.importSnapshot(snapshot)
+        try prediction.importSnapshot(snapshot)
+        // The import keeps only the snapshot's keys: reveal the rest again.
+        var generator = try WindKeyGenerator(windSeed: WindSeed(96), setup: authoritative.windSetup,
+                                             windows: authoritative.wind.windows)
+        for key in generator.keys(through: 40) where key.window >= snapshot.windKeys.endWindow {
+            prediction.addRevealedWindKey(key)
+        }
+        var calls: [RaceEvent] = [], predicted: [RaceEvent] = []
+        while authoritative.tick < 1 {
+            authoritative.step()
+            try prediction.tryStep()
+            calls += authoritative.drainEvents()
+            predicted += prediction.drainEvents()
+        }
+        #expect(calls.map(\.kind).contains(.ocsNotice(recipient: 0)))
+        #expect(authoritative.boats[0].status == .ocs)
+        #expect(!predicted.map(\.kind).contains(.ocsNotice(recipient: 0)))
+        #expect(prediction.boats[0].status == .prestart)
+        for event in calls { prediction.apply(authoritative: event) }
+        #expect(prediction.boats[0].status == .ocs)
+        #expect(prediction.boats[1].status == authoritative.boats[1].status)
+    }
+
     /// The penalty state of each seat that differs between `authoritative` and `prediction`, as text: turns owed,
-    /// the current turn's clock, the queue, the status and ghosting, and the turn's progress to within what one
-    /// tick of turning carries past a served turn (the prediction stops just short of a full turn until the server
-    /// serves it).
+    /// the current turn's clock, the queue, the status and ghosting, and the turn's progress (a served turn's
+    /// overshoot carries into the next in both).
     static func penaltyMismatches(_ authoritative: Race, _ prediction: Race) -> [String] {
         zip(authoritative.boats, prediction.boats).enumerated().compactMap { seat, pair in
             let (a, p) = pair
             guard a.penaltyTurnsOwed != p.penaltyTurnsOwed || a.penaltyClockTick != p.penaltyClockTick
                 || a.queuedPenaltyCallTicks != p.queuedPenaltyCallTicks || a.status != p.status
-                || abs(a.penaltyProgress - p.penaltyProgress) > 0.5
+                || abs(a.penaltyProgress - p.penaltyProgress) > 1e-9
                 || authoritative.isGhost(seat: seat) != prediction.isGhost(seat: seat) else { return nil }
             return "tick \(authoritative.tick) seat \(seat): owed \(a.penaltyTurnsOwed)/\(p.penaltyTurnsOwed) "
                 + "clock \(String(describing: a.penaltyClockTick))/\(String(describing: p.penaltyClockTick)) "
@@ -159,30 +194,42 @@ import Testing
         }
     }
 
-    /// A prediction's progress on a penalty turn stops just short of a full turn: only the server serves it.
+    /// A prediction never serves a penalty turn itself: its progress runs on past a full turn (the arc,
+    /// `OwedPenalty.progress`, waits just short of one) until the server's `penaltyServed` comes, which carries the
+    /// turning past the full turn into the next owed turn as the server did, however late it comes.
     @Test func aPredictionNeverServesAPenaltyTurnItself() throws {
         let setup = try RaceSetup(raceSeed: RaceSeed(96), seats: [.human, .bot], startSequenceTicks: 60)
         let authoritative = Race(setup: setup, windSeed: WindSeed(96))
-        let prediction = try Self.prediction(of: authoritative, through: 600, windSeed: WindSeed(96))
+        let prediction = try Self.prediction(of: authoritative, through: 900, windSeed: WindSeed(96))
         for race in [authoritative, prediction] {
+            race.penalize(0)
             race.penalize(0)
             race.apply(BoatInput(rudder: Int8(127)), seat: 0, atTick: race.tick + 1)
         }
-        var servedAt: Int?
-        for _ in 0..<450 {
+        // Each served turn reaches the prediction 6 ticks late, as over the network.
+        var inFlight: [RaceEvent] = []
+        var served = 0, heldAtFullTurn = 0
+        for _ in 0..<800 {
             authoritative.step()
             try prediction.tryStep()
-            if servedAt == nil, authoritative.drainEvents().contains(where: { $0.kind == .penaltyServed(seat: 0) }) {
-                servedAt = authoritative.tick
+            let events = authoritative.drainEvents().filter { $0.kind == .penaltyServed(seat: 0) }
+            served += events.count
+            inFlight += events
+            #expect(!prediction.drainEvents().contains { $0.kind == .penaltyServed(seat: 0) })
+            if let owed = prediction.owedPenalty(ofSeat: 0) {
+                #expect(owed.progress <= Race.heldPenaltyProgress)
+                if abs(prediction.boats[0].penaltyProgress) >= 2 * .pi { heldAtFullTurn += 1 }
             }
-            _ = prediction.drainEvents()
+            for event in inFlight where event.tick + 6 == prediction.tick {
+                prediction.apply(authoritative: event)
+                #expect(abs(prediction.boats[0].penaltyProgress - authoritative.boats[0].penaltyProgress) < 1e-9)
+            }
+            inFlight.removeAll { $0.tick + 6 <= prediction.tick }
         }
-        #expect(servedAt != nil)
-        #expect(prediction.boats[0].penaltyTurnsOwed == 1)
-        #expect(abs(prediction.boats[0].penaltyProgress) <= Race.heldPenaltyProgress)
-        #expect(abs(prediction.boats[0].penaltyProgress) > 6)
-        prediction.apply(authoritative: RaceEvent(tick: prediction.tick, kind: .penaltyServed(seat: 0)))
+        #expect(served == 2)
+        #expect(heldAtFullTurn > 0, "the arc waited for the server's word")
         #expect(prediction.boats[0].penaltyTurnsOwed == 0 && prediction.boats[0].penaltyClockTick == nil)
+        #expect(prediction.boats[0].penaltyProgress == 0)
     }
 
     /// A prediction's right-of-way relations and rule 17 restrictions are the server umpire's, never its own

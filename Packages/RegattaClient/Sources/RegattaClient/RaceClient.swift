@@ -67,9 +67,9 @@ public final class RaceClient {
 
     private var reliable = ReliableStream(next: 1)
     private var serverEvents: [RaceEvent] = []
-    /// The highest reliable seq (an event's id, `RaceEvent.id`) surfaced in `serverEvents` for this race: the
-    /// host numbers a seat's reliable frames once for the whole race, across rejoins (#96), so a frame at or
-    /// below it, however it comes again, is never surfaced twice.
+    /// The highest reliable seq (an event's id, `RaceEvent.id`) surfaced in `serverEvents` since the last
+    /// `RaceStart`: the host numbers a seat's reliable frames once for the whole race, across rejoins (#96), so a
+    /// frame at or below it, however it comes again, is never surfaced twice. Every `RaceStart` resets it.
     private var lastSurfacedSeq: UInt32 = 0
     private var lastAckSeq: UInt32?
     private var lastResyncRequest: UInt64?
@@ -237,9 +237,10 @@ public final class RaceClient {
                 wantsResync = true
             }
         case .raceStart(let start):
-            // A rejoin (#68): the race again, then the resync to bring it up to the server's tick. Another race
-            // numbers its events afresh.
-            if start.setup.raceSeed != predicted.start.setup.raceSeed { lastSurfacedSeq = 0 }
+            // A rejoin (#68): the race again, then the resync to bring it up to the server's tick. Another race,
+            // the same seed's rematch included, numbers its events afresh; a rejoin's numbering runs on (#96) and
+            // the resync's `nextEventSeq` keeps the stream past what was shown.
+            lastSurfacedSeq = 0
             predicted = PredictedRace(start: start)
             clientTick = max(clientTick, predicted.tick)
             reliable = ReliableStream(next: 1)

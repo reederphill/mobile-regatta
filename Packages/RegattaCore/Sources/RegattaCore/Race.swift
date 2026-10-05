@@ -649,14 +649,20 @@ public final class Race {
             }
             return relations.keepClear
         }
-        let hull = boatClass.hull
-        let boat = boats[seat]
-        return boats.indices.map { other in
-            guard other != seat,
-                  let verdict = Rules.obligation(boat, boats[other], overlapped: overlaps.isOverlapped(seat, other),
-                                                 course: course, hull: hull) else { return nil }
-            return RightOfWay(keepClear: verdict.offender, rule: verdict.rule)
+        return boats.indices.map { keepClearRelation(of: seat, to: $0) }
+    }
+
+    /// `keepClearRelations(of: seat)[other]`, for the one pair: the server works out only the pairs in range of
+    /// a seat (#96). Nil for a seat out of the fleet.
+    public func keepClearRelation(of seat: Int, to other: Int) -> RightOfWay? {
+        guard boats.indices.contains(seat), boats.indices.contains(other), other != seat else { return nil }
+        if umpire == nil {
+            guard let relations = umpireRelations, relations.seat == seat else { return nil }
+            return relations.keepClear[other]
         }
+        guard let verdict = Rules.obligation(boats[seat], boats[other], overlapped: overlaps.isOverlapped(seat, other),
+                                             course: course, hull: boatClass.hull) else { return nil }
+        return RightOfWay(keepClear: verdict.offender, rule: verdict.rule)
     }
 
     /// Boats touching: a contact costs both boats speed and is announced (`RaceEvent.Kind.contact`) on the
@@ -828,6 +834,17 @@ public final class Race {
         return boats.indices.filter { other in
             other != seat && umpire.properCourse(SeatPair(seat, other))?.leeward == seat
         }
+    }
+
+    /// Whether `properCourseRestrictions(of: seat)` holds `other`, for the one pair: the server works out only the
+    /// pairs in range of a seat (#96).
+    public func isHeldToProperCourse(_ seat: Int, against other: Int) -> Bool {
+        guard boats.indices.contains(seat), boats.indices.contains(other), other != seat else { return false }
+        guard let umpire else {
+            guard let relations = umpireRelations, relations.seat == seat else { return false }
+            return relations.restrictedBy.contains(other)
+        }
+        return umpire.properCourse(SeatPair(seat, other))?.leeward == seat
     }
 
     /// Whether rule 18 applies between each pair now (`Rules.markRoomApplies`), by `OverlapTracker.index`,
@@ -1105,13 +1122,18 @@ public final class Race {
     /// (`heldPenaltyProgress`), so the next tick the player drives turning on completes it. Before the player
     /// has set a direction the autohelm's turning counts for nothing.
     ///
-    /// A prediction (#96) turns the arc as the player drives it but never completes a turn: its progress stops
-    /// at `heldPenaltyProgress` until the server's `penaltyServed` arrives (`apply(authoritative:)`), so a turn is
-    /// never served twice.
+    /// A prediction (#96) turns as the player drives it but never completes a turn: its progress runs on past a
+    /// full turn, up to the turns she owes, and the server's `penaltyServed` (`apply(authoritative:)`) takes each
+    /// full turn off as the server served it, carrying the rest into the next. So a turn is never served twice, and
+    /// the arc (`OwedPenalty.progress`) waits just short of a full turn until the server's word comes. The turns
+    /// past the full ones (the server served them, its word is on the way) count as the autohelm's start.
     private func turnPenalty(_ b: inout Boat, seat i: Int, turn: Double, playerDriven: Bool) {
         let before = b.penaltyProgress
         let direction: Double = before > 0 ? 1 : before < 0 ? -1 : 0
         let startedTurn = rules.raceFormat.penalty.startedTurn
+        // A prediction's full turns the server has served and not yet said so (always 0 in the authoritative race).
+        let served = umpire == nil
+            ? min((abs(before) / (2 * .pi)).rounded(.down), Double(max(b.penaltyTurnsOwed - 1, 0))) * 2 * .pi : 0
         var progress: Double
         if playerDriven {
             if direction * turn < 0 {
@@ -1122,11 +1144,15 @@ public final class Race {
             progress = before + turn
         } else {
             guard direction != 0 else { return }
-            let floor = abs(before) >= startedTurn ? startedTurn : 0
-            progress = direction * min(max(direction * (before + turn), floor), Race.heldPenaltyProgress)
+            let floor = served + (abs(before) - served >= startedTurn ? startedTurn : 0)
+            progress = direction * min(max(direction * (before + turn), floor), served + Race.heldPenaltyProgress)
         }
-        if umpire == nil { progress = min(max(progress, -Race.heldPenaltyProgress), Race.heldPenaltyProgress) }
         if abs(before) < startedTurn && abs(progress) >= startedTurn { emit(.penaltyStarted(seat: i)) }
+        if umpire == nil {
+            let owed = Double(b.penaltyTurnsOwed) * 2 * .pi
+            b.penaltyProgress = min(max(progress, -owed), owed)
+            return
+        }
         if abs(progress) >= 2 * .pi {
             progress -= (progress < 0 ? -2 : 2) * .pi
             b.penaltyTurnsOwed -= 1
@@ -1184,14 +1210,26 @@ public final class Race {
 
     // MARK: - The server's word, in a prediction (#96)
 
+    /// Whether `apply(authoritative:)` can change a prediction for `event`: a rule call with a turn, a mark touch,
+    /// a penalty reset or served, a disqualification, an OCS notice or clearing, a finish (#96). A client re-sails
+    /// for these alone (`PredictedRace`).
+    public static func isRuling(_ event: RaceEvent) -> Bool {
+        switch event.kind {
+        case .ruleCall(let call): call.turnsOwed > 0
+        case .markTouch, .penaltyReset, .penaltyServed, .disqualified, .ocsNotice, .cleared, .finished: true
+        default: false
+        }
+    }
+
     /// Applies one of the server's authoritative events to a prediction (#96, ADR 0005), as the authoritative race
     /// changed its state when it emitted it, with the event's tick as the call's: a rule call with a turn and a mark
-    /// touch owe a turn (`penalize`), `penaltyReset` gives the current turn up, `penaltyServed` serves it (the next
-    /// owed turn's clock starting at the event's tick), `disqualified` makes her DSQ and a ghost, owing nothing,
-    /// `ocsNotice` makes her OCS, `cleared` puts her back in the pre-start, and `finished` finishes her if the
-    /// prediction hasn't. Every other event, `markRoomNotice` included, changes nothing. The caller applies each
-    /// event once, in the server's order, at the end of its tick (`PredictedRace`); a prediction makes none of
-    /// these changes itself. A prediction's alone: the authoritative race is the server.
+    /// touch owe a turn (`penalize`), `penaltyReset` gives the current turn up, `penaltyServed` serves it (the turning
+    /// past the full turn carried into the next owed turn, whose clock starts at the event's tick), `disqualified`
+    /// makes her DSQ and a ghost, owing nothing, `ocsNotice` makes her OCS, `cleared` puts her back in the
+    /// pre-start, and `finished` finishes her if the prediction hasn't. Every other event, `markRoomNotice`
+    /// included, changes nothing (`isRuling`). The caller applies each event once, in the server's order, at the
+    /// end of its tick (`PredictedRace`); a prediction makes none of these changes itself. A prediction's alone:
+    /// the authoritative race is the server.
     public func apply(authoritative event: RaceEvent) {
         precondition(umpire == nil, "only a prediction applies the server's events")
         func has(_ seat: Int) -> Bool { boats.indices.contains(seat) }
@@ -1205,11 +1243,15 @@ public final class Race {
         case .penaltyServed(let seat) where has(seat) && boats[seat].penaltyTurnsOwed > 0:
             var b = boats[seat]
             b.penaltyTurnsOwed -= 1
-            b.penaltyProgress = 0
             if b.penaltyTurnsOwed == 0 {
+                b.penaltyProgress = 0
                 b.penaltyClockTick = nil
                 b.queuedPenaltyCallTicks = []
             } else {
+                // The turning past the full turn carries into the next, as `turnPenalty` serves it.
+                let progress = b.penaltyProgress
+                let direction: Double = progress < 0 ? -1 : 1
+                b.penaltyProgress = abs(progress) >= 2 * .pi ? progress - direction * 2 * .pi : 0
                 startNextPenaltyClock(&b, now: event.tick)
             }
             boats[seat] = b
@@ -1278,8 +1320,9 @@ public final class Race {
     // MARK: - Start, roundings, finish
 
     /// OCS (#9, rule 29.1): any point of her hull on the course side of the line or its extensions at the gun.
+    /// A prediction (#96) judges no OCS: its boats are OCS by the server's `ocsNotice` or snapshot.
     private func fireGun() {
-        for i in boats.indices where boats[i].status == .prestart && isOverStartLine(boats[i]) {
+        for i in boats.indices where umpire != nil && boats[i].status == .prestart && isOverStartLine(boats[i]) {
             boats[i].status = .ocs
             emit(.ocsNotice(recipient: i))
         }

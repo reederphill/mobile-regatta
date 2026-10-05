@@ -24,8 +24,10 @@ public enum PredictedRaceError: Error, Equatable, Sendable {
 /// only from the server's reliable events (#18, #68), and the prediction makes no rule call, penalty or
 /// disqualification at all (#96, `Race.Mode.prediction`). The server's events change it instead
 /// (`Race.apply(authoritative:)`), each at its own tick: one newer than the last server world is kept until a
-/// snapshot at or past its tick holds it, and applied as the prediction sails that tick, sailing again from the
-/// last server world when it comes for a tick already sailed. Each snapshot's relations (`Snapshot.relations`)
+/// snapshot at or past its tick holds it, and applied as the prediction sails that tick. The ones that come for a
+/// tick already sailed are applied together at the next `advance(to:)`, by sailing once more from the last server
+/// world; if that is more than `resailCap` ticks behind, they apply where the race is instead and the next snapshot
+/// corrects the rest. Each reliable event is taken once, by its seq, however often it is delivered. Each snapshot's relations (`Snapshot.relations`)
 /// become the race's umpire relations (`Race.setUmpireRelations`): the right-of-way glows and rule 17
 /// restrictions are the server umpire's, never worked out from the client's world (ADR 0005); a resync forgets
 /// them until the next snapshot. The app (#68) reads finishes, places and whether the race is over from
@@ -52,12 +54,22 @@ public final class PredictedRace {
     /// The last server world imported (or the race's start), for sailing again from it when a server event comes
     /// for a tick already predicted (#96).
     private var lastWorld: WorldSnapshot
-    /// The server's events newer than `lastWorld`, in the order they came: applied at their ticks as the race
-    /// sails them (`Race.apply(authoritative:)`, #96).
-    private var rulings: [RaceEvent] = []
+    /// The server's events newer than `lastWorld` that change a prediction (`Race.isRuling`), by reliable seq, in
+    /// the order they came: applied at their ticks as the race sails them (`Race.apply(authoritative:)`, #96).
+    private var rulings: [(seq: UInt32, event: RaceEvent)] = []
+    /// Those of `rulings` that came for a tick the race had already sailed, for the next `advance(to:)` to take in.
+    private var late: [RaceEvent] = []
     /// How many of `unacked` the race has queued since it last imported.
     private var queued = 0
     private var highestSent: UInt32 = 0
+
+    /// The most ticks the race sails again to take in a server event for a tick already sailed (#96): further
+    /// behind, the event applies at the race's tick and the next snapshot corrects the rest.
+    public static let resailCap = 2 * Race.tickRate
+    /// How often the race has sailed again from the last server world for late events, and how often a late
+    /// event applied where the race was because that was more than `resailCap` ticks behind.
+    public private(set) var resails = 0
+    public private(set) var cappedResails = 0
 
     public var seat: Int { start.yourSeat }
     public var tick: Int { race.tick }
@@ -76,30 +88,44 @@ public final class PredictedRace {
         highestSent = max(highestSent, input.seq)
     }
 
-    /// A reliable event, in order; `seq` is its reliable-stream number. One newer than the last server world
-    /// changes the prediction at its tick (#96): if the race has sailed that tick already, it sails again from the
-    /// last server world with the event in.
+    /// A reliable event, in order; `seq` is its reliable-stream number. Each seq counts once: one below the event
+    /// state's next is in it already, and one the race holds as a ruling (a frame put back on top of a resync) is
+    /// not taken again. One newer than the last server world that changes a prediction (`Race.isRuling`) changes
+    /// it at its tick (#96); if the race has sailed that tick already, at the next `advance(to:)`.
     public func record(_ event: RaceEvent, seq: UInt32) {
+        guard seq >= events.nextEventSeq else { return }
         events.record(event)
         events.nextEventSeq = seq &+ 1
-        guard event.tick > lastWorld.tick else { return }
-        rulings.append(event)
-        if event.tick <= race.tick { resail() }
+        guard Race.isRuling(event), event.tick > lastWorld.tick, !rulings.contains(where: { $0.seq == seq }) else {
+            return
+        }
+        rulings.append((seq, event))
+        if event.tick <= race.tick { late.append(event) }
     }
 
-    /// Sails the race again from the last server world to where it was, applying the server's events on the way.
-    private func resail() {
+    /// Takes in the server's events that came for ticks already sailed (#96), all at once: sails again from the
+    /// last server world to where the race is, applying every ruling at its tick; or, with that more than
+    /// `resailCap` ticks behind, applies them where the race is.
+    private func takeInLateRulings() {
+        guard !late.isEmpty else { return }
+        let events = late
+        late = []
         let resumeAt = race.tick
+        guard resumeAt - lastWorld.tick <= Self.resailCap else {
+            cappedResails += 1
+            for event in events { race.apply(authoritative: event) }
+            return
+        }
         var world = lastWorld
         world.windKeys = race.exportSnapshot().windKeys
         do {
             try race.importSnapshot(world)
         } catch {
-            // Never: the world imported before, and the keys are the race's own. Apply it where the race is.
-            for event in rulings where event.tick <= race.tick { race.apply(authoritative: event) }
-            rulings.removeAll { $0.tick <= race.tick }
+            // Never: the world imported before, and the keys are the race's own. Apply them where the race is.
+            for event in events { race.apply(authoritative: event) }
             return
         }
+        resails += 1
         repredict(to: resumeAt)
     }
 
@@ -149,6 +175,7 @@ public final class PredictedRace {
 
     /// Sails the race on to `tick`, stopping before any tick whose wind needs a key it doesn't hold.
     public func advance(to tick: Int) {
+        takeInLateRulings()
         while race.tick < tick && !race.isOver {
             let next = race.tick + 1
             // Queue the inputs due by `next`. If the step can't go, they stay queued in the race until it can.
@@ -175,16 +202,18 @@ public final class PredictedRace {
             }
             _ = race.drainEvents()
             // The server's events of this tick, after the tick as the server emitted them (#96).
-            for event in rulings where event.tick == race.tick { race.apply(authoritative: event) }
+            for ruling in rulings where ruling.event.tick == race.tick { race.apply(authoritative: ruling.event) }
         }
         missingWindKey = missingKeyNow()
     }
 
-    /// The server's `world` is in: the events it holds are dropped (#96).
+    /// The server's `world` is in: the events it holds are dropped (#96), and the rest apply at their ticks as the
+    /// race sails on from it, the late ones included.
     private func imported(_ world: WorldSnapshot) {
         lastWorld = world
         serverTick = world.tick
-        rulings.removeAll { $0.tick <= world.tick }
+        rulings.removeAll { $0.event.tick <= world.tick }
+        late = []
     }
 
     /// The key the wind at the race's own tick needs and the race doesn't hold, if any: only before the

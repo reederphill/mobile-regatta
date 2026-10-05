@@ -75,19 +75,19 @@ public struct WireRelation: Hashable, Sendable {
     }
 
     /// `seat`'s relations to the fleet in the authoritative `race`, by seat, as its snapshot carries them: from the
-    /// umpire (`keepClearRelations(of:)`, `properCourseRestrictions(of:)`), for the seats within `rangeHulls` of
-    /// her; none at her own seat, out of range, or with a ghost (`keepClearRelations` has none).
+    /// umpire (`keepClearRelation(of:to:)`, `isHeldToProperCourse(_:against:)`), for the seats within `rangeHulls`
+    /// of her; none at her own seat, out of range, or with a ghost (`keepClearRelation` has none). The range comes
+    /// first, so a pair out of range costs the server nothing more.
     public static func relations(of seat: Int, in race: Race) -> [WireRelation] {
-        let keepClear = race.keepClearRelations(of: seat)
-        let restricted = Set(race.properCourseRestrictions(of: seat))
         let hull = race.boatClass.hull.length
         let me = race.boats[seat].position
         return race.boats.indices.map { other in
             guard other != seat,
                   RightOfWayGlyph.isInRange(me, race.boats[other].position, rangeHulls: rangeHulls, hullLength: hull)
             else { return .none }
-            return WireRelation(keepClear: keepClear[other].map { KeepClear(recipientKeepsClear: $0.keepClear == seat, rule: $0.rule) },
-                                isRestricted: restricted.contains(other))
+            let keepClear = race.keepClearRelation(of: seat, to: other)
+            return WireRelation(keepClear: keepClear.map { KeepClear(recipientKeepsClear: $0.keepClear == seat, rule: $0.rule) },
+                                isRestricted: race.isHeldToProperCourse(seat, against: other))
         }
     }
 
