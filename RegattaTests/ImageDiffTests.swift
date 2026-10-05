@@ -163,4 +163,34 @@ import Testing
         #expect(FilterCoverage(filtered: PixelImage(width: 200, height: 200, fill: Self.water),
                                unfiltered: PixelImage(width: 200, height: 199, fill: Self.water)) == nil)
     }
+
+    /// A gallery's status-bar clock shows the wall-clock time, so the clock's box isn't compared when asked: a whole
+    /// box of changed pixels isn't a difference, and the box leaves `totalPixels`. Beside the box it still counts.
+    @Test func theStatusBarClockBoxIsLeftOutWhenAsked() {
+        let reference = Self.sea(boatAt: 50, 50)
+        let box = ImageDiff.statusBarClock(width: 200, height: 200)
+        var actual = reference
+        for row in box.y..<(box.y + box.height) {
+            for column in box.x..<(box.x + box.width) { actual[column, row] = (255, 255, 255, 255) }
+        }
+        let compared = ImageDiff(actual: actual, reference: reference, tolerance: .exact, ignoringStatusBarClock: true)
+        #expect(compared.differingPixels == 0)
+        #expect(compared.totalPixels == 200 * 200 - box.width * box.height)
+        #expect(compared.image[box.x, box.y] == (190, 215, 245, 255), "the box is pale blue in the diff")
+        #expect(ImageDiff(actual: actual, reference: reference, tolerance: .exact).differingPixels == box.width * box.height,
+                "the box is compared unless asked")
+        var beside = reference
+        beside[box.x - 1, box.y] = (255, 255, 255, 255)
+        #expect(ImageDiff(actual: beside, reference: reference, tolerance: .exact,
+                          ignoringStatusBarClock: true).differingPixels == 1)
+    }
+
+    /// On an iPhone 17 screenshot (1206 × 2622) the box holds the clock at about x 157-290, y 80-118, and the
+    /// leading edge of the bar's Wi-Fi and battery (x 860 and up) stays outside.
+    @Test func theStatusBarClockBoxCoversTheIPhoneClock() {
+        let box = ImageDiff.statusBarClock(width: 1206, height: 2622)
+        #expect(box.x <= 150 && box.x + box.width >= 300)
+        #expect(box.y <= 75 && box.y + box.height >= 125)
+        #expect(box.x + box.width < 860)
+    }
 }
