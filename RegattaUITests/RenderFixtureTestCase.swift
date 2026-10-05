@@ -62,8 +62,24 @@ class RenderFixtureTestCase: RaceUITestCase {
         return ImageDiff.rows(coveringBottom: inset, ofFrame: Double(scene.frame.height), imageRows: imageRows)
     }
 
+    /// Dismisses a system notification banner (a "Ready for Apple Intelligence" one has covered the top of a
+    /// render in CI) and returns whether there was one. SpringBoard owns banners, so they are in its
+    /// accessibility tree rather than the app's; querying it doesn't launch or activate it. A banner times out
+    /// on its own after a few seconds, so when the swipe doesn't take, waiting for it to go is the fallback.
+    @MainActor private func dismissSystemBanner() -> Bool {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let banner = springboard.otherElements["NotificationShortLookView"].firstMatch
+        guard banner.exists else { return false }
+        banner.swipeUp()
+        let gone = NSPredicate(format: "exists == false")
+        _ = XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: gone, object: banner)], timeout: 15)
+        return true
+    }
+
     /// Launches `-fixture <name>` and returns its render once two screenshots in a row agree outside the
-    /// home-indicator band, so the launch animation is over and the frozen frame is on screen.
+    /// home-indicator band, so the launch animation is over and the frozen frame is on screen, and no system
+    /// banner was up before the first screenshot or after the last (one that stays across both would pass the
+    /// two-in-a-row check, so a banner seen means starting the comparison over).
     @MainActor func renderFixture(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws -> FixtureRender {
         let app = XCUIApplication()
         if app.state != .notRunning { app.terminate() }
@@ -79,11 +95,13 @@ class RenderFixtureTestCase: RaceUITestCase {
         }
 
         var last: PixelImage?
-        for _ in 0..<20 {
+        for _ in 0..<40 {
+            if dismissSystemBanner() { last = nil }
             let data = scene.screenshot().pngRepresentation
             let image = try XCTUnwrap(PixelImage(pngData: data), "screenshot isn't a PNG", file: file, line: line)
             let rows = try homeIndicatorRows(of: scene, imageRows: image.height)
-            if let last, ImageDiff(actual: image, reference: last, tolerance: .exact, ignoringBottomRows: rows).differingPixels == 0 {
+            if let last, ImageDiff(actual: image, reference: last, tolerance: .exact, ignoringBottomRows: rows).differingPixels == 0,
+               !dismissSystemBanner() {
                 return FixtureRender(image: image, homeIndicatorRows: rows)
             }
             last = image
