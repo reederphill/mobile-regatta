@@ -1,0 +1,9 @@
+{
+  "log" : "water-light-and-patchy.racelog.json",
+  "freezeTick" : 30,
+  "camera" : "boat",
+  "vision" : "none",
+  "view" : "courseUp",
+  "ruleCues" : true,
+  "hud" : { "seat" : 1, "hint" : "red_glow" }
+}

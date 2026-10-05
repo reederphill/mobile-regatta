@@ -164,6 +164,7 @@ final class TuningModel {
         case .water(let path): return WaterStyle.standard[keyPath: path]
         case .camera(let path): return CameraStyle.standard[keyPath: path]
         case .boat(let path): return BoatStyle.standard[keyPath: path]
+        case .hint(let path): return HintTuning.standard[keyPath: path]
         }
     }
 
@@ -173,6 +174,7 @@ final class TuningModel {
         case .water(let path): return tuning.water[keyPath: path]
         case .camera(let path): return tuning.camera[keyPath: path]
         case .boat(let path): return tuning.boat[keyPath: path]
+        case .hint(let path): return tuning.hint[keyPath: path]
         case .file, .groove:
             guard let slot = slider.slot, let key = slider.valueKey else { return nil }
             return tuning[values: slot][key] ?? fileValue(slider)
@@ -193,6 +195,7 @@ final class TuningModel {
         case .water(let path): tuning.water[keyPath: path] = same ? file ?? value : value
         case .camera(let path): tuning.camera[keyPath: path] = same ? file ?? value : value
         case .boat(let path): tuning.boat[keyPath: path] = same ? file ?? value : value
+        case .hint(let path): tuning.hint[keyPath: path] = same ? file ?? value : value
         case .file, .groove:
             guard let slot = slider.slot, let key = slider.valueKey, file != nil else { return }
             tuning[values: slot][key] = same ? nil : value
@@ -207,6 +210,7 @@ final class TuningModel {
             case .water(let path): tuning.water[keyPath: path] = WaterStyle.standard[keyPath: path]
             case .camera(let path): tuning.camera[keyPath: path] = CameraStyle.standard[keyPath: path]
             case .boat(let path): tuning.boat[keyPath: path] = BoatStyle.standard[keyPath: path]
+            case .hint(let path): tuning.hint[keyPath: path] = HintTuning.standard[keyPath: path]
             case .file, .groove:
                 if let slot = slider.slot, let key = slider.valueKey { tuning[values: slot][key] = nil }
             }
@@ -305,9 +309,10 @@ final class TuningModel {
         if session.scene.waterStyle != tuning.water { session.scene.waterStyle = tuning.water }
         if session.scene.cameraStyle != tuning.camera { session.scene.cameraStyle = tuning.camera }
         if session.scene.boatStyle != tuning.boat { session.scene.boatStyle = tuning.boat }
+        if session.hintTuning != tuning.hint { session.hintTuning = tuning.hint }
         if session.scene.showsPressureOverlay != tuning.showsPressure { session.scene.showsPressureOverlay = tuning.showsPressure }
         session.isTuned = liveSessionSailsTunedFiles || tuning.water != .standard || tuning.camera != .standard
-            || tuning.boat != .standard
+            || tuning.boat != .standard || tuning.hint != .standard
     }
 
     /// Saves a practice session's log with its tuned copies beside it, if it sailed any, so it replays

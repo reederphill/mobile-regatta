@@ -27,6 +27,8 @@ struct TuningSlider: Identifiable {
         case water(WritableKeyPath<WaterStyle, Double>)
         case camera(WritableKeyPath<CameraStyle, Double>)
         case boat(WritableKeyPath<BoatStyle, Double>)
+        /// A hint threshold (#129): app-side, live, never logged.
+        case hint(WritableKeyPath<HintTuning, Double>)
     }
 
     let id: String
@@ -55,7 +57,7 @@ struct TuningSlider: Identifiable {
         switch target {
         case .file(_, let pointer): pointer
         case .groove(let column): TuningSlider.grooveKey(column)
-        case .water, .camera, .boat: nil
+        case .water, .camera, .boat, .hint: nil
         }
     }
 
@@ -63,7 +65,7 @@ struct TuningSlider: Identifiable {
         switch target {
         case .file(let slot, _): slot
         case .groove: .boatClass
-        case .water, .camera, .boat: nil
+        case .water, .camera, .boat, .hint: nil
         }
     }
 
@@ -378,6 +380,18 @@ enum TuningCatalog {
                     boat("penaltyArcWidth", "Penalty arc width", \.penaltyArcWidth, 1...10, 0.5, unit: " pt"),
                 ]),
             TuningGroup(
+                id: "hints", title: "Hints",
+                note: "When the hints fire (#129): letting go after this long steering, sooner in the first race; the wind-shift hint's turn and smoothing; how long a situation is off before its hint may show again.",
+                applies: .live,
+                sliders: [
+                    hint("lettingGoSeconds", "Letting go after", \.lettingGoSeconds, 5...60, 1, unit: " s"),
+                    hint("lettingGoFirstRaceSeconds", "Letting go, first race", \.lettingGoFirstRaceSeconds, 1...30, 0.5,
+                         unit: " s"),
+                    hint("shiftDegrees", "Shift hint past", \.shiftDegrees, 2...20, 0.5, unit: "°"),
+                    hint("shiftSmoothingSeconds", "Shift smoothing", \.shiftSmoothingSeconds, 0...30, 1, unit: " s"),
+                    hint("rearmSeconds", "Hint again after off", \.rearmSeconds, 1...30, 0.5, unit: " s"),
+                ]),
+            TuningGroup(
                 id: "later", title: "Later",
                 note: "Values later tickets bring, tuned here once they're in a file.",
                 applies: .later, sliders: [],
@@ -397,6 +411,11 @@ enum TuningCatalog {
     private static func boat(_ name: String, _ title: String, _ path: WritableKeyPath<BoatStyle, Double>,
                              _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {
         TuningSlider(id: "boat.\(name)", title: title, unit: unit, range: range, step: step, target: .boat(path))
+    }
+
+    private static func hint(_ name: String, _ title: String, _ path: WritableKeyPath<HintTuning, Double>,
+                             _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {
+        TuningSlider(id: "hint.\(name)", title: title, unit: unit, range: range, step: step, target: .hint(path))
     }
 
     private static func camera(_ name: String, _ title: String, _ path: WritableKeyPath<CameraStyle, Double>,

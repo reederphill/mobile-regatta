@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import RegattaBots
 import RegattaCore
+import RegattaServices
 import UIKit
 
 /// Hosts one race's driver and bridges it to SwiftUI: HUD snapshots, the notice slot (#114),
@@ -94,6 +95,15 @@ final class GameSession {
     @ObservationIgnored var now: () -> Date = { .now }
     /// Driver events into notices and cues (#124).
     @ObservationIgnored private var presenter: RaceEventPresenter
+    /// The race's hints (#129); nil shows none (tests and render fixtures).
+    @ObservationIgnored private let hints: HintEngine?
+    /// The hints' thresholds (#129): the debug tuning panel's, live.
+    var hintTuning: HintTuning {
+        get { hints?.thresholds ?? .standard }
+        set { hints?.thresholds = newValue }
+    }
+    /// Told once per hint as it retires, with how (#128's `hint_retired`): `AppModel` logs it.
+    @ObservationIgnored var onHintRetired: ((String, HintRetirement) -> Void)?
     /// Every cue the presenter plays, after its haptic and sound: for tests.
     @ObservationIgnored var onCue: ((RaceCue) -> Void)?
     /// The race's sounds (#126): the committee's sequence, your boat's moments and the ambience, gated by Settings'
@@ -111,18 +121,19 @@ final class GameSession {
     /// time (`-timescale`, for tests).
     convenience init(config: RaceConfig, timescale: Double = 1, haptics: any Haptics = GatedHaptics(),
                      sound: any SoundOutput = SilentSoundOutput(), controls: ControlSettings = ControlSettings(),
-                     rulesSeen: RuleSeenStore = RuleSeenStore(), livery: Livery = FleetLiveries.yours) {
+                     rulesSeen: RuleSeenStore = RuleSeenStore(), livery: Livery = FleetLiveries.yours,
+                     hints: HintEngine? = nil) {
         let driver = PracticeDriver(config: config, timescale: timescale, livery: livery)
         self.init(driver: driver, roster: driver.roster, haptics: haptics, sound: sound, controls: controls,
-                  rulesSeen: rulesSeen)
+                  rulesSeen: rulesSeen, hints: hints)
     }
 
     /// An online race (#68).
     convenience init(online driver: OnlineDriver, haptics: any Haptics = GatedHaptics(),
                      sound: any SoundOutput = SilentSoundOutput(), controls: ControlSettings = ControlSettings(),
-                     rulesSeen: RuleSeenStore = RuleSeenStore()) {
+                     rulesSeen: RuleSeenStore = RuleSeenStore(), hints: HintEngine? = nil) {
         self.init(driver: driver, roster: driver.roster, haptics: haptics, sound: sound, controls: controls,
-                  rulesSeen: rulesSeen)
+                  rulesSeen: rulesSeen, hints: hints)
     }
 
     /// A render fixture (#62): `log` replayed to the fixture's freeze tick and frozen there, drawn from
@@ -154,6 +165,13 @@ final class GameSession {
                                    expires: .distantFuture))
             notice = noticeSlot.current(at: now())
         }
+        if let id = fixture.hud?.hint {
+            // A hint and its leader line (#129), shown for good: the fixture runs no hint engine.
+            let hint = HintCatalogue.hint(id)
+            noticeSlot.show(Notice(id: 0, kind: .hint, text: hint.text.text(for: controls.steering), posted: .distantPast,
+                                   expires: .distantFuture, leader: HintLeader.fixtureTarget(id, world: driver.renderWorld)))
+            notice = noticeSlot.current(at: now())
+        }
     }
 
     // TODO-COPY (#171): `RaceEventPresenter` writes the real notices; a fixture's is a placeholder of a real length.
@@ -162,11 +180,13 @@ final class GameSession {
     }
 
     /// `rulesSeen`: which rule numbers this device has seen called, for plain words (#23). In memory by default, so
-    /// tests and fixtures never write the device's; the app passes one over its defaults.
+    /// tests and fixtures never write the device's; the app passes one over its defaults. `hints`: the race's hint
+    /// engine (#129), nil for none, as tests and fixtures have; the app passes one over the device's progress.
     init(driver: any RaceDriver, roster: FleetRoster, haptics: any Haptics = GatedHaptics(),
          sound: any SoundOutput = SilentSoundOutput(), controls: ControlSettings = ControlSettings(),
-         rulesSeen: RuleSeenStore = RuleSeenStore()) {
+         rulesSeen: RuleSeenStore = RuleSeenStore(), hints: HintEngine? = nil) {
         self.driver = driver
+        self.hints = hints
         self.roster = roster
         self.haptics = haptics
         self.sound = RaceSound(output: sound)
@@ -177,21 +197,13 @@ final class GameSession {
         vision = LaunchOptions.current.raceVision
         scene = GameScene(driver: driver, roster: roster)
         scene.session = self
+        hints?.onRetired = { [weak self] id, mode in self?.onHintRetired?(id.rawValue, mode) }
         // `-hideScene` (#361): a live race only; a render fixture always paints.
         scene.paintsWorld = driver.isFrozen || !LaunchOptions.current.hidesScene
         // The minimap's first pressure sample (up to ~170 ms on first use, #310) waits for the scene's first HUD
         // refresh, off the race's construction; a frozen fixture takes it here, as its render holds still.
+        // The first refresh posts the steering hint at once (#129); a frozen fixture shows only the notice it names.
         refreshHUD(samplesPressure: driver.isFrozen)
-        // A frozen fixture shows only the notice it names.
-        if !driver.isFrozen { post(.hint, Self.startHint(controls.steering)) }
-    }
-
-    // TODO-COPY (#171): #129's scheme-aware hints replace this.
-    static func startHint(_ steering: DeviceSettings.Steering) -> String {
-        switch steering {
-        case .halves: "Hold the left or right side of the screen to steer. Be below the line at the gun."
-        case .tiller: "Touch anywhere and slide sideways to steer. Be below the line at the gun."
-        }
     }
 
     /// A render fixture that draws the HUD over its scene (#114).
@@ -274,6 +286,16 @@ final class GameSession {
 
     func refreshHUD() { refreshHUD(samplesPressure: true) }
 
+    /// The scene steps the live race for the first time (`GameScene.update`): the notice slot's clock starts again
+    /// from here (#129). The steering hint is posted as the race is set up, before its clock shows, and setting up
+    /// and presenting the scene can take seconds; its time on screen starts once the race does. Once a session.
+    func sceneStarted() {
+        guard !hasSceneStarted else { return }
+        hasSceneStarted = true
+        noticeSlot.restartClock(at: now())
+    }
+    @ObservationIgnored private var hasSceneStarted = false
+
     /// A tap on the place or the live leaderboard (#268): opens it to the whole fleet, or closes it.
     func toggleLeaderboard() {
         isLeaderboardExpanded.toggle()
@@ -308,6 +330,7 @@ final class GameSession {
         let current = noticeSlot.current(at: now())
         settleMarks()
         if current != notice { notice = current }
+        refreshHints(world)
         closeLeaderboardIfDue()
         refreshResults()
         // The RTT warning (#18, #68): once as it starts.
@@ -316,6 +339,16 @@ final class GameSession {
             toldUpdateRequired = true
             post(.latency, "Update Regatta to race online. This race can't reconnect.")
         }
+    }
+
+    /// Settles the hint showing and posts the next one due (#129), on the driver's frame. Not in a frozen fixture.
+    private func refreshHints(_ world: RenderWorld) {
+        guard let hints, !driver.isFrozen,
+              let next = hints.refresh(world: world, slot: noticeSlot, now: now(), hintsOn: controls.showsHints,
+                                       showsLaylines: controls.showsLaylines, isFirstRace: isFirstRace) else { return }
+        let id = noticeSlot.nextID
+        post(.hint, next.hint.text.text(for: controls.steering), leader: next.leader)
+        hints.posted(next.hint.id, noticeID: id)
     }
 
     func consume(_ events: [RaceEvent]) {
@@ -333,6 +366,7 @@ final class GameSession {
         sound.play(cues: cues, raceTime: driver.currentFrame.time)
         if let onCue { cues.forEach(onCue) }
         let me = driver.myBoatIndex
+        hints?.consume(events, me: me, hintsOn: controls.showsHints)
         for event in events {
             switch event.kind {
             case .penaltyServed(let seat):
@@ -386,9 +420,9 @@ final class GameSession {
         return makeResults().leftBeforeClose()
     }
 
-    private func post(_ kind: NoticeKind, _ text: String, marks: [SeenMark] = []) {
+    private func post(_ kind: NoticeKind, _ text: String, marks: [SeenMark] = [], leader: HintTarget? = nil) {
         if !marks.isEmpty { pendingMarks[noticeSlot.nextID] = marks }
-        notice = noticeSlot.post(kind, text, at: now())
+        notice = noticeSlot.post(kind, text, at: now(), leader: leader)
         settleMarks()
     }
 
