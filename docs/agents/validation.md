@@ -5,7 +5,7 @@
 
 | # | what | where | when |
 |---|------|-------|------|
-| 1 | `scripts/check.sh` | local | after every edit batch; first thing after a rebase |
+| 1 | `scripts/check.sh` | local | once per ticket: the tester's recorded run on the final code (owner 2026-10-04); after that, filtered runs of what a fix touches, and CI |
 | 2 | CI on the PR | GitHub Actions | before merge; required |
 | 3 | render references (`RegattaUITests/References/`) | CI render job's `render-actuals` artifact | a change that moves a render (e.g. a sim bump that moves `prestart.png`) fails the compare in CI, which uploads the render: `scripts/adopt-references.sh <PR>` copies it in; look at it, commit it, push; the next CI run passes the compare (no local re-records) |
 | 4 | golden / RegattaBots rows | CI Linux job log | a sim change needs a new row: take `GOLDEN …` and `REGATTABOTS …` from the log and commit the row last, after review (no local podman since 2026-09-25) |
@@ -17,6 +17,19 @@
 - Render references: CI's render is the reference (renders are only reproducible on CI's pinned device and OS; a Mac recording drifted 0.2% in #209). A reference compare that fails, or has no reference, in the `render` job leaves the render in `render-actuals` (`<device>/<name>.png`, plus `<name>-diff.png` to look at; kept 5 days; uploaded only when the job fails). `scripts/adopt-references.sh <PR>` (or `--run <id>`) copies the renders, never the diffs, into `RegattaUITests/References/` and prints what changed. Nobody re-records locally; `-recordReferences` is refused in CI and isn't the route for a reference change.
 - Render banners: a system notification banner over a render ("Ready for Apple Intelligence", seen in run 37231353556) fails the compare at random. The `render` job boots the iPhone in its own step and waits for `simctl bootstatus -b`; `RenderFixtureTestCase.renderFixture` also looks for a SpringBoard banner (`NotificationShortLookView`) before and after its screenshots, swipes it away and starts the two-in-a-row comparison over. Thresholds and references are unchanged; a render with a banner in it is never adopted from `render-actuals`. The status-bar clock is the other source of random failures (run 37249491482: `pause-menu` at 0.1008% against the 0.1000% limit, every red pixel in the clock): a reference keeps the wall-clock time it was recorded at (12:40, 12:19), so a gallery fixture's diffs (JSON with a `gallery` key; race fixtures hide the status bar and draw their own HUD clock) leave out the clock's box, `ImageDiff.statusBarClock`, as they leave out the home-indicator rows. The threshold is unchanged and no reference is re-recorded.
 - Sim revision: a sim-changing ticket takes the **next free** `simulationRevision` at merge time (rebase first; never reserve one in advance).
+
+## Sizing (#377 postmortem, owner 2026-10-05)
+
+- `check.sh` once per ticket (row 1). A rebase, squash, fixture refit or sim-revision bump afterwards gets filtered runs of the touched suites, then CI; not another `check.sh`.
+- Bot matrix: once per ticket, after the last fix round, on the branch only, compared with a main baseline cached by main's SHA (rerun main only when no baseline for that SHA exists).
+- Downstream reach: a change to `WorldSnapshot`, the snapshot/wire code or the protocol runs `check.sh --all` once (RegattaClient's resync tests caught #377's wire merge only in CI).
+- Per-tick or per-frame cost: a change adding sim work per tick or a scene layer runs the headless 16-boat pace probe in Debug (scene hidden and shown) against main before the push (#377: ribbons built under `-hideScene` failed `testFifteenBotRaceRunsFullLength` in CI).
+
+## Local preview (visual changes)
+
+- A change to anything drawn attaches a local screenshot before the push: build the app (`scripts/heavy.sh --simulator xcodebuild build … -derivedDataPath .build/preview-dd`), `xcrun simctl install`, then `xcrun simctl launch --terminate-running-process <udid> com.phillreeder.regatta -demo -seed <n> -startSeconds 10 -timescale 4` (a live race on the default class) or `-uitesting -fixture <name>` with `SIMCTL_CHILD_REGATTA_FIXTURE_DIR` set to a copy of the fixtures folder, and `xcrun simctl io <udid> screenshot <file>` (take a second one if the first catches the launch).
+- It is a preview for the owner, not a reference: references still come only from CI's `render-actuals`.
+- Fixtures replay logs sailed on a pinned class. When the default class or anything drawn changes, re-record the fixtures on the default class, or the renders keep drawing the old class (#377's references showed skiff@4's trapezoid through three reshapes).
 
 ## Rules
 

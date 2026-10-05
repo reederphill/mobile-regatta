@@ -16,6 +16,7 @@ The Mac has 8 GB of RAM: one heavy build or test run at a time. Parallel local w
 - Pipeline: when a ticket's PR is pushed, claim the next ticket and start its implementer. The pushed PR's CI, review and acceptance check run alongside. At most two tickets in flight: one in the local slot, one in CI/review.
 - A fix round for the older PR takes the local slot next, ahead of a new ticket.
 - Push once per round. Every push restarts the whole CI run.
+- Don't hold a push for a queued render job: renders are adopted from any finished run, and the owner approves the look from a local preview first.
 
 ## Merging
 
@@ -26,6 +27,12 @@ Squash-merge without asking when all of these hold for the head SHA:
 
 Ask the human only for: a blocker you'd leave unfixed, a scope change, or a `needs:human` item. A reference-image change isn't one: since #215 it routes through CI, not a human re-record. The failing compare uploads `render-actuals`; adopt it with `scripts/adopt-references.sh <PR>`, look at it, commit, push (validation.md, Render references).
 
+## Before the brief (#377 postmortem, owner 2026-10-05)
+
+- **Design gate.** Anything drawn or felt (a zone's shape, a size, a cue) gets the owner's sign-off on a sketch or a local screenshot before the implementer starts. The brief lists every open design question as decided (quoted) or as an explicit placeholder; it never silently keeps the old behaviour. #377 reshaped its backwind zone four times from CI renders.
+- **Split by layer; switch the default class last.** A sim change that adds a class version ships as: core + class version (not the default) → bots → app drawing → a small last PR that switches the default class, re-records the fixtures on it and adopts references. Seeded-test churn and render changes then land in one small PR, not in every round.
+- **Merge main at the start of every round** (implementer, tester, fixer), not only on a conflict, so main's new tests fail in the local loop, not in CI.
+
 ## Implementer brief
 
 The orchestrator writes a brief of about 2K tokens; the implementer doesn't re-derive it. Include:
@@ -33,6 +40,7 @@ The orchestrator writes a brief of about 2K tokens; the implementer doesn't re-d
 - The files and types to touch, and the merged tickets it builds on (one line each).
 - The map decisions and ADR paragraphs that apply, quoted. Not "read ADR 0002"; quote the lines.
 - What the change may move (digests, bot behaviour, render references), for the tester. Validation itself is the tester's call; `docs/agents/validation.md` by reference.
+- For a visual change: the local preview the implementer must attach (validation.md, Local preview), and "fixtures re-recorded on the default class" when the default class or anything drawn changes.
 
 Implementer reading rules: `grep -n` / `sed -n <range>p` or the codebase-memory graph, not `cat` of whole files. Never read transcripts or tool-output files from other agents.
 
@@ -44,6 +52,8 @@ A ticket's local-slot work is a loop of separate agents, each fresh:
 2. **Tester: decides and runs the minimal validation.** It writes a test plan first: what could break, the checks that cover it, what it deliberately doesn't run and why. Then it runs the plan (`check.sh` at least once on the final code, the recorded gate the acceptance check reads; digest comparisons for sim changes; the bot matrix only when bot behaviour or rule-call rates should move). Every failure is rerun once and checked against the base: only a failure the change causes is a regression. It never edits code, and it reports verdict, findings and repro commands.
 3. **Fixer: fresh per round.** It gets the tester's regressions and repros, fixes, compiles, confirms each repro, and commits locally. The tester then re-tests only what the fix could affect.
 4. The loop runs until the tester passes, up to 3 rounds; after that it goes to the orchestrator with the history.
+   - **Time box:** a fixer that hasn't converged after ~45 min or 3 variants stops, commits nothing it doesn't trust, and reports causes and variants tried. The orchestrator parks it with the owner (follow-up ticket, known-issue marker) instead of starting another round. #377's cautious-bot round ran 100 min and 9 variants.
+   - **Failure ledger:** the orchestrator keeps the open failures in one scratchpad file (test, repro, cause if known, decision); each fixer brief points at it instead of restating history.
 5. **Publisher:** squashes WIP commits, pushes once, and opens the PR (acceptance → test map, the tester's validation, sim revision, deviations). Review, CI and the acceptance check then run as before. Their findings re-enter the loop as a fixer round, then tester, then a push onto the PR.
 
 ## Agent lifetime

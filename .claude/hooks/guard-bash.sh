@@ -19,7 +19,10 @@ if grep -Eq 'pgrep[^|;&]*check\.sh' <<<"$cmd"; then
 fi
 
 # UI tests run in CI only.
-if grep -Eq '\bxcodebuild\b' <<<"$cmd" && grep -q 'RegattaUITests' <<<"$cmd" && ! grep -q 'ALLOW_LOCAL_UI_TESTS=1' <<<"$cmd"; then
+# Only a test action naming the UI-test target: a build, or a path that merely contains the folder name (a fixtures
+# copy for a local preview, #377), isn't a UI test run.
+if grep -Eq '\bxcodebuild\b' <<<"$cmd" && grep -Eq '\btest(-without-building)?\b' <<<"$cmd" \
+    && grep -Eq -- '-only-testing:? ?RegattaUITests|-scheme +RegattaUITests' <<<"$cmd" && ! grep -q 'ALLOW_LOCAL_UI_TESTS=1' <<<"$cmd"; then
     block "RegattaUITests run in CI only. If CI can't run and the ticket's acceptance needs one, the orchestrator (not an implementer) prefixes the command with ALLOW_LOCAL_UI_TESTS=1."
 fi
 
