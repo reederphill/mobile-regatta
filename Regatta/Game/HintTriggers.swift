@@ -5,7 +5,7 @@ import RegattaCore
 /// each a debug slider (`TuningCatalog`'s Hints group, fun before realism). App-side and never logged.
 nonisolated struct HintTuning: Codable, Equatable, Sendable {
     /// Letting go (#219, ruling 3): after the gun, you've steered this many seconds without a break, the autohelm
-    /// never holding (or, never having steered, sailed this long since the gun hands off)...
+    /// never holding...
     var lettingGoSeconds = 20.0
     /// ...or this many in your first race (#134), so it shows early there.
     var lettingGoFirstRaceSeconds = 5.0
@@ -91,10 +91,6 @@ struct HintSnapshot: Equatable {
     var markZone: Vec2?
     /// How long you've held the rudder off centre without a break (the autohelm not holding) since the gun, seconds.
     var steeringSeconds = 0.0
-    /// How long since the gun you've been sailing (not finished or out), seconds: started or not.
-    var sinceGunSeconds = 0.0
-    /// You've held the rudder off centre this race (past `Autohelm.deadBand`).
-    var hasSteered = false
     /// Your first race (#134): letting go shows earlier.
     var isFirstRace = false
     /// You've let the autohelm hold after steering, this race.
@@ -135,14 +131,12 @@ enum HintTriggers {
         return s.greenGlow.map { HintFiring(leader: .boat($0)) }
     }
 
-    /// After the gun (started or still behind the line): you've steered `hold` seconds without a break, or never
-    /// steered and sailed that long hands off (so a first race's player who never touches the water still hears
-    /// about the autohelm, #134).
+    /// After the gun (started or still behind the line): you've steered `hold` seconds without a break. Only once
+    /// it's relevant (owner ruling 2026-10-05): a player who never steers never sees it.
     static func lettingGo(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
         let hold = s.isFirstRace ? t.lettingGoFirstRaceSeconds : t.lettingGoSeconds
         guard s.raceTime >= 0, s.status != .finished, !s.isGhost, !s.hasLetGo else { return nil }
-        let handsOff = !s.hasSteered && s.sinceGunSeconds >= hold
-        return s.steeringSeconds >= hold || handsOff ? HintFiring(leader: .vane) : nil
+        return s.steeringSeconds >= hold ? HintFiring(leader: .vane) : nil
     }
 
     /// Racing with the vane drawn: after a minute's racing, or sooner once you've let go and the letting-go hint is
@@ -187,8 +181,6 @@ struct HintObservations: Equatable {
     private(set) var hasSteered = false
     private(set) var hasLetGo = false
     private(set) var racingSeconds = 0.0
-    /// Since the gun, sailing (not a ghost): started or not.
-    private(set) var sinceGunSeconds = 0.0
     /// The fleet-wide wind smoothed, as a unit vector towards where it blows from; and its direction at your start.
     private(set) var smoothedWind: Vec2?
     private(set) var referenceWind: Double?
@@ -240,7 +232,6 @@ struct HintObservations: Equatable {
         let steering = abs(rudder) > Autohelm.deadBand && me.autohelm == nil && !me.isGhost
         if steering { hasSteered = true }
         let afterGun = frame.time >= 0 && !me.isGhost
-        if afterGun { sinceGunSeconds += dt }
         steeringSeconds = steering && afterGun ? steeringSeconds + dt : 0
         if me.autohelm != nil {
             autohelmSeconds += dt
@@ -296,8 +287,6 @@ extension HintSnapshot {
         shiftDegrees = o.shiftDegrees
         shadowSeconds = o.shadowSeconds
         steeringSeconds = o.steeringSeconds
-        hasSteered = o.hasSteered
-        sinceGunSeconds = o.sinceGunSeconds
         self.isFirstRace = isFirstRace
         hasLetGo = o.hasLetGo
         racingSeconds = o.racingSeconds

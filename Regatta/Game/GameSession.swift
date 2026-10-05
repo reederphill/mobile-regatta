@@ -343,12 +343,19 @@ final class GameSession {
 
     /// Settles the hint showing and posts the next one due (#129), on the driver's frame. Not in a frozen fixture.
     private func refreshHints(_ world: RenderWorld) {
-        guard let hints, !driver.isFrozen,
-              let next = hints.refresh(world: world, slot: noticeSlot, now: now(), hintsOn: controls.showsHints,
-                                       showsLaylines: controls.showsLaylines, isFirstRace: isFirstRace) else { return }
+        guard let hints, !driver.isFrozen else { return }
+        let next = hints.refresh(world: world, slot: noticeSlot, now: now(), hintsOn: controls.showsHints,
+                                 showsLaylines: controls.showsLaylines, isFirstRace: isFirstRace)
+        // The first race's steering hint, held until you steer (owner ruling 2026-10-05).
+        if let held = hints.takeDownDue() {
+            noticeSlot.takeDown(held, at: now())
+            let current = noticeSlot.current(at: now())
+            if current != notice { notice = current }
+        }
+        guard let next else { return }
         let id = noticeSlot.nextID
-        post(.hint, next.hint.text.text(for: controls.steering), leader: next.leader)
-        hints.posted(next.hint.id, noticeID: id)
+        post(.hint, next.hint.text.text(for: controls.steering), leader: next.leader, held: next.held)
+        hints.posted(next.hint.id, noticeID: id, held: next.held)
     }
 
     func consume(_ events: [RaceEvent]) {
@@ -420,9 +427,10 @@ final class GameSession {
         return makeResults().leftBeforeClose()
     }
 
-    private func post(_ kind: NoticeKind, _ text: String, marks: [SeenMark] = [], leader: HintTarget? = nil) {
+    private func post(_ kind: NoticeKind, _ text: String, marks: [SeenMark] = [], leader: HintTarget? = nil,
+                      held: Bool = false) {
         if !marks.isEmpty { pendingMarks[noticeSlot.nextID] = marks }
-        notice = noticeSlot.post(kind, text, at: now(), leader: leader)
+        notice = noticeSlot.post(kind, text, at: now(), leader: leader, held: held)
         settleMarks()
     }
 

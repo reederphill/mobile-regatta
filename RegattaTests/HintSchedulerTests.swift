@@ -254,11 +254,12 @@ import Testing
         private(set) var posts: [(id: HintID, time: Double)] = []
         private(set) var retired: [(id: HintID, mode: HintRetirement)] = []
 
-        init(progress: HintProgressStore, prestartSeconds: Double = 10, catalogue: [Hint] = HintCatalogue.engine) {
+        init(progress: HintProgressStore, prestartSeconds: Double = 10, catalogue: [Hint] = HintCatalogue.engine,
+             isFirstRaceOnDevice: Bool = false) {
             let config = RaceConfig(opponents: 2, prestartSeconds: prestartSeconds, seed: 1,
                                     windSeed: RaceConfig.windSeed(pinnedTo: 1))
             driver = PracticeDriver(config: config)
-            engine = HintEngine(progress: progress, catalogue: catalogue)
+            engine = HintEngine(progress: progress, catalogue: catalogue, isFirstRaceOnDevice: isFirstRaceOnDevice)
             engine.onRetired = { [unowned self] id, mode in retired.append((id, mode)) }
             refresh()
         }
@@ -275,35 +276,56 @@ import Testing
             }
         }
 
-        private func refresh() {
+        func refresh() {
             _ = slot.current(at: clock)
-            guard let next = engine.refresh(world: driver.renderWorld, slot: slot, now: clock, hintsOn: hintsOn,
-                                            showsLaylines: true, isFirstRace: isFirstRace) else { return }
+            let next = engine.refresh(world: driver.renderWorld, slot: slot, now: clock, hintsOn: hintsOn,
+                                      showsLaylines: true, isFirstRace: isFirstRace)
+            if let held = engine.takeDownDue() {
+                slot.takeDown(held, at: clock)
+                _ = slot.current(at: clock)
+            }
+            guard let next else { return }
             let noticeID = slot.nextID
-            slot.post(.hint, next.hint.id.rawValue, at: clock, leader: next.leader)
-            engine.posted(next.hint.id, noticeID: noticeID)
+            slot.post(.hint, next.hint.id.rawValue, at: clock, leader: next.leader, held: next.held)
+            engine.posted(next.hint.id, noticeID: noticeID, held: next.held)
             posts.append((next.hint.id, driver.renderWorld.time))
         }
     }
 
-    /// A first-race player who never touches the water hears about the autohelm a few seconds after the gun, and the
-    /// hint isn't counted learned: the autohelm engaging on the race's first step isn't letting go (no steering).
-    @Test func handsOffFirstRaceShowsLettingGoAndDoesNotLearnIt() {
+    /// The letting-go hint waits until it's relevant (owner ruling 2026-10-05): a first-race player who never steers
+    /// never sees it, however long they sail; the held steering hint stays up meanwhile.
+    @Test func handsOffFirstRaceNeverShowsLettingGo() {
+        for isFirstRaceOnDevice in [true, false] {
+            let progress = HintProgressStore()
+            let rig = Rig(progress: progress, isFirstRaceOnDevice: isFirstRaceOnDevice)
+            rig.isFirstRace = true
+            rig.run(10 + 60)
+            #expect(!rig.engine.observations.hasSteered)
+            #expect(rig.posted(.lettingGo).isEmpty, "\(rig.posts)")
+            #expect(!progress.isLearned(.lettingGo))
+            #expect(rig.posted(.raceStart).count == 1)
+        }
+    }
+
+    /// After the first steer takes the held steering hint down, letting go shows once you've steered without a break
+    /// for the first race's threshold, and not before.
+    @Test func firstRaceLettingGoShowsAfterTheFirstSteerAndTheSteeringThreshold() throws {
         let progress = HintProgressStore()
-        let rig = Rig(progress: progress)
+        let rig = Rig(progress: progress, isFirstRaceOnDevice: true)
         rig.isFirstRace = true
-        rig.run(10 + 12)
-        #expect(!rig.engine.observations.hasSteered)
-        #expect(!rig.engine.observations.hasLetGo)
+        rig.run(10 + 2)
+        #expect(rig.slot.showing?.text == HintID.raceStart.rawValue)
+        let firstSteer = rig.driver.renderWorld.time
+        rig.rudder = Autohelm.deadBand + 0.05
+        rig.run(0.5)
+        #expect(rig.engine.heldNoticeID == nil, "the steering hint goes on the first steer")
+        #expect(rig.posted(.lettingGo).isEmpty)
+        rig.run(20)
         let shown = rig.posted(.lettingGo)
         #expect(shown.count == 1, "\(rig.posts)")
-        if let time = shown.first {
-            #expect(time >= HintTuning.standard.lettingGoFirstRaceSeconds - 0.2 && time < 10, "letting go at \(time) s")
-        }
-        #expect(!progress.isLearned(.lettingGo))
-        #expect(!rig.retired.contains { $0.id == .lettingGo })
-        // The steering hint showed once, at the first refresh.
-        #expect(rig.posted(.raceStart).count == 1)
+        let time = try #require(shown.first)
+        #expect(time >= firstSteer + HintTuning.standard.lettingGoFirstRaceSeconds - 0.1, "letting go at \(time) s")
+        #expect(rig.posts.filter { $0.id == .lettingGo || $0.id == .raceStart }.map(\.id) == [.raceStart, .lettingGo])
     }
 
     /// A situation that lasts shows its hint once, not again at every gap: it shows again only after its trigger has
@@ -339,16 +361,17 @@ import Testing
     /// counters (or the wind smoothing).
     @Test func hintsOffThenOnAddsNoGap() {
         let rig = Rig(progress: HintProgressStore())
+        rig.rudder = Autohelm.deadBand + 0.05
         rig.run(10 + 3)
-        let sailed = rig.engine.observations.sinceGunSeconds
-        #expect(sailed > 2)
+        let steered = rig.engine.observations.steeringSeconds
+        #expect(steered > 2)
         rig.hintsOn = false
         rig.run(20)
         #expect(rig.engine.observations.lastTick == nil)
-        #expect(rig.engine.observations.sinceGunSeconds == sailed)
+        #expect(rig.engine.observations.steeringSeconds == steered)
         rig.hintsOn = true
         rig.run(1.0 / 15)
-        #expect(rig.engine.observations.sinceGunSeconds - sailed < 0.1)
+        #expect(rig.engine.observations.steeringSeconds - steered < 0.1)
     }
 
     /// Through `HintEngine.refresh` on a real race: the steering hint is picked, posted, counted as it shows and
@@ -400,5 +423,96 @@ import Testing
         #expect(!rig.engine.observations.steeredBothWays(.standard))
         #expect(!progress.isLearned(.raceStart))
         #expect(rig.posts.count == 1 && rig.retired.isEmpty)
+    }
+
+    // MARK: The first race's steering hint (owner ruling 2026-10-05)
+
+    /// In the first race the steering hint stays up until you steer: 30 s of race time hands off and it is still the
+    /// notice showing, counted once, with no other hint posted past it.
+    @Test func firstRaceSteeringHintStaysWithoutInput() throws {
+        let progress = HintProgressStore()
+        let rig = Rig(progress: progress, isFirstRaceOnDevice: true)
+        let held = try #require(rig.engine.heldNoticeID)
+        for _ in 0..<(10 + 31) {
+            rig.run(1)
+            #expect(rig.slot.showing?.id == held && rig.slot.showing?.text == HintID.raceStart.rawValue,
+                    "at \(rig.driver.renderWorld.time) s: \(String(describing: rig.slot.showing))")
+        }
+        #expect(rig.driver.renderWorld.time >= 30)
+        #expect(!rig.engine.observations.hasSteered)
+        #expect(progress.timesShown(.raceStart) == 1)
+        #expect(rig.posts.map(\.id) == [.raceStart], "\(rig.posts)")
+        #expect(rig.retired.isEmpty)
+    }
+
+    /// It goes on your first steer (a rudder just past the autohelm's dead band, one way), retires as learned, tells
+    /// analytics once, and doesn't show in a later race.
+    @Test func firstRaceSteeringHintGoesOnFirstSteerAndRetiresLearnedOnce() {
+        let progress = HintProgressStore()
+        let rig = Rig(progress: progress, isFirstRaceOnDevice: true)
+        rig.run(10 + 5)
+        #expect(rig.slot.showing?.text == HintID.raceStart.rawValue)
+        rig.rudder = Autohelm.deadBand + 0.05
+        #expect(rig.rudder < HintTuning.standard.steerRudderShare, "a first steer, not both ways")
+        rig.run(0.5)
+        #expect(rig.slot.showing?.text != HintID.raceStart.rawValue && rig.slot.waiting.isEmpty)
+        #expect(rig.engine.heldNoticeID == nil)
+        #expect(progress.isLearned(.raceStart))
+        rig.rudder = 0
+        rig.run(20)
+        #expect(rig.posted(.raceStart).count == 1)
+        #expect(rig.retired.filter { $0.id == .raceStart }.map(\.mode) == [.learned])
+        // Other hints may follow once it has gone.
+        #expect(rig.engine.scheduler.tracked?.id != .raceStart)
+
+        let later = Rig(progress: progress)
+        later.run(10 + 10)
+        #expect(later.posted(.raceStart).isEmpty)
+        #expect(!later.retired.contains { $0.id == .raceStart })
+    }
+
+    /// It gives way to a rule call or OCS notice and comes back after it, still held, not counted again.
+    @Test func firstRaceSteeringHintYieldsToRuleCallsAndComesBack() {
+        for kind in [NoticeKind.ruleCall, .ocs] {
+            let progress = HintProgressStore()
+            let rig = Rig(progress: progress, isFirstRaceOnDevice: true)
+            rig.run(3)
+            rig.slot.post(kind, "call", at: rig.clock)
+            rig.run(1)
+            #expect(rig.slot.showing?.kind == kind)
+            rig.run(NoticeTable.rule(kind).seconds + 1)
+            #expect(rig.slot.showing?.text == HintID.raceStart.rawValue, "\(kind): \(String(describing: rig.slot.showing))")
+            rig.run(20)
+            #expect(rig.slot.showing?.text == HintID.raceStart.rawValue)
+            #expect(progress.timesShown(.raceStart) == 1)
+            #expect(rig.posts.map(\.id) == [.raceStart])
+        }
+    }
+
+    /// Later races keep the usual 4 s: an engine not told it's the first race shows the steering hint for its time.
+    @Test func laterRaceSteeringHintShowsItsUsualTime() {
+        let rig = Rig(progress: HintProgressStore())
+        #expect(rig.engine.heldNoticeID == nil)
+        rig.run(NoticeTable.rule(.hint).seconds + 0.5)
+        #expect(rig.slot.showing?.text != HintID.raceStart.rawValue)
+    }
+
+    /// The app's engine is the first race's while the steering hint has never shown on the device; through a session,
+    /// the hint stays up over 30 s of a hands-off race's refreshes.
+    @Test func sessionHoldsTheFirstRaceSteeringHint() {
+        let progress = HintProgressStore()
+        #expect(HintEngine.isFirstRace(progress))
+        let config = RaceConfig(opponents: 2, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+        let session = GameSession(config: config, hints: HintEngine(progress: progress, isFirstRaceOnDevice: true))
+        let steering = HintCatalogue.hint(.raceStart).text.text(for: session.controls.steering)
+        var time = Date.now
+        session.now = { time }
+        session.sceneStarted()
+        for _ in 0..<(30 * 15) {
+            time += 1.0 / 15
+            session.refreshHUD()
+            #expect(session.notice?.text == steering)
+        }
+        #expect(!HintEngine.isFirstRace(progress))
     }
 }
