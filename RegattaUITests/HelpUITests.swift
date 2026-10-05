@@ -25,6 +25,14 @@ final class HelpUITests: RaceUITestCase {
                       "no wind vane in the legend")
         app.navigationBars.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(page.waitForExistence(timeout: 10), "back didn't return to Help")
+        // The sounds topic (#126): what the committee's sounds mean.
+        let sounds = app.buttons["help-topic-sounds"].firstMatch
+        XCTAssertTrue(sounds.waitForExistence(timeout: 10), "no sounds topic in Help")
+        sounds.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["help-sounds"].firstMatch.waitForExistence(timeout: 20),
+                      "the sounds topic didn't push")
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(page.waitForExistence(timeout: 10), "back didn't return to Help")
         app.navigationBars["Help"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.buttons["toolbar-help"].waitForExistence(timeout: 10), "back didn't return home")
         app.terminate()

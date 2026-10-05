@@ -1,8 +1,7 @@
 import Foundation
 import RegattaCore
 
-/// A race moment you feel (#22): each has one haptic, and #126's audio subscribes to the same cues
-/// (`GameSession.onCue`). Puffs, wind shadow and the tack tap have no cue, so they can't fire one.
+/// A race moment you feel (#22): each has one haptic, and some a sound too (#126, `SoundCue.init?(_:)`). Puffs, wind shadow and the tack tap have no cue, so they can't fire one.
 enum RaceCue: CaseIterable, Hashable {
     /// The sequence ticks: 30 s, 10 s, 5…1 s.
     case sequenceTick
