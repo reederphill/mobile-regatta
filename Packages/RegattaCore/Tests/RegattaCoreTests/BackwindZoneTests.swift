@@ -170,29 +170,34 @@ import Testing
     }
 
     /// The header's zone on skiff@6 is the upwash beside her sail (the owner's renders review; research note §2), run on
-    /// astern (the owner's lengthening), a fan (renders review 2): on her windward side, along her hull from her mast
-    /// (0.4 L back from her bow) to her stern and on 1.5 L astern of it; narrow at her mast (0.25 L out) widening
-    /// straight to 1.5 L out at its aft end; full at her side and fading straight to nothing at its width out (a share of
-    /// the local width); fading in over 0.1 L at her mast, and straight from full at her stern to nothing 1.5 L astern of
-    /// it. Nothing to leeward, ahead of her mast, more than 1.5 L astern of her stern or past its outer edge; bound to
-    /// her (her speed doesn't stretch it), and it flips with her windward side.
+    /// astern (the owner's lengthening), a wedge (renders reviews 2 and 3): on her windward side, along her hull from her
+    /// mast (0.4 L back from her bow) to her stern and on 1.5 L astern of it; a point on her side line at her mast, its
+    /// outer edge slanting straight back and out to 1.5 L out at its aft end; full at her side and fading straight to
+    /// nothing at its width out (a share of the local width); fading in over 0.1 L at her mast, and straight from full at
+    /// her stern to nothing 1.5 L astern of it. Nothing to leeward, ahead of her mast, more than 1.5 L astern of her stern
+    /// or past its outer edge; bound to her (her speed doesn't stretch it), and it flips with her windward side.
     @Test func headerZoneIsTheUpwashBesideHerSail() throws {
         let shadow = RaceFiles.defaults.boatClass.content.windShadow
         let length = RaceFiles.defaults.boatClass.content.hull.length
         let upwash = try #require(shadow.backwindUpwash)
         #expect(shadow.header != nil)
-        #expect(abs(upwash.mastFromBow - 0.4 * length) < 1e-12 && abs(upwash.widthAtMast - 0.25 * length) < 1e-12
+        #expect(abs(upwash.mastFromBow - 0.4 * length) < 1e-12 && upwash.widthAtMast == 0
                 && abs(upwash.widthAft - 1.5 * length) < 1e-12
                 && abs(upwash.endFade - 0.1 * length) < 1e-12 && abs((upwash.astern ?? 0) - 1.5 * length) < 1e-12)
         let side = shadow.sternCorner.x, stern = shadow.sternCorner.y, mast = shadow.bowY - 0.4 * length
         let astern = 1.5 * length
         let extent = try #require(shadow.upwashExtent)
         #expect(abs(extent.aft - (stern - astern)) < 1e-12 && extent.stern == stern && abs(extent.fore - mast) < 1e-12)
-        // The fan's width out from her side: 0.25 L at her mast, straight to 1.5 L at its aft end.
-        func width(_ y: Double) -> Double { 0.25 * length + 1.25 * length * (mast - y) / (mast - (stern - astern)) }
-        #expect(abs(shadow.upwashWidth(along: mast) - 0.25 * length) < 1e-9)
+        // The wedge's width out from her side: nothing at her mast, straight to 1.5 L at its aft end.
+        func width(_ y: Double) -> Double { 1.5 * length * (mast - y) / (mast - (stern - astern)) }
+        #expect(shadow.upwashWidth(along: mast) == 0)
         #expect(abs(shadow.upwashWidth(along: stern - astern) - 1.5 * length) < 1e-9)
         #expect(abs(shadow.upwashWidth(along: stern) - width(stern)) < 1e-9)
+        // Well defined at its apex: a point at her mast on her side line, or a hair aft of it, is a number, never NaN.
+        for (out, along) in [(0.0, mast), (1e-12, mast), (0.0, mast - 1e-12), (1e-15, mast - 1e-12), (-1e-12, mast)] {
+            let share = shadow.upwashShare(out: out, along: along)
+            #expect(share.isFinite && share >= 0 && share < 1e-6, "at the apex: \(out), \(along)")
+        }
         let e = 1e-6
         for speed in [metresPerSecond(knots: 6), metresPerSecond(knots: 9), metresPerSecond(knots: 14)] {
             for windward in [Tack.starboard, .port] {
@@ -209,17 +214,24 @@ import Testing
                 for y in [stern, stern + 0.1 * length, middle, mast - 0.1 * length - e] {
                     #expect(abs(at(side + e, y) - 1) < 1e-5, "full at her side, \(y) m forward")
                 }
-                // Fading straight out to windward, to nothing at the fan's width there.
+                // Fading straight out to windward, to nothing at the wedge's width there.
                 #expect(abs(at(side + 0.25 * w, middle) - 0.75) < 1e-9)
                 #expect(abs(at(side + 0.5 * w, middle) - 0.5) < 1e-9)
                 #expect(at(side + w - e, middle) > 0 && at(side + w - e, middle) < 1e-5)
                 #expect(at(side + w + e, middle) == 0 && at(side + 2 * length, middle) == 0, "nothing past its outer edge")
-                // Narrow at her mast: 0.5 L out beside it is outside; just inside 0.25 L out there is in.
-                #expect(at(side + 0.5 * length, mast - 0.05 * length) == 0, "narrow at her mast")
-                #expect(at(side + 0.5 * length, mast - 0.2 * length) == 0)
-                #expect(at(side + 0.25 * length - e, mast - 0.1 * length) > 0)
-                // Fading in at her mast: half 0.05 L inside it.
-                #expect(abs(at(side + e, mast - 0.05 * length) - 0.5) < 1e-5)
+                // A point at her mast, no square front edge: just outboard of her side beside her mast is outside; at
+                // her mast on her side line it is nothing.
+                #expect(at(side + 0.02 * length, mast - 0.01 * length) == 0, "beside her mast, just outboard: outside")
+                #expect(at(side + 0.1 * length, mast - 0.05 * length) == 0 && at(side + 0.25 * length, mast - 0.1 * length) == 0)
+                // (Through her frame's turn the apex lands a rounding off it: nothing to within that, never NaN.)
+                #expect(at(side, mast).isFinite && at(side, mast) < 1e-9 && at(side + e, mast) < 1e-9, "nothing at the apex")
+                // Just inside its slanted edge near her mast it is in (0.1 L aft of the mast, half its width there).
+                let near = mast - 0.1 * length
+                #expect(abs(at(side + 0.5 * width(near), near) - 0.5) < 1e-9, "inside the wedge near her mast")
+                // Fading in at her mast: half 0.05 L inside it, at her side.
+                #expect(abs(at(side + e, mast - 0.05 * length) - 0.5) < 1e-4)
+                // Inside the wedge aft: half its width out at her stern, exactly half.
+                #expect(abs(at(side + 0.5 * width(stern), stern) - 0.5) < 1e-9, "inside the wedge at her stern")
                 // Wide aft: 1 L out, 1 L astern of her stern, is inside, at the local share times the aft fade.
                 let wide = at(side + length, stern - length)
                 #expect(wide > 0 && abs(wide - (1 - length / width(stern - length)) * (1 - length / astern)) < 1e-9,

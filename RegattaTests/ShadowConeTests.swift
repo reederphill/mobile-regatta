@@ -113,7 +113,7 @@ import Testing
     }
 
     /// The backwind's sprite covers exactly core's zone: on skiff@6 (#377) the header's upwash beside her sail, from her
-    /// mast back past her stern to 1.5 L astern of it on her windward side, a fan narrow at her mast and wide aft (#298's trapezoid on her windward quarter
+    /// mast back past her stern to 1.5 L astern of it on her windward side, a wedge from a point at her mast, wide aft (#298's trapezoid on her windward quarter
     /// before it): at points just
     /// inside and outside each corner and edge, on both tacks, it draws where `isInBackwind` is true and nowhere else,
     /// and it flips side with her tack. A class with #79's band draws none.
@@ -132,7 +132,7 @@ import Testing
             // Running (skiff@5): she casts none, so nothing is drawn and core slows no one.
             #expect(effects.backwind.isHidden == core.isRunning, "\(c)")
             guard !core.isRunning else {
-                let inside = corners.reduce(Vec2.zero, +) / 4
+                let inside = corners.reduce(Vec2.zero, +) / Double(corners.count)
                 #expect(!core.isInBackwind(inside), "\(c): running, no backwind")
                 continue
             }
@@ -147,22 +147,28 @@ import Testing
             }
             // On her windward side, from her mast back past her stern to the zone's aft end (#377, the owner's
             // lengthening).
-            let centre = corners.reduce(Vec2.zero, +) / 4 - core.apex
+            let centre = corners.reduce(Vec2.zero, +) / Double(corners.count) - core.apex
             #expect(centre.dot(core.windward) > 0 && centre.dot(core.forward) < 0, "\(c)")
             let extent = try #require(shadow.upwashExtent)
             #expect(extent.aft < shadow.sternCorner.y, "\(c): it runs on astern of her stern")
-            // A fan (the owner's renders review 2): along her side from its aft end to her mast, out to its width at her
-            // mast, then slanting out to its width at its aft end; wider aft than at her mast.
+            // A wedge (the owner's renders reviews 2 and 3): from a point on her side line at her mast, its outer edge
+            // slanting straight back and out to its width at its aft end; a triangle, no square front edge.
             let fan = try #require(ShadowShapes.backwindLocal(shadow))
             let expected = [Vec2(extent.out, extent.aft), Vec2(extent.out + extent.widthAft, extent.aft),
-                            Vec2(extent.out + extent.widthAtMast, extent.fore), Vec2(extent.out, extent.fore)]
-            #expect(zip(fan, expected).allSatisfy { ($0 - $1).length < 1e-12 } && fan.count == 4, "\(c): the fan's corners")
-            #expect(extent.widthAft > extent.widthAtMast, "\(c): wider aft than at her mast")
+                            Vec2(extent.out, extent.fore)]
+            #expect(zip(fan, expected).allSatisfy { ($0 - $1).length < 1e-12 } && fan.count == 3, "\(c): the wedge's corners")
+            #expect(extent.widthAtMast == 0 && extent.widthAft > 0, "\(c): a point at her mast, wide aft")
             #expect(corners.allSatisfy { ($0 - core.apex).dot(core.forward) >= extent.aft - 1e-9
                 && ($0 - core.apex).dot(core.forward) <= extent.fore + 1e-9 }, "\(c): from its aft end to her mast")
             sides.insert(effects.backwind.xScale > 0)
         }
         #expect(sides == [true, false], "drawn on both sides")
+        // A width at her mast (a tuned class) draws the quad: its mast edge out to that width.
+        var wide = shadow
+        wide.backwindUpwash?.widthAtMast = 0.25 * Self.boatClass.hull.length
+        let zone = try #require(wide.upwashExtent)
+        let quad = try #require(ShadowShapes.backwindLocal(wide))
+        #expect(quad.count == 4 && (quad[2] - Vec2(zone.out + zone.widthAtMast, zone.fore)).length < 1e-12, "the quad")
 
         // #79's band (no inner length): core has no trapezoid, and nothing is drawn.
         var banded = Self.boatClass
@@ -242,7 +248,7 @@ import Testing
         let shadow = Self.boatClass.windShadow
         let boat = Self.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
         // Mean alpha over a strip of the art a pixel wide and 24 points tall, 0.25 hull lengths astern of her stern line
-        // (skiff@6's upwash zone, #377, where the fan is about 0.75 L wide, so its outer edge is clear of the strip; it
+        // (skiff@6's upwash zone, #377, where the wedge is about 0.6 L wide, so its outer edge is clear of the strip; it
         // was 0.3 L forward of her stern while the zone was a 1 L strip, and half a length astern of her stern in #298's
         // trapezoid) on her hull-side edge (x = her stern corner), `across` points out from it (negative: outside the
         // zone). Clear of its mast fade; inside its fade aft of her stern (0.6 to 1 of full along the strip).
@@ -275,7 +281,10 @@ import Testing
         hardStyle.backwindFeather = 0
         let hardEffects = BoatEffects(seat: boat.id, boatClass: Self.boatClass, pointsPerMeter: Self.ppm, style: hardStyle)
 
-        let inside = try alpha(soft, across: 10), edge = try alpha(soft, across: 0), outside = try alpha(soft, across: -8)
+        // Inside: 4 points in, where the alpha peaks. The wedge (renders review 3, ~24 points wide here) fades out from
+        // her side so fast that there is no plateau: 0.23 at 2-4 points, 0.17 at 10 (where the fan's strip read it), 0.11
+        // at 14; the feather (3 points) is the same.
+        let inside = try alpha(soft, across: 4), edge = try alpha(soft, across: 0), outside = try alpha(soft, across: -8)
         #expect(inside > 0.2, "inside the zone")
         #expect(edge > outside && edge < inside, "falls across the edge: \(inside) \(edge) \(outside)")
         #expect(outside < inside * 0.4, "mostly gone a few points out")

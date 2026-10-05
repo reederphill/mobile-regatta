@@ -221,9 +221,9 @@ import Testing
             let file = try BoatClassFile.bundled(id: id, version: version)
             let s = file.content.windShadow
             #expect(s.header != nil && s.backwindFadeSeconds == 1.5 && s.backwindFloorSpeed != nil)
-            // The header's zone is the upwash beside her sail (the owner's renders review), a fan 0.25 L out at her mast
-            // widening to 1.5 L out at its aft end (renders review 2).
-            #expect(abs((s.backwindUpwash?.widthAtMast ?? 0) - 0.25 * file.content.hull.length) < 1e-12)
+            // The header's zone is the upwash beside her sail (the owner's renders review), a wedge from a point at her
+            // mast widening to 1.5 L out at its aft end (renders reviews 2 and 3).
+            #expect(s.backwindUpwash?.widthAtMast == 0)
             #expect(abs((s.backwindUpwash?.widthAft ?? 0) - 1.5 * file.content.hull.length) < 1e-12)
             #expect(s.ribbons.peak == s.lossCloseIn && s.ribbons.startWidth == s.coneWidthAtBoat && s.ribbons.endWidth == s.coneWidthAtEnd)
         }
@@ -232,7 +232,7 @@ import Testing
             (of: #""peakLoss": 0.25"#, with: #""peakLoss": 0.3"#),
             (of: #""floorKnots": 2,"#, with: #""floorKnots": 3,"#),
             (of: #""mastStationFromBow": 0.25,"#, with: #""mastStationFromBow": 0.3,"#),
-            (of: #""upwashWidthAtMastHullLengths": 0.25,"#, with: #""upwashWidthAtMastHullLengths": 1.5,"#),
+            (of: #""upwashWidthAtMastHullLengths": 0,"#, with: #""upwashWidthAtMastHullLengths": 1.5,"#),
             (of: #""upwashWidthAftHullLengths": 1.5,"#, with: #""upwashWidthAftHullLengths": 2.0,"#),
             (of: #""upwashEndFadeHullLengths": 0.1,"#, with: #""upwashEndFadeHullLengths": 0.2,"#),
             (of: #""upwashAftHullLengths": 1.5,"#, with: #""upwashAftHullLengths": 0.5,"#),
@@ -244,7 +244,7 @@ import Testing
                 && abs(upwash.widthAft - 2.0 * hullLength) < 1e-12
                 && abs(upwash.endFade - 0.2 * hullLength) < 1e-12 && abs((upwash.astern ?? 0) - 0.5 * hullLength) < 1e-12)
         // Its zone reaches as far as the file says: 1.25 L out from her side, 0.3 L forward of her stern, is in the
-        // edited zone (1.5 L wide at her mast), not ilca-dinghy@5's (0.5 L wide there).
+        // edited zone (1.5 L wide at her mast), not ilca-dinghy@5's (0.3 L wide there, a wedge from a point at her mast).
         let ilca5 = try BoatClassFile.bundled(id: Fixtures.classID, version: 5).content.windShadow
         let wide = Vec2(edited.sternCorner.x + 1.25 * hullLength, edited.sternCorner.y + 0.3 * hullLength)
         #expect(ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: edited).isInBackwind(wide))

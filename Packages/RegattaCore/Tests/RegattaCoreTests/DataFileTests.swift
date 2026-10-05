@@ -16,7 +16,7 @@ enum Fixtures {
         2: "f5c8f1677a45f76c2ffe27914671ea0ce615614944f331027c506cafb6caa12d",
         3: "0796b93570fb9723697162f3da4617b28ee0100f693116f1574a198c4c3bf792",
         4: "bd90cabe38cfea22c88dd0a6e4c462e04691dec0c5b90420d416bd8555f05bdf",
-        5: "e04c3e03b0d016f8547eb920f3bac3738ebbd75d253ab822759e38f8d1428f89",
+        5: "c49cb58de8939be9d53625581eeaf8e5acddf6d63d023ca75fbe3ef2b603397b",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -56,7 +56,7 @@ enum SkiffFixtures {
         3: "3a6e6b7bf037bc496a9fdddfa45d7000ab41dd1801a08cece1bc2d3a76092c81",
         4: "4e2d1a94d1c90ac80aa88bdaa4890fc68095b16de61324c6fdaa19f54ee3a9a1",
         5: "ce105fbd37ca455498592ea9ae4e47a34a5e255617b2490019a1360330261b80",
-        6: "1941e775769cf5ab25c5abcf3fa01daebeb451bd7bfdb3b16fc49a2213029eb3",
+        6: "4c20609ea59408e6ea81cb58d2aa3dba8365d24fcbe8ba883c819e6071d097e8",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -779,13 +779,13 @@ enum SkiffFixtures {
         #expect(b.windShadow.backwindFadeSeconds == 1.5)
         #expect(b.windShadow.backwindFloorSpeed == metresPerSecond(knots: 2) && b.windShadow.backwindFloorSpan == metresPerSecond(knots: 2))
         // The header's zone is the upwash beside her sail (the owner's renders review): her mast 0.4 L (skiff) or 0.25 L
-        // (ilca) back from her bow, a fan reaching 0.25 L out at her mast widening to 1.5 L out at its aft end (the
-        // owner's renders review 2), fading in over 0.1 L at her mast, and running on 1.5 L astern of her stern (the
+        // (ilca) back from her bow, a wedge from a point at her mast (0 out there) widening to 1.5 L out at its aft end (the
+        // owner's renders reviews 2 and 3), fading in over 0.1 L at her mast, and running on 1.5 L astern of her stern (the
         // owner's lengthening).
         #expect(a.windShadow.backwindUpwash == nil)
         let upwash = try #require(b.windShadow.backwindUpwash)
         #expect(abs(upwash.mastFromBow - (skiff ? 0.4 : 0.25) * length) < 1e-12)
-        #expect(abs(upwash.widthAtMast - 0.25 * length) < 1e-12 && abs(upwash.widthAft - 1.5 * length) < 1e-12)
+        #expect(upwash.widthAtMast == 0 && abs(upwash.widthAft - 1.5 * length) < 1e-12)
         #expect(abs(upwash.endFade - 0.1 * length) < 1e-12)
         #expect(abs((upwash.astern ?? 0) - 1.5 * length) < 1e-12)
     }
@@ -798,14 +798,14 @@ enum SkiffFixtures {
         (#""lullLoss": 0,"#, #""lullLoss": -1,"#, "backwind header lull"),
         (#""floorKnots": 2,"#, #""floorKnots": -2,"#, "backwind floor"),
         (#""mastStationFromBow": 0.4,"#, #""mastStationFromBow": 1.2,"#, "backwind upwash mast station"),
-        (#""upwashWidthAtMastHullLengths": 0.25,"#, #""upwashWidthAtMastHullLengths": 0,"#, "backwind upwash widths"),
-        (#""upwashWidthAftHullLengths": 1.5,"#, #""upwashWidthAftHullLengths": 0,"#, "backwind upwash widths"),
-        (#""upwashWidthAftHullLengths": 1.5,"#, #""upwashWidthAftHullLengths": 0.2,"#, "backwind upwash widths"),
+        (#""upwashWidthAtMastHullLengths": 0,"#, #""upwashWidthAtMastHullLengths": -0.1,"#, "backwind upwash width at the mast"),
+        (#""upwashWidthAftHullLengths": 1.5,"#, #""upwashWidthAftHullLengths": 0,"#, "backwind upwash width at the mast"),
+        (#""upwashWidthAtMastHullLengths": 0,"#, #""upwashWidthAtMastHullLengths": 1.6,"#, "backwind upwash width at the mast"),
         (#""upwashWidthAftHullLengths": 1.5,"#, "", "together"),
         (#""upwashEndFadeHullLengths": 0.1,"#, #""upwashEndFadeHullLengths": -0.1,"#, "backwind upwash mast station"),
         (#""upwashEndFadeHullLengths": 0.1,"#, "", "together"),
         (#""upwashAftHullLengths": 1.5,"#, #""upwashAftHullLengths": 0,"#, "backwind upwash aft length must be positive"),
-        (#""mastStationFromBow": 0.4,"# + "\n      " + #""upwashWidthAtMastHullLengths": 0.25,"# + "\n      "
+        (#""mastStationFromBow": 0.4,"# + "\n      " + #""upwashWidthAtMastHullLengths": 0,"# + "\n      "
             + #""upwashWidthAftHullLengths": 1.5,"# + "\n      " + #""upwashEndFadeHullLengths": 0.1,"#, "",
          "a backwind upwash aft length needs the upwash"),
         (#""header": { "degrees": 8, "capDegrees": 12, "lullLoss": 0, "lagSeconds": 1 }"#, #""renamed": {}"#,

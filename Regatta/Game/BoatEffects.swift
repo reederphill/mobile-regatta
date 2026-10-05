@@ -337,7 +337,9 @@ extension EffectArt {
     /// stern when it ends there). Column by column out from her side to its widest, a texel wide, each a gradient along
     /// her through the share's knots (its ends, the ends of its fades, where the column meets the fan's outer edge, and
     /// enough between them for the share's curve across a widening fan), in the art's frame (starboard tack). The hatch
-    /// is already clipped to the fan (`ShadowShapes.backwindLocal`).
+    /// is already clipped to the fan (`ShadowShapes.backwindLocal`). A wedge from a point at her mast (no width there)
+    /// draws the same way: every column then crosses the slanted edge strictly between its ends, so the knots stay
+    /// inside 0...1 and the share stays finite (it is 0 at the apex).
     fileprivate static func fadeUpwash(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat, margin: CGFloat) {
         guard let zone = shadow.upwashExtent, let upwash = shadow.backwindUpwash else { return }
         let space = CGColorSpaceCreateDeviceRGB()

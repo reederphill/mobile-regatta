@@ -10,8 +10,8 @@
 /// tapering at the edges. A ghost casts neither (`Race.shadowCone(ofSeat:)`).
 ///
 /// A class with a `header` (#377) sails an envelope (`backwindEnvelope(at:)`): the upwash beside her sail, from her
-/// mast back past her stern (to a length astern of it on skiff@6) on her windward side, a fan narrow at her mast and
-/// widening aft, for a class with one
+/// mast back past her stern (to a length astern of it on skiff@6) on her windward side, a fan widening aft (on skiff@6
+/// a wedge from a point at her mast), for a class with one
 /// (`BoatClass.WindShadow.backwindUpwash`, the owner's renders review), else the trapezoid. A boat in it has her
 /// wind turned towards her bow (`Race`), plus the header's lull, if any; the envelope is scaled by how hard her sail is
 /// working (`backwindSail`), held on the side it was cast on while it fades (`backwindSide`), and faded out below the

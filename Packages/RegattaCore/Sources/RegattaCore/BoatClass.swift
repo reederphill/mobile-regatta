@@ -329,13 +329,15 @@ public struct BoatClass: DataFileContent, Equatable {
         /// header on a boat to windward is a bound field off the leeward boat's sail, negligible by about 1 L out): on
         /// her windward side, along her hull from her mast back to her stern, and `astern` on past it when set (the
         /// owner's lengthening, so a boat lee-bowed from 2.5-3 L ahead is headed). A fan (the owner's renders review 2):
-        /// narrow at her mast, `widthAtMast` out from her side, widening straight to `widthAft` out at its aft end.
+        /// `widthAtMast` out from her side at her mast, widening straight to `widthAft` out at its aft end; with
+        /// `widthAtMast` 0 a wedge from a point at her mast (renders review 3, the placeholder).
         /// In code units; tuning, not measured.
         public struct Upwash: Sendable, Equatable {
             /// Metres from her bow (`bowY`) back to her mast, the zone's forward end.
             public var mastFromBow: Double
             /// Metres out to windward from her side (`sternCorner.x`) at which the zone has faded to nothing, at her
-            /// mast (its forward end) and at its aft end; straight between them.
+            /// mast (its forward end; 0: the zone starts as a point on her side line) and at its aft end (> 0); straight
+            /// between them.
             public var widthAtMast: Double
             public var widthAft: Double
             /// Metres over which it fades in from nothing at its mast end, inside it; and at its stern end too when it
@@ -359,7 +361,7 @@ public struct BoatClass: DataFileContent, Equatable {
         /// and from `aft` (its aft end: `astern` past her stern, or her stern) through `stern` (her stern,
         /// `sternCorner.y`) forward to `fore` (her mast). Nil without `backwindUpwash`, and for a class it doesn't shape:
         /// one without a `header` and the trapezoid's inner length (the envelope's class,
-        /// `ShadowCone.backwindEnvelope(at:)`). The drawn zone is this fan, a quad (`ShadowShapes`).
+        /// `ShadowCone.backwindEnvelope(at:)`). The drawn zone is this fan, a quad (`ShadowShapes`), a triangle with no width at her mast.
         public var upwashExtent: (out: Double, widthAtMast: Double, widthAft: Double, aft: Double, stern: Double, fore: Double)? {
             guard let u = backwindUpwash, header != nil, backwindInnerLength != nil else { return nil }
             return (sternCorner.x, u.widthAtMast, u.widthAft, sternCorner.y - (u.astern ?? 0), sternCorner.y, bowY - u.mastFromBow)
@@ -379,12 +381,14 @@ public struct BoatClass: DataFileContent, Equatable {
         /// (`upwashWidth(along:)`, a share of the local width); between her stern and
         /// her mast, fading in over `endFade` from nothing at her mast; astern of her stern, falling straight from full
         /// at it to nothing `astern` behind it (or, ending at her stern, fading in over `endFade` there too); 0
-        /// elsewhere, and without `upwashExtent`. Before her presence, floor and sail (`ShadowCone.backwindEnvelope(at:)`).
+        /// elsewhere, and without `upwashExtent`. A point apex (`widthAtMast` 0) is well defined: the width is > 0 strictly
+        /// aft of her mast, and a point at her mast or on her side line gets 0, never a division by a zero width.
+        /// Before her presence, floor and sail (`ShadowCone.backwindEnvelope(at:)`).
         public func upwashShare(out: Double, along: Double) -> Double {
             guard let zone = upwashExtent, let u = backwindUpwash else { return 0 }
             guard out > 0, along > zone.aft, along < zone.fore else { return 0 }
             let width = upwashWidth(along: along)
-            guard out < width else { return 0 }
+            guard width > 0, out < width else { return 0 }
             let fore = u.endFade > 0 ? min(1, (zone.fore - along) / u.endFade) : 1
             let aft: Double
             if let astern = u.astern {
@@ -583,7 +587,7 @@ private struct BoatClassSchema2: Decodable {
             let floorBuildKnots: Double?
             /// #377: the header's zone as the upwash beside her sail (`BoatClass.WindShadow.Upwash`): her mast's
             /// station back from her bow, a share of her length; how far out it reaches at her mast and at its aft end
-            /// (a fan, the owner's renders review 2) and its end fade, hull lengths. Optional, all four or none, with a
+            /// (a fan, the owner's renders review 2; 0 at her mast: a wedge from a point there, review 3) and its end fade, hull lengths. Optional, all four or none, with a
             /// header only.
             let mastStationFromBow: Double?
             let upwashWidthAtMastHullLengths: Double?
@@ -749,8 +753,8 @@ private struct BoatClassSchema2: Decodable {
             try check(windShadow.header != nil, "a backwind upwash needs a header")
             try check(station >= 0 && station < 1 && fade.isFinite && fade >= 0,
                       "backwind upwash mast station must be 0..<1 of her length and its end fade not negative")
-            try check(positive(atMast) && positive(aftWidth) && aftWidth >= atMast,
-                      "backwind upwash widths must be positive, its aft width no less than at the mast")
+            try check(atMast.isFinite && atMast >= 0 && positive(aftWidth) && aftWidth >= atMast,
+                      "backwind upwash width at the mast must not be negative, its aft width positive and no less than at the mast")
         }
         if let aft = windShadow.backwind.upwashAftHullLengths {
             try check(upwash[0] != nil, "a backwind upwash aft length needs the upwash")

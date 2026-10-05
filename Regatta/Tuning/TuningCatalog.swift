@@ -239,7 +239,7 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/windShadow/backwind/floorKnots", "None below", unit: " kn", 0...8, step: 0.1),
                     TuningSlider(.boatClass, "/windShadow/backwind/floorBuildKnots", "Builds in over", unit: " kn", 0...6, step: 0.1),
                     TuningSlider(.boatClass, "/windShadow/backwind/mastStationFromBow", "Mast back from bow", 0...0.9, step: 0.01),
-                    TuningSlider(.boatClass, "/windShadow/backwind/upwashWidthAtMastHullLengths", "Width at her mast", 0.05...3, step: 0.05),
+                    TuningSlider(.boatClass, "/windShadow/backwind/upwashWidthAtMastHullLengths", "Width at her mast", 0...3, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/upwashWidthAftHullLengths", "Width at its aft end", 0.1...4, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/upwashEndFadeHullLengths", "Fades in at its mast over", 0...0.5, step: 0.01),
                     TuningSlider(.boatClass, "/windShadow/backwind/upwashAftHullLengths", "Runs on astern of her stern", 0.1...3, step: 0.05),

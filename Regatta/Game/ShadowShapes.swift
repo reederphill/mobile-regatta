@@ -17,11 +17,13 @@ nonisolated enum ShadowShapes {
     /// For a class whose header's zone is the upwash beside her sail (#377, `BoatClass.WindShadow.upwashExtent`), the
     /// fan of it, a quad: along her side from its aft end (astern of her stern, or her stern) forward to her mast, out
     /// to its width at her mast, and slanting straight out to its width at its aft end; not scaled (it is bound to her,
-    /// her speed doesn't stretch it).
+    /// her speed doesn't stretch it). With no width at her mast (a wedge from a point there, the owner's renders review
+    /// 3) the quad's two mast corners are one, so it is a triangle: its aft end's two corners and her mast's point.
     static func backwindLocal(_ shadow: BoatClass.WindShadow, scale: Double = 1) -> [Vec2]? {
         if let zone = shadow.upwashExtent {
-            return [Vec2(zone.out, zone.aft), Vec2(zone.out + zone.widthAft, zone.aft),
-                    Vec2(zone.out + zone.widthAtMast, zone.fore), Vec2(zone.out, zone.fore)]
+            let aft = [Vec2(zone.out, zone.aft), Vec2(zone.out + zone.widthAft, zone.aft)]
+            guard zone.widthAtMast > 0 else { return aft + [Vec2(zone.out, zone.fore)] }
+            return aft + [Vec2(zone.out + zone.widthAtMast, zone.fore), Vec2(zone.out, zone.fore)]
         }
         guard let hullSide = shadow.backwindSpan(out: 0), let outboard = shadow.backwindSpan(out: shadow.backwindWidth) else {
             return nil

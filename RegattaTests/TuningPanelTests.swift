@@ -163,7 +163,11 @@ import RegattaCore
         model.set(try slider("boatClass:/windShadow/backwind/floorKnots", in: model), to: 3)
         // The header's upwash zone (#377, the owner's renders review).
         model.set(try slider("boatClass:/windShadow/backwind/mastStationFromBow", in: model), to: 0.3)
-        model.set(try slider("boatClass:/windShadow/backwind/upwashWidthAtMastHullLengths", in: model), to: 0.5)
+        // A wedge from a point at her mast (the owner's renders review 3): its width there is 0 in the file, and the
+        // slider reaches down to it.
+        let atMast = try slider("boatClass:/windShadow/backwind/upwashWidthAtMastHullLengths", in: model)
+        #expect(atMast.range.lowerBound == 0 && model.fileValue(atMast) == 0)
+        model.set(atMast, to: 0.5)
         model.set(try slider("boatClass:/windShadow/backwind/upwashWidthAftHullLengths", in: model), to: 2.0)
         model.set(try slider("boatClass:/windShadow/backwind/upwashEndFadeHullLengths", in: model), to: 0.2)
         model.set(try slider("boatClass:/windShadow/backwind/upwashAftHullLengths", in: model), to: 0.5)

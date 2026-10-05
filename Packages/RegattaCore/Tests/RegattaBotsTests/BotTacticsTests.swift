@@ -307,7 +307,7 @@ import Testing
     /// landed the starboard boat in it; with it she lee-bows again, from 5.5 L ahead (at 5.8 her forecast never lands seed 3's
     /// boat in the zone, and she sails on). On a probe grid (3–7 L ahead by 0.5, 1–3.5 L to leeward, seeds 3, 11
     /// and 20) 12 starts land crossable lee-bows, about 2.4 L ahead and 0.7 L to leeward once tacked, never closer than
-    /// 1.7 L, no rule call; the same 12 with the zone a fan (renders review 2). skiff@5's trapezoid (`trapezoidClass`, `FleetTactics.leeBowAstern`) lee-bows from 5.8 L as
+    /// 1.7 L, no rule call; the same 12 with the zone a fan (renders review 2) and a wedge from a point at her mast (review 3). skiff@5's trapezoid (`trapezoidClass`, `FleetTactics.leeBowAstern`) lee-bows from 5.8 L as
     /// before.
     @Test func leeBowsInsteadOfDuckingWhenPossible() throws {
         for seed in Self.fleetSeeds {
