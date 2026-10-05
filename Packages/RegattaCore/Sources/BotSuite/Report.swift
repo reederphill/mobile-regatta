@@ -86,6 +86,10 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     /// last leg (#351). Nil and false once finished.
     public var metresToFinish: Double?
     public var onLastLeg: Bool = false
+    /// Whether the cautious bot sailed her seat (#104, #105's cautious mix): `tier` is then the cell's for the seat.
+    public var cautious: Bool = false
+    /// Each run she sailed, in order (#105): from her rounding into it until she rounds the gate or finishes.
+    public var runs: [RunSplit] = []
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
@@ -94,7 +98,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         "rowSpot", "startSpot", "onCourseSeconds", "encounters", "encountersEndingInFouls", "encountersToFoulsShare",
         "preStartEncounters", "preStartEncountersEndingInFouls", "closeEncounters", "crossings", "shadowGiven", "shadowReceived", "covers",
         "callsByRule", "callsBeforeFirstRounding", "racingTacks",
-        "preStartCallsByRule", "cascadeCallsByRule", "metresToFinish", "onLastLeg",
+        "preStartCallsByRule", "cascadeCallsByRule", "metresToFinish", "onLastLeg", "cautious", "runs",
     ]
 
     private enum CodingKeys: String, CodingKey {
@@ -105,7 +109,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case encounters, encountersEndingInFouls, encountersToFoulsShare
         case preStartEncounters, preStartEncountersEndingInFouls, closeEncounters, crossings, shadowGiven, shadowReceived, covers
         case callsByRule, callsBeforeFirstRounding, racingTacks
-        case preStartCallsByRule, cascadeCallsByRule, metresToFinish, onLastLeg
+        case preStartCallsByRule, cascadeCallsByRule, metresToFinish, onLastLeg, cautious, runs
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -152,6 +156,8 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(cascadeCallsByRule, forKey: .cascadeCallsByRule)
         try c.encode(metresToFinish, forKey: .metresToFinish)
         try c.encode(onLastLeg, forKey: .onLastLeg)
+        try c.encode(cautious, forKey: .cautious)
+        try c.encode(runs, forKey: .runs)
     }
 
     /// Whether her style means her to start in the line's pin third (#99).
@@ -180,6 +186,58 @@ public struct BeatSplit: Codable, Hashable, Sendable {
     public var metres: Double
     /// Her tacks from the beat's beginning to her rounding out of it; penalty turns aside.
     public var tacks: Int = 0
+}
+
+/// One run a seat sailed (#105): how long it took her, how far she made good down the course over it, and how often
+/// she gybed on it.
+public struct RunSplit: Codable, Hashable, Sendable {
+    public var seconds: Double
+    /// Metres along the course axis, downwind, from where she began the run to where she rounded the gate or finished.
+    public var metres: Double
+    /// Her gybes (and any tacks) from the run's beginning to its end; penalty turns aside.
+    public var gybes: Int = 0
+}
+
+/// A leg a seat sailed, for a gain over it (`legGains`): a beat or a run.
+protocol LegSplit {
+    var seconds: Double { get }
+    /// Metres made good along the leg's way.
+    var metres: Double { get }
+}
+
+extension BeatSplit: LegSplit {}
+extension RunSplit: LegSplit {}
+
+/// Each leg's gain of `ahead` over `behind`, in leg order, hull lengths: the time `behind`'s seats took over it less
+/// `ahead`'s (each side's mean over the seats that sailed it), at `behind`'s mean speed along it. A leg either side
+/// didn't complete has none. `legs` gives a seat's legs of the kind: her beats, or her runs.
+func legGains<Split: LegSplit>(_ ahead: [SeatMetrics], over behind: [SeatMetrics], hullLength: Double,
+                               legs: (SeatMetrics) -> [Split]) -> [Double] {
+    let legCount = (ahead + behind).map { legs($0).count }.max() ?? 0
+    return (0..<legCount).compactMap { leg in
+        let t = ahead.compactMap { legs($0).indices.contains(leg) ? legs($0)[leg] : nil }
+        let b = behind.compactMap { legs($0).indices.contains(leg) ? legs($0)[leg] : nil }
+        guard !t.isEmpty, !b.isEmpty else { return nil }
+        let seconds = { (splits: [Split]) in splits.reduce(0) { $0 + $1.seconds } / Double(splits.count) }
+        let baselineSeconds = seconds(b)
+        let baselineSpeed = b.reduce(0) { $0 + $1.metres } / Double(b.count) / max(baselineSeconds, 1)
+        return (baselineSeconds - seconds(t)) * baselineSpeed / hullLength
+    }
+}
+
+/// A race's rule 16.1 calls (#228, #105's watchdog): all of them, those whose offender (the right-of-way boat) held her
+/// rudder centred throughout the window the escape simulation read (the autohelm's course change: following a shift,
+/// or a snap), and of those the ones with a tack or gybe tap of hers in the window.
+public struct Rule161Calls: Codable, Hashable, Sendable {
+    public var calls = 0
+    public var centredRudder = 0
+    public var centredRudderWithTap = 0
+
+    public init(calls: Int = 0, centredRudder: Int = 0, centredRudderWithTap: Int = 0) {
+        self.calls = calls
+        self.centredRudder = centredRudder
+        self.centredRudderWithTap = centredRudderWithTap
+    }
 }
 
 /// Tick times over one race, milliseconds: the bots' decisions and the race step together; and the race's
@@ -262,6 +320,14 @@ public struct RaceResult: Codable, Hashable, Sendable {
     /// The ticks its hunters held their hunting turn at a boat that must keep clear of them (`HuntTally`, a luff or a
     /// turn bringing it closer), in a race of the hunters mix (#355); nil otherwise.
     public var hunterTurnTicks: Int? = nil
+    /// Its rule 16.1 calls, for the watchdog (#105); nil in a race not sailed by the harness.
+    public var rule161: Rule161Calls? = nil
+    /// The executor against the tactician at Club-level execution (#105), in a race that has both; nil otherwise.
+    public var execution: RaceExecution? = nil
+    /// The player stand-in against her rivals (#105), in a race of the rivals mix; nil otherwise.
+    public var rivals: RaceRivals? = nil
+    /// Skill against finishing order (#105), in a race of the rank-stability mix; nil otherwise.
+    public var rank: RaceRank? = nil
 
     /// `ranks`: each seat's place in the race's order at the end (`Race.place(of:)`), finished or not.
     init(cell: BotRaceCell, finalTick: Int, capped: Bool, tideStateAtGun: Double?, seats: [SeatMetrics],
@@ -279,6 +345,9 @@ public struct RaceResult: Codable, Hashable, Sendable {
         midFleetCloseEncounters = middle.isEmpty ? nil
             : Double(middle.reduce(0) { $0 + seats[$1].closeEncounters }) / Double(middle.count)
         self.timings = timings
+        execution = RaceExecution(seats: seats, ranks: ranks)
+        rivals = cell.profileMix == .rivals ? RaceRivals(cell: cell, seats: seats, ranks: ranks) : nil
+        rank = cell.profileMix == .rankStability ? RaceRank(seats: seats, ranks: ranks) : nil
     }
 }
 
@@ -348,6 +417,12 @@ public struct RaceSkillGap: Codable, Hashable, Sendable {
     /// seats took over it less the tactician seats' (each side's mean over the seats that sailed it), at the
     /// baseline seats' mean speed up the course. A beat either side didn't complete has none.
     public var gainLengthsPerBeat: [Double]
+    /// Each run's gain of the tactician over the baseline, in run order, hull lengths, as `gainLengthsPerBeat` (#105).
+    public var gainLengthsPerRun: [Double] = []
+    /// The tactician's lead over the baseline at their first cross after the gun (#105, `StartCrossTally`): along the
+    /// course axis, hull lengths, the mean over the race's tactician–baseline pairs; nil when no pair crossed or reached
+    /// the fallback.
+    public var startGainLengths: Double? = nil
 
     /// Nil for a race without both profiles.
     init?(seats: [SeatMetrics], ranks: [Int], hullLength: Double) {
@@ -358,16 +433,8 @@ public struct RaceSkillGap: Codable, Hashable, Sendable {
         tacticianWin = win(.tactician, over: .baseline, in: order)
         let wins = tacticians.reduce(0) { total, t in total + baselines.filter { ranks[t.seat] < ranks[$0.seat] }.count }
         tacticianPairShare = share(wins, of: tacticians.count * baselines.count)
-        let beatCount = seats.map(\.beats.count).max() ?? 0
-        gainLengthsPerBeat = (0..<beatCount).compactMap { beat in
-            let t = tacticians.compactMap { $0.beats.indices.contains(beat) ? $0.beats[beat] : nil }
-            let b = baselines.compactMap { $0.beats.indices.contains(beat) ? $0.beats[beat] : nil }
-            guard !t.isEmpty, !b.isEmpty else { return nil }
-            let seconds = { (splits: [BeatSplit]) in splits.reduce(0) { $0 + $1.seconds } / Double(splits.count) }
-            let baselineSeconds = seconds(b)
-            let baselineSpeed = b.reduce(0) { $0 + $1.metres } / Double(b.count) / max(baselineSeconds, 1)
-            return (baselineSeconds - seconds(t)) * baselineSpeed / hullLength
-        }
+        gainLengthsPerBeat = legGains(tacticians, over: baselines, hullLength: hullLength) { $0.beats }
+        gainLengthsPerRun = legGains(tacticians, over: baselines, hullLength: hullLength) { $0.runs }
     }
 }
 
@@ -431,6 +498,13 @@ public struct SkillGapSummary: Codable, Hashable, Sendable {
     public var beats: Int
     /// The median of those gains, hull lengths.
     public var medianGainLengthsPerBeat: Double
+    /// Runs with a gain (#105): every race's, together; and their median, hull lengths (0 for none).
+    public var runs: Int = 0
+    public var medianGainLengthsPerRun: Double = 0
+    /// Races with a lead at the first cross (#105, `RaceSkillGap.startGainLengths`), and those leads' mean, hull
+    /// lengths; nil for none.
+    public var startRaces: Int = 0
+    public var meanStartGainLengths: Double? = nil
 
     /// Nil when no race had both profiles.
     init?(_ races: [RaceSkillGap]) {
@@ -440,7 +514,277 @@ public struct SkillGapSummary: Codable, Hashable, Sendable {
         tacticianPairShare = races.reduce(0) { $0 + $1.tacticianPairShare } / Double(races.count)
         let gains = races.flatMap(\.gainLengthsPerBeat).sorted()
         beats = gains.count
-        medianGainLengthsPerBeat = gains.isEmpty ? 0 : (gains[(gains.count - 1) / 2] + gains[gains.count / 2]) / 2
+        medianGainLengthsPerBeat = median(gains)
+        let runGains = races.flatMap(\.gainLengthsPerRun).sorted()
+        runs = runGains.count
+        medianGainLengthsPerRun = median(runGains)
+        let leads = races.compactMap(\.startGainLengths)
+        startRaces = leads.count
+        meanStartGainLengths = leads.isEmpty ? nil : leads.reduce(0, +) / Double(leads.count)
+    }
+}
+
+/// The median of `sorted` (ascending); 0 for none.
+func median(_ sorted: [Double]) -> Double {
+    sorted.isEmpty ? 0 : (sorted[(sorted.count - 1) / 2] + sorted[sorted.count / 2]) / 2
+}
+
+/// How a race's tactician at Club-level execution did against its executor (#222, #105: "a perfect-execution,
+/// poor-tactics bot loses to a good-tactics, average-execution bot: decisions stay the main skill").
+public struct RaceExecution: Codable, Hashable, Sendable {
+    /// The profiles in the race's order at the end, first place first.
+    public var order: [BotProfile]
+    /// Whether tactics won: 1 when the tactician's seats' mean place in `order` is ahead of the executor's, 0 when
+    /// behind, ½ for a tie.
+    public var tacticsWin: Double
+
+    /// Nil for a race without both profiles.
+    init?(seats: [SeatMetrics], ranks: [Int]) {
+        guard seats.contains(where: { $0.profile == .executor }),
+              seats.contains(where: { $0.profile == .tacticianClubExecution }) else { return nil }
+        order = profileOrder(seats, ranks: ranks)
+        tacticsWin = win(.tacticianClubExecution, over: .executor, in: order)
+    }
+}
+
+/// Execution against tactics over a run (#105): what `minTacticsBeatsExecutionShare` holds.
+public struct ExecutionSummary: Codable, Hashable, Sendable {
+    /// Races with both profiles.
+    public var races: Int
+    /// The share of them tactics won (`RaceExecution.tacticsWin`).
+    public var tacticsBeatsExecutionShare: Double
+
+    /// Nil when no race had both.
+    init?(_ races: [RaceExecution]) {
+        guard !races.isEmpty else { return nil }
+        self.races = races.count
+        tacticsBeatsExecutionShare = races.reduce(0) { $0 + $1.tacticsWin } / Double(races.count)
+    }
+}
+
+/// The 16.1 watchdog over a run (#228, #105): rule 16.1 calls whose right-of-way boat held her rudder centred
+/// throughout the escape window (`Rule161Calls`), over the all-National live fleets sailed in the conditions where the
+/// autohelm follows the shifts fastest (`watchedConditions`, by id whatever the version): what `watchdog` holds.
+public struct WatchdogSummary: Codable, Hashable, Sendable {
+    /// Races of all-National live fleets in those conditions.
+    public var races: Int
+    /// By conditions id, every one of `watchedConditions` listed even at 0: all 16.1 calls, the centred-rudder ones the
+    /// watchdog counts, and of those the ones with a tack or gybe tap in the window (reported, never gated).
+    public var rule161CallsByConditions: [String: Int]
+    public var centredRudder161CallsByConditions: [String: Int]
+    public var centredRudderWithTap161CallsByConditions: [String: Int]
+    /// The centred-rudder calls, all conditions together: what `maxCentredRudder161Calls` holds.
+    public var centredRudder161Calls: Int
+
+    /// #228: "classic-oscillating @3 and gusty-offshore @3 (the fastest shift-following)"; on main their version 7.
+    public static let watchedConditions = ["classic-oscillating", "gusty-offshore"]
+
+    /// Nil when no race was of an all-National live fleet in those conditions.
+    init?(_ races: [RaceResult]) {
+        let races = races.filter {
+            guard $0.cell.isAllNationalLive, let id = try? dataFileKey($0.cell.conditions).id else { return false }
+            return WatchdogSummary.watchedConditions.contains(id)
+        }
+        guard !races.isEmpty else { return nil }
+        self.races = races.count
+        var calls: [String: Int] = [:], centred: [String: Int] = [:], tapped: [String: Int] = [:]
+        for id in WatchdogSummary.watchedConditions { (calls[id], centred[id], tapped[id]) = (0, 0, 0) }
+        for race in races {
+            guard let id = try? dataFileKey(race.cell.conditions).id, let counts = race.rule161 else { continue }
+            calls[id, default: 0] += counts.calls
+            centred[id, default: 0] += counts.centredRudder
+            tapped[id, default: 0] += counts.centredRudderWithTap
+        }
+        rule161CallsByConditions = calls
+        centredRudder161CallsByConditions = centred
+        centredRudderWithTap161CallsByConditions = tapped
+        centredRudder161Calls = centred.values.reduce(0, +)
+    }
+}
+
+/// A rivals race (#235, #105): the player stand-in (seat 0) and her rivals (`Rivals.seats`), all at `skill`, and their
+/// places in the race's order at the end, finished or not.
+public struct RaceRivals: Codable, Hashable, Sendable {
+    public var skill: Double
+    public var seatPlace: Int
+    public var rivalPlaces: [Int]
+
+    init(cell: BotRaceCell, seats: [SeatMetrics], ranks: [Int]) {
+        skill = seats[0].skill
+        seatPlace = ranks[0]
+        rivalPlaces = ProfileMix.rivalSeats(seed: cell.seed, fleetSize: cell.fleetSize).sorted().map { ranks[$0] }
+    }
+}
+
+/// The rival pace band over a run (#235, #105): at each skill, the player stand-in's mean place and her rivals' (both
+/// rivals pooled), and how far apart they are: what `rivals` holds.
+public struct RivalPaceSummary: Codable, Hashable, Sendable {
+    /// Races of the rivals mix.
+    public var races: Int
+    /// The fleet sizes they were sailed in, ascending: one in the bundled matrix (`BotMatrix.mixFleetSizes`), so the
+    /// mean places aren't pooled over fleets of different sizes.
+    public var fleetSizes: [Int]
+    /// By skill (`fixed`, two places): the stand-in's mean place, her rivals' mean place, and the gap between them.
+    public var seatMeanPlace: [String: Double]
+    public var rivalMeanPlace: [String: Double]
+    public var meanPlaceGap: [String: Double]
+    /// The widest of those gaps: what `maxMeanPlaceGap` holds.
+    public var maxMeanPlaceGap: Double
+
+    public init(races: Int, fleetSizes: [Int] = [], seatMeanPlace: [String: Double], rivalMeanPlace: [String: Double]) {
+        self.races = races
+        self.fleetSizes = fleetSizes
+        self.seatMeanPlace = seatMeanPlace
+        self.rivalMeanPlace = rivalMeanPlace
+        meanPlaceGap = seatMeanPlace.reduce(into: [:]) { gaps, entry in
+            if let rival = rivalMeanPlace[entry.key] { gaps[entry.key] = abs(entry.value - rival) }
+        }
+        maxMeanPlaceGap = meanPlaceGap.values.max() ?? 0
+    }
+
+    /// Nil when no race was of the rivals mix.
+    init?(_ races: [RaceResult]) {
+        let rivals = races.compactMap(\.rivals)
+        guard !rivals.isEmpty else { return nil }
+        let fleetSizes = Set(races.filter { $0.rivals != nil }.map(\.cell.fleetSize)).sorted()
+        var seat: [String: [Int]] = [:], rival: [String: [Int]] = [:]
+        for race in rivals {
+            seat[fixed(race.skill), default: []].append(race.seatPlace)
+            rival[fixed(race.skill), default: []] += race.rivalPlaces
+        }
+        let mean = { (places: [Int]) in Double(places.reduce(0, +)) / Double(max(places.count, 1)) }
+        self.init(races: rivals.count, fleetSizes: fleetSizes, seatMeanPlace: seat.mapValues(mean), rivalMeanPlace: rival.mapValues(mean))
+    }
+}
+
+/// A rank-stability race (#105): each seat's skill and place in the race's order at the end, finished or not, and the
+/// Spearman correlation between skill and finishing order (1: the more skilled always ahead); nil for a race whose
+/// seats share one skill.
+public struct RaceRank: Codable, Hashable, Sendable {
+    public var skills: [Double]
+    public var places: [Int]
+    public var spearman: Double?
+
+    init(seats: [SeatMetrics], ranks: [Int]) {
+        skills = seats.map(\.skill)
+        places = ranks
+        spearman = spearmanCorrelation(skills, places.map { -Double($0) })
+    }
+}
+
+/// Spearman's rank correlation of `x` and `y`: Pearson's over their ranks, ties given their mean rank; nil when either
+/// has no spread.
+func spearmanCorrelation(_ x: [Double], _ y: [Double]) -> Double? {
+    precondition(x.count == y.count)
+    func ranks(_ values: [Double]) -> [Double] {
+        let order = values.indices.sorted { values[$0] < values[$1] }
+        var ranks = [Double](repeating: 0, count: values.count)
+        var i = 0
+        while i < order.count {
+            var j = i
+            while j + 1 < order.count && values[order[j + 1]] == values[order[i]] { j += 1 }
+            for k in i...j { ranks[order[k]] = Double(i + j) / 2 + 1 }
+            i = j + 1
+        }
+        return ranks
+    }
+    let (rx, ry) = (ranks(x), ranks(y))
+    let n = Double(x.count)
+    guard n > 1 else { return nil }
+    let (mx, my) = (rx.reduce(0, +) / n, ry.reduce(0, +) / n)
+    var sxy = 0.0, sxx = 0.0, syy = 0.0
+    for i in rx.indices {
+        sxy += (rx[i] - mx) * (ry[i] - my)
+        sxx += (rx[i] - mx) * (rx[i] - mx)
+        syy += (ry[i] - my) * (ry[i] - my)
+    }
+    guard sxx > 0, syy > 0 else { return nil }
+    return sxy / (sxx * syy).squareRoot()
+}
+
+/// Rank stability over a run (#105): a fleet of a fixed mix of skills (`ProfileMix.rankSkills`) raced over the seeds.
+/// How well skill orders the finish (`meanSkillRankCorrelation`, what `rank` holds), and the luck floor: how far boats
+/// of the same skill spread in one race (reported, never gated).
+public struct RankSummary: Codable, Hashable, Sendable {
+    /// Races of the rank-stability mix, and of them those with a correlation.
+    public var races: Int
+    public var correlatedRaces: Int
+    /// The fleet sizes they were sailed in, ascending: one in the bundled matrix (`BotMatrix.mixFleetSizes`), so the
+    /// correlation isn't averaged over fleets of different sizes.
+    public var fleetSizes: [Int]
+    /// The mean over those races of each one's Spearman correlation (`RaceRank.spearman`).
+    public var meanSkillRankCorrelation: Double
+    /// The luck floor: by skill (`fixed`, two places), the mean gap in places between two seats of that skill in one
+    /// race, every such pair of every race; and over every skill together.
+    public var sameSkillPlaceGap: [String: Double]
+    public var meanSameSkillPlaceGap: Double?
+
+    public init(races: Int, correlatedRaces: Int, fleetSizes: [Int] = [], meanSkillRankCorrelation: Double,
+                sameSkillPlaceGap: [String: Double] = [:], meanSameSkillPlaceGap: Double? = nil) {
+        self.races = races
+        self.correlatedRaces = correlatedRaces
+        self.fleetSizes = fleetSizes
+        self.meanSkillRankCorrelation = meanSkillRankCorrelation
+        self.sameSkillPlaceGap = sameSkillPlaceGap
+        self.meanSameSkillPlaceGap = meanSameSkillPlaceGap
+    }
+
+    /// Nil when no race was of the rank-stability mix.
+    init?(_ races: [RaceResult]) {
+        let ranks = races.compactMap(\.rank)
+        guard !ranks.isEmpty else { return nil }
+        let correlations = ranks.compactMap(\.spearman)
+        var gaps: [String: [Int]] = [:]
+        for race in ranks {
+            for a in race.skills.indices {
+                for b in (a + 1)..<race.skills.count where race.skills[b] == race.skills[a] {
+                    gaps[fixed(race.skills[a]), default: []].append(abs(race.places[a] - race.places[b]))
+                }
+            }
+        }
+        let all = gaps.values.flatMap { $0 }
+        self.init(races: ranks.count, correlatedRaces: correlations.count,
+                  fleetSizes: Set(races.filter { $0.rank != nil }.map(\.cell.fleetSize)).sorted(),
+                  meanSkillRankCorrelation: correlations.isEmpty ? 0 : correlations.reduce(0, +) / Double(correlations.count),
+                  sameSkillPlaceGap: gaps.mapValues { Double($0.reduce(0, +)) / Double($0.count) },
+                  meanSameSkillPlaceGap: all.isEmpty ? nil : Double(all.reduce(0, +)) / Double(all.count))
+    }
+}
+
+/// The cautious mix over a run (#104, #105): the cautious seats among live bots, reported for #389's cautious gate.
+public struct CautiousSummary: Codable, Hashable, Sendable {
+    /// Races of the cautious mix, and their cautious seats.
+    public var races: Int
+    public var seats: Int
+    /// The cautious seats' rule calls as the offender, and the races in which she had one.
+    public var foulsAsOffender: Int
+    public var racesWithFoul: Int
+    /// Mean place of the cautious seats and of the live seats beside them, a boat that didn't finish placed last.
+    public var meanPlace: Double
+    public var liveMeanPlace: Double
+
+    /// Nil when no race was of the cautious mix.
+    init?(_ races: [RaceResult]) {
+        let races = races.filter { $0.cell.profileMix == .cautious }
+        guard !races.isEmpty else { return nil }
+        self.races = races.count
+        var cautious: [SeatMetrics] = [], live: [Double] = [], places: [Double] = []
+        for race in races {
+            for seat in race.seats {
+                let place = Double(seat.place ?? race.cell.fleetSize)
+                if seat.cautious {
+                    cautious.append(seat)
+                    places.append(place)
+                } else {
+                    live.append(place)
+                }
+            }
+        }
+        seats = cautious.count
+        foulsAsOffender = cautious.reduce(0) { $0 + $1.foulsAsOffender }
+        racesWithFoul = races.filter { $0.seats.contains { $0.cautious && $0.foulsAsOffender > 0 } }.count
+        meanPlace = places.reduce(0, +) / Double(max(places.count, 1))
+        liveMeanPlace = live.reduce(0, +) / Double(max(live.count, 1))
     }
 }
 
@@ -802,6 +1146,16 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var closeEncounters: CloseEncounterSummary?
     /// The hunters scenario (#355) over its races; nil when none sailed.
     public var hunters: HuntersSummary?
+    /// Execution against tactics (#105) over the races with both; nil when none did.
+    public var execution: ExecutionSummary?
+    /// The 16.1 watchdog (#105) over the all-National live fleets in its conditions; nil when none sailed.
+    public var watchdog: WatchdogSummary?
+    /// The rival pace band (#105) over the rivals mix's races; nil when none sailed.
+    public var rivals: RivalPaceSummary?
+    /// Rank stability (#105) over the rank-stability mix's races; nil when none sailed.
+    public var rank: RankSummary?
+    /// The cautious mix (#105) over its races; nil when none sailed.
+    public var cautious: CautiousSummary?
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -819,8 +1173,9 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         self.thresholds = thresholds
         self.races = races
         let seats = races.flatMap(\.seats)
-        // The live bots the tiers gate: never those racing hunters (#355), whose numbers are `hunters`'.
-        let gated = races.filter { $0.cell.profileMix != .hunters }.flatMap(\.seats)
+        // The live bots the tiers gate: never those racing hunters (#355), whose numbers are `hunters`', a cautious bot, or
+        // at a skill their mix sets (#105: `ProfileMix.gatesLiveTiers`).
+        let gated = races.filter(\.cell.profileMix.gatesLiveTiers).flatMap(\.seats)
         tiers = Dictionary(uniqueKeysWithValues: BotTier.allCases.compactMap { tier in
             let ofTier = gated.filter { $0.tier == tier && $0.profile == nil }
             return ofTier.isEmpty ? nil : (tier.rawValue, TierSummary(ofTier))
@@ -836,10 +1191,16 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         conduct = ConductSummary(races)
         closeEncounters = CloseEncounterSummary(races)
         hunters = HuntersSummary(races)
+        execution = ExecutionSummary(races.compactMap(\.execution))
+        watchdog = WatchdogSummary(races)
+        rivals = RivalPaceSummary(races)
+        rank = RankSummary(races)
+        cautious = CautiousSummary(races)
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
         breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start,
-                                       navigation: navigation, conduct: conduct, closeEncounters: closeEncounters)
+                                       navigation: navigation, conduct: conduct, closeEncounters: closeEncounters,
+                                       execution: execution, watchdog: watchdog, rivals: rivals, rank: rank)
         passed = breaches.isEmpty
     }
 
@@ -879,7 +1240,13 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         if let gap = skillGap {
             lines.append("skill gap: tactician won \(fixed(gap.tacticianWinShare)) of \(gap.races) races "
                 + "(\(fixed(gap.tacticianPairShare)) of pairs), median gain \(fixed(gap.medianGainLengthsPerBeat)) "
-                + "lengths/beat over \(gap.beats) beats")
+                + "lengths/beat over \(gap.beats) beats, \(fixed(gap.medianGainLengthsPerRun)) lengths/run over \(gap.runs) runs, "
+                + "start \(gap.meanStartGainLengths.map { fixed($0) } ?? "-") lengths ahead at the first cross over "
+                + "\(gap.startRaces) races")
+        }
+        if let execution {
+            lines.append("execution: tactician at Club execution beat the executor in \(fixed(execution.tacticsBeatsExecutionShare)) "
+                + "of \(execution.races) races")
         }
         if let pass = funPass {
             let tacks = BotProfile.allCases.compactMap { profile in
@@ -936,7 +1303,33 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 lines.append(liveLine("same seats without", twin, place: hunters.twinLiveMeanPlace, dnfs: hunters.twinLiveDNFs))
             }
         }
-        lines.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms, max \(fixed(timings.maxMs, 3)) ms")
+        if let watchdog {
+            let ids = WatchdogSummary.watchedConditions
+            let parts = ids.map { id in
+                "\(id) \(watchdog.centredRudder161CallsByConditions[id] ?? 0) of \(watchdog.rule161CallsByConditions[id] ?? 0) "
+                    + "(tap in window \(watchdog.centredRudderWithTap161CallsByConditions[id] ?? 0))"
+            }
+            lines.append("watchdog: \(watchdog.races) all-National races, centred-rudder 16.1 calls \(parts.joined(separator: ", "))")
+        }
+        if let rivals {
+            let parts = rivals.meanPlaceGap.keys.sorted().map { skill in
+                "s \(skill) seat \(fixed(rivals.seatMeanPlace[skill] ?? 0)) rivals \(fixed(rivals.rivalMeanPlace[skill] ?? 0))"
+            }
+            lines.append("rivals: \(rivals.races) races, fleet \(fleetText(rivals.fleetSizes)), \(parts.joined(separator: ", ")); widest gap \(fixed(rivals.maxMeanPlaceGap)) places")
+        }
+        if let rank {
+            let spread = rank.sameSkillPlaceGap.keys.sorted().map { "s \($0) \(fixed(rank.sameSkillPlaceGap[$0] ?? 0))" }
+            lines.append("rank: fleet \(fleetText(rank.fleetSizes)), skill vs finishing order \(fixed(rank.meanSkillRankCorrelation)) "
+                + "(Spearman, mean of \(rank.correlatedRaces) races); same-skill place gap \(rank.meanSameSkillPlaceGap.map { fixed($0) } ?? "-") "
+                + "(\(spread.joined(separator: ", ")))")
+        }
+        if let cautious {
+            lines.append("cautious: \(cautious.races) races, fouls as offender \(cautious.foulsAsOffender) in \(cautious.racesWithFoul) races, "
+                + "mean place \(fixed(cautious.meanPlace)) (live beside her \(fixed(cautious.liveMeanPlace)))")
+        }
+        lines.append("tick: worst p99 \(fixed(timings.maxP99Ms, 3)) ms, max \(fixed(timings.maxMs, 3)) ms "
+            + "(budget \(fixed(thresholds.maxP99TickMs, 3)) ms)")
+        if !thresholds.placeholders.isEmpty { lines.append("placeholder keys: \(thresholds.placeholders.count)") }
         lines.append(passed ? "gate: pass" : "gate: FAIL")
         lines += breaches.map { "  \($0)" }
         return lines
@@ -952,3 +1345,6 @@ func callsLine(_ calls: [String: Int]) -> String {
 func fixed(_ value: Double, _ places: Int = 2) -> String {
     String(format: "%.\(places)f", value)
 }
+
+/// Fleet sizes as the summary prints them: `10`, or `2/5` when a run pooled several.
+func fleetText(_ sizes: [Int]) -> String { sizes.isEmpty ? "-" : sizes.map(String.init).joined(separator: "/") }

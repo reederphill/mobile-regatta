@@ -168,24 +168,6 @@ import Testing
         #expect(Set(report.profiles.keys) == ["baseline", "tactician", "blipTacker"])
     }
 
-    /// #238 acceptance: a fun-pass run that misses a fixture's tactician limits exits non-zero, naming each;
-    /// one that meets them exits 0.
-    @Test func funPassThresholdBreachExitsNonZero() throws {
-        let matrix = try funPassMatrix()
-        var impossible = unmissableThresholds()
-        impossible.profiles["tactician"] = ProfileLimits(minTacticianTacksPerBeat: 1_000, minTacticianBeatsBlipTackerShare: 1.01)
-        let failing = try botsuite(["--matrix", matrix, "--thresholds", try fixture(impossible, named: "impossible-fun-pass")])
-        #expect(failing.status == 1)
-        #expect(failing.stdout.contains("gate: FAIL"))
-        #expect(failing.stdout.contains("fun pass: 1 races, tacks/beat"))
-        #expect(failing.stdout.contains("tactician: tacks"))
-        #expect(failing.stdout.contains("tactician: beat the blip-tacker"))
-
-        var easy = unmissableThresholds()
-        easy.profiles["tactician"] = ProfileLimits(minTacticianTacksPerBeat: 0, minTacticianBeatsBlipTackerShare: 0)
-        let passing = try botsuite(["--matrix", matrix, "--thresholds", try fixture(easy, named: "easy-fun-pass")])
-        #expect(passing.status == 0)
-        #expect(passing.stdout.contains("gate: pass"))
-    }
+    // #238's funPassThresholdBreachExitsNonZero is BotSuiteGateTests' since #105, with a breach for each fun-pass key.
     #endif
 }

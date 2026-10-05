@@ -1,15 +1,26 @@
 {
-  "maxP99TickMs": 10,
+  "maxP99TickMs": 5,
   "tiers": {
     "club": { "minFinishShare": 0.75, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 2, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 },
     "regional": { "minFinishShare": 0.75, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 2, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 },
     "national": { "minFinishShare": 0.75, "maxMeanIronsSeconds": 10, "maxMeanMarkContacts": 2, "maxContactsToFoulsShare": 1, "maxMeanEdgeSeconds": 30 }
   },
   "profiles": {
-    "tactician": { "minTacticianWinShare": 0.75, "minTacticianGainLengthsPerBeat": 3, "minTacticianTacksPerBeat": 4, "minTacticianBeatsBlipTackerShare": 0.75 }
+    "tactician": { "minTacticianWinShare": 0.75, "minTacticianGainLengthsPerBeat": 3, "minTacticianTacksPerBeat": 4, "minTacticianBeatsBlipTackerShare": 0.75, "minTacticianGainLengthsPerRun": 0.5, "minTacticianStartGainLengths": 0, "minTacticsBeatsExecutionShare": 0.75 }
   },
   "start": { "maxOCSShare": 0.05, "minOnTimeShare": 0.6, "maxMeanPreGunIronsSeconds": 1, "minPinThirdShare": 0.7 },
   "navigation": { "minFinishShare": 0.98, "maxDSQMissedPenalty": 0, "maxEdgeShare": 0.02, "maxMarkContactsPerBoat": 0.2 },
   "conduct": { "maxEncountersToFoulsShare": 0.02 },
-  "encounters": { "minCloseEncountersPerRace": 8 }
+  "encounters": { "minCloseEncountersPerRace": 8 },
+  "watchdog": { "maxCentredRudder161Calls": 0 },
+  "rivals": { "maxMeanPlaceGap": 2 },
+  "rank": { "minSkillRankCorrelation": 0.5 },
+  "placeholders": [
+    "tiers.club.minFinishShare", "tiers.club.maxMeanIronsSeconds", "tiers.club.maxMeanMarkContacts", "tiers.club.maxContactsToFoulsShare", "tiers.club.maxMeanEdgeSeconds",
+    "tiers.regional.minFinishShare", "tiers.regional.maxMeanIronsSeconds", "tiers.regional.maxMeanMarkContacts", "tiers.regional.maxContactsToFoulsShare", "tiers.regional.maxMeanEdgeSeconds",
+    "tiers.national.minFinishShare", "tiers.national.maxMeanIronsSeconds", "tiers.national.maxMeanMarkContacts", "tiers.national.maxContactsToFoulsShare", "tiers.national.maxMeanEdgeSeconds",
+    "profiles.tactician.minTacticianWinShare", "profiles.tactician.minTacticianGainLengthsPerBeat", "profiles.tactician.minTacticianTacksPerBeat", "profiles.tactician.minTacticianBeatsBlipTackerShare",
+    "profiles.tactician.minTacticianGainLengthsPerRun", "profiles.tactician.minTacticianStartGainLengths", "profiles.tactician.minTacticsBeatsExecutionShare",
+    "encounters.minCloseEncountersPerRace", "watchdog.maxCentredRudder161Calls", "rivals.maxMeanPlaceGap", "rank.minSkillRankCorrelation"
+  ]
 }
