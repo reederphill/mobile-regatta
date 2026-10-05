@@ -104,8 +104,11 @@ final class GameSession {
     }
     /// Told once per hint as it retires, with how (#128's `hint_retired`): `AppModel` logs it.
     @ObservationIgnored var onHintRetired: ((String, HintRetirement) -> Void)?
-    /// Every cue the presenter plays, for #126's audio. Nothing sets it yet.
+    /// Every cue the presenter plays, after its haptic and sound: for tests.
     @ObservationIgnored var onCue: ((RaceCue) -> Void)?
+    /// The race's sounds (#126): the committee's sequence, your boat's moments and the ambience, gated by Settings'
+    /// Effects (`AppModel.sound`).
+    @ObservationIgnored private var sound: RaceSound
     /// The plain words posted and not yet shown or dropped, by notice id: what each teaches (`settleMarks`).
     @ObservationIgnored private var pendingMarks: [Int: [SeenMark]] = [:]
     @ObservationIgnored private var toldUpdateRequired = false
@@ -117,19 +120,20 @@ final class GameSession {
     /// A practice race on the device, your boat in `livery` (#136). `timescale` runs the simulation that many times real
     /// time (`-timescale`, for tests).
     convenience init(config: RaceConfig, timescale: Double = 1, haptics: any Haptics = GatedHaptics(),
-                     controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
-                     livery: Livery = FleetLiveries.yours, hints: HintEngine? = nil) {
+                     sound: any SoundOutput = SilentSoundOutput(), controls: ControlSettings = ControlSettings(),
+                     rulesSeen: RuleSeenStore = RuleSeenStore(), livery: Livery = FleetLiveries.yours,
+                     hints: HintEngine? = nil) {
         let driver = PracticeDriver(config: config, timescale: timescale, livery: livery)
-        self.init(driver: driver, roster: driver.roster, haptics: haptics, controls: controls, rulesSeen: rulesSeen,
-                  hints: hints)
+        self.init(driver: driver, roster: driver.roster, haptics: haptics, sound: sound, controls: controls,
+                  rulesSeen: rulesSeen, hints: hints)
     }
 
     /// An online race (#68).
     convenience init(online driver: OnlineDriver, haptics: any Haptics = GatedHaptics(),
-                     controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
-                     hints: HintEngine? = nil) {
-        self.init(driver: driver, roster: driver.roster, haptics: haptics, controls: controls, rulesSeen: rulesSeen,
-                  hints: hints)
+                     sound: any SoundOutput = SilentSoundOutput(), controls: ControlSettings = ControlSettings(),
+                     rulesSeen: RuleSeenStore = RuleSeenStore(), hints: HintEngine? = nil) {
+        self.init(driver: driver, roster: driver.roster, haptics: haptics, sound: sound, controls: controls,
+                  rulesSeen: rulesSeen, hints: hints)
     }
 
     /// A render fixture (#62): `log` replayed to the fixture's freeze tick and frozen there, drawn from
@@ -179,12 +183,13 @@ final class GameSession {
     /// tests and fixtures never write the device's; the app passes one over its defaults. `hints`: the race's hint
     /// engine (#129), nil for none, as tests and fixtures have; the app passes one over the device's progress.
     init(driver: any RaceDriver, roster: FleetRoster, haptics: any Haptics = GatedHaptics(),
-         controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
-         hints: HintEngine? = nil) {
+         sound: any SoundOutput = SilentSoundOutput(), controls: ControlSettings = ControlSettings(),
+         rulesSeen: RuleSeenStore = RuleSeenStore(), hints: HintEngine? = nil) {
         self.driver = driver
         self.hints = hints
         self.roster = roster
         self.haptics = haptics
+        self.sound = RaceSound(output: sound)
         self.controls = controls
         let me = driver.myBoatIndex
         presenter = RaceEventPresenter(me: me, seen: rulesSeen) { roster.label(of: $0, playerSeat: me) }
@@ -257,6 +262,8 @@ final class GameSession {
     func setPaused(_ paused: Bool) {
         isPaused = paused && driver.isPausable
         releaseControls()
+        // The ambience stops with the race and ramps back in as it resumes (`refreshHUD`).
+        if isPaused { sound.silence() }
     }
 
     /// Lets go of steering and Ease, and tells the held buttons (`controlReleases`): an overlay is taking the touches,
@@ -279,6 +286,7 @@ final class GameSession {
 
     func refreshHUD() { refreshHUD(samplesPressure: true) }
 
+
     /// A tap on the place or the live leaderboard (#268): opens it to the whole fleet, or closes it.
     func toggleLeaderboard() {
         isLeaderboardExpanded.toggle()
@@ -299,6 +307,14 @@ final class GameSession {
         var hud = HUDState(world: world) { roster[$0].isBot }
         hud.pressureImage = samplesPressure ? minimapField.refresh(world) : minimapField.image
         self.hud = hud
+        if !driver.isFrozen {
+            // The ambience follows what the HUD shows: the ground wind before shadow, your speed, your eased sail.
+            // It fades once you're done.
+            let me = driver.myBoatIndex
+            let input = AmbienceInput(windKnots: hud.windKnots, boatKnots: knots(metresPerSecond: myBoat.speed),
+                                      isEasing: world.ease(ofSeat: me))
+            sound.stepAmbience(playerDone ? nil : input, at: now())
+        }
         // Your owed penalty turn's countdown (#123), live in the slot while you owe one.
         let penalty = showsRuleCues ? PenaltyReadout(frame: driver.currentFrame, seat: driver.myBoatIndex) : nil
         noticeSlot.setLive(.penalty, text: penalty?.noticeText, at: now())
@@ -337,6 +353,8 @@ final class GameSession {
         if let tick = presenter.sequenceCue(raceTime: driver.currentFrame.time) { cues.append(tick) }
         // One haptic a batch, the strongest: a contact and its call arrive on the same tick.
         HapticPattern.strongest(of: cues)?.play(on: haptics)
+        // The committee's sequence on the race clock, and your boat's moments (#126).
+        sound.play(cues: cues, raceTime: driver.currentFrame.time)
         if let onCue { cues.forEach(onCue) }
         let me = driver.myBoatIndex
         hints?.consume(events, me: me, hintsOn: controls.showsHints)

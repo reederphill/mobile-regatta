@@ -78,12 +78,18 @@ final class AppModel {
             guard deviceSettings != oldValue else { return }
             deviceSettings.save(to: defaults)
             haptics.isOn = deviceSettings.haptics
+            sound.isOn = deviceSettings.effects
+            music.isOn = deviceSettings.music
             controls.update(deviceSettings, launchOptions: launchOptions)
             analytics.setSharing(deviceSettings.sharesUsageData)
         }
     }
     /// Every race's haptics, on while Settings' Haptics is (#110): set here once per change, not read per haptic.
     @ObservationIgnored let haptics: GatedHaptics
+    /// Every race's sounds, on while Settings' Effects is (#126): set here once per change, like `haptics`.
+    @ObservationIgnored let sound: GatedSound
+    /// The menus' music, on while Settings' Music is (#126): `menuMusic` unless a test replaces it.
+    @ObservationIgnored let music: GatedMenuMusic
     /// Every race's steering scheme (#112), camera, auto zoom and pinch multiplier (#113, #322): Settings', or `-scheme`'s and `-camera`'s
     /// over them; set here once per change.
     @ObservationIgnored let controls: ControlSettings
@@ -101,8 +107,9 @@ final class AppModel {
     var briefing: BriefingModel? {
         if case .briefing(let briefing, _) = race { briefing } else { nil }
     }
-    /// The menus' music, faded out as a briefing starts (#126, #130).
-    @ObservationIgnored var menuMusic: any MenuMusic = SilentMenuMusic()
+    /// The menus' music (#126): playing from launch and on returning home, faded out as a briefing starts (#130) or a
+    /// race starts without one. `music`, unless a test replaces it.
+    @ObservationIgnored var menuMusic: any MenuMusic
     /// Home's notice slot. Nothing posts one yet.
     var notice: Notice?
     /// Your last race's results, home's Last race row (#24, #132): kept as a practice race closes, or as you leave one
@@ -142,8 +149,9 @@ final class AppModel {
 
     /// `sceneState` locks the orientation while the race sequence shows (G5).
     /// `store` sells paid designs (#136): the app's stub (`StubStoreService`) unless given.
+    /// `audio` plays the sounds and music (#126): silent unless given, so tests never touch the audio engine.
     init(sceneState: SceneState = SceneState(), launchOptions: LaunchOptions = .current, defaults: UserDefaults = .standard,
-         store: (any StoreService)? = nil, analytics: Analytics = .discarding()) {
+         store: (any StoreService)? = nil, analytics: Analytics = .discarding(), audio: AppAudio = .silent) {
         self.sceneState = sceneState
         self.analytics = analytics
         self.launchOptions = launchOptions
@@ -176,6 +184,10 @@ final class AppModel {
         myBoat = MyBoatModel(saved: myLivery, owned: StubStoreService.owned(in: myBoatDefaults),
                              completedRaces: completed.count, store: store)
         haptics = GatedHaptics(isOn: deviceSettings.haptics)
+        sound = GatedSound(output: audio.effects, isOn: deviceSettings.effects)
+        let music = GatedMenuMusic(output: audio.music, isOn: deviceSettings.music)
+        self.music = music
+        menuMusic = music
         controls = ControlSettings(deviceSettings, launchOptions: launchOptions)
         #if DEBUG
         tuning = TuningModel(store: launchOptions.uiTesting ? .inMemory : .standard)
@@ -183,6 +195,9 @@ final class AppModel {
         sceneState.isRaceSequenceShowing = false
         controls.savesZoomMultiplier = { [weak self] multiplier in self?.deviceSettings.zoomMultiplier = multiplier }
         myBoat.onSave = { [weak self] livery in self?.myLivery = livery }
+        sound.isSceneActive = sceneState.isActive
+        sceneState.onPhaseChange = { [weak self] isActive in self?.sceneChanged(isActive: isActive) }
+        music.play()
     }
 
     /// Opens My boat (#136) from home, with `design` tried on if given: results' Try it (#133, #24) and `-myBoat`.
@@ -229,8 +244,14 @@ final class AppModel {
     /// Shows `race` in the race sequence, replacing any race there. The one way into a race, whether it's a
     /// practice race, a restart, a launch argument or an online race. The pushed pages stay under the cover until
     /// the race sequence routes elsewhere (`leaveRace`, `changeSetup`).
+    /// A practice or online race fades the menu music; a briefing fades it itself as it begins (#130).
     func startRaceSequence(_ race: Race) {
         archiveRace()
+        sound.setAmbience(.silent)
+        switch race {
+        case .practice, .online: menuMusic.fadeOut()
+        case .briefing: break
+        }
         sheet = nil
         self.race = race
         phase = .raceSequence
@@ -289,8 +310,8 @@ final class AppModel {
 
     /// A practice race on `config`, whose files are already the tuning panel's (`tuned(_:)`).
     private func session(tuned config: RaceConfig) -> GameSession {
-        let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls,
-                                  rulesSeen: rulesSeen, livery: myLivery, hints: hintEngine())
+        let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, sound: sound,
+                                  controls: controls, rulesSeen: rulesSeen, livery: myLivery, hints: hintEngine())
         session.onHintRetired = logsHintRetired
         #if DEBUG
         tuning.attach(session, files: config.files)
@@ -357,11 +378,20 @@ final class AppModel {
         startRaceSequence(session(tuned: config))
     }
 
-    /// Quits the race sequence back to the menus.
+    /// The scene's phase changed (#126): the ambience is silent while the scene isn't active, online races included,
+    /// and the music plays on again as it's active, if the system stopped it meanwhile.
+    func sceneChanged(isActive: Bool) {
+        sound.isSceneActive = isActive
+        if isActive { music.resume() }
+    }
+
+    /// Quits the race sequence back to the menus, where the music fades back in (#126).
     func endRaceSequence() {
         archiveRace()
+        sound.setAmbience(.silent)
         phase = .home
         race = nil
+        menuMusic.play()
     }
 
     /// Home's Last race takes `results` unless you retired from that race (#132): a RET leaves the one before. Your

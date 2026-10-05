@@ -34,6 +34,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         let metricKit = MetricKitForwarder(analytics: analytics)
         metricKit.start()
         self.metricKit = metricKit
+        // `.ambient` (#126): the silent switch silences the game. Tests, UI tests and render fixtures play nothing.
+        if AppAudio.isLive(.current) { SoundSession.configure() }
         Task { await analytics.flush() }
         return true
     }
