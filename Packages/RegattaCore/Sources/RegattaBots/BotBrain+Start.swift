@@ -86,8 +86,14 @@ extension BotBrain {
     /// her reckon one end favoured when it isn't, and she moves her spot that way along the line, by
     /// `lineBiasShift` of it for each degree of misread: away from the spot her style chose, into the crowd at
     /// the end she wrongly favours.
+    ///
+    /// The tactician (#105, `Tactics.startsAtFavouredEnd`) sets up at the spot she reads the line's bias to favour
+    /// instead (`favouredEndSpot`, `readLineBias`), once she has read it.
     func startPoint(_ c: CourseLayout) -> Vec2 {
         let line = c.startLine
+        if let favouredEndSpot {
+            return line.pin.position + (line.committee.position - line.pin.position) * favouredEndSpot
+        }
         let misread = weaknesses.lineBiasMisread * style.lineBiasDraw
         let spot = min(max(style.startSpot + Self.lineBiasShift * rad2deg(misread), 0.05), 0.95)
         return line.pin.position + (line.committee.position - line.pin.position) * (misread == 0 ? style.startSpot : spot)
@@ -95,6 +101,28 @@ extension BotBrain {
 
     /// The share of the line she moves her spot for each degree she misreads its bias by.
     static let lineBiasShift = 0.04
+
+    /// "Start at the favoured end" (#105, the tactician's, `Tactics.startsAtFavouredEnd`): she reads the start line's bias
+    /// and moves her spot towards the end it favours, this share of the line for each degree of bias: the live bots'
+    /// misread (`lineBiasShift`) the right way round, read off the wind rather than drawn. Internal, never shown to a
+    /// player (#122: there is no line-bias cue). A tunable for #389.
+    static let favouredEndShift = 0.04
+    /// The nearest to either end she sets up, as a share of the line: off the mark.
+    static let favouredEndInset = 0.05
+
+    /// The tactician reads the start line's bias (#105) before the gun: the line's angle off square to the wind she sees,
+    /// smoothed (`Senses.direction`), the committee end favoured when it lies up the wind. Her spot (`favouredEndSpot`) is
+    /// her style's (`BotStyle.startSpot`) moved towards the favoured end by `favouredEndShift` a degree. After the gun the
+    /// spot she last read stands.
+    mutating func readLineBias(_ b: SeatView.OwnBoat, _ view: SeatView) {
+        guard tactics.startsAtFavouredEnd, view.time < 0 else { return }
+        let line = view.course.startLine
+        let along = (line.committee.position - line.pin.position).normalized
+        // The sine of the bias, about the angle in radians: positive when the committee end lies up the wind of square.
+        let bias = along.dot(Vec2.heading(senses.direction ?? b.windDirection))
+        favouredEndSpot = min(max(style.startSpot + Self.favouredEndShift * rad2deg(bias), Self.favouredEndInset),
+                              1 - Self.favouredEndInset)
+    }
 
     /// Her hold angle: `holdMargin` outside the no-go zone.
     static func holdAngle(_ view: SeatView) -> Double {
@@ -110,6 +138,7 @@ extension BotBrain {
 
     /// Before her start: before the gun, or after it and not started yet.
     mutating func startAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
+        readLineBias(b, view)
         let line = view.course.startLine
         // After the gun, back below the line running (she was OCS) or bearing away, she heads up on her own tack
         // first, as turning for the other one from a run is a gybe; on port if starboard would take her past the
