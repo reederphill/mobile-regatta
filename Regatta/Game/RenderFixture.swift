@@ -19,6 +19,8 @@ import RegattaCore
 /// board is off, so the HUD fixtures before #268 keep their references. Without `hud`, the scene alone, as every
 /// fixture before #114.
 ///
+/// `"hint": "<id>"` in `hud` shows that hint (`HintID`) with its thin leader line to what it points at (#129).
+///
 /// `"ruleCues": true` draws the rule cues (#123): right-of-way glows, rule-call lines from the replay's calls, your
 /// penalty arc and, with `hud`, the Turn notice. Without it they are off, so the fixtures before #123 keep their
 /// references.
@@ -53,6 +55,8 @@ struct RenderFixture: Codable, Equatable {
         var seat: Int? = nil
         /// The live leaderboard (#268), compact or tapped open; nil leaves it off.
         var leaderboard: Leaderboard? = nil
+        /// A hint the fixture shows for good, by id, with its leader line (#129): `"hint": "red_glow"`.
+        var hint: HintID? = nil
     }
 
     enum Leaderboard: String, Codable, CaseIterable {

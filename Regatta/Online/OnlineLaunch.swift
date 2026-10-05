@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import RegattaClient
 import RegattaProtocol
+import RegattaServices
 
 /// The monotonic clock the online client runs on (#64): microseconds since it was made.
 struct MonotonicClock: Sendable {
@@ -59,11 +60,19 @@ final class OnlineLaunch {
     @ObservationIgnored private let controls: ControlSettings
     /// The rule numbers this device has seen called (#23): the app passes `AppModel.rulesSeen`.
     @ObservationIgnored private let rulesSeen: RuleSeenStore
+    /// Makes each race's hints (#129), which show online too until they stop: the app passes `AppModel.hintEngine`,
+    /// so every session gets a fresh engine.
+    @ObservationIgnored private let hints: (() -> HintEngine)?
+    /// Told as a hint retires: the app passes `AppModel.logsHintRetired`.
+    @ObservationIgnored private let onHintRetired: ((String, HintRetirement) -> Void)?
 
     init(server: RaceServer, haptics: any Haptics = GatedHaptics(), sound: any SoundOutput = SilentSoundOutput(),
          controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
+         hints: (() -> HintEngine)? = nil, onHintRetired: ((String, HintRetirement) -> Void)? = nil,
          ticket: @escaping () async throws -> [UInt8]) {
         self.server = server
+        self.hints = hints
+        self.onHintRetired = onHintRetired
         self.haptics = haptics
         self.sound = sound
         self.rulesSeen = rulesSeen
@@ -103,8 +112,10 @@ final class OnlineLaunch {
             let clock = clock
             let driver = OnlineDriver(start: start, transport: joined, token: token, clientBuild: Self.clientBuild,
                                       now: clock.now, connect: { WebSocketTransport(url: url) })
-            phase = .racing(GameSession(online: driver, haptics: haptics, sound: sound, controls: controls,
-                                              rulesSeen: rulesSeen))
+            let session = GameSession(online: driver, haptics: haptics, sound: sound, controls: controls,
+                                      rulesSeen: rulesSeen, hints: hints?())
+            session.onHintRetired = onHintRetired
+            phase = .racing(session)
         case .updateRequired(let reason):
             transport.close()
             phase = .updateRequired(reason)
