@@ -199,6 +199,22 @@ final class AppModel {
     /// UI tests keep it in memory, a race's own, so every run reads the same words.
     var rulesSeen: RuleSeenStore { launchOptions.uiTesting ? RuleSeenStore() : RuleSeenStore(defaults: defaults) }
 
+    /// Each hint's progress on this device (#129), in `defaults` beside `rulesSeen`: Reset hints clears it. UI tests
+    /// keep it in memory, so every race is a first.
+    var hintProgress: HintProgressStore {
+        launchOptions.uiTesting ? HintProgressStore() : HintProgressStore(defaults: defaults)
+    }
+
+    /// A race's hint engine (#129) over `hintProgress`.
+    func hintEngine() -> HintEngine {
+        HintEngine(progress: hintProgress)
+    }
+
+    /// Logs a hint's retirement (#128's `hint_retired`): every race's session, practice or online, is told it.
+    var logsHintRetired: (String, HintRetirement) -> Void {
+        { [analytics] hint, mode in analytics.log(.hintRetired(hint, mode: mode)) }
+    }
+
     /// Settings' Reset hints: every hint shows again, and so do the plain words of every rule call (#25, #23).
     func resetHints() {
         DeviceSettings.resetHints(in: defaults)
@@ -274,7 +290,8 @@ final class AppModel {
     /// A practice race on `config`, whose files are already the tuning panel's (`tuned(_:)`).
     private func session(tuned config: RaceConfig) -> GameSession {
         let session = GameSession(config: config, timescale: launchOptions.timescale, haptics: haptics, controls: controls,
-                                  rulesSeen: rulesSeen, livery: myLivery)
+                                  rulesSeen: rulesSeen, livery: myLivery, hints: hintEngine())
+        session.onHintRetired = logsHintRetired
         #if DEBUG
         tuning.attach(session, files: config.files)
         #endif

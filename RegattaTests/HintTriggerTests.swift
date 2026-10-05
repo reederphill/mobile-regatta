@@ -1,0 +1,186 @@
+import CoreGraphics
+import Foundation
+import RegattaCore
+import Testing
+@testable import Regatta
+
+/// The hint catalogue (#23, #129): its rows, and each trigger on hand-built snapshots and real practice frames.
+@MainActor @Suite struct HintTriggerTests {
+    private let t = HintTuning.standard
+
+    private func fires(_ id: HintID, _ s: HintSnapshot) -> HintFiring? {
+        HintCatalogue.hint(id).trigger(s, t)
+    }
+
+    private func racing(_ edit: (inout HintSnapshot) -> Void = { _ in }) -> HintSnapshot {
+        var s = HintSnapshot()
+        s.status = .racing
+        s.raceTime = 30
+        edit(&s)
+        return s
+    }
+
+    // MARK: Catalogue
+
+    @Test func theCatalogueHasFourteenRowsWithUniqueIds() {
+        #expect(HintCatalogue.all.count == 14)
+        #expect(Set(HintCatalogue.all.map(\.id)) == Set(HintID.allCases))
+        #expect(HintCatalogue.all.map(\.id).count == HintID.allCases.count)
+        // OCS and the first rule call are the presenter's notices (ruling 1); the engine's twelve are #171's lines.
+        #expect(HintCatalogue.all.filter { $0.delivery == .presenter }.map(\.id) == [.ocs, .ruleCall])
+        #expect(HintCatalogue.engine.count == 12)
+        #expect(HintCatalogue.engine.first?.id == .raceStart)
+    }
+
+    @Test func everyLineIsPlaceholderCopyShortAndNumberFree() {
+        for hint in HintCatalogue.engine {
+            #expect(hint.isPlaceholderCopy, "\(hint.id) TODO-COPY (#171)")
+            for steering in DeviceSettings.Steering.allCases {
+                let text = hint.text.text(for: steering)
+                #expect(!text.isEmpty && text.count <= 56, "\(hint.id): \(text)")
+                #expect(text.rangeOfCharacter(from: .decimalDigits) == nil, "\(hint.id): \(text)")
+            }
+        }
+        // The first hint is the scheme's own and mentions the other one in Settings.
+        let start = HintCatalogue.hint(.raceStart).text
+        #expect(start.halves != start.tiller)
+        #expect(start.halves.contains("Tiller is in Settings") && start.tiller.contains("Settings"))
+        #expect(HintCatalogue.hint(.lettingGo).text.halves == "Let go and she holds her angle to the wind")
+    }
+
+    @Test func progressKeysAreUnderTheHintPrefixApartFromPlainWords() {
+        let plain = [RuleSeenStore.rulesKey, RuleSeenStore.rulesAgainstKey, RuleSeenStore.autohelmKey]
+        for id in HintID.allCases {
+            for key in [HintProgressStore.shownKey(id), HintProgressStore.learnedKey(id)] {
+                #expect(key.hasPrefix(DeviceSettings.hintKeyPrefix))
+                #expect(!plain.contains(key))
+            }
+        }
+    }
+
+    // MARK: Triggers
+
+    @Test func raceStartFiresAtOnceAndStartSequenceBeforeTheLastSeconds() {
+        var pre = HintSnapshot()
+        pre.raceTime = -50
+        #expect(fires(.raceStart, pre) != nil)
+        #expect(fires(.startSequence, pre) != nil)
+        pre.raceTime = -5
+        #expect(fires(.startSequence, pre) == nil)
+        #expect(fires(.startSequence, racing()) == nil)
+    }
+
+    @Test func noGoWaitsItsDwellAndNotWhileTacking() {
+        #expect(fires(.noGo, racing { $0.noGoSeconds = 1 }) == nil)
+        #expect(fires(.noGo, racing { $0.noGoSeconds = 2 })?.leader == .vane)
+        #expect(fires(.noGo, racing { $0.noGoSeconds = 2; $0.inManoeuvre = true }) == nil)
+    }
+
+    @Test func lettingGoFiresEarlyInTheFirstRace() {
+        let five = racing { $0.steeringSeconds = 5.5 }
+        #expect(fires(.lettingGo, five) == nil, "not before about 20 s outside the first race")
+        #expect(fires(.lettingGo, racing { $0.steeringSeconds = 5.5; $0.isFirstRace = true })?.leader == .vane)
+        #expect(fires(.lettingGo, racing { $0.steeringSeconds = 19 }) == nil)
+        #expect(fires(.lettingGo, racing { $0.steeringSeconds = 21 }) != nil)
+        #expect(fires(.lettingGo, racing { $0.steeringSeconds = 21; $0.hasLetGo = true }) == nil)
+    }
+
+    @Test func grooveTickFollowsLettingGo() {
+        let s = racing { $0.vaneShows = true; $0.hasLetGo = true }
+        #expect(fires(.grooveTick, s) == nil)
+        #expect(fires(.grooveTick, racing { $0.vaneShows = true; $0.hasLetGo = true; $0.lettingGoRetired = true }) != nil)
+        #expect(fires(.grooveTick, racing { $0.vaneShows = true; $0.lettingGoRetired = true; $0.racingSeconds = 61 }) != nil)
+        #expect(fires(.grooveTick, racing { $0.vaneShows = true; $0.lettingGoRetired = true; $0.racingSeconds = 30 }) == nil)
+    }
+
+    @Test func situationalHintsPointAtTheirThing() {
+        let p = Vec2(10, 20)
+        #expect(fires(.windShift, racing { $0.shiftDegrees = 4.9 }) == nil)
+        #expect(fires(.windShift, racing { $0.shiftDegrees = 5.1 })?.leader == .vane)
+        #expect(fires(.puff, racing { $0.nearPuff = p })?.leader == .point(p))
+        #expect(fires(.windShadow, racing { $0.shadowSeconds = 1 }) == nil)
+        #expect(fires(.windShadow, racing { $0.shadowSeconds = 2; $0.shadowSource = 3 })?.leader == .boat(3))
+        #expect(fires(.layline, racing { $0.nearLayline = p })?.leader == .point(p))
+        #expect(fires(.redGlow, racing { $0.redGlow = 1 })?.leader == .boat(1))
+        #expect(fires(.greenGlow, racing { $0.greenGlow = 4 })?.leader == .boat(4))
+        #expect(fires(.markZone, racing { $0.markZone = p })?.leader == .point(p))
+        for id in HintID.allCases where id != .raceStart && id != .startSequence {
+            #expect(fires(id, HintSnapshot()) == nil, "\(id) on an empty prestart snapshot")
+        }
+    }
+
+    @Test func snapshotHelpersPickTheNearestAndStrongest() {
+        let lines = [(from: Vec2(0, 0), to: Vec2(0, 100))]
+        #expect(HintSnapshot.nearestPoint(on: lines, to: Vec2(5, 50), within: 10) == Vec2(0, 50))
+        #expect(HintSnapshot.nearestPoint(on: lines, to: Vec2(20, 50), within: 10) == nil)
+        let glows: [RightOfWayGlow?] = [nil, RightOfWayGlow(kind: .giveWay, intensity: 0.6),
+                                        RightOfWayGlow(kind: .giveWay, intensity: 0.9),
+                                        RightOfWayGlow(kind: .hasRight, intensity: 0.4)]
+        #expect(HintSnapshot.strongest(.giveWay, in: glows, atLeast: 0.5) == 2)
+        #expect(HintSnapshot.strongest(.hasRight, in: glows, atLeast: 0.5) == nil)
+        let strong = Puff(center: Vec2(0, 30), radius: 20, strength: 0.3, age: 50, lifetime: 100)
+        let faint = Puff(center: Vec2(0, 12), radius: 10, strength: 0.01, age: 50, lifetime: 100)
+        #expect(HintSnapshot.nearPuff([faint, strong], to: .zero, within: 15) == Vec2(0, 30))
+        #expect(HintSnapshot.nearPuff([faint, strong], to: .zero, within: 5) == nil)
+    }
+
+    // MARK: Real frames
+
+    /// Steering a real practice boat both ways is seen, by race time, and letting go after steering counts as let go.
+    @Test func observationsSeeSteeringBothWaysAndLettingGo() {
+        let config = RaceConfig(opponents: 1, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+        let driver = PracticeDriver(config: config)
+        var o = HintObservations()
+        func run(_ rudder: Int8, seconds: Double) {
+            driver.submit(BoatInput(rudder: rudder))
+            for _ in 0..<Int(seconds * 15) {
+                driver.tick(1.0 / 15)
+                o.observe(driver.renderWorld, tuning: .standard)
+            }
+        }
+        run(100, seconds: 1)
+        #expect(!o.steeredBothWays(.standard))
+        #expect(o.steeringSeconds > 0.5)
+        run(-100, seconds: 1)
+        #expect(o.steeredBothWays(.standard))
+        #expect(!o.hasLetGo)
+        run(0, seconds: 2)
+        #expect(o.hasLetGo)
+        #expect(o.steeringSeconds == 0)
+        let snapshot = HintSnapshot(world: driver.renderWorld, observations: o, showsLaylines: true, isFirstRace: false,
+                                    lettingGoRetired: false, tuning: .standard)
+        #expect(snapshot.status == .prestart && snapshot.hasLetGo)
+    }
+
+    // MARK: Tuning
+
+    /// The thresholds are debug sliders (ruling 3): a saved tuning missing a field keeps its standard value, and a
+    /// session's are live.
+    @Test func tuningDecodesLenientlyAndReachesTheSession() throws {
+        let tuning = try JSONDecoder().decode(HintTuning.self, from: Data(#"{"lettingGoSeconds": 30}"#.utf8))
+        #expect(tuning.lettingGoSeconds == 30 && tuning.lettingGoFirstRaceSeconds == 5 && tuning.shiftDegrees == 5)
+        let config = RaceConfig(opponents: 1, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+        let engine = HintEngine(progress: HintProgressStore())
+        let session = GameSession(config: config, hints: engine)
+        session.hintTuning = tuning
+        #expect(engine.thresholds == tuning)
+        #if DEBUG
+        let ids = TuningCatalog.groups(grooveColumns: [], fullSteeragePoint: nil).flatMap(\.sliders).map(\.id)
+        #expect(ids.contains("hint.lettingGoSeconds") && ids.contains("hint.lettingGoFirstRaceSeconds"))
+        #endif
+    }
+
+    // MARK: Leader line
+
+    @Test func leaderLineStopsShortOfAVisibleTarget() throws {
+        let visible = CGRect(x: 0, y: 100, width: 400, height: 600)
+        let anchor = CGPoint(x: 200, y: 750)
+        let line = try #require(HintLeader.segment(anchor: anchor, target: CGPoint(x: 200, y: 300), visible: visible))
+        #expect(line.from == anchor)
+        #expect(abs(line.to.y - (300 + HintLeader.targetGap)) < 1e-9 && line.to.x == 200)
+        // Off screen or under the HUD: no line.
+        #expect(HintLeader.segment(anchor: anchor, target: CGPoint(x: 200, y: 50), visible: visible) == nil)
+        #expect(HintLeader.segment(anchor: anchor, target: CGPoint(x: 200, y: 720), visible: visible) == nil)
+        #expect(HintLeader.segment(anchor: anchor, target: CGPoint(x: 500, y: 300), visible: visible) == nil)
+    }
+}

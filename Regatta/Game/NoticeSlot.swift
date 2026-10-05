@@ -31,7 +31,8 @@ enum NoticeTable {
         .roll: NoticeRule(priority: 35, seconds: 1.8, maxWait: 1, symbol: "arrow.triangle.2.circlepath", holdsHints: false),
         .penalty: NoticeRule(priority: 30, seconds: 5, maxWait: 4, symbol: "arrow.clockwise", holdsHints: false),
         .latency: NoticeRule(priority: 20, seconds: 10, maxWait: 30, symbol: "wifi.exclamationmark", holdsHints: false),
-        .hint: NoticeRule(priority: 10, seconds: 6, maxWait: 60, symbol: "lightbulb", holdsHints: false),
+        // About 4 s (#23): one short line, read at a glance.
+        .hint: NoticeRule(priority: 10, seconds: 4, maxWait: 60, symbol: "lightbulb", holdsHints: false),
     ]
 
     static func rule(_ kind: NoticeKind) -> NoticeRule {
@@ -53,6 +54,8 @@ struct Notice: Equatable, Identifiable {
     var isLive = false
     /// When its wait for the slot last started, if not `posted`: when a live notice stopped holding the slot.
     var waitStart: Date?
+    /// What a hint's thin leader line points at (#23), if it has one.
+    var leader: HintTarget? = nil
 
     var symbol: String { NoticeTable.rule(kind).symbol }
 }
@@ -67,9 +70,10 @@ struct NoticeSlot: Equatable {
     /// The id the next notice posted gets.
     private(set) var nextID = 0
 
-    /// Posts `text` as a `kind` notice at `now`, and returns what shows.
-    @discardableResult mutating func post(_ kind: NoticeKind, _ text: String, at now: Date) -> Notice? {
-        let notice = Notice(id: nextID, kind: kind, text: text, posted: now, expires: now)
+    /// Posts `text` as a `kind` notice at `now`, with a hint's `leader`, and returns what shows.
+    @discardableResult mutating func post(_ kind: NoticeKind, _ text: String, at now: Date,
+                                          leader: HintTarget? = nil) -> Notice? {
+        let notice = Notice(id: nextID, kind: kind, text: text, posted: now, expires: now, leader: leader)
         nextID += 1
         if let current = showing, NoticeTable.rule(kind).priority > NoticeTable.rule(current.kind).priority {
             if current.isLive { restartWaits(at: now) }
@@ -153,6 +157,7 @@ struct NoticeSlot: Equatable {
 
 private extension Notice {
     func withText(_ text: String) -> Notice {
-        Notice(id: id, kind: kind, text: text, posted: posted, expires: expires, isLive: isLive, waitStart: waitStart)
+        Notice(id: id, kind: kind, text: text, posted: posted, expires: expires, isLive: isLive, waitStart: waitStart,
+               leader: leader)
     }
 }

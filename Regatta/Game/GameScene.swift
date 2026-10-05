@@ -95,6 +95,8 @@ final class GameScene: SKScene {
     private let grooveTick = SKShapeNode()
     /// The next-mark edge arrow (#15): the camera's child, so it stays put on screen as the view zooms and turns.
     private let edgeArrow = SKShapeNode()
+    /// A hint's leader line (#129), on the camera.
+    private let hintLeader = HintLeaderLayer()
     /// The camera scale the ladder lines were last built for: a zoom past it rebuilds them.
     private var ladderScale: CGFloat = 0
     /// The vane's and tick's length the paths were built for, points.
@@ -210,6 +212,7 @@ final class GameScene: SKScene {
         edgeArrow.zPosition = 20
         edgeArrow.isHidden = true
         cam.addChild(edgeArrow)
+        cam.addChild(hintLeader.node)
     }
 
     private func buildBoats() {
@@ -375,6 +378,18 @@ final class GameScene: SKScene {
         if showsLadderLines && (refresh || ladderTurnedOn || zoomed) { updateLadderLines(world) }
         updateVane(world, style: style, px: px)
         updateEdgeArrow(world)
+        updateHintLeader(world)
+    }
+
+    /// The showing hint's leader line (#129), from under the notice pill to its target.
+    private func updateHintLeader(_ world: RenderWorld) {
+        let framing = rig
+        let sceneSize = size
+        let top = (view?.safeAreaInsets.top ?? 0)
+            + HUDView.noticeTop(showsLeaderboard: session?.controls.showsLeaderboard ?? false) + HintLeader.pillHeight
+        hintLeader.update(notice: session?.notice, world: world, sceneSize: sceneSize, anchorFromTop: top,
+                          visible: framing.visibleInsets.visibleRect(sceneSize: sceneSize),
+                          project: { framing.project($0, sceneSize: sceneSize) })
     }
 
     /// Your laylines, from the formula a bot sees them by (`Laylines`, `SeatView.laylines`): dashed.

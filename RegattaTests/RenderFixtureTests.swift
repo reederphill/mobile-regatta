@@ -129,6 +129,23 @@ import UIKit
     /// The rule-cue fixtures (#123) through every filter: `rules-call` draws two rule-call lines, the arc counting
     /// your started turn's complete deadline and glows; `rules-penalty` your unstarted turn's arc, both glows and
     /// the HUD's live Turn notice. Every older fixture draws no rule cue, so its reference doesn't move.
+    /// `hud-hint-leader` (#129) shows the red-glow hint for good, its leader on the nearest boat, close by.
+    @Test func hintFixtureShowsAHintWithItsLeader() throws {
+        let (fixture, log) = try RenderFixture.load(named: "hud-hint-leader", in: Self.fixtures)
+        let session = try GameSession(fixture: fixture, log: log)
+        let notice = try #require(session.notice)
+        #expect(notice.kind == .hint && notice.expires == .distantFuture)
+        #expect(notice.text == HintCatalogue.hint(.redGlow).text.halves)
+        guard case .boat(let seat)? = notice.leader else {
+            Issue.record("no boat leader: \(String(describing: notice.leader))")
+            return
+        }
+        let world = session.driver.renderWorld
+        #expect(seat != world.myBoatIndex)
+        let hulls = (world.boats[seat].position - world.me.position).length / world.boatClass.hull.length
+        #expect(hulls < 10, "the leader's boat is \(hulls) hulls away")
+    }
+
     @Test func ruleFixturesShowTheRuleCues() throws {
         func session(_ name: String) throws -> GameSession {
             let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
