@@ -8,5 +8,44 @@
         "startSequenceTicks": 900,
         "warmupTicks": 30,
         "ticks": 9000
+    },
+    {
+        "name": "keyed-wind-puffs",
+        "boats": 16,
+        "raceSeed": 76,
+        "windSeed": 7676,
+        "laps": 2,
+        "startSequenceTicks": 900,
+        "warmupTicks": 30,
+        "ticks": 9000,
+        "venue": "dev-venue@7",
+        "conditions": "gusty-offshore@7",
+        "note": "#105, #76: the keyed wind with the gustiest puffs, at the bot suite's venue and conditions version."
+    },
+    {
+        "name": "estuary-current",
+        "boats": 16,
+        "raceSeed": 78,
+        "windSeed": 7878,
+        "laps": 2,
+        "startSequenceTicks": 900,
+        "warmupTicks": 30,
+        "ticks": 9000,
+        "venue": "saltings-reach@1",
+        "conditions": "classic-oscillating@7",
+        "note": "#105, #78: the only bundled venue with a current, its tide drawn at the gun from the race seed."
+    },
+    {
+        "name": "escape-worst-case",
+        "boats": 16,
+        "raceSeed": 46,
+        "windSeed": 4646,
+        "laps": 1,
+        "startSequenceTicks": 300,
+        "warmupTicks": 30,
+        "ticks": 900,
+        "venue": "dev-venue@7",
+        "conditions": "classic-oscillating@7",
+        "note": "#105, #92: sixteen boats still on the start row at a 10 s gun, timed through the start where the umpire's escape simulations run most. Seeds probed 2026-10-04 over race seeds 1-50 (wind seed 101x), start sequences of 150 and 300 ticks, counting incidents to 30 s after the gun: race seed 46 at 300 ticks opened 11 (the next best 4, the median 1)."
     }
 ]

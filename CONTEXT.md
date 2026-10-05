@@ -133,6 +133,14 @@ _Avoid_: difficulty, level
 The bot that sails a dropped player's boat until they come back: a Club bot at the bottom of Club's band, not a fourth tier. It takes the boat from wherever she is, always gives way, early and wide, and never attacks, so dropping never helps.
 _Avoid_: easy bot, autopilot
 
+**Executor**:
+A bot-suite profile only: the groove-only bot's tactics with perfect execution, every roll tack hit. The suite checks she loses to a good tactician with average execution, so decisions stay the main skill.
+_Avoid_: perfect bot
+
+**Watchdog**:
+The bot suite's count of rule 16.1 calls where the right-of-way boat's rudder was centred throughout the escape window: the autohelm's own course change following a shift, called against her.
+_Avoid_: 16.1 monitor
+
 **Handback**:
 A dropped player taking their boat back from the cautious bot. The boat keeps everything she had: a penalty turn part turned, the autohelm's target. The player's inputs apply from the next tick.
 _Avoid_: resume (the server's word for the player rejoining), takeover (the bot taking the boat)
