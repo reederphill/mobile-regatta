@@ -353,11 +353,12 @@ extension CompelledFixture {
     /// Case 95: O, owing E mark-room at the gate mark, squeezes her (18.2), and E is then forced onto that mark, the
     /// incident still open: her touch costs no rule 31 turn (43.1(b): she was sailing within her mark-room; too late
     /// after the breach for 43.1(a)'s escape simulation to call her compelled). It is an obstruction contact, and E
-    /// is exonerated on the incident with O.
+    /// is exonerated on the incident with O. Sailed 4 s: each boat sails in the other's ribbons (#377), and E reaches
+    /// the mark 3 s in.
     @Test func forcedOntoTheMarkSheIsOwedRoomAtIsNoRule31Turn() throws {
         let race = try C.race(seats: 2)
         try C.abreastIntoTheGate(race, toMark: 10, side: 4, lateral: 1, oTurn: deg2rad(10))
-        let events = C.sail(race, ticks: 3 * Race.tickRate)
+        let events = C.sail(race, ticks: 4 * Race.tickRate)
         let call = try #require(C.calls(events).first)
         #expect(C.calls(events).count == 1)
         #expect(call.rule == .givingMarkRoom && call.offender == 0 && call.victim == 1)
