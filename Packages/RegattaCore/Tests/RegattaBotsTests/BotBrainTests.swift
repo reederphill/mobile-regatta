@@ -225,6 +225,32 @@ import RegattaCore
         #expect(approach(from: short, on: .starboard) == lead, "her course passes too close to the mark")
     }
 
+    /// #377's fixer (BotSuiteGateTests' skill-gap seed 1): a boat above the windward mark that hasn't rounded it (she
+    /// bore away past it on its wrong side) sails back below it, right of it from its right and round its foot from its
+    /// left, rather than for the fetch point above the line she must cross upwards: there she circled the mark for the
+    /// rest of the race. Below the mark nothing changes.
+    @Test func aboveTheWindwardMarkUnroundedSheSailsBackBelowIt() {
+        let mark = Vec2(0, 0)
+        let upwind = Vec2.heading(deg2rad(17))
+        let side = upwind.rightPerp
+        let fetch = mark + side * 6 + upwind * 4
+        func approach(from position: Vec2, on tack: Tack) -> Vec2 {
+            BotBrain.windwardApproach(from: position, tack: tack, mark: mark, room: 4.5, fetch: fetch, wind: deg2rad(17),
+                                      groove: deg2rad(42), upwind: upwind)
+        }
+        for tack in [Tack.port, .starboard] {
+            // Past it on its left (the wrong side), and above it on its right beside the fetch point.
+            let left = approach(from: mark - side * 8 + upwind * 4, on: tack)
+            #expect((left - mark).dot(upwind) < 0 && (left - mark).dot(side) < 0, "below it, round its foot")
+            let right = approach(from: mark + side * 12 + upwind * 3, on: tack)
+            #expect((right - mark).dot(upwind) < 0 && (right - mark).dot(side) > 0, "below it, right of it")
+            #expect(right != fetch)
+        }
+        // Below it, the beat's approach: a boat on the starboard layline fetches it.
+        let starboardCloseHauled = Vec2.heading(deg2rad(17) - deg2rad(42))
+        #expect(approach(from: fetch - starboardCloseHauled * 50, on: .starboard) == fetch)
+    }
+
     /// Off the plane in a breeze, the skiff heads up until she can plane, well above the downwind groove;
     /// in a wind too light to plane at any angle, she doesn't.
     @Test func offThePlaneSheHeadsUpToPlane() throws {
