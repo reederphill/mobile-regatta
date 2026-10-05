@@ -2,9 +2,10 @@ import RegattaCore
 
 /// The server umpire's word on one pair, as a snapshot carries it to one of the pair's clients (#96, ADR 0005):
 /// who keeps clear between the recipient and that seat, and under which rule (`Race.keepClearRelations(of:)`:
-/// rule 21 over rules 10–13), and whether the recipient is held to her proper course against that seat (rule 17,
-/// `Race.properCourseRestrictions(of:)`). The client never works these out from its own world: the umpire's records
-/// (rule 18, rule 17, incident memory) stay on the server (#18), so its right-of-way glows are the server's.
+/// rule 21 over rules 10–13, or the boat owing mark-room under 18.2/18.3, #386), and whether the recipient is held
+/// to her proper course against that seat (rule 17, `Race.properCourseRestrictions(of:)`). The client never works
+/// these out from its own world: the umpire's records (rule 18, rule 17, incident memory) stay on the server (#18),
+/// so its right-of-way glows are the server's.
 ///
 /// Six bits a seat, least significant first: bit 0 a keep-clear relation is present; bit 1 who keeps clear (0 the
 /// recipient, 1 the other seat); bits 2–4 the rule, an index into `wireRules`; bit 5 the recipient is restricted by
@@ -36,7 +37,7 @@ public struct WireRelation: Hashable, Sendable {
     }
 
     /// The rules a keep-clear relation can carry (`Rules.obligation`), by their wire index. Fixed for good: never
-    /// reorder, and a new rule takes the next free index. 18.2 and 18.3 are the mark-room relations of PR #386.
+    /// reorder, and a new rule takes the next free index. 18.2 and 18.3 are the mark-room relations (#386).
     public static let wireRules: [RacingRule] = [
         .portStarboard, .windwardLeeward, .clearAstern, .whileTacking, .returningToStart, .takingAPenalty,
         .givingMarkRoom, .tackingInTheZone,

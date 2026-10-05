@@ -65,19 +65,6 @@ enum RuleWords {
     /// The RTT warning (#18, #68), once as it starts.
     // TODO-COPY (#171)
     static let lag = "Slow connection: your boat may jump."
-
-    /// The most a mark-room notice may be: one line under the top readouts (#15).
-    static let markRoomLimit = 40
-
-    /// A mark-room notice to one of its two boats (#15): yours, or the other boat's to give. Never over
-    /// `markRoomLimit` characters: a long name or mark drops out first.
-    // TODO-COPY (#171)
-    static func markRoom(at mark: String, entitled: Bool, other: String) -> String {
-        let candidates = entitled
-            ? ["Mark-room at the \(mark) is yours", "Mark-room is yours"]
-            : ["Give \(other) room at the \(mark)", "Give mark-room at the \(mark)", "Give mark-room"]
-        return candidates.first { $0.count <= markRoomLimit && !$0.contains("\n") } ?? candidates[candidates.count - 1]
-    }
 }
 
 /// What a plain-words notice teaches you, marked seen once the notice shows (#23): a rule number spelled out, a rule's

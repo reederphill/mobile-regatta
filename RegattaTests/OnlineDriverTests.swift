@@ -44,10 +44,12 @@ import RegattaProtocol
     /// Seed 3's race, as the fake server sails it, in a ten-second sequence. With `collisionCourse`, seats 1
     /// and 2 are set head to head below the fleet and seat 1 fouls seat 2 (port/starboard) about four
     /// seconds in, whatever the bots do (`FakeRaceServer.setCollisionCourse`).
-    init(seed: UInt64 = 3, collisionCourse: Bool = false, uplink: LinkFaults = .none, downlink: LinkFaults = .none) throws {
+    init(seed: UInt64 = 3, collisionCourse: Bool = false, markRoomAt: Int? = nil, uplink: LinkFaults = .none,
+         downlink: LinkFaults = .none) throws {
         let clock = VirtualClock(now: 1_000_000)
         let link = FaultInjectingLink(clock: clock, uplink: uplink, downlink: downlink, seed: 1)
-        let server = try FakeRaceServer(seed: seed, collisionCourse: collisionCourse, transport: link.server, clock: clock)
+        let server = try FakeRaceServer(seed: seed, collisionCourse: collisionCourse, markRoomAt: markRoomAt,
+                                        transport: link.server, clock: clock)
         let network = Network(link: link, server: server)
         let join = RaceJoin(connection: link.client, token: Self.token, clientBuild: "test", now: clock.now)
         while !join.isFinished {
@@ -142,6 +144,27 @@ import RegattaProtocol
         let sent = rig.server.sentEvents.compactMap { if case .ruleCall(let call) = $0.event.kind { call } else { nil } }
         let first = try #require(sent.first, "the server's race makes a rule call")
         #expect(rig.session.ruleCalls.calls.first == first)
+    }
+
+    /// Mark-room is the glow online as offline (#386): the client's boat owes the other mark-room by the windward mark,
+    /// and every frame the authoritative race shows that (`keepClearRelations(of:)`, the offline glow) for the
+    /// snapshot the prediction last imported, the online frame shows it too: red on the boat owed room.
+    @Test func onlineMarkRoomGlowMatchesOffline() throws {
+        let rig = try OnlineRig(markRoomAt: 30)
+        let owed = RightOfWay(keepClear: rig.driver.myBoatIndex, rule: .givingMarkRoom)
+        var framesWithMarkRoom = 0, mismatches = 0
+        rig.run(for: 16_000_000) { _ in
+            let frame = rig.driver.currentFrame
+            let predicted = rig.driver.client.predicted
+            guard frame.tick == predicted.tick,
+                  let offline = predicted.serverTick.flatMap({ rig.server.offlineRelations[$0] }),
+                  offline[1]?.rule == .givingMarkRoom else { return false }
+            #expect(offline[1] == owed)
+            if frame.keepClear?[1] == offline[1] { framesWithMarkRoom += 1 } else { mismatches += 1 }
+            return false
+        }
+        #expect(framesWithMarkRoom > 0, "the pair by the mark show mark-room")
+        #expect(mismatches == 0)
     }
 
     /// Fault-injected transport (acceptance): the connection drops mid-race, after the gun. The driver

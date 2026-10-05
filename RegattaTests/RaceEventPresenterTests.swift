@@ -162,26 +162,13 @@ import RegattaCore
         #expect(recorder.calls == ["impact 0.5"])
     }
 
-    /// A mark-room notice is one short line (#15), to its two boats only, whichever side of it you are, however long
-    /// the other boat's name.
-    @Test func markRoomNoticeIsOneLine() {
-        let marks = ["pin", "committee boat", "windward mark", "offset mark", "gate left", "gate right"]
-        for long in [false, true] {
-            let name: (Int) -> String = { long ? "A Very Long Sailor Name Indeed \($0)" : "Boat \($0)" }
-            for mark in marks {
-                for (boat, over) in [(Self.me, 1), (1, Self.me)] {
-                    var presenter = RaceEventPresenter(me: Self.me, name: name)
-                    let shown = presenter.present([Self.event(.markRoomNotice(boat: boat, entitledOver: over, mark: mark))])
-                    #expect(shown.notices.count == 1 && shown.notices[0].kind == .markRoom)
-                    let text = shown.notices.first?.text ?? ""
-                    #expect(text.count <= RuleWords.markRoomLimit && !text.contains("\n") && !text.isEmpty, "\(text)")
-                    #expect(text.contains("yours") == (boat == Self.me), "\(text)")
-                }
-            }
+    /// Mark-room has no notice: the right-of-way glow shows who owes it (`Race.keepClearRelations(of:)`), so the
+    /// record's event presents nothing, to either boat or to a third.
+    @Test func markRoomNoticeIsSilent() {
+        for (boat, over) in [(Self.me, 1), (1, Self.me), (1, 2)] {
+            var presenter = RaceEventPresenter(me: Self.me)
+            #expect(presenter.present([Self.event(.markRoomNotice(boat: boat, entitledOver: over, mark: "pin"))]) == Presentation())
         }
-        var presenter = RaceEventPresenter(me: Self.me)
-        #expect(presenter.present([Self.event(.markRoomNotice(boat: 1, entitledOver: 2, mark: "pin"))]) == Presentation(),
-                "not to a third boat")
     }
 
     /// Online every server event carries a stable id (#96, #124 review): one delivered again, of any kind, presents
@@ -189,7 +176,7 @@ import RegattaCore
     @Test func anEventWithAnIdSeenBeforeIsNotPresentedAgain() {
         let me = Self.me
         var presenter = RaceEventPresenter(me: me)
-        let kinds: [RaceEvent.Kind] = [.ocsNotice(recipient: me), .markRoomNotice(boat: me, entitledOver: 1, mark: "pin"),
+        let kinds: [RaceEvent.Kind] = [.ocsNotice(recipient: me), .rollMissed(seat: me),
                                        .markTouch(seat: me, mark: "pin"), .penaltyServed(seat: me), .finished(seat: me, place: 1)]
         for (k, kind) in kinds.enumerated() {
             let event = RaceEvent(tick: 10 + k, kind: kind, id: UInt32(k + 1))
@@ -197,7 +184,7 @@ import RegattaCore
             #expect(presenter.present([event]) == Presentation(), "\(kind) again")
         }
         #expect(presenter.present([RaceEvent(tick: 20, kind: .ocsNotice(recipient: me), id: 9)]) != Presentation())
-        let offline = RaceEvent(tick: 30, kind: .markRoomNotice(boat: me, entitledOver: 1, mark: "pin"))
+        let offline = RaceEvent(tick: 30, kind: .rollMissed(seat: me))
         #expect(presenter.present([offline]) != Presentation())
         #expect(presenter.present([offline]) != Presentation())
     }
