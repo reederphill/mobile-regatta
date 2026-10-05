@@ -222,12 +222,17 @@ import RegattaCore
 }
 
 @MainActor @Suite struct PracticeDriverTests {
+    /// A bot in both seats, one lap: cheap enough to sail headless to the close on the main actor in a Debug build.
+    static let headlessRace = RaceConfig(opponents: 1, laps: 1, prestartSeconds: 30, seed: 7,
+                                         windSeed: RaceConfig.windSeed(pinnedTo: 7), botSailsYourBoat: true)
+
     /// A bot sails every seat (`-demo`), so the race runs headless to its finish; its log replays to the same world.
-    /// Seed 6: your bot finishes at tick 17,250 and the race closes at 20,143 (measured headless with the ribbon wake,
-    /// #377). Since the bots sail with skill weaknesses (#102) your bot is still racing at the close on some seeds
-    /// (with #377: 1, 2, 3, 8, 9 and 16; seed 4, the pick before, has her finish last, closing the race).
+    /// Kept small, since the suite holds the main actor and a Debug tick is slow (in CI the 8-boat, 3-lap race of
+    /// #377 took ~250 s before its replay and timed the app's other tests out): `headlessRace`, one opponent, one lap,
+    /// a 30 s sequence. Seed 7: your bot finishes at tick 6,000 and the race closes at 7,450 (with the ribbon wake,
+    /// #377), well inside the finish window, so she doesn't hang on a seed where she's still racing at the close.
     @Test func runsHeadlessToTheFinishAndReplaysToTheSameDigest() throws {
-        let config = RaceConfig(opponents: 7, seed: 6, windSeed: RaceConfig.windSeed(pinnedTo: 6), botSailsYourBoat: true)
+        let config = Self.headlessRace
         let driver = PracticeDriver(config: config)
         var seconds = 0
         while !driver.currentFrame.isOver && seconds < 1_500 {
@@ -247,8 +252,9 @@ import RegattaCore
 
     /// Once the race is over the clock stops: display frames run no ticks and the drawn world stays at the
     /// last tick, so the fleet doesn't wobble between the last two ticks behind the results.
+    /// Sails `headlessRace` to its close.
     @Test func aFinishedRaceStandsStill() {
-        let config = RaceConfig(opponents: 3, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1), botSailsYourBoat: true)
+        let config = Self.headlessRace
         let driver = PracticeDriver(config: config)
         var seconds = 0
         while !driver.currentFrame.isOver && seconds < 1_500 {
