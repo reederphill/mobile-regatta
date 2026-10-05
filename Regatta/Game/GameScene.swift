@@ -67,7 +67,8 @@ final class GameScene: SKScene {
 
     /// Whether SpriteKit draws the world and the camera's nodes: `-hideScene` turns it off for a UI test that only
     /// waits for the results (#361), so a GPU-less CI runner rasterises nothing while `render(_:)` still moves every
-    /// node, and the race's pace no longer hangs on the runner's draw speed. The HUD and results are SwiftUI's.
+    /// node but the ribbons' (#377: skipped while hidden), and the race's pace no longer hangs on the runner's draw
+    /// speed. The HUD and results are SwiftUI's.
     var paintsWorld = true {
         didSet {
             world.isHidden = !paintsWorld
@@ -299,8 +300,10 @@ final class GameScene: SKScene {
             boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality, time: world.time,
                                 dt: dt, settled: settled, backwindSail: backwind.sail, backwindSide: backwind.side)
         }
-        // The sim's ribbons at the time drawn, between the last two ticks (`ribbons(of:time:)`).
-        trailLayer.update(wake: world.frame.wake, time: world.time, style: boatStyle)
+        // The sim's ribbons at the time drawn, between the last two ticks (`ribbons(of:time:)`). Not while the world
+        // isn't painted (`-hideScene`): they are pure paint and most of a 16-boat frame's render (#377), so a hidden
+        // race spends its frame on ticks. They come back with the next frame painted.
+        if paintsWorld { trailLayer.update(wake: world.frame.wake, time: world.time, style: boatStyle) }
 
         syncCamera()
         rig.visibleInsets = viewInsets
