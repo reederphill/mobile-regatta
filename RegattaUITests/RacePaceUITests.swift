@@ -16,7 +16,7 @@ final class RacePaceUITests: RaceUITestCase {
     ///   72.2 s (48/s): about 1,300 + 1,490 = 2,790 ticks.
     /// Half of 2,570, rounded down: 1,250. Runners vary about 2x run to run, so this catches a slowdown of 3-4x or
     /// worse (a per-cone shader's 2x, #339, it can't); the deterministic guard for that one cause is
-    /// `ShadowConeTests.fleetConesShareOneShader`.
+    /// `ShadowConeTests.ribbonsDrawAsOneFaintLayer` (the fleet's ribbons share one shader, #377).
     static let floorTicks = 1_250
 
     /// Sails the settings' two laps, so even a fast runner is still racing when the pace is read. The probe is looked

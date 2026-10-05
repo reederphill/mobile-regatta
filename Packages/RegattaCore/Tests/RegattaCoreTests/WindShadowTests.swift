@@ -2,8 +2,9 @@ import Foundation
 import Testing
 @testable import RegattaCore
 
-/// #79 acceptance: the shadow cone follows the caster's apparent wind, backwind reaches to windward of
-/// her, and both slow a boat without turning her wind (#10).
+/// #79 acceptance, as #377 left it: the shadow is the caster's ribbon wake down the wind from her, the backwind reaches
+/// to windward of her; the shadow slows a boat without turning her wind (#10), and so does #298's backwind loss (a class
+/// with a header turns it instead, `WakeRibbonsTests`).
 @Suite struct WindShadowTests {
     let dinghy: BoatClass
     var shadow: BoatClass.WindShadow { dinghy.windShadow }
@@ -57,33 +58,33 @@ import Testing
         #expect(race.shadowCone(ofSeat: 2) == nil)
     }
 
-    @Test func lossOneLengthBehindIsAtMostAQuarter() {
-        let cone = ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: shadow)
-        let behind = cone.axis * hullLength
-        #expect(cone.factor(at: behind) >= 0.75 && cone.factor(at: behind) < 1)
-        // The loss is greatest on the axis, smaller off it, and gone at the cone's edge.
-        let side = cone.axis.rightPerp
-        #expect(cone.factor(at: behind + side * 0.5) > cone.factor(at: behind))
-        #expect(cone.factor(at: behind + side * (cone.halfWidth(at: hullLength) + 0.01)) == 1)
-    }
-
-    @Test func noLossBeyondTheClassConeLength() {
-        let cone = ShadowCone(apex: .zero, apparentWindDirection: deg2rad(30), heading: 0, windwardSide: .starboard, shadow: shadow)
-        #expect(cone.length == shadow.coneLength && cone.length == 8 * hullLength)
-        #expect(cone.factor(at: cone.axis * (cone.length - 0.5)) < 1)
-        #expect(cone.factor(at: cone.axis * (cone.length + 0.01)) == 1)
-        #expect(cone.factor(at: cone.axis * (cone.length * 2)) == 1)
-    }
-
-    @Test func twoStackedConesNeverGoBelowTheFloor() {
-        let near = ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: shadow)
-        let nearer = ShadowCone(apex: near.axis * 0.5, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: shadow)
-        let p = near.axis * 1
-        // Together they would take more than 40 %; the class floor holds it at 60 %.
-        #expect(near.factor(at: p) * nearer.factor(at: p) < shadow.stackingFloor)
-        let stacked = ShadowCone.factor(at: p, of: [near, nearer], floor: shadow.stackingFloor)
-        #expect(stacked >= 0.6 && stacked == shadow.stackingFloor)
-        #expect(ShadowCone.factor(at: p, of: [near], floor: shadow.stackingFloor) == near.factor(at: p))
+    /// Two casters' ribbons over one point stack by product, never below the class's floor (#377, as the cones did).
+    @Test func twoStackedRibbonsNeverGoBelowTheFloor() {
+        var ribbons = TurbulenceRibbons(shadow: shadow)
+        let up = dinghy.polar.bestUpwind(tws: WakeScene.tws)
+        func boat(_ id: Int, _ at: Vec2) -> Boat {
+            var b = Boat(id: id, isPlayer: false, colorIndex: id, position: at, heading: -up.twa, speed: up.speed)
+            b.windOverGround = WakeScene.wind
+            b.sailingWind = WakeScene.wind
+            b.apparentWind = BoatWinds.resolve(ground: WakeScene.wind, current: .zero, velocityThroughWater: b.velocity).apparent
+            b.boomSide = .port
+            return b
+        }
+        var boats = [boat(0, .zero), boat(1, Vec2(0.5, 0))]
+        for tick in 0..<(6 * Race.tickRate) {
+            for i in boats.indices { boats[i].position += boats[i].velocity * Race.dt }
+            ribbons.step(boats: boats, tick: tick)
+        }
+        let tick = 6 * Race.tickRate - 1
+        let p = boats[0].position - Vec2.heading(boats[0].apparentWind.direction) * hullLength
+        let each = (1 - ribbons.loss(of: 0, at: p, tick: tick)) * (1 - ribbons.loss(of: 1, at: p, tick: tick))
+        #expect(ribbons.loss(of: 0, at: p, tick: tick) > 0 && ribbons.loss(of: 1, at: p, tick: tick) > 0)
+        #expect(ribbons.factor(at: p, tick: tick, receiver: 2) == max(each, shadow.stackingFloor))
+        #expect(ribbons.factor(at: p, tick: tick, receiver: 2) >= shadow.stackingFloor)
+        var low = shadow
+        low.stackingFloor = 0.99
+        let floored = TurbulenceRibbons(shadow: low, points: ribbons.points, levels: ribbons.levels)
+        #expect(floored.factor(at: p, tick: tick, receiver: 2) == 0.99)
     }
 
     /// ilca-dinghy@4 (#298): ilca-dinghy@3 with its backwind the trapezoid astern on the windward quarter.
@@ -177,19 +178,20 @@ import Testing
             }
         }
         let together = try race(together: true), alone = try race(together: false)
-        for tick in 0..<(2 * Race.tickRate) {
+        var shadedTicks = 0
+        for _ in 0..<(6 * Race.tickRate) {
             together.step()
             alone.step()
             let (shaded, clear) = (together.boats[1], alone.boats[1])
-            if tick == 0 {
-                #expect(shaded.shadow < 1 && clear.shadow == 1)
-                #expect(shaded.sailingWind == clear.sailingWind)
-                #expect(shaded.windOverGround == clear.windOverGround)
-            }
+            #expect(clear.shadow == 1)
+            if shaded.shadow < 1 { shadedTicks += 1 }
             // Shadow slows her; it never turns the wind she steers by, so her autohelm holds the same course.
             #expect(shaded.sailingWind.direction == clear.sailingWind.direction)
+            #expect(shaded.windOverGround == clear.windOverGround)
             #expect(shaded.heading == clear.heading)
         }
+        // The caster's ribbon reaches her once its air has drifted the two lengths down to her.
+        #expect(shadedTicks > 2 * Race.tickRate, "in the ribbons \(shadedTicks) ticks")
         #expect(together.boats[1].speed < alone.boats[1].speed)
     }
 
@@ -210,10 +212,47 @@ import Testing
         let wider = ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: retuned)
         #expect(wider.factor(at: upwind) < 1)
         #expect(abs(wider.factor(at: Vec2.heading(0) * 0.001) - 0.8) < 1e-3)
-        let near = ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: retuned)
-        let nearer = ShadowCone(apex: near.axis * 0.5, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: retuned)
-        let p = near.axis * 1
-        #expect(ShadowCone.factor(at: p, of: [near, nearer], floor: retuned.stackingFloor) == near.factor(at: p) * nearer.factor(at: p))
+        #expect(retuned.stackingFloor == 0.5)
+        // A class without a ribbons block (#377) seeds its ribbons from its cone: as wide and as strong.
+        #expect(retuned.ribbons == .seeded(coneWidthAtBoat: retuned.coneWidthAtBoat, coneWidthAtEnd: retuned.coneWidthAtEnd,
+                                           lossCloseIn: retuned.lossCloseIn))
+        // skiff@6 and ilca-dinghy@5 carry theirs, and the backwind header, fade and floor (#377).
+        for (id, version) in [("skiff", 6), (Fixtures.classID, 5)] {
+            let file = try BoatClassFile.bundled(id: id, version: version)
+            let s = file.content.windShadow
+            #expect(s.header != nil && s.backwindFadeSeconds == 1.5 && s.backwindFloorSpeed != nil)
+            // The header's zone is the upwash beside her sail (the owner's renders review), a wedge from a point at her
+            // mast widening to 1.5 L out at its aft end (renders reviews 2 and 3).
+            #expect(s.backwindUpwash?.widthAtMast == 0)
+            #expect(abs((s.backwindUpwash?.widthAft ?? 0) - 1.5 * file.content.hull.length) < 1e-12)
+            #expect(s.ribbons.peak == s.lossCloseIn && s.ribbons.startWidth == s.coneWidthAtBoat && s.ribbons.endWidth == s.coneWidthAtEnd)
+        }
+        let edited = try BoatClassFile(data: Fixtures.edited([
+            (of: #""degrees": 8"#, with: #""degrees": 5"#),
+            (of: #""peakLoss": 0.25"#, with: #""peakLoss": 0.3"#),
+            (of: #""floorKnots": 2,"#, with: #""floorKnots": 3,"#),
+            (of: #""mastStationFromBow": 0.25,"#, with: #""mastStationFromBow": 0.3,"#),
+            (of: #""upwashWidthAtMastHullLengths": 0,"#, with: #""upwashWidthAtMastHullLengths": 1.5,"#),
+            (of: #""upwashWidthAftHullLengths": 1.5,"#, with: #""upwashWidthAftHullLengths": 2.0,"#),
+            (of: #""upwashEndFadeHullLengths": 0.1,"#, with: #""upwashEndFadeHullLengths": 0.2,"#),
+            (of: #""upwashAftHullLengths": 1.5,"#, with: #""upwashAftHullLengths": 0.5,"#),
+        ], version: 5)).content.windShadow
+        #expect(edited.header?.angle == deg2rad(5) && edited.ribbons.peak == 0.3)
+        #expect(edited.backwindFloorSpeed == metresPerSecond(knots: 3))
+        let upwash = try #require(edited.backwindUpwash)
+        #expect(abs(upwash.mastFromBow - 0.3 * hullLength) < 1e-12 && abs(upwash.widthAtMast - 1.5 * hullLength) < 1e-12
+                && abs(upwash.widthAft - 2.0 * hullLength) < 1e-12
+                && abs(upwash.endFade - 0.2 * hullLength) < 1e-12 && abs((upwash.astern ?? 0) - 0.5 * hullLength) < 1e-12)
+        // Its zone reaches as far as the file says: 1.25 L out from her side, 0.3 L forward of her stern, is in the
+        // edited zone (1.5 L wide at her mast), not ilca-dinghy@5's (0.3 L wide there, a wedge from a point at her mast).
+        let ilca5 = try BoatClassFile.bundled(id: Fixtures.classID, version: 5).content.windShadow
+        let wide = Vec2(edited.sternCorner.x + 1.25 * hullLength, edited.sternCorner.y + 0.3 * hullLength)
+        #expect(ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: edited).isInBackwind(wide))
+        #expect(!ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: ilca5).isInBackwind(wide))
+        // And as far astern: 1 L astern of her stern is in ilca-dinghy@5's (1.5 L), not the edited one's (0.5 L).
+        let astern = Vec2(edited.sternCorner.x + 0.2 * hullLength, edited.sternCorner.y - hullLength)
+        #expect(!ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: edited).isInBackwind(astern))
+        #expect(ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: ilca5).isInBackwind(astern))
 
         // ilca-dinghy@3 keeps #79's band (no inner length); version 4 (#298) casts the trapezoid, its corner read off
         // the hull outline (0.63 m out, 0.15 L), 1 L wide, 2 L on its outer edge and 1.5 L on its inner one.
@@ -248,5 +287,35 @@ import Testing
         // A race casts with its class's values.
         let race = try placedRace(current: noCurrent) { _, _ in }
         #expect(race.shadowCone(ofSeat: 0)?.shadow == race.boatClass.windShadow)
+        #expect(race.wake.shadow == race.boatClass.windShadow)
+    }
+
+    /// #377: an eased boat's sail isn't working, so she sheds no turbulence (a boat down her apparent wind stays in clean
+    /// air) and, once her backwind has faded (1.5 s), casts none: the boat she had lee-bowed is headed no longer.
+    @Test func easedBoatCastsNoShadowAndNoBackwind() throws {
+        let trail = try WakeRibbonsTests.pairRace(.down)
+        _ = trail.apply(BoatInput(rudder: 0 as Int8, ease: true), seat: 0, atTick: trail.tick + 1)
+        for _ in 0..<(10 * Race.tickRate) {
+            trail.step()
+            #expect(trail.boats[1].shadow == 1)
+        }
+        #expect(trail.wake.levels[0] == 0 && trail.wake.points[0].allSatisfy { $0.peak == 0 && $0.scale == 0 })
+
+        // The lee-bow (`WakeRibbonsTests.backwindTurnsTheReceiversWindTowardsHerBow`): 3 s on, seat 0 is in the
+        // lee-bower's upwash, astern of her.
+        let race = try WakeRibbonsTests.leeBow().leeBowed
+        for _ in 0..<(3 * Race.tickRate) { race.step() }
+        #expect(race.header(ofSeat: 0) > deg2rad(1) && race.backwindSail(ofSeat: 1) == 1)
+        _ = race.apply(BoatInput(rudder: 0 as Int8, ease: true), seat: 1, atTick: race.tick + 1)
+        race.step()
+        race.step()
+        #expect(race.backwindSail(ofSeat: 1) > 0 && race.backwindSail(ofSeat: 1) < 1, "fading, not cut")
+        for _ in 0..<(2 * Race.tickRate) { race.step() }
+        #expect(race.backwindSail(ofSeat: 1) == 0, "gone by 1.5 s")
+        let zone = try #require(race.shadowCone(ofSeat: 1))
+        #expect(zone.backwindEnvelope(at: race.boats[0].position) == 0 && !zone.isInBackwind(race.boats[0].position))
+        for _ in 0..<(5 * Race.tickRate) { race.step() }
+        #expect(race.header(ofSeat: 0) < deg2rad(0.1), "\(rad2deg(race.header(ofSeat: 0)))° left")
+        #expect(race.boats[0].shadow == 1, "and no lull")
     }
 }

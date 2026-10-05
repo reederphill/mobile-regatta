@@ -5,7 +5,7 @@ import UIKit
 
 /// Each legend item's picture (#135, #23: "drawn with the real renderer, so the tutorial can reuse it"): a frozen
 /// `GameScene` over a posed moment of a real practice race (`LegendDriver`), framed by the north-up follow camera on
-/// your boat and drawn once off screen. Nothing here is a lookalike: the water, boats, wakes, cones, cues, marks and
+/// your boat and drawn once off screen. Nothing here is a lookalike: the water, boats, wakes, wind shadows, cues, marks and
 /// rule cues are the race's own nodes. Each picture is drawn the first time it's asked for, then kept.
 @MainActor enum LegendArt {
     /// A picture's size in points.
@@ -141,6 +141,28 @@ struct LegendShot {
         return boat
     }
 
+    /// How long, seconds, the posed boats are taken to have sailed straight to where they are (`settledWake`): longer
+    /// than a ribbon point lives, so their wakes are whole.
+    private static let wakeSeconds = 12.0
+
+    /// The wind shadow `boats` would have left had each sailed straight at her speed, sail working, for `wakeSeconds`
+    /// to where she is (#377): the sim's own ribbons (`TurbulenceRibbons`), stepped a tick at a time over that run, so a
+    /// picture shows them as a race draws them.
+    func settledWake(_ boats: [Boat]) -> TurbulenceRibbons {
+        var wake = TurbulenceRibbons(shadow: boatClass.windShadow)
+        let scales = boats.map { SailTrim.standard.workingScale(of: $0, ease: false, boatClass: boatClass) }
+        let ticks = Int(Self.wakeSeconds * Double(Race.tickRate))
+        for back in stride(from: ticks, through: 0, by: -1) {
+            let moved = boats.map { boat in
+                var boat = boat
+                boat.position -= boat.velocity * (Double(back) * Race.dt)
+                return boat
+            }
+            wake.step(boats: moved, tick: race.tick - back, scales: scales)
+        }
+        return wake
+    }
+
     /// The upwind groove's sailing angle at `p`.
     func upwindGroove(at p: Vec2) -> Double {
         Autohelm.grooveAngle(.upwind, tws: wind(at: p).speed, boatClass: boatClass)
@@ -250,7 +272,7 @@ final class LegendDriver: RaceDriver {
         currentFrame = TickFrame(tick: race.tick, boats: shot.boats, standings: Array(0..<count), wind: race.wind,
                                  isOver: false, keepClear: shot.keepClear,
                                  owed: shot.owed.map { $0 + Array(repeating: nil, count: max(0, count - $0.count)) },
-                                 penalty: race.rules.raceFormat.penalty)
+                                 penalty: race.rules.raceFormat.penalty, wake: stage.settledWake(shot.boats))
     }
 
     func tick(_ dt: Double) -> [TickFrame] { [] }

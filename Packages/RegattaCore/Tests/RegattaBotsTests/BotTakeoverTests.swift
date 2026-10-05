@@ -172,7 +172,8 @@ import RegattaCore
             sail(race, &controllers, ticks: 5 * Race.tickRate) { race in events += race.drainEvents().map(\.kind) }
             if events.contains(.penaltyReset(seat: 0)) { resets.append(seed) }
         }
-        #expect(started >= 20, "\(started) takeovers part way into a turn")
+        // #377: the ribbons leave fewer seeds with clear water part way into a turn (19 of 60).
+        #expect(started >= 18, "\(started) takeovers part way into a turn")
         #expect(resets.isEmpty, "turned back, resetting the turn: seeds \(resets)")
     }
 

@@ -67,7 +67,8 @@ final class GameScene: SKScene {
 
     /// Whether SpriteKit draws the world and the camera's nodes: `-hideScene` turns it off for a UI test that only
     /// waits for the results (#361), so a GPU-less CI runner rasterises nothing while `render(_:)` still moves every
-    /// node, and the race's pace no longer hangs on the runner's draw speed. The HUD and results are SwiftUI's.
+    /// node but the ribbons' (#377: skipped while hidden), and the race's pace no longer hangs on the runner's draw
+    /// speed. The HUD and results are SwiftUI's.
     var paintsWorld = true {
         didSet {
             world.isHidden = !paintsWorld
@@ -81,8 +82,9 @@ final class GameScene: SKScene {
     private let cam = SKCameraNode()
     private let water = WaterNode(pointsPerMeter: Double(GameScene.pointsPerMeter))
     private let effectsLayer = SKNode()
-    /// The fleet's wind-shadow cones, one faint layer in the effects layer (#121).
-    private let coneLayer = ConeLayer()
+    /// The fleet's wind shadow (#377): the sim's turbulence ribbons, one faint layer in the effects layer, under every
+    /// boat's backwind and wake.
+    private(set) lazy var trailLayer = TurbulenceTrailLayer(pointsPerMeter: ppm)
     private let courseLayer = SKNode()
     private let boatLayer = SKNode()
     /// The boat-side cues (#122) in the world, under the fleet: laylines, ladder lines and your wind vane with its
@@ -217,14 +219,15 @@ final class GameScene: SKScene {
 
     private func buildBoats() {
         let me = driver.myBoatIndex
-        effectsLayer.addChild(coneLayer)
+        effectsLayer.addChild(trailLayer)
+        let pool = TurbulenceTrailLayer.reserve(boats: driver.currentFrame.boats.count)
+        trailLayer.reserve(strips: pool.strips, discs: pool.discs)
         for boat in driver.currentFrame.boats {
             let node = BoatNode(boat: boat, isMine: boat.id == me, color: Palette.boat(boat.colorIndex),
                                 boatClass: driver.boatClass, pointsPerMeter: ppm, style: boatStyle)
             boatNodes.append(node)
             boatLayer.addChild(node)
             node.effects.nodes.forEach(effectsLayer.addChild)
-            coneLayer.add(node.effects)
         }
         // Over the fleet, whose top z is about 14 (`DrawOrder`), under the edge arrow (20).
         let rules = RuleCueLayer(pointsPerMeter: ppm)
@@ -232,7 +235,7 @@ final class GameScene: SKScene {
         world.addChild(rules)
         ruleCues = rules
 #if DEBUG
-        // #57's 16-boat demo: what the fleet's wakes, cones and backwinds cost, once at race start (#121).
+        // #57's 16-boat demo: what the fleet's wakes and backwinds cost, once at race start (#121).
         if LaunchOptions.current.perf {
             // The boats' own effects only (`BoatEffects`), not the rest of the effects layer.
             let nodes = boatNodes.reduce(0) { $0 + $1.effects.nodeCount }
@@ -293,10 +296,14 @@ final class GameScene: SKScene {
         for (i, boat) in world.boats.enumerated() {
             let pose = BoatPose(boat, ease: world.ease(ofSeat: i), isGhost: world.isGhost(ofSeat: i),
                                 boatClass: world.boatClass, style: boatStyle, autohelm: world.autohelm(ofSeat: i))
+            let backwind = world.backwind(ofSeat: i)
             boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality, time: world.time,
-                                dt: dt, settled: settled)
+                                dt: dt, settled: settled, backwindSail: backwind.sail, backwindSide: backwind.side)
         }
-        coneLayer.update(style: boatStyle)
+        // The sim's ribbons at the time drawn, between the last two ticks (`ribbons(of:time:)`). Not while the world
+        // isn't painted (`-hideScene`): they are pure paint and most of a 16-boat frame's render (#377), so a hidden
+        // race spends its frame on ticks. They come back with the next frame painted.
+        if paintsWorld { trailLayer.update(wake: world.frame.wake, time: world.time, style: boatStyle) }
 
         syncCamera()
         rig.visibleInsets = viewInsets
@@ -306,6 +313,7 @@ final class GameScene: SKScene {
         cam.position = rig.center
         cam.setScale(rig.cameraScale)
         cam.zRotation = rig.cameraRotation
+        pointShimmer(world)
 
         let view = WaterView(center: cam.position, sceneSize: size, scale: cam.xScale, rotation: cam.zRotation)
         Signpost.waterUpdate.measure { water.update(WaterWorld(world), view: view, dt: dt) }
@@ -326,6 +334,16 @@ final class GameScene: SKScene {
         for (seat, node) in boatNodes.enumerated() {
             node.setRightOfWayGlow(seat < glows.count ? glows[seat] : nil, style: boatStyle)
         }
+    }
+
+    /// Points the ribbons' shimmer at the water this frame (`TurbulenceTrailLayer.setView`): a drawable pixel's world
+    /// metres through the camera as just set.
+    private func pointShimmer(_ world: RenderWorld) {
+        guard let view else { return }
+        let frame = TurbulenceTrailLayer.pixelFrame(viewSize: view.bounds.size, pixelScale: view.contentScaleFactor,
+                                                    sceneSize: size, camera: cam, layer: trailLayer,
+                                                    metresPerPoint: 1 / Double(ppm))
+        TurbulenceTrailLayer.setView(pixel: frame, time: world.time)
     }
 
     /// What the rule cues show (#123), for tests: e.g. `glows=2 lines=1 arc=1`.

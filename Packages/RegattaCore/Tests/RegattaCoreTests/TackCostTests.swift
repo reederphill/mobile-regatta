@@ -19,9 +19,12 @@ enum OpenWater {
 
     /// A two-seat race in `knots` of steady wind with seat 0 close-hauled on starboard at her polar speed, her autohelm
     /// to engage on the groove on the first step; `place` edits the snapshot after that (seat 1 is already out of the way).
-    static func race(knots: Double, place: (inout WorldSnapshot, Race) -> Void = { _, _ in }) throws -> Race {
+    /// `boatClassFile`, if given, is sailed instead of the default class (a tuned copy of it: the same polar).
+    static func race(knots: Double, boatClassFile: BoatClassFile? = nil,
+                     place: (inout WorldSnapshot, Race) -> Void = { _, _ in }) throws -> Race {
         let wind = GroundWind(direction: try windDirection(), speed: metresPerSecond(knots: knots))
-        return try placedRace(current: still, seed: seed, wind: { _ in wind }, boatClass: RaceFiles.defaults.boatClass.ref) { snapshot, race in
+        return try placedRace(current: still, seed: seed, wind: { _ in wind }, boatClass: RaceFiles.defaults.boatClass.ref,
+                              boatClassFile: boatClassFile) { snapshot, race in
             let area = race.course.raceArea
             var boat = snapshot.seats[0].boat
             let best = boatClass.polar.bestUpwind(tws: wind.speed)
