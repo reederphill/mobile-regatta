@@ -113,7 +113,8 @@ import Testing
     }
 
     /// The backwind's sprite covers exactly core's zone: on skiff@6 (#377) the header's upwash beside her sail, from her
-    /// mast back to her stern on her windward side (#298's trapezoid on her windward quarter before it): at points just
+    /// mast back past her stern to 1.5 L astern of it on her windward side (#298's trapezoid on her windward quarter
+    /// before it): at points just
     /// inside and outside each corner and edge, on both tacks, it draws where `isInBackwind` is true and nowhere else,
     /// and it flips side with her tack. A class with #79's band draws none.
     @Test func backwindZoneMatchesCoreZone() throws {
@@ -144,11 +145,14 @@ import Testing
                 #expect(core.isInBackwind(p) == inside, "\(c): core at \(p)")
                 #expect(Self.draws(effects.backwind, local: local, at: p, in: scene) == inside, "\(c): sprite at \(p)")
             }
-            // On her windward side, beside her between her stern and her mast (#377: no longer astern of her stern).
+            // On her windward side, from her mast back past her stern to the zone's aft end (#377, the owner's
+            // lengthening).
             let centre = corners.reduce(Vec2.zero, +) / 4 - core.apex
             #expect(centre.dot(core.windward) > 0 && centre.dot(core.forward) < 0, "\(c)")
-            #expect(corners.allSatisfy { ($0 - core.apex).dot(core.forward) >= shadow.sternCorner.y - 1e-9
-                && ($0 - core.apex).dot(core.forward) <= shadow.bowY }, "\(c): from her stern to her mast")
+            let extent = try #require(shadow.upwashExtent)
+            #expect(extent.aft < shadow.sternCorner.y, "\(c): it runs on astern of her stern")
+            #expect(corners.allSatisfy { ($0 - core.apex).dot(core.forward) >= extent.aft - 1e-9
+                && ($0 - core.apex).dot(core.forward) <= extent.fore + 1e-9 }, "\(c): from its aft end to her mast")
             sides.insert(effects.backwind.xScale > 0)
         }
         #expect(sides == [true, false], "drawn on both sides")

@@ -16,7 +16,7 @@ enum Fixtures {
         2: "f5c8f1677a45f76c2ffe27914671ea0ce615614944f331027c506cafb6caa12d",
         3: "0796b93570fb9723697162f3da4617b28ee0100f693116f1574a198c4c3bf792",
         4: "bd90cabe38cfea22c88dd0a6e4c462e04691dec0c5b90420d416bd8555f05bdf",
-        5: "e946b1d0041c4ffd473cc35f7d05f50edea152ec9a363bc9e5f2b5b3311b16ce",
+        5: "7b5c35b95867b8cd7a023c474fc1f55f5e929e10516b056d48cf514a461d3694",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -56,7 +56,7 @@ enum SkiffFixtures {
         3: "3a6e6b7bf037bc496a9fdddfa45d7000ab41dd1801a08cece1bc2d3a76092c81",
         4: "4e2d1a94d1c90ac80aa88bdaa4890fc68095b16de61324c6fdaa19f54ee3a9a1",
         5: "ce105fbd37ca455498592ea9ae4e47a34a5e255617b2490019a1360330261b80",
-        6: "95d21293ea5abb39076f00ecb0d046bb0d524cbb264703684e1511c43d05cf31",
+        6: "b4e2f9b180fb80af3a704566925489c56ff0640e84107289f58f7ac7b544b4bb",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -779,11 +779,13 @@ enum SkiffFixtures {
         #expect(b.windShadow.backwindFadeSeconds == 1.5)
         #expect(b.windShadow.backwindFloorSpeed == metresPerSecond(knots: 2) && b.windShadow.backwindFloorSpan == metresPerSecond(knots: 2))
         // The header's zone is the upwash beside her sail (the owner's renders review): her mast 0.4 L (skiff) or 0.25 L
-        // (ilca) back from her bow, reaching 1 L out, fading in over 0.1 L at each end.
+        // (ilca) back from her bow, reaching 1 L out, fading in over 0.1 L at her mast, and running on 1.5 L astern of
+        // her stern (the owner's lengthening).
         #expect(a.windShadow.backwindUpwash == nil)
         let upwash = try #require(b.windShadow.backwindUpwash)
         #expect(abs(upwash.mastFromBow - (skiff ? 0.4 : 0.25) * length) < 1e-12)
         #expect(abs(upwash.reach - length) < 1e-12 && abs(upwash.endFade - 0.1 * length) < 1e-12)
+        #expect(abs((upwash.astern ?? 0) - 1.5 * length) < 1e-12)
     }
 
     @Test(arguments: [
@@ -797,6 +799,9 @@ enum SkiffFixtures {
         (#""upwashReachHullLengths": 1.0,"#, #""upwashReachHullLengths": 0,"#, "backwind upwash mast station"),
         (#""upwashEndFadeHullLengths": 0.1,"#, #""upwashEndFadeHullLengths": -0.1,"#, "backwind upwash mast station"),
         (#""upwashEndFadeHullLengths": 0.1,"#, "", "together"),
+        (#""upwashAftHullLengths": 1.5,"#, #""upwashAftHullLengths": 0,"#, "backwind upwash aft length must be positive"),
+        (#""mastStationFromBow": 0.4,"# + "\n      " + #""upwashReachHullLengths": 1.0,"# + "\n      "
+            + #""upwashEndFadeHullLengths": 0.1,"#, "", "a backwind upwash aft length needs the upwash"),
         (#""header": { "degrees": 8, "capDegrees": 12, "lullLoss": 0, "lagSeconds": 1 }"#, #""renamed": {}"#,
          "a backwind upwash needs a header"),
     ])

@@ -3,7 +3,7 @@ import Testing
 @testable import RegattaCore
 
 /// #298 acceptance: a lee-bow pays. A boat on port tacks onto the lee bow of a boat close-hauled on starboard, so the
-/// starboard boat sits in her backwind (to windward of her; since #377 the upwash beside her sail), and loses speed
+/// starboard boat sits in her backwind (to windward of her; since #377 the upwash beside her sail and astern), and loses speed
 /// against a twin sailing on with no lee-bower. Twin races in open water and a steady wind (`OpenWater`, the default
 /// class). What she loses is set by the class's placeholder backwind loss (skiff@4, #232's slider), and sized so a
 /// lee-bow costs clearly less than sitting in a wind shadow (`ShadowCostTests`: 0.7–1.5 L over 5 s).
@@ -32,20 +32,19 @@ import Testing
         }
     }
 
-    /// Seat 1 starts 2.5 L ahead of seat 0 and 1.5 L to leeward on port and tacks at once; she is on starboard about
-    /// 1 L ahead of her and 0.5 L to leeward when her tack ends. Since #377 (skiff@6) the backwind is a header (8°, a
-    /// 1 s lag) and its zone is the upwash beside her sail, from her mast back to her stern and 1 L out to windward (the
-    /// owner's renders review): seat 0 is headed only while overlapped with her. Holding her heading (her autohelm
-    /// pinches through the header rather than bearing away onto the lee-bower's stern, so she keeps clear), she sails up
-    /// into the zone from astern on the slow, just-tacked lee-bower within 2 s and sits in it for several seconds, until
-    /// the lee-bower has built her speed and pulls clear ahead. Her loss is measured upwind over 10 s.
+    /// Seat 1 starts 3 L ahead of seat 0 and 1.5 L to leeward on port and tacks at once; she is on starboard about
+    /// 1.6 L ahead of her and 0.6 L to leeward when her tack ends. Since #377 (skiff@6) the backwind is a header (8°, a
+    /// 1 s lag) and its zone is the upwash beside her sail, from her mast back past her stern to 1.5 L astern of it and
+    /// 1 L out to windward (the owner's renders review, then his lengthening): seat 0 is in it from the end of the tack
+    /// and on every tick of the next 10 s, astern of the lee-bower or beside her. Holding her heading (her autohelm
+    /// pinches through the header rather than bearing away onto the lee-bower's stern, so she keeps clear), she pays in
+    /// pinching. Her loss is measured upwind over 10 s.
     ///
-    /// Before the reshape this started from 3 L ahead, seat 0 then 1–2.5 L astern of the lee-bower in #298's trapezoid
-    /// and headed on every tick of the 10 s. From there she is now never in the zone (it ends at the lee-bower's stern),
-    /// so the scene moved to the overlapped lee-bow, and "headed every tick" became "in the zone for 4 s or more": a
-    /// bound zone beside the hull is crossed, not sat in. The loss band (0.6–1.2 L) is unchanged.
+    /// The reshape without the run astern moved this scene to 2.5 L ahead (from 3 L seat 0 never reached a zone that
+    /// ended at the lee-bower's stern) and to "in the zone 4 s or more"; the lengthening brings back the 3 L lee-bow
+    /// and "every tick". The loss band (0.6–1.2 L) is unchanged.
     @Test func leeBowedBoatLosesSpeedAgainstACleanTwin() throws {
-        let (ahead, leeward) = (2.5, 1.5)
+        let (ahead, leeward) = (3.0, 1.5)
         let leeBowed = try race(ahead: ahead, leeward: leeward, together: true)
         let clean = try race(ahead: ahead, leeward: leeward, together: false)
         // One step so both autohelms engage on their grooves, then seat 1 tacks.
@@ -62,31 +61,31 @@ import Testing
         #expect(!lee.isTacking && lee.tack == .starboard, "she has tacked onto starboard, seat 0's tack")
         let offset = leeBowed.boats[0].position - lee.position
         let (astern, toWindward) = (-offset.dot(lee.forward) / hullLength, offset.dot(lee.forward.rightPerp) / hullLength)
-        #expect(astern > 0.75 && astern < 1.5 && toWindward > 0 && toWindward < 1.2,
+        #expect(astern > 1 && astern < 2.5 && toWindward > 0 && toWindward < 1.2,
                 "the lee-bowed boat is \(astern) L astern of her and \(toWindward) L to windward")
 
         // 10 s from there, against the twin.
         let (from, twinFrom) = (leeBowed.boats[0].position, clean.boats[0].position)
         // Upwind: since #377 the backwind is a header, so she loses height as well as speed.
         let course = try OpenWater.windDirection()
-        var inZoneTicks = 0, firstInZone: Int?
-        for tick in 0..<(10 * Race.tickRate) {
+        #expect(try #require(leeBowed.shadowCone(ofSeat: 1)).isInBackwind(leeBowed.boats[0].position), "in her backwind")
+        var inZoneTicks = 0
+        for _ in 0..<(10 * Race.tickRate) {
             leeBowed.step()
             clean.step()
             let zone = try #require(leeBowed.shadowCone(ofSeat: 1))
             if zone.isInBackwind(leeBowed.boats[0].position) {
                 inZoneTicks += 1
-                if firstInZone == nil { firstInZone = tick }
-                // Beside her, between her mast and her stern, and to windward: the upwash zone.
+                // Beside her or astern of her, between her mast and the zone's aft end, and to windward: the upwash zone.
                 let off = leeBowed.boats[0].position - leeBowed.boats[1].position
-                let along = off.dot(leeBowed.boats[1].forward), shadow = leeBowed.boatClass.windShadow
-                #expect(along > shadow.sternCorner.y && along < shadow.bowY - (shadow.backwindUpwash?.mastFromBow ?? 0))
+                let along = off.dot(leeBowed.boats[1].forward)
+                let extent = try #require(leeBowed.boatClass.windShadow.upwashExtent)
+                #expect(along > extent.aft && along < extent.fore)
                 #expect(off.dot(leeBowed.boats[1].forward.rightPerp) > 0)
             }
             #expect(clean.boats[0].shadow == 1 && clean.header(ofSeat: 0) == 0)
         }
-        #expect((firstInZone ?? .max) < 2 * Race.tickRate, "she sails into the zone within 2 s: \(String(describing: firstInZone))")
-        #expect(inZoneTicks >= 4 * Race.tickRate, "in her backwind \(inZoneTicks) of \(10 * Race.tickRate) ticks")
+        #expect(inZoneTicks == 10 * Race.tickRate, "in her backwind \(inZoneTicks) of \(10 * Race.tickRate) ticks")
         let events = leeBowed.drainEvents()
         // She keeps clear (#377): her autohelm never follows the header down onto the lee-bower's stern.
         #expect(!events.contains { if case .ruleCall = $0.kind { true } else { false } }, "no contact, no call")
@@ -102,8 +101,8 @@ import Testing
     /// backwind then costs nothing, so what is left is the ribbons and the tack). The owner's reference (#377, from
     /// #376): today's box cost 1.50 L, and the header about +5% of it. Print only, under the fleet runs' switch
     /// (`ShadowModelFleetTests`, `REGATTA_SHADOW_FLEET=1`). Since the header's zone is the upwash beside the lee-bower's
-    /// sail, the 3 L geometries leave seat 0 astern of it (the header costs nothing there); 2.5 and 2.25 L are the
-    /// overlapped lee-bows, where it acts (`leeBowedBoatLosesSpeedAgainstACleanTwin`).
+    /// sail, run on 1.5 L astern of her stern, the 3 and 3.25 L geometries sit seat 0 in its run astern, fading towards its
+    /// end; 2.5 and 2.25 L are the overlapped lee-bows, nearer her side.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["REGATTA_SHADOW_FLEET"] == "1"))
     func leeBowCostOverTwentySeconds() throws {
         let data = try #require(try BoatClassFile.bundledData(id: "skiff", version: 6))
@@ -115,7 +114,7 @@ import Testing
         let box = 1.50
         let course = try OpenWater.windDirection()
         for (ahead, leeward) in [(3.0, 1.5), (3.25, 1.5), (2.5, 1.5), (2.25, 1.5)] {
-            var lost: [String: (at5: Double, at20: Double, cleanDMG: Double, calls: Int)] = [:]
+            var lost: [String: (at5: Double, at20: Double, cleanDMG: Double, calls: Int, headed: Int)] = [:]
             for (name, file) in [("header 8°", nil), ("header 0°", unheaded)] as [(String, BoatClassFile?)] {
                 let leeBowed = try race(ahead: ahead, leeward: leeward, together: true, boatClassFile: file)
                 let clean = try race(ahead: ahead, leeward: leeward, together: false, boatClassFile: file)
@@ -130,10 +129,11 @@ import Testing
                 }
                 _ = leeBowed.drainEvents()
                 let (from, twinFrom) = (leeBowed.boats[0].position, clean.boats[0].position)
-                var at5 = 0.0
+                var at5 = 0.0, headed = 0
                 for tick in 1...(20 * Race.tickRate) {
                     leeBowed.step()
                     clean.step()
+                    if leeBowed.header(ofSeat: 0) > 0 { headed += 1 }
                     if tick == 5 * Race.tickRate {
                         at5 = (OpenWater.madeGood(clean, from: twinFrom, direction: course)
                                - OpenWater.madeGood(leeBowed, from: from, direction: course)) / hullLength
@@ -142,13 +142,14 @@ import Testing
                 let twin = OpenWater.madeGood(clean, from: twinFrom, direction: course)
                 let at20 = (twin - OpenWater.madeGood(leeBowed, from: from, direction: course)) / hullLength
                 let calls = leeBowed.drainEvents().filter { if case .ruleCall = $0.kind { true } else { false } }.count
-                lost[name] = (at5, at20, twin / hullLength, calls)
+                lost[name] = (at5, at20, twin / hullLength, calls, headed)
             }
             for name in ["header 8°", "header 0°"] {
                 let l = lost[name]!
                 print(String(format: "LEE-BOW %.2f L ahead, %.2f L to leeward, %@: DMG lost at 5 s %.3f L, over 20 s %.3f L "
-                             + "(%.1f%% of the clean twin's %.2f L; %+.0f%% of #376's box %.2f L); rule calls %d",
-                             ahead, leeward, name, l.at5, l.at20, l.at20 / l.cleanDMG * 100, l.cleanDMG, (l.at20 / box - 1) * 100, box, l.calls))
+                             + "(%.1f%% of the clean twin's %.2f L; %+.0f%% of #376's box %.2f L); rule calls %d; headed %.1f s",
+                             ahead, leeward, name, l.at5, l.at20, l.at20 / l.cleanDMG * 100, l.cleanDMG, (l.at20 / box - 1) * 100, box, l.calls,
+                             Double(l.headed) / Double(Race.tickRate)))
             }
             let header = lost["header 8°"]!.at20 - lost["header 0°"]!.at20
             print(String(format: "LEE-BOW %.2f L ahead: the header's own cost over 20 s %.3f L (%.1f%% of the clean twin's DMG)",

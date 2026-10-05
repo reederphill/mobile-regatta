@@ -232,17 +232,22 @@ import Testing
             (of: #""mastStationFromBow": 0.25,"#, with: #""mastStationFromBow": 0.3,"#),
             (of: #""upwashReachHullLengths": 1.0,"#, with: #""upwashReachHullLengths": 1.5,"#),
             (of: #""upwashEndFadeHullLengths": 0.1,"#, with: #""upwashEndFadeHullLengths": 0.2,"#),
+            (of: #""upwashAftHullLengths": 1.5,"#, with: #""upwashAftHullLengths": 0.5,"#),
         ], version: 5)).content.windShadow
         #expect(edited.header?.angle == deg2rad(5) && edited.ribbons.peak == 0.3)
         #expect(edited.backwindFloorSpeed == metresPerSecond(knots: 3))
         let upwash = try #require(edited.backwindUpwash)
         #expect(abs(upwash.mastFromBow - 0.3 * hullLength) < 1e-12 && abs(upwash.reach - 1.5 * hullLength) < 1e-12
-                && abs(upwash.endFade - 0.2 * hullLength) < 1e-12)
+                && abs(upwash.endFade - 0.2 * hullLength) < 1e-12 && abs((upwash.astern ?? 0) - 0.5 * hullLength) < 1e-12)
         // Its zone reaches as far as the file says: 1.25 L out from her side is in the edited zone, not ilca-dinghy@5's.
         let ilca5 = try BoatClassFile.bundled(id: Fixtures.classID, version: 5).content.windShadow
         let wide = Vec2(edited.sternCorner.x + 1.25 * hullLength, edited.sternCorner.y + 0.3 * hullLength)
         #expect(ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: edited).isInBackwind(wide))
         #expect(!ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: ilca5).isInBackwind(wide))
+        // And as far astern: 1 L astern of her stern is in ilca-dinghy@5's (1.5 L), not the edited one's (0.5 L).
+        let astern = Vec2(edited.sternCorner.x + 0.2 * hullLength, edited.sternCorner.y - hullLength)
+        #expect(!ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: edited).isInBackwind(astern))
+        #expect(ShadowCone(apex: .zero, apparentWindDirection: 0, heading: 0, windwardSide: .starboard, shadow: ilca5).isInBackwind(astern))
 
         // ilca-dinghy@3 keeps #79's band (no inner length); version 4 (#298) casts the trapezoid, its corner read off
         // the hull outline (0.63 m out, 0.15 L), 1 L wide, 2 L on its outer edge and 1.5 L on its inner one.
@@ -291,10 +296,10 @@ import Testing
         }
         #expect(trail.wake.levels[0] == 0 && trail.wake.points[0].allSatisfy { $0.peak == 0 && $0.scale == 0 })
 
-        // The overlapped lee-bow (`WakeRibbonsTests.backwindTurnsTheReceiversWindTowardsHerBow`): 4 s on, seat 0 is
-        // beside her, in the upwash.
-        let race = try WakeRibbonsTests.leeBow(ahead: 2.5).leeBowed
-        for _ in 0..<(4 * Race.tickRate) { race.step() }
+        // The lee-bow (`WakeRibbonsTests.backwindTurnsTheReceiversWindTowardsHerBow`): 3 s on, seat 0 is in the
+        // lee-bower's upwash, astern of her.
+        let race = try WakeRibbonsTests.leeBow().leeBowed
+        for _ in 0..<(3 * Race.tickRate) { race.step() }
         #expect(race.header(ofSeat: 0) > deg2rad(1) && race.backwindSail(ofSeat: 1) == 1)
         _ = race.apply(BoatInput(rudder: 0 as Int8, ease: true), seat: 1, atTick: race.tick + 1)
         race.step()

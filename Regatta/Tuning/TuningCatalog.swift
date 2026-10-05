@@ -228,7 +228,7 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "backwind", title: "Backwind",
-                note: "The zone astern of a boat on her windward quarter (#298), from skiff@6 a header (#377): a boat in it has her wind turned towards her bow, stacked up to a cap, after a lag, with an optional lull. Cast only off a working sail, as hard as it works; it fades out on its old side over the fade time before building on the new one, and she casts none below the floor speed, building in over the span above it. Its shape: how far astern it reaches (hull lengths; its length scales with her speed, full size at the speed below), and the true wind angle from which she is running and casts none. From skiff@6 the header's zone is the upwash beside her sail instead: on her windward side from her mast (a share of her length back from her bow) to her stern, full at her side and fading to nothing its reach out (hull lengths), fading in at its mast and stern ends; it doesn't grow with her speed.",
+                note: "The zone astern of a boat on her windward quarter (#298), from skiff@6 a header (#377): a boat in it has her wind turned towards her bow, stacked up to a cap, after a lag, with an optional lull. Cast only off a working sail, as hard as it works; it fades out on its old side over the fade time before building on the new one, and she casts none below the floor speed, building in over the span above it. Its shape: how far astern it reaches (hull lengths; its length scales with her speed, full size at the speed below), and the true wind angle from which she is running and casts none. From skiff@6 the header's zone is the upwash beside her sail instead: on her windward side from her mast (a share of her length back from her bow) past her stern to its length astern of her stern (hull lengths), full at her side and fading to nothing its reach out (hull lengths), fading in at its mast end and from full at her stern to nothing at its aft end; it doesn't grow with her speed.",
                 applies: .nextRace,
                 sliders: [
                     TuningSlider(.boatClass, "/windShadow/header/degrees", "Header", unit: "°", 0...20, step: 0.5),
@@ -240,7 +240,8 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/windShadow/backwind/floorBuildKnots", "Builds in over", unit: " kn", 0...6, step: 0.1),
                     TuningSlider(.boatClass, "/windShadow/backwind/mastStationFromBow", "Mast back from bow", 0...0.9, step: 0.01),
                     TuningSlider(.boatClass, "/windShadow/backwind/upwashReachHullLengths", "Reach to windward", 0.1...3, step: 0.05),
-                    TuningSlider(.boatClass, "/windShadow/backwind/upwashEndFadeHullLengths", "Fades in at its ends over", 0...0.5, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/backwind/upwashEndFadeHullLengths", "Fades in at its mast over", 0...0.5, step: 0.01),
+                    TuningSlider(.boatClass, "/windShadow/backwind/upwashAftHullLengths", "Runs on astern of her stern", 0.1...3, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/innerLengthHullLengths", "Short edge length", 0.25...4, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/lengthHullLengths", "Long edge length", 0.5...4, step: 0.05),
                     TuningSlider(.boatClass, "/windShadow/backwind/widthHullLengths", "Width at her stern", 0.25...3, step: 0.05),

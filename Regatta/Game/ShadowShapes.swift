@@ -15,8 +15,8 @@ nonisolated enum ShadowShapes {
     /// skiff@4's shape, the stern one for skiff@5's. Nil for a class with #79's band, which draws no zone.
     ///
     /// For a class whose header's zone is the upwash beside her sail (#377, `BoatClass.WindShadow.upwashExtent`), the
-    /// rectangle of it: from her side to its reach out, from her stern forward to her mast, not scaled (it is bound to
-    /// her, her speed doesn't stretch it).
+    /// rectangle of it: from her side to its reach out, from its aft end (astern of her stern, or her stern) forward to
+    /// her mast, not scaled (it is bound to her, her speed doesn't stretch it).
     static func backwindLocal(_ shadow: BoatClass.WindShadow, scale: Double = 1) -> [Vec2]? {
         if let zone = shadow.upwashExtent {
             let out = zone.out + zone.reach

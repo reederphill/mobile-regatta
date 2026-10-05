@@ -379,9 +379,9 @@ struct LogFeeder {
     /// snapshot exactly. Exported with a wake formed, seat 0 headed by the lee-bower and the lee-bower's backwind fading
     /// as she eases, the import continues bit for bit.
     @Test func ribbonsAndBackwindStateRoundTrip() throws {
-        // The overlapped lee-bow (2.5 L ahead): seat 0 beside the lee-bower, in her upwash zone, 4 s on (#377).
-        let original = try WakeRibbonsTests.leeBow(ahead: 2.5).leeBowed
-        for _ in 0..<(4 * Race.tickRate) { original.step() }
+        // The lee-bow (3 L ahead): seat 0 in the lee-bower's upwash zone, astern of her, 3 s on (#377).
+        let original = try WakeRibbonsTests.leeBow().leeBowed
+        for _ in 0..<(3 * Race.tickRate) { original.step() }
         _ = original.apply(BoatInput(rudder: 0 as Int8, ease: true), seat: 1, atTick: original.tick + 1)
         for _ in 0..<10 { original.step() }
         #expect(original.header(ofSeat: 0) > 0)
@@ -392,7 +392,7 @@ struct LogFeeder {
         #expect(snapshot.ribbonPoints == original.wake.points && snapshot.emissionLevels == original.wake.levels)
         #expect(snapshot.headers.count == 2 && snapshot.backwind.levels.count == 2)
 
-        let copy = try WakeRibbonsTests.leeBow(ahead: 2.5).clean
+        let copy = try WakeRibbonsTests.leeBow().clean
         try copy.importSnapshot(snapshot)
         #expect(copy.wake == original.wake)
         #expect(copy.header(ofSeat: 0) == original.header(ofSeat: 0))

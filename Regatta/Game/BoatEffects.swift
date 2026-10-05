@@ -189,7 +189,7 @@ private struct EffectArt {
                                shadow.backwindLength, shadow.backwindWidth, shadow.backwindInnerLength ?? -1,
                                shadow.sternCorner.x, shadow.sternCorner.y, shadow.backwindSternSlant ? 1 : 0,
                                shadow.bowY, shadow.upwashExtent == nil ? -1 : 1, shadow.backwindUpwash?.mastFromBow ?? -1, shadow.backwindUpwash?.reach ?? -1,
-                               shadow.backwindUpwash?.endFade ?? -1],
+                               shadow.backwindUpwash?.endFade ?? -1, shadow.backwindUpwash?.astern ?? -1],
                       ppm: ppm, hatch: [style.hatchSpacing, style.hatchLineWidth, style.backwindFeather])
         if let art = cache[key] { return art }
         let art = EffectArt(shadow: shadow, ppm: ppm, style: style)
@@ -331,17 +331,20 @@ private struct EffectArt {
 
 extension EffectArt {
     /// Fades the upwash zone's hatch (#377) as core's envelope fades (`BoatClass.WindShadow.upwashShare(out:along:)`):
-    /// full at her side, straight down to `backwindFadeFloor` at its reach out, and down to it over the end fades at her
-    /// mast and her stern. Column by column out from her side, a texel wide, each a gradient along her through the
-    /// share's knots (its ends, and the ends of its fades), in the art's frame (starboard tack).
+    /// full at her side, straight down to `backwindFadeFloor` at its reach out, down to it over the end fade at her
+    /// mast, and from her stern down to it at its aft end (or over the end fade at her stern when it ends there). Column
+    /// by column out from her side, a texel wide, each a gradient along her through the share's knots (its ends, and
+    /// the ends of its fades), in the art's frame (starboard tack).
     fileprivate static func fadeUpwash(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat, margin: CGFloat) {
         guard let zone = shadow.upwashExtent, let upwash = shadow.backwindUpwash else { return }
         let space = CGColorSpaceCreateDeviceRGB()
         let floor = Double(backwindFadeFloor)
-        let middle = (zone.aft + zone.fore) / 2
-        // The share is straight between these along her: nothing at her stern, full past the fade, full to the fade
-        // before her mast, nothing at it (the fades meet in the middle on a short zone).
-        let knots = [zone.aft, min(zone.aft + upwash.endFade, middle), max(zone.fore - upwash.endFade, middle), zone.fore]
+        // The share is straight between these along her: nothing at its aft end, full from her stern (or past the
+        // fade in from her stern when it ends there), full to the fade before her mast, nothing at it (the fades meet
+        // in the middle on a short zone).
+        let full = upwash.astern == nil ? zone.aft + upwash.endFade : zone.stern
+        let middle = upwash.astern == nil ? (zone.aft + zone.fore) / 2 : max(zone.stern, (zone.stern + zone.fore) / 2)
+        let knots = [zone.aft, min(full, middle), max(zone.fore - upwash.endFade, middle), zone.fore]
         let length = zone.fore - zone.aft
         guard length > 0 else { return }
         let step: CGFloat = 1.0 / 3

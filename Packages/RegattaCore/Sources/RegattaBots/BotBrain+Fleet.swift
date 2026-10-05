@@ -82,7 +82,8 @@ extension BotBrain {
         static let leeBowRange = 8.0
         static let leeBowAstern = 0.75
         /// For a class whose backwind is the upwash beside her sail (#377, `BoatClass.WindShadow.upwashExtent`): the
-        /// zone lies along her hull, from her mast back to her stern, so a lee-bow lands overlapped, not clear astern.
+        /// zone lies along her hull, from her mast back past her stern (to `upwashAftHullLengths` astern of it), so a
+        /// lee-bow lands beside her or close astern, not only clear astern.
         /// Her tack lands when the boat is in that zone and this many lengths or more to windward of her centre line
         /// (clear of her hull, centre to centre) at every one of `tackOnWindSeconds`, in place of `leeBowAstern`.
         static let leeBowAbeam = 0.5
@@ -272,7 +273,7 @@ extension BotBrain {
     /// Whether her tack now would land her on `other`'s lee bow (`tackForecast`): the boat in her backwind and
     /// `leeBowAstern` lengths or more astern of her at every one of `tackOnWindSeconds`. The lee-bow's second gate.
     /// For a class whose backwind is the upwash beside her sail (#377), the boat in it and `leeBowAbeam` lengths or more
-    /// to windward of her instead: that zone lies alongside her, so the lee-bow is overlapped.
+    /// to windward of her instead: that zone lies alongside her and on astern, so the lee-bow may be overlapped.
     func leeBowLands(_ b: SeatView.OwnBoat, _ view: SeatView, _ other: SeatView.OtherBoat) -> Bool {
         guard let forecast = tackForecast(b, view, on: other) else { return false }
         let length = view.boatClass.hull.length

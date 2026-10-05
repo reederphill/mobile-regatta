@@ -169,18 +169,23 @@ import Testing
         }
     }
 
-    /// The header's zone on skiff@6 is the upwash beside her sail (the owner's renders review; research note §2): on
-    /// her windward side, along her hull from her mast (0.4 L back from her bow) to her stern, full at her side and
-    /// fading straight to nothing 1 L out, fading in over 0.1 L at each end. Nothing to leeward, ahead of her mast, astern
-    /// of her stern or past 1 L out; bound to her (her speed doesn't stretch it), and it flips with her windward side.
+    /// The header's zone on skiff@6 is the upwash beside her sail (the owner's renders review; research note §2), run on
+    /// astern (the owner's lengthening): on her windward side, along her hull from her mast (0.4 L back from her bow) to
+    /// her stern and on 1.5 L astern of it, full at her side and fading straight to nothing 1 L out; fading in over 0.1 L
+    /// at her mast, and straight from full at her stern to nothing 1.5 L astern of it. Nothing to leeward, ahead of her
+    /// mast, more than 1.5 L astern of her stern or past 1 L out; bound to her (her speed doesn't stretch it), and it
+    /// flips with her windward side.
     @Test func headerZoneIsTheUpwashBesideHerSail() throws {
         let shadow = RaceFiles.defaults.boatClass.content.windShadow
         let length = RaceFiles.defaults.boatClass.content.hull.length
         let upwash = try #require(shadow.backwindUpwash)
         #expect(shadow.header != nil)
         #expect(abs(upwash.mastFromBow - 0.4 * length) < 1e-12 && abs(upwash.reach - length) < 1e-12
-                && abs(upwash.endFade - 0.1 * length) < 1e-12)
+                && abs(upwash.endFade - 0.1 * length) < 1e-12 && abs((upwash.astern ?? 0) - 1.5 * length) < 1e-12)
         let side = shadow.sternCorner.x, stern = shadow.sternCorner.y, mast = shadow.bowY - 0.4 * length
+        let astern = 1.5 * length
+        let extent = try #require(shadow.upwashExtent)
+        #expect(abs(extent.aft - (stern - astern)) < 1e-12 && extent.stern == stern && abs(extent.fore - mast) < 1e-12)
         let e = 1e-6
         for speed in [metresPerSecond(knots: 6), metresPerSecond(knots: 9), metresPerSecond(knots: 14)] {
             for windward in [Tack.starboard, .port] {
@@ -193,8 +198,8 @@ import Testing
                     cone.backwindEnvelope(at: point(x, y, apex: apex, heading: heading, windward: windward))
                 }
                 let middle = (stern + mast) / 2
-                // Full at her windward side between her mast and her stern, past the end fades.
-                for y in [stern + 0.1 * length + e, middle, mast - 0.1 * length - e] {
+                // Full at her windward side from her stern to the fade before her mast.
+                for y in [stern, stern + 0.1 * length, middle, mast - 0.1 * length - e] {
                     #expect(abs(at(side + e, y) - 1) < 1e-5, "full at her side, \(y) m forward")
                 }
                 // Fading straight out to windward, to nothing 1 L out.
@@ -202,18 +207,25 @@ import Testing
                 #expect(abs(at(side + 0.5 * length, middle) - 0.5) < 1e-9)
                 #expect(at(side + length - e, middle) > 0 && at(side + length - e, middle) < 1e-5)
                 #expect(at(side + length + e, middle) == 0 && at(side + 2 * length, middle) == 0, "nothing past 1 L out")
-                // Fading in at its ends, inside them: half at 0.05 L inside each.
-                #expect(abs(at(side + e, mast - 0.05 * length) - 0.5) < 1e-5 && abs(at(side + e, stern + 0.05 * length) - 0.5) < 1e-5)
-                // Nothing ahead of her mast, astern of her stern (well astern above all: where #298's trapezoid lay),
-                // to leeward, or inside her side line.
+                // Fading in at her mast: half 0.05 L inside it.
+                #expect(abs(at(side + e, mast - 0.05 * length) - 0.5) < 1e-5)
+                // Astern of her stern, fading straight to nothing 1.5 L astern: half at 0.75 L, a quarter at 1.125 L; out
+                // to windward as alongside.
+                #expect(abs(at(side + e, stern - 0.5 * astern) - 0.5) < 1e-5, "half 0.75 L astern of her stern")
+                #expect(abs(at(side + e, stern - 0.75 * astern) - 0.25) < 1e-5, "a quarter 1.125 L astern")
+                #expect(abs(at(side + 0.5 * length, stern - 0.5 * astern) - 0.25) < 1e-9, "half out, half way astern")
+                #expect(at(side + e, stern - astern + e) > 0 && at(side + e, stern - astern + e) < 1e-5)
+                #expect(at(side + length + e, stern - 0.5 * length) == 0, "nothing past 1 L out astern of her either")
+                // Nothing ahead of her mast, more than 1.5 L astern of her stern, to leeward, or inside her side line.
                 #expect(at(side + 0.5 * length, mast + e) == 0 && at(side + 0.5 * length, shadow.bowY) == 0, "ahead of the mast")
-                #expect(at(side + 0.5 * length, stern - e) == 0, "astern of her stern")
-                #expect(at(side + 0.5 * length, stern - 0.5 * length) == 0 && at(side + 0.5 * length, stern - 1.5 * length) == 0,
-                        "well astern")
+                #expect(at(side + e, stern - astern - e) == 0 && at(side + 0.5 * length, stern - 2 * length) == 0,
+                        "more than 1.5 L astern of her stern")
                 #expect(at(-side - 0.5 * length, middle) == 0 && at(-side - e, middle) == 0, "to leeward")
                 #expect(at(side - e, middle) == 0 && at(0, middle) == 0, "inside her side line")
+                #expect(at(side - e, stern - 0.5 * length) == 0, "inside her side line astern of her")
                 #expect(cone.isInBackwind(point(side + 0.5 * length, middle, apex: apex, heading: heading, windward: windward)))
-                #expect(!cone.isInBackwind(point(side + 0.5 * length, stern - 0.5 * length, apex: apex, heading: heading, windward: windward)))
+                #expect(cone.isInBackwind(point(side + 0.5 * length, stern - 0.5 * length, apex: apex, heading: heading, windward: windward)))
+                #expect(!cone.isInBackwind(point(side + 0.5 * length, stern - 2 * length, apex: apex, heading: heading, windward: windward)))
             }
         }
         // Its header: 8° full at her side, 4° half way out, none 1 L out.
@@ -240,7 +252,7 @@ import Testing
         // A quarter of the upwash's reach out from her side, half way between her stern and her mast: 0.75 of it.
         let extent = try #require(shadow.upwashExtent)
         func p(_ z: ShadowCone) -> Vec2 {
-            z.apex + z.windward * (extent.out + 0.25 * extent.reach) + z.forward * ((extent.aft + extent.fore) / 2)
+            z.apex + z.windward * (extent.out + 0.25 * extent.reach) + z.forward * ((extent.stern + extent.fore) / 2)
         }
         for speed in [0, 0.5, floor - 1e-9, floor] {
             let z = zone(speed: speed)

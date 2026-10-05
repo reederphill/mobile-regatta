@@ -198,12 +198,8 @@ import Testing
 
     static let fleetSeeds: [UInt64] = [3, 11, 20]
 
-    /// The class the lee-bow scenes sail (#377): skiff@5, whose backwind is #298's trapezoid astern of her stern. On
-    /// skiff@6 the backwind's zone is the upwash beside her sail, from her mast back to her stern (the owner's renders
-    /// review), and no tack from a crossing she can just make lands the starboard boat in it: every forecast landing in
-    /// the upwash on seeds 3, 11 and 20 (2–7 L ahead, 1–3.5 L to leeward) is one she couldn't cross, about 0.2–0.6 L
-    /// abeam. So a bot on skiff@6 doesn't lee-bow (`leeBowsInsteadOfDuckingWhenPossible` asserts it); the lee-bow's gates
-    /// and play are tested on skiff@5, where a landing exists.
+    /// skiff@5, whose backwind is #298's trapezoid astern of her stern (#377): the class for the lee-bow's trapezoid
+    /// gate (`FleetTactics.leeBowAstern`), which skiff@6's upwash zone doesn't read (`leeBowsInsteadOfDuckingWhenPossible`).
     static let trapezoidClass = try! BoatClassFile.bundled(id: "skiff", version: 5).ref
 
     /// #234 acceptance: a National bot ahead covers a boat that tacks away (#223: "a bot ahead covers a boat that tacks
@@ -252,7 +248,7 @@ import Testing
     /// `justTacked`: she tacked onto port a second ago, well inside her tack interval (`Tactics.tackInterval`).
     static func portMeetsStarboard(seed: UInt64, ahead: Double, leeward: Double = 3.5, engagement: Double = 1,
                                    seconds: Double = 12, justTacked: Bool = false,
-                                   boatClass: FileRef = trapezoidClass) throws
+                                   boatClass: FileRef = RaceFiles.defaults.boatClass.ref) throws
         -> (tapped: Int?, kinds: [RaceEvent.Kind], race: Race, closest: Double, backwinded: Bool,
             tacked: (ahead: Double, leeward: Double)?, gates: LeeBowGates) {
         let scene = Scene(seed: seed, boatClass: boatClass)
@@ -306,17 +302,22 @@ import Testing
     /// #349 widened the grid (312 starts, 0.5 to 6.5 ahead and 0.5 to 4 to leeward, same seeds): 46 landings, every one
     /// crossable, so `canJustCross` stays as a safety gate that refuses nothing here today.
     ///
-    /// #377: sailed on skiff@5 (`trapezoidClass`). On skiff@6, whose backwind is the upwash beside her sail, the same
-    /// port bot meeting the same starboard boat never reads a landing she can cross, so she doesn't lee-bow it: the
-    /// starboard boat never sits in her backwind, and there is no rule call.
+    /// #377: on skiff@6 the backwind's zone is the upwash beside her sail, run on 1.5 L astern of her stern (the owner's
+    /// lengthening), and her gate is `FleetTactics.leeBowAbeam`. Without the run astern no crossing she could just make
+    /// landed the starboard boat in it; with it she lee-bows again, from 5.5 L ahead (at 5.8 her forecast never lands seed 3's
+    /// boat in the zone, and she sails on). On a probe grid (3–7 L ahead by 0.5, 1–3.5 L to leeward, seeds 3, 11
+    /// and 20) 12 starts land crossable lee-bows, about 2.4 L ahead and 0.7 L to leeward once tacked, never closer than
+    /// 1.7 L, no rule call. skiff@5's trapezoid (`trapezoidClass`, `FleetTactics.leeBowAstern`) lee-bows from 5.8 L as
+    /// before.
     @Test func leeBowsInsteadOfDuckingWhenPossible() throws {
         for seed in Self.fleetSeeds {
-            let upwash = try Self.portMeetsStarboard(seed: seed, ahead: 5.8, boatClass: RaceFiles.defaults.boatClass.ref)
-            #expect(BotConductTests.calls(upwash.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(upwash.kinds))")
-            #expect(!upwash.gates.landedCrossing && !upwash.backwinded, "seed \(seed): skiff@6 has no lee-bow from a crossing")
+            let trapezoid = try Self.portMeetsStarboard(seed: seed, ahead: 5.8, boatClass: Self.trapezoidClass)
+            #expect(BotConductTests.calls(trapezoid.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(trapezoid.kinds))")
+            #expect(trapezoid.tacked != nil && trapezoid.backwinded && trapezoid.gates.landedCrossing && trapezoid.closest > 1,
+                    "seed \(seed): skiff@5 lee-bows from 5.8 L")
         }
         for seed in Self.fleetSeeds {
-            let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.8)
+            let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.5)
             #expect(BotConductTests.calls(lee.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(lee.kinds))")
             let tacked = try #require(lee.tacked, "seed \(seed): she didn't lee-bow")
             #expect(tacked.ahead > 1 && tacked.ahead < 3.5, "seed \(seed): her tack done, she's \(tacked.ahead) L ahead of her")
@@ -342,12 +343,11 @@ import Testing
     /// (`FleetTactics.leeBowInsideTackInterval`). The port bot of `leeBowsInsteadOfDuckingWhenPossible`, having tacked
     /// onto port a second before, still lee-bows the starboard boat she can just cross, clear and with no rule call. Her
     /// tack on a boat's wind is hers to choose, so it waits for the interval: crossing well ahead of the starboard boat
-    /// a second after a tack (`crossingAhead`), she holds port past the chance. The lee-bow sails skiff@5
-    /// (`trapezoidClass`, #377).
+    /// a second after a tack (`crossingAhead`), she holds port past the chance. From 5.5 L ahead on skiff@6 (#377).
     @Test func leeBowAnswersInsideTheTackInterval() throws {
         #expect(BotBrain.FleetTactics.leeBowInsideTackInterval)
         for seed in Self.fleetSeeds {
-            let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.8, seconds: 8, justTacked: true)
+            let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true)
             #expect(BotConductTests.calls(lee.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(lee.kinds))")
             #expect(lee.tapped != nil, "seed \(seed): she didn't lee-bow inside her tack interval")
             #expect(lee.tacked != nil && lee.backwinded, "seed \(seed): the starboard boat sat in her backwind")
@@ -481,10 +481,10 @@ import Testing
 
     /// #234 acceptance (#223: "targets by tactical value only, blind to human or bot"): a port bot meeting a starboard
     /// boat she can lee-bow, with another starboard boat near, chooses the same target, and decides the same, whichever
-    /// of the two a human sails. On skiff@5 (`trapezoidClass`, #377: skiff@6 has no lee-bow from a crossing).
+    /// of the two a human sails.
     @Test func targetIgnoresHumanFlag() throws {
         func play(_ seats: [SeatKind]) throws -> (play: BotBrain.FleetPlay?, decision: BotDecision) {
-            let scene = Scene(seats: seats, seed: 9, boatClass: Self.trapezoidClass)
+            let scene = Scene(seats: seats, seed: 9)
             let starboard = scene.centre
             let other = scene.offStarboardBoat(at: starboard, ahead: -1, leeward: -4)
             let port = scene.offStarboardBoat(at: starboard, ahead: 4, leeward: 1.75)
@@ -551,15 +551,14 @@ import Testing
 
 extension BotTacticsTests {
     /// #377: her tack forecast reads her ribbons and her backwind as the sim then applies them. A National port bot
-    /// sailing at a starboard boat (to tack on its wind: from 7 ahead and 2 to leeward; into her backwind: from 3 ahead
-    /// and 2 to leeward), her forecast at 4, 5 and 6 s once it says her tack would land (for the backwind, once it has the
-    /// boat in her zone at 5 and 6 s: the upwash beside her sail is crossed, not sat in, and is reached only from
-    /// closer than she would choose, so this is a tap the test makes, not a lee-bow); then she taps at once and the race
+    /// sailing at a starboard boat (to tack on its wind: from 7 ahead and 2 to leeward; into her backwind, the lee-bow:
+    /// from 5.5 ahead and 3.5 to leeward, `leeBowsInsteadOfDuckingWhenPossible`'s), her forecast at 4, 5 and 6 s once it
+    /// says her tack would land; then she taps at once and the race
     /// sails it: at each of those seconds its factor is her ribbons' and zone's within 0.2; from 5 s on its backwind flag
     /// is what the race's zone says, and at 6 s both have her in her shadow or neither.
     @Test func tackForecastReadsRibbonsAndBackwind() throws {
         for seed in Self.fleetSeeds {
-            for (ahead, leeward, backwind) in [(7.0, 2.0, false), (3.0, 2.0, true)] {
+            for (ahead, leeward, backwind) in [(7.0, 2.0, false), (5.5, 3.5, true)] {
                 let scene = Scene(seed: seed)
                 let port = scene.offStarboardBoat(at: scene.centre, ahead: ahead, leeward: leeward)
                 try scene.place([scene.beating(.port, at: port), scene.beating(.starboard, at: scene.centre)])
@@ -575,7 +574,7 @@ extension BotTacticsTests {
                     brain.observe(view.own, view)
                     let other = try #require(view.others.first { $0.seat == 1 })
                     forecast = try #require(brain.tackForecast(view.own, view, on: other))
-                    let lands = backwind ? forecast.dropFirst().allSatisfy { $0.backwind }
+                    let lands = backwind ? brain.leeBowLands(view.own, view, other)
                         : forecast.reduce(0) { $0 + $1.factor } / Double(forecast.count) < 0.9
                     if lands { break }
                 }
