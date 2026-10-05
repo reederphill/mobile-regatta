@@ -1,6 +1,6 @@
 {
-  "log" : "rules.racelog.json",
-  "freezeTick" : -1255,
+  "log" : "fleet.racelog.json",
+  "freezeTick" : 4880,
   "camera" : "boat",
   "vision" : "tritanopia",
   "view" : "courseUp",

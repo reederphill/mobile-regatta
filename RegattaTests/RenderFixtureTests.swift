@@ -153,10 +153,10 @@ import UIKit
         #expect(session.scene.showsHintLeader)
     }
 
-    /// The rule-cue fixtures (#123) through every filter, on `rules.racelog.json` (the bot race the fleet fixtures sailed
-    /// until #377, whose prestart still replays to these calls): `rules-call` draws two rule-call lines, the arc counting
-    /// your started turn's complete deadline and glows; `rules-penalty` your unstarted turn's arc, both glows and
-    /// the HUD's live Turn notice. Every older fixture draws no rule cue, so its reference doesn't move.
+    /// The rule-cue fixtures (#123) through every filter, on the fleet's log (#377: your port-starboard call on the first
+    /// beat): `rules-call` draws two rule-call lines, the arc counting your started turn's complete deadline and glows;
+    /// `rules-penalty` your unstarted turn's arc, both glows and the HUD's live Turn notice. Both show a backwind wedge
+    /// (#377). Every older fixture draws no rule cue, so its reference doesn't move.
     @Test func ruleFixturesShowTheRuleCues() throws {
         func session(_ name: String) throws -> GameSession {
             let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
@@ -170,7 +170,7 @@ import UIKit
             let (call, _) = try RenderFixture.load(named: "rules-call" + suffix, in: Self.fixtures)
             let (penalty, _) = try RenderFixture.load(named: "rules-penalty" + suffix, in: Self.fixtures)
             #expect(call.vision == vision && penalty.vision == vision && call.ruleCues == true && penalty.ruleCues == true)
-            #expect(call.freezeTick == -1255 && penalty.freezeTick == -1290)
+            #expect(call.freezeTick == 4880 && penalty.freezeTick == 4690)
         }
 
         let call = try session("rules-call")
@@ -178,14 +178,16 @@ import UIKit
         #expect(call.scene.shownGlows.contains { $0?.kind == .giveWay })
         #expect(!call.showsFixtureHUD, "no HUD in this fixture")
         let calls = call.ruleCalls.active(at: call.driver.currentFrame.time, seconds: 8, fadeSeconds: 1.5)
-        #expect(calls.map(\.badge) == ["16.1", "10"])
+        #expect(calls.map(\.badge) == ["21.2", "10"])
+        #expect(Self.wedgesOnScreen(call.scene) >= 1, "no backwind wedge in view")
 
         let penalty = try session("rules-penalty")
         #expect(penalty.scene.ruleCueSummary.hasSuffix("lines=1 arc=1"), "\(penalty.scene.ruleCueSummary)")
         #expect(penalty.scene.shownGlows.contains { $0?.kind == .giveWay })
         #expect(penalty.scene.shownGlows.contains { $0?.kind == .hasRight })
         #expect(penalty.showsFixtureHUD)
-        #expect(penalty.notice?.kind == .penalty && penalty.notice?.text == "Turn · 18s / 38s")
+        #expect(penalty.notice?.kind == .penalty && penalty.notice?.text == "Turn · 20s / 40s")
+        #expect(Self.wedgesOnScreen(penalty.scene) >= 1, "no backwind wedge in view")
 
         for name in ["prestart", "fleet", "cues", "hud-prestart", "hud-racing"] {
             let older = try session(name)
@@ -209,7 +211,7 @@ import UIKit
             }
         }
         // The log's own seat, 4th of 6 at the tick: the leader, a skip, the boat ahead, you and the boat behind.
-        #expect(lines == ["1:Leader", "sep", "3:+76 m", "4:+84 m*", "5:+88 m"])
+        #expect(lines == ["1:Leader", "sep", "3:+32 m", "4:+72 m*", "5:+84 m"])
 
         for vision in VisionFilter.allCases where vision != .none {
             let (fixture, _) = try RenderFixture.load(named: "hud-leaderboard-\(vision.rawValue)", in: Self.fixtures)
@@ -274,17 +276,16 @@ import UIKit
         }
     }
 
-    /// The fleet fixture (#117) is a bot race recorded on skiff@4 (re-recorded on seed 8 for #377: the ribbons' shadow left
-    /// the old log's replayed inputs in a wreck; skiff@4 still, the default class when it was first recorded; a log replays
-    /// on the class it names, so it stays skiff@4 when the default moves on), frozen after the first finish and before the
-    /// close, with a ghost and at least three racing boats in the boat camera's view; its five twins are the same
-    /// frame through each other filter.
+    /// The fleet fixture (#117) is a bot race recorded on skiff@6, the default class (re-recorded on seed 19 for #377, so
+    /// the references draw its backwind wedge; a log replays on the class it names, so it stays skiff@6 when the default
+    /// moves on), frozen after the first finish and before the close, with a ghost, at least three racing boats and a
+    /// backwind wedge in the boat camera's view; its five twins are the same frame through each other filter.
     @Test func fleetFixtureShowsAGhostAmongTheFleet() throws {
         let (fixture, log) = try RenderFixture.load(named: "fleet", in: Self.fixtures)
         #expect(fixture.camera == .boat && fixture.vision == VisionFilter.none)
-        // Its recorded class, not today's default: the log predates skiff@5 (#339). Re-recording it on the default moves
-        // every fleet, cues and hud reference that shares it, which is the owner's call (#354).
-        #expect(log.header.setup.boatClass.id == "skiff" && log.header.setup.boatClass.version == 4)
+        // Its recorded class, the default when it was recorded (#377). Re-recording it on a later default moves every
+        // fleet, cues, hud and rules reference that shares it, which is the owner's call (#354).
+        #expect(log.header.setup.boatClass.id == "skiff" && log.header.setup.boatClass.version == 6)
         let world = try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
         #expect(!world.frame.isOver)
         #expect(!world.isGhost(ofSeat: world.myBoatIndex))
@@ -297,6 +298,8 @@ import UIKit
         }
         #expect(inView.filter { world.isGhost(ofSeat: $0) }.count >= 1, "\(inView)")
         #expect(inView.filter { !world.isGhost(ofSeat: $0) }.count >= 3, "\(inView)")
+        let (scene, _) = try DrawOrderTests.scene(fixture: "fleet")
+        #expect(Self.wedgesOnScreen(scene) >= 1, "no backwind wedge in view")
         for vision in VisionFilter.allCases where vision != .none {
             let (twin, _) = try RenderFixture.load(named: "fleet-\(vision.rawValue)", in: Self.fixtures)
             var expected = fixture
@@ -320,7 +323,7 @@ import UIKit
 
     /// The camera fixtures (#113) draw the race camera, auto zoom on: course-up over the prestart log, whose course
     /// axis is 9° off north (as far off as a shipped venue's gets), and boat-up over the light and patchy log, your
-    /// boat heading 64° east of north. Every other fixture keeps its
+    /// boat heading 57° west of north. Every other fixture keeps its
     /// north-up camera from before #113, and its reference.
     @Test func cameraFixturesDrawTheRaceCamera() throws {
         let (courseUp, log) = try RenderFixture.load(named: "course-up", in: Self.fixtures)
@@ -401,6 +404,19 @@ import UIKit
                 #expect(!shallow.isEmpty, "\(name): no shallows in view")
             }
         }
+    }
+
+    /// How many backwind wedges (#377) `scene` draws at half strength or more with their stern corner on screen: a boat
+    /// sailing upwind with her sail working.
+    static func wedgesOnScreen(_ scene: GameScene) -> Int {
+        guard let effects = scene.childNode(withName: "//effects") else { return 0 }
+        let full = CGFloat(scene.boatStyle.coneAlpha * scene.boatStyle.backwindShare)
+        let ppm = Double(GameScene.pointsPerMeter)
+        return effects.children.compactMap { $0 as? SKSpriteNode }.filter { wedge in
+            guard !wedge.isHidden, wedge.alpha >= full / 2 else { return false }
+            let p = scene.rig.project(Vec2(Double(wedge.position.x), Double(wedge.position.y)) / ppm, sceneSize: scene.size)
+            return (0...scene.size.width).contains(p.x) && (0...scene.size.height).contains(p.y)
+        }.count
     }
 
     @Test func fixtureFieldsDecodeEveryCameraAndVision() throws {

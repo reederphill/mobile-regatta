@@ -170,7 +170,7 @@ import Testing
     }
 
     /// The cue fixtures (#62) draw every cue: laylines, ladder lines, your vane and the edge arrow, pinching at one
-    /// tick and footing at the other. The arrow, the camera's child, is on screen where `EdgeArrow` places it,
+    /// tick and footing at the other, on the first beat with the fleet's backwind wedges (#377) in view. The arrow, the camera's child, is on screen where `EdgeArrow` places it,
     /// whatever the camera's zoom and turn.
     @Test func cueFixturesDrawTheArrowWhereItsPlaced() throws {
         let size = CameraRigTests.iPhone
@@ -183,6 +183,8 @@ import Testing
             view.presentScene(scene)
             scene.update(0)
             #expect(scene.cueSummary == "laylines=1 ladder=1 vane=1 arrow=1", "\(name): \(scene.cueSummary)")
+            // Upwind with sails working: the fleet's backwind wedges show (#377).
+            #expect(RenderFixtureTests.wedgesOnScreen(scene) >= 2, "\(name): \(RenderFixtureTests.wedgesOnScreen(scene)) wedges in view")
 
             let world = session.driver.renderWorld
             let reading = try #require(world.autohelm(ofSeat: world.myBoatIndex))
