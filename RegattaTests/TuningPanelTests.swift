@@ -163,7 +163,8 @@ import RegattaCore
         model.set(try slider("boatClass:/windShadow/backwind/floorKnots", in: model), to: 3)
         // The header's upwash zone (#377, the owner's renders review).
         model.set(try slider("boatClass:/windShadow/backwind/mastStationFromBow", in: model), to: 0.3)
-        model.set(try slider("boatClass:/windShadow/backwind/upwashReachHullLengths", in: model), to: 1.5)
+        model.set(try slider("boatClass:/windShadow/backwind/upwashWidthAtMastHullLengths", in: model), to: 0.5)
+        model.set(try slider("boatClass:/windShadow/backwind/upwashWidthAftHullLengths", in: model), to: 2.0)
         model.set(try slider("boatClass:/windShadow/backwind/upwashEndFadeHullLengths", in: model), to: 0.2)
         model.set(try slider("boatClass:/windShadow/backwind/upwashAftHullLengths", in: model), to: 0.5)
         #expect(model.tuning.isTuned && model.problems.isEmpty)
@@ -180,7 +181,8 @@ import RegattaCore
         #expect(abs((shadow.backwindFloorSpeed ?? 0) - metresPerSecond(knots: 3)) < 1e-12)
         let length = try #require(session.driver as? PracticeDriver).boatClass.hull.length
         let upwash = try #require(shadow.backwindUpwash)
-        #expect(abs(upwash.mastFromBow - 0.3 * length) < 1e-12 && abs(upwash.reach - 1.5 * length) < 1e-12
+        #expect(abs(upwash.mastFromBow - 0.3 * length) < 1e-12 && abs(upwash.widthAtMast - 0.5 * length) < 1e-12
+                && abs(upwash.widthAft - 2.0 * length) < 1e-12
                 && abs(upwash.endFade - 0.2 * length) < 1e-12 && abs((upwash.astern ?? 0) - 0.5 * length) < 1e-12)
     }
 

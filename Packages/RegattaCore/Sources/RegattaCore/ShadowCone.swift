@@ -10,7 +10,8 @@
 /// tapering at the edges. A ghost casts neither (`Race.shadowCone(ofSeat:)`).
 ///
 /// A class with a `header` (#377) sails an envelope (`backwindEnvelope(at:)`): the upwash beside her sail, from her
-/// mast back past her stern (to a length astern of it on skiff@6) on her windward side and reaching about a length out, for a class with one
+/// mast back past her stern (to a length astern of it on skiff@6) on her windward side, a fan narrow at her mast and
+/// widening aft, for a class with one
 /// (`BoatClass.WindShadow.backwindUpwash`, the owner's renders review), else the trapezoid. A boat in it has her
 /// wind turned towards her bow (`Race`), plus the header's lull, if any; the envelope is scaled by how hard her sail is
 /// working (`backwindSail`), held on the side it was cast on while it fades (`backwindSide`), and faded out below the
@@ -139,8 +140,8 @@ public struct ShadowCone: Sendable, Equatable {
     /// How much of her backwind zone reaches `p`, 0...1 (#377), on `backwindSide`, times `backwindPresence` (running),
     /// the class's floor (`backwindFloorFactor`) and `backwindSail` (her sail working); 0 outside it, and everywhere for
     /// a class with #79's band. The zone is the upwash beside her sail for a class with one
-    /// (`BoatClass.WindShadow.upwashShare(out:along:)`: from her mast back past her stern to its aft end, full at her
-    /// side and nothing its reach out, bound to her, not scaled by her speed); else her trapezoid, 1 at its stern edge, falling straight
+    /// (`BoatClass.WindShadow.upwashShare(out:along:)`: from her mast back past her stern to its aft end, a fan, full at her
+    /// side and nothing at its width out (`upwashWidth(along:)`), bound to her, not scaled by her speed); else her trapezoid, 1 at its stern edge, falling straight
     /// to 0 at its far edge.
     public func backwindEnvelope(at p: Vec2) -> Double {
         guard shadow.backwindInnerLength != nil, backwindSail > 0 else { return 0 }

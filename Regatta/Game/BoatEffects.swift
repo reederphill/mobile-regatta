@@ -188,7 +188,8 @@ private struct EffectArt {
         let key = Key(shadow: [shadow.coneLength, shadow.coneWidthAtBoat, shadow.coneWidthAtEnd,
                                shadow.backwindLength, shadow.backwindWidth, shadow.backwindInnerLength ?? -1,
                                shadow.sternCorner.x, shadow.sternCorner.y, shadow.backwindSternSlant ? 1 : 0,
-                               shadow.bowY, shadow.upwashExtent == nil ? -1 : 1, shadow.backwindUpwash?.mastFromBow ?? -1, shadow.backwindUpwash?.reach ?? -1,
+                               shadow.bowY, shadow.upwashExtent == nil ? -1 : 1, shadow.backwindUpwash?.mastFromBow ?? -1,
+                               shadow.backwindUpwash?.widthAtMast ?? -1, shadow.backwindUpwash?.widthAft ?? -1,
                                shadow.backwindUpwash?.endFade ?? -1, shadow.backwindUpwash?.astern ?? -1],
                       ppm: ppm, hatch: [style.hatchSpacing, style.hatchLineWidth, style.backwindFeather])
         if let art = cache[key] { return art }
@@ -331,28 +332,40 @@ private struct EffectArt {
 
 extension EffectArt {
     /// Fades the upwash zone's hatch (#377) as core's envelope fades (`BoatClass.WindShadow.upwashShare(out:along:)`):
-    /// full at her side, straight down to `backwindFadeFloor` at its reach out, down to it over the end fade at her
-    /// mast, and from her stern down to it at its aft end (or over the end fade at her stern when it ends there). Column
-    /// by column out from her side, a texel wide, each a gradient along her through the share's knots (its ends, and
-    /// the ends of its fades), in the art's frame (starboard tack).
+    /// full at her side, straight down to `backwindFadeFloor` at the fan's width out there (`upwashWidth(along:)`), down
+    /// to it over the end fade at her mast, and from her stern down to it at its aft end (or over the end fade at her
+    /// stern when it ends there). Column by column out from her side to its widest, a texel wide, each a gradient along
+    /// her through the share's knots (its ends, the ends of its fades, where the column meets the fan's outer edge, and
+    /// enough between them for the share's curve across a widening fan), in the art's frame (starboard tack). The hatch
+    /// is already clipped to the fan (`ShadowShapes.backwindLocal`).
     fileprivate static func fadeUpwash(_ cg: CGContext, shadow: BoatClass.WindShadow, ppm: CGFloat, margin: CGFloat) {
         guard let zone = shadow.upwashExtent, let upwash = shadow.backwindUpwash else { return }
         let space = CGColorSpaceCreateDeviceRGB()
         let floor = Double(backwindFadeFloor)
-        // The share is straight between these along her: nothing at its aft end, full from her stern (or past the
-        // fade in from her stern when it ends there), full to the fade before her mast, nothing at it (the fades meet
-        // in the middle on a short zone).
-        let full = upwash.astern == nil ? zone.aft + upwash.endFade : zone.stern
-        let middle = upwash.astern == nil ? (zone.aft + zone.fore) / 2 : max(zone.stern, (zone.stern + zone.fore) / 2)
-        let knots = [zone.aft, min(full, middle), max(zone.fore - upwash.endFade, middle), zone.fore]
         let length = zone.fore - zone.aft
         guard length > 0 else { return }
+        // The share's aft and fore fades are straight between these along her: nothing at its aft end, full from her
+        // stern (or past the fade in from her stern when it ends there), full to the fade before her mast, nothing at
+        // it (the fades meet in the middle on a short zone).
+        let full = upwash.astern == nil ? zone.aft + upwash.endFade : zone.stern
+        let middle = upwash.astern == nil ? (zone.aft + zone.fore) / 2 : max(zone.stern, (zone.stern + zone.fore) / 2)
+        let fadeKnots = [min(full, middle), max(zone.fore - upwash.endFade, middle)]
+        let samples = 32
+        let even = (0...samples).map { zone.aft + length * Double($0) / Double(samples) }
+        let widest = max(zone.widthAtMast, zone.widthAft)
         let step: CGFloat = 1.0 / 3
-        let x0 = CGFloat(zone.out) * ppm, width = CGFloat(zone.reach) * ppm
+        let x0 = CGFloat(zone.out) * ppm, width = CGFloat(widest) * ppm
         cg.setShouldAntialias(false)
         var x: CGFloat = -step - margin
         while x < width + step + margin {
-            let out = (Double((x + step / 2) / width) * zone.reach).clamped(to: 1e-9...(zone.reach * (1 - 1e-9)))
+            let out = (Double((x + step / 2) / width) * widest).clamped(to: 1e-9...(widest * (1 - 1e-9)))
+            // Where this column crosses the fan's slanted outer edge, if it does.
+            var edge: [Double] = []
+            if zone.widthAft != zone.widthAtMast {
+                let y = zone.fore - (out - zone.widthAtMast) / (zone.widthAft - zone.widthAtMast) * length
+                if y > zone.aft && y < zone.fore { edge = [y] }
+            }
+            let knots = Array(Set(even + fadeKnots + edge)).sorted()
             // Drawn, the share's 0...1 maps onto the floor...1, so the whole zone stays readable.
             let alphas = knots.map { along -> CGFloat in
                 let inside = along.clamped(to: (zone.aft + 1e-9)...(zone.fore - 1e-9))

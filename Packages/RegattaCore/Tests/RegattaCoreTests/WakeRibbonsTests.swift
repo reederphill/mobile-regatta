@@ -250,7 +250,8 @@ enum WakeScene {
         let zone = ShadowCone(caster: caster, shadow: Self.shadow)
         // Full at her side, half way between her stern and her mast.
         let extent = try #require(Self.shadow.upwashExtent)
-        let p = zone.apex + zone.windward * (extent.out + 1e-6 * extent.reach) + zone.forward * ((extent.stern + extent.fore) / 2)
+        let middle = (extent.stern + extent.fore) / 2
+        let p = zone.apex + zone.windward * (extent.out + 1e-6 * Self.shadow.upwashWidth(along: middle)) + zone.forward * middle
         #expect(abs(zone.backwindEnvelope(at: p) - 1) < 1e-5)
         #expect(abs(Race.headerTarget(at: p, receiver: 9, zones: [zone], header: header) - deg2rad(8)) < 1e-6)
         #expect(Race.headerTarget(at: p, receiver: 9, zones: [zone, zone], header: header) == deg2rad(12))
@@ -265,9 +266,10 @@ enum WakeScene {
     /// working scale is 0, so her level falls to 0 over the fade); trimmed in the groove she casts it all.
     @Test func noBackwindWithoutAWorkingSail() throws {
         let boatClass = WakeScene.boatClass, trim = SailTrim.standard
-        // A point in her upwash zone: a quarter of its reach out from her side, half way between her stern and her mast.
+        // A point in her upwash zone: a quarter of its width out from her side, half way between her stern and her mast.
         let extent = try #require(Self.shadow.upwashExtent)
-        let (out, along) = (extent.out + 0.25 * extent.reach, (extent.stern + extent.fore) / 2)
+        let along = (extent.stern + extent.fore) / 2
+        let out = extent.out + 0.25 * Self.shadow.upwashWidth(along: along)
         func envelope(_ caster: Boat, ease: Bool) -> Double {
             var zone = ShadowCone(caster: caster, shadow: Self.shadow)
             zone.backwindSail = trim.workingScale(of: caster, ease: ease, boatClass: boatClass)
