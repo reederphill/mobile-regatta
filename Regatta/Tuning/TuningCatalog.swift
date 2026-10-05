@@ -363,7 +363,7 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "hints", title: "Hints",
-                note: "When the hints fire (#129): letting go after this long steering, sooner in the first race; the wind-shift hint's turn and smoothing.",
+                note: "When the hints fire (#129): letting go after this long steering, sooner in the first race; the wind-shift hint's turn and smoothing; how long a situation is off before its hint may show again.",
                 applies: .live,
                 sliders: [
                     hint("lettingGoSeconds", "Letting go after", \.lettingGoSeconds, 5...60, 1, unit: " s"),
@@ -371,6 +371,7 @@ enum TuningCatalog {
                          unit: " s"),
                     hint("shiftDegrees", "Shift hint past", \.shiftDegrees, 2...20, 0.5, unit: "°"),
                     hint("shiftSmoothingSeconds", "Shift smoothing", \.shiftSmoothingSeconds, 0...30, 1, unit: " s"),
+                    hint("rearmSeconds", "Hint again after off", \.rearmSeconds, 1...30, 0.5, unit: " s"),
                 ]),
             TuningGroup(
                 id: "later", title: "Later",

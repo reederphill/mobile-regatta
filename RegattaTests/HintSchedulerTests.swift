@@ -205,4 +205,168 @@ import Testing
         session.consume([RaceEvent(tick: 1, kind: .tacked(seat: session.driver.myBoatIndex))])
         #expect(told == ["no_go learned"])
     }
+
+    // MARK: The engine end to end
+
+    /// A practice race whose hints run as `GameSession.refreshHints` runs them: the driver ticked at 15 Hz on a test
+    /// clock, its events fed in, the slot advanced, and each hint the engine returns posted.
+    @MainActor final class Rig {
+        let driver: PracticeDriver
+        let engine: HintEngine
+        var slot = NoticeSlot()
+        var clock = HintSchedulerTests.t0
+        var hintsOn = true
+        var isFirstRace = false
+        var rudder = 0.0
+        /// Each hint posted, with the race time it posted at.
+        private(set) var posts: [(id: HintID, time: Double)] = []
+        private(set) var retired: [(id: HintID, mode: HintRetirement)] = []
+
+        init(progress: HintProgressStore, prestartSeconds: Double = 10, catalogue: [Hint] = HintCatalogue.engine) {
+            let config = RaceConfig(opponents: 2, prestartSeconds: prestartSeconds, seed: 1,
+                                    windSeed: RaceConfig.windSeed(pinnedTo: 1))
+            driver = PracticeDriver(config: config)
+            engine = HintEngine(progress: progress, catalogue: catalogue)
+            engine.onRetired = { [unowned self] id, mode in retired.append((id, mode)) }
+            refresh()
+        }
+
+        func posted(_ id: HintID) -> [Double] { posts.filter { $0.id == id }.map(\.time) }
+
+        func run(_ seconds: Double) {
+            for _ in 0..<Int((seconds * 15).rounded()) {
+                driver.submit(BoatInput(rudder: rudder))
+                driver.tick(1.0 / 15)
+                clock = clock.addingTimeInterval(1.0 / 15)
+                engine.consume(driver.drainEvents(), me: driver.myBoatIndex, hintsOn: hintsOn)
+                refresh()
+            }
+        }
+
+        private func refresh() {
+            _ = slot.current(at: clock)
+            guard let next = engine.refresh(world: driver.renderWorld, slot: slot, now: clock, hintsOn: hintsOn,
+                                            showsLaylines: true, isFirstRace: isFirstRace) else { return }
+            let noticeID = slot.nextID
+            slot.post(.hint, next.hint.id.rawValue, at: clock, leader: next.leader)
+            engine.posted(next.hint.id, noticeID: noticeID)
+            posts.append((next.hint.id, driver.renderWorld.time))
+        }
+    }
+
+    /// A first-race player who never touches the water hears about the autohelm a few seconds after the gun, and the
+    /// hint isn't counted learned: the autohelm engaging on the race's first step isn't letting go (no steering).
+    @Test func handsOffFirstRaceShowsLettingGoAndDoesNotLearnIt() {
+        let progress = HintProgressStore()
+        let rig = Rig(progress: progress)
+        rig.isFirstRace = true
+        rig.run(10 + 12)
+        #expect(!rig.engine.observations.hasSteered)
+        #expect(!rig.engine.observations.hasLetGo)
+        let shown = rig.posted(.lettingGo)
+        #expect(shown.count == 1, "\(rig.posts)")
+        if let time = shown.first {
+            #expect(time >= HintTuning.standard.lettingGoFirstRaceSeconds - 0.2 && time < 10, "letting go at \(time) s")
+        }
+        #expect(!progress.isLearned(.lettingGo))
+        #expect(!rig.retired.contains { $0.id == .lettingGo })
+        // The steering hint showed once, at the first refresh.
+        #expect(rig.posted(.raceStart).count == 1)
+    }
+
+    /// A situation that lasts shows its hint once, not again at every gap: it shows again only after its trigger has
+    /// been off for `rearmSeconds`. The steering hint shows once a race.
+    @Test func aLastingSituationShowsItsHintOncePerEpisode() {
+        final class Flag { var on = true }
+        let flag = Flag()
+        let lasting = Hint(id: .puff, delivery: .engine, text: HintText("puff"), isPlaceholderCopy: true,
+                           learning: .never, trigger: { _, _ in flag.on ? HintFiring(leader: nil) : nil })
+        let progress = HintProgressStore()
+        let rig = Rig(progress: progress, prestartSeconds: 60, catalogue: [HintCatalogue.hint(.raceStart), lasting])
+        rig.run(30)
+        #expect(rig.posted(.raceStart).count == 1)
+        #expect(rig.posted(.puff).count == 1, "\(rig.posts)")
+        #expect(progress.timesShown(.puff) == 1)
+        // Off for less than the re-arm time: still spent.
+        flag.on = false
+        rig.run(HintTuning.standard.rearmSeconds - 2)
+        flag.on = true
+        rig.run(10)
+        #expect(rig.posted(.puff).count == 1)
+        // Off long enough: a new episode shows it again (its second showing, which retires it).
+        flag.on = false
+        rig.run(HintTuning.standard.rearmSeconds + 1)
+        flag.on = true
+        rig.run(5)
+        #expect(rig.posted(.puff).count == 2)
+        #expect(rig.retired.filter { $0.id == .puff }.map(\.mode) == [.shownTwice])
+        #expect(rig.posted(.raceStart).count == 1)
+    }
+
+    /// Hints switched off and back on: nothing is observed meanwhile, and the next tick adds no long gap to the
+    /// counters (or the wind smoothing).
+    @Test func hintsOffThenOnAddsNoGap() {
+        let rig = Rig(progress: HintProgressStore())
+        rig.run(10 + 3)
+        let sailed = rig.engine.observations.sinceGunSeconds
+        #expect(sailed > 2)
+        rig.hintsOn = false
+        rig.run(20)
+        #expect(rig.engine.observations.lastTick == nil)
+        #expect(rig.engine.observations.sinceGunSeconds == sailed)
+        rig.hintsOn = true
+        rig.run(1.0 / 15)
+        #expect(rig.engine.observations.sinceGunSeconds - sailed < 0.1)
+    }
+
+    /// Through `HintEngine.refresh` on a real race: the steering hint is picked, posted, counted as it shows and
+    /// settled as it goes; its second showing (the next race) retires it and tells analytics once; steering both ways
+    /// retires it as learned, once.
+    @Test func refreshPicksPostsSettlesAndRetiresOnce() {
+        let progress = HintProgressStore()
+        let first = Rig(progress: progress)
+        #expect(first.posted(.raceStart).count == 1)
+        #expect(first.engine.scheduler.tracked?.id == .raceStart)
+        // Counted on the refresh that sees it showing.
+        #expect(progress.timesShown(.raceStart) == 0)
+        first.run(1.0 / 15)
+        #expect(progress.timesShown(.raceStart) == 1)
+        first.run(5)
+        #expect(first.engine.scheduler.tracked == nil && first.engine.scheduler.lastEnded != nil)
+        #expect(first.retired.isEmpty)
+
+        let second = Rig(progress: progress)
+        second.run(1.0 / 15)
+        #expect(progress.timesShown(.raceStart) == 2)
+        second.run(20)
+        #expect(second.posted(.raceStart).count == 1)
+        #expect(second.retired.filter { $0.id == .raceStart }.map(\.mode) == [.shownTwice])
+
+        let learner = Rig(progress: HintProgressStore())
+        learner.rudder = 1
+        learner.run(1)
+        learner.rudder = -1
+        learner.run(1)
+        learner.run(3)
+        #expect(learner.retired.filter { $0.id == .raceStart }.map(\.mode) == [.learned])
+    }
+
+    /// Hints off: the hint already posted still settles (counted, then let go), but nothing new is observed, learned
+    /// or picked.
+    @Test func hintsOffStillSettlesAndObservesNothing() {
+        let progress = HintProgressStore()
+        let rig = Rig(progress: progress)
+        #expect(rig.engine.scheduler.tracked?.id == .raceStart)
+        rig.hintsOn = false
+        rig.rudder = 1
+        rig.run(1)
+        rig.rudder = -1
+        rig.run(5)
+        #expect(rig.engine.scheduler.tracked == nil)
+        #expect(progress.timesShown(.raceStart) == 1)
+        #expect(rig.engine.observations.lastTick == nil)
+        #expect(!rig.engine.observations.steeredBothWays(.standard))
+        #expect(!progress.isLearned(.raceStart))
+        #expect(rig.posts.count == 1 && rig.retired.isEmpty)
+    }
 }

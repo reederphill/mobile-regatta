@@ -4,5 +4,6 @@
   "camera" : "boat",
   "vision" : "none",
   "view" : "courseUp",
-  "hud" : { "hint" : "red_glow" }
+  "ruleCues" : true,
+  "hud" : { "seat" : 1, "hint" : "red_glow" }
 }

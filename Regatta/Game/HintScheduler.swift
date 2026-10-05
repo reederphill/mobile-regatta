@@ -71,14 +71,24 @@ struct HintScheduler: Equatable {
     /// When the last hint went from the slot (shown out, replaced and gone, or dropped stale).
     private(set) var lastEnded: Date?
 
-    /// The first of `eligible` (catalogue order) to post now, or nil: hints on, no hint in the slot or posted, nothing
-    /// that holds hints showing or waiting, the gap since the last one passed, and not retired.
+    /// The first of `eligible` (catalogue order) to post now, or nil: `canPick`, and not retired.
     func pick(_ eligible: [HintID], slot: NoticeSlot, now: Date, hintsOn: Bool, progress: HintProgressStore) -> HintID? {
-        guard hintsOn, tracked == nil else { return nil }
-        let inSlot = [slot.showing].compactMap { $0 } + slot.waiting
-        guard !inSlot.contains(where: { $0.kind == .hint || NoticeTable.rule($0.kind).holdsHints }) else { return nil }
-        if let lastEnded, now.timeIntervalSince(lastEnded) < Self.gapSeconds { return nil }
+        guard canPick(slot: slot, now: now, hintsOn: hintsOn) else { return nil }
         return eligible.first { !progress.isRetired($0) }
+    }
+
+    /// Whether a hint may post now: hints on, no hint in the slot or posted, nothing that holds hints showing or
+    /// waiting, and the gap since the last one passed.
+    func canPick(slot: NoticeSlot, now: Date, hintsOn: Bool) -> Bool {
+        guard hintsOn, tracked == nil else { return false }
+        if let showing = slot.showing, Self.blocks(showing) { return false }
+        guard !slot.waiting.contains(where: Self.blocks) else { return false }
+        if let lastEnded, now.timeIntervalSince(lastEnded) < Self.gapSeconds { return false }
+        return true
+    }
+
+    private static func blocks(_ notice: Notice) -> Bool {
+        notice.kind == .hint || NoticeTable.rule(notice.kind).holdsHints
     }
 
     /// `id` was posted as notice `noticeID`.
@@ -114,7 +124,8 @@ struct HintScheduler: Equatable {
 
 /// One race's hints (#129): what it has seen of your boat, the scheduler, and the device's progress. `GameSession`
 /// asks it at each HUD refresh which hint to post, and feeds it the race's events; it reads only the driver's frames
-/// and drained events (online, the prediction and the server's events), never the race.
+/// and drained events (online, the prediction and the server's events), never the race. One per race: the app makes
+/// a fresh one for each session.
 final class HintEngine {
     let progress: HintProgressStore
     /// The triggers' thresholds: the debug tuning panel's when it's open (ruling 3).
@@ -123,48 +134,95 @@ final class HintEngine {
     var onRetired: ((HintID, HintRetirement) -> Void)?
     /// The triggers are worked out at most this often, seconds of wall-clock time: puffs and laylines cost.
     static let evaluateInterval = 0.25
+    /// Hints that show once a race, however long their situation lasts: the steering hint, up from the first frame.
+    static let oncePerRace: Set<HintID> = [.raceStart]
 
     private(set) var scheduler = HintScheduler()
     private(set) var observations = HintObservations()
     private var lastEvaluated: Date?
+    /// Hints posted this episode of their situation (#129): not posted again until their trigger has been off for
+    /// `HintTuning.rearmSeconds`, so a situation that lasts shows its hint once, not every gap.
+    private(set) var spent: Set<HintID> = []
+    /// Since when each spent hint's trigger has been off.
+    private var offSince: [HintID: Date] = [:]
+    /// The once-a-race hints posted this race.
+    private var postedThisRace: Set<HintID> = []
 
-    init(progress: HintProgressStore, thresholds: HintTuning = .standard) {
+    /// The rows it schedules, in priority order: the catalogue's engine rows (tests pass their own).
+    let catalogue: [Hint]
+
+    init(progress: HintProgressStore, thresholds: HintTuning = .standard, catalogue: [Hint] = HintCatalogue.engine) {
         self.progress = progress
         self.thresholds = thresholds
+        self.catalogue = catalogue
     }
 
     /// One HUD refresh at `now`: settles the posted hint with `slot`, takes `world`'s tick, retires what you've
-    /// learned, and returns the hint to post now, if any, with its leader.
+    /// learned, and returns the hint to post now, if any, with its leader. With hints off it only settles: nothing
+    /// is observed, learned or picked.
     func refresh(world: RenderWorld, slot: NoticeSlot, now: Date, hintsOn: Bool, showsLaylines: Bool,
                  isFirstRace: Bool) -> (hint: Hint, leader: HintTarget?)? {
         if let retired = scheduler.settle(slot: slot, now: now, progress: progress) { onRetired?(retired, .shownTwice) }
-        guard hintsOn else { return nil }
+        guard hintsOn else {
+            observations.pause()
+            return nil
+        }
         observations.observe(world, tuning: thresholds)
         if observations.steeredBothWays(thresholds) { learn(.steeredBothWays, hintsOn: hintsOn) }
         if observations.hasLetGo { learn(.autohelmHeld, hintsOn: hintsOn) }
 
-        guard scheduler.pick(HintCatalogue.engine.map(\.id), slot: slot, now: now, hintsOn: hintsOn,
-                             progress: progress) != nil else { return nil }
         if let lastEvaluated, now.timeIntervalSince(lastEvaluated) < Self.evaluateInterval { return nil }
+        let canPick = scheduler.canPick(slot: slot, now: now, hintsOn: hintsOn)
+        // Spent hints are watched to re-arm them even while none can post.
+        guard canPick || !spent.isEmpty else { return nil }
         lastEvaluated = now
         let snapshot = HintSnapshot(world: world, observations: observations, showsLaylines: showsLaylines,
                                     isFirstRace: isFirstRace, lettingGoRetired: progress.isRetired(.lettingGo),
                                     tuning: thresholds)
-        var firings: [HintID: HintFiring] = [:]
-        let eligible = HintCatalogue.engine.compactMap { hint -> HintID? in
-            guard !progress.isRetired(hint.id), let firing = hint.trigger(snapshot, thresholds) else { return nil }
-            firings[hint.id] = firing
-            return hint.id
+        var chosen: (hint: Hint, leader: HintTarget?)?
+        for hint in catalogue {
+            let id = hint.id
+            if progress.isRetired(id) {
+                spent.remove(id)
+                offSince[id] = nil
+                continue
+            }
+            if Self.oncePerRace.contains(id) && postedThisRace.contains(id) { continue }
+            let firing = hint.trigger(snapshot, thresholds)
+            if spent.contains(id) {
+                rearm(id, firing: firing != nil, now: now)
+                continue
+            }
+            if canPick, chosen == nil, let firing { chosen = (hint, firing.leader) }
         }
-        guard let id = scheduler.pick(eligible, slot: slot, now: now, hintsOn: hintsOn, progress: progress) else {
-            return nil
+        return chosen
+    }
+
+    /// A spent hint whose trigger has been off `rearmSeconds` may post again.
+    private func rearm(_ id: HintID, firing: Bool, now: Date) {
+        guard !firing else {
+            offSince[id] = nil
+            return
         }
-        return (HintCatalogue.hint(id), firings[id]?.leader)
+        guard let since = offSince[id] else {
+            offSince[id] = now
+            return
+        }
+        if now.timeIntervalSince(since) >= thresholds.rearmSeconds {
+            spent.remove(id)
+            offSince[id] = nil
+        }
     }
 
     /// The hint `id` was posted as notice `noticeID`.
     func posted(_ id: HintID, noticeID: Int) {
         scheduler.posted(id, noticeID: noticeID)
+        if Self.oncePerRace.contains(id) {
+            postedThisRace.insert(id)
+        } else {
+            spent.insert(id)
+            offSince[id] = nil
+        }
     }
 
     /// The race's events: what you did that a hint teaches (tacked, rounded, the autohelm snapped to the groove).
@@ -182,7 +240,7 @@ final class HintEngine {
     }
 
     private func learn(_ learning: HintLearning, hintsOn: Bool) {
-        for hint in HintCatalogue.engine where hint.learning == learning {
+        for hint in catalogue where hint.learning == learning {
             if scheduler.learn(hint.id, hintsOn: hintsOn, progress: progress) { onRetired?(hint.id, .learned) }
         }
     }

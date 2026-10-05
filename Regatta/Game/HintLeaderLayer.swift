@@ -39,7 +39,16 @@ nonisolated enum HintLeader {
     @MainActor static func fixtureTarget(_ id: HintID, world: RenderWorld) -> HintTarget? {
         let me = world.me.position
         switch id {
-        case .redGlow, .greenGlow, .windShadow:
+        case .redGlow, .greenGlow:
+            // The boat with the strongest glow of the hint's kind, as the scene draws them.
+            let seat = world.myBoatIndex
+            let glows = GlowSelection.glows(keepClear: world.frame.keepClear, positions: world.boats.map(\.position),
+                                            me: seat, isGhost: world.isGhost(ofSeat: seat),
+                                            rangeHulls: BoatStyle.standard.glowRangeHulls,
+                                            fullHulls: BoatStyle.standard.glowFullHulls,
+                                            hullLength: world.boatClass.hull.length)
+            return HintSnapshot.strongest(id == .redGlow ? .giveWay : .hasRight, in: glows, atLeast: 0).map { .boat($0) }
+        case .windShadow:
             let others = world.boats.indices.filter { $0 != world.myBoatIndex }
             return others.min { (world.boats[$0].position - me).length < (world.boats[$1].position - me).length }
                 .map { .boat($0) }
@@ -61,6 +70,9 @@ nonisolated enum HintLeader {
 /// The leader line's node, a child of the camera like the edge arrow: placed in screen points from the view's centre.
 final class HintLeaderLayer {
     let node = SKShapeNode()
+    /// The line the path was last built for, camera points: rebuilt only once an end moves more than `rebuildPoints`.
+    private var drawn: (from: CGPoint, to: CGPoint)?
+    static let rebuildPoints: CGFloat = 0.5
 
     init() {
         node.name = "hintLeader"
@@ -83,10 +95,22 @@ final class HintLeaderLayer {
             return
         }
         let centre = CGPoint(x: sceneSize.width / 2, y: sceneSize.height / 2)
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: line.from.x - centre.x, y: line.from.y - centre.y))
-        path.addLine(to: CGPoint(x: line.to.x - centre.x, y: line.to.y - centre.y))
-        node.path = path
+        let from = CGPoint(x: line.from.x - centre.x, y: line.from.y - centre.y)
+        let to = CGPoint(x: line.to.x - centre.x, y: line.to.y - centre.y)
         node.isHidden = false
+        if let drawn, !Self.moved(drawn.from, from), !Self.moved(drawn.to, to) { return }
+        let path = CGMutablePath()
+        path.move(to: from)
+        path.addLine(to: to)
+        node.path = path
+        drawn = (from, to)
     }
+
+    /// Whether `b` is more than `rebuildPoints` from `a`.
+    static func moved(_ a: CGPoint, _ b: CGPoint) -> Bool {
+        hypot(b.x - a.x, b.y - a.y) > rebuildPoints
+    }
+
+    /// Whether the line shows, for tests.
+    var isShowing: Bool { !node.isHidden }
 }

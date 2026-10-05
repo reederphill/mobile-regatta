@@ -83,6 +83,21 @@ import Testing
         #expect(fires(.lettingGo, racing { $0.steeringSeconds = 19 }) == nil)
         #expect(fires(.lettingGo, racing { $0.steeringSeconds = 21 }) != nil)
         #expect(fires(.lettingGo, racing { $0.steeringSeconds = 21; $0.hasLetGo = true }) == nil)
+        // Hands off (never steered): on racing time alone, so a first race's player who never touches the water
+        // still hears about the autohelm (#134).
+        #expect(fires(.lettingGo, racing { $0.sinceGunSeconds = 5.5; $0.isFirstRace = true }) != nil)
+        #expect(fires(.lettingGo, racing { $0.sinceGunSeconds = 5.5 }) == nil)
+        #expect(fires(.lettingGo, racing { $0.sinceGunSeconds = 21 }) != nil)
+        #expect(fires(.lettingGo, racing { $0.sinceGunSeconds = 21; $0.hasSteered = true }) == nil)
+        // After the gun, whether or not you've started yet; never before it.
+        var behind = HintSnapshot()
+        behind.raceTime = 6
+        behind.sinceGunSeconds = 6
+        behind.isFirstRace = true
+        #expect(fires(.lettingGo, behind) != nil)
+        behind.raceTime = -30
+        behind.steeringSeconds = 30
+        #expect(fires(.lettingGo, behind) == nil)
     }
 
     @Test func grooveTickFollowsLettingGo() {
@@ -91,6 +106,9 @@ import Testing
         #expect(fires(.grooveTick, racing { $0.vaneShows = true; $0.hasLetGo = true; $0.lettingGoRetired = true }) != nil)
         #expect(fires(.grooveTick, racing { $0.vaneShows = true; $0.lettingGoRetired = true; $0.racingSeconds = 61 }) != nil)
         #expect(fires(.grooveTick, racing { $0.vaneShows = true; $0.lettingGoRetired = true; $0.racingSeconds = 30 }) == nil)
+        // A player who never steers (letting go never learned) still reaches it after a minute's racing.
+        #expect(fires(.grooveTick, racing { $0.vaneShows = true; $0.racingSeconds = 61 }) != nil)
+        #expect(fires(.grooveTick, racing { $0.racingSeconds = 61 }) == nil, "not without the vane")
     }
 
     @Test func situationalHintsPointAtTheirThing() {
@@ -106,6 +124,17 @@ import Testing
         #expect(fires(.markZone, racing { $0.markZone = p })?.leader == .point(p))
         for id in HintID.allCases where id != .raceStart && id != .startSequence {
             #expect(fires(id, HintSnapshot()) == nil, "\(id) on an empty prestart snapshot")
+        }
+        // Racing unless noted (the brief): the situational hints don't fire before the gun.
+        var pre = HintSnapshot()
+        pre.raceTime = -30
+        pre.nearPuff = p
+        pre.shadowSeconds = 5
+        pre.redGlow = 1
+        pre.greenGlow = 2
+        pre.markZone = p
+        for id in [HintID.puff, .windShadow, .redGlow, .greenGlow, .markZone] {
+            #expect(fires(id, pre) == nil, "\(id) before the gun")
         }
     }
 
@@ -138,9 +167,15 @@ import Testing
                 o.observe(driver.renderWorld, tuning: .standard)
             }
         }
+        // The first frame, before the race's first step: no autohelm yet and the rudder centred is not steering.
+        o.observe(driver.renderWorld, tuning: .standard)
+        #expect(!o.hasSteered)
+        run(0, seconds: 2)
+        #expect(!o.hasSteered && !o.hasLetGo, "the autohelm engaging on its own isn't letting go")
         run(100, seconds: 1)
         #expect(!o.steeredBothWays(.standard))
-        #expect(o.steeringSeconds > 0.5)
+        #expect(o.hasSteered)
+        #expect(o.steeringSeconds == 0, "steering time counts from the gun")
         run(-100, seconds: 1)
         #expect(o.steeredBothWays(.standard))
         #expect(!o.hasLetGo)
@@ -182,5 +217,8 @@ import Testing
         #expect(HintLeader.segment(anchor: anchor, target: CGPoint(x: 200, y: 50), visible: visible) == nil)
         #expect(HintLeader.segment(anchor: anchor, target: CGPoint(x: 200, y: 720), visible: visible) == nil)
         #expect(HintLeader.segment(anchor: anchor, target: CGPoint(x: 500, y: 300), visible: visible) == nil)
+        // The path is rebuilt only once an end moves more than half a point.
+        #expect(!HintLeaderLayer.moved(CGPoint(x: 10, y: 10), CGPoint(x: 10.3, y: 10.3)))
+        #expect(HintLeaderLayer.moved(CGPoint(x: 10, y: 10), CGPoint(x: 10.6, y: 10)))
     }
 }

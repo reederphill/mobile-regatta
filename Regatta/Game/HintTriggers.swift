@@ -4,7 +4,8 @@ import RegattaCore
 /// Every threshold the hints fire by (#129), in one value: placeholders, the ticket's numbers where it gives them,
 /// each a debug slider (`TuningCatalog`'s Hints group, fun before realism). App-side and never logged.
 nonisolated struct HintTuning: Codable, Equatable, Sendable {
-    /// Letting go (#219, ruling 3): you've steered this many seconds without a break, the autohelm never holding...
+    /// Letting go (#219, ruling 3): after the gun, you've steered this many seconds without a break, the autohelm
+    /// never holding (or, never having steered, sailed this long since the gun hands off)...
     var lettingGoSeconds = 20.0
     /// ...or this many in your first race (#134), so it shows early there.
     var lettingGoFirstRaceSeconds = 5.0
@@ -25,13 +26,17 @@ nonisolated struct HintTuning: Codable, Equatable, Sendable {
     var glowIntensity = 0.5
     /// The start-sequence hint shows only while at least this many seconds are left to the gun.
     var startSequenceLatestSeconds = 10.0
-    /// The groove-tick hint: after this much racing, if you haven't let go yet.
+    /// The groove-tick hint: after this much racing, whether or not you've let go (sooner once you have and the
+    /// letting-go hint is done).
     var grooveTickRacingSeconds = 60.0
     /// Steered each way: the rudder held past this share of full, for this long each way.
     var steerRudderShare = 0.25
     var steerSeconds = 0.1
     /// Let go: the autohelm holds this long after you've steered.
     var autohelmHoldSeconds = 1.0
+    /// A hint shows once per episode of its situation (#129): it shows again only after its trigger has been off this
+    /// long. The steering hint shows once per race.
+    var rearmSeconds = 5.0
 
     static let standard = HintTuning()
 }
@@ -48,6 +53,7 @@ nonisolated extension HintTuning {
             (.startSequenceLatestSeconds, \.startSequenceLatestSeconds),
             (.grooveTickRacingSeconds, \.grooveTickRacingSeconds), (.steerRudderShare, \.steerRudderShare),
             (.steerSeconds, \.steerSeconds), (.autohelmHoldSeconds, \.autohelmHoldSeconds),
+            (.rearmSeconds, \.rearmSeconds),
         ]
         var tuning = HintTuning.standard
         for (key, path) in fields {
@@ -83,8 +89,12 @@ struct HintSnapshot: Equatable {
     var greenGlow: Int?
     /// The mark whose zone you're in, racing.
     var markZone: Vec2?
-    /// How long you've held the rudder off centre without a break (the autohelm not holding), seconds.
+    /// How long you've held the rudder off centre without a break (the autohelm not holding) since the gun, seconds.
     var steeringSeconds = 0.0
+    /// How long since the gun you've been sailing (not finished or out), seconds: started or not.
+    var sinceGunSeconds = 0.0
+    /// You've held the rudder off centre this race (past `Autohelm.deadBand`).
+    var hasSteered = false
     /// Your first race (#134): letting go shows earlier.
     var isFirstRace = false
     /// You've let the autohelm hold after steering, this race.
@@ -111,25 +121,35 @@ enum HintTriggers {
     }
 
     static func markZone(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
-        s.markZone.map { HintFiring(leader: .point($0)) }
+        guard s.status == .racing else { return nil }
+        return s.markZone.map { HintFiring(leader: .point($0)) }
     }
 
     static func redGlow(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
-        s.redGlow.map { HintFiring(leader: .boat($0)) }
+        guard s.status == .racing else { return nil }
+        return s.redGlow.map { HintFiring(leader: .boat($0)) }
     }
 
     static func greenGlow(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
-        s.greenGlow.map { HintFiring(leader: .boat($0)) }
+        guard s.status == .racing else { return nil }
+        return s.greenGlow.map { HintFiring(leader: .boat($0)) }
     }
 
+    /// After the gun (started or still behind the line): you've steered `hold` seconds without a break, or never
+    /// steered and sailed that long hands off (so a first race's player who never touches the water still hears
+    /// about the autohelm, #134).
     static func lettingGo(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
         let hold = s.isFirstRace ? t.lettingGoFirstRaceSeconds : t.lettingGoSeconds
-        return !s.isGhost && !s.hasLetGo && s.steeringSeconds >= hold ? HintFiring(leader: .vane) : nil
+        guard s.raceTime >= 0, s.status != .finished, !s.isGhost, !s.hasLetGo else { return nil }
+        let handsOff = !s.hasSteered && s.sinceGunSeconds >= hold
+        return s.steeringSeconds >= hold || handsOff ? HintFiring(leader: .vane) : nil
     }
 
+    /// Racing with the vane drawn: after a minute's racing, or sooner once you've let go and the letting-go hint is
+    /// done. Sparse: it shows once a race at most, twice in all.
     static func grooveTick(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
-        guard s.lettingGoRetired, s.status == .racing, s.vaneShows,
-              s.hasLetGo || s.racingSeconds >= t.grooveTickRacingSeconds else { return nil }
+        guard s.status == .racing, s.vaneShows,
+              s.racingSeconds >= t.grooveTickRacingSeconds || (s.lettingGoRetired && s.hasLetGo) else { return nil }
         return HintFiring(leader: .vane)
     }
 
@@ -139,12 +159,12 @@ enum HintTriggers {
     }
 
     static func puff(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
-        guard !s.isGhost, let centre = s.nearPuff else { return nil }
+        guard s.status == .racing, !s.isGhost, let centre = s.nearPuff else { return nil }
         return HintFiring(leader: .point(centre))
     }
 
     static func windShadow(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
-        guard !s.isGhost, s.shadowSeconds >= t.shadowSeconds else { return nil }
+        guard s.status == .racing, !s.isGhost, s.shadowSeconds >= t.shadowSeconds else { return nil }
         return HintFiring(leader: s.shadowSource.map { .boat($0) })
     }
 
@@ -167,10 +187,15 @@ struct HintObservations: Equatable {
     private(set) var hasSteered = false
     private(set) var hasLetGo = false
     private(set) var racingSeconds = 0.0
+    /// Since the gun, sailing (not a ghost): started or not.
+    private(set) var sinceGunSeconds = 0.0
     /// The fleet-wide wind smoothed, as a unit vector towards where it blows from; and its direction at your start.
     private(set) var smoothedWind: Vec2?
     private(set) var referenceWind: Double?
     private(set) var wasRacing = false
+    /// You've started (the gun, or clearing an OCS) and the reference wind waits for a tick with wind (online, the
+    /// wind may come after the start).
+    private var wantsReference = false
 
     /// You've held the rudder each way.
     func steeredBothWays(_ t: HintTuning) -> Bool {
@@ -188,6 +213,12 @@ struct HintObservations: Equatable {
         hasLetGo = true
     }
 
+    /// Hints are off: nothing is observed meanwhile, and the next tick seen after they're back adds no time, so no
+    /// long gap lands in the dwell counters or the wind smoothing.
+    mutating func pause() {
+        lastTick = nil
+    }
+
     /// Takes `world`'s latest tick. A tick already seen adds nothing; one before it (an online re-prediction) starts
     /// the clock again from there.
     mutating func observe(_ world: RenderWorld, tuning t: HintTuning) {
@@ -200,18 +231,22 @@ struct HintObservations: Equatable {
         let me = frame.boats[seat]
         let racing = me.status == .racing
 
-        let rudder = frame.heldInputs.indices.contains(seat) ? Double(frame.heldInputs[seat].rudder) / 127 : 0
+        let rudder = frame.heldInputs.indices.contains(seat) ? frame.heldInputs[seat].rudderValue : 0
         if rudder <= -t.steerRudderShare { portSteerSeconds += dt }
         if rudder >= t.steerRudderShare { starboardSteerSeconds += dt }
 
-        if me.autohelm == nil, !me.isGhost {
-            steeringSeconds += dt
-            autohelmSeconds = 0
-            hasSteered = true
-        } else {
-            steeringSeconds = 0
+        // Steering is a held rudder past the autohelm's dead band, as `Race` lets go of it: a boat with no autohelm
+        // yet (the first frame, before the race's first step) and a centred rudder hasn't steered.
+        let steering = abs(rudder) > Autohelm.deadBand && me.autohelm == nil && !me.isGhost
+        if steering { hasSteered = true }
+        let afterGun = frame.time >= 0 && !me.isGhost
+        if afterGun { sinceGunSeconds += dt }
+        steeringSeconds = steering && afterGun ? steeringSeconds + dt : 0
+        if me.autohelm != nil {
             autohelmSeconds += dt
             if hasSteered && autohelmSeconds >= t.autohelmHoldSeconds { hasLetGo = true }
+        } else {
+            autohelmSeconds = 0
         }
 
         let noGo = me.twa < BoatDynamics.noGoAngle(world.boatClass.polar)
@@ -228,8 +263,14 @@ struct HintObservations: Equatable {
             } else {
                 smoothedWind = v
             }
-            // The reference is the smoothed wind as you start (the gun, or as you clear an OCS and start).
-            if racing && !wasRacing, let s = smoothedWind { referenceWind = atan2(s.x, s.y) }
+        }
+        // The reference is the smoothed wind as you start (the gun, or as you clear an OCS and start), or on the first
+        // racing tick after that with a wind.
+        if racing && !wasRacing { wantsReference = true }
+        if !racing { wantsReference = false }
+        if wantsReference, let s = smoothedWind, world.courseWind != nil {
+            referenceWind = atan2(s.x, s.y)
+            wantsReference = false
         }
         wasRacing = racing
     }
@@ -255,6 +296,8 @@ extension HintSnapshot {
         shiftDegrees = o.shiftDegrees
         shadowSeconds = o.shadowSeconds
         steeringSeconds = o.steeringSeconds
+        hasSteered = o.hasSteered
+        sinceGunSeconds = o.sinceGunSeconds
         self.isFirstRace = isFirstRace
         hasLetGo = o.hasLetGo
         racingSeconds = o.racingSeconds

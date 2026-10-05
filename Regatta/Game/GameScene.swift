@@ -330,6 +330,8 @@ final class GameScene: SKScene {
     var ruleCueSummary: String { ruleCues?.summary ?? "" }
     /// The right-of-way glow each seat shows, for tests.
     var shownGlows: [RightOfWayGlow?] { ruleCues?.glows ?? [] }
+    /// Whether a hint's leader line shows (#129), for tests.
+    var showsHintLeader: Bool { hintLeader.isShowing }
 
     /// The north-up course camera over `course` in a scene of `sceneSize` (`CameraRig.courseFraming`): centred on
     /// the course, scaled to show the whole of it (marks, pin and committee boat) with a margin, and never closer

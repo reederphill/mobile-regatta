@@ -58,13 +58,14 @@ final class OnlineLaunch {
     @ObservationIgnored private let controls: ControlSettings
     /// The rule numbers this device has seen called (#23): the app passes `AppModel.rulesSeen`.
     @ObservationIgnored private let rulesSeen: RuleSeenStore
-    /// The race's hints (#129), which show online too until they stop: the app passes `AppModel.hintEngine()`.
-    @ObservationIgnored private let hints: HintEngine?
+    /// Makes each race's hints (#129), which show online too until they stop: the app passes `AppModel.hintEngine`,
+    /// so every session gets a fresh engine.
+    @ObservationIgnored private let hints: (() -> HintEngine)?
     /// Told as a hint retires: the app passes `AppModel.logsHintRetired`.
     @ObservationIgnored private let onHintRetired: ((String, HintRetirement) -> Void)?
 
     init(server: RaceServer, haptics: any Haptics = GatedHaptics(), controls: ControlSettings = ControlSettings(),
-         rulesSeen: RuleSeenStore = RuleSeenStore(), hints: HintEngine? = nil,
+         rulesSeen: RuleSeenStore = RuleSeenStore(), hints: (() -> HintEngine)? = nil,
          onHintRetired: ((String, HintRetirement) -> Void)? = nil, ticket: @escaping () async throws -> [UInt8]) {
         self.server = server
         self.hints = hints
@@ -108,7 +109,7 @@ final class OnlineLaunch {
             let driver = OnlineDriver(start: start, transport: joined, token: token, clientBuild: Self.clientBuild,
                                       now: clock.now, connect: { WebSocketTransport(url: url) })
             let session = GameSession(online: driver, haptics: haptics, controls: controls, rulesSeen: rulesSeen,
-                                      hints: hints)
+                                      hints: hints?())
             session.onHintRetired = onHintRetired
             phase = .racing(session)
         case .updateRequired(let reason):

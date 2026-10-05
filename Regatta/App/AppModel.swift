@@ -205,7 +205,7 @@ final class AppModel {
         launchOptions.uiTesting ? HintProgressStore() : HintProgressStore(defaults: defaults)
     }
 
-    /// A race's hint engine (#129) over `hintProgress`.
+    /// A fresh hint engine (#129) over `hintProgress`, one per race's session.
     func hintEngine() -> HintEngine {
         HintEngine(progress: hintProgress)
     }
