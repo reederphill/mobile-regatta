@@ -26,20 +26,48 @@ nonisolated struct SoundLibrary: Sendable {
         return PlaceholderSound.buffer(asset).map { ($0, true) }
     }
 
-    /// The music's file: the bundled one, or the placeholder, written once to the temporary directory.
-    func musicURL() -> URL? {
+    /// The music's file: the bundled one, or the placeholder, written to the temporary directory. A file already
+    /// there is reused only if it's whole (the placeholder's format and length); otherwise it's written afresh, to a
+    /// scratch file first and then moved into place, so a write cut short never leaves a broken file to reuse.
+    func musicURL(directory: URL = FileManager.default.temporaryDirectory) -> URL? {
         if let url = bundledURL(.menuMusic) { return url }
-        let url = FileManager.default.temporaryDirectory.appending(path: "menu-music-placeholder.caf")
-        if FileManager.default.fileExists(atPath: url.path) { return url }
+        let url = directory.appending(path: Self.placeholderMusicName)
+        if Self.isWholePlaceholderMusic(url) { return url }
         guard let buffer = PlaceholderSound.buffer(.menuMusic) else { return nil }
+        let scratch = directory.appending(path: "\(UUID().uuidString).caf")
         do {
-            let file = try AVAudioFile(forWriting: url, settings: buffer.format.settings)
-            try file.write(from: buffer)
+            do {
+                let file = try AVAudioFile(forWriting: scratch, settings: buffer.format.settings)
+                try file.write(from: buffer)
+            }  // The file closes here, before it's checked and moved.
+            guard Self.isWholePlaceholderMusic(scratch) else {
+                try? FileManager.default.removeItem(at: scratch)
+                SoundSession.log.error("Placeholder music: the written file is incomplete")
+                return nil
+            }
+            if FileManager.default.fileExists(atPath: url.path) {
+                _ = try FileManager.default.replaceItemAt(url, withItemAt: scratch)
+            } else {
+                try FileManager.default.moveItem(at: scratch, to: url)
+            }
             return url
         } catch {
+            try? FileManager.default.removeItem(at: scratch)
             SoundSession.log.error("Placeholder music: \(String(describing: error), privacy: .public)")
             return nil
         }
+    }
+
+    /// The placeholder music's file name: versioned, so a change to the placeholder never reuses an old file.
+    static let placeholderMusicName = "menu-music-placeholder-2.caf"
+
+    /// Whether `url` holds the whole placeholder music: its sample rate, channels and length.
+    static func isWholePlaceholderMusic(_ url: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: url.path),
+              let file = try? AVAudioFile(forReading: url) else { return false }
+        let format = file.fileFormat
+        return format.sampleRate == PlaceholderSound.sampleRate && format.channelCount == 1
+            && file.length == AVAudioFramePosition(PlaceholderSound.musicFrameCount)
     }
 
     private static func read(_ url: URL) -> AVAudioPCMBuffer? {
@@ -115,15 +143,23 @@ nonisolated enum PlaceholderSound {
         case .menuMusic:
             // A slow pad: an A minor chord, breathing.
             let notes = [220.0, 261.63, 329.63, 440.0]
-            let raw = (0..<frames(8)).map { i -> Double in
+            let raw = (0..<frames(musicSeconds)).map { i -> Double in
                 let t = Double(i) / sampleRate
-                let swell: Double = 0.6 + 0.4 * sine(1.0 / 8, t)
+                let swell: Double = 0.6 + 0.4 * sine(1.0 / musicSeconds, t)
                 let chord: Double = notes.reduce(0) { $0 + sine($1, t) }
                 return chord * 0.06 * swell
             }
-            return raw.map(Float.init)
+            // The chord's notes don't complete whole cycles in the loop: crossfade its end into its start.
+            return seamless(raw)
         }
     }
+
+    /// The placeholder music's length before its loop crossfade.
+    static let musicSeconds = 8.0
+    /// The placeholder music's frames: `musicSeconds` less its loop crossfade (`seamless`).
+    static var musicFrameCount: Int { frames(musicSeconds) - min(frames(loopFadeSeconds), frames(musicSeconds) / 2) }
+    /// How much of a loop's end `seamless` crossfades into its start.
+    static let loopFadeSeconds = 0.25
 
     private static func frames(_ seconds: Double) -> Int { Int(seconds * sampleRate) }
 
@@ -154,7 +190,7 @@ nonisolated enum PlaceholderSound {
 
     /// `raw` with its last quarter second crossfaded into its start, so it loops without a click.
     private static func seamless(_ raw: [Double]) -> [Float] {
-        let fade = min(frames(0.25), raw.count / 2)
+        let fade = min(frames(loopFadeSeconds), raw.count / 2)
         let count = raw.count - fade
         return (0..<count).map { i in
             guard i < fade else { return Float(raw[i]) }

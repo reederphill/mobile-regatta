@@ -79,7 +79,7 @@ Sources: #21 (liveries), #22 (art direction, audio), #36 (venues, icon), #53. De
 
 | Name | File | Format | Source | Plays |
 |---|---|---|---|---|
-| `horn` | `horn.caf` | LPCM 16-bit 44.1 kHz mono | licensed | 60 s, 30 s, OCS (repeated), finish; patterns in code |
+| `horn` | `horn.caf` | LPCM 16-bit 44.1 kHz mono | licensed | 60 s, 30 s, OCS (one horn), finish; patterns in code |
 | `gun` | `gun.caf` | LPCM 16-bit 44.1 kHz mono | licensed | start |
 | `beep` | `beep.caf` | LPCM 16-bit 44.1 kHz mono | synthesised | 5-4-3-2-1 (one asset, played 5×) |
 | `whistle` | `whistle.caf` | LPCM 16-bit 44.1 kHz mono | recorded | rule call involving you |

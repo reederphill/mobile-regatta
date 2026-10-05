@@ -57,6 +57,14 @@ final class GatedMenuMusic: MenuMusic {
         apply()
     }
 
+    /// The scene is active again: tells the output to play once more if the music should, even if it was told
+    /// already, since the system may have stopped the player meanwhile (an interruption, the background).
+    func resume() {
+        guard isOn && isWanted else { return }
+        isPlaying = true
+        output.fadeIn()
+    }
+
     private func apply() {
         let plays = isOn && isWanted
         guard plays != isPlaying else { return }

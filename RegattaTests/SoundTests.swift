@@ -316,3 +316,207 @@ final class RecordingMusic: MusicOutput {
         #expect(recorder.ambience.last == .silent)
     }
 }
+
+/// A music track that records what it was told; the test stops it as the system would.
+nonisolated final class FakeTrack: MenuMusicTrack, @unchecked Sendable {
+    var isPlaying = false
+    var volume: Float = 1
+    var plays = 0
+    @discardableResult func play() -> Bool {
+        plays += 1
+        isPlaying = true
+        return true
+    }
+    func pause() { isPlaying = false }
+    func setVolume(_ volume: Float, fadeDuration: TimeInterval) { self.volume = volume }
+}
+
+/// The menu music keeps playing through what the system does to it (#126): interruptions, the background, a file
+/// that won't load.
+@MainActor @Suite struct MusicPlaybackTests {
+    nonisolated final class Harness: @unchecked Sendable {
+        let track = FakeTrack()
+        var loads = 0
+        var activations = 0
+        var silenced = false
+        var loadFails = false
+        var pending: [@Sendable () -> Void] = []
+        private(set) var playback: MusicPlayback!
+
+        init() {
+            playback = MusicPlayback(
+                load: { [unowned self] in
+                    loads += 1
+                    return loadFails ? nil : track
+                },
+                isSilencedByOtherAudio: { [unowned self] in silenced },
+                activateSession: { [unowned self] in activations += 1 },
+                after: { [unowned self] _, work in pending.append(work) })
+        }
+
+        func runPending() {
+            let work = pending
+            pending = []
+            work.forEach { $0() }
+        }
+    }
+
+    @Test func anInterruptionEndingPlaysTheMusicAgain() {
+        let h = Harness()
+        h.playback.setWanted(true)
+        #expect(h.track.isPlaying && h.track.volume == MusicPlayback.volume)
+        h.track.isPlaying = false  // A call: the system pauses the player.
+        h.playback.interruptionEnded()
+        #expect(h.activations == 1, "the session is reactivated")
+        #expect(h.track.isPlaying && h.track.plays == 2)
+    }
+
+    @Test func aForegroundReturnPlaysAStoppedPlayer() {
+        let h = Harness()
+        h.playback.setWanted(true)
+        h.track.isPlaying = false  // The background: the system stopped it.
+        h.playback.refresh()
+        #expect(h.track.isPlaying && h.track.plays == 2)
+        // Not wanted: an interruption ending or a return leaves it silent, and the session alone.
+        h.playback.setWanted(false)
+        h.runPending()
+        #expect(!h.track.isPlaying)
+        h.playback.interruptionEnded()
+        h.playback.refresh()
+        #expect(!h.track.isPlaying && h.activations == 0)
+    }
+
+    @Test func otherAudioSilencesItAndAFadeInCallsOffThePause() {
+        let h = Harness()
+        h.playback.setWanted(true)
+        h.silenced = true
+        h.playback.refresh()
+        #expect(h.track.volume == 0)
+        h.silenced = false
+        h.playback.refresh()
+        h.runPending()
+        #expect(h.track.isPlaying, "the pause scheduled by the fade-out is called off")
+    }
+
+    @Test func aFailedLoadIsNotRetried() {
+        let h = Harness()
+        h.loadFails = true
+        h.playback.setWanted(true)
+        h.playback.refresh()
+        h.playback.interruptionEnded()
+        h.playback.setWanted(true)
+        #expect(h.loads == 1)
+    }
+
+    /// The gate re-tells its output to play on the scene's return, though it told it already.
+    @Test func theGateResumesOnTheScenesReturn() {
+        let recorder = RecordingMusic()
+        let music = GatedMenuMusic(output: recorder, isOn: true)
+        music.play()
+        music.resume()
+        #expect(recorder.calls == ["in", "in"])
+        music.fadeOut()
+        music.resume()
+        #expect(recorder.calls == ["in", "in", "out"], "not in a race")
+    }
+}
+
+/// The ambience is quiet when it should be and cheap while it plays (#126).
+@MainActor @Suite struct AmbienceGateTests {
+    private static let audible = AmbienceMix.gains(for: .init(windKnots: 10, boatKnots: 4, isEasing: false))
+
+    @Test func theSceneGatesTheAmbience() {
+        let recorder = RecordingSound()
+        let sound = GatedSound(output: recorder, isOn: true)
+        sound.setAmbience(Self.audible)
+        sound.isSceneActive = false
+        #expect(recorder.ambience == [Self.audible, .silent])
+        sound.setAmbience(Self.audible)
+        sound.play(.bell)
+        #expect(recorder.ambience.count == 2, "nothing while the scene isn't active")
+        #expect(recorder.played == [.bell], "a one-shot still plays")
+        sound.isSceneActive = true
+        #expect(recorder.ambience.last == Self.audible, "back at once")
+    }
+
+    @Test func effectsOffFromLaunchNeverTouchesTheOutput() {
+        let recorder = RecordingSound()
+        let sound = GatedSound(output: recorder, isOn: false)
+        sound.setAmbience(.silent)
+        sound.setAmbience(Self.audible)
+        sound.isSceneActive = false
+        sound.isSceneActive = true
+        sound.setAmbience(.silent)
+        #expect(recorder.ambience.isEmpty && recorder.played.isEmpty)
+        // On, a silence the output already has isn't sent either.
+        sound.isOn = true
+        #expect(recorder.ambience.isEmpty)
+    }
+
+    /// The model follows the scene: the ambience is silent while it isn't active.
+    @Test func theModelGatesOnTheScene() {
+        let scene = SceneState()
+        scene.phase = .active
+        let recorder = RecordingSound()
+        let model = AppModel(sceneState: scene, audio: AppAudio(effects: recorder, music: SilentMusicOutput()))
+        #expect(model.sound.isSceneActive)
+        model.sound.setAmbience(Self.audible)
+        scene.phase = .inactive
+        #expect(!model.sound.isSceneActive && recorder.ambience.last == .silent)
+        scene.phase = .active
+        #expect(recorder.ambience.last == Self.audible)
+    }
+
+    /// A steady mix sends nothing per tick once the ramp has landed.
+    @Test func aSteadyMixSendsOnlyChanges() throws {
+        let recorder = RecordingSound()
+        var sound = RaceSound(output: recorder)
+        let t0 = Date(timeIntervalSinceReferenceDate: 0)
+        let input = AmbienceInput(windKnots: 14, boatKnots: 5, isEasing: false)
+        for i in 0...40 { sound.stepAmbience(input, at: t0.addingTimeInterval(Double(i) / 15)) }
+        let last = try #require(recorder.ambience.last)
+        #expect(!last.differs(from: AmbienceMix.gains(for: input), by: RaceSound.sendEpsilon), "near enough its target")
+        let sent = recorder.ambience.count
+        for i in 41...80 { sound.stepAmbience(input, at: t0.addingTimeInterval(Double(i) / 15)) }
+        #expect(recorder.ambience.count == sent)
+        // A change below the epsilon isn't sent; one above it is.
+        sound.stepAmbience(AmbienceInput(windKnots: 14.001, boatKnots: 5, isEasing: false), at: t0 + 81.0 / 15)
+        #expect(recorder.ambience.count == sent)
+        sound.stepAmbience(AmbienceInput(windKnots: 14, boatKnots: 5, isEasing: true), at: t0 + 82.0 / 15)
+        #expect(recorder.ambience.count == sent + 1)
+        // Silence is sent exactly, once.
+        sound.silence()
+        sound.stepAmbience(nil, at: t0 + 83.0 / 15)
+        #expect(recorder.ambience.count == sent + 2 && recorder.ambience.last == .silent)
+    }
+}
+
+/// The placeholder music (#126, until #169): a seamless loop, written whole.
+@MainActor @Suite struct PlaceholderMusicTests {
+    @Test func itLoopsSeamlessly() {
+        let samples = PlaceholderSound.samples(.menuMusic)
+        #expect(samples.count == PlaceholderSound.musicFrameCount)
+        let peak = samples.map(abs).max() ?? 0
+        let biggestStep = zip(samples, samples.dropFirst()).map { abs($1 - $0) }.max() ?? 0
+        // The wrap from the end to the start is no bigger than a step inside the loop.
+        #expect(abs(samples[0] - samples[samples.count - 1]) <= biggestStep + 1e-6 && peak > 0)
+    }
+
+    @Test func aBrokenFileIsWrittenAfresh() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "PlaceholderMusicTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let library = SoundLibrary()
+        try #require(library.isPlaceholder(.menuMusic))
+        let url = directory.appending(path: SoundLibrary.placeholderMusicName)
+        try Data([1, 2, 3]).write(to: url)  // A write cut short.
+        #expect(!SoundLibrary.isWholePlaceholderMusic(url))
+        #expect(library.musicURL(directory: directory) == url)
+        #expect(SoundLibrary.isWholePlaceholderMusic(url))
+        // Whole, it's reused, and nothing else is left in the directory.
+        let written = try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+        #expect(library.musicURL(directory: directory) == url)
+        #expect(try FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date == written)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == [SoundLibrary.placeholderMusicName])
+    }
+}

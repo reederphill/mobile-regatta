@@ -17,6 +17,12 @@ nonisolated enum SoundSession {
             log.error("Audio session: \(String(describing: error), privacy: .public)")
         }
     }
+
+    /// Whether `note`, an `AVAudioSession.interruptionNotification`, says the interruption ended.
+    static func interruptionEnded(_ note: Notification) -> Bool {
+        (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt).flatMap(AVAudioSession.InterruptionType.init)
+            == .ended
+    }
 }
 
 /// The app's sounds: live on a device or simulator, silent in tests, UI tests and render fixtures, which never touch
@@ -34,8 +40,12 @@ struct AppAudio {
         !options.uiTesting && options.fixture == nil && environment["XCTestConfigurationFilePath"] == nil
     }
 
+    /// The app's one live audio, shared by every `AppModel` (the app has one scene): made on first use, and each
+    /// output makes its engine or player only when it first sounds (`SystemSoundOutput`, `SystemMusicOutput`).
+    private static let shared = AppAudio(effects: SystemSoundOutput(), music: SystemMusicOutput())
+
     static func live(for options: LaunchOptions = .current) -> AppAudio {
         guard isLive(options) else { return .silent }
-        return AppAudio(effects: SystemSoundOutput(), music: SystemMusicOutput())
+        return shared
     }
 }

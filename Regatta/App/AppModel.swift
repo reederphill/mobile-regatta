@@ -195,6 +195,8 @@ final class AppModel {
         sceneState.isRaceSequenceShowing = false
         controls.savesZoomMultiplier = { [weak self] multiplier in self?.deviceSettings.zoomMultiplier = multiplier }
         myBoat.onSave = { [weak self] livery in self?.myLivery = livery }
+        sound.isSceneActive = sceneState.isActive
+        sceneState.onPhaseChange = { [weak self] isActive in self?.sceneChanged(isActive: isActive) }
         music.play()
     }
 
@@ -357,6 +359,13 @@ final class AppModel {
     func finishBriefing() {
         guard case .briefing(_, let config) = race else { return }
         startRaceSequence(session(tuned: config))
+    }
+
+    /// The scene's phase changed (#126): the ambience is silent while the scene isn't active, online races included,
+    /// and the music plays on again as it's active, if the system stopped it meanwhile.
+    func sceneChanged(isActive: Bool) {
+        sound.isSceneActive = isActive
+        if isActive { music.resume() }
     }
 
     /// Quits the race sequence back to the menus, where the music fades back in (#126).

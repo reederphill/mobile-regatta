@@ -229,7 +229,7 @@ private struct SoundsHelp: View {
         ])
         HelpSection(heading: "Your boat", lines: [
             "A horn just after the gun: you were over the line. Dip back below it, then start.",
-            "A whistle: a call on you.",
+            "A whistle: a rule call with you in it.",
             "A soft bell: you rounded a mark.",
             "A horn at the end: you finished.",
         ])

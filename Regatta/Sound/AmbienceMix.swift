@@ -8,22 +8,55 @@ struct AmbienceInput: Equatable {
     var isEasing: Bool
 }
 
-/// Each ambience layer's gain, 0…1. A layer with no entry is silent.
+/// Each ambience layer's gain, 0…1: one stored value per layer, so stepping the mix on every HUD tick allocates
+/// nothing.
 nonisolated struct AmbienceGains: Equatable, Sendable {
-    var values: [AmbienceLayer: Double] = [:]
+    var windLight = 0.0, windMedium = 0.0, windStrong = 0.0
+    var waterSlow = 0.0, waterFast = 0.0
+    var sailFlog = 0.0
 
     static let silent = AmbienceGains()
 
     subscript(layer: AmbienceLayer) -> Double {
-        get { values[layer] ?? 0 }
-        set { values[layer] = newValue }
+        get {
+            switch layer {
+            case .windLight: windLight
+            case .windMedium: windMedium
+            case .windStrong: windStrong
+            case .waterSlow: waterSlow
+            case .waterFast: waterFast
+            case .sailFlog: sailFlog
+            }
+        }
+        set {
+            switch layer {
+            case .windLight: windLight = newValue
+            case .windMedium: windMedium = newValue
+            case .windStrong: windStrong = newValue
+            case .waterSlow: waterSlow = newValue
+            case .waterFast: waterFast = newValue
+            case .sailFlog: sailFlog = newValue
+            }
+        }
     }
 
-    var isSilent: Bool { values.values.allSatisfy { $0 <= 0 } }
+    var isSilent: Bool {
+        windLight <= 0 && windMedium <= 0 && windStrong <= 0 && waterSlow <= 0 && waterFast <= 0 && sailFlog <= 0
+    }
 
-    /// Equal when every layer's gain is, a missing layer counting as silent.
-    static func == (lhs: AmbienceGains, rhs: AmbienceGains) -> Bool {
-        AmbienceLayer.allCases.allSatisfy { lhs[$0] == rhs[$0] }
+    /// Whether some layer's gain differs from `other`'s by more than `epsilon`.
+    func differs(from other: AmbienceGains, by epsilon: Double) -> Bool {
+        let close = { (a: Double, b: Double) in abs(a - b) <= epsilon }
+        return !(close(windLight, other.windLight) && close(windMedium, other.windMedium)
+            && close(windStrong, other.windStrong) && close(waterSlow, other.waterSlow)
+            && close(waterFast, other.waterFast) && close(sailFlog, other.sailFlog))
+    }
+
+    /// Each layer's gain combined with `other`'s by `combine`.
+    func combined(with other: AmbienceGains, _ combine: (Double, Double) -> Double) -> AmbienceGains {
+        AmbienceGains(windLight: combine(windLight, other.windLight), windMedium: combine(windMedium, other.windMedium),
+                      windStrong: combine(windStrong, other.windStrong), waterSlow: combine(waterSlow, other.waterSlow),
+                      waterFast: combine(waterFast, other.waterFast), sailFlog: combine(sailFlog, other.sailFlog))
     }
 }
 
@@ -75,12 +108,7 @@ enum AmbienceMix {
     /// `current` moved towards `target` over `seconds`: each layer by at most `seconds / rampSeconds` of full scale.
     static func ramp(_ current: AmbienceGains, toward target: AmbienceGains, over seconds: Double) -> AmbienceGains {
         let step = max(0, seconds) / rampSeconds
-        var out = AmbienceGains()
-        for layer in AmbienceLayer.allCases {
-            let from = current[layer], to = target[layer]
-            out[layer] = from + min(max(to - from, -step), step)
-        }
-        return out
+        return current.combined(with: target) { from, to in from + min(max(to - from, -step), step) }
     }
 
     /// The two gains of a constant-power crossfade at `t` (0…1): their squares sum to 1.
