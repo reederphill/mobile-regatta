@@ -10,7 +10,19 @@ import UIKit
 @Observable
 final class SceneState {
     /// Follows the scene's activation state, forwarded by `SceneDelegate`.
-    var phase: ScenePhase = .inactive
+    var phase: ScenePhase = .inactive {
+        didSet {
+            guard phase != oldValue else { return }
+            onPhaseChange?(isActive)
+        }
+    }
+
+    /// The scene is in the foreground and active.
+    var isActive: Bool { phase == .active }
+
+    /// Told each change of `phase`, with `isActive`: `AppModel` silences the ambience while the scene isn't active
+    /// (#126).
+    @ObservationIgnored var onPhaseChange: ((Bool) -> Void)?
 
     /// Whether the race sequence (briefing, race, results) is on screen, set by `AppModel.phase`. The root view
     /// controller prefers a locked interface orientation only while it is. Menus adapt to any window, so they

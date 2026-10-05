@@ -28,7 +28,8 @@ public struct BotSuiteOptions: Hashable, Sendable {
           --seeds <n>            sail seeds 1...n instead of the matrix's
           --fleet-size <n>       sail only this fleet size (repeatable)
           --tier-mix <mix>       sail only this tier mix: club, regional, national, mixed (repeatable)
-          --profile-mix <mix>    sail only this profile mix: live, skillGap, funPass, hunters (repeatable)
+          --profile-mix <mix>    sail only this profile mix: live, skillGap, funPass, hunters, execution,
+                                 cautious, rivals, rankStability (repeatable)
           --laps <n>             laps per race instead of the matrix's
           --json <path|->        write the JSON report there (- for stdout)
         Exits 1 when the run misses the thresholds, 2 on a usage or setup error.
@@ -75,7 +76,15 @@ public struct BotSuiteOptions: Hashable, Sendable {
         if let seedCount { matrix.seeds = (1...seedCount).map(UInt64.init) }
         if !fleetSizes.isEmpty { matrix.fleetSizes = fleetSizes }
         if !tierMixes.isEmpty { matrix.tierMixes = tierMixes }
-        if !profileMixes.isEmpty { matrix.profileMixes = profileMixes }
+        if !profileMixes.isEmpty {
+            matrix.profileMixes = profileMixes
+        } else if !fleetSizes.isEmpty || !tierMixes.isEmpty {
+            // Narrowed to fleets or tiers some of the matrix's mixes aren't sailed in (`ProfileMix.tierMix`,
+            // `BotMatrix.mixFleetSizes`): those mixes weren't asked for by name, so leave them out. A mix named with
+            // `--profile-mix` that sails nothing is refused (`validate`).
+            let narrowed = matrix
+            matrix.profileMixes = matrix.profileMixes.filter(narrowed.sailsAny)
+        }
         if let laps { matrix.laps = laps }
         try matrix.validate()
         return matrix

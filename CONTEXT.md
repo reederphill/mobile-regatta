@@ -18,6 +18,10 @@ _Avoid_: tournament, event
 The countdown before the gun, during which boats manoeuvre below the start line.
 _Avoid_: pre-race, lobby countdown
 
+**Committee sounds**:
+The start sequence's horns (60 s and 30 s), beeps (5 to 1) and gun, played from the race clock the player sees, never from a server event.
+_Avoid_: alarms, countdown sounds
+
 **OCS** (On Course Side):
 A boat with any part of her hull on the course side of the start line at the gun. She must return until her whole hull is on the pre-start side before starting. A boat that never comes back is scored OCS, and so is a boat that never started: behind every boat placed by ladder distance and every DSQ, and ahead of RET.
 _Avoid_: false start, early
@@ -128,6 +132,14 @@ _Avoid_: difficulty, level
 **Cautious bot**:
 The bot that sails a dropped player's boat until they come back: a Club bot at the bottom of Club's band, not a fourth tier. It takes the boat from wherever she is, always gives way, early and wide, and never attacks, so dropping never helps.
 _Avoid_: easy bot, autopilot
+
+**Executor**:
+A bot-suite profile only: the groove-only bot's tactics with perfect execution, every roll tack hit. The suite checks she loses to a good tactician with average execution, so decisions stay the main skill.
+_Avoid_: perfect bot
+
+**Watchdog**:
+The bot suite's count of rule 16.1 calls where the right-of-way boat's rudder was centred throughout the escape window: the autohelm's own course change following a shift, called against her.
+_Avoid_: 16.1 monitor
 
 **Handback**:
 A dropped player taking their boat back from the cautious bot. The boat keeps everything she had: a penalty turn part turned, the autohelm's target. The player's inputs apply from the next tick.

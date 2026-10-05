@@ -140,6 +140,30 @@ import RegattaCore
         #expect(briefing.displayedSeconds == 15)
     }
 
+    /// The menu music (#126): playing from launch, faded by a practice or online race entered without a briefing
+    /// (the briefing fades it itself), and back on returning home.
+    @Test func menuMusicPlaysInTheMenusOnly() throws {
+        let name = "AppModelTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let music = RecordingMusic()
+        let model = AppModel(launchOptions: LaunchOptions(arguments: ["/path/to/Regatta", "-uitesting"]),
+                             defaults: defaults, audio: AppAudio(effects: SilentSoundOutput(), music: music))
+        #expect(music.calls == ["in"], "at launch")
+        model.startBriefing(config: Self.config, mode: .practice)
+        #expect(music.calls == ["in"], "the briefing fades it as it begins")
+        model.briefing?.begin()
+        #expect(music.calls == ["in", "out"])
+        model.finishBriefing()
+        model.leaveRace()
+        #expect(music.calls == ["in", "out", "in"], "home again")
+        model.startRaceSequence(model.practiceSession(config: Self.config))
+        #expect(music.calls == ["in", "out", "in", "out"], "a race without a briefing")
+        model.endRaceSequence()
+        model.startRaceSequence(.online(OnlineLaunch(server: RaceServer(address: "localhost:1")) { [] }))
+        #expect(music.calls == ["in", "out", "in", "out", "in", "out"], "an online race")
+    }
+
     @Test func lobbyPanelFollowsConnectivityThenAccount() {
         var status = LobbyStatus()
         #expect(LobbyPanelState(isOnline: false, status: status) == .offline)

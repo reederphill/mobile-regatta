@@ -278,10 +278,48 @@ import RegattaCore
             var hunter = Tactics(profile: .hunter, skill: skill)
             #expect(hunter.hunts)
             hunter.hunts = false
-            #expect(hunter == Tactics(profile: .tactician, skill: skill))
+            // #355's tactician: #105's run and line tactics are the tactician's alone, not the hunter's.
+            var tactician = Tactics(profile: .tactician, skill: skill)
+            #expect(tactician.runsToPressure && tactician.gybesOutOfShadow && tactician.startsAtFavouredEnd)
+            tactician.runsToPressure = false
+            tactician.gybesOutOfShadow = false
+            tactician.startsAtFavouredEnd = false
+            #expect(hunter == tactician)
         }
         for profile in [nil, BotProfile.baseline, .tactician, .blipTacker] {
             #expect(!Tactics(profile: profile, skill: 1).hunts)
+        }
+    }
+
+    /// #105 (#222): the executor is the baseline's tactics executed perfectly, rolling every tack and hitting every roll;
+    /// the tactician at Club-level execution is the tactician whose rolls hit half the time (rolls only, the ruling).
+    @Test func executorAndClubTacticianDifferInExecutionOnly() {
+        var executor = Tactics(profile: .executor, skill: 0.9)
+        #expect(executor.rollsTacks)
+        executor.rollsTacks = false
+        #expect(executor == Tactics(profile: .baseline, skill: 0.9))
+        #expect(Tactics(profile: .tacticianClubExecution, skill: 0.9) == Tactics(profile: .tactician, skill: 0.9))
+        let perfect = BotProfile.executor.weaknesses(skill: 0.9)
+        #expect(perfect == BotWeaknesses.none(skill: 0.9))
+        #expect(perfect.rollHitRate == 1 && perfect.angleMissRate == 0)
+        var club = BotProfile.tacticianClubExecution.weaknesses(skill: 0.9)
+        #expect(club.rollHitRate == 0.5)
+        club.rollHitRate = 1
+        #expect(club == perfect, "only her rolls differ")
+    }
+
+    /// #105: the tactician's downwind and start tactics are hers (and the Club-execution tactician's) alone; no live
+    /// bot or other profile plays them. Not the hunter: she stays #355's tactician, hunting (#105 fix round 1).
+    @Test func onlyTheTacticianPlaysTheRunAndTheLine() {
+        for profile in [BotProfile.tactician, .tacticianClubExecution] {
+            let tactics = Tactics(profile: profile, skill: 0.9)
+            #expect(tactics.runsToPressure && tactics.gybesOutOfShadow && tactics.startsAtFavouredEnd, "\(profile)")
+        }
+        for profile in [nil, BotProfile.baseline, .blipTacker, .executor, .hunter] {
+            for skill in [0.0, 0.5, 1.0] {
+                let tactics = Tactics(profile: profile, skill: skill)
+                #expect(!tactics.runsToPressure && !tactics.gybesOutOfShadow && !tactics.startsAtFavouredEnd)
+            }
         }
     }
 

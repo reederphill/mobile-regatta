@@ -62,6 +62,15 @@ struct Tactics: Sendable, Equatable {
     /// As the right-of-way boat racing, she turns towards a boat that must keep clear of her, within rule 16.1's rate,
     /// instead of holding her course (#355, `BotProfile.hunter`, `hunting`). Only the suite's hunter.
     var hunts = false
+    /// Downwind, she weighs the pressure ahead on each gybe (#105, `downwindPressureAdvantage`) against the shift she
+    /// gybes on: she stays in the pressure. The tactician's (and the Club-execution tactician's), not the hunter's.
+    var runsToPressure = false
+    /// Downwind, she gybes out of the wind shadow of a boat behind her (#105): its shadow on her (`SeatView.OwnBoat.shadow`
+    /// under `BotBrain.dirtyAir`) is worth `BotBrain.downwindShadowWeight` of shift. The tactician's, not the hunter's.
+    var gybesOutOfShadow = false
+    /// Before the gun she reads the start line's bias from the wind at her and sets up at the end it favours
+    /// (#105, `BotBrain.readLineBias`), in place of her style's spot. The tactician's, not the hunter's.
+    var startsAtFavouredEnd = false
 
     /// Metres ahead she notices puffs and lulls (`BotWeaknesses.puffPerception`), when she seeks them; she reads the
     /// pressure out to twice as far (`pressureLookAhead`).
@@ -94,7 +103,11 @@ struct Tactics: Sendable, Equatable {
             // The groove only: headers past a threshold, the corridor, and nothing off the groove.
             self.init(headerThreshold: deg2rad(5), tackInterval: 15)
             rollsTacks = false
-        case .tactician, .hunter:
+        case .executor:
+            // #222, #105: the baseline's tactics, executed perfectly: she rolls every tack (and her weaknesses,
+            // `BotProfile.weaknesses`, have every roll hit).
+            self.init(headerThreshold: deg2rad(5), tackInterval: 15)
+        case .tactician, .hunter, .tacticianClubExecution:
             // #263: a corridor a little wider than the baseline's and her tacks as close together as hers, measured in
             // the fun pass: with skiff@3's tack cost and momentum, 0.8 and 20 s cost her the edge (#300 retunes).
             self.init(headerThreshold: deg2rad(4), tackInterval: 15, anticipation: 6, corridor: 0.5,
@@ -108,6 +121,13 @@ struct Tactics: Sendable, Equatable {
                 leeBows = true
                 tacksOnWind = true
             }
+            // #105: downwind she stays in the pressure and out of the shadow of the boats behind her, and she starts
+            // at the end of the line its bias favours. Not the hunter: she stays #355's tactician, so the hunters mix
+            // measures hunting and nothing else (#105 fix round 1: the extensions moved her into 16.1 calls).
+            let extended = profile != .hunter
+            runsToPressure = extended
+            gybesOutOfShadow = extended
+            startsAtFavouredEnd = extended
             // #355: the hunter is the tactician, hunting.
             hunts = profile == .hunter
         case .blipTacker:
@@ -329,13 +349,26 @@ extension BotBrain {
     /// (`pressureWeight`), and a bend only where she'd sail into more pressure: a bend with no more pressure in it is
     /// a shift she'd only sail into and out of again, not worth a tack.
     func pressureAdvantage(_ b: SeatView.OwnBoat, _ view: SeatView, over tack: Tack) -> Double {
+        // A veer lifts her on starboard, a back on port.
+        pressureAdvantage(b, view, over: tack, angle: grooveAngle(.upwind, b, view), veerLifts: .starboard)
+    }
+
+    /// Downwind (#105, `Tactics.runsToPressure`): how much better, as degrees of shift, the pressure ahead is on the other
+    /// gybe than on `gybe`, read along the downwind groove as `pressureAdvantage` reads it upwind. Downwind a back on
+    /// starboard swings her heading towards dead downwind and her mark (the mirror of `downwindGybe`'s header), so a back
+    /// lifts her on starboard, a veer on port.
+    func downwindPressureAdvantage(_ b: SeatView.OwnBoat, _ view: SeatView, over gybe: Tack) -> Double {
+        pressureAdvantage(b, view, over: gybe, angle: grooveAngle(.downwind, b, view), veerLifts: .port)
+    }
+
+    /// `pressureAdvantage` sailing at `angle` off the wind, a veer lifting her on `veerLifts` and a back on the other.
+    private func pressureAdvantage(_ b: SeatView.OwnBoat, _ view: SeatView, over tack: Tack, angle up: Double,
+                                   veerLifts: Tack) -> Double {
         guard let map = view.pressure, tactics.puffRange > 0, let here = map.sample(at: b.position) else { return 0 }
-        let up = grooveAngle(.upwind, b, view)
         let alongTrack = tactics.goesToThePressure
         func read(_ tack: Tack) -> Double {
             let ahead = Vec2.heading(Aim(angle: up, tack: tack).heading(wind: b.windDirection))
-            // A veer lifts her on starboard, a back on port.
-            let lift: Double = tack == .starboard ? 1 : -1
+            let lift: Double = tack == veerLifts ? 1 : -1
             var total = 0.0
             var best: Double?
             for share in Self.pressureLookAhead {
@@ -397,13 +430,23 @@ extension BotBrain {
     /// wind has shifted past her threshold the way that swings her heading away from the mark. Downwind that
     /// is a veer on starboard (her heading turns further from dead downwind) and a back on port: the mirror
     /// of a header upwind.
+    ///
+    /// The tactician (#105) weighs two things more, as the upwind beat weighs puffs and dirty air: the pressure ahead on
+    /// each gybe (`Tactics.runsToPressure`, `downwindPressureAdvantage`), and the wind shadow of a boat behind her
+    /// (`Tactics.gybesOutOfShadow`): on a run every boat shadowing her is astern of her, up the course.
     mutating func downwindGybe(_ b: SeatView.OwnBoat, _ view: SeatView, planned gybe: Tack) -> Tack {
         guard let threshold = tactics.downwindShiftThreshold, view.time - lastTackTime > tactics.tackInterval else { return gybe }
         let direction = (senses.direction ?? b.windDirection) + senses.directionRate * tactics.anticipation
         let shift = wrapAngle(direction - view.course.axis)
-        let away = gybe == .starboard ? shift : -shift
+        var away = gybe == .starboard ? shift : -shift
+        if tactics.runsToPressure { away += downwindPressureAdvantage(b, view, over: gybe) }
+        if tactics.gybesOutOfShadow && gybe == b.tack && b.shadow < Self.dirtyAir { away += Self.downwindShadowWeight }
         return away > threshold ? gybe.other : gybe
     }
+
+    /// Downwind, the shadow of a boat behind her is worth this much shift (#105): with a degree of shift the way it
+    /// swings her from her mark, enough to gybe out of past the tactician's 5° threshold. A tunable for #389.
+    static let downwindShadowWeight = deg2rad(4)
 
     /// How far above the groove she sails in a lull to stay on the plane: past the downwind snap.
     static let lullHeatUp = deg2rad(12)
