@@ -174,10 +174,12 @@ extension BotBrain {
             ? toSpot >= hold - Self.fetchMargin && landingRoom(b, view, hold: hold) > 0
             : toSpot >= hold + Self.joinMargin
                 || secondsToLine(b, view, angle: go.angle, ease: false, within: arrival) + Self.tackSeconds >= arrival
-        // Over the line before the gun, she runs back below it as an OCS boat would, on her own tack.
-        let bow = b.position + b.forward * (view.boatClass.hull.length / 2)
-        if line.side(bow) >= 0 && view.time < 0 { return returnAim(b, view) }
-        guard line.side(bow) < 0, joins, toSpot <= .pi / 2 + Self.waitOffLine else {
+        // Over the line before the gun, she runs back below it as an OCS boat would, on her own tack. Over is any
+        // point of her hull (`hullDepth`), as the race calls it: easing along the line with her bow up, her windward
+        // bow quarter crosses it before her bow does (#388, seed 9 of `aBotTakingOverBeforeTheGunStarts`).
+        let depth = Self.hullDepth(b.position, heading: b.heading, line, view.boatClass)
+        if depth <= 0 && view.time < 0 { return overEarlyAim(b, view) }
+        guard depth > 0, joins, toSpot <= .pi / 2 + Self.waitOffLine else {
             guard view.time < 0 else { return lateStartAim(b, view) }
             return toSetup(b, view, spot: spot, hold: hold, arrival: arrival)
         }
@@ -308,12 +310,23 @@ extension BotBrain {
         return spot - course * (depth / max(course.dot(c.upwind), 0.3))
     }
 
-    /// Seconds until her bow reaches the start line sailing `angle` on starboard (`secondsToLine(_:_:heading:ease:within:)`).
+    /// Seconds until her hull reaches the start line sailing `angle` on starboard (`secondsToLine(_:_:heading:ease:within:)`).
     func secondsToLine(_ b: SeatView.OwnBoat, _ view: SeatView, angle: Double, ease: Bool, within: Double) -> Double {
         secondsToLine(b, view, heading: b.windDirection - angle, ease: ease, within: within)
     }
 
-    /// Seconds until her bow reaches the start line sailing `heading`, sheeted in or with Ease, from her speed
+    /// Metres below the start line of the point of her hull furthest over it, her centre at `position` sailing `heading`:
+    /// negative once any of her hull is over, as the race calls a boat over (`Race.isOverStartLine`, the class's hull
+    /// outline). Her bow alone reads her clear while, luffed along the line, the bow quarter nearer the course side is
+    /// over (#388).
+    static func hullDepth(_ position: Vec2, heading: Double, _ line: CourseLayout.Line, _ boatClass: BoatClass) -> Double {
+        let forward = Vec2.heading(heading)
+        let right = forward.rightPerp
+        let over = boatClass.hull.outline.map { line.side(position + right * $0.x + forward * $0.y) }.max()
+        return -(over ?? line.side(position + forward * (boatClass.hull.length / 2)))
+    }
+
+    /// Seconds until her hull reaches the start line (`hullDepth`) sailing `heading`, sheeted in or with Ease, from her speed
     /// now: reckoned from her class's polar and momentum, in the wind at her and the current carrying her, a
     /// `timingStep` at a time as the dynamics sail it (`BoatDynamics.advance`). Infinity if not within `within`
     /// seconds and a second more, or if her course never gets there.
@@ -324,7 +337,7 @@ extension BotBrain {
         let rate = line.courseSideRate(course)
         let drift = line.courseSideRate(b.velocityOverGround - b.velocity)
         guard rate > 0.05 else { return .infinity }
-        var depth = -line.side(b.position + course * (boatClass.hull.length / 2))
+        var depth = Self.hullDepth(b.position, heading: heading, line, boatClass)
         guard depth > 0 else { return 0 }
         let relativeWind = wrapAngle(b.windDirection - heading)
         var target = BoatDynamics.polarTarget(relativeWind: relativeWind, boomSide: relativeWind >= 0 ? .port : .starboard,
@@ -344,7 +357,7 @@ extension BotBrain {
         return .infinity
     }
 
-    /// Whether sailing `heading` with Ease would still put her bow over the start line before the gun, or within
+    /// Whether sailing `heading` with Ease would still put her hull over the start line before the gun, or within
     /// `within` seconds if that is sooner.
     func crossesEarly(_ b: SeatView.OwnBoat, _ view: SeatView, heading: Double, within: Double? = nil) -> Bool {
         guard b.status == .prestart, view.time < 0, view.course.startLine.side(b.position) < 0 else { return false }
@@ -500,6 +513,18 @@ extension BotBrain {
         let along = (landing - line.pin.position).dot((line.committee.position - line.pin.position).normalized)
         let clearOfEnds = view.boatClass.hull.length
         return along > clearOfEnds && along < line.length - clearOfEnds
+    }
+
+    /// Over the line before the gun (`startAim`): with her centre more than half a beam below it, only a corner of her
+    /// hull is over, luffed along the line with her bow up (#388): she bears away along the line on her own tack, a little
+    /// off it (`waitOffLine`), with Ease, which swings it back below; otherwise she runs back (`returnAim`).
+    mutating func overEarlyAim(_ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
+        let line = view.course.startLine
+        guard -line.side(b.position) > view.boatClass.hull.beam / 2 else { return returnAim(b, view) }
+        let along = b.tack == .starboard ? line.pin.position - line.committee.position : line.committee.position - line.pin.position
+        let angle = abs(wrapAngle(b.windDirection - along.bearing)) + Self.waitOffLine
+        guard angle > Self.holdAngle(view), angle < Self.returnAngle else { return returnAim(b, view) }
+        return Aim(angle: angle, tack: b.tack, tolerance: Self.approachTolerance, ease: true)
     }
 
     /// OCS (#85): back below the line, whole hull, by the shortest way: she bears away and runs down across it
