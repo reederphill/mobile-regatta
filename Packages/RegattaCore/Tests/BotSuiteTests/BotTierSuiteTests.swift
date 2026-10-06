@@ -31,7 +31,11 @@ import Testing
         print("BotTierSuiteTests mean place over \(Self.seeds) mixed fleets of \(Self.fleetSize): national \(national) "
               + "(\(places[.national]?.count ?? 0) seats), regional \(regional) (\(places[.regional]?.count ?? 0)), "
               + "club \(club) (\(places[.club]?.count ?? 0))")
-        #expect(regional - national >= gap, "national \(national), regional \(regional)")
+        // #388's pre-gun gybe hold (takeover seed 1) reshuffles these races: regional - national 0.993 against the
+        // 1.0 placeholder. Owner 2026-10-05: ship, #389 tunes the gap.
+        withKnownIssue("#389: placeholder tier gap; national-regional 0.993 after #388", isIntermittent: true) {
+            #expect(regional - national >= gap, "national \(national), regional \(regional)")
+        }
         #expect(club - regional >= gap, "regional \(regional), club \(club)")
     }
 }

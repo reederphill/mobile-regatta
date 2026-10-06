@@ -78,7 +78,7 @@ import Testing
 
     /// #99 acceptance: pin-style bots (their spot in the line's pin third) seeded in committee slots (the row's
     /// slots off the line's committee third or past its end) work down the line and start in its pin third: at
-    /// least 70 % of them (the bundled gate).
+    /// least 68 % of them (the bundled gate).
     @Test func pinStyleBotsFromCommitteeSlotsReachThePinThird() throws {
         let summary = try Self.summary()
         #expect(summary.pinStyleFromCommitteeSeats >= 150, "\(summary.pinStyleFromCommitteeSeats) pin-style bots from committee slots")
@@ -155,7 +155,7 @@ import Testing
     @Test func bundledThresholdsGateTheStart() throws {
         let start = try Self.limits()
         #expect(start.maxOCSShare == 0.05 && start.minOnTimeShare == 0.6)
-        // #377: the pin third lowered from 0.70 to 0.68 under the ribbons and header; the start drift is #388.
+        // #377: the pin third lowered from 0.70 to 0.68 under the ribbons and header; the owner kept 0.68 after #388.
         #expect(start.maxMeanPreGunIronsSeconds == 1 && start.minPinThirdShare == 0.68)
         let old = try JSONDecoder().decode(BotThresholds.self, from: Data(#"{"maxP99TickMs": 10, "tiers": {}}"#.utf8))
         #expect(old.start == nil)

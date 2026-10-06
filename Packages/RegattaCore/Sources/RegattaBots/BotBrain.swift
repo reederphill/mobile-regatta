@@ -241,13 +241,23 @@ struct BotBrain: Sendable {
             // her start (#99) she sails her own tack's groove sheeted in instead: the speed to tack, rather than
             // a gybe to leeward the race area below the line may not have room for; but running by an end of the
             // line, she runs on clear of its mark to gybe.
+            // Off the wind, held off the gybe onto the other tack by boats near (with room for it to leeward), where
+            // her groove would put her on the line well before the gun (`grooveIsOverEarly`), she holds her angle, or
+            // bears away to the plan's if it is broader, with the plan's Ease, until the gybe is clear, rather than luff
+            // to her groove (anywhere else she luffs to it as before): from a broad reach on port that drove her at the
+            // line beside the committee boat with 19 s to go, over early, and running back swept her into it; luffing
+            // again, across the starboard boats (#388, seed 1 of `aBotTakingOverBeforeTheGunStarts`).
             var own = aim
             own.tack = boat.tack
             if boat.status == .prestart || boat.status == .ocs {
                 let running = sailingAngle(boat) >= .pi / 2
+                let groove = Aim.groove(.upwind, tack: boat.tack, angle: grooveAngle(.upwind, boat, view))
                 own = running && !isClearOfMarks(boat, view, lengths: Self.tapMarkClearance)
                     ? Aim(angle: max(sailingAngle(boat), Self.returnAngle), tack: boat.tack)
-                    : .groove(.upwind, tack: boat.tack, angle: grooveAngle(.upwind, boat, view))
+                    : running && (!tapIsClear(boat, view) || tapTurnsAtKeepClearBoat(boat, view))
+                        && hasGybeRoom(boat, view) && grooveIsOverEarly(boat, view, groove)
+                    ? Aim(angle: max(sailingAngle(boat), min(aim.angle, Self.returnAngle)), tack: boat.tack, ease: aim.ease)
+                    : groove
             }
             return holding(boat, view, helm(boat, to: own, view), desired: own.heading(wind: boat.windDirection))
         }
@@ -404,7 +414,7 @@ struct BotBrain: Sendable {
     /// Whether she may give her current turn up to keep clear (rule 21.2) and turn it all again: until
     /// `penaltyStartMargin` before its start deadline (`canPutOffTurn`) and `penaltyCompleteMargin` before its
     /// complete deadline.
-    private func canGiveUpTurn(_ owed: OwedPenalty, _ view: SeatView) -> Bool {
+    func canGiveUpTurn(_ owed: OwedPenalty, _ view: SeatView) -> Bool {
         canPutOffTurn(owed, view)
             && owed.completeDeadlineTick - view.tick > RulesConfig.ticks(Self.penaltyCompleteMargin)
     }
@@ -518,6 +528,26 @@ struct BotBrain: Sendable {
     /// her speed, to leeward.
     static let gybeRoom = (hullLengths: 2.0, seconds: 4.0)
 
+    /// How long before the gun her own tack's groove must carry her to the start line for her to hold off the wind
+    /// instead (`grooveIsOverEarly`): nearer the gun, luffed to it, she is only on the line a little early.
+    static let grooveEarlySeconds = 10.0
+
+    /// Whether, before the gun, her own tack's groove would carry her hull to the start line more than
+    /// `grooveEarlySeconds` before it (`secondsToLine`).
+    func grooveIsOverEarly(_ b: SeatView.OwnBoat, _ view: SeatView, _ groove: Aim) -> Bool {
+        guard view.time < 0 else { return false }
+        let toGun = -view.time
+        return secondsToLine(b, view, heading: groove.heading(wind: b.windDirection), ease: false, within: toGun)
+            < toGun - Self.grooveEarlySeconds
+    }
+
+    /// Whether the race area has room to leeward of her for a gybe (`gybeRoom`).
+    func hasGybeRoom(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        let room = view.boatClass.hull.length * Self.gybeRoom.hullLengths + b.speed * Self.gybeRoom.seconds
+        let leeward = -Vec2.heading(b.windDirection) * room
+        return view.course.isInRaceArea(b.position + leeward)
+    }
+
     /// Whether she can tap now: a tap done, no mark close enough for the turn to swing her onto, and for a
     /// tack, the speed to carry her through it; for a gybe, room to leeward inside the race area. Racing, she also
     /// taps only clear of every boat (`tapIsClear`, #101).
@@ -525,11 +555,7 @@ struct BotBrain: Sendable {
         guard view.time - lastTapTime >= Self.tapInterval,
               isClearOfMarks(b, view, lengths: Self.tapMarkClearance), tapIsClear(b, view),
               !tapTurnsAtKeepClearBoat(b, view) else { return false }
-        guard abs(sailingAngle(b)) < .pi / 2 else {
-            let room = view.boatClass.hull.length * Self.gybeRoom.hullLengths + b.speed * Self.gybeRoom.seconds
-            let leeward = -Vec2.heading(b.windDirection) * room
-            return view.course.isInRaceArea(b.position + leeward)
-        }
+        guard abs(sailingAngle(b)) < .pi / 2 else { return hasGybeRoom(b, view) }
         let closeHauled = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).speed * b.speedShadow
         return b.speed >= closeHauled * Self.tackingSpeed
     }

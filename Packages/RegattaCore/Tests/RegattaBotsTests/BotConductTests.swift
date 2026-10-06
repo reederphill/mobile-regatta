@@ -411,6 +411,54 @@ import RegattaCore
                                                                    caution: .standard)
     }
 
+    /// #388 (from #360): the cautious bot (#104) 30° to 60° into a penalty turn, hard over, near a boat that holds its
+    /// course, never fouls it: turning, she keeps clear of every boat (rule 21.2), so her look before she leaps
+    /// (`guarded`) covers the turn's own path. She reaches on starboard and bears away into the turn, its circle
+    /// sweeping to port; the other boat, on her port side, sails on what her autohelm holds, never steering for her:
+    /// overtaking her from her port quarter a little faster on near enough her course (seed 82 of
+    /// `CautiousBotSuiteTests`: she bore away round her circle into a boat overtaking her there), alongside, or
+    /// reaching back past her.
+    @Test func cautiousBotTurningAPenaltyNearABoatHoldingCourseDoesNotFoul() throws {
+        var fouls: [String] = []
+        var encounters = 0
+        for progress in [30.0, 45.0, 60.0] {
+            // The other boat: hull lengths ahead of her and to port, her heading off hers, and her speed.
+            for (ahead, toPort, off, speed) in [(-1.3, 0.95, 7.0, 3.7), (-2.0, 1.0, 0.0, 3.7), (-1.0, 1.2, 10.0, 3.5),
+                                                (0.0, 1.4, 0.0, 3.0), (-0.5, 1.6, 5.0, 3.2),
+                                                (2.0, 1.2, 180.0, 3.0), (3.0, 0.8, 180.0, 3.0)] {
+                let water = Water(seed: 5)
+                let heading = water.wind - .pi / 2
+                let forward = Vec2.heading(heading)
+                let race = try Self.place(water, [
+                    Placement(position: water.centre, heading: heading, speed: 2.9),
+                    Placement(position: water.centre + forward * water.length * ahead - forward.rightPerp * water.length * toPort,
+                              heading: heading + deg2rad(off), speed: speed),
+                ]) { snapshot in
+                    snapshot.seats[0].boat.autohelm = nil
+                    snapshot.seats[0].boat.rudder = -1
+                    snapshot.seats[0].heldInput = BoatInput(rudder: -1.0)
+                    snapshot.seats[0].boat.penaltyTurnsOwed = 1
+                    snapshot.seats[0].boat.penaltyProgress = -deg2rad(progress)
+                    snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+                }
+                let skill = BotBrain.Caution.skill
+                var pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: skill,
+                                  weaknesses: BotBrain.Caution.weaknesses(skill: skill), caution: .standard)
+                var kinds: [RaceEvent.Kind] = []
+                for _ in 0..<(30 * Race.tickRate) where !race.isOver {
+                    _ = pilot.drive(race)
+                    race.step()
+                    kinds += race.drainEvents().map(\.kind)
+                }
+                encounters += 1
+                let calls = Self.calls(kinds)
+                if !calls.isEmpty { fouls.append("\(progress)° in, ahead \(ahead) to port \(toPort) off \(off)°: \(calls)") }
+            }
+        }
+        #expect(encounters == 21)
+        #expect(fouls.isEmpty, "\(fouls.joined(separator: "\n"))")
+    }
+
     /// `rightOfWayBotNeverRuddersTowardAKeepClearBoat` at `skill`, both bots with `weaknesses` (their skill's if nil) and
     /// `caution`.
     static func checkRightOfWayNeverRuddersTowardAKeepClearBoat(skill: Double, weaknesses: BotWeaknesses? = nil,
