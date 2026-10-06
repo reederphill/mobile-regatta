@@ -65,4 +65,7 @@ final class OnlineStatus {
 extension EnvironmentValues {
     @Entry var isOnline = true
     @Entry var lobbyStatus = LobbyStatus()
+    /// Every service, for what acts on them outside the lobby: the online results' Race again joins the queue, and the
+    /// `-onlineResults` harness reads the race session (#133). Nil in previews and tests.
+    @Entry var onlineServices: ServiceSet? = nil
 }

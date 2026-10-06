@@ -69,9 +69,25 @@ final class GameSession {
         case practice
         /// Race online (primary) and Help.
         case firstRace
+        /// An online race with the server's results (#133): Race again (primary, re-queues) and Home.
+        case online
     }
 
-    var resultsButtons: ResultsButtons { Self.resultsButtons(isFirstRace: isFirstRace) }
+    /// An online race's results from the server's stream (#133), nil for practice and for a Debug dev-instant race,
+    /// which has no hand-off and keeps the live frame's standings and its own loop.
+    var onlineResults: OnlineResults? {
+        didSet {
+            onlineResults?.onChange = { [weak self] in
+                guard let self else { return }
+                resultsTick = nil
+                refreshResults()
+            }
+        }
+    }
+
+    var resultsButtons: ResultsButtons {
+        onlineResults != nil ? .online : Self.resultsButtons(isFirstRace: isFirstRace)
+    }
 
     static func resultsButtons(isFirstRace: Bool) -> ResultsButtons { isFirstRace ? .firstRace : .practice }
     /// The device's steering scheme, live (#112, #131).
@@ -408,6 +424,13 @@ final class GameSession {
 
     /// Rebuilds the results once a tick while you're done, and slides them up once their delay has passed.
     private func refreshResults() {
+        if onlineResults?.isCancelled == true {
+            // A cancelled race has no results: the sheet goes (#24; Home's notice is #141's).
+            results = nil
+            showsResults = false
+            finishedAt = nil
+            return
+        }
         guard playerDone else { return }
         if resultsTick != driver.currentFrame.tick || results == nil {
             results = makeResults()
@@ -462,6 +485,8 @@ final class GameSession {
             RaceResultViewModel.Entrant(name: roster.name(of: seat, playerSeat: me), isBot: roster[seat].isBot,
                                         livery: liveries[seat], isRival: roster[seat].isRival)
         }
+        // Online, the server's results once its stream has a report (#133); until then the live frame.
+        if let online = onlineResults?.model(entrants: entrants, livery: liveries[me]) { return online }
         return RaceResultViewModel(results: closedResults, live: live, entrants: entrants, mySeat: me,
                                    incidents: driver.incidents, served: servedTurns)
     }

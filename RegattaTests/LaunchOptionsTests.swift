@@ -95,7 +95,8 @@ import RegattaServices
         let unknown = parse("-fakeServices", "haunted")
         #expect(unknown.fakeServices == nil)
         #expect(unknown.problems == ["-fakeServices haunted: expected "
-            + "signed-out, underage, communication-restricted, multiplayer-restricted, offline, queued, cancelled-race"])
+            + "signed-out, underage, communication-restricted, multiplayer-restricted, offline, queued, cancelled-race, "
+            + "online-results, online-results-unrated"])
         let missing = parse("-fakeServices", "-autostart")
         #expect(missing.fakeServices == nil && missing.autostart)
         #expect(missing.problems == ["-fakeServices needs a value"])
@@ -275,6 +276,10 @@ import RegattaServices
         #expect(options.myBoat == DesignID("skiff-stars"))
         #expect(options.keepMyBoat)
         #expect(options.completedRaces == 3)
+        // `-onlineResults` (#133): the online results harness.
+        #expect(parse("-uitesting", "-fakeServices", "online-results", "-onlineResults", "-completedRaces", "9").onlineResults)
+        #expect(!options.onlineResults)
+        #expect(parse("-onlineResults", "-autostart").autostart, "-onlineResults takes no value")
         #expect(options.problems.isEmpty)
         #expect(!options.startsRace)
         let bad = parse("-myBoat", "skiff-gone", "-completedRaces", "-1")

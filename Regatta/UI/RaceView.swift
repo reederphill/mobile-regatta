@@ -16,6 +16,10 @@ struct RaceView: View {
     var onChangeSetup: (() -> Void)? = nil
     /// The first race's results' Race online (#24): leaves the race for online racing. Nil falls back to `onExit`.
     var onRaceOnline: (() -> Void)? = nil
+    /// An online race's results' Race again (#24, #133): joins the queue and goes home. Nil falls back to `onRestart`.
+    var onRaceAgain: (() -> Void)? = nil
+    /// The online results' Try it (#24): My boat with the earned design on. Nil falls back to `onExit`.
+    var onTryIt: ((DesignID) -> Void)? = nil
     /// Sending the app to the background pauses a practice race (#25), read from the scene (`SceneState`).
     @Environment(\.sceneState) private var sceneState
     @State private var showsHelp = false
@@ -178,13 +182,17 @@ struct RaceView: View {
         showsHelp = true
     }
 
-    /// Practice: Home, Change setup, Sail again; the first race: Race online and Help (#24).
+    /// Practice: Home, Change setup, Sail again; the first race: Race online and Help; online: Race again and Home (#24).
     private var resultsButtons: ResultsView.Buttons {
         switch session.resultsButtons {
         case .practice:
             .practice(home: onExit, changeSetup: onChangeSetup, sailAgain: onSailAgain ?? onRestart)
         case .firstRace:
             .firstRace(raceOnline: onRaceOnline ?? onExit, help: openHelp)
+        case .online:
+            .online(raceAgain: onRaceAgain ?? onRestart, home: onExit, tryIt: { [onExit] design in
+                if let onTryIt { onTryIt(design) } else { onExit() }
+            })
         }
     }
 
