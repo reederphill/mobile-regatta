@@ -132,7 +132,8 @@ extension BotBrain {
         let keepsClearOfAll = b.penalty.map { $0.isStarted || penaltyTurn != nil } ?? false
         let owedProgress = b.penalty?.progress
         if b.penaltyTurnsOwed != 0 {
-            guard let owed = b.penalty, canGiveUpTurn(owed, view) else { return nil }
+            // As `penaltyInput` gives a turn up: in its first half, not after giving it up, while she can turn it again.
+            guard let owed = b.penalty, !penaltyGivenUp, owed.progress < .pi, canGiveUpTurn(owed, view) else { return nil }
         }
         let hull = view.boatClass.hull
         let clear = hull.length * Self.guardLengths
