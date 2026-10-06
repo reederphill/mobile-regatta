@@ -190,6 +190,10 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     public var seeds: [UInt64]
     public var venues: [String]
     public var conditions: [String]
+    /// The conditions a venue sails, of `conditions`, by venue (`id@version`), for a venue that pairs with only some of
+    /// them (#316: the real venues pair with two each); a venue not in it sails every one. Empty when a matrix file
+    /// has none.
+    public var conditionsByVenue: [String: [String]]
     /// Tide states at the gun, degrees through the cycle (as a wind-seed pool names them).
     public var tideStatesDegrees: [Double]
     public var fleetSizes: [Int]
@@ -206,12 +210,13 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     public var capSecondsAfterGun: Int
 
     public init(seeds: [UInt64], venues: [String] = ["dev-venue@3"], conditions: [String] = ["classic-oscillating@3"],
-                tideStatesDegrees: [Double] = [0], fleetSizes: [Int], tierMixes: [TierMix] = [.mixed],
+                conditionsByVenue: [String: [String]] = [:], tideStatesDegrees: [Double] = [0], fleetSizes: [Int], tierMixes: [TierMix] = [.mixed],
                 profileMixes: [ProfileMix] = [.live], mixFleetSizes: [ProfileMix: Int] = [:], laps: Int = RaceSetup.defaultLaps,
                 capSecondsAfterGun: Int = BotMatrix.defaultCapSecondsAfterGun) {
         self.seeds = seeds
         self.venues = venues
         self.conditions = conditions
+        self.conditionsByVenue = conditionsByVenue
         self.tideStatesDegrees = tideStatesDegrees
         self.fleetSizes = fleetSizes
         self.tierMixes = tierMixes
@@ -222,7 +227,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case seeds, venues, conditions, tideStatesDegrees, fleetSizes, tierMixes, profileMixes, mixFleetSizes, laps
+        case seeds, venues, conditions, conditionsByVenue, tideStatesDegrees, fleetSizes, tierMixes, profileMixes, mixFleetSizes, laps
         case capSecondsAfterGun
     }
 
@@ -231,6 +236,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
         self.init(seeds: try c.decode([UInt64].self, forKey: .seeds),
                   venues: try c.decode([String].self, forKey: .venues),
                   conditions: try c.decode([String].self, forKey: .conditions),
+                  conditionsByVenue: try c.decodeIfPresent([String: [String]].self, forKey: .conditionsByVenue) ?? [:],
                   tideStatesDegrees: try c.decode([Double].self, forKey: .tideStatesDegrees),
                   fleetSizes: try c.decode([Int].self, forKey: .fleetSizes),
                   tierMixes: try c.decode([TierMix].self, forKey: .tierMixes),
@@ -240,14 +246,37 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                   capSecondsAfterGun: try c.decode(Int.self, forKey: .capSecondsAfterGun))
     }
 
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(seeds, forKey: .seeds)
+        try c.encode(venues, forKey: .venues)
+        try c.encode(conditions, forKey: .conditions)
+        // Left out when empty, so a matrix without it encodes as it did before #316.
+        if !conditionsByVenue.isEmpty { try c.encode(conditionsByVenue, forKey: .conditionsByVenue) }
+        try c.encode(tideStatesDegrees, forKey: .tideStatesDegrees)
+        try c.encode(fleetSizes, forKey: .fleetSizes)
+        try c.encode(tierMixes, forKey: .tierMixes)
+        try c.encode(profileMixes, forKey: .profileMixes)
+        try c.encode(mixFleetSizes, forKey: .mixFleetSizes)
+        try c.encode(laps, forKey: .laps)
+        try c.encode(capSecondsAfterGun, forKey: .capSecondsAfterGun)
+    }
+
+    /// The conditions `venue` sails, in `conditions`' order: those `conditionsByVenue` names for it, else all.
+    public func conditions(at venue: String) -> [String] {
+        guard let named = conditionsByVenue[venue] else { return conditions }
+        return conditions.filter(named.contains)
+    }
+
     /// As `botFleetCompletesARace` sails its fleet: well past a two-lap race and its finish window.
     public static let defaultCapSecondsAfterGun = 1_500
 
-    /// Every race of the matrix, seeds outermost and profile mixes innermost.
+    /// Every race of the matrix, seeds outermost and profile mixes innermost; each venue in the conditions it sails
+    /// (`conditions(at:)`).
     public var cells: [BotRaceCell] {
         seeds.flatMap { seed in
             venues.flatMap { venue in
-                conditions.flatMap { conditions in
+                self.conditions(at: venue).flatMap { conditions in
                     tideStatesDegrees.flatMap { tide in
                         fleetSizes.flatMap { fleetSize in
                             tierMixes.flatMap { mix in
@@ -271,12 +300,13 @@ public struct BotMatrix: Codable, Hashable, Sendable {
 
     /// Whether the matrix sails any race of `mix`: it names conditions, a tier mix and a fleet size the mix is sailed in.
     public func sailsAny(_ mix: ProfileMix) -> Bool {
-        conditions.contains(where: mix.sails(in:)) && tierMixes.contains(where: mix.sails(in:))
+        venues.contains { conditions(at: $0).contains(where: mix.sails(in:)) } && tierMixes.contains(where: mix.sails(in:))
             && fleetSizes.contains { sails(mix, inFleetOf: $0) }
     }
 
     /// Throws unless every axis has a value, every fleet size is one a race can have, every data file
-    /// is bundled, every venue has a pairing for every conditions, and every profile mix sails at least one race:
+    /// is bundled, every venue has a pairing for every conditions it sails (`conditions(at:)`: `conditionsByVenue` names
+    /// only venues and conditions of the matrix, at least one each), and every profile mix sails at least one race:
     /// a gate that sails nothing would pass without measuring anything (#105), so it fails loudly instead.
     public func validate() throws {
         for (axis, count) in [("seeds", seeds.count), ("venues", venues.count), ("conditions", conditions.count),
@@ -289,10 +319,17 @@ public struct BotMatrix: Codable, Hashable, Sendable {
         }
         guard laps >= 1 else { throw BotSuiteError.matrix("laps must be at least 1") }
         guard capSecondsAfterGun >= 1 else { throw BotSuiteError.matrix("capSecondsAfterGun must be at least 1") }
+        for (venue, named) in conditionsByVenue.sorted(by: { $0.key < $1.key }) {
+            guard venues.contains(venue) else { throw BotSuiteError.matrix("conditionsByVenue names \(venue), which venues doesn't") }
+            for conditions in named where !self.conditions.contains(conditions) {
+                throw BotSuiteError.matrix("conditionsByVenue gives \(venue) \(conditions), which conditions doesn't name")
+            }
+            if named.isEmpty { throw BotSuiteError.matrix("conditionsByVenue gives \(venue) no conditions") }
+        }
         for venue in venues {
             let venueKey = try dataFileKey(venue)
             let file = try VenueFile.bundled(id: venueKey.id, version: venueKey.version)
-            for conditions in conditions {
+            for conditions in self.conditions(at: venue) {
                 let key = try dataFileKey(conditions)
                 _ = try ConditionsFile.bundled(id: key.id, version: key.version)
                 guard file.content.pairing(for: key) != nil else {
@@ -301,7 +338,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
             }
         }
         for mix in profileMixes {
-            if let id = mix.conditionsID, !conditions.contains(where: mix.sails(in:)) {
+            if let id = mix.conditionsID, !venues.contains(where: { conditions(at: $0).contains(where: mix.sails(in:)) }) {
                 throw BotSuiteError.matrix("\(mix.rawValue) sails only in \(id) conditions, which the matrix doesn't name")
             }
             if let tierMix = mix.tierMix, !tierMixes.contains(tierMix) {

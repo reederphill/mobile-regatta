@@ -19,8 +19,9 @@ public enum VenueSailability {
     public static let lull = 0.25
     /// Knots of progress over the ground up the course a boat must make somewhere across the beat (#14).
     public static let minimumProgressKnots = 1.0
-    /// Degrees between the tide states swept over the venue's allowed range at the gun.
-    public static let tideStepDegrees = 15.0
+    /// Degrees between the tide states swept over the venue's allowed range at the gun: fine enough to catch the
+    /// current's peak, which the channel and shallows reach at different phases (#316; 15° until then).
+    public static let tideStepDegrees = 5.0
     /// Metres between sample points, along and across the course.
     public static let sampleSpacingMetres = 20.0
 

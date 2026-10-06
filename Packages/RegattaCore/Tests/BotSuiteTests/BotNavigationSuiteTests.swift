@@ -20,11 +20,30 @@ import Testing
     /// The CLI's options for the full navigation run.
     static let fullRun = ["--tier-mix", "national", "--profile-mix", "live"]
 
-    /// The venues the bundled matrix sails, as `id@version`. The matrix pairs every venue with every conditions it
-    /// names, so it can't yet express the real venues' two pairings each (#83): it sails dev-venue only, and the real
-    /// venues join it when the matrix gets per-pairing cells.
-    static func availableVenues() throws -> [String] {
-        try BotMatrix.bundled().venues.sorted()
+    /// Every venue a race can be sailed at, as `id@version`: the latest version of each bundled venue (older versions
+    /// are kept for replays only, as practice picks; #316). Throws when `matrix` doesn't sail one, so a newly bundled
+    /// venue fails here until the matrix expresses its pairings (`BotMatrix.conditionsByVenue`).
+    static func availableVenues(bundled keys: [DataFileKey] = VenueFile.bundledKeys(),
+                                matrix: BotMatrix? = nil) throws -> [String] {
+        let matrix = try matrix ?? BotMatrix.bundled()
+        let latest = Dictionary(keys.map { ($0.id, $0.version) }, uniquingKeysWith: max)
+        let venues = latest.map { "\($0.key)@\($0.value)" }.sorted()
+        for venue in venues where !matrix.venues.contains(venue) {
+            throw BotSuiteError.matrix("the bundled matrix doesn't sail \(venue)")
+        }
+        return venues
+    }
+
+    /// #316 acceptance: the available venues are every bundled venue, the real ones (#83) included, and a bundled venue
+    /// the matrix doesn't sail fails them.
+    @Test func availableVenuesAreEveryBundledVenue() throws {
+        #expect(try Self.availableVenues() == ["dev-venue@7", "fellmere@1", "hollin-bay@1", "saltings-reach@1"])
+        #expect(throws: BotSuiteError.self) {
+            try Self.availableVenues(bundled: VenueFile.bundledKeys() + [DataFileKey(id: "new-venue", version: 1)])
+        }
+        #expect(throws: BotSuiteError.self) {
+            try Self.availableVenues(bundled: VenueFile.bundledKeys() + [DataFileKey(id: "hollin-bay", version: 2)])
+        }
     }
 
     /// A seat of a race: finished unless not, with the given penalty disqualifications, seconds at the edge of the
