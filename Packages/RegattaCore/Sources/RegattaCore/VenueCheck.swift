@@ -11,15 +11,20 @@ import Foundation
 /// - land reaching into the race area's rectangle: land is only at the edges (#12), beyond the rectangle;
 /// - land within `landClearanceMetres` of the start line (its ends and the segment between) or any mark;
 /// - a geographic grid that doesn't cover the rectangle (outside the grid the shift is neutral, a cliff);
+/// - a landmark (#115 draws them) more than `landmarkBesideMetres` from every land ring, or inside the rectangle:
+///   landmarks stand on or beside the shore, never on the race's water (#316);
 /// - for a venue with current: a current grid that doesn't cover the rectangle, deepest water (every node at the
 ///   deepest depth) outside it, or no shallows node (deeper than 0, shallower than the channel) inside it. The
-///   channel is the water at least `channelFraction` of the deepest; its deepest part and the shallows beside it
-///   sit inside the race area (#12).
+///   channel is the water at least `channelFraction` of the deepest; its deepest part and some shallows sit inside
+///   the race area (#12). The check doesn't ask the channel to run along the course axis: a pairing may lay its
+///   course across it (#316, owner).
 ///
 /// The check recomputes the course from the class and rules files, so a retuned polar is re-checked (#14).
 public enum VenueCheck {
     /// Metres land must keep from the start line and every mark (a placeholder, #83).
     public static let landClearanceMetres = 30.0
+    /// Metres a landmark may stand from the nearest land ring and still be beside the shore (a placeholder, #316).
+    public static let landmarkBesideMetres = 40.0
     /// Water at least this fraction of the deepest node's depth is the channel; shallower water is shallows.
     public static let channelFraction = 0.5
     /// Degrees between the rotations of the mean the check lays a course at, across ±`meanDirectionSpread`.
@@ -113,6 +118,17 @@ public enum VenueCheck {
                 if d < landClearanceMetres {
                     problems.append(String(format: "land %d is %.0f m from the ", i, d) + mark.name)
                 }
+            }
+        }
+
+        for (i, landmark) in venue.landmarks.enumerated() {
+            // Distance to the rings, not `Venue.isLand`: a point on an edge two rings share may go either way there.
+            let shore = venue.land.map { distance(landmark.position, $0.points) }.min() ?? .infinity
+            if shore > landmarkBesideMetres {
+                problems.append("landmark \(i) (\(landmark.asset)) is " + String(format: "%.0f m from land", shore))
+            }
+            if area.contains(landmark.position) {
+                problems.append("landmark \(i) (\(landmark.asset)) is in the race area")
             }
         }
 

@@ -9,13 +9,23 @@ import Testing
     /// since #238, the conditions at version 3 (#221, #233) and their venue; since #286, version 4, with the
     /// pressure field, and its venue; since #287, version 5 and dev-venue@5, whose geography steers the field;
     /// since #288, version 6 and dev-venue@6, whose puffs form from the field; since the finite lanes, version 7 and
-    /// dev-venue@7.
+    /// dev-venue@7; since #316, the three real venues (#83) in the two conditions each pairs with.
     @Test func bundledMatrixCoversTheSuiteAxes() throws {
         let matrix = try BotMatrix.bundled()
         try matrix.validate()
         #expect(matrix.fleetSizes == [2, 5, 10, 16])
-        #expect(matrix.venues == ["dev-venue@7"])
+        #expect(matrix.venues == ["dev-venue@7", "fellmere@1", "hollin-bay@1", "saltings-reach@1"])
         #expect(Set(matrix.conditions) == ["classic-oscillating@7", "gusty-offshore@7", "light-and-patchy@7", "sea-breeze@7"])
+        #expect(matrix.conditions(at: "dev-venue@7") == matrix.conditions)
+        #expect(matrix.conditions(at: "fellmere@1") == ["gusty-offshore@7", "light-and-patchy@7"])
+        #expect(matrix.conditions(at: "hollin-bay@1") == ["classic-oscillating@7", "sea-breeze@7"])
+        #expect(matrix.conditions(at: "saltings-reach@1") == ["classic-oscillating@7", "gusty-offshore@7"])
+        // Each venue sails exactly the pairings its file has.
+        for venue in matrix.venues {
+            let parts = venue.split(separator: "@")
+            let pairings = try VenueFile.bundled(id: String(parts[0]), version: try #require(Int(parts[1]))).content.pairings
+            #expect(Set(matrix.conditions(at: venue)) == Set(pairings.map { "\($0.conditions.id)@\($0.conditions.version)" }))
+        }
         #expect(Set(matrix.tierMixes) == Set(TierMix.allCases))
         // #231: the live bots the tiers gate, and the skill-gap scenario; #238: the fun pass, in classic
         // oscillating conditions only.
@@ -24,14 +34,19 @@ import Testing
         #expect(Set(matrix.profileMixes) == Set(ProfileMix.allCases).subtracting([.hunters]))
         #expect(!matrix.cells.contains { $0.profileMix == .hunters })
         #expect(!matrix.seeds.isEmpty && !matrix.tideStatesDegrees.isEmpty)
-        let perConditions = matrix.seeds.count * matrix.tideStatesDegrees.count * 4 * TierMix.allCases.count
-        // Live, skill gap and cautious in every conditions and tier mix; the fun pass in one conditions; execution, rivals
-        // and rank stability in every conditions but one tier mix each (`ProfileMix.tierMix`).
-        // Rivals and rank stability in fleets of 10 alone (`mixFleetSizes`), so their summaries pool no other size.
-        let pinned = perConditions / TierMix.allCases.count
-        let oneFleet = pinned / matrix.fleetSizes.count
+        // Venue × conditions pairings: dev-venue's four and two at each real venue; three of them classic oscillating.
+        let pairings = 4 + 3 * 2
+        let classicPairings = 1 + 2
+        #expect(matrix.venues.map { matrix.conditions(at: $0).count }.reduce(0, +) == pairings)
+        let races = matrix.seeds.count * matrix.tideStatesDegrees.count
+        let fleets = matrix.fleetSizes.count, tiers = TierMix.allCases.count
+        // Live, skill gap and cautious in every pairing, fleet size and tier mix; the fun pass in the classic oscillating
+        // pairings only; execution, rivals and rank stability in every pairing but one tier mix each
+        // (`ProfileMix.tierMix`). Rivals and rank stability in fleets of 10 alone (`mixFleetSizes`), so their summaries
+        // pool no other size.
         #expect(matrix.mixFleetSizes == [.rivals: 10, .rankStability: 10])
-        #expect(matrix.cells.count == perConditions * (4 * 3 + 1) + pinned * 4 + oneFleet * 4 * 2)
+        #expect(matrix.cells.count == races * fleets * tiers * (3 * pairings + classicPairings) + races * fleets * pairings
+            + races * pairings * 2)
         #expect(Set(matrix.cells.filter { [.rivals, .rankStability].contains($0.profileMix) }.map(\.fleetSize)) == [10])
         #expect(Set(matrix.cells.filter { $0.profileMix == .execution }.map(\.tierMix)) == [.national])
         #expect(Set(matrix.cells.filter { $0.profileMix == .rankStability }.map(\.tierMix)) == [.mixed])
@@ -56,6 +71,41 @@ import Testing
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--tier-mix", "pro"]) }
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--profile-mix", "blipTacker"]) }
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--fleet-size", "17"]).matrix() }
+    }
+
+    /// #316: a venue sails only the conditions `conditionsByVenue` gives it, in the matrix's order; a venue it doesn't
+    /// name sails them all, its cells as before; and it names only the matrix's own venues and conditions.
+    @Test func matrixSailsEachVenueInItsOwnPairings() throws {
+        let all = ["classic-oscillating@7", "gusty-offshore@7", "light-and-patchy@7", "sea-breeze@7"]
+        let dev = BotMatrix(seeds: [1, 2], venues: ["dev-venue@7"], conditions: all, fleetSizes: [2, 10],
+                            profileMixes: [.live, .funPass])
+        var both = dev
+        both.venues.append("fellmere@1")
+        both.conditionsByVenue = ["fellmere@1": ["light-and-patchy@7", "gusty-offshore@7"]]
+        try both.validate()
+        #expect(both.cells.filter { $0.venue == "dev-venue@7" } == dev.cells, "dev-venue's cells are unchanged")
+        let fellmere = both.cells.filter { $0.venue == "fellmere@1" }
+        #expect(Set(fellmere.map(\.conditions)) == ["gusty-offshore@7", "light-and-patchy@7"])
+        #expect(fellmere.first?.conditions == "gusty-offshore@7", "in the matrix's order")
+        #expect(!fellmere.contains { $0.profileMix == .funPass }, "fellmere has no classic oscillating pairing")
+        // Encoded without the map when it is empty; decoded with it, or without it as before.
+        let encoded = try JSONEncoder().encode(dev)
+        #expect(!String(decoding: encoded, as: UTF8.self).contains("conditionsByVenue"))
+        #expect(try JSONDecoder().decode(BotMatrix.self, from: encoded) == dev)
+        #expect(try JSONDecoder().decode(BotMatrix.self, from: JSONEncoder().encode(both)) == both)
+
+        var unpaired = both
+        unpaired.conditionsByVenue = [:]
+        #expect(throws: BotSuiteError.self) { try unpaired.validate() }
+        var stranger = both
+        stranger.conditionsByVenue["hollin-bay@1"] = ["classic-oscillating@7"]
+        #expect(throws: BotSuiteError.self) { try stranger.validate() }
+        var unnamed = both
+        unnamed.conditions = ["gusty-offshore@7"]
+        #expect(throws: BotSuiteError.self) { try unnamed.validate() }
+        var empty = both
+        empty.conditionsByVenue["fellmere@1"] = []
+        #expect(throws: BotSuiteError.self) { try empty.validate() }
     }
 
     @Test func matrixRejectsAnEmptyAxisAndUnbundledFiles() {
