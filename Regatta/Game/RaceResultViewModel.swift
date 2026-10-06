@@ -10,7 +10,8 @@ struct RaceResultViewModel: Equatable, Codable {
     /// One boat's row.
     struct Row: Equatable, Codable, Identifiable {
         var seat: Int
-        /// The place column: a number, shared by boats scored alike once the race has closed (`SeatResult.place`).
+        /// The place column: a number, shared by boats scored alike once the race has closed (`SeatResult.place`); 0,
+        /// drawn blank, for an online boat still sailing (#133).
         var place: Int
         /// "You", a bot's sailing name, or another helm's name. Its alias once online racing names players (#133).
         var name: String
@@ -114,6 +115,8 @@ struct RaceResultViewModel: Equatable, Codable {
     /// The rows are final: the race closed, or you left it (`leftBeforeClose`). False while boats still sail.
     var isFinal: Bool
     var mySeat: Int
+    /// An online race's rating cell, earned line and race (#133); nil for practice.
+    var online: Online?
 
     /// Your row.
     var myRow: Row? { rows.first { $0.isPlayer } }
@@ -203,11 +206,12 @@ struct RaceResultViewModel: Equatable, Codable {
         }.flatMap { $0.isEmpty ? nil : $0 }
     }
 
-    init(rows: [Row], card: YourRaceCard?, isFinal: Bool, mySeat: Int) {
+    init(rows: [Row], card: YourRaceCard?, isFinal: Bool, mySeat: Int, online: Online? = nil) {
         self.rows = rows
         self.card = card
         self.isFinal = isFinal
         self.mySeat = mySeat
+        self.online = online
     }
 
     /// This model as kept on leaving the race before it closed (ruling 4, #132): every boat still sailing or not yet
@@ -330,10 +334,24 @@ struct YourRaceCard: Equatable, Codable {
     /// race is final, or owed while it runs.
     init(incidents: IncidentIndex, mySeat: Int, label: (Int) -> String, served: [Int: Int], codes: [Int: ResultCode],
          isFinal: Bool) {
-        let calls = incidents.incidents.compactMap { incident -> RuleCall? in
+        self.init(calls: Self.calls(in: incidents.incidents), touches: incidents.markTouches,
+                  protests: incidents.protests(by: mySeat), mySeat: mySeat, label: label, served: served, codes: codes,
+                  isFinal: isFinal)
+    }
+
+    /// The rule calls among `incidents`, in their order.
+    static func calls(in incidents: [Incident]) -> [RuleCall] {
+        incidents.compactMap { incident -> RuleCall? in
             if case .called(let call) = incident.outcome { call } else { nil }
         }
-        let touches = Array(incidents.markTouches.enumerated())
+    }
+
+    /// The card from the calls, penalised mark touches and your protests as given: the whole race's (a practice
+    /// race's incident index), or only those involving you (the online results stream's, #133). Each penalty's outcome
+    /// as above; an offender's served turns count only against the touches and calls given.
+    init(calls: [RuleCall], touches: [MarkTouch], protests: [Protest], mySeat: Int, label: (Int) -> String,
+         served: [Int: Int], codes: [Int: ResultCode], isFinal: Bool) {
+        let touches = Array(touches.enumerated())
         enum Key: Hashable { case call(Int), touch(Int) }
         var outcomes: [Key: Outcome] = [:]
         let offenders = Set(calls.map(\.offender)).union(touches.map(\.element.seat))
@@ -368,6 +386,6 @@ struct YourRaceCard: Equatable, Codable {
         inFavour = calls.filter { $0.victim == mySeat && $0.offender != mySeat }.map {
             entry($0, other: $0.offender, inFavour: true)
         }
-        protests = incidents.protests(by: mySeat).map { ProtestEntry(tick: $0.tick, protested: label($0.protested)) }
+        self.protests = protests.filter { $0.protester == mySeat }.map { ProtestEntry(tick: $0.tick, protested: label($0.protested)) }
     }
 }

@@ -38,6 +38,8 @@ import RegattaServices
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
 /// - `-completedRaces <n>` (with `-uitesting`) sets the online races you've completed, which earned designs count (#136).
+/// - `-onlineResults` (with `-uitesting` and `-fakeServices online-results`) opens on the online results sheet, fed by
+///   the scenario's paced results stream (#133).
 ///   Kept in the UI tests' own suite; without `-uitesting` it's ignored, so it never unlocks a design for real.
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
@@ -87,6 +89,7 @@ struct LaunchOptions: Equatable {
     var myBoat: DesignID?
     var keepMyBoat = false
     var completedRaces: Int?
+    var onlineResults = false
     #if DEBUG
     var tuning = false
     #endif
@@ -111,6 +114,7 @@ struct LaunchOptions: Equatable {
             case "-resetSettings": resetSettings = true
             case "-online": online = true
             case "-keepMyBoat": keepMyBoat = true
+            case "-onlineResults": onlineResults = true
             case "-hideScene": hidesScene = true
             #if DEBUG
             case "-tuning": tuning = true
@@ -132,7 +136,8 @@ struct LaunchOptions: Equatable {
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
                           "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
-                          "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces"]
+                          "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces",
+                          "-onlineResults"]
         #if DEBUG
         flags.insert("-tuning")
         #endif

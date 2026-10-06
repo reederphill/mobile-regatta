@@ -5,15 +5,22 @@ import SwiftUI
 /// race's results while boats still sail, `"closed"` the same race's at its close, both with the Your race card, over
 /// the race's dark chrome. Like the race fixture (`RaceView`), it's one `render-fixture` element whose value is the
 /// bottom safe-area inset in points. A `"rivalSkill"` gives the sample race practice rivals (#235): "Rival" on
-/// their rows.
+/// their rows. `"online-live"`, `"online-rated"` and `"online-unrated"` show the fake online race's results (#133).
 struct ResultsGalleryView: View {
     let stage: RenderFixture.ResultsStage
     var rivalSkill: Double? = nil
 
     var body: some View {
         GeometryReader { proxy in
-            ResultsView(model: RaceResultViewModel.gallerySample(final: stage == .closed, rivalSkill: rivalSkill),
-                        buttons: .practice(home: {}, changeSetup: {}, sailAgain: {}))
+            Group {
+                if stage.isOnline {
+                    ResultsView(model: RaceResultViewModel.onlineSample(stage),
+                                buttons: .online(raceAgain: {}, home: {}, tryIt: { _ in }))
+                } else {
+                    ResultsView(model: RaceResultViewModel.gallerySample(final: stage == .closed, rivalSkill: rivalSkill),
+                                buttons: .practice(home: {}, changeSetup: {}, sailAgain: {}))
+                }
+            }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(ChromePalette.background.ignoresSafeArea())
                 .environment(\.colorScheme, .dark)

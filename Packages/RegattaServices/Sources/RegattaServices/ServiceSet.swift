@@ -40,9 +40,11 @@ public struct ServiceSet: Sendable {
         return set
     }
 
-    /// The scripted fakes in `scenario`, all telling the same story.
-    public static func fake(_ scenario: FakeServiceScenario) -> ServiceSet {
-        FakeServiceScenario.Story(scenario).services
+    /// The scripted fakes in `scenario`, all telling the same story. `wait` paces the online results scenarios
+    /// (`FakeServiceScenario.onlineResultsPacing` apart); without it their updates all come at once.
+    public static func fake(_ scenario: FakeServiceScenario,
+                            wait: (@Sendable (Duration) async -> Void)? = nil) -> ServiceSet {
+        FakeServiceScenario.Story(scenario, wait: wait).services
     }
 }
 
@@ -63,9 +65,64 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
     case queued
     /// Signed in, with a race the server cancels before the close.
     case cancelledRace = "cancelled-race"
+    /// Signed in, in a rated six-boat race (you, two other humans, three bots) whose results fill in live: a boat
+    /// finishes every `onlineResultsPacing`, then the race closes, then the rating change is pushed (#133). One
+    /// call against you, its turn done.
+    case onlineResults = "online-results"
+    /// As `onlineResults`, but every other boat is a bot: unrated (#133).
+    case onlineResultsUnrated = "online-results-unrated"
+
+    /// How far apart the online results scenarios' updates come.
+    public static let onlineResultsPacing = Duration.milliseconds(1500)
+
+    /// The seats the scenario's race gives to bots: the roster doesn't say (`RosterEntry`), the race transport does.
+    public var raceBotSeats: [Int] {
+        switch self {
+        case .onlineResults: [3, 4, 5]
+        case .onlineResultsUnrated: [1, 2, 3, 4, 5]
+        default: [1]
+        }
+    }
+
+    /// The online results scenarios' race (#133): seat 0 is the player. Boats finish one by one, the race closes
+    /// with two boats placed by distance, then the rating follows.
+    public static func onlineRace(rated: Bool, pacing: RaceSessionPacing? = nil) -> RaceSessionScenario {
+        let player = Story.player
+        let names = rated
+            ? [player.alias, "Wren", "Kestrel", "Tern", "Skua", "Petrel"]
+            : [player.alias, "Gannet", "Kestrel", "Tern", "Skua", "Petrel"]
+        let roster = names.enumerated().map { RosterEntry(name: $1, colorIndex: $0) }
+        let call = RuleCall(incidentId: 0, tick: 2400, rule: .portStarboard, offender: 0, victim: 1, leg: 0, turnsOwed: 1,
+                            startDeadlineTick: nil, completeDeadlineTick: nil)
+        let mine = SeatIncidents(
+            seat: 0, incidents: [Incident(id: 0, tick: 2400, leg: 0, parties: SeatPair(0, 1), outcome: .called(call))],
+            turnsServed: 1)
+        let finishes = [
+            SeatResult(seat: 3, place: 1, code: .finished, finishTick: 9000),
+            SeatResult(seat: 1, place: 2, code: .finished, finishTick: 9150),
+            SeatResult(seat: 0, place: 3, code: .finished, finishTick: 9420),
+            SeatResult(seat: 4, place: 4, code: .finished, finishTick: 9600),
+        ]
+        let atClose = finishes + [SeatResult(seat: 2, place: 5, code: .byDistance), SeatResult(seat: 5, place: 6, code: .byDistance)]
+        func report(_ rows: [SeatResult], isClosed: Bool) -> RaceReport {
+            let scored = Set(rows.map(\.seat))
+            return RaceReport(
+                raceID: Story.race, seat: 0, roster: roster, results: RaceResults(rows: rows, rated: rated),
+                sailing: roster.indices.filter { !scored.contains($0) }, incidents: [mine], isClosed: isClosed,
+                flaggedSeats: [0])
+        }
+        let reports = (1...finishes.count).map { report(Array(finishes.prefix($0)), isClosed: false) } + [report(atClose, isClosed: true)]
+        let rating = RatingChange(raceID: Story.race, outcome: rated
+            ? .rated(before: Rating(value: 1500, isProvisional: true), after: Rating(value: 1512, isProvisional: true))
+            : .unrated)
+        return RaceSessionScenario(
+            results: reports.map(RaceUpdate.report), ratingChanges: [rating],
+            lastRace: LastRace(report: reports[reports.count - 1], rating: rating), pacing: pacing)
+    }
 
     /// The fakes for one scenario, built from the same player.
     struct Story {
+
         let services: ServiceSet
 
         static let player = GameCenterPlayer(gamePlayerID: GamePlayerID("G:fake-1"), alias: "Sailor")
@@ -77,7 +134,7 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
         /// The bundled livery catalogue (#118), which RegattaCore always ships.
         static let catalogue = try! LiveryCatalogueFile.bundled(id: "livery-catalogue", version: 1).content
 
-        init(_ scenario: FakeServiceScenario) {
+        init(_ scenario: FakeServiceScenario, wait: (@Sendable (Duration) async -> Void)? = nil) {
             var player = Self.player
             switch scenario {
             case .underage: player.isUnderage = true
@@ -113,6 +170,10 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
                     raceID: Self.race, seat: 0, roster: [RosterEntry(name: player.alias, colorIndex: 0), RosterEntry(name: "Bot Tern", colorIndex: 1)],
                     results: RaceResults(rows: [], rated: true), sailing: [0, 1], incidents: [], isClosed: false)
                 raceSession = ScriptedRaceSessionService(RaceSessionScenario(results: [.report(partial), .cancelled(.serverShutdown)]))
+            case .onlineResults, .onlineResultsUnrated:
+                let pacing = wait.map { RaceSessionPacing(interval: FakeServiceScenario.onlineResultsPacing, wait: $0) }
+                raceSession = ScriptedRaceSessionService(
+                    FakeServiceScenario.onlineRace(rated: scenario == .onlineResults, pacing: pacing))
             default: raceSession = ScriptedRaceSessionService(RaceSessionScenario())
             }
 
@@ -126,7 +187,10 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
                     LobbyMessage(id: MessageID("fake-2"), kind: .post(LobbyPost(
                         author: LobbyAuthor(gamePlayerID: Self.other, nickname: "Wren", rating: Rating(value: 1610, isProvisional: false), chip: Self.chip),
                         body: .quickChat(.oneMore)))),
-                ]))
+                ],
+                races: [Self.race: (0..<6).map { seat in
+                    seat == 0 ? .player : scenario.raceBotSeats.contains(seat) ? .bot : .human(GamePlayerID("G:fake-\(seat + 1)"))
+                }]))
 
             let profile = ScriptedProfileService(ProfileScenario(
                 profile: signedIn ? Profile(
