@@ -8,28 +8,24 @@ enum RealVenues {
 
     static func file(_ id: String) throws -> VenueFile { try VenueFile.bundled(id: id, version: 1) }
 
-    /// Venue `id`@1 as `fixture-venue@1`, its JSON edited by `edit`.
-    static func edited(_ id: String, _ edit: (inout [String: Any]) throws -> Void) throws -> Venue {
+    /// Venue `id`@1 as `fixture-venue@1`, its file edited by `edit`. Decoded into the schema's own types rather than
+    /// `JSONSerialization` casts, which bridge numbers differently on Linux (#316).
+    static func edited(_ id: String, _ edit: (inout VenueSchema2) throws -> Void) throws -> Venue {
         let bytes = try #require(try VenueFile.bundledData(id: id, version: 1))
-        var json = try #require(try JSONSerialization.jsonObject(with: bytes) as? [String: Any])
-        json["id"] = "fixture-venue"
-        json["version"] = 1
-        try edit(&json)
-        return try VenueFile(data: JSONSerialization.data(withJSONObject: json, options: .sortedKeys)).content
+        var file = try JSONDecoder().decode(VenueSchema2.self, from: bytes)
+        file.id = "fixture-venue"
+        file.version = 1
+        try edit(&file)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .sortedKeys
+        return try VenueFile(data: encoder.encode(file)).content
     }
 
     /// A closed ring of a `side`-metre square centred on `centre`.
-    static func square(_ centre: Vec2, side: Double) -> [String: Any] {
+    static func square(_ centre: Vec2, side: Double) -> VenueSchema1.Land {
         let h = side / 2
         let corners = [Vec2(-h, -h), Vec2(h, -h), Vec2(h, h), Vec2(-h, h), Vec2(-h, -h)].map { centre + $0 }
-        return ["outlineMetres": corners.map { [$0.x, $0.y] }]
-    }
-
-    /// Adds `ring` to the venue's land.
-    static func addLand(_ ring: [String: Any], to json: inout [String: Any]) throws {
-        var land = try #require(json["land"] as? [[String: Any]])
-        land.append(ring)
-        json["land"] = land
+        return VenueSchema1.Land(outlineMetres: corners.map { [$0.x, $0.y] })
     }
 }
 
@@ -54,12 +50,30 @@ enum RealVenues {
     @Test func landInsideRaceAreaFails() throws {
         let venue = try RealVenues.edited("hollin-bay") { json in
             // Halfway up the classic-oscillating beat (from 240°), square on the course.
-            try RealVenues.addLand(RealVenues.square(Vec2.heading(deg2rad(240)) * 180, side: 40), to: &json)
+            json.land.append(RealVenues.square(Vec2.heading(deg2rad(240)) * 180, side: 40))
         }
         let findings = VenueCheck.check(venue)
         let classic = findings.filter { $0.pairing.id == "classic-oscillating" }
         #expect(classic.contains { $0.reason == "land 1 reaches into the race area" })
         #expect(classic.count >= VenueCheck.rotations.count, "found at every rotation")
+    }
+
+    /// #316: a landmark (#115 draws them) out on the water, in the race area, fails the check: landmarks stand on or
+    /// beside the shore, outside the race area.
+    @Test func landmarkOnWaterOrInRaceAreaFails() throws {
+        let venue = try RealVenues.edited("hollin-bay") { json in
+            // The clubhouse moved onto the classic-oscillating start line's centre, out on the water.
+            json.landmarks[0].positionMetres = json.pairings[0].startLineCentreMetres
+        }
+        let findings = VenueCheck.check(venue)
+        let asset = venue.landmarks[0].asset
+        for pairing in venue.pairings {
+            let mine = findings.filter { $0.pairing == pairing.conditions }
+            #expect(mine.filter { $0.reason == "landmark 0 (\(asset)) is in the race area" }.count == VenueCheck.rotations.count,
+                    "found at every rotation: \(mine)")
+            #expect(mine.contains { $0.reason.hasPrefix("landmark 0 (\(asset)) is ") && $0.reason.hasSuffix(" m from land") })
+        }
+        #expect(!findings.contains { $0.reason.hasPrefix("landmark 1") || $0.reason.hasPrefix("landmark 2") })
     }
 
     // MARK: More fixtures
@@ -73,7 +87,7 @@ enum RealVenues {
                                         rules: RaceFiles.defaults.rulesConfiguration.content)[0].layout
         let windward = layout.elements[CourseLayout.windwardIndex].marks[0].position
         let venue = try RealVenues.edited("hollin-bay") { json in
-            try RealVenues.addLand(RealVenues.square(windward + layout.right * 25, side: 10), to: &json)
+            json.land.append(RealVenues.square(windward + layout.right * 25, side: 10))
         }
         let problems = VenueCheck.problems(venue: venue, pairing: venue.pairings[0], layout: layout)
         #expect(problems.contains { $0.hasPrefix("land 1 is ") && $0.hasSuffix(" m from the windward mark") }, "\(problems)")
@@ -81,14 +95,10 @@ enum RealVenues {
 
     @Test func deepestWaterOutsideRaceAreaFails() throws {
         let venue = try RealVenues.edited("saltings-reach") { json in
-            var current = try #require(json["current"] as? [String: Any])
-            var grid = try #require(current["grid"] as? [String: Any])
-            var depths = try #require(grid["depthMetres"] as? [[Double]])
+            var grid = try #require(json.current.grid)
             // The last row, 800 m up the reach, in the channel: beyond every race area.
-            depths[depths.count - 1][5] = 9
-            grid["depthMetres"] = depths
-            current["grid"] = grid
-            json["current"] = current
+            grid.depthMetres[grid.depthMetres.count - 1][5] = 9
+            json.current.grid = grid
         }
         let findings = VenueCheck.check(venue)
         #expect(findings.contains { $0.reason == "the deepest water lies outside the race area" })
@@ -96,11 +106,7 @@ enum RealVenues {
 
     @Test func gridNotCoveringRaceAreaFails() throws {
         let venue = try RealVenues.edited("fellmere") { json in
-            var pairings = try #require(json["pairings"] as? [[String: Any]])
-            var grid = try #require(pairings[0]["geographicGrid"] as? [String: Any])
-            grid["cellSizeMetres"] = 50
-            pairings[0]["geographicGrid"] = grid
-            json["pairings"] = pairings
+            json.pairings[0].geographicGrid.cellSizeMetres = 50
         }
         let findings = VenueCheck.check(venue)
         #expect(findings.contains { $0.pairing.id == "light-and-patchy" && $0.reason == "the geographic grid doesn't cover the race area" })
@@ -136,24 +142,40 @@ enum RealVenues {
     /// 2 kn of foul tide straight down the course, against a weak lull, sweeps a boat backwards.
     @Test func footOfTideAgainstWeakLullFails() throws {
         let venue = try RealVenues.edited("saltings-reach") { json in
-            var pairings = try #require(json["pairings"] as? [[String: Any]])
             // The pairing laid down the reach, in light and patchy with the pressure taken off everywhere.
-            pairings[0]["conditionsRef"] = ["id": "light-and-patchy", "version": 7]
-            var grid = try #require(pairings[0]["geographicGrid"] as? [String: Any])
-            let rows = try #require(grid["rows"] as? Int), columns = try #require(grid["columns"] as? Int)
-            grid["speedChange"] = Array(repeating: Array(repeating: -0.3, count: columns), count: rows)
-            pairings[0]["geographicGrid"] = grid
-            json["pairings"] = pairings
+            json.pairings[0].conditionsRef = DataFileKey(id: "light-and-patchy", version: 7)
+            let grid = json.pairings[0].geographicGrid
+            json.pairings[0].geographicGrid.speedChange = Array(repeating: Array(repeating: -0.3, count: grid.columns),
+                                                                count: grid.rows)
         }
         let result = VenueSailability.check(venue)[0]
         #expect(!result.passes)
         #expect(result.worstProgressKnots < 0)
     }
 
+    /// #316: a pairing whose wind is too light to make 1 kn up the beat anywhere fails criterion (1) on its own: no
+    /// current, so nowhere is a boat swept backwards.
+    @Test func tooLightToMakeWayFailsOnItsOwn() throws {
+        let venue = try RealVenues.edited("hollin-bay") { json in
+            // Nineteen twentieths of the pressure taken off everywhere, in both pairings.
+            for k in json.pairings.indices {
+                let grid = json.pairings[k].geographicGrid
+                json.pairings[k].geographicGrid.speedChange = Array(repeating: Array(repeating: -0.95, count: grid.columns),
+                                                                    count: grid.rows)
+            }
+        }
+        #expect(venue.current == nil)
+        for result in VenueSailability.check(venue) {
+            #expect(!result.passes, "\(result)")
+            #expect(result.bestProgressKnots < VenueSailability.minimumProgressKnots, "\(result)")
+            #expect(result.worstProgressKnots >= 0, "\(result)")
+        }
+    }
+
     @Test func tideStatesSweepTheWholeCycleOnce() throws {
         let states = VenueSailability.tideStates(try RealVenues.file("saltings-reach").content)
-        #expect(states.count == 24)
-        #expect(states.first == 0 && abs(states.last! - deg2rad(345)) < 1e-9)
+        #expect(states.count == 72)
+        #expect(states.first == 0 && abs(states.last! - deg2rad(355)) < 1e-9)
         #expect(VenueSailability.tideStates(try RealVenues.file("fellmere").content) == [0])
     }
 }

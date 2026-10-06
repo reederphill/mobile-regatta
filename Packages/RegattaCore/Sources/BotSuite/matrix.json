@@ -1,7 +1,12 @@
 {
   "seeds": [1, 2, 3, 4],
-  "venues": ["dev-venue@7"],
+  "venues": ["dev-venue@7", "fellmere@1", "hollin-bay@1", "saltings-reach@1"],
   "conditions": ["classic-oscillating@7", "gusty-offshore@7", "light-and-patchy@7", "sea-breeze@7"],
+  "conditionsByVenue": {
+    "fellmere@1": ["gusty-offshore@7", "light-and-patchy@7"],
+    "hollin-bay@1": ["classic-oscillating@7", "sea-breeze@7"],
+    "saltings-reach@1": ["classic-oscillating@7", "gusty-offshore@7"]
+  },
   "tideStatesDegrees": [0],
   "fleetSizes": [2, 5, 10, 16],
   "tierMixes": ["club", "regional", "national", "mixed"],

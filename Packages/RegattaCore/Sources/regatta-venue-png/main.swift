@@ -6,13 +6,17 @@ import RegattaCore
 //
 //     swift run --package-path Packages/RegattaCore regatta-venue-png [output-dir] [venue@version ...]
 //
-// Defaults: docs/venues and the three real venues. Each pairing's course is VenueCheck's (largest fleet, longest
+// Defaults: the repository's docs/venues (found from this source file, wherever the command runs) and the three real
+// venues. Each pairing's course is VenueCheck's (largest fleet, longest
 // beat): land, depth tint, the race area at the seeded mean's −10° (orange), authored (grey) and +10° (purple)
 // rotations with their marks and start lines, the anchor, and landmarks, under a title naming both files. The
 // check's findings and the sailability margins are printed.
 
 var arguments = Array(CommandLine.arguments.dropFirst())
-let outputDirectory = arguments.isEmpty ? "docs/venues" : arguments.removeFirst()
+/// The repository's docs/venues: this file is Packages/RegattaCore/Sources/regatta-venue-png/main.swift (#316).
+let defaultOutputDirectory = (0..<5).reduce(URL(fileURLWithPath: #filePath)) { url, _ in url.deletingLastPathComponent() }
+    .appendingPathComponent("docs/venues").path
+let outputDirectory = arguments.isEmpty ? defaultOutputDirectory : arguments.removeFirst()
 let venueNames = arguments.isEmpty ? ["hollin-bay@1", "saltings-reach@1", "fellmere@1"] : arguments
 
 /// Metres per pixel.
