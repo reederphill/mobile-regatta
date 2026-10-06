@@ -20,8 +20,14 @@ final class SettingsUITests: RaceUITestCase {
     @MainActor private func value(_ toggle: XCUIElement) -> String? { toggle.value as? String }
 
     /// Taps the switch itself, at the row's trailing end: a tap on a SwiftUI toggle's label doesn't always flip it.
+    /// Then waits up to 5 s for its value to change: XCTest can call the app idle before the switch reports its new
+    /// value (a CI run read the old one the instant after the tap, where the wait for idle usually takes ~1.3 s), so
+    /// a read straight after the tap could see the old value. A tap that didn't flip it still fails the caller's check.
     @MainActor private func flip(_ toggle: XCUIElement) {
+        let before = value(toggle) ?? ""
         toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before), object: toggle)
+        _ = XCTWaiter.wait(for: [changed], timeout: 5)
     }
 
     /// Ladder lines flipped on the Settings page is still flipped after the app is killed and launched again; the
@@ -91,8 +97,20 @@ final class SettingsUITests: RaceUITestCase {
     /// The live leaderboard (#268) is on by default: up on the HUD once the gun has gone. Turned off in Settings, a
     /// race after the gun has no board. The test turns it back on, so the next test starts from the defaults. The
     /// waits add up to under 3.5 min (`RaceUITestCase`): each race's start sequence runs at 8× (about 8-15 s).
+    /// The first launch clears the device's settings (`-resetSettings`) and so does a launch at tear-down, whether or
+    /// not the test got that far: a try that failed with the board turned off no longer fails the retry's first check.
     @MainActor func testLiveLeaderboardToggleHidesBoard() {
-        var app = launchRace(["-timescale", "8"])
+        addTeardownBlock {
+            // XCTest runs tear-down blocks on the main thread, as it does `tearDown`.
+            MainActor.assumeIsolated {
+                let app = XCUIApplication()
+                if app.state != .notRunning { app.terminate() }
+                app.launchArguments = ["-uitesting", "-resetSettings"]
+                app.launch()
+                app.terminate()
+            }
+        }
+        var app = launchRace(["-timescale", "8", "-resetSettings"])
         XCTAssertTrue(waitForGun(app), "the race never reached the gun")
         let board = app.descendants(matching: .any)["race-leaderboard"].firstMatch
         XCTAssertTrue(board.waitForExistence(timeout: 15), "no live leaderboard after the gun with the setting on")

@@ -84,8 +84,8 @@ nonisolated extension WaterStyle {
 }
 
 /// How much the water spends per frame (#127 picks it from thermal state; the ladder is #27's). The cheap tier
-/// freezes the ripple (no drift, every tile on the course wind, no per-tile sampling), thins the whitecaps and
-/// samples the pressure tone at half resolution. Puff shading and the pressure are race cues, drawn in every tier.
+/// freezes the ripple (no drift, every tile on the course wind, no per-tile sampling) and thins the whitecaps. Puff
+/// shading and the pressure tone are race cues, drawn the same in every tier.
 nonisolated enum WaterQuality: Sendable {
     case full, cheap
 }

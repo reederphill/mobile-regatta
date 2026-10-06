@@ -30,6 +30,14 @@ final class BoatNode: SKNode {
     private var sailAngle: CGFloat = 0
     /// The current roll miss's flog (`BoatPose.RollCue.flog`), timed in race seconds.
     private var flog = FlogTimer()
+    /// Whether she is far from your boat (`FarBoat`), kept across frames for its dead band.
+    private(set) var isFar = false
+    /// How much of her sail animation detail draws, 0…1: eased to 0 while she is far at `SailDetail.farReduced` and
+    /// back to 1 otherwise, so a boat crossing the line doesn't pop (#127).
+    private var sailDetailShare: CGFloat = 1
+    /// Hides her sail and wake, what the thermal tiers change, for `-cuesOnly`'s UI test (#127). Her hull, heel, glows,
+    /// cone and backwind still draw.
+    var hidesDecoration = false
     /// Your roll ring (#222): a sprite on your boat only, nil for the rest of the fleet, and always there on yours so the
     /// scene's node count doesn't depend on her class; it stays hidden for a class with no roll tack.
     private let ring: SKSpriteNode?
@@ -88,6 +96,8 @@ final class BoatNode: SKNode {
         sail.anchorPoint = art.sailAnchor
         sail.position = CGPoint(x: 0, y: length * 0.16)
         sail.zPosition = Layer.sail
+        // Named, so a test can tell what the thermal tiers change from the rest (#127).
+        sail.name = "sail"
 
         ringArt = Dictionary(uniqueKeysWithValues: RollRingArt.Look.allCases.map { ($0, RollRingArt.texture($0)) })
         let rollRing = isMine ? SKSpriteNode(texture: ringArt[.approach]) : nil
@@ -124,18 +134,29 @@ final class BoatNode: SKNode {
 
     /// Draws `boat` in `pose` at race time `time` (seconds; every flutter swings on it, never the wall clock).
     /// `settled` trims the sail straight to its target rather than easing it there (a frozen render fixture).
-    /// `wakeQuality` is the wake's tier (#127). `backwindSail` scales her backwind stripes and `backwindSide` (nil: her
-    /// windward side now) places them (`RenderWorld.backwind(ofSeat:)`, #377).
-    func update(with boat: Boat, pose: BoatPose, style: BoatStyle, wakeQuality: WakeQuality = .full, time: Double,
-                dt: Double, settled: Bool = false, backwindSail: Double = 1, backwindSide: Tack? = nil) {
+    /// `wakeQuality` is the wake's tier and `sailDetail` the sail's (#127): at `.farReduced` a boat more than
+    /// `style.farBoatHulls` from yours (`hullsFromYou`; yours passes 0) draws no sail animation detail.
+    /// `backwindSail` scales her backwind stripes and `backwindSide` (nil: her windward side now) places them
+    /// (`RenderWorld.backwind(ofSeat:)`, #377).
+    func update(with boat: Boat, pose: BoatPose, style: BoatStyle, wakeQuality: WakeQuality = .full,
+                sailDetail: SailDetail = .full, hullsFromYou: Double = 0, time: Double, dt: Double,
+                settled: Bool = false, backwindSail: Double = 1, backwindSide: Tack? = nil) {
         position = CGPoint(x: boat.position.x * ppm, y: boat.position.y * ppm)
         body.zRotation = CGFloat(-boat.heading)
 
+        isFar = FarBoat.isFar(hullsFromYou: hullsFromYou, wasFar: isFar, hulls: style.farBoatHulls)
+        let reduced = sailDetail == .farReduced && isFar && !pose.isGhost
+        let detail: CGFloat = reduced ? 0 : 1
+        sailDetailShare += (detail - sailDetailShare) * (settled ? 1 : min(1, CGFloat(dt) * 2))
+
         updateHeel(pose, style: style)
-        let isFlogging = updateSail(pose, style: style, time: time, dt: dt, settled: settled)
+        let isFlogging = updateSail(pose, style: style, detail: Double(sailDetailShare), time: time, dt: dt,
+                                    settled: settled)
         effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
                        settled: settled, isFlogging: isFlogging, backwindSail: backwindSail,
                        backwindSide: backwindSide)
+        sail.isHidden = hidesDecoration
+        if hidesDecoration { effects.trail.isHidden = true }
 
         updateRing(boat, style: style, time: time)
 
@@ -185,9 +206,11 @@ final class BoatNode: SKNode {
         heelShadow.alpha = heel * CGFloat(style.heelShadowAlpha)
     }
 
-    /// Returns whether a roll miss's flog is on (the wake dies with it, #222).
+    /// Returns whether a roll miss's flog is on (the wake dies with it, #222). `detail` scales the flutter swing, luff
+    /// shiver, belly pump and flog swing (#127's far tier); the trim and side (the boom) never drop.
     @discardableResult
-    private func updateSail(_ pose: BoatPose, style: BoatStyle, time: Double, dt: Double, settled: Bool) -> Bool {
+    private func updateSail(_ pose: BoatPose, style: BoatStyle, detail: Double, time: Double, dt: Double,
+                            settled: Bool) -> Bool {
         // The sail sits on the boom side, to leeward except by the lee, eased out as far as the pose says.
         let side: CGFloat = pose.sailSide == .port ? -1 : 1
         let target = CGFloat(pose.sailTrim) * side
@@ -207,7 +230,9 @@ final class BoatNode: SKNode {
             flap = 1
         }
         // Pinched (#219): the leading edge lifts, a small quick shiver at the luff on top of any flutter.
-        let luff = sin(time * 37 + flutterPhase) * deg2rad(style.pinchLuffDegrees) * pose.luffLift
+        let luff = sin(time * 37 + flutterPhase) * deg2rad(style.pinchLuffDegrees) * pose.luffLift * detail
+        amplitude *= detail
+        flap *= detail
         sail.zRotation = sailAngle + CGFloat(swing * amplitude + luff)
         // A flapping sail loses its belly; a ghost's hangs limp. Pinched it flattens, footed it fills (#219).
         let belly = pose.isGhost
@@ -217,6 +242,10 @@ final class BoatNode: SKNode {
         sail.xScale = side * CGFloat(belly)
         return isFlogging
     }
+
+    /// Her sail's rotation and x scale as drawn, and her hull's heel narrowing, for tests (#127).
+    var sailLook: (rotation: CGFloat, xScale: CGFloat) { (sail.zRotation, sail.xScale) }
+    var hullXScale: CGFloat { hullGroup.xScale }
 
 }
 

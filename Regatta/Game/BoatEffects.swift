@@ -63,6 +63,8 @@ final class BoatEffects {
         trail.lineCap = .round
         trail.lineJoin = .round
         trail.alpha = 0
+        // Named, so a test can tell what the thermal tiers change from the rest (#127).
+        trail.name = "wake"
 
         let slot = DrawOrder.z(seat)
         backwind.zPosition = Layer.backwind + slot

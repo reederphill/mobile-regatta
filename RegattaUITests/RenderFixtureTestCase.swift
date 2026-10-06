@@ -87,14 +87,15 @@ class RenderFixtureTestCase: RaceUITestCase {
         return true
     }
 
-    /// Launches `-fixture <name>` and returns its render once two screenshots in a row agree outside the
+    /// Launches `-fixture <name>`, with `arguments` after it, and returns its render once two screenshots in a row agree outside the
     /// home-indicator band, so the launch animation is over and the frozen frame is on screen, and no system
     /// banner was up before the first screenshot or after the last (one that stays across both would pass the
     /// two-in-a-row check, so a banner seen means starting the comparison over).
-    @MainActor func renderFixture(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws -> FixtureRender {
+    @MainActor func renderFixture(_ name: String, arguments: [String] = [], file: StaticString = #filePath,
+                                  line: UInt = #line) throws -> FixtureRender {
         let app = XCUIApplication()
         if app.state != .notRunning { app.terminate() }
-        app.launchArguments = ["-uitesting", "-fixture", name]
+        app.launchArguments = ["-uitesting", "-fixture", name] + arguments
         app.launchEnvironment["REGATTA_FIXTURE_DIR"] = Self.fixtures.path
         app.launch()
 

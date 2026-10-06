@@ -16,6 +16,7 @@ struct RootView: View {
     @State private var harnessResults: OnlineResults?
     @Environment(\.sceneState) private var sceneState
     @Environment(\.screenSize) private var screenSize
+    @Environment(\.maximumFramesPerSecond) private var maximumFramesPerSecond
     @Environment(\.lobbyService) private var lobbyService
     @Environment(\.onlineServices) private var services
 
@@ -88,6 +89,7 @@ struct RootView: View {
             }
             .environment(\.sceneState, sceneState)
             .environment(\.screenSize, screenSize)
+            .environment(\.maximumFramesPerSecond, maximumFramesPerSecond)
             // The online results report through the lobby (#26, #133).
             .environment(\.lobbyService, lobbyService)
             .environment(\.colorScheme, .dark)

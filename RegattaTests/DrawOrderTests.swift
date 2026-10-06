@@ -24,11 +24,16 @@ import Testing
             // them); each boat's heel shadow, right-of-way glow (#348, drawn hidden or not), hull, outline and sail;
             // your glow and roll ring too.
             #expect(boats > 1, "\(name)")
-            #expect(drawn.filter { $0.layer == "effects" }.count == 2 * boats, "\(name)")
+            // The wake and sail are named for the render-quality ladder (#127), so they read as layers of their own here.
+            let effects = drawn.filter { ["effects", "wake"].contains($0.layer) }
+            let fleet = drawn.filter { ["fleet", "sail"].contains($0.layer) }
+            #expect(effects.count == 2 * boats, "\(name)")
+            #expect(drawn.filter { $0.layer == "wake" }.count == boats, "\(name)")
+            #expect(drawn.filter { $0.layer == "sail" }.count == boats, "\(name)")
             let ribbons = drawn.filter { $0.layer == "turbulenceTrails" }
-            let effectsBottom = drawn.filter { $0.layer == "effects" }.map(\.z).min() ?? 0
+            let effectsBottom = effects.map(\.z).min() ?? 0
             #expect(ribbons.allSatisfy { $0.z < effectsBottom }, "\(name): the ribbons under every boat's effects")
-            #expect(drawn.filter { $0.layer == "fleet" }.count == 5 * boats + 2, "\(name)")
+            #expect(fleet.count == 5 * boats + 2, "\(name)")
             #expect(drawn.filter { $0.layer == "course" }.count > 4, "\(name)")
             // The chart (#115): the boundary's band and line, the land and its relief, a landmark; shallows where
             // the venue has a current.
@@ -47,7 +52,7 @@ import Testing
                            "course"]
             let cues = drawn.filter { ["laylines", "ladderLines", "windVane", "grooveTick", "vaneArc"].contains($0.layer) }
             let chartTop = try #require(drawn.filter { charted.contains($0.layer) }.map(\.z).max())
-            let fleetBottom = try #require(drawn.filter { $0.layer == "fleet" }.map(\.z).min())
+            let fleetBottom = try #require(fleet.map(\.z).min())
             let arrow = try #require(drawn.first { $0.layer == "edgeArrow" })
             #expect(cues.allSatisfy { $0.z > chartTop && $0.z < fleetBottom }, "\(name)")
             #expect(drawn.allSatisfy { $0.layer == "edgeArrow" || $0.z < arrow.z }, "\(name)")
