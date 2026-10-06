@@ -168,12 +168,19 @@ public struct BandwidthBudget: Hashable, Sendable {
 
     /// What `report` exceeds, in words; empty if nothing.
     public func violations(_ report: LoadReport) -> [String] {
+        violations(seat: report.seat, downstreamBytesPerSecond: report.downstreamBytesPerSecond,
+                   bytesReceived: report.bytesReceived)
+    }
+
+    /// What one seat's downstream exceeds, in words; empty if nothing. For a measurement that isn't a
+    /// `LoadReport` (the in-memory 16-seat race, #216).
+    public func violations(seat: Int, downstreamBytesPerSecond: Double, bytesReceived: Int) -> [String] {
         var found: [String] = []
-        if report.downstreamBytesPerSecond > bytesPerSecond {
-            found.append("seat \(report.seat): \(Int(report.downstreamBytesPerSecond)) B/s down > \(Int(bytesPerSecond))")
+        if downstreamBytesPerSecond > bytesPerSecond {
+            found.append("seat \(seat): \(Int(downstreamBytesPerSecond)) B/s down > \(Int(bytesPerSecond))")
         }
-        if report.bytesReceived >= bytesPerRace {
-            found.append("seat \(report.seat): \(report.bytesReceived) B down this race >= \(bytesPerRace)")
+        if bytesReceived >= bytesPerRace {
+            found.append("seat \(seat): \(bytesReceived) B down this race >= \(bytesPerRace)")
         }
         return found
     }
