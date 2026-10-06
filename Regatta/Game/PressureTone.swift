@@ -82,9 +82,9 @@ nonisolated extension WaterTone {
 /// Where the water samples the pressure (#289): a square grid fixed to the water, so the tone doesn't swim as
 /// the camera moves, covering the view with a sample to spare all round. Spread out with the camera's zoom as
 /// the ripple's lattice is (`RippleLattice.step`), so a view takes about the same number of samples at any
-/// zoom; the cheap tier (#127) samples at half the resolution.
+/// zoom, the same in every water tier: the tone is a race cue, so the thermal ladder (#127) never coarsens it.
 nonisolated struct PressureGrid: Equatable, Sendable {
-    /// Points between samples at the default zoom in the full tier.
+    /// Points between samples at the default zoom.
     static let fullSpacing = 96.0
 
     /// Points between samples.
@@ -92,9 +92,10 @@ nonisolated struct PressureGrid: Equatable, Sendable {
     var columns: ClosedRange<Int>
     var rows: ClosedRange<Int>
 
-    /// The grid covering `view` in `quality`.
-    @MainActor static func forView(_ view: WaterView, quality: WaterQuality) -> PressureGrid {
-        let spacing = fullSpacing * RippleLattice.step(cameraScale: view.spreadScale) * (quality == .cheap ? 2 : 1)
+    /// The grid covering `view`. Every water tier samples it alike: a few hundred samples, so halving them saves
+    /// next to nothing, and the cue must draw pixel for pixel the same at every thermal tier (#127).
+    @MainActor static func forView(_ view: WaterView) -> PressureGrid {
+        let spacing = fullSpacing * RippleLattice.step(cameraScale: view.spreadScale)
         let rect = view.rect
         return PressureGrid(spacing: spacing,
                             columns: Int((rect.minX / spacing).rounded(.down)) - 1...Int((rect.maxX / spacing).rounded(.up)) + 1,

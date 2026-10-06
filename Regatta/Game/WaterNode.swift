@@ -88,6 +88,12 @@ final class WaterNode: SKNode {
     /// The tuning panel's pressure overlay (#289, Debug builds): the tone drawn `PressureOverlay.boost` times as
     /// strong, the pressure lanes' centrelines dotted and the pressure side labelled.
     var showsPressureOverlay = false
+    /// Hides the ripple and whitecaps, what the thermal tiers change, for `-cuesOnly`'s UI test (#127). The pressure
+    /// and puffs still draw.
+    var hidesRipple: Bool {
+        get { rippleLayer.isHidden }
+        set { rippleLayer.isHidden = newValue }
+    }
 
     /// The pressure tone's sprite's name: the one sprite whose texture is made each frame.
     static let pressureName = "pressure"
@@ -118,6 +124,9 @@ final class WaterNode: SKNode {
         pressureSprite.name = Self.pressureName
         pressureSprite.isHidden = true
         puffLayer.zPosition = 0
+        // Named, so a test can tell what the thermal tiers change (the ripple) from the cues (the puffs, #127).
+        puffLayer.name = "puffs"
+        rippleLayer.name = "ripple"
         rippleLayer.zPosition = 1
         // Clear of the ripple's slots (`DrawOrder`: its tiles and caps reach past 2) and under the next layer's.
         overlayLines.zPosition = 5
@@ -156,7 +165,7 @@ final class WaterNode: SKNode {
             pressureSprite.isHidden = true
             return
         }
-        let grid = PressureGrid.forView(view, quality: quality)
+        let grid = PressureGrid.forView(view)
         var pressures: [Double] = []
         pressures.reserveCapacity(grid.columns.count * grid.rows.count)
         for j in grid.rows {

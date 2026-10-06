@@ -200,6 +200,8 @@ final class GameSession {
         hints?.onRetired = { [weak self] id, mode in self?.onHintRetired?(id.rawValue, mode) }
         // `-hideScene` (#361): a live race only; a render fixture always paints.
         scene.paintsWorld = driver.isFrozen || !LaunchOptions.current.hidesScene
+        // `-cuesOnly` (#127): a UI test's cue-only render.
+        scene.drawsCuesOnly = LaunchOptions.current.drawsCuesOnly
         // The minimap's first pressure sample (up to ~170 ms on first use, #310) waits for the scene's first HUD
         // refresh, off the race's construction; a frozen fixture takes it here, as its render holds still.
         // The first refresh posts the steering hint at once (#129); a frozen fixture shows only the notice it names.

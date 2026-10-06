@@ -29,6 +29,8 @@ import RegattaServices
 /// - `-vision deut|prot|trit|grey|sun|none` puts a colour-vision filter over a live race's whole view, scene, HUD
 ///   and letterbox alike (#111, Debug builds). `VisionFilter`'s own names (`deuteranopia`, …, `washout`) work too.
 /// - `-tuning` opens the debug tuning panel at launch (#232). Debug builds only: other builds don't know it.
+/// - `-fps120` draws the race at 120 frames a second on a ProMotion screen while the device is cool (#127,
+///   `RenderQualityPolicy`); every build draws at 60 without it. Debug builds only: other builds don't know it.
 /// - `-briefing practice|online` opens on the briefing (#130) for the launch race (`RaceConfig.launch()`, and `-seed`), with
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
@@ -39,6 +41,12 @@ import RegattaServices
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
 /// - `-completedRaces <n>` (with `-uitesting`) sets the online races you've completed, which earned designs count (#136).
 ///   Kept in the UI tests' own suite; without `-uitesting` it's ignored, so it never unlocks a design for real.
+/// - `-thermal nominal|fair|serious|critical` draws the race as if the device were at that thermal state (#127,
+///   `RenderQualityPolicy`), whatever its own: for #172's device runs and the UI tests (Debug builds). A render
+///   fixture or a UI test run draws at `-thermal`'s state, nominal without it, and never at the device's own state or
+///   Low Power Mode, so references stay put.
+/// - `-cuesOnly` (with `-uitesting`) hides what the thermal tiers change, the ripple and whitecaps, the wakes and the
+///   sails, so a UI test can compare the race cues alone across tiers (#127).
 struct LaunchOptions: Equatable {
     enum SteeringScheme: String, CaseIterable {
         case halves, tiller
@@ -57,6 +65,20 @@ struct LaunchOptions: Equatable {
     /// `-briefing`'s variants (#130).
     enum Briefing: String, CaseIterable {
         case practice, online
+    }
+
+    /// `-thermal`'s states (#127).
+    enum Thermal: String, CaseIterable {
+        case nominal, fair, serious, critical
+
+        var state: ProcessInfo.ThermalState {
+            switch self {
+            case .nominal: .nominal
+            case .fair: .fair
+            case .serious: .serious
+            case .critical: .critical
+            }
+        }
     }
 
     /// Boats in the `-perf` race, the largest fleet.
@@ -87,8 +109,12 @@ struct LaunchOptions: Equatable {
     var myBoat: DesignID?
     var keepMyBoat = false
     var completedRaces: Int?
+    var thermal: Thermal?
+    /// `-cuesOnly`: honoured only with `-uitesting` (`drawsCuesOnly`).
+    var cuesOnly = false
     #if DEBUG
     var tuning = false
+    var fps120 = false
     #endif
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
@@ -112,11 +138,13 @@ struct LaunchOptions: Equatable {
             case "-online": online = true
             case "-keepMyBoat": keepMyBoat = true
             case "-hideScene": hidesScene = true
+            case "-cuesOnly": cuesOnly = true
             #if DEBUG
             case "-tuning": tuning = true
+            case "-fps120": fps120 = true
             #endif
             case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
-                 "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-completedRaces":
+                 "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-completedRaces", "-thermal":
                 guard let value = rest.first, !Self.flags.contains(value) else {
                     problems.append("\(argument) needs a value")
                     continue
@@ -132,9 +160,10 @@ struct LaunchOptions: Equatable {
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
                           "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
-                          "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces"]
+                          "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces",
+                          "-thermal", "-cuesOnly"]
         #if DEBUG
-        flags.insert("-tuning")
+        flags.formUnion(["-tuning", "-fps120"])
         #endif
         return flags
     }()
@@ -185,6 +214,12 @@ struct LaunchOptions: Equatable {
             } else {
                 reject(argument, value, "a design id of the practice boat class")
             }
+        case "-thermal":
+            if let state = Thermal(rawValue: value) {
+                thermal = state
+            } else {
+                reject(argument, value, "nominal, fair, serious or critical")
+            }
         case "-completedRaces":
             if let n = Int(value), n >= 0 { completedRaces = n } else { reject(argument, value, "a whole number ≥ 0") }
         case "-fakeServices":
@@ -215,6 +250,21 @@ struct LaunchOptions: Equatable {
         .none
         #endif
     }
+
+    /// The thermal state a race draws at instead of the device's (#127): `-thermal`'s in Debug builds, and nominal
+    /// for a render fixture or a UI test run without it, so neither follows the device's heat. Nil follows the device.
+    var renderThermalState: ProcessInfo.ThermalState? {
+        #if DEBUG
+        if let thermal { return thermal.state }
+        #endif
+        return pinsRenderQuality ? .nominal : nil
+    }
+
+    /// Whether the race ignores the device's thermal state and Low Power Mode (#127): a render fixture or a UI test.
+    var pinsRenderQuality: Bool { uiTesting || fixture != nil }
+
+    /// Whether the race hides what the thermal tiers change (`-cuesOnly`, UI tests only, #127).
+    var drawsCuesOnly: Bool { uiTesting && cuesOnly }
 
     /// Whether launch skips the menu and starts a race.
     var startsRace: Bool { autostart || demo || perf }

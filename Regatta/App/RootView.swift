@@ -14,6 +14,7 @@ struct RootView: View {
     @State private var showsOnlineStub = false
     @Environment(\.sceneState) private var sceneState
     @Environment(\.screenSize) private var screenSize
+    @Environment(\.maximumFramesPerSecond) private var maximumFramesPerSecond
 
     var body: some View {
         if let fixtureError {
@@ -74,6 +75,7 @@ struct RootView: View {
             }
             .environment(\.sceneState, sceneState)
             .environment(\.screenSize, screenSize)
+            .environment(\.maximumFramesPerSecond, maximumFramesPerSecond)
             .environment(\.colorScheme, .dark)
             #if DEBUG
             .environment(model.tuning)

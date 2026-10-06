@@ -18,6 +18,10 @@ struct RaceView: View {
     var onRaceOnline: (() -> Void)? = nil
     /// Sending the app to the background pauses a practice race (#25), read from the scene (`SceneState`).
     @Environment(\.sceneState) private var sceneState
+    /// The screen's top frame rate (#127): 120 on ProMotion.
+    @Environment(\.maximumFramesPerSecond) private var maximumFramesPerSecond
+    /// The device's heat and Low Power Mode, which set the frame rate and effect tiers (#127).
+    @State private var renderQuality = RenderQualityMonitor(options: .current)
     @State private var showsHelp = false
     #if DEBUG
     /// The debug tuning panel (#232), over a paused practice race: its render values show live behind it.
@@ -33,6 +37,8 @@ struct RaceView: View {
         #endif
     }
 
+    private var renderPolicy: RenderQualityPolicy { renderQuality.policy(maxFPS: maximumFramesPerSecond) }
+
     var body: some View {
         RaceViewport { layout in
             race(layout)
@@ -41,6 +47,7 @@ struct RaceView: View {
         // One colour-vision filter over everything the race draws, live or a fixture: the scene at any camera
         // scale, the HUD and overlays, and the letterbox (#111).
         .vision(session.vision)
+        .onChange(of: renderPolicy, initial: true) { _, policy in session.scene.apply(policy) }
         .onChange(of: sceneState.phase) { _, phase in
             if phase == .background { session.pauseForBackground() }
         }
@@ -85,7 +92,7 @@ struct RaceView: View {
     // from launch to launch: every node the scene draws has a z of its own, or a render fixture isn't
     // repeatable (#62, `DrawOrder`).
     private var scene: some View {
-        SpriteView(scene: session.scene, preferredFramesPerSecond: 120, options: [.ignoresSiblingOrder], debugOptions: debugOptions)
+        SpriteView(scene: session.scene, preferredFramesPerSecond: renderPolicy.fps, options: [.ignoresSiblingOrder], debugOptions: debugOptions)
             .ignoresSafeArea()
     }
 

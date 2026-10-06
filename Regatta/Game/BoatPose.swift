@@ -12,8 +12,8 @@ import RegattaCore
 /// race (ADR 0002).
 ///
 /// The base pose, plus #122's pinch/foot sail-shape cue (#219) from her autohelm's offset from the groove: the
-/// same for every boat in the same state, as the rest. #120's sailors and #127's far tier keep `heel` and
-/// `sailSide` apart from `flutter`.
+/// same for every boat in the same state, as the rest. #127's far tier keeps `heel` and `sailSide` apart from
+/// `flutter`.
 nonisolated struct BoatPose: Equatable, Sendable {
     /// The cue a roll tack (#222, #263) shows while it lasts.
     enum RollCue: Equatable, Sendable {
@@ -354,6 +354,13 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var penaltyArcRadiusHulls = 0.9
     var penaltyArcWidth = 4.0
 
+    // MARK: Render quality (#127)
+
+    /// A boat this many hull lengths from yours is far: at the serious thermal tier her sail drops its animation detail
+    /// (`SailDetail.farReduced`), near again inside `FarBoat.nearShare` of it. A debug slider; placeholder about half
+    /// the portrait view at the default zoom.
+    var farBoatHulls = 8.0
+
     /// The shipped placeholders.
     static let standard = BoatStyle()
 }
@@ -399,6 +406,7 @@ nonisolated extension BoatStyle {
             (.rightOfWayGlowBlur, \.rightOfWayGlowBlur),
             (.ruleCallLineSeconds, \.ruleCallLineSeconds), (.ruleCallFadeSeconds, \.ruleCallFadeSeconds),
             (.penaltyArcRadiusHulls, \.penaltyArcRadiusHulls), (.penaltyArcWidth, \.penaltyArcWidth),
+            (.farBoatHulls, \.farBoatHulls),
         ]
         for (key, path) in fields {
             if let value = try c.decodeIfPresent(Double.self, forKey: key) { style[keyPath: path] = value }

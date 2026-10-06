@@ -64,6 +64,23 @@ final class GameScene: SKScene {
     }
     /// The wakes' tier: the thermal ladder's (#127) seam. Every tier's wake is speed-scaled.
     var wakeQuality = WakeQuality.full
+    /// The far boats' sail tier (#127): your boat and ghosts always draw in full.
+    var sailDetail = SailDetail.full
+    /// `-cuesOnly` (#127's UI test): draws none of what the thermal tiers change (ripple, whitecaps, wakes, sails).
+    var drawsCuesOnly = false {
+        didSet { needsPausedRender = true }
+    }
+
+    /// Draws at `policy`'s tiers from the next frame (#127), and at its frame rate: `RaceView` gives the same rate to
+    /// its `SpriteView`, and setting it on the view here too makes a change take hold whether or not SpriteView passes
+    /// a changed rate on to a view it already made.
+    func apply(_ policy: RenderQualityPolicy) {
+        view?.preferredFramesPerSecond = policy.fps
+        waterQuality = policy.water
+        wakeQuality = policy.wake
+        sailDetail = policy.sail
+        needsPausedRender = true
+    }
 
     /// Whether SpriteKit draws the world and the camera's nodes: `-hideScene` turns it off for a UI test that only
     /// waits for the results (#361), so a GPU-less CI runner rasterises nothing while `render(_:)` still moves every
@@ -293,12 +310,17 @@ final class GameScene: SKScene {
         // Simulated seconds since the last frame drawn.
         let dt = settled ? 0 : max(0, world.time - (lastRenderTime ?? world.time))
         lastRenderTime = world.time
+        let me = world.me.position
+        let hull = max(world.boatClass.hull.length, 1e-6)
         for (i, boat) in world.boats.enumerated() {
             let pose = BoatPose(boat, ease: world.ease(ofSeat: i), isGhost: world.isGhost(ofSeat: i),
                                 boatClass: world.boatClass, style: boatStyle, autohelm: world.autohelm(ofSeat: i))
+            let hullsFromYou = i == world.myBoatIndex ? 0 : (boat.position - me).length / hull
             let backwind = world.backwind(ofSeat: i)
-            boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality, time: world.time,
-                                dt: dt, settled: settled, backwindSail: backwind.sail, backwindSide: backwind.side)
+            boatNodes[i].hidesDecoration = drawsCuesOnly
+            boatNodes[i].update(with: boat, pose: pose, style: boatStyle, wakeQuality: wakeQuality,
+                                sailDetail: sailDetail, hullsFromYou: hullsFromYou, time: world.time, dt: dt,
+                                settled: settled, backwindSail: backwind.sail, backwindSide: backwind.side)
         }
         // The sim's ribbons at the time drawn, between the last two ticks (`ribbons(of:time:)`). Not while the world
         // isn't painted (`-hideScene`): they are pure paint and most of a 16-boat frame's render (#377), so a hidden
@@ -316,6 +338,7 @@ final class GameScene: SKScene {
         pointShimmer(world)
 
         let view = WaterView(center: cam.position, sceneSize: size, scale: cam.xScale, rotation: cam.zRotation)
+        water.hidesRipple = drawsCuesOnly
         Signpost.waterUpdate.measure { water.update(WaterWorld(world), view: view, dt: dt) }
 
         // The active leg's marks orange, the rest grey (#15); strokes kept steady on screen as the camera zooms.

@@ -18,6 +18,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let window = UIWindow(windowScene: windowScene)
         guard let app = AppDelegate.current else { return }
         window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size,
+                                                          maximumFramesPerSecond: windowScene.screen.maximumFramesPerSecond,
                                                           onlineStatus: OnlineStatus(services: app.services), analytics: app.analytics)
         if let appearance = LaunchOptions.current.appearance {
             window.overrideUserInterfaceStyle = appearance == .dark ? .dark : .light
@@ -61,12 +62,14 @@ struct AppRoot: View {
     let model: AppModel
     let sceneState: SceneState
     let screenSize: CGSize
+    var maximumFramesPerSecond = 60
     let onlineStatus: OnlineStatus
 
     var body: some View {
         RootView(model: model)
             .environment(\.sceneState, sceneState)
             .environment(\.screenSize, screenSize)
+            .environment(\.maximumFramesPerSecond, maximumFramesPerSecond)
             .environment(\.isOnline, onlineStatus.isOnline)
             .environment(\.lobbyStatus, onlineStatus.lobbyStatus.hidingChat(model.deviceSettings.hidesLobbyChat))
             .environment(\.lobbyService, onlineStatus.services.lobby)
@@ -86,12 +89,14 @@ final class RootHostingController: UIHostingController<AppRoot> {
     }
 
     /// With no `onlineStatus`, online and signed out, as the placeholders were: for tests.
-    init(sceneState: SceneState, screenSize: CGSize, onlineStatus: OnlineStatus? = nil, analytics: Analytics = .discarding()) {
+    init(sceneState: SceneState, screenSize: CGSize, maximumFramesPerSecond: Int = 60, onlineStatus: OnlineStatus? = nil,
+         analytics: Analytics = .discarding()) {
         // My boat sells from the app's store; with none given, the model's own stub.
         let model = AppModel(sceneState: sceneState, store: onlineStatus?.services.store, analytics: analytics,
                              audio: .live())
         let onlineStatus = onlineStatus ?? OnlineStatus(services: .fake(.signedOut))
-        super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize, onlineStatus: onlineStatus))
+        super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize,
+                                     maximumFramesPerSecond: maximumFramesPerSecond, onlineStatus: onlineStatus))
         isOrientationLocked = sceneState.isRaceSequenceShowing
         sceneState.onRaceSequenceShowingChange = { [weak self] showing in self?.isOrientationLocked = showing }
     }

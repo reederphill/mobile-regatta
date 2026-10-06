@@ -19,8 +19,9 @@ import RegattaServices
 
     @Test func parsesEveryOption() {
         let options = parse("-autostart", "-seed", "1", "-fixture", "windward-mark", "-timescale", "4",
-                            "-scheme", "tiller", "-camera", "boat", "-demo", "-perf")
+                            "-scheme", "tiller", "-camera", "boat", "-demo", "-perf", "-thermal", "serious")
         #expect(options.autostart && options.demo && options.perf)
+        #expect(options.thermal == .serious)
         #expect(options.seed == 1)
         #expect(options.fixture == "windward-mark")
         #expect(options.timescale == 4)
@@ -67,6 +68,30 @@ import RegattaServices
         #expect(options.camera == nil)
         #expect(options.autostart)
         #expect(options.problems.count == 4)
+    }
+
+    /// `-thermal nominal|fair|serious|critical` pins the thermal state a race draws at (#127, Debug builds); a bad or
+    /// missing value is a launch problem. `-cuesOnly` counts only with `-uitesting`.
+    @Test func parsesTheThermalState() {
+        #expect(parse().thermal == nil)
+        for thermal in LaunchOptions.Thermal.allCases {
+            let options = parse("-thermal", thermal.rawValue, "-autostart")
+            #expect(options.thermal == thermal && options.autostart && options.problems.isEmpty)
+            #if DEBUG
+            #expect(options.renderThermalState == thermal.state)
+            #endif
+        }
+        #expect(LaunchOptions.Thermal.allCases.map(\.state) == [.nominal, .fair, .serious, .critical])
+        let bad = parse("-thermal", "hot")
+        #expect(bad.thermal == nil)
+        #expect(bad.problems == ["-thermal hot: expected nominal, fair, serious or critical"])
+        let missing = parse("-thermal", "-uitesting")
+        #expect(missing.thermal == nil && missing.uiTesting)
+        #expect(missing.problems == ["-thermal needs a value"])
+
+        #expect(parse("-uitesting", "-cuesOnly").drawsCuesOnly)
+        #expect(!parse("-cuesOnly").drawsCuesOnly)
+        #expect(!parse("-uitesting").drawsCuesOnly)
     }
 
     /// `-briefing practice|online` opens on the briefing (#130); anything else is ignored with a launch problem.
@@ -267,6 +292,18 @@ import RegattaServices
         let valueless = parse("-seed", "-tuning")
         #expect(valueless.tuning)
         #expect(valueless.problems == ["-seed needs a value"])
+    }
+
+    /// `-fps120` (#127) lets a cool ProMotion screen draw at 120: a flag of its own, Debug builds only, so a Release
+    /// build always draws at 60 or less.
+    @Test func fps120IsADebugFlag() {
+        #expect(parse("-fps120").fps120)
+        #expect(!parse().fps120)
+        let valueless = parse("-thermal", "-fps120")
+        #expect(valueless.fps120 && valueless.thermal == nil)
+        #expect(valueless.problems == ["-thermal needs a value"])
+        #expect(RenderQualityMonitor(options: parse("-fps120", "-thermal", "nominal")).policy(maxFPS: 120).fps == 120)
+        #expect(RenderQualityMonitor(options: parse("-thermal", "nominal")).policy(maxFPS: 120).fps == 60)
     }
     #endif
     /// My boat's launch arguments (#136): `-myBoat` stands in for Try it's deep link.

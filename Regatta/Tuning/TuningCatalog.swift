@@ -378,6 +378,8 @@ enum TuningCatalog {
                     boat("ruleCallFadeSeconds", "Rule-call line fade", \.ruleCallFadeSeconds, 0...5, 0.25, unit: " s"),
                     boat("penaltyArcRadiusHulls", "Penalty arc radius", \.penaltyArcRadiusHulls, 0.5...2, 0.1, unit: " hulls"),
                     boat("penaltyArcWidth", "Penalty arc width", \.penaltyArcWidth, 1...10, 0.5, unit: " pt"),
+                    // #127: the serious thermal tier's far boats.
+                    boat("farBoatHulls", "Far boat (thermal tier)", \.farBoatHulls, 2...30, 0.5, unit: " hulls"),
                 ]),
             TuningGroup(
                 id: "hints", title: "Hints",

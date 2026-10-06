@@ -294,19 +294,17 @@ import RegattaCore
         // Every cheap streak lies on the course wind.
         #expect(cheap.streaks.allSatisfy { $0.windDirection == course.direction })
 
-        // The pressure is a race cue (#289): the cheap tier keeps it, sampled at half the resolution, each sample
-        // the model's pressure, darker where more as in the full tier.
+        // The pressure is a race cue (#289): the cheap tier draws it exactly as the full one, on the same grid with
+        // the same samples, so it is pixel for pixel the same at every thermal tier (#127).
         let pressured = try Self.pressureWorld()
         let sampler = try #require(pressured.windSampler)
         let pressureView = Self.view(centeredOn: pressured.me.position)
         full.update(WaterWorld(pressured), view: pressureView, dt: 0)
         cheap.update(WaterWorld(pressured), view: pressureView, dt: 0)
         let fullTone = try #require(full.pressure), cheapTone = try #require(cheap.pressure)
-        #expect(cheapTone.grid.spacing == 2 * fullTone.grid.spacing)
+        #expect(cheapTone.grid == fullTone.grid)
+        #expect(cheapTone.tone.pressures == fullTone.tone.pressures)
         #expect(cheapTone.grid.rect.contains(pressureView.rect))
-        // Half as many a side, but for the samples to spare all round (a view's edges rounded out, and one more).
-        #expect(cheapTone.tone.columns <= (fullTone.tone.columns + 1) / 2 + 2 && cheapTone.tone.rows <= (fullTone.tone.rows + 1) / 2 + 2)
-        #expect(cheapTone.tone.pressures.count < fullTone.tone.pressures.count)
         for (row, j) in cheapTone.grid.rows.enumerated() {
             for (column, i) in cheapTone.grid.columns.enumerated() {
                 let point = cheapTone.grid.position(i, j)
