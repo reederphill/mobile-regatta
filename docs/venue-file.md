@@ -44,7 +44,7 @@ Files are `<id>@<version>.json`: bundled ones in `Sources/RegattaCore/Resources/
   square to its mean, 100 m cells, covering the race area at every seeded rotation. The files' `notes` say what each
   grid does; their grids, side tendencies and current are placeholders until play teaches what reads well. Overviews
   of every pairing are in `docs/venues/` (`regatta-venue-png`). The default race still sails `dev-venue@2`; practice
-  setup (#131) picks a real venue.
+  setup (#131) picks a real venue. The bot suite's matrix sails each in its two pairings (`conditionsByVenue`, #316).
 - `test-venue@1` (test resource): small hand-checkable grids, concave land, a tidal current with an eddy.
 
 ## Frame and units
@@ -282,8 +282,9 @@ don't check this yet.) It throws `invalidContent` for a venue that breaks any of
   `speedChange` > −1, `lanePreference` in 0…1 and `sideTendency` within ±0.5.
 - The current rules in the tables above.
 
-Land clear of the start line, marks and race area, and the estuary's channel inside it, are offline
-checks over the derived course (#83), not load-time validation: below.
+Land clear of the start line, marks and race area, landmarks on the shore, and the estuary's deepest water
+and some shallows inside the race area, are offline checks over the derived course (#83, #316), not load-time
+validation: below.
 
 ## Offline checks (#83)
 
@@ -298,18 +299,25 @@ steps; `WindSetup(conditions:pairing:meanDirection:baseStrength:)` forces it).
 - any land reaches into the race area's rectangle (land is only at the edges, #12);
 - land is within 30 m (`landClearanceMetres`) of the start line or any mark;
 - its geographic grid doesn't cover the rectangle (outside it the shift is neutral: a cliff);
+- a landmark stands more than 40 m (`landmarkBesideMetres`, a placeholder) from every land ring, or inside the
+  rectangle (#316): landmarks are scenery on or beside the shore, never on the race's water. The distance is to the
+  rings themselves (0 on or in one), not `isLand`, so a landmark on an edge two rings share passes;
 - at a venue with current: the current grid doesn't cover the rectangle, the deepest water (every node at the
   deepest depth) lies outside it, or no shallows node lies in it. The channel is water at least half
-  (`channelFraction`) the deepest node's depth; shallows are shallower, but deeper than 0.
+  (`channelFraction`) the deepest node's depth; shallows are shallower, but deeper than 0. The check doesn't ask
+  the channel to run along the course axis (owner, #316): a pairing may lay its course across it, as Saltings
+  Reach's gusty offshore does.
 
 **Sailability** (`VenueSailability`, #11, #14). In a 25 % lull (the conditions' weakest strength × 0.75), shifted and
-scaled by the pairing's geographic grid, and the current at every tide state the venue allows at the gun (15° steps;
+scaled by the pairing's geographic grid, and the current at every tide state the venue allows at the gun (5° steps,
+fine enough to catch the current's peak; 15° until #316;
 eddies included), a boat sails the class polar's best upwind angle on the sailing wind (ground wind less current).
 Her progress is her velocity over the ground along the course axis, on the better tack, at points every 20 m over
 the race area from the start line to the windward mark. On every course and at every tide state, (1) somewhere
 across the beat progress is at least 1 kn, and (2) nowhere is it negative: she is never swept backwards.
 
 **Overviews.** `swift run --package-path Packages/RegattaCore regatta-venue-png` draws every real pairing into
-`docs/venues/<venue>@<v>__<conditions>@<v>.png`, and prints both checks' results: land (green), depth tint (blues,
+the repository's `docs/venues/<venue>@<v>__<conditions>@<v>.png` from any working directory (or into the directory
+given as its first argument), and prints both checks' results: land (green), depth tint (blues,
 Saltings Reach), the race area at −10° (orange), the authored mean (grey, dashed) and +10° (purple), with each one's
 marks (red) and start line (black), the anchor (black dot) and landmarks (green squares). #84 reviews them.
