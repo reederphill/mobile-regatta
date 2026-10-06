@@ -65,12 +65,16 @@ final class OnlineLaunch {
     @ObservationIgnored private let hints: (() -> HintEngine)?
     /// Told as a hint retires: the app passes `AppModel.logsHintRetired`.
     @ObservationIgnored private let onHintRetired: ((String, HintRetirement) -> Void)?
+    /// The race's results from the server's stream (#133), for a race with a hand-off (`AppModel.onlineResults`). Nil
+    /// for a Debug dev-instant race, which keeps the live frame's standings and its own loop.
+    @ObservationIgnored private let results: OnlineResults?
 
     init(server: RaceServer, haptics: any Haptics = GatedHaptics(), sound: any SoundOutput = SilentSoundOutput(),
          controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
          hints: (() -> HintEngine)? = nil, onHintRetired: ((String, HintRetirement) -> Void)? = nil,
-         ticket: @escaping () async throws -> [UInt8]) {
+         results: OnlineResults? = nil, ticket: @escaping () async throws -> [UInt8]) {
         self.server = server
+        self.results = results
         self.hints = hints
         self.onHintRetired = onHintRetired
         self.haptics = haptics
@@ -115,6 +119,10 @@ final class OnlineLaunch {
             let session = GameSession(online: driver, haptics: haptics, sound: sound, controls: controls,
                                       rulesSeen: rulesSeen, hints: hints?())
             session.onHintRetired = onHintRetired
+            if let results {
+                session.onlineResults = results
+                results.start()
+            }
             phase = .racing(session)
         case .updateRequired(let reason):
             transport.close()

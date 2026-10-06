@@ -207,6 +207,31 @@ final class AppModel {
         path = [.myBoat]
     }
 
+    /// An online race's results stream (#133), counting from the online races completed so far: its close, when it
+    /// counts (G6), adds one, so the earned line's Try it lands on an unlocked design. #163 later sets the server's count.
+    func onlineResults(service: any RaceSessionService, raceID: RaceID?) -> OnlineResults {
+        let completed = CompletedRacesStore(defaults: myBoatDefaults)
+        let results = OnlineResults(service: service, raceID: raceID, completedBefore: completed.count)
+        results.onCompleted = { [weak self] race in
+            guard let self, completed.countCompletion(of: race.rawValue) else { return }
+            myBoat.completedRaces = completed.count
+        }
+        return results
+    }
+
+    /// The online results' Race again (#24, #25): joins the queue, then home, where the queue shows (#140's bar). A
+    /// refusal (cooldown, suspension) just lands home; the queue's own state says why.
+    func raceAgain(queue: any QueueService) {
+        Task { try? await queue.join() }
+        leaveRace()
+    }
+
+    /// The online results' Try it (#24, #25): My boat with the earned design on.
+    func tryEarnedDesign(_ design: DesignID) {
+        endRaceSequence()
+        openMyBoat(trying: design)
+    }
+
     /// The UI tests' practice setup suite.
     static let uiTestingPracticeSuite = "com.phillreeder.regatta.uitesting.practice"
 

@@ -40,6 +40,8 @@ import RegattaServices
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
 /// - `-completedRaces <n>` (with `-uitesting`) sets the online races you've completed, which earned designs count (#136).
+/// - `-onlineResults` (with `-uitesting` and `-fakeServices online-results`) opens on the online results sheet, fed by
+///   the scenario's paced results stream (#133).
 ///   Kept in the UI tests' own suite; without `-uitesting` it's ignored, so it never unlocks a design for real.
 /// - `-thermal nominal|fair|serious|critical` draws the race as if the device were at that thermal state (#127,
 ///   `RenderQualityPolicy`), whatever its own: for #172's device runs and the UI tests (Debug builds). A render
@@ -112,6 +114,7 @@ struct LaunchOptions: Equatable {
     var thermal: Thermal?
     /// `-cuesOnly`: honoured only with `-uitesting` (`drawsCuesOnly`).
     var cuesOnly = false
+    var onlineResults = false
     #if DEBUG
     var tuning = false
     var fps120 = false
@@ -137,6 +140,7 @@ struct LaunchOptions: Equatable {
             case "-resetSettings": resetSettings = true
             case "-online": online = true
             case "-keepMyBoat": keepMyBoat = true
+            case "-onlineResults": onlineResults = true
             case "-hideScene": hidesScene = true
             case "-cuesOnly": cuesOnly = true
             #if DEBUG
@@ -161,7 +165,8 @@ struct LaunchOptions: Equatable {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
                           "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
                           "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces",
-                          "-thermal", "-cuesOnly"]
+                          "-thermal", "-cuesOnly",
+                          "-onlineResults"]
         #if DEBUG
         flags.formUnion(["-tuning", "-fps120"])
         #endif

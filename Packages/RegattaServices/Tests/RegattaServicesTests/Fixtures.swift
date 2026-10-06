@@ -68,7 +68,10 @@ enum Fixtures {
     static func report(rows: [SeatResult], sailing: [Int], isClosed: Bool) -> RaceReport {
         RaceReport(
             raceID: race, seat: 0, roster: roster, results: RaceResults(rows: rows, rated: true), sailing: sailing,
-            incidents: [SeatIncidents(seat: 0, incidents: [incident])], isClosed: isClosed)
+            incidents: [SeatIncidents(
+                seat: 0, incidents: [incident], markTouches: [MarkTouch(tick: 700, leg: 0, seat: 0, mark: "Windward")],
+                protests: [Protest(tick: 610, leg: 0, protester: 0, protested: 1, matchedIncidentId: 0)], turnsServed: 1)],
+            isClosed: isClosed, flaggedSeats: [0])
     }
 
     /// Seat 2 finishes, then the player, and at the close one boat is placed by distance and one retired.

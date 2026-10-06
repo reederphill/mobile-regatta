@@ -12,9 +12,13 @@ struct RootView: View {
     /// The off-water gallery a `-fixture` launch shows in place of the menu (#119).
     @State private var fixtureGallery: RenderFixture.Gallery?
     @State private var showsOnlineStub = false
+    /// The `-onlineResults` harness's results stream (#133), while it shows.
+    @State private var harnessResults: OnlineResults?
     @Environment(\.sceneState) private var sceneState
     @Environment(\.screenSize) private var screenSize
     @Environment(\.maximumFramesPerSecond) private var maximumFramesPerSecond
+    @Environment(\.lobbyService) private var lobbyService
+    @Environment(\.onlineServices) private var services
 
     var body: some View {
         if let fixtureError {
@@ -28,6 +32,15 @@ struct RootView: View {
             case .practiceSetup, .pauseMenu, .myBoat, .help: MenuGalleryView(gallery: fixtureGallery, model: model)
             case .results(let stage, let rivalSkill): ResultsGalleryView(stage: stage, rivalSkill: rivalSkill)
             }
+        } else if let harnessResults, let scenario = model.launchOptions.fakeServices {
+            OnlineResultsHarness(
+                results: harnessResults,
+                entrants: RaceResultViewModel.onlineSampleEntrants(roster: harnessResults.report?.roster ?? [],
+                                                                    botSeats: scenario.raceBotSeats),
+                livery: model.myLivery,
+                raceAgain: { raceAgain(); self.harnessResults = nil },
+                home: { self.harnessResults = nil },
+                tryIt: { design in self.harnessResults = nil; model.openMyBoat(trying: design) })
         } else {
             HomeView(model: model, onRaceOnline: raceOnline)
                 .onAppear(perform: autostartIfRequested)
@@ -55,7 +68,8 @@ struct RootView: View {
                              onRaceOnline: { model.leaveRace(); raceOnline() })
                         .id(ObjectIdentifier(session))
                 case .online(let launch):
-                    OnlineLaunchView(launch: launch, onRestart: startOnlineRace, onExit: model.endRaceSequence)
+                    OnlineLaunchView(launch: launch, onRestart: startOnlineRace, onExit: model.endRaceSequence,
+                                     onRaceAgain: raceAgain, onTryIt: model.tryEarnedDesign)
                         .id(ObjectIdentifier(launch))
                 case .briefing(let briefing, _):
                     BriefingView(model: briefing, onAdvance: model.finishBriefing, onBack: model.endRaceSequence)
@@ -76,6 +90,8 @@ struct RootView: View {
             .environment(\.sceneState, sceneState)
             .environment(\.screenSize, screenSize)
             .environment(\.maximumFramesPerSecond, maximumFramesPerSecond)
+            // The online results report through the lobby (#26, #133).
+            .environment(\.lobbyService, lobbyService)
             .environment(\.colorScheme, .dark)
             #if DEBUG
             .environment(model.tuning)
@@ -98,6 +114,8 @@ struct RootView: View {
         withTransaction(transaction) {
             if let name = launchOptions.fixture {
                 startFixture(named: name)
+            } else if launchOptions.uiTesting, launchOptions.onlineResults, let services {
+                harnessResults = model.onlineResults(service: services.raceSession, raceID: nil)
             } else if launchOptions.online {
                 startOnlineRace()
             } else if let briefing = launchOptions.briefing {
@@ -123,6 +141,12 @@ struct RootView: View {
         #else
         showsOnlineStub = true
         #endif
+    }
+
+    /// The online results' Race again (#24, #133): joins the queue, then home.
+    private func raceAgain() {
+        guard let services else { return model.leaveRace() }
+        model.raceAgain(queue: services.queue)
     }
 
     /// A new online race: in a Debug build, the dev server's instant race on the Settings page's host or

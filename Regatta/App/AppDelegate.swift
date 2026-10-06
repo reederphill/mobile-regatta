@@ -15,7 +15,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     private var metricKit: MetricKitForwarder?
 
     private static func makeServices(launchOptions: LaunchOptions) -> ServiceSet {
-        var services = launchOptions.fakeServices.map(ServiceSet.fake)
+        // The fakes' online results scenarios fill in live, a sleep apart (the services package keeps no clock).
+        var services = launchOptions.fakeServices.map { ServiceSet.fake($0, wait: { try? await Task.sleep(for: $0) }) }
             ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
         // The shop sells every paid design from a stub until StoreKit (#137): see `StubStoreService`. Its defaults
         // are My boat's (UI tests' own suite, emptied at launch).

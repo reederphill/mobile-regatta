@@ -64,10 +64,20 @@ public struct SeatIncidents: Equatable, Sendable {
     public var seat: Int
     /// In id order. Each has `seat` as a party.
     public var incidents: [Incident]
+    /// Her penalised mark touches (rule 31), in tick order. Each is `seat`'s.
+    public var markTouches: [MarkTouch]
+    /// Her protests, in tick order. Each has `seat` as the protester (#24 lists only your own).
+    public var protests: [Protest]
+    /// How many penalty turns she has completed so far (`penaltyServed`): which of the turns her calls and touches
+    /// owed were done, oldest first (#133).
+    public var turnsServed: Int
 
-    public init(seat: Int, incidents: [Incident]) {
+    public init(seat: Int, incidents: [Incident], markTouches: [MarkTouch] = [], protests: [Protest] = [], turnsServed: Int = 0) {
         self.seat = seat
         self.incidents = incidents
+        self.markTouches = markTouches
+        self.protests = protests
+        self.turnsServed = turnsServed
     }
 }
 
@@ -87,10 +97,13 @@ public struct RaceReport: Equatable, Sendable {
     public var incidents: [SeatIncidents]
     /// The race has closed: nothing here changes again, and the rating follows.
     public var isClosed: Bool
+    /// Every seat the rules have called a foul against so far, ascending: #24's ⚑ on any boat's row, not only on the
+    /// boats in her own incidents.
+    public var flaggedSeats: [Int]
 
     public init(
         raceID: RaceID, seat: Int, roster: [RosterEntry], results: RaceResults, sailing: [Int],
-        incidents: [SeatIncidents], isClosed: Bool
+        incidents: [SeatIncidents], isClosed: Bool, flaggedSeats: [Int] = []
     ) {
         self.raceID = raceID
         self.seat = seat
@@ -99,6 +112,7 @@ public struct RaceReport: Equatable, Sendable {
         self.sailing = sailing
         self.incidents = incidents
         self.isClosed = isClosed
+        self.flaggedSeats = flaggedSeats
     }
 }
 

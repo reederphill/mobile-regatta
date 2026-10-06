@@ -36,6 +36,18 @@ struct CompletedRacesStore {
         get { max(0, defaults.integer(forKey: Self.key)) }
         nonmutating set { defaults.set(max(0, newValue), forKey: Self.key) }
     }
+
+    /// The last race counted here, so a race counts once however often its close is read (#133).
+    static let lastCountedKey = "lastCountedOnlineRace"
+
+    /// Counts `race` as completed, once: false if it was the last one counted.
+    @discardableResult
+    func countCompletion(of race: String) -> Bool {
+        guard defaults.string(forKey: Self.lastCountedKey) != race else { return false }
+        defaults.set(race, forKey: Self.lastCountedKey)
+        count += 1
+        return true
+    }
 }
 
 /// Where My boat keeps your livery, owned designs and completed races: the app's defaults, or in UI tests a suite of

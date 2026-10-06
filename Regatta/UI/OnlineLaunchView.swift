@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaProtocol
 import SwiftUI
 
@@ -7,11 +8,14 @@ struct OnlineLaunchView: View {
     let launch: OnlineLaunch
     var onRestart: () -> Void
     var onExit: () -> Void
+    /// The online results' Race again and Try it (#133), for a race with the server's results stream.
+    var onRaceAgain: (() -> Void)? = nil
+    var onTryIt: ((DesignID) -> Void)? = nil
 
     var body: some View {
         switch launch.phase {
         case .racing(let session):
-            RaceView(session: session, onRestart: onRestart, onExit: onExit)
+            RaceView(session: session, onRestart: onRestart, onExit: onExit, onRaceAgain: onRaceAgain, onTryIt: onTryIt)
                 .id(ObjectIdentifier(session))
         case .connecting:
             panel {

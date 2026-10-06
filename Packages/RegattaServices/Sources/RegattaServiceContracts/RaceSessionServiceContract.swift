@@ -100,7 +100,15 @@ public struct RaceSessionServiceContract: ContractSuite {
         for entry in report.incidents {
             try await require(entry.incidents.allSatisfy { $0.parties.contains(entry.seat) }, "seat \(entry.seat) lists an incident she isn't in")
             try await require(entry.incidents.map(\.id) == entry.incidents.map(\.id).sorted(), "seat \(entry.seat)'s incidents aren't in id order")
+            try await require(entry.markTouches.allSatisfy { $0.seat == entry.seat }, "seat \(entry.seat) lists another boat's mark touch")
+            try await require(entry.protests.allSatisfy { $0.protester == entry.seat }, "seat \(entry.seat) lists another boat's protest")
+            try await require(entry.markTouches.map(\.tick) == entry.markTouches.map(\.tick).sorted(), "seat \(entry.seat)'s mark touches aren't in tick order")
+            try await require(entry.protests.map(\.tick) == entry.protests.map(\.tick).sorted(), "seat \(entry.seat)'s protests aren't in tick order")
+            try await require(entry.turnsServed >= 0, "seat \(entry.seat) served \(entry.turnsServed) turns")
         }
+        try await require(report.flaggedSeats == report.flaggedSeats.sorted() && Set(report.flaggedSeats).count == report.flaggedSeats.count,
+                          "the flagged seats \(report.flaggedSeats) aren't ascending and distinct")
+        try await require(report.flaggedSeats.allSatisfy { report.roster.indices.contains($0) }, "a flagged seat isn't in the roster")
         try await require(report.isClosed == isFinal, "the report's closed flag is \(report.isClosed), but it's \(isFinal ? "the last" : "not the last") one")
     }
 

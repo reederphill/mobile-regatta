@@ -78,6 +78,10 @@ extension BotBrain {
 
     // MARK: - Looking ahead
 
+    /// Radians into a penalty turn from which she keeps clear of every boat (rule 21.2, `OwedPenalty.isStarted`): the
+    /// rules' 30°.
+    static let penaltyStartedAngle = deg2rad(30)
+
     /// Seconds ahead she sails each candidate helm on (`guarded`).
     static let guardHorizon = 3.0
     /// Seconds between the steps of that look ahead.
@@ -112,10 +116,25 @@ extension BotBrain {
     /// over (rule 15). Then she holds the helm that keeps furthest from them, nearest the one she chose; as the
     /// right-of-way boat never one turning towards a boat keeping clear of her (#101). Nil when she keeps the one she
     /// chose.
+    ///
+    /// Owing a penalty turn she looks too (#388): any turn she sails then counts towards it, and
+    /// from 30° in (`penaltyStartedAngle`, `OwedPenalty.isStarted`) she keeps clear of every boat (rule 21.2). So her look
+    /// covers the turn's own path, the rudder hard over sailed on in her mind, every boat counted from the step it
+    /// reaches 30°; turning it, from now. A boat holding its course across that path has her steer off and give the turn
+    /// up, to turn it again once clear (`penaltyInput`). Only while she can still give the turn up and turn it all again
+    /// (`canGiveUpTurn`): past that she turns on, as any bot does. Without the look, slow in the fleet's dirty air, she
+    /// bore away round her circle into a boat overtaking her, and sailed on owing a turn across a starboard boat (seeds
+    /// 82 and 38 of `CautiousBotSuiteTests`).
     func guarded(_ view: SeatView, _ input: BoatInput) -> BoatInput? {
         let b = view.own
-        guard caution != nil, b.isOnCourse, b.penaltyTurnsOwed == 0,
-              b.autohelm?.isTapping != true else { return nil }
+        guard caution != nil, b.isOnCourse, b.autohelm?.isTapping != true else { return nil }
+        // Turning a penalty, or 30° into one: the turn she turns on reaches 30° inside her look, and the call comes then.
+        let keepsClearOfAll = b.penalty.map { $0.isStarted || penaltyTurn != nil } ?? false
+        let owedProgress = b.penalty?.progress
+        if b.penaltyTurnsOwed != 0 {
+            // As `penaltyInput` gives a turn up: in its first half, not after giving it up, while she can turn it again.
+            guard let owed = b.penalty, !penaltyGivenUp, owed.progress < .pi, canGiveUpTurn(owed, view) else { return nil }
+        }
         let hull = view.boatClass.hull
         let clear = hull.length * Self.guardLengths
         let reach = clear + (b.speed + 8) * Self.guardHorizon
@@ -162,6 +181,9 @@ extension BotBrain {
                 state = BoatDynamics.advance(state, control: .init(rudder: rudder, ease: ease), env: env,
                                              boatClass: view.boatClass, dt: Self.guardStep)
                 let twa = abs(wrapAngle(b.windDirection - state.heading))
+                // Owing a turn, any turn she sails counts towards it: 30° on, she keeps clear of every boat.
+                let ofAll = keepsClearOfAll
+                    || owedProgress.map { $0 + abs(wrapAngle(state.heading - b.heading)) >= Self.penaltyStartedAngle } ?? false
                 if state.boomSide != b.boomSide, twa < .pi / 2 { tacking = true }
                 if twa >= closeHauled { tacking = false }
                 for obstacle in obstacles {
@@ -177,7 +199,7 @@ extension BotBrain {
                     let overlapped = !Rules.isClearAstern(me, of: other, hull: hull)
                         && !Rules.isClearAstern(other, of: me, hull: hull)
                     let right = Rules.rightOfWay(me, other, overlapped: overlapped, hull: hull)?.keepClear == other.id
-                    if right && holdsRight[i] { continue }
+                    if right && holdsRight[i] && !ofAll { continue }
                     worst = clear - distance
                 }
             }
@@ -197,8 +219,8 @@ extension BotBrain {
         // over her starboard side (`rudder`).
         let luffSign: Double = b.boomSide == .port ? 1 : -1
         for rudder in Self.guardRudders {
-            if senses.tacking, rudder * luffSign > 0 { continue }
-            if rudder != 0, holdsRight.contains(true), turnsTowardsKeepClearBoat(b, view, turn: rudder > 0 ? 1 : -1) { continue }
+            if senses.tacking, !keepsClearOfAll, rudder * luffSign > 0 { continue }
+            if rudder != 0, !keepsClearOfAll, holdsRight.contains(true), turnsTowardsKeepClearBoat(b, view, turn: rudder > 0 ? 1 : -1) { continue }
             for ease in [false, true] {
                 let change = abs(rudder - input.rudderValue) + (ease == input.ease ? 0 : 0.25)
                 let r = rank(intrusion(rudder, ease), change: change)

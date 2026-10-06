@@ -161,6 +161,15 @@ struct RenderFixture: Codable, Equatable {
         case live
         /// The race closed.
         case closed
+        /// An online race's results from the server's stream (#133): you finished, three boats sailing, rating pending.
+        case onlineLive = "online-live"
+        /// The online race closed and rated: the change pushed, provisional.
+        case onlineRated = "online-rated"
+        /// The online race closed with no other humans at the gun: unrated.
+        case onlineUnrated = "online-unrated"
+
+        /// One of the online stages.
+        var isOnline: Bool { self == .onlineLive || self == .onlineRated || self == .onlineUnrated }
     }
 
     /// A briefing render fixture (#130): the race it briefs, with no log, since a briefing needs only the setup.
