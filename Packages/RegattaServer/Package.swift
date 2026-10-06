@@ -109,6 +109,7 @@ let package = Package(
                 "RaceHost",
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
+                .product(name: "RegattaClient", package: "RegattaClient"),
                 // Built so a test can start the real executable and see it refuse to start (#67).
                 "RegattaServer",
             ]

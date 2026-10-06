@@ -9,7 +9,8 @@ import RegattaProtocol
 import Testing
 
 /// #67 end to end, on the wall clock: a dev server on a free localhost port, and load clients sailing
-/// instant races against it over real WebSockets. Serialized so the bandwidth run has the machine.
+/// instant races against it over real WebSockets. Serialized: one server at a time. The 16-client
+/// bandwidth budget is `BandwidthBudgetTests`', on a virtual clock (#216).
 @Suite(.serialized)
 struct EndToEndTests {
     private func withServer(_ config: ServerConfig = .dev(host: "127.0.0.1", port: 0),
@@ -52,29 +53,6 @@ struct EndToEndTests {
             // The race leaves the server when it closes.
             for _ in 0..<100 where await server.registry.count > 0 { try await Task.sleep(for: .milliseconds(20)) }
             #expect(await server.registry.count == 0)
-        }
-    }
-
-    /// #27 with a full fleet of humans: every client's downstream about 5 KB/s at most, and under 1 MB
-    /// for the race with its join. Printed for the PR; see the README for how it scales with race length.
-    @Test func sixteenLoadClientsInOneRaceStayWithinTheBandwidthBudget() async throws {
-        try await withServer { _, options in
-            let (race, results) = try await LoadClient.sailInstantRace(
-                InstantRaceRequest(clients: 16, raceSeconds: 8, startSeconds: 2, seed: 16), options: options)
-            #expect(race.fleetSize == 16)
-            #expect(race.bots == 0)
-            #expect(results.count == 16)
-            let reports = try results.map { try $0.get() }
-            #expect(Set(reports.map(\.seat)) == Set(0..<16))
-            for report in reports {
-                #expect(report.completed, "seat \(report.seat): \(report.finalStatus)")
-                #expect(BandwidthBudget.issue27.violations(report) == [])
-                #expect(report.downstreamBytesPerSecond > 1000, "a 16-boat race sends snapshots at 10 Hz")
-            }
-            let worst = reports.map(\.downstreamBytesPerSecond).max() ?? 0
-            let most = reports.map(\.bytesReceived).max() ?? 0
-            let join = reports.map(\.joinBytes).max() ?? 0
-            print("16 clients: worst downstream \(Int(worst)) B/s, most bytes \(most) B (join \(join) B) in \(race.startSeconds + (race.raceSeconds ?? 0)) s")
         }
     }
 

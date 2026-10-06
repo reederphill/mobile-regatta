@@ -274,12 +274,13 @@ podman exec regatta regatta-loadclient --clients 16 --race-seconds 20 --check-ba
 podman stop regatta
 ```
 
-Bandwidth: with 16 boats a client receives about 3.5 KB/s (a snapshot of about 350 bytes 10 times a second,
-plus pongs and events) and joins in about 0.4 KB. Fewer boats send less: about 2.3 KB/s with 10. The 5 KB/s
-budget (#27) holds. The 1 MB per race budget is measured only on the short e2e races (8 to 20 s after the
-start sequence), where it passes trivially. A race costs the join plus that rate times its length from the join to
-the close, so it extrapolates to about 1.7 to 1.9 MB for an 8-minute race (with a 60 s sequence): at the
-measured rate 1 MB holds only to about 4.5 minutes. The two budgets disagree for real race lengths; which one
+Bandwidth: with 16 boats a client receives about 4.9 KB/s at worst (a snapshot of about 480 bytes with the
+umpire's relations 10 times a second, plus pongs and events) and joins in about 0.7 KB. Fewer boats send less.
+The 5 KB/s budget (#27) holds, with little room: `BandwidthBudgetTests` measures it for 16 clients on a virtual
+clock (#216), and CI's container job over real sockets. The 1 MB per race budget is measured only on the short
+races (8 to 20 s after the start sequence), where it passes trivially. A race costs the join plus that rate times
+its length from the join to the close, so it extrapolates to about 2.6 MB for an 8-minute race (with a 60 s
+sequence): at the measured rate 1 MB holds only to about 3.4 minutes. The two budgets disagree for real race lengths; which one
 gives way (or whether the snapshot rate changes) is an open question for the product owner.
 
 ### Online client
