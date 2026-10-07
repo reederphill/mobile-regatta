@@ -161,6 +161,41 @@ jobs:
         if: always()
         run: docker logs regatta || true
 
+  # The server's Postgres stores (#144, ADR 0009) against a real Postgres: a service container next to the pinned
+  # Linux replay image (scripts/check-image-pins.sh holds the two pins equal). macOS's check.sh skips these tests,
+  # having no database; here REGATTA_REQUIRE_DATABASE=1 makes a missing REGATTA_TEST_DATABASE_URL a failure, not a
+  # skip (CI=true alone doesn't: GitHub sets it on every runner, the macOS job included).
+  persistence:
+    name: Server persistence against Postgres
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: swift:6.3.3-noble@sha256:8de8ea332a61e961ead4ef41029c2552b18e1a70dd5942d25ecf7d8de2eec5b5
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: regatta
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      REGATTA_REQUIRE_DATABASE: "1"
+      REGATTA_TEST_DATABASE_URL: postgres://postgres:regatta@postgres:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: .build/persistence
+          key: persistence-${{ hashFiles('scripts/linux-test.sh', 'Packages/RegattaServer/Package.resolved') }}
+          restore-keys: persistence-
+      - name: Migrations, the race registry and the data-file store (swift test --filter PersistenceTests)
+        run: swift test --package-path Packages/RegattaServer --scratch-path .build/persistence --filter PersistenceTests
+
   macos:
     name: Packages on macOS
     needs: changes

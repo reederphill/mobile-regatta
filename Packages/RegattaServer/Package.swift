@@ -5,12 +5,15 @@ import PackageDescription
 // injectable clock, talking to each seat over an injectable transport (no sockets). `RegattaServer` (#67):
 // the executable that puts races behind a WebSocket endpoint (SwiftNIO, ADR 0006), and
 // `regatta-loadclient`, the headless client that sails races against it over the same stack.
-// `regatta-bench` (#69) measures the host's per-tick work against the server budget (#27). Builds on Linux.
+// `regatta-bench` (#69) measures the host's per-tick work against the server budget (#27). `Persistence` (#144):
+// the server's Postgres tables (players, sessions, the race registry, race logs, data files) and their migrations
+// (ADR 0009). Builds on Linux.
 let package = Package(
     name: "RegattaServer",
     platforms: [.iOS(.v18), .macOS(.v15)],
     products: [
         .library(name: "RaceHost", targets: ["RaceHost"]),
+        .library(name: "Persistence", targets: ["Persistence"]),
         .executable(name: "RegattaServer", targets: ["RegattaServer"]),
         .executable(name: "regatta-loadclient", targets: ["regatta-loadclient"]),
         .executable(name: "regatta-bench", targets: ["regatta-bench"]),
@@ -24,6 +27,9 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio.git", .upToNextMinor(from: "2.103.0")),
         // HMAC for race tokens, on Linux and macOS alike. Already in the graph through RegattaCore.
         .package(url: "https://github.com/apple/swift-crypto.git", from: "4.0.0"),
+        // Postgres for players, sessions, the race registry, race logs and data files (ADR 0009). Pinned to a
+        // minor like swift-nio: Package.resolved has the exact one.
+        .package(url: "https://github.com/vapor/postgres-nio.git", .upToNextMinor(from: "1.33.1")),
     ],
     targets: [
         .target(
@@ -54,6 +60,15 @@ let package = Package(
             ]
         ),
         .executableTarget(name: "RegattaServer", dependencies: ["RegattaServerKit"]),
+        // The server's Postgres store (#144, ADR 0009): a connection pool, our own migration runner and one store
+        // per table. Not wired into RegattaServerKit yet: #145 does that.
+        .target(
+            name: "Persistence",
+            dependencies: [
+                .product(name: "RegattaCore", package: "RegattaCore"),
+                .product(name: "PostgresNIO", package: "postgres-nio"),
+            ]
+        ),
         // The load client (#67): RegattaClient over a NIO WebSocket, scripted inputs, bytes and RTT measured.
         .target(
             name: "RegattaLoadClient",
@@ -87,6 +102,15 @@ let package = Package(
         .testTarget(
             name: "BenchTests",
             dependencies: ["Bench", "regatta-bench", .product(name: "RegattaCore", package: "RegattaCore")]
+        ),
+        // The stores against a real Postgres named by REGATTA_TEST_DATABASE_URL; skipped without it, except in CI.
+        .testTarget(
+            name: "PersistenceTests",
+            dependencies: [
+                "Persistence",
+                .product(name: "RegattaCore", package: "RegattaCore"),
+                .product(name: "PostgresNIO", package: "postgres-nio"),
+            ]
         ),
         .testTarget(
             name: "RaceHostTests",
