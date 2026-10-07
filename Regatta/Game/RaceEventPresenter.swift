@@ -184,11 +184,9 @@ struct RaceEventPresenter {
             // Overrides #124: a miss has no haptic, but it is read, as a hit is (`BoatNode`'s ring shows it too).
             if seat == me { out.notices.append(PresentedNotice(kind: .roll, text: RuleWords.rollMissed)) }
         case .tacked, .gybed, .penaltyStarted, .penaltyReset, .started, .cleared, .becameGhost,
-             .firstFinish, .raceClosed:
-            // Seen on the water or in the results, not felt (#22).
-            break
-        case .markRoomNotice:
-            // No words: the glow shows who owes mark-room (`Race.keepClearRelations(of:)`), once the other boat is near.
+             .firstFinish, .raceClosed, .markRoomNotice:
+            // Seen on the water or in the results, not felt (#22). `markRoomNotice` is reserved, never emitted (#403):
+            // the glow shows who owes mark-room (`Race.keepClearRelations(of:)`).
             break
         case .obstructionContact:
             // Land, the boundary or a free mark: visible on the water. #22's Contact is boat to boat.

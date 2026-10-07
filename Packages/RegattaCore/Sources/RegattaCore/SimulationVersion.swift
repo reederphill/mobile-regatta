@@ -228,7 +228,9 @@ import Glibc
 ///    and not scaled by her speed (`backwindUpwash`, `upwashAftHullLengths`); class files without those fields keep
 ///    the trapezoid. The ribbons, emission levels, headers and backwind levels and sides
 ///    are race state in `WorldSnapshot`.
-public let simulationRevision = 33
+/// 34: the mark-room notice is no longer emitted (#403), on 33; races otherwise sail as on 33, bit for bit. The
+///    umpire still keeps rule 18's records; `markRoomNotice` (wire code 24) stays reserved and decoded.
+public let simulationRevision = 34
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

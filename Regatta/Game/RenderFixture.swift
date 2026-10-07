@@ -13,7 +13,7 @@ import RegattaCore
 /// whole course), so the fixtures drawn that way keep their references. `"view": "courseUp"` or `"boatUp"` draws
 /// the race camera itself (#113), auto zoom on, settled. `"laylines"` and `"ladderLines"` set the cue toggles (#122).
 ///
-/// With `hud` the fixture draws the race HUD over the scene (#114): `{ "hud": { "notice": "markRoom" } }` shows that
+/// With `hud` the fixture draws the race HUD over the scene (#114): `{ "hud": { "notice": "ocs" } }` shows that
 /// notice, and `"seat"` draws the race from another seat's boat (a log whose own seat is never OCS can still show
 /// the OCS HUD). `"leaderboard": "compact"` or `"expanded"` shows the live leaderboard (#268) with it; without it the
 /// board is off, so the HUD fixtures before #268 keep their references. Without `hud`, the scene alone, as every

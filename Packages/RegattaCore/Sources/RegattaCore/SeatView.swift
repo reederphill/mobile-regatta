@@ -307,8 +307,8 @@ public struct SeatView: Sendable, Equatable {
         }
     }
 
-    /// A mark-room notice (#91, `RaceEvent.Kind.markRoomNotice`): the rule 18 record it announced to its two boats,
-    /// while it lasts (`UmpireState.markRoom(_:)`). Which boat is entitled to mark-room at the mark they are both
+    /// A mark-room notice (#91): a rule 18 record between the seat and another boat, read from the umpire (no event
+    /// announces it, #403) while it lasts (`UmpireState.markRoom(_:)`). Which boat is entitled to mark-room at the mark they are both
     /// racing to, and which must give it. Mark-room is not right of way: rules 10–13 still say who keeps clear.
     public struct MarkRoomNotice: Sendable, Equatable {
         /// The boat entitled to mark-room.

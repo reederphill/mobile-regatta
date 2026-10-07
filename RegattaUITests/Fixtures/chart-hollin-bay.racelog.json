@@ -29,7 +29,7 @@
         "bot",
         "bot"
       ],
-      "simulationVersion" : "33/swift-6.3.3/darwin/arm64",
+      "simulationVersion" : "34/swift-6.3.3/darwin/arm64",
       "startSequenceTicks" : 1800,
       "venue" : {
         "hash" : "9552bb1d08414c79b5fa76078bf826b7326565777a6b8a113a34027813267832",

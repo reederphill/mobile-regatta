@@ -153,10 +153,10 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
 
     // The HUD (#114): clock, place, ground wind, minimap and the notice line over the scene.
 
-    /// Before the gun (yellow sequence clock, place hidden), racing, OCS (place reads OCS, the OCS notice), a
-    /// mark-room notice, and after the first finish (the yellow countdown to the close).
+    /// Before the gun (yellow sequence clock, place hidden), racing, OCS (place reads OCS, the OCS notice), and
+    /// after the first finish (the yellow countdown to the close).
     @MainActor func testHUDFixturesMatchReferences() throws {
-        try assertAllMatchIPhoneReferences(["hud-prestart", "hud-racing", "hud-ocs", "hud-markroom", "hud-afterfirstfinish"])
+        try assertAllMatchIPhoneReferences(["hud-prestart", "hud-racing", "hud-ocs", "hud-afterfirstfinish"])
     }
 
     // The live leaderboard (#268): the compact board under the clock and place, and tapped open.

@@ -48,6 +48,8 @@ enum MarkRoomFixture {
         }
     }
 
+    /// The mark-room notices among `events`: always none, since the event is no longer emitted (#403); the
+    /// umpire's records (`record`) carry rule 18.
     static func notices(_ events: [RaceEvent]) -> [RaceEvent.Kind] {
         events.map(\.kind).filter { if case .markRoomNotice = $0 { true } else { false } }
     }
@@ -89,7 +91,7 @@ enum MarkRoomFixture {
         let record = try #require(M.record(race))
         #expect(record == MarkRoomRecord(mark: "windward mark", entitled: 1, owing: 0, rule: .givingMarkRoom,
                                          firstInZone: 1, overlappedAtZoneEntry: false))
-        #expect(M.notices(race.drainEvents()) == [.markRoomNotice(boat: 1, entitledOver: 0, mark: "windward mark")])
+        #expect(M.notices(race.drainEvents()).isEmpty, "the record is announced by no event (#403)")
         // The glow is the player's only cue (owner, 2026-10-03): the boat owing mark-room is the one that keeps clear,
         // whatever Section A says (seat 0 is clear ahead), and both boats agree.
         let seen = race.keepClearRelations(of: 0)[1]
@@ -190,11 +192,11 @@ enum MarkRoomFixture {
 
         let sameTack = try sail(secondOnPort: false)
         #expect(M.record(sameTack.race) != nil)
-        #expect(M.notices(sameTack.events).count == 1)
+        #expect(M.notices(sameTack.events).isEmpty)
     }
 
     /// At the leeward gate, running on opposite tacks after one has gybed, rule 18 applies (it is off only on a
-    /// beat): the inside boat, overlapped as the first reaches the zone, is entitled, and both are told. While
+    /// beat): the inside boat, overlapped as the first reaches the zone, is entitled (no event tells them, #403). While
     /// it applies the overlap terms reach across the tacks, even with one boat heading up past the beam, where
     /// without rule 18 they wouldn't.
     @Test func gybingAtGateOnOppositeTacksIsOn() throws {
@@ -217,10 +219,7 @@ enum MarkRoomFixture {
         let record = try #require(M.record(race))
         #expect(record == MarkRoomRecord(mark: "gate left", entitled: 1, owing: 0, rule: .givingMarkRoom,
                                          firstInZone: 1, overlappedAtZoneEntry: true))
-        let events = race.drainEvents()
-        #expect(M.notices(events) == [.markRoomNotice(boat: 1, entitledOver: 0, mark: "gate left")])
-        let notice = try #require(events.first { if case .markRoomNotice = $0.kind { true } else { false } })
-        #expect(notice.kind.isRuleEvent)
+        #expect(M.notices(race.drainEvents()).isEmpty, "the record is announced by no event (#403)")
 
         // Seat 1 heads up to 80° from the wind, still on port, both slowed to 0.5 m/s: the terms alone no
         // longer apply between them, but rule 18 does, so past the last point of certainty they are still
@@ -407,7 +406,7 @@ enum MarkRoomFixture {
         #expect(finishing.0.course.legs[finishLeg] == .finish)
         #expect(M.record(finishing.0) == MarkRoomRecord(mark: "pin", entitled: 0, owing: 1, rule: .givingMarkRoom,
                                                         firstInZone: 0, overlappedAtZoneEntry: true))
-        #expect(M.notices(finishing.1) == [.markRoomNotice(boat: 0, entitledOver: 1, mark: "pin")])
+        #expect(M.notices(finishing.1).isEmpty)
     }
 
     /// 18.3: a boat that tacks from port to starboard in the zone of the windward mark (left to port) loses
@@ -452,7 +451,7 @@ enum MarkRoomFixture {
         #expect(M.record(tackedOutside.race) == MarkRoomRecord(mark: "windward mark", entitled: 1, owing: 0,
                                                                rule: .tackingInTheZone, firstInZone: 1,
                                                                overlappedAtZoneEntry: true))
-        #expect(M.notices(tackedOutside.events) == [.markRoomNotice(boat: 1, entitledOver: 0, mark: "windward mark")])
+        #expect(M.notices(tackedOutside.events).isEmpty)
         // The glow carries 18.3 too (#386): the tacker owes mark-room, so she is the one keeping clear, by 18.3.
         let seen = tackedOutside.race.keepClearRelations(of: 0)[1]
         #expect(seen == RightOfWay(keepClear: 0, rule: .tackingInTheZone))

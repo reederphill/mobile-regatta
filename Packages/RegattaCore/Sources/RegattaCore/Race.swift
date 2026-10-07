@@ -1020,16 +1020,16 @@ public final class Race {
     }
 
     /// Rule 18 (#91): the umpire's records of who is entitled to mark-room from whom
-    /// (`UmpireState.updateMarkRoom`), each new one announced to its two boats (`markRoomNotice`). The
-    /// authoritative race's alone: a client never shows a notice the server hasn't sent (ADR 0005). Mark-room
+    /// (`UmpireState.updateMarkRoom`), announced by no event: mark-room is the right-of-way glow
+    /// (`keepClearRelations(of:)`, #386), and `markRoomNotice` is no longer emitted (#403). The authoritative
+    /// race's alone (ADR 0005). Mark-room
     /// is not right of way: an incident's call reads the record only through the escape simulation
     /// (`EscapeSimulation.verdict`: 18.2, 18.2(d) and 43.1(b), #93).
     private func updateMarkRoom(previous: [Boat], hulls: [[Vec2]], zones: [MarkZone?], markRoomApplies: [Bool]) {
         guard umpire != nil else { return }
-        let notices = umpire?.updateMarkRoom(MarkRoomTick(
+        umpire?.updateMarkRoom(MarkRoomTick(
             tick: tick, boats: boats, previous: previous, hulls: hulls, zones: zones, markRoomApplies: markRoomApplies,
-            overlaps: overlaps, course: course, rules: rules, boatClass: boatClass)) ?? []
-        for notice in notices { emit(notice) }
+            overlaps: overlaps, course: course, rules: rules, boatClass: boatClass))
     }
 
     /// Whether the umpire holds an incident open between seats `a` and `b`. Never, in a prediction.
@@ -1385,7 +1385,7 @@ public final class Race {
     /// past the full turn carried into the next owed turn, whose clock starts at the event's tick), `disqualified`
     /// makes her DSQ and a ghost, owing nothing, `ocsNotice` makes her OCS, `cleared` puts her back in the
     /// pre-start, and `finished` finishes her if the prediction hasn't. Every other event, `markRoomNotice`
-    /// included, changes nothing (`isRuling`). The caller applies each event once, in the server's order, at the
+    /// included (reserved, no longer emitted, #403), changes nothing (`isRuling`). The caller applies each event once, in the server's order, at the
     /// end of its tick (`PredictedRace`); a prediction makes none of these changes itself. A prediction's alone:
     /// the authoritative race is the server.
     public func apply(authoritative event: RaceEvent) {
