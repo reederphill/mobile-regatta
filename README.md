@@ -97,6 +97,12 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     RegattaHTTPServer.swift  the port: HTTP/1.1, upgraded to a WebSocket at /race
   RegattaServer/           the `RegattaServer` executable
   RegattaDevAPI/           the dev endpoints' JSON, shared by the server and the load client
+  Persistence/             the server's Postgres (#144, ADR 0009), not wired into the server yet (#145)
+    Database.swift           the connection pool; its config from a postgres:// URL (REGATTA_DATABASE_URL)
+    Migrator.swift           numbered migrations (Migrations/), applied and reverted in one transaction each run
+    Stores.swift             players (by Game Center id) and their sessions
+    RaceRegistryStore.swift  races running, closed or cancelled, the files each names; orphans cancelled; logs (bytea)
+    DataFileStore.swift      every version of every data file, by FileRef; a version never changes
   RegattaLoadClient/       RegattaClient over a NIO WebSocket: scripted helm, bytes and RTT measured
   regatta-loadclient/      the `regatta-loadclient` executable
 Regatta/                The iOS app
@@ -282,6 +288,29 @@ races (8 to 20 s after the start sequence), where it passes trivially. A race co
 its length from the join to the close, so it extrapolates to about 2.6 MB for an 8-minute race (with a 60 s
 sequence): at the measured rate 1 MB holds only to about 3.4 minutes. The two budgets disagree for real race lengths; which one
 gives way (or whether the snapshot rate changes) is an open question for the product owner.
+
+### Server persistence (Postgres)
+
+`Persistence` keeps players, sessions, the race registry, race logs and every version of every data file in
+Postgres 17 (ADR 0009). `PersistenceTests` run against a real database named by `REGATTA_TEST_DATABASE_URL`; each
+test makes its own schema and drops it, so they run in parallel. Without the variable they're skipped, saying why
+(so `scripts/check.sh` runs without a database); in CI (`CI=true`) a missing variable fails them, and CI's
+`persistence` job runs them in the pinned Linux image next to a `postgres:17` service container.
+
+Locally, with Homebrew's `postgresql@17` (trust auth on localhost; `createdb regatta_test` once). Start it only
+for the run (`LC_ALL` is required, or the postmaster refuses to start):
+
+```bash
+LC_ALL=en_US.UTF-8 /opt/homebrew/opt/postgresql@17/bin/pg_ctl -D /opt/homebrew/var/postgresql@17 \
+    -l /opt/homebrew/var/log/postgresql@17.log -w start
+REGATTA_TEST_DATABASE_URL=postgres://$USER@localhost:5432/regatta_test \
+    scripts/heavy.sh swift test --package-path Packages/RegattaServer --filter PersistenceTests
+/opt/homebrew/opt/postgresql@17/bin/pg_ctl -D /opt/homebrew/var/postgresql@17 -w stop
+```
+
+A container works as well:
+`podman run --rm -d --name regatta-pg -p 5432:5432 -e POSTGRES_PASSWORD=regatta postgres:17` with
+`REGATTA_TEST_DATABASE_URL=postgres://postgres:regatta@localhost:5432/postgres`.
 
 ### Online client
 

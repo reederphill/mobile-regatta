@@ -185,6 +185,10 @@ _Avoid_: finished race (when DSQ and OCS are meant too)
 What hands a player one seat in one online race: the race, the seat and an expiry, signed by the server. The client sends it, unread, to join.
 _Avoid_: ticket, invite, session key
 
+**Race registry**:
+The server's record of every online race it starts: running until it closes or is cancelled, with the data files it names at race start. A race still running when the server starts is an orphan of a crash and is cancelled.
+_Avoid_: race table, lobby
+
 **Instant race**:
 A dev-only online race started on request for the clients asking, with bots filling it to ten boats. It exists only on a dev server, for testing; players never see it.
 _Avoid_: quick race, private race
