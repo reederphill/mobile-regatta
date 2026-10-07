@@ -33,7 +33,8 @@ public struct DatabaseConfiguration: Sendable, Equatable {
     }
 
     public enum URLError: Error, Equatable, CustomStringConvertible {
-        case malformed(String)
+        /// Carries nothing of the URL, which may hold a password.
+        case malformed
         case unsupportedScheme(String)
         case missingHost
         case missingUser
@@ -54,7 +55,7 @@ public struct DatabaseConfiguration: Sendable, Equatable {
     /// may carry a password.
     public init(url string: String) throws(URLError) {
         guard let components = URLComponents(string: string), let scheme = components.scheme else {
-            throw .malformed(string)
+            throw .malformed
         }
         guard scheme == "postgres" || scheme == "postgresql" else { throw .unsupportedScheme(scheme) }
         guard let host = components.host, !host.isEmpty else { throw .missingHost }

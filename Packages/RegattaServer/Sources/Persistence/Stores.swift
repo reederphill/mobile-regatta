@@ -16,6 +16,8 @@ public enum PersistenceError: Error, Equatable, CustomStringConvertible {
     case versionConflict(DataFileKey)
     /// Tuned copies sail practice races only (#229) and never reach the server's store.
     case tunedFile(DataFileKey)
+    /// A race names each data file once.
+    case duplicateFile(String)
 
     public var description: String {
         switch self {
@@ -26,6 +28,7 @@ public enum PersistenceError: Error, Equatable, CustomStringConvertible {
         case .hashMismatch(let key): "\(key)'s content doesn't match its hash"
         case .versionConflict(let key): "\(key) is already stored with a different hash"
         case .tunedFile(let key): "\(key) is a tuned copy"
+        case .duplicateFile(let id): "the race names \(id) more than once"
         }
     }
 }

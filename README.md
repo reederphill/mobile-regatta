@@ -294,8 +294,9 @@ gives way (or whether the snapshot rate changes) is an open question for the pro
 `Persistence` keeps players, sessions, the race registry, race logs and every version of every data file in
 Postgres 17 (ADR 0009). `PersistenceTests` run against a real database named by `REGATTA_TEST_DATABASE_URL`; each
 test makes its own schema and drops it, so they run in parallel. Without the variable they're skipped, saying why
-(so `scripts/check.sh` runs without a database); in CI (`CI=true`) a missing variable fails them, and CI's
-`persistence` job runs them in the pinned Linux image next to a `postgres:17` service container.
+(so `scripts/check.sh` runs without a database, CI's macOS job included); with `REGATTA_REQUIRE_DATABASE=1` a
+missing variable fails them instead, and CI's `persistence` job sets it and runs them in the pinned Linux image
+next to a `postgres:17` service container.
 
 Locally, with Homebrew's `postgresql@17` (trust auth on localhost; `createdb regatta_test` once). Start it only
 for the run (`LC_ALL` is required, or the postmaster refuses to start):

@@ -111,6 +111,7 @@ import Testing
             try DatabaseConfiguration(url: "mysql://u@h/d")
         }
         #expect(throws: DatabaseConfiguration.URLError.missingUser) { try DatabaseConfiguration(url: "postgres://h/d") }
+        #expect(throws: DatabaseConfiguration.URLError.malformed) { try DatabaseConfiguration(url: "postgres://u:secret@h:port/d") }
         #expect(throws: DatabaseConfiguration.URLError.unsupportedSSLMode("verify-full")) {
             try DatabaseConfiguration(url: "postgres://u@h/d?sslmode=verify-full")
         }

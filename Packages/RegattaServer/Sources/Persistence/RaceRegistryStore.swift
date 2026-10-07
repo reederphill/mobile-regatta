@@ -23,10 +23,16 @@ public struct RaceRegistryStore: Sendable {
     public init(_ database: Database) { self.database = database }
 
     /// Registers a running race naming `files`, each of which must already be in the data-file store with that
-    /// hash (the server names each file's hash at race start, #32).
+    /// hash (the server names each file's hash at race start, #32). A tuned copy, or a file id named twice, is refused
+    /// before anything is written.
     @discardableResult
     public func create(id: UUID = UUID(), files: [FileRef] = []) async throws -> RaceRecord {
-        try await database.transaction { connection in
+        var named: Set<String> = []
+        for file in files {
+            guard file.tune == nil else { throw PersistenceError.tunedFile(file.key) }
+            guard named.insert(file.id).inserted else { throw PersistenceError.duplicateFile(file.id) }
+        }
+        return try await database.transaction { connection in
             let inserted = try await connection.query(
                 "INSERT INTO races (id, state) VALUES (\(id), 'running') ON CONFLICT (id) DO NOTHING RETURNING id",
                 logger: database.logger)
@@ -37,7 +43,7 @@ public struct RaceRegistryStore: Sendable {
                     logger: database.logger)
                 var matches = false
                 for try await hash in stored.decode(Data.self) { matches = hash == Data(file.hash.bytes) }
-                guard matches, file.tune == nil else { throw PersistenceError.hashMismatch(file.key) }
+                guard matches else { throw PersistenceError.hashMismatch(file.key) }
                 try await connection.query("""
                     INSERT INTO race_files (race_id, file_id, file_version) VALUES (\(id), \(file.id), \(file.version))
                     """, logger: database.logger)

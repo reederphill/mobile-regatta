@@ -120,6 +120,7 @@ private func file(_ id: String, _ version: Int, _ text: String) -> (FileRef, Dat
             let other = file("skiff", 4, "another boat").0
             await #expect(throws: PersistenceError.hashMismatch(boat.key)) { try await registry.create(files: [other]) }
             #expect(try await registry.races(in: .running).isEmpty)
+            await #expect(throws: PersistenceError.duplicateFile(boat.id)) { try await registry.create(files: [boat, boat]) }
             #expect(try await registry.create(files: [boat]).files == [boat.key])
         }
     }

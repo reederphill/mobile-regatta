@@ -14,7 +14,8 @@ extension Migration {
                 CHECK ((state = 'running') = (ended_at IS NULL))
             )
             """,
-            "CREATE INDEX races_running ON races (id) WHERE state = 'running'",
+            // races(in:) and cancelOrphans scan by state, oldest first.
+            "CREATE INDEX races_state ON races (state, created_at)",
             """
             CREATE TABLE race_files (
                 race_id uuid NOT NULL REFERENCES races (id) ON DELETE CASCADE,
