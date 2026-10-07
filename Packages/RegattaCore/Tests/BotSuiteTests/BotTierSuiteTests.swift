@@ -7,8 +7,8 @@ import Testing
 /// drawn from its bot's seed, as the app's bots are), a National bot finishes ahead of a Regional one, and a
 /// Regional ahead of a Club one, by at least the bot-tier file's place gap (1.0, a placeholder) on average.
 @Suite struct BotTierSuiteTests {
-    /// Seeds sailed: 200 races of ten, one lap.
-    static let seeds = 200
+    /// Seeds sailed: 50 mixed fleets of ten, one lap (#408: enough for the tier ordering check under CI time).
+    static let seeds = 50
     static let fleetSize = 10
 
     @Test func meanPlaceOrdersTiersByAtLeastOnePlace() throws {

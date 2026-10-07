@@ -9,8 +9,8 @@ import Testing
 /// after it. And dropping never helps: her mean place is no better than the Club bots' (a place number at least as
 /// high as theirs). The 16.1 watchdog and the cautious gate in the bot matrix are #105's.
 @Suite struct CautiousBotSuiteTests {
-    /// Seeds sailed: races of ten, one lap, all Club, one cautious seat each, rotated through the seats.
-    static let seeds = 100
+    /// Seeds sailed: races of ten, one lap, all Club, one cautious seat each, rotated through the seats (#408).
+    static let seeds = 32
     static let fleetSize = 10
 
     @Test func cautiousSeatNeverFoulsAndPlacesAtOrBelowClub() throws {

@@ -13,6 +13,14 @@ import UIKit
     static let fixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .deletingLastPathComponent().appendingPathComponent("RegattaUITests/Fixtures")
 
+    @Test func fixtureDriverReplaysEachTruncatedLogOnce() throws {
+        let (_, log) = try RenderFixture.load(named: "prestart", in: Self.fixtures)
+        _ = try FixtureDriver(log: log, freezeTick: -1500)
+        let afterFirst = FixtureDriver.replayCount
+        _ = try FixtureDriver(log: log, freezeTick: -1500)
+        #expect(FixtureDriver.replayCount == afterFirst)
+    }
+
     @Test func committedFixturesLoadAndReplayToTheirFreezeTick() throws {
         let (fixture, log) = try RenderFixture.load(named: "prestart", in: Self.fixtures)
         #expect(fixture == RenderFixture(log: "prestart.racelog.json", freezeTick: -1500, camera: .boat, vision: .none))

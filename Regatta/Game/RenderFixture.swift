@@ -364,7 +364,7 @@ final class FixtureDriver: RaceDriver {
         truncated.inputs.removeAll { $0.tick > freezeTick }
         truncated.seatEvents.removeAll { $0.tick > freezeTick }
         truncated.finalTick = freezeTick
-        let race = try Replayer.replay(truncated, requireMatchingVersion: false)
+        let race = try Self.replayed(truncated)
         let setup = log.header.setup
         myBoatIndex = seat ?? setup.seats.firstIndex(of: .human) ?? 0
         course = race.course
@@ -374,6 +374,20 @@ final class FixtureDriver: RaceDriver {
         liveries = FleetLiveries(setup: setup, mySeat: myBoatIndex)
         currentFrame = TickFrame(race: race, keepClearOf: myBoatIndex)
         ruleCalls = race.incidents.incidents.compactMap { if case .called(let call) = $0.outcome { call } else { nil } }
+    }
+
+    /// Each truncated log replayed once per process (#408): the unit tests build dozens of sessions from a handful of
+    /// fixtures, every replay a Debug build's seconds on the main actor. The race is only read, never stepped.
+    private static var replays: [RaceLog: Race] = [:]
+
+    /// How many distinct truncated logs have been replayed in this process.
+    static var replayCount: Int { replays.count }
+
+    private static func replayed(_ log: RaceLog) throws -> Race {
+        if let race = replays[log] { return race }
+        let race = try Replayer.replay(log, requireMatchingVersion: false)
+        replays[log] = race
+        return race
     }
 
     /// The rule calls made up to the freeze tick, in incident order: a frozen fixture drains no events, so the
