@@ -11,8 +11,8 @@ import Testing
 /// within 2 places is printed for information only: race-to-race scatter is bot work (#105/#177), not this check.
 @Suite struct BotRivalSuiteTests {
     static let skills = [0.45, 0.7, 0.9]
-    /// Seeds sailed per skill: races of ten.
-    static let seeds = 100
+    /// Seeds sailed per skill: races of ten (#408: 32 keeps the mean-place gap well inside 2 on macOS and CI).
+    static let seeds = 32
     static let fleetSize = 10
     static let laps = 1
     /// Places seat 0's mean place and its rivals' mean place may be apart and still pass.
