@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaServiceContracts
 import RegattaServices
 import Testing
@@ -44,6 +45,17 @@ import Testing
             try await QueueServiceContract().run { BrokenQueue(base: Fixtures.queue($0)) }
         }
         #expect(queue?.message.contains("join()") == true)
+
+        // Only a suspended player's join goes through: the suspension check catches it (#314).
+        let suspended = await Self.violation {
+            try await QueueServiceContract().run { SuspendedCanJoinQueue(base: Fixtures.queue($0)) }
+        }
+        #expect(suspended?.message.contains("a suspended player's join() didn't throw") == true, "\(String(describing: suspended))")
+
+        let livery = await Self.violation {
+            try await ProfileServiceContract().run { AnyClassLiveryProfile(base: Fixtures.profile($0)) }
+        }
+        #expect(livery?.message.contains("another class") == true, "\(String(describing: livery))")
 
         let session = await Self.violation {
             try await RaceSessionServiceContract().run { BrokenRaceSession(base: Fixtures.raceSession($0)) }
@@ -97,6 +109,7 @@ private struct BrokenIdentity: IdentityService {
     let base: ScriptedIdentityService
 
     func state() async -> GameCenterState { await base.state() }
+    func stateUpdates() -> AsyncStream<GameCenterState> { base.stateUpdates() }
     func gamePlayerID() async -> GamePlayerID? { await base.gamePlayerID() }
     func signIn() async -> GameCenterState { await base.signIn() }
     func identitySignature() async throws -> IdentitySignature {
@@ -104,12 +117,26 @@ private struct BrokenIdentity: IdentityService {
     }
 }
 
-/// Lets a suspended player join.
+/// Swallows every refusal to join.
 private struct BrokenQueue: QueueService {
     let base: ScriptedQueueService
 
     func stateUpdates() -> AsyncStream<QueueState> { base.stateUpdates() }
     func join() async throws { try? await base.join() }
+    func leave() async throws { try await base.leave() }
+}
+
+/// Lets a suspended player join, and is right about everything else.
+private struct SuspendedCanJoinQueue: QueueService {
+    let base: ScriptedQueueService
+
+    func stateUpdates() -> AsyncStream<QueueState> { base.stateUpdates() }
+    func join() async throws {
+        do {
+            try await base.join()
+        } catch QueueError.refused(.suspended) {
+        }
+    }
     func leave() async throws { try await base.leave() }
 }
 
@@ -122,4 +149,15 @@ private struct BrokenRaceSession: RaceSessionService {
     func results() -> AsyncStream<RaceUpdate> { base.results() }
     func ratingChanges() -> AsyncStream<RatingChange> { base.ratingChanges() }
     func lastRace() async throws -> LastRace? { nil }
+}
+
+/// Takes a livery of another boat class.
+private struct AnyClassLiveryProfile: ProfileService {
+    let base: ScriptedProfileService
+
+    func profile() async throws -> Profile { try await base.profile() }
+    func saveLivery(_ livery: Livery) async throws -> Livery {
+        if livery.design == ProfileServiceContract.otherClassDesign { return livery }
+        return try await base.saveLivery(livery)
+    }
 }

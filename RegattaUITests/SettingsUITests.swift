@@ -30,14 +30,16 @@ final class SettingsUITests: RaceUITestCase {
         _ = XCTWaiter.wait(for: [changed], timeout: 5)
     }
 
-    /// Ladder lines flipped on the Settings page is still flipped after the app is killed and launched again; the
-    /// test flips it back, so the next test starts from the defaults.
+    /// Ladder lines flipped on the Settings page is still flipped after the app is killed and launched again. A
+    /// `defer` sets the toggles back, so the next test starts from the defaults even when an assertion here fails
+    /// (#314).
     @MainActor func testTogglesPersistAcrossRelaunch() {
         var app = openSettings()
         // `firstMatch`: in case a SwiftUI toggle exposes an inner switch carrying the same identifier.
         var ladder = app.switches["settings-ladderLines"].firstMatch
         XCTAssertTrue(ladder.waitForExistence(timeout: 20), "no Ladder lines toggle")
         let before = value(ladder)
+        defer { restoreCueToggles() }
         flip(ladder)
         XCTAssertNotEqual(value(ladder), before, "the toggle didn't flip")
         let flipped = value(ladder)
@@ -47,9 +49,6 @@ final class SettingsUITests: RaceUITestCase {
         ladder = app.switches["settings-ladderLines"].firstMatch
         XCTAssertTrue(ladder.waitForExistence(timeout: 20), "no Ladder lines toggle after relaunch")
         XCTAssertEqual(value(ladder), flipped, "Ladder lines wasn't kept across the relaunch")
-
-        flip(ladder)
-        XCTAssertEqual(value(ladder), before, "the toggle didn't flip back")
     }
 
     /// Laylines off and ladder lines on in Settings reach the race: the scene hides the laylines and draws the

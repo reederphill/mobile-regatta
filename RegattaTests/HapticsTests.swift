@@ -8,7 +8,7 @@ import RegattaCore
     private static let config = RaceConfig(opponents: 1, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
 
     /// Records what reaches it.
-    final class RecordingGenerator: HapticGenerator {
+    final class RecordingGenerator: Haptics {
         var calls: [String] = []
         func impact(intensity: Double) { calls.append("impact \(intensity)") }
         func notify(_ kind: HapticNotification) { calls.append("notify \(kind)") }

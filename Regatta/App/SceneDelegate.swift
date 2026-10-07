@@ -19,7 +19,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let app = AppDelegate.current else { return }
         window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size,
                                                           maximumFramesPerSecond: windowScene.screen.maximumFramesPerSecond,
-                                                          onlineStatus: OnlineStatus(services: app.services), analytics: app.analytics)
+                                                          onlineStatus: OnlineStatus(services: app.services,
+                                                                                    isInitiallyOnline: OnlineStatus.isInitiallyOnline(.current)),
+                                                          analytics: app.analytics)
         if let appearance = LaunchOptions.current.appearance {
             window.overrideUserInterfaceStyle = appearance == .dark ? .dark : .light
         }

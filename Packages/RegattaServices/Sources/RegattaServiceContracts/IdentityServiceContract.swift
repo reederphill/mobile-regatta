@@ -23,6 +23,8 @@ public struct IdentityServiceContract: ContractSuite {
 
     private func signedOut(_ service: any IdentityService) async throws {
         try await require(await service.state() == .signedOut, "a signed-out player's state isn't .signedOut")
+        var updates = StreamReader(service.stateUpdates())
+        try await require(await updates.next() == .signedOut, "stateUpdates() doesn't open with the state now")
         try await require(await service.gamePlayerID() == nil, "a signed-out player has a gamePlayerID")
         try await requireThrows(IdentityError.notSignedIn, "identitySignature() while signed out") {
             try await service.identitySignature()
@@ -30,6 +32,9 @@ public struct IdentityServiceContract: ContractSuite {
         // Whatever signing in comes to, the service agrees with itself about it.
         let after = await service.signIn()
         try await require(await service.state() == after, "state() after signIn() isn't what signIn() returned")
+        if after != .signedOut {
+            try await require(await updates.next() == after, "signIn()'s answer didn't arrive on stateUpdates()")
+        }
         try await require(await service.gamePlayerID() == after.player?.gamePlayerID, "gamePlayerID() doesn't follow the state after signIn()")
         if after.player == nil {
             try await requireThrows(IdentityError.notSignedIn, "identitySignature() after a declined sign-in") {
@@ -43,6 +48,7 @@ public struct IdentityServiceContract: ContractSuite {
     private func signedIn(_ service: any IdentityService) async throws {
         let state = await service.state()
         guard let player = state.player else { try fail("a signed-in player's state has no player") }
+        try await require(await StreamReader.first(of: service.stateUpdates()) == state, "stateUpdates() doesn't open with the state now")
         try await require(!player.gamePlayerID.rawValue.isEmpty, "the gamePlayerID is empty")
         try await require(await service.gamePlayerID() == player.gamePlayerID, "gamePlayerID() isn't the state's player's")
         try await require(player.canRaceOnline, "an unrestricted player can't race online")

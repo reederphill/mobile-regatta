@@ -17,8 +17,12 @@ public final class PathConnectivityService: ConnectivityService, @unchecked Send
         var nextListener = 0
     }
 
-    public init() {
+    public convenience init() { self.init(monitoring: true) }
+
+    /// Without `monitoring`, only `update(_:)` moves it: for tests, which can't build an `NWPath`.
+    init(monitoring: Bool) {
         state = Mutex(State())
+        guard monitoring else { return }
         monitor.pathUpdateHandler = { [weak self] path in
             self?.update(path.status == .satisfied ? .online : .offline)
         }
@@ -30,7 +34,9 @@ public final class PathConnectivityService: ConnectivityService, @unchecked Send
         state.withLock { $0.listeners.values.forEach { $0.finish() } }
     }
 
-    private func update(_ status: ConnectivityStatus) {
+    /// A path update: passed on only when the status changed, as the monitor repeats itself (a new interface,
+    /// say, while still online). Internal for tests.
+    func update(_ status: ConnectivityStatus) {
         let listeners = state.withLock { state -> [AsyncStream<ConnectivityStatus>.Continuation] in
             guard state.current != status else { return [] }
             state.current = status

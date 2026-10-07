@@ -17,6 +17,10 @@ public struct ProfileServiceContract: ContractSuite {
         case liveryLocked
     }
 
+    /// A bundled design (#118) for a class the situations' player doesn't sail: they all sail the skiff, and this
+    /// is the ILCA dinghy's, with as many colour slots as the skiff's plain design.
+    public static let otherClassDesign = DesignID("ilca-dinghy-plain")
+
     public let name = "ProfileService"
 
     public init() {}
@@ -75,6 +79,8 @@ public struct ProfileServiceContract: ContractSuite {
         try await refused(.sailNumber, "sail number 0") { $0.sailNumber = 0 }
         try await refused(.sailNumber, "sail number \(Livery.sailNumbers.upperBound + 1)") { $0.sailNumber = Livery.sailNumbers.upperBound + 1 }
         try await refused(.unknownDesign, "an unknown design") { $0.design = DesignID("contract-no-such-design") }
+        // A design that exists, but for another class, is no design for this boat (#314).
+        try await refused(.unknownDesign, "a design of another class") { $0.design = Self.otherClassDesign }
         try await refused(.slotCount, "four colours") { $0.colours = Array(repeating: $0.colours[0], count: 4) }
         try await refused(.colour, "a colour off the palette") { $0.colours[0] = SwatchID("contract-no-such-swatch") }
 

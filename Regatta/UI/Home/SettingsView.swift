@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Settings (#110, #25): one page, in sections: Controls, On the water, Hints, Sound, Lobby, Purchases, Share usage
-/// data, Delete my online data, About. Every row is a `DeviceSettings` value, kept on the device.
+/// Settings (#110, #25): one page, in sections: Controls, On the water, Hints, Sound, Lobby, Purchases, Usage
+/// data, Online data, About. Every row is a `DeviceSettings` value, kept on the device.
 ///
 /// A scroll view and a column like the other pages, not a `Form`: an identifier on a `Form` doesn't reach the
 /// accessibility tree, and UI tests find the page by `page-settings`.
@@ -15,7 +15,7 @@ struct SettingsView: View {
     @Bindable var model: AppModel
     var deleteOnlineData: OnlineDataDeletion = Self.deletionArrivesLater
     @State private var confirmsDeletion = false
-    @State private var shownNotice: String?
+    @State private var notice = SettingsNotice()
 
     var body: some View {
         ScrollView {
@@ -49,7 +49,7 @@ struct SettingsView: View {
                     Divider()
                     buttonRow("Reset hints", id: "settings-resetHints") {
                         model.resetHints()
-                        shownNotice = "Hints will show again."
+                        notice.arrive("Hints will show again.")
                     }
                 }
                 section("Sound") {
@@ -72,7 +72,7 @@ struct SettingsView: View {
                 section("Purchases") {
                     // Restores through the store service once purchases are wired (#166).
                     buttonRow("Restore purchases", id: "settings-restorePurchases") {
-                        shownNotice = "Purchases are restored once the shop opens."
+                        notice.arrive("Purchases are restored once the shop opens.")
                     }
                 }
                 section("Usage data") {
@@ -82,6 +82,7 @@ struct SettingsView: View {
                 section("Online data") {
                     buttonRow("Delete my online data", role: .destructive, id: "settings-deleteOnlineData") {
                         confirmsDeletion = true
+                        notice.dialogIsUp = true
                     }
                     footnote("Deletes your profile, rating, chat and reports from the server. Purchases stay with your Apple ID.")
                 }
@@ -125,13 +126,15 @@ struct SettingsView: View {
         .navigationTitle("Settings")
         .confirmationDialog("Delete your online data?", isPresented: $confirmsDeletion, titleVisibility: .visible) {
             Button("Delete", role: .destructive) {
-                Task { shownNotice = await deleteOnlineData() }
+                Task { notice.arrive(await deleteOnlineData()) }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Your profile, rating, chat history and reports are deleted, and your name comes off the leaderboard. Race results keep a random name in your place.")
         }
-        .alert(shownNotice ?? "", isPresented: Binding(get: { shownNotice != nil }, set: { if !$0 { shownNotice = nil } })) {
+        // The deletion notice waits for the dialog to go (#314): an alert raised as it dismisses can be dropped.
+        .onChange(of: confirmsDeletion) { _, isUp in notice.dialogIsUp = isUp }
+        .alert(notice.shown ?? "", isPresented: Binding(get: { notice.shown != nil }, set: { if !$0 { notice.shown = nil } })) {
             Button("OK", role: .cancel) {}
         }
     }
@@ -168,17 +171,8 @@ struct SettingsView: View {
     private func pickerRow<Value: Hashable & CaseIterable>(
         _ title: String, selection: Binding<Value>, id: String, label: @escaping (Value) -> String
     ) -> some View where Value.AllCases: RandomAccessCollection {
-        HStack {
-            Text(title).font(MenuFont.body())
-            Spacer(minLength: 12)
-            Picker(title, selection: selection) {
-                ForEach(Array(Value.allCases), id: \.self) { Text(label($0)).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .fixedSize()
-            .accessibilityIdentifier(id)
-        }
-        .padding(16)
+        SegmentedPickerRow(title: title, titleFont: MenuFont.body(), selection: selection, id: id, label: label)
+            .padding(16)
     }
 
     private func buttonRow(_ title: String, role: ButtonRole? = nil, id: String, action: @escaping () -> Void) -> some View {
@@ -226,5 +220,26 @@ private struct AcknowledgementsPage: View {
         }
         .menuBackground()
         .navigationTitle("Acknowledgements")
+    }
+}
+
+/// Settings' one-line notices, as an alert. A notice that arrives while the delete confirmation is up waits for it
+/// to go, so the alert isn't raised in the tick the dialog dismisses, when SwiftUI can drop it (#314).
+struct SettingsNotice: Equatable {
+    /// The notice the alert shows; nil once dismissed.
+    var shown: String?
+    private var pending: String?
+
+    /// Whether the delete confirmation is up. Setting it false shows a notice that waited for it.
+    var dialogIsUp = false {
+        didSet {
+            guard !dialogIsUp, let pending else { return }
+            shown = pending
+            self.pending = nil
+        }
+    }
+
+    mutating func arrive(_ notice: String) {
+        if dialogIsUp { pending = notice } else { shown = notice }
     }
 }

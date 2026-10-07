@@ -36,18 +36,29 @@ final class OnlineStatus {
     private(set) var lobbyStatus = LobbyStatus()
     let services: ServiceSet
 
-    /// `isOnline` starts optimistic until the connectivity service says, so Race online doesn't flash "Offline".
-    init(services: ServiceSet) {
+    /// `isOnline` starts at `isInitiallyOnline` until the connectivity service says: optimistic for the device's
+    /// path, so Race online doesn't flash "Offline", and `isInitiallyOnline(_:)` for a launch's fakes, so the
+    /// offline scenario isn't online for its first frame (#314).
+    init(services: ServiceSet, isInitiallyOnline: Bool = true) {
         self.services = services
-        isOnline = true
+        isOnline = isInitiallyOnline
         Task { [weak self] in
             for await status in services.connectivity.statusUpdates() { self?.isOnline = status.isOnline }
         }
         Task { [weak self] in await self?.refreshAccount() }
         Task { [weak self] in
-            for await state in services.queue.stateUpdates() {
-                if case .queued(let queued) = state { self?.lobbyStatus.queuedPlayers = queued.queuedPlayers }
-            }
+            for await state in services.queue.stateUpdates() { self?.show(state) }
+        }
+    }
+
+    /// Whether the app starts online for these launch options: not on the offline scenario's fakes.
+    nonisolated static func isInitiallyOnline(_ launchOptions: LaunchOptions) -> Bool { launchOptions.fakeServices != .offline }
+
+    /// The queued count while the player is queued; none once she isn't (#314).
+    func show(_ queue: QueueState) {
+        switch queue {
+        case .queued(let queued): lobbyStatus.queuedPlayers = queued.queuedPlayers
+        case .idle, .unavailable, .fleetLocked: lobbyStatus.queuedPlayers = nil
         }
     }
 

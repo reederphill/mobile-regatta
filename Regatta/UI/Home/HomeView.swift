@@ -56,14 +56,12 @@ struct HomeView: View {
     }
 
     private var raceOnline: some View {
-        Button(action: onRaceOnline) {
+        let availability = RaceOnlineAvailability(isOnline: isOnline, lobbyStatus: lobbyStatus)
+        return Button(action: onRaceOnline) {
             VStack(spacing: 2) {
                 Text("Race online").font(MenuFont.heading(.title2))
-                if !isOnline {
-                    Text("Offline").font(MenuFont.body(.subheadline))
-                } else if !lobbyStatus.canRaceOnline {
-                    // Game Center's multiplayer restriction (#34): disabled, with a one-line reason.
-                    Text("Practice races only").font(MenuFont.body(.subheadline))
+                if let reason = availability.reason {
+                    Text(reason).font(MenuFont.body(.subheadline))
                 }
             }
             // The page's `menuBackground` text colour would otherwise reach the label: navy on the navy fill.
@@ -73,7 +71,7 @@ struct HomeView: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
-        .disabled(!isOnline || !lobbyStatus.canRaceOnline)
+        .disabled(!availability.isEnabled)
         .accessibilityIdentifier("race-online")
     }
 
@@ -273,5 +271,27 @@ private struct LastRaceRow: View {
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("last-race")
+    }
+}
+
+/// Whether Home's Race online can be tapped, and the one line under it when it can't (#242, #314).
+struct RaceOnlineAvailability: Equatable {
+    var isEnabled: Bool
+    var reason: String?
+
+    init(isOnline: Bool, lobbyStatus: LobbyStatus) {
+        if !isOnline {
+            self.init(isEnabled: false, reason: "Offline")
+        } else if !lobbyStatus.canRaceOnline {
+            // Game Center's multiplayer restriction (#34): disabled, with a one-line reason.
+            self.init(isEnabled: false, reason: "Practice races only")
+        } else {
+            self.init(isEnabled: true, reason: nil)
+        }
+    }
+
+    init(isEnabled: Bool, reason: String?) {
+        self.isEnabled = isEnabled
+        self.reason = reason
     }
 }

@@ -25,7 +25,7 @@ public struct QueueServiceContract: ContractSuite {
         try await joinToFleetLock(makeService(.joinable))
         try await leaveIsFree(makeService(.joinable))
         try await cooldownCountsDown(makeService(.cooldown))
-        try await refused(makeService(.suspended)) { if case .suspended = $0 { true } else { false } }
+        try await suspended(makeService(.suspended))
         try await refused(makeService(.notSignedIn)) { $0 == .notSignedIn }
         try await refused(makeService(.termsNotAccepted)) { $0 == .termsNotAccepted }
         try await refused(makeService(.multiplayerRestricted)) { $0 == .multiplayerRestricted }
@@ -99,6 +99,25 @@ public struct QueueServiceContract: ContractSuite {
             previous = seconds
         }
         try await service.join()
+    }
+
+    /// A suspended player can't queue (#26): `join()` throws `.refused(.suspended)`, and afterwards the queue still
+    /// shows the suspension, not a place in the queue (#314).
+    private func suspended(_ service: any QueueService) async throws {
+        var reader = StreamReader(service.stateUpdates())
+        guard case .unavailable(.suspended(let until))? = await reader.next() else {
+            try fail("a suspended player's queue doesn't start in .unavailable(.suspended)")
+        }
+        var thrown: (any Error)?
+        do { try await service.join() } catch { thrown = error }
+        guard let thrown else { try fail("a suspended player's join() didn't throw") }
+        guard case .refused(.suspended)? = thrown as? QueueError else {
+            try fail("a suspended player's join() threw \(thrown), not .refused(.suspended)")
+        }
+        let after = await StreamReader.first(of: service.stateUpdates())
+        try await require(after == .unavailable(.suspended(until: until)),
+                          "after a suspended player's join(), the queue shows \(String(describing: after)), not the suspension")
+        try await requireThrows(QueueError.notQueued, "leave() while suspended") { try await service.leave() }
     }
 
     /// A refusal shows as the state, and is why joining throws.
