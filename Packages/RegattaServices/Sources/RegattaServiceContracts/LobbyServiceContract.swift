@@ -5,7 +5,8 @@ public struct LobbyServiceContract: ContractSuite {
     public enum Situation: Hashable, Sendable {
         /// The lobby is open and the player may post free text, in good standing. Its history holds at least one
         /// system line and one line by another player. The filter blocks `filteredText`. The player sailed `race`
-        /// in `ownSeat`, against a human in `humanSeat` and a bot in `botSeat`.
+        /// in `ownSeat`, against a human in `humanSeat` and a bot in `botSeat`. After the state, the feed brings one
+        /// more line by that other player.
         case open
         /// Open, but the player hasn't completed an online race yet.
         case freeTextLocked
@@ -101,7 +102,9 @@ public struct LobbyServiceContract: ContractSuite {
         try await require(ok.post?.delivery == .sent, "a post at the limit after two refused ones came back as \(ok)")
     }
 
-    /// Links, email addresses and phone numbers are stripped.
+    /// Links, email addresses and phone numbers are stripped. Best-effort only (owner ruling, #314): a spaced-out
+    /// number or "name at mail dot com" may pass, and moderation (#153) is the backstop, so this checks the plain
+    /// forms and nothing cleverer.
     private func contactsAreStripped(_ service: any LobbyService) async throws {
         let message = try await service.post("race me https://example.com or mail sailor@example.com or call 5551234567")
         guard case .text(let text)? = message.post?.body else { try fail("a text post came back as \(message)") }
@@ -122,21 +125,34 @@ public struct LobbyServiceContract: ContractSuite {
         return me
     }
 
-    /// Blocking hides the other player's lines, is listed, is idempotent and undone by unblocking; blocking
-    /// yourself is refused.
+    /// Blocking hides the other player's lines, old and new, is listed, is idempotent and undone by unblocking,
+    /// which brings the old lines back; blocking yourself is refused.
     private func blocking(_ service: any LobbyService) async throws {
         let me = try await ownID(service)
-        guard let author = try await service.history().compactMap(\.post?.author).first(where: { $0.gamePlayerID != me }) else {
+        var feed = StreamReader(service.feed())
+        _ = await feed.next()
+        let before = try await service.history()
+        guard let author = before.compactMap(\.post?.author).first(where: { $0.gamePlayerID != me }) else {
             try fail("no other player's line to block")
         }
+        let theirs = before.filter { $0.post?.author.gamePlayerID == author.gamePlayerID }.map(\.id)
         try await service.block(author.gamePlayerID)
         try await require(try await !service.history().contains { $0.post?.author.gamePlayerID == author.gamePlayerID },
                           "a blocked player's lines still show")
+        // The feed's next line by them, and then the removal of their old ones, pass the player by.
+        let (events, removed) = await feed.read { event in
+            if case .removed(let id) = event { theirs.contains(id) } else { false }
+        }
+        try await require(removed, "blocking didn't take their lines off the feed; it read \(events)")
+        try await require(!events.contains { if case .message(let line) = $0 { line.post?.author.gamePlayerID == author.gamePlayerID } else { false } },
+                          "a blocked player's new line arrived on the feed: \(events)")
         try await service.block(author.gamePlayerID)
         let list = try await service.blockedPlayers()
         try await require(list.filter { $0.gamePlayerID == author.gamePlayerID }.count == 1, "the blocked list is \(list)")
         try await service.unblock(author.gamePlayerID)
         try await require(try await !service.blockedPlayers().contains { $0.gamePlayerID == author.gamePlayerID }, "unblocking didn't unlist")
+        let after = try await service.history().map(\.id)
+        try await require(theirs.allSatisfy(after.contains), "unblocking didn't bring their earlier lines back: \(after)")
         try await requireThrows(LobbyError.cannotBlockSelf, "block(yourself)") { try await service.block(me) }
     }
 

@@ -22,7 +22,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // are My boat's (UI tests' own suite, emptied at launch).
         services.store = StubStoreService(boatClass: RaceFiles.defaults.boatClass.ref.id,
                                           defaults: .init(MyBoatDefaults.defaults(for: launchOptions, standard: .standard)),
-                                          isOnline: launchOptions.fakeServices != .offline)
+                                          isOnline: OnlineStatus.isInitiallyOnline(launchOptions))
         return services
     }
 

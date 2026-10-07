@@ -1,5 +1,3 @@
-import Synchronization
-
 /// What a `ScriptedLobbyService` plays.
 public struct LobbyScenario: Sendable {
     /// The player, as her own lines show her.
@@ -37,12 +35,18 @@ public struct LobbyScenario: Sendable {
 /// A `LobbyService` that plays its scenario and keeps what the player does in memory. Time only moves by
 /// `advance(seconds:)`, so the rate limit holds until a test moves it on. The feed gives the state, then one
 /// event per read: the scenario's background, then what the player's calls caused, finishing when there is
-/// nothing left (a real feed would wait).
+/// nothing left (a real feed would wait). Each feed reads the events with its own cursor (#314).
+///
+/// Blocking hides a player's lines without deleting them (#314): the feed drops their new lines and removes the
+/// old ones from view, and unblocking brings the old ones back to `history()`. Only reports delete.
 public actor ScriptedLobbyService: LobbyService {
     private var current: LobbyState
     private let player: LobbyAuthor
     private var lines: [LobbyMessage]
-    private var pending: [LobbyEvent]
+    private let initialState: LobbyState
+    private let script: StreamScript<LobbyEvent>
+    /// The `.removed` events `block` queued: they hide a line, and unblocking shows it again.
+    private var hiddenByBlock: Set<MessageID> = []
     private let filteredWords: [String]
     private let races: [RaceID: [LobbyScenario.RaceSeat]]
     private var blocked: [BlockedPlayer] = []
@@ -54,9 +58,10 @@ public actor ScriptedLobbyService: LobbyService {
 
     public init(_ scenario: LobbyScenario) {
         current = scenario.state
+        initialState = scenario.state
         player = scenario.player
         lines = scenario.history
-        pending = scenario.background
+        script = StreamScript(scenario.background)
         filteredWords = scenario.filteredWords.map { $0.lowercased() }
         races = scenario.races
     }
@@ -75,26 +80,38 @@ public actor ScriptedLobbyService: LobbyService {
     }
 
     public nonisolated func feed() -> AsyncStream<LobbyEvent> {
-        let started = Mutex(false)
-        return AsyncStream {
-            let first = started.withLock { started in
-                defer { started = true }
-                return !started
-            }
-            return await self.next(first: first)
-        }
+        let cursor = script.cursor()
+        return AsyncStream { await self.next(cursor) }
     }
 
-    private func next(first: Bool) -> LobbyEvent? {
-        if first { return .state(current) }
-        guard !pending.isEmpty else { return nil }
-        let event = pending.removeFirst()
+    private func next(_ cursor: StreamCursor) -> LobbyEvent? {
+        let loaded = cursor.load()
+        var position = loaded.position
+        guard loaded.hasStarted else {
+            let (start, before) = script.steps(before: position)
+            cursor.store(start)
+            let state = before.reversed().lazy.compactMap { if case .state(let state) = $0 { state } else { nil } }.first
+            return .state(state ?? initialState)
+        }
+        defer { cursor.store(position) }
+        while let (_, event, isFirstRead) = script.next(&position) {
+            if isFirstRead { apply(event) }
+            // A blocked player's lines are kept, for unblocking, but never reach the feed.
+            if case .message(let message) = event, isBlocked(message) { continue }
+            return event
+        }
+        return nil
+    }
+
+    private func apply(_ event: LobbyEvent) {
         switch event {
         case .state(let state): current = state
-        case .message(let message): lines.append(message)
-        case .removed(let id): lines.removeAll { $0.id == id }
+        case .message(let message):
+            // The player's own sent lines are in `lines` from `send`.
+            if !lines.contains(where: { $0.id == message.id }) { lines.append(message) }
+        case .removed(let id):
+            if !hiddenByBlock.contains(id) { lines.removeAll { $0.id == id } }
         }
-        return event
     }
 
     public func post(_ text: String) throws -> LobbyMessage {
@@ -137,12 +154,14 @@ public actor ScriptedLobbyService: LobbyService {
         // A blocked line reaches no one else, so the feed doesn't carry it; the sender has it from this return.
         if delivery == .sent {
             lines.append(message)
-            pending.append(.message(message))
+            script.append(.message(message))
         }
         return message
     }
 
-    /// Drops the words that are links, email addresses or phone numbers (#17).
+    /// Drops the words that are links, email addresses or phone numbers (#17). Best-effort, by design (owner
+    /// ruling, #314): spaced-out digits or "name at mail dot com" get through. Moderation (#153) is the backstop,
+    /// so don't grow this into a detector.
     static func stripContacts(_ text: String) -> String {
         text.split(whereSeparator: \.isWhitespace).filter { word in
             let lowered = word.lowercased()
@@ -155,9 +174,12 @@ public actor ScriptedLobbyService: LobbyService {
     }
 
     private func isVisible(_ message: LobbyMessage) -> Bool {
-        guard !reported.contains(message.id) else { return false }
-        guard let author = message.post?.author.gamePlayerID else { return true }
-        return !blocked.contains { $0.gamePlayerID == author }
+        !reported.contains(message.id) && !isBlocked(message)
+    }
+
+    private func isBlocked(_ message: LobbyMessage) -> Bool {
+        guard let author = message.post?.author.gamePlayerID else { return false }
+        return blocked.contains { $0.gamePlayerID == author }
     }
 
     public func block(_ other: GamePlayerID) throws {
@@ -165,7 +187,10 @@ public actor ScriptedLobbyService: LobbyService {
         guard !blocked.contains(where: { $0.gamePlayerID == other }) else { return }
         let nickname = lines.compactMap(\.post?.author).first { $0.gamePlayerID == other }?.nickname ?? other.rawValue
         blocked.append(BlockedPlayer(gamePlayerID: other, nickname: nickname))
-        for message in lines where message.post?.author.gamePlayerID == other { pending.append(.removed(message.id)) }
+        for message in lines where message.post?.author.gamePlayerID == other && !reported.contains(message.id) {
+            hiddenByBlock.insert(message.id)
+            script.append(.removed(message.id))
+        }
     }
 
     public func unblock(_ other: GamePlayerID) {
@@ -179,7 +204,8 @@ public actor ScriptedLobbyService: LobbyService {
         guard let post = message.post, post.author.gamePlayerID != player.gamePlayerID else { throw LobbyError.notReportable }
         reported.insert(id)
         reports.append("message \(id.rawValue)")
-        pending.append(.removed(id))
+        hiddenByBlock.remove(id)
+        script.append(.removed(id))
     }
 
     public func report(player other: GamePlayerID) throws {

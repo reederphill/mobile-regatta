@@ -204,7 +204,8 @@ public protocol LobbyService: Sendable {
     /// `historySeconds`. Excludes lines the player reported and lines to or from players either has blocked.
     /// Throws `LobbyError.closed` when the lobby is closed.
     func history() async throws -> [LobbyMessage]
-    /// The feed: the state now, then lines and changes as they come, for as long as the stream is held.
+    /// The feed: the state now, then lines and changes as they come, for as long as the stream is held. A blocked
+    /// player's new lines never arrive on it.
     func feed() -> AsyncStream<LobbyEvent>
     /// Posts free text, returned as the filter left it and as the player sees it (`Delivery.notSent` when it was
     /// blocked). A refused post doesn't count against the rate limit.
@@ -213,8 +214,9 @@ public protocol LobbyService: Sendable {
     func post(_ quickChat: QuickChat) async throws -> LobbyMessage
 
     /// Blocks a player: stored on the server by player ID, hiding chat both ways, with no effect on matchmaking.
-    /// Blocking someone already blocked changes nothing.
+    /// Blocking someone already blocked changes nothing. Their lines leave the feed as `.removed`.
     func block(_ player: GamePlayerID) async throws
+    /// Unblocks a player: their earlier lines show in `history()` again (the feed doesn't resend them).
     func unblock(_ player: GamePlayerID) async throws
     /// The blocked list, for Settings.
     func blockedPlayers() async throws -> [BlockedPlayer]

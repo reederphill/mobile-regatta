@@ -1,5 +1,4 @@
 import RegattaCore
-import Synchronization
 
 /// What a `ScriptedStoreService` plays.
 public struct StoreScenario: Sendable {
@@ -31,16 +30,27 @@ public struct StoreScenario: Sendable {
 }
 
 /// A `StoreService` that plays its scenario. The ownership stream gives the owned set, then one change per read,
-/// finishing when there is none left (a real one stays open).
+/// finishing when there is none left (a real one stays open). Each stream reads the changes with its own cursor
+/// (#314).
 public actor ScriptedStoreService: StoreService {
+    /// One ownership change. Purchases are queued as the design they add, not a snapshot, so two that arrive
+    /// before a read both land (#314).
+    private enum Change: Sendable {
+        /// A refund or revocation from the scenario: the whole owned set.
+        case owned(Set<DesignID>)
+        case adds(DesignID)
+    }
+
     private let scenario: StoreScenario
     private var owned: Set<DesignID>
-    private var pending: [Set<DesignID>]
+    private let script: StreamScript<Change>
+    /// The owned set after each change some stream has read, for the streams reading behind it.
+    private var ownedAfter: [Set<DesignID>] = []
 
     public init(_ scenario: StoreScenario) {
         self.scenario = scenario
         owned = scenario.owned
-        pending = scenario.background
+        script = StreamScript(scenario.background.map(Change.owned))
     }
 
     public func products() throws -> [StoreProduct] {
@@ -57,10 +67,10 @@ public actor ScriptedStoreService: StoreService {
         switch scenario.checkout {
         case .completes:
             owned.insert(product.design)
-            pending.append(owned)
+            script.append(.adds(product.design))
             return .purchased(product.design)
         case .askToBuy(let approved):
-            if approved { pending.append(owned.union([product.design])) }
+            if approved { script.append(.adds(product.design)) }
             return .pending
         case .cancels:
             return .cancelled
@@ -73,20 +83,27 @@ public actor ScriptedStoreService: StoreService {
     }
 
     public nonisolated func ownershipUpdates() -> AsyncStream<Set<DesignID>> {
-        let started = Mutex(false)
-        return AsyncStream {
-            let first = started.withLock { started in
-                defer { started = true }
-                return !started
-            }
-            return await self.next(first: first)
-        }
+        let cursor = script.cursor()
+        return AsyncStream { await self.next(cursor) }
     }
 
-    private func next(first: Bool) -> Set<DesignID>? {
-        if first { return owned }
-        guard !pending.isEmpty else { return nil }
-        owned = pending.removeFirst()
-        return owned
+    private func next(_ cursor: StreamCursor) -> Set<DesignID>? {
+        let loaded = cursor.load()
+        var position = loaded.position
+        guard loaded.hasStarted else {
+            let (start, _) = script.steps(before: position)
+            cursor.store(start)
+            return start.index == 0 ? scenario.owned : ownedAfter[start.index - 1]
+        }
+        defer { cursor.store(position) }
+        guard let (index, change, isFirstRead) = script.next(&position) else { return nil }
+        if isFirstRead {
+            switch change {
+            case .owned(let designs): owned = designs
+            case .adds(let design): owned.insert(design)
+            }
+            ownedAfter.append(owned)
+        }
+        return ownedAfter[index]
     }
 }

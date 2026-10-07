@@ -5,21 +5,23 @@ enum HapticNotification: Equatable {
     case success, warning, error
 }
 
-/// What plays haptics: the device's feedback generators, or a recorder in tests.
-protocol HapticGenerator: AnyObject {
-    func impact(intensity: Double)
-    func notify(_ kind: HapticNotification)
-}
-
-/// The race's haptics (#110): every call site goes through here, and nothing reaches a generator while Settings'
-/// Haptics is off.
+/// What plays the race's haptics (#110): the device's feedback generators, `GatedHaptics` in front of them (every
+/// call site goes through it, and nothing reaches the device while Settings' Haptics is off), silence, or a
+/// recorder in tests.
 protocol Haptics: AnyObject {
     func impact(intensity: Double)
     func notify(_ kind: HapticNotification)
 }
 
+/// No haptics: what a race has unless it's given the app's (`AppModel.haptics`), so tests and fixtures never buzz
+/// the device (#314). Like `SilentSoundOutput`.
+final class SilentHaptics: Haptics {
+    func impact(intensity: Double) {}
+    func notify(_ kind: HapticNotification) {}
+}
+
 /// UIKit's feedback generators.
-final class SystemHapticGenerator: HapticGenerator {
+final class SystemHapticGenerator: Haptics {
     private let impactGenerator = UIImpactFeedbackGenerator(style: .medium)
     private let notificationGenerator = UINotificationFeedbackGenerator()
 
@@ -39,11 +41,11 @@ final class SystemHapticGenerator: HapticGenerator {
 /// Haptics gated by Settings: `isOn` follows Settings' Haptics, set once per change by whoever owns the setting
 /// (`AppModel`), so switching Haptics off takes effect mid-race without reading the settings on every haptic.
 final class GatedHaptics: Haptics {
-    private let generator: any HapticGenerator
+    private let generator: any Haptics
     var isOn: Bool
 
-    /// By default the device's generators, on: the app passes `AppModel.haptics`, which follows the setting.
-    init(generator: any HapticGenerator = SystemHapticGenerator(), isOn: Bool = true) {
+    /// By default the device's generators: `AppModel.haptics` is one, `isOn` following the setting.
+    init(generator: any Haptics = SystemHapticGenerator(), isOn: Bool) {
         self.generator = generator
         self.isOn = isOn
     }

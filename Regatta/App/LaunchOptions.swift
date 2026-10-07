@@ -35,7 +35,8 @@ import RegattaServices
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued` or
-///   `cancelled-race` (`FakeServiceScenario`).
+///   `cancelled-race` (`FakeServiceScenario`). Debug builds only (#314): other builds don't know it, so a release
+///   build always runs on the real services.
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
@@ -146,14 +147,13 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
+            case "-fakeServices":
+                guard let value = takeValue(of: argument, from: &rest) else { continue }
+                apply(argument, value)
             #endif
             case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
-                 "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-completedRaces", "-thermal":
-                guard let value = rest.first, !Self.flags.contains(value) else {
-                    problems.append("\(argument) needs a value")
-                    continue
-                }
-                rest.removeFirst()
+                 "-appearance", "-vision", "-briefing", "-myBoat", "-completedRaces", "-thermal":
+                guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             default:
                 continue
@@ -161,14 +161,24 @@ struct LaunchOptions: Equatable {
         }
     }
 
+    /// The value after `argument`, taken off `rest`; nil, noted as a problem, when the next argument is another flag.
+    private mutating func takeValue(of argument: String, from rest: inout ArraySlice<String>) -> String? {
+        guard let value = rest.first, !Self.flags.contains(value) else {
+            problems.append("\(argument) needs a value")
+            return nil
+        }
+        rest.removeFirst()
+        return value
+    }
+
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
                           "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
-                          "-appearance", "-vision", "-fakeServices", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces",
+                          "-appearance", "-vision", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces",
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
         #if DEBUG
-        flags.formUnion(["-tuning", "-fps120"])
+        flags.formUnion(["-tuning", "-fps120", "-fakeServices"])
         #endif
         return flags
     }()

@@ -135,7 +135,7 @@ final class GameSession {
 
     /// A practice race on the device, your boat in `livery` (#136). `timescale` runs the simulation that many times real
     /// time (`-timescale`, for tests).
-    convenience init(config: RaceConfig, timescale: Double = 1, haptics: any Haptics = GatedHaptics(),
+    convenience init(config: RaceConfig, timescale: Double = 1, haptics: any Haptics = SilentHaptics(),
                      sound: any SoundOutput = SilentSoundOutput(), controls: ControlSettings = ControlSettings(),
                      rulesSeen: RuleSeenStore = RuleSeenStore(), livery: Livery = FleetLiveries.yours,
                      hints: HintEngine? = nil) {
@@ -145,7 +145,7 @@ final class GameSession {
     }
 
     /// An online race (#68).
-    convenience init(online driver: OnlineDriver, haptics: any Haptics = GatedHaptics(),
+    convenience init(online driver: OnlineDriver, haptics: any Haptics = SilentHaptics(),
                      sound: any SoundOutput = SilentSoundOutput(), controls: ControlSettings = ControlSettings(),
                      rulesSeen: RuleSeenStore = RuleSeenStore(), hints: HintEngine? = nil) {
         self.init(driver: driver, roster: driver.roster, haptics: haptics, sound: sound, controls: controls,
@@ -198,7 +198,7 @@ final class GameSession {
     /// `rulesSeen`: which rule numbers this device has seen called, for plain words (#23). In memory by default, so
     /// tests and fixtures never write the device's; the app passes one over its defaults. `hints`: the race's hint
     /// engine (#129), nil for none, as tests and fixtures have; the app passes one over the device's progress.
-    init(driver: any RaceDriver, roster: FleetRoster, haptics: any Haptics = GatedHaptics(),
+    init(driver: any RaceDriver, roster: FleetRoster, haptics: any Haptics = SilentHaptics(),
          sound: any SoundOutput = SilentSoundOutput(), controls: ControlSettings = ControlSettings(),
          rulesSeen: RuleSeenStore = RuleSeenStore(), hints: HintEngine? = nil) {
         self.driver = driver

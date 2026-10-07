@@ -2,8 +2,9 @@
 //
 // How the four services in this package use time and streams:
 // - A service is `Sendable` and `async` where it does I/O.
-// - State that changes on its own (the queue, the race session) comes as an `AsyncStream`; state that changes
-//   only by the caller's own calls (identity, terms) is returned by them, so no stream is needed.
+// - State that changes on its own (identity, the queue, the race session) comes as an `AsyncStream`: Game Center
+//   can sign the player out or change her restrictions at any time (#314). State that changes only by the
+//   caller's own calls (terms) is returned by them, so no stream is needed.
 // - Times are whole seconds or race ticks the service reports. Nothing here reads a clock.
 
 /// Game Center's opaque id for a player (`GKPlayer.gamePlayerID`). The server keys the player's profile by it (#16).
@@ -77,6 +78,10 @@ public enum IdentityError: Error, Equatable, Sendable {
 public protocol IdentityService: Sendable {
     /// Game Center's state now.
     func state() async -> GameCenterState
+    /// Game Center's state now, then each change as it comes (signing out or in, a restriction changing,
+    /// `signIn()`'s answer), for as long as the stream is held (#314). A racing suspension isn't Game Center's:
+    /// the queue's stream carries it (`QueueRefusal.suspended`) and the profile reports it.
+    func stateUpdates() -> AsyncStream<GameCenterState>
     /// The signed-in player's id, or nil when signed out.
     func gamePlayerID() async -> GamePlayerID?
     /// A signature for the signed-in player, for the server to verify. Throws `IdentityError.notSignedIn`

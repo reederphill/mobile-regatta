@@ -69,7 +69,7 @@ final class OnlineLaunch {
     /// for a Debug dev-instant race, which keeps the live frame's standings and its own loop.
     @ObservationIgnored private let results: OnlineResults?
 
-    init(server: RaceServer, haptics: any Haptics = GatedHaptics(), sound: any SoundOutput = SilentSoundOutput(),
+    init(server: RaceServer, haptics: any Haptics = SilentHaptics(), sound: any SoundOutput = SilentSoundOutput(),
          controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
          hints: (() -> HintEngine)? = nil, onHintRetired: ((String, HintRetirement) -> Void)? = nil,
          results: OnlineResults? = nil, ticket: @escaping () async throws -> [UInt8]) {

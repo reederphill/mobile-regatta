@@ -143,7 +143,10 @@ extension Fixtures {
         }
         let open = LobbyState(access: .open, canPostFreeText: true)
         return switch situation {
-        case .open: ScriptedLobbyService(scenario(open))
+        case .open:
+            ScriptedLobbyService(scenario(open, background: [
+                .message(LobbyMessage(id: MessageID("m5"), kind: .post(LobbyPost(author: wren, body: .text("still here?"))))),
+            ]))
         case .freeTextLocked: ScriptedLobbyService(scenario(LobbyState(access: .open, canPostFreeText: false)))
         case .muted: ScriptedLobbyService(scenario(LobbyState(access: .open, canPostFreeText: true, standing: .muted(until: 1_790_086_400, isAutomatic: true))))
         case .banned: ScriptedLobbyService(scenario(LobbyState(access: .open, canPostFreeText: true, standing: .banned)))

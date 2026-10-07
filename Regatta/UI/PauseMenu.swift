@@ -97,15 +97,6 @@ struct PauseMenu: View {
     private func pickerRow<Value: Hashable & CaseIterable>(
         _ title: String, selection: Binding<Value>, id: String, label: @escaping (Value) -> String
     ) -> some View where Value.AllCases: RandomAccessCollection {
-        HStack {
-            Text(title)
-            Spacer(minLength: 12)
-            Picker(title, selection: selection) {
-                ForEach(Array(Value.allCases), id: \.self) { Text(label($0)).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .fixedSize()
-            .accessibilityIdentifier(id)
-        }
+        SegmentedPickerRow(title: title, selection: selection, id: id, label: label)
     }
 }
