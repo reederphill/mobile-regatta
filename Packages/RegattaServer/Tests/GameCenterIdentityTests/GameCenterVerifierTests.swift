@@ -88,11 +88,62 @@ import X509
         "https://evilapple.com/key.cer",
         "https://example.com/key.cer",
         "not a url",
+        "https://gc.apple.com/public-key/gc-prod-10.cer",
+        "https://static.gc.apple.com:8443/public-key/gc-prod-10.cer",
+        "https://static.gc.apple.com/other/gc-prod-10.cer",
+        "https://static.gc.apple.com/public-key/gc-prod-10.cer?x=1",
+        "https://static.gc.apple.com/public-key/../admin",
+        "https://user@static.gc.apple.com/public-key/gc-prod-10.cer",
     ])
     func publicKeyURLOffAppleIsRefused(url: String) async throws {
         let chain = try TestChain()
         await #expect(throws: GameCenterVerificationError.untrustedPublicKeyURL(url)) {
             try await chain.verifier().verify(try chain.claim(url: url))
+        }
+    }
+
+    @Test(arguments: ["https://static.gc.apple.com/public-key/gc-prod-10.cer", "https://STATIC.gc.apple.com:443/public-key/gc-prod-10.cer"])
+    func gameCentersKeyURLPasses(url: String) async throws {
+        let chain = try TestChain()
+        #expect(try await chain.verifier().verify(try chain.claim(url: url)) == "T:_test1")
+    }
+
+    /// A burst of sign-ins naming fresh URLs doesn't fan out into unbounded fetches: past the cap they're refused.
+    @Test func fetchesPastTheCapAreRefused() async throws {
+        let chain = try TestChain()
+        let fetcher = HeldFetcher(bytes: chain.leafDER)
+        let verifier = AppleGameCenterVerifier(
+            config: GameCenterVerifierConfig(bundleID: TestChain.bundleID, trustedRoots: [chain.root], maxConcurrentFetches: 2),
+            fetcher: fetcher, now: { TestChain.now })
+        let claims = try (1...2).map { try chain.claim(url: "https://static.gc.apple.com/public-key/k\($0).cer") }
+        let held = claims.map { claim in Task { try await verifier.verify(claim) } }
+        while await fetcher.started < 2 { await Task.yield() }
+        await #expect(throws: GameCenterVerificationError.fetchFailed("too many certificate fetches at once")) {
+            try await verifier.verify(try chain.claim(url: "https://static.gc.apple.com/public-key/k3.cer"))
+        }
+        await fetcher.release()
+        for task in held { #expect(try await task.value == "T:_test1") }
+        #expect(try await verifier.verify(try chain.claim(url: "https://static.gc.apple.com/public-key/k1.cer")) == "T:_test1")
+    }
+
+    /// Game Center serves the leaf only; Apple's root signs an intermediate that signs the leaf. With the root alone
+    /// pinned, the chain can't be built; with the intermediate pinned beside it (one PEM file), it verifies, and the
+    /// intermediate is a link, not an anchor.
+    @Test func aLeafUnderAnIntermediateVerifiesWithTheIntermediatePinned() async throws {
+        let chain = try IntermediateChain()
+        let rootOnly = chain.verifier(GameCenterVerifierConfig(bundleID: TestChain.bundleID, trustedRoots: [chain.root]))
+        await #expect { try await rootOnly.verify(try chain.claim()) } throws: { error in
+            if case GameCenterVerificationError.untrustedCertificate = error { true } else { false }
+        }
+        let pem = try chain.intermediate.serializeAsPEM().pemString + "\n" + chain.root.serializeAsPEM().pemString + "\n"
+        let config = GameCenterVerifierConfig(bundleID: TestChain.bundleID, pinned: try GameCenterVerifierConfig.certificates(pem: pem))
+        #expect(config.trustedRoots == [chain.root])
+        #expect(config.intermediates == [chain.intermediate])
+        #expect(try await chain.verifier(config).verify(try chain.claim()) == "T:_test2")
+        // The intermediate alone is no anchor.
+        let intermediateOnly = chain.verifier(GameCenterVerifierConfig(bundleID: TestChain.bundleID, pinned: [chain.intermediate]))
+        await #expect { try await intermediateOnly.verify(try chain.claim()) } throws: { error in
+            if case GameCenterVerificationError.untrustedCertificate = error { true } else { false }
         }
     }
 
@@ -136,7 +187,8 @@ import X509
 }
 
 /// A real Game Center payload captured on a device (#175), when it's there:
-/// `Packages/RegattaServer/Tests/Fixtures/real/gc-identity.json`, with Apple's root in `apple-root.pem` beside it.
+/// `Packages/RegattaServer/Tests/Fixtures/real/gc-identity.json`, with Apple's root (and the intermediate that issued
+/// the leaf, as `REGATTA_APPLE_ROOT_PEM` holds them) in `apple-root.pem` beside it.
 /// The JSON: `teamPlayerID`, `gamePlayerID`, `bundleID`, `publicKeyURL`, `signature`, `salt` and `certificate` (base64,
 /// the DER Apple served at the URL when it was captured) and `timestamp` (milliseconds). Verified at its own
 /// timestamp, so its age doesn't matter. Skipped when absent, the expected state until #175.
@@ -159,11 +211,11 @@ import X509
     @Test(.enabled(if: FileManager.default.fileExists(atPath: payloadURL.path), "no Fixtures/real/gc-identity.json yet (#175)"))
     func realPayloadVerifiesAgainstApplesRoot() async throws {
         let payload = try JSONDecoder().decode(Payload.self, from: Data(contentsOf: Self.payloadURL))
-        let roots = try GameCenterVerifierConfig.certificates(
+        let pinned = try GameCenterVerifierConfig.certificates(
             pem: String(contentsOf: Self.directory.appendingPathComponent("apple-root.pem"), encoding: .utf8))
         let certificate = try #require(Data(base64Encoded: payload.certificate))
         let verifier = AppleGameCenterVerifier(
-            config: GameCenterVerifierConfig(bundleID: payload.bundleID, trustedRoots: roots),
+            config: GameCenterVerifierConfig(bundleID: payload.bundleID, pinned: pinned),
             fetcher: FixedFetcher(bytes: Array(certificate)),
             now: { Date(timeIntervalSince1970: Double(payload.timestamp) / 1000) })
         let claim = GameCenterIdentityClaim(

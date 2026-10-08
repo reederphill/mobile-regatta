@@ -263,7 +263,7 @@ with it, the signature is checked against Apple's chain. It reads:
 | `MAX_RACES` | `64` | races at once |
 | `TERMS_VERSION` | `1` | the Terms of Use version players must accept; a bump re-asks everyone |
 | `REGATTA_BUNDLE_ID`, `REGATTA_TEAM_ID` | `com.phillreeder.regatta`, `8S5TQ65X3B` | what Game Center signs, and the team (final values: #49) |
-| `REGATTA_APPLE_ROOT_PEM` | none | PEM file of the certificates Game Center's key must chain to; required outside dev |
+| `REGATTA_APPLE_ROOT_PEM` | none | PEM file with Apple's root and the intermediate that issues Game Center's key (Game Center serves the leaf only); self-signed certificates are the anchors, the rest chain links; required outside dev (ADR 0010) |
 | `REGATTA_DATABASE_URL` | none | Postgres (migrations run at start, orphaned races cancelled); unset in dev keeps accounts in memory |
 
 `POST /dev/instant-race?clients=N` starts a race now for N clients (1…16), with bots filling it to 10 boats,

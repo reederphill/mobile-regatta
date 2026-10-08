@@ -15,10 +15,10 @@ extension ServiceEndpoint {
         let identity = config.identity
         let verifier: any GameCenterVerifier
         if let pem = identity.appleRootsPEM {
-            let roots = try GameCenterVerifierConfig.certificates(pem: pem)
+            let pinned = try GameCenterVerifierConfig.certificates(pem: pem)
             verifier = AppleGameCenterVerifier(
-                config: GameCenterVerifierConfig(bundleID: identity.bundleID, trustedRoots: roots, freshness: identity.signatureFreshness),
-                fetcher: fetcher ?? HTTPSCertificateFetcher())
+                config: GameCenterVerifierConfig(bundleID: identity.bundleID, pinned: pinned, freshness: identity.signatureFreshness),
+                fetcher: try fetcher ?? HTTPSCertificateFetcher())
         } else if config.environment.isDev {
             verifier = DevGameCenterVerifier(freshness: identity.signatureFreshness)
         } else {
@@ -61,16 +61,19 @@ extension ServiceEndpoint {
 }
 
 /// Fetches Game Center's certificate over HTTPS (HTTP/1.1 on NIO with NIOSSL: no FoundationNetworking on Linux). The
-/// verifier has already checked the URL is https on an apple.com host; the TLS trust is the system's.
+/// verifier has already checked the URL is Game Center's key host and path; the TLS trust is the system's, loaded
+/// once into the context every fetch shares.
 public struct HTTPSCertificateFetcher: CertificateFetching {
     /// Game Center's certificate is a couple of KB.
     static let maxBody = 64 * 1024
     let group: any EventLoopGroup
     let timeout: Duration
+    let context: NIOSSLContext
 
-    public init(group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton, timeout: Duration = .seconds(10)) {
+    public init(group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton, timeout: Duration = .seconds(10)) throws {
         self.group = group
         self.timeout = timeout
+        context = try NIOSSLContext(configuration: .makeClientConfiguration())
     }
 
     public enum FetchError: Error, Equatable, Sendable {
@@ -80,11 +83,21 @@ public struct HTTPSCertificateFetcher: CertificateFetching {
         case incomplete
     }
 
+    /// The request line's target: the path and query as the URL encodes them (never decoded, so a `%0d%0a` stays
+    /// three characters each and can't break the request line), and nothing outside printable ASCII.
+    static func requestTarget(_ url: URL) throws -> String {
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { throw FetchError.badURL }
+        let path = parts.percentEncodedPath.isEmpty ? "/" : parts.percentEncodedPath
+        let target = path + (parts.percentEncodedQuery.map { "?" + $0 } ?? "")
+        guard target.unicodeScalars.allSatisfy({ $0.value > 0x20 && $0.value < 0x7F }) else { throw FetchError.badURL }
+        return target
+    }
+
     public func fetch(_ url: URL) async throws -> [UInt8] {
         guard let host = url.host, url.scheme == "https" else { throw FetchError.badURL }
         let port = url.port ?? 443
-        let path = url.path.isEmpty ? "/" : url.path + (url.query.map { "?" + $0 } ?? "")
-        let context = try NIOSSLContext(configuration: .makeClientConfiguration())
+        let path = try Self.requestTarget(url)
+        let context = context
         let channel = try await ClientBootstrap(group: group)
             .connectTimeout(.seconds(Int64(timeout.components.seconds)))
             .connect(host: host, port: port) { channel in

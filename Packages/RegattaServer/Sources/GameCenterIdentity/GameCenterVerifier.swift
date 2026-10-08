@@ -5,8 +5,8 @@ import X509
 import _CryptoExtras
 
 // Game Center identity verification (#145): the client's `fetchItems(forIdentityVerificationSignature:)` gives a
-// public key URL, a signature, a salt and a timestamp; the server fetches the certificate at the URL, chains it to
-// Apple's root, and checks the RSA PKCS#1 v1.5 SHA-256 signature over
+// public key URL, a signature, a salt and a timestamp; the server fetches the certificate at the URL, chains it
+// through the pinned intermediate to Apple's root, and checks the RSA PKCS#1 v1.5 SHA-256 signature over
 //
 //     teamPlayerID (UTF-8) | bundle id (UTF-8) | timestamp (UInt64, big-endian) | salt
 //
@@ -45,7 +45,7 @@ public enum GameCenterSignedPayload {
 }
 
 public enum GameCenterVerificationError: Error, Equatable, Sendable {
-    /// Not https, or not on an `apple.com` host.
+    /// Not https on Game Center's key host and path.
     case untrustedPublicKeyURL(String)
     /// The certificate couldn't be fetched.
     case fetchFailed(String)
@@ -74,18 +74,36 @@ public protocol CertificateFetching: Sendable {
 /// What the verifier checks against.
 public struct GameCenterVerifierConfig: Sendable {
     public var bundleID: String
-    /// The certificates trusted as anchors (Apple's root, plus any intermediate the operator pins).
+    /// The trust anchors: Apple's root.
     public var trustedRoots: [Certificate]
+    /// Certificates the leaf may chain through to a root (Apple's issuing intermediate). Game Center serves the leaf
+    /// only, so the intermediate has to be configured: it is not an anchor, only a link the chain may use.
+    public var intermediates: [Certificate]
     /// How far the timestamp may be from now, either side.
     public var freshness: Duration
-    /// Host suffix the public key URL must have.
-    public var allowedHostSuffix: String
+    /// The one host Game Center's public key URL may name (https, port 443).
+    public var allowedHost: String
+    /// The path the public key URL must start with.
+    public var allowedPathPrefix: String
+    /// Fetches in flight at once; a sign-in past it is refused (`fetchFailed`) rather than queued.
+    public var maxConcurrentFetches: Int
 
-    public init(bundleID: String, trustedRoots: [Certificate], freshness: Duration = .seconds(300), allowedHostSuffix: String = ".apple.com") {
+    public init(bundleID: String, trustedRoots: [Certificate], intermediates: [Certificate] = [], freshness: Duration = .seconds(300),
+                allowedHost: String = "static.gc.apple.com", allowedPathPrefix: String = "/public-key/", maxConcurrentFetches: Int = 4) {
         self.bundleID = bundleID
         self.trustedRoots = trustedRoots
+        self.intermediates = intermediates
         self.freshness = freshness
-        self.allowedHostSuffix = allowedHostSuffix
+        self.allowedHost = allowedHost
+        self.allowedPathPrefix = allowedPathPrefix
+        self.maxConcurrentFetches = maxConcurrentFetches
+    }
+
+    /// The config for the certificates in an operator's PEM file: the self-issued ones (Apple's root) are the
+    /// anchors, the rest (the intermediate that issues Game Center's leaf) only chain links.
+    public init(bundleID: String, pinned: [Certificate], freshness: Duration = .seconds(300)) {
+        let roots = pinned.filter { $0.subject == $0.issuer }
+        self.init(bundleID: bundleID, trustedRoots: roots, intermediates: pinned.filter { $0.subject != $0.issuer }, freshness: freshness)
     }
 
     /// Every certificate in a PEM file (one or more `BEGIN CERTIFICATE` blocks).
@@ -132,19 +150,28 @@ public final class AppleGameCenterVerifier: GameCenterVerifier {
         return claim.teamPlayerID
     }
 
+    /// Only Game Center's key: https on the pinned host, port 443, under the key path, nothing else in the URL.
     private func trustedURL(_ string: String) throws -> URL {
-        guard let url = URL(string: string), url.scheme?.lowercased() == "https", let host = url.host?.lowercased(),
-              host.hasSuffix(config.allowedHostSuffix) || "." + host == config.allowedHostSuffix
+        guard let url = URL(string: string), let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              parts.scheme?.lowercased() == "https", parts.host?.lowercased() == config.allowedHost.lowercased(),
+              parts.port == nil || parts.port == 443, parts.user == nil, parts.password == nil,
+              parts.percentEncodedQuery == nil, parts.fragment == nil,
+              parts.percentEncodedPath.hasPrefix(config.allowedPathPrefix), !parts.percentEncodedPath.contains("..")
         else { throw GameCenterVerificationError.untrustedPublicKeyURL(string) }
         return url
     }
 
     private func certificate(at url: URL) async throws -> Certificate {
         if let cached = await cache.certificate(for: url) { return cached }
+        guard await cache.beginFetch(limit: config.maxConcurrentFetches) else {
+            throw GameCenterVerificationError.fetchFailed("too many certificate fetches at once")
+        }
         let bytes: [UInt8]
         do {
             bytes = try await fetcher.fetch(url)
+            await cache.endFetch()
         } catch {
+            await cache.endFetch()
             throw GameCenterVerificationError.fetchFailed("\(error)")
         }
         let certificate: Certificate
@@ -167,7 +194,7 @@ public final class AppleGameCenterVerifier: GameCenterVerifier {
 
     private func validateChain(_ leaf: Certificate, at time: Date) async throws {
         var verifier = Verifier(rootCertificates: CertificateStore(config.trustedRoots)) { RFC5280Policy(validationTime: time) }
-        switch await verifier.validate(leaf: leaf, intermediates: CertificateStore()) {
+        switch await verifier.validate(leaf: leaf, intermediates: CertificateStore(config.intermediates)) {
         case .validCertificate: return
         case .couldNotValidate(let failures):
             throw GameCenterVerificationError.untrustedCertificate(failures.map { "\($0.policyFailureReason)" }.joined(separator: "; "))
@@ -179,7 +206,17 @@ public final class AppleGameCenterVerifier: GameCenterVerifier {
 /// cached certificate past its expiry fails then.
 actor CertificateCache {
     private var certificates: [URL: Certificate] = [:]
+    private var fetching = 0
     private static let capacity = 16
+
+    /// Takes a fetch slot, or false when `limit` are in flight.
+    func beginFetch(limit: Int) -> Bool {
+        guard fetching < limit else { return false }
+        fetching += 1
+        return true
+    }
+
+    func endFetch() { fetching -= 1 }
 
     func certificate(for url: URL) -> Certificate? { certificates[url] }
 

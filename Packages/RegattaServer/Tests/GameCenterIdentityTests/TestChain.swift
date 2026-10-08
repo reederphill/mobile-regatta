@@ -81,3 +81,83 @@ final class FixedFetcher: CertificateFetching, @unchecked Sendable {
         return bytes
     }
 }
+
+/// Apple's shape (#145 review): root → intermediate → leaf, with Game Center serving the leaf only.
+struct IntermediateChain: Sendable {
+    let root: Certificate
+    let intermediate: Certificate
+    let leaf: Certificate
+    let leafKey: _RSA.Signing.PrivateKey
+
+    init() throws {
+        let base = try TestChain()
+        let rootKey = P256.Signing.PrivateKey(), intermediateKey = P256.Signing.PrivateKey()
+        let rootName = try DistinguishedName { CommonName("Test Apple Root") }
+        let intermediateName = try DistinguishedName { CommonName("Test Apple Intermediate") }
+        let validity = TestChain.now.addingTimeInterval(-86_400 * 365)...TestChain.now.addingTimeInterval(86_400 * 365)
+        root = try Certificate(
+            version: .v3, serialNumber: Certificate.SerialNumber(), publicKey: Certificate.PrivateKey(rootKey).publicKey,
+            notValidBefore: validity.lowerBound, notValidAfter: validity.upperBound,
+            issuer: rootName, subject: rootName, signatureAlgorithm: .ecdsaWithSHA256,
+            extensions: try Certificate.Extensions {
+                Critical(BasicConstraints.isCertificateAuthority(maxPathLength: nil))
+                Critical(KeyUsage(keyCertSign: true))
+            },
+            issuerPrivateKey: Certificate.PrivateKey(rootKey))
+        intermediate = try Certificate(
+            version: .v3, serialNumber: Certificate.SerialNumber(), publicKey: Certificate.PrivateKey(intermediateKey).publicKey,
+            notValidBefore: validity.lowerBound, notValidAfter: validity.upperBound,
+            issuer: rootName, subject: intermediateName, signatureAlgorithm: .ecdsaWithSHA256,
+            extensions: try Certificate.Extensions {
+                Critical(BasicConstraints.isCertificateAuthority(maxPathLength: 0))
+                Critical(KeyUsage(keyCertSign: true))
+            },
+            issuerPrivateKey: Certificate.PrivateKey(rootKey))
+        leafKey = base.leafKey
+        leaf = try Certificate(
+            version: .v3, serialNumber: Certificate.SerialNumber(), publicKey: Certificate.PrivateKey(leafKey).publicKey,
+            notValidBefore: TestChain.now.addingTimeInterval(-86_400), notValidAfter: TestChain.now.addingTimeInterval(86_400 * 30),
+            issuer: intermediateName, subject: try DistinguishedName { CommonName("gc-test-2") }, signatureAlgorithm: .ecdsaWithSHA256,
+            extensions: try Certificate.Extensions { Critical(KeyUsage(digitalSignature: true)) },
+            issuerPrivateKey: Certificate.PrivateKey(intermediateKey))
+    }
+
+    var leafDER: [UInt8] {
+        var serializer = DER.Serializer()
+        try! serializer.serialize(leaf)
+        return serializer.serializedBytes
+    }
+
+    func claim(teamPlayerID: String = "T:_test2") throws -> GameCenterIdentityClaim {
+        let salt: [UInt8] = [3, 1, 4, 1, 5, 9]
+        let millis = UInt64(TestChain.now.timeIntervalSince1970 * 1000)
+        let payload = GameCenterSignedPayload.bytes(teamPlayerID: teamPlayerID, bundleID: TestChain.bundleID, timestamp: millis, salt: salt)
+        let signature = try leafKey.signature(for: SHA256.hash(data: payload), padding: .insecurePKCS1v1_5)
+        return GameCenterIdentityClaim(teamPlayerID: teamPlayerID, gamePlayerID: "G:test2", publicKeyURL: TestChain.url,
+                                       signature: Array(signature.rawRepresentation), salt: salt, timestamp: millis)
+    }
+
+    func verifier(_ config: GameCenterVerifierConfig) -> AppleGameCenterVerifier {
+        AppleGameCenterVerifier(config: config, fetcher: FixedFetcher(bytes: leafDER), now: { TestChain.now })
+    }
+}
+
+/// Holds every fetch until released, counting those in flight.
+actor HeldFetcher: CertificateFetching {
+    let bytes: [UInt8]
+    private(set) var started = 0
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    init(bytes: [UInt8]) { self.bytes = bytes }
+
+    func fetch(_ url: URL) async throws -> [UInt8] {
+        started += 1
+        await withCheckedContinuation { waiting.append($0) }
+        return bytes
+    }
+
+    func release() {
+        for continuation in waiting { continuation.resume() }
+        waiting = []
+    }
+}
