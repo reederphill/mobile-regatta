@@ -6,14 +6,6 @@ import XCTest
 /// the references; the owner approves them before adoption.
 extension RenderFixtureUITests {
     @objc @MainActor func testPracticeMenusMatchReferences() throws {
-        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad,
-                      "render references are recorded on iPhone 17 only; the iPad run doesn't compare them")
-        // Every render compares before a failure ends the test, so each one that moved (or has no reference yet)
-        // reaches render-actuals in one CI run.
-        continueAfterFailure = true
-        defer { continueAfterFailure = false }
-        for name in ["practice-setup", "pause-menu"] {
-            try assertMatchesReference(name)
-        }
+        try assertAllMatchReferences(["practice-setup", "pause-menu"])
     }
 }

@@ -31,6 +31,10 @@ jobs:
       app: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.app }}
       viewport: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.viewport }}
       imagediff: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.imagediff }}
+      render: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.render }}
+      # The colour-filter and thermal-tier sweeps: on a pull request only when its change reaches what they guard;
+      # every push to main, and every nightly or manual run, runs them.
+      sweeps: ${{ github.event_name != 'pull_request' || steps.filter.outputs.sweeps }}
       online: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || steps.filter.outputs.online }}
     steps:
       - uses: actions/checkout@v4
@@ -82,6 +86,88 @@ jobs:
               - "RegattaUITests/ReferencePolicy.swift"
               - "RegattaUITests/RenderFixtureTestCase.swift"
               - "RegattaUITests/RenderFixtureUITests.swift"
+            # What can move a render fixture's pixels: the `render` job runs only for these. Conservative, since a
+            # render that moves unseen merges: everything the app draws a fixture with (the race scene and HUD, the
+            # menus, briefing, results, help and My boat galleries, their app plumbing, assets and build settings),
+            # the packages they read (RegattaCore's simulation, replays and liveries; RegattaServices' types the
+            # results and hints use), and the fixtures, references and harness. Not the online client
+            # (Regatta/Online, RegattaClient, RegattaProtocol: no fixture races online), sound, unit tests or the
+            # other UI tests.
+            render:
+              - *ci
+              - "Regatta/App/**"
+              - "Regatta/Game/**"
+              - "Regatta/UI/**"
+              - "Regatta/Tuning/**"
+              - "Regatta/Assets.xcassets/**"
+              - "Regatta/Info.plist"
+              - "Regatta/Acknowledgements.plist"
+              - "Regatta.xcodeproj/**"
+              - "ThirdParty/**"
+              - "Packages/RegattaCore/Sources/**"
+              - "Packages/RegattaCore/Package.*"
+              - "Packages/RegattaServices/Sources/**"
+              - "Packages/RegattaServices/Package.*"
+              - "RegattaUITests/Fixtures/**"
+              - "RegattaUITests/References/**"
+              - "RegattaUITests/RenderFixture*.swift"
+              - "RegattaUITests/RaceUITestCase.swift"
+              - "RegattaUITests/ImageDiff.swift"
+              - "RegattaUITests/ReferencePolicy.swift"
+            # The sweeps, RenderFixtureFilterUITests (the fixtures through each colour-vision filter) and
+            # RenderFixtureThermalUITests (the cues identical across thermal tiers), run on a pull request only for
+            # these: whatever draws the race the filters go over (all of Regatta/Game, the race view, HUD, minimap
+            # and their palette, so a change to a cue's red or green glow still checks its colour-blind legibility),
+            # the filter itself (VisionEffect, VisionFilter in RenderFixture), the render quality ladder
+            # (RenderQualityPolicy in Game, RenderQualityMonitor, LaunchOptions' -thermal and -cuesOnly), the race's
+            # host in the app, the packages the race reads, the swept fixtures and references, and the harness. A
+            # menu, briefing, results, help or My boat change, or another fixture's reference, skips them.
+            sweeps:
+              - *ci
+              - "Regatta/Game/**"
+              - "Regatta/UI/RaceView.swift"
+              - "Regatta/UI/HUDView.swift"
+              - "Regatta/UI/MinimapView.swift"
+              - "Regatta/UI/RaceControls.swift"
+              - "Regatta/UI/RaceStatusProbe.swift"
+              - "Regatta/UI/VisionEffect.swift"
+              - "Regatta/UI/Theme/**"
+              - "Regatta/App/AppModel.swift"
+              - "Regatta/App/DeviceSettings.swift"
+              - "Regatta/App/FixtureSequence.swift"
+              - "Regatta/App/LaunchOptions.swift"
+              - "Regatta/App/RaceCover.swift"
+              - "Regatta/App/RenderQualityMonitor.swift"
+              - "Regatta/App/RootView.swift"
+              - "Regatta/App/SceneDelegate.swift"
+              - "Regatta/Tuning/**"
+              - "Regatta/Assets.xcassets/**"
+              - "Regatta/Info.plist"
+              - "Regatta.xcodeproj/**"
+              - "Packages/RegattaCore/Sources/**"
+              - "Packages/RegattaCore/Package.*"
+              - "Packages/RegattaServices/Sources/**"
+              - "Packages/RegattaServices/Package.*"
+              - "RegattaUITests/Fixtures/prestart*"
+              - "RegattaUITests/Fixtures/water-*"
+              - "RegattaUITests/Fixtures/fleet*"
+              - "RegattaUITests/Fixtures/hud-leaderboard*"
+              - "RegattaUITests/Fixtures/chart-*"
+              - "RegattaUITests/Fixtures/cues*"
+              - "RegattaUITests/Fixtures/rules-*"
+              - "RegattaUITests/References/**/prestart*"
+              - "RegattaUITests/References/**/water-*"
+              - "RegattaUITests/References/**/fleet*"
+              - "RegattaUITests/References/**/hud-leaderboard*"
+              - "RegattaUITests/References/**/chart-*"
+              - "RegattaUITests/References/**/cues*"
+              - "RegattaUITests/References/**/rules-*"
+              - "RegattaUITests/RenderFixtureFilterUITests.swift"
+              - "RegattaUITests/RenderFixtureThermalUITests.swift"
+              - "RegattaUITests/RenderFixtureTestCase.swift"
+              - "RegattaUITests/RaceUITestCase.swift"
+              - "RegattaUITests/ImageDiff.swift"
+              - "RegattaUITests/ReferencePolicy.swift"
             # Online code: the end-to-end run needs a macOS slot, so it runs only for these.
             online:
               - *ci
@@ -268,6 +354,8 @@ jobs:
           xcodebuild test-without-building -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
             -skip-testing:RegattaUITests/RenderFixtureUITests \
+            -skip-testing:RegattaUITests/RenderFixtureFilterUITests \
+            -skip-testing:RegattaUITests/RenderFixtureThermalUITests \
             -retry-tests-on-failure -test-iterations 2 \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 300 \
             -maximum-test-execution-time-allowance 300 \
@@ -296,17 +384,23 @@ jobs:
             Regatta-iPad.xcresult
           if-no-files-found: ignore
 
-  # The render fixtures (RenderFixtureUITests: HUD, leaderboard, fleet, charts, 1-3 min each), split out of `app` so
-  # that neither job runs out of time, and a moved render fails at once with its render uploaded as render-actuals.
+  # The render fixtures (RenderFixtureUITests: HUD, leaderboard, fleet, charts, menus; and the sweeps,
+  # RenderFixtureFilterUITests and RenderFixtureThermalUITests), split out of `app` so that neither job runs out of
+  # time, and a moved render fails at once with its render uploaded as render-actuals. Only for a change that can move
+  # a render (the `render` filter).
   render:
     name: Render references on the iOS Simulator
     needs: changes
-    if: needs.changes.outputs.app == 'true'
+    if: needs.changes.outputs.render == 'true'
     # Pinned so the SDK and simulator runtime only change on purpose: Xcode 26.6, iOS 26.5.
     runs-on: macos-26
-    # About 10 min to build and boot; the render step now runs 30-40 min on a loaded runner (whole jobs took 39-45
-    # min on 2026-10-07, one 52 min), no retry: 65 min is room for a hung fixture (5 min allowance each) and a slow
-    # boot. The image-diff self-tests add a few minutes, and only when a change reaches the tool.
+    # About 2.5 min to build and up to 9 to boot. On 2026-10-07, with a launch per fixture and the sweeps on every
+    # pull request, the render step ran 30-40 min on a loaded runner (whole jobs 39-45 min, one 52). Each test now
+    # renders its fixtures in one launch (`-fixtures`, a launch's 15-20 s saved per fixture after the first), and a
+    # pull request runs the sweeps (about a third of the renders) only when its change reaches them: expect the
+    # render step at roughly 10-15 min with the sweeps and 7-10 without, until CI timings say otherwise. No retry;
+    # 65 min is room for a hung fixture (5 min allowance each) and a slow boot. The image-diff self-tests add a few
+    # minutes, and only when a change reaches the tool.
     timeout-minutes: 65
     env:
       # DEVELOPER_DIR rather than xcode-select: switching with xcode-select hid the simulators.
@@ -347,11 +441,20 @@ jobs:
                           sys.exit(0)
           sys.exit(1)")
           xcrun simctl bootstatus "$device" -b
+      # The sweeps (the colour-filter fixtures and the thermal-tier identity) only when the change reaches them (the
+      # sweeps filter; always on main and nightly).
       - name: xcodebuild test (render references) on iPhone
         run: |
+          tests=(-only-testing:RegattaUITests/RenderFixtureUITests)
+          if [[ "${{ needs.changes.outputs.sweeps }}" == true ]]; then
+            tests+=(-only-testing:RegattaUITests/RenderFixtureFilterUITests)
+            tests+=(-only-testing:RegattaUITests/RenderFixtureThermalUITests)
+          else
+            echo "The change doesn't reach the colour-filter or thermal-tier sweeps: skipping them."
+          fi
           xcodebuild test-without-building -project Regatta.xcodeproj -scheme Regatta \
             -destination 'platform=iOS Simulator,name=iPhone 17,OS=26.5' \
-            -only-testing:RegattaUITests/RenderFixtureUITests \
+            "${tests[@]}" \
             -skip-testing:RegattaUITests/RenderFixtureUITests/testFixtureRendersIdenticallyTwice \
             -skip-testing:RegattaUITests/RenderFixtureUITests/testOnePixelChangeOnARealRenderPasses \
             -skip-testing:RegattaUITests/RenderFixtureUITests/testMovedBoatFailsWithTheDiffAttached \

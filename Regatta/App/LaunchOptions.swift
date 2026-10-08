@@ -10,6 +10,9 @@ import RegattaServices
 /// - `-seed <n>` sails every race on race seed `n` instead of a random one, with the wind seed pinned
 ///   to it by `RaceConfig.windSeed(pinnedTo:)`, so the whole race reproduces.
 /// - `-fixture <name>` names a render fixture to replay (#62).
+/// - `-fixtures <name>,<name>,…` (with `-uitesting`) replays several render fixtures in one launch, the first at launch
+///   and each next one when the UI test asks for it (`FixtureSequence`), on a fresh window and model each time, so a
+///   render is the one its own launch draws. Saves the render job a launch per fixture.
 /// - `-timescale <n>` runs the simulation at `n`× real time.
 /// - `-uitesting` marks a UI test run.
 /// - `-resetSettings` (with `-uitesting`) clears the device's settings at launch, so a UI test that changes them starts
@@ -95,6 +98,8 @@ struct LaunchOptions: Equatable {
     var resetSettings = false
     var seed: UInt64?
     var fixture: String?
+    /// `-fixtures`' names, in order; `fixture` is the one showing. Empty without `-fixtures`.
+    var fixtureSequence: [String] = []
     var timescale = 1.0
     var steeringScheme: SteeringScheme?
     var camera: CameraMode?
@@ -151,7 +156,7 @@ struct LaunchOptions: Equatable {
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             #endif
-            case "-seed", "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
+            case "-seed", "-fixture", "-fixtures", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
                  "-appearance", "-vision", "-briefing", "-myBoat", "-completedRaces", "-thermal":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
@@ -173,7 +178,7 @@ struct LaunchOptions: Equatable {
 
     private static let flags: Set<String> = {
         var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
-                          "-fixture", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
+                          "-fixture", "-fixtures", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
                           "-appearance", "-vision", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces",
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
@@ -198,6 +203,14 @@ struct LaunchOptions: Equatable {
             if let n = UInt64(value) { seed = n } else { reject(argument, value, "a whole number ≥ 0") }
         case "-fixture":
             fixture = value
+        case "-fixtures":
+            let names = value.split(separator: ",").map(String.init).filter { !$0.isEmpty }
+            if names.isEmpty {
+                reject(argument, value, "fixture names separated by commas")
+            } else {
+                fixtureSequence = names
+                fixture = names[0]
+            }
         case "-timescale":
             if let n = Double(value), n.isFinite, n > 0 { timescale = n } else { reject(argument, value, "a number > 0") }
         case "-scheme":
@@ -250,6 +263,13 @@ struct LaunchOptions: Equatable {
 
     private mutating func reject(_ argument: String, _ value: String, _ expected: String) {
         problems.append("\(argument) \(value): expected \(expected)")
+    }
+
+    /// These options with `name` as the fixture showing: the next fixture of a `-fixtures` sequence.
+    func showingFixture(_ name: String) -> LaunchOptions {
+        var options = self
+        options.fixture = name
+        return options
     }
 
     /// Whether the Debug FPS, node and draw-count overlay shows. UI tests and render fixtures hide it,

@@ -6,12 +6,6 @@ import XCTest
 /// approves them before adoption.
 extension RenderFixtureUITests {
     @objc @MainActor func testHelpMatchesReferences() throws {
-        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad,
-                      "render references are recorded on iPhone 17 only; the iPad run doesn't compare them")
-        continueAfterFailure = true
-        defer { continueAfterFailure = false }
-        for name in ["help", "help-symbols"] {
-            try assertMatchesReference(name)
-        }
+        try assertAllMatchReferences(["help", "help-symbols"])
     }
 }
