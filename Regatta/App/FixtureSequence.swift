@@ -52,9 +52,10 @@ import Foundation
     }
 }
 
-/// The Darwin notification callback: a C function, so it hops to the main actor with the name alone.
-private func fixtureSequenceNotified(_ center: CFNotificationCenter?, _ observer: UnsafeMutableRawPointer?,
-                                     _ name: CFNotificationName?, _ object: UnsafeRawPointer?, _ userInfo: CFDictionary?) {
+/// The Darwin notification callback: a C function, so it hops to the main actor with the name alone. A nonisolated
+/// closure literal, not a `func`: the app target's default main-actor isolation would make a `func` isolated, and a C
+/// function pointer can't be formed from one.
+nonisolated(unsafe) private let fixtureSequenceNotified: CFNotificationCallback = { _, _, name, _, _ in
     guard let raw = name?.rawValue else { return }
     let name = raw as String
     Task { @MainActor in FixtureSequence.received(name) }
