@@ -114,6 +114,14 @@ import RegattaCore
             var style = BotConductTests.skill1
             style.skill = skill
             brain = BotBrain(style: style, profile: profile, seed: UInt64(seat + 1), weaknesses: weaknesses, caution: caution)
+            if profile == nil {
+                // #366: a scripted encounter sails a live bot's own tactics (#102), as at the bottom of the National band,
+                // with her own skill's execution and weaknesses: the ramp to the tactician's (seeking clear air,
+                // anticipating, setting up at the favoured end) would steer her away from the boat the scene puts her
+                // against, and the scene would test nothing. The ramp's conduct is the bot matrix's (National tier).
+                brain.tactics = Tactics(profile: nil, skill: min(skill, BotTier.national.skillBand.lowerBound),
+                                        style: style, weaknesses: brain.weaknesses)
+            }
             brain.plannedTack = plannedTack ?? race.boats[seat].tack
         }
 

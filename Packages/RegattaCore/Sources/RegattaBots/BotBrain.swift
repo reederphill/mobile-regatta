@@ -98,8 +98,9 @@ public struct BotDecision: Hashable, Sendable {
 /// `BotBrain*.swift` file.
 struct BotBrain: Sendable {
     let style: BotStyle
-    /// What she plays beyond sailing the groove to the marks.
-    let tactics: Tactics
+    /// What she plays beyond sailing the groove to the marks. Set once, at her making; a `var` only so the scripted
+    /// encounter tests can sail a live bot without #366's National ramp (`BotConductTests.Pilot`).
+    var tactics: Tactics
     var plannedTack: Tack = .starboard
     /// The tactician's spot on the start line as she reads its bias (#105, `Tactics.startsAtFavouredEnd`, `readLineBias`),
     /// 0 the pin … 1 the committee boat; nil until she has read it, or for any other bot.

@@ -321,14 +321,20 @@ import RegattaCore
         #expect(club == perfect, "only her rolls differ")
     }
 
-    /// #105: the tactician's downwind and start tactics are hers (and the Club-execution tactician's) alone; no live
-    /// bot or other profile plays them. Not the hunter: she stays #355's tactician, hunting (#105 fix round 1).
+    /// #105: the tactician's downwind and start tactics are hers (and the Club-execution tactician's) alone; no other
+    /// profile plays them, and a live bot only high in the National band (#366,
+    /// `BotTacticsTests.liveTacticsRampMonotonicThroughNational`). Not the hunter: she stays #355's tactician, hunting
+    /// (#105 fix round 1).
     @Test func onlyTheTacticianPlaysTheRunAndTheLine() {
         for profile in [BotProfile.tactician, .tacticianClubExecution] {
             let tactics = Tactics(profile: profile, skill: 0.9)
             #expect(tactics.runsToPressure && tactics.gybesOutOfShadow && tactics.startsAtFavouredEnd, "\(profile)")
         }
-        for profile in [nil, BotProfile.baseline, .blipTacker, .executor, .hunter] {
+        for skill in [0.0, 0.5, BotTier.national.skillBand.lowerBound] {
+            let tactics = Tactics(profile: nil, skill: skill)
+            #expect(!tactics.runsToPressure && !tactics.gybesOutOfShadow && !tactics.startsAtFavouredEnd)
+        }
+        for profile in [BotProfile.baseline, .blipTacker, .executor, .hunter] {
             for skill in [0.0, 0.5, 1.0] {
                 let tactics = Tactics(profile: profile, skill: skill)
                 #expect(!tactics.runsToPressure && !tactics.gybesOutOfShadow && !tactics.startsAtFavouredEnd)
