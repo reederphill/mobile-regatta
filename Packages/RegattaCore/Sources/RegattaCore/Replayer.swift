@@ -34,8 +34,12 @@ public enum Replayer {
     ///
     /// The files resolve from `catalog`, then this build's bundle (`RaceFiles(resolving:from:)`), and
     /// throw as that does, before anything is simulated.
+    ///
+    /// `each` reads the race at every tick, from the first, before the next is stepped (#404: a tool choosing a
+    /// render fixture's freeze tick by a condition); it mustn't step or steer the race.
     public static func replay(
-        _ log: RaceLog, requireMatchingVersion: Bool = true, catalog: RaceFileCatalog = RaceFileCatalog()
+        _ log: RaceLog, requireMatchingVersion: Bool = true, catalog: RaceFileCatalog = RaceFileCatalog(),
+        each: (Race) throws -> Void = { _ in }
     ) throws -> Race {
         if requireMatchingVersion && log.header.simulationVersion != simulationVersion {
             throw ReplayError.simulationVersion(log: log.header.simulationVersion, build: simulationVersion)
@@ -64,6 +68,7 @@ public enum Replayer {
         }
 
         try recordSeatEvents()
+        try each(race)
         while race.tick < log.finalTick {
             let next = race.tick + 1
             while nextInput < log.inputs.count {
@@ -81,6 +86,7 @@ public enum Replayer {
             race.step()
             guard race.tick == next else { throw ReplayError.raceOverEarly(atTick: race.tick) }
             try recordSeatEvents()
+            try each(race)
         }
         if nextInput < log.inputs.count { throw ReplayError.outOfOrderInput(index: nextInput) }
         if nextSeatEvent < log.seatEvents.count { throw ReplayError.outOfOrderSeatEvent(index: nextSeatEvent) }

@@ -170,12 +170,15 @@ import UIKit
             session.scene.update(0)
             return session
         }
+        // Each twin is its fixture's frame (#404: the tick is the one `scripts/record-fixtures.sh`'s condition picks).
+        let (callTick, penaltyTick) = try (RenderFixture.load(named: "rules-call", in: Self.fixtures).0.freezeTick,
+                                           RenderFixture.load(named: "rules-penalty", in: Self.fixtures).0.freezeTick)
         for vision in VisionFilter.allCases {
             let suffix = vision == .none ? "" : "-\(vision.rawValue)"
             let (call, _) = try RenderFixture.load(named: "rules-call" + suffix, in: Self.fixtures)
             let (penalty, _) = try RenderFixture.load(named: "rules-penalty" + suffix, in: Self.fixtures)
             #expect(call.vision == vision && penalty.vision == vision && call.ruleCues == true && penalty.ruleCues == true)
-            #expect(call.freezeTick == 4880 && penalty.freezeTick == 4690)
+            #expect(call.freezeTick == callTick && penalty.freezeTick == penaltyTick)
         }
 
         let call = try session("rules-call")

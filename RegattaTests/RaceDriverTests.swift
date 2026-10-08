@@ -223,16 +223,46 @@ import RegattaCore
 
 @MainActor @Suite struct PracticeDriverTests {
     /// A bot in both seats, one lap: cheap enough to sail headless to the close on the main actor in a Debug build.
-    static let headlessRace = RaceConfig(opponents: 1, laps: 1, prestartSeconds: 30, seed: 7,
-                                         windSeed: RaceConfig.windSeed(pinnedTo: 7), botSailsYourBoat: true)
+    static func headlessRace(seed: UInt64) -> RaceConfig {
+        RaceConfig(opponents: 1, laps: 1, prestartSeconds: 30, seed: seed,
+                   windSeed: RaceConfig.windSeed(pinnedTo: seed), botSailsYourBoat: true)
+    }
+
+    /// `headlessRace` on the first seed from 7 on which your bot finishes at least 30 s before the race's close (#404):
+    /// a seed where she's still racing at the close would hang the tests that sail it. Seed 7 today: she finishes at
+    /// tick 6,000 and the race closes at 7,450 (with the ribbon wake, #377). Chosen once per process.
+    static func headlessRace() throws -> RaceConfig {
+        if let chosenHeadlessRace { return chosenHeadlessRace }
+        let config = headlessRace(seed: try firstSeed(in: 7...18) { finishesWellBeforeTheClose(headlessRace(seed: $0)) })
+        chosenHeadlessRace = config
+        return config
+    }
+
+    private static var chosenHeadlessRace: RaceConfig?
+
+    /// Whether your bot, sailing `config` headless, finishes with at least 30 s to the close as it stands when she does.
+    /// While the close isn't set (`closeTick` nil) it sails on and measures from the first tick it is; a race that
+    /// ends, or runs 1,500 s, without one is false, so that seed is rejected.
+    static func finishesWellBeforeTheClose(_ config: RaceConfig) -> Bool {
+        let driver = PracticeDriver(config: config)
+        var seconds = 0
+        while !driver.currentFrame.isOver && seconds < 1_500 {
+            driver.tick(1)
+            seconds += 1
+            let frame = driver.currentFrame
+            if frame.boats[driver.myBoatIndex].status == .finished, let close = frame.closeTick {
+                return close - frame.tick >= 30 * Race.tickRate
+            }
+        }
+        return false
+    }
 
     /// A bot sails every seat (`-demo`), so the race runs headless to its finish; its log replays to the same world.
     /// Kept small, since the suite holds the main actor and a Debug tick is slow (in CI the 8-boat, 3-lap race of
     /// #377 took ~250 s before its replay and timed the app's other tests out): `headlessRace`, one opponent, one lap,
-    /// a 30 s sequence. Seed 7: your bot finishes at tick 6,000 and the race closes at 7,450 (with the ribbon wake,
-    /// #377), well inside the finish window, so she doesn't hang on a seed where she's still racing at the close.
+    /// a 30 s sequence, on a seed where your bot finishes well inside the finish window (`headlessRace()`).
     @Test func runsHeadlessToTheFinishAndReplaysToTheSameDigest() throws {
-        let config = Self.headlessRace
+        let config = try Self.headlessRace()
         let driver = PracticeDriver(config: config)
         var seconds = 0
         while !driver.currentFrame.isOver && seconds < 1_500 {
@@ -253,8 +283,8 @@ import RegattaCore
     /// Once the race is over the clock stops: display frames run no ticks and the drawn world stays at the
     /// last tick, so the fleet doesn't wobble between the last two ticks behind the results.
     /// Sails `headlessRace` to its close.
-    @Test func aFinishedRaceStandsStill() {
-        let config = Self.headlessRace
+    @Test func aFinishedRaceStandsStill() throws {
+        let config = try Self.headlessRace()
         let driver = PracticeDriver(config: config)
         var seconds = 0
         while !driver.currentFrame.isOver && seconds < 1_500 {

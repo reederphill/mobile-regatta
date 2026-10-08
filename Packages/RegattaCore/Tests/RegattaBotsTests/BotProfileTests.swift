@@ -89,12 +89,25 @@ import RegattaCore
     @Test func hunterAltersCourseTowardsAGiveWayBoatWithinRule16() throws {
         // Running on starboard, overlapped, the live bot to windward and keeping clear (rule 11): holding her course the
         // hunter would leave her be; she turns at her gently instead, and the gap closes, with no 16.1 call on her.
-        // (Scenes whose tactician gybes away at once leave nothing to hunt: seeds 3 and 6 hold their tack. Seed 6 starts
-        // half a length ahead, overlapped (#377): from a length ahead, on the edge of clear astern, the windward boat's
-        // ribbons drifting downwind ahead of her slow the leeward one back clear astern, where rule 12 has her keep clear.)
+        // Scenes whose tactician gybes away at once leave nothing to hunt, so each scene sails on the first seed whose
+        // tactician holds her tack (#404: 3 today), the last on a second wind, the next such seed (6 today). That one
+        // starts half a length ahead, overlapped (#377): from a length ahead, on the edge of clear astern, the windward
+        // boat's ribbons drifting downwind ahead of her slow the leeward one back clear astern, where rule 12 has her
+        // keep clear.
+        func scene(_ seed: UInt64, _ abeam: Double, _ ahead: Double) -> BotConductTests.Encounter {
+            BotConductTests.windwardLeeward(seed: seed, running: true, abeam: abeam, ahead: ahead, converging: 0)
+        }
+        func holdsHerTack(_ abeam: Double, _ ahead: Double, after: UInt64 = 0) throws -> UInt64 {
+            try firstSeed(in: after + 1...after + 12) { seed in
+                try !Self.sail(scene(seed, abeam, ahead), profile: .tactician).tapping[0]
+            }
+        }
+        let first = try holdsHerTack(2.5, 0.5)
+        let scenes = [(first, 2.5, 0.5), (try holdsHerTack(3.0, 1.0), 3.0, 1.0),
+                      (try holdsHerTack(3.0, 0.5, after: first), 3.0, 0.5)]
         var closer = 0
-        for (seed, abeam, ahead) in [(UInt64(3), 2.5, 0.5), (3, 3.0, 1.0), (6, 3.0, 0.5)] {
-            let encounter = BotConductTests.windwardLeeward(seed: seed, running: true, abeam: abeam, ahead: ahead, converging: 0)
+        for (seed, abeam, ahead) in scenes {
+            let encounter = scene(seed, abeam, ahead)
             let hunted = try Self.sail(encounter)
             let held = try Self.sail(encounter, profile: .tactician)
             try Self.checkWithinRule16(hunted, encounter.name)

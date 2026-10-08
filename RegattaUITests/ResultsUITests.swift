@@ -4,14 +4,13 @@ import XCTest
 /// Change setup returns to the practice setup; home's Last race reopens the results until the next race ends.
 /// CI only, like every UI test.
 final class ResultsUITests: RaceUITestCase {
-    /// `-demo` sails your boat. On seed 394 at one lap it finishes at tick 6,629 and the race closes at tick 10,055
-    /// (measured headless with #388's bots, seeds 1-400): 3,426 ticks after your finish. (Seed 2's fleet all
-    /// finished 270 ticks after you with #377's ribbons, seed 13's close came 2,360 after the header's reshape, seed
-    /// 77's 1,404 after the wedge, and seed 107's 303 after #388, so their clocks stopped too soon.) `-timescale 8`
-    /// holds the race to at most 240 ticks/s, so the close comes at least 14.3 s of wall-clock time after your finish
-    /// and the 3 s delay is the sheet's, not the close's.
+    /// `-demo` sails your boat, one lap, on `SeedTable.resultsSheet`: the first seed on which a headless probe has
+    /// your boat finish at least 3,360 ticks before the race closes (#404, `scripts/pick-ui-seeds.sh`; it was re-picked
+    /// by hand four times, 13, 77, 107, 394, as sim changes stopped the clock too soon). `-timescale 8` holds the race
+    /// to at most 240 ticks/s, so the close comes at least 14 s of wall-clock time after your finish and the 3 s delay
+    /// is the sheet's, not the close's.
     @MainActor func testSheetAppearsAbout3sAfterFinishWhileSceneRenders() throws {
-        let app = launchRace(["-demo", "-seed", "394", "-laps", "1", "-timescale", "8"])
+        let app = launchRace(["-demo", "-seed", "\(SeedTable.resultsSheet)", "-laps", "1", "-timescale", "8"])
         let status = app.staticTexts["race-status"]
         let finished = watch(status, every: 0.5, until: .now.addingTimeInterval(200)) { $0.label.hasPrefix("Finished") }
         XCTAssertTrue(finished.seen, "your boat never finished: \(finished.last?.label ?? "no status")")

@@ -31,6 +31,7 @@
 - A change to anything drawn attaches a local screenshot before the push: build the app (`scripts/heavy.sh --simulator xcodebuild build … -derivedDataPath .build/preview-dd`), `xcrun simctl install`, then `xcrun simctl launch --terminate-running-process <udid> com.phillreeder.regatta -demo -seed <n> -startSeconds 10 -timescale 4` (a live race on the default class) or `-uitesting -fixture <name>` with `SIMCTL_CHILD_REGATTA_FIXTURE_DIR` set to a copy of the fixtures folder, and `xcrun simctl io <udid> screenshot <file>` (take a second one if the first catches the launch).
 - It is a preview for the owner, not a reference: references still come only from CI's `render-actuals`.
 - Fixtures replay logs sailed on a pinned class. When the default class or anything drawn changes, re-record the fixtures on the default class, or the renders keep drawing the old class (#377's references showed skiff@4's trapezoid through three reshapes).
+- Seeds and ticks by condition (#404): after a fixture log is re-recorded, `scripts/record-fixtures.sh` sets the freeze ticks of the fixtures `scripts/fixture-freeze-ticks.json` names (`--check` reports without writing); after a sim or bot change that moves a UI test's race, `scripts/pick-ui-seeds.sh` regenerates `RegattaUITests/SeedTable.swift`. Neither ticks nor seeds are picked by hand; core and app tests choose theirs with `firstSeed`/`firstTick` (`SeedChoice.swift`).
 
 ## Rules
 
