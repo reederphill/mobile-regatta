@@ -11,7 +11,7 @@ import Testing
     @Test func everyKindHasARowAndTheOrderIsTheTicket() {
         for kind in NoticeKind.allCases { #expect(NoticeTable.rows[kind] != nil, "\(kind)") }
         let order = NoticeKind.allCases.sorted { NoticeTable.rule($0).priority > NoticeTable.rule($1).priority }
-        #expect(order == [.ocs, .ruleCall, .markRoom, .roll, .penalty, .latency, .hint])
+        #expect(order == [.ocs, .ruleCall, .roll, .penalty, .latency, .hint])
         #expect(NoticeKind.allCases.filter { NoticeTable.rule($0).holdsHints } == [.ocs, .ruleCall])
     }
 
@@ -43,10 +43,10 @@ import Testing
 
     @Test func aHintNeverShowsWhileARuleCallWaits() {
         var slot = NoticeSlot()
-        slot.post(.markRoom, "room", at: Self.at(0))
+        slot.post(.roll, "roll", at: Self.at(0))
         slot.post(.hint, "steer", at: Self.at(0.5))
         slot.post(.ruleCall, "foul", at: Self.at(1))
-        // The rule call outranks mark-room, which is replaced; the hint stays held.
+        // The rule call outranks the roll notice, which is replaced; the hint stays held.
         #expect(slot.current(at: Self.at(1))?.kind == .ruleCall)
         #expect(slot.current(at: Self.at(7))?.kind == .hint)
     }
@@ -57,9 +57,9 @@ import Testing
         #expect(shown?.expires == Self.at(NoticeTable.rule(.penalty).seconds))
         #expect(slot.current(at: Self.at(4.9))?.kind == .penalty)
         #expect(slot.current(at: Self.at(5)) == nil)
-        // A mark-room notice that waits past its max wait is dropped: it would be about a mark long gone.
+        // A roll notice that waits past its max wait is dropped: it would be about a roll long gone.
         slot.post(.ruleCall, "foul", at: Self.at(10))
-        slot.post(.markRoom, "room", at: Self.at(10))
+        slot.post(.roll, "roll", at: Self.at(10))
         #expect(slot.current(at: Self.at(16)) == nil)
         #expect(slot.waiting.isEmpty)
     }

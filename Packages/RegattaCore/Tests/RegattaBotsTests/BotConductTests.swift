@@ -329,13 +329,16 @@ import RegattaCore
     /// either: each keeps clear when she must and holds her course when she needn't. Neither ever protests.
     @Test func scriptedEncountersZeroFoulsAtSkill1() throws {
         var failures: [String] = []
-        var markRoomNotices = 0
+        var markRoomEncounters = 0
         var closest = Double.infinity
         for encounter in Self.encounters {
             let race = try encounter.race()
             var nearest = Double.infinity
+            var hadMarkRoom = false
             let kinds = Self.sail(race, seconds: encounter.seconds, planned: encounter.planned) { race in
                 nearest = min(nearest, (race.boats[0].position - race.boats[1].position).length)
+                // The umpire's rule 18 record, as the bots read it: no event announces it (#403).
+                if !hadMarkRoom, !race.seatView(for: 0).own.markRoom.isEmpty { hadMarkRoom = true }
             }
             closest = min(closest, nearest)
             let calls = Self.calls(kinds)
@@ -343,13 +346,11 @@ import RegattaCore
             if kinds.contains(where: { if case .protestRecorded = $0 { true } else { false } }) {
                 failures.append("\(encounter.name): protested")
             }
-            if !kinds.isEmpty, kinds.contains(where: { if case .markRoomNotice = $0 { true } else { false } }) {
-                markRoomNotices += 1
-            }
+            if hadMarkRoom { markRoomEncounters += 1 }
             #expect(nearest < race.boatClass.hull.length * 4, "\(encounter.name): they never met (\(nearest) m)")
         }
         #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
-        #expect(markRoomNotices >= 3, "the mark-room encounters made rule 18 records")
+        #expect(markRoomEncounters >= 3, "the mark-room encounters made rule 18 records")
     }
 
     /// "Tacks away from a boat alongside" (#263): two bots beating on starboard side by side, a hull length apart (inside

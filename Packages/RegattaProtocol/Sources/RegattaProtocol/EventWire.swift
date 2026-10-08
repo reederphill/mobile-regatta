@@ -43,7 +43,8 @@ public enum EventAudience: Equatable, Sendable {
 // the codec), and a retired code is never reused. Code 4 was the pre-#73 `foul` (rule, offender,
 // victim); a rule call is code 12. Code 11 was `raceClosed` without results; with them (#86) it is
 // code 23. Code 17 was `markRoomNotice` with a list of recipients, never sent; with the entitled boat,
-// the boat she is entitled over and the mark (#91) it is code 24. #263's roll hit and miss are 25 and 26. Code 10
+// the boat she is entitled over and the mark (#91) it is code 24. Code 24 (`markRoomNotice`) is no
+// longer emitted (#403); reserved, still decoded. #263's roll hit and miss are 25 and 26. Code 10
 // was `protestRecorded` (seat, target); with the matched incident (#94) it is code 27. Seats, places, legs and turns are one
 // byte; ticks are int32; mark names and reasons are strings.
 

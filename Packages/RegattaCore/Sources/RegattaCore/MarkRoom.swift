@@ -112,7 +112,7 @@ extension Rules {
 /// overlap afterwards gives it to the inside boat when 18.2(a) no longer does (18.2(c)); a tack from port to
 /// starboard in the zone moves it (18.3). The umpire holds it (`UmpireState.markRoom(_:)`) until mark-room
 /// has been given, the entitled boat passes head to wind or leaves the zone, or both boats have left the mark
-/// astern. Each new record is announced to its two boats (`RaceEvent.Kind.markRoomNotice`).
+/// astern. No event announces it (#403): mark-room is the right-of-way glow (`Race.keepClearRelations(of:)`).
 public struct MarkRoomRecord: Sendable, Equatable {
     /// The mark's name (`CourseLayout.Mark.name`).
     public let mark: String
