@@ -374,4 +374,35 @@ import RegattaCore
         }
         #expect(scanned > 50, "scanned \(scanned) sources")
     }
+
+    /// #367: a suite profile's weaknesses override (`BotDriver(seat:raceSeed:skill:profile:weaknesses:)`) is what she
+    /// sails with, in place of her skill's and profile's; nil is the driver she always was. Sailed: the tactician with
+    /// her own weaknesses given as the override logs the same race as with none, and Club-level weaknesses another.
+    @Test func weaknessesOverrideApplies() throws {
+        let raceSeed = RaceSeed(11)
+        let novice = BotWeaknesses(skill: 0.35)
+        let overridden = BotDriver(seat: 0, raceSeed: raceSeed, skill: 1, profile: .tactician, weaknesses: novice)
+        #expect(overridden.weaknesses == novice)
+        #expect(overridden.style == BotDriver(seat: 0, raceSeed: raceSeed, skill: 1, profile: .tactician).style,
+                "only her weaknesses change")
+        let plain = BotDriver(seat: 0, raceSeed: raceSeed, skill: 1, profile: .tactician, weaknesses: nil)
+        #expect(plain.weaknesses == BotProfile.tactician.weaknesses(skill: 1))
+        #expect(BotDriver(seat: 0, raceSeed: raceSeed, skill: 0.5, weaknesses: nil).weaknesses == BotWeaknesses(skill: 0.5))
+
+        func sail(seat0 weaknesses: BotWeaknesses?) -> RaceLog? {
+            let setup = try! RaceSetup(raceSeed: raceSeed, seats: Array(repeating: .bot, count: 4), laps: 1,
+                                       startSequenceTicks: 20 * Race.tickRate)
+            let race = Race(setup: setup, windSeed: WindSeed(5))
+            var controllers = SeatControllers(setup: setup)
+            controllers[0] = .bot(BotDriver(seat: 0, raceSeed: raceSeed, skill: 1, profile: .tactician, weaknesses: weaknesses))
+            for _ in 0..<(80 * Race.tickRate) {
+                controllers.drive(race)
+                race.step()
+            }
+            return race.log
+        }
+        let none = sail(seat0: nil)
+        #expect(sail(seat0: BotProfile.tactician.weaknesses(skill: 1)) == none, "her own weaknesses as the override: the same race")
+        #expect(sail(seat0: novice) != none, "a novice's weaknesses sail another race")
+    }
 }

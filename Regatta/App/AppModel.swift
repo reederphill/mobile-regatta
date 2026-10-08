@@ -324,8 +324,10 @@ final class AppModel {
 
     /// `config` on the tuning panel's boat class and rules in a Debug build (#232), at the setup's venue and conditions
     /// unless the panel tuned or picked the conditions (`TuningModel.practiceFiles(over:)`); as it is otherwise.
+    /// A reference race (#367) keeps its own untuned files.
     func tuned(_ config: RaceConfig) -> RaceConfig {
         #if DEBUG
+        guard config.reference == nil else { return config }
         var config = config
         config.files = tuning.practiceFiles(over: config.files)
         return config
@@ -340,7 +342,7 @@ final class AppModel {
                                   controls: controls, rulesSeen: rulesSeen, livery: myLivery, hints: hintEngine())
         session.onHintRetired = logsHintRetired
         #if DEBUG
-        tuning.attach(session, files: config.files)
+        tuning.attach(session, files: config.files, hidesPressure: config.reference != nil)
         #endif
         session.practiceTier = config.botTier
         session.recordsPracticeHistory = practiceRecordsHistory

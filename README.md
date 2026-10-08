@@ -379,6 +379,9 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
 - `-demo` starts a race with a bot controller attached to your seat too. Useful for watching the AI.
 - `-perf` starts a 16-boat demo race for profiling.
 - `-seed <n>` sails every race on race seed `n`, with the wind seed pinned to it too, so the whole race reproduces.
+- `-referenceRace <n>` (Debug builds, #367) sails reference race `n` (1…16, `reference-regatta@1.json`) with you in
+  seat 0: the pinned race the bot suite sails with a stand-in (`BotRaceHarness.runReference`), on untuned files with
+  the pressure overlay off. It looks like any practice race.
 - `-timescale <n>` runs the simulation at `n`× real time.
 - `-uitesting` marks a UI test run. It and `-fixture` hide the Debug FPS, node and draw-count overlay so
   screenshots are deterministic.
