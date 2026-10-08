@@ -57,7 +57,7 @@ import Testing
         let options = try BotSuiteOptions(arguments: ["--seeds", "2", "--fleet-size", "16", "--fleet-size", "2",
                                                       "--tier-mix", "national", "--profile-mix", "skillGap",
                                                       "--profile-mix", "funPass", "--profile-mix", "hunters", "--laps", "1",
-                                                      "--json", "-"])
+                                                      "--json", "-", "--jobs", "3"])
         let matrix = try options.matrix()
         #expect(matrix.seeds == [1, 2])
         #expect(matrix.fleetSizes == [16, 2])
@@ -65,9 +65,13 @@ import Testing
         #expect(matrix.profileMixes == [.skillGap, .funPass, .hunters])
         #expect(matrix.laps == 1)
         #expect(options.jsonPath == "-")
+        #expect(options.jobs == 3)
+        #expect(try BotSuiteOptions(arguments: []).jobs == nil)
+        #expect(BotSuite.defaultJobs >= 1)
 
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--seeds"]) }
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--seeds", "0"]) }
+        #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--jobs", "0"]) }
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--tier-mix", "pro"]) }
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--profile-mix", "blipTacker"]) }
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--fleet-size", "17"]).matrix() }

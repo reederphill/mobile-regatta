@@ -22,7 +22,7 @@
 ## Sizing (#377 postmortem, owner 2026-10-05)
 
 - `check.sh` once per ticket (row 1). A rebase, squash, fixture refit or sim-revision bump afterwards gets filtered runs of the touched suites, then CI; not another `check.sh`.
-- Bot matrix: once per ticket, after the last fix round, on the branch only, compared with a main baseline cached by main's SHA (rerun main only when no baseline for that SHA exists).
+- Bot matrix: once per ticket, after the last fix round: `scripts/bot-matrix.sh <regatta-botsuite options>` (e.g. `--profile-mix live --tier-mix national --tier-mix mixed --seeds 16`). It sails the branch and diffs it against main's baseline (gates green on main and red on the branch are flagged `REGRESSED`). The baseline is the merge-base with `origin/main`, cached for every worktree in `$(git rev-parse --git-common-dir)/botsuite-baselines/<sha>/<args-hash>.json` (hash: the options but `--jobs`, a `--matrix`/`--thresholds` file's contents, the platform); main is built and sailed, in a temporary worktree, only when that file is missing. Races run in parallel: `--jobs` defaults to the performance cores (`--jobs 1` is serial); the report is the same for any `--jobs` but for the tick times (`races[].timings`, `timings`, and a `tick:` breach), which parallel races stretch.
 - Downstream reach: a change to `WorldSnapshot`, the snapshot/wire code or the protocol runs `check.sh --all` once (RegattaClient's resync tests caught #377's wire merge only in CI).
 - Per-tick or per-frame cost: a change adding sim work per tick or a scene layer runs the headless 16-boat pace probe in Debug (scene hidden and shown) against main before the push (#377: ribbons built under `-hideScene` failed `testFifteenBotRaceRunsFullLength` in CI).
 
