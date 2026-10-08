@@ -280,7 +280,12 @@ import Testing
 
     @Test func messageDirectionsAndStreams() {
         for type in MessageType.allCases {
-            let clientSends: Set<MessageType> = [.hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync]
+            let clientSends: Set<MessageType> = [
+                .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync,
+                // Service requests (#143).
+                .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
+                .analyticsRequest, .deletionRequest, .streamNext, .streamClose,
+            ]
             #expect((type.direction == .clientToServer) == clientSends.contains(type))
         }
         #expect(MessageType.inputHeld.stream == .input && MessageType.inputTap.stream == .input)

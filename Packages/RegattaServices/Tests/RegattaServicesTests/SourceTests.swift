@@ -8,7 +8,8 @@ import Testing
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources")
-        return try ["RegattaServices", "RegattaServiceContracts"].flatMap { target in
+        let targets = ["RegattaServices", "RegattaServiceContracts", "RegattaServiceClient", "RegattaServiceLoopback", "RegattaContractRunner"]
+        return try targets.flatMap { target in
             let dir = root.appendingPathComponent(target)
             let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }.sorted()
             return try names.map { ("\(target)/\($0)", try String(contentsOf: dir.appendingPathComponent($0), encoding: .utf8)) }
@@ -17,9 +18,13 @@ import Testing
 
     @Test func importsOnlyThePackagesItBuildsOn() throws {
         let files = try Self.sources()
-        #expect(files.count >= 9)
+        #expect(files.count >= 14)
         let imports = try Regex(#"^\s*(?:@\w+(?:\([^)]*\))?\s+)*import\s+(?:\w+\s+)?(\w+)"#)
-        let allowed: Set<String> = ["RegattaCore", "RegattaProtocol", "RegattaServices", "Synchronization"]
+        let allowed: Set<String> = [
+            "RegattaCore", "RegattaProtocol", "RegattaServices", "Synchronization",
+            // #143's targets build on the services and on each other.
+            "RegattaServiceContracts", "RegattaServiceClient",
+        ]
         // Network and Dispatch only in `PathConnectivityService`, behind `#if canImport(Network)` (#241).
         let pathMonitor: Set<String> = ["Network", "Dispatch"]
         var foreign: [String] = []

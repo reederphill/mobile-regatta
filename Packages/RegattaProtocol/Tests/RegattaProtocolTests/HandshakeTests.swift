@@ -57,6 +57,11 @@ import Testing
             .hello: 1, .joinRace: 2, .inputHeld: 3, .inputTap: 4, .ping: 5, .requestResync: 6,
             .helloAck: 16, .updateRequired: 17, .raceStart: 18, .resync: 19, .snapshot: 20, .event: 21,
             .windKey: 22, .pong: 23, .raceCancelled: 24, .raceClosed: 25,
+            // Service messages (#143).
+            .identityRequest: 64, .termsRequest: 65, .queueRequest: 66, .raceSessionRequest: 67, .lobbyRequest: 68,
+            .profileRequest: 69, .analyticsRequest: 70, .deletionRequest: 71, .streamNext: 72, .streamClose: 73,
+            .identityReply: 80, .termsReply: 81, .queueReply: 82, .raceSessionReply: 83, .lobbyReply: 84,
+            .profileReply: 85, .analyticsReply: 86, .deletionReply: 87, .streamEnd: 88,
         ]
         #expect(codes.count == MessageType.allCases.count)
         for type in MessageType.allCases { #expect(codes[type] == type.rawValue) }
