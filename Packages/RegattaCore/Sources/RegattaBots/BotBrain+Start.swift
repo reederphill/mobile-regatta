@@ -249,6 +249,24 @@ extension BotBrain {
         return (shifted - line.pin.position).dot(direction) < pinEnd ? line.pin.position + direction * pinEnd : shifted
     }
 
+    /// Seconds her approach to her own spot (`startPoint`) takes her from where she is, as `reachableSpot` reckons it:
+    /// reaching along the line, either way, to where its approach passes her depth at `positioningSpeed`, two tacks
+    /// (`tackSeconds`), her run in close-hauled and `positioningMargin`: past it, `reachableSpot` gives up on her spot.
+    func secondsToSpot(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        let c = view.course
+        let line = c.startLine
+        let spot = startPoint(c)
+        let direction = (line.committee.position - line.pin.position).normalized
+        let joining = Vec2.heading(b.windDirection - Self.holdAngle(view) - Self.joinMargin)
+        let depth = max(-line.side(b.position), 0)
+        let across = (spot - joining * (depth / max(joining.dot(c.upwind), 0.3)) - b.position).dot(direction)
+        let tws = b.polarWindSpeed
+        let polar = view.boatClass.polar
+        let reach = max(polar.speed(twa: .pi / 2, tws: tws) * b.speedShadow * Self.positioningSpeed, 0.3)
+        let runIn = depth / max(polar.bestUpwind(tws: tws).vmg * b.speedShadow, 0.3)
+        return abs(across) / reach + runIn + Self.tackSeconds * 2 + Self.positioningMargin
+    }
+
     /// Too early even holding with Ease, by `early` seconds: she bears away with Ease and lets the time run.
     /// A little to the right of the line she holds along to her spot, with room below her in the race area, she
     /// runs deeper; further right, or without the room, she reaches along the start line, a little away from it,

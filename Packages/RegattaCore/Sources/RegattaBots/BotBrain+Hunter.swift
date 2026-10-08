@@ -109,15 +109,28 @@ extension BotBrain {
     /// right-of-way boat (rule 11) luffs a windward boat that must keep clear of her (`quarry`), as the hunter does
     /// racing: rule 16.1's rate and the hunter's limits (`huntingInput`, `gently`), never without the right of way, never
     /// a boat she owes room, and never onto a heading that would carry her over the line within `luffLineSeconds` (`crossesEarly`). She
-    /// eases it off `startLuffUntil` seconds before the gun to start. Nil when she doesn't: she holds her course
+    /// eases it off `startLuffUntil` seconds before the gun to start, and breaks it off sooner once she no longer has the
+    /// time to spare for her approach to her spot (`hasTimeToSpare`). Nil when she doesn't: she holds her course
     /// (`holdingCourse`) as every other bot does.
     func startLuffing(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> BoatInput? {
         guard let until = tactics.startLuffUntil, b.status == .prestart, b.penalty == nil, view.time < 0,
-              -view.time > until, let (quarry, rule) = quarry(b, view), rule == .windwardLeeward,
+              -view.time > until, hasTimeToSpare(b, view), let (quarry, rule) = quarry(b, view), rule == .windwardLeeward,
               !crossesEarly(b, view, heading: b.heading + luff(b) * Hunter.probe, within: Self.luffLineSeconds) else { return nil }
         let most = huntRudder(b, view)
         let (luffed, _) = huntingInput(b, view, input, desired: desired, quarry: quarry, rule: rule, most: most)
         return gently(b, view, luffed, most: most)
+    }
+
+    /// Seconds to spare she keeps over her approach to her spot (`secondsToSpot`) before she breaks a luff off
+    /// (`hasTimeToSpare`). A placeholder: 2 s and 5 s gave the same pin third (0.701, #337 round 2); 2 s luffs more.
+    static let luffSpareSeconds = 2.0
+
+    /// Whether she still has time to luff before her start (#337, owner 2026-10-08: "luff with time to spare"): her
+    /// approach to her own spot (`secondsToSpot`) plus `luffSpareSeconds` inside the time to the gun. Once it isn't, she
+    /// breaks off and bears away to her plan (#337 round 1: luffing a windward boat for tens of seconds, combative
+    /// pin-style bots from committee slots never got to the pin and lost the pin third).
+    func hasTimeToSpare(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        secondsToSpot(b, view) + Self.luffSpareSeconds < -view.time
     }
 
     /// `input`, or with the autohelm due to turn her, her own rudder of `most` towards where it would turn her instead:

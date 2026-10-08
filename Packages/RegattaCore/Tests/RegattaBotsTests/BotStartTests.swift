@@ -219,4 +219,59 @@ import RegattaCore
             #expect(!calls.contains { $0.hasSuffix(" on 0") }, "seed \(seed): \(calls)")
         }
     }
+
+    /// #337 (owner 2026-10-08: "luff with time to spare"): `combativeLuffsAWindwardBoatBeforeTheStart`'s scene, `below`
+    /// hull lengths below the middle of the line `toGun` seconds before the gun, sailed out against a typical windward bot
+    /// to `after` seconds past it: the times the combative leeward boat luffed, the first her approach to her own spot
+    /// (`secondsToSpot`) and `luffSpareSeconds` no longer fit in the time to the gun, and when she started (nil: not by
+    /// then) and whether she was over at the gun; times from the gun.
+    static func luffingOut(seed: UInt64, toGun: Int, below: Double, after: Double = 30) throws
+        -> (luffs: [Double], outOfTime: Double?, started: Double?, ocs: Bool, until: Double) {
+        let water = BotConductTests.Water(seed: seed, toGun: toGun, below: below)
+        let heading = water.heading(.starboard, deg2rad(45))
+        let forward = Vec2.heading(heading)
+        let race = try BotConductTests.place(water, [
+            BotConductTests.Placement(position: water.centre, heading: heading, speed: 2, status: .prestart),
+            BotConductTests.Placement(position: water.centre + forward.rightPerp * water.length * 1.5, heading: heading,
+                                      speed: 2, status: .prestart),
+        ])
+        var luffer = BotTacticsTests.pilot(seat: 0, race, engagement: 1, planned: .starboard)
+        var windward = BotTacticsTests.pilot(seat: 1, race, engagement: 0.5, planned: .starboard)
+        let until = try #require(luffer.brain.tactics.startLuffUntil)
+        var luffs: [Double] = [], outOfTime: Double?, started: Double?, ocs = false
+        while race.seatView(for: 0).time < after, !race.isOver, started == nil {
+            let view = race.seatView(for: 0)
+            if let decision = luffer.drive(race) {
+                if outOfTime == nil, luffer.brain.secondsToSpot(view.own, view) + BotBrain.luffSpareSeconds >= -view.time {
+                    outOfTime = view.time
+                }
+                if decision.startLuff { luffs.append(view.time) }
+            }
+            _ = windward.drive(race)
+            race.step()
+            for event in race.drainEvents() {
+                if case .started(seat: 0) = event.kind { started = race.seatView(for: 0).time }
+                if case .ocsNotice(recipient: 0) = event.kind { ocs = true }
+            }
+        }
+        return (luffs, outOfTime, started, ocs, until)
+    }
+
+    /// #337 (owner 2026-10-08: "luff with time to spare"): seed 13's scene 50 s before the gun, five lengths below the
+    /// line: the combative leeward boat luffs the windward one while her approach to her own spot and
+    /// `luffSpareSeconds` fit in the time to the gun, breaks off as soon as they don't (still well before her ease,
+    /// `startLuffUntil`), and starts on time.
+    @Test func combativeBreaksOffHerLuffInTimeToStart() throws {
+        let sailed = try Self.luffingOut(seed: 13, toGun: 50, below: 5)
+        let outOfTime = try #require(sailed.outOfTime, "her time ran out before the gun")
+        #expect(-outOfTime > sailed.until + 10, "out of time \(-outOfTime) s before the gun, her ease \(sailed.until) s")
+        #expect(sailed.luffs.contains { $0 < outOfTime - 10 }, "she luffed with time to spare")
+        let last = try #require(sailed.luffs.last)
+        #expect(outOfTime - last < Double(BotDriver.decisionInterval) / Double(Race.tickRate) + 1e-9,
+                "she luffed until her time ran out (last luff \(last) s, out of time \(outOfTime) s): it broke her luff off")
+        #expect(!sailed.luffs.contains { $0 >= outOfTime }, "and not once it had")
+        #expect(!sailed.ocs)
+        let started = try #require(sailed.started, "she started")
+        #expect(started <= 3, "on time: \(started) s after the gun")
+    }
 }
