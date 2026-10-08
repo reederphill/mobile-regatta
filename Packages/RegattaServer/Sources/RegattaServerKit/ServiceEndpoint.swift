@@ -13,8 +13,9 @@ import RegattaServices
 // Requests are answered in order; a `StreamNext` waits for its item on its own, so a stream with nothing to say
 // never holds up the requests behind it. A stream nobody reads for `streamIdleTimeout` is dropped (a later
 // `StreamNext` on it is answered `StreamEnd`). Every service behind the identity, session and terms calls is gated
-// (#34), deny by default: signed in, allowed by Game Center's restrictions, and the current Terms of Use accepted. The
-// lobby and the queue answer a refusal in the shape the `OnlineAccess` contracts expect; the rest close the connection.
+// (#34), deny by default: signed in, allowed by Game Center's restrictions, and the current Terms of Use accepted
+// (deleting the player's online data needs only the sign-in). The lobby and the queue answer a refusal in the shape
+// the `OnlineAccess` contracts expect; the rest close the connection.
 // Until a session is signed in the connection's frames are capped at `preSignInFrameCap`, at the frame's header.
 
 /// What the endpoint is run with.
@@ -344,9 +345,11 @@ public actor ServiceConnectionHandler {
 
     /// The gate in front of every service but identity, sessions and terms: signed in, then the restriction that
     /// service has (multiplayer for the queue and races, communication for the lobby), then the current terms. A
-    /// call let through is the player online now (G8).
+    /// call let through is the player online now (G8). Deleting the player's online data needs only the sign-in
+    /// (owner ruling, 2026-10-08): no terms, no restrictions, and it isn't use.
     private func gate(_ type: MessageType) async -> Denial? {
         guard let session = await identity.signedIn else { return .notSignedIn }
+        if type == .deletionRequest { return nil }
         switch type {
         case .queueRequest, .raceSessionRequest:
             if session.restrictions.isMultiplayerGamingRestricted { return .multiplayerRestricted }

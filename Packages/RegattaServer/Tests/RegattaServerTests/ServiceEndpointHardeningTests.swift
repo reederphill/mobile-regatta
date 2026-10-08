@@ -11,12 +11,11 @@ import Testing
 /// last online session time moving with use; a cap on open streams.
 @Suite(.timeLimit(.minutes(1))) struct ServiceEndpointHardeningTests {
     /// Every gated request a connection can make that has no refusal shape of its own: race sessions, profile,
-    /// analytics, data deletion.
+    /// analytics. (Data deletion needs only the sign-in: `deletionNeedsOnlyTheSignIn`.)
     static let ungatedShapes: [(String, Message)] = [
         ("race session", .raceSessionRequest(ServiceRequest(id: 7, call: .openResults))),
         ("profile", .profileRequest(ServiceRequest(id: 7, call: .profile))),
         ("analytics", .analyticsRequest(ServiceRequest(id: 7, call: WireAnalyticsBatch(installID: "i", events: [])))),
-        ("deletion", .deletionRequest(ServiceRequest(id: 7, call: .plan))),
     ]
 
     private static func send(_ message: Message, on link: InProcessServiceLink) async throws {
@@ -44,6 +43,21 @@ import Testing
             #expect(accepted.closeReason == "no \(name) service")
             withExtendedLifetime(connection) {}
         }
+    }
+
+    /// Owner ruling (2026-10-08): "Delete my online data" needs only the sign-in. Refused signed out; signed in, it
+    /// gets past the gate (to the missing backend) with the terms unaccepted and the player restricted.
+    @Test func deletionNeedsOnlyTheSignIn() async throws {
+        let message = Message.deletionRequest(ServiceRequest(id: 7, call: .plan))
+        let endpoint = ServiceFixtures.endpoint()
+        let signedOut = try await InProcessServiceLink.open(endpoint)
+        try await Self.send(message, on: signedOut)
+        #expect(signedOut.closeReason == "deletion refused: not signed in")
+
+        let (unaccepted, held, _) = try await ServiceFixtures.signedIn(endpoint, "u-deletion", multiplayerRestricted: true)
+        try await Self.send(message, on: unaccepted)
+        #expect(unaccepted.closeReason == "no deletion service")
+        withExtendedLifetime(held) {}
     }
 
     @Test func aRaceSessionIsDeniedToAMultiplayerRestrictedPlayer() async throws {
