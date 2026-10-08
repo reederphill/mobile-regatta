@@ -2,7 +2,8 @@ import RegattaCore
 
 /// What a bot plays beyond sailing the groove to the marks (#231): when she tacks or gybes, and when she
 /// leaves the groove, and how she plays the boats around her (#234, `BotBrain+Fleet.swift`). Set by a bot-suite profile
-/// (`BotProfile`), or for a live bot by her skill's weaknesses and her style (#102, #234).
+/// (`BotProfile`), or for a live bot by her skill's weaknesses and her style (#102, #234), ramping to the tactician's
+/// through the National band (#366).
 struct Tactics: Sendable, Equatable {
     /// She tacks on a header past this, radians, against the course axis; nil: never on a header.
     var headerThreshold: Double?
@@ -32,8 +33,8 @@ struct Tactics: Sendable, Equatable {
     var seeksPressure: Bool
     /// With the shift neutral, she tacks to the pressure on half the case a shift needs: she goes to the pressure
     /// when there's no shift to play; and she weighs the pressure along her whole track on each tack
-    /// (`pressureAdvantage`). The tactician's; a live bot weighs the pressure only against the shift, and by the best
-    /// spot she sees on each tack (#290).
+    /// (`pressureAdvantage`). The tactician's, and a live bot's high in the National band (#366); below it a live bot
+    /// weighs the pressure only against the shift, and by the best spot she sees on each tack (#290).
     var goesToThePressure: Bool
     /// Upwind, she tacks out of another boat's wind shadow.
     var seeksClearAir: Bool
@@ -63,13 +64,16 @@ struct Tactics: Sendable, Equatable {
     /// instead of holding her course (#355, `BotProfile.hunter`, `hunting`). Only the suite's hunter.
     var hunts = false
     /// Downwind, she weighs the pressure ahead on each gybe (#105, `downwindPressureAdvantage`) against the shift she
-    /// gybes on: she stays in the pressure. The tactician's (and the Club-execution tactician's), not the hunter's.
+    /// gybes on: she stays in the pressure. The tactician's (and the Club-execution tactician's, and a live bot's high in
+    /// the National band, #366), not the hunter's.
     var runsToPressure = false
     /// Downwind, she gybes out of the wind shadow of a boat behind her (#105): its shadow on her (`SeatView.OwnBoat.shadow`
-    /// under `BotBrain.dirtyAir`) is worth `BotBrain.downwindShadowWeight` of shift. The tactician's, not the hunter's.
+    /// under `BotBrain.dirtyAir`) is worth `BotBrain.downwindShadowWeight` of shift. The tactician's (and a live bot's high
+    /// in the National band, #366), not the hunter's.
     var gybesOutOfShadow = false
     /// Before the gun she reads the start line's bias from the wind at her and sets up at the end it favours
-    /// (#105, `BotBrain.readLineBias`), in place of her style's spot. The tactician's, not the hunter's.
+    /// (#105, `BotBrain.readLineBias`), in place of her style's spot. The tactician's (and a live bot's high in the
+    /// National band, #366), not the hunter's.
     var startsAtFavouredEnd = false
 
     /// Metres ahead she notices puffs and lulls (`BotWeaknesses.puffPerception`), when she seeks them; she reads the
@@ -99,6 +103,7 @@ struct Tactics: Sendable, Equatable {
             holdsLane = engagement >= BotBrain.FleetTactics.laneEngagement
             leeBows = engagement >= BotBrain.FleetTactics.leeBowEngagement
             tacksOnWind = engagement >= BotBrain.FleetTactics.tackOnWindEngagement
+            rampToTheTactician(skill: skill)
         case .baseline:
             // The groove only: headers past a threshold, the corridor, and nothing off the groove.
             self.init(headerThreshold: deg2rad(5), tackInterval: 15)
@@ -134,6 +139,45 @@ struct Tactics: Sendable, Equatable {
             // The baseline with a hair trigger: a 3° blip tacks her as a real header does.
             self.init(headerThreshold: deg2rad(3), tackInterval: 15)
             rollsTacks = false
+        }
+    }
+
+    /// #366: where through the National band (`BotTier.national.skillBand`, 0 at its bottom … 1 at its top) a live bot
+    /// takes up each of the tactician's tactics. Placeholders (#389 retunes), staggered so they don't all arrive at
+    /// once; each at or before 1, so a live bot at the top of the band sails the tactician's tactics.
+    static let nationalHeatsUpInLulls = 0.2
+    static let nationalPinchesToFetch = 0.4
+    static let nationalDownwindShifts = 0.5
+    static let nationalSeeksClearAir = 0.6
+    /// Going to the pressure upwind and down, gybing out of a boat's shadow and starting at the favoured end (#105).
+    static let nationalPressureAndLine = 0.8
+
+    /// #366 (#364, "the ceiling"): a live bot's tactics ramp toward the tactician's through the National band. Her
+    /// anticipation, corridor and header threshold move linearly from her own to the tactician's, and each of the
+    /// tactician's other tactics switches on at its named place in the band (`nationalHeatsUpInLulls` …). Below the
+    /// band nothing moves. Her style stays hers: her favoured side, tack interval and engagement (and the fleet tactics
+    /// it floors), her skill's puff range and tactical quality; the tactician's pure cover (`covers`) stays the
+    /// tactician's. Skill is an input, so nothing is drawn.
+    private mutating func rampToTheTactician(skill: Double) {
+        let band = BotTier.national.skillBand
+        let w = BotWeaknesses.ramp(skill, from: band.lowerBound, to: band.upperBound)
+        guard w > 0 else { return }
+        let tactician = Tactics(profile: .tactician, skill: skill)
+        func lerp(_ a: Double, _ b: Double) -> Double { w >= 1 ? b : a + (b - a) * w }
+        anticipation = lerp(anticipation, tactician.anticipation)
+        corridor = lerp(corridor, tactician.corridor)
+        if let own = headerThreshold, let target = tactician.headerThreshold {
+            headerThreshold = lerp(own, target)
+        }
+        if w >= Self.nationalHeatsUpInLulls { heatsUpInLulls = tactician.heatsUpInLulls }
+        if w >= Self.nationalPinchesToFetch { pinchesToFetch = tactician.pinchesToFetch }
+        if w >= Self.nationalDownwindShifts { downwindShiftThreshold = tactician.downwindShiftThreshold }
+        if w >= Self.nationalSeeksClearAir { seeksClearAir = tactician.seeksClearAir }
+        if w >= Self.nationalPressureAndLine {
+            goesToThePressure = tactician.goesToThePressure
+            runsToPressure = tactician.runsToPressure
+            gybesOutOfShadow = tactician.gybesOutOfShadow
+            startsAtFavouredEnd = tactician.startsAtFavouredEnd
         }
     }
 

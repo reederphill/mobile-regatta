@@ -504,6 +504,112 @@ import Testing
         #expect(a.decision == b.decision)
         #expect(try play([.bot, .bot, .bot]).play == a.play)
     }
+
+    // MARK: #366: live bots ramp to the tactician's tactics through the National band
+
+    /// Live bots of every temperament: willing and reluctant tackers, either favoured side, combative and own-race.
+    static let liveStyles: [@Sendable (Double) -> BotStyle] = [
+        (0.0, -1.0, 0.0), (0.5, 0.0, 0.5), (1.0, 1.0, 1.0), (0.2, 0.6, 0.8), (0.9, -0.4, 0.3),
+    ].map { willingness, side, engagement in
+        { skill in
+            BotStyle(skill: skill, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1,
+                     favouredSide: side, tackWillingness: willingness, engagement: engagement)
+        }
+    }
+
+    /// Her style's and her skill's own, which stay hers at any skill (#234, #337, #102); and the tactician's pure
+    /// cover, which stays the tactician's.
+    static func withOwnStyle(_ tactics: Tactics, from live: Tactics) -> Tactics {
+        var tactics = tactics
+        tactics.corridorBias = live.corridorBias
+        tactics.tackInterval = live.tackInterval
+        tactics.engagement = live.engagement
+        tactics.coversTackers = live.coversTackers
+        tactics.holdsLane = live.holdsLane
+        tactics.leeBows = live.leeBows
+        tactics.tacksOnWind = live.tacksOnWind
+        tactics.tacticalQuality = live.tacticalQuality
+        tactics.puffRange = live.puffRange
+        tactics.covers = live.covers
+        return tactics
+    }
+
+    /// #366 (#364, "the ceiling"): a live bot at the top of the National band sails the tactician's tactics, every
+    /// field but her style's own; she keeps her own cover (`coversTackers`), not the tactician's.
+    @Test func liveSkillOneSailsTheTacticiansTactics() {
+        let top = BotTier.national.skillBand.upperBound
+        let tactician = Tactics(profile: .tactician, skill: top)
+        for style in Self.liveStyles {
+            let live = Tactics(profile: nil, skill: top, style: style(top))
+            #expect(live == Self.withOwnStyle(tactician, from: live), "\(style(top))")
+            #expect(!live.covers && !live.hunts)
+        }
+    }
+
+    /// #366 (#364: Club and Regional stay frozen): below the National band a live bot's tactics are #102's, and at its
+    /// bottom too.
+    @Test func liveTacticsBelowNationalUnchanged() throws {
+        let bottom = BotTier.national.skillBand.lowerBound
+        for skill in Array(stride(from: 0.0, through: bottom, by: 0.05)) + [bottom] {
+            for style in Self.liveStyles {
+                let s = style(skill)
+                let live = Tactics(profile: nil, skill: skill, style: s)
+                let threshold = deg2rad(3 + 2 * (1 - s.tackWillingness) + 12 * max(0, 0.75 - skill))
+                let header = try #require(live.headerThreshold)
+                #expect(header == threshold)
+                #expect(live.anticipation == 0 && live.corridor == 0.35 && live.downwindShiftThreshold == nil)
+                #expect(!live.heatsUpInLulls && !live.pinchesToFetch && !live.goesToThePressure && !live.seeksClearAir)
+                #expect(!live.runsToPressure && !live.gybesOutOfShadow && !live.startsAtFavouredEnd)
+                #expect(!live.covers && !live.hunts && live.replanes && live.rollsTacks)
+            }
+        }
+    }
+
+    /// #366: through the National band each ramped tactic moves only toward the tactician's, and none she takes up is
+    /// ever dropped again; her style's own stay hers all the way.
+    @Test func liveTacticsRampMonotonicThroughNational() throws {
+        let band = BotTier.national.skillBand
+        let skills = (0...20).map { band.lowerBound + (band.upperBound - band.lowerBound) * Double($0) / 20 }
+        let tactician = Tactics(profile: .tactician, skill: band.upperBound)
+        let target = try #require(tactician.headerThreshold)
+        for style in Self.liveStyles {
+            var previous: Tactics?
+            for skill in skills {
+                let live = Tactics(profile: nil, skill: skill, style: style(skill))
+                let header = try #require(live.headerThreshold)
+                if let p = previous {
+                    #expect(live.anticipation >= p.anticipation && live.anticipation <= tactician.anticipation)
+                    #expect(live.corridor >= p.corridor && live.corridor <= tactician.corridor)
+                    let previousHeader = try #require(p.headerThreshold)
+                    #expect(abs(header - target) <= abs(previousHeader - target) + 1e-12)
+                    let switches: [KeyPath<Tactics, Bool>] = [
+                        \.heatsUpInLulls, \.pinchesToFetch, \.seeksClearAir, \.goesToThePressure, \.runsToPressure,
+                        \.gybesOutOfShadow, \.startsAtFavouredEnd, \.seeksPuffs, \.seeksPressure, \.replanes,
+                    ]
+                    for key in switches where p[keyPath: key] {
+                        #expect(live[keyPath: key], "\(key) switched back off at \(skill)")
+                    }
+                    if p.downwindShiftThreshold != nil {
+                        #expect(live.downwindShiftThreshold == tactician.downwindShiftThreshold)
+                    }
+                    #expect(live.corridorBias == p.corridorBias && live.tackInterval == p.tackInterval)
+                    #expect(live.engagement == p.engagement && live.coversTackers == p.coversTackers)
+                    #expect(live.holdsLane == p.holdsLane && live.leeBows == p.leeBows && live.tacksOnWind == p.tacksOnWind)
+                }
+                #expect(!live.covers && !live.hunts)
+                previous = live
+            }
+            // The ramp takes her all the way: every switch is on by the top.
+            let top = try #require(previous)
+            #expect(top.heatsUpInLulls && top.pinchesToFetch && top.seeksClearAir && top.goesToThePressure)
+            #expect(top.runsToPressure && top.gybesOutOfShadow && top.startsAtFavouredEnd)
+        }
+        // Each switch at or before the top, staggered through the band.
+        let switchOns = [Tactics.nationalHeatsUpInLulls, Tactics.nationalPinchesToFetch, Tactics.nationalDownwindShifts,
+                         Tactics.nationalSeeksClearAir, Tactics.nationalPressureAndLine]
+        #expect(switchOns.allSatisfy { $0 > 0 && $0 <= 1 })
+        #expect(switchOns == switchOns.sorted() && Set(switchOns).count == switchOns.count)
+    }
 }
 
 /// #329: the fleet tactics' tuning follow-ups to #234.
