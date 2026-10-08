@@ -24,6 +24,8 @@ RUN swift build -c release --static-swift-stdlib --package-path Packages/Regatta
 
 # Ubuntu 24.04: glibc 2.39, the C library of the simulation version (ADR 0002).
 FROM ubuntu:24.04
+# The system's TLS roots: the server fetches Game Center's certificate over HTTPS (#145).
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/ /app/
 ENV PATH=/app:$PATH HOST=0.0.0.0 PORT=8080
 EXPOSE 8080

@@ -39,16 +39,19 @@ public struct WirePlayer: Equatable, Sendable {
     }
 }
 
-/// What Game Center signed for the server to check the player's id (#16).
+/// What Game Center signed for the server to check the player's id (#16, #145): the signature covers the
+/// `teamPlayerID` (with the bundle id, the timestamp and the salt); the `gamePlayerID` rides along unsigned.
 public struct WireIdentitySignature: Equatable, Sendable {
     public var gamePlayerID: String
+    public var teamPlayerID: String
     public var publicKeyURL: String
     public var signature: [UInt8]
     public var salt: [UInt8]
     public var timestamp: UInt64
 
-    public init(gamePlayerID: String, publicKeyURL: String, signature: [UInt8], salt: [UInt8], timestamp: UInt64) {
+    public init(gamePlayerID: String, teamPlayerID: String, publicKeyURL: String, signature: [UInt8], salt: [UInt8], timestamp: UInt64) {
         self.gamePlayerID = gamePlayerID
+        self.teamPlayerID = teamPlayerID
         self.publicKeyURL = publicKeyURL
         self.signature = signature
         self.salt = salt
@@ -57,6 +60,7 @@ public struct WireIdentitySignature: Equatable, Sendable {
 
     func encode(to w: inout WireWriter) throws {
         try w.text(gamePlayerID, "gamePlayerID")
+        try w.text(teamPlayerID, "teamPlayerID")
         try w.string(publicKeyURL, limit: WireLimit.token, "publicKeyURL")
         try w.blob(signature, limit: WireLimit.token, "signature")
         try w.blob(salt, limit: WireLimit.token, "salt")
@@ -64,7 +68,7 @@ public struct WireIdentitySignature: Equatable, Sendable {
     }
 
     init(from r: inout WireReader) throws {
-        self.init(gamePlayerID: try r.text("gamePlayerID"), publicKeyURL: try r.string(limit: WireLimit.token, "publicKeyURL"),
+        self.init(gamePlayerID: try r.text("gamePlayerID"), teamPlayerID: try r.text("teamPlayerID"), publicKeyURL: try r.string(limit: WireLimit.token, "publicKeyURL"),
                   signature: try r.blob(limit: WireLimit.token, "signature"), salt: try r.blob(limit: WireLimit.token, "salt"),
                   timestamp: try r.u64())
     }
@@ -111,6 +115,87 @@ public enum IdentityResult: Equatable, Sendable {
         case 2: self = .signature(try WireIdentitySignature(from: &r))
         case 3: self = .notSignedIn
         default: throw WireError.invalidValue("identityResult")
+        }
+    }
+}
+
+// MARK: - Session
+
+/// Opening the connection's signed-in session (#145). A connection starts signed out; until a session is open the
+/// server answers identity as signed out and refuses every other service.
+public enum SessionCall: Equatable, Sendable {
+    /// Signs in with what Game Center signed, and the alias and restrictions Game Center reports now (taken from the
+    /// client until #158's App Attest assertion covers the request). The player's `gamePlayerID` is the signature's.
+    case signIn(signature: WireIdentitySignature, player: WirePlayer)
+    /// Resumes the session `token` names, with the alias and restrictions Game Center reports now.
+    case resume(token: [UInt8], player: WirePlayer)
+    /// Ends the connection's session: its token stops working.
+    case signOut
+
+    func encode(to w: inout WireWriter) throws {
+        switch self {
+        case .signIn(let signature, let player):
+            w.u8(0)
+            try signature.encode(to: &w)
+            try player.encode(to: &w)
+        case .resume(let token, let player):
+            w.u8(1)
+            try w.blob(token, limit: WireLimit.token, "token")
+            try player.encode(to: &w)
+        case .signOut: w.u8(2)
+        }
+    }
+
+    init(from r: inout WireReader) throws {
+        switch try r.u8() {
+        case 0: self = .signIn(signature: try WireIdentitySignature(from: &r), player: try WirePlayer(from: &r))
+        case 1: self = .resume(token: try r.blob(limit: WireLimit.token, "token"), player: try WirePlayer(from: &r))
+        case 2: self = .signOut
+        default: throw WireError.invalidValue("sessionCall")
+        }
+    }
+}
+
+/// Why the server didn't open a session.
+public enum WireSessionRefusal: UInt8, Equatable, Sendable, CaseIterable {
+    /// The signature doesn't verify: a bad or untrusted certificate, the wrong bundle, a tampered field.
+    case invalidSignature
+    /// The signature's timestamp is outside the server's window: sign again.
+    case staleSignature
+    /// Another player is bound to this gamePlayerID, or this player to another one.
+    case gamePlayerIDConflict
+    /// The token names no live session (expired, signed out, or never issued): sign in.
+    case sessionExpired
+    /// The server can't open sessions now: try later.
+    case unavailable
+}
+
+public enum SessionResult: Equatable, Sendable {
+    /// The session is open: `token` resumes it on a later connection.
+    case signedIn(token: [UInt8], player: WirePlayer)
+    case refused(WireSessionRefusal)
+    /// `signOut` went through.
+    case signedOut
+
+    func encode(to w: inout WireWriter) throws {
+        switch self {
+        case .signedIn(let token, let player):
+            w.u8(0)
+            try w.blob(token, limit: WireLimit.token, "token")
+            try player.encode(to: &w)
+        case .refused(let refusal):
+            w.u8(1)
+            w.u8(refusal.rawValue)
+        case .signedOut: w.u8(2)
+        }
+    }
+
+    init(from r: inout WireReader) throws {
+        switch try r.u8() {
+        case 0: self = .signedIn(token: try r.blob(limit: WireLimit.token, "token"), player: try WirePlayer(from: &r))
+        case 1: self = .refused(try r.code("sessionRefusal"))
+        case 2: self = .signedOut
+        default: throw WireError.invalidValue("sessionResult")
         }
     }
 }

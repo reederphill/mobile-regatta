@@ -17,6 +17,11 @@ extension Gen {
                    isMultiplayerGamingRestricted: bool())
     }
 
+    mutating func identitySignature() -> WireIdentitySignature {
+        WireIdentitySignature(gamePlayerID: string(), teamPlayerID: string(), publicKeyURL: string(), signature: bytes(0...64),
+                              salt: bytes(0...16), timestamp: u64())
+    }
+
     mutating func rating() -> WireRating { WireRating(value: anyInt(), isProvisional: bool()) }
 
     mutating func refusal() -> WireQueueRefusal {
@@ -193,8 +198,7 @@ extension Gen {
             let result: IdentityResult = switch int(0...3) {
             case 0: .state(maybe { $0.player() })
             case 1: .gamePlayerID(maybe { $0.string() })
-            case 2: .signature(WireIdentitySignature(gamePlayerID: string(), publicKeyURL: string(), signature: bytes(0...64),
-                                                     salt: bytes(0...16), timestamp: u64()))
+            case 2: .signature(identitySignature())
             default: .notSignedIn
             }
             return .identityReply(ServiceReply(id: id, result: result))
@@ -263,6 +267,20 @@ extension Gen {
             }
             return .deletionReply(ServiceReply(id: id, result: result))
         case .streamEnd: return .streamEnd(StreamEnd(id: id))
+        case .sessionRequest:
+            let call: SessionCall = switch int(0...2) {
+            case 0: .signIn(signature: identitySignature(), player: player())
+            case 1: .resume(token: bytes(0...64), player: player())
+            default: .signOut
+            }
+            return .sessionRequest(ServiceRequest(id: id, call: call))
+        case .sessionReply:
+            let result: SessionResult = switch int(0...2) {
+            case 0: .signedIn(token: bytes(0...64), player: player())
+            case 1: .refused(pick(WireSessionRefusal.allCases))
+            default: .signedOut
+            }
+            return .sessionReply(ServiceReply(id: id, result: result))
         default: fatalError("\(type) isn't a service message")
         }
     }

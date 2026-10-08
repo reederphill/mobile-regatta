@@ -14,6 +14,7 @@ let package = Package(
     products: [
         .library(name: "RaceHost", targets: ["RaceHost"]),
         .library(name: "Persistence", targets: ["Persistence"]),
+        .library(name: "GameCenterIdentity", targets: ["GameCenterIdentity"]),
         .executable(name: "RegattaServer", targets: ["RegattaServer"]),
         .executable(name: "regatta-loadclient", targets: ["regatta-loadclient"]),
         .executable(name: "regatta-bench", targets: ["regatta-bench"]),
@@ -23,6 +24,9 @@ let package = Package(
         .package(path: "../RegattaProtocol"),
         // The load client sails with the app's online client (#64).
         .package(path: "../RegattaClient"),
+        // The service protocols, their wire adapters and the contract runner (#143): the service endpoint answers
+        // through the same mapping as the loopback, and the contract runner reaches it through a connector (#145).
+        .package(path: "../RegattaServices"),
         // WebSocket and HTTP/1.1, server and client (ADR 0006). Pinned to a minor: Package.resolved has the exact one.
         .package(url: "https://github.com/apple/swift-nio.git", .upToNextMinor(from: "2.103.0")),
         // HMAC for race tokens, on Linux and macOS alike. Already in the graph through RegattaCore.
@@ -30,6 +34,12 @@ let package = Package(
         // Postgres for players, sessions, the race registry, race logs and data files (ADR 0009). Pinned to a
         // minor like swift-nio: Package.resolved has the exact one.
         .package(url: "https://github.com/vapor/postgres-nio.git", .upToNextMinor(from: "1.33.1")),
+        // Game Center identity verification (#145): X.509 chain building to Apple's root, and the HTTPS fetch of
+        // Game Center's certificate. swift-nio-ssl is already in the graph through postgres-nio; swift-certificates
+        // is new (Apple's, pure Swift, Linux-buildable). Pinned to a minor: Package.resolved has the exact ones.
+        .package(url: "https://github.com/apple/swift-certificates.git", .upToNextMinor(from: "1.21.0")),
+        .package(url: "https://github.com/apple/swift-nio-ssl.git", .upToNextMinor(from: "2.37.5")),
+        .package(url: "https://github.com/apple/swift-asn1.git", .upToNextMinor(from: "1.7.3")),
     ],
     targets: [
         .target(
@@ -41,6 +51,17 @@ let package = Package(
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
             ]
         ),
+        // Game Center identity verification (#145): the signed payload, the certificate chain to Apple's root and
+        // the RSA signature check, over an injectable fetcher and clock. No sockets: the server supplies the fetcher.
+        .target(
+            name: "GameCenterIdentity",
+            dependencies: [
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
+            ]
+        ),
         // The dev endpoints' JSON (#67), shared by the server and the load client. Foundation only.
         .target(name: "RegattaDevAPI"),
         // Everything the executable does, as a library the tests start in-process: config and the
@@ -50,16 +71,24 @@ let package = Package(
             dependencies: [
                 "RaceHost",
                 "RegattaDevAPI",
+                // Identity, sessions and the Terms of Use (#145).
+                "GameCenterIdentity",
+                "Persistence",
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
+                .product(name: "RegattaServices", package: "RegattaServices"),
+                .product(name: "RegattaServiceClient", package: "RegattaServices"),
+                .product(name: "RegattaServiceLoopback", package: "RegattaServices"),
                 .product(name: "NIOCore", package: "swift-nio"),
                 .product(name: "NIOPosix", package: "swift-nio"),
                 .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOWebSocket", package: "swift-nio"),
+                .product(name: "NIOSSL", package: "swift-nio-ssl"),
                 .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "X509", package: "swift-certificates"),
             ]
         ),
-        .executableTarget(name: "RegattaServer", dependencies: ["RegattaServerKit"]),
+        .executableTarget(name: "RegattaServer", dependencies: ["RegattaServerKit", "Persistence"]),
         // The server's Postgres store (#144, ADR 0009): a connection pool, our own migration runner and one store
         // per table. Not wired into RegattaServerKit yet: #145 does that.
         .target(
@@ -69,12 +98,14 @@ let package = Package(
                 .product(name: "PostgresNIO", package: "postgres-nio"),
             ]
         ),
-        // The load client (#67): RegattaClient over a NIO WebSocket, scripted inputs, bytes and RTT measured.
+        // The load client (#67): RegattaClient over a NIO WebSocket, scripted inputs, bytes and RTT measured. Also the
+        // contract runner's connector to a dev server's service endpoint (#145).
         .target(
             name: "RegattaLoadClient",
             dependencies: [
                 "RegattaDevAPI",
                 .product(name: "RegattaClient", package: "RegattaClient"),
+                .product(name: "RegattaServiceClient", package: "RegattaServices"),
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
                 .product(name: "NIOCore", package: "swift-nio"),
@@ -112,6 +143,17 @@ let package = Package(
                 .product(name: "PostgresNIO", package: "postgres-nio"),
             ]
         ),
+        // The verifier against a certificate chain the tests make, and the real payload when #175's fixture is there.
+        .testTarget(
+            name: "GameCenterIdentityTests",
+            dependencies: [
+                "GameCenterIdentity",
+                .product(name: "Crypto", package: "swift-crypto"),
+                .product(name: "_CryptoExtras", package: "swift-crypto"),
+                .product(name: "X509", package: "swift-certificates"),
+                .product(name: "SwiftASN1", package: "swift-asn1"),
+            ]
+        ),
         .testTarget(
             name: "RaceHostTests",
             dependencies: [
@@ -136,6 +178,15 @@ let package = Package(
                 .product(name: "RegattaClient", package: "RegattaClient"),
                 // Built so a test can start the real executable and see it refuse to start (#67).
                 "RegattaServer",
+                // The service endpoint (#145): its clients, the contract runner, and Postgres for its persistence tests.
+                "GameCenterIdentity",
+                "Persistence",
+                .product(name: "RegattaServices", package: "RegattaServices"),
+                .product(name: "RegattaServiceClient", package: "RegattaServices"),
+                .product(name: "RegattaServiceContracts", package: "RegattaServices"),
+                .product(name: "RegattaContractRunner", package: "RegattaServices"),
+                .product(name: "PostgresNIO", package: "postgres-nio"),
+                .product(name: "Crypto", package: "swift-crypto"),
             ]
         ),
     ]

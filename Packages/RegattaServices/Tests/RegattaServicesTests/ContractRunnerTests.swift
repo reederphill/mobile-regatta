@@ -61,24 +61,15 @@ extension ContractLinks {
         }
     }
 
-    /// `CONTRACT_ENDPOINT` set: the wired suites against it. A connector arrives with the first server that speaks the
-    /// service messages (#145 on); until then this says so rather than passing.
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["CONTRACT_ENDPOINT"] != nil))
-    func everyWiredSuitePassesAgainstTheEndpoint() async throws {
-        let endpoint = ProcessInfo.processInfo.environment["CONTRACT_ENDPOINT"] ?? ""
-        guard let connector = Self.endpointConnector else {
-            Issue.record("CONTRACT_ENDPOINT is \(endpoint), but this build has no ServiceEndpointConnector (#145 on plug one in)")
-            return
-        }
-        for suite in ContractSuiteID.allCases where suite.isWired {
-            try await withTimeout(Self.suiteTimeout, suite.suiteName) {
-                try await ContractRunner.run(suite, over: .endpoint(endpoint, connector: connector))
-            }
-        }
+    /// `CONTRACT_ENDPOINT` and `CONTRACT_SUITES` are read by the runner (#145); the run against a real server is
+    /// RegattaServer's `ServiceEndpointContractTests`, which has the WebSocket connector.
+    @Test func theEndpointAndItsSuitesComeFromTheEnvironment() throws {
+        #expect(ContractEndpoint.fromEnvironment([:]) == nil)
+        #expect(ContractEndpoint.fromEnvironment(["CONTRACT_ENDPOINT": "ws://127.0.0.1:8080"]) == "ws://127.0.0.1:8080")
+        #expect(try ContractEndpoint.suites(served: [.identity, .terms], [:]) == [.identity, .terms])
+        #expect(try ContractEndpoint.suites(served: [.identity], ["CONTRACT_SUITES": "terms, queue"]) == [.terms, .queue])
+        #expect(throws: ContractRunnerError.unknownSuite("store")) { try ContractEndpoint.suites(served: [], ["CONTRACT_SUITES": "store"]) }
     }
-
-    /// The connector `CONTRACT_ENDPOINT` runs through: none yet.
-    static let endpointConnector: (any ServiceEndpointConnector)? = nil
 }
 
 /// Runs `body`, failing the test if it hasn't finished within `limit`. A body that never finishes is left running.

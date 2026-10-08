@@ -32,6 +32,8 @@ public enum MessageType: UInt8, Sendable, CaseIterable {
     case deletionRequest = 71
     case streamNext = 72
     case streamClose = 73
+    /// Opens, resumes or ends the connection's signed-in session (#145).
+    case sessionRequest = 74
     // Service messages, server → client: each service's replies, and the end of a stream.
     case identityReply = 80
     case termsReply = 81
@@ -42,6 +44,7 @@ public enum MessageType: UInt8, Sendable, CaseIterable {
     case analyticsReply = 86
     case deletionReply = 87
     case streamEnd = 88
+    case sessionReply = 89
 
     public enum Direction: Sendable { case clientToServer, serverToClient }
 
@@ -51,9 +54,9 @@ public enum MessageType: UInt8, Sendable, CaseIterable {
         case .helloAck, .updateRequired, .raceStart, .resync, .snapshot, .event, .windKey, .pong, .raceCancelled,
              .raceClosed: .serverToClient
         case .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
-             .analyticsRequest, .deletionRequest, .streamNext, .streamClose: .clientToServer
+             .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .sessionRequest: .clientToServer
         case .identityReply, .termsReply, .queueReply, .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply,
-             .deletionReply, .streamEnd: .serverToClient
+             .deletionReply, .streamEnd, .sessionReply: .serverToClient
         }
     }
 
@@ -120,6 +123,8 @@ public enum Message: Equatable, Sendable {
     case analyticsReply(ServiceReply<AnalyticsResult>)
     case deletionReply(ServiceReply<DeletionResult>)
     case streamEnd(StreamEnd)
+    case sessionRequest(ServiceRequest<SessionCall>)
+    case sessionReply(ServiceReply<SessionResult>)
 
     public var type: MessageType {
         switch self {
@@ -158,6 +163,8 @@ public enum Message: Equatable, Sendable {
         case .analyticsReply: .analyticsReply
         case .deletionReply: .deletionReply
         case .streamEnd: .streamEnd
+        case .sessionRequest: .sessionRequest
+        case .sessionReply: .sessionReply
         }
     }
 }
@@ -236,7 +243,8 @@ public struct Frame: Equatable, Sendable {
         case .raceClosed(let m): try m.results.encode(to: &w, "results")
         case .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
              .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .identityReply, .termsReply, .queueReply,
-             .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd:
+             .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd, .sessionRequest,
+             .sessionReply:
             try message.encodeService(to: &w)
         }
         return w.bytes
@@ -269,7 +277,8 @@ public struct Frame: Equatable, Sendable {
         case .raceClosed: message = .raceClosed(RaceClosed(results: try VersionedPayload(from: &r, "results")))
         case .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
              .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .identityReply, .termsReply, .queueReply,
-             .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd:
+             .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd, .sessionRequest,
+             .sessionReply:
             message = try Message(service: type, from: &r)
         }
         try r.finish()

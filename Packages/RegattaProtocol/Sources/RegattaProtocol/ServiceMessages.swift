@@ -15,6 +15,11 @@
 // map them to and from the service types. Integers are zigzag varints unless they are seats (a byte) or ticks
 // (int32); enum codes are fixed for good, and a decoder rejects codes it doesn't know.
 
+/// The largest service frame either way, the transport's cap (#145): over the largest real message (a race report
+/// with mark touches, about 16 MB; the lobby history, about 9.5 MB). An analytics batch over it is refused: the
+/// client splits it.
+public let serviceFrameLimit = 32 << 20
+
 /// A call to a service: the id its reply echoes, and what is asked.
 public struct ServiceRequest<Call: Equatable & Sendable>: Equatable, Sendable {
     public var id: UInt32
@@ -75,6 +80,7 @@ extension Message {
         case .analyticsReply(let m): m.id
         case .deletionReply(let m): m.id
         case .streamEnd(let m): m.id
+        case .sessionReply(let m): m.id
         default: nil
         }
     }
@@ -103,6 +109,8 @@ extension Message {
         case .analyticsReply(let m): try w.reply(m) { try $1.encode(to: &$0) }
         case .deletionReply(let m): try w.reply(m) { try $1.encode(to: &$0) }
         case .streamEnd(let m): w.requestID(m.id)
+        case .sessionRequest(let m): try w.request(m) { try $1.encode(to: &$0) }
+        case .sessionReply(let m): try w.reply(m) { try $1.encode(to: &$0) }
         default: throw WireError.outOfRange("service")
         }
     }
@@ -132,6 +140,8 @@ extension Message {
         case .analyticsReply: self = .analyticsReply(ServiceReply(id: try r.requestID(), result: try AnalyticsResult(from: &r)))
         case .deletionReply: self = .deletionReply(ServiceReply(id: try r.requestID(), result: try DeletionResult(from: &r)))
         case .streamEnd: self = .streamEnd(StreamEnd(id: try r.requestID()))
+        case .sessionRequest: self = .sessionRequest(ServiceRequest(id: try r.requestID(), call: try SessionCall(from: &r)))
+        case .sessionReply: self = .sessionReply(ServiceReply(id: try r.requestID(), result: try SessionResult(from: &r)))
         default: throw WireError.unknownMessageType(type.rawValue)
         }
     }

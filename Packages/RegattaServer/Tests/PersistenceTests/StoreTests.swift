@@ -143,30 +143,90 @@ private func file(_ id: String, _ version: Int, _ text: String) -> (FileRef, Dat
 }
 
 @Suite(TestDatabase.available) struct PlayerAndSessionStoreTests {
-    @Test func testPlayersAreKeyedByGameCenterID() async throws {
+    @Test func testPlayersAreKeyedByTeamPlayerID() async throws {
         try await TestDatabase.withMigratedSchema { database in
             let players = PlayerStore(database)
-            let created = try await players.upsert(gameCenterID: "G:123", displayName: "Phill")
-            #expect(created.gameCenterID == "G:123" && created.displayName == "Phill")
-            let renamed = try await players.upsert(gameCenterID: "G:123", displayName: "Skipper")
+            let created = try await players.signIn(teamPlayerID: "T:123", gamePlayerID: "G:123", displayName: "Phill")
+            #expect(created.teamPlayerID == "T:123" && created.gamePlayerID == "G:123" && created.displayName == "Phill")
+            let renamed = try await players.signIn(teamPlayerID: "T:123", gamePlayerID: "G:123", displayName: "Skipper")
             #expect(renamed.displayName == "Skipper" && renamed.createdAt == created.createdAt)
-            #expect(try await players.player(gameCenterID: "G:123") == renamed)
-            #expect(try await players.player(gameCenterID: "G:999") == nil)
+            #expect(try await players.player(teamPlayerID: "T:123") == renamed)
+            #expect(try await players.player(teamPlayerID: "T:999") == nil)
 
             let sessions = SessionStore(database)
             let now = Date()
             let token = Data(repeating: 7, count: 32)
-            let session = try await sessions.create(playerID: "G:123", tokenHash: token, expiresAt: now + 3600)
+            let session = try await sessions.create(playerID: "T:123", tokenHash: token, expiresAt: now + 3600)
             #expect(try await sessions.session(tokenHash: token, at: now)?.id == session.id)
             #expect(try await sessions.session(tokenHash: token, at: now + 7200) == nil)
             await #expect(throws: (any Error).self) {
-                try await sessions.create(playerID: "G:999", tokenHash: Data([1]), expiresAt: now)
+                try await sessions.create(playerID: "T:999", tokenHash: Data([1]), expiresAt: now)
             }
             #expect(try await sessions.deleteExpired(at: now + 7200) == 1)
 
-            try await sessions.create(playerID: "G:123", tokenHash: token, expiresAt: now + 3600)
-            #expect(try await players.delete(gameCenterID: "G:123"))
+            try await sessions.create(playerID: "T:123", tokenHash: token, expiresAt: now + 3600)
+            try await TermsStore(database).accept(playerID: "T:123", version: 1)
+            #expect(try await players.delete(teamPlayerID: "T:123"))
             #expect(try await sessions.session(tokenHash: token, at: now) == nil)
+            #expect(try await TermsStore(database).lastAccepted(playerID: "T:123") == nil)
+        }
+    }
+
+    /// Acceptance (#145): a second teamPlayerID claiming an already-bound gamePlayerID is refused, and changes nothing.
+    @Test func testSecondTeamPlayerIDClaimingABoundGamePlayerIDIsRefused() async throws {
+        try await TestDatabase.withMigratedSchema { database in
+            let players = PlayerStore(database)
+            try await players.signIn(teamPlayerID: "T:alice", gamePlayerID: "G:alice", displayName: "Alice")
+            await #expect(throws: PersistenceError.gamePlayerIDBound("G:alice")) {
+                try await players.signIn(teamPlayerID: "T:mallory", gamePlayerID: "G:alice", displayName: "Mallory")
+            }
+            #expect(try await players.player(teamPlayerID: "T:mallory") == nil)
+            // And the bound player can't move to another gamePlayerID either: the binding is 1:1.
+            await #expect(throws: PersistenceError.gamePlayerIDMismatch("T:alice")) {
+                try await players.signIn(teamPlayerID: "T:alice", gamePlayerID: "G:other", displayName: "Alice")
+            }
+            #expect(try await players.player(teamPlayerID: "T:alice")?.gamePlayerID == "G:alice")
+        }
+    }
+
+    @Test func testLastSessionTimeIsTheRetentionClock() async throws {
+        try await TestDatabase.withMigratedSchema { database in
+            let players = PlayerStore(database)
+            try await players.signIn(teamPlayerID: "T:1", gamePlayerID: "G:1", displayName: "One")
+            let then = Date(timeIntervalSince1970: 1_800_000_000)
+            try await players.touchSession(teamPlayerID: "T:1", at: then)
+            #expect(try await players.player(teamPlayerID: "T:1")?.lastSessionAt == then)
+        }
+    }
+
+    @Test func testSessionsKeepRestrictionsAndSlide() async throws {
+        try await TestDatabase.withMigratedSchema { database in
+            try await PlayerStore(database).signIn(teamPlayerID: "T:1", gamePlayerID: "G:1", displayName: "One")
+            let sessions = SessionStore(database)
+            let now = Date()
+            let restricted = SessionRestrictions(isUnderage: true, isMultiplayerGamingRestricted: true)
+            let session = try await sessions.create(playerID: "T:1", tokenHash: Data([9]), expiresAt: now + 60, restrictions: restricted)
+            #expect(session.restrictions == restricted)
+            let slid = try await sessions.refresh(id: session.id, expiresAt: now + 3600, restrictions: .unrestricted, at: now)
+            #expect(slid?.restrictions == SessionRestrictions.unrestricted)
+            #expect(try await sessions.session(tokenHash: Data([9]), at: now + 120)?.id == session.id)
+            #expect(try await sessions.refresh(id: session.id, expiresAt: now + 7200, restrictions: nil, at: now + 4000) == nil)
+        }
+    }
+
+    /// Terms acceptances record player, version and time; the newest version counts, and re-accepting keeps the first time.
+    @Test func testTermsAcceptancesRecordPlayerVersionAndTime() async throws {
+        try await TestDatabase.withMigratedSchema { database in
+            try await PlayerStore(database).signIn(teamPlayerID: "T:1", gamePlayerID: "G:1", displayName: "One")
+            let terms = TermsStore(database)
+            #expect(try await terms.lastAccepted(playerID: "T:1") == nil)
+            let first = Date(timeIntervalSince1970: 1_800_000_000)
+            try await terms.accept(playerID: "T:1", version: 1, at: first)
+            try await terms.accept(playerID: "T:1", version: 1, at: first + 60)
+            #expect(try await terms.acceptedAt(playerID: "T:1", version: 1) == first)
+            try await terms.accept(playerID: "T:1", version: 2, at: first + 120)
+            #expect(try await terms.lastAccepted(playerID: "T:1") == 2)
+            await #expect(throws: (any Error).self) { try await terms.accept(playerID: "T:none", version: 1) }
         }
     }
 }

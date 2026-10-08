@@ -6,10 +6,12 @@ import NIOWebSocket
 import RegattaDevAPI
 
 /// The server's one port (ADR 0006): HTTP/1.1 for `/health` and the dev routes, upgraded to a WebSocket at
-/// `/race` for races. SwiftNIO's typed upgrade pipeline and async channels; one task per connection.
+/// `/race` for races and at `/service` for the service messages (#145). SwiftNIO's typed upgrade pipeline and async
+/// channels; one task per connection.
 public final class RegattaHTTPServer: Sendable {
     private enum Connection {
         case race(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>)
+        case service(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>, NIOLoopBound<WebSocketFrameGate>)
         case http(NIOAsyncChannel<HTTPServerRequestPart, HTTPPart<HTTPResponseHead, ByteBuffer>>)
     }
 
@@ -18,6 +20,7 @@ public final class RegattaHTTPServer: Sendable {
 
     public let config: ServerConfig
     public let registry: RaceRegistry
+    public let services: ServiceEndpoint
     /// The port it listens on (the one it was given, or the free one it picked for port 0).
     public let port: Int
     private let listener: NIOAsyncChannel<EventLoopFuture<Connection>, Never>
@@ -25,9 +28,13 @@ public final class RegattaHTTPServer: Sendable {
     /// The accept loop; ends with the listener's error, or nil if the listener closed.
     private let task: Task<(any Error)?, Never>
 
-    /// Binds and starts serving. Refuses to start outside `ENV=dev` (dev auth is all there is).
-    public static func start(config: ServerConfig, group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> RegattaHTTPServer {
+    /// Binds and starts serving. Refuses to start outside `ENV=dev` (dev auth is all there is). `services` is the
+    /// service endpoint; by default the config's, with its accounts in memory (a dev server without a database).
+    public static func start(config: ServerConfig, services: ServiceEndpoint? = nil,
+                             group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> RegattaHTTPServer {
         _ = try SeatAuthPolicy.for(config.environment)
+        let services = try services ?? ServiceEndpoint.make(config: config, store: InMemoryAccountStore())
+        let frameCap = services.config.frameCap, preSignInFrameCap = services.config.preSignInFrameCap
         let registry = RaceRegistry(maxRaces: config.maxRaces)
         let listener = try await ServerBootstrap(group: group)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
@@ -36,7 +43,7 @@ public final class RegattaHTTPServer: Sendable {
             .childChannelOption(.tcpOption(.tcp_nodelay), value: 1)
             .bind(host: config.host, port: config.port) { channel in
                 channel.eventLoop.makeCompletedFuture {
-                    try Self.configure(channel)
+                    try Self.configure(channel, frameCap: frameCap, preSignInFrameCap: preSignInFrameCap)
                 }
             }
         do {
@@ -49,15 +56,17 @@ public final class RegattaHTTPServer: Sendable {
             try? await listener.channel.close()
             throw error
         }
-        return RegattaHTTPServer(config: config, registry: registry, listener: listener)
+        return RegattaHTTPServer(config: config, registry: registry, services: services, listener: listener)
     }
 
-    private init(config: ServerConfig, registry: RaceRegistry, listener: NIOAsyncChannel<EventLoopFuture<Connection>, Never>) {
+    private init(config: ServerConfig, registry: RaceRegistry, services: ServiceEndpoint,
+                 listener: NIOAsyncChannel<EventLoopFuture<Connection>, Never>) {
         self.config = config
         self.registry = registry
+        self.services = services
         self.listener = listener
         port = listener.channel.localAddress?.port ?? config.port
-        let handler = RequestHandler(config: config, registry: registry)
+        let handler = RequestHandler(config: config, registry: registry, services: services)
         self.handler = handler
         task = Task {
             await withDiscardingTaskGroup { group in
@@ -93,13 +102,18 @@ public final class RegattaHTTPServer: Sendable {
         _ = await task.value
     }
 
-    private static func configure(_ channel: any Channel) throws -> EventLoopFuture<Connection> {
-        let upgrader = NIOTypedWebSocketServerUpgrader<Connection>(
-            maxFrameSize: maxClientMessage,
-            shouldUpgrade: { channel, head in
-                let path = RequestHandler.split(head.uri).path
-                return channel.eventLoop.makeSucceededFuture(path == ServerPath.race ? HTTPHeaders() : nil)
-            },
+    private static func configure(_ channel: any Channel, frameCap: Int, preSignInFrameCap: Int) throws -> EventLoopFuture<Connection> {
+        // One WebSocket upgrader per path, so each path's decoder has its own frame limit: a race frame over
+        // `maxClientMessage` is refused at its header, before its payload is buffered; a service frame may run to the
+        // service's cap once signed in, and to `preSignInFrameCap` before (the gate ahead of the decoder, which the
+        // connection raises at sign-in).
+        let shouldUpgrade: @Sendable (any Channel, HTTPRequestHead) -> EventLoopFuture<HTTPHeaders?> = { channel, head in
+            let path = RequestHandler.split(head.uri).path
+            let upgrades = path == ServerPath.race || path == ServerPath.service
+            return channel.eventLoop.makeSucceededFuture(upgrades ? HTTPHeaders() : nil)
+        }
+        let race = NIOTypedWebSocketServerUpgrader<Connection>(
+            maxFrameSize: maxClientMessage, shouldUpgrade: shouldUpgrade,
             upgradePipelineHandler: { channel, _ in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandler(
@@ -109,6 +123,23 @@ public final class RegattaHTTPServer: Sendable {
                 }
             }
         )
+        let service = NIOTypedWebSocketServerUpgrader<Connection>(
+            maxFrameSize: max(maxClientMessage, frameCap), shouldUpgrade: shouldUpgrade,
+            upgradePipelineHandler: { channel, _ in
+                channel.eventLoop.makeCompletedFuture {
+                    let pipeline = channel.pipeline.syncOperations
+                    let gate = WebSocketFrameGate(limit: preSignInFrameCap)
+                    let decoder = try pipeline.context(handlerType: ByteToMessageHandler<WebSocketFrameDecoder>.self)
+                    try pipeline.addHandler(gate, position: .before(decoder.handler))
+                    try pipeline.addHandler(
+                        NIOWebSocketFrameAggregator(minNonFinalFragmentSize: 0, maxAccumulatedFrameCount: 4096,
+                                                    maxAccumulatedFrameSize: frameCap))
+                    return Connection.service(try NIOAsyncChannel(wrappingChannelSynchronously: channel),
+                                              NIOLoopBound(gate, eventLoop: channel.eventLoop))
+                }
+            }
+        )
+        let upgrader = PathWebSocketUpgrader(race: race, service: service)
         let configuration = NIOTypedHTTPServerUpgradeConfiguration(
             upgraders: [upgrader],
             notUpgradingCompletionHandler: { channel in
@@ -126,6 +157,7 @@ public final class RegattaHTTPServer: Sendable {
         do {
             switch try await connection.get() {
             case .race(let channel): try await serveRace(channel, handler: handler)
+            case .service(let channel, let gate): try await serveService(channel, gate: gate, handler: handler)
             case .http(let channel): try await serveHTTP(channel, handler: handler)
             }
         } catch {
@@ -153,6 +185,46 @@ public final class RegattaHTTPServer: Sendable {
                         await connection.receive(Array(buffer: frame.unmaskedData))
                         if connection.isSeated { handshakeDeadline.cancel() }
                         if connection.isClosed { return }
+                    case .ping:
+                        try await outbound.write(WebSocketFrame(fin: true, opcode: .pong, data: frame.unmaskedData))
+                    case .connectionClose:
+                        transport.close(code: .normalClosure, reason: nil)
+                        return
+                    default:
+                        break
+                    }
+                }
+            }
+        } catch {
+            await connection.ended()
+            throw error
+        }
+        await connection.ended()
+    }
+
+    /// A service connection (#145): each binary message through `ServiceConnectionHandler`, in order, until either
+    /// side closes. A connection that doesn't send `Hello` in time is closed, as on `/race`.
+    private static func serveService(_ channel: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>, gate: NIOLoopBound<WebSocketFrameGate>,
+                                     handler: RequestHandler) async throws {
+        guard let services = handler.services else { return }
+        let transport = WebSocketSeatTransport(channel: channel.channel, maxPendingBytes: 2 * services.config.frameCap)
+        let sink = ServiceSink(transport: transport, gate: gate)
+        let connection = ServiceConnectionHandler(endpoint: services, sink: sink)
+        let timeout = handler.config.handshakeTimeout
+        let handshakeDeadline = Task {
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            transport.close(code: .policyViolation, reason: "no Hello in time")
+        }
+        defer { handshakeDeadline.cancel() }
+        do {
+            try await channel.executeThenClose { inbound, outbound in
+                for try await frame in inbound {
+                    switch frame.opcode {
+                    case .binary:
+                        await connection.receive(Array(buffer: frame.unmaskedData))
+                        handshakeDeadline.cancel()
+                        if await connection.isClosed { return }
                     case .ping:
                         try await outbound.write(WebSocketFrame(fin: true, opcode: .pong, data: frame.unmaskedData))
                     case .connectionClose:
@@ -206,6 +278,45 @@ private final class ConnectionSetupErrorHandler: ChannelInboundHandler {
 
     func errorCaught(context: ChannelHandlerContext, error: any Error) {
         FileHandle.standardError.write(Data("RegattaServer: a connection failed to set up: \(error)\n".utf8))
+    }
+}
+
+/// The service connection's frames onto its WebSocket.
+private struct ServiceSink: ServiceFrameSink {
+    let transport: WebSocketSeatTransport
+    let gate: NIOLoopBound<WebSocketFrameGate>
+
+    func send(_ frame: [UInt8]) { transport.send(frame) }
+    func close(reason: String) { transport.close(code: .policyViolation, reason: String(reason.prefix(120))) }
+
+    /// On the event loop, queued ahead of the reply the handler sends next, so the client's next frame meets it.
+    func allowFrames(upTo bytes: Int) {
+        let gate = gate
+        gate.eventLoop.execute { gate.value.limit = bytes }
+    }
+}
+
+/// The WebSocket upgrade, by path: `/service` to its own upgrader (its decoder takes frames up to the service cap),
+/// everything else to the race one (16 KiB).
+private struct PathWebSocketUpgrader<UpgradeResult: Sendable>: NIOTypedHTTPServerProtocolUpgrader {
+    let race: NIOTypedWebSocketServerUpgrader<UpgradeResult>
+    let service: NIOTypedWebSocketServerUpgrader<UpgradeResult>
+
+    var supportedProtocol: String { race.supportedProtocol }
+    var requiredUpgradeHeaders: [String] { race.requiredUpgradeHeaders }
+
+    private func upgrader(for head: HTTPRequestHead) -> NIOTypedWebSocketServerUpgrader<UpgradeResult> {
+        RequestHandler.split(head.uri).path == ServerPath.service ? service : race
+    }
+
+    func buildUpgradeResponse(channel: any Channel, upgradeRequest: HTTPRequestHead,
+                              initialResponseHeaders: HTTPHeaders) -> EventLoopFuture<HTTPHeaders> {
+        upgrader(for: upgradeRequest).buildUpgradeResponse(channel: channel, upgradeRequest: upgradeRequest,
+                                                           initialResponseHeaders: initialResponseHeaders)
+    }
+
+    func upgrade(channel: any Channel, upgradeRequest: HTTPRequestHead) -> EventLoopFuture<UpgradeResult> {
+        upgrader(for: upgradeRequest).upgrade(channel: channel, upgradeRequest: upgradeRequest)
     }
 }
 

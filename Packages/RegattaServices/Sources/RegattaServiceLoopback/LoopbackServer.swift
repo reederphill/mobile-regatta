@@ -125,16 +125,16 @@ private struct Dispatcher {
             if request.call == .openStateUpdates {
                 return open(request.id, service.stateUpdates()) { .identityReply(ServiceReply(id: $0, result: .state($1.wire))) }
             }
-            return await Self.identity(request.call, service).map { [.identityReply(ServiceReply(id: request.id, result: $0))] }
+            return await ServiceAnswers.identity(request.call, service).map { [.identityReply(ServiceReply(id: request.id, result: $0))] }
         case .termsRequest(let request):
             guard let service = services.terms else { return nil }
-            return await Self.terms(request.call, service).map { [.termsReply(ServiceReply(id: request.id, result: $0))] }
+            return await ServiceAnswers.terms(request.call, service).map { [.termsReply(ServiceReply(id: request.id, result: $0))] }
         case .queueRequest(let request):
             guard let service = services.queue else { return nil }
             if request.call == .openStateUpdates {
                 return open(request.id, service.stateUpdates()) { .queueReply(ServiceReply(id: $0, result: .state($1.wire))) }
             }
-            return await Self.queue(request.call, service).map { [.queueReply(ServiceReply(id: request.id, result: $0))] }
+            return await ServiceAnswers.queue(request.call, service).map { [.queueReply(ServiceReply(id: request.id, result: $0))] }
         case .raceSessionRequest(let request):
             guard let service = services.raceSession else { return nil }
             switch request.call {
@@ -143,23 +143,23 @@ private struct Dispatcher {
             case .openRatingChanges:
                 return open(request.id, service.ratingChanges()) { .raceSessionReply(ServiceReply(id: $0, result: .ratingChange($1.wire))) }
             default:
-                return await Self.raceSession(request.call, service).map { [.raceSessionReply(ServiceReply(id: request.id, result: $0))] }
+                return await ServiceAnswers.raceSession(request.call, service).map { [.raceSessionReply(ServiceReply(id: request.id, result: $0))] }
             }
         case .lobbyRequest(let request):
             guard let service = services.lobby else { return nil }
             if request.call == .openFeed {
                 return open(request.id, service.feed()) { .lobbyReply(ServiceReply(id: $0, result: .event($1.wire))) }
             }
-            return await Self.lobby(request.call, service).map { [.lobbyReply(ServiceReply(id: request.id, result: $0))] }
+            return await ServiceAnswers.lobby(request.call, service).map { [.lobbyReply(ServiceReply(id: request.id, result: $0))] }
         case .profileRequest(let request):
             guard let service = services.profile else { return nil }
-            return await Self.profile(request.call, service).map { [.profileReply(ServiceReply(id: request.id, result: $0))] }
+            return await ServiceAnswers.profile(request.call, service).map { [.profileReply(ServiceReply(id: request.id, result: $0))] }
         case .analyticsRequest(let request):
             guard let service = services.analytics else { return nil }
-            return await Self.analytics(request.call, service).map { [.analyticsReply(ServiceReply(id: request.id, result: $0))] }
+            return await ServiceAnswers.analytics(request.call, service).map { [.analyticsReply(ServiceReply(id: request.id, result: $0))] }
         case .deletionRequest(let request):
             guard let service = services.deletion else { return nil }
-            return await Self.deletion(request.call, service).map { [.deletionReply(ServiceReply(id: request.id, result: $0))] }
+            return await ServiceAnswers.deletion(request.call, service).map { [.deletionReply(ServiceReply(id: request.id, result: $0))] }
         default:
             return nil
         }
@@ -172,8 +172,13 @@ private struct Dispatcher {
         streams[id] = OpenStream(stream, reply: reply)
         return []
     }
+}
 
-    private static func identity(_ call: IdentityCall, _ service: any IdentityService) async -> IdentityResult? {
+/// Each service call answered from a service implementation, as its wire result: nil when the call has no reply
+/// (a stream's opening) or the service failed in a way the protocol has no answer for (the link closes). The
+/// loopback answers with it, and so does the real server (#145), so both map every call and error alike.
+public enum ServiceAnswers {
+    public static func identity(_ call: IdentityCall, _ service: any IdentityService) async -> IdentityResult? {
         switch call {
         case .state: return .state(await service.state().wire)
         case .signIn: return .state(await service.signIn().wire)
@@ -190,7 +195,7 @@ private struct Dispatcher {
         }
     }
 
-    private static func terms(_ call: TermsCall, _ service: any TermsService) async -> TermsResult? {
+    public static func terms(_ call: TermsCall, _ service: any TermsService) async -> TermsResult? {
         do {
             switch call {
             case .status: return .status(try await service.status().wire)
@@ -203,7 +208,7 @@ private struct Dispatcher {
         }
     }
 
-    private static func queue(_ call: QueueCall, _ service: any QueueService) async -> QueueResult? {
+    public static func queue(_ call: QueueCall, _ service: any QueueService) async -> QueueResult? {
         do {
             switch call {
             case .join: try await service.join()
@@ -222,7 +227,7 @@ private struct Dispatcher {
         }
     }
 
-    private static func raceSession(_ call: RaceSessionCall, _ service: any RaceSessionService) async -> RaceSessionResult? {
+    public static func raceSession(_ call: RaceSessionCall, _ service: any RaceSessionService) async -> RaceSessionResult? {
         do {
             switch call {
             case .handOff: return .handOff(try await service.handOff().wire)
@@ -239,7 +244,7 @@ private struct Dispatcher {
         }
     }
 
-    private static func lobby(_ call: LobbyCall, _ service: any LobbyService) async -> LobbyResult? {
+    public static func lobby(_ call: LobbyCall, _ service: any LobbyService) async -> LobbyResult? {
         do {
             switch call {
             case .state: return .state(try await service.state().wire)
@@ -266,7 +271,7 @@ private struct Dispatcher {
         }
     }
 
-    private static func profile(_ call: ProfileCall, _ service: any ProfileService) async -> ProfileResult? {
+    public static func profile(_ call: ProfileCall, _ service: any ProfileService) async -> ProfileResult? {
         do {
             switch call {
             case .profile: return .profile(try await service.profile().wire)
@@ -283,7 +288,7 @@ private struct Dispatcher {
         }
     }
 
-    private static func analytics(_ batch: WireAnalyticsBatch, _ service: any AnalyticsTransport) async -> AnalyticsResult? {
+    public static func analytics(_ batch: WireAnalyticsBatch, _ service: any AnalyticsTransport) async -> AnalyticsResult? {
         do {
             let receipt = try await service.send(AnalyticsBatch(wire: batch))
             return .receipt(accepted: receipt.accepted, duplicates: receipt.duplicates)
@@ -297,7 +302,7 @@ private struct Dispatcher {
         }
     }
 
-    private static func deletion(_ call: DeletionCall, _ service: any DataDeletionService) async -> DeletionResult? {
+    public static func deletion(_ call: DeletionCall, _ service: any DataDeletionService) async -> DeletionResult? {
         do {
             switch call {
             case .plan: return .plan(try await service.plan().wire)
