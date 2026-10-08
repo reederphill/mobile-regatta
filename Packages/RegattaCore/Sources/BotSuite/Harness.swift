@@ -106,6 +106,24 @@ public enum BotRaceHarness {
         return result
     }
 
+    /// Sails reference race `n` (#367, `ReferenceRegatta.race(_:)`, 1-based) with `standIn` in seat 0 and the file's
+    /// bots in the rest, all built by `ReferenceRace`: the race the app's `-referenceRace <n>` sails, with only the
+    /// helm in seat 0 differing. Stops at the race's close or `capSecondsAfterGun` after the gun.
+    public static func runReference(_ n: Int, standIn: StandIn,
+                                    capSecondsAfterGun: Int = BotMatrix.defaultCapSecondsAfterGun) throws -> ReferenceResult {
+        let reference = ReferenceRegatta.race(n)
+        let race = try reference.race()
+        var controllers = reference.controllers(standIn: standIn)
+        let lastTick = capSecondsAfterGun * Race.tickRate
+        while !race.isOver && race.tick < lastTick {
+            controllers.drive(race)
+            race.step()
+        }
+        return ReferenceResult(number: n, standIn: standIn, finalTick: race.tick, capped: !race.isOver,
+                               places: race.boats.indices.map(race.place(of:)), results: race.results,
+                               digest: race.digest())
+    }
+
     /// CPU time the calling thread has used, seconds: what a race costs, however busy the machine.
     /// POSIX `clock_gettime`, on Darwin and Linux alike.
     static func threadCPUSeconds() -> Double {
@@ -629,4 +647,19 @@ struct Rule161Watchdog {
         calls.centredRudder += 1
         if lastTapTicks[offender] >= windowStart { calls.centredRudderWithTap += 1 }
     }
+}
+
+/// What a reference race sailed (#367, `BotRaceHarness.runReference`): every seat's place, the results if it closed,
+/// and the race's state digest. Seeded throughout, so the same race and stand-in give the same result every time.
+public struct ReferenceResult: Hashable, Sendable {
+    public var number: Int
+    public var standIn: StandIn
+    public var finalTick: Int
+    /// Stopped at the cap, not closed.
+    public var capped: Bool
+    /// Each seat's place (`Race.place(of:)`), by seat: seat 0 is the stand-in's.
+    public var places: [Int]
+    /// The race's results, nil if it was capped.
+    public var results: RaceResults?
+    public var digest: UInt64
 }
