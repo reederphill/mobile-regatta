@@ -8,7 +8,7 @@ import XCTest
 /// of its own beside `RenderFixtureUITests`, as the cues' are.
 ///
 /// Three fixtures to a test: each is a launch of about 20 s on CI's render job, and the twelve in one test ran
-/// 210-265 s against the 300 s allowance (#408).
+/// 210-265 s against the 300 s allowance.
 extension RenderFixtureUITests {
     @objc @MainActor func testRuleCallCuesMatchReferences() throws {
         try assertRuleCuesMatchReferences(["rules-call", "rules-call-deuteranopia", "rules-call-protanopia"])
