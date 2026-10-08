@@ -1070,6 +1070,10 @@ extension BoatClass {
     public func handling(in conditions: Conditions) -> BoatClass {
         var c = self
         c.overpowered?.threshold *= conditions.gustScale
+        // Screenshot aid (prototype only): REGATTA_PROTO_GUST_SCALE multiplies the threshold again.
+        if let extra = ProcessInfo.processInfo.environment["REGATTA_PROTO_GUST_SCALE"].flatMap(Double.init), extra > 0 {
+            c.overpowered?.threshold *= extra
+        }
         c.planing?.onSpeed *= conditions.planingOnSpeedScale
         c.planing?.offSpeed *= conditions.planingOffSpeedScale
         if let p = c.planing, p.offSpeed > p.onSpeed { c.planing?.offSpeed = p.onSpeed }
