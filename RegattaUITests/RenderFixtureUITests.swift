@@ -52,6 +52,8 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         try renderFixtures(["results-live", "hud-racing", "prestart"]) { name, render in
             if name == "prestart" { sequenced = render }
         }
+        // A handshake that timed out falls back to a launch per fixture, which would pass here without testing a thing.
+        XCTAssertFalse(Self.sequencesFailed, "a -fixtures handshake timed out, so the run launched each fixture alone")
         let render = try XCTUnwrap(sequenced)
         let diff = assertMatches(render.image, fresh.image, named: "prestart-sequenced", tolerance: .exact,
                                  ignoringBottomRows: max(render.homeIndicatorRows, fresh.homeIndicatorRows))

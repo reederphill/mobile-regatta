@@ -97,16 +97,20 @@ class RenderFixtureTestCase: RaceUITestCase {
     /// Renders each of `names` in turn and hands it to `body`, all in one launch: `-fixtures` shows the first, and
     /// each next one replaces it on a fresh window and model when asked (the app's `FixtureSequence`), so a render is
     /// the one its own launch draws (`testFixtureSequenceRendersAsFreshLaunches`) for one launch's cost rather than
-    /// one per fixture. Should the app miss a handshake (or quit), the rest launch afresh from the fixture it missed.
+    /// one per fixture. Should the app miss a handshake (or quit), the rest launch afresh from the fixture it missed;
+    /// a handshake that times out stops the run asking again (`sequencesFailed`), so each later fixture launches on
+    /// its own as before rather than waiting out the timeout first.
     @MainActor func renderFixtures(_ names: [String], arguments: [String] = [], file: StaticString = #filePath,
                                    line: UInt = #line, _ body: (String, FixtureRender) throws -> Void) throws {
         guard !names.isEmpty else { return }
-        var app = launchFixtures(names, arguments: arguments)
+        var app = launchFixtures(Self.sequencesFailed ? [names[0]] : names, arguments: arguments)
         var launchedAt = 0
         for (index, name) in names.enumerated() {
-            if index > launchedAt, !showFixture(index - launchedAt, in: app) {
+            if Self.sequencesFailed, index > 0 {
+                app = launchFixtures([name], arguments: arguments)
+            } else if index > launchedAt, !showFixture(index - launchedAt, in: app) {
                 launchedAt = index
-                app = launchFixtures(Array(names[index...]), arguments: arguments)
+                app = launchFixtures(Self.sequencesFailed ? [name] : Array(names[index...]), arguments: arguments)
             }
             try body(name, settledRender(of: name, in: app, file: file, line: line))
         }
@@ -135,8 +139,15 @@ class RenderFixtureTestCase: RaceUITestCase {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
                                              CFNotificationName("\(Self.sequenceNamePrefix).show.\(index)" as CFString),
                                              nil, nil, true)
-        return XCTWaiter().wait(for: [shown], timeout: 30) == .completed
+        guard XCTWaiter().wait(for: [shown], timeout: 30) == .completed else {
+            Self.sequencesFailed = true
+            return false
+        }
+        return true
     }
+
+    /// Whether a `-fixtures` handshake has timed out in this run: then every fixture launches on its own.
+    @MainActor private(set) static var sequencesFailed = false
 
     /// Fixture `name`'s render once it's on screen in `app`: two screenshots in a row agree outside the
     /// home-indicator band, so the launch animation is over and the frozen frame is on screen, and no system
