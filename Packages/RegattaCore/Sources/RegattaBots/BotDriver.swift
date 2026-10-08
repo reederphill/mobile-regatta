@@ -36,6 +36,12 @@ public struct BotDriver: Sendable {
     /// Whether the decision she holds is the suite's hunter turning at the boat she hunts (#355, `BotBrain.hunting`):
     /// a luff, or a turn that brings a boat that must keep clear of her closer. Never for a live bot.
     public private(set) var isHuntingTurn = false
+    /// Her taps that played a fleet tactic (#234), by tactic, and her decisions luffing a windward boat before her start
+    /// (#337, `BotBrain.startLuffing`): what the suite counts by engagement band.
+    public private(set) var leeBowTaps = 0
+    public private(set) var tackOnWindTaps = 0
+    public private(set) var coverTaps = 0
+    public private(set) var startLuffDecisions = 0
 
     private var brain: BotBrain
 
@@ -112,6 +118,15 @@ public struct BotDriver: Sendable {
         let decision = brain.decide(view)
         decisions += 1
         isHuntingTurn = decision.hunt == .turn
+        if decision.tap != nil {
+            switch decision.play {
+            case .leeBow: leeBowTaps += 1
+            case .tackOnWind: tackOnWindTaps += 1
+            case .cover: coverTaps += 1
+            case .holdLane, nil: break
+            }
+        }
+        if decision.startLuff { startLuffDecisions += 1 }
         let next = race.tick + 1
         race.apply(decision.input, seat: seat, atTick: next)
         if let tap = decision.tap { race.tap(tap, seat: seat, atTick: next) }

@@ -347,6 +347,7 @@ extension BotBrain {
             guard tactics.leeBowExempt(sinceTack: view.time - lastTackTime),
                   let play = fleetPlay(b, view, planned: tack, headed: shifted, lean: shifted, threshold: threshold,
                                        leeBowOnly: true, overstood: overstood), play.play == .leeBow else { return tack }
+            notePlay(play.play, view)
             return tack.other
         }
         // Goes to the pressure (`Tactics.goesToThePressure`): with the shift neutral, nothing in it to play, the
@@ -358,7 +359,10 @@ extension BotBrain {
         if tactics.seeksClearAir && tack == b.tack && b.shadow < Self.dirtyAir { headed += Self.dirtyAirWeight }
         if let play = fleetPlay(b, view, planned: tack, headed: shifted, lean: headed, threshold: threshold,
                                 overstood: overstood) {
-            guard play.play == .holdLane else { return tack.other }
+            guard play.play == .holdLane else {
+                notePlay(play.play, view)
+                return tack.other
+            }
             // Holding her lane, only a big header tacks her, and like any fleet tactic's tack, only when she can tap
             // it now and onto a board she hasn't overstood.
             let tacks = shifted > threshold * tactics.laneHeader && !overstood(tack.other) && canTap(b, view)
@@ -369,6 +373,12 @@ extension BotBrain {
         }
         let bar = tactics.goesToThePressure && neutral && pressure > threshold / 2 ? threshold / 2 : threshold
         return headed > bar ? tack.other : tack
+    }
+
+    /// Notes the fleet tactic that turns her plan to the other tack now (`lastFleetPlay`, #337).
+    private mutating func notePlay(_ kind: FleetPlay.Kind, _ view: SeatView) {
+        lastFleetPlay = kind
+        lastFleetPlayTime = view.time
     }
 
     /// Her wind shadow factor under which she is in another boat's dirty air.

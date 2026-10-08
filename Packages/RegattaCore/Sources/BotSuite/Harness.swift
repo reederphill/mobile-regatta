@@ -92,8 +92,17 @@ public enum BotRaceHarness {
             crosses?.record(race)
         }
         let seats = tiers.indices.map { seat in
-            tally.metrics(seat: seat, of: race, tier: tiers[seat], profile: profiles[seat],
-                          style: controllers[seat].driver?.style, cautious: cautiousSeats.contains(seat))
+            var metrics = tally.metrics(seat: seat, of: race, tier: tiers[seat], profile: profiles[seat],
+                                        style: controllers[seat].driver?.style, cautious: cautiousSeats.contains(seat))
+            // #337: her fleet tactics' taps and pre-start luffs, and a live bot's engagement, by which they're banded.
+            if let driver = controllers[seat].driver {
+                metrics.leeBowTaps = driver.leeBowTaps
+                metrics.tackOnWindTaps = driver.tackOnWindTaps
+                metrics.coverTaps = driver.coverTaps
+                metrics.startLuffDecisions = driver.startLuffDecisions
+                if profiles[seat] == nil, !cautiousSeats.contains(seat) { metrics.engagement = driver.style.engagement }
+            }
+            return metrics
         }
         var result = RaceResult(cell: cell, finalTick: race.tick, capped: !race.isOver,
                                 tideStateAtGun: race.tideStateAtGun, seats: seats,

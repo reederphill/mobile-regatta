@@ -90,6 +90,14 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     public var cautious: Bool = false
     /// Each run she sailed, in order (#105): from her rounding into it until she rounds the gate or finishes.
     public var runs: [RunSplit] = []
+    /// A live bot's engagement (`BotStyle.engagement`, #337); nil for a profile and the cautious bot.
+    public var engagement: Double? = nil
+    /// Her taps that played a fleet tactic (#234, `BotDriver.leeBowTaps` …), and her decisions luffing a windward boat
+    /// before her start (#337, `BotDriver.startLuffDecisions`); nil for a seat no bot sailed.
+    public var leeBowTaps: Int? = nil
+    public var tackOnWindTaps: Int? = nil
+    public var coverTaps: Int? = nil
+    public var startLuffDecisions: Int? = nil
 
     public static let metricKeys = [
         "finished", "place", "ironsSeconds", "markContacts", "boatContacts", "contactsEndingInFouls",
@@ -110,6 +118,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         case preStartEncounters, preStartEncountersEndingInFouls, closeEncounters, crossings, shadowGiven, shadowReceived, covers
         case callsByRule, callsBeforeFirstRounding, racingTacks
         case preStartCallsByRule, cascadeCallsByRule, metresToFinish, onLastLeg, cautious, runs
+        case engagement, leeBowTaps, tackOnWindTaps, coverTaps, startLuffDecisions
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -158,6 +167,11 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(onLastLeg, forKey: .onLastLeg)
         try c.encode(cautious, forKey: .cautious)
         try c.encode(runs, forKey: .runs)
+        try c.encodeIfPresent(engagement, forKey: .engagement)
+        try c.encodeIfPresent(leeBowTaps, forKey: .leeBowTaps)
+        try c.encodeIfPresent(tackOnWindTaps, forKey: .tackOnWindTaps)
+        try c.encodeIfPresent(coverTaps, forKey: .coverTaps)
+        try c.encodeIfPresent(startLuffDecisions, forKey: .startLuffDecisions)
     }
 
     /// Whether her style means her to start in the line's pin third (#99).
@@ -934,6 +948,45 @@ public struct CloseEncounterSummary: Codable, Hashable, Sendable {
     }
 }
 
+/// #337: the live bots' fleet tactics by engagement band over every live race (all tiers): how often each band
+/// lee-bows, tacks on a boat's wind and covers, luffs before her start, and is called. Bands: mild under 0.4,
+/// middle 0.4 to 0.6, combative 0.6 and up.
+public struct EngagementBandSummary: Codable, Hashable, Sendable {
+    public struct Band: Codable, Hashable, Sendable {
+        public var name: String
+        /// Live seats in the band, all races together (seat-races).
+        public var seatRaces: Int
+        /// Per seat-race.
+        public var leeBows: Double
+        public var tacksOnWind: Double
+        public var covers: Double
+        public var startLuffDecisions: Double
+        public var foulsAsOffender: Double
+        public var preStartCalls: Double
+    }
+    public var bands: [Band]
+
+    static let edges: [(name: String, range: Range<Double>)] = [
+        ("mild", 0..<0.4), ("middle", 0.4..<0.6), ("combative", 0.6..<1.000_001),
+    ]
+
+    /// Nil when no live seat sailed.
+    init?(_ races: [RaceResult]) {
+        let seats = races.filter { $0.cell.profileMix == .live }.flatMap(\.seats).filter { $0.engagement != nil }
+        guard !seats.isEmpty else { return nil }
+        bands = Self.edges.map { edge in
+            let band = seats.filter { edge.range.contains($0.engagement ?? -1) }
+            func per(_ value: (SeatMetrics) -> Int) -> Double {
+                band.isEmpty ? 0 : Double(band.reduce(0) { $0 + value($1) }) / Double(band.count)
+            }
+            return Band(name: edge.name, seatRaces: band.count, leeBows: per { $0.leeBowTaps ?? 0 },
+                        tacksOnWind: per { $0.tackOnWindTaps ?? 0 }, covers: per { $0.coverTaps ?? 0 },
+                        startLuffDecisions: per { $0.startLuffDecisions ?? 0 }, foulsAsOffender: per(\.foulsAsOffender),
+                        preStartCalls: per { $0.preStartCallsByRule.values.reduce(0, +) })
+        }
+    }
+}
+
 extension BotRaceCell {
     /// Whether it sails an all-National fleet of live bots: the fleets navigation (#100) and conduct (#101) are gated
     /// over.
@@ -1144,6 +1197,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var conduct: ConductSummary?
     /// Close encounters (#234) over the all-National live fleets; nil when none sailed.
     public var closeEncounters: CloseEncounterSummary?
+    /// The live bots' fleet tactics by engagement band (#337) over every live race; nil when none sailed.
+    public var engagementBands: EngagementBandSummary? = nil
     /// The hunters scenario (#355) over its races; nil when none sailed.
     public var hunters: HuntersSummary?
     /// Execution against tactics (#105) over the races with both; nil when none did.
@@ -1190,6 +1245,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         navigation = NavigationSummary(races)
         conduct = ConductSummary(races)
         closeEncounters = CloseEncounterSummary(races)
+        engagementBands = EngagementBandSummary(races)
         hunters = HuntersSummary(races)
         execution = ExecutionSummary(races.compactMap(\.execution))
         watchdog = WatchdogSummary(races)
@@ -1278,6 +1334,14 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
             lines.append("close encounters: \(close.races) all-National races, \(fixed(close.closeEncountersPerRace)) per mid-fleet boat "
                 + "per race (crossings \(fixed(close.crossingsPerRace)), shadow given \(fixed(close.shadowGivenPerRace)), "
                 + "received \(fixed(close.shadowReceivedPerRace)), covers \(fixed(close.coversPerRace)))")
+        }
+        if let engagementBands {
+            for band in engagementBands.bands {
+                lines.append("engagement \(band.name): \(band.seatRaces) live seat-races, per seat-race lee-bows "
+                    + "\(fixed(band.leeBows, 3)), tacks on wind \(fixed(band.tacksOnWind, 3)), covers \(fixed(band.covers, 3)), "
+                    + "pre-start luff decisions \(fixed(band.startLuffDecisions, 2)), fouls \(fixed(band.foulsAsOffender, 3)), "
+                    + "pre-start calls \(fixed(band.preStartCalls, 3))")
+            }
         }
         if let hunters {
             let profile = profiles[BotProfile.hunter.rawValue]

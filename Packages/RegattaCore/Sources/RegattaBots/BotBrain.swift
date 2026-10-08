@@ -71,6 +71,10 @@ public struct BotDecision: Hashable, Sendable {
     /// What the suite's hunter's hunting made of `input` (#355, `BotBrain.hunting`); nil for every other bot, and for
     /// her when she sailed as a live bot does.
     var hunt: BotBrain.HuntStep? = nil
+    /// The fleet tactic her tap plays (#234, #337: counted by the suite by engagement band); nil for any other tap.
+    var play: BotBrain.FleetPlay.Kind? = nil
+    /// Whether `input` is a combative bot's luff at a windward boat before her start (#337, `startLuffing`).
+    var startLuff = false
 
     public init(input: BoatInput, tap: BoatTap? = nil) {
         self.input = input
@@ -106,6 +110,10 @@ struct BotBrain: Sendable {
     /// 0 the pin … 1 the committee boat; nil until she has read it, or for any other bot.
     var favouredEndSpot: Double?
     var lastTackTime = -1_000.0
+    /// The fleet tactic (#234) that last turned her plan to the other tack (`upwindTack`), and when: her tap then is
+    /// that play's (`BotDecision.play`, for the suite's count, #337).
+    var lastFleetPlay: FleetPlay.Kind?
+    var lastFleetPlayTime = -Double.infinity
     /// When she last tapped: she lets a tap finish before another.
     var lastTapTime = -1_000.0
     /// The rudder she holds hard over through her penalty turns, one way, from when she starts them until
@@ -241,7 +249,9 @@ struct BotBrain: Sendable {
             if canTap(boat, view) {
                 lastTapTime = view.time
                 planRoll(boat, view)
-                return BotDecision(input: .neutral, tap: .tackGybe)
+                var decision = BotDecision(input: .neutral, tap: .tackGybe)
+                if lastFleetPlayTime == view.time { decision.play = lastFleetPlay }
+                return decision
             }
             // Not yet (too slow to tack, or a mark too close to turn by): the same aim on her own tack. Before
             // her start (#99) she sails her own tack's groove sheeted in instead: the speed to tack, rather than
@@ -275,8 +285,10 @@ struct BotBrain: Sendable {
     private func holding(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> BotDecision {
         guard tactics.hunts else {
             // #337: a combative live bot luffs a windward boat before her start (`startLuffing`).
-            let held = startLuffing(b, view, input, desired: desired) ?? holdingCourse(b, view, input)
-            return BotDecision(input: clearingQuarter(b, view, held))
+            let luffed = startLuffing(b, view, input, desired: desired)
+            var decision = BotDecision(input: clearingQuarter(b, view, luffed ?? holdingCourse(b, view, input)))
+            decision.startLuff = luffed != nil && decision.input == luffed
+            return decision
         }
         let (held, step) = hunting(b, view, input, desired: desired)
         var decision = BotDecision(input: clearingQuarter(b, view, held))
