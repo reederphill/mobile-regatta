@@ -12,7 +12,7 @@ import Testing
     @Test func everyScenarioBuildsItsServices() async throws {
         #expect(FakeServiceScenario.allCases.map(\.rawValue) == [
             "signed-out", "underage", "communication-restricted", "multiplayer-restricted", "offline", "queued", "cancelled-race",
-            "online-results", "online-results-unrated",
+            "online-results", "online-results-unrated", "terms-bump",
         ])
         for scenario in FakeServiceScenario.allCases {
             let services = ServiceSet.fake(scenario)
@@ -24,7 +24,7 @@ import Testing
             #expect((player == nil) == (scenario == .signedOut), "\(scenario): signed in")
             #expect(online == (scenario == .offline ? .offline : .online), "\(scenario): connectivity")
             if player != nil {
-                #expect(try await services.terms.status().isAccepted, "\(scenario): terms accepted")
+                #expect(try await services.terms.status().isAccepted == (scenario != .termsBump), "\(scenario): terms accepted")
                 #expect(try await services.profile.profile().gamePlayerID == player?.gamePlayerID, "\(scenario): profile")
             }
 
@@ -46,6 +46,11 @@ import Testing
                 #expect(player?.canRaceOnline == false && player?.canChat == true)
                 #expect(queue == .unavailable(.multiplayerRestricted))
                 #expect(lobby == .open)
+            case .termsBump:
+                let terms = try await services.terms.status()
+                #expect(terms == .needsAcceptance(current: TermsVersion(2), lastAccepted: TermsVersion(1)), "the sheet asks again")
+                #expect(lobby == .closed(.termsNotAccepted))
+                #expect(try await services.terms.accept(TermsVersion(2)).isAccepted)
             case .offline:
                 await #expect(throws: StoreError.offline) { try await services.store.products() }
                 await #expect(throws: AnalyticsError.unavailable) {

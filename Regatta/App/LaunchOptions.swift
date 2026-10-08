@@ -34,8 +34,8 @@ import RegattaServices
 /// - `-briefing practice|online` opens on the briefing (#130) for the launch race (`RaceConfig.launch()`, and `-seed`), with
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
-///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued` or
-///   `cancelled-race` (`FakeServiceScenario`). Debug builds only (#314): other builds don't know it, so a release
+///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued`,
+///   `cancelled-race`, `online-results`, `online-results-unrated` or `terms-bump` (`FakeServiceScenario`). Debug builds only (#314): other builds don't know it, so a release
 ///   build always runs on the real services.
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI

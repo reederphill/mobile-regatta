@@ -1,11 +1,12 @@
+import RegattaServices
 import SwiftUI
 
 /// The one home screen (#25): Race online leading Practice, the lobby area below, and the toolbar's pages
 /// pushed on top. No tab bar.
 struct HomeView: View {
     @Bindable var model: AppModel
-    /// Race online: a stub until matchmaking (Debug builds join the dev server's instant race, #68).
-    var onRaceOnline: () -> Void
+    /// Race online, the lobby's Sign in and the Terms of Use sheet: RootView's gate (#138).
+    var online: HomeOnlineActions
     @Environment(\.isOnline) private var isOnline
     @Environment(\.lobbyStatus) private var lobbyStatus
 
@@ -24,9 +25,8 @@ struct HomeView: View {
                     if let lastRace = model.lastRace {
                         LastRaceRow(lastRace: lastRace) { model.sheet = .lastRace }
                     }
-                    LobbyPanel(state: LobbyPanelState(isOnline: isOnline, status: lobbyStatus)) {
-                        model.sheet = .signIn
-                    }
+                    LobbyPanel(state: LobbyPanelState(isOnline: isOnline, status: lobbyStatus), onSignIn: online.signIn,
+                               onReviewTerms: { model.sheet = .terms })
                 }
                 .padding(.vertical, 20)
                 .readableColumn()
@@ -43,8 +43,10 @@ struct HomeView: View {
             }
         }
         .tint(ChromePalette.tint)
-        .sheet(item: $model.sheet) { sheet in
-            if sheet == .lastRace, let lastRace = model.lastRace {
+        .sheet(item: $model.sheet, onDismiss: online.sheetDismissed) { sheet in
+            if sheet == .terms {
+                TermsSheet(version: lobbyStatus.termsVersion, agree: online.agreeToTerms, close: { model.sheet = nil })
+            } else if sheet == .lastRace, let lastRace = model.lastRace {
                 // Your last race's results, reopened (#24, #132): large, with Close only.
                 ResultsView(model: lastRace, buttons: .reopened(close: { model.sheet = nil }), presentation: .page)
                     .environment(\.colorScheme, .dark)
@@ -57,7 +59,7 @@ struct HomeView: View {
 
     private var raceOnline: some View {
         let availability = RaceOnlineAvailability(isOnline: isOnline, lobbyStatus: lobbyStatus)
-        return Button(action: onRaceOnline) {
+        return Button(action: online.raceOnline) {
             VStack(spacing: 2) {
                 Text("Race online").font(MenuFont.heading(.title2))
                 if let reason = availability.reason {
@@ -142,7 +144,18 @@ struct HomeView: View {
     }
 }
 
-/// What the lobby area shows, from connectivity and the player's account (#25).
+/// What Home's online controls do (#138): RootView runs Race online's gate, Game Center's sign-in and the terms.
+struct HomeOnlineActions {
+    var raceOnline: () -> Void = {}
+    /// The lobby area's Sign in.
+    var signIn: () -> Void = {}
+    /// The Terms of Use sheet's I agree.
+    var agreeToTerms: () -> Void = {}
+    /// A sheet went away, however it was closed: what waits on the Terms of Use sheet runs here.
+    var sheetDismissed: () -> Void = {}
+}
+
+/// What the lobby area shows, from connectivity and the player's account (#25), by the gating matrix (#138).
 enum LobbyPanelState: Equatable {
     case offline
     case signIn
@@ -153,13 +166,14 @@ enum LobbyPanelState: Equatable {
     case lobby
 
     init(isOnline: Bool, status: LobbyStatus) {
+        let access = status.access(isOnline: isOnline)
         if !isOnline {
             self = .offline
         } else if !status.isSignedIn {
             self = .signIn
-        } else if !status.hasAcceptedTerms {
+        } else if access.termsDue {
             self = .acceptTerms
-        } else if status.hidesChat || !status.canChat {
+        } else if status.hidesChat || !access.chatVisible {
             self = .chatHidden(queuedPlayers: status.queuedPlayers)
         } else {
             self = .lobby
@@ -171,6 +185,7 @@ enum LobbyPanelState: Equatable {
 private struct LobbyPanel: View {
     let state: LobbyPanelState
     var onSignIn: () -> Void
+    var onReviewTerms: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -188,16 +203,17 @@ private struct LobbyPanel: View {
         switch state {
         case .offline:
             heading("You're offline", systemImage: "wifi.slash")
-            detail("Practice races work without a connection. Race online and the lobby come back when you're online.")
+            detail("Practice races work offline.")
         case .signIn:
-            heading("Sign in to race online", systemImage: "person.crop.circle.badge.checkmark")
-            detail("Game Center signs you in. Practice races need no account.")
+            heading("Sign in to Game Center to chat", systemImage: "person.crop.circle.badge.checkmark")
             Button("Sign in", action: onSignIn)
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("lobby-sign-in")
         case .acceptTerms:
-            heading("Accept the terms", systemImage: "doc.text")
-            detail("Accept the terms to race online and chat in the lobby.")
+            heading("Accept the terms to chat and race online", systemImage: "doc.text")
+            Button("Review terms", action: onReviewTerms)
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("lobby-terms")
         case .chatHidden(let queuedPlayers):
             heading("Queue", systemImage: "person.3")
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -274,20 +290,16 @@ private struct LastRaceRow: View {
     }
 }
 
-/// Whether Home's Race online can be tapped, and the one line under it when it can't (#242, #314).
+/// Whether Home's Race online can be tapped, and the one line under it when it can't (#242, #314): "Offline", or
+/// "Practice races only" for Game Center's multiplayer restriction (#34), by the gating matrix (#138). Signed out it
+/// can: the tap signs in (#25).
 struct RaceOnlineAvailability: Equatable {
     var isEnabled: Bool
     var reason: String?
 
     init(isOnline: Bool, lobbyStatus: LobbyStatus) {
-        if !isOnline {
-            self.init(isEnabled: false, reason: "Offline")
-        } else if !lobbyStatus.canRaceOnline {
-            // Game Center's multiplayer restriction (#34): disabled, with a one-line reason.
-            self.init(isEnabled: false, reason: "Practice races only")
-        } else {
-            self.init(isEnabled: true, reason: nil)
-        }
+        let access = lobbyStatus.access(isOnline: isOnline)
+        self.init(isEnabled: access.onlineAllowed, reason: access.reason)
     }
 
     init(isEnabled: Bool, reason: String?) {

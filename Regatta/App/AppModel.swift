@@ -27,8 +27,8 @@ final class AppModel {
 
     /// Sheets are only for small, brief things (#25).
     enum Sheet: String, Identifiable {
-        /// Game Center sign-in.
-        case signIn
+        /// The Terms of Use (#34, #138): after Game Center sign-in, and reopened from the lobby area.
+        case terms
         /// A lobby player's boat card.
         case boatCard
         /// Your last race's results, reopened from home's Last race (#24, #132): large, with Close only.

@@ -20,7 +20,7 @@ import RegattaCore
     @Test func dismissAllClearsPathAndSheet() {
         let model = AppModel()
         model.path = [.practiceSetup, .myBoat]
-        model.sheet = .signIn
+        model.sheet = .terms
 
         model.dismissAll()
         #expect(model.path.isEmpty)

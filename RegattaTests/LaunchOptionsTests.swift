@@ -121,7 +121,7 @@ import RegattaServices
         #expect(unknown.fakeServices == nil)
         #expect(unknown.problems == ["-fakeServices haunted: expected "
             + "signed-out, underage, communication-restricted, multiplayer-restricted, offline, queued, cancelled-race, "
-            + "online-results, online-results-unrated"])
+            + "online-results, online-results-unrated, terms-bump"])
         let missing = parse("-fakeServices", "-autostart")
         #expect(missing.fakeServices == nil && missing.autostart)
         #expect(missing.problems == ["-fakeServices needs a value"])
