@@ -87,18 +87,74 @@ class RenderFixtureTestCase: RaceUITestCase {
         return true
     }
 
-    /// Launches `-fixture <name>`, with `arguments` after it, and returns its render once two screenshots in a row agree outside the
+    /// Launches `-fixture <name>`, with `arguments` after it, and returns its render (`settledRender`).
+    @MainActor func renderFixture(_ name: String, arguments: [String] = [], file: StaticString = #filePath,
+                                  line: UInt = #line) throws -> FixtureRender {
+        let app = launchFixtures([name], arguments: arguments)
+        return try settledRender(of: name, in: app, file: file, line: line)
+    }
+
+    /// Renders each of `names` in turn and hands it to `body`, all in one launch: `-fixtures` shows the first, and
+    /// each next one replaces it on a fresh window and model when asked (the app's `FixtureSequence`), so a render is
+    /// the one its own launch draws (`testFixtureSequenceRendersAsFreshLaunches`) for one launch's cost rather than
+    /// one per fixture. Should the app miss a handshake (or quit), the rest launch afresh from the fixture it missed;
+    /// a handshake that times out stops the run asking again (`sequencesFailed`), so each later fixture launches on
+    /// its own as before rather than waiting out the timeout first.
+    @MainActor func renderFixtures(_ names: [String], arguments: [String] = [], file: StaticString = #filePath,
+                                   line: UInt = #line, _ body: (String, FixtureRender) throws -> Void) throws {
+        guard !names.isEmpty else { return }
+        var app = launchFixtures(Self.sequencesFailed ? [names[0]] : names, arguments: arguments)
+        var launchedAt = 0
+        for (index, name) in names.enumerated() {
+            if Self.sequencesFailed, index > 0 {
+                app = launchFixtures([name], arguments: arguments)
+            } else if index > launchedAt, !showFixture(index - launchedAt, in: app) {
+                launchedAt = index
+                app = launchFixtures(Self.sequencesFailed ? [name] : Array(names[index...]), arguments: arguments)
+            }
+            try body(name, settledRender(of: name, in: app, file: file, line: line))
+        }
+    }
+
+    /// A fresh launch on `names`' first fixture: `-fixture <name>` for one, `-fixtures <name>,<name>,…` for more.
+    @MainActor private func launchFixtures(_ names: [String], arguments: [String]) -> XCUIApplication {
+        let app = XCUIApplication()
+        if app.state != .notRunning { app.terminate() }
+        let fixtures = names.count == 1 ? ["-fixture", names[0]] : ["-fixtures", names.joined(separator: ",")]
+        app.launchArguments = ["-uitesting"] + fixtures + arguments
+        app.launchEnvironment["REGATTA_FIXTURE_DIR"] = Self.fixtures.path
+        app.launch()
+        return app
+    }
+
+    /// The app's `FixtureSequence` handshake names start with this; the test runner and the app share no code.
+    private static let sequenceNamePrefix = "com.phillreeder.regatta.render-fixture"
+
+    /// Asks the running `-fixtures` launch for its `index`th fixture and waits until the app says that fixture's
+    /// window has replaced the last one's, so no screenshot after this is of the fixture before. False if it never
+    /// says.
+    @MainActor private func showFixture(_ index: Int, in app: XCUIApplication) -> Bool {
+        guard app.state == .runningForeground else { return false }
+        let shown = XCTDarwinNotificationExpectation(notificationName: "\(Self.sequenceNamePrefix).shown.\(index)")
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                             CFNotificationName("\(Self.sequenceNamePrefix).show.\(index)" as CFString),
+                                             nil, nil, true)
+        guard XCTWaiter().wait(for: [shown], timeout: 30) == .completed else {
+            Self.sequencesFailed = true
+            return false
+        }
+        return true
+    }
+
+    /// Whether a `-fixtures` handshake has timed out in this run: then every fixture launches on its own.
+    @MainActor private(set) static var sequencesFailed = false
+
+    /// Fixture `name`'s render once it's on screen in `app`: two screenshots in a row agree outside the
     /// home-indicator band, so the launch animation is over and the frozen frame is on screen, and no system
     /// banner was up before the first screenshot or after the last (one that stays across both would pass the
     /// two-in-a-row check, so a banner seen means starting the comparison over).
-    @MainActor func renderFixture(_ name: String, arguments: [String] = [], file: StaticString = #filePath,
-                                  line: UInt = #line) throws -> FixtureRender {
-        let app = XCUIApplication()
-        if app.state != .notRunning { app.terminate() }
-        app.launchArguments = ["-uitesting", "-fixture", name] + arguments
-        app.launchEnvironment["REGATTA_FIXTURE_DIR"] = Self.fixtures.path
-        app.launch()
-
+    @MainActor private func settledRender(of name: String, in app: XCUIApplication, file: StaticString,
+                                          line: UInt) throws -> FixtureRender {
         let scene = app.descendants(matching: .any)["render-fixture"].firstMatch
         guard scene.waitForExistence(timeout: 60) else {
             let error = app.staticTexts["fixture-error"]
@@ -171,6 +227,26 @@ class RenderFixtureTestCase: RaceUITestCase {
     /// (`assertMatchesReference(_:render:)`).
     @MainActor func assertMatchesReference(_ name: String, file: StaticString = #filePath, line: UInt = #line) throws {
         try assertMatchesReference(name, render: renderFixture(name, file: file, line: line), file: file, line: line)
+    }
+
+    /// `assertMatchesReference` for several fixtures in one test and one launch (`renderFixtures`), on iPhone only
+    /// (`skipOnIPad`): each renders and compares before any failure ends the test, so every render that moved (or
+    /// has no reference yet) reaches render-actuals in one CI run rather than one per run.
+    @MainActor func assertAllMatchReferences(_ names: [String], file: StaticString = #filePath,
+                                             line: UInt = #line) throws {
+        try skipOnIPad()
+        continueAfterFailure = true
+        defer { continueAfterFailure = false }
+        try renderFixtures(names, file: file, line: line) { name, render in
+            try assertMatchesReference(name, render: render, file: file, line: line)
+        }
+    }
+
+    /// References are recorded on iPhone only; the iPad run skips a reference test on purpose. Anywhere else, a
+    /// missing reference fails in CI rather than skipping.
+    @MainActor func skipOnIPad() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad,
+                      "render references are recorded on iPhone 17 only; the iPad run doesn't compare them")
     }
 
     /// Diffs `render`, fixture `name`'s, against this device's committed reference. With no reference

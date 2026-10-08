@@ -168,6 +168,18 @@ import RegattaServices
         #expect(missing.problems == ["-vision needs a value"])
     }
 
+    /// `-fixtures` (#62's render job): the first fixture shows at launch, the rest wait their turn.
+    @Test func parsesAFixtureSequence() {
+        let options = parse("-uitesting", "-fixtures", "hud-prestart,hud-racing,hud-ocs")
+        #expect(options.fixture == "hud-prestart")
+        #expect(options.fixtureSequence == ["hud-prestart", "hud-racing", "hud-ocs"])
+        #expect(options.showingFixture("hud-ocs").fixture == "hud-ocs")
+        #expect(options.showingFixture("hud-ocs").fixtureSequence == options.fixtureSequence)
+        #expect(options.problems.isEmpty)
+        #expect(parse("-fixture", "prestart").fixtureSequence.isEmpty)
+        #expect(parse("-fixtures", ",").problems == ["-fixtures ,: expected fixture names separated by commas"])
+    }
+
     @Test func aMissingValueDoesNotSwallowTheNextFlag() {
         let options = parse("-seed", "-autostart", "-fixture")
         #expect(options.seed == nil)

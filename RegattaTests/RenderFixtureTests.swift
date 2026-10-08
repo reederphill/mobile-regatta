@@ -484,7 +484,7 @@ import UIKit
     }
 
     /// Every filter moves the water tones well past `FilterCoverage.minimumShift`, so the vision fixtures' UI tests,
-    /// which check a filtered render's edges against the unfiltered one (`RenderFixtureUITests`'
+    /// which check a filtered render's edges against the unfiltered one (`RenderFixtureFilterUITests`'
     /// `assertFilterReachesEveryEdge`), see each filter wherever it reaches.
     @Test func everyFilterMovesTheWaterPastTheCoverageThreshold() {
         for filter in VisionFilter.allCases where filter != .none {

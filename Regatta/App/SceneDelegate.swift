@@ -11,18 +11,42 @@ import UIKit
 final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
     private let sceneState = SceneState()
+    private weak var windowScene: UIWindowScene?
+    private var onlineStatus: OnlineStatus?
+    /// `-fixtures`' later fixtures, each shown when the UI test asks (#62's render job).
+    private var fixtureSequence: FixtureSequence?
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
         sceneState.phase = SceneState.phase(for: windowScene.activationState)
-        let window = UIWindow(windowScene: windowScene)
         guard let app = AppDelegate.current else { return }
+        self.windowScene = windowScene
+        onlineStatus = OnlineStatus(services: app.services, isInitiallyOnline: OnlineStatus.isInitiallyOnline(.current))
+        let launchOptions = LaunchOptions.current
+        showWindow(launchOptions: launchOptions)
+        if launchOptions.uiTesting {
+            fixtureSequence = FixtureSequence(names: launchOptions.fixtureSequence) { [weak self] name in
+                self?.showWindow(launchOptions: launchOptions.showingFixture(name))
+            }
+        }
+    }
+
+    /// A new window with a new root, and so a new `AppModel` and `RootView`, for `launchOptions`: at launch, and for
+    /// each later fixture of a `-fixtures` sequence, where it stands in for a relaunch. The old window's race cover is
+    /// dismissed and the window hidden and emptied first, so nothing of the last fixture's view or model is left.
+    private func showWindow(launchOptions: LaunchOptions) {
+        guard let windowScene, let app = AppDelegate.current, let onlineStatus else { return }
+        if let old = window {
+            old.rootViewController?.dismiss(animated: false)
+            old.isHidden = true
+            old.rootViewController = nil
+        }
+        let window = UIWindow(windowScene: windowScene)
         window.rootViewController = RootHostingController(sceneState: sceneState, screenSize: windowScene.screen.bounds.size,
                                                           maximumFramesPerSecond: windowScene.screen.maximumFramesPerSecond,
-                                                          onlineStatus: OnlineStatus(services: app.services,
-                                                                                    isInitiallyOnline: OnlineStatus.isInitiallyOnline(.current)),
-                                                          analytics: app.analytics)
-        if let appearance = LaunchOptions.current.appearance {
+                                                          onlineStatus: onlineStatus, analytics: app.analytics,
+                                                          launchOptions: launchOptions)
+        if let appearance = launchOptions.appearance {
             window.overrideUserInterfaceStyle = appearance == .dark ? .dark : .light
         }
         window.makeKeyAndVisible()
@@ -92,12 +116,13 @@ final class RootHostingController: UIHostingController<AppRoot> {
         }
     }
 
-    /// With no `onlineStatus`, online and signed out, as the placeholders were: for tests.
+    /// With no `onlineStatus`, online and signed out, as the placeholders were: for tests. `launchOptions` is the
+    /// launch's, or a `-fixtures` sequence's with its next fixture showing.
     init(sceneState: SceneState, screenSize: CGSize, maximumFramesPerSecond: Int = 60, onlineStatus: OnlineStatus? = nil,
-         analytics: Analytics = .discarding()) {
+         analytics: Analytics = .discarding(), launchOptions: LaunchOptions = .current) {
         // My boat sells from the app's store; with none given, the model's own stub.
-        let model = AppModel(sceneState: sceneState, store: onlineStatus?.services.store, analytics: analytics,
-                             audio: .live())
+        let model = AppModel(sceneState: sceneState, launchOptions: launchOptions, store: onlineStatus?.services.store,
+                             analytics: analytics, audio: .live())
         let onlineStatus = onlineStatus ?? OnlineStatus(services: .fake(.signedOut))
         super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize,
                                      maximumFramesPerSecond: maximumFramesPerSecond, onlineStatus: onlineStatus))
