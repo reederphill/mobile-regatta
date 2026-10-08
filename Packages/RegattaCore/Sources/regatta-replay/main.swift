@@ -5,6 +5,9 @@
 // and warns: the digest is then this build's reading of the inputs, not the race as it was sailed.
 // A folder is a tuned practice race as `RaceLogFolder` saves it (#232): its log, with the tuned
 // copies it names beside it, which the replay resolves before the bundled files.
+//
+// regatta-replay freeze-ticks [--check] <fixtures folder> <table.json> picks render fixtures' freeze ticks by a
+// condition on their logs instead (#404, `FreezeTicks`, `scripts/record-fixtures.sh`).
 import Foundation
 import RegattaCore
 
@@ -14,6 +17,7 @@ func fail(_ message: String, status: Int32) -> Never {
 }
 
 var arguments = Array(CommandLine.arguments.dropFirst())
+if arguments.first == "freeze-ticks" { exit(FreezeTicks.main(arguments: Array(arguments.dropFirst()))) }
 let anyVersion = arguments.contains("--any-version")
 arguments.removeAll { $0 == "--any-version" }
 guard arguments.count == 1, !arguments[0].hasPrefix("-") else {

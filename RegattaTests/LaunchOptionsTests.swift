@@ -277,6 +277,17 @@ import RegattaServices
         #expect(config.setup.seats[0] == .human, "it's still your seat")
     }
 
+    /// The race `regatta-botsuite results-seed` probes for the UI tests' seed table (#404, `scripts/pick-ui-seeds.sh`)
+    /// is the `-demo -seed <n> -laps 1` launch race: seven opponents, a 60 s sequence, the bundled files, the wind
+    /// pinned to the seed. If this moves, so must the probe (`ResultsSeedProbe.sail`), or the table picks for another race.
+    @Test func theDemoRaceIsTheOneTheSeedProbeSails() throws {
+        let config = try #require(parse("-demo", "-seed", "12", "-laps", "1").launchRaceConfig())
+        #expect(config == RaceConfig(opponents: 7, laps: 1, prestartSeconds: 60, seed: 12,
+                                     windSeed: RaceConfig.windSeed(pinnedTo: 12), botSailsYourBoat: true))
+        #expect(config.setup == (try RaceSetup(raceSeed: RaceSeed(12), seats: [.human] + Array(repeating: .bot, count: 7),
+                                               laps: 1, startSequenceTicks: 60 * Race.tickRate)))
+    }
+
     @Test func perfIsASixteenBoatDemoRace() throws {
         let config = try #require(parse("-perf").launchRaceConfig())
         #expect(config.botSailsYourBoat)

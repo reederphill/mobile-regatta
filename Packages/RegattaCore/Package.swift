@@ -52,8 +52,8 @@ let package = Package(
             // The full matrix and the per-tier limits are data (#19: "The exact limits are set at build time").
             resources: [.copy("matrix.json"), .copy("thresholds.json")]
         ),
-        // A thin command line over BotSuite.
-        .executableTarget(name: "regatta-botsuite", dependencies: ["BotSuite"]),
+        // A thin command line over BotSuite, and the UI tests' seed probe (#404) over RegattaBots.
+        .executableTarget(name: "regatta-botsuite", dependencies: ["BotSuite", "RegattaBots", "RegattaCore"]),
         // regatta-botsuite is a dependency so `swift test` builds it: the gate tests run it as its own process.
         .testTarget(name: "BotSuiteTests", dependencies: ["BotSuite", "regatta-botsuite", "RegattaCore", "RegattaBots"]),
     ]
