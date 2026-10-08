@@ -95,8 +95,8 @@ import UIKit
         #expect(session.scene.filter == nil && !session.scene.shouldEnableEffects)
     }
 
-    /// The HUD fixtures (#114) are what their names say: before the gun, racing, OCS, a mark-room notice, and after
-    /// the first finish with the countdown to the close. Each draws the HUD over the scene; every older fixture
+    /// The HUD fixtures (#114) are what their names say: before the gun, racing, OCS, and after the first
+    /// finish with the countdown to the close. Each draws the HUD over the scene; every older fixture
     /// draws the scene alone, so its reference doesn't move.
     @Test func hudFixturesShowWhatTheyAreFor() throws {
         func hud(_ name: String) throws -> (fixture: RenderFixture, session: GameSession) {
@@ -117,9 +117,6 @@ import UIKit
         let ocs = try hud("hud-ocs").session
         #expect(ocs.hud.status == .ocs, "the fixture's seat is OCS at its tick: \(ocs.hud.status)")
         #expect(HUDModel(ocs.hud).placeText == "OCS" && ocs.notice?.kind == .ocs)
-
-        let markRoom = try hud("hud-markroom").session
-        #expect(markRoom.notice?.kind == .markRoom && markRoom.notice?.expires == .distantFuture)
 
         let finish = try hud("hud-afterfirstfinish").session
         let close = try #require(finish.hud.closeTick, "a boat has finished at the fixture's tick")
@@ -239,7 +236,7 @@ import UIKit
         open.refreshHUD()
         #expect(open.isLeaderboardExpanded, "a frozen fixture's board stays open")
 
-        for name in ["hud-prestart", "hud-racing", "hud-ocs", "hud-markroom", "hud-afterfirstfinish"] {
+        for name in ["hud-prestart", "hud-racing", "hud-ocs", "hud-afterfirstfinish"] {
             let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
             #expect(try !GameSession(fixture: fixture, log: log).controls.showsLeaderboard, "\(name)")
         }

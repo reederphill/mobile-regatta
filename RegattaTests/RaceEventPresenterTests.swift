@@ -162,8 +162,8 @@ import RegattaCore
         #expect(recorder.calls == ["impact 0.5"])
     }
 
-    /// Mark-room has no notice: the right-of-way glow shows who owes it (`Race.keepClearRelations(of:)`), so the
-    /// record's event presents nothing, to either boat or to a third.
+    /// Mark-room has no notice: the right-of-way glow shows who owes it (`Race.keepClearRelations(of:)`). The event is
+    /// reserved and no longer emitted (#403), but an old server's one still presents nothing, to either boat or a third.
     @Test func markRoomNoticeIsSilent() {
         for (boat, over) in [(Self.me, 1), (1, Self.me), (1, 2)] {
             var presenter = RaceEventPresenter(me: Self.me)

@@ -40,6 +40,7 @@ public struct RaceEvent: Sendable, Equatable {
         case disqualified(seat: Int, reason: String)
         /// A new rule 18 record (#91, `MarkRoomRecord`): `boat` is entitled to mark-room at `mark` (its name)
         /// from `entitledOver`, who must give it. Told to those two boats only (#15), and never right of way.
+        /// Reserved: no longer emitted (#403), mark-room being the right-of-way glow (#386); still decoded.
         case markRoomNotice(boat: Int, entitledOver: Int, mark: String)
         /// The boat has stopped racing and is now a ghost (#30, `Race.isGhost(seat:)`): as she finishes, at the
         /// DSQ call, or, still OCS or never started, at the close, just before `raceClosed`.
@@ -63,7 +64,8 @@ public struct RaceEvent: Sendable, Equatable {
         case rollMissed(seat: Int)
 
         /// A decision of the umpire or race committee under the rules: a rule call, a mark touch's penalty
-        /// (rule 31), a recall, a disqualification, a mark-room notice, a protest recorded. Only the
+        /// (rule 31), a recall, a disqualification, a mark-room notice (reserved, no longer emitted, #403),
+        /// a protest recorded. Only the
         /// authoritative race emits them; a prediction never does (`Race.Mode`, #96).
         public var isRuleEvent: Bool {
             switch self {

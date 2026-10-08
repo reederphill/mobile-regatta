@@ -198,8 +198,8 @@ public struct UmpireState: Sendable, Equatable {
     }
 
     /// One tick of rule 18 (#91), after the boats have moved and the overlaps have been updated: each boat's
-    /// presence in her mark's zone, then each pair's record, in seat order. Returns the notices of the records
-    /// made this tick (`RaceEvent.Kind.markRoomNotice`), in seat-pair order.
+    /// presence in her mark's zone, then each pair's record, in seat order. Announces nothing: mark-room is the
+    /// right-of-way glow (#386), and `RaceEvent.Kind.markRoomNotice` is no longer emitted (#403).
     ///
     /// - A boat is in the zone from the tick any part of her hull reaches it; she has left it once all of it
     ///   has been out for the last point of certainty, so a hull skimming the circle doesn't flicker.
@@ -222,32 +222,25 @@ public struct UmpireState: Sendable, Equatable {
     ///   boat has been on starboard since entering the zone, the tacker owes her mark-room once that boat is
     ///   overlapped inside the tacker (RRS 18.3(b): "if the other boat becomes overlapped inside her"). A tacker
     ///   that ends up inside is owed nothing: 18.2 no longer applies between them.
-    mutating func updateMarkRoom(_ tick: MarkRoomTick) -> [RaceEvent.Kind] {
+    mutating func updateMarkRoom(_ tick: MarkRoomTick) {
         let margin = RulesConfig.ticks(tick.rules.incidents.lastPointOfCertainty)
         updateZonePresence(tick, margin: margin)
         // By seat, and whether any pair holds a record yet: most pairs, most ticks, are nowhere near a zone.
         let presence = tick.boats.indices.map { zonePresence[$0] }
         let anyPair = !markRoomPairs.isEmpty
-        var notices: [RaceEvent.Kind] = []
         let n = tick.boats.count
         for a in 0..<n {
             for b in (a + 1)..<n {
                 let pair = SeatPair(a, b)
-                var began: MarkRoomPair.Owed?
                 if anyPair, var state = markRoomPairs[pair] {
-                    let holds = state.advance(a, b, tick, margin: margin, presence: { presence[$0] }, began: &began)
+                    let holds = state.advance(a, b, tick, margin: margin, presence: { presence[$0] })
                     markRoomPairs[pair] = holds ? state : nil
                 } else if presence[a] != nil || presence[b] != nil,
                           let state = MarkRoomPair.begin(a, b, tick, presence: { presence[$0] }) {
                     markRoomPairs[pair] = state
-                    began = state.owed
-                }
-                if let began, let mark = markRoomPairs[pair]?.mark.name {
-                    notices.append(.markRoomNotice(boat: began.entitled, entitledOver: began.owing, mark: mark))
                 }
             }
         }
-        return notices
     }
 
     /// Each seat's `ZonePresence` for this tick: begun on the tick any part of her hull is in the zone of the
@@ -419,9 +412,8 @@ struct MarkRoomPair: Sendable, Equatable {
     }
 
     /// One tick for seats `a` < `b` (see `UmpireState.updateMarkRoom`): false once rule 18 has ended between
-    /// them at this mark. Sets `began` to a record it makes.
-    mutating func advance(_ a: Int, _ b: Int, _ tick: MarkRoomTick, margin: Int, presence: (Int) -> ZonePresence?,
-                          began: inout Owed?) -> Bool {
+    /// them at this mark.
+    mutating func advance(_ a: Int, _ b: Int, _ tick: MarkRoomTick, margin: Int, presence: (Int) -> ZonePresence?) -> Bool {
         let (boatA, boatB) = (tick.boats[a], tick.boats[b])
         guard boatA.status == .racing, boatB.status == .racing else { return false }
         if boatA.legIndex > lowLeg && boatB.legIndex > highLeg { return false }
@@ -476,7 +468,6 @@ struct MarkRoomPair: Sendable, Equatable {
         }
         entitledHasBeenIn = inside == a ? aIn : bIn
         entitledTicksOut = 0
-        began = owed
         return true
     }
 

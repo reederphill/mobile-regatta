@@ -4,7 +4,7 @@ import Foundation
 /// moments (the gun, a rounding, a finish) are felt as haptics, not read; your roll tack's result is read as well as seen
 /// (`BoatNode`'s ring), since it is over in a moment.
 enum NoticeKind: String, CaseIterable, Codable {
-    case ocs, ruleCall, markRoom, roll, penalty, latency, hint
+    case ocs, ruleCall, roll, penalty, latency, hint
 }
 
 /// How each kind of notice behaves in the slot: a data table, so its order is read in one place (#114).
@@ -26,7 +26,6 @@ enum NoticeTable {
     static let rows: [NoticeKind: NoticeRule] = [
         .ocs: NoticeRule(priority: 60, seconds: 6, maxWait: 2, symbol: "exclamationmark.triangle.fill", holdsHints: true),
         .ruleCall: NoticeRule(priority: 50, seconds: 6, maxWait: 6, symbol: "flag.fill", holdsHints: true),
-        .markRoom: NoticeRule(priority: 40, seconds: 4, maxWait: 2, symbol: "circle.dashed", holdsHints: false),
         // How your roll tack went (#222): a moment, gone before it is stale.
         .roll: NoticeRule(priority: 35, seconds: 1.8, maxWait: 1, symbol: "arrow.triangle.2.circlepath", holdsHints: false),
         .penalty: NoticeRule(priority: 30, seconds: 5, maxWait: 4, symbol: "arrow.clockwise", holdsHints: false),
