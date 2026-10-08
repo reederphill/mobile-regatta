@@ -304,10 +304,10 @@ jobs:
     if: needs.changes.outputs.app == 'true'
     # Pinned so the SDK and simulator runtime only change on purpose: Xcode 26.6, iOS 26.5.
     runs-on: macos-26
-    # About 10 min to build and boot, the render step about 18 min (#127 added the thermal-tier cue test, ~5 min), no
-    # retry: 50 min is room for a hung fixture (5 min allowance each) and a slow boot, not the expected run. The
-    # image-diff self-tests add a few minutes, and only when a change reaches the tool.
-    timeout-minutes: 50
+    # About 10 min to build and boot; the render step now runs 30-40 min on a loaded runner (whole jobs took 39-45
+    # min on 2026-10-07, one 52 min), no retry: 65 min is room for a hung fixture (5 min allowance each) and a slow
+    # boot. The image-diff self-tests add a few minutes, and only when a change reaches the tool.
+    timeout-minutes: 65
     env:
       # DEVELOPER_DIR rather than xcode-select: switching with xcode-select hid the simulators.
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
