@@ -17,6 +17,8 @@ final class BoatNode: SKNode {
     /// What heel narrows: the drop shadow, glow, hull and outline, never the sail (`xScale` would warp it).
     private let hullGroup = SKNode()
     private let heelShadow: SKSpriteNode
+    /// #429 prototype: spray flecks, made on first use.
+    private var sprayDots: [SKShapeNode] = []
     private let glow: SKSpriteNode?
     /// The right-of-way glow (#123): a white halo tinted red or green and faded by `setRightOfWayGlow`, under the
     /// hull. Your own boat never has one.
@@ -149,7 +151,7 @@ final class BoatNode: SKNode {
         let detail: CGFloat = reduced ? 0 : 1
         sailDetailShare += (detail - sailDetailShare) * (settled ? 1 : min(1, CGFloat(dt) * 2))
 
-        updateHeel(pose, style: style)
+        updateHeel(pose, style: style, time: time)
         let isFlogging = updateSail(pose, style: style, detail: Double(sailDetailShare), time: time, dt: dt,
                                     settled: settled)
         effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
@@ -198,12 +200,40 @@ final class BoatNode: SKNode {
     }
 
     /// Heel (#22): the hull drawn narrower and a drop shadow offset to leeward (the boom's side, except by the lee).
-    private func updateHeel(_ pose: BoatPose, style: BoatStyle) {
+    private func updateHeel(_ pose: BoatPose, style: BoatStyle, time: Double) {
         let heel = CGFloat(pose.heel)
         let leeward: CGFloat = pose.leeSide == .port ? -1 : 1
-        hullGroup.xScale = 1 - CGFloat(style.heelNarrowing) * heel
-        heelShadow.position = CGPoint(x: leeward * heel * CGFloat(style.heelShadowOffset) * beam, y: 0)
-        heelShadow.alpha = heel * CGFloat(style.heelShadowAlpha)
+        hullGroup.xScale = pose.isWipedOut ? CGFloat(style.wipeoutHullScale) : 1 - CGFloat(style.heelNarrowing) * heel
+        hullGroup.position = CGPoint(x: pose.isWipedOut ? leeward * 0.4 * beam : 0, y: 0)
+        let shadowOffset = pose.isWipedOut ? 1.2 : CGFloat(style.heelShadowOffset)
+        heelShadow.position = CGPoint(x: leeward * heel * shadowOffset * beam / hullGroup.xScale, y: 0)
+        heelShadow.alpha = heel * CGFloat(style.heelShadowAlpha) * (pose.isWipedOut ? 1.6 : 1)
+        updateSpray(pose, leeward: leeward, time: time)
+    }
+
+    /// #429 prototype: white flecks thrown off her leeward bow and beam, more with more heel.
+    private func updateSpray(_ pose: BoatPose, leeward: CGFloat, time: Double) {
+        if sprayDots.isEmpty {
+            for k in 0..<8 {
+                let dot = SKShapeNode(circleOfRadius: max(1.5, beam * (k.isMultiple(of: 2) ? 0.14 : 0.09)))
+                dot.fillColor = .white
+                dot.strokeColor = .clear
+                dot.zPosition = Layer.sail + 0.01
+                dot.alpha = 0
+                body.addChild(dot)
+                sprayDots.append(dot)
+            }
+        }
+        let amount = CGFloat(pose.spray)
+        for (k, dot) in sprayDots.enumerated() {
+            // Each fleck flies out from the hull to leeward and fades, on its own phase.
+            let phase = (time * 1.7 + Double(k) * 0.137 + Double(seat) * 0.31).truncatingRemainder(dividingBy: 1)
+            let along = length * (0.32 - 0.07 * CGFloat(k % 4))
+            let out = beam * (0.55 + 1.6 * CGFloat(phase) * (0.6 + amount))
+            dot.position = CGPoint(x: leeward * out, y: along - CGFloat(phase) * length * 0.12)
+            dot.alpha = amount * CGFloat(1 - phase) * 0.95
+            dot.isHidden = amount <= 0
+        }
     }
 
     /// Returns whether a roll miss's flog is on (the wake dies with it, #222). `detail` scales the flutter swing, luff
@@ -239,7 +269,8 @@ final class BoatNode: SKNode {
             ? style.ghostSailBelly
             : pose.sailFullness
                 * (1 - style.flapBellyLoss * flap * (0.5 + 0.5 * sin(time * style.flapBellyRate + flutterPhase)))
-        sail.xScale = side * CGFloat(belly)
+        sail.xScale = side * CGFloat(belly) * (pose.isWipedOut ? 1.8 : 1)
+        sail.alpha = pose.isWipedOut ? 0.75 : 1
         return isFlogging
     }
 

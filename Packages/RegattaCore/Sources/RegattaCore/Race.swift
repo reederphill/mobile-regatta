@@ -50,7 +50,8 @@ public final class Race {
     /// the nearest point of the finish line. 0 for the finish leg.
     private let ladderAfterTarget: [Double]
     /// The class every boat sails: hull, polar and handling (ADR 0004).
-    public var boatClass: BoatClass { files.boatClass.content }
+    /// As the conditions scale it (#429 prototype: `BoatClass.handling(in:)`).
+    public let boatClass: BoatClass
     /// The water's own motion (#78, ADR 0003), which carries every boat (#79): the venue's current at the
     /// tide state at the gun the race seed draws.
     public let current: CurrentField
@@ -171,6 +172,7 @@ public final class Race {
         try files.check(against: setup)
         self.setup = setup
         self.files = files
+        boatClass = files.boatClass.content.handling(in: files.conditions.content)
         self.scriptedWind = scriptedWind
         let revealedWindKeys: [WindKey]
         switch mode {
@@ -349,7 +351,7 @@ public final class Race {
             switch tap {
             case .tackGybe:
                 let b = boats[i]
-                guard !b.isGhost else { break }
+                guard !b.isGhost, !b.isWipedOut else { break }
                 if boatClass.rollTack != nil, isInTack(b) {
                     // A second tap during a tack is the roll (#222, #263): one a tack, any after it ignored.
                     if b.roll == nil { boats[i].roll = .pending(tapTick: tick) } // timed in `sailRoll`
@@ -704,7 +706,8 @@ public final class Race {
         let speedBefore = b.speed
         let moved = BoatDynamics.advance(
             BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide,
-                               isPlaning: b.isPlaning, spinnaker: b.spinnaker),
+                               isPlaning: b.isPlaning, spinnaker: b.spinnaker, heel: b.heel,
+                               wipeoutTicksLeft: b.wipeoutTicksLeft),
             control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: !b.isGhost),
             env: BoatDynamics.Environment(windDirection: b.sailingWind.direction, windSpeed: tws, current: b.current,
                                           shadow: b.speedShadow(in: boatClass)),
@@ -715,6 +718,8 @@ public final class Race {
         b.rudder = moved.rudder
         b.isPlaning = moved.isPlaning
         b.spinnaker = moved.spinnaker
+        b.heel = moved.heel
+        b.wipeoutTicksLeft = moved.wipeoutTicksLeft
         let crossing = moved.boomSide != b.boomSide
         b.boomSide = moved.boomSide
         let turn = wrapAngle(b.heading - before)

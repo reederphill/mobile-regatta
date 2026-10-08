@@ -8,6 +8,7 @@ struct RaceControls: View {
     let session: GameSession
 
     private var isRacing: Bool { session.hud.status.isRacingOrStarting }
+    private var easeGlows: Bool { session.isEasing && session.hud.status == .racing }
 
     /// A control's height and the row's bottom padding, points.
     static let controlHeight: CGFloat = 56
@@ -22,6 +23,9 @@ struct RaceControls: View {
                        releases: session.controlReleases,
                        onPress: { session.setEase(true) }, onRelease: { session.setEase(false) },
                        accessibilityToggle: .init(isOn: session.isEasing, toggle: { session.toggleEase() }))
+                // #429 prototype: Ease glows while held mid-leg (after the gun).
+                .shadow(color: .white.opacity(easeGlows ? 0.95 : 0), radius: easeGlows ? 14 : 0)
+                .shadow(color: .white.opacity(easeGlows ? 0.7 : 0), radius: easeGlows ? 5 : 0)
             Spacer()
             HoldButton(title: session.hud.isUpwind ? "TACK" : "GYBE", width: 120, identifier: "race-tack",
                        isEnabled: isRacing, releases: session.controlReleases,

@@ -110,6 +110,12 @@ public struct Boat: Identifiable, Sendable {
     /// Her automatic spinnaker (#248, `BoatClass.spinnaker`): down, going up, up or coming down. Always
     /// down for a class without one. For drawing (#120) as much as for her speed.
     public var spinnaker = Spinnaker.down
+    /// Heel from being overpowered, 0…1 (#429 prototype): set by `BoatDynamics.advance`.
+    public var heel = 0.0
+    /// Ticks left of a wipeout (#429 prototype), or nil.
+    public var wipeoutTicksLeft: Int?
+    /// Wiped out (#429 prototype).
+    public var isWipedOut: Bool { wipeoutTicksLeft != nil }
     /// The class's running average of the wind speed her polar reads (`polarWindSpeed(in:)`), m/s: what her
     /// autohelm's grooves follow (#245, `grooveWindSpeed(in:)`). Nil until the race first samples her wind.
     /// With no average (`AutohelmTuning.grooveWindAverage` 0, every schema-2 class) it is the wind right now.

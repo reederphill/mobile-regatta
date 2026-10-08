@@ -21,7 +21,7 @@ import Foundation
 public struct Conditions: DataFileContent, Hashable {
     public static let kind = "conditions"
     public static let bundleDirectory = "conditions"
-    public static let supportedSchemaVersions = [1, 2, 3, 4, 5, 6]
+    public static let supportedSchemaVersions = [1, 2, 3, 4, 5, 6, 7]
 
     /// Every conditions entry oscillates with a main period in 60–180 s (ADR 0001). #221 made the shifts
     /// faster, about 60–100 s from version 3 of each file (90–180 s before, #10); with 30 s knots, periods
@@ -45,6 +45,11 @@ public struct Conditions: DataFileContent, Hashable {
     /// The pressure field's layers (#286, ADR 0008), or nil for a schema 1 or 2 file, whose wind has none and
     /// sails as it always has.
     public let pressureField: PressureField?
+    /// Schema 7 (#429 prototype): the scale on the class's overpowered threshold (1 for an older file).
+    public internal(set) var gustScale = 1.0
+    /// Schema 7 (#429 prototype): the scales on the class's planing on and off speeds (1 for an older file).
+    public internal(set) var planingOnSpeedScale = 1.0
+    public internal(set) var planingOffSpeedScale = 1.0
 
     /// The oscillating shift about the mean direction.
     public struct Shift: Hashable, Sendable {
@@ -189,9 +194,16 @@ public struct Conditions: DataFileContent, Hashable {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2, 3, 4, 5, 6:
-            self = try JSONDecoder().decode(ConditionsSchema.self, from: fileData)
-                .conditions(id: header.id, schemaVersion: header.schemaVersion)
+        case 1, 2, 3, 4, 5, 6, 7:
+            let schema = try JSONDecoder().decode(ConditionsSchema.self, from: fileData)
+            // Schema 7 is schema 6 plus the handling scales (#429 prototype).
+            var conditions = try schema.conditions(id: header.id, schemaVersion: min(header.schemaVersion, 6))
+            if header.schemaVersion >= 7 {
+                conditions.gustScale = schema.gustScale ?? 1
+                conditions.planingOnSpeedScale = schema.planing?.onSpeedScale ?? 1
+                conditions.planingOffSpeedScale = schema.planing?.offSpeedScale ?? 1
+            }
+            self = conditions
         default:
             throw DataFileError.unsupportedSchemaVersion(
                 kind: Self.kind, found: header.schemaVersion, supported: Self.supportedSchemaVersions)
@@ -309,6 +321,13 @@ private struct ConditionsSchema: Decodable {
     let puffs: Puffs
     /// Schema 3.
     let pressureField: PressureField?
+    /// Schema 7.
+    struct Planing: Decodable {
+        let onSpeedScale: Double?
+        let offSpeedScale: Double?
+    }
+    let gustScale: Double?
+    let planing: Planing?
 
     func conditions(id: String, schemaVersion: Int) throws -> Conditions {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {

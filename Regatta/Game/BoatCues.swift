@@ -24,6 +24,9 @@ nonisolated struct VaneCue: Equatable, Sendable {
     var isLocked: Bool
     /// Where the pinch or foot arc ends, from the tick; nil for none.
     var arcEnd: Double?
+    /// #429 prototype: the puff tick, the downwind groove at the wind at her now (`instantGrooveAngle`), on runs only
+    /// and only when it is `BoatStyle.puffTickMinDegrees` or more from the groove tick; nil otherwise.
+    var puffTick: Double?
 
     /// `boat`'s vane in `boatClass`, with her autohelm's `reading` (nil while the rudder is held), or nil for none:
     /// a ghost has none, and nor has a boat with no wind yet (online before the key).
@@ -39,6 +42,15 @@ nonisolated struct VaneCue: Equatable, Sendable {
             grooveAngle = Autohelm.grooveAngle(groove, tws: boat.grooveWindSpeed(in: boatClass), boatClass: boatClass)
         }
         tick = wrapAngle(side * grooveAngle)
+        if abs(boat.sailingAngle) >= .pi / 2 {
+            let instant = reading?.instantGrooveAngle
+                ?? Autohelm.grooveAngle(.downwind, tws: boat.polarWindSpeed(in: boatClass), boatClass: boatClass)
+            let groove = reading?.groove == .downwind ? grooveAngle
+                : Autohelm.grooveAngle(.downwind, tws: boat.grooveWindSpeed(in: boatClass), boatClass: boatClass)
+            puffTick = abs(instant - groove) >= deg2rad(style.puffTickMinDegrees) ? wrapAngle(side * instant) : nil
+        } else {
+            puffTick = nil
+        }
 
         let holding = reading.map { !$0.isTapping } ?? false
         let onGroove = holding && reading?.target.groove != nil

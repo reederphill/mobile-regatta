@@ -65,9 +65,10 @@ public struct RaceFiles: Sendable {
     public static let defaults: RaceFiles = {
         do {
             return try RaceFiles(
-                boatClass: .bundled(id: "skiff", version: 6),
-                venue: .bundled(id: "dev-venue", version: 2),
-                conditions: .bundled(id: "classic-oscillating", version: 2),
+                // #429 prototype (proto-handling only): skiff@7 and the @8 conditions, with a venue that pairs them.
+                boatClass: .bundled(id: "skiff", version: 7),
+                venue: .bundled(id: "dev-venue", version: 8),
+                conditions: .bundled(id: "classic-oscillating", version: 8),
                 rulesConfiguration: .bundled(id: "fleet-rules", version: 5)
             )
         } catch {

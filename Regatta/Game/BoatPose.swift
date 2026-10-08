@@ -45,6 +45,10 @@ nonisolated struct BoatPose: Equatable, Sendable {
     /// The sail's belly, 1 for its base shape: flatter pinched, fuller footed (#219). Footed, `sailTrim` is
     /// eased too.
     var sailFullness = 1.0
+    /// Wiped out (#429 prototype): hull on her side, sail flat on the water.
+    var isWipedOut = false
+    /// Spray off her leeward side (#429 prototype), 0 to 1: heel past `BoatStyle.sprayHeel`.
+    var spray = 0.0
 
     /// `boat`'s pose in `boatClass`. `ease` is her held ease; `isGhost` whether she has stopped racing, as the
     /// race shows it (`Race.isGhost(seat:)`); `autohelm` what her autohelm holds (`RenderWorld.autohelm(ofSeat:)`),
@@ -104,7 +108,26 @@ nonisolated struct BoatPose: Equatable, Sendable {
         }
         self.flutter = flutter.clamped(to: 0...1)
 
-        heel = ease || headToWind ? 0 : Self.heel(felt: Self.feltWind(boat), twa: twa, style: style)
+        if boatClass.overpowered != nil {
+            // #429 prototype: the sim's heel, eased or not.
+            heel = boat.heel
+            spray = ((boat.heel - style.sprayHeel) / max(0.01, 1 - style.sprayHeel)).clamped(to: 0...1)
+            if ease && boat.heel > 0.05 {
+                // Depowering: the luff lifts and shivers while she bleeds off heel.
+                luffLift = 1
+            }
+            if boat.isWipedOut {
+                isWipedOut = true
+                heel = 1
+                spray = 0
+                sailTrim = .pi / 2
+                self.flutter = 0
+                luffLift = 0
+                roll = nil
+            }
+        } else {
+            heel = ease || headToWind ? 0 : Self.heel(felt: Self.feltWind(boat), twa: twa, style: style)
+        }
     }
 
     /// The apparent wind off her bow, radians (0...π), as her sail trims to it: the sailing wind's angle before the race
@@ -190,11 +213,17 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// under it at 1, she heels more. So its tuning slider runs to 2.
     var heelScale = 1.0
     /// How much narrower her hull draws at full heel, a fraction of her beam.
-    var heelNarrowing = 0.14
+    var heelNarrowing = 0.3 // #429 prototype: was 0.14; the sim's heel is 0 until she is overpowered
     /// How far her drop shadow sits to leeward at full heel, in beams.
     var heelShadowOffset = 0.22
     /// The drop shadow's alpha at full heel; less heel, fainter.
     var heelShadowAlpha = 0.35
+    /// #429 prototype: heel from which she throws spray off her leeward side.
+    var sprayHeel = 0.6
+    /// #429 prototype: the puff tick shows only this far or more from the groove tick, degrees.
+    var puffTickMinDegrees = 2.0
+    /// #429 prototype: how narrow her hull draws wiped out (on her side), a fraction of her beam.
+    var wipeoutHullScale = 0.35
 
     // MARK: Sail
 

@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 7,
+  "id": "gusty-offshore",
+  "version": 8,
+  "name": "Gusty offshore",
+  "placeholders": [
+    "/shift/periodSeconds",
+    "/shift/wobbleDegrees",
+    "/puffs",
+    "/puffs/fanDegrees",
+    "/pressureField",
+    "/pressureField/side/tendencyScale",
+    "/pressureField/lanes/spotShare",
+    "/puffs/coverage",
+    "/pressureField/puffChoices",
+    "/pressureField/lanes/lengthMetres",
+    "/pressureField/lanes/alongDriftFraction",
+    "/pressureField/lanes/weakShare"
+  ],
+  "notes": [
+    "Wind model #10: 14-20 kn, oscillation +/-12 deg, no persistent trend; frequent, strong puffs with wide fanning, and deep lulls. #221 overrides #10's 90-120 s period with 60-70 s, the fastest of the four: 60 s is the shortest period the 30 s knots draw cleanly (ADR 0001).",
+    "Units: knots, degrees, seconds, metres; gains, losses, shares, coverage and drift as fractions.",
+    "Version 2 (schema 2, #75) is version 1 plus the keyed wind's wobble: wobbleDegrees is the peak of the smaller, faster wobble (#10) each 30 s window's key draws on top of the oscillation, vanishing at the window's knots. Strength is fixed for the race (#10), so there is no strength-channel tuning.",
+    "Version 3 (#221, #233) is version 2 with only three values changed: the period 60-70 s (was 90-120 s), the wobble 4 deg (was 1.5 deg), readable but never outlasting its 30 s window, and the puff fan 12 deg (was 8 deg), about 1.5 x, so a puff can decide which tack is favoured. The amplitude and every other puff column are unchanged.",
+    "Placeholders (JSON Pointers above) await tuning on the #232 sliders: the 60-70 s period, the 4 deg wobble and the 12 deg fan (#221), and the other puff columns, set from #10's words (frequent, strong, wide fanning, deep lulls) and its shared ranges (60-150 m, puffs +20-35 %, lulls -15-25 %, drift 0.3-0.5 x wind).",
+    "Version 4 (schema 3, #286, ADR 0008) is version 3 plus the pressure field: a pressure side (a slope in speed across the race area, up to strength at its sides, redrawn on average every persistenceSeconds, veering bendDegrees where it is stronger) and pressure lanes (count alive on average, each a band widthMetres wide along the wind with a peak gain of strength, living lifetimeSeconds, drifting sideways at up to driftMetresPerSecond and bending bendDegrees at its edges). Every other value is unchanged. The pressure field's values are placeholders awaiting the #232 sliders (#290 tunes them), set from #283's scale: about +/-15-25 % across the course, lanes a few hundred metres wide living 2-4 min.",
+    "Version 5 (schema 4, #287, ADR 0008) is version 4 plus how much the venue's geography steers the pressure field: side.tendencyScale, the range each race draws its multiplier on the venue's side tendency from (below 0 reversed, near 0 absent, above 1 stronger), and lanes.spotShare, the share of lanes that form at the venue's lane spots rather than anywhere across the course. Both are placeholders awaiting the #232 sliders: usually present, sometimes absent, occasionally reversed, and about 70 % of lanes at the spots. Every other value is unchanged.",
+    "Version 6 (schema 5, #288, ADR 0008) is version 5 with puffs and lulls as a supplement to the pressure field, formed from it: pressureField.puffChoices is how many places each puff and lull is drawn at, a puff forming at the one with the most pressure at its spawn (in a pressure lane, on the pressure side, in the venue's pressure) and a lull at the one with the least, so they end up apart; and coverage drops to about a third of version 5's (0.38 to 0.13), so they are occasional bursts. Both are placeholders awaiting the #232 sliders. Every other value is unchanged.",
+    "Version 7 (schema 6, ADR 0008) is version 6 with the pressure field's lanes as finite patches that change the pressure up the course as well as across it. lanes.lengthMetres is how long a lane is along the wind (widthMetres being its breadth, so a lane is an ellipse), alongDriftFraction how fast it drifts down the wind as a fraction of the base wind speed, and weakShare the share of lanes that weaken the wind instead of strengthening it. The pressure side is halved (0.15 to 0.08) so it no longer carries the whole field, lanes are narrower (120-240 m), more numerous and stronger, and fewer of them form at the venue's spots (spotShare 0.3), because finite lanes spread over the whole course. Every other value is unchanged. Placeholders awaiting the #232 sliders.",
+    "Version 8 (schema 7, #429 PROTOTYPE ONLY, never merged) is version 7 plus gustScale on the class's overpowered threshold and planing.onSpeedScale/offSpeedScale on its planing speeds. Placeholders."
+  ],
+  "strength": {
+    "minKnots": 14,
+    "maxKnots": 20
+  },
+  "shift": {
+    "amplitudeDegrees": 12,
+    "periodSeconds": {
+      "min": 60,
+      "max": 70
+    },
+    "wobbleDegrees": 4
+  },
+  "trend": null,
+  "build": null,
+  "puffs": {
+    "coverage": 0.13,
+    "diameterMetres": {
+      "min": 60,
+      "max": 150
+    },
+    "lifetimeSeconds": {
+      "min": 40,
+      "max": 90
+    },
+    "driftFraction": {
+      "min": 0.3,
+      "max": 0.5
+    },
+    "fanDegrees": 12,
+    "puffGain": {
+      "min": 0.28,
+      "max": 0.35
+    },
+    "lullShare": 0.35,
+    "lullLoss": {
+      "min": 0.2,
+      "max": 0.25
+    }
+  },
+  "pressureField": {
+    "side": {
+      "strength": 0.08,
+      "persistenceSeconds": 420,
+      "bendDegrees": 2,
+      "tendencyScale": {
+        "min": -0.5,
+        "max": 1.5
+      }
+    },
+    "lanes": {
+      "count": 18,
+      "strength": {
+        "min": 0.16,
+        "max": 0.3
+      },
+      "widthMetres": {
+        "min": 120,
+        "max": 240
+      },
+      "lifetimeSeconds": {
+        "min": 120,
+        "max": 240
+      },
+      "driftMetresPerSecond": 0.4,
+      "bendDegrees": 6,
+      "spotShare": 0.3,
+      "lengthMetres": {
+        "min": 300,
+        "max": 800
+      },
+      "alongDriftFraction": {
+        "min": 0.1,
+        "max": 0.25
+      },
+      "weakShare": 0.4
+    },
+    "puffChoices": 3
+  },
+  "gustScale": 1.0,
+  "planing": {
+    "onSpeedScale": 2.0,
+    "offSpeedScale": 2.0
+  }
+}

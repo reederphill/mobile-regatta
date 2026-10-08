@@ -114,6 +114,8 @@ struct LaunchOptions: Equatable {
     var raceSeconds: Int?
     var startSeconds: Int?
     var laps: Int?
+    /// `-conditions <id>` (#429 prototype): the launch race sails that conditions file at version 8, on dev-venue@8.
+    var conditions: String?
     var hidesScene = false
     var appearance: Appearance?
     var vision: VisionFilter?
@@ -146,6 +148,9 @@ struct LaunchOptions: Equatable {
         while let argument = rest.popFirst() {
             switch argument {
             case "-autostart": autostart = true
+            case "-conditions":
+                guard let value = takeValue(of: argument, from: &rest) else { continue }
+                conditions = value
             case "-demo": demo = true
             case "-perf": perf = true
             case "-uitesting": uiTesting = true
@@ -183,7 +188,7 @@ struct LaunchOptions: Equatable {
     }
 
     private static let flags: Set<String> = {
-        var flags: Set = ["-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
+        var flags: Set = ["-conditions", "-autostart", "-demo", "-perf", "-uitesting", "-resetSettings", "-online", "-hideScene", "-seed",
                           "-fixture", "-fixtures", "-timescale", "-scheme", "-camera", "-onlineHost", "-raceSeconds", "-startSeconds", "-laps",
                           "-appearance", "-vision", "-briefing", "-myBoat", "-keepMyBoat", "-completedRaces",
                           "-thermal", "-cuesOnly",
@@ -349,6 +354,11 @@ struct LaunchOptions: Equatable {
         if let referenceRace { return .reference(ReferenceRegatta.race(referenceRace)) }
         var config = raceConfig(from: config)
         config.botSailsYourBoat = demo || perf
+        if let conditions, let file = try? ConditionsFile.bundled(id: conditions, version: 8),
+           let venue = try? VenueFile.bundled(id: "dev-venue", version: 8) {
+            config.files.conditions = file.ref
+            config.files.venue = venue.ref
+        }
         if perf { config.opponents = Self.perfFleetSize - 1 }
         return config
     }

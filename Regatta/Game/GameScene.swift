@@ -112,6 +112,8 @@ final class GameScene: SKScene {
     private let vaneArc = SKShapeNode()
     private let vane = SKShapeNode()
     private let grooveTick = SKShapeNode()
+    /// #429 prototype: the puff tick, fainter than the groove tick.
+    private let puffTick = SKShapeNode()
     /// The next-mark edge arrow (#15): the camera's child, so it stays put on screen as the view zooms and turns.
     private let edgeArrow = SKShapeNode()
     /// A hint's leader line (#129), on the camera.
@@ -203,7 +205,8 @@ final class GameScene: SKScene {
     /// The cue layer's nodes, a z each in drawing order, and the edge arrow on the camera, over everything.
     private func buildCues() {
         let cues: [(SKShapeNode, String)] = [(ladderLines, "ladderLines"), (laylines, "laylines"), (vaneArc, "vaneArc"),
-                                            (vane, "windVane"), (grooveTick, "grooveTick")]
+                                            (vane, "windVane"), (grooveTick, "grooveTick"),
+                                            (puffTick, "puffTick")]
         for (slot, (node, name)) in cues.enumerated() {
             node.name = name
             node.zPosition = DrawOrder.z(slot)
@@ -211,9 +214,10 @@ final class GameScene: SKScene {
             node.lineJoin = .round
             cueLayer.addChild(node)
         }
-        for node in [vaneArc, vane, grooveTick] {
+        for node in [vaneArc, vane, grooveTick, puffTick] {
             node.strokeColor = CuePalette.vermillion.uiColor
         }
+        puffTick.alpha = 0.45
 
         let arrow = CGMutablePath()
         arrow.move(to: CGPoint(x: 11, y: 0))
@@ -473,7 +477,7 @@ final class GameScene: SKScene {
         let seat = world.myBoatIndex
         guard let cue = VaneCue(me, reading: world.autohelm(ofSeat: seat), isGhost: world.isGhost(ofSeat: seat),
                                 boatClass: world.boatClass, style: style) else {
-            [vane, grooveTick, vaneArc].forEach { $0.isHidden = true }
+            [vane, grooveTick, vaneArc, puffTick].forEach { $0.isHidden = true }
             return
         }
         let length = CGFloat(world.boatClass.hull.length * style.vaneLengthHulls) * ppm
@@ -491,6 +495,7 @@ final class GameScene: SKScene {
             tick.move(to: CGPoint(x: 0, y: length * 0.8))
             tick.addLine(to: CGPoint(x: 0, y: length * 1.2))
             grooveTick.path = tick
+            puffTick.path = tick
         }
         let at = point(me.position)
         // Angles off the bow, to starboard: a node turned by −(heading + angle) has its +y along that bearing.
@@ -502,6 +507,14 @@ final class GameScene: SKScene {
         grooveTick.zRotation = CGFloat(-(me.heading + cue.tick))
         vane.lineWidth = 2 * px
         grooveTick.lineWidth = 2.5 * px
+        if let puff = cue.puffTick {
+            puffTick.isHidden = false
+            puffTick.position = at
+            puffTick.zRotation = CGFloat(-(me.heading + puff))
+            puffTick.lineWidth = 2.5 * px
+        } else {
+            puffTick.isHidden = true
+        }
         vaneArc.lineWidth = 2 * px
 
         guard let end = cue.arcEnd else {

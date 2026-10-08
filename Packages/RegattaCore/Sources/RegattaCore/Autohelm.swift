@@ -156,6 +156,9 @@ public struct Autohelm: Sendable, Equatable {
         /// `aim` less `grooveAngle`, radians: 0 in the groove, positive further off the wind (footing,
         /// sailing deeper), negative closer to it (pinching).
         public let offsetFromGroove: Double
+        /// The downwind groove's sailing angle at the wind at the boat right now, not the averaged groove wind
+        /// (#429 prototype: the puff tick), radians.
+        public var instantGrooveAngle: Double = 0
     }
 
     /// Its reading in `tws` and `grooveTWS` (m/s, as `aim`).
@@ -168,8 +171,10 @@ public struct Autohelm: Sendable, Equatable {
         case .angle: groove = abs(aim) < .pi / 2 ? .upwind : .downwind
         }
         let grooveAngle = Autohelm.grooveAngle(groove, tws: grooveTWS, boatClass: boatClass)
-        return Reading(target: target, isTapping: isTapping, aim: aim, groove: groove, grooveAngle: grooveAngle,
-                       offsetFromGroove: wrapAngle(aim - grooveAngle))
+        var reading = Reading(target: target, isTapping: isTapping, aim: aim, groove: groove, grooveAngle: grooveAngle,
+                              offsetFromGroove: wrapAngle(aim - grooveAngle))
+        reading.instantGrooveAngle = Autohelm.grooveAngle(.downwind, tws: tws, boatClass: boatClass)
+        return reading
     }
 }
 

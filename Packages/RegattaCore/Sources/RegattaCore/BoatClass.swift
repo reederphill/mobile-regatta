@@ -17,7 +17,7 @@ public struct BoatClass: DataFileContent, Equatable {
     /// at the boat right now), so it sails exactly as #230 sailed it. This build sails no schema-1 class:
     /// RegattaCore holds no boat constants (ADR 0004), so it has nothing to fill the autohelm's values with.
     /// Logs sailed on one replay on the simulation version that sailed them (ADR 0002).
-    public static let supportedSchemaVersions = [2, 3]
+    public static let supportedSchemaVersions = [2, 3, 4]
 
     /// Name shown to players.
     public var name: String
@@ -31,6 +31,8 @@ public struct BoatClass: DataFileContent, Equatable {
     /// How she gets on and off the plane (schema 3), or nil for a class that never planes: she sails the
     /// polar as is.
     public var planing: PlaningTuning?
+    /// Gust management (schema 4, #429 prototype), or nil for a class that is never overpowered.
+    public var overpowered: OverpoweredTuning?
     /// Her automatic spinnaker (schema 3), or nil for a class without one: the polar is all she sails.
     public var spinnaker: SpinnakerTuning?
     /// The graded by-the-lee penalty and where the spinnaker collapses (schema 3), or nil: only the
@@ -470,10 +472,14 @@ public struct BoatClass: DataFileContent, Equatable {
         switch header.schemaVersion {
         case 2:
             self = try JSONDecoder().decode(BoatClassSchema2.self, from: fileData).boatClass(id: header.id)
-        case 3:
-            // Schema 3 is schema 2's fields with its additions: both read the same file.
+        case 3, 4:
+            // Schema 3 is schema 2's fields with its additions: both read the same file. Schema 4 (#429 prototype)
+            // adds the overpowered block and the downwind polar shaping, all optional.
             var boatClass = try JSONDecoder().decode(BoatClassSchema2.self, from: fileData).boatClass(id: header.id)
             try JSONDecoder().decode(BoatClassSchema3Additions.self, from: fileData).apply(to: &boatClass, id: header.id)
+            if header.schemaVersion >= 4 {
+                try JSONDecoder().decode(BoatClassSchema4Additions.self, from: fileData).apply(to: &boatClass, id: header.id)
+            }
             self = boatClass
         default:
             throw DataFileError.unsupportedSchemaVersion(
@@ -1006,5 +1012,167 @@ private struct BoatClassSchema3Additions: Decodable {
             speedLossPerRadian: byTheLee.speedLossPerDegree * 180 / .pi,
             spinnakerCollapse: deg2rad(byTheLee.spinnakerCollapseDegrees)
         )
+    }
+}
+
+// MARK: - Schema 4 (#429 prototype: never merged)
+
+extension BoatClass {
+    /// Gust management (#426 Phase 4 spec): heel builds when the heeling wind is over the threshold; easing
+    /// depowers; past `wipeoutHeel` she wipes out.
+    public struct OverpoweredTuning: Sendable, Equatable {
+        /// m/s.
+        public var threshold: Double
+        /// m/s of heeling wind over the threshold that make full heel.
+        public var excessRange: Double
+        /// (true wind angle, radians; factor), ascending by angle: heeling wind = TWS × factor.
+        public var powerByTWA: [(twa: Double, factor: Double)]
+        public var heelBuildSeconds: Double
+        public var heelReleaseSeconds: Double
+        public var speedLossAtFullHeel: Double
+        public var easeDepowerFraction: Double
+        public var easeDepowerSeconds: Double
+        public var depowerSpeedFraction: Double
+        public var wipeoutHeel: Double?
+        public var wipeoutRecoverySeconds: Double
+        public var wipeoutStopSeconds: Double
+
+        public func power(twa: Double) -> Double {
+            let a = abs(twa)
+            guard let first = powerByTWA.first, let last = powerByTWA.last else { return 1 }
+            if a <= first.twa { return first.factor }
+            if a >= last.twa { return last.factor }
+            for k in 1..<powerByTWA.count where a <= powerByTWA[k].twa {
+                let p = powerByTWA[k - 1], q = powerByTWA[k]
+                return p.factor + (q.factor - p.factor) * (a - p.twa) / (q.twa - p.twa)
+            }
+            return last.factor
+        }
+
+        /// 0…1: how far over the threshold (× `gustScale`, already applied to `threshold`) the heeling wind is.
+        public func excess(tws: Double, twa: Double) -> Double {
+            ((tws * power(twa: twa) - threshold) / excessRange).clamped(to: 0...1)
+        }
+
+        public static func == (a: Self, b: Self) -> Bool {
+            a.threshold == b.threshold && a.excessRange == b.excessRange
+                && a.powerByTWA.map(\.twa) == b.powerByTWA.map(\.twa) && a.powerByTWA.map(\.factor) == b.powerByTWA.map(\.factor)
+                && a.heelBuildSeconds == b.heelBuildSeconds && a.heelReleaseSeconds == b.heelReleaseSeconds
+                && a.speedLossAtFullHeel == b.speedLossAtFullHeel && a.easeDepowerFraction == b.easeDepowerFraction
+                && a.easeDepowerSeconds == b.easeDepowerSeconds && a.depowerSpeedFraction == b.depowerSpeedFraction
+                && a.wipeoutHeel == b.wipeoutHeel && a.wipeoutRecoverySeconds == b.wipeoutRecoverySeconds
+                && a.wipeoutStopSeconds == b.wipeoutStopSeconds
+        }
+    }
+
+    /// This class as a race on `conditions` sails it (#429 prototype): the overpowered threshold × `gustScale`,
+    /// planing on/off speeds × the conditions' planing scales.
+    public func handling(in conditions: Conditions) -> BoatClass {
+        var c = self
+        c.overpowered?.threshold *= conditions.gustScale
+        c.planing?.onSpeed *= conditions.planingOnSpeedScale
+        c.planing?.offSpeed *= conditions.planingOffSpeedScale
+        if let p = c.planing, p.offSpeed > p.onSpeed { c.planing?.offSpeed = p.onSpeed }
+        return c
+    }
+}
+
+private struct BoatClassSchema4Additions: Decodable {
+    struct Overpowered: Decodable {
+        struct Power: Decodable {
+            let twaDegrees: Double
+            let factor: Double
+        }
+
+        let thresholdKnots: Double
+        let excessRangeKnots: Double
+        let powerByTWA: [Power]
+        let heelBuildSeconds: Double
+        let heelReleaseSeconds: Double
+        let speedLossAtFullHeel: Double
+        let easeDepowerFraction: Double
+        let easeDepowerSeconds: Double
+        let depowerSpeedFraction: Double
+        let wipeoutHeel: Double?
+        let wipeoutRecoverySeconds: Double
+        let wipeoutStopSeconds: Double
+    }
+
+    struct Polar: Decodable {
+        let downwindPeakSharpness: Double?
+        let downwindGrooveSpread: Double?
+    }
+
+    let overpowered: Overpowered?
+    let polar: Polar?
+
+    func apply(to boatClass: inout BoatClass, id: String) throws {
+        func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
+            if !condition { throw DataFileError.invalidContent(kind: BoatClass.kind, id: id, reason: reason()) }
+        }
+        if let o = overpowered {
+            try check(o.thresholdKnots > 0 && o.excessRangeKnots > 0, "overpowered threshold and range must be positive")
+            try check(!o.powerByTWA.isEmpty, "overpowered powerByTWA needs a point")
+            let tiny = 0.01
+            boatClass.overpowered = .init(
+                threshold: metresPerSecond(knots: o.thresholdKnots),
+                excessRange: metresPerSecond(knots: o.excessRangeKnots),
+                powerByTWA: o.powerByTWA.sorted { $0.twaDegrees < $1.twaDegrees }.map { (deg2rad($0.twaDegrees), $0.factor) },
+                heelBuildSeconds: max(tiny, o.heelBuildSeconds),
+                heelReleaseSeconds: max(tiny, o.heelReleaseSeconds),
+                speedLossAtFullHeel: o.speedLossAtFullHeel.clamped(to: 0...1),
+                easeDepowerFraction: o.easeDepowerFraction.clamped(to: 0...1),
+                easeDepowerSeconds: max(tiny, o.easeDepowerSeconds),
+                depowerSpeedFraction: o.depowerSpeedFraction.clamped(to: 0...1),
+                wipeoutHeel: o.wipeoutHeel,
+                wipeoutRecoverySeconds: max(0, o.wipeoutRecoverySeconds),
+                wipeoutStopSeconds: max(tiny, o.wipeoutStopSeconds))
+        }
+        let sharpness = polar?.downwindPeakSharpness ?? 1
+        let spread = polar?.downwindGrooveSpread ?? 1
+        if sharpness != 1 || spread != 1 {
+            do {
+                boatClass.polar = try Self.shaped(boatClass.polar, sharpness: sharpness, spread: spread)
+            } catch {
+                try check(false, "downwind polar shaping failed: \(error)")
+            }
+        }
+    }
+
+    /// D3: the downwind half of the polar reshaped. Per wind column, the VMG curve is shifted so the best angle
+    /// spreads `spread` × as far from its value at 14 kn, and every VMG loss either side of the best is
+    /// × `sharpness`. Rows from 90° are resampled every 2.5° so the new groove reads finely; a blend from 100° to
+    /// 120° keeps the reach as it was.
+    static func shaped(_ polar: PolarTable, sharpness: Double, spread: Double) throws -> PolarTable {
+        let beam = Double.pi / 2
+        var axis = polar.twaAxis.filter { $0 < beam }
+        var a = beam
+        while a < .pi - 1e-9 { axis.append(a); a += deg2rad(2.5) }
+        axis.append(.pi)
+        let mid = polar.bestDownwind(tws: metresPerSecond(knots: 14)).twa
+        let speeds: [[Double]] = polar.twsAxis.indices.map { c in
+            let tws = polar.twsAxis[c]
+            let original = polar.speeds[c]
+            func s(_ twa: Double) -> Double { PolarTable.columnSpeed(polar.twaAxis, original, twa) }
+            func vmg(_ twa: Double) -> Double { -s(twa) * cos(twa) }
+            let best = polar.downwindOptima[c]
+            guard best.vmg > 0 else { return axis.map(s) }
+            let target = (mid + spread * (best.twa - mid)).clamped(to: deg2rad(110)...Double.pi)
+            let shift = target - best.twa
+            return axis.map { twa in
+                guard twa >= deg2rad(100) else { return s(twa) }
+                var src = twa - shift
+                if src > .pi { src = 2 * .pi - src }
+                src = max(src, beam)
+                let v = max(0, best.vmg - sharpness * (best.vmg - vmg(src)))
+                let shapedSpeed = v / max(1e-6, -cos(twa))
+                let w = ((twa - deg2rad(100)) / deg2rad(20)).clamped(to: 0...1)
+                let blended = (1 - w) * s(twa) + w * shapedSpeed
+                return max(0, min(blended, s(twa) * 2))
+            }
+        }
+        return try PolarTable(twaAxis: axis, twsAxis: polar.twsAxis, speeds: speeds,
+                              byTheLeeLimitTWS: polar.byTheLeeLimitTWS, byTheLeeLimits: polar.byTheLeeLimits,
+                              byTheLeePenalty: polar.byTheLeePenalty)
     }
 }

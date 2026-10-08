@@ -18,9 +18,15 @@ public enum BoatDynamics {
         public var isPlaning: Bool
         /// The automatic spinnaker (`BoatClass.spinnaker`); always down for a class without one.
         public var spinnaker: Spinnaker
+        /// Heel from being overpowered, 0…1 (#429 prototype); always 0 for a class without `overpowered`.
+        public var heel: Double = 0
+        /// Ticks left of a wipeout (#429 prototype), or nil when she is not wiped out.
+        public var wipeoutTicksLeft: Int?
 
         public init(position: Vec2 = .zero, heading: Double, speed: Double, rudder: Double = 0, boomSide: BoomSide = .port,
-                    isPlaning: Bool = false, spinnaker: Spinnaker = .down) {
+                    isPlaning: Bool = false, spinnaker: Spinnaker = .down, heel: Double = 0, wipeoutTicksLeft: Int? = nil) {
+            self.heel = heel
+            self.wipeoutTicksLeft = wipeoutTicksLeft
             self.position = position
             self.heading = heading
             self.speed = speed
@@ -129,9 +135,46 @@ public enum BoatDynamics {
             : 0
         let shadowSlowingDown = env.shadow < 1 ? boatClass.windShadow.slowingDown : nil
         if shadowSlowingDown != nil { target *= env.shadow }
+
+        // Gust management (#426 Phase 4, #429 prototype).
+        var wipedOut = false
+        if let o = boatClass.overpowered {
+            if let left = s.wipeoutTicksLeft {
+                wipedOut = true
+                s.heel = 1
+                if left <= 1 {
+                    s.wipeoutTicksLeft = nil
+                    s.heel = 0
+                } else {
+                    s.wipeoutTicksLeft = left - 1
+                }
+            } else {
+                // Heeling wind after shadow: a speed-loss shadow's factor stands in for the wind it takes.
+                let excess = control.sailing && !inNoGo ? o.excess(tws: env.windSpeed * env.shadow, twa: twa) : 0
+                let easing = control.ease && control.sailing && excess > 0
+                let heelTarget = easing ? excess * (1 - o.easeDepowerFraction) : excess
+                let seconds = heelTarget > s.heel ? o.heelBuildSeconds : (easing ? o.easeDepowerSeconds : o.heelReleaseSeconds)
+                s.heel += (heelTarget - s.heel) * min(1, dt / seconds)
+                if let limit = o.wipeoutHeel, s.heel >= limit {
+                    s.wipeoutTicksLeft = max(1, Int((o.wipeoutRecoverySeconds / dt).rounded()))
+                    s.heel = 1
+                    wipedOut = true
+                }
+            }
+            if !wipedOut { target *= 1 - o.speedLossAtFullHeel * s.heel }
+        }
+
         let timeConstant: Double
-        if control.ease && control.sailing {
-            target *= boatClass.ease.speedFraction
+        if wipedOut, let o = boatClass.overpowered {
+            target = 0
+            timeConstant = o.wipeoutStopSeconds
+        } else if control.ease && control.sailing {
+            // D1: while still heeled, easing costs only the depower fraction; flat, the full ease.
+            if let o = boatClass.overpowered, s.heel > 0.1 {
+                target *= o.depowerSpeedFraction
+            } else {
+                target *= boatClass.ease.speedFraction
+            }
             timeConstant = target > s.speed ? boatClass.momentum.speedingUp : boatClass.ease.timeConstant
         } else if target > s.speed {
             timeConstant = boatClass.momentum.speedingUp
