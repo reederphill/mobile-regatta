@@ -76,6 +76,7 @@ struct AppRoot: View {
             .environment(\.lobbyStatus, onlineStatus.lobbyStatus.hidingChat(model.deviceSettings.hidesLobbyChat))
             .environment(\.lobbyService, onlineStatus.services.lobby)
             .environment(\.onlineServices, onlineStatus.services)
+            .environment(\.onlineStatus, onlineStatus)
     }
 }
 

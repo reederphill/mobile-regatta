@@ -12,6 +12,10 @@ struct RootView: View {
     /// The off-water gallery a `-fixture` launch shows in place of the menu (#119).
     @State private var fixtureGallery: RenderFixture.Gallery?
     @State private var showsOnlineStub = false
+    /// The Terms of Use sheet came from Race online's gate for a player who can race: I agree goes on to the queue.
+    @State private var racesAfterTerms = false
+    /// I agree took; what waits on the sheet runs once it's gone (`termsSheetDismissed`).
+    @State private var agreedToTerms = false
     /// The `-onlineResults` harness's results stream (#133), while it shows.
     @State private var harnessResults: OnlineResults?
     @Environment(\.sceneState) private var sceneState
@@ -19,6 +23,7 @@ struct RootView: View {
     @Environment(\.maximumFramesPerSecond) private var maximumFramesPerSecond
     @Environment(\.lobbyService) private var lobbyService
     @Environment(\.onlineServices) private var services
+    @Environment(\.onlineStatus) private var onlineStatus
 
     var body: some View {
         if let fixtureError {
@@ -42,10 +47,12 @@ struct RootView: View {
                 home: { self.harnessResults = nil },
                 tryIt: { design in self.harnessResults = nil; model.openMyBoat(trying: design) })
         } else {
-            HomeView(model: model, onRaceOnline: raceOnline)
+            HomeView(model: model, online: HomeOnlineActions(raceOnline: raceOnline, signIn: signIn, agreeToTerms: agreeToTerms,
+                                                             sheetDismissed: termsSheetDismissed))
                 .onAppear(perform: autostartIfRequested)
                 .raceCover(isPresented: model.phase == .raceSequence && model.race != nil) { raceCover }
-                // A stub until matchmaking; Debug builds join the dev server's instant race instead (#68).
+                // A stub past Race online's gate until the queue (#140); Debug builds on the real services join the dev
+                // server's instant race instead (#68).
                 .alert("Online racing is on its way", isPresented: $showsOnlineStub) {
                     Button("OK", role: .cancel) {}
                 } message: {
@@ -132,15 +139,66 @@ struct RootView: View {
         }
     }
 
-    /// Home's Race online: a stub until matchmaking, except that a Debug build joins the dev server's instant
-    /// race (#68).
+    /// Home's Race online, the one way in (#138): Game Center's sign-in when signed out, then the Terms of Use sheet
+    /// when due, then the queue. The e2e launches (`-online`, `-onlineHost`) skip the gate.
     private func raceOnline() {
         model.analytics.log(.practiceToOnline(.raceOnlineTapped))
         #if DEBUG
-        startOnlineRace()
-        #else
-        showsOnlineStub = true
+        if model.launchOptions.online || model.launchOptions.onlineHost != nil { return startOnlineRace() }
         #endif
+        guard let onlineStatus else { return enterQueue() }
+        Task {
+            switch await onlineStatus.passGate(analytics: model.analytics) {
+            case .proceed: enterQueue()
+            case .terms: showTerms(thenRace: onlineStatus.access.onlineAllowed)
+            case .stopped: break
+            }
+        }
+    }
+
+    /// The lobby area's Sign in: Game Center's sign-in, then the Terms of Use sheet when due (question 7), but not
+    /// the queue.
+    private func signIn() {
+        guard let onlineStatus else { return }
+        Task {
+            guard await onlineStatus.signIn(analytics: model.analytics), onlineStatus.access.termsDue else { return }
+            showTerms(thenRace: false)
+        }
+    }
+
+    private func showTerms(thenRace: Bool) {
+        racesAfterTerms = thenRace
+        agreedToTerms = false
+        model.sheet = .terms
+    }
+
+    /// The sheet's I agree: records the acceptance, then closes the sheet. If it didn't take (a newer version), the
+    /// sheet stays with the version now current.
+    private func agreeToTerms() {
+        guard let onlineStatus else { return model.sheet = nil }
+        Task {
+            guard await onlineStatus.acceptTerms(analytics: model.analytics) else { return }
+            agreedToTerms = true
+            model.sheet = nil
+        }
+    }
+
+    /// Any of Home's sheets is gone. After the terms sheet's I agree from Race online, on to the queue; Close or a
+    /// swipe declines, and the lobby area offers the sheet again.
+    private func termsSheetDismissed() {
+        let races = agreedToTerms && racesAfterTerms
+        agreedToTerms = false
+        racesAfterTerms = false
+        if races { enterQueue() }
+    }
+
+    /// Past the gate: the stub alert until the queue (#140). A Debug build on the real services joins the dev server's
+    /// instant race instead (#68).
+    private func enterQueue() {
+        #if DEBUG
+        if model.launchOptions.fakeServices == nil, !model.launchOptions.uiTesting { return startOnlineRace() }
+        #endif
+        showsOnlineStub = true
     }
 
     /// The online results' Race again (#24, #133): joins the queue, then home.

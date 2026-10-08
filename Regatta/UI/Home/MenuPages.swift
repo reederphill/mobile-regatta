@@ -184,7 +184,7 @@ struct DevRaceServerField: View {
 }
 #endif
 
-/// A brief sheet over the home screen (#25). Placeholders until sign-in (#109) and the lobby's boat card.
+/// A brief sheet over the home screen (#25). A placeholder until the lobby's boat card.
 struct MenuSheetView: View {
     let sheet: AppModel.Sheet
     @Environment(\.dismiss) private var dismiss
@@ -212,7 +212,7 @@ struct MenuSheetView: View {
 
     private var title: String {
         switch sheet {
-        case .signIn: "Sign in"
+        case .terms: "Terms of Use"
         case .boatCard: "Boat card"
         case .lastRace: "Last race"
         }
@@ -220,7 +220,8 @@ struct MenuSheetView: View {
 
     private var message: String {
         switch sheet {
-        case .signIn: "Game Center sign-in arrives here."
+        // `HomeView` always shows `TermsSheet` for the terms.
+        case .terms: ""
         case .boatCard: "A sailor's boat card arrives here."
         // `HomeView` shows the results themselves; this only when there are none to show.
         case .lastRace: "No last race yet."

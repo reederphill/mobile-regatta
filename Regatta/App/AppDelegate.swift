@@ -7,7 +7,8 @@ import UIKit
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// The services every scene runs on. `-fakeServices <scenario>` plays a scenario's scripted fakes (#242);
-    /// otherwise the device's connectivity, signed out, until the real services arrive.
+    /// otherwise the device's connectivity and Game Center with the terms kept on the device (#138), the rest signed
+    /// out until the real services arrive. Tests and UI tests never touch Game Center.
     let services = AppDelegate.makeServices(launchOptions: .current)
     /// Usage analytics (#128), one for the app over its one set of `analytics.` keys: every scene logs to it. Sent at
     /// launch and on going to the background, never during a race.
@@ -18,12 +19,23 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // The fakes' online results scenarios fill in live, a sleep apart (the services package keeps no clock).
         var services = launchOptions.fakeServices.map { ServiceSet.fake($0, wait: { try? await Task.sleep(for: $0) }) }
             ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
+        if usesGameCenter(launchOptions) {
+            let identity = GameKitIdentityService()
+            services.identity = identity
+            services.terms = LocalTermsService(identity: identity, defaults: .standard)
+        }
         // The shop sells every paid design from a stub until StoreKit (#137): see `StubStoreService`. Its defaults
         // are My boat's (UI tests' own suite, emptied at launch).
         services.store = StubStoreService(boatClass: RaceFiles.defaults.boatClass.ref.id,
                                           defaults: .init(MyBoatDefaults.defaults(for: launchOptions, standard: .standard)),
                                           isOnline: OnlineStatus.isInitiallyOnline(launchOptions))
         return services
+    }
+
+    /// Game Center and the device's terms only off the fakes, outside UI tests (`-uitesting`) and unit tests.
+    private static func usesGameCenter(_ launchOptions: LaunchOptions) -> Bool {
+        launchOptions.fakeServices == nil && !launchOptions.uiTesting
+            && ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil
     }
 
     /// The running app's delegate.
@@ -37,6 +49,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         self.metricKit = metricKit
         // `.ambient` (#126): the silent switch silences the game. Tests, UI tests and render fixtures play nothing.
         if AppAudio.isLive(.current) { SoundSession.configure() }
+        // Game Center signs a returning player in silently; its sign-in sheet waits for Race online (#23, #138).
+        (services.identity as? GameKitIdentityService)?.start()
         Task { await analytics.flush() }
         return true
     }

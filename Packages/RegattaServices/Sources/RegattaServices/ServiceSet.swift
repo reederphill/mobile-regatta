@@ -71,6 +71,8 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
     case onlineResults = "online-results"
     /// As `onlineResults`, but every other boat is a bot: unrated (#133).
     case onlineResultsUnrated = "online-results-unrated"
+    /// Signed in, having accepted the terms' version 1 when version 2 is current: the sheet asks again (#34, #138).
+    case termsBump = "terms-bump"
 
     /// How far apart the online results scenarios' updates come.
     public static let onlineResultsPacing = Duration.milliseconds(1500)
@@ -147,7 +149,9 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
             let identity = ScriptedIdentityService(signedIn
                 ? IdentityScenario(initial: .signedIn(player))
                 : IdentityScenario(initial: .signedOut, afterSignIn: .signedIn(player)))
-            let terms = ScriptedTermsService(TermsScenario(current: Self.terms, accepted: signedIn ? Self.terms : nil))
+            let terms = ScriptedTermsService(scenario == .termsBump
+                ? TermsScenario(current: TermsVersion(Self.terms.rawValue + 1), accepted: Self.terms)
+                : TermsScenario(current: Self.terms, accepted: signedIn ? Self.terms : nil))
 
             let queue: ScriptedQueueService
             let raceSession: ScriptedRaceSessionService
@@ -179,7 +183,8 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
 
             let me = LobbyAuthor(gamePlayerID: player.gamePlayerID, nickname: player.alias,
                                  rating: Rating(value: 1500, isProvisional: true), chip: Self.chip)
-            let access: LobbyAccess = !signedIn ? .closed(.notSignedIn) : player.canChat ? .open : .closed(.communicationRestricted)
+            let access: LobbyAccess = !signedIn ? .closed(.notSignedIn) : !player.canChat ? .closed(.communicationRestricted)
+                : scenario == .termsBump ? .closed(.termsNotAccepted) : .open
             let lobby = ScriptedLobbyService(LobbyScenario(
                 player: me, state: LobbyState(access: access, canPostFreeText: false),
                 history: [

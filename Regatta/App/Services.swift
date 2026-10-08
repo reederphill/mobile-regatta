@@ -19,6 +19,15 @@ struct LobbyStatus: Equatable {
     var canChat = true
     /// False for Game Center's `isMultiplayerGamingRestricted`: practice races only (#34).
     var canRaceOnline = true
+    /// The terms' current version, which the Terms of Use sheet shows and its I agree accepts (#138); nil signed out
+    /// or not yet read.
+    var termsVersion: TermsVersion? = nil
+
+    /// The gating matrix (#138) for this status: what Race online, the lobby area and Race online's gate read.
+    func access(isOnline: Bool) -> OnlineAccess {
+        OnlineAccess(isOnline: isOnline, isSignedIn: isSignedIn, canChat: canChat, canRaceOnline: canRaceOnline,
+                     termsAccepted: hasAcceptedTerms)
+    }
 
     /// This status with Settings' Hide lobby chat (#110), a device setting the services don't know.
     func hidingChat(_ hides: Bool) -> LobbyStatus {
@@ -46,6 +55,10 @@ final class OnlineStatus {
             for await status in services.connectivity.statusUpdates() { self?.isOnline = status.isOnline }
         }
         Task { [weak self] in await self?.refreshAccount() }
+        // Game Center can sign the player out, or change her restrictions, at any time (#314).
+        Task { [weak self] in
+            for await _ in services.identity.stateUpdates() { await self?.refreshAccount() }
+        }
         Task { [weak self] in
             for await state in services.queue.stateUpdates() { self?.show(state) }
         }
@@ -62,14 +75,59 @@ final class OnlineStatus {
         }
     }
 
-    /// Reads the player, her restrictions and the terms again: after signing in, say.
+    /// Reads the player, her restrictions and the terms again: after signing in, say. Terms that can't be read
+    /// are due (`LocalTermsService` already falls back to what the device last recorded).
     func refreshAccount() async {
         let player = await services.identity.state().player
-        let accepted = player == nil ? false : ((try? await services.terms.status().isAccepted) ?? false)
+        let terms = player == nil ? nil : try? await services.terms.status()
         lobbyStatus.isSignedIn = player != nil
-        lobbyStatus.hasAcceptedTerms = accepted
+        lobbyStatus.hasAcceptedTerms = terms?.isAccepted ?? false
+        lobbyStatus.termsVersion = terms?.current
         lobbyStatus.canChat = player?.canChat ?? true
         lobbyStatus.canRaceOnline = player?.canRaceOnline ?? true
+    }
+
+    /// The gating matrix now (#138).
+    var access: OnlineAccess { lobbyStatus.access(isOnline: isOnline) }
+
+    /// Where Race online's gate leaves the player (#138).
+    enum GateStep: Equatable {
+        /// Through: the queue.
+        case proceed
+        /// Signed in, terms due: the Terms of Use sheet.
+        case terms
+        /// Sign-in declined, offline, or practice races only: stay home.
+        case stopped
+    }
+
+    /// Race online's gate (#23, #34, #138): signs in first when signed out (Game Center's own sheet), then says
+    /// whether the terms are due. A player who turns out to be multiplayer-restricted but can chat still gets the
+    /// terms straight after signing in, for the lobby; one who can do neither gets nothing (question 1).
+    func passGate(analytics: Analytics) async -> GateStep {
+        if access.next == .signIn, !(await signIn(analytics: analytics)) { return .stopped }
+        let access = access
+        if access.termsDue { return .terms }
+        return access.next == .proceed ? .proceed : .stopped
+    }
+
+    /// Game Center's sign-in, from Race online or the lobby's Sign in: true when it signed the player in. Logs the
+    /// prompt's answer, and the funnel's "GC signed in" step (#128).
+    @discardableResult func signIn(analytics: Analytics) async -> Bool {
+        let signedIn = await services.identity.signIn().player != nil
+        analytics.log(.gameCenterPrompt(accepted: signedIn))
+        if signedIn { analytics.log(.practiceToOnline(.gameCenterSignedIn)) }
+        await refreshAccount()
+        return signedIn
+    }
+
+    /// The Terms of Use sheet's I agree (#34): accepts the version the sheet showed, and logs the funnel's "terms
+    /// accepted" step (#128). False when it didn't take: a newer version came, or the service failed.
+    func acceptTerms(analytics: Analytics) async -> Bool {
+        guard let version = lobbyStatus.termsVersion else { return false }
+        let accepted = (try? await services.terms.accept(version))?.isAccepted ?? false
+        if accepted { analytics.log(.practiceToOnline(.termsAccepted)) }
+        await refreshAccount()
+        return accepted && lobbyStatus.hasAcceptedTerms
     }
 }
 
@@ -79,4 +137,7 @@ extension EnvironmentValues {
     /// Every service, for what acts on them outside the lobby: the online results' Race again joins the queue, and the
     /// `-onlineResults` harness reads the race session (#133). Nil in previews and tests.
     @Entry var onlineServices: ServiceSet? = nil
+    /// The services' state, for Race online's gate and the lobby's Sign in and Terms of Use (#138). Nil in previews
+    /// and tests.
+    @Entry var onlineStatus: OnlineStatus? = nil
 }
