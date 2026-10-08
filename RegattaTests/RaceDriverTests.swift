@@ -241,6 +241,8 @@ import RegattaCore
     private static var chosenHeadlessRace: RaceConfig?
 
     /// Whether your bot, sailing `config` headless, finishes with at least 30 s to the close as it stands when she does.
+    /// While the close isn't set (`closeTick` nil) it sails on and measures from the first tick it is; a race that
+    /// ends, or runs 1,500 s, without one is false, so that seed is rejected.
     static func finishesWellBeforeTheClose(_ config: RaceConfig) -> Bool {
         let driver = PracticeDriver(config: config)
         var seconds = 0

@@ -279,13 +279,31 @@ import RegattaServices
 
     /// The race `regatta-botsuite results-seed` probes for the UI tests' seed table (#404, `scripts/pick-ui-seeds.sh`)
     /// is the `-demo -seed <n> -laps 1` launch race: seven opponents, a 60 s sequence, the bundled files, the wind
-    /// pinned to the seed. If this moves, so must the probe (`ResultsSeedProbe.sail`), or the table picks for another race.
+    /// pinned to the seed, a default bot sailing your boat. If this moves, so must the probe (`ResultsSeedProbe.sail`),
+    /// or the table picks for another race. The probe can't import the app, so it copies the wind derivation and builds
+    /// its own controllers; the literals and the probe's construction below are the only link between the two.
     @Test func theDemoRaceIsTheOneTheSeedProbeSails() throws {
         let config = try #require(parse("-demo", "-seed", "12", "-laps", "1").launchRaceConfig())
+        // What the probe's `SplitMix64(seed: seed ^ 0x5749_4E44_5345_4544).next()` gives for seed 12.
+        let probeWindSeed: UInt64 = 0x0011_9BE7_B9FE_E27B
         #expect(config == RaceConfig(opponents: 7, laps: 1, prestartSeconds: 60, seed: 12,
-                                     windSeed: RaceConfig.windSeed(pinnedTo: 12), botSailsYourBoat: true))
-        #expect(config.setup == (try RaceSetup(raceSeed: RaceSeed(12), seats: [.human] + Array(repeating: .bot, count: 7),
-                                               laps: 1, startSequenceTicks: 60 * Race.tickRate)))
+                                     windSeed: probeWindSeed, botSailsYourBoat: true))
+        let probeSetup = try RaceSetup(raceSeed: RaceSeed(12), seats: [.human] + Array(repeating: .bot, count: 7),
+                                       laps: 1, startSequenceTicks: 60 * Race.tickRate)
+        #expect(config.setup == probeSetup)
+
+        // The controllers: the probe's (the setup's defaults, a default bot on seat 0) against the app's practice
+        // race, sailed through the start; any other bot on any seat logs other inputs.
+        var probeControllers = SeatControllers(setup: probeSetup)
+        probeControllers[0] = .bot(BotDriver(seat: 0, raceSeed: probeSetup.raceSeed))
+        let probeRace = Race(setup: probeSetup, windSeed: WindSeed(probeWindSeed))
+        for _ in 0..<(80 * Race.tickRate) { // the 60 s sequence and 20 s after the gun, as `app.tick(80)`
+            probeControllers.drive(probeRace)
+            probeRace.step()
+        }
+        let app = PracticeDriver(config: config)
+        app.tick(80)
+        #expect(app.log == probeRace.log)
     }
 
     @Test func perfIsASixteenBoatDemoRace() throws {

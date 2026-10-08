@@ -38,6 +38,11 @@ enum ResultsSeedProbe {
             FileHandle.standardError.write(Data("results-seed: --from is after --to\n".utf8))
             return 2
         }
+        guard options.laps >= 1, RaceSetup.fleetSizes.contains(options.opponents + 1) else {
+            FileHandle.standardError.write(Data(
+                "results-seed: --laps must be at least 1 and --opponents in \(RaceSetup.fleetSizes.lowerBound - 1)...\(RaceSetup.fleetSizes.upperBound - 1)\n\(usage)\n".utf8))
+            return 2
+        }
         for seed in options.from...options.to {
             guard let (finish, close) = sail(seed: seed, laps: options.laps, opponents: options.opponents) else { continue }
             if close - finish >= options.minGap {

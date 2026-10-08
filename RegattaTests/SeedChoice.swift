@@ -14,7 +14,8 @@ func firstSeed(in range: ClosedRange<UInt64>, where meets: (UInt64) throws -> Bo
 
 /// The first tick in `range`, every `step` ticks from its lower bound, that `meets`, trying them in order.
 func firstTick(in range: ClosedRange<Int>, step: Int = 1, where meets: (Int) throws -> Bool) throws -> Int {
-    try firstChoice(stride(from: range.lowerBound, through: range.upperBound, by: step), "tick", range, where: meets)
+    precondition(step > 0, "firstTick steps forward through the range")
+    return try firstChoice(stride(from: range.lowerBound, through: range.upperBound, by: step), "tick", range, where: meets)
 }
 
 private func firstChoice<S: Sequence, R>(_ values: S, _ what: String, _ range: R,

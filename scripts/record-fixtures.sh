@@ -22,15 +22,23 @@ mode=()
 case "${1:-}" in
     "") ;;
     --check) mode=(--check) ;;
-    -h | --help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "usage: scripts/record-fixtures.sh [--check]" >&2; exit 2 ;;
 esac
 
 package=Packages/RegattaCore
 scratch=.build/check/RegattaCore
-scripts/heavy.sh swift build -c release --package-path "$package" --scratch-path "$scratch" --product regatta-replay \
-    | grep -E "error|warning: unre" || true
 tool="$scratch/release/regatta-replay"
+build_log="$(mktemp)"
+trap 'rm -f "$build_log"' EXIT
+# A failed build stops here: never check or rewrite ticks with whatever binary an earlier build left.
+if ! scripts/heavy.sh swift build -c release --package-path "$package" --scratch-path "$scratch" \
+    --product regatta-replay >"$build_log" 2>&1; then
+    grep -E "error" "$build_log" >&2 || tail -20 "$build_log" >&2
+    echo "record-fixtures.sh: building the tool failed" >&2
+    exit 1
+fi
+grep -E "warning: unre" "$build_log" || true
 [[ -x "$tool" ]] || { echo "record-fixtures.sh: no tool at $tool" >&2; exit 1; }
 
 "$tool" freeze-ticks ${mode[@]+"${mode[@]}"} RegattaUITests/Fixtures scripts/fixture-freeze-ticks.json
