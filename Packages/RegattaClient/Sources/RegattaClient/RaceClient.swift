@@ -249,6 +249,11 @@ public final class RaceClient {
             closed = true
         case .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync, .helloAck, .updateRequired:
             break
+        // Service messages (#143) go over the service link, not the race transport.
+        case .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
+             .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .identityReply, .termsReply, .queueReply,
+             .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd:
+            break
         }
     }
 

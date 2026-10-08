@@ -14,6 +14,11 @@ let package = Package(
         .library(name: "RegattaServices", targets: ["RegattaServices"]),
         // Apart from the services so the app doesn't link the suites; #143's runner and #241's suites do.
         .library(name: "RegattaServiceContracts", targets: ["RegattaServiceContracts"]),
+        // #143: the client adapters over the service messages, the in-process loopback server, and the remote
+        // contract runner. Transport-free like the rest: a link is the caller's.
+        .library(name: "RegattaServiceClient", targets: ["RegattaServiceClient"]),
+        .library(name: "RegattaServiceLoopback", targets: ["RegattaServiceLoopback"]),
+        .library(name: "RegattaContractRunner", targets: ["RegattaContractRunner"]),
     ],
     dependencies: [
         .package(path: "../RegattaCore"),
@@ -35,11 +40,35 @@ let package = Package(
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
             ]
         ),
+        .target(
+            name: "RegattaServiceClient",
+            dependencies: [
+                "RegattaServices",
+                .product(name: "RegattaCore", package: "RegattaCore"),
+                .product(name: "RegattaProtocol", package: "RegattaProtocol"),
+            ]
+        ),
+        .target(
+            name: "RegattaServiceLoopback",
+            dependencies: [
+                "RegattaServices",
+                "RegattaServiceClient",
+                .product(name: "RegattaCore", package: "RegattaCore"),
+                .product(name: "RegattaProtocol", package: "RegattaProtocol"),
+            ]
+        ),
+        .target(
+            name: "RegattaContractRunner",
+            dependencies: ["RegattaServices", "RegattaServiceContracts", "RegattaServiceClient"]
+        ),
         .testTarget(
             name: "RegattaServicesTests",
             dependencies: [
                 "RegattaServices",
                 "RegattaServiceContracts",
+                "RegattaServiceClient",
+                "RegattaServiceLoopback",
+                "RegattaContractRunner",
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
             ]

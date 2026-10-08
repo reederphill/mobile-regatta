@@ -11,6 +11,10 @@ import RegattaCore
 /// older client. Only three things are frozen forever, so that any future client and server can still
 /// tell each other apart: the frame header (`Frame`), the `protocolVersion` at the start of `Hello`'s
 /// body (`Frame.helloProtocolVersion(in:)`), and the whole `UpdateRequired` body.
+///
+/// Before the first release it stays at 1 whatever changes (map #37, the #73 ruling): there is no older peer in the
+/// field to tell apart, so the service messages (#143, codes 64 and up) came in without a bump. The rule above
+/// applies from the first release on.
 public let wireProtocolVersion: UInt16 = 1
 
 /// Bytes whose shape is owned by a later ticket, tagged with that shape's schema, so the owner can
