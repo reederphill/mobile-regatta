@@ -76,4 +76,17 @@ import Testing
         #expect(TierMix.club.tier(ofSeat: 4, raceSeed: raceSeed) == .club)
         #expect(TierMix.national.tier(ofSeat: 0, raceSeed: raceSeed) == .national)
     }
+
+    /// #367: a reference race with the stand-in in seat 0 sails the same result twice (it has no tick timings), and
+    /// another stand-in sails another race. Capped 3 min after the gun to keep it quick: the whole race is the same
+    /// function of the same keys and drivers.
+    @Test func referenceRaceWithTheStandInSailsTheSameResultTwice() throws {
+        let cap = 180
+        let first = try BotRaceHarness.runReference(2, standIn: .tactician, capSecondsAfterGun: cap)
+        let second = try BotRaceHarness.runReference(2, standIn: .tactician, capSecondsAfterGun: cap)
+        #expect(first == second)
+        #expect(first.finalTick == cap * Race.tickRate && first.places.count == 10)
+        let novice = StandIn(profile: .baseline, skill: 0.35, weaknesses: BotWeaknesses(skill: 0.35))
+        #expect(try BotRaceHarness.runReference(2, standIn: novice, capSecondsAfterGun: cap).digest != first.digest)
+    }
 }

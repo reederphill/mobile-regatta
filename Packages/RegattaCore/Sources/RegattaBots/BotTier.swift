@@ -131,9 +131,12 @@ extension BotDriver {
         self.init(seat: seat, raceSeed: raceSeed, skill: tier.skill(seed: seed), profile: profile)
     }
 
-    /// A bot of `skill` for `seat`, e.g. one derived from a rating: her style drawn from her own seed.
-    public init(seat: Int, raceSeed: RaceSeed, skill: Double, profile: BotProfile? = nil) {
+    /// A bot of `skill` for `seat`, e.g. one derived from a rating: her style drawn from her own seed. `weaknesses`, if
+    /// given, replace what her skill and profile give her (`BotProfile.weaknesses(skill:)`): a suite profile's override
+    /// (#367), e.g. the novice stand-in's low-skill weaknesses (#370). Nil is the bot she always was.
+    public init(seat: Int, raceSeed: RaceSeed, skill: Double, profile: BotProfile? = nil, weaknesses: BotWeaknesses? = nil) {
         var rng = SplitMix64(seed: botSeed(raceSeed: raceSeed, seat: seat))
-        self.init(seat: seat, raceSeed: raceSeed, style: BotStyle(skill: skill, rng: &rng), profile: profile)
+        self.init(seat: seat, raceSeed: raceSeed, style: BotStyle(skill: skill, rng: &rng), profile: profile,
+                  overriding: weaknesses)
     }
 }

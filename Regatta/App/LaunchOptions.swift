@@ -1,4 +1,5 @@
 import Foundation
+import RegattaBots
 import RegattaCore
 import RegattaServices
 
@@ -9,6 +10,9 @@ import RegattaServices
 /// - `-perf` starts a 16-boat demo race to profile against the signposts.
 /// - `-seed <n>` sails every race on race seed `n` instead of a random one, with the wind seed pinned
 ///   to it by `RaceConfig.windSeed(pinnedTo:)`, so the whole race reproduces.
+/// - `-referenceRace <n>` sails reference race `n`, 1…`ReferenceRegatta.count` (#367, Debug builds): the pinned race
+///   the bot suite sails with a stand-in, here with you in seat 0, on untuned files with the pressure overlay off. It
+///   looks like any practice race. Takes precedence over `-seed`, `-laps` and `-startSeconds`.
 /// - `-fixture <name>` names a render fixture to replay (#62).
 /// - `-fixtures <name>,<name>,…` (with `-uitesting`) replays several render fixtures in one launch, the first at launch
 ///   and each next one when the UI test asks for it (`FixtureSequence`), on a fresh window and model each time, so a
@@ -97,6 +101,8 @@ struct LaunchOptions: Equatable {
     /// `-resetSettings`: honoured only with `-uitesting`.
     var resetSettings = false
     var seed: UInt64?
+    /// `-referenceRace`: 1-based, in 1…`ReferenceRegatta.count`. Only Debug builds parse it.
+    var referenceRace: Int?
     var fixture: String?
     /// `-fixtures`' names, in order; `fixture` is the one showing. Empty without `-fixtures`.
     var fixtureSequence: [String] = []
@@ -152,7 +158,7 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
-            case "-fakeServices":
+            case "-fakeServices", "-referenceRace":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             #endif
@@ -183,7 +189,7 @@ struct LaunchOptions: Equatable {
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
         #if DEBUG
-        flags.formUnion(["-tuning", "-fps120", "-fakeServices"])
+        flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace"])
         #endif
         return flags
     }()
@@ -201,6 +207,12 @@ struct LaunchOptions: Equatable {
         switch argument {
         case "-seed":
             if let n = UInt64(value) { seed = n } else { reject(argument, value, "a whole number ≥ 0") }
+        case "-referenceRace":
+            if let n = Int(value), (1...ReferenceRegatta.count).contains(n) {
+                referenceRace = n
+            } else {
+                reject(argument, value, "a whole number, 1…\(ReferenceRegatta.count)")
+            }
         case "-fixture":
             fixture = value
         case "-fixtures":
@@ -302,7 +314,7 @@ struct LaunchOptions: Equatable {
     var drawsCuesOnly: Bool { uiTesting && cuesOnly }
 
     /// Whether launch skips the menu and starts a race.
-    var startsRace: Bool { autostart || demo || perf }
+    var startsRace: Bool { autostart || demo || perf || referenceRace != nil }
 
     /// A race's seeds: fresh ones, drawn independently (ADR 0001: online races get the race seed from the server, which
     /// keeps the wind seed to itself), or `-seed`'s with the wind seed pinned to it.
@@ -331,9 +343,10 @@ struct LaunchOptions: Equatable {
     }
 
     /// The race started at launch, or nil to show the menu: `config`, the launch race (`RaceConfig.launch()`) unless a
-    /// test gives another.
+    /// test gives another, or reference race `-referenceRace` (#367).
     func launchRaceConfig(from config: RaceConfig = .launch()) -> RaceConfig? {
         guard startsRace else { return nil }
+        if let referenceRace { return .reference(ReferenceRegatta.race(referenceRace)) }
         var config = raceConfig(from: config)
         config.botSailsYourBoat = demo || perf
         if perf { config.opponents = Self.perfFleetSize - 1 }

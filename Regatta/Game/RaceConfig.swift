@@ -82,6 +82,9 @@ struct RaceConfig: Equatable {
     /// launch-argument race. Only seats are derived here, from the setup's race seed, so a re-pinned `seed` keeps them
     /// consistent.
     var rivalSkill: Double?
+    /// The reference race this is (#367, `-referenceRace`, Debug builds), or nil: its setup, wind seed and bots come
+    /// from `ReferenceRace`, the builder the bot suite sails it with, never from this config's own derivations.
+    var reference: ReferenceRace?
 
     init(opponents: Int = 7, laps: Int = RaceSetup.defaultLaps, prestartSeconds: Double = 60,
          seed: UInt64, windSeed: UInt64, botSailsYourBoat: Bool = false) {
@@ -91,6 +94,20 @@ struct RaceConfig: Equatable {
         self.seed = seed
         self.windSeed = windSeed
         self.botSailsYourBoat = botSailsYourBoat
+    }
+
+    /// Reference race `race` (#367) with you in seat 0: its seeds, laps, start sequence, untuned bundled files and
+    /// tier, every bot from the builder (`seatControllers`), no rivals.
+    static func reference(_ race: ReferenceRace) -> RaceConfig {
+        let setup = race.setup
+        var config = RaceConfig(opponents: setup.fleetSize - 1, laps: setup.laps,
+                                prestartSeconds: Double(setup.startSequenceTicks) / Double(Race.tickRate),
+                                seed: setup.raceSeed.value, windSeed: race.windSeed.value)
+        config.files = PracticeFiles(boatClass: setup.boatClass, venue: setup.venue, conditions: setup.conditions,
+                                     rulesConfiguration: setup.rulesConfiguration)
+        config.botTier = race.tier
+        config.reference = race
+        return config
     }
 
     /// The wind seed for a race pinned to `seed` by a developer (`-seed`) or a test: a fixed mix of the
@@ -104,7 +121,8 @@ struct RaceConfig: Equatable {
     /// The practice setup keeps the fleet in 2...16 and `-perf` sails 16, so the fleet is always valid. It
     /// names `files`: the bundled defaults (`RaceFiles.defaults`) unless the tuning panel chose others (#232).
     var setup: RaceSetup {
-        try! RaceSetup(
+        if let reference { return reference.setup }
+        return try! RaceSetup(
             raceSeed: RaceSeed(seed),
             seats: [.human] + Array(repeating: .bot, count: opponents),
             laps: laps,
@@ -119,6 +137,8 @@ struct RaceConfig: Equatable {
     /// A bot for each bot seat, of `botTier` if there is one, and you in seat 0, or, for `-demo`, a bot attached to
     /// seat 0 as well.
     var seatControllers: SeatControllers {
+        // A reference race's bots are the builder's; a bot sailing your boat there is the suite's stand-in.
+        if let reference { return reference.controllers(standIn: botSailsYourBoat ? .tactician : nil) }
         let setup = setup
         var controllers = SeatControllers(setup: setup)
         if let botTier {

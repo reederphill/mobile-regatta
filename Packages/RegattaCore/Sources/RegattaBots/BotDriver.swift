@@ -25,6 +25,8 @@ public struct BotDriver: Sendable {
     /// `botSeed(raceSeed:seat:)`; the style and sailing name are drawn from it.
     public let seed: UInt64
     public var style: BotStyle { brain.style }
+    /// What she sails with: her skill's, her profile's, or an override's (#367).
+    public var weaknesses: BotWeaknesses { brain.weaknesses }
     /// The bot suite's scripted profile she sails (#231), or nil for a live bot.
     public let profile: BotProfile?
     /// Which of the three ticks this seat decides on.
@@ -48,6 +50,13 @@ public struct BotDriver: Sendable {
     /// her one (#231).
     public init(seat: Int, raceSeed: RaceSeed, style: BotStyle, profile: BotProfile? = nil) {
         self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, profile: profile)
+    }
+
+    /// `init(seat:raceSeed:style:profile:)` with `weaknesses`, if given, in place of her skill's and profile's
+    /// (`BotDriver(seat:raceSeed:skill:profile:weaknesses:)`, #367).
+    init(seat: Int, raceSeed: RaceSeed, style: BotStyle, profile: BotProfile?, overriding weaknesses: BotWeaknesses?) {
+        self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, profile: profile,
+                  weaknesses: weaknesses)
     }
 
     /// The bot for `seat` with a given style and `weaknesses` in place of her skill's (`BotWeaknesses`), cautious

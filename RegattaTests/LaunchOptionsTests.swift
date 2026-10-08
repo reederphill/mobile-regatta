@@ -347,6 +347,30 @@ import RegattaServices
         #expect(RenderQualityMonitor(options: parse("-fps120", "-thermal", "nominal")).policy(maxFPS: 120).fps == 120)
         #expect(RenderQualityMonitor(options: parse("-thermal", "nominal")).policy(maxFPS: 120).fps == 60)
     }
+
+    /// `-referenceRace <n>` (#367, Debug builds) takes a reference race 1…`ReferenceRegatta.count` and starts it; anything
+    /// else is refused and the menu shows, as a bad `-laps` is.
+    @Test func referenceRaceParsesAndRejectsOutOfRange() throws {
+        let count = ReferenceRegatta.count
+        for n in [1, count] {
+            let options = parse("-referenceRace", "\(n)")
+            #expect(options.referenceRace == n)
+            #expect(options.problems.isEmpty)
+            #expect(options.startsRace)
+            let config = try #require(options.launchRaceConfig())
+            #expect(config.reference == ReferenceRegatta.race(n))
+        }
+        for bad in ["0", "\(count + 1)", "-1", "three", "2.5"] {
+            let options = parse("-referenceRace", bad)
+            #expect(options.referenceRace == nil, "\(bad)")
+            #expect(options.problems.count == 1, "\(bad)")
+            #expect(options.launchRaceConfig() == nil, "\(bad): the menu")
+        }
+        #expect(parse().referenceRace == nil)
+        // It names the race whatever else pins one: `-seed` and `-laps` don't move it.
+        let pinned = try #require(parse("-referenceRace", "2", "-seed", "1", "-laps", "1").launchRaceConfig())
+        #expect(pinned.setup == ReferenceRegatta.race(2).setup)
+    }
     #endif
     /// My boat's launch arguments (#136): `-myBoat` stands in for Try it's deep link.
     @Test func parsesMyBoat() {

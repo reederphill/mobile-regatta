@@ -43,6 +43,8 @@ final class TuningModel {
     /// copies (its badge shows while either differs).
     @ObservationIgnored private weak var liveSession: GameSession?
     @ObservationIgnored private var liveSessionSailsTunedFiles = false
+    /// The live race keeps the pressure overlay off whatever the panel says: a reference race (#367).
+    @ObservationIgnored private var liveSessionHidesPressure = false
     @ObservationIgnored private weak var lastArchived: GameSession?
     @ObservationIgnored private let logger = Logger(subsystem: "com.phillreeder.regatta", category: "tuning")
 
@@ -297,9 +299,11 @@ final class TuningModel {
     }
 
     /// A practice session starts on this tuning: its render values, live from now on, and the TUNED badge.
-    func attach(_ session: GameSession, files: PracticeFiles) {
+    /// `hidesPressure`, the pressure overlay stays off for it (a reference race, #367).
+    func attach(_ session: GameSession, files: PracticeFiles, hidesPressure: Bool = false) {
         liveSession = session
         liveSessionSailsTunedFiles = files.isTuned
+        liveSessionHidesPressure = hidesPressure
         showLive()
     }
 
@@ -310,7 +314,8 @@ final class TuningModel {
         if session.scene.cameraStyle != tuning.camera { session.scene.cameraStyle = tuning.camera }
         if session.scene.boatStyle != tuning.boat { session.scene.boatStyle = tuning.boat }
         if session.hintTuning != tuning.hint { session.hintTuning = tuning.hint }
-        if session.scene.showsPressureOverlay != tuning.showsPressure { session.scene.showsPressureOverlay = tuning.showsPressure }
+        let showsPressure = tuning.showsPressure && !liveSessionHidesPressure
+        if session.scene.showsPressureOverlay != showsPressure { session.scene.showsPressureOverlay = showsPressure }
         session.isTuned = liveSessionSailsTunedFiles || tuning.water != .standard || tuning.camera != .standard
             || tuning.boat != .standard || tuning.hint != .standard
     }
