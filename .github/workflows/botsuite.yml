@@ -16,6 +16,9 @@
 #   rivals          the rival pace band.         rankStability  skill vs finishing order.
 #                   Both are sailed in fleets of 10 only (matrix.json mixFleetSizes), never pooled across fleet sizes.
 # Every job gates the worst p99 tick of its own races, so together they gate the worst of the whole matrix.
+# Each job sails its races in parallel, one per vCPU (regatta-botsuite's default --jobs: the active processors on Linux);
+# the report is the same as a serial run's but for the tick times, which sharing the runner stretches. They were noisy on a
+# hosted runner already; the Bench workflow's tick budget is the authoritative one.
 name: Bot suite
 
 on:

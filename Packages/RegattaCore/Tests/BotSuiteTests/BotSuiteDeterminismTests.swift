@@ -20,6 +20,19 @@ import Testing
         #expect(other.races.map(\.seats) != first.races.map(\.seats), "another seed sails another race")
     }
 
+    /// `--jobs`: races sailed at once give the report sailed one after another, but for the tick times: each race is
+    /// its own, and the results are pooled in the matrix's order whichever finishes first.
+    @Test func parallelRacesGiveTheSerialReportExcludingTimings() throws {
+        let matrix = BotMatrix(seeds: [5, 6, 7], fleetSizes: [2, 5], tierMixes: [.mixed, .national], laps: 1,
+                               capSecondsAfterGun: 240)
+        let serial = try BotSuite.run(matrix, thresholds: unmissableThresholds(), jobs: 1)
+        let parallel = try BotSuite.run(matrix, thresholds: unmissableThresholds(), jobs: 4)
+        #expect(serial.races.count > 4)
+        #expect(parallel.races.map(\.cell) == matrix.cells)
+        #expect(try jsonWithoutTimings(parallel) == jsonWithoutTimings(serial))
+        #expect(parallel.races.map(\.timings.ticks) == serial.races.map(\.timings.ticks))
+    }
+
     /// Since #81 a race is assembled from the files its setup names, so the conditions axis sails other
     /// wind: each cell's race is sailed with exactly the conditions it names.
     @Test func conditionsAxisVariesTheRace() throws {
