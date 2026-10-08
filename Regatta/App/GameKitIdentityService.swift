@@ -99,11 +99,13 @@ nonisolated final class GameKitIdentityService: IdentityService {
     func identitySignature() async throws -> IdentitySignature {
         guard let player = state().player else { throw IdentityError.notSignedIn }
         let local = GKLocalPlayer.local
+        // The signature covers the teamPlayerID (the server's key for the player); the gamePlayerID rides along (#145).
+        let teamPlayerID = local.teamPlayerID
         return try await withCheckedThrowingContinuation { continuation in
             local.fetchItems(forIdentityVerificationSignature: { @Sendable url, signature, salt, timestamp, error in
                 if let url, let signature, let salt {
                     continuation.resume(returning: IdentitySignature(
-                        gamePlayerID: player.gamePlayerID, publicKeyURL: url.absoluteString, signature: [UInt8](signature),
+                        gamePlayerID: player.gamePlayerID, teamPlayerID: teamPlayerID, publicKeyURL: url.absoluteString, signature: [UInt8](signature),
                         salt: [UInt8](salt), timestamp: timestamp))
                 } else {
                     continuation.resume(throwing: error ?? IdentityError.notSignedIn)

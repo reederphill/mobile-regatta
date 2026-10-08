@@ -1,5 +1,7 @@
 import Crypto
 import Foundation
+import Persistence
+import RegattaProtocol
 
 /// The deployment the server runs in: the `ENV` variable. Only `dev` exists for now (#67): the server has
 /// dev auth and nothing else, so it refuses to start anywhere else, and the dev endpoints (the instant
@@ -65,6 +67,11 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `RACE_TOKEN_TTL` | `600` | seconds a race token joins for |
 /// | `SERVER_BUILD` | `dev` | reported in `HelloAck` and `/health` |
 /// | `MAX_RACES` | `64` | races at once |
+/// | `TERMS_VERSION` | `1` | the Terms of Use version players must accept (#145); a bump re-asks |
+/// | `REGATTA_BUNDLE_ID` | `com.phillreeder.regatta` | the bundle id Game Center signs (README; final in #49) |
+/// | `REGATTA_TEAM_ID` | `8S5TQ65X3B` | the Apple Developer team (README; final in #49) |
+/// | `REGATTA_APPLE_ROOT_PEM` | none | a PEM file of the certificates Game Center's key must chain to; unset in dev = dev verifier |
+/// | `REGATTA_DATABASE_URL` | none | Postgres (ADR 0009); unset in dev = accounts in memory |
 public struct ServerConfig: Sendable {
     public var environment: ServerEnvironment
     public var auth: SeatAuthPolicy
@@ -76,6 +83,8 @@ public struct ServerConfig: Sendable {
     public var maxRaces: Int
     /// How long a race connection has to send `Hello` and `JoinRace` before it's closed (policy violation).
     public var handshakeTimeout: Duration = .seconds(10)
+    /// Identity, sessions and the Terms of Use (#145).
+    public var identity = IdentitySettings()
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
@@ -106,9 +115,26 @@ public struct ServerConfig: Sendable {
         } else {
             key = SymmetricKey(size: .bits256)
         }
-        return ServerConfig(environment: environment, auth: auth, host: env["HOST"] ?? "127.0.0.1", port: port,
-                            tokenKey: key, tokenLifetime: TimeInterval(lifetime),
-                            serverBuild: env["SERVER_BUILD"] ?? "dev", maxRaces: maxRaces)
+        var config = ServerConfig(environment: environment, auth: auth, host: env["HOST"] ?? "127.0.0.1", port: port,
+                                  tokenKey: key, tokenLifetime: TimeInterval(lifetime),
+                                  serverBuild: env["SERVER_BUILD"] ?? "dev", maxRaces: maxRaces)
+        config.identity.termsVersion = try int("TERMS_VERSION", default: 1, in: 1...1_000_000)
+        if let bundle = env["REGATTA_BUNDLE_ID"], !bundle.isEmpty { config.identity.bundleID = bundle }
+        if let team = env["REGATTA_TEAM_ID"], !team.isEmpty { config.identity.teamID = team }
+        if let path = env["REGATTA_APPLE_ROOT_PEM"], !path.isEmpty {
+            guard let pem = try? String(contentsOfFile: path, encoding: .utf8), pem.contains("BEGIN CERTIFICATE") else {
+                throw .invalid(variable: "REGATTA_APPLE_ROOT_PEM", value: path, expected: "a readable PEM file of certificates")
+            }
+            config.identity.appleRootsPEM = pem
+        } else if !environment.isDev {
+            throw .invalid(variable: "REGATTA_APPLE_ROOT_PEM", value: "(unset)", expected: "Apple's root outside ENV=dev")
+        }
+        do {
+            config.identity.database = try DatabaseConfiguration.fromEnvironment(env)
+        } catch {
+            throw .invalid(variable: "REGATTA_DATABASE_URL", value: "(hidden)", expected: "a postgres:// URL")
+        }
+        return config
     }
 
     public init(environment: ServerEnvironment, auth: SeatAuthPolicy, host: String, port: Int, tokenKey: SymmetricKey,
@@ -122,4 +148,28 @@ public struct ServerConfig: Sendable {
         self.serverBuild = serverBuild
         self.maxRaces = maxRaces
     }
+}
+
+/// Identity, sessions and the Terms of Use (#145).
+public struct IdentitySettings: Sendable {
+    public var termsVersion = 1
+    /// What Game Center signs with the teamPlayerID. README's value; #49 confirms it, #167 deploys it.
+    public var bundleID = "com.phillreeder.regatta"
+    /// The Apple Developer team. README's value; #49 confirms it.
+    public var teamID = "8S5TQ65X3B"
+    /// How far a signature's timestamp may be from now, either side.
+    public var signatureFreshness: Duration = .seconds(300)
+    /// The certificates Game Center's key must chain to (Apple's root, `REGATTA_APPLE_ROOT_PEM`). Nil in dev: any
+    /// well-formed, fresh signature passes (`DevGameCenterVerifier`), so the contract runner reaches the server.
+    public var appleRootsPEM: String?
+    /// Sessions slide: this long from the last sign-in or resume.
+    public var sessionLifetime: TimeInterval = 30 * 86_400
+    /// A service stream nobody reads for this long is dropped.
+    public var streamIdleTimeout: Duration = .seconds(60)
+    /// The largest service frame either way.
+    public var frameCap = serviceFrameLimit
+    /// Postgres, or nil: accounts in memory (dev only).
+    public var database: DatabaseConfiguration?
+
+    public init() {}
 }

@@ -252,7 +252,8 @@ public final class RaceClient {
         // Service messages (#143) go over the service link, not the race transport.
         case .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
              .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .identityReply, .termsReply, .queueReply,
-             .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd:
+             .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd, .sessionRequest,
+             .sessionReply:
             break
         }
     }

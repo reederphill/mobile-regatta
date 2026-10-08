@@ -93,17 +93,23 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     RaceRegistry.swift       running races by id, and nothing else
     SeatConnection.swift     one connection's Hello, JoinRace and hand-off to the host
     WebSocketSeatTransport.swift  a seat's WebSocket as the host's SeatTransport: buffered, never blocks
-    Routes.swift             /health and the dev-only /dev/instant-race
-    RegattaHTTPServer.swift  the port: HTTP/1.1, upgraded to a WebSocket at /race
+    Routes.swift             /health and the dev-only /dev/instant-race and /dev/situation
+    RegattaHTTPServer.swift  the port: HTTP/1.1, upgraded to a WebSocket at /race or /service
+    ServiceEndpoint.swift    one /service connection (#145): handshake, session calls, the Terms gate, pulled streams
+    ServiceSessions.swift    sign-in by Game Center signature, session tokens (SHA-256 stored), identity and terms
+    AccountStore.swift       players, sessions and terms acceptances: Postgres, or in memory for dev and tests
+    ServiceSetup.swift       the endpoint from the config (Apple or dev verifier), the dev situations, the HTTPS fetch
+  GameCenterIdentity/      Game Center identity verification: Apple's chain, RSA PKCS#1 v1.5 over the signed payload
   RegattaServer/           the `RegattaServer` executable
   RegattaDevAPI/           the dev endpoints' JSON, shared by the server and the load client
-  Persistence/             the server's Postgres (#144, ADR 0009), not wired into the server yet (#145)
+  Persistence/             the server's Postgres (#144, ADR 0009), used by the server when REGATTA_DATABASE_URL is set
     Database.swift           the connection pool; its config from a postgres:// URL (REGATTA_DATABASE_URL)
     Migrator.swift           numbered migrations (Migrations/), applied and reverted in one transaction each run
-    Stores.swift             players (by Game Center id) and their sessions
+    Stores.swift             players (by verified teamPlayerID, gamePlayerID bound 1:1), sessions, terms acceptances
     RaceRegistryStore.swift  races running, closed or cancelled, the files each names; orphans cancelled; logs (bytea)
     DataFileStore.swift      every version of every data file, by FileRef; a version never changes
-  RegattaLoadClient/       RegattaClient over a NIO WebSocket: scripted helm, bytes and RTT measured
+  RegattaLoadClient/       RegattaClient over a NIO WebSocket: scripted helm, bytes and RTT measured; the
+                           contract runner's WebSocketServiceConnector (#145)
   regatta-loadclient/      the `regatta-loadclient` executable
 Regatta/                The iOS app
   Game/RaceDriver.swift   what the app sails a race through: 30 Hz tick clock, tick frames, the interpolated RenderWorld
@@ -239,9 +245,13 @@ resources ("encountered an I/O error (code: 4)", an interrupted read); the scrip
 ### Race server and load client
 
 `RegattaServer` serves races on one port: `GET /health`, the race WebSocket at `/race` (`Hello`, then `JoinRace`
-with a race token, then the race; #18), and in dev `POST /dev/instant-race`. It has dev auth only (no accounts,
-no App Attest yet), so it refuses to start (exit status 78) unless `ENV=dev`, and the instant race exists only
-there (404 otherwise). It reads:
+with a race token, then the race; #18), the service WebSocket at `/service` (#145: `Hello`, then a session call
+that signs in with a Game Center identity signature or resumes a session token, then the service messages of
+#143, the lobby and the queue gated on the current Terms of Use), and in dev `POST /dev/instant-race` and
+`POST /dev/situation` (puts a contract-runner test account in a suite's situation). Race seats still have dev auth
+only (no App Attest yet), so it refuses to start (exit status 78) unless `ENV=dev`, and the dev routes exist only
+there (404 otherwise). In dev, without `REGATTA_APPLE_ROOT_PEM`, any well-formed fresh identity signature passes;
+with it, the signature is checked against Apple's chain. It reads:
 
 | variable | default | |
 |---|---|---|
@@ -251,6 +261,10 @@ there (404 otherwise). It reads:
 | `RACE_TOKEN_TTL` | `600` | seconds a race token joins for |
 | `SERVER_BUILD` | `dev` | reported in `HelloAck` and `/health` |
 | `MAX_RACES` | `64` | races at once |
+| `TERMS_VERSION` | `1` | the Terms of Use version players must accept; a bump re-asks everyone |
+| `REGATTA_BUNDLE_ID`, `REGATTA_TEAM_ID` | `com.phillreeder.regatta`, `8S5TQ65X3B` | what Game Center signs, and the team (final values: #49) |
+| `REGATTA_APPLE_ROOT_PEM` | none | PEM file of the certificates Game Center's key must chain to; required outside dev |
+| `REGATTA_DATABASE_URL` | none | Postgres (migrations run at start, orphaned races cancelled); unset in dev keeps accounts in memory |
 
 `POST /dev/instant-race?clients=N` starts a race now for N clients (1…16), with bots filling it to 10 boats,
 and answers each client's seat and signed race token. `raceSeconds=S` closes the race S seconds after the gun,

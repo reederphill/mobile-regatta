@@ -7,6 +7,65 @@ public enum ServerPath {
     public static let race = "/race"
     /// `POST`, dev only (`ENV=dev`): a race now, for the clients asking and bots. Absent (404) otherwise.
     public static let instantRace = "/dev/instant-race"
+    /// The service WebSocket (#145): `Hello`, then a session call, then the service messages (#143).
+    public static let service = "/service"
+    /// `POST`, dev only: puts a test account in a contract suite's situation (#145, the contract runner's
+    /// `ServiceEndpointConnector`). Absent (404) otherwise.
+    public static let devSituation = "/dev/situation"
+}
+
+/// What `POST /dev/situation` takes, as query parameters: the test account (its Game Center ids, which the dev
+/// verifier accepts) and the contract suite and situation it is put in, by name (`TermsService`, `versionBumped`).
+public struct DevSituationRequest: Hashable, Sendable {
+    public var service: String
+    public var situation: String
+    public var teamPlayerID: String
+    public var gamePlayerID: String
+
+    public init(service: String, situation: String, teamPlayerID: String, gamePlayerID: String) {
+        self.service = service
+        self.situation = situation
+        self.teamPlayerID = teamPlayerID
+        self.gamePlayerID = gamePlayerID
+    }
+
+    static let keys = ["service", "situation", "teamPlayerID", "gamePlayerID"]
+
+    public var query: String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~:"))
+        return zip(Self.keys, [service, situation, teamPlayerID, gamePlayerID])
+            .map { "\($0)=\($1.addingPercentEncoding(withAllowedCharacters: allowed) ?? $1)" }.joined(separator: "&")
+    }
+
+    /// Nil when a key is missing or empty.
+    public init?(query: String) {
+        var values: [String: String] = [:]
+        for pair in query.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
+            guard parts.count == 2 else { continue }
+            values[parts[0]] = parts[1].removingPercentEncoding ?? parts[1]
+        }
+        guard let service = values["service"], let situation = values["situation"], let team = values["teamPlayerID"],
+              let game = values["gamePlayerID"], ![service, situation, team, game].contains(where: \.isEmpty)
+        else { return nil }
+        self.init(service: service, situation: situation, teamPlayerID: team, gamePlayerID: game)
+    }
+}
+
+/// How the client signs in for the situation: not at all (signed out), or with these restrictions.
+public struct DevSituationResponse: Codable, Hashable, Sendable {
+    public var signIn: Bool
+    public var isUnderage: Bool
+    public var isPersonalizedCommunicationRestricted: Bool
+    public var isMultiplayerGamingRestricted: Bool
+
+    public init(signIn: Bool, isUnderage: Bool = false, isPersonalizedCommunicationRestricted: Bool = false,
+                isMultiplayerGamingRestricted: Bool = false) {
+        self.signIn = signIn
+        self.isUnderage = isUnderage
+        self.isPersonalizedCommunicationRestricted = isPersonalizedCommunicationRestricted
+        self.isMultiplayerGamingRestricted = isMultiplayerGamingRestricted
+    }
 }
 
 /// What `POST /dev/instant-race` takes, as query parameters (`?clients=16&raceSeconds=20`).

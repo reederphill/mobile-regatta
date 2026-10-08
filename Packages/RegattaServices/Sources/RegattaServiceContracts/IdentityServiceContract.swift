@@ -67,6 +67,7 @@ public struct IdentityServiceContract: ContractSuite {
     private func checkSignature(_ service: any IdentityService, _ state: GameCenterState) async throws {
         let signature = try await service.identitySignature()
         try await require(signature.gamePlayerID == state.player?.gamePlayerID, "the signature is for another player")
+        try await require(!signature.teamPlayerID.isEmpty, "the signature has no teamPlayerID")
         try await require(!signature.signature.isEmpty && !signature.salt.isEmpty, "the signature or its salt is empty")
         try await require(!signature.publicKeyURL.isEmpty, "the signature has no public key URL")
     }

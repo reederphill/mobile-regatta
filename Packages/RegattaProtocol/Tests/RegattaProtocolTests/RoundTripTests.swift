@@ -284,7 +284,7 @@ import Testing
                 .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync,
                 // Service requests (#143).
                 .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
-                .analyticsRequest, .deletionRequest, .streamNext, .streamClose,
+                .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .sessionRequest,
             ]
             #expect((type.direction == .clientToServer) == clientSends.contains(type))
         }

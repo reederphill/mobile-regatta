@@ -102,7 +102,33 @@ public enum ContractRunner {
     }
 }
 
+/// Where the runner finds a real server: `CONTRACT_ENDPOINT` (`ws://host:port`), and which suites to run against it,
+/// `CONTRACT_SUITES` (comma-separated `ContractSuiteID` names; by default the ones the caller says the server serves).
+/// The caller passes its environment in (this package does no I/O); the test that runs it reads `ProcessInfo`.
+public enum ContractEndpoint {
+    public static let endpointVariable = "CONTRACT_ENDPOINT"
+    public static let suitesVariable = "CONTRACT_SUITES"
+
+    /// The endpoint, or nil when it isn't set.
+    public static func fromEnvironment(_ environment: [String: String]) -> String? {
+        guard let endpoint = environment[endpointVariable], !endpoint.isEmpty else { return nil }
+        return endpoint
+    }
+
+    /// The suites `CONTRACT_SUITES` names, or `served` when it's unset. Throws on a name that isn't a wired suite.
+    public static func suites(served: [ContractSuiteID], _ environment: [String: String]) throws -> [ContractSuiteID] {
+        guard let names = environment[suitesVariable], !names.isEmpty else { return served }
+        return try names.split(separator: ",").map { name in
+            let trimmed = String(name.drop(while: \.isWhitespace).reversed().drop(while: \.isWhitespace).reversed())
+            guard let suite = ContractSuiteID(rawValue: trimmed), suite.isWired else { throw ContractRunnerError.unknownSuite(trimmed) }
+            return suite
+        }
+    }
+}
+
 public enum ContractRunnerError: Error, Equatable, Sendable {
     /// A local suite (`ContractSuiteID.isWired` false) has no adapter to run over a link.
     case notWired(ContractSuiteID)
+    /// `CONTRACT_SUITES` names something that isn't a wired suite.
+    case unknownSuite(String)
 }

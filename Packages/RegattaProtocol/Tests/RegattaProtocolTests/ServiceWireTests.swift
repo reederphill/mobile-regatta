@@ -14,7 +14,7 @@ import Testing
     @Test func serviceCodesStartAt64AndKeepTheirDirection() {
         let service = MessageType.allCases.filter { $0.rawValue >= 64 }
         #expect(MessageType.allCases.filter { $0.rawValue >= 32 } == service)
-        #expect(service.map(\.rawValue) == Array(64...73) + Array(80...88))
+        #expect(service.map(\.rawValue) == Array(64...74) + Array(80...89))
         for type in service {
             #expect((type.direction == .clientToServer) == (type.rawValue < 80))
             #expect(type.stream == .other)
@@ -33,6 +33,20 @@ import Testing
         // An id is a uint32: one past it, and a long-form varint, are rejected.
         #expect(throws: WireError.invalidValue("id")) { try Self.decode(.streamEnd, [0x80, 0x80, 0x80, 0x80, 0x10]) }
         #expect(throws: WireError.invalidValue("id")) { try Self.decode(.streamEnd, [0x81, 0x00]) }
+    }
+
+    /// The session calls (#145): a code, then the call's fields; unknown codes are rejected.
+    @Test func sessionMessagesEncodeTheirCodeThenFields() throws {
+        #expect(try Self.encode(.sessionRequest(ServiceRequest(id: 1, call: .signOut))) == [1, 2])
+        #expect(try Self.encode(.sessionReply(ServiceReply(id: 1, result: .refused(.sessionExpired)))) == [1, 1, 3])
+        let player = WirePlayer(gamePlayerID: "G", alias: "A", isUnderage: false, isPersonalizedCommunicationRestricted: false,
+                                isMultiplayerGamingRestricted: true)
+        #expect(try Self.encode(.sessionRequest(ServiceRequest(id: 2, call: .resume(token: [7, 8], player: player))))
+            == [2, 1, 2, 7, 8, 1, 0x47, 1, 0x41, 4])
+        #expect(throws: WireError.invalidValue("sessionCall")) { try Self.decode(.sessionRequest, [0, 3]) }
+        #expect(throws: WireError.invalidValue("sessionResult")) { try Self.decode(.sessionReply, [0, 3]) }
+        #expect(throws: WireError.invalidValue("sessionRefusal")) { try Self.decode(.sessionReply, [0, 1, 5]) }
+        #expect(try Self.decode(.sessionReply, [4, 2]).replyID == 4)
     }
 
     @Test func integersAreZigzagVarints() throws {
