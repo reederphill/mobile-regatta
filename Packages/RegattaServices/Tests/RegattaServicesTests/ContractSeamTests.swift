@@ -113,7 +113,7 @@ private struct BrokenIdentity: IdentityService {
     func gamePlayerID() async -> GamePlayerID? { await base.gamePlayerID() }
     func signIn() async -> GameCenterState { await base.signIn() }
     func identitySignature() async throws -> IdentitySignature {
-        IdentitySignature(gamePlayerID: GamePlayerID("G:0"), publicKeyURL: "https://x.invalid", signature: [1], salt: [1], timestamp: 0)
+        IdentitySignature(gamePlayerID: GamePlayerID("G:0"), teamPlayerID: "T:0", publicKeyURL: "https://x.invalid", signature: [1], salt: [1], timestamp: 0)
     }
 }
 

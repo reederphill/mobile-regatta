@@ -301,7 +301,8 @@ struct Gen {
         case .raceClosed: message = .raceClosed(RaceClosed(results: payload()))
         case .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
              .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .identityReply, .termsReply, .queueReply,
-             .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd:
+             .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd, .sessionRequest,
+             .sessionReply:
             message = serviceMessage(type)
         }
         return Frame(seq: u32(), tick: int(Int(Int32.min)...Int(Int32.max)), message: message)

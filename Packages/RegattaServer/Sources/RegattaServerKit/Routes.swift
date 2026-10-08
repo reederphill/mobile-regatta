@@ -11,7 +11,9 @@ import RegattaProtocol
 public enum Route: Hashable, Sendable {
     case health
     case instantRace
-    /// `/race` without a WebSocket upgrade.
+    /// `POST /dev/situation`, dev only (#145).
+    case devSituation
+    /// `/race` or `/service` without a WebSocket upgrade.
     case upgradeRequired
     case methodNotAllowed
     case notFound
@@ -22,7 +24,9 @@ public enum Route: Hashable, Sendable {
             return method == .GET || method == .HEAD ? .health : .methodNotAllowed
         case ServerPath.instantRace where environment.servesDevEndpoints:
             return method == .POST ? .instantRace : .methodNotAllowed
-        case ServerPath.race:
+        case ServerPath.devSituation where environment.servesDevEndpoints:
+            return method == .POST ? .devSituation : .methodNotAllowed
+        case ServerPath.race, ServerPath.service:
             return .upgradeRequired
         default:
             return .notFound
@@ -57,13 +61,16 @@ extension JSONEncoder {
 public struct RequestHandler: Sendable {
     public let config: ServerConfig
     public let registry: RaceRegistry
+    /// The service endpoint (#145), when the server has one.
+    public let services: ServiceEndpoint?
     /// Unix seconds now, for token expiry.
     let now: @Sendable () -> Int64
 
-    public init(config: ServerConfig, registry: RaceRegistry,
+    public init(config: ServerConfig, registry: RaceRegistry, services: ServiceEndpoint? = nil,
                 now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970) }) {
         self.config = config
         self.registry = registry
+        self.services = services
         self.now = now
     }
 
@@ -78,8 +85,14 @@ public struct RequestHandler: Sendable {
                                                      races: await registry.count))
         case .instantRace:
             return await instantRace(query: query)
+        case .devSituation:
+            guard let services else { return HTTPReply(.notFound, error: "not found") }
+            guard let request = DevSituationRequest(query: query) else {
+                return HTTPReply(.badRequest, error: "service, situation, teamPlayerID and gamePlayerID are required")
+            }
+            return await services.arrange(request)
         case .upgradeRequired:
-            return HTTPReply(.upgradeRequired, error: "\(ServerPath.race) is a WebSocket")
+            return HTTPReply(.upgradeRequired, error: "\(path) is a WebSocket")
         case .methodNotAllowed:
             return HTTPReply(.methodNotAllowed, error: "method not allowed")
         case .notFound:

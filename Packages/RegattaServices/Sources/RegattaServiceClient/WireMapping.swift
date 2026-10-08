@@ -28,12 +28,12 @@ extension GameCenterState {
 
 extension IdentitySignature {
     public init(wire: WireIdentitySignature) {
-        self.init(gamePlayerID: GamePlayerID(wire.gamePlayerID), publicKeyURL: wire.publicKeyURL, signature: wire.signature,
+        self.init(gamePlayerID: GamePlayerID(wire.gamePlayerID), teamPlayerID: wire.teamPlayerID, publicKeyURL: wire.publicKeyURL, signature: wire.signature,
                   salt: wire.salt, timestamp: wire.timestamp)
     }
 
     public var wire: WireIdentitySignature {
-        WireIdentitySignature(gamePlayerID: gamePlayerID.rawValue, publicKeyURL: publicKeyURL, signature: signature, salt: salt,
+        WireIdentitySignature(gamePlayerID: gamePlayerID.rawValue, teamPlayerID: teamPlayerID, publicKeyURL: publicKeyURL, signature: signature, salt: salt,
                               timestamp: timestamp)
     }
 }

@@ -57,7 +57,7 @@ public actor ScriptedIdentityService: IdentityService {
     public func identitySignature() throws -> IdentitySignature {
         guard let player = current.player else { throw IdentityError.notSignedIn }
         return IdentitySignature(
-            gamePlayerID: player.gamePlayerID, publicKeyURL: "https://scripted.invalid/gc-public-key.cer",
+            gamePlayerID: player.gamePlayerID, teamPlayerID: "T:" + player.gamePlayerID.rawValue, publicKeyURL: "https://scripted.invalid/gc-public-key.cer",
             signature: Array(player.gamePlayerID.rawValue.utf8), salt: [1, 2, 3, 4], timestamp: 1)
     }
 

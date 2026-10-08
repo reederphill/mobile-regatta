@@ -51,18 +51,23 @@ public enum GameCenterState: Equatable, Sendable {
     }
 }
 
-/// What Game Center signs to prove the player's id to the server
-/// (`generateIdentityVerificationSignature`): the server checks it and keeps a profile keyed by `gamePlayerID` (#16).
+/// What Game Center signs to prove the player's id to the server (`fetchItems(forIdentityVerificationSignature:)`):
+/// the signature covers `teamPlayerID`, the bundle id, the timestamp and the salt. The server keys the player by the
+/// verified `teamPlayerID` and binds the unsigned `gamePlayerID` to it 1:1 (#16, #145).
 public struct IdentitySignature: Equatable, Sendable {
     public var gamePlayerID: GamePlayerID
+    /// `GKPlayer.teamPlayerID`: the signed id.
+    public var teamPlayerID: String
     /// Where the server fetches the certificate that verifies the signature.
     public var publicKeyURL: String
     public var signature: [UInt8]
     public var salt: [UInt8]
+    /// Milliseconds since the epoch.
     public var timestamp: UInt64
 
-    public init(gamePlayerID: GamePlayerID, publicKeyURL: String, signature: [UInt8], salt: [UInt8], timestamp: UInt64) {
+    public init(gamePlayerID: GamePlayerID, teamPlayerID: String, publicKeyURL: String, signature: [UInt8], salt: [UInt8], timestamp: UInt64) {
         self.gamePlayerID = gamePlayerID
+        self.teamPlayerID = teamPlayerID
         self.publicKeyURL = publicKeyURL
         self.signature = signature
         self.salt = salt

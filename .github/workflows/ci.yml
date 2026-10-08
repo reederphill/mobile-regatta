@@ -279,8 +279,13 @@ jobs:
           path: .build/persistence
           key: persistence-${{ hashFiles('scripts/linux-test.sh', 'Packages/RegattaServer/Package.resolved') }}
           restore-keys: persistence-
-      - name: Migrations, the race registry and the data-file store (swift test --filter PersistenceTests)
-        run: swift test --package-path Packages/RegattaServer --scratch-path .build/persistence --filter PersistenceTests
+      # Every suite that needs the database: the Persistence target's (migrations, race registry, data files, players,
+      # sessions and terms acceptances) and the service endpoint's against Postgres (#145). A new database-backed suite
+      # joins this filter.
+      - name: Migrations, the stores, and the service endpoint against Postgres
+        run: >-
+          swift test --package-path Packages/RegattaServer --scratch-path .build/persistence
+          --filter '^PersistenceTests\.' --filter 'ServiceEndpointPersistenceTests'
 
   macos:
     name: Packages on macOS

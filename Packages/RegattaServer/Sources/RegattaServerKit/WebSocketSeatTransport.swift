@@ -9,6 +9,9 @@ import Synchronization
 /// the connection is closed, and its seat drops like any lost connection.
 public final class WebSocketSeatTransport: SeatTransport {
     public static let maxPendingBytes = 256 * 1024
+    /// Unsent bytes past which the connection closes: `maxPendingBytes` for a seat, more for the service endpoint,
+    /// whose frames go up to the 32 MiB cap (#145).
+    private let maxPending: Int
 
     private struct State {
         var pending = 0
@@ -20,7 +23,10 @@ public final class WebSocketSeatTransport: SeatTransport {
     private let channel: any Channel
     private let state = Mutex(State())
 
-    public init(channel: any Channel) { self.channel = channel }
+    public init(channel: any Channel, maxPendingBytes: Int = WebSocketSeatTransport.maxPendingBytes) {
+        self.channel = channel
+        maxPending = maxPendingBytes
+    }
 
     /// Payload bytes and messages sent so far.
     public var sent: (bytes: Int, messages: Int) { state.withLock { ($0.sentBytes, $0.sentMessages) } }
@@ -29,7 +35,7 @@ public final class WebSocketSeatTransport: SeatTransport {
     public func send(_ frame: [UInt8]) {
         let overflow: Bool = state.withLock { state in
             guard !state.closed else { return false }
-            if state.pending + frame.count > Self.maxPendingBytes { return true }
+            if state.pending + frame.count > maxPending { return true }
             state.pending += frame.count
             state.sentBytes += frame.count
             state.sentMessages += 1

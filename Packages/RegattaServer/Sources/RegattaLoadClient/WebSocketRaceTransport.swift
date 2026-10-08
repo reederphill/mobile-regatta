@@ -61,6 +61,49 @@ public enum LoadClientError: Error, Equatable, Sendable, CustomStringConvertible
     }
 }
 
+/// A client WebSocket on NIO: the HTTP upgrade at `path`, then whole messages (fragments aggregated up to `maxMessage`).
+enum WebSocketClient {
+    static func connect(host: String, port: Int, path: String, maxMessage: Int, counter: ByteCounter,
+                        group: any EventLoopGroup) async throws -> NIOAsyncChannel<WebSocketFrame, WebSocketFrame> {
+        enum Upgrade: Sendable {
+            case websocket(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>)
+            case refused
+        }
+        let upgrade: EventLoopFuture<Upgrade> = try await ClientBootstrap(group: group)
+            .channelOption(.tcpOption(.tcp_nodelay), value: 1)
+            .connect(host: host, port: port) { channel in
+                channel.eventLoop.makeCompletedFuture {
+                    try channel.pipeline.syncOperations.addHandler(ByteCountingHandler(counter))
+                    let upgrader = NIOTypedWebSocketClientUpgrader<Upgrade>(
+                        maxFrameSize: maxMessage,
+                        upgradePipelineHandler: { channel, _ in
+                            channel.eventLoop.makeCompletedFuture {
+                                try channel.pipeline.syncOperations.addHandler(
+                                    NIOWebSocketFrameAggregator(minNonFinalFragmentSize: 0, maxAccumulatedFrameCount: 4096,
+                                                                maxAccumulatedFrameSize: maxMessage))
+                                return Upgrade.websocket(try NIOAsyncChannel(wrappingChannelSynchronously: channel))
+                            }
+                        }
+                    )
+                    var headers = HTTPHeaders()
+                    headers.add(name: "Host", value: "\(host):\(port)")
+                    headers.add(name: "Content-Length", value: "0")
+                    let configuration = NIOTypedHTTPClientUpgradeConfiguration(
+                        upgradeRequestHead: HTTPRequestHead(version: .http1_1, method: .GET, uri: path, headers: headers),
+                        upgraders: [upgrader],
+                        notUpgradingCompletionHandler: { channel in channel.eventLoop.makeSucceededFuture(Upgrade.refused) }
+                    )
+                    return try channel.pipeline.syncOperations.configureUpgradableHTTPClientPipeline(
+                        configuration: .init(upgradeConfiguration: configuration))
+                }
+            }
+        switch try await upgrade.get() {
+        case .websocket(let channel): return channel
+        case .refused: throw LoadClientError.upgradeRefused
+        }
+    }
+}
+
 /// A race connection over a NIO WebSocket, as `RaceClient` polls it (`RaceTransport`). A reader task
 /// buffers each binary message as it arrives; `receive()` hands over what has come. Sends are queued on
 /// the channel's event loop and never block. Client frames are masked (RFC 6455).
@@ -89,47 +132,12 @@ public final class WebSocketRaceTransport: RaceTransport, @unchecked Sendable {
     /// Opens `ws://host:port/race`.
     public static func connect(host: String, port: Int, clock: @escaping @Sendable () -> UInt64,
                                group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> WebSocketRaceTransport {
-        enum Upgrade: Sendable {
-            case websocket(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>)
-            case refused
-        }
         let counter = ByteCounter()
-        let upgrade: EventLoopFuture<Upgrade> = try await ClientBootstrap(group: group)
-            .channelOption(.tcpOption(.tcp_nodelay), value: 1)
-            .connect(host: host, port: port) { channel in
-                channel.eventLoop.makeCompletedFuture {
-                    try channel.pipeline.syncOperations.addHandler(ByteCountingHandler(counter))
-                    let upgrader = NIOTypedWebSocketClientUpgrader<Upgrade>(
-                        maxFrameSize: maxServerMessage,
-                        upgradePipelineHandler: { channel, _ in
-                            channel.eventLoop.makeCompletedFuture {
-                                try channel.pipeline.syncOperations.addHandler(
-                                    NIOWebSocketFrameAggregator(minNonFinalFragmentSize: 0, maxAccumulatedFrameCount: 256,
-                                                                maxAccumulatedFrameSize: maxServerMessage))
-                                return Upgrade.websocket(try NIOAsyncChannel(wrappingChannelSynchronously: channel))
-                            }
-                        }
-                    )
-                    var headers = HTTPHeaders()
-                    headers.add(name: "Host", value: "\(host):\(port)")
-                    headers.add(name: "Content-Length", value: "0")
-                    let configuration = NIOTypedHTTPClientUpgradeConfiguration(
-                        upgradeRequestHead: HTTPRequestHead(version: .http1_1, method: .GET, uri: ServerPath.race, headers: headers),
-                        upgraders: [upgrader],
-                        notUpgradingCompletionHandler: { channel in channel.eventLoop.makeSucceededFuture(Upgrade.refused) }
-                    )
-                    return try channel.pipeline.syncOperations.configureUpgradableHTTPClientPipeline(
-                        configuration: .init(upgradeConfiguration: configuration))
-                }
-            }
-        switch try await upgrade.get() {
-        case .websocket(let channel):
-            let transport = WebSocketRaceTransport(channel: channel.channel, counter: counter, clock: clock)
-            transport.startReading(channel)
-            return transport
-        case .refused:
-            throw LoadClientError.upgradeRefused
-        }
+        let channel = try await WebSocketClient.connect(host: host, port: port, path: ServerPath.race, maxMessage: maxServerMessage,
+                                                        counter: counter, group: group)
+        let transport = WebSocketRaceTransport(channel: channel.channel, counter: counter, clock: clock)
+        transport.startReading(channel)
+        return transport
     }
 
     private init(channel: any Channel, counter: ByteCounter, clock: @escaping @Sendable () -> UInt64) {

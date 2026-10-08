@@ -5,6 +5,7 @@ import Darwin
 #endif
 import Dispatch
 import Foundation
+import Persistence
 import RegattaServerKit
 
 /// `RegattaServer` (#67): the race server. Configured from the environment (`ServerConfig`); refuses to
@@ -30,7 +31,8 @@ enum RegattaServerMain {
         }
         let server: RegattaHTTPServer
         do {
-            server = try await RegattaHTTPServer.start(config: config)
+            let store = try await accountStore(config)
+            server = try await RegattaHTTPServer.start(config: config, services: try ServiceEndpoint.make(config: config, store: store))
         } catch {
             FileHandle.standardError.write(Data("RegattaServer: can't start: \(error)\n".utf8))
             exit(1)
@@ -47,5 +49,22 @@ enum RegattaServerMain {
             FileHandle.standardError.write(Data("RegattaServer: the listener failed: \(error)\n".utf8))
         }
         exit(1)
+    }
+
+    /// Postgres when `REGATTA_DATABASE_URL` is set (ADR 0009): its pool runs for the life of the process, the
+    /// migrations run, and races a crash left running are cancelled (`cancelOrphans`). Otherwise, in dev, accounts
+    /// live in memory.
+    private static func accountStore(_ config: ServerConfig) async throws -> any AccountStore {
+        guard let configuration = config.identity.database else {
+            FileHandle.standardOutput.write(Data("RegattaServer: no REGATTA_DATABASE_URL: accounts in memory\n".utf8))
+            return InMemoryAccountStore()
+        }
+        let database = Database(configuration)
+        Task.detached { await database.run() }
+        let applied = try await Migrator().up(database)
+        let orphans = try await RaceRegistryStore(database).cancelOrphans()
+        FileHandle.standardOutput.write(Data(
+            "RegattaServer: Postgres: migrations applied \(applied), orphaned races cancelled \(orphans.count)\n".utf8))
+        return PostgresAccountStore(database)
     }
 }
