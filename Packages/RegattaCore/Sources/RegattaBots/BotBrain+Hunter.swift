@@ -26,7 +26,7 @@ import RegattaCore
 //   (`tapTurnsAtKeepClearBoat`): the tap turns faster than rule 16.1's test.
 // - She keeps clear first: `evasion` (a boat she must keep clear of, marks, the edge) is steered before this is
 //   reached, and she never hunts a boat she owes mark-room, a ghost, or with a penalty to take; before her start she
-//   sails as a live bot does (pre-start fighting is #337's).
+//   sails as a live bot does (pre-start fighting is #337's: a combative live bot's luff, `startLuffing`).
 extension BotBrain {
     /// The hunter's tunables (#355): how hard she turns at a boat, how far ahead and how near she looks.
     enum Hunter {
@@ -103,6 +103,21 @@ extension BotBrain {
         }
         let (hunted, turned) = huntingInput(b, view, input, desired: desired, quarry: quarry, rule: rule, most: most)
         return (gently(b, view, hunted, most: most), turned ? .turn : .hold)
+    }
+
+    /// #337 (owner 2026-10-08): before her start, a combative live bot (`Tactics.startLuffUntil`) as the leeward
+    /// right-of-way boat (rule 11) luffs a windward boat that must keep clear of her (`quarry`), as the hunter does
+    /// racing: rule 16.1's rate and the hunter's limits (`huntingInput`, `gently`), never without the right of way, never
+    /// a boat she owes room, and never onto a heading that would carry her over the line within `luffLineSeconds` (`crossesEarly`). She
+    /// eases it off `startLuffUntil` seconds before the gun to start. Nil when she doesn't: she holds her course
+    /// (`holdingCourse`) as every other bot does.
+    func startLuffing(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> BoatInput? {
+        guard let until = tactics.startLuffUntil, b.status == .prestart, b.penalty == nil, view.time < 0,
+              -view.time > until, let (quarry, rule) = quarry(b, view), rule == .windwardLeeward,
+              !crossesEarly(b, view, heading: b.heading + luff(b) * Hunter.probe, within: Self.luffLineSeconds) else { return nil }
+        let most = huntRudder(b, view)
+        let (luffed, _) = huntingInput(b, view, input, desired: desired, quarry: quarry, rule: rule, most: most)
+        return gently(b, view, luffed, most: most)
     }
 
     /// `input`, or with the autohelm due to turn her, her own rudder of `most` towards where it would turn her instead:

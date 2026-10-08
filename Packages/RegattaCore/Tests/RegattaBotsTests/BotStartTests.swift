@@ -158,4 +158,65 @@ import RegattaCore
         #expect(aiming.startAim(b, beyond.view) == setting.toSetup(b, beyond.view, spot: spot, hold: hold, arrival: arrival),
                 "beyond the pin end she sails to her setup point")
     }
+
+    // MARK: - Fighting for her spot (#337)
+
+    /// #337 acceptance (start): the windward boat of #280's scene, luffed to her floor and still not clear of the
+    /// leeward boat (`BotBrain.startLuff`), holds her ground from further out the more combative she is
+    /// (`FleetTactics.startHoldsGroundScale`): 25 s before the gun the typical bot still eases and drops astern and
+    /// a combative one holds; 15 s before it the typical one holds and a mild one still drops astern. She stays the
+    /// keep-clear boat throughout (the luff is hers, away from the leeward boat).
+    @Test func holdsHerGroundLongerTheMoreCombative() throws {
+        func dropsAstern(_ engagement: Double, toGun: Int) throws -> Bool {
+            let race = try BotConductTests.prestartWindwardLeeward(seed: 3, toGun: toGun, leeward: deg2rad(32),
+                                                                   windward: deg2rad(36), abeam: 0.9)
+            let view = race.seatView(for: 1)
+            #expect(view.others.first?.rightOfWay?.keepClear == 1, "she is the keep-clear boat")
+            var brain = BotTacticsTests.pilot(seat: 1, race, engagement: engagement, planned: .starboard).brain
+            brain.observe(view.own, view)
+            return brain.startLuff(view.own, view, desired: view.own.heading, lookahead: 3).dropsAstern
+        }
+        let floor = BotBrain.FleetTactics.engagementFloor
+        #expect(try dropsAstern(0.5, toGun: 25))
+        #expect(try !dropsAstern(1, toGun: 25))
+        #expect(try !dropsAstern(0.5, toGun: 15))
+        #expect(try dropsAstern(floor, toGun: 15))
+    }
+
+    /// #337 acceptance (start, the owner 2026-10-08: combative bots luff harder before the start when they hold the
+    /// right of way, never without it): the leeward boat 40 s before the gun, a windward boat a length and a half
+    /// abeam that must keep clear of her (rule 11). A combative bot luffs her (rudder towards the wind, at the hunter's
+    /// rate); the fleet's typical one holds her course (#101); the combative one eases her luff off for her start
+    /// (`FleetTactics.startLuffUntilScale`), and never luffs as the windward boat, without the right of way. Sailed
+    /// out against a typical windward bot, no rule call on her.
+    @Test func combativeLuffsAWindwardBoatBeforeTheStart() throws {
+        func luffing(_ engagement: Double, seat: Int = 0, toGun: Int = 40) throws -> BoatInput? {
+            let race = try BotConductTests.prestartWindwardLeeward(seed: 3, toGun: toGun, leeward: deg2rad(45),
+                                                                   windward: deg2rad(45), abeam: 1.5)
+            // A second on, the rules have them overlapped (rule 11).
+            for _ in 0..<Race.tickRate { race.step() }
+            let view = race.seatView(for: seat)
+            #expect(view.others.first?.rightOfWay == RightOfWay(keepClear: 1, rule: .windwardLeeward))
+            var brain = BotTacticsTests.pilot(seat: seat, race, engagement: engagement, planned: .starboard).brain
+            brain.observe(view.own, view)
+            return brain.startLuffing(view.own, view, .neutral, desired: view.own.heading)
+        }
+        let combative = try #require(try luffing(1), "combative, she luffs")
+        #expect(combative.rudderValue > 0, "a luff on starboard turns her to starboard: \(combative.rudderValue)")
+        #expect(try luffing(0.5) == nil, "typical, she holds her course")
+        #expect(try luffing(1, toGun: 5) == nil, "4 s before the gun she has eased her luff off")
+        #expect(try luffing(1, seat: 1) == nil, "as the windward boat she has no luff to take")
+
+        for seed: UInt64 in [3, 7, 13] {
+            let race = try BotConductTests.prestartWindwardLeeward(seed: seed, toGun: 40, leeward: deg2rad(45),
+                                                                   windward: deg2rad(45), abeam: 1.5)
+            let sailed = BotTacticsTests.sail(race, BotTacticsTests.pilot(seat: 0, race, engagement: 1, planned: .starboard),
+                                              seconds: 10, others: [BotTacticsTests.pilot(seat: 1, race, engagement: 0.5,
+                                                                                            planned: .starboard)])
+            // Never a call on her: her luff is within rule 16.1's rate. The windward boat may be called under rule 11
+            // (the owner: more calls at the combative end), as a player squeezed there would be.
+            let calls = BotConductTests.calls(sailed.kinds)
+            #expect(!calls.contains { $0.hasSuffix(" on 0") }, "seed \(seed): \(calls)")
+        }
+    }
 }

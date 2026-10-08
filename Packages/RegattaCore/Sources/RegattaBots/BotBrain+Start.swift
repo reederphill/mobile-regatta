@@ -376,7 +376,8 @@ extension BotBrain {
     static let luffLineSeconds = 6.0
     /// Seconds before the gun from which a windward boat luffed to `startLuffFloor` and still not clear no longer eases
     /// to drop astern (`Evasion.dropsAstern`): later, slowed there, she starts late. #280 measured easing to the gun
-    /// at on time 0.50 against the start gate's 0.60.
+    /// at on time 0.50 against the start gate's 0.60. A live bot's scales with her engagement (#337,
+    /// `Tactics.startHoldsGroundSeconds`): this at the fleet's typical one.
     static let startLuffEaseSeconds = 20.0
 
     /// The closest to the wind she luffs before her start (`startLuffMargin`).
@@ -414,7 +415,7 @@ extension BotBrain {
             angle = max(floor, angle - Self.startLuffStep)
         }
         return Evasion(heading: b.windDirection + side * floor, closest: floor,
-                       dropsAstern: view.time < 0 && -view.time > Self.startLuffEaseSeconds)
+                       dropsAstern: view.time < 0 && -view.time > tactics.startHoldsGroundSeconds)
     }
 
     /// Whether she lets the sheets out while she steers `heading` on starboard to keep clear or off a mark

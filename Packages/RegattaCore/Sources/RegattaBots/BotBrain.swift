@@ -171,6 +171,11 @@ struct BotBrain: Sendable {
         self.caution = caution
         self.weaknesses = weaknesses ?? profile?.weaknesses(skill: style.skill) ?? BotWeaknesses(skill: style.skill)
         tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
+        // #337: the cautious bot plays no fleet tactic (her engagement is 0) and fights for no spot: today's values.
+        if caution != nil {
+            tactics.tacticEngagement = nil
+            tactics.startEngagement = nil
+        }
         rng = SplitMix64(seed: seed, stream: Self.brainStream)
         tacticsRng = SplitMix64(seed: seed, stream: Self.tacticsStream)
     }
@@ -268,7 +273,11 @@ struct BotBrain: Sendable {
     /// Her decision as the right-of-way boat, `input` her plan's helm: holding her course (`holdingCourse`, #228), or for
     /// the suite's hunter hunting (`hunting`, #355), then clearing her quarter. `desired` is the heading her plan sails.
     private func holding(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> BotDecision {
-        guard tactics.hunts else { return BotDecision(input: clearingQuarter(b, view, holdingCourse(b, view, input))) }
+        guard tactics.hunts else {
+            // #337: a combative live bot luffs a windward boat before her start (`startLuffing`).
+            let held = startLuffing(b, view, input, desired: desired) ?? holdingCourse(b, view, input)
+            return BotDecision(input: clearingQuarter(b, view, held))
+        }
         let (held, step) = hunting(b, view, input, desired: desired)
         var decision = BotDecision(input: clearingQuarter(b, view, held))
         // What hunting did, unless clearing her quarter steered her otherwise.
