@@ -333,12 +333,28 @@ public final class Race {
         // A held rudder off centre steers, and lets go of the autohelm and any tap it is sailing (#13). A
         // centred one leaves her to the autohelm, which captures her wind angle on the tick it centres (ADR 0007).
         for i in boats.indices {
+            // Prototype (proto-tiller): a human's tack/gybe tap hands back a centred rudder once it has crossed the
+            // boom and settled her within 3° of the new groove.
+            if boats[i].isPlayer, let helm = boats[i].autohelm, !helm.isTapping {
+                let aim = helm.aim(tws: boats[i].polarWindSpeed(in: boatClass),
+                                   grooveTWS: boats[i].grooveWindSpeed(in: boatClass), boatClass: boatClass)
+                if abs(wrapAngle(aim - boats[i].sailingAngle)) < deg2rad(3) {
+                    boats[i].autohelm = nil
+                    boats[i].desiredRudder = 0
+                }
+            }
             let rudder = heldInputs[i].rudderValue
             if abs(rudder) > Autohelm.deadBand {
                 boats[i].autohelm = nil
                 boats[i].desiredRudder = rudder
             } else if boats[i].autohelm == nil {
-                engageAutohelm(i)
+                if boats[i].isPlayer {
+                    // Prototype (proto-tiller, never merged): no autohelm for a human. A centred rudder is a
+                    // centred rudder: she sails straight on, and the wind's shifts and puffs are hers to steer.
+                    boats[i].desiredRudder = 0
+                } else {
+                    engageAutohelm(i)
+                }
             }
         }
 
