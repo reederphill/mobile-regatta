@@ -330,6 +330,23 @@ import Testing
         #expect(rig.posts.filter { $0.id == .lettingGo || $0.id == .raceStart }.map(\.id) == [.raceStart, .lettingGo])
     }
 
+    /// The device's first race is the engine's, whatever the session says (nothing sets `GameSession.isFirstRace`): on
+    /// the default class (skiff@7, hand steering) the centred-rudder hint shows after the first race's 5 s of steering,
+    /// not the later races' 20 s (#437).
+    @Test func firstRaceOnDeviceShowsCentredRudderAfterFiveSecondsOfSteering() throws {
+        let rig = Rig(progress: HintProgressStore(), isFirstRaceOnDevice: true)
+        #expect(!rig.isFirstRace)
+        rig.run(10 + 2)
+        rig.rudder = Autohelm.deadBand + 0.05
+        let firstSteer = rig.driver.renderWorld.time
+        rig.run(12)
+        let shown = rig.posted(.centredRudder)
+        #expect(shown.count == 1, "\(rig.posts)")
+        let time = try #require(shown.first)
+        #expect(time >= firstSteer + HintTuning.standard.lettingGoFirstRaceSeconds - 0.1 && time < firstSteer + 12, "at \(time) s")
+        #expect(rig.posted(.lettingGo).isEmpty)
+    }
+
     /// A situation that lasts shows its hint once, not again at every gap: it shows again only after its trigger has
     /// been off for `rearmSeconds`. The steering hint shows once a race.
     @Test func aLastingSituationShowsItsHintOncePerEpisode() {
