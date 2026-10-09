@@ -3,7 +3,8 @@ import RegattaCore
 // A bot's conduct under the rules once racing (#101, #19: "bots hold their rights as a human would: they hold course
 // as the right-of-way boat, defend a lane, and luff within rule 16's room"; "they never hunt other boats to force
 // fouls, and never protest"). What she sees of the rules is her seat's (`SeatView`): who keeps clear of whom under
-// rules 10–13 (`OtherBoat.rightOfWay`) and the mark-room notices told her (`OwnBoat.markRoom`). Never the umpire's
+// rules 10–13, or rule 21 for another boat taking a penalty or returning (`OtherBoat.rightOfWay`, `Race.rightsOfWay(of:)`),
+// and the mark-room notices told her (`OwnBoat.markRoom`). Never the umpire's
 // escape simulation or its calls to come: room is her own reckoning, a straight-line closest approach.
 //
 // - Give way (rules 10–13, and 18 when she owes mark-room): she steers clear with the rudder (`racingKeepClear`): a
@@ -99,7 +100,7 @@ extension BotBrain {
     // MARK: - Giving way
 
     /// The rule she keeps clear of `other` under, racing: the one rules 10–13 name her keep-clear boat under
-    /// (`OtherBoat.rightOfWay`), else `.givingMarkRoom` when a mark-room notice has her owe `other` room (rule 18,
+    /// (`OtherBoat.rightOfWay`; never rule 21, which names `other` when it names either), else `.givingMarkRoom` when a mark-room notice has her owe `other` room (rule 18,
     /// `OwnBoat.markRoom`), or nil when she owes `other` nothing.
     func keepClearRule(_ b: SeatView.OwnBoat, _ view: SeatView, _ other: SeatView.OtherBoat) -> RacingRule? {
         if let right = other.rightOfWay, right.keepClear == view.seat { return right.rule }
@@ -200,8 +201,8 @@ extension BotBrain {
         return BoatInput(rudder: 0 as Int8, ease: input.ease)
     }
 
-    /// Whether turning her `turn` way (+1 to starboard) brings a boat that must keep clear of her (rules 10–13,
-    /// `OtherBoat.rightOfWay`) closer to her than holding her course would, at a moment within `roomLookahead` seconds
+    /// Whether turning her `turn` way (+1 to starboard) brings a boat that must keep clear of her (rules 10–13, or 21
+    /// for a boat taking a penalty or returning: `OtherBoat.rightOfWay`) closer to her than holding her course would, at a moment within `roomLookahead` seconds
     /// when that boat is inside `roomDistance` hull lengths of her: any of `roomTurns` that way, both boats sailing on
     /// in straight lines in the same water, weighed every `roomStep` seconds.
     func turnsTowardsKeepClearBoat(_ b: SeatView.OwnBoat, _ view: SeatView, turn: Double) -> Bool {
@@ -259,4 +260,9 @@ extension BotBrain {
             return tapApproach(of: other, track: sailed, lookahead: lookahead, view) >= min(clear, gap)
         }
     }
+}
+
+extension RacingRule {
+    /// Rule 21: a boat returning to start or taking a penalty keeps clear (`Race.rightsOfWay(of:)`, #337).
+    var isRule21: Bool { self == .returningToStart || self == .takingAPenalty }
 }

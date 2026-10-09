@@ -229,42 +229,45 @@ extension BotBrain {
     /// needs the rest of the time for the run in, two tacks and `positioningMargin`; never within two hull
     /// lengths of the pin.
     func reachableSpot(_ b: SeatView.OwnBoat, _ view: SeatView, hold: Double, arrival: Double) -> Vec2 {
+        let spot = startPoint(view.course)
+        guard view.time < 0 else { return spot }
+        let approach = spotApproach(b, view, hold: hold)
+        let spare = max(0, arrival - approach.runIn - Self.tackSeconds * 2 - Self.positioningMargin)
+        guard approach.across > approach.reach * spare else { return spot }
+        let line = view.course.startLine
+        let shifted = spot - approach.direction * (approach.across - approach.reach * spare)
+        let pinEnd = view.boatClass.hull.length * 2
+        return (shifted - line.pin.position).dot(approach.direction) < pinEnd
+            ? line.pin.position + approach.direction * pinEnd : shifted
+    }
+
+    /// Her approach to her own spot (`startPoint`) from where she is, joining it at `hold`, as `reachableSpot` and
+    /// `secondsToSpot` both reckon it: metres right of her along the start line (`direction`, pin to committee boat)
+    /// that its approach passes her depth, her reaching speed along the line (`positioningSpeed`), and her run in
+    /// close-hauled, seconds.
+    func spotApproach(_ b: SeatView.OwnBoat, _ view: SeatView, hold: Double)
+        -> (across: Double, direction: Vec2, reach: Double, runIn: Double) {
         let c = view.course
         let line = c.startLine
-        let spot = startPoint(c)
-        guard view.time < 0 else { return spot }
         let direction = (line.committee.position - line.pin.position).normalized
         let joining = Vec2.heading(b.windDirection - hold - Self.joinMargin)
         let depth = max(-line.side(b.position), 0)
         // How far right of her, along the line, her spot's approach passes her depth.
-        let across = (spot - joining * (depth / max(joining.dot(c.upwind), 0.3)) - b.position).dot(direction)
+        let across = (startPoint(c) - joining * (depth / max(joining.dot(c.upwind), 0.3)) - b.position).dot(direction)
         let tws = b.polarWindSpeed
         let polar = view.boatClass.polar
         let reach = polar.speed(twa: .pi / 2, tws: tws) * b.speedShadow * Self.positioningSpeed
         let runIn = depth / max(polar.bestUpwind(tws: tws).vmg * b.speedShadow, 0.3)
-        let spare = max(0, arrival - runIn - Self.tackSeconds * 2 - Self.positioningMargin)
-        guard across > reach * spare else { return spot }
-        let shifted = spot - direction * (across - reach * spare)
-        let pinEnd = view.boatClass.hull.length * 2
-        return (shifted - line.pin.position).dot(direction) < pinEnd ? line.pin.position + direction * pinEnd : shifted
+        return (across, direction, reach, runIn)
     }
 
-    /// Seconds her approach to her own spot (`startPoint`) takes her from where she is, as `reachableSpot` reckons it:
-    /// reaching along the line, either way, to where its approach passes her depth at `positioningSpeed`, two tacks
-    /// (`tackSeconds`), her run in close-hauled and `positioningMargin`: past it, `reachableSpot` gives up on her spot.
-    func secondsToSpot(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
-        let c = view.course
-        let line = c.startLine
-        let spot = startPoint(c)
-        let direction = (line.committee.position - line.pin.position).normalized
-        let joining = Vec2.heading(b.windDirection - Self.holdAngle(view) - Self.joinMargin)
-        let depth = max(-line.side(b.position), 0)
-        let across = (spot - joining * (depth / max(joining.dot(c.upwind), 0.3)) - b.position).dot(direction)
-        let tws = b.polarWindSpeed
-        let polar = view.boatClass.polar
-        let reach = max(polar.speed(twa: .pi / 2, tws: tws) * b.speedShadow * Self.positioningSpeed, 0.3)
-        let runIn = depth / max(polar.bestUpwind(tws: tws).vmg * b.speedShadow, 0.3)
-        return abs(across) / reach + runIn + Self.tackSeconds * 2 + Self.positioningMargin
+    /// Seconds her approach to her own spot (`spotApproach`, joining it at `hold`) takes her from where she is:
+    /// reaching along the line, either way, two tacks (`tackSeconds`), her run in and `positioningMargin`. With her spot
+    /// to her right, an `arrival` later than this `reachableSpot(hold:arrival:)` keeps her spot, and earlier gives it up.
+    func secondsToSpot(_ b: SeatView.OwnBoat, _ view: SeatView, hold: Double) -> Double {
+        let approach = spotApproach(b, view, hold: hold)
+        return abs(approach.across) / max(approach.reach, 0.3) + approach.runIn + Self.tackSeconds * 2
+            + Self.positioningMargin
     }
 
     /// Too early even holding with Ease, by `early` seconds: she bears away with Ease and lets the time run.
@@ -458,7 +461,7 @@ extension BotBrain {
     /// boats she keeps clear of.
     func startKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Double? {
         // OCS, she keeps clear of every boat as a returning one (rule 21.1), whatever rules 10–13 would give her
-        // (`OtherBoat.rightOfWay` has only those): she is returning as soon as she heads back. The cautious bot keeps
+        // (`OtherBoat.rightOfWay` gives her own relations by those alone, `Race.rightsOfWay(of:)`): she is returning as soon as she heads back. The cautious bot keeps
         // clear of every boat before her start in any case (#104, `keepsClearOfEveryBoat`).
         let returning = b.status == .ocs || keepsClearOfEveryBoat
         // Not returning, she leaves out a boat she misjudges her encounter with (#280, `judgeEncounters`).

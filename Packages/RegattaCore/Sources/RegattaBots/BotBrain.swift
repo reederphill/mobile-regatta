@@ -114,6 +114,11 @@ struct BotBrain: Sendable {
     /// that play's (`BotDecision.play`, for the suite's count, #337).
     var lastFleetPlay: FleetPlay.Kind?
     var lastFleetPlayTime = -Double.infinity
+    /// Whether her last decision was a combative bot's luff before her start (`BotDecision.startLuff`, #337).
+    var wasStartLuffing = false
+    /// She broke a pre-start luff off with no more time to spare for her spot (`hasTimeToSpare`, #337 review): she luffs
+    /// no more before her start, so a margin that recovers as she bears away doesn't have her luff and break off in turn.
+    var brokeOffStartLuff = false
     /// When she last tapped: she lets a tap finish before another.
     var lastTapTime = -1_000.0
     /// The rudder she holds hard over through her penalty turns, one way, from when she starts them until
@@ -203,10 +208,20 @@ struct BotBrain: Sendable {
             if decision.tap == nil, let input = guarded(view, decision.input) { decision.input = input }
             see(view)
         }
+        noteStartLuff(view, decision)
         if decision.input.ease, view.own.twa < BoatDynamics.noGoAngle(view.boatClass.polar) {
             decision.input = decision.input.eased(false)
         }
         return decision
+    }
+
+    /// Latches `brokeOffStartLuff` when her luff before her start ends with no more time to spare for her spot.
+    private mutating func noteStartLuff(_ view: SeatView, _ decision: BotDecision) {
+        if wasStartLuffing, !decision.startLuff, view.own.status == .prestart, view.time < 0,
+           !hasTimeToSpare(view.own, view) {
+            brokeOffStartLuff = true
+        }
+        wasStartLuffing = decision.startLuff
     }
 
     /// What she sails now: her held input, and her tack or gybe tap.
