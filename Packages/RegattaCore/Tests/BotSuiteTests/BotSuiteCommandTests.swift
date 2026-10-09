@@ -31,8 +31,10 @@ import Testing
         // oscillating conditions only.
         // #355: the hunters mix is sailed only when named (`--profile-mix hunters`), never in the bundle.
         // #105: execution, the cautious bot among live bots, rivals and rank stability join it.
-        #expect(Set(matrix.profileMixes) == Set(ProfileMix.allCases).subtracting([.hunters]))
-        #expect(!matrix.cells.contains { $0.profileMix == .hunters })
+        // #435: so is the handling mix (`--profile-mix handling`), and the bundle sails each class as bundled.
+        #expect(Set(matrix.profileMixes) == Set(ProfileMix.allCases).subtracting([.hunters, .handling]))
+        #expect(!matrix.cells.contains { $0.profileMix == .hunters || $0.profileMix == .handling })
+        #expect(!matrix.autohelmOff && matrix.cells.allSatisfy { $0.autohelmOff == nil })
         #expect(!matrix.seeds.isEmpty && !matrix.tideStatesDegrees.isEmpty)
         // Venue × conditions pairings: dev-venue's four and two at each real venue; three of them classic oscillating.
         let pairings = 4 + 3 * 2
@@ -167,6 +169,55 @@ import Testing
         #expect(result.timings.ticks > 0 && result.timings.p50Ms <= result.timings.p99Ms)
         #expect(Set(report.tiers.keys) == ["club", "regional", "national"])
         #expect(report.passed)
+    }
+
+    /// #435: `--profile-mix handling --autohelm off` sails the handling mix's four profiles in all-National fleets on an
+    /// autohelm-off copy of the class, out of the live tiers' gate; the copy is the bundled class but for the autohelm.
+    @Test func handlingMixSailsByHandWithTheAutohelmOff() throws {
+        let options = try BotSuiteOptions(arguments: ["--profile-mix", "handling", "--autohelm", "off", "--seeds", "2",
+                                                      "--fleet-size", "5"])
+        #expect(options.autohelmOff == true)
+        let matrix = try options.matrix()
+        #expect(matrix.autohelmOff && matrix.profileMixes == [.handling])
+        #expect(!matrix.cells.isEmpty && matrix.cells.allSatisfy { $0.autohelmOff == true && $0.tierMix == .national })
+        #expect(!ProfileMix.handling.gatesLiveTiers)
+        let cell = try #require(matrix.cells.first)
+        #expect(Set((0..<4).compactMap(cell.profile(ofSeat:))) == Set(ProfileMix.handlingProfiles))
+        #expect(try BotSuiteOptions(arguments: ["--autohelm", "on"]).autohelmOff == false)
+        #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--autohelm", "sideways"]) }
+
+        let bundled = RaceFiles.defaults.boatClass
+        let copy = try BotRaceHarness.handSteered(bundled)
+        #expect(!copy.content.steering.autohelm.holdsWhenCentred)
+        var held = copy.content
+        held.steering.autohelm.holdsWhenCentred = true
+        #expect(held == bundled.content && copy.ref != bundled.ref)
+        let setup = try BotRaceHarness.raceSetup(for: cell)
+        #expect(setup.boatClass == copy.ref)
+    }
+
+    /// #435: the handling mix measures hand steering, which shows only with the autohelm off, and deals four profiles
+    /// by turns, so a matrix naming it without `autohelmOff`, or sailing it in a fleet under four, fails loudly.
+    @Test func handlingMixNeedsTheAutohelmOffAndFleetsOfFour() throws {
+        try BotMatrix(seeds: [1], fleetSizes: [5], tierMixes: [.national], profileMixes: [.handling], autohelmOff: true).validate()
+        #expect(throws: BotSuiteError.self) {
+            try BotMatrix(seeds: [1], fleetSizes: [5], tierMixes: [.national], profileMixes: [.handling]).validate()
+        }
+        for size in [2, 3] {
+            #expect(throws: BotSuiteError.self) {
+                try BotMatrix(seeds: [1], fleetSizes: [size, 10], tierMixes: [.national], profileMixes: [.live, .handling],
+                              autohelmOff: true).validate()
+            }
+        }
+        // A small fleet the handling mix doesn't sail in (`mixFleetSizes`) is no matter.
+        try BotMatrix(seeds: [1], fleetSizes: [2, 10], tierMixes: [.national], profileMixes: [.live, .handling],
+                      mixFleetSizes: [.handling: 10], autohelmOff: true).validate()
+        #expect(throws: BotSuiteError.self) {
+            try BotSuiteOptions(arguments: ["--profile-mix", "handling", "--fleet-size", "5"]).matrix()
+        }
+        #expect(throws: BotSuiteError.self) {
+            try BotSuiteOptions(arguments: ["--profile-mix", "handling", "--autohelm", "off", "--fleet-size", "2"]).matrix()
+        }
     }
 
     @Test func unknownArgumentIsAUsageError() throws {

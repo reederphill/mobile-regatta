@@ -45,7 +45,7 @@ public struct BotDriver: Sendable {
 
     private var brain: BotBrain
     /// Her own hand on the helm for a class whose autohelm doesn't hold a centred rudder (#434); idle otherwise.
-    private var helm = BotHelm()
+    private var helm: BotHelm
 
     /// The bot for `seat` in the race with `raceSeed`, a Mixed fleet's (CONTEXT.md **Mixed fleet**, the default
     /// for practice): her tier drawn from her own seed by the bot-tier file's shares (`BotTier.mixedFleetDraw`),
@@ -82,6 +82,7 @@ public struct BotDriver: Sendable {
         self.profile = profile
         phase = seat % BotDriver.decisionInterval
         brain = BotBrain(style: style, profile: profile, seed: seed, weaknesses: weaknesses, caution: caution)
+        helm = BotHelm(hand: HandSteering(brain.weaknesses, seed: seed))
     }
 
     /// Whether she is the cautious bot that sails a dropped player's boat (#104, `cautious(seat:raceSeed:)`).

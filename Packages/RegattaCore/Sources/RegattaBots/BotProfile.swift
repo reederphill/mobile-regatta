@@ -31,6 +31,13 @@ public enum BotProfile: String, Codable, CaseIterable, Hashable, Sendable {
     /// The tactician at Club-level execution (#222, #105): her tactics, but half her rolls miss
     /// (`clubExecutionRollHitRate`; rolls only, the orchestrator's ruling on #105). A measuring profile for the suite only.
     case tacticianClubExecution
+    /// The baseline steering by hand at Club level (#435): her tactics and no weaknesses, but Club's shift lag, wander
+    /// and overshoot (`BotWeaknesses.clubHandSteering`), felt only in a class whose autohelm doesn't hold a centred
+    /// rudder. A measuring profile for the suite only: the handling mix races her against the baseline.
+    case clubSteering
+    /// The tactician steering by hand at Club level (#435), as `clubSteering` is the baseline. A measuring profile for
+    /// the suite only: the handling mix races her against the tactician.
+    case tacticianClubSteering
 }
 
 extension BotProfile {
@@ -38,10 +45,14 @@ extension BotProfile {
     static let clubExecutionRollHitRate = 0.5
 
     /// What she sails with at `skill`: no weaknesses (`BotWeaknesses.none`, #102), but for `tacticianClubExecution`,
-    /// whose rolls hit only `clubExecutionRollHitRate` of the time.
+    /// whose rolls hit only `clubExecutionRollHitRate` of the time, and the Club-steering profiles, which steer by hand
+    /// as Club does (#435).
     func weaknesses(skill: Double) -> BotWeaknesses {
         var weaknesses = BotWeaknesses.none(skill: skill)
         if self == .tacticianClubExecution { weaknesses.rollHitRate = Self.clubExecutionRollHitRate }
+        if self == .clubSteering || self == .tacticianClubSteering {
+            weaknesses = weaknesses.steering(like: .clubHandSteering)
+        }
         return weaknesses
     }
 }
