@@ -791,9 +791,11 @@ extension BotTacticsTests {
     /// sails it: at each of those seconds its factor is her ribbons' and zone's within 0.2; from 5 s on its backwind flag
     /// is what the race's zone says, and at 6 s both have her in her shadow or neither.
     @Test func tackForecastReadsRibbonsAndBackwind() throws {
+        // skiff@6: the unsteered boats beat on the autohelm while the ribbons form (#437).
+        let autohelm = try BotHelmTests.autohelmOn().ref
         for seed in Self.fleetSeeds {
             for (ahead, leeward, backwind) in [(7.0, 2.0, false), (5.5, 3.5, true)] {
-                let scene = Scene(seed: seed)
+                let scene = Scene(seed: seed, boatClass: autohelm)
                 let port = scene.offStarboardBoat(at: scene.centre, ahead: ahead, leeward: leeward)
                 try scene.place([scene.beating(.port, at: port), scene.beating(.starboard, at: scene.centre)])
                 let race = scene.race

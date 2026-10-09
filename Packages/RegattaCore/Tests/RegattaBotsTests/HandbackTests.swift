@@ -5,8 +5,8 @@ import RegattaCore
 /// #104: a dropped player takes their boat back (CONTEXT.md **Handback**): the seat swaps from the cautious bot to the
 /// player between steps (`SeatControllers.handBack`), and the boat keeps everything the race holds for her.
 @Suite struct HandbackTests {
-    static func race(seed: UInt64, fleetSize: Int = 4) -> Race {
-        botRace(seats: [.human] + Array(repeating: .bot, count: fleetSize - 1), laps: 1, prestartSeconds: 30, seed: seed)
+    static func race(seed: UInt64, fleetSize: Int = 4, boatClass: FileRef = RaceFiles.defaults.boatClass.ref) -> Race {
+        botRace(seats: [.human] + Array(repeating: .bot, count: fleetSize - 1), laps: 1, prestartSeconds: 30, seed: seed, boatClass: boatClass)
     }
 
     static func fleet(_ race: Race) -> SeatControllers {
@@ -104,7 +104,7 @@ import RegattaCore
 
     /// Autohelm-target handback on `seed`.
     static func autohelmHandback(seed: UInt64) throws -> Bool {
-        let race = Self.race(seed: seed)
+        let race = try Self.race(seed: seed, boatClass: BotHelmTests.autohelmOn().ref) // skiff@6: the autohelm target is the subject (#437)
         var controllers = Self.fleet(race)
         controllers.takeOver(seat: 0, raceSeed: race.setup.raceSeed, cautious: true)
         sail(race, &controllers, ticks: 30 * Race.tickRate - race.tick)
@@ -138,7 +138,7 @@ import RegattaCore
     /// autohelm keeps her sailing angle to the wind wherever the wind goes, turning with it.
     @Test func aDroppedSeatWithACentredRudderHoldsItsWindAngle() throws {
         for seed: UInt64 in 1...6 {
-            let race = Self.race(seed: seed)
+            let race = try Self.race(seed: seed, boatClass: BotHelmTests.autohelmOn().ref) // skiff@6: the autohelm is the subject (#437)
             var controllers = Self.fleet(race)
             controllers.takeOver(seat: 0, raceSeed: race.setup.raceSeed, cautious: true)
             sail(race, &controllers, ticks: 40 * Race.tickRate - race.tick)

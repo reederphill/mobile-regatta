@@ -6,8 +6,9 @@ import RegattaCore
     /// A race with seat 0 a bot beating up the first leg on starboard, clear of every mark and boat and well
     /// inside her corridor to the mark, `offGroove` radians further off the wind than her groove with nobody
     /// holding her rudder; seat 1, nobody's, far off to one side.
-    static func beatingRace(seed: UInt64, offGroove: Double) throws -> Race {
-        let race = botRace(seats: [.bot, .human], seed: seed)
+    static func beatingRace(seed: UInt64, offGroove: Double,
+                            boatClass: FileRef = RaceFiles.defaults.boatClass.ref) throws -> Race {
+        let race = botRace(seats: [.bot, .human], seed: seed, boatClass: boatClass)
         let c = race.course
         let lineCentre = (c.startLine.pin.position + c.startLine.committee.position) * 0.5
         var snapshot = race.exportSnapshot()
@@ -30,7 +31,8 @@ import RegattaCore
     /// autohelm (ADR 0007). Once she's on it, the rudder it holds is 0 until a decision changes the aim: no
     /// heading tracking between decisions, however the wind moves under her.
     @Test func botCentresRudderOnTarget() throws {
-        let race = try Self.beatingRace(seed: 5, offGroove: deg2rad(20))
+        // skiff@6: the autohelm is the subject (#437).
+        let race = try Self.beatingRace(seed: 5, offGroove: deg2rad(20), boatClass: BotHelmTests.autohelmOn().ref)
         // Skill 0.4: a bot that doesn't tack on headers, so nothing changes her aim, the starboard groove.
         let style = BotStyle(skill: 0.4, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
         var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style,
@@ -62,7 +64,8 @@ import RegattaCore
     /// Off the groove by less than the autohelm's snap, she still centres on it: close to the groove, the
     /// autohelm takes it over (ADR 0007).
     @Test func botLetsTheAutohelmSnapToTheGroove() throws {
-        let race = try Self.beatingRace(seed: 6, offGroove: deg2rad(2))
+        // skiff@6: the autohelm is the subject (#437).
+        let race = try Self.beatingRace(seed: 6, offGroove: deg2rad(2), boatClass: BotHelmTests.autohelmOn().ref)
         let style = BotStyle(skill: 0.4, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
         var driver = BotDriver(seat: 0, raceSeed: race.setup.raceSeed, style: style,
                                weaknesses: .none(skill: style.skill)) // the mechanism alone, no misjudged grooves (#102)

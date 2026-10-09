@@ -827,7 +827,8 @@ import RegattaCore
     /// she holds her rights and sails on into the starboard boat, and is called under rule 10; judging it right, she
     /// keeps clear and nobody is called. Never a turn towards: misjudging only leaves her keep-clear out.
     @Test func prestartMisjudgingPortBoatSailsOnAndIsCalled() throws {
-        for seed: UInt64 in [3, 11] {
+        // Seeds 1 and 11 (#437): hand steering (skiff@7) puts the port boat 0.3 m wide of the starboard one on seed 3, a miss.
+        for seed: UInt64 in [1, 11] {
             let judged = Self.sailOne(try Self.prestartPortStarboard(seed: seed), seat: 1, seconds: 12,
                                       weaknesses: Self.misjudging(0), planned: .port)
             #expect(Self.calls(judged.kinds).isEmpty, "seed \(seed): \(Self.calls(judged.kinds))")

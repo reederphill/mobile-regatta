@@ -10,7 +10,8 @@ import RegattaCore
     /// speed, the autohelm holding it, `left` metres left of the course axis at a third of the beat; seat 1,
     /// nobody's, far off to the right. Bot or not, seat 0 is driven only by what a test sends it.
     static func beatingRace(seed: UInt64, left: Double) throws -> Race {
-        let race = botRace(seats: [.bot, .human], seed: seed)
+        // skiff@6: the tap exiting at the groove is the autohelm (#437); only `tackIsTheTapExitingAtTheGroove` uses this.
+        let race = try botRace(seats: [.bot, .human], seed: seed, boatClass: BotHelmTests.autohelmOn().ref)
         for _ in 0..<(race.setup.startSequenceTicks + Race.tickRate) { race.step() }
         let c = race.course
         let lineCentre = (c.startLine.pin.position + c.startLine.committee.position) * 0.5
@@ -115,7 +116,7 @@ import RegattaCore
                 "\(settled.map { rad2deg($0.sailingAngle - $0.grooveAngle) })")
 
         // The physics' own tack: the same state, nobody at the helm, the same tap at the same tick.
-        let physics = botRace(seats: [.bot, .human], seed: 5)
+        let physics = try botRace(seats: [.bot, .human], seed: 5, boatClass: BotHelmTests.autohelmOn().ref)
         try physics.importSnapshot(start)
         var physicsTrace = [Sample(physics)]
         while physics.tick < race.tick {
