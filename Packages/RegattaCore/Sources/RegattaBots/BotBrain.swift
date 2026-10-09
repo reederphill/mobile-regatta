@@ -248,8 +248,9 @@ struct BotBrain: Sendable {
         if caution != nil, senses.tacking, aim.tack == boat.tack, aim.angle < closeHauled {
             aim = Aim(angle: closeHauled, tack: aim.tack, ease: aim.ease)
         }
-        // Held to her proper course under rule 17, she sails no higher than it allows (#346).
-        if limitsProperCourse { aim = Self.properCourseLimited(aim, boat) }
+        // Held to her proper course under rule 17, she sails no higher than it allows (#346); clear astern of a boat
+        // close ahead on a reach or run, no higher than it before she makes the overlap (#337).
+        if limitsProperCourse { aim = Self.properCourseAnticipated(aim, boat, view) }
         // The autohelm is sailing the tap through the tack or gybe: hands off. Any rudder would cancel it
         // (#13) and leave her head to wind; it's over in a couple of seconds.
         if boat.autohelm?.isTapping == true { return BotDecision(input: .neutral) }

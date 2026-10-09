@@ -13,13 +13,15 @@ extension BotConductTests {
     /// At `shiftTick` the wind turns `shift` radians so that her held angle, still held, is carried that far closer
     /// to the wind than the bearing to the mark: above her proper course. With `restricted`, seat 0 gets the rule 17
     /// record against seat 1, as if she had come up from astern (placing by snapshot forgets the umpire's memory).
-    /// With `fromMark`, she is placed that many hull lengths short of the offset mark on the same line instead.
+    /// With `fromMark`, she is placed that many hull lengths short of the offset mark on the same line instead. With
+    /// `ahead`, seat 1 is also that many hull lengths ahead of her (centres), not overlapped: she is clear astern.
     struct Reach {
         let race: Race
         let leg: Int
         let shiftTick: Int
 
-        init(seed: UInt64, shift: Double, restricted: Bool, abeam: Double = 2, fromMark: Double? = nil) throws {
+        init(seed: UInt64, shift: Double, restricted: Bool, abeam: Double = 2, fromMark: Double? = nil,
+             ahead: Double = 0) throws {
             let probe = botRace(seats: [.bot, .bot], seed: seed)
             let c = probe.course
             let leg = try #require(c.legs.firstIndex(of: .round(CourseLayout.offsetIndex)))
@@ -52,7 +54,7 @@ extension BotConductTests {
             var snapshot = race.exportSnapshot()
             for seat in 0..<2 {
                 var boat = snapshot.seats[seat].boat
-                boat.position = seat == 0 ? at : at + toWindward * (length * abeam)
+                boat.position = seat == 0 ? at : at + toWindward * (length * abeam) + forward * (length * ahead)
                 boat.heading = heading
                 boat.speed = speed
                 boat.boomSide = starboard ? .port : .starboard
@@ -67,7 +69,7 @@ extension BotConductTests {
                 snapshot.seats[seat].heldInput = .neutral
             }
             snapshot.touchingBoats = []
-            snapshot.overlaps = [.init(pair: .init(0, 1), isOverlapped: true, changeTicks: 0)]
+            snapshot.overlaps = [.init(pair: .init(0, 1), isOverlapped: ahead == 0, changeTicks: 0)]
             try race.importSnapshot(snapshot)
             _ = race.drainEvents()
             if restricted {
@@ -158,6 +160,42 @@ extension BotConductTests {
         #expect(!withLimit.isEmpty && withLimit == withoutLimit)
         #expect(limited.race.boats.map(\.position) == free.race.boats.map(\.position)
                 && limited.race.boats.map(\.heading) == free.race.boats.map(\.heading))
+    }
+
+    /// #337 round 4: clear astern of a boat close ahead on a reach, in a header that carries her held angle above the
+    /// bearing to the mark, a bot already sails no higher than her proper course before any overlap (no notice yet):
+    /// one that made the overlap to leeward above it, too close for the windward boat to keep clear at once, was
+    /// called under rule 17 on that tick (seed 2, mixed 16, seat 7 in `BotRule17SuiteTests`). Without the limit she
+    /// stays above it.
+    @Test(arguments: reachSeeds)
+    func clearAsternOnAReachSailsWithinProperCourseBeforeTheOverlap(seed: UInt64) throws {
+        let reach = try Reach(seed: seed, shift: Self.reachShift, restricted: false, abeam: 0.5, ahead: 2)
+        let settled = reach.shiftTick + 2 * Race.tickRate
+        func properAngle(_ race: Race) -> Double? {
+            race.boats[0].properCourse(on: race.course, boatClass: race.boatClass)?.sailingAngle
+        }
+        func astern(_ race: Race) -> Bool {
+            race.seatView(for: 0).others[0].rightOfWay == RightOfWay(keepClear: 0, rule: .clearAstern)
+        }
+        var asternTicks = 0
+        var worst = Double.infinity
+        let kinds = reach.sail(seconds: 6) { race in
+            guard race.tick >= settled, astern(race), let proper = properAngle(race) else { return }
+            #expect(race.seatView(for: 0).own.properCourse == nil)
+            asternTicks += 1
+            worst = min(worst, reach.leewardAngle - proper)
+        }
+        #expect(asternTicks >= 2 * Race.tickRate, "clear astern \(asternTicks) ticks after the shift settled")
+        #expect(worst >= -deg2rad(1), "she sailed \(rad2deg(-worst))° above her proper course while clear astern")
+        #expect(!Self.calls(kinds).contains { $0.hasPrefix("17 ") }, "\(Self.calls(kinds))")
+
+        let free = try Reach(seed: seed, shift: Self.reachShift, restricted: false, abeam: 0.5, ahead: 2)
+        var above = 0
+        _ = free.sail(seconds: 6, limit: false) { race in
+            guard race.tick >= settled, astern(race), let proper = properAngle(race) else { return }
+            if free.leewardAngle < proper - deg2rad(8) { above += 1 }
+        }
+        #expect(above > 0, "without the limit she never sailed above her proper course's edge: the scenario tests nothing")
     }
 
     // MARK: - The limiter

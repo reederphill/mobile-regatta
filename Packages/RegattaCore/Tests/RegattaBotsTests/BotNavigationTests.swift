@@ -238,6 +238,53 @@ import RegattaCore
         #expect(race.seatView(for: 0).others[0].rightOfWay?.keepClear == 1)
     }
 
+    /// #337 round 4: before her start, a bot gives a boat turning a penalty close aboard berth (`startKeepClear`,
+    /// `penalisedBerthLengths`), though it keeps clear of her under rule 21 in her view. Thirty seconds before the gun,
+    /// well below the line: seat 0, 60° into her turn, two hull lengths dead ahead of seat 1 (a bot reaching on
+    /// starboard, right of way under rule 10 too): seat 1 bears off it. Six lengths ahead, outside the berth, she holds on.
+    @Test func beforeTheStartABotGivesABoatTurningAPenaltyBerth() throws {
+        func keepClear(ahead lengths: Double) throws -> (Double?, RightOfWay?) {
+            let race = botRace(seats: [.human, .bot], seed: 5)
+            while race.tick < -30 * Race.tickRate { race.step() }
+            let c = race.course
+            let length = race.boatClass.hull.length
+            let at = c.startLine.centre - c.upwind * 80
+            let wind = race.seatView(for: 1).own.windDirection
+            let heading = wind - .pi / 2
+            let forward = Vec2.heading(heading)
+            var snapshot = race.exportSnapshot()
+            snapshot.seats[0].boat.position = at + forward * (length * lengths)
+            snapshot.seats[0].boat.heading = heading + .pi / 3
+            snapshot.seats[0].boat.boomSide = .port
+            snapshot.seats[0].boat.speed = 0.5
+            snapshot.seats[0].boat.autohelm = nil
+            snapshot.seats[0].boat.rudder = 1
+            snapshot.seats[0].heldInput = BoatInput(rudder: 1.0)
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyProgress = deg2rad(60)
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+            snapshot.seats[1].boat.position = at
+            snapshot.seats[1].boat.heading = heading
+            snapshot.seats[1].boat.boomSide = .port
+            snapshot.seats[1].boat.speed = 4
+            snapshot.seats[1].boat.autohelm = Autohelm(target: .angle(.pi / 2))
+            snapshot.seats[1].boat.rudder = 0
+            snapshot.seats[1].heldInput = .neutral
+            snapshot.touchingBoats = []
+            try race.importSnapshot(snapshot)
+            _ = race.drainEvents()
+            #expect(race.boats[0].isTakingPenalty && race.boats[1].status == .prestart && race.tick < 0)
+            let view = race.seatView(for: 1)
+            let pilot = BotConductTests.Pilot(seat: 1, plannedTack: nil, race: race)
+            return (pilot.brain.startKeepClear(view.own, view, desired: heading, lookahead: 3), view.others[0].rightOfWay)
+        }
+        let (close, right) = try keepClear(ahead: 2)
+        #expect(right == RightOfWay(keepClear: 0, rule: .takingAPenalty))
+        #expect(close != nil, "two lengths off: she bears off the boat turning her penalty")
+        let (far, _) = try keepClear(ahead: 6)
+        #expect(far == nil, "six lengths off: she holds on")
+    }
+
     /// #337 review: the suite's hunter hunts no boat keeping clear of her under rule 21 (`quarry`): seat 0, 60° into
     /// her penalty turn, keeps clear of seat 1 in seat 1's view, within range and ahead of her, but is no quarry.
     @Test func theHunterHuntsNoBoatTurningAPenalty() throws {

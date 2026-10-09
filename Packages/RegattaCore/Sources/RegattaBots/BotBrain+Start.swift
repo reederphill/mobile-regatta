@@ -67,6 +67,9 @@ extension BotBrain {
     static let setupSeconds = 10.0
     /// Metres within which another boat is one she may have to keep clear of before her start.
     static let keepClearRange = 30.0
+    /// Hull lengths, centre to centre: before her start she gives a boat turning a penalty or returning (rule 21) this
+    /// much berth, though it keeps clear of her (`startKeepClear`, #337 round 4, untuned).
+    static let penalisedBerthLengths = 2.5
     /// Hull lengths, centre to centre, she keeps from a boat she must keep clear of before her start.
     static let keepClearDistance = 1.3
     /// How much further than that a heading must pass it to keep her clear.
@@ -454,7 +457,8 @@ extension BotBrain {
 
     /// Keeping clear before her start, in the crowd below the line where boats hold, wait and cross on every
     /// course: if her `desired` heading would bring a boat she must keep clear of (rule 21 over rules 10–13,
-    /// `OtherBoat.rightOfWay`) within `keepClearDistance` hull lengths over `lookahead` seconds, the heading on
+    /// `OtherBoat.rightOfWay`), or one under rule 21 within `penalisedBerthLengths` of her, within
+    /// `keepClearDistance` hull lengths over `lookahead` seconds, the heading on
     /// her own tack nearest her desired one that passes it `keepClearMargin` further off, or failing that the
     /// one that passes furthest from it. Before the gun she weighs only headings that keep her below the line
     /// with Ease (`crossesEarly`): keeping clear by luffing over it early would leave her OCS, trapped above the
@@ -468,6 +472,13 @@ extension BotBrain {
         let threats = view.others.filter { other in
             guard !other.isGhost, (other.position - b.position).length < Self.keepClearRange else { return false }
             if returning { return true }
+            // Rule 14 before her start: a boat under rule 21 close aboard keeps clear of her, but turning circles or
+            // running back in the crowd it can't promise to, so she gives it berth (#337 round 4). Holding on for it,
+            // as her view's right of way has it, pin-style bots working down the line from the committee end lost the
+            // pin third among the pre-start penalty turns (0.701 to 0.674 of `BotStartSuiteTests`). Racing she holds her
+            // course for it (`holdingCourse`), as round 3 has her.
+            if let right = other.rightOfWay, right.keepClear == other.seat, right.rule.isRule21,
+               (other.position - b.position).length < view.boatClass.hull.length * Self.penalisedBerthLengths { return true }
             guard let right = other.rightOfWay, right.keepClear == view.seat else { return false }
             return !misjudges(other, right.rule)
         }
