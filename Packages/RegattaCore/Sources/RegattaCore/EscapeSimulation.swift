@@ -111,7 +111,9 @@ public struct PairTrack: Sendable, Equatable {
 ///
 /// - The keep-clear boat is sailed on from her recorded state by each of the rules configuration's
 ///   `escape.candidates` in turn (fixed order, first escape wins: deterministic by construction, ADR 0002),
-///   held for `escape.horizon`: a centred rudder is her autohelm, which follows the shifts as it did (#219).
+///   held for `escape.horizon`: a centred rudder is her autohelm, which follows the shifts as it did (#219); for a
+///   class whose autohelm doesn't hold a centred rudder (`BoatClass.AutohelmTuning.holdsWhenCentred`, #434), a
+///   straight course, as the race sails her.
 ///   Each tick she sails in the wind and water she recorded that tick, which the race sampled from its
 ///   `WindField` and `CurrentField` at her (shadow included), through `BoatDynamics.advance`: sailed on her own
 ///   inputs she follows her own track to the bit. Past now, the last tick's.
@@ -527,22 +529,11 @@ public struct EscapeSimulation: Sendable {
 
     /// Whether any of the rules configuration's candidates, in order, sails `from` through `environments` (one a
     /// tick) with `isClear(boat, n)` on the `n`th: a held rudder, or centred her autohelm (engaged at her angle
-    /// if she had none), and her ease.
+    /// if she had none; for a class whose autohelm doesn't hold a centred rudder, #434, a straight course), and her
+    /// ease.
     private func sailsClear(_ from: Boat, through environments: [RecordedBoat], isClear: (Boat, Int) -> Bool) -> Bool {
         escape.candidates.contains { candidate in
-            var boat = from
-            let rudder = candidate.rudderValue
-            if abs(rudder) > Autohelm.deadBand {
-                boat.autohelm = nil
-                boat.desiredRudder = rudder
-            } else if boat.autohelm == nil {
-                let environment = environments[0]
-                boat.sailingWind = Wind(direction: environment.windDirection, speed: environment.windSpeed)
-                boat.shadow = environment.shadow
-                boat.averagedWindSpeed = environment.grooveWindSpeed
-                boat.autohelm = Autohelm.engage(sailingAngle: boat.sailingAngle, tws: environment.grooveWindSpeed,
-                                                boatClass: boatClass).autohelm
-            }
+            var boat = holding(candidate, from: from, in: environments[0])
             for n in environments.indices {
                 sail(&boat, ease: candidate.ease, in: environments[n])
                 if !isClear(boat, n) { return false }
@@ -551,14 +542,41 @@ public struct EscapeSimulation: Sendable {
         }
     }
 
+    /// `from` taking up `candidate`'s rudder in the wind `environment` recorded, as `Race` applies a held input: off
+    /// centre it steers, and lets go of her autohelm; centred, her autohelm (engaged at her angle if she had none),
+    /// or for a class whose autohelm doesn't hold a centred rudder (#434), a centred rudder: she sails straight on.
+    func holding(_ candidate: BoatInput, from: Boat, in environment: RecordedBoat) -> Boat {
+        var boat = from
+        let rudder = candidate.rudderValue
+        if abs(rudder) > Autohelm.deadBand {
+            boat.autohelm = nil
+            boat.desiredRudder = rudder
+        } else if boat.autohelm == nil, !boatClass.steering.autohelm.holdsWhenCentred {
+            boat.desiredRudder = 0
+        } else if boat.autohelm == nil {
+            boat.sailingWind = Wind(direction: environment.windDirection, speed: environment.windSpeed)
+            boat.shadow = environment.shadow
+            boat.averagedWindSpeed = environment.grooveWindSpeed
+            boat.autohelm = Autohelm.engage(sailingAngle: boat.sailingAngle, tws: environment.grooveWindSpeed,
+                                            boatClass: boatClass).autohelm
+        }
+        return boat
+    }
+
     /// One tick of `boat` in the wind and water `environment` recorded, as `Race` sails her: the autohelm's
     /// rudder, the dynamics, and the tap it may be sailing ending as the boom crosses.
-    private func sail(_ boat: inout Boat, ease: Bool, in environment: RecordedBoat) {
+    func sail(_ boat: inout Boat, ease: Bool, in environment: RecordedBoat) {
         boat.sailingWind = Wind(direction: environment.windDirection, speed: environment.windSpeed)
         boat.shadow = environment.shadow
         boat.averagedWindSpeed = environment.grooveWindSpeed
         boat.current = environment.current
         let tws = boat.polarWindSpeed(in: boatClass)
+        // A tap's autohelm on a class whose autohelm doesn't hold a centred rudder lets go near the new groove (#434).
+        if let helm = boat.autohelm, helm.handsBack(sailingAngle: boat.sailingAngle, tws: tws,
+                                                    grooveTWS: environment.grooveWindSpeed, boatClass: boatClass) {
+            boat.autohelm = nil
+            boat.desiredRudder = 0
+        }
         if let helm = boat.autohelm {
             boat.desiredRudder = helm.rudder(sailingAngle: boat.sailingAngle, boomSide: boat.boomSide, tws: tws,
                                              grooveTWS: environment.grooveWindSpeed, boatClass: boatClass)

@@ -122,10 +122,10 @@ enum SkiffFixtures {
         #expect(ContentHash(of: data).hex == Fixtures.pinnedHashes[version])
     }
 
-    @Test(arguments: [0, 1, 4, 99])
+    @Test(arguments: [0, 1, 5, 99])
     func wrongSchemaVersionThrows(schemaVersion: Int) throws {
         let data = try Fixtures.edited([(of: #""schemaVersion": 2,"#, with: #""schemaVersion": \#(schemaVersion),"#)])
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: schemaVersion, supported: [2, 3])) {
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: schemaVersion, supported: [2, 3, 4])) {
             try BoatClassFile(data: data)
         }
     }
@@ -136,23 +136,23 @@ enum SkiffFixtures {
     @Test func schemaOneBoatClassIsRefused() throws {
         for version in [1, 2] {
             let data = try #require(try BoatClassFile.bundledData(id: Fixtures.classID, version: version))
-            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3])) {
+            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3, 4])) {
                 try BoatClassFile(data: data)
             }
-            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3])) {
+            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3, 4])) {
                 try BoatClassFile.bundled(id: Fixtures.classID, version: version)
             }
             let ref = FileRef(id: Fixtures.classID, version: version, hash: ContentHash(of: data))
             let setup = try RaceSetup(raceSeed: RaceSeed(1), seats: [.human, .bot], boatClass: ref)
-            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3])) {
+            #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3, 4])) {
                 try RaceFiles(resolving: setup)
             }
         }
         let headedOne = try Fixtures.edited([(of: #""schemaVersion": 2,"#, with: #""schemaVersion": 1,"#)])
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3])) {
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: "boat class", found: 1, supported: [2, 3, 4])) {
             try BoatClassFile(data: headedOne)
         }
-        #expect(BoatClass.supportedSchemaVersions == [2, 3])
+        #expect(BoatClass.supportedSchemaVersions == [2, 3, 4])
         #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version)).ref,
                 "races sail skiff@6 unless told otherwise (#248, #89, #263, #298, #377)")
     }

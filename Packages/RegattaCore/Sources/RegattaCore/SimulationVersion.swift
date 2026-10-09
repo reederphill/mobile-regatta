@@ -230,7 +230,12 @@ import Glibc
 ///    are race state in `WorldSnapshot`.
 /// 34: the mark-room notice is no longer emitted (#403), on 33; races otherwise sail as on 33, bit for bit. The
 ///    umpire still keeps rule 18's records; `markRoomNotice` (wire code 24) stays reserved and decoded.
-public let simulationRevision = 34
+/// 35: the autohelm as a boat class setting (#434, ADR 0011), on 34. Boat class schema 4 adds
+///    `steering.autohelm.holdsWhenCentred` (absent true) and `handBackDegrees` (absent 3). Off, a centred rudder holds her
+///    heading on every seat, the tap hands back within the hand-back of the new groove, bots steer by hand (`BotHelm`),
+///    and the escape simulation predicts a centred rudder straight. Every class before schema 4, and races on skiff@6,
+///    sail as on 34, bit for bit.
+public let simulationRevision = 35
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
