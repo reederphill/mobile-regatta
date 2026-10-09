@@ -196,6 +196,30 @@ import Testing
         #expect(setup.boatClass == copy.ref)
     }
 
+    /// #435: the handling mix measures hand steering, which shows only with the autohelm off, and deals four profiles
+    /// by turns, so a matrix naming it without `autohelmOff`, or sailing it in a fleet under four, fails loudly.
+    @Test func handlingMixNeedsTheAutohelmOffAndFleetsOfFour() throws {
+        try BotMatrix(seeds: [1], fleetSizes: [5], tierMixes: [.national], profileMixes: [.handling], autohelmOff: true).validate()
+        #expect(throws: BotSuiteError.self) {
+            try BotMatrix(seeds: [1], fleetSizes: [5], tierMixes: [.national], profileMixes: [.handling]).validate()
+        }
+        for size in [2, 3] {
+            #expect(throws: BotSuiteError.self) {
+                try BotMatrix(seeds: [1], fleetSizes: [size, 10], tierMixes: [.national], profileMixes: [.live, .handling],
+                              autohelmOff: true).validate()
+            }
+        }
+        // A small fleet the handling mix doesn't sail in (`mixFleetSizes`) is no matter.
+        try BotMatrix(seeds: [1], fleetSizes: [2, 10], tierMixes: [.national], profileMixes: [.live, .handling],
+                      mixFleetSizes: [.handling: 10], autohelmOff: true).validate()
+        #expect(throws: BotSuiteError.self) {
+            try BotSuiteOptions(arguments: ["--profile-mix", "handling", "--fleet-size", "5"]).matrix()
+        }
+        #expect(throws: BotSuiteError.self) {
+            try BotSuiteOptions(arguments: ["--profile-mix", "handling", "--autohelm", "off", "--fleet-size", "2"]).matrix()
+        }
+    }
+
     @Test func unknownArgumentIsAUsageError() throws {
         #expect(try botsuite(["--nope"]).status == 2)
     }

@@ -366,6 +366,17 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                 throw BotSuiteError.matrix("\(mix.rawValue) sails only in a fleet of \(size), which the matrix doesn't name")
             }
         }
+        if profileMixes.contains(.handling) {
+            // Hand steering shows only where the autohelm doesn't hold a centred rudder, and the mix deals four
+            // profiles by turns, so a smaller fleet would leave one unsailed.
+            guard autohelmOff else {
+                throw BotSuiteError.matrix("handling measures hand steering, which shows only with autohelmOff (--autohelm off)")
+            }
+            let needed = ProfileMix.handlingProfiles.count
+            if let size = fleetSizes.filter({ sails(.handling, inFleetOf: $0) }).min(), size < needed {
+                throw BotSuiteError.matrix("handling deals \(needed) profiles, so it needs fleets of at least \(needed); the matrix sails it in a fleet of \(size)")
+            }
+        }
     }
 
     public static func load(from url: URL) throws -> BotMatrix {

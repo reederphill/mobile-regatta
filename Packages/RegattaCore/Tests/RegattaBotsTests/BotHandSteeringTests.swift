@@ -178,4 +178,39 @@ import Testing
         #expect(worst <= club.wander + deg2rad(0.5), "she wandered \(rad2deg(worst))° off her aim")
         #expect(worst >= 0.5 * club.wander, "she wandered only \(rad2deg(worst))°")
     }
+
+    /// A re-aim while her last overshoot still decays carries what's left of it on (#435 review): two 4° shifts half a
+    /// second apart leave her more than any one overshoot's cap past the wind, and it all decays back to her aim.
+    @Test func reAimCarriesTheDecayingOvershoot() throws {
+        let firstTick = 20 * Race.tickRate
+        let secondTick = firstTick + Race.tickRate / 2
+        let race = try Self.scriptedRace(boatClass: BotHelmTests.skiff(holds: false), sailingAngle: deg2rad(70)) { tick in
+            GroundWind(direction: tick < firstTick ? 0 : deg2rad(tick < secondTick ? 4 : 8), speed: metresPerSecond(knots: 10))
+        }
+        let cap = deg2rad(5)
+        let hand = HandSteering(shiftLag: 0, wander: 0, wanderPeriod: 30, wanderPhase: 0, overshoot: cap)
+        var steered: HandSteering.SteeredWind?
+        var reAims: [(before: Double, after: Double)] = []
+        var lastOffset = 0.0
+        var offset = 0.0
+        while race.tick < firstTick + 6 * Race.tickRate {
+            let own = race.seatView(for: 0).own
+            let previous = steered
+            let wind = hand.steer(&steered, own: own, tick: race.tick)
+            offset = wrapAngle(wind.direction - steered!.direction)
+            if let previous, steered!.overshootTick == race.tick, previous.overshootTick != race.tick {
+                reAims.append((before: lastOffset, after: offset))
+            }
+            lastOffset = offset
+            race.step()
+        }
+        #expect(reAims.count >= 2)
+        for reAim in reAims {
+            // What was left goes on into the new overshoot, the way the wind swung.
+            #expect(reAim.after >= reAim.before - 1e-12)
+        }
+        let most = reAims.map(\.after).max() ?? 0
+        #expect(most > cap, "her overshoot peaked at \(rad2deg(most))°, no more than one re-aim's")
+        #expect(abs(offset) < 1e-12, "her overshoot never decayed")
+    }
 }

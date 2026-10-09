@@ -63,4 +63,35 @@ import Testing
         #expect(harness.capped && harness.finalTick == race.tick)
         #expect(harness.digest == race.digest())
     }
+
+    /// #435: the National stand-in is the tactician steering by hand at Club level and nothing else; the Club stand-in
+    /// the novice (skill 0.35, that skill's weaknesses) with the same hand steering. On the bundled class, whose autohelm
+    /// holds a centred rudder, her hand steering never shows: the National stand-in sails the tactician's race to the bit.
+    @Test func standInsSteerByHandAtClubLevel() throws {
+        let club = BotWeaknesses.clubHandSteering
+        #expect(club.shiftLag > 0 && club.wander > 0 && club.overshoot > 0)
+        func steersLikeClub(_ weaknesses: BotWeaknesses) -> Bool {
+            weaknesses.shiftLag == club.shiftLag && weaknesses.wander == club.wander && weaknesses.overshoot == club.overshoot
+        }
+
+        let national = StandIn.national
+        #expect(national.profile == StandIn.tactician.profile && national.skill == StandIn.tactician.skill)
+        let nationalWeaknesses = try #require(national.weaknesses)
+        #expect(steersLikeClub(nationalWeaknesses))
+        let tactician = BotWeaknesses.none(skill: 1)
+        #expect(nationalWeaknesses.steering(like: tactician) == tactician)
+        #expect(national.driver(seat: 0, raceSeed: RaceSeed(1)).profile == .tactician)
+
+        let novice = StandIn.club
+        #expect(novice.profile == .baseline && novice.skill == StandIn.noviceSkill && StandIn.noviceSkill == 0.35)
+        let noviceWeaknesses = try #require(novice.weaknesses)
+        #expect(steersLikeClub(noviceWeaknesses))
+        let own = BotWeaknesses(skill: 0.35)
+        #expect(noviceWeaknesses.steering(like: own) == own)
+
+        let cap = 60
+        #expect(RaceFiles.defaults.boatClass.content.steering.autohelm.holdsWhenCentred)
+        let asTactician = try BotRaceHarness.runReference(2, standIn: .tactician, capSecondsAfterGun: cap)
+        #expect(try BotRaceHarness.runReference(2, standIn: .national, capSecondsAfterGun: cap).digest == asTactician.digest)
+    }
 }

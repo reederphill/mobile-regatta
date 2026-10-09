@@ -162,8 +162,10 @@ struct HandSteering: Sendable, Equatable {
             wind.noticedTick = tick
         }
         if let noticed = wind.noticedTick, Double(tick - noticed) / Double(Race.tickRate) >= shiftLag {
-            // She re-aims to the wind at her, past it the way it swung.
-            wind.overshoot = (swing < 0 ? -1 : 1) * min(overshoot, abs(swing))
+            // She re-aims to the wind at her, past it the way it swung, on top of what's left of her last overshoot,
+            // so a re-aim while one still decays carries it on rather than dropping it.
+            wind.overshoot = wind.overshoot * overshootDecay(since: wind.overshootTick, at: tick)
+                + (swing < 0 ? -1 : 1) * min(overshoot, abs(swing))
             wind.overshootTick = tick
             wind.direction = own.windDirection
             wind.tws = own.polarWindSpeed
@@ -171,7 +173,13 @@ struct HandSteering: Sendable, Equatable {
             wind.noticedTick = nil
         }
         steered = wind
-        let decay = max(0, 1 - Double(tick - wind.overshootTick) / Double(Race.tickRate) / HandSteeringTable.overshootDecay)
+        let decay = overshootDecay(since: wind.overshootTick, at: tick)
         return (wrapAngle(wind.direction + wind.overshoot * decay + wander(atTick: tick)), wind.tws, wind.grooveTWS)
+    }
+
+    /// The share of an overshoot begun at `start` left at `tick`: 1 falling linearly to none over
+    /// `HandSteeringTable.overshootDecay`.
+    private func overshootDecay(since start: Int, at tick: Int) -> Double {
+        max(0, 1 - Double(tick - start) / Double(Race.tickRate) / HandSteeringTable.overshootDecay)
     }
 }

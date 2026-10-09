@@ -86,7 +86,6 @@ import Testing
         let second = try BotRaceHarness.runReference(2, standIn: .tactician, capSecondsAfterGun: cap)
         #expect(first == second)
         #expect(first.finalTick == cap * Race.tickRate && first.places.count == 10)
-        let novice = StandIn(profile: .baseline, skill: 0.35, weaknesses: BotWeaknesses(skill: 0.35))
-        #expect(try BotRaceHarness.runReference(2, standIn: novice, capSecondsAfterGun: cap).digest != first.digest)
+        #expect(try BotRaceHarness.runReference(2, standIn: .club, capSecondsAfterGun: cap).digest != first.digest)
     }
 }
