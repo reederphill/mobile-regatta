@@ -267,7 +267,8 @@ public struct SeatView: Sendable, Equatable {
         /// rights or obligations.
         public let isGhost: Bool
         /// Which of her and this view's seat must keep clear now under rules 10–13 (`Race.rightOfWay`), as
-        /// the right-of-way glyphs show it (#123); nil if either is a ghost.
+        /// the right-of-way glyphs show it (#123), or under rule 21 when she is taking a penalty or returning and
+        /// this view's seat isn't (`Race.rightsOfWay(of:)`, #337); nil if either is a ghost.
         public let rightOfWay: RightOfWay?
 
         init(_ boat: Boat, isGhost: Bool, rightOfWay: RightOfWay?) {

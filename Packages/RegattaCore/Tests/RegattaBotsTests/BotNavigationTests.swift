@@ -225,6 +225,19 @@ import RegattaCore
         #expect(race.boats[0].penaltyTurnsOwed == 0 && race.boats[0].status == .racing)
     }
 
+    /// #337 round 3: the boat a penalised boat keeps clear of sees her keep clear (rule 21.2), whatever rules 10–13
+    /// would give her, so she holds her course for her as for any boat keeping clear; the penalised boat's own view
+    /// keeps rules 10–13 (`penaltyTurningBotKeepsClearUnder21_2`). Read by rules 10–13 alone, the cautious bot, clear
+    /// astern of a boat turning a penalty, bore away to keep clear of her onto another penalised boat and was called
+    /// under 16.1 (seed 26 of `CautiousBotSuiteTests`). Seat 0, on starboard, 60° into her turn; seat 1 on port.
+    @Test func aBoatTurningAPenaltyKeepsClearInTheOtherBoatsView() throws {
+        let race = try Self.penaltyRace(turned: deg2rad(60), ahead: 14, across: 7)
+        #expect(race.boats[0].isTakingPenalty)
+        #expect(race.rightOfWay(0, 1)?.keepClear == 1, "rule 10 alone has seat 1 keep clear")
+        #expect(race.seatView(for: 1).others[0].rightOfWay == RightOfWay(keepClear: 0, rule: .takingAPenalty))
+        #expect(race.seatView(for: 0).others[0].rightOfWay?.keepClear == 1)
+    }
+
     /// #100's review nit, #101: a penalised bot close to her turn's complete deadline turns on rather than give the turn
     /// up to keep clear (`canGiveUpTurn`: never inside `penaltyCompleteMargin` of it). The encounter of
     /// `penaltyTurningBotKeepsClearUnder21_2`, seat 1 coming back past her on the side she turns to, with the turn's
