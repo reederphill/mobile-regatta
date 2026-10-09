@@ -215,7 +215,8 @@ public final class Race {
         // race's base strength. The public wind setup, not the wind at her: a prediction may not hold the
         // first window's key yet (ADR 0001). Boom to port: starboard tack. Her rudder is centred, so her
         // autohelm engages on the first step at the wind angle she has then, and holds the reach until
-        // she steers (#219, ADR 0007).
+        // she steers (#219, ADR 0007); for a class whose autohelm doesn't hold a centred rudder (#434), she
+        // holds her heading instead.
         let boatClass = files.boatClass.content
         let row = course.startRow(fleetSize: setup.fleetSize, raceSeed: setup.raceSeed, hullLength: boatClass.hull.length)
         let rowHeading = course.startRowHeading
@@ -332,13 +333,26 @@ public final class Race {
 
         // A held rudder off centre steers, and lets go of the autohelm and any tap it is sailing (#13). A
         // centred one leaves her to the autohelm, which captures her wind angle on the tick it centres (ADR 0007).
+        // For a class whose autohelm doesn't hold a centred rudder (#434, ADR 0011), a centred rudder is a centred
+        // rudder: she holds her heading. Its autohelm only sails the tap, and lets go once past the boom within the
+        // class's hand-back of the new groove.
+        let holdsWhenCentred = boatClass.steering.autohelm.holdsWhenCentred
         for i in boats.indices {
+            if !holdsWhenCentred, let helm = boats[i].autohelm {
+                let b = boats[i]
+                let sailingAngle = helm.target.groove != nil ? helmSailingAngle(b, seat: i) : b.sailingAngle
+                if helm.handsBack(sailingAngle: sailingAngle, tws: b.polarWindSpeed(in: boatClass),
+                                  grooveTWS: b.grooveWindSpeed(in: boatClass), boatClass: boatClass) {
+                    boats[i].autohelm = nil
+                    boats[i].desiredRudder = 0
+                }
+            }
             let rudder = heldInputs[i].rudderValue
             if abs(rudder) > Autohelm.deadBand {
                 boats[i].autohelm = nil
                 boats[i].desiredRudder = rudder
             } else if boats[i].autohelm == nil {
-                engageAutohelm(i)
+                if holdsWhenCentred { engageAutohelm(i) } else { boats[i].desiredRudder = 0 }
             }
         }
 

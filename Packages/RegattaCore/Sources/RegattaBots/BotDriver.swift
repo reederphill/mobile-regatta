@@ -44,6 +44,8 @@ public struct BotDriver: Sendable {
     public private(set) var startLuffDecisions = 0
 
     private var brain: BotBrain
+    /// Her own hand on the helm for a class whose autohelm doesn't hold a centred rudder (#434); idle otherwise.
+    private var helm = BotHelm()
 
     /// The bot for `seat` in the race with `raceSeed`, a Mixed fleet's (CONTEXT.md **Mixed fleet**, the default
     /// for practice): her tier drawn from her own seed by the bot-tier file's shares (`BotTier.mixedFleetDraw`),
@@ -115,7 +117,8 @@ public struct BotDriver: Sendable {
     @discardableResult
     mutating func drive(_ race: Race, seeing view: SeatView) -> BotDecision {
         precondition(view.seat == seat && view.tick == race.tick, "seat \(seat) at tick \(race.tick) given the view of seat \(view.seat) at tick \(view.tick)")
-        let decision = brain.decide(view)
+        var decision = brain.decide(helm.view(view))
+        decision.input = helm.input(decision.input, view, tapping: decision.tap != nil)
         decisions += 1
         isHuntingTurn = decision.hunt == .turn
         if decision.tap != nil {

@@ -20,14 +20,16 @@ let openWaterRules: RulesConfigFile = {
 /// water (`openWaterRules`, or `rules`). Seat 0 is far from every mark and every edge, seat 1 far from her;
 /// `place` sets seat 0 up in the first tick's wind, with the rudder centred and no autohelm yet, so the next
 /// step engages it on her placed angle, as a player letting go. The boats sail `boatClass`: by default
-/// ilca-dinghy@3, the schema-2 class #230's tests were written for.
-func scriptedWindRace(boatClass: FileRef? = nil, rules: RulesConfigFile = openWaterRules,
+/// ilca-dinghy@3, the schema-2 class #230's tests were written for; `boatClassFile`, a file the bundle doesn't hold
+/// (a tuned copy, #434), sails in its place when given.
+func scriptedWindRace(boatClass: FileRef? = nil, boatClassFile: BoatClassFile? = nil, rules: RulesConfigFile = openWaterRules,
                       wind: @escaping (_ seconds: Double) -> Wind,
                       place: (inout Boat, BoatClass) -> Void) throws -> Race {
     let sequence = 600 * Race.tickRate
-    let boatClass = try boatClass ?? BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
+    let boatClass = try boatClassFile?.ref ?? boatClass ?? BoatClassFile.bundled(id: Fixtures.classID, version: Fixtures.version).ref
     var catalog = RaceFileCatalog()
     try catalog.rulesConfigurations.add(rules)
+    if let boatClassFile { try catalog.boatClasses.add(boatClassFile) }
     let setup = try RaceSetup(raceSeed: RaceSeed(3), seats: [.human, .human], laps: 1, startSequenceTicks: sequence,
                               boatClass: boatClass, rulesConfiguration: rules.ref)
     let race = try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
