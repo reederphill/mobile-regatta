@@ -237,8 +237,17 @@ import Testing
                 } else {
                     #expect(view.own.properCourse == nil && (restricted.isEmpty || proper == nil))
                 }
+                // Rules 10–13, but a boat under rule 21 that she isn't under keeps clear of her (#337).
+                func rule21(_ b: Boat) -> RacingRule? {
+                    race.course.isReturning(b) ? .returningToStart : b.isTakingPenalty ? .takingAPenalty : nil
+                }
                 for other in view.others {
-                    #expect(other.rightOfWay == race.rightOfWay(seat, other.seat))
+                    let them = race.boats[other.seat]
+                    if rule21(boat) == nil, let rule = rule21(them), !other.isGhost, !race.isGhost(seat: seat) {
+                        #expect(other.rightOfWay == RightOfWay(keepClear: other.seat, rule: rule))
+                    } else {
+                        #expect(other.rightOfWay == race.rightOfWay(seat, other.seat))
+                    }
                     #expect(other.velocity == race.boats[other.seat].velocity && other.isGhost == race.isGhost(seat: other.seat))
                 }
                 #expect(view.shadowCones == race.boats.indices.compactMap(race.shadowCone(ofSeat:)))

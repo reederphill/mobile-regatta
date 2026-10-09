@@ -158,4 +158,175 @@ import RegattaCore
         #expect(aiming.startAim(b, beyond.view) == setting.toSetup(b, beyond.view, spot: spot, hold: hold, arrival: arrival),
                 "beyond the pin end she sails to her setup point")
     }
+
+    // MARK: - Fighting for her spot (#337)
+
+    /// #337 acceptance (start): the windward boat of #280's scene, luffed to her floor and still not clear of the
+    /// leeward boat (`BotBrain.startLuff`), holds her ground from further out the more combative she is
+    /// (`FleetTactics.startHoldsGroundScale`): 25 s before the gun the typical bot still eases and drops astern and
+    /// a combative one holds; 15 s before it the typical one holds and a mild one still drops astern. She stays the
+    /// keep-clear boat throughout (the luff is hers, away from the leeward boat).
+    @Test func holdsHerGroundLongerTheMoreCombative() throws {
+        func dropsAstern(_ engagement: Double, toGun: Int) throws -> Bool {
+            let race = try BotConductTests.prestartWindwardLeeward(seed: 3, toGun: toGun, leeward: deg2rad(32),
+                                                                   windward: deg2rad(36), abeam: 0.9)
+            let view = race.seatView(for: 1)
+            #expect(view.others.first?.rightOfWay?.keepClear == 1, "she is the keep-clear boat")
+            var brain = BotTacticsTests.pilot(seat: 1, race, engagement: engagement, planned: .starboard).brain
+            brain.observe(view.own, view)
+            return brain.startLuff(view.own, view, desired: view.own.heading, lookahead: 3).dropsAstern
+        }
+        let floor = BotBrain.FleetTactics.engagementFloor
+        #expect(try dropsAstern(0.5, toGun: 25))
+        #expect(try !dropsAstern(1, toGun: 25))
+        #expect(try !dropsAstern(0.5, toGun: 15))
+        #expect(try dropsAstern(floor, toGun: 15))
+    }
+
+    /// #337 acceptance (start, the owner 2026-10-08: combative bots luff harder before the start when they hold the
+    /// right of way, never without it): the leeward boat 40 s before the gun, a windward boat a length and a half
+    /// abeam that must keep clear of her (rule 11). A combative bot luffs her (rudder towards the wind, at the hunter's
+    /// rate); the fleet's typical one holds her course (#101); the combative one eases her luff off for her start
+    /// (`FleetTactics.startLuffUntilScale`), and never luffs as the windward boat, without the right of way. Sailed
+    /// out against a typical windward bot, no rule call on her.
+    @Test func combativeLuffsAWindwardBoatBeforeTheStart() throws {
+        func luffing(_ engagement: Double, seat: Int = 0, toGun: Int = 40) throws -> BoatInput? {
+            let race = try BotConductTests.prestartWindwardLeeward(seed: 3, toGun: toGun, leeward: deg2rad(45),
+                                                                   windward: deg2rad(45), abeam: 1.5)
+            // A second on, the rules have them overlapped (rule 11).
+            for _ in 0..<Race.tickRate { race.step() }
+            let view = race.seatView(for: seat)
+            #expect(view.others.first?.rightOfWay == RightOfWay(keepClear: 1, rule: .windwardLeeward))
+            var brain = BotTacticsTests.pilot(seat: seat, race, engagement: engagement, planned: .starboard).brain
+            brain.observe(view.own, view)
+            return brain.startLuffing(view.own, view, .neutral, desired: view.own.heading)
+        }
+        let combative = try #require(try luffing(1), "combative, she luffs")
+        #expect(combative.rudderValue > 0, "a luff on starboard turns her to starboard: \(combative.rudderValue)")
+        #expect(try luffing(0.5) == nil, "typical, she holds her course")
+        #expect(try luffing(1, toGun: 5) == nil, "4 s before the gun she has eased her luff off")
+        #expect(try luffing(1, seat: 1) == nil, "as the windward boat she has no luff to take")
+
+        for seed: UInt64 in [3, 7, 13] {
+            let race = try BotConductTests.prestartWindwardLeeward(seed: seed, toGun: 40, leeward: deg2rad(45),
+                                                                   windward: deg2rad(45), abeam: 1.5)
+            let sailed = BotTacticsTests.sail(race, BotTacticsTests.pilot(seat: 0, race, engagement: 1, planned: .starboard),
+                                              seconds: 10, others: [BotTacticsTests.pilot(seat: 1, race, engagement: 0.5,
+                                                                                            planned: .starboard)])
+            // Never a call on her: her luff is within rule 16.1's rate. The windward boat may be called under rule 11
+            // (the owner: more calls at the combative end), as a player squeezed there would be.
+            let calls = BotConductTests.calls(sailed.kinds)
+            #expect(!calls.contains { $0.hasSuffix(" on 0") }, "seed \(seed): \(calls)")
+        }
+    }
+
+    /// #337 (owner 2026-10-08: "luff with time to spare"): `combativeLuffsAWindwardBoatBeforeTheStart`'s scene, `below`
+    /// hull lengths below the middle of the line `toGun` seconds before the gun, sailed out against a typical windward bot
+    /// to `after` seconds past it: the times the combative leeward boat luffed, the first her approach to her own spot
+    /// (`secondsToSpot`) and `luffSpareSeconds` no longer fit in the time to the gun, and when she started (nil: not by
+    /// then) and whether she was over at the gun; times from the gun.
+    static func luffingOut(seed: UInt64, toGun: Int, below: Double, after: Double = 30) throws
+        -> (luffs: [Double], outOfTime: Double?, brokeOff: Double?, started: Double?, ocs: Bool, until: Double) {
+        let water = BotConductTests.Water(seed: seed, toGun: toGun, below: below)
+        let heading = water.heading(.starboard, deg2rad(45))
+        let forward = Vec2.heading(heading)
+        let race = try BotConductTests.place(water, [
+            BotConductTests.Placement(position: water.centre, heading: heading, speed: 2, status: .prestart),
+            BotConductTests.Placement(position: water.centre + forward.rightPerp * water.length * 1.5, heading: heading,
+                                      speed: 2, status: .prestart),
+        ])
+        var luffer = BotTacticsTests.pilot(seat: 0, race, engagement: 1, planned: .starboard)
+        var windward = BotTacticsTests.pilot(seat: 1, race, engagement: 0.5, planned: .starboard)
+        let until = try #require(luffer.brain.tactics.startLuffUntil)
+        var luffs: [Double] = [], outOfTime: Double?, brokeOff: Double?, started: Double?, ocs = false
+        while race.seatView(for: 0).time < after, !race.isOver, started == nil {
+            let view = race.seatView(for: 0)
+            if let decision = luffer.drive(race) {
+                if outOfTime == nil, luffer.brain.secondsToSpot(view.own, view, hold: BotBrain.holdAngle(view)) + BotBrain.luffSpareSeconds >= -view.time {
+                    outOfTime = view.time
+                }
+                if decision.startLuff { luffs.append(view.time) }
+                if brokeOff == nil, luffer.brain.brokeOffStartLuff { brokeOff = view.time }
+            }
+            _ = windward.drive(race)
+            race.step()
+            for event in race.drainEvents() {
+                if case .started(seat: 0) = event.kind { started = race.seatView(for: 0).time }
+                if case .ocsNotice(recipient: 0) = event.kind { ocs = true }
+            }
+        }
+        return (luffs, outOfTime, brokeOff, started, ocs, until)
+    }
+
+    /// #337 (owner 2026-10-08: "luff with time to spare"): seed 13's scene 50 s before the gun, five lengths below the
+    /// line: the combative leeward boat luffs the windward one while her approach to her own spot and
+    /// `luffSpareSeconds` fit in the time to the gun, breaks off as soon as they don't (still well before her ease,
+    /// `startLuffUntil`), and starts on time.
+    @Test func combativeBreaksOffHerLuffInTimeToStart() throws {
+        let sailed = try Self.luffingOut(seed: 13, toGun: 50, below: 5)
+        let outOfTime = try #require(sailed.outOfTime, "her time ran out before the gun")
+        #expect(-outOfTime > sailed.until + 10, "out of time \(-outOfTime) s before the gun, her ease \(sailed.until) s")
+        #expect(sailed.luffs.contains { $0 < outOfTime - 10 }, "she luffed with time to spare")
+        let last = try #require(sailed.luffs.last)
+        #expect(outOfTime - last < Double(BotDriver.decisionInterval) / Double(Race.tickRate) + 1e-9,
+                "she luffed until her time ran out (last luff \(last) s, out of time \(outOfTime) s): it broke her luff off")
+        #expect(!sailed.luffs.contains { $0 >= outOfTime }, "and not once it had")
+        // #337 review: the break-off is latched (`brokeOffStartLuff`) the decision her time runs out: she luffs no more
+        // before her start, though bearing away to her plan wins time back.
+        let brokeOff = try #require(sailed.brokeOff, "her break-off latched")
+        #expect(abs(brokeOff - outOfTime) < 1e-9, "latched \(brokeOff) s, out of time \(outOfTime) s")
+        #expect(!sailed.ocs)
+        let started = try #require(sailed.started, "she started")
+        #expect(started <= 3, "on time: \(started) s after the gun")
+    }
+
+    /// #337 review: once she has broken a pre-start luff off for want of time (`brokeOffStartLuff`), a combative bot
+    /// luffs no more before her start, with time to spare again or not: `combativeLuffsAWindwardBoatBeforeTheStart`'s
+    /// scene, 40 s before the gun.
+    @Test func aBrokenOffLuffStaysBrokenOff() throws {
+        let race = try BotConductTests.prestartWindwardLeeward(seed: 3, toGun: 40, leeward: deg2rad(45),
+                                                               windward: deg2rad(45), abeam: 1.5)
+        for _ in 0..<Race.tickRate { race.step() }
+        let view = race.seatView(for: 0)
+        var brain = BotTacticsTests.pilot(seat: 0, race, engagement: 1, planned: .starboard).brain
+        brain.observe(view.own, view)
+        #expect(brain.hasTimeToSpare(view.own, view))
+        #expect(brain.startLuffing(view.own, view, .neutral, desired: view.own.heading) != nil, "she luffs")
+        brain.brokeOffStartLuff = true
+        #expect(brain.startLuffing(view.own, view, .neutral, desired: view.own.heading) == nil, "broken off, she doesn't")
+    }
+
+    /// #337 review: `secondsToSpot` and `reachableSpot` reckon her approach to her spot alike (`spotApproach`): with her
+    /// spot to her right, an arrival a little later than `secondsToSpot` keeps her spot, and a little earlier gives it up.
+    @Test func secondsToSpotAgreesWithTheReachableSpot() throws {
+        var checked = 0
+        for seed: UInt64 in [3, 7, 13] {
+            for below in [3.0, 6.0, 10.0] {
+                for left in [4.0, 8.0, 12.0] {
+                    let water = BotConductTests.Water(seed: seed, toGun: 60, below: below)
+                    let c = water.race.course
+                    let pinward = (c.startLine.pin.position - c.startLine.committee.position).normalized
+                    let race = try BotConductTests.place(water, [
+                        BotConductTests.Placement(position: water.centre + pinward * water.length * left,
+                                                  heading: water.heading(.starboard, deg2rad(45)), speed: 2,
+                                                  status: .prestart),
+                        BotConductTests.Placement(position: water.centre + c.right * 200, heading: water.heading(.port, deg2rad(45)),
+                                                  speed: 2, status: .prestart),
+                    ])
+                    let view = race.seatView(for: 0)
+                    let brain = BotTacticsTests.pilot(seat: 0, race, engagement: 1, planned: .starboard).brain
+                    let hold = BotBrain.holdAngle(view)
+                    guard brain.spotApproach(view.own, view, hold: hold).across > 0 else { continue }
+                    let seconds = brain.secondsToSpot(view.own, view, hold: hold)
+                    let spot = brain.startPoint(view.course)
+                    #expect(brain.reachableSpot(view.own, view, hold: hold, arrival: seconds + 0.05) == spot,
+                            "seed \(seed), \(below) below, \(left) left: \(seconds) s keeps it")
+                    #expect(brain.reachableSpot(view.own, view, hold: hold, arrival: seconds - 0.5) != spot,
+                            "seed \(seed), \(below) below, \(left) left: earlier gives it up")
+                    checked += 1
+                }
+            }
+        }
+        #expect(checked >= 9, "\(checked) scenes with her spot to her right")
+    }
 }

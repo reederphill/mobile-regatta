@@ -790,12 +790,23 @@ public final class Race {
     }
 
     /// `rightOfWay(seat, other)` for every seat in order, nil at `seat` itself: one seat's relation to the
-    /// whole fleet, as `SeatView` shows it, in one pass.
+    /// whole fleet, as `SeatView` shows it, in one pass. Except that another boat under rule 21 (taking a penalty,
+    /// `Boat.isTakingPenalty`, or returning, `CourseLayout.isReturning`) keeps clear of `seat` when `seat` isn't
+    /// (`Rules.obligation`): a bot holds her course for her as for any boat keeping clear. Read by rules 10–13
+    /// alone, a bot clear astern of a boat turning a penalty bore away to keep clear of her, onto a second penalised
+    /// boat, and was called under 16.1 (#337 round 3, the cautious seat in seed 26 of `CautiousBotSuiteTests`).
+    /// `seat`'s own rule 21 she keeps herself (`penaltyInput`, `startKeepClear`): her rules 10–13 relations stand.
     func rightsOfWay(of seat: Int) -> [RightOfWay?] {
         let hull = boatClass.hull
         let boat = boats[seat]
+        let underRule21 = { (b: Boat) in b.isTakingPenalty || self.course.isReturning(b) }
         return boats.indices.map { other in
-            other == seat ? nil : Rules.rightOfWay(boat, boats[other], overlapped: overlaps.isOverlapped(seat, other), hull: hull)
+            guard other != seat else { return nil }
+            let them = boats[other]
+            if !boat.isGhost, !them.isGhost, !underRule21(boat), underRule21(them) {
+                return RightOfWay(keepClear: other, rule: course.isReturning(them) ? .returningToStart : .takingAPenalty)
+            }
+            return Rules.rightOfWay(boat, them, overlapped: overlaps.isOverlapped(seat, other), hull: hull)
         }
     }
 

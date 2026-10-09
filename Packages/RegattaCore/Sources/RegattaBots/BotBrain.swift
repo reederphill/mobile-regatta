@@ -71,6 +71,10 @@ public struct BotDecision: Hashable, Sendable {
     /// What the suite's hunter's hunting made of `input` (#355, `BotBrain.hunting`); nil for every other bot, and for
     /// her when she sailed as a live bot does.
     var hunt: BotBrain.HuntStep? = nil
+    /// The fleet tactic her tap plays (#234, #337: counted by the suite by engagement band); nil for any other tap.
+    var play: BotBrain.FleetPlay.Kind? = nil
+    /// Whether `input` is a combative bot's luff at a windward boat before her start (#337, `startLuffing`).
+    var startLuff = false
 
     public init(input: BoatInput, tap: BoatTap? = nil) {
         self.input = input
@@ -106,6 +110,15 @@ struct BotBrain: Sendable {
     /// 0 the pin … 1 the committee boat; nil until she has read it, or for any other bot.
     var favouredEndSpot: Double?
     var lastTackTime = -1_000.0
+    /// The fleet tactic (#234) that last turned her plan to the other tack (`upwindTack`), and when: her tap then is
+    /// that play's (`BotDecision.play`, for the suite's count, #337).
+    var lastFleetPlay: FleetPlay.Kind?
+    var lastFleetPlayTime = -Double.infinity
+    /// Whether her last decision was a combative bot's luff before her start (`BotDecision.startLuff`, #337).
+    var wasStartLuffing = false
+    /// She broke a pre-start luff off with no more time to spare for her spot (`hasTimeToSpare`, #337 review): she luffs
+    /// no more before her start, so a margin that recovers as she bears away doesn't have her luff and break off in turn.
+    var brokeOffStartLuff = false
     /// When she last tapped: she lets a tap finish before another.
     var lastTapTime = -1_000.0
     /// The rudder she holds hard over through her penalty turns, one way, from when she starts them until
@@ -171,6 +184,11 @@ struct BotBrain: Sendable {
         self.caution = caution
         self.weaknesses = weaknesses ?? profile?.weaknesses(skill: style.skill) ?? BotWeaknesses(skill: style.skill)
         tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
+        // #337: the cautious bot plays no fleet tactic (her engagement is 0) and fights for no spot: today's values.
+        if caution != nil {
+            tactics.tacticEngagement = nil
+            tactics.startEngagement = nil
+        }
         rng = SplitMix64(seed: seed, stream: Self.brainStream)
         tacticsRng = SplitMix64(seed: seed, stream: Self.tacticsStream)
     }
@@ -190,10 +208,20 @@ struct BotBrain: Sendable {
             if decision.tap == nil, let input = guarded(view, decision.input) { decision.input = input }
             see(view)
         }
+        noteStartLuff(view, decision)
         if decision.input.ease, view.own.twa < BoatDynamics.noGoAngle(view.boatClass.polar) {
             decision.input = decision.input.eased(false)
         }
         return decision
+    }
+
+    /// Latches `brokeOffStartLuff` when her luff before her start ends with no more time to spare for her spot.
+    private mutating func noteStartLuff(_ view: SeatView, _ decision: BotDecision) {
+        if wasStartLuffing, !decision.startLuff, view.own.status == .prestart, view.time < 0,
+           !hasTimeToSpare(view.own, view) {
+            brokeOffStartLuff = true
+        }
+        wasStartLuffing = decision.startLuff
     }
 
     /// What she sails now: her held input, and her tack or gybe tap.
@@ -220,8 +248,9 @@ struct BotBrain: Sendable {
         if caution != nil, senses.tacking, aim.tack == boat.tack, aim.angle < closeHauled {
             aim = Aim(angle: closeHauled, tack: aim.tack, ease: aim.ease)
         }
-        // Held to her proper course under rule 17, she sails no higher than it allows (#346).
-        if limitsProperCourse { aim = Self.properCourseLimited(aim, boat) }
+        // Held to her proper course under rule 17, she sails no higher than it allows (#346); clear astern of a boat
+        // close ahead on a reach or run, no higher than it before she makes the overlap (#337).
+        if limitsProperCourse { aim = Self.properCourseAnticipated(aim, boat, view) }
         // The autohelm is sailing the tap through the tack or gybe: hands off. Any rudder would cancel it
         // (#13) and leave her head to wind; it's over in a couple of seconds.
         if boat.autohelm?.isTapping == true { return BotDecision(input: .neutral) }
@@ -236,7 +265,9 @@ struct BotBrain: Sendable {
             if canTap(boat, view) {
                 lastTapTime = view.time
                 planRoll(boat, view)
-                return BotDecision(input: .neutral, tap: .tackGybe)
+                var decision = BotDecision(input: .neutral, tap: .tackGybe)
+                if lastFleetPlayTime == view.time { decision.play = lastFleetPlay }
+                return decision
             }
             // Not yet (too slow to tack, or a mark too close to turn by): the same aim on her own tack. Before
             // her start (#99) she sails her own tack's groove sheeted in instead: the speed to tack, rather than
@@ -268,7 +299,13 @@ struct BotBrain: Sendable {
     /// Her decision as the right-of-way boat, `input` her plan's helm: holding her course (`holdingCourse`, #228), or for
     /// the suite's hunter hunting (`hunting`, #355), then clearing her quarter. `desired` is the heading her plan sails.
     private func holding(_ b: SeatView.OwnBoat, _ view: SeatView, _ input: BoatInput, desired: Double) -> BotDecision {
-        guard tactics.hunts else { return BotDecision(input: clearingQuarter(b, view, holdingCourse(b, view, input))) }
+        guard tactics.hunts else {
+            // #337: a combative live bot luffs a windward boat before her start (`startLuffing`).
+            let luffed = startLuffing(b, view, input, desired: desired)
+            var decision = BotDecision(input: clearingQuarter(b, view, luffed ?? holdingCourse(b, view, input)))
+            decision.startLuff = luffed != nil && decision.input == luffed
+            return decision
+        }
         let (held, step) = hunting(b, view, input, desired: desired)
         var decision = BotDecision(input: clearingQuarter(b, view, held))
         // What hunting did, unless clearing her quarter steered her otherwise.

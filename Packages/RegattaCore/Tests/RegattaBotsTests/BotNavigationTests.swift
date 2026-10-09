@@ -225,6 +225,96 @@ import RegattaCore
         #expect(race.boats[0].penaltyTurnsOwed == 0 && race.boats[0].status == .racing)
     }
 
+    /// #337 round 3: the boat a penalised boat keeps clear of sees her keep clear (rule 21.2), whatever rules 10–13
+    /// would give her, so she holds her course for her as for any boat keeping clear; the penalised boat's own view
+    /// keeps rules 10–13 (`penaltyTurningBotKeepsClearUnder21_2`). Read by rules 10–13 alone, the cautious bot, clear
+    /// astern of a boat turning a penalty, bore away to keep clear of her onto another penalised boat and was called
+    /// under 16.1 (seed 26 of `CautiousBotSuiteTests`). Seat 0, on starboard, 60° into her turn; seat 1 on port.
+    @Test func aBoatTurningAPenaltyKeepsClearInTheOtherBoatsView() throws {
+        let race = try Self.penaltyRace(turned: deg2rad(60), ahead: 14, across: 7)
+        #expect(race.boats[0].isTakingPenalty)
+        #expect(race.rightOfWay(0, 1)?.keepClear == 1, "rule 10 alone has seat 1 keep clear")
+        #expect(race.seatView(for: 1).others[0].rightOfWay == RightOfWay(keepClear: 0, rule: .takingAPenalty))
+        #expect(race.seatView(for: 0).others[0].rightOfWay?.keepClear == 1)
+    }
+
+    /// #337 round 4: before her start, a bot gives a boat turning a penalty close aboard berth (`startKeepClear`,
+    /// `penalisedBerthLengths`), though it keeps clear of her under rule 21 in her view. Thirty seconds before the gun,
+    /// well below the line: seat 0, 60° into her turn, two hull lengths dead ahead of seat 1 (a bot reaching on
+    /// starboard, right of way under rule 10 too): seat 1 bears off it. Six lengths ahead, outside the berth, she holds on.
+    @Test func beforeTheStartABotGivesABoatTurningAPenaltyBerth() throws {
+        func keepClear(ahead lengths: Double) throws -> (Double?, RightOfWay?) {
+            let race = botRace(seats: [.human, .bot], seed: 5)
+            while race.tick < -30 * Race.tickRate { race.step() }
+            let c = race.course
+            let length = race.boatClass.hull.length
+            let at = c.startLine.centre - c.upwind * 80
+            let wind = race.seatView(for: 1).own.windDirection
+            let heading = wind - .pi / 2
+            let forward = Vec2.heading(heading)
+            var snapshot = race.exportSnapshot()
+            snapshot.seats[0].boat.position = at + forward * (length * lengths)
+            snapshot.seats[0].boat.heading = heading + .pi / 3
+            snapshot.seats[0].boat.boomSide = .port
+            snapshot.seats[0].boat.speed = 0.5
+            snapshot.seats[0].boat.autohelm = nil
+            snapshot.seats[0].boat.rudder = 1
+            snapshot.seats[0].heldInput = BoatInput(rudder: 1.0)
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyProgress = deg2rad(60)
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+            snapshot.seats[1].boat.position = at
+            snapshot.seats[1].boat.heading = heading
+            snapshot.seats[1].boat.boomSide = .port
+            snapshot.seats[1].boat.speed = 4
+            snapshot.seats[1].boat.autohelm = Autohelm(target: .angle(.pi / 2))
+            snapshot.seats[1].boat.rudder = 0
+            snapshot.seats[1].heldInput = .neutral
+            snapshot.touchingBoats = []
+            try race.importSnapshot(snapshot)
+            _ = race.drainEvents()
+            #expect(race.boats[0].isTakingPenalty && race.boats[1].status == .prestart && race.tick < 0)
+            let view = race.seatView(for: 1)
+            let pilot = BotConductTests.Pilot(seat: 1, plannedTack: nil, race: race)
+            return (pilot.brain.startKeepClear(view.own, view, desired: heading, lookahead: 3), view.others[0].rightOfWay)
+        }
+        let (close, right) = try keepClear(ahead: 2)
+        #expect(right == RightOfWay(keepClear: 0, rule: .takingAPenalty))
+        #expect(close != nil, "two lengths off: she bears off the boat turning her penalty")
+        let (far, _) = try keepClear(ahead: 6)
+        #expect(far == nil, "six lengths off: she holds on")
+    }
+
+    /// #337 review: the suite's hunter hunts no boat keeping clear of her under rule 21 (`quarry`): seat 0, 60° into
+    /// her penalty turn, keeps clear of seat 1 in seat 1's view, within range and ahead of her, but is no quarry.
+    @Test func theHunterHuntsNoBoatTurningAPenalty() throws {
+        let race = try Self.penaltyRace(turned: deg2rad(60), ahead: 14, across: 7)
+        let view = race.seatView(for: 1)
+        #expect(view.others[0].rightOfWay == RightOfWay(keepClear: 0, rule: .takingAPenalty))
+        let hunter = BotConductTests.Pilot(seat: 1, plannedTack: nil, race: race, profile: .hunter)
+        #expect(hunter.brain.hasKeepClearBoatInRange(view.own, view), "she is in range")
+        #expect(hunter.brain.quarry(view.own, view) == nil)
+    }
+
+    /// #337 review: the cautious bot's look before she leaps (`guarded`) reads a boat keeping clear of her under rule 21
+    /// as her view does: seat 0, 60° into her penalty turn, passing seat 1 (the cautious bot) seven metres off is no
+    /// intrusion, though rules 10–13 on the boats alone would have seat 1 keep clear (port). 10° into it, not yet under
+    /// rule 21.2, the same boat is one she keeps clear of.
+    @Test func theCautiousLookReadsRule21AsHerViewDoes() throws {
+        func guarded(turned: Double) throws -> BoatInput? {
+            let race = try Self.penaltyRace(turned: turned, ahead: 14, across: 7)
+            let view = race.seatView(for: 1)
+            let pilot = BotConductTests.Pilot(seat: 1, plannedTack: nil, race: race, caution: .standard)
+            return pilot.brain.guarded(view, .neutral)
+        }
+        let penalised = try Self.penaltyRace(turned: deg2rad(60), ahead: 14, across: 7)
+        #expect(penalised.boats[0].isTakingPenalty && penalised.rightOfWay(0, 1)?.keepClear == 1)
+        #expect(try guarded(turned: deg2rad(60)) == nil, "rule 21: seat 0 keeps clear of her")
+        let early = try Self.penaltyRace(turned: deg2rad(10), ahead: 14, across: 7)
+        #expect(!early.boats[0].isTakingPenalty)
+        #expect(try guarded(turned: deg2rad(10)) != nil, "rule 10: she keeps clear of seat 0")
+    }
+
     /// #100's review nit, #101: a penalised bot close to her turn's complete deadline turns on rather than give the turn
     /// up to keep clear (`canGiveUpTurn`: never inside `penaltyCompleteMargin` of it). The encounter of
     /// `penaltyTurningBotKeepsClearUnder21_2`, seat 1 coming back past her on the side she turns to, with the turn's

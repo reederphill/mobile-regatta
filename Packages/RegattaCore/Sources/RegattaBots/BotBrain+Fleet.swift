@@ -159,6 +159,65 @@ extension BotBrain {
         /// How far her cone's apex may sit from her, metres, and its forward from her heading, radians, for it to be
         /// hers (`ownCone`; the sine of the angle between them, for a small one): float noise, no more.
         static let ownConeTolerance = (metres: 1e-6, radians: 1e-6)
+
+        // MARK: How hard she plays (#337)
+
+        /// #337: her engagement scales how hard she plays each tactic, not just whether. Each value is one of these
+        /// scales: piecewise linear through her `mild` value at `engagementFloor`, today's (#338's) at
+        /// `engagementMiddle` and her `combative` one at 1, flat below the floor. At the middle every value is exactly
+        /// today's, so the fleet's typical bot (engagement is one uniform draw, `BotStyle.engagement`) plays as before;
+        /// combative bots harder, mild ones softer. Placeholders (owner 2026-10-08: a wide spread, the combative end
+        /// clearly aggressive; #389 retunes). Only a live bot's own engagement reads them
+        /// (`Tactics.tacticEngagement`, `Tactics.startEngagement`); the profiles, the tactician among them, and the
+        /// cautious bot pin today's values.
+        struct EngagementScale: Sendable {
+            var mild: Double
+            var middle: Double
+            var combative: Double
+
+            func at(_ engagement: Double) -> Double {
+                let e = min(max(engagement, FleetTactics.engagementFloor), 1)
+                if e == FleetTactics.engagementMiddle { return middle }
+                if e < FleetTactics.engagementMiddle {
+                    let w = (e - FleetTactics.engagementFloor) / (FleetTactics.engagementMiddle - FleetTactics.engagementFloor)
+                    return mild + (middle - mild) * w
+                }
+                let w = (e - FleetTactics.engagementMiddle) / (1 - FleetTactics.engagementMiddle)
+                return middle + (combative - middle) * w
+            }
+        }
+        /// The mild end of every scale: the cover and lane floors (`coverEngagement`, `laneEngagement`).
+        static let engagementFloor = 0.3
+        /// The fleet's typical engagement, where every scale gives today's value.
+        static let engagementMiddle = 0.5
+        /// Cover: seconds after which it's too late to cover a boat that tacked away (`coverLate` at the middle): a mild
+        /// bot lets a boat go after 3 s, a combative one still goes with her 12 s on.
+        static let coverLateScale = EngagementScale(mild: 3, middle: coverLate, combative: 12)
+        /// Cover: her range (`coverRange`, already scaled by her engagement) lifted by this factor, combative only.
+        static let coverRangeLiftScale = EngagementScale(mild: 1, middle: 1, combative: 1.25)
+        /// Lane: the header, times her threshold, that tacks her out of her lane (`laneHeader` at the middle): a
+        /// combative bot holds against a bigger one.
+        static let laneHeaderScale = EngagementScale(mild: 1.5, middle: laneHeader, combative: 3)
+        /// Tack on wind: the seconds she reckons she holds a boat in her shadow (`shadowHeld` at the middle), so the
+        /// payoff check (`paysToTackOnWind`) asks less of the tack the more combative she is.
+        static let shadowHeldScale = EngagementScale(mild: 7, middle: shadowHeld, combative: 14)
+        /// Lee-bow: only from this engagement does a lee-bow tack her inside her tack interval (#329,
+        /// `leeBowInsideTackInterval`) ...
+        static let leeBowExemptEngagement = 0.6
+        /// ... and then only this many seconds or more after her last tack: two tacks back to back are no lee-bow (#338
+        /// review).
+        static let leeBowMinSeparation = 5.0
+        /// Before her start, as the windward boat luffed to her floor and still not clear (`BotBrain.startLuff`): the
+        /// seconds before the gun from which she holds her ground rather than ease and drop astern
+        /// (`BotBrain.startLuffEaseSeconds` at the middle). A combative bot holds her spot from 30 s, a mild one gives
+        /// it up and drops astern to 5 s.
+        static let startHoldsGroundScale = EngagementScale(mild: 5, middle: BotBrain.startLuffEaseSeconds, combative: 30)
+        /// Before her start, as the leeward right-of-way boat (rule 11), a bot this engaged or more luffs a windward boat
+        /// that must keep clear of her (`startLuffing`), as the suite's hunter does racing (rule 16.1's rate, the
+        /// hunter's limits); never without the right of way, and never over the line early.
+        static let startLuffEngagement = 0.6
+        /// ... until this many seconds before the gun, when she eases her luff off for her start: at 1, to 5 s.
+        static let startLuffUntilScale = EngagementScale(mild: 30, middle: 20, combative: 5)
     }
 
     /// Whether she plays any fleet tactic.
@@ -225,12 +284,13 @@ extension BotBrain {
     func coverTackTarget(_ b: SeatView.OwnBoat, _ view: SeatView) -> Int? {
         let length = view.boatClass.hull.length
         let range = length * FleetTactics.coverRange * (0.5 + 0.5 * tactics.tacticalQuality) * (0.25 + 0.75 * tactics.engagement)
+            * tactics.coverRangeLift
         let up = view.course.upwind
         let seen = weaknesses.reactionDelay + FleetTactics.coverReaction
         return nearest(view, within: range, of: b) { other, offset in
             guard other.tack != b.tack, let boat = fleet.bySeat[other.seat], boat.tack == other.tack else { return false }
             let age = view.time - boat.tackedAt
-            return age >= seen && age <= max(seen, FleetTactics.coverLate) && -offset.dot(up) > length * FleetTactics.coverBehind
+            return age >= seen && age <= max(seen, tactics.coverLate) && -offset.dot(up) > length * FleetTactics.coverBehind
                 && abs(offset.dot(up.rightPerp)) > length * FleetTactics.coverAbeam
         }
     }
@@ -298,7 +358,8 @@ extension BotBrain {
                   forecast.allSatisfy({ $0.astern >= length * FleetTactics.tackOnWindAstern }) else { return false }
             let factor = forecast.reduce(0) { $0 + $1.factor } / Double(forecast.count)
             return factor < FleetTactics.tackOnWindShadow
-                && Self.paysToTackOnWind(windSpeed: b.polarWindSpeed, factor: factor, lean: lean, threshold: threshold)
+                && Self.paysToTackOnWind(windSpeed: b.polarWindSpeed, factor: factor, lean: lean, threshold: threshold,
+                                        shadowHeld: tactics.shadowHeld)
         }
     }
 
@@ -307,8 +368,11 @@ extension BotBrain {
     /// (`tackCost`), scaled by her own plan's `lean` to the other tack (positive: headed on this one, or the puffs,
     /// pressure or clean air that way): the full cost with her plan neutral, none when it leans to the other tack by
     /// her threshold (it would tack her anyway), twice it when it leans to this tack by as much (lifted on this one).
-    static func paysToTackOnWind(windSpeed: Double, factor: Double, lean: Double, threshold: Double) -> Bool {
-        let gain = (1 - factor) * FleetTactics.shadowCost * FleetTactics.shadowHeld
+    /// `shadowHeld`: the seconds she reckons she holds the boat there (`Tactics.shadowHeld`, #337: longer the more
+    /// combative she is); today's `FleetTactics.shadowHeld` by default.
+    static func paysToTackOnWind(windSpeed: Double, factor: Double, lean: Double, threshold: Double,
+                                 shadowHeld: Double = FleetTactics.shadowHeld) -> Bool {
+        let gain = (1 - factor) * FleetTactics.shadowCost * shadowHeld
         let plan = min(max(1 - lean / threshold, 0), 2)
         return gain >= tackCost(windSpeed: windSpeed) * plan
     }

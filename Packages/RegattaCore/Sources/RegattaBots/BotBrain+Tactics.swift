@@ -82,6 +82,42 @@ struct Tactics: Sendable, Equatable {
     /// How well she times cover and lee-bow, 0…1 (`BotWeaknesses.tacticalQuality`, #223): she covers a boat within
     /// this share of `BotBrain.coverRange` (and more of it the better she is); #234's fleet tactics read it too.
     var tacticalQuality = 1.0
+    /// #337: the engagement that scales how hard she plays each fleet tactic (`BotBrain.FleetTactics.EngagementScale`):
+    /// a live bot's own (`engagement`); nil pins today's values: the profiles (the tactician among them, though fully
+    /// engaged) and the cautious bot.
+    var tacticEngagement: Double?
+    /// #337: the same for how she fights for her spot before her start (`FleetTactics.startHoldsGroundScale`,
+    /// `startLuffEngagement`): a live bot's own; nil pins today's start.
+    var startEngagement: Double?
+
+    typealias FleetTactics = BotBrain.FleetTactics
+    /// Seconds after which it's too late to cover a boat that tacked away (`FleetTactics.coverLateScale`).
+    var coverLate: Double { tacticEngagement.map { FleetTactics.coverLateScale.at($0) } ?? FleetTactics.coverLate }
+    /// The lift on her cover range (`FleetTactics.coverRangeLiftScale`).
+    var coverRangeLift: Double { tacticEngagement.map { FleetTactics.coverRangeLiftScale.at($0) } ?? 1 }
+    /// The header, times her threshold, that tacks her out of her lane (`FleetTactics.laneHeaderScale`).
+    var laneHeader: Double { tacticEngagement.map { FleetTactics.laneHeaderScale.at($0) } ?? FleetTactics.laneHeader }
+    /// The seconds she reckons she holds a boat in her shadow (`FleetTactics.shadowHeldScale`).
+    var shadowHeld: Double { tacticEngagement.map { FleetTactics.shadowHeldScale.at($0) } ?? FleetTactics.shadowHeld }
+    /// Whether a lee-bow tacks her inside her tack interval `sinceTack` seconds after her last tack (#329,
+    /// `FleetTactics.leeBowInsideTackInterval`): pinned, as before; scaled, only from `leeBowExemptEngagement` and
+    /// `leeBowMinSeparation` or more after her last tack.
+    func leeBowExempt(sinceTack: Double) -> Bool {
+        guard FleetTactics.leeBowInsideTackInterval, leeBows else { return false }
+        guard let e = tacticEngagement else { return true }
+        return e >= FleetTactics.leeBowExemptEngagement && sinceTack >= FleetTactics.leeBowMinSeparation
+    }
+    /// Seconds before the gun from which, luffed to her floor as the windward boat and still not clear, she holds her
+    /// ground rather than drop astern (`FleetTactics.startHoldsGroundScale`).
+    var startHoldsGroundSeconds: Double {
+        startEngagement.map { FleetTactics.startHoldsGroundScale.at($0) } ?? BotBrain.startLuffEaseSeconds
+    }
+    /// Seconds before the gun until which she luffs a windward boat as the right-of-way boat before her start
+    /// (`FleetTactics.startLuffEngagement`, `startLuffUntilScale`); nil: she never does, holding her course (#101).
+    var startLuffUntil: Double? {
+        guard let e = startEngagement, e >= FleetTactics.startLuffEngagement else { return nil }
+        return FleetTactics.startLuffUntilScale.at(e)
+    }
 
     init(profile: BotProfile?, skill: Double, style: BotStyle? = nil, weaknesses: BotWeaknesses? = nil) {
         switch profile {
@@ -103,6 +139,9 @@ struct Tactics: Sendable, Equatable {
             holdsLane = engagement >= BotBrain.FleetTactics.laneEngagement
             leeBows = engagement >= BotBrain.FleetTactics.leeBowEngagement
             tacksOnWind = engagement >= BotBrain.FleetTactics.tackOnWindEngagement
+            // #337: and how hard she plays each, and fights for her spot before her start.
+            tacticEngagement = engagement
+            startEngagement = engagement
             rampToTheTactician(skill: skill)
         case .baseline:
             // The groove only: headers past a threshold, the corridor, and nothing off the groove.
@@ -298,6 +337,8 @@ extension BotBrain {
     /// crossing, not a tack of her choosing.
     mutating func upwindTack(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack,
                              overstood: (Tack) -> Bool = { _ in false }) -> Tack {
+        // Only a play noted in this evaluation counts for her tap (`BotDecision.play`).
+        lastFleetPlay = nil
         guard let threshold = tactics.headerThreshold else { return tack }
         let direction = (senses.direction ?? b.windDirection) + senses.directionRate * tactics.anticipation
         let shift = wrapAngle(direction - view.course.axis)
@@ -305,9 +346,10 @@ extension BotBrain {
         var headed = tack == .starboard ? -shift : shift
         let shifted = headed
         guard view.time - lastTackTime > tactics.tackInterval else {
-            guard FleetTactics.leeBowInsideTackInterval, tactics.leeBows,
+            guard tactics.leeBowExempt(sinceTack: view.time - lastTackTime),
                   let play = fleetPlay(b, view, planned: tack, headed: shifted, lean: shifted, threshold: threshold,
                                        leeBowOnly: true, overstood: overstood), play.play == .leeBow else { return tack }
+            notePlay(play.play, view)
             return tack.other
         }
         // Goes to the pressure (`Tactics.goesToThePressure`): with the shift neutral, nothing in it to play, the
@@ -319,10 +361,13 @@ extension BotBrain {
         if tactics.seeksClearAir && tack == b.tack && b.shadow < Self.dirtyAir { headed += Self.dirtyAirWeight }
         if let play = fleetPlay(b, view, planned: tack, headed: shifted, lean: headed, threshold: threshold,
                                 overstood: overstood) {
-            guard play.play == .holdLane else { return tack.other }
+            guard play.play == .holdLane else {
+                notePlay(play.play, view)
+                return tack.other
+            }
             // Holding her lane, only a big header tacks her, and like any fleet tactic's tack, only when she can tap
             // it now and onto a board she hasn't overstood.
-            let tacks = shifted > threshold * FleetTactics.laneHeader && !overstood(tack.other) && canTap(b, view)
+            let tacks = shifted > threshold * tactics.laneHeader && !overstood(tack.other) && canTap(b, view)
             return tacks ? tack.other : tack
         }
         if tactics.covers, let rival = coverTarget(b, view), rival.tack != tack, headed > -threshold {
@@ -330,6 +375,12 @@ extension BotBrain {
         }
         let bar = tactics.goesToThePressure && neutral && pressure > threshold / 2 ? threshold / 2 : threshold
         return headed > bar ? tack.other : tack
+    }
+
+    /// Notes the fleet tactic that turns her plan to the other tack now (`lastFleetPlay`, #337).
+    private mutating func notePlay(_ kind: FleetPlay.Kind, _ view: SeatView) {
+        lastFleetPlay = kind
+        lastFleetPlayTime = view.time
     }
 
     /// Her wind shadow factor under which she is in another boat's dirty air.

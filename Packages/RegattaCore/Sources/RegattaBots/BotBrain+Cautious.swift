@@ -112,7 +112,8 @@ extension BotBrain {
     /// `guardHorizon` seconds, the boats around her going on as she saw them going (turning and slowing as they were
     /// since her last decision), and keeps the one she chose unless it brings her within `guardLengths` of a boat she
     /// would have to keep clear of then (rules 10–13 on the boats as they would be: her own tack and tack change
-    /// included), of one she owes mark-room to (rule 18, #93), or of one she would have just gained the right of way
+    /// included; racing, a boat keeping clear of her under rule 21, taking a penalty or returning, keeps clear of her all
+    /// through her look, as her view has it, `Race.rightsOfWay(of:)`, #337), of one she owes mark-room to (rule 18, #93), or of one she would have just gained the right of way
     /// over (rule 15). Then she holds the helm that keeps furthest from them, nearest the one she chose; as the
     /// right-of-way boat never one turning towards a boat keeping clear of her (#101). Nil when she keeps the one she
     /// chose.
@@ -165,6 +166,13 @@ extension BotBrain {
             other.rightOfWay?.keepClear == other.seat
                 && !b.markRoom.contains(where: { $0.owing == view.seat && $0.entitled == other.seat })
         }
+        // Racing, a boat keeping clear of her under rule 21 (#337 review) does so all through her look, as her view has it:
+        // rules 10–13 on the boats as they would be don't decide it. Before her start she keeps clear of every boat
+        // (`keepsClearOfEveryBoat`, `startKeepClear`), one under rule 21 too, and her look keeps clear of it as before:
+        // read as keeping clear of her there, the bot taking a seat over before the gun (seed 8 of
+        // `aBotTakingOverBeforeTheGunStarts`, cautious) sailed on among penalised boats past the pin end and started 66 s
+        // after the gun (`cautiousStartSeconds` 60).
+        let underRule21 = near.map { b.status == .racing && $0.rightOfWay?.rule.isRule21 == true }
         let env = BoatDynamics.Environment(windDirection: b.windDirection, windSpeed: b.polarWindSpeed,
                                            shadow: b.speedShadow)
         let closeHauled = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).twa - deg2rad(5)
@@ -199,7 +207,7 @@ extension BotBrain {
                     let overlapped = !Rules.isClearAstern(me, of: other, hull: hull)
                         && !Rules.isClearAstern(other, of: me, hull: hull)
                     let right = Rules.rightOfWay(me, other, overlapped: overlapped, hull: hull)?.keepClear == other.id
-                    if right && holdsRight[i] && !ofAll { continue }
+                    if (right || underRule21[i]) && holdsRight[i] && !ofAll { continue }
                     worst = clear - distance
                 }
             }

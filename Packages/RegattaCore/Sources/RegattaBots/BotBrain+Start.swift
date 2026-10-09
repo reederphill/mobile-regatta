@@ -67,6 +67,9 @@ extension BotBrain {
     static let setupSeconds = 10.0
     /// Metres within which another boat is one she may have to keep clear of before her start.
     static let keepClearRange = 30.0
+    /// Hull lengths, centre to centre: before her start she gives a boat turning a penalty or returning (rule 21) this
+    /// much berth, though it keeps clear of her (`startKeepClear`, #337 round 4, untuned).
+    static let penalisedBerthLengths = 2.5
     /// Hull lengths, centre to centre, she keeps from a boat she must keep clear of before her start.
     static let keepClearDistance = 1.3
     /// How much further than that a heading must pass it to keep her clear.
@@ -229,24 +232,45 @@ extension BotBrain {
     /// needs the rest of the time for the run in, two tacks and `positioningMargin`; never within two hull
     /// lengths of the pin.
     func reachableSpot(_ b: SeatView.OwnBoat, _ view: SeatView, hold: Double, arrival: Double) -> Vec2 {
+        let spot = startPoint(view.course)
+        guard view.time < 0 else { return spot }
+        let approach = spotApproach(b, view, hold: hold)
+        let spare = max(0, arrival - approach.runIn - Self.tackSeconds * 2 - Self.positioningMargin)
+        guard approach.across > approach.reach * spare else { return spot }
+        let line = view.course.startLine
+        let shifted = spot - approach.direction * (approach.across - approach.reach * spare)
+        let pinEnd = view.boatClass.hull.length * 2
+        return (shifted - line.pin.position).dot(approach.direction) < pinEnd
+            ? line.pin.position + approach.direction * pinEnd : shifted
+    }
+
+    /// Her approach to her own spot (`startPoint`) from where she is, joining it at `hold`, as `reachableSpot` and
+    /// `secondsToSpot` both reckon it: metres right of her along the start line (`direction`, pin to committee boat)
+    /// that its approach passes her depth, her reaching speed along the line (`positioningSpeed`), and her run in
+    /// close-hauled, seconds.
+    func spotApproach(_ b: SeatView.OwnBoat, _ view: SeatView, hold: Double)
+        -> (across: Double, direction: Vec2, reach: Double, runIn: Double) {
         let c = view.course
         let line = c.startLine
-        let spot = startPoint(c)
-        guard view.time < 0 else { return spot }
         let direction = (line.committee.position - line.pin.position).normalized
         let joining = Vec2.heading(b.windDirection - hold - Self.joinMargin)
         let depth = max(-line.side(b.position), 0)
         // How far right of her, along the line, her spot's approach passes her depth.
-        let across = (spot - joining * (depth / max(joining.dot(c.upwind), 0.3)) - b.position).dot(direction)
+        let across = (startPoint(c) - joining * (depth / max(joining.dot(c.upwind), 0.3)) - b.position).dot(direction)
         let tws = b.polarWindSpeed
         let polar = view.boatClass.polar
         let reach = polar.speed(twa: .pi / 2, tws: tws) * b.speedShadow * Self.positioningSpeed
         let runIn = depth / max(polar.bestUpwind(tws: tws).vmg * b.speedShadow, 0.3)
-        let spare = max(0, arrival - runIn - Self.tackSeconds * 2 - Self.positioningMargin)
-        guard across > reach * spare else { return spot }
-        let shifted = spot - direction * (across - reach * spare)
-        let pinEnd = view.boatClass.hull.length * 2
-        return (shifted - line.pin.position).dot(direction) < pinEnd ? line.pin.position + direction * pinEnd : shifted
+        return (across, direction, reach, runIn)
+    }
+
+    /// Seconds her approach to her own spot (`spotApproach`, joining it at `hold`) takes her from where she is:
+    /// reaching along the line, either way, two tacks (`tackSeconds`), her run in and `positioningMargin`. With her spot
+    /// to her right, an `arrival` later than this `reachableSpot(hold:arrival:)` keeps her spot, and earlier gives it up.
+    func secondsToSpot(_ b: SeatView.OwnBoat, _ view: SeatView, hold: Double) -> Double {
+        let approach = spotApproach(b, view, hold: hold)
+        return abs(approach.across) / max(approach.reach, 0.3) + approach.runIn + Self.tackSeconds * 2
+            + Self.positioningMargin
     }
 
     /// Too early even holding with Ease, by `early` seconds: she bears away with Ease and lets the time run.
@@ -376,7 +400,8 @@ extension BotBrain {
     static let luffLineSeconds = 6.0
     /// Seconds before the gun from which a windward boat luffed to `startLuffFloor` and still not clear no longer eases
     /// to drop astern (`Evasion.dropsAstern`): later, slowed there, she starts late. #280 measured easing to the gun
-    /// at on time 0.50 against the start gate's 0.60.
+    /// at on time 0.50 against the start gate's 0.60. A live bot's scales with her engagement (#337,
+    /// `Tactics.startHoldsGroundSeconds`): this at the fleet's typical one.
     static let startLuffEaseSeconds = 20.0
 
     /// The closest to the wind she luffs before her start (`startLuffMargin`).
@@ -414,7 +439,7 @@ extension BotBrain {
             angle = max(floor, angle - Self.startLuffStep)
         }
         return Evasion(heading: b.windDirection + side * floor, closest: floor,
-                       dropsAstern: view.time < 0 && -view.time > Self.startLuffEaseSeconds)
+                       dropsAstern: view.time < 0 && -view.time > tactics.startHoldsGroundSeconds)
     }
 
     /// Whether she lets the sheets out while she steers `heading` on starboard to keep clear or off a mark
@@ -432,20 +457,28 @@ extension BotBrain {
 
     /// Keeping clear before her start, in the crowd below the line where boats hold, wait and cross on every
     /// course: if her `desired` heading would bring a boat she must keep clear of (rule 21 over rules 10–13,
-    /// `OtherBoat.rightOfWay`) within `keepClearDistance` hull lengths over `lookahead` seconds, the heading on
+    /// `OtherBoat.rightOfWay`), or one under rule 21 within `penalisedBerthLengths` of her, within
+    /// `keepClearDistance` hull lengths over `lookahead` seconds, the heading on
     /// her own tack nearest her desired one that passes it `keepClearMargin` further off, or failing that the
     /// one that passes furthest from it. Before the gun she weighs only headings that keep her below the line
     /// with Ease (`crossesEarly`): keeping clear by luffing over it early would leave her OCS, trapped above the
     /// boats she keeps clear of.
     func startKeepClear(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double, lookahead: Double) -> Double? {
         // OCS, she keeps clear of every boat as a returning one (rule 21.1), whatever rules 10–13 would give her
-        // (`OtherBoat.rightOfWay` has only those): she is returning as soon as she heads back. The cautious bot keeps
+        // (`OtherBoat.rightOfWay` gives her own relations by those alone, `Race.rightsOfWay(of:)`): she is returning as soon as she heads back. The cautious bot keeps
         // clear of every boat before her start in any case (#104, `keepsClearOfEveryBoat`).
         let returning = b.status == .ocs || keepsClearOfEveryBoat
         // Not returning, she leaves out a boat she misjudges her encounter with (#280, `judgeEncounters`).
         let threats = view.others.filter { other in
             guard !other.isGhost, (other.position - b.position).length < Self.keepClearRange else { return false }
             if returning { return true }
+            // Rule 14 before her start: a boat under rule 21 close aboard keeps clear of her, but turning circles or
+            // running back in the crowd it can't promise to, so she gives it berth (#337 round 4). Holding on for it,
+            // as her view's right of way has it, pin-style bots working down the line from the committee end lost the
+            // pin third among the pre-start penalty turns (0.701 to 0.674 of `BotStartSuiteTests`). Racing she holds her
+            // course for it (`holdingCourse`), as round 3 has her.
+            if let right = other.rightOfWay, right.keepClear == other.seat, right.rule.isRule21,
+               (other.position - b.position).length < view.boatClass.hull.length * Self.penalisedBerthLengths { return true }
             guard let right = other.rightOfWay, right.keepClear == view.seat else { return false }
             return !misjudges(other, right.rule)
         }

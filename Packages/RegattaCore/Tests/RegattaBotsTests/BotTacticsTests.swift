@@ -245,20 +245,21 @@ import Testing
     /// A port bot (seat 0, National) beating at seat 1, a bot beating on starboard sailing her own race, from `ahead` hull
     /// lengths ahead of her and 3.5 to leeward, in seat 1's frame: what happened over `seconds`, the closest they came,
     /// and how the lee-bow's gates read at seat 0's decisions on port (`LeeBowGates`, a twin of her brain looking on).
-    /// `justTacked`: she tacked onto port a second ago, well inside her tack interval (`Tactics.tackInterval`).
+    /// `justTacked`: she tacked onto port `tackedAgo` seconds ago, well inside her tack interval (`Tactics.tackInterval`).
     static func portMeetsStarboard(seed: UInt64, ahead: Double, leeward: Double = 3.5, engagement: Double = 1,
-                                   seconds: Double = 12, justTacked: Bool = false,
+                                   seconds: Double = 12, justTacked: Bool = false, tackedAgo: Double = 1,
                                    boatClass: FileRef = RaceFiles.defaults.boatClass.ref) throws
         -> (tapped: Int?, kinds: [RaceEvent.Kind], race: Race, closest: Double, backwinded: Bool,
-            tacked: (ahead: Double, leeward: Double)?, gates: LeeBowGates) {
+            tacked: (ahead: Double, leeward: Double)?, gates: LeeBowGates, from: Int) {
         let scene = Scene(seed: seed, boatClass: boatClass)
         let port = scene.offStarboardBoat(at: scene.centre, ahead: ahead, leeward: leeward)
         try scene.place([scene.beating(.port, at: port), scene.beating(.starboard, at: scene.centre)])
         var closest = Double.infinity
         var backwinded = false
         var tacked: (ahead: Double, leeward: Double)?
+        let from = scene.race.tick
         var pilot = Self.pilot(seat: 0, scene.race, engagement: engagement, planned: .port)
-        if justTacked { pilot.brain.lastTackTime = scene.race.time - 1 }
+        if justTacked { pilot.brain.lastTackTime = scene.race.time - tackedAgo }
         var looking = pilot.brain
         var gates = LeeBowGates()
         let sailed = Self.sail(scene.race, pilot, seconds: seconds, others: [Self.victim(scene.race)]) { race in
@@ -282,7 +283,7 @@ import Testing
             gates.landedCrossing = gates.landedCrossing || (crosses && lands)
             gates.landedNotCrossing = gates.landedNotCrossing || (!crosses && lands)
         }
-        return (sailed.tapped, sailed.kinds, scene.race, closest, backwinded, tacked, gates)
+        return (sailed.tapped, sailed.kinds, scene.race, closest, backwinded, tacked, gates, from)
     }
 
     /// #234 acceptance (the owner, 2026-09-29: "lee-bow when she can just cross, duck when she can't"): a National port
@@ -346,15 +347,42 @@ import Testing
     /// a second after a tack (`crossingAhead`), she holds port past the chance. From 5.5 L ahead on skiff@6 (#377).
     @Test func leeBowAnswersInsideTheTackInterval() throws {
         #expect(BotBrain.FleetTactics.leeBowInsideTackInterval)
+        let separation = BotBrain.FleetTactics.leeBowMinSeparation
         for seed in Self.fleetSeeds {
-            let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true)
+            // #337: a combative bot, her last tack `leeBowMinSeparation` ago, inside her interval.
+            let lee = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true, tackedAgo: separation)
             #expect(BotConductTests.calls(lee.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(lee.kinds))")
             #expect(lee.tapped != nil, "seed \(seed): she didn't lee-bow inside her tack interval")
             #expect(lee.tacked != nil && lee.backwinded, "seed \(seed): the starboard boat sat in her backwind")
             #expect(lee.closest > 1, "seed \(seed): she came within \(lee.closest) L")
 
+            // Her tack on a boat's wind is hers to choose: it waits for the interval. The same scene a second after a
+            // tack, she holds port past the chance; outside her interval she takes it (the positive control, #338).
             let onWind = try Self.crossingAhead(seed: seed, together: true, seconds: 8, justTacked: true)
             #expect(onWind.tapped == nil, "seed \(seed): she tacked on her wind inside her tack interval")
+            let free = try Self.crossingAhead(seed: seed, together: true, seconds: 8)
+            #expect(free.tapped != nil, "seed \(seed): outside her interval she tacks on her wind")
+        }
+    }
+
+    /// #337 acceptance (lee-bow): inside her tack interval only a combative bot lee-bows
+    /// (`FleetTactics.leeBowExemptEngagement`); at the lee-bow's floor (`FleetTactics.leeBowEngagement`) she waits
+    /// out the interval, as for any tack of her choosing. And not right after a tack (`leeBowMinSeparation`, #338
+    /// review): a second after one, a combative bot holds port past the separation.
+    @Test func leeBowsInsideTheIntervalOnlyCombative() throws {
+        let separation = BotBrain.FleetTactics.leeBowMinSeparation
+        for seed in Self.fleetSeeds {
+            let combative = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true, tackedAgo: separation)
+            #expect(combative.tapped != nil, "seed \(seed): combative, she lee-bows inside her interval")
+            let floor = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, engagement: BotBrain.FleetTactics.leeBowEngagement,
+                                                   seconds: 8, justTacked: true, tackedAgo: separation)
+            #expect(floor.tapped == nil, "seed \(seed): at the floor, she waits out her interval")
+            // Outside her interval the floor bot lee-bows the same crossing (the positive control).
+            let free = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, engagement: BotBrain.FleetTactics.leeBowEngagement)
+            #expect(free.tapped != nil, "seed \(seed): at the floor, outside her interval, she lee-bows")
+            let back = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true, tackedAgo: 1)
+            let early = back.tapped.map { Double($0 - back.from) / Double(Race.tickRate) < separation - 1 } ?? false
+            #expect(!early, "seed \(seed): a second after a tack, she tacked again inside the separation")
         }
     }
 
@@ -450,7 +478,8 @@ import Testing
     /// windward, `LeeBowTests`' geometry).
     @Test func holdsItsLane() throws {
         for seed in Self.fleetSeeds {
-            func tack(header: Double, neighbour: Bool, close: Bool = false, overstood: Bool = false) throws -> Tack {
+            func tack(header: Double, neighbour: Bool, close: Bool = false, overstood: Bool = false,
+                      engagement: Double = 0.5) throws -> Tack {
                 let scene = Scene(seed: seed)
                 var behind = close ? scene.offStarboardBoat(at: scene.centre, ahead: -1.6, leeward: -0.6)
                     : scene.offStarboardBoat(at: scene.centre, ahead: -1.5, leeward: -2.5)
@@ -461,7 +490,8 @@ import Testing
                 view.puffs = []
                 view.pressure = nil
                 #expect(view.own.shadow == 1, "seed \(seed): she's in clear air")
-                var brain = Self.pilot(seat: 0, scene.race, planned: .starboard).brain
+                // #337: today's lane header, at the fleet's typical engagement (`holdsLaneHarderTheMoreCombative`).
+                var brain = Self.pilot(seat: 0, scene.race, engagement: engagement, planned: .starboard).brain
                 brain.observe(view.own, view)
                 let threshold = try #require(brain.tactics.headerThreshold)
                 // Headed on starboard: backed.
@@ -476,7 +506,103 @@ import Testing
                     "seed \(seed): but not onto a board she has overstood")
             #expect(try tack(header: 2.5, neighbour: true, close: true) == .starboard,
                     "seed \(seed): nor with a boat too close to tack clear of")
+            // #337: how hard she holds it is her engagement (`FleetTactics.laneHeaderScale`): a combative bot holds
+            // against the header that tacks the fleet's typical one, and only a bigger one tacks her; a mild one (the
+            // lane's floor) tacks on a header the typical one holds against.
+            #expect(try tack(header: 2.5, neighbour: true, engagement: 1) == .starboard,
+                    "seed \(seed): combative, she holds her lane against 2.5 times her threshold")
+            #expect(try tack(header: 3.5, neighbour: true, engagement: 1) == .port, "seed \(seed): not against 3.5")
+            #expect(try tack(header: 1.75, neighbour: true) == .starboard, "seed \(seed): typical, she holds against 1.75")
+            #expect(try tack(header: 1.75, neighbour: true, engagement: BotBrain.FleetTactics.laneEngagement) == .port,
+                    "seed \(seed): mild, 1.75 tacks her")
         }
+    }
+
+    // MARK: - How hard she plays (#337)
+
+    /// #337 acceptance (cover): at the same scene, a boat 1.5 lengths behind her and 2.5 abeam that she saw tack onto
+    /// port, a bot at engagement 1 still covers it 6 s on; one at the cover's floor (`FleetTactics.coverEngagement`)
+    /// has let it go (`FleetTactics.coverLateScale`), though she covers it as soon as she's seen it tack.
+    @Test func coversLaterTheMoreCombative() throws {
+        for seed in Self.fleetSeeds {
+            func target(engagement: Double, tackedAgo: Double) throws -> Int? {
+                let scene = Scene(seed: seed)
+                let c = scene.race.course
+                let behind = scene.centre - c.upwind * (1.5 * scene.length) + c.right * (2.5 * scene.length)
+                try scene.place([scene.beating(.starboard, at: scene.centre), scene.beating(.port, at: behind)])
+                let view = scene.race.seatView(for: 0)
+                var brain = Self.pilot(seat: 0, scene.race, skill: 1, engagement: engagement, planned: .starboard).brain
+                brain.observe(view.own, view)
+                brain.fleet.bySeat[1] = .init(tack: .port, tackedAt: view.time - tackedAgo, timing: 0)
+                #expect(brain.tactics.coversTackers)
+                return brain.coverTackTarget(view.own, view)
+            }
+            let floor = BotBrain.FleetTactics.coverEngagement
+            #expect(try target(engagement: 1, tackedAgo: 6) == 1, "seed \(seed): combative, she covers 6 s on")
+            #expect(try target(engagement: 0.5, tackedAgo: 6) == 1, "seed \(seed): typical, within today's 8 s")
+            #expect(try target(engagement: floor, tackedAgo: 6) == nil, "seed \(seed): mild, too late")
+            #expect(try target(engagement: floor, tackedAgo: 2.5) == 1, "seed \(seed): mild, she covers it fresh")
+            #expect(try target(engagement: 0.5, tackedAgo: 10) == nil, "seed \(seed): typical, 10 s is too late")
+            #expect(try target(engagement: 1, tackedAgo: 10) == 1, "seed \(seed): combative, not yet")
+        }
+    }
+
+    /// #337 acceptance (tack on wind): the same tack, leaving the boat at the same shadow factor in the same wind, pays
+    /// a bot at engagement 1 (she reckons she holds the boat there longer, `FleetTactics.shadowHeldScale`) and not one
+    /// at the tactic's floor (`FleetTactics.tackOnWindEngagement`), nor the fleet's typical one, whose reckoning is
+    /// today's (`tackOnWindPayoffBinds`).
+    @Test func tackOnWindPaysTheCombativeSooner() {
+        func pays(_ engagement: Double) -> Bool {
+            var style = BotConductTests.skill1
+            style.engagement = engagement
+            let tactics = Tactics(profile: nil, skill: 0.9, style: style)
+            #expect(tactics.tacksOnWind)
+            return BotBrain.paysToTackOnWind(windSpeed: 10 * 0.514444, factor: 0.72, lean: 0, threshold: deg2rad(4),
+                                             shadowHeld: tactics.shadowHeld)
+        }
+        #expect(pays(1))
+        #expect(!pays(BotBrain.FleetTactics.tackOnWindEngagement))
+        #expect(!BotBrain.paysToTackOnWind(windSpeed: 10 * 0.514444, factor: 0.72, lean: 0, threshold: deg2rad(4)))
+    }
+
+    /// #337: every scale gives today's (#338's) value at the fleet's typical engagement, and the profiles (the tactician
+    /// fully engaged among them) and the cautious bot pin today's, whatever their engagement; the ramp to the tactician
+    /// (#366) leaves a live bot's scaled values hers, and her cover hers (`covers` false).
+    @Test func engagementScalesArePinnedAtTheMiddle() {
+        typealias F = BotBrain.FleetTactics
+        let typical = Tactics(profile: nil, skill: 0.9, style: BotConductTests.skill1)
+        #expect(typical.tacticEngagement == 0.5 && typical.startEngagement == 0.5)
+        #expect(typical.coverLate == F.coverLate && typical.coverRangeLift == 1 && typical.laneHeader == F.laneHeader)
+        #expect(typical.shadowHeld == F.shadowHeld && typical.startHoldsGroundSeconds == BotBrain.startLuffEaseSeconds)
+        #expect(typical.startLuffUntil == nil)
+        for scale in [F.coverLateScale, F.coverRangeLiftScale, F.laneHeaderScale, F.shadowHeldScale,
+                      F.startHoldsGroundScale, F.startLuffUntilScale] {
+            #expect(scale.at(0) == scale.mild && scale.at(F.engagementFloor) == scale.mild)
+            #expect(scale.at(0.5) == scale.middle && scale.at(1) == scale.combative)
+        }
+        // The owner's spread (2026-10-08): cover lateness and the start's hold, floor / middle / 1.
+        #expect([F.coverLateScale.mild, F.coverLateScale.middle, F.coverLateScale.combative] == [3, 8, 12])
+        #expect([F.startHoldsGroundScale.mild, F.startHoldsGroundScale.middle, F.startHoldsGroundScale.combative] == [5, 20, 30])
+        for profile in BotProfile.allCases {
+            let tactics = Tactics(profile: profile, skill: 1)
+            #expect(tactics.tacticEngagement == nil && tactics.startEngagement == nil, "\(profile)")
+            #expect(tactics.coverLate == F.coverLate && tactics.laneHeader == F.laneHeader
+                    && tactics.shadowHeld == F.shadowHeld && tactics.startHoldsGroundSeconds == BotBrain.startLuffEaseSeconds && tactics.startLuffUntil == nil, "\(profile)")
+        }
+        // The tactician lee-bows inside her tack interval as before, right after a tack.
+        #expect(Tactics(profile: .tactician, skill: 1).leeBowExempt(sinceTack: 0))
+        var rng = SplitMix64(seed: 7)
+        let cautious = BotBrain(style: BotBrain.Caution.style(skill: 0.9, rng: &rng), seed: 7,
+                                weaknesses: BotBrain.Caution.weaknesses(skill: 0.9), caution: .standard)
+        #expect(cautious.tactics.tacticEngagement == nil && cautious.tactics.startEngagement == nil)
+        #expect(!cautious.tactics.coversTackers && !cautious.tactics.leeBows && !cautious.tactics.tacksOnWind
+                && !cautious.tactics.holdsLane && cautious.tactics.startLuffUntil == nil)
+        // A National live bot at engagement 1, at the top of the band: the tactician's tactics, her own cover and scales.
+        var combative = BotConductTests.skill1
+        combative.engagement = 1
+        let national = Tactics(profile: nil, skill: BotTier.national.skillBand.upperBound, style: combative)
+        #expect(!national.covers && national.coversTackers && national.coverLate == 12 && national.laneHeader == 3)
+        #expect(national.startLuffUntil == 5 && national.startHoldsGroundSeconds == 30)
     }
 
     /// #234 acceptance (#223: "targets by tactical value only, blind to human or bot"): a port bot meeting a starboard
@@ -531,6 +657,8 @@ import Testing
         tactics.tacticalQuality = live.tacticalQuality
         tactics.puffRange = live.puffRange
         tactics.covers = live.covers
+        tactics.tacticEngagement = live.tacticEngagement
+        tactics.startEngagement = live.startEngagement
         return tactics
     }
 
