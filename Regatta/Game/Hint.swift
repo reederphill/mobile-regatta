@@ -17,6 +17,7 @@ enum HintID: String, CaseIterable, Codable, Sendable {
     case ruleCall = "rule_call"
     case markZone = "mark_zone"
     case lettingGo = "letting_go"
+    case centredRudder = "centred_rudder"
     case grooveTick = "groove_tick"
 }
 
@@ -55,6 +56,8 @@ enum HintLearning: Equatable, Sendable {
     case rounded
     /// The autohelm took over: a groove snap, or the rudder let go long enough for it to hold (letting go).
     case autohelmHeld
+    /// Its one showing: a line that teaches by being read (the centred-rudder hint, #436).
+    case shown
 }
 
 /// A hint's line in each steering scheme: the same words unless the scheme changes them.
@@ -124,6 +127,8 @@ enum HintCatalogue {
              isPlaceholderCopy: true, learning: .never, trigger: HintTriggers.greenGlow),
         Hint(id: .lettingGo, delivery: .engine, text: HintText("Let go and she holds her angle to the wind"),
              isPlaceholderCopy: true, learning: .autohelmHeld, trigger: HintTriggers.lettingGo),
+        Hint(id: .centredRudder, delivery: .engine, text: HintText("A centred rudder sails straight on."),
+             isPlaceholderCopy: true, learning: .shown, trigger: HintTriggers.centredRudder),
         Hint(id: .grooveTick, delivery: .engine, text: HintText("The tick on the vane is her best angle."),
              isPlaceholderCopy: true, learning: .never, trigger: HintTriggers.grooveTick),
         Hint(id: .windShift, delivery: .engine, text: HintText("A shift turns your boat. The vane shows the wind."),

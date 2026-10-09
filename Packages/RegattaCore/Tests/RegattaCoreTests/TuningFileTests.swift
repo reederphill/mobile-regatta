@@ -180,6 +180,27 @@ import Testing
         #expect(TunedCopy.numbers(at: "/columns", in: Data(#"{"columns": [0, 1.5, 3]}"#.utf8)) == [0, 1.5, 3])
     }
 
+    /// A flag (#436, the Auto tiller): read as 1 or 0 from a JSON bool, and readied for `patched` without changing what
+    /// the file sails: a bool becomes 1 or 0, and a member the file leaves out of an object it has is added as its
+    /// absent value, with the schema raised to the first that reads it. A number there, or no object, changes nothing.
+    @Test func flagsAreReadiedForTuning() throws {
+        let text = #"{"schemaVersion": 3, "a": {\#n  "b": 1,\#n  "t": true\#n}, "f": false, "e": {}}"#
+        let data = Data(text.utf8)
+        #expect(TunedCopy.flag(at: "/a/t", in: data) == 1 && TunedCopy.flag(at: "/f", in: data) == 0)
+        #expect(TunedCopy.flag(at: "/a/b", in: data) == 1 && TunedCopy.flag(at: "/a/x", in: data) == nil)
+        func readied(_ pointer: String) -> String {
+            String(decoding: TunedCopy.readyingFlag(at: pointer, in: data, absent: 1, schemaVersion: 4), as: UTF8.self)
+        }
+        #expect(readied("/a/t") == text.replacingOccurrences(of: "true", with: "1"))
+        #expect(readied("/f") == text.replacingOccurrences(of: "false", with: "0"))
+        #expect(readied("/a/b") == text && readied("/x/y") == text)
+        #expect(readied("/a/x") == #"{"schemaVersion": 4, "a": {\#n  "b": 1,\#n  "t": true,\#n  "x": 1\#n}, "f": false, "e": {}}"#)
+        #expect(readied("/e/x") == #"{"schemaVersion": 4, "a": {\#n  "b": 1,\#n  "t": true\#n}, "f": false, "e": {\#n  "x": 1\#n}}"#)
+        // Readied, the flag tunes like any number.
+        let tuned = try TunedCopy.patched(Data(readied("/a/x").utf8), values: ["/a/x": 0])
+        #expect(TunedCopy.number(at: "/a/x", in: tuned) == 0)
+    }
+
     /// The polar's upwind-angle sliders: warping one column moves its groove to about the angle asked for,
     /// keeps its best VMG, and leaves the other columns and the rows from 90° on alone.
     @Test func upwindAngleWarpMovesTheGroove() throws {

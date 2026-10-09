@@ -379,6 +379,36 @@ import RegattaCore
         model.delete(saved)
         #expect(model.savedTunings.isEmpty)
     }
+
+    /// #436: the Steering group, first, holds the Auto tiller, a 0/1 slider on the class's
+    /// `steering.autohelm.holdsWhenCentred` (#434). The default class leaves it out, so it reads 1 (on); 0 sails a
+    /// tuned copy from the next race whose autohelm doesn't hold a centred rudder, every boat's, and exports as a
+    /// schema-4 next version; back to 1 is untuned again.
+    @Test func autoTillerSliderTargetsClassValue() throws {
+        let (model, root) = model()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let group = try #require(model.groups.first)
+        let tiller = try slider("boatClass:/steering/autohelm/holdsWhenCentred", in: model)
+        #expect(group.id == "steering" && group.title == "Steering" && group.applies == .nextRace)
+        #expect(group.sliders.map(\.id) == [tiller.id] && tiller.range == 0...1 && tiller.step == 1)
+        #expect(model.fileValue(tiller) == 1 && model.value(tiller) == 1 && !model.tuning.isTuned)
+
+        model.set(tiller, to: 0)
+        #expect(model.value(tiller) == 0 && model.isChanged(tiller) && model.problems.isEmpty)
+        var config = Self.config
+        config.files = model.practiceFiles()
+        #expect(config.files.boatClass.tune == 1)
+        let session = GameSession(config: config)
+        #expect(try !#require(session.driver as? PracticeDriver).boatClass.steering.autohelm.holdsWhenCentred)
+
+        let urls = try model.exportFiles()
+        let skiff = try BoatClassFile(data: Data(contentsOf: urls[0]))
+        #expect(skiff.header.schemaVersion == 4 && !skiff.content.steering.autohelm.holdsWhenCentred)
+        #expect(skiff.header.placeholders.last == "/steering/autohelm/holdsWhenCentred")
+
+        model.set(tiller, to: 1)
+        #expect(!model.tuning.isTuned && model.practiceFiles().boatClass.tune == nil)
+    }
 }
 
 /// The panel is compiled only under the flag the store build config leaves out (#232, #170): `DEBUG`. The

@@ -22,13 +22,14 @@ import Testing
 
     // MARK: Catalogue
 
-    @Test func theCatalogueHasFourteenRowsWithUniqueIds() {
-        #expect(HintCatalogue.all.count == 14)
+    @Test func theCatalogueHasFifteenRowsWithUniqueIds() {
+        #expect(HintCatalogue.all.count == 15)
         #expect(Set(HintCatalogue.all.map(\.id)) == Set(HintID.allCases))
         #expect(HintCatalogue.all.map(\.id).count == HintID.allCases.count)
-        // OCS and the first rule call are the presenter's notices (ruling 1); the engine's twelve are #171's lines.
+        // OCS and the first rule call are the presenter's notices (ruling 1); the engine's thirteen are #171's lines
+        // (the centred-rudder hint, #436, in letting go's place when the class's autohelm doesn't hold).
         #expect(HintCatalogue.all.filter { $0.delivery == .presenter }.map(\.id) == [.ocs, .ruleCall])
-        #expect(HintCatalogue.engine.count == 12)
+        #expect(HintCatalogue.engine.count == 13)
         #expect(HintCatalogue.engine.first?.id == .raceStart)
     }
 
@@ -46,6 +47,7 @@ import Testing
         #expect(start.halves != start.tiller)
         #expect(start.halves.contains("Tiller is in Settings") && start.tiller.contains("Settings"))
         #expect(HintCatalogue.hint(.lettingGo).text.halves == "Let go and she holds her angle to the wind")
+        #expect(HintCatalogue.hint(.centredRudder).text.halves == "A centred rudder sails straight on.")
     }
 
     @Test func progressKeysAreUnderTheHintPrefixApartFromPlainWords() {
@@ -95,6 +97,52 @@ import Testing
         behind.raceTime = -30
         behind.steeringSeconds = 30
         #expect(fires(.lettingGo, behind) == nil)
+    }
+
+    /// #436: on a class whose autohelm doesn't hold a centred rudder, the centred-rudder hint takes letting go's
+    /// place, on its timing (sooner in the first race, only once you've steered without a break, after the gun);
+    /// with the autohelm holding, letting go shows and it never does. It points at the vane, shows once a race and
+    /// retires as it shows. A real race's snapshot reads the class's setting.
+    @Test func centredRudderHintOnlyWithAutohelmOff() throws {
+        func hand(_ edit: (inout HintSnapshot) -> Void) -> HintSnapshot {
+            racing { $0.autohelmHolds = false; edit(&$0) }
+        }
+        #expect(fires(.centredRudder, hand { $0.steeringSeconds = 5.5; $0.isFirstRace = true })?.leader == .vane)
+        #expect(fires(.centredRudder, hand { $0.steeringSeconds = 5.5 }) == nil, "not before about 20 s after the first race")
+        #expect(fires(.centredRudder, hand { $0.steeringSeconds = 21 }) != nil)
+        #expect(fires(.centredRudder, hand { $0.raceTime = 120; $0.racingSeconds = 120; $0.isFirstRace = true }) == nil,
+                "never without steering")
+        #expect(fires(.centredRudder, hand { $0.raceTime = -30; $0.steeringSeconds = 30; $0.isFirstRace = true }) == nil)
+        #expect(fires(.lettingGo, hand { $0.steeringSeconds = 21; $0.isFirstRace = true }) == nil, "letting go is wrong then")
+        // The autohelm holding: letting go, never the centred rudder.
+        let held = racing { $0.steeringSeconds = 21; $0.isFirstRace = true }
+        #expect(fires(.centredRudder, held) == nil && fires(.lettingGo, held) != nil)
+        let row = HintCatalogue.hint(.centredRudder)
+        #expect(row.learning == .shown && HintEngine.oncePerRace.contains(.centredRudder))
+
+        func snapshot(_ files: PracticeFiles) -> HintSnapshot {
+            var config = RaceConfig(opponents: 1, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+            config.files = files
+            return HintSnapshot(world: PracticeDriver(config: config).renderWorld, observations: HintObservations(),
+                                showsLaylines: false, isFirstRace: true, lettingGoRetired: false, tuning: t)
+        }
+        #expect(snapshot(.defaults).autohelmHolds)
+        #expect(try !snapshot(Self.handSteeredFiles()).autohelmHolds)
+    }
+
+    /// Practice files sailing the default class with its autohelm off (#434's `holdsWhenCentred` 0), as the tuning
+    /// panel's Auto tiller makes them (#436).
+    static func handSteeredFiles() throws -> PracticeFiles {
+        let pointer = "/steering/autohelm/holdsWhenCentred"
+        let key = RaceFiles.defaults.boatClass.ref.key
+        let base = try #require(try BoatClassFile.bundledData(id: key.id, version: key.version))
+        let readied = TunedCopy.readyingFlag(at: pointer, in: base, absent: 1, schemaVersion: 4)
+        let tuned = try TunedCopy.make(BoatClass.self, base: readied, values: [pointer: 0], tune: 1)
+        var files = PracticeFiles.defaults
+        try files.catalog.boatClasses.add(tuned.file)
+        files.boatClass = tuned.file.ref
+        files.tunedFiles[tuned.file.ref] = tuned.data
+        return files
     }
 
     @Test func grooveTickFollowsLettingGo() {

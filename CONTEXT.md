@@ -416,7 +416,7 @@ _Avoid_: autopilot, lock, helm (to helm is what a player does)
 The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. The autohelm snaps to it when let go close to it and follows it as the wind strength changes; with the autohelm off (ADR 0011) it is the angle to steer to by hand.
 
 **Groove tick**:
-A tick on the wind vane at the groove on the boat's tack. The vane locks to it while the autohelm holds the groove; a pinch or foot shows as a short arc from it to the angle held. With the autohelm off the arc shows only during a tap until [#436](https://github.com/reederphill/mobile-regatta/issues/436).
+A tick on the wind vane at the groove on the boat's tack. The vane locks to it while the autohelm holds the groove; a pinch or foot shows as a short arc from it to the angle held. With the autohelm off she steers by hand ([#436](https://github.com/reederphill/mobile-regatta/issues/436)): the vane locks to the tick when she sails within the lock angle of the groove, and the arc runs from it to her own angle, as the sail's pinch/foot shape does.
 
 **Tack cost**:
 What a tack loses against sailing on: the distance made good upwind, in hull lengths, over the tack and the speed she takes to get back. About a hull length from close-hauled with the autohelm sailing the tap; it decides which shifts are worth tacking on.

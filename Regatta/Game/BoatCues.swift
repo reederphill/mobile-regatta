@@ -12,9 +12,10 @@ import RegattaCore
 /// - The tick is the groove on her boom's side: the autohelm's (`Autohelm.Reading.grooveAngle`), or while you hand
 ///   steer the groove of the wind she's in (upwind forward of the beam, downwind abaft it), to steer to.
 /// - While the autohelm holds the groove and she sails within `BoatStyle.vaneLockDegrees` of it, the vane locks
-///   to the tick.
+///   to the tick; and so it does steering by hand on a class whose autohelm doesn't hold (`HandSteering`, #436).
 /// - While it holds an angle off the groove (a pinch or a foot) by more than `grooveCueDeadbandDegrees`, a short
-///   arc runs from the tick to the angle it holds; none for an angle held out on a reach (`grooveOffset`).
+///   arc runs from the tick to the angle it holds; none for an angle held out on a reach (`grooveOffset`). Steering
+///   by hand on such a class, the arc runs to her own angle the same way (#436).
 nonisolated struct VaneCue: Equatable, Sendable {
     /// Where the vane points.
     var vane: Double
@@ -31,23 +32,19 @@ nonisolated struct VaneCue: Equatable, Sendable {
         guard !isGhost, boat.windOverGround.speed > 0 else { return nil }
         // Sailing angles are read against the boom: +1 with the boom to port, where the wind is over starboard.
         let side: Double = boat.boomSide == .port ? 1 : -1
-        let grooveAngle: Double
-        if let reading {
-            grooveAngle = reading.grooveAngle
-        } else {
-            let groove: Autohelm.Groove = abs(boat.sailingAngle) < .pi / 2 ? .upwind : .downwind
-            grooveAngle = Autohelm.grooveAngle(groove, tws: boat.grooveWindSpeed(in: boatClass), boatClass: boatClass)
-        }
+        let hand = HandSteering(boat, reading: reading, boatClass: boatClass)
+        let grooveAngle = reading?.grooveAngle ?? hand?.grooveAngle ?? HandSteering.groove(of: boat, in: boatClass).angle
         tick = wrapAngle(side * grooveAngle)
 
-        let holding = reading.map { !$0.isTapping } ?? false
-        let onGroove = holding && reading?.target.groove != nil
+        let holdsGroove = reading.map { !$0.isTapping && $0.target.groove != nil } ?? false
+        let onGroove = (holdsGroove || hand != nil)
             && abs(wrapAngle(boat.sailingAngle - grooveAngle)) <= deg2rad(style.vaneLockDegrees)
         isLocked = onGroove
         vane = onGroove ? tick : wrapAngle(boat.windOverGround.direction - boat.heading)
 
-        if let reading, reading.target.angle != nil, let offset = reading.grooveOffset(style: style),
-           abs(offset) > deg2rad(style.grooveCueDeadbandDegrees) {
+        let offset = hand.map { $0.cueOffset(style: style) }
+            ?? reading.flatMap { $0.target.angle != nil ? $0.grooveOffset(style: style) : nil }
+        if !onGroove, let offset, abs(offset) > deg2rad(style.grooveCueDeadbandDegrees) {
             arcEnd = wrapAngle(side * (grooveAngle + offset))
         } else {
             arcEnd = nil
@@ -55,17 +52,50 @@ nonisolated struct VaneCue: Equatable, Sendable {
     }
 }
 
+/// Her own angle against the groove while she steers by hand (#436, ADR 0011): on a class whose autohelm doesn't
+/// hold a centred rudder (`holdsWhenCentred` false), whenever no tap has handed her to it. The groove stays the
+/// target to steer to; her pinch or foot is her sailing angle off it, for the vane's arc and lock and the sail cue.
+nonisolated struct HandSteering: Equatable, Sendable {
+    /// The groove she sails: upwind forward of the beam, downwind abaft it.
+    var groove: Autohelm.Groove
+    /// Its sailing angle in her groove wind, radians.
+    var grooveAngle: Double
+    /// Her sailing angle less `grooveAngle`, radians: positive footing (further off the wind), negative pinching.
+    var offset: Double
+
+    /// Nil while the autohelm has her (`reading`, a tap), or on a class whose autohelm holds a centred rudder.
+    init?(_ boat: Boat, reading: Autohelm.Reading?, boatClass: BoatClass) {
+        guard reading == nil, !boatClass.steering.autohelm.holdsWhenCentred else { return nil }
+        (groove, grooveAngle) = Self.groove(of: boat, in: boatClass)
+        offset = wrapAngle(boat.sailingAngle - grooveAngle)
+    }
+
+    /// The groove of the wind `boat` is in and its angle: upwind forward of the beam, downwind abaft it.
+    static func groove(of boat: Boat, in boatClass: BoatClass) -> (groove: Autohelm.Groove, angle: Double) {
+        let groove: Autohelm.Groove = abs(boat.sailingAngle) < .pi / 2 ? .upwind : .downwind
+        return (groove, Autohelm.grooveAngle(groove, tws: boat.grooveWindSpeed(in: boatClass), boatClass: boatClass))
+    }
+
+    /// `offset` for the pinch and foot cues, as the autohelm's (`Autohelm.Groove.cueOffset`): nil on a reach.
+    func cueOffset(style: BoatStyle) -> Double? { groove.cueOffset(offset, style: style) }
+}
+
 extension Autohelm.Reading {
     /// Its offset from the groove (`offsetFromGroove`, radians) while it sails a groove, for the pinch and foot
-    /// cues (#219): nil while it tacks or gybes, or while it holds an angle more than
-    /// `BoatStyle.grooveCueReachDegrees` from its groove towards the beam. A held angle reads against the upwind
-    /// groove forward of the beam and the downwind one abaft it, so a reach would read as a hard foot or pinch.
+    /// cues (#219): nil while it tacks or gybes, or while it holds an angle out on a reach (`Groove.cueOffset`).
     nonisolated func grooveOffset(style: BoatStyle) -> Double? {
-        guard !isTapping else { return nil }
-        let reach = deg2rad(style.grooveCueReachDegrees)
+        isTapping ? nil : groove.cueOffset(offsetFromGroove, style: style)
+    }
+}
+
+extension Autohelm.Groove {
+    /// `offset` from this groove (radians, positive further off the wind) for the pinch and foot cues (#219), or nil
+    /// more than `BoatStyle.grooveCueReachDegrees` from it towards the beam. An angle reads against the upwind
+    /// groove forward of the beam and the downwind one abaft it, so a reach would read as a hard foot or pinch.
+    nonisolated func cueOffset(_ offset: Double, style: BoatStyle) -> Double? {
         // Towards the beam: footing off the upwind groove, pinching up from the downwind one.
-        let towardsBeam = groove == .upwind ? offsetFromGroove : -offsetFromGroove
-        return towardsBeam > reach ? nil : offsetFromGroove
+        let towardsBeam = self == .upwind ? offset : -offset
+        return towardsBeam > deg2rad(style.grooveCueReachDegrees) ? nil : offset
     }
 }
 

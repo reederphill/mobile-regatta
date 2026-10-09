@@ -158,7 +158,11 @@ final class TuningModel {
     private func readFileValue(_ slider: TuningSlider) -> Double? {
         switch slider.target {
         case .file(let slot, let pointer):
-            return baseData(slot).flatMap { TunedCopy.number(at: pointer, in: $0) }
+            guard let data = baseData(slot) else { return nil }
+            if let flag = TuningCatalog.fileFlags.first(where: { $0.slot == slot && $0.pointer == pointer }) {
+                return TunedCopy.flag(at: pointer, in: data) ?? flag.absent
+            }
+            return TunedCopy.number(at: pointer, in: data)
         case .groove(let column):
             guard let data = baseData(.boatClass), let rows = TunedCopy.numbers(at: "/polar/twaDegrees", in: data),
                   let speeds = TunedCopy.numbers(at: "/polar/columns/\(column)/speedKnots", in: data) else { return nil }
@@ -368,7 +372,7 @@ final class TuningModel {
                                              (.rulesConfiguration, RulesConfig.bundleDirectory)]
         var urls: [URL] = []
         for (slot, kindFolder) in kinds where !tuning[values: slot].isEmpty {
-            guard let base = baseData(slot) else { continue }
+            guard let base = baseData(slot).map({ readied(slot, $0) }) else { continue }
             let key = tuning[base: slot]
             let values = try expandedValues(slot, base: base)
             let note = "Version \(key.version + 1) is version \(key.version) with the debug tuning panel's values (#232) at "
@@ -391,6 +395,15 @@ final class TuningModel {
     func files(ofRace folder: URL) -> [URL] { store.files(ofRace: folder) }
 
     // MARK: - Generating
+
+    /// The slot's base file readied for each flag the tuning sets (`TuningCatalog.FileFlag`, #436): written as a
+    /// number, or added when the file leaves it out. It sails as the file does; untuned, it is the file itself.
+    func readied(_ slot: TuningSlot, _ base: Data) -> Data {
+        TuningCatalog.fileFlags.reduce(base) { data, flag in
+            guard flag.slot == slot, tuning[values: slot][flag.pointer] != nil else { return data }
+            return TunedCopy.readyingFlag(at: flag.pointer, in: data, absent: flag.absent, schemaVersion: flag.schemaVersion)
+        }
+    }
 
     /// A slot's values as JSON Pointers into its base file: a groove becomes its column's warped speeds.
     func expandedValues(_ slot: TuningSlot, base: Data) throws -> [String: Double] {
@@ -419,7 +432,7 @@ final class TuningModel {
         guard let base = baseData(slot) else { throw DataFileError.notBundled(kind: Content.kind, id: key.id, version: key.version) }
         let bundled = TunedFile(file: try DataFile<Content>(data: base), data: base)
         do {
-            let data = try TunedCopy.patched(base, values: expandedValues(slot, base: base))
+            let data = try TunedCopy.patched(readied(slot, base), values: expandedValues(slot, base: base))
             guard data != base else { return bundled }
             // Loaded before it's numbered, so a copy that doesn't load never takes a tune number.
             _ = try DataFile<Content>(data: data)
@@ -436,7 +449,7 @@ final class TuningModel {
     private func validate() {
         problems = [:]
         for slot in TuningSlot.allCases {
-            guard let base = baseData(slot) else {
+            guard let base = baseData(slot).map({ readied(slot, $0) }) else {
                 problems[slot] = "\(tuning[base: slot]) isn't in this build"
                 continue
             }

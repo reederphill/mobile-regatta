@@ -40,7 +40,7 @@ nonisolated struct BoatPose: Equatable, Sendable {
     /// leeward (`leeSide`).
     var heel: Double
     var isGhost: Bool
-    /// Pinched (#219), 0 to 1: how far her sail's leading edge lifts. 0 on the groove, footing or hand steering.
+    /// Pinched (#219), 0 to 1: how far her sail's leading edge lifts. 0 on the groove or footing.
     var luffLift = 0.0
     /// The sail's belly, 1 for its base shape: flatter pinched, fuller footed (#219). Footed, `sailTrim` is
     /// eased too.
@@ -48,9 +48,11 @@ nonisolated struct BoatPose: Equatable, Sendable {
 
     /// `boat`'s pose in `boatClass`. `ease` is her held ease; `isGhost` whether she has stopped racing, as the
     /// race shows it (`Race.isGhost(seat:)`); `autohelm` what her autohelm holds (`RenderWorld.autohelm(ofSeat:)`),
-    /// nil while her rudder is held, for the sail-shape cue.
+    /// nil while her rudder is held, for the sail-shape cue; with none on a class whose autohelm doesn't hold a
+    /// centred rudder she steers by hand, and the cue reads her own angle (`HandSteering`, #436). `grooveCue` false
+    /// leaves the cue out (`angleOfAttack`).
     init(_ boat: Boat, ease: Bool, isGhost: Bool, boatClass: BoatClass, style: BoatStyle = .standard,
-         autohelm: Autohelm.Reading? = nil) {
+         autohelm: Autohelm.Reading? = nil, grooveCue: Bool = true) {
         sailSide = boat.boomSide
         leeSide = BoomSide.leeward(ofRelativeWind: boat.relativeWind)
         self.isGhost = isGhost
@@ -86,7 +88,9 @@ nonisolated struct BoatPose: Equatable, Sendable {
         } else {
             sailTrim = (awa * style.trimPerApparentAngle).clamped(to: minTrim...maxTrim)
             // The sail-shape cue (#219), only on a sail that draws: the luff lifts pinched; footed, eased and full.
-            let cue = Self.grooveCue(autohelm, style: style)
+            let offset = grooveCue ? HandSteering(boat, reading: autohelm, boatClass: boatClass).map { $0.cueOffset(style: style) }
+                ?? autohelm?.grooveOffset(style: style) : nil
+            let cue = Self.grooveCue(offset: offset, style: style)
             luffLift = cue.pinch
             sailTrim = min(sailTrim + deg2rad(style.footEaseDegrees) * cue.foot, maxTrim)
             sailFullness = 1 + style.footFullness * cue.foot - style.pinchFlatten * cue.pinch
@@ -117,20 +121,21 @@ nonisolated struct BoatPose: Equatable, Sendable {
     }
 
     /// The angle between her drawn sail and her apparent wind, radians, 0 up (#377): how hard the sail she shows turns
-    /// the air. 0 head to wind and with her sheets out; otherwise the apparent angle less `sailTrim`. Without her
-    /// autohelm's footed ease (#219). At `BoatStyle.standard` it is the sim's `SailTrim.standard.angleOfAttack`, which
-    /// sets her ribbons' emission and her backwind (`BoatPoseTests`' parity test).
+    /// the air. 0 head to wind and with her sheets out; otherwise the apparent angle less `sailTrim`. Without the
+    /// pinch/foot cue's footed ease (#219, by hand too, #436). At `BoatStyle.standard` it is the sim's
+    /// `SailTrim.standard.angleOfAttack`, which sets her ribbons' emission and her backwind (`BoatPoseTests`' parity test).
     static func angleOfAttack(_ boat: Boat, ease: Bool, boatClass: BoatClass, style: BoatStyle = .standard) -> Double {
         guard !isHeadToWind(boat, boatClass: boatClass, style: style) else { return 0 }
-        let pose = BoatPose(boat, ease: ease, isGhost: false, boatClass: boatClass, style: style)
+        let pose = BoatPose(boat, ease: ease, isGhost: false, boatClass: boatClass, style: style, grooveCue: false)
         return max(0, apparentAngle(boat) - pose.sailTrim)
     }
 
-    /// How far the autohelm pinches and foots (#219), each 0 to 1: its offset from the groove past
-    /// `BoatStyle.grooveCueDeadbandDegrees`, full at `grooveCueFullDegrees`. Nothing while it tacks or gybes her
-    /// (`isTapping`), the rudder is held, or it holds an angle out on a reach (`Autohelm.Reading.grooveOffset`).
-    static func grooveCue(_ reading: Autohelm.Reading?, style: BoatStyle) -> (pinch: Double, foot: Double) {
-        guard let offset = reading?.grooveOffset(style: style).map(rad2deg) else { return (0, 0) }
+    /// How far she pinches and foots (#219), each 0 to 1: `offset` from the groove (radians, the autohelm's
+    /// `Autohelm.Reading.grooveOffset` or her own steering by hand, `HandSteering.cueOffset`) past
+    /// `BoatStyle.grooveCueDeadbandDegrees`, full at `grooveCueFullDegrees`. Nothing for none: while a tap turns
+    /// her, the rudder is held with the autohelm on, or she sails out on a reach.
+    static func grooveCue(offset: Double?, style: BoatStyle) -> (pinch: Double, foot: Double) {
+        guard let offset = offset.map(rad2deg) else { return (0, 0) }
         let span = max(style.grooveCueFullDegrees - style.grooveCueDeadbandDegrees, 0.001)
         let amount = ((abs(offset) - style.grooveCueDeadbandDegrees) / span).clamped(to: 0...1)
         return offset < 0 ? (amount, 0) : (0, amount)

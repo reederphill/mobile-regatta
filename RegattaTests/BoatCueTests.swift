@@ -375,6 +375,58 @@ import Testing
         #expect(footedUp.pose.sailFullness > 1 && footedUp.arc != nil, "footing upwind")
     }
 
+    // MARK: - Steering by hand (#436)
+
+    /// Steering by hand on a class whose autohelm doesn't hold a centred rudder (#434, ADR 0011), the vane and sail
+    /// read her own angle against the groove: a pinch or foot runs an arc from the tick to her angle, on the groove
+    /// she locks to the tick, and the sail pinches and foots as the autohelm's would. A tap (the autohelm has her)
+    /// shows none; on a class whose autohelm holds, a held rudder shows the tick only, as before. The sail's angle of
+    /// attack (the sim's, #377) leaves the cue out either way.
+    @Test func handSteeredPinchShowsArc() {
+        var hand = Self.boatClass
+        hand.steering.autohelm.holdsWhenCentred = false
+        let groove = Autohelm.grooveAngle(.upwind, tws: metresPerSecond(knots: 12), boatClass: hand)
+        let grooveDegrees = rad2deg(groove)
+        for boom in [BoomSide.port, .starboard] {
+            let side: Double = boom == .port ? 1 : -1
+            for offsetDegrees in [-4.0, 6, 2] {
+                let boat = Self.boat(sailingDegrees: grooveDegrees + offsetDegrees, boom: boom)
+                let cue = VaneCue(boat, reading: nil, isGhost: false, boatClass: hand)
+                #expect(cue?.isLocked == false, "\(boom) \(offsetDegrees)°")
+                let tick = cue?.tick ?? .nan, end = cue?.arcEnd ?? .nan
+                #expect(abs(tick - side * groove) < 1e-9, "\(boom): the tick stays the groove")
+                #expect(abs(wrapAngle(end - tick) - side * deg2rad(offsetDegrees)) < 1e-9, "\(boom) \(offsetDegrees)°")
+                #expect(abs(end - (cue?.vane ?? .nan)) < 1e-9, "the arc ends at the vane in a steady wind")
+
+                let tapping = VaneCue(boat, reading: Self.reading(.groove(.upwind), isTapping: true, for: boat),
+                                      isGhost: false, boatClass: hand)
+                #expect(tapping?.arcEnd == nil && tapping?.isLocked == false, "a tap's turn shows nothing")
+                let held = VaneCue(boat, reading: nil, isGhost: false, boatClass: Self.boatClass)
+                #expect(held?.arcEnd == nil && held?.isLocked == false, "the autohelm on: a held rudder, the tick only")
+            }
+            // On the groove by hand: locked to the tick, no arc.
+            let onGroove = Self.boat(sailingDegrees: grooveDegrees - 1, boom: boom)
+            let locked = VaneCue(onGroove, reading: nil, isGhost: false, boatClass: hand)
+            #expect(locked?.isLocked == true && locked?.vane == locked?.tick && locked?.arcEnd == nil, "\(boom)")
+        }
+
+        // The sail: pinched and footed by hand as by the autohelm holding that angle; on a reach, nothing.
+        func pose(_ degrees: Double, _ boatClass: BoatClass, autohelm: Bool = false) -> BoatPose {
+            let boat = Self.boat(sailingDegrees: degrees)
+            let reading = autohelm ? Self.reading(.angle(deg2rad(degrees)), for: boat) : nil
+            return BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass, autohelm: reading)
+        }
+        let pinched = pose(grooveDegrees - 5, hand), footed = pose(grooveDegrees + 6, hand)
+        #expect(pinched.luffLift > 0 && pinched == pose(grooveDegrees - 5, Self.boatClass, autohelm: true))
+        #expect(footed.sailFullness > 1 && footed == pose(grooveDegrees + 6, Self.boatClass, autohelm: true))
+        #expect(pose(grooveDegrees + 6, Self.boatClass).sailFullness == 1, "the autohelm on: a held rudder, no sail cue")
+        #expect(pose(95, hand) == pose(95, Self.boatClass), "a reach by hand shows no sail cue")
+        #expect(pose(grooveDegrees, hand) == pose(grooveDegrees, Self.boatClass), "on the groove, the base pose")
+        let footedBoat = Self.boat(sailingDegrees: grooveDegrees + 6)
+        #expect(BoatPose.angleOfAttack(footedBoat, ease: false, boatClass: hand)
+                == BoatPose.angleOfAttack(footedBoat, ease: false, boatClass: Self.boatClass))
+    }
+
     // MARK: - Ladder lines
 
     /// The ladder lines lie across the course axis, `spacing` apart from the windward mark, whatever the live wind

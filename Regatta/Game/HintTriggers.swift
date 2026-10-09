@@ -100,6 +100,9 @@ struct HintSnapshot: Equatable {
     var vaneShows = false
     /// The letting-go hint is done on this device: the groove-tick hint follows it.
     var lettingGoRetired = false
+    /// The race's class's autohelm holds a centred rudder (`holdsWhenCentred`, #434). Off, she steers by hand: a
+    /// centred rudder sails straight on, so the centred-rudder hint shows in place of letting go (#436).
+    var autohelmHolds = true
 }
 
 /// The catalogue's triggers: pure functions of a snapshot and the tuning.
@@ -133,7 +136,19 @@ enum HintTriggers {
 
     /// After the gun (started or still behind the line): you've steered `hold` seconds without a break. Only once
     /// it's relevant (owner ruling 2026-10-05): a player who never steers never sees it.
+    /// Only while the class's autohelm holds a centred rudder: off, the centred-rudder hint says what letting go does.
     static func lettingGo(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
+        guard s.autohelmHolds else { return nil }
+        return afterSteering(s, t)
+    }
+
+    /// Letting go's place when the class's autohelm doesn't hold (#436): when a centred rudder sails straight on, on
+    /// the same timing, once a race (`HintEngine.oncePerRace`) and retired once shown.
+    static func centredRudder(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
+        s.autohelmHolds ? nil : afterSteering(s, t)
+    }
+
+    private static func afterSteering(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
         let hold = s.isFirstRace ? t.lettingGoFirstRaceSeconds : t.lettingGoSeconds
         guard s.raceTime >= 0, s.status != .finished, !s.isGhost, !s.hasLetGo else { return nil }
         return s.steeringSeconds >= hold ? HintFiring(leader: .vane) : nil
@@ -291,6 +306,7 @@ extension HintSnapshot {
         hasLetGo = o.hasLetGo
         racingSeconds = o.racingSeconds
         self.lettingGoRetired = lettingGoRetired
+        autohelmHolds = world.boatClass.steering.autohelm.holdsWhenCentred
         guard !ghost else { return }
         vaneShows = VaneCue(me, reading: world.autohelm(ofSeat: seat), isGhost: ghost, boatClass: world.boatClass) != nil
 
