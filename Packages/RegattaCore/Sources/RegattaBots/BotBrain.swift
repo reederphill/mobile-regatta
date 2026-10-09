@@ -1,3 +1,4 @@
+import Foundation // TEMP #445
 import RegattaCore
 
 /// A bot's hidden, seeded style (#19, #102): where on the line she starts, which side of the course she favours,
@@ -189,6 +190,9 @@ struct BotBrain: Sendable {
             tactics.tacticEngagement = nil
             tactics.startEngagement = nil
         }
+        let t445 = ProcessInfo.processInfo.environment // TEMP #445
+        if t445["T445_NO_TACTIC_ENG"] != nil { tactics.tacticEngagement = nil }
+        if t445["T445_NO_START_ENG"] != nil { tactics.startEngagement = nil }
         rng = SplitMix64(seed: seed, stream: Self.brainStream)
         tacticsRng = SplitMix64(seed: seed, stream: Self.tacticsStream)
     }
@@ -250,7 +254,7 @@ struct BotBrain: Sendable {
         }
         // Held to her proper course under rule 17, she sails no higher than it allows (#346); clear astern of a boat
         // close ahead on a reach or run, no higher than it before she makes the overlap (#337).
-        if limitsProperCourse { aim = Self.properCourseAnticipated(aim, boat, view) }
+        if limitsProperCourse, ProcessInfo.processInfo.environment["T445_NO_R17"] == nil { aim = Self.properCourseAnticipated(aim, boat, view) }
         // The autohelm is sailing the tap through the tack or gybe: hands off. Any rudder would cancel it
         // (#13) and leave her head to wind; it's over in a couple of seconds.
         if boat.autohelm?.isTapping == true { return BotDecision(input: .neutral) }

@@ -796,6 +796,7 @@ public final class Race {
     /// alone, a bot clear astern of a boat turning a penalty bore away to keep clear of her, onto a second penalised
     /// boat, and was called under 16.1 (#337 round 3, the cautious seat in seed 26 of `CautiousBotSuiteTests`).
     /// `seat`'s own rule 21 she keeps herself (`penaltyInput`, `startKeepClear`): her rules 10–13 relations stand.
+    static let t445NoR21View = ProcessInfo.processInfo.environment["T445_NO_R21VIEW"] != nil // TEMP #445
     func rightsOfWay(of seat: Int) -> [RightOfWay?] {
         let hull = boatClass.hull
         let boat = boats[seat]
@@ -803,7 +804,7 @@ public final class Race {
         return boats.indices.map { other in
             guard other != seat else { return nil }
             let them = boats[other]
-            if !boat.isGhost, !them.isGhost, !underRule21(boat), underRule21(them) {
+            if !Race.t445NoR21View, !boat.isGhost, !them.isGhost, !underRule21(boat), underRule21(them) {
                 return RightOfWay(keepClear: other, rule: course.isReturning(them) ? .returningToStart : .takingAPenalty)
             }
             return Rules.rightOfWay(boat, them, overlapped: overlaps.isOverlapped(seat, other), hull: hull)

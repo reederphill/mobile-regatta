@@ -1,3 +1,4 @@
+import Foundation // TEMP #445
 import RegattaCore
 
 /// The start (#99): from wherever the start row (#35) or a takeover left her, to her spot on the line as the
@@ -477,7 +478,7 @@ extension BotBrain {
             // as her view's right of way has it, pin-style bots working down the line from the committee end lost the
             // pin third among the pre-start penalty turns (0.701 to 0.674 of `BotStartSuiteTests`). Racing she holds her
             // course for it (`holdingCourse`), as round 3 has her.
-            if let right = other.rightOfWay, right.keepClear == other.seat, right.rule.isRule21,
+            if ProcessInfo.processInfo.environment["T445_NO_BERTH"] == nil, let right = other.rightOfWay, right.keepClear == other.seat, right.rule.isRule21,
                (other.position - b.position).length < view.boatClass.hull.length * Self.penalisedBerthLengths { return true }
             guard let right = other.rightOfWay, right.keepClear == view.seat else { return false }
             return !misjudges(other, right.rule)
