@@ -63,7 +63,7 @@ import Testing
             }
         }
         let mean = total / Double(today.count * 2)
-        #expect(worst < 2, "a bot strayed \(worst) hull lengths from today's track")
-        #expect(mean < 1, "the bots strayed \(mean) hull lengths on average")
+        #expect(worst < 1, "a bot strayed \(worst) hull lengths from today's track")
+        #expect(mean < 0.5, "the bots strayed \(mean) hull lengths on average")
     }
 }

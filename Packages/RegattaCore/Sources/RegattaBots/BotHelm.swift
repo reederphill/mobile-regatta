@@ -6,7 +6,10 @@ import RegattaCore
 /// straight on through every shift. So the helm keeps the angle the class's autohelm would have taken on the tick she
 /// centred (`Autohelm.engage`: her angle, or the groove within a snap of it) and turns it into a held rudder each
 /// decision with the autohelm's own rudder law (`Autohelm.rudder`): she sails the same track either way, close to it
-/// rather than bit for bit, since she steers ten times a second where the autohelm steers every tick.
+/// rather than bit for bit, since she steers ten times a second where the autohelm steers every tick. A correction inside
+/// the autohelm's dead band (`Autohelm.deadBand`, about 0.5° of error at the class's gain) is a centred rudder, so she can
+/// sit that far off her aim; and she steers by the headed angle she sees under a backwind header, where the race's
+/// autohelm holds a groove's heading through it (#377).
 ///
 /// Her brain reads the angle it holds as her autohelm's (`view(_:)`), so it decides exactly as it does with the
 /// autohelm on. A rudder her brain holds off centre is hers, and lets the angle go. The tack/gybe tap is still the
