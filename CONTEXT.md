@@ -64,7 +64,7 @@ A boat that broke a rule of Part 2 isn't penalised for it, because she was compe
 _Avoid_: acquittal, cleared
 
 **Hold course**:
-What a right-of-way boat does to keep her rights: rudder centred. The autohelm holds her wind angle, or for a class whose autohelm doesn't hold a centred rudder (ADR 0011), she sails straight on her heading. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course.
+What a right-of-way boat does to keep her rights: rudder centred. The autohelm holds her wind angle, or for a class whose autohelm doesn't hold a centred rudder (ADR 0011), a player sails straight on her heading while a bot holds her angle by hand (`BotHelm`), still following a shift. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course.
 _Avoid_: hold heading, stand on
 
 **Defend lane**:
@@ -138,7 +138,7 @@ A bot-suite profile only: perfect handling with groove-only tactics (#426): ever
 _Avoid_: perfect bot
 
 **Watchdog**:
-The bot suite's count of rule 16.1 calls where the right-of-way boat's rudder was centred throughout the escape window: the autohelm's own course change following a shift, called against her. Only with the autohelm on: off (ADR 0011), a centred rudder doesn't change course.
+The bot suite's count of rule 16.1 calls where the right-of-way boat's rudder was centred throughout the escape window: the autohelm's own course change following a shift, called against her. Off (ADR 0011), a player's centred rudder doesn't change course, and a bot following a shift by hand holds a rudder, so the watchdog doesn't count it.
 _Avoid_: 16.1 monitor
 
 **Handback**:
@@ -413,10 +413,10 @@ What steers the boat whenever nobody is holding the rudder, for a class whose au
 _Avoid_: autopilot, lock, helm (to helm is what a player does)
 
 **Groove**:
-The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. The autohelm snaps to it when let go close to it and follows it as the wind strength changes.
+The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. The autohelm snaps to it when let go close to it and follows it as the wind strength changes; with the autohelm off (ADR 0011) it is the angle to steer to by hand.
 
 **Groove tick**:
-A tick on the wind vane at the groove on the boat's tack. The vane locks to it while the autohelm holds the groove; a pinch or foot shows as a short arc from it to the angle held.
+A tick on the wind vane at the groove on the boat's tack. The vane locks to it while the autohelm holds the groove; a pinch or foot shows as a short arc from it to the angle held. With the autohelm off the arc shows only during a tap until [#436](https://github.com/reederphill/mobile-regatta/issues/436).
 
 **Tack cost**:
 What a tack loses against sailing on: the distance made good upwind, in hull lengths, over the tack and the speed she takes to get back. About a hull length from close-hauled with the autohelm sailing the tap; it decides which shifts are worth tacking on.
@@ -427,7 +427,7 @@ A second tack/gybe tap during a tack, timed on the boom crossing. Close enough t
 _Avoid_: double tap (fine as UI copy), roll gybe (a gybe has no roll yet)
 
 **Pinch** / **foot**:
-Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). The autohelm holds either until the player changes it. On a beat the groove is proper course, so a pinch beyond 5° is above proper course (rule 17).
+Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). The autohelm holds either until the player changes it; with it off (ADR 0011) the player holds it by hand. On a beat the groove is proper course, so a pinch beyond 5° is above proper course (rule 17).
 _Avoid_: pinch for the two-finger zoom gesture; call that **pinch-zoom**
 
 **Livery**:
