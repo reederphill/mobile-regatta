@@ -9,6 +9,13 @@ import Testing
 /// screen, the wind vane's groove tick, lock and arc, the pinch/foot sail shape, and ladder lines across the axis.
 @MainActor @Suite struct BoatCueTests {
     static let boatClass = Race.defaultBoatClass
+    /// The default class with an autohelm that holds a centred rudder (skiff@6's): the default, skiff@7, steers by
+    /// hand (#437), so a test of a held rudder on a holding class names this.
+    static let holdingClass: BoatClass = {
+        var holding = Race.defaultBoatClass
+        holding.steering.autohelm.holdsWhenCentred = true
+        return holding
+    }()
 
     /// The prestart fixture's course: a real derived course, its axis 9° off north.
     static func course() throws -> CourseLayout {
@@ -285,7 +292,7 @@ import Testing
                 let tapping = VaneCue(held, reading: Self.reading(.angle(angle), isTapping: true, for: held), isGhost: false,
                                       boatClass: Self.boatClass)
                 #expect(tapping?.arcEnd == nil && tapping?.isLocked == false)
-                let hand = VaneCue(held, reading: nil, isGhost: false, boatClass: Self.boatClass)
+                let hand = VaneCue(held, reading: nil, isGhost: false, boatClass: Self.holdingClass)
                 #expect(hand?.arcEnd == nil && hand?.isLocked == false)
                 #expect(abs((hand?.tick ?? 0) - side * groove) < 1e-9)
             }
@@ -401,7 +408,7 @@ import Testing
                 let tapping = VaneCue(boat, reading: Self.reading(.groove(.upwind), isTapping: true, for: boat),
                                       isGhost: false, boatClass: hand)
                 #expect(tapping?.arcEnd == nil && tapping?.isLocked == false, "a tap's turn shows nothing")
-                let held = VaneCue(boat, reading: nil, isGhost: false, boatClass: Self.boatClass)
+                let held = VaneCue(boat, reading: nil, isGhost: false, boatClass: Self.holdingClass)
                 #expect(held?.arcEnd == nil && held?.isLocked == false, "the autohelm on: a held rudder, the tick only")
             }
             // On the groove by hand: locked to the tick, no arc.
@@ -445,19 +452,19 @@ import Testing
             return BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass, autohelm: reading)
         }
         let pinched = pose(grooveDegrees - 5, hand), footed = pose(grooveDegrees + 6, hand)
-        #expect(pinched.luffLift > 0 && pinched == pose(grooveDegrees - 5, Self.boatClass, autohelm: true))
-        #expect(footed.sailFullness > 1 && footed == pose(grooveDegrees + 6, Self.boatClass, autohelm: true))
-        #expect(pose(grooveDegrees + 6, Self.boatClass).sailFullness == 1, "the autohelm on: a held rudder, no sail cue")
-        #expect(pose(95, hand) == pose(95, Self.boatClass), "a reach by hand shows no sail cue")
-        #expect(pose(grooveDegrees, hand) == pose(grooveDegrees, Self.boatClass), "on the groove, the base pose")
+        #expect(pinched.luffLift > 0 && pinched == pose(grooveDegrees - 5, Self.holdingClass, autohelm: true))
+        #expect(footed.sailFullness > 1 && footed == pose(grooveDegrees + 6, Self.holdingClass, autohelm: true))
+        #expect(pose(grooveDegrees + 6, Self.holdingClass).sailFullness == 1, "the autohelm on: a held rudder, no sail cue")
+        #expect(pose(95, hand) == pose(95, Self.holdingClass), "a reach by hand shows no sail cue")
+        #expect(pose(grooveDegrees, hand) == pose(grooveDegrees, Self.holdingClass), "on the groove, the base pose")
         // A tap on a hand class: the autohelm has her, so the sail reads its reading as on any class.
         let tapBoat = Self.boat(sailingDegrees: grooveDegrees + 6)
         let tap = Self.reading(.groove(.upwind), isTapping: true, for: tapBoat)
         #expect(BoatPose(tapBoat, ease: false, isGhost: false, boatClass: hand, autohelm: tap)
-                == BoatPose(tapBoat, ease: false, isGhost: false, boatClass: Self.boatClass, autohelm: tap))
+                == BoatPose(tapBoat, ease: false, isGhost: false, boatClass: Self.holdingClass, autohelm: tap))
         let footedBoat = Self.boat(sailingDegrees: grooveDegrees + 6)
         #expect(BoatPose.angleOfAttack(footedBoat, ease: false, boatClass: hand)
-                == BoatPose.angleOfAttack(footedBoat, ease: false, boatClass: Self.boatClass))
+                == BoatPose.angleOfAttack(footedBoat, ease: false, boatClass: Self.holdingClass))
     }
 
     // MARK: - Ladder lines

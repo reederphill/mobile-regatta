@@ -197,8 +197,10 @@ import Testing
     // MARK: Real frames
 
     /// Steering a real practice boat both ways is seen, by race time, and letting go after steering counts as let go.
-    @Test func observationsSeeSteeringBothWaysAndLettingGo() {
-        let config = RaceConfig(opponents: 1, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+    /// On skiff@6 (#437): letting go is a centred rudder the autohelm holds, which the default, skiff@7, has not.
+    @Test func observationsSeeSteeringBothWaysAndLettingGo() throws {
+        var config = RaceConfig(opponents: 1, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+        config.files = try Self.autohelmOnFiles()
         let driver = PracticeDriver(config: config)
         var o = HintObservations()
         func run(_ rudder: Int8, seconds: Double) {
