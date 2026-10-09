@@ -255,9 +255,10 @@ import Testing
         private(set) var retired: [(id: HintID, mode: HintRetirement)] = []
 
         init(progress: HintProgressStore, prestartSeconds: Double = 10, catalogue: [Hint] = HintCatalogue.engine,
-             isFirstRaceOnDevice: Bool = false) {
-            let config = RaceConfig(opponents: 2, prestartSeconds: prestartSeconds, seed: 1,
+             isFirstRaceOnDevice: Bool = false, files: PracticeFiles = .defaults) {
+            var config = RaceConfig(opponents: 2, prestartSeconds: prestartSeconds, seed: 1,
                                     windSeed: RaceConfig.windSeed(pinnedTo: 1))
+            config.files = files
             driver = PracticeDriver(config: config)
             engine = HintEngine(progress: progress, catalogue: catalogue, isFirstRaceOnDevice: isFirstRaceOnDevice)
             engine.onRetired = { [unowned self] id, mode in retired.append((id, mode)) }
@@ -309,9 +310,10 @@ import Testing
 
     /// After the first steer takes the held steering hint down, letting go shows once you've steered without a break
     /// for the first race's threshold, and not before.
+    /// On skiff@6 (#437): letting go is for a class whose autohelm holds a centred rudder; skiff@7's is centredRudder.
     @Test func firstRaceLettingGoShowsAfterTheFirstSteerAndTheSteeringThreshold() throws {
         let progress = HintProgressStore()
-        let rig = Rig(progress: progress, isFirstRaceOnDevice: true)
+        let rig = Rig(progress: progress, isFirstRaceOnDevice: true, files: try HintTriggerTests.autohelmOnFiles())
         rig.isFirstRace = true
         rig.run(10 + 2)
         #expect(rig.slot.showing?.text == HintID.raceStart.rawValue)

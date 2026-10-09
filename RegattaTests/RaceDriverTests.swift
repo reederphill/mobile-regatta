@@ -41,8 +41,11 @@ import RegattaCore
 
     /// #230: the scene reads what each boat's autohelm holds (the angle or the groove, and how far off the
     /// groove) from the render world, for the vane (#122).
-    @Test func renderWorldReadsEachSeatsAutohelm() {
-        let driver = PracticeDriver(config: RaceDriverTests.config)
+    /// On skiff@6 (#437): your centred rudder engages the autohelm only on a class whose autohelm holds.
+    @Test func renderWorldReadsEachSeatsAutohelm() throws {
+        var config = RaceDriverTests.config
+        config.files = try HintTriggerTests.autohelmOnFiles()
+        let driver = PracticeDriver(config: config)
         driver.tick(2 / Double(Race.tickRate))
         let world = driver.renderWorld
         for seat in world.boats.indices {
