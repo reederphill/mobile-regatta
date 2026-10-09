@@ -1,7 +1,7 @@
 import RegattaCore
 import SwiftUI
 
-/// The race's bottom row (#15, #112): Ease bottom left, Tack/Gybe bottom centre, Protest bottom right. All three are
+/// The race's bottom row (#15, #112): Ease bottom left, Tack/Gybe bottom centre. Both are
 /// HUD chrome, white on translucent black: orange is the active leg's alone (#22, G7). Nothing on the water is
 /// tappable, since touching the water steers.
 struct RaceControls: View {
@@ -27,11 +27,11 @@ struct RaceControls: View {
                        isEnabled: isRacing, releases: session.controlReleases,
                        onPress: { session.pressTack(at: Self.now) }, onRelease: { session.releaseTack(at: Self.now) })
             Spacer()
-            // A placeholder until #125 wires it to the protest picker: it brightens under the finger like the others.
-            Button("Protest") {}
-                .buttonStyle(ControlButtonStyle(title: "PROTEST", width: 96))
-                .disabled(!isRacing)
-                .accessibilityIdentifier("race-protest")
+            // Ease's width, empty, so Tack/Gybe stays centred; it takes no touches, so the water under it steers.
+            Color.clear
+                .frame(width: 96, height: Self.controlHeight)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 16)
         .padding(.bottom, Self.bottomPadding)
@@ -59,16 +59,6 @@ private struct ControlLabel: View {
             .foregroundStyle(.white)
             .opacity(isEnabled ? 1 : 0.5)
             .shadow(radius: 6, y: 3)
-    }
-}
-
-/// A plain button's face: the control label, brighter while pressed.
-private struct ControlButtonStyle: ButtonStyle {
-    let title: String
-    let width: CGFloat
-
-    func makeBody(configuration: Configuration) -> some View {
-        ControlLabel(title: title, width: width, isHeld: configuration.isPressed)
     }
 }
 
