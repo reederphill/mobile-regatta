@@ -17,7 +17,10 @@ public struct BoatClass: DataFileContent, Equatable {
     /// at the boat right now), so it sails exactly as #230 sailed it. This build sails no schema-1 class:
     /// RegattaCore holds no boat constants (ADR 0004), so it has nothing to fill the autohelm's values with.
     /// Logs sailed on one replay on the simulation version that sailed them (ADR 0002).
-    public static let supportedSchemaVersions = [2, 3]
+    /// Schema 4 (#434, ADR 0011) is schema 3 with two optional autohelm values: whether a centred rudder hands her to
+    /// the autohelm (`AutohelmTuning.holdsWhenCentred`, absent true) and how close to the new groove a tap lets go
+    /// (`AutohelmTuning.handBack`). A schema-2 or -3 class, or a schema-4 one without them, sails exactly as before.
+    public static let supportedSchemaVersions = [2, 3, 4]
 
     /// Name shown to players.
     public var name: String
@@ -107,6 +110,15 @@ public struct BoatClass: DataFileContent, Equatable {
         /// build longer than it does. 0 (every schema-2 class) is no average: the grooves read the wind at
         /// the boat right now.
         public var grooveWindAverage: Double
+        /// Whether a centred rudder hands her to the autohelm (schema 4, #434, ADR 0011), on every seat, bots
+        /// included. True (every class before schema 4, and a schema-4 one that leaves it out): it engages on the
+        /// tick the rudder centres and holds her angle to the wind (ADR 0007). False: a centred rudder is a
+        /// centred rudder, she holds her heading through the shifts, and the autohelm only sails the tack/gybe tap,
+        /// letting go within `handBack` of the new groove.
+        public var holdsWhenCentred = true
+        /// With `holdsWhenCentred` false, how close to its aim the tap's autohelm brings her past the boom before
+        /// it lets go and centres the rudder, radians (schema 4's `handBackDegrees`; 3° when the file leaves it out).
+        public var handBack = deg2rad(3)
     }
 
     /// How the boat gets on and off the plane (schema 3, #248). Downwind and reaching only: forward of
@@ -470,10 +482,14 @@ public struct BoatClass: DataFileContent, Equatable {
         switch header.schemaVersion {
         case 2:
             self = try JSONDecoder().decode(BoatClassSchema2.self, from: fileData).boatClass(id: header.id)
-        case 3:
-            // Schema 3 is schema 2's fields with its additions: both read the same file.
+        case 3, 4:
+            // Schema 3 is schema 2's fields with its additions, and schema 4 schema 3's with its own: all read the
+            // same file.
             var boatClass = try JSONDecoder().decode(BoatClassSchema2.self, from: fileData).boatClass(id: header.id)
             try JSONDecoder().decode(BoatClassSchema3Additions.self, from: fileData).apply(to: &boatClass, id: header.id)
+            if header.schemaVersion == 4 {
+                try JSONDecoder().decode(BoatClassSchema4Additions.self, from: fileData).apply(to: &boatClass, id: header.id)
+            }
             self = boatClass
         default:
             throw DataFileError.unsupportedSchemaVersion(
@@ -1006,5 +1022,58 @@ private struct BoatClassSchema3Additions: Decodable {
             speedLossPerRadian: byTheLee.speedLossPerDegree * 180 / .pi,
             spinnakerCollapse: deg2rad(byTheLee.spinnakerCollapseDegrees)
         )
+    }
+}
+
+// MARK: - Schema 4
+
+/// What the boat class file's schema 4 adds to schema 3 (#434, ADR 0011): two optional autohelm values. Left out,
+/// the class sails as a schema-3 one: the autohelm holds a centred rudder, and a tap lets go 3° from the groove.
+private struct BoatClassSchema4Additions: Decodable {
+    struct Steering: Decodable {
+        struct Autohelm: Decodable {
+            /// A JSON bool, or the number 0 or 1: a tuned copy (`TunedCopy`) writes numbers only.
+            let holdsWhenCentred: FlagValue?
+            let handBackDegrees: Double?
+        }
+
+        let autohelm: Autohelm?
+    }
+
+    /// A flag as a JSON bool or a number.
+    enum FlagValue: Decodable {
+        case bool(Bool)
+        case number(Double)
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let flag = try? container.decode(Bool.self) {
+                self = .bool(flag)
+            } else {
+                self = .number(try container.decode(Double.self))
+            }
+        }
+    }
+
+    let steering: Steering?
+
+    func apply(to boatClass: inout BoatClass, id: String) throws {
+        func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
+            if !condition { throw DataFileError.invalidContent(kind: BoatClass.kind, id: id, reason: reason()) }
+        }
+        guard let helm = steering?.autohelm else { return }
+        switch helm.holdsWhenCentred {
+        case .bool(let flag):
+            boatClass.steering.autohelm.holdsWhenCentred = flag
+        case .number(let number):
+            try check(number == 0 || number == 1, "autohelm holdsWhenCentred must be true, false, 0 or 1")
+            boatClass.steering.autohelm.holdsWhenCentred = number == 1
+        case nil:
+            break
+        }
+        if let degrees = helm.handBackDegrees {
+            try check(degrees.isFinite && degrees > 0 && degrees < 90, "autohelm hand-back must be in 0 exclusive ..<90°")
+            boatClass.steering.autohelm.handBack = deg2rad(degrees)
+        }
     }
 }

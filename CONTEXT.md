@@ -64,7 +64,7 @@ A boat that broke a rule of Part 2 isn't penalised for it, because she was compe
 _Avoid_: acquittal, cleared
 
 **Hold course**:
-What a right-of-way boat does to keep her rights: rudder centred, the autohelm holding her wind angle. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course.
+What a right-of-way boat does to keep her rights: rudder centred. The autohelm holds her wind angle, or for a class whose autohelm doesn't hold a centred rudder (ADR 0011), she sails straight on her heading. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course.
 _Avoid_: hold heading, stand on
 
 **Defend lane**:
@@ -134,11 +134,11 @@ The bot that sails a dropped player's boat until they come back: a Club bot at t
 _Avoid_: easy bot, autopilot
 
 **Executor**:
-A bot-suite profile only: the groove-only bot's tactics with perfect execution, every roll tack hit. The suite checks she loses to a good tactician with average execution, so decisions stay the main skill.
+A bot-suite profile only: perfect handling with groove-only tactics (#426): every roll tack hit and, steering by hand (ADR 0011), no steering error. #426's parity between handling and tactics is read against her.
 _Avoid_: perfect bot
 
 **Watchdog**:
-The bot suite's count of rule 16.1 calls where the right-of-way boat's rudder was centred throughout the escape window: the autohelm's own course change following a shift, called against her.
+The bot suite's count of rule 16.1 calls where the right-of-way boat's rudder was centred throughout the escape window: the autohelm's own course change following a shift, called against her. Only with the autohelm on: off (ADR 0011), a centred rudder doesn't change course.
 _Avoid_: 16.1 monitor
 
 **Handback**:
@@ -409,7 +409,7 @@ Letting the sheets out so the sail flaps and the boat slows, e.g. to hold positi
 _Avoid_: luff (in the rules, luffing means turning toward the wind)
 
 **Autohelm**:
-What steers the boat whenever nobody is holding the rudder: it holds the angle to the true wind she had when the rudder was centred, snapping to the groove when close to it. It never tacks or gybes by itself, and it sails the tack/gybe tap.
+What steers the boat whenever nobody is holding the rudder, for a class whose autohelm holds a centred rudder (`holdsWhenCentred`, ADR 0011; every class today): it holds the angle to the true wind she had when the rudder was centred, snapping to the groove when close to it. It never tacks or gybes by itself, and it sails the tack/gybe tap. Off, a centred rudder holds her heading, and the autohelm only sails the tap, handing back a centred rudder within 3° of the new groove.
 _Avoid_: autopilot, lock, helm (to helm is what a player does)
 
 **Groove**:

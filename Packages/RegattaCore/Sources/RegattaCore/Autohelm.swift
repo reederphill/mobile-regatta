@@ -24,6 +24,9 @@
 ///   downwind for a gybe, and `isTapping`: full rudder the way that crosses the boom, then, once it
 ///   has crossed, the groove on the new side (the new tack).
 /// - A held rudder off centre disengages it, a tap included (`Race`); the next centring captures again.
+/// - A class may turn the holding off (`BoatClass.AutohelmTuning.holdsWhenCentred`, #434, ADR 0011): then it never
+///   engages on centring, a centred rudder holds her heading, and it only sails the tap, letting go once past the boom
+///   within the class's `handBack` of the new groove (`handsBack`).
 public struct Autohelm: Sendable, Equatable {
     /// A held rudder (`BoatInput.rudderValue`) within this of centre is centred: the autohelm steers.
     public static let deadBand = 0.05
@@ -139,6 +142,16 @@ public struct Autohelm: Sendable, Equatable {
         if isTapping { return target.isDownwind ? -boomSide.windSign : boomSide.windSign }
         let error = wrapAngle(aim(tws: tws, grooveTWS: grooveTWS, boatClass: boatClass) - sailingAngle)
         return (-boomSide.windSign * boatClass.steering.autohelm.gain * error).clamped(to: -1...1)
+    }
+
+    /// For a class whose autohelm doesn't hold a centred rudder (`BoatClass.AutohelmTuning.holdsWhenCentred` false,
+    /// #434): whether this tap's autohelm is done and lets go. Past the boom (no longer `isTapping`), within the
+    /// class's `handBack` of its aim at `sailingAngle` in `tws` and `grooveTWS` (as `aim`). Never for a class that
+    /// holds a centred rudder: its autohelm keeps her.
+    public func handsBack(sailingAngle: Double, tws: Double, grooveTWS: Double? = nil, boatClass: BoatClass) -> Bool {
+        guard !boatClass.steering.autohelm.holdsWhenCentred, !isTapping else { return false }
+        let aim = aim(tws: tws, grooveTWS: grooveTWS, boatClass: boatClass)
+        return abs(wrapAngle(aim - sailingAngle)) <= boatClass.steering.autohelm.handBack
     }
 
     // MARK: - Reading

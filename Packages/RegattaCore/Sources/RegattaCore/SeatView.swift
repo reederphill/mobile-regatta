@@ -33,7 +33,7 @@ public struct SeatView: Sendable, Equatable {
     public let finishWindowRemaining: Double?
 
     /// Her own boat.
-    public let own: OwnBoat
+    public internal(set) var own: OwnBoat
     /// Every other seat's boat, in seat order.
     public let others: [OtherBoat]
     /// The rule calls on show: each from its call for the rules' penalty completion window (30 s), which is
@@ -116,6 +116,14 @@ public struct SeatView: Sendable, Equatable {
         self.boatClass = boatClass
     }
 
+    /// This view with her own autohelm's reading as `reading`: for a class whose autohelm doesn't hold a centred rudder
+    /// (#434), the angle a bot's own helm holds by hand (`BotHelm`), read as the autohelm's would be. Nothing else changes.
+    public func holdingOwnHelm(_ reading: Autohelm.Reading?) -> SeatView {
+        var view = self
+        view.own.autohelm = reading
+        return view
+    }
+
     /// What every seat sees alike at one tick: the clock, the rule calls, the wind on the water, the water, the
     /// course and the class. Made once for all the views built together (`Race.seatViews(for:)`), since a
     /// fleet of bots looks at the same tick several at a time.
@@ -177,8 +185,9 @@ public struct SeatView: Sendable, Equatable {
         /// Which side her boom is on; her tack is the other side.
         public let boomSide: BoomSide
         /// What her autohelm holds (ADR 0007): the wind angle held or the groove, whether it's sailing the
-        /// tap, and how far off the groove, as the vane shows it (#122); nil while her rudder is held off centre.
-        public let autohelm: Autohelm.Reading?
+        /// tap, and how far off the groove, as the vane shows it (#122); nil while her rudder is held off centre, and
+        /// for a class whose autohelm doesn't hold a centred rudder (#434), nil but while it sails a tap.
+        public internal(set) var autohelm: Autohelm.Reading?
         public let status: BoatStatus
         /// The leg she's sailing: an index into the course's `legs`.
         public let legIndex: Int
@@ -199,6 +208,8 @@ public struct SeatView: Sendable, Equatable {
         public let shadow: Double
         /// The wind speed her polar reads, m/s (`Boat.polarWindSpeed(in:)`): the sailing wind's, less any shadow on it.
         public let polarWindSpeed: Double
+        /// The wind speed her grooves read, m/s (`Boat.grooveWindSpeed(in:)`): what the vane's groove is drawn in.
+        public let grooveWindSpeed: Double
         /// The shadow's multiplier on her target speed (`Boat.speedShadow(in:)`): 1 for a class whose shadow slows
         /// the wind instead.
         public let speedShadow: Double
@@ -232,6 +243,7 @@ public struct SeatView: Sendable, Equatable {
             sailingWind = boat.sailingWind
             shadow = boat.shadow
             polarWindSpeed = boat.polarWindSpeed(in: boatClass)
+            grooveWindSpeed = boat.grooveWindSpeed(in: boatClass)
             speedShadow = boat.speedShadow(in: boatClass)
             self.zone = zone
             self.markRoom = markRoom

@@ -1,0 +1,21 @@
+# Handling is steering by hand; the autohelm is a boat class setting
+
+The autohelm of ADR 0007 becomes a value in the boat class file, `steering.autohelm.holdsWhenCentred` (schema 4, ADR 0004), tuned for every boat at once, players and bots alike. On (true, and every file that leaves it out), a centred rudder is ADR 0007's autohelm, exactly as before. Off, a centred rudder is a centred rudder: she sails straight on her heading, the autohelm never engages on centring and never snaps to the groove, and every shift and puff is hers to steer through. The tack/gybe tap still hands her to the autohelm, which sails the turn onto the groove on the new tack and, past the boom, lets go with the rudder centred once she is within the class's `handBackDegrees` (3°) of it, so she doesn't stall just past head to wind. Settled in [#426](https://github.com/reederphill/mobile-regatta/issues/426) (Q10, 2026-10-09) and built in [#434](https://github.com/reederphill/mobile-regatta/issues/434), overriding part of ADR 0007 and [#219](https://github.com/reederphill/mobile-regatta/issues/219). The default stays on until [#437](https://github.com/reederphill/mobile-regatta/issues/437) ships a class file with it off.
+
+We did this because the autohelm made the legs mindless: holding the groove through every puff and shift left nothing to do between decisions. #426 set out to add boat handling as a second skill axis beside tactics. The handling mechanics tried on the throwaway `proto-handling` branch (an overpowered state with Ease and wipeouts; Ease as a sheet dial with a fast heel band) were either a tapping game to survive gusts or too much to work while steering. The `proto-tiller` branch, main's sailing model with only the player's autohelm turned off, played "much better". Steering through the wind at your boat is the handling skill.
+
+## Considered options
+
+- **Keep the autohelm and add a gust mechanic (heel, overpowered, depower with Ease, wipeout):** rejected after playtest. Ease is a separate button, so depowering fought steering.
+- **Ease as a sheet dial with a fast heel band and rounding up:** rejected after playtest as too much.
+- **A per-player setting, bots keeping the autohelm:** rejected (owner, 2026-10-09). Bots and players sail the same model, and a per-player choice would mean two input models in one race.
+- **A race option or an unlogged app flag (the prototype's):** rejected. Everything the simulation reads about a boat is in her class file (ADR 0004), so the setting is logged by the file's ref, the server sails the same file, and the tuning panel tunes it like any other value: a tuned copy writes a number, so the file takes 0 or 1 as well as a JSON bool.
+- **Autohelm off as a class value (chosen):** the smallest change that gives the legs something to do, and it reuses the polar, vane, groove and tap as they are.
+
+## Consequences
+
+- This reverses ADR 0007's rejection of a heading-hold option. There is still one input model per race, as ADR 0007 wanted: every boat sails the race's class.
+- A new simulation version (ADR 0002) when this lands. On the default class nothing moves: digests, goldens and bot tracks are unchanged until #437 switches the default.
+- Bots sail by centring on an aim and leaving it to the autohelm. With it off they hold the aim themselves (`BotHelm` in RegattaBots): the angle the autohelm would have taken on centring, turned into a held rudder each decision with the autohelm's own rudder law, so a bot sails today's track to within a fraction of a hull length. Hand-steering imperfections by skill are [#435](https://github.com/reederphill/mobile-regatta/issues/435).
+- The escape simulation and course prediction read the setting: off, a centred rudder predicts a straight course. No right-of-way boat changes course by following a shift, so the watchdog and [#228](https://github.com/reederphill/mobile-regatta/issues/228)'s shift-following case apply only with the autohelm on.
+- The groove stays the target to steer to. The vane's pinch/foot arc shows only while the autohelm holds an angle, so off, only during a tap. Hand-steering cues and the tuning toggle are [#436](https://github.com/reederphill/mobile-regatta/issues/436).
