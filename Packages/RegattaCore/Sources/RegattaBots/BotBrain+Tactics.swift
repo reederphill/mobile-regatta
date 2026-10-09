@@ -104,7 +104,7 @@ struct Tactics: Sendable, Equatable {
             leeBows = engagement >= BotBrain.FleetTactics.leeBowEngagement
             tacksOnWind = engagement >= BotBrain.FleetTactics.tackOnWindEngagement
             rampToTheTactician(skill: skill)
-        case .baseline:
+        case .baseline, .clubSteering:
             // The groove only: headers past a threshold, the corridor, and nothing off the groove.
             self.init(headerThreshold: deg2rad(5), tackInterval: 15)
             rollsTacks = false
@@ -112,7 +112,7 @@ struct Tactics: Sendable, Equatable {
             // #222, #105: the baseline's tactics, executed perfectly: she rolls every tack (and her weaknesses,
             // `BotProfile.weaknesses`, have every roll hit).
             self.init(headerThreshold: deg2rad(5), tackInterval: 15)
-        case .tactician, .hunter, .tacticianClubExecution:
+        case .tactician, .hunter, .tacticianClubExecution, .tacticianClubSteering:
             // #263: a corridor a little wider than the baseline's and her tacks as close together as hers, measured in
             // the fun pass: with skiff@3's tack cost and momentum, 0.8 and 20 s cost her the edge (#300 retunes).
             self.init(headerThreshold: deg2rad(4), tackInterval: 15, anticipation: 6, corridor: 0.5,

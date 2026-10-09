@@ -91,6 +91,20 @@ public struct StandIn: Hashable, Sendable {
     /// The suite's tactician at skill 1, with no weaknesses (#364: "the tactician (no weaknesses) in the owner's seat").
     public static let tactician = StandIn(profile: .tactician)
 
+    /// The National stand-in (#435, #426 T4): the tactician at skill 1, steering by hand at Club level
+    /// (`BotWeaknesses.clubHandSteering`) and with no other weakness. Steering by hand shows only in a class whose
+    /// autohelm doesn't hold a centred rudder; in one that does she sails as `tactician`.
+    public static let national = StandIn(profile: .tactician,
+                                         weaknesses: BotWeaknesses.none(skill: 1).steering(like: .clubHandSteering))
+
+    /// The Club stand-in (#435, #370): the groove-only novice (the baseline at skill 0.35, with that skill's
+    /// weaknesses), steering by hand at Club level.
+    public static let club = StandIn(profile: .baseline, skill: noviceSkill,
+                                     weaknesses: BotWeaknesses(skill: noviceSkill).steering(like: .clubHandSteering))
+
+    /// The novice stand-in's skill (#370): the bottom of Club's band.
+    public static let noviceSkill = 0.35
+
     /// Her driver for `seat` of the race with `raceSeed`.
     public func driver(seat: Int, raceSeed: RaceSeed) -> BotDriver {
         BotDriver(seat: seat, raceSeed: raceSeed, skill: skill, profile: profile, weaknesses: weaknesses)

@@ -213,6 +213,13 @@ extension RunSplit: LegSplit {}
 /// didn't complete has none. `legs` gives a seat's legs of the kind: her beats, or her runs.
 func legGains<Split: LegSplit>(_ ahead: [SeatMetrics], over behind: [SeatMetrics], hullLength: Double,
                                legs: (SeatMetrics) -> [Split]) -> [Double] {
+    legGainSeconds(ahead, over: behind, legs: legs).map { $0.seconds * $0.speed / hullLength }
+}
+
+/// Each leg's gain of `ahead` over `behind`, as `legGains`, in seconds (#435: the time `behind`'s seats took over it
+/// less `ahead`'s), with `behind`'s mean speed along it, metres per second.
+func legGainSeconds<Split: LegSplit>(_ ahead: [SeatMetrics], over behind: [SeatMetrics],
+                                     legs: (SeatMetrics) -> [Split]) -> [(seconds: Double, speed: Double)] {
     let legCount = (ahead + behind).map { legs($0).count }.max() ?? 0
     return (0..<legCount).compactMap { leg in
         let t = ahead.compactMap { legs($0).indices.contains(leg) ? legs($0)[leg] : nil }
@@ -221,7 +228,7 @@ func legGains<Split: LegSplit>(_ ahead: [SeatMetrics], over behind: [SeatMetrics
         let seconds = { (splits: [Split]) in splits.reduce(0) { $0 + $1.seconds } / Double(splits.count) }
         let baselineSeconds = seconds(b)
         let baselineSpeed = b.reduce(0) { $0 + $1.metres } / Double(b.count) / max(baselineSeconds, 1)
-        return (baselineSeconds - seconds(t)) * baselineSpeed / hullLength
+        return (baselineSeconds - seconds(t), baselineSpeed)
     }
 }
 
@@ -328,6 +335,8 @@ public struct RaceResult: Codable, Hashable, Sendable {
     public var rivals: RaceRivals? = nil
     /// Skill against finishing order (#105), in a race of the rank-stability mix; nil otherwise.
     public var rank: RaceRank? = nil
+    /// Perfect hand steering against Club's (#435), in a race of the handling mix; nil otherwise.
+    public var handling: RaceHandling? = nil
 
     /// `ranks`: each seat's place in the race's order at the end (`Race.place(of:)`), finished or not.
     init(cell: BotRaceCell, finalTick: Int, capped: Bool, tideStateAtGun: Double?, seats: [SeatMetrics],
@@ -338,7 +347,8 @@ public struct RaceResult: Codable, Hashable, Sendable {
         tideStateAtGunDegrees = tideStateAtGun.map { $0 * 180 / .pi }
         self.seats = seats
         fleet = FleetMetrics(seats)
-        skillGap = RaceSkillGap(seats: seats, ranks: ranks, hullLength: hullLength)
+        // The handling mix's baseline and tactician steer by hand: their gap is the handling's, not the skill gap's.
+        skillGap = cell.profileMix == .handling ? nil : RaceSkillGap(seats: seats, ranks: ranks, hullLength: hullLength)
         funPass = cell.profileMix == .funPass ? RaceFunPass(seats: seats, ranks: ranks) : nil
         let middle = midFleet(ranks)
         midFleetSeats = middle
@@ -348,6 +358,7 @@ public struct RaceResult: Codable, Hashable, Sendable {
         execution = RaceExecution(seats: seats, ranks: ranks)
         rivals = cell.profileMix == .rivals ? RaceRivals(cell: cell, seats: seats, ranks: ranks) : nil
         rank = cell.profileMix == .rankStability ? RaceRank(seats: seats, ranks: ranks) : nil
+        handling = cell.profileMix == .handling ? RaceHandling(seats: seats, hullLength: hullLength) : nil
     }
 }
 
@@ -544,6 +555,85 @@ public struct RaceExecution: Codable, Hashable, Sendable {
               seats.contains(where: { $0.profile == .tacticianClubExecution }) else { return nil }
         order = profileOrder(seats, ranks: ranks)
         tacticsWin = win(.tacticianClubExecution, over: .executor, in: order)
+    }
+}
+
+/// What steering well by hand gains over Club's hand steering (#435) for one pair of profiles in a race: `perfect`
+/// over `club`, each beat and run in leg order.
+public struct HandlingGain: Codable, Hashable, Sendable {
+    /// Each beat's gain, seconds (`legGainSeconds`); a beat either side didn't complete has none.
+    public var secondsPerBeat: [Double]
+    /// Each run's gain, seconds.
+    public var secondsPerRun: [Double]
+    /// The same gains in hull lengths, at the Club seats' speed along the leg (`legGains`).
+    public var lengthsPerBeat: [Double]
+    public var lengthsPerRun: [Double]
+
+    /// Nil unless the race has both.
+    init?(_ perfect: BotProfile, over club: BotProfile, seats: [SeatMetrics], hullLength: Double) {
+        let ahead = seats.filter { $0.profile == perfect }
+        let behind = seats.filter { $0.profile == club }
+        guard !ahead.isEmpty, !behind.isEmpty else { return nil }
+        let beats = legGainSeconds(ahead, over: behind) { $0.beats }
+        let runs = legGainSeconds(ahead, over: behind) { $0.runs }
+        secondsPerBeat = beats.map(\.seconds)
+        secondsPerRun = runs.map(\.seconds)
+        lengthsPerBeat = beats.map { $0.seconds * $0.speed / hullLength }
+        lengthsPerRun = runs.map { $0.seconds * $0.speed / hullLength }
+    }
+}
+
+/// A handling race's dividend of steering well by hand (#435): perfect hand steering over Club's, without tactics (the
+/// baseline over `clubSteering`) and with them (the tactician over `tacticianClubSteering`).
+public struct RaceHandling: Codable, Hashable, Sendable {
+    public var baseline: HandlingGain?
+    public var tactician: HandlingGain?
+
+    init(seats: [SeatMetrics], hullLength: Double) {
+        baseline = HandlingGain(.baseline, over: .clubSteering, seats: seats, hullLength: hullLength)
+        tactician = HandlingGain(.tactician, over: .tacticianClubSteering, seats: seats, hullLength: hullLength)
+    }
+}
+
+/// The handling mix over a run (#435): the median gain per beat and per run of perfect hand steering over Club's, read
+/// against #426's T1 (placeholders ≈ 6 s/beat, ≈ 4 s/run). Reported, not gated.
+public struct HandlingSummary: Codable, Hashable, Sendable {
+    /// One pair's gains over every race with both, pooled.
+    public struct Medians: Codable, Hashable, Sendable {
+        public var beats: Int
+        public var medianSecondsPerBeat: Double
+        public var medianLengthsPerBeat: Double
+        public var runs: Int
+        public var medianSecondsPerRun: Double
+        public var medianLengthsPerRun: Double
+
+        init(_ gains: [HandlingGain]) {
+            beats = gains.reduce(0) { $0 + $1.secondsPerBeat.count }
+            medianSecondsPerBeat = median(gains.flatMap(\.secondsPerBeat).sorted())
+            medianLengthsPerBeat = median(gains.flatMap(\.lengthsPerBeat).sorted())
+            runs = gains.reduce(0) { $0 + $1.secondsPerRun.count }
+            medianSecondsPerRun = median(gains.flatMap(\.secondsPerRun).sorted())
+            medianLengthsPerRun = median(gains.flatMap(\.lengthsPerRun).sorted())
+        }
+    }
+
+    /// Races of the handling mix.
+    public var races: Int
+    /// Without tactics (the baseline over `clubSteering`), with them (the tactician over `tacticianClubSteering`), and
+    /// both pooled.
+    public var baseline: Medians
+    public var tactician: Medians
+    public var all: Medians
+
+    /// Nil when no race was of the handling mix.
+    init?(_ races: [RaceHandling]) {
+        guard !races.isEmpty else { return nil }
+        self.races = races.count
+        let baselines = races.compactMap(\.baseline)
+        let tacticians = races.compactMap(\.tactician)
+        baseline = Medians(baselines)
+        tactician = Medians(tacticians)
+        all = Medians(baselines + tacticians)
     }
 }
 
@@ -1156,6 +1246,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var rank: RankSummary?
     /// The cautious mix (#105) over its races; nil when none sailed.
     public var cautious: CautiousSummary?
+    /// The handling mix (#435) over its races; nil when none sailed.
+    public var handling: HandlingSummary?
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -1196,6 +1288,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         rivals = RivalPaceSummary(races)
         rank = RankSummary(races)
         cautious = CautiousSummary(races)
+        handling = HandlingSummary(races.compactMap(\.handling))
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
         breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start,
@@ -1243,6 +1336,17 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                 + "lengths/beat over \(gap.beats) beats, \(fixed(gap.medianGainLengthsPerRun)) lengths/run over \(gap.runs) runs, "
                 + "start \(gap.meanStartGainLengths.map { fixed($0) } ?? "-") lengths ahead at the first cross over "
                 + "\(gap.startRaces) races")
+        }
+        if let handling {
+            func line(_ name: String, _ m: HandlingSummary.Medians) -> String {
+                "  \(name): median \(fixed(m.medianSecondsPerBeat)) s/beat (\(fixed(m.medianLengthsPerBeat)) lengths) over "
+                    + "\(m.beats) beats, \(fixed(m.medianSecondsPerRun)) s/run (\(fixed(m.medianLengthsPerRun)) lengths) over \(m.runs) runs"
+            }
+            lines.append("handling: perfect hand steering over Club's in \(handling.races) races"
+                + (matrix.autohelmOff ? "" : " (the class's autohelm holds a centred rudder: sail with --autohelm off)"))
+            lines.append(line("without tactics", handling.baseline))
+            lines.append(line("with tactics", handling.tactician))
+            lines.append(line("both", handling.all))
         }
         if let execution {
             lines.append("execution: tactician at Club execution beat the executor in \(fixed(execution.tacticsBeatsExecutionShare)) "

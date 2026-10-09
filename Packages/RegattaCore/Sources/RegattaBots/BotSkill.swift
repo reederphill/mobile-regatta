@@ -45,11 +45,18 @@ public struct BotWeaknesses: Hashable, Sendable {
     /// on, so fails to keep clear. Drawn once an encounter, never a turn towards the other boat; none from National's
     /// band up.
     public var ruleMisjudgeRate: Double
+    /// Hand steering (#435), felt only in a class whose autohelm doesn't hold a centred rudder (`BotHelm`): seconds she
+    /// sails her old heading after a shift or puff reaches her before she re-aims to the new wind (`HandSteering`).
+    public var shiftLag: Double
+    /// Hand steering (#435): radians, at most, of her slow drift around her aim, seeded per boat.
+    public var wander: Double
+    /// Hand steering (#435): radians, at most, past the new angle when she re-aims, decaying back to her aim.
+    public var overshoot: Double
 
     public init(startTiming: Double, lineBiasMisread: Double, reactionDelay: Double, laylineMisjudge: Double,
                 angleMissRate: Double, angleMissSize: Double, puffPerception: Double, currentSense: Double,
                 rollHitRate: Double, tacticalQuality: Double, keepClearLookahead: Double = 4.5,
-                ruleMisjudgeRate: Double = 0) {
+                ruleMisjudgeRate: Double = 0, shiftLag: Double = 0, wander: Double = 0, overshoot: Double = 0) {
         self.startTiming = startTiming
         self.lineBiasMisread = lineBiasMisread
         self.reactionDelay = reactionDelay
@@ -62,10 +69,13 @@ public struct BotWeaknesses: Hashable, Sendable {
         self.tacticalQuality = tacticalQuality
         self.keepClearLookahead = keepClearLookahead
         self.ruleMisjudgeRate = ruleMisjudgeRate
+        self.shiftLag = shiftLag
+        self.wander = wander
+        self.overshoot = overshoot
     }
 
     /// No weaknesses: a bot-suite profile's (#231). Her start timing and keep-clear lookahead are her style's as
-    /// before #102 and #103; she misjudges no rule.
+    /// before #102 and #103; she misjudges no rule, and steers by hand perfectly (#435).
     public static func none(skill: Double) -> BotWeaknesses {
         let own = BotWeaknesses(skill: skill)
         return BotWeaknesses(startTiming: own.startTiming, lineBiasMisread: 0, reactionDelay: 0,
@@ -92,6 +102,24 @@ public struct BotWeaknesses: Hashable, Sendable {
         tacticalQuality = Self.ramp(s, from: 0.35, to: 0.9)
         keepClearLookahead = Self.keepClearLookahead(skill: s)
         ruleMisjudgeRate = Self.ruleMisjudgeRate(skill: s)
+        shiftLag = HandSteeringTable.shiftLagScale * deficit
+        wander = HandSteeringTable.wanderScale * deficit
+        overshoot = HandSteeringTable.overshootScale * deficit
+    }
+
+    /// These weaknesses with `other`'s hand steering (#435): e.g. a stand-in's Club hand steering on her own tactics.
+    public func steering(like other: BotWeaknesses) -> BotWeaknesses {
+        var weaknesses = self
+        weaknesses.shiftLag = other.shiftLag
+        weaknesses.wander = other.wander
+        weaknesses.overshoot = other.overshoot
+        return weaknesses
+    }
+
+    /// Club hand steering (#435): the hand-steering weaknesses at the centre of Club's band, on none of anything else.
+    public static var clubHandSteering: BotWeaknesses {
+        let skill = BotTier.club.skill(at: 0.5)
+        return none(skill: skill).steering(like: BotWeaknesses(skill: skill))
     }
 
     /// Metres ahead a bot that notices every puff looks: the far end of `BotBrain.puffLookAhead`.
@@ -146,4 +174,24 @@ public struct BotWeaknesses: Hashable, Sendable {
     static func ramp(_ x: Double, from a: Double, to b: Double) -> Double {
         min(max((x - a) / (b - a), 0), 1)
     }
+}
+
+/// Hand steering's placeholder values (#435, #426 Q7), one table for the owner to tune: each scales with her skill
+/// deficit (1 − skill), as `reactionDelay` does, so none at skill 1. Club's centre (deficit ≈ 0.53): lag ≈ 2.1 s, wander
+/// ≈ 2.6°, overshoot ≈ 2.1°; National's (0.1): ≈ 0.4 s, 0.5°, 0.4°. Read by `BotWeaknesses(skill:)` and `HandSteering`.
+public enum HandSteeringTable {
+    /// Seconds of shift lag at skill 0.
+    public static let shiftLagScale = 4.0
+    /// Radians of wander amplitude at skill 0.
+    public static let wanderScale = deg2rad(5)
+    /// Seconds a wander cycle lasts, drawn per boat from her seed inside this range.
+    public static let wanderPeriod = 20.0...40.0
+    /// Radians of overshoot at skill 0.
+    public static let overshootScale = deg2rad(4)
+    /// Seconds an overshoot takes to decay back to her aim, linearly.
+    public static let overshootDecay = 2.0
+    /// Radians the wind at her must swing from the wind she steers by before she notices a shift.
+    public static let shiftNoticed = deg2rad(1)
+    /// The share the wind speed at her must change from the speed she steers by before she notices a puff or lull.
+    public static let puffNoticed = 0.1
 }

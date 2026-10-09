@@ -15,6 +15,9 @@ public struct BotSuiteOptions: Hashable, Sendable {
     /// Only these profile mixes (#231), instead of the matrix's; all when empty.
     public var profileMixes: [ProfileMix] = []
     public var laps: Int?
+    /// `--autohelm off` (#435): sail every race on a copy of its class with the autohelm off a centred rudder, so the
+    /// bots steer by hand; nil or `on` sails the matrix's setting.
+    public var autohelmOff: Bool?
     /// Races sailed at once; nil for `BotSuite.defaultJobs`. 1 sails them one after another.
     public var jobs: Int?
     /// Where to write the JSON report; `-` for stdout (the text report then goes to stderr).
@@ -31,7 +34,9 @@ public struct BotSuiteOptions: Hashable, Sendable {
           --fleet-size <n>       sail only this fleet size (repeatable)
           --tier-mix <mix>       sail only this tier mix: club, regional, national, mixed (repeatable)
           --profile-mix <mix>    sail only this profile mix: live, skillGap, funPass, hunters, execution,
-                                 cautious, rivals, rankStability (repeatable)
+                                 cautious, rivals, rankStability, handling (repeatable)
+          --autohelm <on|off>    off: sail each race on a copy of its class with the autohelm off a centred
+                                 rudder, so the bots steer by hand (default: the matrix's, the class as bundled)
           --laps <n>             laps per race instead of the matrix's
           --json <path|->        write the JSON report there (- for stdout)
           --jobs <n>             races sailed at once (default: the performance cores; 1 = one after another).
@@ -66,6 +71,12 @@ public struct BotSuiteOptions: Hashable, Sendable {
                 guard let mix = ProfileMix(rawValue: text) else { throw BotSuiteError.usage("--profile-mix: unknown mix \(text)") }
                 profileMixes.append(mix)
             case "--laps": laps = try number(flag)
+            case "--autohelm":
+                switch try value(flag) {
+                case "on": autohelmOff = false
+                case "off": autohelmOff = true
+                case let text: throw BotSuiteError.usage("--autohelm: on or off, not \(text)")
+                }
             case "--json": jsonPath = try value(flag)
             case "--jobs": jobs = try number(flag)
             case "-h", "--help": help = true
@@ -92,6 +103,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
             matrix.profileMixes = matrix.profileMixes.filter(narrowed.sailsAny)
         }
         if let laps { matrix.laps = laps }
+        if let autohelmOff { matrix.autohelmOff = autohelmOff }
         try matrix.validate()
         return matrix
     }

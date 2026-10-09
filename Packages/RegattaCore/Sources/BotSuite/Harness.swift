@@ -29,16 +29,52 @@ public enum BotRaceHarness {
 
     /// `cell`'s setup: every seat a bot sailing the default class (`RaceFiles.defaults`: the skiff since #248,
     /// which the suite sails since #231; skiff@2 since #89, skiff@3 since #263, skiff@4 since #298, skiff@5 since its follow-up), the venue and conditions named by their bundled files.
+    /// With `cell.autohelmOff`, the class is the default's copy with the autohelm off a centred rudder (`handSteered`,
+    /// #435), which `raceFiles(for:)` resolves.
     public static func raceSetup(for cell: BotRaceCell) throws -> RaceSetup {
         let venue = try dataFileKey(cell.venue)
         let conditions = try dataFileKey(cell.conditions)
+        let boatClass = cell.autohelmOff == true ? try handSteered(RaceFiles.defaults.boatClass).ref : RaceFiles.defaults.boatClass.ref
         return try RaceSetup(
             raceSeed: RaceSeed(cell.seed),
             seats: Array(repeating: .bot, count: cell.fleetSize),
             laps: cell.laps,
+            boatClass: boatClass,
             venue: VenueFile.bundled(id: venue.id, version: venue.version).ref,
             conditions: ConditionsFile.bundled(id: conditions.id, version: conditions.version).ref
         )
+    }
+
+    /// The files `setup`, `cell`'s (`raceSetup(for:)`), names: the bundled ones, and the hand-steered copy of the class
+    /// for a cell sailed with the autohelm off.
+    static func raceFiles(for cell: BotRaceCell, setup: RaceSetup) throws -> RaceFiles {
+        guard cell.autohelmOff == true else { return try RaceFiles(resolving: setup) }
+        var catalog = RaceFileCatalog()
+        try catalog.boatClasses.add(handSteered(RaceFiles.defaults.boatClass))
+        return try RaceFiles(resolving: setup, from: catalog)
+    }
+
+    /// A copy of `file`, a bundled schema-3 or schema-4 class, with its autohelm off a centred rudder
+    /// (`AutohelmTuning.holdsWhenCentred` false, #434), so bots sail it steering by hand (#435): its bytes headed as
+    /// schema 4 with the value added to `steering.autohelm`, loaded as tune 1, in memory like a tuned copy. `file`
+    /// itself when its autohelm is already off.
+    public static func handSteered(_ file: BoatClassFile) throws -> BoatClassFile {
+        guard file.content.steering.autohelm.holdsWhenCentred else { return file }
+        let key = (id: file.ref.id, version: file.ref.version)
+        guard let data = try BoatClassFile.bundledData(id: key.id, version: key.version) else {
+            throw BotSuiteError.matrix("\(key.id)@\(key.version) is not bundled")
+        }
+        var text = String(decoding: data, as: UTF8.self)
+        guard !text.contains("\"holdsWhenCentred\""), let helm = text.range(of: "\"autohelm\": {") else {
+            throw BotSuiteError.matrix("\(key.id)@\(key.version): no autohelm to turn off")
+        }
+        text.replaceSubrange(helm, with: "\"autohelm\": { \"holdsWhenCentred\": false,")
+        if let schema = text.range(of: "\"schemaVersion\": 3,") { text.replaceSubrange(schema, with: "\"schemaVersion\": 4,") }
+        let copy = try BoatClassFile(data: Data(text.utf8), tune: 1)
+        guard !copy.content.steering.autohelm.holdsWhenCentred else {
+            throw BotSuiteError.matrix("\(key.id)@\(key.version): the autohelm didn't turn off")
+        }
+        return copy
     }
 
     /// Sails `cell` with the cautious bot and the set skills its profile mix gives (`BotRaceCell.cautiousSeats`,
@@ -57,7 +93,7 @@ public enum BotRaceHarness {
                            events: (Race, [RaceEvent]) -> Void = { _, _ in }) throws -> RaceResult {
         let setup = try raceSetup(for: cell)
         // Assembled as the server assembles a race (#81): the files the setup names, the race of record.
-        let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+        let race = try Race(setup: setup, files: raceFiles(for: cell, setup: setup),
                             mode: .authoritative(windSeed: windSeed(for: cell.seed)))
         let tiers = setup.seats.indices.map { cell.tierMix.tier(ofSeat: $0, raceSeed: setup.raceSeed) }
         let profiles = setup.seats.indices.map { cell.profile(ofSeat: $0) }
