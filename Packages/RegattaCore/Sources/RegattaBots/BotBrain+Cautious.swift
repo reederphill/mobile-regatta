@@ -43,9 +43,12 @@ extension BotBrain {
         /// Placeholder.
         static var skill: Double { BotTier.club.skillBand.lowerBound }
 
-        /// Her weaknesses: her skill's, but she misjudges no encounter (she always gives way, #19).
+        /// Her handling skill (#443): the bottom of Club's handling band, as her skill is of its skill band. Placeholder.
+        static var handling: Double { BotTier.club.handlingBand.lowerBound }
+
+        /// Her weaknesses: her skill's and `handling`'s, but she misjudges no encounter (she always gives way, #19).
         static func weaknesses(skill: Double) -> BotWeaknesses {
-            var weaknesses = BotWeaknesses(skill: skill)
+            var weaknesses = BotWeaknesses(skill: skill, handling: handling)
             weaknesses.ruleMisjudgeRate = 0
             return weaknesses
         }

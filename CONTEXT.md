@@ -126,7 +126,7 @@ A computer-helmed boat that fills an empty seat in a fleet. A bot also sails a d
 _Avoid_: AI, CPU
 
 **Bot tier**:
-How well a bot sails: **Club**, **Regional** or **National**. Online, bots are matched to the fleet's ratings instead of using a fixed tier.
+How well a bot sails: **Club**, **Regional** or **National**. A tier sets two bands, drawn apart for each bot: her tactics skill and her handling skill (how well she steers by hand). The bands overlap, so a sharp tactician can have a sloppy helm. Online, bots are matched to the fleet's ratings instead of using a fixed tier.
 _Avoid_: difficulty, level
 
 **Cautious bot**:

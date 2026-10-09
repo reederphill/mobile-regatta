@@ -275,4 +275,52 @@ import Testing
             print("HAND-STEERING-LOSS steady=\(steady) club beat \(beat) run \(run) national beat \(nationalBeat) run \(nationalRun)")
         }
     }
+
+    /// #443: her hand steering follows her handling skill, her tactics her skill, each apart from the other. The same
+    /// skill on two handling skills steers differently, by more the worse her handling, and decides alike; the same
+    /// handling on two skills steers alike and decides differently. With the autohelm on, handling is never felt: a bot's
+    /// race is the same at any handling to the bit; off, her handling moves her track.
+    @Test func handlingSkillIsIndependentOfTacticsSkill() throws {
+        let sloppy = BotWeaknesses(skill: 0.9, handling: 0.3)
+        let sharp = BotWeaknesses(skill: 0.9, handling: 0.8)
+        #expect(sloppy.shiftLag > sharp.shiftLag && sloppy.wander > sharp.wander && sloppy.overshoot > sharp.overshoot)
+        #expect(abs(sloppy.shiftLag - HandSteeringTable.shiftLagScale * 0.7) < 1e-9)
+        #expect(sloppy.steering(like: sharp) == sharp, "only her hand steering differs")
+        #expect(BotWeaknesses(skill: 1, handling: 1).steering(like: .none(skill: 1)) == BotWeaknesses(skill: 1))
+
+        let club = BotWeaknesses(skill: 0.4, handling: 0.6)
+        let national = BotWeaknesses(skill: 0.9, handling: 0.6)
+        #expect(club.shiftLag == national.shiftLag && club.wander == national.wander && club.overshoot == national.overshoot)
+        #expect(club.reactionDelay > national.reactionDelay && club.tacticalQuality < national.tacticalQuality)
+
+        // Her driver: the same seed and skill on two handling skills keeps her style and brain, steers apart.
+        let raceSeed = RaceSeed(5)
+        let seed = botSeed(raceSeed: raceSeed, seat: 1)
+        let a = BotDriver(seat: 1, raceSeed: raceSeed, skill: 0.7, handling: 0.25)
+        let b = BotDriver(seat: 1, raceSeed: raceSeed, skill: 0.7, handling: 0.95)
+        #expect(a.style == b.style && a.weaknesses.steering(like: b.weaknesses) == b.weaknesses)
+        #expect(HandSteering(a.weaknesses, seed: seed) != HandSteering(b.weaknesses, seed: seed))
+        let c = BotDriver(seat: 1, raceSeed: raceSeed, skill: 0.95, handling: 0.25)
+        #expect(HandSteering(a.weaknesses, seed: seed) == HandSteering(c.weaknesses, seed: seed))
+        #expect(a.style != c.style)
+
+        // Sailed: the app's bots on a sloppy and a sharp hand. The autohelm holds the default class's rudder, so the
+        // tracks are the same to the bit; the skiff without it sails them apart.
+        func at(_ handling: Double) -> (Int, RaceSeed) -> BotDriver {
+            { seat, raceSeed in
+                let skill = BotTier.mixedFleetDraw(seed: botSeed(raceSeed: raceSeed, seat: seat)).skill
+                return BotDriver(seat: seat, raceSeed: raceSeed, skill: skill, handling: handling)
+            }
+        }
+        let onSloppy = try Self.track(seed: 5, boatClass: RaceFiles.defaults.boatClass, seconds: 120, driver: at(0.2))
+        let onSharp = try Self.track(seed: 5, boatClass: RaceFiles.defaults.boatClass, seconds: 120, driver: at(1))
+        let app = try Self.track(seed: 5, boatClass: RaceFiles.defaults.boatClass, seconds: 120) { seat, raceSeed in
+            BotDriver(seat: seat, raceSeed: raceSeed)
+        }
+        #expect(onSloppy == onSharp && onSharp == app, "handling felt with the autohelm on")
+        let off = try BotHelmTests.skiff(holds: false)
+        let offSloppy = try Self.track(seed: 5, boatClass: off, seconds: 120, driver: at(0.2))
+        let offSharp = try Self.track(seed: 5, boatClass: off, seconds: 120, driver: at(1))
+        #expect(offSloppy != offSharp, "handling unfelt with the autohelm off")
+    }
 }

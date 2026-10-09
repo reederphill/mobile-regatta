@@ -1,9 +1,0 @@
-{
-  "id": "bot-tiers",
-  "version": 1,
-  "notes": "Placeholders (#102), for #105 to tune: each tier's skill band, its share of a Mixed fleet's bots (weights, here in proportion to the bands' widths, so a Mixed fleet's skills spread evenly over 0.35...1), and the mean-place gap each tier step must keep over mixed fleets (BotTierSuiteTests).",
-  "club": { "skillBand": [0.35, 0.6], "mixShare": 0.25 },
-  "regional": { "skillBand": [0.6, 0.8], "mixShare": 0.2 },
-  "national": { "skillBand": [0.8, 1.0], "mixShare": 0.2 },
-  "minPlaceGap": 1.0
-}

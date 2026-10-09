@@ -178,11 +178,14 @@ struct BotBrain: Sendable {
     /// The stream of her seed her fleet tactics' draws come from (#234).
     static let tacticsStream: UInt64 = 0x7461_6374_6963_7321 // "tactics!"
 
-    init(style: BotStyle, profile: BotProfile? = nil, seed: UInt64 = 0, weaknesses: BotWeaknesses? = nil,
-         caution: Caution? = nil) {
+    /// `handling` is her handling skill (#443), which her hand steering's weaknesses scale with when neither `weaknesses`
+    /// nor a profile sets them; nil steers as her skill would.
+    init(style: BotStyle, profile: BotProfile? = nil, seed: UInt64 = 0, handling: Double? = nil,
+         weaknesses: BotWeaknesses? = nil, caution: Caution? = nil) {
         self.style = style
         self.caution = caution
-        self.weaknesses = weaknesses ?? profile?.weaknesses(skill: style.skill) ?? BotWeaknesses(skill: style.skill)
+        self.weaknesses = weaknesses ?? profile?.weaknesses(skill: style.skill)
+            ?? BotWeaknesses(skill: style.skill, handling: handling)
         tactics = Tactics(profile: profile, skill: style.skill, style: style, weaknesses: self.weaknesses)
         // #337: the cautious bot plays no fleet tactic (her engagement is 0) and fights for no spot: today's values.
         if caution != nil {
