@@ -169,6 +169,30 @@ import Testing
         #expect(result.timings.ticks > 0 && result.timings.p50Ms <= result.timings.p99Ms)
         #expect(Set(report.tiers.keys) == ["club", "regional", "national"])
         #expect(report.passed)
+
+        // #443: each live bot's handling skill, in the handling band of her tier, and places by either axis.
+        for seat in result.seats {
+            let handling = try #require(seat.handling, "seat \(seat.seat) has no handling")
+            #expect(seat.tier.handlingBand.contains(handling))
+            #expect(seats[seat.seat]["handling"] != nil)
+        }
+        let axes = try #require(report.axes)
+        #expect(report.handlingAxes == nil)
+        #expect(axes.skillBuckets == BotTier.allCases.map(\.rawValue) && axes.handlingBuckets == axes.skillBuckets)
+        #expect(axes.bySkill.values.reduce(0) { $0 + $1.seats } == 16)
+        #expect(axes.byHandling.values.reduce(0) { $0 + $1.seats } == 16)
+        #expect(axes.grid.values.flatMap(\.values).reduce(0) { $0 + $1.seats } == 16)
+        #expect(report.lines.contains { $0.hasPrefix("live places by tactics skill and handling skill") })
+        // A run from before #443, with no handling, still decodes.
+        var old = object
+        old["races"] = races.map { race in
+            var race = race
+            race["seats"] = (race["seats"] as? [[String: Any]])?.map { $0.filter { $0.key != "handling" } }
+            return race
+        }
+        old["axes"] = nil
+        let decoded = try JSONDecoder().decode(BotSuiteReport.self, from: JSONSerialization.data(withJSONObject: old))
+        #expect(decoded.races.first?.seats.allSatisfy { $0.handling == nil } == true && decoded.axes == nil)
     }
 
     /// #435: `--profile-mix handling --autohelm off` sails the handling mix's four profiles in all-National fleets on an

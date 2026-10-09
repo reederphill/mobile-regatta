@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import RegattaCore
 @testable import RegattaBots
@@ -98,5 +99,85 @@ import Testing
         #expect(abs(club - 0.3) < 0.05 && abs(national - 0.8) < 0.05, "club \(club), national \(national)")
         #expect(club < regional && regional < national)
         #expect(rates.allSatisfy { $0 >= 0 && $0 <= 1 })
+    }
+
+    /// #443: each tier has a handling band of its own in the bot-tier file, overlapping the next; a bot's handling is
+    /// drawn inside her tier's band on a stream of its own, apart from her skill; a Mixed fleet's bot draws it in the
+    /// tier her skill draw dealt, and a bot given a skill alone in the tier holding that skill.
+    @Test func handlingBandsPerTier() throws {
+        let file = BotTierFile.bundled
+        #expect(file.version == 2)
+        #expect(BotTier.club.handlingBand == 0.2...0.7, "the placeholder bands")
+        #expect(BotTier.regional.handlingBand == 0.4...0.9)
+        #expect(BotTier.national.handlingBand == 0.6...1.0)
+        let bands = BotTier.allCases.map(\.handlingBand)
+        for (lower, upper) in zip(bands, bands.dropFirst()) {
+            #expect(lower.lowerBound < upper.lowerBound && lower.upperBound < upper.upperBound, "\(lower) then \(upper)")
+            #expect(lower.upperBound > upper.lowerBound, "bands overlap: a sharp tactician can have a sloppy helm")
+        }
+        // The band decodes like the skill band, and is validated as it is; it round-trips.
+        let bad = #"{"skillBand": [0.35, 0.6], "handlingBand": [0.7, 0.2], "mixShare": 0.25}"#
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(BotTierFile.Tier.self, from: Data(bad.utf8)) }
+        let missing = #"{"skillBand": [0.35, 0.6], "mixShare": 0.25}"#
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(BotTierFile.Tier.self, from: Data(missing.utf8)) }
+        #expect(try JSONDecoder().decode(BotTierFile.self, from: JSONEncoder().encode(file)) == file)
+
+        for tier in BotTier.allCases {
+            #expect(tier.handling(at: 0) == tier.handlingBand.lowerBound && tier.handling(at: 1) == tier.handlingBand.upperBound)
+            for seat in 0..<16 {
+                let raceSeed = RaceSeed(UInt64(seat) * 7 + 1)
+                let seed = botSeed(raceSeed: raceSeed, seat: seat)
+                let handling = tier.handling(seed: seed)
+                #expect(tier.handlingBand.contains(handling))
+                #expect(BotTier.handlingDraw(seed: seed) != BotTier.skillDraw(seed: seed), "a stream of its own")
+                let driver = BotDriver(seat: seat, raceSeed: raceSeed, tier: tier)
+                #expect(driver.handling == handling)
+                #expect(driver.style.skill == tier.skill(seed: seed), "her skill draw never moves")
+                #expect(driver.weaknesses == BotWeaknesses(skill: driver.style.skill, handling: handling))
+            }
+        }
+
+        // Independent of her skill: over many bots, the two draws are uncorrelated.
+        let seeds = (0..<3000).map { botSeed(raceSeed: RaceSeed(UInt64($0 / 10)), seat: $0 % 10) }
+        let a = seeds.map(BotTier.skillDraw(seed:))
+        let b = seeds.map(BotTier.handlingDraw(seed:))
+        let mean = { (x: [Double]) in x.reduce(0, +) / Double(x.count) }
+        let (ma, mb) = (mean(a), mean(b))
+        let cov = mean(zip(a, b).map { ($0 - ma) * ($1 - mb) })
+        let r = cov / (mean(a.map { ($0 - ma) * ($0 - ma) }) * mean(b.map { ($0 - mb) * ($0 - mb) })).squareRoot()
+        #expect(abs(r) < 0.05, "skill and handling draws correlate: r = \(r)")
+
+        // A Mixed fleet's bot: her handling in the band of the tier her skill draw dealt.
+        for seat in 0..<10 {
+            for race in 0..<10 {
+                let raceSeed = RaceSeed(UInt64(race) + 40)
+                let seed = botSeed(raceSeed: raceSeed, seat: seat)
+                let drawn = BotTier.mixedFleetDraw(seed: seed)
+                let driver = BotDriver(seat: seat, raceSeed: raceSeed)
+                #expect(driver.handling == drawn.tier.handling(seed: seed))
+                #expect(drawn.tier.handlingBand.contains(try #require(driver.handling)))
+            }
+        }
+
+        // A bot given a skill alone (a rival, a rating's): the tier holding her skill, Club below every band.
+        #expect(BotTier.holding(skill: 0) == .club && BotTier.holding(skill: 0.35) == .club)
+        #expect(BotTier.holding(skill: 0.59) == .club && BotTier.holding(skill: 0.6) == .regional)
+        #expect(BotTier.holding(skill: 0.79) == .regional && BotTier.holding(skill: 0.8) == .national)
+        #expect(BotTier.holding(skill: 1) == .national)
+        let raceSeed = RaceSeed(3)
+        let seed = botSeed(raceSeed: raceSeed, seat: 1)
+        for (skill, tier) in [(0.0, BotTier.club), (0.5, .club), (0.7, .regional), (0.9, .national)] {
+            #expect(BotDriver(seat: 1, raceSeed: raceSeed, skill: skill).handling == tier.handling(seed: seed))
+        }
+        #expect(BotDriver(seat: 1, raceSeed: raceSeed, skill: 0.5, handling: 0.95).handling == 0.95, "given, it is hers")
+
+        // Pinned: a profile, an override or the cautious bot steer as they did; the cautious bot at Club's floor.
+        #expect(BotDriver(seat: 1, raceSeed: raceSeed, tier: .club, profile: .tactician).handling == nil)
+        #expect(BotDriver(seat: 1, raceSeed: raceSeed, tier: .club, profile: .tactician).weaknesses.shiftLag == 0)
+        #expect(BotDriver(seat: 1, raceSeed: raceSeed, skill: 0.5, weaknesses: .none(skill: 0.5)).handling == nil)
+        let cautious = BotDriver.cautious(seat: 1, raceSeed: raceSeed)
+        #expect(cautious.handling == nil)
+        #expect(cautious.weaknesses.shiftLag == HandSteeringTable.shiftLagScale * (1 - BotTier.club.handlingBand.lowerBound))
+        #expect(BotWeaknesses.clubHandSteering.shiftLag == HandSteeringTable.shiftLagScale * (1 - BotTier.club.handling(at: 0.5)))
     }
 }

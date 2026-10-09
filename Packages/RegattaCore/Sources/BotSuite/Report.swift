@@ -10,6 +10,9 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     /// The scripted profile she sailed (#231), or nil for a live bot.
     public var profile: BotProfile? = nil
     public var skill: Double
+    /// Her handling skill (#443, `BotDriver.handling`): a live bot's, drawn apart from her skill; nil for a profile, a
+    /// pinned or cautious bot, and in runs from before #443.
+    public var handling: Double? = nil
     /// The boat's status at the end: prestart, ocs, racing, finished or dsq.
     public var status: String
     public var finished: Bool
@@ -110,7 +113,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
     ]
 
     private enum CodingKeys: String, CodingKey {
-        case seat, tier, profile, skill, status, finished, place, ironsSeconds, markContacts, boatContacts
+        case seat, tier, profile, skill, handling, status, finished, place, ironsSeconds, markContacts, boatContacts
         case contactsEndingInFouls, contactsToFoulsShare, foulsAsOffender, dsqMissedPenalty, ocsCount
         case edgeSeconds, landContacts, boundaryContacts, beats
         case preGunIronsSeconds, startSeconds, startLineSpot, rowSpot, startSpot, onCourseSeconds
@@ -127,6 +130,7 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encode(tier, forKey: .tier)
         try c.encode(profile, forKey: .profile)
         try c.encode(skill, forKey: .skill)
+        try c.encodeIfPresent(handling, forKey: .handling)
         try c.encode(status, forKey: .status)
         try c.encode(finished, forKey: .finished)
         try c.encode(place, forKey: .place)
@@ -648,6 +652,103 @@ public struct HandlingSummary: Codable, Hashable, Sendable {
         baseline = Medians(baselines)
         tactician = Medians(tacticians)
         all = Medians(baselines + tacticians)
+    }
+}
+
+/// Places by each axis a bot sails on (#443): her tactics skill and her handling skill, drawn apart, so does each buy
+/// places on its own? The mean place of the seats in each bucket of either axis, and in each cell of the two, for the
+/// off-diagonals (a sharp tactician on a sloppy helm, and the reverse). Reported, not gated.
+public struct AxesSummary: Codable, Hashable, Sendable {
+    /// Seats in a bucket, those that finished, and their mean place; nil when none finished.
+    public struct Places: Codable, Hashable, Sendable {
+        public var seats: Int
+        public var finished: Int
+        public var meanPlace: Double?
+
+        init(_ seats: [SeatMetrics]) {
+            self.seats = seats.count
+            let places = seats.compactMap(\.place)
+            finished = places.count
+            meanPlace = places.isEmpty ? nil : Double(places.reduce(0, +)) / Double(places.count)
+        }
+    }
+
+    /// The buckets of each axis, worst first: their keys in `bySkill`, `byHandling` and `grid`.
+    public var skillBuckets: [String]
+    public var handlingBuckets: [String]
+    /// Keyed by `skillBuckets`' and `handlingBuckets`' names.
+    public var bySkill: [String: Places]
+    public var byHandling: [String: Places]
+    /// Skill bucket, then handling bucket: only cells with any seat.
+    public var grid: [String: [String: Places]]
+
+    /// `seats` bucketed on either axis by `skill` and `handling` (nil leaves a seat out), buckets named worst first.
+    init?(_ seats: [SeatMetrics], skillBuckets: [String], handlingBuckets: [String],
+          skill: (SeatMetrics) -> String?, handling: (SeatMetrics) -> String?) {
+        let keyed = seats.compactMap { seat in skill(seat).flatMap { s in handling(seat).map { (seat, s, $0) } } }
+        guard !keyed.isEmpty else { return nil }
+        self.skillBuckets = skillBuckets
+        self.handlingBuckets = handlingBuckets
+        bySkill = Dictionary(grouping: keyed, by: \.1).mapValues { Places($0.map(\.0)) }
+        byHandling = Dictionary(grouping: keyed, by: \.2).mapValues { Places($0.map(\.0)) }
+        grid = Dictionary(grouping: keyed, by: \.1).mapValues { row in
+            Dictionary(grouping: row, by: \.2).mapValues { Places($0.map(\.0)) }
+        }
+    }
+
+    /// The live mix's live bots (#443): buckets by tier, her skill's the tier whose skill band holds it
+    /// (`BotTier.holding`), her handling's the tier whose handling band's centre is nearest (the bands overlap).
+    /// Nil when no live bot with a handling skill sailed.
+    init?(live races: [RaceResult]) {
+        let seats = races.filter { $0.cell.profileMix == .live }.flatMap(\.seats).filter { $0.profile == nil && !$0.cautious }
+        let names = BotTier.allCases.map(\.rawValue)
+        self.init(seats, skillBuckets: names, handlingBuckets: names,
+                  skill: { BotTier.holding(skill: $0.skill).rawValue },
+                  handling: { $0.handling.map { Self.handlingTier($0).rawValue } })
+    }
+
+    /// The handling mix (#435) by its two axes: tactics or none (the tactician's profiles or the baseline's), and a
+    /// perfect hand or Club's. Nil when none sailed.
+    init?(handlingMix races: [RaceResult]) {
+        let seats = races.filter { $0.cell.profileMix == .handling }.flatMap(\.seats)
+        self.init(seats, skillBuckets: ["without", "with"], handlingBuckets: ["club", "perfect"],
+                  skill: { seat in
+                      switch seat.profile {
+                      case .baseline, .clubSteering: "without"
+                      case .tactician, .tacticianClubSteering: "with"
+                      default: nil
+                      }
+                  },
+                  handling: { seat in
+                      switch seat.profile {
+                      case .baseline, .tactician: "perfect"
+                      case .clubSteering, .tacticianClubSteering: "club"
+                      default: nil
+                      }
+                  })
+    }
+
+    /// The tier whose handling band's centre is nearest `handling`.
+    static func handlingTier(_ handling: Double) -> BotTier {
+        BotTier.allCases.min { a, b in
+            abs(a.handling(at: 0.5) - handling) < abs(b.handling(at: 0.5) - handling)
+        } ?? .club
+    }
+
+    /// Text lines: each axis's buckets, then the grid's rows.
+    func lines(skillAxis: String, handlingAxis: String) -> [String] {
+        func cell(_ p: Places?) -> String {
+            guard let p else { return "-" }
+            return "\(p.meanPlace.map { fixed($0, 1) } ?? "-") (\(p.finished)/\(p.seats))"
+        }
+        var lines = ["  by \(skillAxis): " + skillBuckets.map { "\($0) \(cell(bySkill[$0]))" }.joined(separator: ", "),
+                     "  by \(handlingAxis): " + handlingBuckets.map { "\($0) \(cell(byHandling[$0]))" }.joined(separator: ", ")]
+        for row in skillBuckets {
+            guard let cells = grid[row] else { continue }
+            lines.append("  \(skillAxis) \(row), by \(handlingAxis): "
+                + handlingBuckets.map { "\($0) \(cell(cells[$0]))" }.joined(separator: ", "))
+        }
+        return lines
     }
 }
 
@@ -1308,6 +1409,10 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var cautious: CautiousSummary?
     /// The handling mix (#435) over its races; nil when none sailed.
     public var handling: HandlingSummary?
+    /// Places by tactics skill and by handling skill (#443): the live mix's live bots; nil when none sailed.
+    public var axes: AxesSummary? = nil
+    /// The same over the handling mix's profiles (tactics or none, a perfect or Club hand); nil when none sailed.
+    public var handlingAxes: AxesSummary? = nil
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -1350,6 +1455,8 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         rank = RankSummary(races)
         cautious = CautiousSummary(races)
         handling = HandlingSummary(races.compactMap(\.handling))
+        axes = AxesSummary(live: races)
+        handlingAxes = AxesSummary(handlingMix: races)
         timings = RunTimings(maxP99Ms: races.map(\.timings.p99Ms).max() ?? 0,
                              maxMs: races.map(\.timings.maxMs).max() ?? 0)
         breaches = thresholds.breaches(tiers: tiers, timings: timings, skillGap: skillGap, funPass: funPass, start: start,
@@ -1408,6 +1515,15 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
             lines.append(line("without tactics", handling.baseline))
             lines.append(line("with tactics", handling.tactician))
             lines.append(line("both", handling.all))
+            if let handlingAxes {
+                lines.append("handling places (mean place, finished/seats):")
+                lines += handlingAxes.lines(skillAxis: "tactics", handlingAxis: "hand")
+            }
+        }
+        if let axes {
+            lines.append("live places by tactics skill and handling skill (mean place, finished/seats)"
+                + (matrix.autohelmOff ? ":" : " (the class's autohelm holds a centred rudder: handling unfelt; sail with --autohelm off):"))
+            lines += axes.lines(skillAxis: "skill", handlingAxis: "handling")
         }
         if let execution {
             lines.append("execution: tactician at Club execution beat the executor in \(fixed(execution.tacticsBeatsExecutionShare)) "

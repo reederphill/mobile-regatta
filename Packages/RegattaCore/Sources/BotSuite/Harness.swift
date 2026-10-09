@@ -137,6 +137,7 @@ public enum BotRaceHarness {
                 metrics.coverTaps = driver.coverTaps
                 metrics.startLuffDecisions = driver.startLuffDecisions
                 if profiles[seat] == nil, !cautiousSeats.contains(seat) { metrics.engagement = driver.style.engagement }
+                metrics.handling = driver.handling
             }
             return metrics
         }

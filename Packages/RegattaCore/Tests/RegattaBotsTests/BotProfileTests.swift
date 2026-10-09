@@ -387,7 +387,8 @@ import RegattaCore
                 "only her weaknesses change")
         let plain = BotDriver(seat: 0, raceSeed: raceSeed, skill: 1, profile: .tactician, weaknesses: nil)
         #expect(plain.weaknesses == BotProfile.tactician.weaknesses(skill: 1))
-        #expect(BotDriver(seat: 0, raceSeed: raceSeed, skill: 0.5, weaknesses: nil).weaknesses == BotWeaknesses(skill: 0.5))
+        let live = BotDriver(seat: 0, raceSeed: raceSeed, skill: 0.5, weaknesses: nil)
+        #expect(live.weaknesses == BotWeaknesses(skill: 0.5, handling: live.handling), "her skill's, steering by her handling (#443)")
 
         func sail(seat0 weaknesses: BotWeaknesses?) -> RaceLog? {
             let setup = try! RaceSetup(raceSeed: raceSeed, seats: Array(repeating: .bot, count: 4), laps: 1,

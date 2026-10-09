@@ -27,6 +27,9 @@ public struct BotDriver: Sendable {
     public var style: BotStyle { brain.style }
     /// What she sails with: her skill's, her profile's, or an override's (#367).
     public var weaknesses: BotWeaknesses { brain.weaknesses }
+    /// Her handling skill, 0…1 (#443): how well she steers by hand, drawn apart from her skill (`BotTier.handling`), as
+    /// her hand steering's weaknesses scale. Nil when a profile or an override sets those (`weaknesses`).
+    public let handling: Double?
     /// The bot suite's scripted profile she sails (#231), or nil for a live bot.
     public let profile: BotProfile?
     /// Which of the three ticks this seat decides on.
@@ -49,9 +52,18 @@ public struct BotDriver: Sendable {
 
     /// The bot for `seat` in the race with `raceSeed`, a Mixed fleet's (CONTEXT.md **Mixed fleet**, the default
     /// for practice): her tier drawn from her own seed by the bot-tier file's shares (`BotTier.mixedFleetDraw`),
-    /// her skill inside its band and her style from the same seed.
+    /// her skill inside its band and her style from the same seed; her handling inside that tier's handling band
+    /// (`BotTier.handling(seed:)`, #443).
     public init(seat: Int, raceSeed: RaceSeed) {
-        self.init(seat: seat, raceSeed: raceSeed, skill: BotTier.mixedFleetDraw(seed: botSeed(raceSeed: raceSeed, seat: seat)).skill)
+        self.init(seat: seat, raceSeed: raceSeed, profile: nil)
+    }
+
+    /// `init(seat:raceSeed:)` sailing `profile` if the bot suite gives her one (#231): a Mixed fleet's draw.
+    public init(seat: Int, raceSeed: RaceSeed, profile: BotProfile?) {
+        let seed = botSeed(raceSeed: raceSeed, seat: seat)
+        let drawn = BotTier.mixedFleetDraw(seed: seed)
+        self.init(seat: seat, raceSeed: raceSeed, skill: drawn.skill, handling: drawn.tier.handling(seed: seed),
+                  profile: profile)
     }
 
     /// The bot for `seat` with a given style, e.g. a retuned one, sailing `profile` if the bot suite gives
@@ -62,9 +74,10 @@ public struct BotDriver: Sendable {
 
     /// `init(seat:raceSeed:style:profile:)` with `weaknesses`, if given, in place of her skill's and profile's
     /// (`BotDriver(seat:raceSeed:skill:profile:weaknesses:)`, #367).
-    init(seat: Int, raceSeed: RaceSeed, style: BotStyle, profile: BotProfile?, overriding weaknesses: BotWeaknesses?) {
-        self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, profile: profile,
-                  weaknesses: weaknesses)
+    init(seat: Int, raceSeed: RaceSeed, style: BotStyle, handling: Double?, profile: BotProfile?,
+         overriding weaknesses: BotWeaknesses?) {
+        self.init(seat: seat, seed: botSeed(raceSeed: raceSeed, seat: seat), style: style, handling: handling,
+                  profile: profile, weaknesses: weaknesses)
     }
 
     /// The bot for `seat` with a given style and `weaknesses` in place of her skill's (`BotWeaknesses`), cautious
@@ -75,13 +88,17 @@ public struct BotDriver: Sendable {
                   caution: caution)
     }
 
-    private init(seat: Int, seed: UInt64, style: BotStyle, profile: BotProfile? = nil, weaknesses: BotWeaknesses? = nil,
-                 caution: BotBrain.Caution? = nil) {
+    /// `handling` nil draws hers from `seed` in the handling band of the tier holding her skill (`BotTier.holding`).
+    private init(seat: Int, seed: UInt64, style: BotStyle, handling: Double? = nil, profile: BotProfile? = nil,
+                 weaknesses: BotWeaknesses? = nil, caution: BotBrain.Caution? = nil) {
         self.seat = seat
         self.seed = seed
         self.profile = profile
         phase = seat % BotDriver.decisionInterval
-        brain = BotBrain(style: style, profile: profile, seed: seed, weaknesses: weaknesses, caution: caution)
+        let handling = handling ?? BotTier.holding(skill: style.skill).handling(seed: seed)
+        self.handling = weaknesses == nil && profile == nil ? handling : nil
+        brain = BotBrain(style: style, profile: profile, seed: seed, handling: handling, weaknesses: weaknesses,
+                         caution: caution)
         helm = BotHelm(hand: HandSteering(brain.weaknesses, seed: seed))
     }
 

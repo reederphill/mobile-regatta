@@ -87,10 +87,13 @@ public struct BotWeaknesses: Hashable, Sendable {
 
     /// The weaknesses of a bot of `skill`, 0…1. Placeholders (#102), landing on the Build's named endpoints at
     /// the bot-tier file's band centres (Club ~0.48, Regional 0.7, National 0.9): current sense none at Club and
-    /// the forecast at National; roll-tack hit rate ~30 % at Club and ~80 % at National.
-    public init(skill: Double) {
+    /// the forecast at National; roll-tack hit rate ~30 % at Club and ~80 % at National. Her hand steering (shift lag,
+    /// wander, overshoot, #435) scales with `handling`, her handling skill (#443), drawn apart from her skill; nil steers
+    /// as her skill would, for callers with no handling of their own (her hand steering then unused or pinned).
+    public init(skill: Double, handling: Double? = nil) {
         let s = min(max(skill, 0), 1)
         let deficit = 1 - s
+        let handDeficit = 1 - min(max(handling ?? skill, 0), 1)
         startTiming = (1.3 - s) * deficit
         lineBiasMisread = Self.lineBiasMisread(skill: s)
         reactionDelay = 8 * deficit
@@ -103,9 +106,9 @@ public struct BotWeaknesses: Hashable, Sendable {
         tacticalQuality = Self.ramp(s, from: 0.35, to: 0.9)
         keepClearLookahead = Self.keepClearLookahead(skill: s)
         ruleMisjudgeRate = Self.ruleMisjudgeRate(skill: s)
-        shiftLag = HandSteeringTable.shiftLagScale * deficit
-        wander = HandSteeringTable.wanderScale * deficit
-        overshoot = HandSteeringTable.overshootScale * deficit
+        shiftLag = HandSteeringTable.shiftLagScale * handDeficit
+        wander = HandSteeringTable.wanderScale * handDeficit
+        overshoot = HandSteeringTable.overshootScale * handDeficit
     }
 
     /// These weaknesses with `other`'s hand steering (#435): e.g. a stand-in's Club hand steering on her own tactics.
@@ -117,10 +120,11 @@ public struct BotWeaknesses: Hashable, Sendable {
         return weaknesses
     }
 
-    /// Club hand steering (#435): the hand-steering weaknesses at the centre of Club's band, on none of anything else.
+    /// Club hand steering (#435): the hand-steering weaknesses at the centre of Club's handling band (#443), on none of
+    /// anything else.
     public static var clubHandSteering: BotWeaknesses {
         let skill = BotTier.club.skill(at: 0.5)
-        return none(skill: skill).steering(like: BotWeaknesses(skill: skill))
+        return none(skill: skill).steering(like: BotWeaknesses(skill: skill, handling: BotTier.club.handling(at: 0.5)))
     }
 
     /// Metres ahead a bot that notices every puff looks: the far end of `BotBrain.puffLookAhead`.
@@ -177,22 +181,23 @@ public struct BotWeaknesses: Hashable, Sendable {
     }
 }
 
-/// Hand steering's placeholder values (#435, #426 Q7), one table for the owner to tune: each scales with her skill
-/// deficit (1 − skill), as `reactionDelay` does, so none at skill 1. Club's centre (deficit ≈ 0.53): lag ≈ 2.1 s, wander
-/// ≈ 7.4° (≈ 12° running), overshoot ≈ 5.3°; National's (0.1): ≈ 0.4 s, 1.4°, 1°. Tuned towards #426's T1 placeholders
+/// Hand steering's placeholder values (#435, #426 Q7), one table for the owner to tune: each scales with her handling
+/// deficit (1 − handling skill, #443; drawn in her tier's handling band, apart from her tactics skill), so none at
+/// handling 1. Club's handling centre (deficit 0.55): lag ≈ 2.2 s, wander ≈ 7.7° (≈ 12° running), overshoot ≈ 5.5°;
+/// National's (0.2): ≈ 0.8 s, 2.8°, 2°. Tuned towards #426's T1 placeholders
 /// (Club ≈ 6 s a beat and ≈ 4 s a run behind a perfect hand, the handling mix). Wander and overshoot carry the cost: the
 /// skiff gains speed in 2.5 s and loses it over 10 s, so a short swing off her aim, as the lag gives, nearly pays for
-/// itself. Read by `BotWeaknesses(skill:)` and `HandSteering`.
+/// itself. Read by `BotWeaknesses(skill:handling:)` and `HandSteering`.
 public enum HandSteeringTable {
-    /// Seconds of shift lag at skill 0.
+    /// Seconds of shift lag at handling 0.
     public static let shiftLagScale = 4.0
-    /// Radians of wander amplitude at skill 0.
+    /// Radians of wander amplitude at handling 0.
     public static let wanderScale = deg2rad(14)
     /// Her wander abaft the beam, as a share of her wander forward of it: running, she wanders further.
     public static let downwindWander = 1.6
     /// Seconds a wander cycle lasts, drawn per boat from her seed inside this range.
     public static let wanderPeriod = 20.0...40.0
-    /// Radians of overshoot at skill 0: past the new wind on every re-aim to a shift.
+    /// Radians of overshoot at handling 0: past the new wind on every re-aim to a shift.
     public static let overshootScale = deg2rad(10)
     /// Seconds an overshoot takes to decay back to her aim, linearly.
     public static let overshootDecay = 2.0

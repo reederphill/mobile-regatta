@@ -181,11 +181,10 @@ public enum TierMix: String, Codable, CaseIterable, Hashable, Sendable {
 
     /// The live bot sailing `seat` of the race with `raceSeed`, sailing `profile` if the matrix gives the seat one:
     /// its tier's (`BotTier.driver`), or in a Mixed fleet exactly the app's (`BotDriver(seat:raceSeed:)`), her
-    /// tier and her skill in it both from the draw.
+    /// tier and her skill in it both from the draw, her handling in that tier's handling band (#443).
     public func driver(seat: Int, raceSeed: RaceSeed, profile: BotProfile? = nil) -> BotDriver {
         guard self == .mixed else { return tier(ofSeat: seat, raceSeed: raceSeed).driver(seat: seat, raceSeed: raceSeed, profile: profile) }
-        let skill = BotTier.mixedFleetDraw(seed: botSeed(raceSeed: raceSeed, seat: seat)).skill
-        return BotDriver(seat: seat, raceSeed: raceSeed, skill: skill, profile: profile)
+        return BotDriver(seat: seat, raceSeed: raceSeed, profile: profile)
     }
 }
 

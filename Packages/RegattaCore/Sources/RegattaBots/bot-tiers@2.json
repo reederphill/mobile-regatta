@@ -1,0 +1,9 @@
+{
+  "id": "bot-tiers",
+  "version": 2,
+  "notes": "Placeholders (#102, #443), for the owner to tune: each tier's skill band (her tactics), its handling band (how well she steers by hand, drawn apart from her skill; the bands overlap so a sharp tactician can have a sloppy helm and the reverse), its share of a Mixed fleet's bots (weights, here in proportion to the skill bands' widths, so a Mixed fleet's skills spread evenly over 0.35...1), and the mean-place gap each tier step must keep over mixed fleets (BotTierSuiteTests).",
+  "club": { "skillBand": [0.35, 0.6], "handlingBand": [0.2, 0.7], "mixShare": 0.25 },
+  "regional": { "skillBand": [0.6, 0.8], "handlingBand": [0.4, 0.9], "mixShare": 0.2 },
+  "national": { "skillBand": [0.8, 1.0], "handlingBand": [0.6, 1.0], "mixShare": 0.2 },
+  "minPlaceGap": 1.0
+}
