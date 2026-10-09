@@ -20,6 +20,7 @@ import RegattaCore
 /// fixture before #114.
 ///
 /// `"hint": "<id>"` in `hud` shows that hint (`HintID`) with its thin leader line to what it points at (#129).
+/// `"instruments": true` in `hud` draws the bottom row's speed and apparent wind (#457).
 ///
 /// `"ruleCues": true` draws the rule cues (#123): right-of-way glows, rule-call lines from the replay's calls, your
 /// penalty arc and, with `hud`, the Turn notice. Without it they are off, so the fixtures before #123 keep their
@@ -57,6 +58,9 @@ struct RenderFixture: Codable, Equatable {
         var leaderboard: Leaderboard? = nil
         /// A hint the fixture shows for good, by id, with its leader line (#129): `"hint": "red_glow"`.
         var hint: HintID? = nil
+        /// The bottom row's instruments (#457), speed and apparent wind, in their places beside Tack/Gybe's empty
+        /// slot; nil leaves them off, so the HUD fixtures before #457 keep their references.
+        var instruments: Bool? = nil
     }
 
     enum Leaderboard: String, Codable, CaseIterable {

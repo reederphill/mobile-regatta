@@ -204,6 +204,28 @@ import UIKit
         }
     }
 
+    /// The instruments fixture (#457) is `hud-racing` with the bottom row's speed and apparent wind; every older HUD
+    /// fixture draws without them, so its reference doesn't move. A frozen fixture shows the raw reading (its first).
+    @Test func instrumentsFixtureShowsTheInstruments() throws {
+        let (fixture, log) = try RenderFixture.load(named: "hud-instruments", in: Self.fixtures)
+        let (racing, _) = try RenderFixture.load(named: "hud-racing", in: Self.fixtures)
+        var expected = racing
+        expected.hud?.instruments = true
+        #expect(fixture == expected)
+        let session = try GameSession(fixture: fixture, log: log)
+        #expect(session.showsFixtureInstruments)
+        let model = HUDModel(session.hud)
+        #expect(model.showsInstruments)
+        #expect(session.hud.shownInstruments == session.hud.instruments)
+        #expect(session.hud.instruments.speedKnots > 1 && session.hud.instruments.apparentKnots > 1)
+        #expect(model.apparentAngleText.hasSuffix("port") || model.apparentAngleText.hasSuffix("starboard"))
+
+        for name in ["hud-prestart", "hud-racing", "hud-ocs", "hud-afterfirstfinish", "hud-leaderboard", "hud-hint-leader"] {
+            let (older, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            #expect(try !GameSession(fixture: older, log: log).showsFixtureInstruments, "\(name)")
+        }
+    }
+
     /// The live leaderboard fixtures (#268): compact through every filter, and tapped open, on `hud-racing`'s tick.
     /// The board is opt-in, so #114's HUD fixtures draw without it and keep their references.
     @Test func leaderboardFixturesShowTheBoard() throws {

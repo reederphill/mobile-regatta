@@ -176,6 +176,7 @@ final class GameSession {
                              ladderLines: fixture.ladderLines ?? defaults.ladderLines)
         vision = fixture.vision
         showsHUDInFixture = fixture.hud != nil
+        showsInstrumentsInFixture = fixture.hud?.instruments ?? false
         // The board only where the fixture asks for it (#268), held open if it says so: the session's controls are
         // its own here, never the app's.
         controls.showsLeaderboard = fixture.hud?.leaderboard != nil
@@ -232,6 +233,9 @@ final class GameSession {
     /// A render fixture that draws the HUD over its scene (#114).
     var showsFixtureHUD: Bool { driver.isFrozen && showsHUDInFixture }
     @ObservationIgnored private var showsHUDInFixture = false
+    /// A render fixture that draws the bottom row's instruments too (#457).
+    var showsFixtureInstruments: Bool { showsFixtureHUD && showsInstrumentsInFixture }
+    @ObservationIgnored private var showsInstrumentsInFixture = false
 
     /// The halves' faint "‹ Port / Starboard ›" edge labels show in the first race only, and only in halves (#23).
     var showsEdgeLabels: Bool { Self.showsEdgeLabels(isFirstRace: isFirstRace, steering: controls.steering) }
@@ -330,6 +334,9 @@ final class GameSession {
 
     func refreshHUD() { refreshHUD(samplesPressure: true) }
 
+    /// The bottom row's instruments' display smoothing (#457), in race time.
+    @ObservationIgnored private var instrumentSmoother = InstrumentSmoother()
+
     /// The scene steps the live race for the first time (`GameScene.update`): the notice slot's clock starts again
     /// from here (#129). The steering hint is posted as the race is set up, before its clock shows, and setting up
     /// and presenting the scene can take seconds; its time on screen starts once the race does. Once a session.
@@ -358,6 +365,7 @@ final class GameSession {
         let world = driver.renderWorld
         let roster = roster
         var hud = HUDState(world: world) { roster[$0].isBot }
+        hud.shownInstruments = instrumentSmoother.step(hud.instruments, at: hud.clock)
         hud.pressureImage = samplesPressure ? minimapField.refresh(world) : minimapField.image
         self.hud = hud
         if !driver.isFrozen {

@@ -2,7 +2,8 @@ import SwiftUI
 import RegattaCore
 
 /// The race HUD (#114, #15): the clock and your place top left, the ground wind top centre, the course-up minimap top
-/// right, and one notice line under them. Nothing else: no speed, no instruments, no start aids, no shadow readout.
+/// right, and one notice line under them. Nothing else: no start aids, no shadow readout; the speed and apparent wind
+/// are the bottom row's (#457, `RaceControls`).
 /// Its colours keep to the reserved-colour rule (#22, G7): the clock is the cue yellow in the start sequence and the
 /// countdown to the close, and everything else is white on translucent black. Nothing reads by red or green (#5,
 /// #15): a notice's tone is its symbol. Under the clock and place, from the gun to the close, the live leaderboard

@@ -36,6 +36,13 @@ struct HUDState {
     /// else's shadow is in it: you read the shadow from the wakes, not the HUD (#15).
     var windKnots = 0.0
     var windDirection = 0.0
+    /// Your boat's instruments at the latest tick, raw (#457): speed through the water and the apparent wind.
+    var instruments = InstrumentReading()
+    /// The same, display-smoothed by the session (`InstrumentSmoother`): what the bottom row shows. The raw reading
+    /// until the session smooths it.
+    var shownInstruments = InstrumentReading()
+    /// You're a ghost (`RenderWorld.isGhost(ofSeat:)`): finished, DSQ, or OCS or unstarted at the close.
+    var isGhost = false
     var boats: [MiniBoat] = []
     var course: CourseLayout?
     /// The marks of the leg you're sailing, drawn orange on the minimap; the rest are grey (#22, G7).
@@ -78,6 +85,9 @@ struct HUDState {
         // `windOverGround` is the wind at her before anyone's shadow: the HUD shows that (#15).
         windKnots = knots(metresPerSecond: p.windOverGround.speed)
         windDirection = p.windOverGround.direction
+        instruments = InstrumentReading(boat: p)
+        shownInstruments = instruments
+        isGhost = world.isGhost(ofSeat: me)
         fleet = frame.boats.count
         place = frame.place(of: me)
         leaderboard = LeaderboardState(frame: frame, me: me)
