@@ -960,7 +960,9 @@ public struct EngagementBandSummary: Codable, Hashable, Sendable {
         public var leeBows: Double
         public var tacksOnWind: Double
         public var covers: Double
-        public var startLuffDecisions: Double
+        /// Seconds she luffed a windward boat before her start (`SeatMetrics.startLuffDecisions`, one decision
+        /// `BotDriver.decisionInterval` ticks), over every seat-race in the band, those with no luff included.
+        public var startLuffSeconds: Double
         public var foulsAsOffender: Double
         public var preStartCalls: Double
     }
@@ -969,6 +971,9 @@ public struct EngagementBandSummary: Codable, Hashable, Sendable {
     static let edges: [(name: String, range: Range<Double>)] = [
         ("mild", 0..<0.4), ("middle", 0.4..<0.6), ("combative", 0.6..<1.000_001),
     ]
+
+    /// Seconds one bot decision holds (`BotDriver.decisionInterval` ticks at `Race.tickRate`).
+    static let decisionSeconds = Double(BotDriver.decisionInterval) / Double(Race.tickRate)
 
     /// Nil when no live seat sailed.
     init?(_ races: [RaceResult]) {
@@ -981,7 +986,7 @@ public struct EngagementBandSummary: Codable, Hashable, Sendable {
             }
             return Band(name: edge.name, seatRaces: band.count, leeBows: per { $0.leeBowTaps ?? 0 },
                         tacksOnWind: per { $0.tackOnWindTaps ?? 0 }, covers: per { $0.coverTaps ?? 0 },
-                        startLuffDecisions: per { $0.startLuffDecisions ?? 0 }, foulsAsOffender: per(\.foulsAsOffender),
+                        startLuffSeconds: per { $0.startLuffDecisions ?? 0 } * Self.decisionSeconds, foulsAsOffender: per(\.foulsAsOffender),
                         preStartCalls: per { $0.preStartCallsByRule.values.reduce(0, +) })
         }
     }
@@ -1339,7 +1344,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
             for band in engagementBands.bands {
                 lines.append("engagement \(band.name): \(band.seatRaces) live seat-races, per seat-race lee-bows "
                     + "\(fixed(band.leeBows, 3)), tacks on wind \(fixed(band.tacksOnWind, 3)), covers \(fixed(band.covers, 3)), "
-                    + "pre-start luff decisions \(fixed(band.startLuffDecisions, 2)), fouls \(fixed(band.foulsAsOffender, 3)), "
+                    + "pre-start luffing \(fixed(band.startLuffSeconds, 2)) s, fouls \(fixed(band.foulsAsOffender, 3)), "
                     + "pre-start calls \(fixed(band.preStartCalls, 3))")
             }
         }

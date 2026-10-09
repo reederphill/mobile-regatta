@@ -337,6 +337,8 @@ extension BotBrain {
     /// crossing, not a tack of her choosing.
     mutating func upwindTack(_ b: SeatView.OwnBoat, _ view: SeatView, planned tack: Tack,
                              overstood: (Tack) -> Bool = { _ in false }) -> Tack {
+        // Only a play noted in this evaluation counts for her tap (`BotDecision.play`).
+        lastFleetPlay = nil
         guard let threshold = tactics.headerThreshold else { return tack }
         let direction = (senses.direction ?? b.windDirection) + senses.directionRate * tactics.anticipation
         let shift = wrapAngle(direction - view.course.axis)
