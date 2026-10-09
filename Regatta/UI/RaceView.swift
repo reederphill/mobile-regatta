@@ -124,6 +124,10 @@ struct RaceView: View {
             scene
                 // In the scene view's own points, where the scene reads the touches (#112).
                 .overlay { TillerIndicator(knob: session.tillerKnob).ignoresSafeArea() }
+                // VoiceOver can't make the ease gesture (#453): the water's Ease action toggles it, like `race-ease`.
+                .accessibilityElement()
+                .accessibilityLabel("Water")
+                .accessibilityAction(named: "Ease") { session.toggleEase() }
 
             if session.showsEdgeLabels {
                 EdgeLabels()

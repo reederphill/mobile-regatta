@@ -286,6 +286,7 @@ final class GameScene: SKScene {
 
         syncScheme()
         let rudder = steering.advance(by: frameTime)
+        publishEase()
         // The driver latches it for the next tick. With `-demo` a bot sails your seat and ignores it.
         driver.submit(BoatInput(rudder: rudder, ease: session.isEasing))
         let clock = ContinuousClock()
@@ -570,10 +571,22 @@ final class GameScene: SKScene {
         }
     }
 
-    /// Hands the tiller's track and knob to the session for `RaceView` to draw, when they move.
+    /// Hands the tiller's track and knob to the session for `RaceView` to draw, when they move, and the gesture's
+    /// ease when it changes.
     private func publishTillerKnob() {
+        publishEase()
         guard let session, session.tillerKnob != steering.tillerKnob else { return }
         session.tillerKnob = steering.tillerKnob
+    }
+
+    /// The steering gesture's ease as last handed to the session (#453).
+    private var publishedEase = false
+
+    /// Hands the gesture's ease to the session when the interpreter's changes: the tiller's pull ticks.
+    private func publishEase() {
+        guard steering.isEasing != publishedEase else { return }
+        publishedEase = steering.isEasing
+        session?.setGestureEase(publishedEase, ticks: steering.scheme == .tiller)
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {

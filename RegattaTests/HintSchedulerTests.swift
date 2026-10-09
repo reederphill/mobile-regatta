@@ -26,6 +26,16 @@ import Testing
         return scheduler.settle(slot: slot, now: time, progress: progress)
     }
 
+    /// The start-sequence hint says how this scheme eases (#453): there is no Ease button.
+    @Test func startSequenceHintSaysHowThisSchemeEases() {
+        let text = HintCatalogue.hint(.startSequence).text
+        #expect(text.text(for: .halves).contains("Hold both sides to ease."))
+        #expect(text.text(for: .tiller).contains("Pull down to ease."))
+        for steering in DeviceSettings.Steering.allCases {
+            #expect(!text.text(for: steering).contains("Hold Ease"), "no Ease button to hold")
+        }
+    }
+
     @Test func spacingAtLeast3s() {
         let progress = HintProgressStore()
         var slot = NoticeSlot()

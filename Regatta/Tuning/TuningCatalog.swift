@@ -29,6 +29,8 @@ struct TuningSlider: Identifiable {
         case boat(WritableKeyPath<BoatStyle, Double>)
         /// A hint threshold (#129): app-side, live, never logged.
         case hint(WritableKeyPath<HintTuning, Double>)
+        /// An ease gesture threshold (#453): app-side, live, never logged.
+        case ease(WritableKeyPath<EaseGestureTuning, Double>)
     }
 
     let id: String
@@ -57,7 +59,7 @@ struct TuningSlider: Identifiable {
         switch target {
         case .file(_, let pointer): pointer
         case .groove(let column): TuningSlider.grooveKey(column)
-        case .water, .camera, .boat, .hint: nil
+        case .water, .camera, .boat, .hint, .ease: nil
         }
     }
 
@@ -65,7 +67,7 @@ struct TuningSlider: Identifiable {
         switch target {
         case .file(let slot, _): slot
         case .groove: .boatClass
-        case .water, .camera, .boat, .hint: nil
+        case .water, .camera, .boat, .hint, .ease: nil
         }
     }
 
@@ -412,6 +414,16 @@ enum TuningCatalog {
                     hint("rearmSeconds", "Hint again after off", \.rearmSeconds, 1...30, 0.5, unit: " s"),
                 ]),
             TuningGroup(
+                id: "ease", title: "Ease gesture",
+                note: "How the steering gesture eases (#453): halves, both sides held this long with no finger moving past the slop (a pinch-zoom moves its fingers); tiller, a pull down past the engage line, let go back above the release line.",
+                applies: .live,
+                sliders: [
+                    ease("holdDelaySeconds", "Halves hold", \.holdDelaySeconds, 0...1, 0.05, unit: " s"),
+                    ease("slopPoints", "Halves slop", \.slopPoints, 2...40, 1, unit: " pt"),
+                    ease("tillerEngagePoints", "Tiller engage", \.tillerEngagePoints, 20...120, 2, unit: " pt"),
+                    ease("tillerReleasePoints", "Tiller release", \.tillerReleasePoints, 10...110, 2, unit: " pt"),
+                ]),
+            TuningGroup(
                 id: "later", title: "Later",
                 note: "Values later tickets bring, tuned here once they're in a file.",
                 applies: .later, sliders: [],
@@ -436,6 +448,11 @@ enum TuningCatalog {
     private static func hint(_ name: String, _ title: String, _ path: WritableKeyPath<HintTuning, Double>,
                              _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {
         TuningSlider(id: "hint.\(name)", title: title, unit: unit, range: range, step: step, target: .hint(path))
+    }
+
+    private static func ease(_ name: String, _ title: String, _ path: WritableKeyPath<EaseGestureTuning, Double>,
+                             _ range: ClosedRange<Double>, _ step: Double, unit: String = "") -> TuningSlider {
+        TuningSlider(id: "ease.\(name)", title: title, unit: unit, range: range, step: step, target: .ease(path))
     }
 
     private static func camera(_ name: String, _ title: String, _ path: WritableKeyPath<CameraStyle, Double>,
