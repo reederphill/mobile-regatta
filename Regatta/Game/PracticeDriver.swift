@@ -61,6 +61,12 @@ final class PracticeDriver: RaceDriver {
         previousFrame = currentFrame
     }
 
+    /// Prototype (proto-tiller): your autohelm on or off (the tuning panel's Auto tiller), live.
+    var autoTiller: Bool {
+        get { race.humanAutohelm }
+        set { race.humanAutohelm = newValue }
+    }
+
     /// Whether you sail your own seat: false while a bot does (`-demo`).
     var youSailYourBoat: Bool { seats[myBoatIndex].isHuman }
 

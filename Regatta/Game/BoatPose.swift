@@ -195,6 +195,8 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var heelShadowOffset = 0.22
     /// The drop shadow's alpha at full heel; less heel, fainter.
     var heelShadowAlpha = 0.35
+    /// Prototype (proto-tiller): 1 = your autohelm steers when the rudder centres, 0 = it doesn't (default).
+    var autoTiller = 0.0
 
     // MARK: Sail
 
@@ -371,7 +373,7 @@ nonisolated extension BoatStyle {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         var style = BoatStyle.standard
         let fields: [(CodingKeys, WritableKeyPath<BoatStyle, Double>)] = [
-            (.heelOnsetKnots, \.heelOnsetKnots), (.heelFullKnots, \.heelFullKnots), (.heelScale, \.heelScale),
+            (.autoTiller, \.autoTiller), (.heelOnsetKnots, \.heelOnsetKnots), (.heelFullKnots, \.heelFullKnots), (.heelScale, \.heelScale),
             (.heelNarrowing, \.heelNarrowing), (.heelShadowOffset, \.heelShadowOffset),
             (.heelShadowAlpha, \.heelShadowAlpha), (.trimPerApparentAngle, \.trimPerApparentAngle),
             (.minTrimDegrees, \.minTrimDegrees), (.maxTrimDegrees, \.maxTrimDegrees),

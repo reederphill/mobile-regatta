@@ -314,6 +314,8 @@ final class TuningModel {
         if session.scene.cameraStyle != tuning.camera { session.scene.cameraStyle = tuning.camera }
         if session.scene.boatStyle != tuning.boat { session.scene.boatStyle = tuning.boat }
         if session.hintTuning != tuning.hint { session.hintTuning = tuning.hint }
+        // Prototype (proto-tiller): the Auto tiller toggle, live.
+        if let practice = session.driver as? PracticeDriver { practice.autoTiller = tuning.boat.autoTiller >= 0.5 }
         let showsPressure = tuning.showsPressure && !liveSessionHidesPressure
         if session.scene.showsPressureOverlay != showsPressure { session.scene.showsPressureOverlay = showsPressure }
         session.isTuned = liveSessionSailsTunedFiles || tuning.water != .standard || tuning.camera != .standard

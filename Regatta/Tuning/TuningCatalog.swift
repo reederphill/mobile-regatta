@@ -124,6 +124,12 @@ enum TuningCatalog {
     /// rate; nil if it has none.
     static func groups(grooveColumns: [(column: Int, knots: Double)], fullSteeragePoint: Int?) -> [TuningGroup] {
         [
+            // Prototype (proto-tiller, never merged).
+            TuningGroup(
+                id: "steering", title: "Steering",
+                note: "Prototype. Auto tiller 1: your autohelm holds her angle to the wind when you let go of the rudder (main's behaviour). 0: a centred rudder sails straight on and every shift is yours to steer; the tack/gybe tap still sails the turn and hands back on the new groove. Applies live.",
+                applies: .live,
+                sliders: [boat("autoTiller", "Auto tiller (1 on, 0 off)", \.autoTiller, 0...1, 1)]),
             TuningGroup(
                 id: "conditions", title: "Conditions",
                 note: "The wind's oscillation, puffs and pressure field (#221, #220, #286, #287, #288). Period, wobble, fan and lane bend decide how often the favoured tack changes; the pressure side and lanes, where the pressure is; the side tendency and lane spots, how much the venue's geography steers it; lane length, drift and weak share, how far lanes reach up the course and how many are lows; puff coverage and choices, how many puffs there are and how closely they keep to the pressure.",

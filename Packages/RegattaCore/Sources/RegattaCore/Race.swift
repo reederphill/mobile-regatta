@@ -51,6 +51,9 @@ public final class Race {
     private let ladderAfterTarget: [Double]
     /// The class every boat sails: hull, polar and handling (ADR 0004).
     public var boatClass: BoatClass { files.boatClass.content }
+    /// Prototype (proto-tiller, never merged): whether a human seat's autohelm engages when the rudder centres. Off,
+    /// a centred rudder sails straight on. Set by the app's tuning panel (Steering → Auto tiller); not logged.
+    public var humanAutohelm = false
     /// The water's own motion (#78, ADR 0003), which carries every boat (#79): the venue's current at the
     /// tide state at the gun the race seed draws.
     public let current: CurrentField
@@ -335,7 +338,7 @@ public final class Race {
         for i in boats.indices {
             // Prototype (proto-tiller): a human's tack/gybe tap hands back a centred rudder once it has crossed the
             // boom and settled her within 3° of the new groove.
-            if boats[i].isPlayer, let helm = boats[i].autohelm, !helm.isTapping {
+            if boats[i].isPlayer, !humanAutohelm, let helm = boats[i].autohelm, !helm.isTapping {
                 let aim = helm.aim(tws: boats[i].polarWindSpeed(in: boatClass),
                                    grooveTWS: boats[i].grooveWindSpeed(in: boatClass), boatClass: boatClass)
                 if abs(wrapAngle(aim - boats[i].sailingAngle)) < deg2rad(3) {
@@ -348,7 +351,7 @@ public final class Race {
                 boats[i].autohelm = nil
                 boats[i].desiredRudder = rudder
             } else if boats[i].autohelm == nil {
-                if boats[i].isPlayer {
+                if boats[i].isPlayer && !humanAutohelm {
                     // Prototype (proto-tiller, never merged): no autohelm for a human. A centred rudder is a
                     // centred rudder: she sails straight on, and the wind's shifts and puffs are hers to steer.
                     boats[i].desiredRudder = 0
