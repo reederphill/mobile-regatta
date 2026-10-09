@@ -64,7 +64,7 @@ A boat that broke a rule of Part 2 isn't penalised for it, because she was compe
 _Avoid_: acquittal, cleared
 
 **Hold course**:
-What a right-of-way boat does to keep her rights: rudder centred, the autohelm holding her wind angle. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course.
+What a right-of-way boat does to keep her rights: rudder centred. A player's boat sails straight on her heading; a bot's autohelm holds her wind angle (ADR 0010). A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course.
 _Avoid_: hold heading, stand on
 
 **Defend lane**:
@@ -409,11 +409,11 @@ Letting the sheets out so the sail flaps and the boat slows, e.g. to hold positi
 _Avoid_: luff (in the rules, luffing means turning toward the wind)
 
 **Autohelm**:
-What steers the boat whenever nobody is holding the rudder: it holds the angle to the true wind she had when the rudder was centred, snapping to the groove when close to it. It never tacks or gybes by itself, and it sails the tack/gybe tap.
+What steers a bot's boat whenever nobody is holding the rudder, and a player's only when the tuning setting turns it on (off by default, ADR 0010): it holds the angle to the true wind she had when the rudder was centred, snapping to the groove when close to it. It never tacks or gybes by itself, and it sails the tack/gybe tap. For a player with it off, the tap hands back a centred rudder within 3° of the new groove.
 _Avoid_: autopilot, lock, helm (to helm is what a player does)
 
 **Groove**:
-The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. The autohelm snaps to it when let go close to it and follows it as the wind strength changes.
+The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. The autohelm snaps to it when let go close to it and follows it as the wind strength changes. A player steering by hand steers to it.
 
 **Groove tick**:
 A tick on the wind vane at the groove on the boat's tack. The vane locks to it while the autohelm holds the groove; a pinch or foot shows as a short arc from it to the angle held.
@@ -427,7 +427,7 @@ A second tack/gybe tap during a tack, timed on the boom crossing. Close enough t
 _Avoid_: double tap (fine as UI copy), roll gybe (a gybe has no roll yet)
 
 **Pinch** / **foot**:
-Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). The autohelm holds either until the player changes it. On a beat the groove is proper course, so a pinch beyond 5° is above proper course (rule 17).
+Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). The autohelm holds either until the player changes it; steering by hand, the player holds it. On a beat the groove is proper course, so a pinch beyond 5° is above proper course (rule 17).
 _Avoid_: pinch for the two-finger zoom gesture; call that **pinch-zoom**
 
 **Livery**:
