@@ -4,5 +4,5 @@
   "camera" : "boat",
   "vision" : "none",
   "view" : "courseUp",
-  "hud" : { "seat" : 5, "notice" : "ocs" }
+  "hud" : { "seat" : 1, "notice" : "ocs" }
 }

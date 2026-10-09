@@ -36,7 +36,12 @@ struct FreezeTickRow: Decodable {
     /// At least this many boats racing in view, you among them.
     var racingInView: Int?
     /// At least this many boats in view casting a backwind wedge at half strength or more: sailing upwind, sail working.
+    /// As the app draws it (`BoatEffects`): not a ghost, her cone's presence (none running, less across a reach) times
+    /// the class's floor factor times her sail's backwind level (#437: a downwind leg after the first finish has none).
     var sailsWorkingInView: Int?
+    /// The right-of-way glows you see in glow range (`RightOfWayGlyph`, #123), each of these kinds at least once:
+    /// "giveWay" (red, you keep clear), "hasRight" (green).
+    var glows: [String]?
     /// Whether the mark you sail for is in view (false: the edge arrow points at it, as the cue fixtures want).
     var markInView: Bool?
     /// The rules of the calls in their 8 s on screen, newest first, exactly (`RuleCalls.active(... seconds: 8 ...)`'s
@@ -46,7 +51,8 @@ struct FreezeTickRow: Decodable {
     var yourCall: String?
     /// Your penalty turn: "owed" (called, not started), "turning", or "either" (its arc shows).
     var yourTurn: String?
-    /// Your autohelm against her groove: "pinching" (inside it) or "footing" (outside it).
+    /// Your offset from the groove, the autohelm's or by hand on a class whose autohelm doesn't hold (`grooveOffset`):
+    /// "pinching" (inside it) or "footing" (outside it).
     var groove: String?
 
     static let callSeconds = 8
@@ -140,7 +146,19 @@ enum FreezeTicks {
         if let n = row.racingInView, inView.filter({ !race.boats[$0].isGhost && race.boats[$0].status == .racing }).count < n {
             return false
         }
-        if let n = row.sailsWorkingInView, inView.filter({ race.backwindSail(ofSeat: $0) >= 0.5 }).count < n { return false }
+        if let n = row.sailsWorkingInView, inView.filter({ wedgePresence(race, seat: $0) >= 0.5 }).count < n { return false }
+        if let kinds = row.glows {
+            guard !boat.isGhost else { return false }
+            let relations = race.keepClearRelations(of: me)
+            let shown = race.boats.indices.compactMap { seat -> String? in
+                guard seat != me, relations.indices.contains(seat),
+                      RightOfWayGlyph.isInRange(boat.position, race.boats[seat].position,
+                                                rangeHulls: RightOfWayGlyph.defaultRangeHulls,
+                                                hullLength: race.boatClass.hull.length) else { return nil }
+                return RightOfWayGlyph.glyph(for: relations[seat], me: me).map { "\($0)" }
+            }
+            if !kinds.allSatisfy(shown.contains) { return false }
+        }
 
         let live = calls.filter { race.tick - $0.tick < FreezeTickRow.callSeconds * Race.tickRate }
         if let rules = row.liveRules, live.reversed().map(\.rule.rawValue) != rules { return false }
@@ -156,10 +174,32 @@ enum FreezeTicks {
         switch row.groove {
         case nil: break
         case let groove?:
-            guard let offset = boat.autohelmReading(in: race.boatClass)?.offsetFromGroove else { return false }
+            guard let offset = grooveOffset(boat, in: race.boatClass) else { return false }
             if (groove == "pinching") != (offset < 0) || offset == 0 { return false }
         }
         return true
+    }
+
+    /// The strength of `seat`'s backwind wedge as the app draws it (`BoatEffects`), 0...1: none for a ghost.
+    static func wedgePresence(_ race: Race, seat: Int) -> Double {
+        let boat = race.boats[seat]
+        guard !boat.isGhost else { return 0 }
+        let cone = ShadowCone(apex: boat.position, apparentWindDirection: boat.apparentWind.direction, heading: boat.heading,
+                              windwardSide: boat.tack, shadow: race.boatClass.windShadow, trueWindAngle: boat.twa,
+                              speed: boat.speedThroughWater)
+        return cone.backwindPresence * race.boatClass.windShadow.backwindFloorFactor(speed: boat.speedThroughWater)
+            * race.backwindSail(ofSeat: seat).clamped(to: 0...1)
+    }
+
+    /// Her offset from the groove as the vane and sail cues read it: the autohelm's while it has her, or on a class
+    /// whose autohelm doesn't hold a centred rudder (#437's skiff@7), her own sailing angle off the groove of the wind
+    /// she is in (the app's `HandSteering`). Nil otherwise.
+    static func grooveOffset(_ boat: Boat, in boatClass: BoatClass) -> Double? {
+        if let reading = boat.autohelmReading(in: boatClass) { return reading.offsetFromGroove }
+        guard !boatClass.steering.autohelm.holdsWhenCentred else { return nil }
+        let groove: Autohelm.Groove = abs(boat.sailingAngle) < .pi / 2 ? .upwind : .downwind
+        let angle = Autohelm.grooveAngle(groove, tws: boat.grooveWindSpeed(in: boatClass), boatClass: boatClass)
+        return wrapAngle(boat.sailingAngle - angle)
     }
 
     static func committedTick(_ text: String, _ fixture: String) throws -> Int {

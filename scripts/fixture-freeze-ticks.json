@@ -9,13 +9,15 @@
         "fixtures": ["rules-call", "rules-call-deuteranopia", "rules-call-greyscale", "rules-call-protanopia",
                      "rules-call-tritanopia", "rules-call-washout"],
         "log": "fleet.racelog.json",
-        "leg": 0, "yourCall": "10", "liveRules": ["21.2", "10"], "yourTurn": "either", "sailsWorkingInView": 1
+        "leg": 0, "yourCall": "10", "liveRules": ["21.2", "10"], "yourTurn": "either", "sailsWorkingInView": 1,
+        "glows": ["giveWay"]
     },
     {
         "fixtures": ["rules-penalty", "rules-penalty-deuteranopia", "rules-penalty-greyscale", "rules-penalty-protanopia",
                      "rules-penalty-tritanopia", "rules-penalty-washout"],
         "log": "fleet.racelog.json", "seat": 0,
-        "leg": 0, "yourCall": "10", "liveRules": ["10"], "yourTurn": "owed", "sailsWorkingInView": 1
+        "leg": 0, "yourCall": "10", "liveRules": ["10"], "yourTurn": "owed", "sailsWorkingInView": 1,
+        "glows": ["giveWay", "hasRight"]
     },
     {
         "fixtures": ["cues", "cues-deuteranopia", "cues-greyscale", "cues-protanopia", "cues-tritanopia", "cues-washout"],

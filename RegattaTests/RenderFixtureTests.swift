@@ -218,8 +218,8 @@ import UIKit
             case .separator: "sep"
             }
         }
-        // The log's own seat, 4th of 6 at the tick: the leader, a skip, the boat ahead, you and the boat behind.
-        #expect(lines == ["1:Leader", "sep", "3:+32 m", "4:+72 m*", "5:+84 m"])
+        // The log's own seat, 5th of 6 at the tick: the leader, a skip, the boat ahead, you and the boat behind.
+        #expect(lines == ["1:Leader", "sep", "4:+59 m", "5:+88 m*", "6:+105 m"])
 
         for vision in VisionFilter.allCases where vision != .none {
             let (fixture, _) = try RenderFixture.load(named: "hud-leaderboard-\(vision.rawValue)", in: Self.fixtures)
@@ -284,16 +284,16 @@ import UIKit
         }
     }
 
-    /// The fleet fixture (#117) is a bot race recorded on skiff@6, the default class (re-recorded on seed 19 for #377, so
-    /// the references draw its backwind wedge; a log replays on the class it names, so it stays skiff@6 when the default
-    /// moves on), frozen after the first finish and before the close, with a ghost, at least three racing boats and a
+    /// The fleet fixture (#117) is a bot race recorded on skiff@7, the default class (re-recorded for #377 so the
+    /// references draw its backwind wedge, and on skiff@7 for #437 on the first seed meeting its freeze conditions; a
+    /// log replays on the class it names, so it stays skiff@7 when the default moves on), frozen after the first finish and before the close, with a ghost, at least three racing boats and a
     /// backwind wedge in the boat camera's view; its five twins are the same frame through each other filter.
     @Test func fleetFixtureShowsAGhostAmongTheFleet() throws {
         let (fixture, log) = try RenderFixture.load(named: "fleet", in: Self.fixtures)
         #expect(fixture.camera == .boat && fixture.vision == VisionFilter.none)
-        // Its recorded class, the default when it was recorded (#377). Re-recording it on a later default moves every
+        // Its recorded class, the default when it was recorded (#437). Re-recording it on a later default moves every
         // fleet, cues, hud and rules reference that shares it, which is the owner's call (#354).
-        #expect(log.header.setup.boatClass.id == "skiff" && log.header.setup.boatClass.version == 6)
+        #expect(log.header.setup.boatClass.id == "skiff" && log.header.setup.boatClass.version == 7)
         let world = try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
         #expect(!world.frame.isOver)
         #expect(!world.isGhost(ofSeat: world.myBoatIndex))

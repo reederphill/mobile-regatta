@@ -194,8 +194,11 @@ import Testing
             #expect(RenderFixtureTests.wedgesOnScreen(scene) >= 2, "\(name): \(RenderFixtureTests.wedgesOnScreen(scene)) wedges in view")
 
             let world = session.driver.renderWorld
-            let reading = try #require(world.autohelm(ofSeat: world.myBoatIndex))
-            #expect(pinched ? reading.offsetFromGroove < 0 : reading.offsetFromGroove > 0, "\(name)")
+            // Her offset as the cues read it: by hand on the default class, skiff@7 (#437), or the autohelm's in a tap.
+            let reading = world.autohelm(ofSeat: world.myBoatIndex)
+            let hand = HandSteering(world.me, reading: reading, boatClass: world.boatClass)
+            let offset = try #require(hand?.offset ?? reading?.offsetFromGroove)
+            #expect(pinched ? offset < 0 : offset > 0, "\(name)")
             let pose = BoatPose(world.me, ease: false, isGhost: false, boatClass: world.boatClass, autohelm: reading)
             #expect(pinched ? pose.luffLift > 0 : pose.sailFullness > 1, "\(name)")
 

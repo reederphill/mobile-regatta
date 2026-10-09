@@ -1,6 +1,6 @@
 {
   "log" : "water-light-and-patchy.racelog.json",
-  "freezeTick" : 30,
+  "freezeTick" : 10,
   "camera" : "boat",
   "vision" : "greyscale"
 }
