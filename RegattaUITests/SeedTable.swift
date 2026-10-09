@@ -3,7 +3,7 @@
 /// The seeds the UI tests launch, each the first in 1...400 meeting its test's condition.
 enum SeedTable {
     /// `ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders`: the `-demo -laps 1` race on which your
-    /// boat finishes at least 3,360 ticks (14 s at `-timescale 8`) before the close. Probed: she finishes at tick
-    /// 6779, the race closes at 10148.
-    static let resultsSheet: UInt64 = 208
+    /// boat finishes at least 1680 ticks (14 s at `-timescale 4`) before the close. Probed: she finishes at tick
+    /// 5804, the race closes at 7982.
+    static let resultsSheet: UInt64 = 18
 }
