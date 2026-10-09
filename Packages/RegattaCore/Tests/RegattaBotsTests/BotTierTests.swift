@@ -106,8 +106,8 @@ import Testing
     /// tier her skill draw dealt, and a bot given a skill alone in the tier holding that skill.
     @Test func handlingBandsPerTier() throws {
         let file = BotTierFile.bundled
-        #expect(file.version == 2)
-        #expect(BotTier.club.handlingBand == 0.2...0.7, "the placeholder bands")
+        #expect(file.version == 3)
+        #expect(BotTier.club.handlingBand == 0.35...0.75, "the placeholder bands (Club's raised by #437)")
         #expect(BotTier.regional.handlingBand == 0.4...0.9)
         #expect(BotTier.national.handlingBand == 0.6...1.0)
         let bands = BotTier.allCases.map(\.handlingBand)

@@ -89,12 +89,12 @@ import Testing
 
         let seed: UInt64 = 5
         let off = try BotHelmTests.skiff(holds: false)
-        let autohelm = try Self.track(seed: seed, boatClass: RaceFiles.defaults.boatClass, seconds: 300) { seat, raceSeed in
+        let autohelm = try Self.track(seed: seed, boatClass: BotHelmTests.autohelmOn(), seconds: 300) { seat, raceSeed in
             BotDriver(seat: seat, raceSeed: raceSeed)
         }
         let perfect = try Self.track(seed: seed, boatClass: off, seconds: 300, driver: Self.steering(like: top))
         #expect(perfect.count == autohelm.count)
-        let hull = RaceFiles.defaults.boatClass.content.hull.length
+        let hull = try BotHelmTests.autohelmOn().content.hull.length
         var worst = 0.0
         var total = 0.0
         for (a, b) in zip(autohelm, perfect) {
@@ -109,7 +109,7 @@ import Testing
 
         let club = try Self.track(seed: seed, boatClass: off, seconds: 120, driver: Self.steering(like: .clubHandSteering))
         #expect(club != Array(perfect.prefix(club.count)), "Club hand steering sailed the perfect hand's track")
-        let clubOnAutohelm = try Self.track(seed: seed, boatClass: RaceFiles.defaults.boatClass, seconds: 120,
+        let clubOnAutohelm = try Self.track(seed: seed, boatClass: BotHelmTests.autohelmOn(), seconds: 120,
                                             driver: Self.steering(like: .clubHandSteering))
         #expect(clubOnAutohelm == Array(autohelm.prefix(clubOnAutohelm.count)))
     }
@@ -304,7 +304,7 @@ import Testing
         #expect(HandSteering(a.weaknesses, seed: seed) == HandSteering(c.weaknesses, seed: seed))
         #expect(a.style != c.style)
 
-        // Sailed: the app's bots on a sloppy and a sharp hand. The autohelm holds the default class's rudder, so the
+        // Sailed: the app's bots on a sloppy and a sharp hand. The autohelm holds skiff@6's rudder, so the
         // tracks are the same to the bit; the skiff without it sails them apart.
         func at(_ handling: Double) -> (Int, RaceSeed) -> BotDriver {
             { seat, raceSeed in
@@ -312,9 +312,9 @@ import Testing
                 return BotDriver(seat: seat, raceSeed: raceSeed, skill: skill, handling: handling)
             }
         }
-        let onSloppy = try Self.track(seed: 5, boatClass: RaceFiles.defaults.boatClass, seconds: 120, driver: at(0.2))
-        let onSharp = try Self.track(seed: 5, boatClass: RaceFiles.defaults.boatClass, seconds: 120, driver: at(1))
-        let app = try Self.track(seed: 5, boatClass: RaceFiles.defaults.boatClass, seconds: 120) { seat, raceSeed in
+        let onSloppy = try Self.track(seed: 5, boatClass: BotHelmTests.autohelmOn(), seconds: 120, driver: at(0.2))
+        let onSharp = try Self.track(seed: 5, boatClass: BotHelmTests.autohelmOn(), seconds: 120, driver: at(1))
+        let app = try Self.track(seed: 5, boatClass: BotHelmTests.autohelmOn(), seconds: 120) { seat, raceSeed in
             BotDriver(seat: seat, raceSeed: raceSeed)
         }
         #expect(onSloppy == onSharp && onSharp == app, "handling felt with the autohelm on")

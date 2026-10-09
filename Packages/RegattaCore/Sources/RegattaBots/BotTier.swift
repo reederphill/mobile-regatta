@@ -143,8 +143,8 @@ public struct BotTierFile: Codable, Hashable, Sendable {
         }
     }
 
-    /// The file bots sail by.
-    public static let currentVersion = 2
+    /// The file bots sail by: version 3, Club's handling band raised for hand steering on the default class (#437).
+    public static let currentVersion = 3
 
     /// The bundled `bot-tiers@<currentVersion>.json`.
     public static let bundled: BotTierFile = {

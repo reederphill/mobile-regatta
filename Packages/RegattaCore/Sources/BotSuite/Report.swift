@@ -1511,7 +1511,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
                     + "\(m.beats) beats, \(fixed(m.medianSecondsPerRun)) s/run (\(fixed(m.medianLengthsPerRun)) lengths) over \(m.runs) runs"
             }
             lines.append("handling: perfect hand steering over Club's in \(handling.races) races"
-                + (matrix.autohelmOff ? "" : " (the class's autohelm holds a centred rudder: sail with --autohelm off)"))
+                + (matrix.handSteers ? "" : " (the class's autohelm holds a centred rudder: sail with --autohelm off)"))
             lines.append(line("without tactics", handling.baseline))
             lines.append(line("with tactics", handling.tactician))
             lines.append(line("both", handling.all))
@@ -1522,7 +1522,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         }
         if let axes {
             lines.append("live places by tactics skill and handling skill (mean place, finished/seats)"
-                + (matrix.autohelmOff ? ":" : " (the class's autohelm holds a centred rudder: handling unfelt; sail with --autohelm off):"))
+                + (matrix.handSteers ? ":" : " (the class's autohelm holds a centred rudder: handling unfelt; sail with --autohelm off):"))
             lines += axes.lines(skillAxis: "skill", handlingAxis: "handling")
         }
         if let execution {

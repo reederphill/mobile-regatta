@@ -34,8 +34,9 @@ public struct ReferenceRegatta: Sendable {
     /// The races in the file's order: race n is `races[n - 1]`.
     public let races: [ReferenceRace]
 
-    /// The file the app and the suite sail.
-    public static let currentVersion = 1
+    /// The file the app and the suite sail: version 2, on skiff@7, the default class (#437). Version 1, on skiff@6, stays
+    /// bundled.
+    public static let currentVersion = 2
 
     /// The bundled `reference-regatta@<currentVersion>.json`.
     public static let bundled: ReferenceRegatta = {

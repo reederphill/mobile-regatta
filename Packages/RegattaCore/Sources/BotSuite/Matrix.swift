@@ -50,7 +50,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// Hand steering (#435): the baseline and the tactician each steering by hand perfectly and at Club level
     /// (`BotProfile.clubSteering`, `tacticianClubSteering`), the four by turns, one seat further along for each seed, so
     /// the per-leg dividend of steering well is measured with tactics and without. Steering by hand shows only in a class
-    /// whose autohelm doesn't hold a centred rudder: sail it with `--autohelm off` (`BotMatrix.autohelmOff`). Sailed only
+    /// whose autohelm doesn't hold a centred rudder: the default class since #437, or `--autohelm off` (`BotMatrix.handSteers`). Sailed only
     /// when named (`--profile-mix handling`), never in the bundled matrix; all-National fleets, as `execution`; its races
     /// stay out of the live tiers the thresholds gate and out of the skill gap. `BotSuiteReport.handling` reports it.
     case handling
@@ -222,6 +222,12 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     /// bots steer by hand (`BotHelm`); false sails the class as bundled. Left out of a matrix file when false.
     public var autohelmOff = false
 
+    /// The bots steer by hand: the matrix sails a copy with the autohelm off, or the default class's autohelm already
+    /// doesn't hold a centred rudder (skiff@7, the default since #437).
+    public var handSteers: Bool {
+        autohelmOff || !RaceFiles.defaults.boatClass.content.steering.autohelm.holdsWhenCentred
+    }
+
     public init(seeds: [UInt64], venues: [String] = ["dev-venue@3"], conditions: [String] = ["classic-oscillating@3"],
                 conditionsByVenue: [String: [String]] = [:], tideStatesDegrees: [Double] = [0], fleetSizes: [Int], tierMixes: [TierMix] = [.mixed],
                 profileMixes: [ProfileMix] = [.live], mixFleetSizes: [ProfileMix: Int] = [:], laps: Int = RaceSetup.defaultLaps,
@@ -368,7 +374,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
         if profileMixes.contains(.handling) {
             // Hand steering shows only where the autohelm doesn't hold a centred rudder, and the mix deals four
             // profiles by turns, so a smaller fleet would leave one unsailed.
-            guard autohelmOff else {
+            guard handSteers else {
                 throw BotSuiteError.matrix("handling measures hand steering, which shows only with autohelmOff (--autohelm off)")
             }
             let needed = ProfileMix.handlingProfiles.count

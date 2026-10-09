@@ -65,8 +65,8 @@ import Testing
     }
 
     /// #435: the National stand-in is the tactician steering by hand at Club level and nothing else; the Club stand-in
-    /// the novice (skill 0.35, that skill's weaknesses) with the same hand steering. On the bundled class, whose autohelm
-    /// holds a centred rudder, her hand steering never shows: the National stand-in sails the tactician's race to the bit.
+    /// the novice (skill 0.35, that skill's weaknesses) with the same hand steering. On skiff@7, the reference regatta's
+    /// class since #437, her hand steering shows: the National stand-in sails a race of her own.
     @Test func standInsSteerByHandAtClubLevel() throws {
         let club = BotWeaknesses.clubHandSteering
         #expect(club.shiftLag > 0 && club.wander > 0 && club.overshoot > 0)
@@ -89,9 +89,11 @@ import Testing
         let own = BotWeaknesses(skill: 0.35)
         #expect(noviceWeaknesses.steering(like: own) == own)
 
+        // Since #437 the reference regatta (version 2) sails skiff@7, whose autohelm doesn't hold a centred rudder: the
+        // National stand-in's Club hand steering shows, and it leaves the tactician's race.
         let cap = 60
-        #expect(RaceFiles.defaults.boatClass.content.steering.autohelm.holdsWhenCentred)
+        #expect(!RaceFiles.defaults.boatClass.content.steering.autohelm.holdsWhenCentred)
         let asTactician = try BotRaceHarness.runReference(2, standIn: .tactician, capSecondsAfterGun: cap)
-        #expect(try BotRaceHarness.runReference(2, standIn: .national, capSecondsAfterGun: cap).digest == asTactician.digest)
+        #expect(try BotRaceHarness.runReference(2, standIn: .national, capSecondsAfterGun: cap).digest != asTactician.digest)
     }
 }

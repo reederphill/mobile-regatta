@@ -5,13 +5,17 @@ import Testing
 
 /// #434: bots steer by hand (`BotHelm`) when the class's autohelm doesn't hold a centred rudder.
 @Suite struct BotHelmTests {
-    /// The default class's file headed as schema 4 with `holdsWhenCentred` set to `holds`, as tune 1.
+    /// skiff@6 as bundled, the autohelm holding a centred rudder: the class these tests were written on (the default
+    /// until #437, whose skiff@7 is skiff@6 with the autohelm off).
+    static func autohelmOn() throws -> BoatClassFile { try BoatClassFile.bundled(id: "skiff", version: 6) }
+
+    /// skiff@6's file headed as schema 4 with `holdsWhenCentred` set to `holds`, as tune 1.
     static func skiff(holds: Bool) throws -> BoatClassFile {
-        let key = RaceFiles.defaults.boatClass.ref.key
+        let key = try autohelmOn().ref.key
         var text = String(decoding: try #require(try BoatClassFile.bundledData(id: key.id, version: key.version)), as: UTF8.self)
         for (of, with) in [(#""schemaVersion": 3,"#, #""schemaVersion": 4,"#),
                            (#""grooveWindAverageSeconds": 30"#, #""grooveWindAverageSeconds": 30, "holdsWhenCentred": \#(holds)"#)] {
-            #expect(text.contains(of), "the default class no longer holds \(of)")
+            #expect(text.contains(of), "skiff@6 no longer holds \(of)")
             text = text.replacingOccurrences(of: of, with: with)
         }
         return try BoatClassFile(data: Data(text.utf8), tune: 1)
@@ -51,15 +55,15 @@ import Testing
     /// (0.6 when written). With it on (the value set true), today's race to the bit, the full fleet's too.
     @Test func sameTrackWithAutohelmOff() throws {
         let seed: UInt64 = 5
-        let fleet = try Self.track(seed: seed, boatClass: RaceFiles.defaults.boatClass, seconds: 90)
+        let fleet = try Self.track(seed: seed, boatClass: Self.autohelmOn(), seconds: 90)
         #expect(try Self.track(seed: seed, boatClass: Self.skiff(holds: true), seconds: 90) == fleet)
 
-        let today = try Self.track(seed: seed, boatClass: RaceFiles.defaults.boatClass, seconds: 300, seats: 2)
+        let today = try Self.track(seed: seed, boatClass: Self.autohelmOn(), seconds: 300, seats: 2)
         #expect(try Self.track(seed: seed, boatClass: Self.skiff(holds: true), seconds: 300, seats: 2) == today)
         // #435: steering by hand perfectly; the app's bots steer as well as their skill lets them, and stray further.
         let off = try Self.track(seed: seed, boatClass: Self.skiff(holds: false), seconds: 300, seats: 2, perfectHands: true)
         #expect(off.count == today.count)
-        let hull = RaceFiles.defaults.boatClass.content.hull.length
+        let hull = try Self.autohelmOn().content.hull.length
         var worst = 0.0
         var total = 0.0
         for (a, b) in zip(today, off) {
