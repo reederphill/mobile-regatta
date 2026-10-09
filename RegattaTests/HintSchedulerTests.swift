@@ -29,8 +29,8 @@ import Testing
     /// The start-sequence hint says how this scheme eases (#453): there is no Ease button.
     @Test func startSequenceHintSaysHowThisSchemeEases() {
         let text = HintCatalogue.hint(.startSequence).text
-        #expect(text.text(for: .halves).contains("Hold both sides to ease."))
-        #expect(text.text(for: .tiller).contains("Pull down to ease."))
+        #expect(text.text(for: .halves) == "Hold both sides to ease.")
+        #expect(text.text(for: .tiller) == "Pull down to ease.")
         for steering in DeviceSettings.Steering.allCases {
             #expect(!text.text(for: steering).contains("Hold Ease"), "no Ease button to hold")
         }
