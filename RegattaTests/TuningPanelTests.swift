@@ -408,6 +408,9 @@ import RegattaCore
 
         model.set(tiller, to: 1)
         #expect(!model.tuning.isTuned && model.practiceFiles().boatClass.tune == nil)
+        // Back at the file's value, the race sails the bundled files byte for byte: no readied copy.
+        let untouched = model.practiceFiles()
+        #expect(untouched == .defaults && untouched.tunedFiles.isEmpty)
     }
 }
 

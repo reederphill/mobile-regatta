@@ -199,6 +199,17 @@ import Testing
         // Readied, the flag tunes like any number.
         let tuned = try TunedCopy.patched(Data(readied("/a/x").utf8), values: ["/a/x": 0])
         #expect(TunedCopy.number(at: "/a/x", in: tuned) == 0)
+        // A bool `true` is readied to the number 1, and tunes from there.
+        let truth = Data(readied("/a/t").utf8)
+        #expect(TunedCopy.number(at: "/a/t", in: truth) == 1)
+        #expect(TunedCopy.number(at: "/a/t", in: try TunedCopy.patched(truth, values: ["/a/t": 0])) == 0)
+        // A base already at (or past) the schema that reads the flag keeps its version as the member is added.
+        for version in [4, 5] {
+            let at = Data(#"{"schemaVersion": \#(version), "e": {}}"#.utf8)
+            let added = TunedCopy.readyingFlag(at: "/e/x", in: at, absent: 1, schemaVersion: 4)
+            #expect(TunedCopy.number(at: "/schemaVersion", in: added) == Double(version))
+            #expect(TunedCopy.number(at: "/e/x", in: added) == 1)
+        }
     }
 
     /// The polar's upwind-angle sliders: warping one column moves its groove to about the angle asked for,

@@ -232,6 +232,40 @@ import Testing
         #expect(snapshot.status == .prestart && snapshot.hasLetGo)
     }
 
+    /// #436: on a hand-steered class a tap's autohelm (the tack and the hand-back) isn't letting go, so the
+    /// centred-rudder hint still fires afterwards and letting go is never learned for it.
+    @Test func aTappedTackOnAHandSteeredClassIsNotLettingGo() throws {
+        var config = RaceConfig(opponents: 1, prestartSeconds: 1, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+        config.files = try Self.handSteeredFiles()
+        let driver = PracticeDriver(config: config)
+        var o = HintObservations()
+        func run(_ rudder: Int8, seconds: Double) {
+            driver.submit(BoatInput(rudder: rudder))
+            for _ in 0..<Int(seconds * 15) {
+                driver.tick(1.0 / 15)
+                o.observe(driver.renderWorld, tuning: .standard)
+            }
+        }
+        run(0, seconds: 2)
+        run(40, seconds: 1)
+        #expect(o.hasSteered)
+        driver.submit(BoatInput(rudder: Int8(0)))
+        #expect(driver.tap(.tackGybe))
+        var tapped = 0.0
+        for _ in 0..<(10 * 15) {
+            driver.tick(1.0 / 15)
+            o.observe(driver.renderWorld, tuning: .standard)
+            if driver.renderWorld.me.autohelm != nil { tapped += 1.0 / 15 }
+        }
+        #expect(tapped >= HintTuning.standard.autohelmHoldSeconds, "the tap's autohelm held long enough to count")
+        #expect(!o.hasLetGo, "a tap's autohelm isn't letting go")
+        run(40, seconds: 6)
+        let snapshot = HintSnapshot(world: driver.renderWorld, observations: o, showsLaylines: false, isFirstRace: true,
+                                    lettingGoRetired: false, tuning: .standard)
+        #expect(!snapshot.hasLetGo && !snapshot.autohelmHolds)
+        #expect(fires(.centredRudder, snapshot) != nil)
+    }
+
     // MARK: Tuning
 
     /// The thresholds are debug sliders (ruling 3): a saved tuning missing a field keeps its standard value, and a

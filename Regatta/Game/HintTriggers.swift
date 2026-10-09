@@ -248,9 +248,12 @@ struct HintObservations: Equatable {
         if steering { hasSteered = true }
         let afterGun = frame.time >= 0 && !me.isGhost
         steeringSeconds = steering && afterGun ? steeringSeconds + dt : 0
+        // Let go is the autohelm holding a centred rudder: on a class whose autohelm doesn't (#436), a tap's
+        // autohelm sailing a tack or gybe and handing back isn't letting go, so it never counts.
+        let holdsWhenCentred = world.boatClass.steering.autohelm.holdsWhenCentred
         if me.autohelm != nil {
             autohelmSeconds += dt
-            if hasSteered && autohelmSeconds >= t.autohelmHoldSeconds { hasLetGo = true }
+            if holdsWhenCentred && hasSteered && autohelmSeconds >= t.autohelmHoldSeconds { hasLetGo = true }
         } else {
             autohelmSeconds = 0
         }

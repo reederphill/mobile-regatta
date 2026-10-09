@@ -409,6 +409,34 @@ import Testing
             let locked = VaneCue(onGroove, reading: nil, isGhost: false, boatClass: hand)
             #expect(locked?.isLocked == true && locked?.vane == locked?.tick && locked?.arcEnd == nil, "\(boom)")
         }
+        // The lock window and the deadband: just inside the lock, locked with no arc; just outside it, an arc.
+        let style = BoatStyle.standard
+        #expect(style.vaneLockDegrees >= style.grooveCueDeadbandDegrees)
+        for sign in [-1.0, 1] {
+            let inside = VaneCue(Self.boat(sailingDegrees: grooveDegrees + sign * (style.vaneLockDegrees - 0.1)),
+                                 reading: nil, isGhost: false, boatClass: hand)
+            #expect(inside?.isLocked == true && inside?.arcEnd == nil, "\(sign): inside the lock")
+            let outside = VaneCue(Self.boat(sailingDegrees: grooveDegrees + sign * (style.vaneLockDegrees + 0.1)),
+                                  reading: nil, isGhost: false, boatClass: hand)
+            #expect(outside?.isLocked == false && outside?.arcEnd != nil, "\(sign): past the lock, past the deadband")
+        }
+        // The reach rule: footing past `grooveCueReachDegrees` off the upwind groove towards the beam, no arc.
+        let reach = VaneCue(Self.boat(sailingDegrees: grooveDegrees + style.grooveCueReachDegrees + 3),
+                            reading: nil, isGhost: false, boatClass: hand)
+        #expect(reach?.isLocked == false && reach?.arcEnd == nil, "a reach by hand shows no arc")
+        let inReach = VaneCue(Self.boat(sailingDegrees: grooveDegrees + style.grooveCueReachDegrees - 3),
+                              reading: nil, isGhost: false, boatClass: hand)
+        #expect(inReach?.arcEnd != nil, "footing within reach of the groove shows the arc")
+        // Downwind by hand: pinching up from the downwind groove runs the arc the same way.
+        let downwind = Autohelm.grooveAngle(.downwind, tws: metresPerSecond(knots: 12), boatClass: hand)
+        for boom in [BoomSide.port, .starboard] {
+            let side: Double = boom == .port ? 1 : -1
+            let cue = VaneCue(Self.boat(sailingDegrees: rad2deg(downwind) - 6, boom: boom), reading: nil,
+                              isGhost: false, boatClass: hand)
+            #expect(cue?.isLocked == false && abs((cue?.tick ?? .nan) - wrapAngle(side * downwind)) < 1e-9, "\(boom)")
+            let arc = wrapAngle((cue?.arcEnd ?? .nan) - (cue?.tick ?? .nan))
+            #expect(abs(arc - side * deg2rad(-6)) < 1e-9, "\(boom): a downwind pinch by hand")
+        }
 
         // The sail: pinched and footed by hand as by the autohelm holding that angle; on a reach, nothing.
         func pose(_ degrees: Double, _ boatClass: BoatClass, autohelm: Bool = false) -> BoatPose {
@@ -422,6 +450,11 @@ import Testing
         #expect(pose(grooveDegrees + 6, Self.boatClass).sailFullness == 1, "the autohelm on: a held rudder, no sail cue")
         #expect(pose(95, hand) == pose(95, Self.boatClass), "a reach by hand shows no sail cue")
         #expect(pose(grooveDegrees, hand) == pose(grooveDegrees, Self.boatClass), "on the groove, the base pose")
+        // A tap on a hand class: the autohelm has her, so the sail reads its reading as on any class.
+        let tapBoat = Self.boat(sailingDegrees: grooveDegrees + 6)
+        let tap = Self.reading(.groove(.upwind), isTapping: true, for: tapBoat)
+        #expect(BoatPose(tapBoat, ease: false, isGhost: false, boatClass: hand, autohelm: tap)
+                == BoatPose(tapBoat, ease: false, isGhost: false, boatClass: Self.boatClass, autohelm: tap))
         let footedBoat = Self.boat(sailingDegrees: grooveDegrees + 6)
         #expect(BoatPose.angleOfAttack(footedBoat, ease: false, boatClass: hand)
                 == BoatPose.angleOfAttack(footedBoat, ease: false, boatClass: Self.boatClass))
