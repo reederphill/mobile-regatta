@@ -224,7 +224,7 @@ enum ScriptedLog {
         for _ in 0..<9 { race.step() }
         #expect(race.tick == t - 1)
         #expect(race.heldInputs[0] == .neutral)
-        #expect(race.boats[0].autohelm != nil, "the rudder centred: the autohelm steers")
+        #expect(race.boats[0].autohelm == nil, "the rudder centred: on skiff@7 (#437) nothing steers her")
 
         race.step()
         #expect(race.heldInputs[0] == input)

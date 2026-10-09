@@ -149,9 +149,10 @@ func placeOverLine(_ boat: inout Boat, by over: Double, in race: Race) {
         #expect(unfloored.spacing < hull)
     }
 
-    /// #219 ruling: every boat starts with her rudder centred, so on the first step her autohelm engages at
-    /// her placement wind angle and holds the reach, with nobody steering. In a steady wind from the mean
-    /// direction and still water, that angle is exactly the row's.
+    /// #219 ruling: every boat starts with her rudder centred, so she holds the reach with nobody steering. On the
+    /// default class, skiff@7 (#437), the autohelm is off a centred rudder: nothing engages and she holds her placed
+    /// heading, the row's. In a steady wind from the mean direction and still water, her wind angle stays the
+    /// placement's.
     @Test func centredRudderHoldsThePlacementWindAngle() throws {
         let setup = try RaceSetup(raceSeed: RaceSeed(7), seats: [.human] + Array(repeating: .bot, count: 9))
         let files = try RaceFiles(resolving: setup)
@@ -167,15 +168,13 @@ func placeOverLine(_ boat: inout Boat, by over: Double, in race: Race) {
         let snaps = race.drainEvents().filter { if case .grooveSnap = $0.kind { true } else { false } }
         #expect(snaps.isEmpty, "a reach is no groove: nothing snaps")
         for b in race.boats {
-            let held = try #require(b.autohelm?.target.angle, "seat \(b.id) is on the autohelm, holding an angle")
-            #expect(abs(held - placementAngle) < 1e-9)
-            #expect(b.autohelm?.isTapping == false)
+            #expect(b.autohelm == nil, "seat \(b.id): the autohelm engaged on a centred rudder")
         }
 
         // Nobody steers for five seconds: every boat holds the reach, on starboard, on the row's heading.
         for _ in 0..<(5 * Race.tickRate) { race.step() }
         for b in race.boats {
-            #expect(b.autohelm?.target.angle.map { abs($0 - placementAngle) < 1e-9 } == true)
+            #expect(b.autohelm == nil)
             #expect(abs(b.sailingAngle - placementAngle) < deg2rad(1), "seat \(b.id)")
             #expect(abs(wrapAngle(b.heading - rowHeading)) < deg2rad(1), "seat \(b.id)")
             #expect(b.tack == .starboard)

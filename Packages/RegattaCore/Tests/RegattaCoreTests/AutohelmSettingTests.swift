@@ -75,7 +75,8 @@ enum AutohelmSettingFixtures {
     /// The value left out, or true (a bool or 1): today's behaviour exactly, tick for tick, through held rudders,
     /// centring, taps and the seeded wind's shifts.
     @Test func onIsTodaysBehaviour() throws {
-        let bundled = RaceFiles.defaults.boatClass
+        // skiff@6 as bundled, the autohelm on (the default class is skiff@7, the autohelm off, since #437).
+        let bundled = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version)
         #expect(bundled.content.steering.autohelm.holdsWhenCentred)
         let copies = try [nil, #""holdsWhenCentred": true"#, #""holdsWhenCentred": 1"#].map { try AutohelmSettingFixtures.file($0) }
         for copy in copies { #expect(copy.content == bundled.content && copy.ref != bundled.ref) }

@@ -6,11 +6,13 @@ import Testing
 /// speed into it, keeps `edgeSpeedRetention` of her speed along it as the touch begins, and can always
 /// steer away; a touch is recorded and costs no penalty. The autohelm has no special case there (#219).
 ///
-/// The races sail the default class, skiff@3, in still water and a steady scripted wind, so one tick of a
-/// boat's own dynamics is the same wherever she is on the water.
+/// The races sail skiff@6, in still water and a steady scripted wind, so one tick of a boat's own dynamics is the same
+/// wherever she is on the water. Pinned to skiff@6, whose autohelm holds a centred rudder (the default, skiff@7, #437,
+/// is skiff@6 with it off): her autohelm holding her into the edge, and sailing her clear, is what these test.
 @Suite struct RaceAreaContactTests {
-    static let boatClass = RaceFiles.defaults.boatClass.ref
-    static let outline = RaceFiles.defaults.boatClass.content.hull.outline
+    static let skiff6 = try! BoatClassFile.bundled(id: "skiff", version: 6)
+    static let boatClass = skiff6.ref
+    static let outline = skiff6.content.hull.outline
     static let still = CurrentField(current: nil, tideStateAtGun: 0)
     static let seed: UInt64 = 82
     /// Metres per second: a sailing breeze for the skiff.

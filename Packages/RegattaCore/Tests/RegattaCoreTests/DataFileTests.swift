@@ -46,7 +46,10 @@ enum Fixtures {
 /// and edited copies of its bytes.
 enum SkiffFixtures {
     static let classID = "skiff"
+    /// The version most fixtures edit: skiff@6, the autohelm on (schema 3). The default class is `defaultVersion`.
     static let version = 6
+    /// The default class's version (`RaceFiles.defaults`): skiff@7, skiff@6 with the autohelm off (#437).
+    static let defaultVersion = 7
     /// SHA-256 of each bundled `Resources/boat-classes/skiff@<version>.json`. A released file never changes
     /// (ADR 0004): if one fails, ship the change as the next version instead of editing it. Version 1 stays
     /// bundled for the logs sailed on it (ADR 0002).
@@ -57,6 +60,7 @@ enum SkiffFixtures {
         4: "4e2d1a94d1c90ac80aa88bdaa4890fc68095b16de61324c6fdaa19f54ee3a9a1",
         5: "ce105fbd37ca455498592ea9ae4e47a34a5e255617b2490019a1360330261b80",
         6: "4c20609ea59408e6ea81cb58d2aa3dba8365d24fcbe8ba883c819e6071d097e8",
+        7: "4b3c9e3212fca5d39816e3adb5bb46d091fed874df75e44d6b938959c810dba1",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -153,8 +157,8 @@ enum SkiffFixtures {
             try BoatClassFile(data: headedOne)
         }
         #expect(BoatClass.supportedSchemaVersions == [2, 3, 4])
-        #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version)).ref,
-                "races sail skiff@6 unless told otherwise (#248, #89, #263, #298, #377)")
+        #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.defaultVersion)).ref,
+                "races sail skiff@7 unless told otherwise (#248, #89, #263, #298, #377, #437)")
     }
 
     @Test func missingHeaderIsMalformed() throws {
@@ -631,7 +635,8 @@ enum SkiffFixtures {
         #expect(ContentHash(of: data).hex == SkiffFixtures.pinnedHashes[version],
                 "a released file never changes (ADR 0004): ship the change as the next version")
         let file = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: version)
-        #expect(file.schemaVersion == 3 && file.id == "skiff" && file.version == version)
+        // Version 7 (#437) is schema 4: schema 3 plus the autohelm's hold (#434).
+        #expect(file.schemaVersion == (version >= 7 ? 4 : 3) && file.id == "skiff" && file.version == version)
         #expect(file.content.name == "Skiff")
         // Every value is a placeholder: every top-level block is listed.
         for block in ["/hull", "/polar", "/momentum", "/steering", "/windShadow", "/contact", "/ease", "/planing", "/spinnaker", "/byTheLee"] {

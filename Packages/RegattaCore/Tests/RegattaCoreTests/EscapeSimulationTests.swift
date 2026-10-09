@@ -35,7 +35,8 @@ import Testing
         }
         let off = try headingChange(AutohelmSettingFixtures.off().content)
         #expect(abs(off) < 1e-9, "the prediction turned \(off)° on a centred rudder")
-        let on = try headingChange(RaceFiles.defaults.boatClass.content)
+        // skiff@6, the autohelm on (the default, skiff@7, has it off since #437).
+        let on = try headingChange(BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version).content)
         #expect(abs(abs(on) - 10) < 1, "the autohelm turned her \(on)° with a 10° shift")
     }
 }

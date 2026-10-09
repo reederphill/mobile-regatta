@@ -6,15 +6,19 @@ import Testing
 /// a wind the same everywhere and always, so twin races differ only by what one of them does (the in-race "gap" #263
 /// measured was wind shifts and a committee boat, not the sim). Seat 0 sails in open water to the right of the race
 /// area's centre, clear of every mark; seat 1 sits out of the way, well to leeward of her.
+///
+/// Pinned to skiff@6 (#437): its tacks are sailed and settled by the autohelm, as these costs were measured. The
+/// default, skiff@7, is skiff@6 with the autohelm off a centred rudder, so a let-go boat holds her heading instead.
 enum OpenWater {
-    static let boatClass = RaceFiles.defaults.boatClass.content
+    static let file = try! BoatClassFile.bundled(id: "skiff", version: 6)
+    static let boatClass = file.content
     static var hullLength: Double { boatClass.hull.length }
     static let still = CurrentField(current: nil, tideStateAtGun: 0)
     static let seed: UInt64 = 263
 
     /// The direction the wind blows from in every race here: up the course the seed draws.
     static func windDirection() throws -> Double {
-        try placedRace(current: still, seed: seed, boatClass: RaceFiles.defaults.boatClass.ref) { _, _ in }.course.axis
+        try placedRace(current: still, seed: seed, boatClass: file.ref) { _, _ in }.course.axis
     }
 
     /// A two-seat race in `knots` of steady wind with seat 0 close-hauled on starboard at her polar speed, her autohelm
@@ -23,7 +27,7 @@ enum OpenWater {
     static func race(knots: Double, boatClassFile: BoatClassFile? = nil,
                      place: (inout WorldSnapshot, Race) -> Void = { _, _ in }) throws -> Race {
         let wind = GroundWind(direction: try windDirection(), speed: metresPerSecond(knots: knots))
-        return try placedRace(current: still, seed: seed, wind: { _ in wind }, boatClass: RaceFiles.defaults.boatClass.ref,
+        return try placedRace(current: still, seed: seed, wind: { _ in wind }, boatClass: file.ref,
                               boatClassFile: boatClassFile) { snapshot, race in
             let area = race.course.raceArea
             var boat = snapshot.seats[0].boat
