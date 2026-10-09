@@ -27,10 +27,16 @@ import Testing
                         mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)))
     }
 
-    /// Each seat's position every second for `seconds`, the fleet sailed by bots.
-    static func track(seed: UInt64, boatClass: BoatClassFile, seconds: Int, seats: Int = 8) throws -> [[Vec2]] {
+    /// Each seat's position every second for `seconds`, the fleet sailed by bots; steering by hand perfectly if
+    /// `perfectHands` (#435: the app's bots steer by hand as well as their skill lets them).
+    static func track(seed: UInt64, boatClass: BoatClassFile, seconds: Int, seats: Int = 8,
+                      perfectHands: Bool = false) throws -> [[Vec2]] {
         let race = try race(seed: seed, boatClass: boatClass, seats: seats)
-        var controllers = allBots(race)
+        var controllers = perfectHands
+            ? SeatControllers(race.boats.indices.map {
+                .bot(BotHandSteeringTests.steering(like: BotWeaknesses(skill: 1))($0, race.setup.raceSeed))
+            })
+            : allBots(race)
         var track: [[Vec2]] = []
         sail(race, &controllers, ticks: seconds * Race.tickRate) { race in
             if race.tick % Race.tickRate == 0 { track.append(race.boats.map(\.position)) }
@@ -50,7 +56,8 @@ import Testing
 
         let today = try Self.track(seed: seed, boatClass: RaceFiles.defaults.boatClass, seconds: 300, seats: 2)
         #expect(try Self.track(seed: seed, boatClass: Self.skiff(holds: true), seconds: 300, seats: 2) == today)
-        let off = try Self.track(seed: seed, boatClass: Self.skiff(holds: false), seconds: 300, seats: 2)
+        // #435: steering by hand perfectly; the app's bots steer as well as their skill lets them, and stray further.
+        let off = try Self.track(seed: seed, boatClass: Self.skiff(holds: false), seconds: 300, seats: 2, perfectHands: true)
         #expect(off.count == today.count)
         let hull = RaceFiles.defaults.boatClass.content.hull.length
         var worst = 0.0

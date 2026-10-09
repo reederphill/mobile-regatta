@@ -47,6 +47,13 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// one seat further along for each seed), so a fleet of a fixed mix of skills races over the seeds. Reported as
     /// `BotSuiteReport.rank`: how well skill orders the finish (Spearman), and how far boats of one skill spread.
     case rankStability
+    /// Hand steering (#435): the baseline and the tactician each steering by hand perfectly and at Club level
+    /// (`BotProfile.clubSteering`, `tacticianClubSteering`), the four by turns, one seat further along for each seed, so
+    /// the per-leg dividend of steering well is measured with tactics and without. Steering by hand shows only in a class
+    /// whose autohelm doesn't hold a centred rudder: sail it with `--autohelm off` (`BotMatrix.autohelmOff`). Sailed only
+    /// when named (`--profile-mix handling`), never in the bundled matrix; all-National fleets, as `execution`; its races
+    /// stay out of the live tiers the thresholds gate and out of the skill gap. `BotSuiteReport.handling` reports it.
+    case handling
 
     /// The profile sailing `seat` in a race of `fleetSize` boats with race seed `seed`, or nil for a live bot. Only the
     /// hunters mix reads the fleet size, but every mix needs it: a seat of the fleet.
@@ -59,8 +66,12 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
         case .hunters:
             ProfileMix.isHunterSeat(seat, seed: seed, fleetSize: fleetSize) ? .hunter : nil
         case .execution: (seat + Int(seed % 2)).isMultiple(of: 2) ? .executor : .tacticianClubExecution
+        case .handling: ProfileMix.handlingProfiles[(seat + Int(seed % 4)) % 4]
         }
     }
+
+    /// The handling mix's profiles, by turns: perfect and Club hand steering, without tactics and with.
+    public static let handlingProfiles: [BotProfile] = [.baseline, .clubSteering, .tactician, .tacticianClubSteering]
 
     /// The seat the cautious bot sails in the cautious mix (#105), or none in another mix.
     public func cautiousSeats(seed: UInt64, fleetSize: Int) -> Set<Int> {
@@ -107,7 +118,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     public var gatesLiveTiers: Bool {
         switch self {
         case .live, .skillGap, .funPass, .execution: true
-        case .hunters, .cautious, .rivals, .rankStability: false
+        case .hunters, .cautious, .rivals, .rankStability, .handling: false
         }
     }
 
@@ -118,7 +129,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     public var tierMix: TierMix? {
         switch self {
         case .live, .skillGap, .funPass, .hunters, .cautious: nil
-        case .execution: .national
+        case .execution, .handling: .national
         case .rivals, .rankStability: .mixed
         }
     }
@@ -134,7 +145,7 @@ public enum ProfileMix: String, Codable, CaseIterable, Hashable, Sendable {
     /// The fun pass's numbers (#221) are for an oscillating breeze: a matrix sails it in no other conditions.
     public var conditionsID: String? {
         switch self {
-        case .live, .skillGap, .hunters, .execution, .cautious, .rivals, .rankStability: nil
+        case .live, .skillGap, .hunters, .execution, .cautious, .rivals, .rankStability, .handling: nil
         case .funPass: "classic-oscillating"
         }
     }
@@ -208,11 +219,14 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     /// Seconds after the gun a race may sail before the harness stops it; its unfinished boats count
     /// as not finished.
     public var capSecondsAfterGun: Int
+    /// Sail every race on a copy of its class with the autohelm off a centred rudder (#435, `--autohelm off`), so the
+    /// bots steer by hand (`BotHelm`); false sails the class as bundled. Left out of a matrix file when false.
+    public var autohelmOff = false
 
     public init(seeds: [UInt64], venues: [String] = ["dev-venue@3"], conditions: [String] = ["classic-oscillating@3"],
                 conditionsByVenue: [String: [String]] = [:], tideStatesDegrees: [Double] = [0], fleetSizes: [Int], tierMixes: [TierMix] = [.mixed],
                 profileMixes: [ProfileMix] = [.live], mixFleetSizes: [ProfileMix: Int] = [:], laps: Int = RaceSetup.defaultLaps,
-                capSecondsAfterGun: Int = BotMatrix.defaultCapSecondsAfterGun) {
+                capSecondsAfterGun: Int = BotMatrix.defaultCapSecondsAfterGun, autohelmOff: Bool = false) {
         self.seeds = seeds
         self.venues = venues
         self.conditions = conditions
@@ -224,11 +238,12 @@ public struct BotMatrix: Codable, Hashable, Sendable {
         self.mixFleetSizes = mixFleetSizes
         self.laps = laps
         self.capSecondsAfterGun = capSecondsAfterGun
+        self.autohelmOff = autohelmOff
     }
 
     private enum CodingKeys: String, CodingKey {
         case seeds, venues, conditions, conditionsByVenue, tideStatesDegrees, fleetSizes, tierMixes, profileMixes, mixFleetSizes, laps
-        case capSecondsAfterGun
+        case capSecondsAfterGun, autohelmOff
     }
 
     public init(from decoder: Decoder) throws {
@@ -243,7 +258,8 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                   profileMixes: try c.decodeIfPresent([ProfileMix].self, forKey: .profileMixes) ?? [.live],
                   mixFleetSizes: try c.decodeIfPresent([ProfileMix: Int].self, forKey: .mixFleetSizes) ?? [:],
                   laps: try c.decode(Int.self, forKey: .laps),
-                  capSecondsAfterGun: try c.decode(Int.self, forKey: .capSecondsAfterGun))
+                  capSecondsAfterGun: try c.decode(Int.self, forKey: .capSecondsAfterGun),
+                  autohelmOff: try c.decodeIfPresent(Bool.self, forKey: .autohelmOff) ?? false)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -260,6 +276,8 @@ public struct BotMatrix: Codable, Hashable, Sendable {
         try c.encode(mixFleetSizes, forKey: .mixFleetSizes)
         try c.encode(laps, forKey: .laps)
         try c.encode(capSecondsAfterGun, forKey: .capSecondsAfterGun)
+        // Left out when false, so a matrix without it encodes as it did before #435.
+        if autohelmOff { try c.encode(autohelmOff, forKey: .autohelmOff) }
     }
 
     /// The conditions `venue` sails, in `conditions`' order: those `conditionsByVenue` names for it, else all.
@@ -285,7 +303,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                                 }.map { profiles in
                                     BotRaceCell(seed: seed, venue: venue, conditions: conditions, tideStateDegrees: tide,
                                                 fleetSize: fleetSize, tierMix: mix, profileMix: profiles, laps: laps,
-                                                capSecondsAfterGun: capSecondsAfterGun)
+                                                capSecondsAfterGun: capSecondsAfterGun, autohelmOff: autohelmOff ? true : nil)
                                 }
                             }
                         }
@@ -348,6 +366,17 @@ public struct BotMatrix: Codable, Hashable, Sendable {
                 throw BotSuiteError.matrix("\(mix.rawValue) sails only in a fleet of \(size), which the matrix doesn't name")
             }
         }
+        if profileMixes.contains(.handling) {
+            // Hand steering shows only where the autohelm doesn't hold a centred rudder, and the mix deals four
+            // profiles by turns, so a smaller fleet would leave one unsailed.
+            guard autohelmOff else {
+                throw BotSuiteError.matrix("handling measures hand steering, which shows only with autohelmOff (--autohelm off)")
+            }
+            let needed = ProfileMix.handlingProfiles.count
+            if let size = fleetSizes.filter({ sails(.handling, inFleetOf: $0) }).min(), size < needed {
+                throw BotSuiteError.matrix("handling deals \(needed) profiles, so it needs fleets of at least \(needed); the matrix sails it in a fleet of \(size)")
+            }
+        }
     }
 
     public static func load(from url: URL) throws -> BotMatrix {
@@ -374,6 +403,9 @@ public struct BotRaceCell: Codable, Hashable, Sendable {
     public var profileMix: ProfileMix
     public var laps: Int
     public var capSecondsAfterGun: Int
+    /// True: sailed on a copy of the class with the autohelm off a centred rudder (#435, `BotMatrix.autohelmOff`); nil
+    /// for the class as bundled, and left out of the report then.
+    public var autohelmOff: Bool? = nil
 
     /// The profile sailing `seat`, or nil for a live bot.
     public func profile(ofSeat seat: Int) -> BotProfile? { profileMix.profile(ofSeat: seat, seed: seed, fleetSize: fleetSize) }
