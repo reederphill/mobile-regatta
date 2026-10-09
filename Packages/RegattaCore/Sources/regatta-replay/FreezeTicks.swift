@@ -54,6 +54,10 @@ struct FreezeTickRow: Decodable {
     /// Your offset from the groove, the autohelm's or by hand on a class whose autohelm doesn't hold (`grooveOffset`):
     /// "pinching" (inside it) or "footing" (outside it).
     var groove: String?
+    /// The size of that offset in degrees, above the first and below the second: past the app's sail-cue dead band
+    /// and short of the reach where it shows no cue (`BoatStyle.grooveCueDeadbandDegrees`, `grooveCueReachDegrees`),
+    /// so the drawn sail lifts its luff or fills as `BoatCueTests` checks.
+    var grooveDegrees: [Double]?
 
     static let callSeconds = 8
     static let defaultView = [402 * 1.25 / 2 / 8, 874 * 1.25 / 2 / 8]
@@ -105,13 +109,32 @@ enum FreezeTicks {
 
     /// The first tick of `log`, every `row.step` ticks, meeting the row's conditions, or nil.
     static func firstTick(_ row: FreezeTickRow, log: RaceLog) throws -> Int? {
-        let me = row.seat ?? log.header.setup.seats.firstIndex(of: .human) ?? 0
-        let step = row.step ?? 10
-        let view = row.view ?? FreezeTickRow.defaultView
-        var calls: [RuleCall] = []
-        var firstFinish = false
-        var found: Int?
-        _ = try Replayer.replay(log, requireMatchingVersion: false) { race in
+        var scan = Scan([row], setup: log.header.setup)
+        _ = try Replayer.replay(log, requireMatchingVersion: false) { scan.observe($0) }
+        return scan.found[0]
+    }
+
+    /// Rows' conditions read tick by tick as a race sails or replays (`observe` once at its first tick and after each
+    /// step): what each row needs from the race so far (the calls, the first finish), and the first tick each row meets.
+    /// The replay above and the recorder (`RecordFixture`) read a race the same way, so a recorded log replays to the
+    /// ticks its recording found.
+    struct Scan {
+        let rows: [FreezeTickRow]
+        let seats: [Int]
+        private(set) var found: [Int?]
+        private(set) var calls: [RuleCall] = []
+        private var firstFinish = false
+
+        init(_ rows: [FreezeTickRow], setup: RaceSetup) {
+            self.rows = rows
+            seats = rows.map { $0.seat ?? setup.seats.firstIndex(of: .human) ?? 0 }
+            found = rows.map { _ in nil }
+        }
+
+        var allFound: Bool { found.allSatisfy { $0 != nil } }
+
+        /// Drains the race's events: nothing else may drain them while a scan reads the race.
+        mutating func observe(_ race: Race) {
             for event in race.drainEvents() {
                 switch event.kind {
                 case .ruleCall(let call): calls.append(call)
@@ -119,10 +142,24 @@ enum FreezeTicks {
                 default: break
                 }
             }
-            guard found == nil, race.tick % step == 0 else { return }
-            if meets(row, race, me: me, view: view, calls: calls, firstFinish: firstFinish) { found = race.tick }
+            for (index, row) in rows.enumerated() where found[index] == nil && race.tick % (row.step ?? 10) == 0 {
+                if FreezeTicks.meets(row, race, me: seats[index], view: row.view ?? FreezeTickRow.defaultView, calls: calls,
+                                     firstFinish: firstFinish) {
+                    found[index] = race.tick
+                }
+            }
         }
-        return found
+
+        /// Whether a row still unmet can no longer be met: its seat has sailed past the leg it wants, or is a ghost
+        /// where the row wants her racing or on a leg.
+        func isHopeless(_ race: Race) -> Bool {
+            rows.indices.contains { index in
+                guard found[index] == nil else { return false }
+                let boat = race.boats[seats[index]]
+                if let leg = rows[index].leg, boat.legIndex > leg { return true }
+                return boat.isGhost && (rows[index].leg != nil || rows[index].racing == true)
+            }
+        }
     }
 
     static func meets(_ row: FreezeTickRow, _ race: Race, me: Int, view: [Double], calls: [RuleCall],
@@ -176,6 +213,10 @@ enum FreezeTicks {
         case let groove?:
             guard let offset = grooveOffset(boat, in: race.boatClass) else { return false }
             if (groove == "pinching") != (offset < 0) || offset == 0 { return false }
+            if let range = row.grooveDegrees, range.count == 2,
+               !(range[0] < abs(offset) * 180 / .pi && abs(offset) * 180 / .pi < range[1]) {
+                return false
+            }
         }
         return true
     }

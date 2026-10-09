@@ -1,0 +1,26 @@
+[
+    {
+        "log": "fleet.racelog.json",
+        "seats": 8, "laps": 1, "startSequenceTicks": 1800,
+        "venue": "dev-venue@2", "conditions": "classic-oscillating@2", "rulesConfiguration": "fleet-rules@4",
+        "maxTick": 12000, "yourScript": "headUpAfterFirstFinish"
+    },
+    {
+        "log": "rules-call.racelog.json",
+        "seats": 8, "laps": 1, "startSequenceTicks": 1800,
+        "venue": "dev-venue@2", "conditions": "classic-oscillating@2", "rulesConfiguration": "fleet-rules@4",
+        "maxTick": 1800, "yourRuleMisjudgeRate": 1, "yourScript": "penaltyTurnAtOnce"
+    },
+    {
+        "log": "rules-penalty.racelog.json",
+        "seats": 8, "laps": 1, "startSequenceTicks": 1800,
+        "venue": "dev-venue@2", "conditions": "classic-oscillating@2", "rulesConfiguration": "fleet-rules@4",
+        "maxTick": 1800, "yourRuleMisjudgeRate": 1
+    },
+    {
+        "log": "cues.racelog.json",
+        "seats": 8, "laps": 1, "startSequenceTicks": 1800,
+        "venue": "dev-venue@2", "conditions": "classic-oscillating@2", "rulesConfiguration": "fleet-rules@4",
+        "maxTick": 1800
+    }
+]
