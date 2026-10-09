@@ -707,7 +707,7 @@ public final class Race {
         let moved = BoatDynamics.advance(
             BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide,
                                isPlaning: b.isPlaning, spinnaker: b.spinnaker, heel: b.heel,
-                               wipeoutTicksLeft: b.wipeoutTicksLeft),
+                               wipeoutTicksLeft: b.wipeoutTicksLeft, sheet: b.sheet, roundUp: b.roundUp),
             control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: !b.isGhost),
             env: BoatDynamics.Environment(windDirection: b.sailingWind.direction, windSpeed: tws, current: b.current,
                                           shadow: b.speedShadow(in: boatClass)),
@@ -720,6 +720,8 @@ public final class Race {
         b.spinnaker = moved.spinnaker
         b.heel = moved.heel
         b.wipeoutTicksLeft = moved.wipeoutTicksLeft
+        b.sheet = moved.sheet
+        b.roundUp = moved.roundUp
         let crossing = moved.boomSide != b.boomSide
         b.boomSide = moved.boomSide
         let turn = wrapAngle(b.heading - before)

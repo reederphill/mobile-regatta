@@ -1036,6 +1036,26 @@ extension BoatClass {
         public var wipeoutHeel: Double?
         public var wipeoutRecoverySeconds: Double
         public var wipeoutStopSeconds: Double
+        /// Sheet-trim version: seconds to let the sheet fully out holding Ease, and to trim it back in.
+        public var sheetOutSeconds = 2.0
+        public var sheetInSeconds = 2.0
+        /// The share of the heeling wind a fully let-out sheet spills.
+        public var sheetDepower = 0.6
+        /// The fast heel band: speed × (1 + `bandBonus`) inside it, ramping in from 0 heel; past its top heel costs
+        /// up to `speedLossAtFullHeel` at full heel.
+        public var bandLow = 0.3
+        public var bandHigh = 0.6
+        public var bandBonus = 0.04
+        /// Seconds past `wipeoutHeel` (the edge) before she wipes out.
+        public var roundUpSeconds = 1.0
+
+        /// Speed factor for `heel`: rising to the band's bonus by `bandLow`, flat to `bandHigh`, then falling to
+        /// 1 + bonus − `speedLossAtFullHeel` at full heel.
+        public func heelSpeedFactor(_ heel: Double) -> Double {
+            let rise = bandLow > 0 ? min(1, heel / bandLow) : 1
+            let over = bandHigh < 1 ? max(0, (heel - bandHigh) / (1 - bandHigh)) : 0
+            return 1 + bandBonus * rise - speedLossAtFullHeel * over
+        }
 
         public func power(twa: Double) -> Double {
             let a = abs(twa)
@@ -1061,7 +1081,9 @@ extension BoatClass {
                 && a.speedLossAtFullHeel == b.speedLossAtFullHeel && a.easeDepowerFraction == b.easeDepowerFraction
                 && a.easeDepowerSeconds == b.easeDepowerSeconds && a.depowerSpeedFraction == b.depowerSpeedFraction
                 && a.wipeoutHeel == b.wipeoutHeel && a.wipeoutRecoverySeconds == b.wipeoutRecoverySeconds
-                && a.wipeoutStopSeconds == b.wipeoutStopSeconds
+                && a.wipeoutStopSeconds == b.wipeoutStopSeconds && a.sheetOutSeconds == b.sheetOutSeconds
+                && a.sheetInSeconds == b.sheetInSeconds && a.sheetDepower == b.sheetDepower && a.bandLow == b.bandLow
+                && a.bandHigh == b.bandHigh && a.bandBonus == b.bandBonus && a.roundUpSeconds == b.roundUpSeconds
         }
     }
 
@@ -1094,12 +1116,19 @@ private struct BoatClassSchema4Additions: Decodable {
         let heelBuildSeconds: Double
         let heelReleaseSeconds: Double
         let speedLossAtFullHeel: Double
-        let easeDepowerFraction: Double
-        let easeDepowerSeconds: Double
-        let depowerSpeedFraction: Double
+        let easeDepowerFraction: Double?
+        let easeDepowerSeconds: Double?
+        let depowerSpeedFraction: Double?
         let wipeoutHeel: Double?
         let wipeoutRecoverySeconds: Double
         let wipeoutStopSeconds: Double
+        let sheetOutSeconds: Double?
+        let sheetInSeconds: Double?
+        let sheetDepower: Double?
+        let bandLow: Double?
+        let bandHigh: Double?
+        let bandBonus: Double?
+        let roundUpSeconds: Double?
     }
 
     struct Polar: Decodable {
@@ -1125,12 +1154,19 @@ private struct BoatClassSchema4Additions: Decodable {
                 heelBuildSeconds: max(tiny, o.heelBuildSeconds),
                 heelReleaseSeconds: max(tiny, o.heelReleaseSeconds),
                 speedLossAtFullHeel: o.speedLossAtFullHeel.clamped(to: 0...1),
-                easeDepowerFraction: o.easeDepowerFraction.clamped(to: 0...1),
-                easeDepowerSeconds: max(tiny, o.easeDepowerSeconds),
-                depowerSpeedFraction: o.depowerSpeedFraction.clamped(to: 0...1),
+                easeDepowerFraction: (o.easeDepowerFraction ?? 0.7).clamped(to: 0...1),
+                easeDepowerSeconds: max(tiny, o.easeDepowerSeconds ?? 0.6),
+                depowerSpeedFraction: (o.depowerSpeedFraction ?? 0.9).clamped(to: 0...1),
                 wipeoutHeel: o.wipeoutHeel,
                 wipeoutRecoverySeconds: max(0, o.wipeoutRecoverySeconds),
                 wipeoutStopSeconds: max(tiny, o.wipeoutStopSeconds))
+            if let v = o.sheetOutSeconds { boatClass.overpowered?.sheetOutSeconds = max(tiny, v) }
+            if let v = o.sheetInSeconds { boatClass.overpowered?.sheetInSeconds = max(tiny, v) }
+            if let v = o.sheetDepower { boatClass.overpowered?.sheetDepower = v.clamped(to: 0...1) }
+            if let v = o.bandLow { boatClass.overpowered?.bandLow = v.clamped(to: 0...1) }
+            if let v = o.bandHigh { boatClass.overpowered?.bandHigh = v.clamped(to: 0...1) }
+            if let v = o.bandBonus { boatClass.overpowered?.bandBonus = v.clamped(to: 0...0.5) }
+            if let v = o.roundUpSeconds { boatClass.overpowered?.roundUpSeconds = max(tiny, v) }
         }
         let sharpness = polar?.downwindPeakSharpness ?? 1
         let spread = polar?.downwindGrooveSpread ?? 1

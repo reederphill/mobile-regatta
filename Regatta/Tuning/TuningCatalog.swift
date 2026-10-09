@@ -178,7 +178,7 @@ enum TuningCatalog {
             // #429 prototype (proto-handling, never merged): gust management and downwind puff steering.
             TuningGroup(
                 id: "gustsAndPuffs", title: "Handling",
-                note: "#429 prototype. Gusts: heeling wind = TWS x power at her angle; over threshold x gust scale she heels, past wipeout heel she wipes out. Holding Ease depowers. Puffs: the downwind polar's sharpness and groove spread, and the downwind snap. Conditions: gust scale and planing speed scales.",
+                note: "#429 prototype. Gusts: heeling wind = TWS x power at her angle; over threshold x gust scale she heels, past wipeout heel she wipes out. Ease is a sheet: holding it lets the sheet out, letting go trims it in; heel has a fast band, and staying past the rounding-up heel wipes her out. Puffs: the downwind polar's sharpness and groove spread, and the downwind snap. Conditions: gust scale and planing speed scales.",
                 applies: .nextRace,
                 sliders: [
                     TuningSlider(.boatClass, "/overpowered/thresholdKnots", "Overpowered from", unit: " kn", 5...30, step: 0.5),
@@ -191,10 +191,14 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/overpowered/heelBuildSeconds", "Heel builds", unit: " s", 0.1...5, step: 0.1),
                     TuningSlider(.boatClass, "/overpowered/heelReleaseSeconds", "Heel releases", unit: " s", 0.1...5, step: 0.1),
                     TuningSlider(.boatClass, "/overpowered/speedLossAtFullHeel", "Speed lost at full heel", 0...0.8, step: 0.01),
-                    TuningSlider(.boatClass, "/overpowered/easeDepowerFraction", "Ease depowers", 0...1, step: 0.05),
-                    TuningSlider(.boatClass, "/overpowered/easeDepowerSeconds", "Ease bleeds heel in", unit: " s", 0.1...3, step: 0.1),
-                    TuningSlider(.boatClass, "/overpowered/depowerSpeedFraction", "Speed kept easing heeled", 0.3...1, step: 0.01),
-                    TuningSlider(.boatClass, "/overpowered/wipeoutHeel", "Wipeout at heel (over 1: never)", 0.5...1.05, step: 0.01),
+                    TuningSlider(.boatClass, "/overpowered/sheetOutSeconds", "Sheet runs out in", unit: " s", 0.3...6, step: 0.1),
+                    TuningSlider(.boatClass, "/overpowered/sheetInSeconds", "Sheet trims in in", unit: " s", 0.3...6, step: 0.1),
+                    TuningSlider(.boatClass, "/overpowered/sheetDepower", "Sheet spills (fully out)", 0...1, step: 0.05),
+                    TuningSlider(.boatClass, "/overpowered/bandLow", "Fast heel band from", 0...1, step: 0.05),
+                    TuningSlider(.boatClass, "/overpowered/bandHigh", "Fast heel band to", 0...1, step: 0.05),
+                    TuningSlider(.boatClass, "/overpowered/bandBonus", "Fast band speed bonus", 0...0.2, step: 0.01),
+                    TuningSlider(.boatClass, "/overpowered/wipeoutHeel", "Rounding up past heel (over 1: never)", 0.5...1.05, step: 0.01),
+                    TuningSlider(.boatClass, "/overpowered/roundUpSeconds", "Rounding up wipes out after", unit: " s", 0.2...4, step: 0.1),
                     TuningSlider(.boatClass, "/overpowered/wipeoutRecoverySeconds", "Wipeout lasts", unit: " s", 2...20, step: 0.5),
                     TuningSlider(.boatClass, "/overpowered/wipeoutStopSeconds", "Wipeout stops her in", unit: " s", 0.2...5, step: 0.1),
                     TuningSlider(.boatClass, "/polar/downwindPeakSharpness", "Downwind peak sharpness", 0.5...4, step: 0.1),

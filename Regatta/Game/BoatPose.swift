@@ -76,7 +76,15 @@ nonisolated struct BoatPose: Equatable, Sendable {
         let headToWind = Self.isHeadToWind(boat, boatClass: boatClass, style: style)
 
         var flutter = 0.0
-        if ease {
+        // #429 sheet-trim version: a class with `overpowered` shows the sheet's dial, not the held button.
+        let sheetDial = boatClass.overpowered != nil
+        if sheetDial && boat.sheet > 0.01 && !headToWind {
+            // The sail trims out towards the wind as the sheet runs, flapping more the further it is out.
+            let trimmed = (awa * style.trimPerApparentAngle).clamped(to: minTrim...maxTrim)
+            sailTrim = trimmed + (awa.clamped(to: minTrim...maxTrim) - trimmed) * boat.sheet
+            flutter = boat.sheet
+            luffLift = min(1, boat.sheet * 3)
+        } else if ease && !sheetDial {
             // Sheets out: the sail weathervanes to the wind and flaps.
             sailTrim = awa.clamped(to: minTrim...maxTrim)
             flutter = 1
@@ -112,9 +120,10 @@ nonisolated struct BoatPose: Equatable, Sendable {
             // #429 prototype: the sim's heel, eased or not.
             heel = boat.heel
             spray = ((boat.heel - style.sprayHeel) / max(0.01, 1 - style.sprayHeel)).clamped(to: 0...1)
-            if ease && boat.heel > 0.05 {
-                // Depowering: the luff lifts and shivers while she bleeds off heel.
-                luffLift = 1
+            if boat.roundUp > 0 {
+                // Rounding up: the sail flogs and the spray flies; save her before the meter fills.
+                self.flutter = max(self.flutter, boat.roundUp)
+                spray = max(spray, 0.5 + boat.roundUp / 2)
             }
             if boat.isWipedOut {
                 isWipedOut = true

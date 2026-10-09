@@ -33,7 +33,8 @@
     "Every value is a placeholder (the JSON Pointers above) awaiting tuning.",
     "Version 2 is version 1 with a quicker penalty turn (#89, the owner): skiff@1 took 14-22 s over a hard-over 360 in open water, slowing below the 6 kn its full turn rate needed and stalling head to wind. Version 1 turned 30 deg/s from 6 kn up with a 5 deg/s floor and rudder drag 0.2 per second (a tack about 9 m, a gybe about 7 m). Now 36 deg/s full-rudder turns from 1.5 kn up with a 10 deg/s floor serve a clean 360 in about 10 s at 8-16 kn, and doubling the rudder drag keeps a tack and a gybe close to the research's costs (tack 7.7 m and gybe 8.9 m at 10 kn; 8.4 m and 9.6 m at 12 kn). Everything else as version 1.",
     "Version 3 is version 2 with #220's momentum pair (speeding up 2.8 -> 2.5 s, slowing down 4 -> 10 s), rudder drag 0.4 -> 0.25 (the owner, #263: skiff@2 lost 1.06 / 1.57 / 1.81 hull lengths a tack at 6 / 10 / 14 kn, slowing to 30% of her entry speed), the shadow as a speed loss (loss close in 0.25 -> 0.48, stacking floor 0.6 -> 0.3, its own 2 s slowing down) and the roll tack. Everything else as version 2.",
-    "Version 7 (schema 4, #429 PROTOTYPE ONLY, branch proto-handling, never merged) is version 6 plus gust management (overpowered), the downwind polar shaping of #426 D3 (downwindPeakSharpness, downwindGrooveSpread) and the downwind snap at 3 deg (D2). Every new value is a placeholder."
+    "Version 7 (schema 4, #429 PROTOTYPE ONLY, branch proto-handling, never merged) is version 6 plus gust management (overpowered), the downwind polar shaping of #426 D3 (downwindPeakSharpness, downwindGrooveSpread) and the downwind snap at 3 deg (D2). Every new value is a placeholder.",
+    "Sheet-trim version (#429 owner playtest, 2026-10-09): Ease is a dial: holding it lets the sheet out over sheetOutSeconds, letting go trims it in over sheetInSeconds; the sheet spills sheetDepower of the heeling wind fully out, and costs drive quadratically (fully out = ease.speedFraction). Heel has a fast band (bandLow..bandHigh, +bandBonus); past bandHigh it costs up to speedLossAtFullHeel. wipeoutHeel is now the edge: past it for roundUpSeconds she wipes out. Threshold 11 kn, range 5 kn so gusty-offshore puffs bite."
   ],
   "hull": {
     "lengthMetres": 4.9,
@@ -441,8 +442,8 @@
     "missSpeedFactor": 0.8
   },
   "overpowered": {
-    "thresholdKnots": 15,
-    "excessRangeKnots": 6,
+    "thresholdKnots": 11,
+    "excessRangeKnots": 5,
     "powerByTWA": [
       {
         "twaDegrees": 40,
@@ -468,11 +469,15 @@
     "heelBuildSeconds": 1.5,
     "heelReleaseSeconds": 1.0,
     "speedLossAtFullHeel": 0.25,
-    "easeDepowerFraction": 0.7,
-    "easeDepowerSeconds": 0.6,
-    "depowerSpeedFraction": 0.9,
-    "wipeoutHeel": 0.95,
+    "wipeoutHeel": 0.85,
     "wipeoutRecoverySeconds": 10,
-    "wipeoutStopSeconds": 1.5
+    "wipeoutStopSeconds": 1.5,
+    "sheetOutSeconds": 2.0,
+    "sheetInSeconds": 2.0,
+    "sheetDepower": 0.6,
+    "bandLow": 0.3,
+    "bandHigh": 0.6,
+    "bandBonus": 0.04,
+    "roundUpSeconds": 1.0
   }
 }

@@ -22,11 +22,19 @@ public enum BoatDynamics {
         public var heel: Double = 0
         /// Ticks left of a wipeout (#429 prototype), or nil when she is not wiped out.
         public var wipeoutTicksLeft: Int?
+        /// The sheet (#429 prototype, sheet-trim version): 0 trimmed in … 1 fully out; let out while Ease is held,
+        /// trimmed back in when it is let go. Always 0 for a class without `overpowered`.
+        public var sheet: Double = 0
+        /// Rounding up (#429 prototype): 0 … 1, filling while heel is past `wipeoutHeel`; at 1 she wipes out.
+        public var roundUp: Double = 0
 
         public init(position: Vec2 = .zero, heading: Double, speed: Double, rudder: Double = 0, boomSide: BoomSide = .port,
-                    isPlaning: Bool = false, spinnaker: Spinnaker = .down, heel: Double = 0, wipeoutTicksLeft: Int? = nil) {
+                    isPlaning: Bool = false, spinnaker: Spinnaker = .down, heel: Double = 0, wipeoutTicksLeft: Int? = nil,
+                    sheet: Double = 0, roundUp: Double = 0) {
             self.heel = heel
             self.wipeoutTicksLeft = wipeoutTicksLeft
+            self.sheet = sheet
+            self.roundUp = roundUp
             self.position = position
             self.heading = heading
             self.speed = speed
@@ -136,45 +144,59 @@ public enum BoatDynamics {
         let shadowSlowingDown = env.shadow < 1 ? boatClass.windShadow.slowingDown : nil
         if shadowSlowingDown != nil { target *= env.shadow }
 
-        // Gust management (#426 Phase 4, #429 prototype).
+        // Gust management (#426 Phase 4, #429 prototype, sheet-trim version): the sheet is a dial, heel has a fast
+        // band, and a wipeout comes from staying past the edge, not from touching it.
         var wipedOut = false
+        var sheetDrive = 1.0
         if let o = boatClass.overpowered {
+            // The sheet runs out while Ease is held and back in when it is let go, at its own rates.
+            if control.ease && control.sailing {
+                s.sheet = min(1, s.sheet + dt / o.sheetOutSeconds)
+            } else {
+                s.sheet = max(0, s.sheet - dt / o.sheetInSeconds)
+            }
             if let left = s.wipeoutTicksLeft {
                 wipedOut = true
                 s.heel = 1
                 if left <= 1 {
                     s.wipeoutTicksLeft = nil
                     s.heel = 0
+                    s.roundUp = 0
                 } else {
                     s.wipeoutTicksLeft = left - 1
                 }
             } else {
-                // Heeling wind after shadow: a speed-loss shadow's factor stands in for the wind it takes.
-                let excess = control.sailing && !inNoGo ? o.excess(tws: env.windSpeed * env.shadow, twa: twa) : 0
-                let easing = control.ease && control.sailing && excess > 0
-                let heelTarget = easing ? excess * (1 - o.easeDepowerFraction) : excess
-                let seconds = heelTarget > s.heel ? o.heelBuildSeconds : (easing ? o.easeDepowerSeconds : o.heelReleaseSeconds)
+                // Heeling wind after shadow, less what the sheet lets go: a speed-loss shadow's factor stands in
+                // for the wind it takes.
+                let felt = env.windSpeed * env.shadow * (1 - o.sheetDepower * s.sheet)
+                let heelTarget = control.sailing && !inNoGo ? o.excess(tws: felt, twa: twa) : 0
+                let seconds = heelTarget > s.heel ? o.heelBuildSeconds : o.heelReleaseSeconds
                 s.heel += (heelTarget - s.heel) * min(1, dt / seconds)
-                if let limit = o.wipeoutHeel, s.heel >= limit {
+                // Past the edge the round-up fills; back inside it drains at the same rate.
+                let edge = o.wipeoutHeel ?? 2
+                s.roundUp = (s.roundUp + (s.heel > edge ? 1 : -1) * dt / o.roundUpSeconds).clamped(to: 0...1)
+                if s.roundUp >= 1 {
                     s.wipeoutTicksLeft = max(1, Int((o.wipeoutRecoverySeconds / dt).rounded()))
                     s.heel = 1
                     wipedOut = true
                 }
             }
-            if !wipedOut { target *= 1 - o.speedLossAtFullHeel * s.heel }
+            if !wipedOut {
+                target *= o.heelSpeedFactor(s.heel)
+                // The sail's drive: a little sheet costs little, fully out it is the class's ease.
+                sheetDrive = 1 - (1 - boatClass.ease.speedFraction) * s.sheet * s.sheet
+                target *= sheetDrive
+            }
         }
 
         let timeConstant: Double
         if wipedOut, let o = boatClass.overpowered {
             target = 0
             timeConstant = o.wipeoutStopSeconds
-        } else if control.ease && control.sailing {
-            // D1: while still heeled, easing costs only the depower fraction; flat, the full ease.
-            if let o = boatClass.overpowered, s.heel > 0.1 {
-                target *= o.depowerSpeedFraction
-            } else {
-                target *= boatClass.ease.speedFraction
-            }
+        } else if boatClass.overpowered != nil, sheetDrive < 1 {
+            timeConstant = target > s.speed ? boatClass.momentum.speedingUp : boatClass.ease.timeConstant
+        } else if control.ease && control.sailing && boatClass.overpowered == nil {
+            target *= boatClass.ease.speedFraction
             timeConstant = target > s.speed ? boatClass.momentum.speedingUp : boatClass.ease.timeConstant
         } else if target > s.speed {
             timeConstant = boatClass.momentum.speedingUp

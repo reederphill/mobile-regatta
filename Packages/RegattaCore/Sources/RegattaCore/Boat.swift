@@ -116,6 +116,9 @@ public struct Boat: Identifiable, Sendable {
     public var wipeoutTicksLeft: Int?
     /// Wiped out (#429 prototype).
     public var isWipedOut: Bool { wipeoutTicksLeft != nil }
+    /// The sheet, 0 in … 1 out, and the round-up meter (#429 prototype, sheet-trim version).
+    public var sheet = 0.0
+    public var roundUp = 0.0
     /// The class's running average of the wind speed her polar reads (`polarWindSpeed(in:)`), m/s: what her
     /// autohelm's grooves follow (#245, `grooveWindSpeed(in:)`). Nil until the race first samples her wind.
     /// With no average (`AutohelmTuning.grooveWindAverage` 0, every schema-2 class) it is the wind right now.
