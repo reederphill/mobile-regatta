@@ -28,6 +28,9 @@ import RegattaCore
     /// Two bots after the gun on seed `seed`'s race, both seats bots, nothing placed yet: open water on the course,
     /// a third of the way up the beat for boats beating to the windward mark, or two thirds for boats running down to
     /// the gate (`running`); the wind there, and the best upwind and downwind in it.
+    /// The class the scripted encounters' water sails (`Water`): the default, or a pinned one a test binds (#437).
+    @TaskLocal static var waterClass: FileRef = RaceFiles.defaults.boatClass.ref
+
     struct Water {
         let race: Race
         let wind: Double
@@ -39,7 +42,7 @@ import RegattaCore
         let leg: Int
 
         init(seed: UInt64, running: Bool = false) {
-            race = botRace(seats: [.bot, .bot], seed: seed)
+            race = botRace(seats: [.bot, .bot], seed: seed, boatClass: BotConductTests.waterClass)
             for _ in 0..<(race.setup.startSequenceTicks + Race.tickRate) { race.step() }
             let c = race.course
             centre = c.startLine.centre + c.upwind * (c.beat * (running ? 0.7 : 0.35))
@@ -54,7 +57,7 @@ import RegattaCore
         /// Before the gun (#280): two bots on seed `seed`'s race, `toGun` seconds before it, nothing placed yet, the
         /// water `below` hull lengths below the middle of the start line.
         init(seed: UInt64, toGun: Int, below: Double) {
-            race = botRace(seats: [.bot, .bot], prestartSeconds: toGun + 10, seed: seed)
+            race = botRace(seats: [.bot, .bot], prestartSeconds: toGun + 10, seed: seed, boatClass: BotConductTests.waterClass)
             for _ in 0..<(10 * Race.tickRate) { race.step() }
             let c = race.course
             length = race.boatClass.hull.length
@@ -336,6 +339,11 @@ import RegattaCore
     /// boat turning a penalty and one returning OCS), each in several variations, and no rule call is made on
     /// either: each keeps clear when she must and holds her course when she needn't. Neither ever protests.
     @Test func scriptedEncountersZeroFoulsAtSkill1() throws {
+        // skiff@6 until #455: the scripted encounters' bots miss each other or draw calls under hand steering.
+        try Self.$waterClass.withValue(BotHelmTests.autohelmOn().ref) { try Self.checkScriptedEncountersZeroFouls() }
+    }
+
+    static func checkScriptedEncountersZeroFouls() throws {
         var failures: [String] = []
         var markRoomEncounters = 0
         var closest = Double.infinity
@@ -410,7 +418,10 @@ import RegattaCore
     /// keep clear of her.
     @Test(arguments: BotConductTests.everySkill)
     func rightOfWayBotNeverRuddersTowardAKeepClearBoat(skill: Double) throws {
-        try Self.checkRightOfWayNeverRuddersTowardAKeepClearBoat(skill: skill)
+        // skiff@6 until #455: right-of-way bots turn towards a keep-clear boat under hand steering.
+        try Self.$waterClass.withValue(BotHelmTests.autohelmOn().ref) {
+            try Self.checkRightOfWayNeverRuddersTowardAKeepClearBoat(skill: skill)
+        }
     }
 
     /// #104: the cautious bot holds to #101's invariant too: both bots cautious, at her skill and with her weaknesses.

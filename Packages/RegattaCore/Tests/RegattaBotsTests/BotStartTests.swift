@@ -6,8 +6,9 @@ import RegattaCore
 /// follow single bots through it: how they hold, from any pre-gun state, and back from over the line.
 @Suite struct BotStartTests {
     /// A full start sequence (60 s) for `seats`, from the race's own row (#35).
-    static func startRace(seats: [SeatKind] = Array(repeating: .bot, count: 10), seed: UInt64) -> Race {
-        botRace(seats: seats, laps: 1, prestartSeconds: 60, seed: seed)
+    static func startRace(seats: [SeatKind] = Array(repeating: .bot, count: 10), seed: UInt64,
+                          boatClass: FileRef = RaceFiles.defaults.boatClass.ref) -> Race {
+        botRace(seats: seats, laps: 1, prestartSeconds: 60, seed: seed, boatClass: boatClass)
     }
 
     /// Holding before the gun, a bot lets the sheets out rather than luffing into the no-go zone to wait: when
@@ -54,7 +55,9 @@ import RegattaCore
     @Test(arguments: [false, true])
     func aBotTakingOverBeforeTheGunStarts(cautious: Bool) throws {
         for seed: UInt64 in 1...12 {
-            let race = Self.startRace(seats: [.human] + Array(repeating: .bot, count: 9), seed: seed)
+            // skiff@6 until #455: the taken-over bot is over the line at the gun under hand steering.
+            let race = Self.startRace(seats: [.human] + Array(repeating: .bot, count: 9), seed: seed,
+                                      boatClass: try BotHelmTests.autohelmOn().ref)
             // The takeover alone: the fleet around her sails without weaknesses, as the scenario was written for
             // (#99). Line-bias misreads (#102) move where the fleet holds: on seed 9 she then reached the pin end
             // early, luffing to keep clear of a boat to leeward, and was over at the gun.

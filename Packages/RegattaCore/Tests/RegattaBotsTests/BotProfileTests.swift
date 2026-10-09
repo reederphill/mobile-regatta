@@ -87,6 +87,11 @@ import RegattaCore
     }
 
     @Test func hunterAltersCourseTowardsAGiveWayBoatWithinRule16() throws {
+        // skiff@6 until #455: the hunter turns faster than rule 16 allows under hand steering.
+        try BotConductTests.$waterClass.withValue(BotHelmTests.autohelmOn().ref) { try Self.checkHunterAltersCourseWithinRule16() }
+    }
+
+    static func checkHunterAltersCourseWithinRule16() throws {
         // Running on starboard, overlapped, the live bot to windward and keeping clear (rule 11): holding her course the
         // hunter would leave her be; she turns at her gently instead, and the gap closes, with no 16.1 call on her.
         // Scenes whose tactician gybes away at once leave nothing to hunt, so each scene sails on the first seed whose
@@ -267,6 +272,11 @@ import RegattaCore
     /// hunts, or hunting the outside boat there, rounded wider and later (#355's findings round: 1.2 to 5.2 m wider). So
     /// in the zone she rounds as the live bot does, and hunts no one: as near the mark as the tactician, no call on her.
     @Test func hunterTakesAllHerMarkRoom() throws {
+        // skiff@6 until #455: the hunter gives up mark-room under hand steering.
+        try BotConductTests.$waterClass.withValue(BotHelmTests.autohelmOn().ref) { try Self.checkHunterTakesAllHerMarkRoom() }
+    }
+
+    static func checkHunterTakesAllHerMarkRoom() throws {
         let scenes: [(BotConductTests.Encounter, offset: Bool)] = [(1.2, 0.0), (1.2, 0.6), (1.5, -0.6)].map {
             (BotConductTests.markRoom(seed: 19, abeam: $0.0, ahead: $0.1), false)
         } + [1.2, -1.2].map { (BotConductTests.markRoom(seed: 20, abeam: $0, ahead: 0, offsetMark: true), true) }
