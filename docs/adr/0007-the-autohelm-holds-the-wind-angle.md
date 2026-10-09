@@ -1,6 +1,6 @@
 # The autohelm holds the wind angle
 
-> Amended 2026-10-09 by [ADR 0010](0010-players-steer-by-hand.md): players steer by hand by default and the autohelm is a tuning setting for them; bots keep it.
+> Amended 2026-10-09 by [ADR 0010](0010-boats-steer-by-hand.md): boats steer by hand by default, and the autohelm is a race-wide tuning setting for every boat.
 
 A centred rudder no longer holds the boat's compass heading. Whenever the rudder input is centred, the autohelm holds the boat's angle to the true wind at the boat (wind minus current, the wind the polar reads): the angle she had on the tick the rudder centred, or the groove (the best-VMG angle) when that angle is within a snap width of it. It steers through the rudder and the class's turn-rate physics, never tacks or gybes by itself, bears away to the groove from the no-go zone, and sails the tack/gybe tap, which exits at the groove on the new tack. Players and bots use it the same way. Settled in [#219](https://github.com/reederphill/mobile-regatta/issues/219), overriding part of [#13](https://github.com/reederphill/mobile-regatta/issues/13).
 
