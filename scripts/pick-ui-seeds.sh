@@ -8,10 +8,15 @@
 #
 # The probe is `regatta-botsuite results-seed` (Packages/RegattaCore, release build, through scripts/heavy.sh).
 # Rows (only one today):
-#   resultsSheet  ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders: `-demo -laps 1 -timescale 8`
+#   resultsSheet  ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders: `-demo -laps 1 -timescale 4`
 #                 (7 opponents, the launch race), your boat finishes >= 14 s of wall-clock time before the close:
-#                 -timescale 8 runs at most 240 ticks/s, so >= 3,360 ticks.
+#                 the sim ticks at 30 Hz and -timescale 4 runs at most 120 ticks/s, so >= 1,680 ticks (#445: at
+#                 -timescale 8 the 3,360 ticks it needed were more than a one-lap fleet spreads).
 set -euo pipefail
+
+# The timescale ResultsUITests launches at, and the ticks that give it 14 s of wall-clock time after your finish.
+results_timescale=4
+results_min_gap_ticks=$((14 * 30 * results_timescale))
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
@@ -20,7 +25,7 @@ check=false
 case "${1:-}" in
     "") ;;
     --check) check=true ;;
-    -h | --help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "usage: scripts/pick-ui-seeds.sh [--check]" >&2; exit 2 ;;
 esac
 
@@ -39,7 +44,7 @@ fi
 grep -E "warning: unre" "$build_log" || true
 [[ -x "$probe" ]] || { echo "pick-ui-seeds.sh: no probe at $probe" >&2; exit 1; }
 
-found="$("$probe" results-seed --from 1 --to 400 --laps 1 --opponents 7 --min-gap-ticks 3360)"
+found="$("$probe" results-seed --from 1 --to 400 --laps 1 --opponents 7 --min-gap-ticks "$results_min_gap_ticks")"
 echo "resultsSheet: $found"
 read -r _ seed _ finish _ close <<<"$found"
 
@@ -52,7 +57,7 @@ cat >"$generated" <<SWIFT
 /// The seeds the UI tests launch, each the first in 1...400 meeting its test's condition.
 enum SeedTable {
     /// \`ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders\`: the \`-demo -laps 1\` race on which your
-    /// boat finishes at least 3,360 ticks (14 s at \`-timescale 8\`) before the close. Probed: she finishes at tick
+    /// boat finishes at least $results_min_gap_ticks ticks (14 s at \`-timescale $results_timescale\`) before the close. Probed: she finishes at tick
     /// $finish, the race closes at $close.
     static let resultsSheet: UInt64 = $seed
 }

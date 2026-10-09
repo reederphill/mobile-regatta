@@ -11,12 +11,12 @@ enum ResultsSeedProbe {
           The first race seed in from...to (default 1...400) on which the app's `-demo` race (`RaceConfig.launch()`
           with `-seed` and `-laps`: you and the opponents (default 7), a 60 s sequence, laps (default 1), the bundled
           files, the wind seed pinned to the seed, a bot sailing your boat) has your boat finish at least
-          min-gap-ticks (default 3360: 14 s of wall-clock time at -timescale 8) before the race closes.
+          min-gap-ticks (default 1680: 14 s of wall-clock time at -timescale 4, 30 ticks/s × 4) before the race closes.
           Prints `seed <n> finish <tick> close <tick>`; exits 1 when no seed in the range does, 2 on a usage error.
         """
 
     static func main(arguments: [String]) -> Int32 {
-        var options = (from: UInt64(1), to: UInt64(400), laps: 1, opponents: 7, minGap: 3360)
+        var options = (from: UInt64(1), to: UInt64(400), laps: 1, opponents: 7, minGap: 1680)
         var rest = arguments[...]
         while let flag = rest.popFirst() {
             guard let text = rest.popFirst(), let value = Int(text), value >= 0 else {
