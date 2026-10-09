@@ -75,7 +75,7 @@ struct BotHelm: Sendable, Equatable {
             return BoatInput(rudder: rudder, ease: input.ease)
         }
         // By hand: her angle read against the wind she steers by, not the wind at her.
-        let wind = hand.steer(&steering, own: own, tick: view.tick)
+        let wind = hand.steer(&steering, own: own, tick: view.tick, downwind: helm.target.isDownwind)
         let steeredAngle = own.boomSide.sailingAngle(relativeWind: wrapAngle(wind.direction - own.heading))
         let rudder = helm.rudder(sailingAngle: steeredAngle, boomSide: own.boomSide, tws: wind.tws,
                                  grooveTWS: wind.grooveTWS, boatClass: boatClass)
@@ -95,7 +95,7 @@ struct HandSteering: Sendable, Equatable {
     let wanderPeriod: Double
     /// Where in its cycle her wander starts, 0..<1 of a cycle, drawn from her seed.
     let wanderPhase: Double
-    /// Radians past the new angle when she re-aims, at most the shift itself.
+    /// Radians past the new wind when she re-aims to a shift, the way it swung.
     let overshoot: Double
 
     /// No imperfection: she aims by the wind at her, as the autohelm does.
@@ -149,8 +149,9 @@ struct HandSteering: Sendable, Equatable {
 
     /// The wind she steers by at `tick`, `own` her boat in her seat's view, advancing `steered`: started on the wind at
     /// her, re-aimed to it `shiftLag` seconds after it changed past what she notices, past it by her overshoot, and her
-    /// wander added to the direction.
-    func steer(_ steered: inout SteeredWind?, own: SeatView.OwnBoat, tick: Int) -> (direction: Double, tws: Double, grooveTWS: Double) {
+    /// wander added to the direction, `HandSteeringTable.downwindWander` times as much when her aim is `downwind`.
+    func steer(_ steered: inout SteeredWind?, own: SeatView.OwnBoat, tick: Int,
+               downwind: Bool = false) -> (direction: Double, tws: Double, grooveTWS: Double) {
         var wind = steered ?? SteeredWind(direction: own.windDirection, tws: own.polarWindSpeed,
                                           grooveTWS: own.grooveWindSpeed, overshootTick: tick)
         let swing = wrapAngle(own.windDirection - wind.direction)
@@ -162,10 +163,14 @@ struct HandSteering: Sendable, Equatable {
             wind.noticedTick = tick
         }
         if let noticed = wind.noticedTick, Double(tick - noticed) / Double(Race.tickRate) >= shiftLag {
-            // She re-aims to the wind at her, past it the way it swung, on top of what's left of her last overshoot,
-            // so a re-aim while one still decays carries it on rather than dropping it.
-            wind.overshoot = wind.overshoot * overshootDecay(since: wind.overshootTick, at: tick)
-                + (swing < 0 ? -1 : 1) * min(overshoot, abs(swing))
+            // She re-aims to the wind at her, past it the way it swung by her whole overshoot, however small the shift
+            // (a late helm over-corrects: capped at the shift, she'd barely overshoot the shifts she notices, and her
+            // lag alone pays upwind in the skiff's momentum, #435 fix round), on top of what's left of her last one,
+            // so a re-aim while one still decays carries it on rather than dropping it, never past her overshoot. A
+            // puff without a shift she re-aims to without one.
+            let left = wind.overshoot * overshootDecay(since: wind.overshootTick, at: tick)
+            let past = abs(swing) > HandSteeringTable.shiftNoticed ? (swing < 0 ? -overshoot : overshoot) : 0
+            wind.overshoot = (left + past).clamped(to: -overshoot...overshoot)
             wind.overshootTick = tick
             wind.direction = own.windDirection
             wind.tws = own.polarWindSpeed
@@ -174,7 +179,8 @@ struct HandSteering: Sendable, Equatable {
         }
         steered = wind
         let decay = overshootDecay(since: wind.overshootTick, at: tick)
-        return (wrapAngle(wind.direction + wind.overshoot * decay + wander(atTick: tick)), wind.tws, wind.grooveTWS)
+        let wander = wander(atTick: tick) * (downwind ? HandSteeringTable.downwindWander : 1)
+        return (wrapAngle(wind.direction + wind.overshoot * decay + wander), wind.tws, wind.grooveTWS)
     }
 
     /// The share of an overshoot begun at `start` left at `tick`: 1 falling linearly to none over

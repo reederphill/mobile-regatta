@@ -48,9 +48,10 @@ public struct BotWeaknesses: Hashable, Sendable {
     /// Hand steering (#435), felt only in a class whose autohelm doesn't hold a centred rudder (`BotHelm`): seconds she
     /// sails her old heading after a shift or puff reaches her before she re-aims to the new wind (`HandSteering`).
     public var shiftLag: Double
-    /// Hand steering (#435): radians, at most, of her slow drift around her aim, seeded per boat.
+    /// Hand steering (#435): radians, at most, of her slow drift around her aim, seeded per boat (further running,
+    /// `HandSteeringTable.downwindWander`).
     public var wander: Double
-    /// Hand steering (#435): radians, at most, past the new angle when she re-aims, decaying back to her aim.
+    /// Hand steering (#435): radians past the new wind when she re-aims to a shift, decaying back to her aim.
     public var overshoot: Double
 
     public init(startTiming: Double, lineBiasMisread: Double, reactionDelay: Double, laylineMisjudge: Double,
@@ -178,16 +179,21 @@ public struct BotWeaknesses: Hashable, Sendable {
 
 /// Hand steering's placeholder values (#435, #426 Q7), one table for the owner to tune: each scales with her skill
 /// deficit (1 − skill), as `reactionDelay` does, so none at skill 1. Club's centre (deficit ≈ 0.53): lag ≈ 2.1 s, wander
-/// ≈ 2.6°, overshoot ≈ 2.1°; National's (0.1): ≈ 0.4 s, 0.5°, 0.4°. Read by `BotWeaknesses(skill:)` and `HandSteering`.
+/// ≈ 7.4° (≈ 12° running), overshoot ≈ 5.3°; National's (0.1): ≈ 0.4 s, 1.4°, 1°. Tuned towards #426's T1 placeholders
+/// (Club ≈ 6 s a beat and ≈ 4 s a run behind a perfect hand, the handling mix). Wander and overshoot carry the cost: the
+/// skiff gains speed in 2.5 s and loses it over 10 s, so a short swing off her aim, as the lag gives, nearly pays for
+/// itself. Read by `BotWeaknesses(skill:)` and `HandSteering`.
 public enum HandSteeringTable {
     /// Seconds of shift lag at skill 0.
     public static let shiftLagScale = 4.0
     /// Radians of wander amplitude at skill 0.
-    public static let wanderScale = deg2rad(5)
+    public static let wanderScale = deg2rad(14)
+    /// Her wander abaft the beam, as a share of her wander forward of it: running, she wanders further.
+    public static let downwindWander = 1.6
     /// Seconds a wander cycle lasts, drawn per boat from her seed inside this range.
     public static let wanderPeriod = 20.0...40.0
-    /// Radians of overshoot at skill 0.
-    public static let overshootScale = deg2rad(4)
+    /// Radians of overshoot at skill 0: past the new wind on every re-aim to a shift.
+    public static let overshootScale = deg2rad(10)
     /// Seconds an overshoot takes to decay back to her aim, linearly.
     public static let overshootDecay = 2.0
     /// Radians the wind at her must swing from the wind she steers by before she notices a shift.

@@ -22,8 +22,8 @@ import Testing
         return track
     }
 
-    /// A two-seat race sailing `boatClass` in `wind` (by tick), the same everywhere, far from marks and edges in a ten
-    /// minute start sequence: seat 0 at `sailingAngle` on port boom at the polar's speed, the rudder centred and no
+    /// A two-seat race sailing `boatClass` in `wind` (by tick), the same everywhere, in a ten minute start sequence: seat 0 at
+    /// the race area's centre at `sailingAngle` on port boom at the polar's speed, the rudder centred and no
     /// autohelm; seat 1 far from her.
     static func scriptedRace(boatClass: BoatClassFile, sailingAngle: Double,
                              wind: @escaping (Int) -> GroundWind) throws -> Race {
@@ -36,9 +36,10 @@ import Testing
                             current: CurrentField(current: nil, tideStateAtGun: 0), wind: wind)
         race.step()
         var snapshot = race.exportSnapshot()
-        let away = race.course.startLine.centre + race.course.right * 1_500
+        // Inside the race area, which a boat outside of owes a penalty for, and is disqualified for not serving.
+        let area = race.course.raceArea
         var boat = snapshot.seats[0].boat
-        boat.position = away
+        boat.position = area.centre
         boat.rudder = 0
         boat.desiredRudder = 0
         boat.autohelm = nil
@@ -47,7 +48,7 @@ import Testing
         boat.speed = race.boatClass.polar.speed(twa: sailingAngle, tws: boat.windSpeed)
         snapshot.seats[0].boat = boat
         snapshot.seats[0].heldInput = .neutral
-        snapshot.seats[1].boat.position = away + race.course.right * 1_500
+        snapshot.seats[1].boat.position = area.centre + race.course.right * area.halfWidth * 0.8
         try race.importSnapshot(snapshot)
         return race
     }
@@ -113,14 +114,16 @@ import Testing
         #expect(clubOnAutohelm == Array(autohelm.prefix(clubOnAutohelm.count)))
     }
 
-    /// Seconds after a 10° shift at 20 s until seat 0, held on a reach by a helm with `weaknesses`' hand steering, has
-    /// turned 5° with it.
+    /// Seconds after a 10° shift at 20 s until seat 0, held on a reach by a helm with `weaknesses`' shift lag (and no
+    /// wander or overshoot, which would blur it), has turned 5° with it.
     static func turnDelay(_ weaknesses: BotWeaknesses, shift: Double) throws -> Double {
         let shiftTick = 20 * Race.tickRate
         let race = try scriptedRace(boatClass: BotHelmTests.skiff(holds: false), sailingAngle: deg2rad(70)) { tick in
             GroundWind(direction: tick < shiftTick ? 0 : shift, speed: metresPerSecond(knots: 10))
         }
-        var helm = BotHelm(hand: HandSteering(weaknesses, seed: 7))
+        var hand = BotWeaknesses.none(skill: 1)
+        hand.shiftLag = weaknesses.shiftLag
+        var helm = BotHelm(hand: HandSteering(hand, seed: 7))
         hold(race, &helm, seconds: Double(shiftTick - race.tick) / Double(Race.tickRate))
         let before = race.boats[0].heading
         var turned: Double?
@@ -154,7 +157,7 @@ import Testing
     /// her skill's amplitude; held on a reach in a steady wind her angle drifts about her aim by about that and no more.
     @Test func wanderIsSeededAndBounded() throws {
         let club = BotWeaknesses(skill: Self.club)
-        #expect(abs(club.wander - deg2rad(5) * (1 - Self.club)) < 1e-9)
+        #expect(abs(club.wander - HandSteeringTable.wanderScale * (1 - Self.club)) < 1e-9)
         let hands = (1...12).map { HandSteering(club, seed: botSeed(raceSeed: RaceSeed(9), seat: $0)) }
         #expect(hands[0] == HandSteering(club, seed: botSeed(raceSeed: RaceSeed(9), seat: 1)))
         #expect(Set(hands.map(\.wanderPeriod)).count == hands.count)
@@ -174,18 +177,19 @@ import Testing
         }
         var helm = BotHelm(hand: HandSteering(BotWeaknesses.none(skill: 1).steering(like: club), seed: 11))
         var worst = 0.0
-        Self.hold(race, &helm, seconds: 90) { boat in worst = max(worst, abs(wrapAngle(boat.sailingAngle - aim))) }
+        Self.hold(race, &helm, seconds: 45) { boat in worst = max(worst, abs(wrapAngle(boat.sailingAngle - aim))) }
         #expect(worst <= club.wander + deg2rad(0.5), "she wandered \(rad2deg(worst))° off her aim")
         #expect(worst >= 0.5 * club.wander, "she wandered only \(rad2deg(worst))°")
     }
 
-    /// A re-aim while her last overshoot still decays carries what's left of it on (#435 review): two 4° shifts half a
-    /// second apart leave her more than any one overshoot's cap past the wind, and it all decays back to her aim.
+    /// A re-aim while her last overshoot still decays carries what's left of it on (#435 review), never past her overshoot
+    /// (#435 fix round): two 2° shifts half a second apart each take her her whole overshoot past the wind, however small
+    /// the shift, the second on top of what's left of the first, and it all decays back to her aim.
     @Test func reAimCarriesTheDecayingOvershoot() throws {
         let firstTick = 20 * Race.tickRate
         let secondTick = firstTick + Race.tickRate / 2
         let race = try Self.scriptedRace(boatClass: BotHelmTests.skiff(holds: false), sailingAngle: deg2rad(70)) { tick in
-            GroundWind(direction: tick < firstTick ? 0 : deg2rad(tick < secondTick ? 4 : 8), speed: metresPerSecond(knots: 10))
+            GroundWind(direction: tick < firstTick ? 0 : deg2rad(tick < secondTick ? 2 : 4), speed: metresPerSecond(knots: 10))
         }
         let cap = deg2rad(5)
         let hand = HandSteering(shiftLag: 0, wander: 0, wanderPeriod: 30, wanderPhase: 0, overshoot: cap)
@@ -206,11 +210,69 @@ import Testing
         }
         #expect(reAims.count >= 2)
         for reAim in reAims {
-            // What was left goes on into the new overshoot, the way the wind swung.
+            // What was left goes on into the new overshoot, the way the wind swung, up to her overshoot: all of it.
             #expect(reAim.after >= reAim.before - 1e-12)
+            #expect(abs(reAim.after - cap) < 1e-12, "a re-aim to a 2° shift overshot by \(rad2deg(reAim.after))°")
         }
-        let most = reAims.map(\.after).max() ?? 0
-        #expect(most > cap, "her overshoot peaked at \(rad2deg(most))°, no more than one re-aim's")
         #expect(abs(offset) < 1e-12, "her overshoot never decayed")
+    }
+
+    /// Seconds `hand` loses against a perfect hand over `seconds`, held on her groove upwind or down (the autohelm's snap
+    /// takes it) on starboard tack, through the race area's centre, in 10 knots shifting ±6° over 50 s and ±3° over 13 s
+    /// and puffing ±12% over 31 s, or `steady`; averaged over four seeds of her wander.
+    static func loss(_ hand: BotWeaknesses, upwind: Bool, seconds: Double, steady: Bool) throws -> Double {
+        let boatClass = try BotHelmTests.skiff(holds: false)
+        let tws = metresPerSecond(knots: 10)
+        let polar = boatClass.content.polar
+        let angle = upwind ? polar.bestUpwind(tws: tws).twa : polar.bestDownwind(tws: tws).twa
+        func made(_ weaknesses: BotWeaknesses, seed: UInt64) throws -> Double {
+            let race = try scriptedRace(boatClass: boatClass, sailingAngle: angle) { tick in
+                if steady { return GroundWind(direction: 0, speed: tws) }
+                let t = Double(tick) / Double(Race.tickRate)
+                return GroundWind(direction: deg2rad(6) * Foundation.sin(2 * .pi * t / 50) + deg2rad(3) * Foundation.sin(2 * .pi * t / 13),
+                                  speed: tws * (1 + 0.12 * Foundation.sin(2 * .pi * t / 31)))
+            }
+            // Started so that she sails through the race area's centre and never meets its edge.
+            var snapshot = race.exportSnapshot()
+            let boat = snapshot.seats[0].boat
+            snapshot.seats[0].boat.position = race.course.raceArea.centre
+                - Vec2.heading(boat.heading) * boat.speed * 1.1 * (seconds + 10) / 2
+            try race.importSnapshot(snapshot)
+            var helm = BotHelm(hand: HandSteering(weaknesses, seed: seed))
+            hold(race, &helm, seconds: 10)
+            let start = race.boats[0].position
+            hold(race, &helm, seconds: seconds)
+            let end = race.boats[0]
+            #expect(end.status == .prestart && race.course.isInRaceArea(end.position),
+                    "she left the race area: \(end.status) at \(end.position - race.course.raceArea.centre), \(end.speed) m/s")
+            return (end.position - start).dot(.heading(0))
+        }
+        var lost = 0.0
+        let seeds: [UInt64] = [1, 2, 3, 4]
+        for seed in seeds {
+            let perfect = try made(.none(skill: 1), seed: seed)
+            lost += (perfect - (try made(BotWeaknesses.none(skill: 1).steering(like: hand), seed: seed))) / perfect * seconds
+        }
+        return lost / Double(seeds.count)
+    }
+
+    /// Steering by hand costs time on every leg (#435 fix round): held on the groove in a shifty, puffy breeze and in a
+    /// steady one, Club hand steering loses time against a perfect hand upwind and down, and National less. Her shift
+    /// lag alone would pay in the shifty breeze, in the skiff's momentum (it gains speed in 2.5 s and loses it over 10, so
+    /// a lagged heading sails a short foot-then-pinch); her whole overshoot on every re-aim and her wander make her
+    /// imperfection cost.
+    @Test func clubHandLosesTimeOnABeatAndARun() throws {
+        let national = BotWeaknesses(skill: Self.national)
+        for steady in [false, true] {
+            let beat = try Self.loss(.clubHandSteering, upwind: true, seconds: 60, steady: steady)
+            let run = try Self.loss(.clubHandSteering, upwind: false, seconds: 40, steady: steady)
+            #expect(beat > 1, "Club lost \(beat) s in a 60 s beat (steady: \(steady))")
+            #expect(run > 1, "Club lost \(run) s in a 40 s run (steady: \(steady))")
+            let nationalBeat = try Self.loss(national, upwind: true, seconds: 60, steady: steady)
+            let nationalRun = try Self.loss(national, upwind: false, seconds: 40, steady: steady)
+            #expect(nationalBeat < beat && nationalRun < run,
+                    "National lost \(nationalBeat) s a beat and \(nationalRun) s a run; Club \(beat) s and \(run) s")
+            print("HAND-STEERING-LOSS steady=\(steady) club beat \(beat) run \(run) national beat \(nationalBeat) run \(nationalRun)")
+        }
     }
 }
