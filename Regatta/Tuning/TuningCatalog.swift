@@ -119,11 +119,29 @@ struct TuningGroup: Identifiable {
 /// fleet's skill gap most sensitive to, then the polar's grooves and the boat's handling, the race format, and
 /// the render values.
 enum TuningCatalog {
+    /// A class-file flag a slider tunes as 0 or 1 (#436): its file may write it as a JSON bool or leave it out, sailing
+    /// `absent` then; a tuned copy adds it, raising the file's schema to `schemaVersion`, the first that reads it.
+    struct FileFlag {
+        let slot: TuningSlot
+        let pointer: String
+        let absent: Double
+        let schemaVersion: Int
+    }
+
+    /// The Auto tiller (#436): whether a centred rudder hands her to the autohelm (#434, ADR 0011).
+    static let autoTiller = FileFlag(slot: .boatClass, pointer: "/steering/autohelm/holdsWhenCentred", absent: 1, schemaVersion: 4)
+    static let fileFlags = [autoTiller]
+
     /// `grooveColumns`: each driving polar column of the boat class being tuned, and its wind speed in knots.
     /// `fullSteeragePoint`: the index of its turn-rate curve's last point, from whose speed she turns at the top
     /// rate; nil if it has none.
     static func groups(grooveColumns: [(column: Int, knots: Double)], fullSteeragePoint: Int?) -> [TuningGroup] {
         [
+            TuningGroup(
+                id: "steering", title: "Steering",
+                note: "Next race, every boat. Off: a centred rudder sails straight on.",
+                applies: .nextRace,
+                sliders: [TuningSlider(.boatClass, autoTiller.pointer, "Auto tiller (1 on, 0 off)", 0...1, step: 1)]),
             TuningGroup(
                 id: "conditions", title: "Conditions",
                 note: "The wind's oscillation, puffs and pressure field (#221, #220, #286, #287, #288). Period, wobble, fan and lane bend decide how often the favoured tack changes; the pressure side and lanes, where the pressure is; the side tendency and lane spots, how much the venue's geography steers it; lane length, drift and weak share, how far lanes reach up the course and how many are lows; puff coverage and choices, how many puffs there are and how closely they keep to the pressure.",

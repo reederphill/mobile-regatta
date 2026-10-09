@@ -134,8 +134,9 @@ final class HintEngine {
     var onRetired: ((HintID, HintRetirement) -> Void)?
     /// The triggers are worked out at most this often, seconds of wall-clock time: puffs and laylines cost.
     static let evaluateInterval = 0.25
-    /// Hints that show once a race, however long their situation lasts: the steering hint, up from the first frame.
-    static let oncePerRace: Set<HintID> = [.raceStart]
+    /// Hints that show once a race, however long their situation lasts: the steering hint, up from the first frame,
+    /// and the centred-rudder hint (#436).
+    static let oncePerRace: Set<HintID> = [.raceStart, .centredRudder]
 
     private(set) var scheduler = HintScheduler()
     private(set) var observations = HintObservations()
@@ -186,6 +187,11 @@ final class HintEngine {
     func refresh(world: RenderWorld, slot: NoticeSlot, now: Date, hintsOn: Bool, showsLaylines: Bool,
                  isFirstRace: Bool) -> (hint: Hint, leader: HintTarget?, held: Bool)? {
         if let retired = scheduler.settle(slot: slot, now: now, progress: progress) { onRetired?(retired, .shownTwice) }
+        // A hint learned by its showing retires as it shows (#436).
+        if let shown = scheduler.tracked, shown.counted, catalogue.first(where: { $0.id == shown.id })?.learning == .shown,
+           scheduler.learn(shown.id, hintsOn: hintsOn, progress: progress) {
+            onRetired?(shown.id, .learned)
+        }
         guard hintsOn else {
             observations.pause()
             releaseHeld()

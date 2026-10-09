@@ -357,6 +357,18 @@ import Testing
         #expect(rig.posted(.raceStart).count == 1)
     }
 
+    /// A hint learned by its showing (the centred-rudder hint, #436) shows once and retires as it shows, learned.
+    @Test func aHintLearnedByShowingRetiresAsItShows() {
+        let always = Hint(id: .centredRudder, delivery: .engine, text: HintText("centred"), isPlaceholderCopy: true,
+                          learning: .shown, trigger: { _, _ in HintFiring(leader: nil) })
+        let progress = HintProgressStore()
+        let rig = Rig(progress: progress, prestartSeconds: 60, catalogue: [HintCatalogue.hint(.raceStart), always])
+        rig.run(40)
+        #expect(rig.posted(.centredRudder).count == 1, "\(rig.posts)")
+        #expect(progress.isLearned(.centredRudder) && progress.timesShown(.centredRudder) == 1)
+        #expect(rig.retired.filter { $0.id == .centredRudder }.map(\.mode) == [.learned])
+    }
+
     /// Hints switched off and back on: nothing is observed meanwhile, and the next tick adds no long gap to the
     /// counters (or the wind smoothing).
     @Test func hintsOffThenOnAddsNoGap() {

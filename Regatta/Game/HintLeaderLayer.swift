@@ -59,7 +59,7 @@ nonisolated enum HintLeader {
         case .puff:
             return world.puffs.filter { $0.intensity > 0 }.map(\.center)
                 .min { ($0 - me).length < ($1 - me).length }.map { .point($0) }
-        case .noGo, .lettingGo, .grooveTick, .windShift:
+        case .noGo, .lettingGo, .centredRudder, .grooveTick, .windShift:
             return .vane
         case .raceStart, .startSequence, .ocs, .ruleCall, .layline:
             return nil

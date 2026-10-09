@@ -180,6 +180,38 @@ import Testing
         #expect(TunedCopy.numbers(at: "/columns", in: Data(#"{"columns": [0, 1.5, 3]}"#.utf8)) == [0, 1.5, 3])
     }
 
+    /// A flag (#436, the Auto tiller): read as 1 or 0 from a JSON bool, and readied for `patched` without changing what
+    /// the file sails: a bool becomes 1 or 0, and a member the file leaves out of an object it has is added as its
+    /// absent value, with the schema raised to the first that reads it. A number there, or no object, changes nothing.
+    @Test func flagsAreReadiedForTuning() throws {
+        let text = #"{"schemaVersion": 3, "a": {\#n  "b": 1,\#n  "t": true\#n}, "f": false, "e": {}}"#
+        let data = Data(text.utf8)
+        #expect(TunedCopy.flag(at: "/a/t", in: data) == 1 && TunedCopy.flag(at: "/f", in: data) == 0)
+        #expect(TunedCopy.flag(at: "/a/b", in: data) == 1 && TunedCopy.flag(at: "/a/x", in: data) == nil)
+        func readied(_ pointer: String) -> String {
+            String(decoding: TunedCopy.readyingFlag(at: pointer, in: data, absent: 1, schemaVersion: 4), as: UTF8.self)
+        }
+        #expect(readied("/a/t") == text.replacingOccurrences(of: "true", with: "1"))
+        #expect(readied("/f") == text.replacingOccurrences(of: "false", with: "0"))
+        #expect(readied("/a/b") == text && readied("/x/y") == text)
+        #expect(readied("/a/x") == #"{"schemaVersion": 4, "a": {\#n  "b": 1,\#n  "t": true,\#n  "x": 1\#n}, "f": false, "e": {}}"#)
+        #expect(readied("/e/x") == #"{"schemaVersion": 4, "a": {\#n  "b": 1,\#n  "t": true\#n}, "f": false, "e": {\#n  "x": 1\#n}}"#)
+        // Readied, the flag tunes like any number.
+        let tuned = try TunedCopy.patched(Data(readied("/a/x").utf8), values: ["/a/x": 0])
+        #expect(TunedCopy.number(at: "/a/x", in: tuned) == 0)
+        // A bool `true` is readied to the number 1, and tunes from there.
+        let truth = Data(readied("/a/t").utf8)
+        #expect(TunedCopy.number(at: "/a/t", in: truth) == 1)
+        #expect(TunedCopy.number(at: "/a/t", in: try TunedCopy.patched(truth, values: ["/a/t": 0])) == 0)
+        // A base already at (or past) the schema that reads the flag keeps its version as the member is added.
+        for version in [4, 5] {
+            let at = Data(#"{"schemaVersion": \#(version), "e": {}}"#.utf8)
+            let added = TunedCopy.readyingFlag(at: "/e/x", in: at, absent: 1, schemaVersion: 4)
+            #expect(TunedCopy.number(at: "/schemaVersion", in: added) == Double(version))
+            #expect(TunedCopy.number(at: "/e/x", in: added) == 1)
+        }
+    }
+
     /// The polar's upwind-angle sliders: warping one column moves its groove to about the angle asked for,
     /// keeps its best VMG, and leaves the other columns and the rows from 90° on alone.
     @Test func upwindAngleWarpMovesTheGroove() throws {

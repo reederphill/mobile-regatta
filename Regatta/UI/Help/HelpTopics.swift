@@ -81,8 +81,9 @@ private struct HelpSection: View {
 
 // MARK: - Steering
 
-/// Both steering schemes, with a small picture each, then letting go (the autohelm, the groove, pinch and foot, the
-/// groove tick, #219) and the two buttons, in a few short lines.
+/// Both steering schemes, with a small picture each, then letting go and steering by hand (the groove tick, pinch and
+/// foot and the vane's arc, #219, #436: hand steering is the way the game is played, the Auto tiller tuning never
+/// mentioned) and the two buttons, in a few short lines.
 private struct SteeringHelp: View {
     var body: some View {
         // TODO-COPY (#171): every line on this page.
@@ -91,8 +92,9 @@ private struct SteeringHelp: View {
             SchemeCard(title: "Tiller", line: "Touch and slide sideways.") { TillerDiagram() }
         }
         HelpSection(heading: "Let go", lines: [
-            "The autohelm sails on. Near the groove, the best angle, it snaps to it: the vane sits on the groove tick.",
-            "Pinch above it or foot below it, and it holds there.",
+            "Let go and she sails straight on.",
+            "Steer to the tick on the vane, the groove, the best angle.",
+            "Pinch above it or foot below it: the arc shows how far.",
         ])
         HelpSection(heading: "Buttons", lines: [
             "Ease: hold to slow down. Tack: tap to turn; you come out on the groove.",

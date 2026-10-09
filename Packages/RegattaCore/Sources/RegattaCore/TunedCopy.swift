@@ -106,6 +106,40 @@ public enum TunedCopy {
         return try TunedFile(file: DataFile<Content>(data: data, tune: data == base ? nil : tune), data: data)
     }
 
+    /// A flag (#436): the number at `pointer`, or a JSON bool there read as 1 (true) or 0 (false); nil otherwise.
+    public static func flag(at pointer: String, in data: Data) -> Double? {
+        let bytes = [UInt8](data)
+        guard let span = JSONTextSpan.span(of: pointer, in: bytes) else { return nil }
+        switch String(decoding: bytes[span], as: UTF8.self) {
+        case "true": return 1
+        case "false": return 0
+        default: return number(in: bytes[span])
+        }
+    }
+
+    /// `data` readied for `patched` to tune the flag at `pointer` (#436), sailing as before: a JSON bool there is
+    /// written 1 or 0; a member its object leaves out is added as `absent` (what a file without it sails with) and
+    /// `/schemaVersion` raised to `schemaVersion`, the first that reads it. A number there, or no object, gives `data`.
+    public static func readyingFlag(at pointer: String, in data: Data, absent: Double, schemaVersion: Int) -> Data {
+        var bytes = [UInt8](data)
+        if let span = JSONTextSpan.span(of: pointer, in: bytes) {
+            guard number(in: bytes[span]) == nil, let flag = flag(at: pointer, in: data) else { return data }
+            bytes.replaceSubrange(span, with: Array(jsonText(flag).utf8))
+            return Data(bytes)
+        }
+        guard let slash = pointer.lastIndex(of: "/") else { return data }
+        let key = pointer[pointer.index(after: slash)...].replacingOccurrences(of: "~1", with: "/")
+            .replacingOccurrences(of: "~0", with: "~")
+        guard let object = JSONTextSpan.span(of: String(pointer[..<slash]), in: bytes),
+              bytes[object.lowerBound] == UInt8(ascii: "{") else { return data }
+        appendToContainer(&bytes, span: object, items: ["\(jsonString(key)): \(jsonText(absent))"])
+        if let span = JSONTextSpan.span(of: "/schemaVersion", in: bytes), let version = number(in: bytes[span]),
+           version < Double(schemaVersion) {
+            bytes.replaceSubrange(span, with: Array(String(schemaVersion).utf8))
+        }
+        return Data(bytes)
+    }
+
     /// The next version of `base` with `values` in it, ready for the package's `Resources` (#232's export): the
     /// values rewritten, `version` one more, each changed pointer added to `placeholders` (they await
     /// confirming), and `note`, if given, added to `notes`. Every other byte is kept.
@@ -114,14 +148,14 @@ public enum TunedCopy {
         var bytes = [UInt8](try patched(base, values: values))
         // Each edit finds its span afresh, so none depends on where the others sit in the file.
         if let note, let span = JSONTextSpan.span(of: "/notes", in: bytes) {
-            appendToArray(&bytes, span: span, items: [jsonString(note)])
+            appendToContainer(&bytes, span: span, items: [jsonString(note)])
         }
         guard let versionSpan = JSONTextSpan.span(of: "/version", in: bytes) else {
             throw TunedCopyError.notANumber(pointer: "/version")
         }
         if let span = JSONTextSpan.span(of: "/placeholders", in: bytes) {
             let listed = (try? JSONSerialization.jsonObject(with: Data(bytes[span]), options: [])) as? [String] ?? []
-            appendToArray(&bytes, span: span, items: changed.filter { !listed.contains($0) }.map(jsonString))
+            appendToContainer(&bytes, span: span, items: changed.filter { !listed.contains($0) }.map(jsonString))
         } else if !changed.isEmpty {
             let indent = indentation(of: versionSpan.lowerBound, in: bytes)
             let items = changed.map { "\(indent)  \(jsonString($0))" }.joined(separator: ",\n")
@@ -224,9 +258,9 @@ public enum TunedCopy {
         return String(decoding: bytes[start..<end], as: UTF8.self)
     }
 
-    /// Adds `items` (JSON texts) to the end of the array at `span`, laid out like its last element: on a line of
+    /// Adds `items` (JSON texts, or `"key": value` members) to the end of the array (or object) at `span`, laid out like its last element: on a line of
     /// its own at the same indent if the array has one element per line, else after ", ".
-    private static func appendToArray(_ bytes: inout [UInt8], span: Range<Int>, items: [String]) {
+    private static func appendToContainer(_ bytes: inout [UInt8], span: Range<Int>, items: [String]) {
         guard !items.isEmpty else { return }
         let open = span.lowerBound, close = span.upperBound - 1
         var last = close - 1
