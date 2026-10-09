@@ -23,7 +23,7 @@ struct RaceControls: View {
                        onPress: { session.setEase(true) }, onRelease: { session.setEase(false) },
                        accessibilityToggle: .init(isOn: session.isEasing, toggle: { session.toggleEase() }))
             Spacer()
-            HoldButton(title: session.hud.isUpwind ? "TACK" : "GYBE", width: 120, identifier: "race-tack",
+            HoldButton(title: session.hud.tapTurn.label, width: 120, identifier: "race-tack",
                        isEnabled: isRacing, releases: session.controlReleases,
                        onPress: { session.pressTack(at: Self.now) }, onRelease: { session.releaseTack(at: Self.now) })
             Spacer()
