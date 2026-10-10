@@ -67,9 +67,10 @@ enum SkiffEight {
 
 /// #458 acceptance: tacking by hand on skiff@8, measured as #456 did (`HandTack`: 10 kn unless said, entry at the groove
 /// target, loss in hull lengths against a twin that sails on, the mean of a steady and six gusty winds), on the owner's
-/// ruling of 2026-10-09 (rudder drag 0.416 with the cube of the rudder, an 8°/s turn-rate floor): the best tack is a
-/// moderate rudder, 0.950 L at 50 % (0.952 at 60 %), and a slam loses 1.481, 0.53 more; 75 % rudder 1.075, 25 % 1.83.
-/// In the steady wind alone the same turns read 1.29 and 1.83.
+/// rulings of 2026-10-09 (rudder drag 0.416 with the cube of the rudder, an 8°/s turn-rate floor) and 2026-10-10 (#461:
+/// fall-off 2°/s, the turn-rate curve's knee at 1.15 kn): the best tack is a moderate rudder, 0.951 L at 50 % (0.954 at
+/// 60 %), and a slam loses 1.504, 0.55 more; 75 % rudder 1.083, 25 % 1.96. Before the second ruling: 0.950, 1.481, 1.075
+/// and 1.83.
 @Suite struct HandTackTests {
     let boat = SkiffEight.boatClass
 
@@ -90,10 +91,10 @@ enum SkiffEight {
         let three = HandTack.loss(.rudder75, boatClass: boat)
         let quarter = HandTack.loss(.rudder25, boatClass: boat)
         #expect((0.4...0.65).contains(slam - best), "slam \(slam) L against the best's \(best)")
-        #expect(abs(slam - 1.481) <= 0.05, "slam \(slam) L")
+        #expect(abs(slam - 1.504) <= 0.05, "slam \(slam) L")
         // 75 % rudder sits between the two, and a very gentle turn is no answer either.
         #expect(three > best + 0.05 && three < slam - 0.2, "75 % rudder \(three) L between \(best) and \(slam)")
-        #expect(abs(three - 1.075) <= 0.05, "75 % rudder \(three) L")
+        #expect(abs(three - 1.083) <= 0.05, "75 % rudder \(three) L")
         #expect(quarter > best + 0.4, "25 % rudder \(quarter) L against the best's \(best)")
         let gentle = HandTack.gentleGap(boatClass: boat)
         #expect(gentle <= 0.7, "a gentle turn loses \(gentle) L beyond the best")
@@ -103,7 +104,8 @@ enum SkiffEight {
         let light = HandTack.bearOffGap(knots: 6, boatClass: boat)
         let strong = -HandTack.bearOffGap(knots: 14, boatClass: boat)
         #expect(light >= 0.25, "6 kn: bearing off first saves \(light) L")
-        #expect(strong > 0, "14 kn: bearing off first costs \(strong) L (0.13; #456: 0.10, accepted under 0.15)")
+        #expect(strong > 0, "14 kn: bearing off first costs \(strong) L (0.10; #456: 0.10, accepted under 0.15)")
+        #expect(strong < 0.15, "14 kn: bearing off first costs \(strong) L")
     }
 
     /// The longest a slam leaves her under 30 % of her target inside the no-go, over 6, 10 and 14 kn, `entries` of her
@@ -132,23 +134,89 @@ enum SkiffEight {
     }
 
     /// The stall cliff's margin. A slam's drag takes her way off before she is through the wind; past a point she
-    /// stops short of it and sits there (23 s of the 25). The shipped values keep clear of it: the worst slam sticks
-    /// 3.4 s (6 kn, from 70 % of her speed), and 5 % more drag still under 5 s. What holds the cliff off is the 8°/s
-    /// turn-rate floor: with set (a)'s 4°/s the same 5 % (drag 0.44) sticks her 23 s.
+    /// stops short of it and sits there (23 s of the 25: on the first ruling's values, drag 0.44 on set (a)'s 4°/s floor).
+    /// Since #461's retune (fall-off 2°/s, the turn-rate curve's knee) no slam is near it: the worst sticks 2.8 s (3.4
+    /// before), 5 % more drag 3.1 s, the 4°/s floor with it 4.2 s, half as much drag again 4.6 s. The hang the measure
+    /// still sees is too little rudder in light air (a quarter rudder in 4 kn: 17.6 s), which the owner accepts.
     @Test func slamStaysClearOfTheStallCliff() {
         let worst = worstSlamStuck(boat)
         #expect(worst <= 5, "worst slam: \(worst) s stuck")
-        #expect(abs(worst - 3.37) <= 0.5, "worst slam: \(worst) s stuck (re-pin: the margin moved)")
+        #expect(abs(worst - 2.83) <= 0.5, "worst slam: \(worst) s stuck (re-pin: the margin moved)")
         var more = boat
         more.steering.rudderDrag *= 1.05
         #expect(worstSlamStuck(more) <= 5, "5 % more rudder drag: \(worstSlamStuck(more)) s stuck")
         var steeper = boat
         steeper.steering.rudderDragExponent = 3.25
         #expect(worstSlamStuck(steeper) <= 5, "exponent 3.25: \(worstSlamStuck(steeper)) s stuck")
-        // The cliff itself, so the guard is known to see it.
+        // Where the cliff was before the retune (23 s), and well past it.
         var low = more
         low.steering.minTurnRate = deg2rad(4)
-        #expect(worstSlamStuck(low) > 15, "drag 0.44 on a 4°/s floor: \(worstSlamStuck(low)) s stuck")
+        #expect(worstSlamStuck(low) <= 5, "drag 0.44 on a 4°/s floor: \(worstSlamStuck(low)) s stuck")
+        var draggy = boat
+        draggy.steering.rudderDrag *= 1.5
+        #expect(worstSlamStuck(draggy) <= 5, "half as much drag again: \(worstSlamStuck(draggy)) s stuck")
+        // A hang itself, so the guard is known to see one: a quarter rudder in 4 kn.
+        let hung = HandTack.Cell.all(knots: 4, entry: 0.75).map {
+            HandTack.turn(gybe: false, fraction: 0.25, cell: $0, boatClass: boat).stuck
+        }.max()!
+        #expect(hung > 10, "25 % rudder in 4 kn: \(hung) s stuck")
+    }
+}
+
+/// #461, the owner's ruling of 2026-10-10 (fall-off 2°/s against a held rudder, the turn-rate curve's knee at 1.15 kn):
+/// about 2 kn of boat speed is enough to complete a tack, and a penalty turn from a standstill is no death knell.
+@Suite struct FallOffRetuneTests {
+    let boat = SkiffEight.boatClass
+    static let twoKnots = metresPerSecond(knots: 2)
+
+    /// Seconds until she is out on the new tack from `speed` at the edge of the no-go, the worst of 6 and 10 kn's
+    /// seven winds, and whether every one carried her through without falling back out first.
+    func carry(_ fraction: Double, speed: Double) -> (out: Double, clean: Bool) {
+        let runs = [6.0, 10].flatMap { HandTack.Cell.all(knots: $0) }.map {
+            HandTack.carry(fraction: fraction, cell: $0, speed: speed, boatClass: boat)
+        }
+        return (runs.map(\.out).max()!, runs.allSatisfy(\.clean))
+    }
+
+    /// From 2 kn at the edge of the no-go a held rudder of 40 % and up completes the tack: 19.7 s at 40 %, 9.4 s at
+    /// 60 %, 6.3 s hard over (before the retune: never, never, 11.1 s).
+    @Test func twoKnotsAtTheNoGoEdgeCompletesTheTack() {
+        for (fraction, limit, pinned) in [(0.4, 25.0, 19.7), (0.5, 20, nil), (0.6, 12, 9.4), (0.75, 10, nil), (1, 8, 6.3)] {
+            let run = carry(fraction, speed: Self.twoKnots)
+            #expect(run.clean && run.out <= limit, "\(fraction) rudder from 2 kn: out in \(run.out) s, clean \(run.clean)")
+            if let pinned { #expect(abs(run.out - pinned) <= 1, "\(fraction) rudder from 2 kn: \(run.out) s (re-pin)") }
+        }
+    }
+
+    /// Below 2 kn the same tack is slower, not failed: from 1 kn 37 s at 40 %, 17 s at 60 %, 8.7 s hard over.
+    @Test func oneKnotAtTheNoGoEdgeIsSlowNotStuck() {
+        let one = metresPerSecond(knots: 1)
+        for (fraction, limit) in [(0.4, 45.0), (0.6, 22), (1, 11)] {
+            let slow = carry(fraction, speed: one), enough = carry(fraction, speed: Self.twoKnots)
+            #expect(slow.out <= limit, "\(fraction) rudder from 1 kn: out in \(slow.out) s")
+            #expect(slow.out > enough.out, "\(fraction) rudder: 1 kn \(slow.out) s against 2 kn's \(enough.out)")
+        }
+    }
+
+    /// A penalty-style circle, tack first at 70 % rudder (`HandTackTable.penaltyFraction`): in 6 kn 15.3 s from the
+    /// groove, 21.3 s from 2 kn and 25.3 s from a standstill (before the retune 15.1 / 44.9 / 51.8); in 10 kn 21.6 s
+    /// from a standstill (44.7). Every one of the seven winds inside 30 s.
+    @Test func penaltyTurnFromAStandstillCompletes() {
+        for knots in [6.0, 10] {
+            for (speed, name) in [(nil, "the groove"), (Self.twoKnots, "2 kn"), (0.0, "a standstill")] as [(Double?, String)] {
+                let times = HandTack.Cell.all(knots: knots).map {
+                    HandTack.circle(fraction: 0.7, cell: $0, speed: speed, boatClass: boat)
+                }
+                #expect(times.max()! <= 30, "\(knots) kn from \(name): worst \(times.max()!) s")
+            }
+        }
+        func mean(_ knots: Double, _ speed: Double?) -> Double {
+            HandTack.mean(HandTack.Cell.all(knots: knots)) { HandTack.circle(fraction: 0.7, cell: $0, speed: speed, boatClass: boat) }
+        }
+        for (knots, speed, pinned) in [(6.0, nil, 15.3), (6, Self.twoKnots, 21.3), (6, 0, 25.3), (10, 0, 21.6)] as [(Double, Double?, Double)] {
+            let seconds = mean(knots, speed)
+            #expect(abs(seconds - pinned) <= 1.5, "\(knots) kn from \(speed.map { "\($0) m/s" } ?? "the groove"): \(seconds) s (re-pin)")
+        }
     }
 }
 
@@ -157,14 +225,16 @@ enum SkiffEight {
 ///
 /// #456 measured 16 s stuck for set (a), but its release helms took full rudder again whenever she fell back short of
 /// their release point, holding her at the edge of the no-go (`release25Probe`): a held rudder, which by the ruling the
-/// rule never touches. A rudder centred for good (`release25`, `release60`) gets her away in 1.3 s on skiff@8 with the
-/// rule at 9°/s (2.2 s let go a quarter of the way round, 0.4 s at 60 %), against 17.5 s on skiff@7.
+/// rule never touches. A rudder centred for good (`release25`, `release60`) gets her away in 1.4 s on skiff@8 with the
+/// rule at 9°/s (2.3 s let go a quarter of the way round, 0.4 s at 60 %), against 17.5 s on skiff@7.
 @Suite struct IronsRecoveryTests {
     @Test func releasedInIronsGetsAwayInUnderTenSeconds() {
         for helm in [HandTack.Helm.release25, .release60] {
             let stuck = HandTack.stuck([helm], boatClass: SkiffEight.boatClass)
             #expect(stuck < 10, "\(helm): \(stuck) s")
         }
+        let mean = HandTack.stuck(boatClass: SkiffEight.boatClass)
+        #expect(abs(mean - 1.36) <= 0.3, "released in irons: \(mean) s (re-pin)")
         // skiff@7 sails as before #458.
         let before = HandTack.stuck(boatClass: SkiffEight.seven.content)
         #expect(abs(before - 17.466666666667) < 1e-9, "skiff@7: \(before) s")
@@ -194,8 +264,12 @@ enum SkiffEight {
         #expect(b.steering.rudderDragExponent == 3 && b.steering.headToWindFallOffCentredRate == deg2rad(9))
         // Set (a), #456's findings, with the owner's ruling of 2026-10-09: drag 0.416 cubed, an 8°/s floor.
         #expect(b.steering.rudderDrag == 0.416 && b.steering.topTurnRate == deg2rad(48) && b.steering.minTurnRate == deg2rad(8))
-        #expect(b.steering.turnRateCurveSpeeds == [0, metresPerSecond(knots: 4.67)] && b.steering.turnRateCurveFractions == [0, 1])
-        #expect(b.steering.headToWindFallOffRate == deg2rad(6) && b.steering.rudderSlew == 2)
+        // #461, the owner's ruling of 2026-10-10: fall-off 2°/s (6), and the turn-rate curve's knee at 1.15 kn (a line
+        // from 0 to 4.67 kn before); above 2 kn it is that line still.
+        #expect(b.steering.turnRateCurveSpeeds == [0, 0.9, 1.15, 2, 4.67].map { metresPerSecond(knots: $0) })
+        #expect(b.steering.turnRateCurveFractions == [0, 0.1667, 0.428, 0.428, 1])
+        #expect(abs(b.steering.turnRate(speed: metresPerSecond(knots: 3.3)) - deg2rad(48) * 3.3 / 4.67) < deg2rad(0.02))
+        #expect(b.steering.headToWindFallOffRate == deg2rad(2) && b.steering.rudderSlew == 2)
         #expect(b.momentum.speedingUp == 4.5 && b.momentum.slowingDown == 14 && b.momentum.noGo == 5.79)
         // Everything else is skiff@7's.
         #expect(b.name == a.name && b.hull == a.hull && b.polar == a.polar && b.windShadow == a.windShadow)
@@ -281,7 +355,8 @@ enum SkiffEight {
 
 /// #459: the hand turn a bot steers (`BotBrain.handTurning`, its rudder from `HandTackTable` in RegattaBots), measured
 /// on skiff@8 as #458 measured the tack (`HandTack.turn`): the anchors that table's placeholders stand on, on the
-/// owner's ruling of 2026-10-09 (#458: the rudder drag cubed).
+/// owner's rulings of 2026-10-09 (#458: the rudder drag cubed) and 2026-10-10 (#461: fall-off 2°/s, the turn-rate
+/// curve's knee at 1.15 kn).
 @Suite struct HandTurnProfileTests {
     let boat = SkiffEight.boatClass
 
@@ -305,7 +380,7 @@ enum SkiffEight {
     @Test func goodTackIsTheBestAndASlamCostsMore() {
         let good = loss(0.6, ease: 20), club = loss(0.77, ease: 8), slam = loss(1)
         #expect(abs(good - 0.96) <= 0.05, "60 % eased: \(good) L")
-        #expect(abs(slam - 1.48) <= 0.05, "slam: \(slam) L")
+        #expect(abs(slam - 1.50) <= 0.05, "slam: \(slam) L")
         #expect(good < club && club < slam - 0.2, "Club's centre: \(club) L")
         #expect((0.4...0.65).contains(slam - good))
         let steady = HandTack.turn(gybe: false, fraction: 0.6, ease: 20, cell: .init(knots: 10, entry: 1, seed: nil), boatClass: boat).loss
@@ -321,9 +396,10 @@ enum SkiffEight {
     }
 
     /// A flubbed turn costs lengths, never a stall. Over-steered 20° to 30°, a good helm's tack loses about 1.14 to
-    /// 1.52 L (0.95 clean) and a slam 1.92 to 2.31 (1.48); a cranked gybe 1.63 to 1.96. Under-steered at 35 % rudder, in the breeze she
-    /// under-steers in (over 8 kn; `HandTackTable.underSteer`), a tack loses about 1.23 L. From the slowest she tacks at, none of them leaves her
-    /// stuck 5 s; in light air 35 % would (19 s), which is why she never under-steers there.
+    /// 1.53 L (0.95 clean) and a slam 1.95 to 2.32 (1.50); a cranked gybe 1.63 to 1.96. Under-steered at 35 % rudder, in the breeze she
+    /// under-steers in (over 8 kn; `HandTackTable.underSteer`), a tack loses about 1.25 L. From the slowest she tacks at, none of them leaves her
+    /// stuck 5 s. Before #461's retune 35 % in light air did (19 s in 6 kn), which is why she never under-steers there;
+    /// since it 35 % in 6 kn is 2.8 s and the hang is a quarter rudder in 4 kn (17.6 s).
     @Test func flubbedTurnCostsLengthsNeverAStall() {
         let good = loss(0.6), slam = loss(1)
         for (fraction, over, range) in [(0.6, 20.0, 1.0...1.3), (0.6, 30, 1.4...1.65), (1, 20, 1.8...2.05), (1, 30, 2.2...2.45)] {
@@ -347,7 +423,8 @@ enum SkiffEight {
             let spell = stuck(0.35, knots: knots, entry: 0.75)
             #expect(spell <= 5, "\(knots) kn under-steered: \(spell) s stuck")
         }
-        // The cliff she keeps off: too little rudder in light air.
-        #expect(stuck(0.35, knots: 6, entry: 0.75) > 10)
+        // The cliff she kept off before #461's retune is gone (19 s); too little rudder in less wind still hangs her.
+        #expect(stuck(0.35, knots: 6, entry: 0.75) <= 5)
+        #expect(stuck(0.25, knots: 4, entry: 0.75) > 10)
     }
 }

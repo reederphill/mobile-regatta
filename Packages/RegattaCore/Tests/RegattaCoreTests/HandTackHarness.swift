@@ -275,6 +275,53 @@ enum HandTack {
         }
     }
 
+    /// #461's fall-off retune: from just inside the no-go on the old tack at `speed` (m/s), the rudder held at `fraction`
+    /// towards the wind for 60 s. Seconds until she is out of the no-go on the new tack (60: never), and whether she got
+    /// there without first falling back out of the no-go on the old side.
+    static func carry(fraction: Double, cell: Cell, speed: Double, boatClass boat: BoatClass) -> (out: Double, clean: Bool) {
+        let wind0 = WindBook.shared.sample(knots: cell.knots, seed: cell.seed, tick: 0)
+        let noGo = BoatDynamics.noGoAngle(boat.polar)
+        let boom = BoomSide.port
+        var state = BoatDynamics.State(heading: compass(wind: wind0.direction, sailingAngle: noGo - deg2rad(0.5), boom: boom),
+                                       speed: speed, boomSide: boom)
+        state.rudder = quantise(fraction)
+        var clean = true
+        for tick in 0..<Int(60 / dt) {
+            let (dir, tws) = WindBook.shared.sample(knots: cell.knots, seed: cell.seed, tick: tick)
+            state = BoatDynamics.advance(state, control: .init(rudder: quantise(fraction)),
+                                         env: .constant(windDirection: dir, windSpeed: tws), boatClass: boat, dt: dt)
+            let relative = wrapAngle(dir - state.heading)
+            if state.boomSide == boom, abs(relative) > noGo + deg2rad(3) { clean = false }
+            if state.boomSide != boom, abs(relative) >= noGo { return (Double(tick + 1) * dt, clean) }
+        }
+        return (60, false)
+    }
+
+    /// #461's fall-off retune: a whole circle with the rudder held at `fraction` from the close-hauled heading, tacking
+    /// first (a penalty turn luffing) or gybing first, from `speed` (m/s; nil: `cell.entry` of her groove target).
+    /// Seconds to 360° turned (90: never).
+    static func circle(fraction: Double, tackFirst: Bool = true, cell: Cell, speed: Double? = nil,
+                       boatClass boat: BoatClass) -> Double {
+        let wind0 = WindBook.shared.sample(knots: cell.knots, seed: cell.seed, tick: 0)
+        let angle0 = Autohelm.grooveAngle(.upwind, tws: wind0.speed, boatClass: boat)
+        let boom = BoomSide.port
+        let target = BoatDynamics.polarTarget(relativeWind: angle0, boomSide: boom, tws: wind0.speed, isPlaning: false,
+                                              spinnaker: .down, boatClass: boat)
+        var state = BoatDynamics.State(heading: compass(wind: wind0.direction, sailingAngle: angle0, boom: boom),
+                                       speed: speed ?? cell.entry * target, boomSide: boom)
+        let sign: Double = tackFirst ? 1 : -1
+        var turned = 0.0
+        for tick in 0..<Int(90 / dt) {
+            let (dir, tws) = WindBook.shared.sample(knots: cell.knots, seed: cell.seed, tick: tick)
+            let before = state.heading
+            state = BoatDynamics.advance(state, control: .init(rudder: quantise(sign * fraction)),
+                                         env: .constant(windDirection: dir, windSpeed: tws), boatClass: boat, dt: dt)
+            turned += sign * wrapAngle(state.heading - before)
+            if turned >= 2 * .pi { return Double(tick + 1) * dt }
+        }
+        return 90
+    }
+
     static func compass(wind: Double, sailingAngle: Double, boom: BoomSide) -> Double {
         wrapAngle(wind - (boom == .port ? sailingAngle : -sailingAngle))
     }
