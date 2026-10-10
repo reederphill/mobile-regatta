@@ -340,6 +340,8 @@ struct BotBrain: Sendable {
                         && hasGybeRoom(boat, view) && grooveIsOverEarly(boat, view, groove)
                     ? Aim(angle: max(sailingAngle(boat), min(aim.angle, Self.returnAngle)), tack: boat.tack, ease: aim.ease)
                     : groove
+                // By hand, where her groove would have her over the line early, she reaches along it instead (#461).
+                if byHand, !running, let reach = startReachAim(boat, view, groove: groove) { own = reach }
             }
             return holding(boat, view, helm(boat, to: own, view), desired: own.heading(wind: boat.windDirection))
         }
@@ -743,7 +745,7 @@ struct BotBrain: Sendable {
         let c = view.course
         switch b.status {
         case .prestart:
-            return hangBackAim(b, view) ?? startAim(b, view)
+            return hangBackAim(b, view) ?? sheetedInTurningUp(startAim(b, view), b, view)
         case .ocs:
             return returnAim(b, view)
         case .racing:
@@ -975,6 +977,13 @@ struct BotBrain: Sendable {
             evasive = Evasion(heading: b.heading)
         }
         return avoidEdges(b, view, desired: evasive?.heading ?? desired).map { Evasion(heading: $0) } ?? evasive
+    }
+
+    /// `evasion` for a mark or the race area's edge alone, not for a boat: what ends a turn by hand close to the gun
+    /// (`handTurning`, #461).
+    func obstacleEvasion(_ b: SeatView.OwnBoat, _ view: SeatView, desired: Double) -> Evasion? {
+        let off = avoidMarks(b, view, desired: desired)
+        return (avoidEdges(b, view, desired: off ?? desired) ?? off).map { Evasion(heading: $0) }
     }
 
     /// A heading that keeps her clear if a collision is coming and she is the one that must keep clear, or racing,

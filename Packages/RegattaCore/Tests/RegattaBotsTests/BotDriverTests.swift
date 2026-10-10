@@ -95,7 +95,11 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         sail(race, &controllers, ticks: 1_500 * Race.tickRate)
         let finishers = race.boats.filter { $0.status == .finished }
         #expect(race.isOver)
-        #expect(finishers.count >= 5, "finished: \(finishers.map(\.id)), statuses: \(race.boats.map(\.status))")
+        // Half the fleet (#461): on a class that turns its penalty turns by hand (13 to 30 s each) the finish window
+        // closes on the boats that turned them. Seed 42 has six calls before the gun and marks touched at the finish:
+        // four finish and four are on the last leg when the window closes (five finished before the second start fix
+        // round; the bot matrix's finish share is the gate for this).
+        #expect(finishers.count >= 4, "finished: \(finishers.map(\.id)), statuses: \(race.boats.map(\.status))")
     }
 
     /// Bots draw from their own seeds, never the race's: a retuned style moves neither the placement

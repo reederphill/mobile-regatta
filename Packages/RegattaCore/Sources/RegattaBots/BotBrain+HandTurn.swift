@@ -93,6 +93,22 @@ public enum HandTackTable {
     /// 30 m of water downwind of the line.
     public static let startGybeFraction = 0.7
 
+    /// Turning up to her hold or her run in before her start (`BotBrain.turnUpSeconds`): from more than `from` radians
+    /// broader, at `rudder` of the full rudder's rate at `speed` of her close-hauled speed or her own, and `slew`
+    /// seconds for the rudder.
+    public static let startTurnUp = (from: deg2rad(20), speed: 0.4, rudder: 0.8, slew: 0.5)
+    /// Reaching along the line for the speed to tack (`BotBrain.startReachAim`): `towards` radians closer to the wind
+    /// than parallel to the line, no broader than `broadest` (a tack from there, not a gybe), where her groove would
+    /// have her over the line `within` seconds. Measured on the start suite's 160 races: any time before the gun, OCS
+    /// 0.03 and 800 pre-start fouls, but the suite's hunters then draw no more calls than live bots in their seats
+    /// (`BotHunterSuiteTests`: 19 against 22); within 12 s 0.03 and 970 (18 against 14); within 8 s 0.04 and 1018 (25
+    /// against 15); within 5 s 0.05 and 1046; never, 0.05 and 1264.
+    public static let startReach = (towards: deg2rad(12), broadest: deg2rad(85), within: 8.0)
+    /// Seconds to the gun inside which a turn by hand before her start, once begun, ends only for a mark or the edge
+    /// (`BotBrain.handTurning`). Measured on the start suite's 160 races: always, on time 0.46 and 1038 pre-start
+    /// fouls; inside 25 s, 0.46 and 812; inside 12 s, 0.41 and 598; never, 0.41 and 560.
+    public static let startTurnsThroughSeconds = 25.0
+
     /// `values.good` at `handling.good` or better, in a line to `values.poor` at `handling.poor` or worse.
     static func ramp(_ h: Double, _ values: (good: Double, poor: Double), _ handling: (good: Double, poor: Double)) -> Double {
         let t = ((handling.good - h) / (handling.good - handling.poor)).clamped(to: 0...1)
@@ -309,7 +325,11 @@ extension BotBrain {
             handTurn?.started = view.time
         }
         let heading = aim.heading(wind: b.windDirection)
-        if let evasion = evasion(b, view, desired: heading) {
+        // Close to the gun before her start only a mark or the edge ends the turn (#461): the boats she keeps clear of
+        // on this tack are not the ones she will on the other, the turn began clear of them all (`isClearToTurn`), and
+        // ended head to wind she is in every boat's way with no time to turn again.
+        let turnsThrough = b.status != .racing && view.time < 0 && -view.time < HandTackTable.startTurnsThroughSeconds
+        if let evasion = turnsThrough ? obstacleEvasion(b, view, desired: heading) : evasion(b, view, desired: heading) {
             handTurn = nil
             lastTapTime = view.time
             let input = steer(b, toHeading: evasion.heading, view, closest: evasion.closest)
