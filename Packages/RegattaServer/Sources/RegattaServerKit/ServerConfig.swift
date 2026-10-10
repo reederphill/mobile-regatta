@@ -72,6 +72,7 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `REGATTA_TEAM_ID` | `8S5TQ65X3B` | the Apple Developer team (README; final in #49) |
 /// | `REGATTA_APPLE_ROOT_PEM` | none | a PEM file of the certificates Game Center's key must chain to; unset in dev = dev verifier |
 /// | `REGATTA_DATABASE_URL` | none | Postgres (ADR 0009); unset in dev = accounts in memory |
+/// | `QUEUE_LOCK_SECONDS` | `60` | seconds from the oldest queued player's join to fleet lock (#146); short for the contract runner |
 public struct ServerConfig: Sendable {
     public var environment: ServerEnvironment
     public var auth: SeatAuthPolicy
@@ -87,6 +88,8 @@ public struct ServerConfig: Sendable {
     public var identity = IdentitySettings()
     /// Connections held at once on `/service` and `/race`, per address and in all (#146).
     public var connectionLimits = ConnectionLimits()
+    /// The queue and the races it locks (#146).
+    public var queue = QueueSettings()
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
@@ -121,6 +124,7 @@ public struct ServerConfig: Sendable {
                                   tokenKey: key, tokenLifetime: TimeInterval(lifetime),
                                   serverBuild: env["SERVER_BUILD"] ?? "dev", maxRaces: maxRaces)
         config.identity.termsVersion = try int("TERMS_VERSION", default: 1, in: 1...1_000_000)
+        config.queue.lockAfter = TimeInterval(try int("QUEUE_LOCK_SECONDS", default: 60, in: 1...600))
         if let bundle = env["REGATTA_BUNDLE_ID"], !bundle.isEmpty { config.identity.bundleID = bundle }
         if let team = env["REGATTA_TEAM_ID"], !team.isEmpty { config.identity.teamID = team }
         if let path = env["REGATTA_APPLE_ROOT_PEM"], !path.isEmpty {

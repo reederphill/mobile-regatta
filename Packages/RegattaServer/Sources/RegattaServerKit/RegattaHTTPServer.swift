@@ -40,7 +40,8 @@ public final class RegattaHTTPServer: Sendable {
         _ = try SeatAuthPolicy.for(config.environment)
         let services = try services ?? ServiceEndpoint.make(config: config, store: InMemoryAccountStore())
         let frameCap = services.config.frameCap, preSignInFrameCap = services.config.preSignInFrameCap
-        let registry = RaceRegistry(maxRaces: config.maxRaces)
+        // The queue locks its races onto the registry the race connections find them in.
+        let registry = services.matchmaker?.registry ?? RaceRegistry(maxRaces: config.maxRaces)
         let listener = try await ServerBootstrap(group: group)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             // A TCP-level option. (`.socketOption(.tcp_nodelay)` is SOL_SOCKET option 1: SO_DEBUG on Linux,
@@ -61,6 +62,7 @@ public final class RegattaHTTPServer: Sendable {
             try? await listener.channel.close()
             throw error
         }
+        await services.matchmaker?.start()
         return RegattaHTTPServer(config: config, registry: registry, services: services, listener: listener)
     }
 
@@ -115,6 +117,7 @@ public final class RegattaHTTPServer: Sendable {
     public func shutdown() async {
         listener.channel.close(promise: nil)
         sweeper.cancel()
+        await services.matchmaker?.stop()
         await registry.closeAll()
         task.cancel()
         _ = await task.value

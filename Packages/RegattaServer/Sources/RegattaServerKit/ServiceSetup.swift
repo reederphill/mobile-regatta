@@ -6,12 +6,14 @@ import NIOPosix
 import NIOSSL
 import Persistence
 import RegattaDevAPI
+import RegattaServices
 import X509
 
 extension ServiceEndpoint {
     /// The endpoint `config` describes, over `store`: the real Game Center verifier when Apple's root is configured,
-    /// the dev verifier otherwise (only in `ENV=dev`).
-    public static func make(config: ServerConfig, store: any AccountStore, fetcher: (any CertificateFetching)? = nil) throws -> ServiceEndpoint {
+    /// the dev verifier otherwise (only in `ENV=dev`); the queue (#146) locking its races onto `registry`.
+    public static func make(config: ServerConfig, store: any AccountStore, registry: RaceRegistry? = nil,
+                            fetcher: (any CertificateFetching)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
         let verifier: any GameCenterVerifier
         if let pem = identity.appleRootsPEM {
@@ -24,6 +26,12 @@ extension ServiceEndpoint {
         } else {
             throw ServerConfigError.invalid(variable: "REGATTA_APPLE_ROOT_PEM", value: "(unset)", expected: "Apple's root outside ENV=dev")
         }
+        let queue = config.queue
+        let matchmaker = QueueMatchmaker(
+            settings: queue, registry: registry ?? RaceRegistry(maxRaces: config.maxRaces),
+            draw: RaceDraw(pairings: OnlinePairing.bundled(venues: queue.venues),
+                           seeds: FixtureWindSeedPools(poolSize: queue.windSeedPoolSize, reuseCap: queue.windSeedReuseCap)),
+            tokenKey: config.tokenKey, tokenLifetime: config.tokenLifetime)
         return ServiceEndpoint(
             config: ServiceEndpointConfig(termsVersion: identity.termsVersion, sessionLifetime: identity.sessionLifetime,
                                           streamIdleTimeout: identity.streamIdleTimeout, frameCap: identity.frameCap,
@@ -31,21 +39,30 @@ extension ServiceEndpoint {
                                           serverBuild: config.serverBuild),
             sessions: SessionAuthority(store: store, verifier: verifier, lifetime: identity.sessionLifetime,
                                        absoluteLifetime: identity.absoluteSessionLifetime,
-                                       maxSessionsPerPlayer: identity.maxSessionsPerPlayer))
+                                       maxSessionsPerPlayer: identity.maxSessionsPerPlayer),
+            backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0) },
+                                      raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0) }),
+            matchmaker: matchmaker)
     }
 
     /// `POST /dev/situation` (dev only): puts the test account in the contract situation asked for, and says how
-    /// the client signs in for it. Only the suites this server serves: Identity and Terms (#145).
+    /// the client signs in for it. Only the suites this server serves: Identity and Terms (#145), Queue (#146).
     func arrange(_ request: DevSituationRequest) async -> HTTPReply {
         let current = config.termsVersion
-        func signedIn(accepting version: Int?) async -> HTTPReply {
+        func signedIn(accepting version: Int?, multiplayerRestricted: Bool = false,
+                      then arrange: (QueueMatchmaker) async -> Void = { _ in }) async -> HTTPReply {
             do {
                 _ = try await store.signIn(teamPlayerID: request.teamPlayerID, gamePlayerID: request.gamePlayerID, alias: "Contract")
                 if let version { try await store.acceptTerms(playerID: request.teamPlayerID, version: version, at: sessions.now()) }
-                return HTTPReply(.ok, json: DevSituationResponse(signIn: true))
+                if let matchmaker { await arrange(matchmaker) }
+                return HTTPReply(.ok, json: DevSituationResponse(signIn: true, isMultiplayerGamingRestricted: multiplayerRestricted))
             } catch {
                 return HTTPReply(.conflict, error: "can't arrange the test account: \(error)")
             }
+        }
+        let player = request.teamPlayerID
+        if request.service == "QueueService", matchmaker == nil {
+            return HTTPReply(.notFound, error: "this server has no queue")
         }
         switch (request.service, request.situation) {
         case ("IdentityService", "signedOut"): return HTTPReply(.ok, json: DevSituationResponse(signIn: false))
@@ -57,10 +74,25 @@ extension ServiceEndpoint {
         case ("TermsService", "versionBumped"):
             guard current >= 2 else { return HTTPReply(.conflict, error: "versionBumped needs TERMS_VERSION of 2 or more") }
             return await signedIn(accepting: current - 1)
+        // The queue (#146). Cooldown and suspension are dev-arranged in the matchmaker (#146 Q1): the real cooldown
+        // rule is #147's, suspensions #26's.
+        case ("QueueService", "joinable"): return await signedIn(accepting: current)
+        case ("QueueService", "cooldown"):
+            return await signedIn(accepting: current) { await $0.arrangeCooldown(player, seconds: Self.contractCooldownSeconds) }
+        case ("QueueService", "suspended"):
+            return await signedIn(accepting: current) { await $0.arrangeSuspension(player, until: nil) }
+        case ("QueueService", "notSignedIn"): return HTTPReply(.ok, json: DevSituationResponse(signIn: false))
+        case ("QueueService", "termsNotAccepted"): return await signedIn(accepting: nil)
+        case ("QueueService", "multiplayerRestricted"): return await signedIn(accepting: current, multiplayerRestricted: true)
         default:
             return HTTPReply(.notFound, error: "\(request.service).\(request.situation) isn't served yet")
         }
     }
+}
+
+extension ServiceEndpoint {
+    /// The Queue contract's `cooldown` situation: long enough to show a countdown, short enough for the runner.
+    static let contractCooldownSeconds: TimeInterval = 3
 }
 
 /// Fetches Game Center's certificate over HTTPS (HTTP/1.1 on NIO with NIOSSL: no FoundationNetworking on Linux). The

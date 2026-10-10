@@ -226,7 +226,7 @@ actor LaunchLog {
     @Test func theGunGoesToTheLobbyAtTheEndOfTheStartSequence() async throws {
         let clock = VirtualClock(), log = LaunchLog()
         let queue = Self.make(clock, log)
-        var lines = queue.gunLines().makeAsyncIterator()
+        var lines = await queue.gunLines().makeAsyncIterator()
         try await queue.join(Self.player(0))
         try await queue.join(Self.player(1))
         clock.advance(60)

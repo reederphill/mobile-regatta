@@ -129,6 +129,8 @@ public actor QueueMatchmaker {
     private var book = QueueBook()
     /// Each locked player's seat, until their race closes.
     private var handOffs: [String: HandOff] = [:]
+    /// Players whose fleet has locked and whose race is starting, with the fleet's size.
+    private var starting: [String: Int] = [:]
     private var races: [UUID: [String]] = [:]
     private var watchers: [String: [UUID: AsyncStream<QueueState>.Continuation]] = [:]
     private var lastPushed: [String: [UUID: QueueState]] = [:]
@@ -141,6 +143,7 @@ public actor QueueMatchmaker {
     public private(set) var fleetsLocked = 0
     public private(set) var lastFleet: LockedFleet?
     private var driver: Task<Void, Never>?
+    private var stopped = false
 
     public init(settings: QueueSettings, registry: RaceRegistry, draw: RaceDraw, tokenKey: SymmetricKey, tokenLifetime: TimeInterval,
                 random: SeededRandom = .system(), now: @escaping @Sendable () -> Date = { Date() },
@@ -180,6 +183,7 @@ public actor QueueMatchmaker {
     }
 
     public func stop() {
+        stopped = true
         driver?.cancel()
         driver = nil
         for watcher in gunWatchers.values { watcher.finish() }
@@ -205,6 +209,7 @@ public actor QueueMatchmaker {
         let time = now()
         if let refusal = restriction(of: id, at: time) { return .unavailable(refusal) }
         if handOffs[id] != nil { return .fleetLocked }
+        if let fleet = starting[id] { return .queued(QueuedStatus(queuedPlayers: fleet, secondsToLock: 0)) }
         if book.contains(id), let seconds = book.secondsToLock(at: time, settings) {
             return .queued(QueuedStatus(queuedPlayers: book.count, secondsToLock: seconds))
         }
@@ -273,29 +278,32 @@ public actor QueueMatchmaker {
             book.restore(fleet)
             return
         }
-        let expiry = Int64((time + tokenLifetime).timeIntervalSince1970)
-        for (seat, player) in humans.enumerated() {
-            guard let bytes = RaceToken(raceID: raceID, seat: seat, expiresAt: expiry).signed(with: tokenKey) else { continue }
-            handOffs[player.teamPlayerID] = HandOff(raceID: RaceID(raceID.uuidString.lowercased()), token: RegattaServices.RaceToken(bytes: bytes))
-        }
-        races[raceID] = humans.map(\.teamPlayerID)
         let locked = LockedFleet(raceID: raceID, setup: setup, windSeed: drawn.windSeed, humans: humans, drawn: drawn)
-        let gunAt = time + Double(settings.startSequenceTicks) / Double(Race.tickRate)
-        guns.append((gunAt, .gun(venue: drawn.pairing.venue.content.displayName, boats: setup.fleetSize, humans: humans.count)))
-        fleetsLocked += 1
-        lastFleet = locked
-        pushAll()
+        // While the race starts (the actor is free meanwhile) the fleet shows as queued with nothing left on the clock:
+        // `.fleetLocked` and the hand-off come only once its race is in the registry, so a token always finds its race.
+        for player in humans { starting[player.teamPlayerID] = humans.count }
         do {
             try await launch(locked) { Task { await self.raceClosed(raceID) } }
         } catch {
             // The race couldn't start (the server is full): the fleet goes back to the head of the queue. Its wind seed
             // stays retired.
-            for id in races.removeValue(forKey: raceID) ?? [] { handOffs[id] = nil }
-            guns.removeAll { $0.due == gunAt }
-            fleetsLocked -= 1
+            for player in humans { starting[player.teamPlayerID] = nil }
             book.restore(fleet)
             pushAll()
+            return
         }
+        let expiry = Int64((time + tokenLifetime).timeIntervalSince1970)
+        for (seat, player) in humans.enumerated() {
+            starting[player.teamPlayerID] = nil
+            guard let bytes = RaceToken(raceID: raceID, seat: seat, expiresAt: expiry).signed(with: tokenKey) else { continue }
+            handOffs[player.teamPlayerID] = HandOff(raceID: RaceID(raceID.uuidString.lowercased()), token: RegattaServices.RaceToken(bytes: bytes))
+        }
+        races[raceID] = humans.map(\.teamPlayerID)
+        let gunAt = time + Double(settings.startSequenceTicks) / Double(Race.tickRate)
+        guns.append((gunAt, .gun(venue: drawn.pairing.venue.content.displayName, boats: setup.fleetSize, humans: humans.count)))
+        fleetsLocked += 1
+        lastFleet = locked
+        pushAll()
     }
 
     /// The race closed: its players are free to queue again.
@@ -364,15 +372,19 @@ public actor QueueMatchmaker {
 
     /// The lobby's system lines for each race's gun: venue, boats, humans (#17, #36). The lobby service (#152) takes
     /// this stream; it keeps the newest 64 if nobody reads.
-    public nonisolated func gunLines() -> AsyncStream<SystemLine> {
+    /// Every gun from now on; the stream ends at `stop()`.
+    public func gunLines() -> AsyncStream<SystemLine> {
         let (stream, continuation) = AsyncStream<SystemLine>.makeStream(bufferingPolicy: .bufferingNewest(64))
+        guard !stopped else {
+            continuation.finish()
+            return stream
+        }
         let token = UUID()
         continuation.onTermination = { _ in Task { await self.unwatchGuns(token) } }
-        Task { await self.watchGuns(token, continuation) }
+        gunWatchers[token] = continuation
         return stream
     }
 
-    private func watchGuns(_ token: UUID, _ continuation: AsyncStream<SystemLine>.Continuation) { gunWatchers[token] = continuation }
     private func unwatchGuns(_ token: UUID) { gunWatchers[token] = nil }
 
     // MARK: Dev arrangements (#146 Q1)

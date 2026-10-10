@@ -6,17 +6,20 @@ import RegattaServerKit
 import RegattaServiceClient
 import Testing
 
-/// #109's Identity and Terms contract suites through #143's runner against the real server (#145): a `RegattaServer`
+/// #109's Identity, Terms (#145) and Queue (#146) contract suites through #143's runner against the real server: a `RegattaServer`
 /// started in process on a free port, reached over its `/service` WebSocket by `WebSocketServiceConnector`, which
 /// arranges each situation with `POST /dev/situation`. `CONTRACT_ENDPOINT` runs them against a server started elsewhere.
 @Suite(.timeLimit(.minutes(2))) struct ServiceEndpointContractTests {
-    /// The suites the server serves as of #145.
-    static let served: [ContractSuiteID] = [.identity, .terms]
+    /// The suites the server serves as of #146.
+    static let served: [ContractSuiteID] = [.identity, .terms, .queue]
 
-    /// A dev config the Terms suite can run on: its `versionBumped` situation needs an older version to have accepted.
+    /// A dev config the suites can run on: the Terms suite's `versionBumped` situation needs an older version to have
+    /// accepted; the Queue suite's `joinable` waits for fleet lock, so it locks 3 s after the oldest join (long enough
+    /// to see the queued state and leave before it).
     static func config() -> ServerConfig {
         var config = ServerConfig.dev()
         config.identity.termsVersion = 2
+        config.queue.lockAfter = 3
         return config
     }
 
@@ -26,8 +29,8 @@ import Testing
         }
     }
 
-    /// Acceptance (#145): the Identity and Terms suites pass against the real server through the runner.
-    @Test func identityAndTermsSuitesPassAgainstTheServer() async throws {
+    /// Acceptance (#145, #146): the Identity, Terms and Queue suites pass against the real server through the runner.
+    @Test func servedSuitesPassAgainstTheServer() async throws {
         let server = try await RegattaHTTPServer.start(config: Self.config())
         do {
             try await Self.run(Self.served, against: "ws://127.0.0.1:\(server.port)")

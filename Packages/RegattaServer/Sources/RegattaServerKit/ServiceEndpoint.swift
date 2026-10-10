@@ -103,11 +103,15 @@ public struct ServiceEndpoint: Sendable {
     public let config: ServiceEndpointConfig
     public let sessions: SessionAuthority
     public let backends: ServiceBackends
+    /// The global queue (#146), when the server has one: the server drives it, and `POST /dev/situation` arranges it.
+    public let matchmaker: QueueMatchmaker?
 
-    public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none) {
+    public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
+                matchmaker: QueueMatchmaker? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
+        self.matchmaker = matchmaker
     }
 
     public var store: any AccountStore { sessions.store }
