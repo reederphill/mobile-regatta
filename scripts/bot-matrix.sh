@@ -18,6 +18,8 @@
 #
 # The branch's report lands in .build/bot-matrix/branch.{json,txt} at the worktree's root. Exits with the branch run's
 # gate status (0 pass, 1 miss), 2 on a usage or setup error. --no-fetch skips `git fetch origin main`.
+# --diagnose (#471) goes to the branch's run alone: it adds tables to branch.txt and a "diagnose" key to branch.json and
+# changes no result, so the baseline (which may not know the flag) is sailed, hashed and cached without it.
 # Clear the cache with: rm -rf "$(git rev-parse --git-common-dir)/botsuite-baselines"
 set -euo pipefail
 
@@ -29,11 +31,13 @@ export CHECK_STEP_TIMEOUT_MINUTES=${BOT_MATRIX_TIMEOUT_MINUTES:-240}
 
 fetch=1
 args=()
+branch_args=()  # the branch's run alone
 key_args=()  # the options that change results, in order: what the args hash covers
 while (( $# )); do
     case "$1" in
         --no-fetch) fetch=0; shift ;;
         --json) echo "bot-matrix.sh: --json is set by the script" >&2; exit 2 ;;
+        --diagnose) branch_args+=("$1"); shift ;;
         --jobs)
             (( $# >= 2 )) || { echo "bot-matrix.sh: --jobs needs a value" >&2; exit 2; }
             args+=("$1" "$2"); shift 2 ;;
@@ -57,16 +61,17 @@ baseline="$cache_dir/$hash.json"
 out="$root/.build/bot-matrix"
 mkdir -p "$out" "$cache_dir"
 
-# Builds regatta-botsuite in the package at $1 and runs it with the options, the JSON report to $2 and the text to $3.
-# Never fails on the gate: returns the run's exit status.
+# Builds regatta-botsuite in the package at $1 and runs it with the options (and any after $3), the JSON report to $2 and
+# the text to $3. Never fails on the gate: returns the run's exit status.
 sail() {
     local dir=$1 json=$2 text=$3 bin status=0
+    shift 3
     # set -e is off in a function called with ||: check the build by hand.
     "$scripts/heavy.sh" swift build -c release --package-path "$dir/$package" --product regatta-botsuite \
         || { echo "bot-matrix.sh: the build in $dir failed" >&2; exit 2; }
     bin=$(swift build -c release --package-path "$dir/$package" --show-bin-path)
     local start=$SECONDS
-    "$scripts/heavy.sh" "$bin/regatta-botsuite" ${args[@]+"${args[@]}"} --json "$json" > "$text" 2>&1 || status=$?
+    "$scripts/heavy.sh" "$bin/regatta-botsuite" ${args[@]+"${args[@]}"} "$@" --json "$json" > "$text" 2>&1 || status=$?
     echo "== sailed in $(( SECONDS - start )) s (including any wait for the lock), exit $status"
     if (( status > 1 )); then
         cat "$text" >&2
@@ -102,7 +107,7 @@ if [[ "$(git rev-parse HEAD)" == "$base" && -z "$(git status --porcelain -- "$pa
         || branch_status=$?
 else
     echo "== branch $(git rev-parse --short HEAD): sailing"
-    sail "$root" "$out/branch.json" "$out/branch.txt" || branch_status=$?
+    sail "$root" "$out/branch.json" "$out/branch.txt" ${branch_args[@]+"${branch_args[@]}"} || branch_status=$?
 fi
 echo "== branch report: $out/branch.txt"
 
@@ -139,7 +144,7 @@ if rows:
 else:
     print("  every gate green on both")
 
-SKIP = {"races", "matrix", "thresholds", "breaches", "passed", "simulationVersion"}
+SKIP = {"races", "matrix", "thresholds", "breaches", "passed", "simulationVersion", "diagnose"}
 def leaves(node, path=""):
     if isinstance(node, bool):
         return

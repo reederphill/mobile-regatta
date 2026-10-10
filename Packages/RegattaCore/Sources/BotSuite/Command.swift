@@ -22,6 +22,10 @@ public struct BotSuiteOptions: Hashable, Sendable {
     public var jobs: Int?
     /// Where to write the JSON report; `-` for stdout (the text report then goes to stderr).
     public var jsonPath: String?
+    /// `--diagnose` (#471): also watch every race for why boats start late, what their penalty turns cost and why they
+    /// don't finish (`RaceObserver`), and add the tables to the report (`BotSuiteReport.diagnose`). The races, and the
+    /// rest of the report, are the same with it or without.
+    public var diagnose = false
     public var help = false
 
     public init() {}
@@ -39,6 +43,9 @@ public struct BotSuiteOptions: Hashable, Sendable {
                                  rudder, so the bots steer by hand (default: the matrix's, the class as bundled)
           --laps <n>             laps per race instead of the matrix's
           --json <path|->        write the JSON report there (- for stdout)
+          --diagnose             also print, and write under the JSON's "diagnose" key, why boats start late,
+                                 what their penalty turns cost and why they don't finish; the races and the
+                                 rest of the report are the same with it or without
           --jobs <n>             races sailed at once (default: the performance cores; 1 = one after another).
                                  The report is the same for any n but for the tick times
         Exits 1 when the run misses the thresholds, 2 on a usage or setup error.
@@ -79,6 +86,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
                 }
             case "--json": jsonPath = try value(flag)
             case "--jobs": jobs = try number(flag)
+            case "--diagnose": diagnose = true
             case "-h", "--help": help = true
             default: throw BotSuiteError.usage("unknown argument: \(flag)")
             }
@@ -120,9 +128,18 @@ public struct BotSuiteOptions: Hashable, Sendable {
 /// strict concurrency checks). The results are put back in the matrix's order before the report pools them, so the report
 /// is the same for any `jobs` but for the tick times, which a busy machine stretches.
 public enum BotSuite {
-    public static func run(_ matrix: BotMatrix, thresholds: BotThresholds, jobs: Int = 1) throws -> BotSuiteReport {
-        let races = try inParallel(matrix.cells, jobs: jobs, BotRaceHarness.run)
-        return BotSuiteReport(matrix: matrix, thresholds: thresholds, races: races)
+    /// With `diagnose` (#471) a `RaceObserver` watches each race too, and the report carries its tables
+    /// (`BotSuiteReport.diagnose`); everything else in the report is the same.
+    public static func run(_ matrix: BotMatrix, thresholds: BotThresholds, jobs: Int = 1,
+                           diagnose: Bool = false) throws -> BotSuiteReport {
+        guard diagnose else {
+            let races = try inParallel(matrix.cells, jobs: jobs, BotRaceHarness.run)
+            return BotSuiteReport(matrix: matrix, thresholds: thresholds, races: races)
+        }
+        let sailed = try inParallel(matrix.cells, jobs: jobs, BotRaceHarness.runDiagnosed)
+        var report = BotSuiteReport(matrix: matrix, thresholds: thresholds, races: sailed.map(\.result))
+        report.diagnose = DiagnoseSummary(sailed.map(\.diagnosis), seats: report.races.flatMap(\.seats))
+        return report
     }
 
     /// `regatta-botsuite`'s default `--jobs`: the performance cores on Apple silicon (`hw.perflevel0.physicalcpu`), so the
@@ -212,7 +229,7 @@ public enum BotSuiteCommand {
 
     static func run(_ options: BotSuiteOptions) throws -> Int32 {
         let report = try BotSuite.run(options.matrix(), thresholds: options.thresholds(),
-                                      jobs: options.jobs ?? BotSuite.defaultJobs)
+                                      jobs: options.jobs ?? BotSuite.defaultJobs, diagnose: options.diagnose)
         let toStdout = options.jsonPath == "-"
         for line in report.lines {
             if toStdout { printError(line) } else { print(line) }

@@ -1429,6 +1429,9 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var axes: AxesSummary? = nil
     /// The same over the handling mix's profiles (tactics or none, a perfect or Club hand); nil when none sailed.
     public var handlingAxes: AxesSummary? = nil
+    /// `--diagnose`'s tables (#471): late starters, penalty episodes, pre-start calls and non-finishers by cause; nil,
+    /// and left out of the JSON, in a run without it.
+    public var diagnose: DiagnoseSummary? = nil
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -1637,6 +1640,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         if !thresholds.placeholders.isEmpty { lines.append("placeholder keys: \(thresholds.placeholders.count)") }
         lines.append(passed ? "gate: pass" : "gate: FAIL")
         lines += breaches.map { "  \($0)" }
+        if let diagnose { lines += diagnose.lines }
         return lines
     }
 }
