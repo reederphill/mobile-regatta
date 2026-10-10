@@ -16,6 +16,11 @@ struct HUDView: View {
     var heading: () -> Double = { 0 }
     /// Stops the per-frame redraw while the race is paused.
     var isPaused = false
+    /// A frozen render fixture: the leaderboard holds still as in a pause, but the wind arrow keeps reading `heading`
+    /// every frame. A fixture refreshes the HUD once, as its session is made, before the scene's first settled frame
+    /// turns the camera; an arrow that stopped there would show whichever heading its last read caught, which hangs
+    /// on the frame rate and so differs by thermal tier (#127, #467).
+    var isFrozen = false
     /// Settings' Live leaderboard (#268).
     var showsLeaderboard = false
     var isLeaderboardExpanded = false
@@ -78,7 +83,7 @@ struct HUDView: View {
                 .onTapGesture(perform: toggleLeaderboard)
                 .accessibilityHidden(true)
                 .padding(.top, HUDLayout.placeTop)
-            LeaderboardView(state: hud.leaderboard, isExpanded: isLeaderboardExpanded, isPaused: isPaused,
+            LeaderboardView(state: hud.leaderboard, isExpanded: isLeaderboardExpanded, isPaused: isPaused || isFrozen,
                             toggle: toggleLeaderboard)
                 .padding(.top, HUDLayout.boardTop)
         }

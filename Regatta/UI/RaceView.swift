@@ -217,7 +217,7 @@ struct RaceView: View {
     /// open the board (#268).
     private var hudView: some View {
         HUDView(hud: session.hud, notice: session.notice, heading: { [scene = session.scene] in scene.viewHeading },
-                isPaused: session.isPaused || session.driver.isFrozen,
+                isPaused: session.isPaused, isFrozen: session.driver.isFrozen,
                 showsLeaderboard: session.controls.showsLeaderboard,
                 isLeaderboardExpanded: session.isLeaderboardExpanded,
                 toggleLeaderboard: { [session] in session.toggleLeaderboard() })
