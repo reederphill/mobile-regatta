@@ -50,7 +50,8 @@ extension ServiceEndpoint {
     }
 
     /// `POST /dev/situation` (dev only): puts the test account in the contract situation asked for, and says how
-    /// the client signs in for it. Only the suites this server serves: Identity and Terms (#145), Queue (#146).
+    /// the client signs in for it. Only the suites this server serves: Identity and Terms (#145), Queue (#146),
+    /// RaceSession (#148).
     func arrange(_ request: DevSituationRequest) async -> HTTPReply {
         let current = config.termsVersion
         func signedIn(accepting version: Int?, multiplayerRestricted: Bool = false,
@@ -67,6 +68,24 @@ extension ServiceEndpoint {
         let player = request.teamPlayerID
         if request.service == "QueueService", matchmaker == nil {
             return HTTPReply(.notFound, error: "this server has no queue")
+        }
+        if request.service == "RaceSessionService", matchmaker == nil || lifecycle == nil {
+            return HTTPReply(.notFound, error: "this server has no races")
+        }
+        let account = AccountPlayer(teamPlayerID: request.teamPlayerID, gamePlayerID: request.gamePlayerID, alias: "Contract")
+        let lifecycle = lifecycle
+        /// A race of hers, arranged on the lifecycle, then `then` with its id.
+        func raced(graceTicks: Int? = nil, pastGun: Bool = false,
+                   then: @escaping (RaceLifecycle, UUID) async -> Void = { _, _ in }) async -> HTTPReply {
+            await signedIn(accepting: current) { _ in
+                guard let lifecycle else { return }
+                do {
+                    let race = try await lifecycle.arrangeRace(for: account, graceTicks: graceTicks, pastGun: pastGun)
+                    await then(lifecycle, race)
+                } catch {
+                    FileHandle.standardError.write(Data("RegattaServer: can't arrange a race: \(error)\n".utf8))
+                }
+            }
         }
         switch (request.service, request.situation) {
         case ("IdentityService", "signedOut"): return HTTPReply(.ok, json: DevSituationResponse(signIn: false))
@@ -88,6 +107,14 @@ extension ServiceEndpoint {
         case ("QueueService", "notSignedIn"): return HTTPReply(.ok, json: DevSituationResponse(signIn: false))
         case ("QueueService", "termsNotAccepted"): return await signedIn(accepting: nil)
         case ("QueueService", "multiplayerRestricted"): return await signedIn(accepting: current, multiplayerRestricted: true)
+        // The race session (#148): a fleet locked by the queue, or a race of hers arranged on the lifecycle: past the gun
+        // with her boat dropped (to rejoin), closing a second after it starts (every human gone, unrated), or cancelled.
+        case ("RaceSessionService", "fleetLocked"): return await signedIn(accepting: current) { await $0.arrangeLock(account) }
+        case ("RaceSessionService", "inProgress"): return await raced(pastGun: true)
+        case ("RaceSessionService", "closed"): return await raced(graceTicks: 1)
+        case ("RaceSessionService", "cancelled"):
+            return await raced { lifecycle, race in await lifecycle.cancel(race, reason: .unspecified) }
+        case ("RaceSessionService", "noRace"): return await signedIn(accepting: current)
         default:
             return HTTPReply(.notFound, error: "\(request.service).\(request.situation) isn't served yet")
         }

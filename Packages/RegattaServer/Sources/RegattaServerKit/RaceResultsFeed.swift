@@ -48,10 +48,11 @@ public struct RaceSummary: Codable, Sendable, Equatable {
                     rated: rated)
     }
 
-    /// The lobby's line at the close (#36, owner 2026-10-09: one "X won" line): the first row's sailor, unless nobody
-    /// sailed it to the end (a RET at the top).
+    /// The lobby's line at the close (#36, owner 2026-10-09: one "X won" line): the first row's sailor, if she finished
+    /// or was placed by distance; none when nobody raced (an all-gone close before anyone started).
     public var winnerLine: SystemLine? {
-        guard let first = rows.first, first.code != ResultCode.ret.rawValue, roster.indices.contains(first.seat) else { return nil }
+        let placed = [ResultCode.finished.rawValue, ResultCode.byDistance.rawValue]
+        guard let first = rows.first, placed.contains(first.code), roster.indices.contains(first.seat) else { return nil }
         return .winner(venue: venue, nickname: roster[first.seat].name)
     }
 

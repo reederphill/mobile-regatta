@@ -321,15 +321,15 @@ public actor RaceLifecycle: RaceLifecycleProviding {
     }
 
     /// The lobby's lines from the close: one "X won" per race (#36). #152's lobby takes this stream; newest 64 kept.
-    public nonisolated func systemLines() -> AsyncStream<SystemLine> {
+    /// Every line from now on.
+    public func systemLines() -> AsyncStream<SystemLine> {
         let (stream, continuation) = AsyncStream<SystemLine>.makeStream(bufferingPolicy: .bufferingNewest(64))
         let token = UUID()
         continuation.onTermination = { _ in Task { await self.unwatchLines(token) } }
-        Task { await self.watchLines(token, continuation) }
+        lineWatchers[token] = continuation
         return stream
     }
 
-    private func watchLines(_ token: UUID, _ continuation: AsyncStream<SystemLine>.Continuation) { lineWatchers[token] = continuation }
     private func unwatchLines(_ token: UUID) { lineWatchers[token] = nil }
 
     // MARK: The close
@@ -396,6 +396,25 @@ public actor RaceLifecycle: RaceLifecycleProviding {
                 continuation.finish()
             }
         }
+    }
+
+    // MARK: Dev arrangements (#148)
+
+    /// Dev only (`POST /dev/situation`): a race for `player` alone in seat 0, bots to 4 boats, a `startSequenceTicks`
+    /// sequence, started like a queue race; returns once it is past the gun if `pastGun`. Her seat is never joined, so it
+    /// drops a second after the start and the all-gone grace (`graceTicks`) closes the race.
+    public func arrangeRace(for player: AccountPlayer, startSequenceTicks: Int = 15, graceTicks: Int? = nil,
+                            pastGun: Bool = false) async throws -> UUID {
+        let setup = try RaceSetup(raceSeed: RaceSeed(0x148), seats: [.human, .bot, .bot, .bot], laps: 1, startSequenceTicks: startSequenceTicks)
+        var options = settings.hostOptions
+        if let graceTicks { options.allGone.graceTicks = graceTicks }
+        let session = session(id: UUID(), setup: setup, windSeed: WindSeed(0x148), names: [player.alias], options: options)
+        try await launch(session, players: [player.teamPlayerID], venue: "Dev")
+        if pastGun {
+            let deadline = ContinuousClock.now + .seconds(10)
+            while await session.host.tick < 0, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        }
+        return session.id
     }
 
     /// Server shutdown: the streams end.

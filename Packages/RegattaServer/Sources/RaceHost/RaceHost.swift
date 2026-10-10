@@ -69,6 +69,17 @@ public struct LiveResults: Hashable, Sendable {
     public var turnsServed: [Int]
     /// The final results, once closed.
     public var results: RaceResults?
+
+    public init(tick: Int, expectedCloseTick: Int, finishers: [SeatResult], sailing: [Int], incidents: IncidentIndex, turnsServed: [Int],
+                results: RaceResults?) {
+        self.tick = tick
+        self.expectedCloseTick = expectedCloseTick
+        self.finishers = finishers
+        self.sailing = sailing
+        self.incidents = incidents
+        self.turnsServed = turnsServed
+        self.results = results
+    }
 }
 
 /// The race server's core (#65): one authoritative `Race`, stepped at 30 Hz on the injected clock, with

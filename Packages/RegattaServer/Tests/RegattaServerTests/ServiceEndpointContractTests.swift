@@ -10,8 +10,8 @@ import Testing
 /// started in process on a free port, reached over its `/service` WebSocket by `WebSocketServiceConnector`, which
 /// arranges each situation with `POST /dev/situation`. `CONTRACT_ENDPOINT` runs them against a server started elsewhere.
 @Suite(.timeLimit(.minutes(2))) struct ServiceEndpointContractTests {
-    /// The suites the server serves as of #146.
-    static let served: [ContractSuiteID] = [.identity, .terms, .queue]
+    /// The suites the server serves as of #148.
+    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession]
 
     /// A dev config the suites can run on: the Terms suite's `versionBumped` situation needs an older version to have
     /// accepted; the Queue suite's `joinable` waits for fleet lock, so it locks 3 s after the oldest join (long enough

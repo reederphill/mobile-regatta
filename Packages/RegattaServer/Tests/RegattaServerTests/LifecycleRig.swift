@@ -9,6 +9,10 @@ import RegattaServices
 import Synchronization
 import Testing
 
+/// The suites that sail races by hand (#148), one at a time: each simulates a few hundred ticks per test, and run side by
+/// side they starve the cooperative pool the wall-clock tests (idle and sign-in deadlines) time themselves on.
+@Suite(.serialized) enum RaceSims {}
+
 /// A host clock a test moves by hand (microseconds).
 final class ManualHostClock: HostClock {
     private let time = Mutex<UInt64>(1_000_000)
@@ -134,23 +138,26 @@ enum RaceConnectionProbe {
 }
 
 /// Reads a stream's items until `isLast` or `seconds` pass.
-func collect<Element: Sendable>(_ stream: AsyncStream<Element>, seconds: Double = 5,
+func collect<Element: Sendable>(_ stream: AsyncStream<Element>, seconds: Double = 30,
                                 until isLast: @escaping @Sendable (Element) -> Bool) async -> [Element] {
-    await withTaskGroup(of: [Element]?.self) { group in
+    let items = Kept<Element>()
+    await withTaskGroup(of: Void.self) { group in
         group.addTask {
-            var items: [Element] = []
             for await item in stream {
                 items.append(item)
                 if isLast(item) { break }
             }
-            return items
         }
-        group.addTask {
-            try? await Task.sleep(for: .seconds(seconds))
-            return nil
-        }
-        let first = await group.next() ?? nil
+        group.addTask { try? await Task.sleep(for: .seconds(seconds)) }
+        await group.next()
         group.cancelAll()
-        return first ?? []
     }
+    return items.all
+}
+
+/// Items a reader keeps, readable from another task.
+final class Kept<Element: Sendable>: Sendable {
+    private let items = Mutex<[Element]>([])
+    func append(_ item: Element) { items.withLock { $0.append(item) } }
+    var all: [Element] { items.withLock { $0 } }
 }

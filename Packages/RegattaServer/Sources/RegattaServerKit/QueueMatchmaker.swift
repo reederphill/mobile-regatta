@@ -395,6 +395,13 @@ public actor QueueMatchmaker {
         pushAll()
     }
 
+    /// Dev only (`POST /dev/situation`, #148): the queue locks now with the player in it, so the RaceSession contract's
+    /// `fleetLocked` has a hand-off without waiting out `lockAfter`.
+    public func arrangeLock(_ player: AccountPlayer) async {
+        if !book.contains(player.teamPlayerID) { book.add(player, at: now()) }
+        await lockFleet(at: now())
+    }
+
     /// Dev only: an online racing suspension until `until` (Unix seconds), nil for permanent. #26 owns the real store.
     public func arrangeSuspension(_ id: String, until: Int64?) {
         suspensions[id] = .some(until)
