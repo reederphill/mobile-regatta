@@ -35,6 +35,9 @@ struct FreezeTickRow: Decodable {
     var ghostsInView: Int?
     /// At least this many boats racing in view, you among them.
     var racingInView: Int?
+    /// Your place in the standings (`Race.place(of:)`, from 1) inside these bounds, both included: the live leaderboard's
+    /// compact lines (the leader, the boat ahead, you, the boat behind) show a gap to the leader only off first place.
+    var place: [Int]?
     /// At least this many boats in view casting a backwind wedge at half strength or more: sailing upwind, sail working.
     /// As the app draws it (`BoatEffects`): not a ghost, her cone's presence (none running, less across a reach) times
     /// the class's floor factor times her sail's backwind level (#437: a downwind leg after the first finish has none).
@@ -183,6 +186,7 @@ enum FreezeTicks {
         if let n = row.racingInView, inView.filter({ !race.boats[$0].isGhost && race.boats[$0].status == .racing }).count < n {
             return false
         }
+        if let bounds = row.place, bounds.count == 2, !(bounds[0]...bounds[1]).contains(race.place(of: me)) { return false }
         if let n = row.sailsWorkingInView, inView.filter({ wedgePresence(race, seat: $0) >= 0.5 }).count < n { return false }
         if let kinds = row.glows {
             guard !boat.isGhost else { return false }

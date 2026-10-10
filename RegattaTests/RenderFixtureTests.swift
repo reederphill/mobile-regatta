@@ -228,7 +228,8 @@ import UIKit
         }
     }
 
-    /// The live leaderboard fixtures (#268): compact through every filter, and tapped open, on `hud-racing`'s tick.
+    /// The live leaderboard fixtures (#268): compact through every filter, and tapped open, on `hud-racing`'s tick (its
+    /// row in scripts/fixture-freeze-ticks.json: racing on the first beat among the fleet, you 3rd to 6th, #467).
     /// The board is opt-in, so #114's HUD fixtures draw without it and keep their references.
     @Test func leaderboardFixturesShowTheBoard() throws {
         let (compact, log) = try RenderFixture.load(named: "hud-leaderboard", in: Self.fixtures)
@@ -236,15 +237,29 @@ import UIKit
         #expect(session.controls.showsLeaderboard && !session.isLeaderboardExpanded)
         let board = session.hud.leaderboard
         #expect(board.isVisible)
-        let lines = board.entries(expanded: false).map { entry -> String in
+        // The board's shape, not its numbers, so a re-record (`scripts/record-fixtures.sh`) needs no edit here: the whole
+        // fleet ranked, and compact lines of the leader first, the boat ahead of you, you (starred, not leading, so the
+        // board shows a gap) and the boat behind, in place order, with a separator wherever the places skip.
+        #expect(board.rows.count == session.driver.renderWorld.boats.count)
+        let me = try #require(board.me, "you're in the standings")
+        #expect(me.place > 1, "you lead at the fixture's tick, so the board shows no gap to the leader")
+        let entries = board.entries(expanded: false)
+        let rows = entries.compactMap { entry -> LeaderboardState.Row? in
+            if case .row(let row) = entry { row } else { nil }
+        }
+        let lines = entries.map { entry -> String in
             switch entry {
             case .row(let row): "\(row.place):\(row.gap.text)\(row.isMe ? "*" : "")"
             case .separator: "sep"
             }
         }
-        // The log's own seat, 3rd of 8 at the tick (#466's fleet scene): the leader, the boat ahead, you and the boat
-        // behind, with no skip. A re-record moves these; read them off this test's failure.
-        #expect(lines == ["1:Leader", "2:+12 m", "3:+17 m*", "4:+56 m"])
+        let wanted = Set([1, me.place - 1, me.place, me.place + 1].filter { (1...board.rows.count).contains($0) })
+        #expect(rows.map(\.place) == wanted.sorted(), "\(lines)")
+        #expect(rows.first?.place == 1 && rows.first?.gap == .leader && rows.filter(\.isMe).map(\.place) == [me.place], "\(lines)")
+        let gaps = rows.dropFirst().map { row -> Int? in if case .metres(let metres) = row.gap { metres } else { nil } }
+        #expect(gaps.allSatisfy { $0 != nil } && gaps.map { $0 ?? 0 } == gaps.map { $0 ?? 0 }.sorted(), "\(lines)")
+        let separators = entries.indices.filter { if case .separator = entries[$0] { true } else { false } }.count
+        #expect(separators == zip(rows, rows.dropFirst()).filter { $1.place > $0.place + 1 }.count, "\(lines)")
 
         for vision in VisionFilter.allCases where vision != .none {
             let (fixture, _) = try RenderFixture.load(named: "hud-leaderboard-\(vision.rawValue)", in: Self.fixtures)

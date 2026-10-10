@@ -6,6 +6,13 @@
         "afterFirstFinish": true, "racing": true, "ghostsInView": 1, "racingInView": 3, "sailsWorkingInView": 1
     },
     {
+        "fixtures": ["hud-racing", "hud-instruments", "hud-leaderboard", "hud-leaderboard-deuteranopia",
+                     "hud-leaderboard-greyscale", "hud-leaderboard-protanopia", "hud-leaderboard-tritanopia",
+                     "hud-leaderboard-washout", "hud-leaderboard-expanded"],
+        "log": "fleet.racelog.json",
+        "leg": 0, "racing": true, "racingInView": 5, "place": [3, 6]
+    },
+    {
         "fixtures": ["rules-call", "rules-call-deuteranopia", "rules-call-greyscale", "rules-call-protanopia",
                      "rules-call-tritanopia", "rules-call-washout"],
         "log": "rules-call.racelog.json",
