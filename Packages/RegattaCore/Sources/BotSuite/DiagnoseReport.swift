@@ -220,11 +220,14 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
 
     // MARK: - Text
 
-    /// The tables as text: what `regatta-botsuite --diagnose` prints after the gate.
+    /// The tables as text: what `regatta-botsuite --diagnose` prints after the gate. A run of one tier prints that
+    /// tier's rows and leaves out `all`'s, which are the same.
     public var lines: [String] {
-        let tiers = starts.map(\.tier)
+        let single = starts.count == 2
+        let tiers = starts.map(\.tier).filter { !single || $0 != Self.all }
+        func printed<Row>(_ rows: [Row], _ tier: KeyPath<Row, String>) -> [Row] { rows.filter { tiers.contains($0[keyPath: tier]) } }
         var lines = ["diagnose: \(races) races; starts by tier (on time is within \(Int(LateCause.onTimeSeconds)) s of the gun):"]
-        lines += table([["tier", "boats", "on time", "> 5 s", "> 10 s", "never", "mean start s"]] + starts.map {
+        lines += table([["tier", "boats", "on time", "> 5 s", "> 10 s", "never", "mean start s"]] + printed(starts, \.tier).map {
             [$0.tier, "\($0.boats)", fixed($0.onTimeShare, 3), fixed($0.over5Share, 3), fixed($0.over10Share, 3),
              "\($0.neverStarted)", text($0.meanStartSeconds, 2)]
         })
@@ -244,7 +247,7 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
         lines.append("penalty episodes; timings are median / p90 seconds over the served one-turn episodes (n): call to 30° in, "
             + "turning, served to 90 % of target speed, total; then every served episode's seconds a turn")
         func spread(_ spread: Spread?) -> String { spread.map { "\(fixed($0.median, 1)) / \(fixed($0.p90, 1))" } ?? "-" }
-        let shown = penaltyEpisodes.filter { $0.tier == Self.all || $0.phase == Self.all }
+        let shown = penaltyEpisodes.filter { $0.tier == Self.all || ($0.phase == Self.all && !single) }
         func name(_ row: EpisodeRow) -> String {
             row.phase == Self.all ? row.tier : PenaltyPhase(rawValue: row.phase)?.label ?? row.phase
         }
@@ -265,14 +268,14 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
         lines += table(resetRows)
         lines.append("turns owed a boat a race, the share of boats owing 1, 2, 3 or more; pre-start episodes a boat, and those "
             + "opened before the gun by the seconds left to it at the call (after: after the gun, not yet started)")
-        lines += table([["tier", "turns/boat", ">= 1", ">= 2", ">= 3", "pre-start/boat", "> 40 s", "40-20 s", "20-10 s", "< 10 s", "after"]] + penaltiesOwed.map {
+        lines += table([["tier", "turns/boat", ">= 1", ">= 2", ">= 3", "pre-start/boat", "> 40 s", "40-20 s", "20-10 s", "< 10 s", "after"]] + printed(penaltiesOwed, \.tier).map {
             [$0.tier, fixed($0.turnsPerBoat), fixed($0.owingOneShare, 3), fixed($0.owingTwoShare, 3), fixed($0.owingThreeShare, 3),
              fixed($0.preStartEpisodesPerBoat, 3), "\($0.secondsToGun.over40)", "\($0.secondsToGun.from40To20)",
              "\($0.secondsToGun.from20To10)", "\($0.secondsToGun.under10)", "\($0.secondsToGun.afterGun)"]
         })
         lines.append("pre-start calls a boat by rule (all but 21.2, called while she turned a penalty; all):")
         let rules = RacingRule.allCases.map(\.rawValue).filter { rule in preStartCalls.contains { $0.calls[rule] != nil } }
-        lines += table([["tier"] + rules + ["but 21.2", "all"]] + preStartCalls.map { row in
+        lines += table([["tier"] + rules + ["but 21.2", "all"]] + printed(preStartCalls, \.tier).map { row in
             [row.tier] + rules.map { fixed(row.perBoat[$0] ?? 0, 3) } + [fixed(row.notTurningPerBoat, 3), fixed(row.allPerBoat, 3)]
         })
         lines.append("non-finishers by cause: per 1000 boats (boats; median metres to go)")

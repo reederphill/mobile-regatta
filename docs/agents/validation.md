@@ -26,6 +26,16 @@
 - Downstream reach: a change to `WorldSnapshot`, the snapshot/wire code or the protocol runs `check.sh --all` once (RegattaClient's resync tests caught #377's wire merge only in CI).
 - Per-tick or per-frame cost: a change adding sim work per tick or a scene layer runs the headless 16-boat pace probe in Debug (scene hidden and shown) against main before the push (#377: ribbons built under `-hideScene` failed `testFifteenBotRaceRunsFullLength` in CI).
 
+## Bot diagnosis (#471)
+
+`regatta-botsuite --diagnose` adds tables after the gate (and a `diagnose` key to `--json`): late starters by primary cause, penalty episodes, pre-start calls by rule, non-finishers by cause. Off by default; the races, gates and the rest of the report are the same with it or without (`BotSuiteDiagnoseTests`). Causes and their priority order: the doc comments in `Sources/BotSuite/Diagnose.swift`.
+
+- Build once per change, the release binary in check.sh's scratch dir: `scripts/heavy.sh swift build -c release --product regatta-botsuite --package-path Packages/RegattaCore --scratch-path .build/check/RegattaCore` (about a minute).
+- Starts and pre-start fouls (the start gate's own cut, 160 all-National 10-boat races, about 2 min): `scripts/heavy.sh .build/check/RegattaCore/release/regatta-botsuite --profile-mix live --tier-mix national --fleet-size 10 --seeds 16 --diagnose`. Read: `on time` and `mean start s` (the gate's `start:` line), then the row of the cause the change is for in `late starters, more than 10 s` (per 1000 boats; 16 boats are 10), and `pre-start calls a boat by rule`.
+- Penalty serving (80 all-Club 10-boat races, about 65 s): the same with `--tier-mix club --seeds 8`. Read: `penalty episodes` (seconds from the call to 30° in, turning, back to speed), the resets an episode by cause, `2+ calls`, `> 30 s`, and `non-finishers by cause`.
+- Exit 1 is the gate missing, as without the flag: the tables are printed either way. 160 races read on time to about ±0.015; a cause row under 20 per 1000 is a few boats.
+- The matrix takes it too (`scripts/bot-matrix.sh ... --diagnose`): the flag goes to the branch's run alone, the tables land in `.build/bot-matrix/branch.txt`.
+
 ## Local preview (visual changes)
 
 - A change to anything drawn attaches a local screenshot before the push: build the app (`scripts/heavy.sh --simulator xcodebuild build … -derivedDataPath .build/preview-dd`), `xcrun simctl install`, then `xcrun simctl launch --terminate-running-process <udid> com.phillreeder.regatta -demo -seed <n> -startSeconds 10 -timescale 4` (a live race on the default class) or `-uitesting -fixture <name>` with `SIMCTL_CHILD_REGATTA_FIXTURE_DIR` set to a copy of the fixtures folder, and `xcrun simctl io <udid> screenshot <file>` (take a second one if the first catches the launch).
