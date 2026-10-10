@@ -108,7 +108,7 @@ public enum BotRaceHarness {
         var tally = RaceTally(race: race)
         // #355: in a hunters race, every rule call (offender and victim), and the ticks each hunter turned at a boat she hunted.
         let hunterSeats = cell.profileMix == .hunters ? profiles.indices.filter { profiles[$0] == .hunter } : []
-        var hunts = cell.profileMix == .hunters ? HuntTally(hunters: hunterSeats) : nil
+        var hunts = cell.profileMix == .hunters ? HuntTally(hunters: hunterSeats, race: race) : nil
         // #105: in a race with the tactician and the baseline, each pair's lead at their first cross after the gun.
         var crosses = StartCrossTally(race: race, tacticians: profiles.indices.filter { profiles[$0] == .tactician },
                                       baselines: profiles.indices.filter { profiles[$0] == .baseline })
@@ -148,6 +148,10 @@ public enum BotRaceHarness {
                                 timings: TickTimings(samples: tickMs, cpuSeconds: threadCPUSeconds() - cpuStart))
         result.ruleCalls = hunts?.calls
         result.hunterTurnTicks = hunts?.turnTicks
+        result.hunterTurns = hunts.map {
+            HunterTurns(radians: $0.turnRadians, ticksOverCourseChangeRate: $0.turnTicksOverRate, peakRate: $0.turnPeakRate,
+                        courseChangeRate: $0.courseChangeRate)
+        }
         result.rule161 = tally.rule161
         result.skillGap?.startGainLengths = crosses?.meanLead
         return result
@@ -188,13 +192,25 @@ public enum BotRaceHarness {
 /// A hunters race's own tally (#355): every rule call, offender and victim, and the ticks a hunter held her hunting
 /// branch's turn at a boat (`BotDriver.isHuntingTurn`: a luff, or a turn bringing a boat that must keep clear of her
 /// closer), racing: so a scan of the mix can tell she hunted at all. Her other ticks (holding course, keeping clear,
-/// tacking, rounding) aren't counted.
+/// tacking, rounding) aren't counted. And how she turned on those ticks (#472), as rule 16.1's course-change test reads
+/// a turn (`EscapeSimulation`: her heading's change over the tick, a second's worth): how far in all, the ticks faster
+/// than the rules' rate (`incidents.escape.changesCourse`), and the fastest.
 struct HuntTally {
     let hunters: [Int]
     private(set) var calls: [RuleCallRecord] = []
     private(set) var turnTicks = 0
+    private(set) var turnRadians = 0.0
+    private(set) var turnTicksOverRate = 0
+    private(set) var turnPeakRate = 0.0
+    /// Each hunter's heading after the tick before.
+    private var headings: [Double]
+    let courseChangeRate: Double?
 
-    init(hunters: [Int]) { self.hunters = hunters }
+    init(hunters: [Int], race: Race) {
+        self.hunters = hunters
+        headings = hunters.map { race.boats[$0].heading }
+        courseChangeRate = race.rules.incidents.escape.changesCourse
+    }
 
     /// After a tick: its events, and the hunters' decisions held through it (`controllers`).
     mutating func record(_ race: Race, events: [RaceEvent], controllers: SeatControllers) {
@@ -202,8 +218,16 @@ struct HuntTally {
             guard case .ruleCall(let call) = event.kind else { continue }
             calls.append(RuleCallRecord(rule: call.rule.rawValue, offender: call.offender, victim: call.victim, tick: call.tick))
         }
-        for seat in hunters where race.boats[seat].status == .racing && controllers[seat].driver?.isHuntingTurn == true {
+        for (index, seat) in hunters.enumerated() {
+            let heading = race.boats[seat].heading
+            defer { headings[index] = heading }
+            guard race.boats[seat].status == .racing, controllers[seat].driver?.isHuntingTurn == true else { continue }
+            let turned = abs(wrapAngle(heading - headings[index]))
+            let rate = turned * Double(Race.tickRate)
             turnTicks += 1
+            turnRadians += turned
+            turnPeakRate = max(turnPeakRate, rate)
+            if let courseChangeRate, rate > courseChangeRate { turnTicksOverRate += 1 }
         }
     }
 }
