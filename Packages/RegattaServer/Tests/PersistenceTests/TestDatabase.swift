@@ -26,6 +26,11 @@ enum TestDatabase {
 
     /// Runs `body` against a fresh, empty schema of its own, dropped afterwards, so the tests run in parallel.
     static func withFreshSchema(_ body: @Sendable (Database) async throws -> Void) async throws {
+        try await withFreshSchema { database, _ in try await body(database) }
+    }
+
+    /// As `withFreshSchema`, also handing `body` the schema's configuration, to open a second pool on it (a restart).
+    static func withFreshSchema(_ body: @Sendable (Database, DatabaseConfiguration) async throws -> Void) async throws {
         guard let url else {
             Issue.record("\(urlKey) is unset but \(requireKey)=1: the persistence job must name its Postgres service")
             return
@@ -34,10 +39,11 @@ enum TestDatabase {
         let schema = "t_" + UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "")
         try await Database.withDatabase(base) { admin in
             try await admin.client.query(PostgresQuery(unsafeSQL: "CREATE SCHEMA \(schema)"))
-            var scoped = base
-            scoped.searchPath = schema
+            var schemaConfiguration = base
+            schemaConfiguration.searchPath = schema
+            let scoped = schemaConfiguration
             do {
-                try await Database.withDatabase(scoped, body)
+                try await Database.withDatabase(scoped) { try await body($0, scoped) }
             } catch {
                 _ = try? await admin.client.query(PostgresQuery(unsafeSQL: "DROP SCHEMA \(schema) CASCADE"))
                 throw error

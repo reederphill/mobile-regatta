@@ -19,7 +19,7 @@ public struct Migration: Sendable, Equatable {
 
 public extension Migration {
     /// The server's schema, in order (ADR 0009). A released migration never changes: a change is a new one.
-    static let all: [Migration] = [.players, .sessions, .dataFiles, .raceRegistry, .raceLogs, .identity, .raceResults]
+    static let all: [Migration] = [.players, .sessions, .dataFiles, .raceRegistry, .raceLogs, .identity, .raceResults, .restrictions]
 }
 
 /// Runs the numbered migrations against a database and records each applied one in `schema_migrations`
