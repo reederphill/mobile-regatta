@@ -11,6 +11,8 @@ import RegattaProtocol
 ///    `UpdateRequired` and the connection closes; otherwise `HelloAck`. Dev auth (`SeatAuthPolicy.dev`) asks nothing more.
 /// 2. `JoinRace`: the race token must be signed by this server, unexpired, and name a running race's
 ///    human seat that no connection holds. Then the race's host takes over: `RaceStart`, and the race.
+///    A good token for a race that isn't running gets `RaceCancelled` (#30, #148: one a restart lost, or cancelled),
+///    or `RaceClosed` if the lifecycle closed it, and the connection closes normally.
 /// 3. Everything after goes to `RaceHost.receive(_:from:)`.
 ///
 /// Anything out of turn, or a bad token, closes the connection with a policy-violation close: the
@@ -27,16 +29,19 @@ struct SeatConnection {
     let config: ServerConfig
     let registry: RaceRegistry
     let transport: WebSocketSeatTransport
+    /// Races that aren't running: closed or cancelled (#148). Without one, every such race is cancelled.
+    let lifecycle: RaceLifecycle?
     /// Unix seconds now, for token expiry.
     let now: @Sendable () -> Int64
     private(set) var phase = Phase.awaitingHello
     private var seq: UInt32 = 1
 
-    init(config: ServerConfig, registry: RaceRegistry, transport: WebSocketSeatTransport,
+    init(config: ServerConfig, registry: RaceRegistry, transport: WebSocketSeatTransport, lifecycle: RaceLifecycle? = nil,
          now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970) }) {
         self.config = config
         self.registry = registry
         self.transport = transport
+        self.lifecycle = lifecycle
         self.now = now
     }
 
@@ -94,13 +99,24 @@ struct SeatConnection {
         } catch {
             return refuse("race token \(error)")
         }
-        guard let session = await registry.session(token.raceID) else { return refuse("no such race") }
+        guard let session = await registry.session(token.raceID) else { return await notRunning(token.raceID) }
         do {
             try await session.join(seat: token.seat, transport: transport)
         } catch {
             return refuse("seat \(token.seat): \(error)")
         }
         phase = .seated(session, seat: token.seat)
+    }
+
+    /// The token's race isn't running: closed, or cancelled (#30).
+    private mutating func notRunning(_ race: UUID) async {
+        if await lifecycle?.endedState(of: race) == .closed {
+            send(.raceClosed(RaceClosed(results: .none)))
+        } else {
+            send(.raceCancelled(RaceCancelled(reason: .unspecified)))
+        }
+        transport.close(code: .normalClosure, reason: nil)
+        phase = .closed
     }
 
     private mutating func updateRequired(_ reason: UpdateRequired.Reason) {

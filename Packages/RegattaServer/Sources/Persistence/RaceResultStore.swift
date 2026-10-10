@@ -38,6 +38,15 @@ public struct StoredRaceResult: Sendable, Equatable {
     public let incidents: Data
     public let rated: Bool
     public let endedAt: Date
+
+    public init(raceID: UUID, seat: Int?, results: Data, incidents: Data, rated: Bool, endedAt: Date) {
+        self.raceID = raceID
+        self.seat = seat
+        self.results = results
+        self.incidents = incidents
+        self.rated = rated
+        self.endedAt = endedAt
+    }
 }
 
 /// Closed races' results (#148, ADR 0009): written once with the close, never for a cancelled race. A player's last

@@ -105,13 +105,16 @@ public struct ServiceEndpoint: Sendable {
     public let backends: ServiceBackends
     /// The global queue (#146), when the server has one: the server drives it, and `POST /dev/situation` arranges it.
     public let matchmaker: QueueMatchmaker?
+    /// The queue's races from fleet lock to the close (#148): race connections ask it about races that aren't running.
+    public let lifecycle: RaceLifecycle?
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
-                matchmaker: QueueMatchmaker? = nil) {
+                matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
         self.matchmaker = matchmaker
+        self.lifecycle = lifecycle
     }
 
     public var store: any AccountStore { sessions.store }

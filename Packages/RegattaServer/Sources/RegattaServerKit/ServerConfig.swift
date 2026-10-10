@@ -1,6 +1,7 @@
 import Crypto
 import Foundation
 import Persistence
+import RaceHost
 import RegattaProtocol
 
 /// The deployment the server runs in: the `ENV` variable. Only `dev` exists for now (#67): the server has
@@ -73,6 +74,7 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `REGATTA_APPLE_ROOT_PEM` | none | a PEM file of the certificates Game Center's key must chain to; unset in dev = dev verifier |
 /// | `REGATTA_DATABASE_URL` | none | Postgres (ADR 0009); unset in dev = accounts in memory |
 /// | `QUEUE_LOCK_SECONDS` | `60` | seconds from the oldest queued player's join to fleet lock (#146); short for the contract runner |
+/// | `SIMULTANEOUS_LOSS_POLICY` | `cancel` | a mass drop (G3): `cancel` (no results, no rating) or `ret` (RET in leave order, rated per #30) (#148) |
 public struct ServerConfig: Sendable {
     public var environment: ServerEnvironment
     public var auth: SeatAuthPolicy
@@ -90,6 +92,8 @@ public struct ServerConfig: Sendable {
     public var connectionLimits = ConnectionLimits()
     /// The queue and the races it locks (#146).
     public var queue = QueueSettings()
+    /// Races from fleet lock to the close (#148): the all-gone rules and the mass-drop policy.
+    public var lifecycle = RaceLifecycleSettings()
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
@@ -125,6 +129,13 @@ public struct ServerConfig: Sendable {
                                   serverBuild: env["SERVER_BUILD"] ?? "dev", maxRaces: maxRaces)
         config.identity.termsVersion = try int("TERMS_VERSION", default: 1, in: 1...1_000_000)
         config.queue.lockAfter = TimeInterval(try int("QUEUE_LOCK_SECONDS", default: 60, in: 1...600))
+        if let policy = env["SIMULTANEOUS_LOSS_POLICY"] {
+            guard let value = SimultaneousLossPolicy(rawValue: policy) else {
+                throw .invalid(variable: "SIMULTANEOUS_LOSS_POLICY", value: policy,
+                               expected: SimultaneousLossPolicy.allCases.map(\.rawValue).joined(separator: " or "))
+            }
+            config.lifecycle.allGone.simultaneousLossPolicy = value
+        }
         if let bundle = env["REGATTA_BUNDLE_ID"], !bundle.isEmpty { config.identity.bundleID = bundle }
         if let team = env["REGATTA_TEAM_ID"], !team.isEmpty { config.identity.teamID = team }
         if let path = env["REGATTA_APPLE_ROOT_PEM"], !path.isEmpty {

@@ -119,6 +119,7 @@ public final class RegattaHTTPServer: Sendable {
         sweeper.cancel()
         await services.matchmaker?.stop()
         await registry.closeAll()
+        await services.lifecycle?.stop()
         task.cancel()
         _ = await task.value
     }
@@ -207,7 +208,8 @@ public final class RegattaHTTPServer: Sendable {
     /// A race connection: each binary message through `SeatConnection`, in order, until either side closes.
     private static func serveRace(_ channel: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>, handler: RequestHandler) async throws {
         let transport = WebSocketSeatTransport(channel: channel.channel)
-        var connection = SeatConnection(config: handler.config, registry: handler.registry, transport: transport)
+        var connection = SeatConnection(config: handler.config, registry: handler.registry, transport: transport,
+                                        lifecycle: handler.services?.lifecycle)
         // A connection that never sends Hello and JoinRace mustn't hold its socket and task for ever.
         let timeout = handler.config.handshakeTimeout
         let handshakeDeadline = Task {

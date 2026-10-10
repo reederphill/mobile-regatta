@@ -47,6 +47,28 @@ public struct RaceOutcome: Hashable, Sendable {
     public var digest: UInt64
     /// Every input the host applied, bots' included, and every seat event, at the ticks they took effect.
     public var log: RaceLog
+    /// `Race.results`: every seat's result, if the race ended on its own or every human went (#86); nil if it was
+    /// closed where it stood before it was over (a dev close, a shutdown).
+    public var results: RaceResults? = nil
+}
+
+/// The race's results so far, as the host has them (#148): what the results stream is built from. No clock and no
+/// randomness: the same race gives the same reading at the same tick.
+public struct LiveResults: Hashable, Sendable {
+    /// The last tick simulated.
+    public var tick: Int
+    /// `Race.expectedCloseTick`.
+    public var expectedCloseTick: Int
+    /// The finishers so far, in finish order, each with her finish tick.
+    public var finishers: [SeatResult]
+    /// The seats still sailing: neither finished nor disqualified. Empty once closed.
+    public var sailing: [Int]
+    /// The race's incident index (`Race.incidents`).
+    public var incidents: IncidentIndex
+    /// Penalty turns each seat has completed (`penaltyServed` events), by seat.
+    public var turnsServed: [Int]
+    /// The final results, once closed.
+    public var results: RaceResults?
 }
 
 /// The race server's core (#65): one authoritative `Race`, stepped at 30 Hz on the injected clock, with
@@ -124,6 +146,16 @@ public actor RaceHost {
     private var goneCount = 0
     private var allGoneFired = false
     public private(set) var outcome: RaceOutcome?
+    /// Set when the race was cancelled (#148): it never steps again and has no results.
+    public private(set) var cancelled: RaceCancelled.Reason?
+    /// Closed or cancelled.
+    public var isEnded: Bool { outcome != nil || cancelled != nil }
+    /// Each finisher's result row as she finished, in finish order (#148).
+    private var finishers: [SeatResult] = []
+    private var turnsServed: [Int]
+    /// Moves on each event that changes the results so far (a finish, a call, a served turn...): the results stream
+    /// reads `liveResults()` when it moves (#148).
+    public private(set) var resultsVersion = 0
 
     /// A host for a new race, at the start of its sequence now. Seats the setup marks `.bot` are sailed
     /// by RegattaBots; the rest wait `firstInputHoldTicks` for a player to attach, then are dropped until
@@ -151,6 +183,7 @@ public actor RaceHost {
         seats = Array(repeating: Seat(caps: options.caps), count: race.boats.count)
         humanSeats = setup.seats.indices.filter { setup.seats[$0] == .human }
         gone = Array(repeating: nil, count: race.boats.count)
+        turnsServed = Array(repeating: 0, count: race.boats.count)
         for seat in humanSeats { seats[seat].holdDeadline = startTick + options.firstInputHoldTicks }
         // Keys due before the first tick (from the window origin, #75): no seat is attached yet, so they
         // reach each seat in its `RaceStart`.
@@ -175,6 +208,22 @@ public actor RaceHost {
     /// `seat`'s boat as of the last tick simulated.
     public func boat(seat: Int) -> Boat { race.boats[seat] }
     public var revealedWindKeys: [WindKey] { revealed }
+    /// Who sails each seat, by seat.
+    public var rosterEntries: [RosterEntry] { roster }
+    /// The tick the race starts at: `-startSequenceTicks`.
+    public var firstTick: Int { startTick }
+    /// `Race.expectedCloseTick` (#16, #147).
+    public var expectedCloseTick: Int { race.expectedCloseTick }
+    /// Whether the player at `seat` left (#16): her seat can't be rejoined.
+    public func hasLeft(seat: Int) -> Bool { gone.indices.contains(seat) && gone[seat]?.kind == .left }
+
+    /// The results so far (#148).
+    public func liveResults() -> LiveResults {
+        let finished = Set(finishers.map(\.seat))
+        let sailing = race.isOver ? [] : race.boats.indices.filter { !finished.contains($0) && race.boats[$0].status != .dsq }
+        return LiveResults(tick: race.tick, expectedCloseTick: race.expectedCloseTick, finishers: finishers, sailing: sailing,
+                           incidents: race.incidents, turnsServed: turnsServed, results: race.results)
+    }
 
     /// The clock time at which `tick` is simulated.
     public func time(ofTick tick: Int) -> UInt64 {
@@ -191,11 +240,11 @@ public actor RaceHost {
     /// Simulates every tick due by the clock, several if the host fell behind, and alerts if it fell more
     /// than `behindAlertTicks` behind (#18). Does nothing once the race is closed.
     public func advance() {
-        guard outcome == nil else { return }
+        guard !isEnded else { return }
         let due = dueTick(at: clock.now())
         let behind = due - race.tick
         if behind > options.behindAlertTicks { onBehind?(behind) }
-        while race.tick < due && outcome == nil { step() }
+        while race.tick < due && !isEnded { step() }
     }
 
     private func step() {
@@ -208,14 +257,33 @@ public actor RaceHost {
         race.step()
         for seat in expired { dropBoat(seat) }
         checkAllGone()
+        guard cancelled == nil else { return }
         for seat in seats.indices { acknowledge(seat) }
-        for event in race.drainEvents() { enqueue(event, to: EventAudience(event.kind)) }
+        for event in race.drainEvents() {
+            noteResults(event)
+            enqueue(event, to: EventAudience(event.kind))
+        }
         let keys = Self.dueKeys(&keyGenerator, atTick: race.tick)
         revealed += keys
         for key in keys { enqueueReliable(.windKey(key), to: .everyone) }
         flushReliable()
         if race.tick % options.snapshotEvery == 0 { sendSnapshots() }
         if race.isOver { close() }
+    }
+
+    /// Keeps the results so far up to date with `event` (#148).
+    private func noteResults(_ event: RaceEvent) {
+        switch event.kind {
+        case .finished(let seat, let place):
+            finishers.append(SeatResult(seat: seat, place: place, code: .finished, finishTick: event.tick))
+        case .penaltyServed(let seat):
+            if turnsServed.indices.contains(seat) { turnsServed[seat] += 1 }
+        case .ruleCall, .markTouch, .contact, .disqualified, .protestRecorded, .raceClosed, .penaltyStarted, .penaltyReset:
+            break
+        default:
+            return
+        }
+        resultsVersion += 1
     }
 
     /// Makes every key whose reveal tick (`WindKeyWire.revealTick`) is at or before `tick`, not made yet.
@@ -254,7 +322,7 @@ public actor RaceHost {
     /// Sends a race event the host decides, rather than the race, to `audience` only: a targeted notice
     /// such as the recall notice to the boat that is over (#9, #85). Stamped with the current tick.
     public func sendEvent(_ kind: RaceEvent.Kind, to audience: EventAudience) {
-        guard outcome == nil else { return }
+        guard !isEnded else { return }
         enqueue(RaceEvent(tick: race.tick, kind: kind), to: audience)
         flushReliable()
     }
@@ -300,7 +368,7 @@ public actor RaceHost {
     /// bot seat, a seat that left (#35: it was given away), a seat out of range or a closed race.
     @discardableResult
     public func attach(seat: Int, transport: any SeatTransport) -> Bool {
-        guard outcome == nil, humanSeats.contains(seat), gone[seat]?.kind != .left else { return false }
+        guard !isEnded, humanSeats.contains(seat), gone[seat]?.kind != .left else { return false }
         let rejoin = seats[seat].hasJoined
         // The reliable numbering runs on (#96): an event's seq is its id for the whole race, so a rejoined client
         // never takes a new event for one it showed before. The resync restarts its stream there.
@@ -324,7 +392,7 @@ public actor RaceHost {
         guard seats.indices.contains(seat), let transport = seats[seat].transport else { return }
         seats[seat].transport = nil
         seats[seat].reliableQueue.removeAll()
-        if outcome == nil {
+        if !isEnded {
             race.record(.disconnected, seat: seat)
             startHold(seat)
         }
@@ -337,7 +405,7 @@ public actor RaceHost {
     /// seat out of range or a closed race.
     @discardableResult
     public func leave(seat: Int) -> Bool {
-        guard outcome == nil, humanSeats.contains(seat), gone[seat]?.kind != .left else { return false }
+        guard !isEnded, humanSeats.contains(seat), gone[seat]?.kind != .left else { return false }
         let transport = seats[seat].transport
         seats[seat].transport = nil
         seats[seat].reliableQueue.removeAll()
@@ -353,6 +421,7 @@ public actor RaceHost {
         markGone(seat, .left)
         transport?.close()
         checkAllGone()
+        if race.isOver { close() }
         return true
     }
 
@@ -397,7 +466,7 @@ public actor RaceHost {
     /// Fires `onAllGone`, once, when every human seat is gone in a way `goneKinds` counts and the last
     /// went `graceTicks` ago or more. A rejoin in the grace makes a seat not gone, so nothing fires.
     private func checkAllGone() {
-        guard !allGoneFired, outcome == nil, !race.isOver, !humanSeats.isEmpty else { return }
+        guard !allGoneFired, !isEnded, !race.isOver, !humanSeats.isEmpty else { return }
         let config = options.allGone
         var went: [(seat: Int, gone: Gone)] = []
         for seat in humanSeats {
@@ -410,7 +479,15 @@ public actor RaceHost {
         let allDropped = went.allSatisfy { $0.gone.kind == .dropped }
         let isMassDrop = went.count >= 2 && allDropped && last - first <= config.massDropWindowTicks
         allGoneFired = true
-        onAllGone?(AllGone(tick: race.tick, leaveOrder: went.map { $0.seat }, isMassDrop: isMassDrop))
+        let allGone = AllGone(tick: race.tick, leaveOrder: went.map { $0.seat }, isMassDrop: isMassDrop)
+        if config.endsRace {
+            switch config.ending(allGone) {
+            // At the trigger's tick, after its step and seat events (#86): the log records it, and a replay closes the same way.
+            case .closeAllGone: race.closeAllGone(atTick: race.tick, leaveOrder: allGone.leaveOrder)
+            case .cancel: cancel(.unspecified)
+            }
+        }
+        onAllGone?(allGone)
     }
 
     private func sendResync(to seat: Int) {
@@ -426,9 +503,9 @@ public actor RaceHost {
     /// under the caps (#26) and the 1 s stamp limit (#18), pings and resync requests. Anything else, and
     /// anything from a seat that isn't attached, is ignored.
     public func receive(_ bytes: [UInt8], from seat: Int) {
-        guard outcome == nil, seats.indices.contains(seat), seats[seat].transport != nil else { return }
+        guard !isEnded, seats.indices.contains(seat), seats[seat].transport != nil else { return }
         advance()
-        guard outcome == nil, let frame = try? Frame(decoding: bytes) else { return }
+        guard !isEnded, let frame = try? Frame(decoding: bytes) else { return }
         switch frame.message {
         case .inputHeld(let input): receiveHeld(input, frame: frame, seat: seat)
         case .inputTap(let tap): receiveTap(tap, frame: frame, seat: seat)
@@ -506,12 +583,28 @@ public actor RaceHost {
     @discardableResult
     public func close() -> RaceOutcome {
         if let outcome { return outcome }
-        let outcome = RaceOutcome(standings: race.standings(), digest: race.digest(), log: log)
+        let outcome = RaceOutcome(standings: race.standings(), digest: race.digest(), log: log, results: race.results)
         self.outcome = outcome
+        // A cancelled race told its seats so; it has no close to send.
+        guard cancelled == nil else { return outcome }
         flushReliable()
         // The results reach clients in the `raceClosed` event (#86); the message's own results stream is
         // #148's: `.none` until then.
         for seat in seats.indices { send(.raceClosed(RaceClosed(results: .none)), to: seat) }
         return outcome
+    }
+
+    /// Cancels the race (#30, #148): it never steps again, has no results, and every attached seat is sent
+    /// `RaceCancelled` and closed. Nothing if it has already closed or been cancelled.
+    public func cancel(_ reason: RaceCancelled.Reason) {
+        guard !isEnded else { return }
+        cancelled = reason
+        for seat in seats.indices {
+            guard let transport = seats[seat].transport else { continue }
+            send(.raceCancelled(RaceCancelled(reason: reason)), to: seat)
+            seats[seat].transport = nil
+            seats[seat].reliableQueue.removeAll()
+            transport.close()
+        }
     }
 }

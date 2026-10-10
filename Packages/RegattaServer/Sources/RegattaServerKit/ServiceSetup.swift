@@ -11,9 +11,10 @@ import X509
 
 extension ServiceEndpoint {
     /// The endpoint `config` describes, over `store`: the real Game Center verifier when Apple's root is configured,
-    /// the dev verifier otherwise (only in `ENV=dev`); the queue (#146) locking its races onto `registry`.
-    public static func make(config: ServerConfig, store: any AccountStore, registry: RaceRegistry? = nil,
-                            fetcher: (any CertificateFetching)? = nil) throws -> ServiceEndpoint {
+    /// the dev verifier otherwise (only in `ENV=dev`); the queue (#146) locking its races onto `registry`, each race
+    /// registered, streamed and closed by the lifecycle (#148) into `archive` (memory by default: a dev server).
+    public static func make(config: ServerConfig, store: any AccountStore, archive: any RaceArchive = InMemoryRaceArchive(),
+                            registry: RaceRegistry? = nil, fetcher: (any CertificateFetching)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
         let verifier: any GameCenterVerifier
         if let pem = identity.appleRootsPEM {
@@ -27,11 +28,14 @@ extension ServiceEndpoint {
             throw ServerConfigError.invalid(variable: "REGATTA_APPLE_ROOT_PEM", value: "(unset)", expected: "Apple's root outside ENV=dev")
         }
         let queue = config.queue
+        let registry = registry ?? RaceRegistry(maxRaces: config.maxRaces)
+        let lifecycle = RaceLifecycle(settings: config.lifecycle, archive: archive, tokenKey: config.tokenKey,
+                                      tokenLifetime: config.tokenLifetime, toolchain: config.serverBuild, registry: registry)
         let matchmaker = QueueMatchmaker(
-            settings: queue, registry: registry ?? RaceRegistry(maxRaces: config.maxRaces),
+            settings: queue, registry: registry,
             draw: RaceDraw(pairings: OnlinePairing.bundled(venues: queue.venues),
                            seeds: FixtureWindSeedPools(poolSize: queue.windSeedPoolSize, reuseCap: queue.windSeedReuseCap)),
-            tokenKey: config.tokenKey, tokenLifetime: config.tokenLifetime)
+            tokenKey: config.tokenKey, tokenLifetime: config.tokenLifetime, launch: lifecycle.launcher())
         return ServiceEndpoint(
             config: ServiceEndpointConfig(termsVersion: identity.termsVersion, sessionLifetime: identity.sessionLifetime,
                                           streamIdleTimeout: identity.streamIdleTimeout, frameCap: identity.frameCap,
@@ -40,9 +44,9 @@ extension ServiceEndpoint {
             sessions: SessionAuthority(store: store, verifier: verifier, lifetime: identity.sessionLifetime,
                                        absoluteLifetime: identity.absoluteSessionLifetime,
                                        maxSessionsPerPlayer: identity.maxSessionsPerPlayer),
-            backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0) },
-                                      raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0) }),
-            matchmaker: matchmaker)
+            backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
+                                      raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) }),
+            matchmaker: matchmaker, lifecycle: lifecycle)
     }
 
     /// `POST /dev/situation` (dev only): puts the test account in the contract situation asked for, and says how

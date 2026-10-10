@@ -14,8 +14,35 @@ public struct AllGoneConfig: Hashable, Sendable {
     public var graceTicks = 900
     /// At least 2 humans all dropping within this many ticks, and none leaving, is a mass drop (G3: 2 s).
     public var massDropWindowTicks = 60
+    /// What a mass drop does when the host ends the race (G3: cancel).
+    public var simultaneousLossPolicy = SimultaneousLossPolicy.cancel
+    /// Whether the host ends the race itself when the trigger fires (#148): `Race.closeAllGone` at the trigger's tick,
+    /// or, for a mass drop under `.cancel`, a cancel. Off (the default), `onAllGone` only hears it.
+    public var endsRace = false
 
     public init() {}
+
+    /// How the host ends the race for `allGone`, when it does.
+    public func ending(_ allGone: AllGone) -> AllGoneEnding {
+        allGone.isMassDrop && simultaneousLossPolicy == .cancel ? .cancel : .closeAllGone
+    }
+}
+
+/// What a mass drop (G3: at least 2 humans, all dropped within 2 s, none left, nobody back in the grace) does.
+/// Server config (`SIMULTANEOUS_LOSS_POLICY`).
+public enum SimultaneousLossPolicy: String, Hashable, Sendable, CaseIterable {
+    /// Treated as a server or network fault: the race is cancelled like a crash (#30): no results, no rating.
+    case cancel
+    /// Ended like any all-gone race: RET in leave order, rated per #30.
+    case ret
+}
+
+/// How an all-gone race ends (#148).
+public enum AllGoneEnding: Hashable, Sendable {
+    /// `Race.closeAllGone`: bots placed by distance, the humans RET in reverse leave order (#30, G3).
+    case closeAllGone
+    /// Cancelled: no results.
+    case cancel
 }
 
 /// The all-gone trigger (G3): every human seat gone, and the grace over. The host doesn't close the race
