@@ -421,7 +421,7 @@ struct BotBrain: Sendable {
         let servedOne = owed.progress < penaltyProgress - .pi
         penaltyProgress = owed.progress
         if servedOne, penaltyTurn != nil, let mark = nearestMark(b, view),
-           mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance, canPutOffTurn(owed, b, view) {
+           mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance, canPutOffToStartMargin(owed, view) {
             penaltyTurn = nil
             penaltyGivenUp = false
         }
@@ -488,8 +488,11 @@ struct BotBrain: Sendable {
         let readsThePack = skill >= Self.penaltyPutOffSkill
         let crowded = crowd != nil
             && (b.status != .racing || (readsThePack && !isOnLastLeg(b, view) && !putOffEndsAtAMark(b, view, owed)))
-        if crowded || mark.map({ $0.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance }) == true,
-           canPutOffTurn(owed, b, view) {
+        // A mark close aboard holds her off to the start margin whatever the time a turn by hand takes her (#461):
+        // turned beside it she touches it, and owes another (cut short as a boat's put-off is, the all-National
+        // fleets' mark contacts rose from 0.19 to 0.25 a boat).
+        let markClose = mark.map({ $0.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance }) == true
+        if crowded && canPutOffTurn(owed, b, view) || markClose && canPutOffToStartMargin(owed, view) {
             return nil
         }
         // Away from the nearest mark, if one is near, else from the nearest boat in her water (#351): turning to
@@ -504,7 +507,12 @@ struct BotBrain: Sendable {
     /// Whether she may still put her current turn off, waiting to start it: until `penaltyStartMargin` before its
     /// start deadline.
     private func canPutOffTurn(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
-        owed.startDeadlineTick - view.tick > RulesConfig.ticks(Self.penaltyStartMargin) && hasTimeToTurnLater(owed, b, view)
+        canPutOffToStartMargin(owed, view) && hasTimeToTurnLater(owed, b, view)
+    }
+
+    /// Whether her current turn's start deadline is further off than `penaltyStartMargin`.
+    private func canPutOffToStartMargin(_ owed: OwedPenalty, _ view: SeatView) -> Bool {
+        owed.startDeadlineTick - view.tick > RulesConfig.ticks(Self.penaltyStartMargin)
     }
 
     /// Whether she may give her current turn up to keep clear (rule 21.2) and turn it all again: until
