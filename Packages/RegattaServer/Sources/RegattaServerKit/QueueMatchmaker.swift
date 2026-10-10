@@ -170,6 +170,8 @@ public actor QueueMatchmaker {
     public nonisolated let briefingLeaves: BriefingLeaveTracker
     /// The races the queue catches finishers from (G2); nil: none.
     private let runningRaces: (any RunningRaces)?
+    /// Each human's stored livery (#21), for the briefing; nil, or none stored: a starter livery.
+    private let liveries: LiverySource?
     /// Each watched, queued or locked player's restrictions as last read from the store: `state(of:)` reads these.
     private var restricted: [String: PlayerRestrictions] = [:]
     private var guns: [(due: Date, line: SystemLine)] = []
@@ -184,6 +186,7 @@ public actor QueueMatchmaker {
                 random: SeededRandom = .system(), now: @escaping @Sendable () -> Date = { Date() },
                 bands: @escaping RatingBands = { [$0] },
                 restrictions: any RestrictionStore = InMemoryRestrictionStore(), runningRaces: (any RunningRaces)? = nil,
+                liveries: LiverySource? = nil,
                 launch: RaceLauncher? = nil) {
         self.settings = settings
         self.registry = registry
@@ -195,6 +198,7 @@ public actor QueueMatchmaker {
         self.bands = bands
         self.restrictions = restrictions
         self.runningRaces = runningRaces
+        self.liveries = liveries
         briefingLeaves = BriefingLeaveTracker(store: restrictions, rule: settings.briefingLeaves, now: now)
         self.launch = launch ?? Self.registryLauncher(registry)
     }
@@ -357,11 +361,15 @@ public actor QueueMatchmaker {
             pushAll()
             return
         }
+        var stored: [Livery?] = []
+        for player in humans { stored.append(await liveries?(player)) }
+        let briefings = OnlineBriefing.payloads(locked, stored: stored, settings: settings)
         let expiry = Int64((time + tokenLifetime).timeIntervalSince1970)
         for (seat, player) in humans.enumerated() {
             starting[player.teamPlayerID] = nil
             guard let bytes = RaceToken(raceID: raceID, seat: seat, expiresAt: expiry).signed(with: tokenKey) else { continue }
-            handOffs[player.teamPlayerID] = HandOff(raceID: RaceID(raceID.uuidString.lowercased()), token: RegattaServices.RaceToken(bytes: bytes))
+            handOffs[player.teamPlayerID] = HandOff(raceID: RaceID(raceID.uuidString.lowercased()), token: RegattaServices.RaceToken(bytes: bytes),
+                                                    briefing: briefings[seat])
         }
         let gunAt = time + Double(settings.startSequenceTicks) / Double(Race.tickRate)
         guns.append((gunAt, .gun(venue: drawn.pairing.venue.content.displayName, boats: setup.fleetSize, humans: humans.count)))
