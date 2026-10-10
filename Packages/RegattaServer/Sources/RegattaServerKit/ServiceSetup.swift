@@ -27,8 +27,11 @@ extension ServiceEndpoint {
         return ServiceEndpoint(
             config: ServiceEndpointConfig(termsVersion: identity.termsVersion, sessionLifetime: identity.sessionLifetime,
                                           streamIdleTimeout: identity.streamIdleTimeout, frameCap: identity.frameCap,
+                                          signInDeadline: identity.signInDeadline, idleTimeout: identity.connectionIdleTimeout,
                                           serverBuild: config.serverBuild),
-            sessions: SessionAuthority(store: store, verifier: verifier, lifetime: identity.sessionLifetime))
+            sessions: SessionAuthority(store: store, verifier: verifier, lifetime: identity.sessionLifetime,
+                                       absoluteLifetime: identity.absoluteSessionLifetime,
+                                       maxSessionsPerPlayer: identity.maxSessionsPerPlayer))
     }
 
     /// `POST /dev/situation` (dev only): puts the test account in the contract situation asked for, and says how

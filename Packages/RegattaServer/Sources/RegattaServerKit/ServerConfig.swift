@@ -85,6 +85,8 @@ public struct ServerConfig: Sendable {
     public var handshakeTimeout: Duration = .seconds(10)
     /// Identity, sessions and the Terms of Use (#145).
     public var identity = IdentitySettings()
+    /// Connections held at once on `/service` and `/race`, per address and in all (#146).
+    public var connectionLimits = ConnectionLimits()
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
@@ -164,8 +166,18 @@ public struct IdentitySettings: Sendable {
     public var appleRootsPEM: String?
     /// Sessions slide: this long from the last sign-in or resume.
     public var sessionLifetime: TimeInterval = 30 * 86_400
+    /// No more than this long from the first sign-in or resume, however often it slides (#146, R11).
+    public var absoluteSessionLifetime: TimeInterval = 90 * 86_400
+    /// Sessions one player holds at once; a new one past it ends the oldest (#146, R11).
+    public var maxSessionsPerPlayer = 5
+    /// How often expired sessions are deleted (#146, R11).
+    public var sessionSweepInterval: Duration = .seconds(3_600)
     /// A service stream nobody reads for this long is dropped.
     public var streamIdleTimeout: Duration = .seconds(60)
+    /// A service connection past `Hello` that hasn't signed in this long after it is closed (#146, R4).
+    public var signInDeadline: Duration = .seconds(10)
+    /// A service connection with no frame either way for this long is closed (#146, R4).
+    public var connectionIdleTimeout: Duration = .seconds(120)
     /// The largest service frame either way.
     public var frameCap = serviceFrameLimit
     /// Postgres, or nil: accounts in memory (dev only).

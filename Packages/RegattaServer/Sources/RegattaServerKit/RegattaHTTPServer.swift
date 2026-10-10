@@ -25,8 +25,13 @@ public final class RegattaHTTPServer: Sendable {
     public let port: Int
     private let listener: NIOAsyncChannel<EventLoopFuture<Connection>, Never>
     private let handler: RequestHandler
+    /// Open connections per path, against `config.connectionLimits` (#146, R4).
+    let raceConnections: ConnectionCounter
+    let serviceConnections: ConnectionCounter
     /// The accept loop; ends with the listener's error, or nil if the listener closed.
     private let task: Task<(any Error)?, Never>
+    /// Deletes expired sessions every `sessionSweepInterval` (#146, R11).
+    private let sweeper: Task<Void, Never>
 
     /// Binds and starts serving. Refuses to start outside `ENV=dev` (dev auth is all there is). `services` is the
     /// service endpoint; by default the config's, with its accounts in memory (a dev server without a database).
@@ -68,13 +73,25 @@ public final class RegattaHTTPServer: Sendable {
         port = listener.channel.localAddress?.port ?? config.port
         let handler = RequestHandler(config: config, registry: registry, services: services)
         self.handler = handler
+        let limits = config.connectionLimits
+        let counters = Counters(race: ConnectionCounter(perAddress: limits.racePerAddress, total: limits.raceTotal),
+                                service: ConnectionCounter(perAddress: limits.servicePerAddress, total: limits.serviceTotal))
+        raceConnections = counters.race
+        serviceConnections = counters.service
+        let sweepInterval = config.identity.sessionSweepInterval
+        sweeper = Task {
+            repeat {
+                await services.sessions.sweepExpired()
+                try? await Task.sleep(for: sweepInterval)
+            } while !Task.isCancelled
+        }
         task = Task {
             await withDiscardingTaskGroup { group in
                 defer { group.cancelAll() }
                 do {
                     try await listener.executeThenClose { inbound in
                         for try await connection in inbound {
-                            group.addTask { await Self.serve(connection, handler: handler) }
+                            group.addTask { await Self.serve(connection, handler: handler, counters: counters) }
                         }
                     }
                     return nil
@@ -97,6 +114,7 @@ public final class RegattaHTTPServer: Sendable {
     /// Stops listening, closes every race where it stands and every connection.
     public func shutdown() async {
         listener.channel.close(promise: nil)
+        sweeper.cancel()
         await registry.closeAll()
         task.cancel()
         _ = await task.value
@@ -153,15 +171,33 @@ public final class RegattaHTTPServer: Sendable {
             configuration: .init(upgradeConfiguration: configuration))
     }
 
-    private static func serve(_ connection: EventLoopFuture<Connection>, handler: RequestHandler) async {
+    private struct Counters: Sendable {
+        let race: ConnectionCounter
+        let service: ConnectionCounter
+    }
+
+    private static func serve(_ connection: EventLoopFuture<Connection>, handler: RequestHandler, counters: Counters) async {
         do {
             switch try await connection.get() {
-            case .race(let channel): try await serveRace(channel, handler: handler)
-            case .service(let channel, let gate): try await serveService(channel, gate: gate, handler: handler)
+            case .race(let channel):
+                guard let slot = counters.race.acquire(channel.channel.remoteAddress) else { return try await refuse(channel) }
+                defer { slot.release() }
+                try await serveRace(channel, handler: handler)
+            case .service(let channel, let gate):
+                guard let slot = counters.service.acquire(channel.channel.remoteAddress) else { return try await refuse(channel) }
+                defer { slot.release() }
+                try await serveService(channel, gate: gate, handler: handler)
             case .http(let channel): try await serveHTTP(channel, handler: handler)
             }
         } catch {
             // One connection's failure is that connection's: the server carries on.
+        }
+    }
+
+    /// A WebSocket over its path's connection cap: closed at once ("try again later", 1013), unread.
+    private static func refuse(_ channel: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>) async throws {
+        try await channel.executeThenClose { _, _ in
+            WebSocketSeatTransport(channel: channel.channel).close(code: .unknown(1013), reason: "too many connections")
         }
     }
 
@@ -226,6 +262,7 @@ public final class RegattaHTTPServer: Sendable {
                         handshakeDeadline.cancel()
                         if await connection.isClosed { return }
                     case .ping:
+                        await connection.noteActivity()
                         try await outbound.write(WebSocketFrame(fin: true, opcode: .pong, data: frame.unmaskedData))
                     case .connectionClose:
                         transport.close(code: .normalClosure, reason: nil)
