@@ -238,7 +238,13 @@ import Glibc
 /// 36: races sail skiff@7 by default (#437), on 35: skiff@6 with the autohelm off a centred rudder
 ///    (`holdsWhenCentred` false), so every default race steers by hand, players and bots. A race naming skiff@6, or any
 ///    other class, sails as on 35, bit for bit.
-public let simulationRevision = 36
+/// 37: skiff@8 (#458), on 36: tack and gybe by hand. Boat class schema 4 adds `steering.rudderDragExponent` (absent 1;
+///    M1, skiff@8 sails 2: the rudder drag goes with the rudder squared), `steering.headToWindFallOffCentredDegreesPerSecond`
+///    (absent: none; irons recovery, with the rudder centred inside the no-go she falls off at the greater of it and the
+///    head-to-wind fall-off, scaled by how little steerage she has) and `steering.autohelm.sailsTap` (absent true; false,
+///    the tack/gybe tap is logged and does nothing else). skiff@8 has no roll tack. Every race naming any older class,
+///    the default skiff@7 included, sails as on 36, bit for bit.
+public let simulationRevision = 37
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

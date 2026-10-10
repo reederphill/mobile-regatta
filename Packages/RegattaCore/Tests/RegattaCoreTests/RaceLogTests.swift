@@ -191,6 +191,16 @@ enum ScriptedLog {
         #expect(throws: DecodingError.self) { try JSONDecoder().decode(InputRecord.self, from: json) }
     }
 
+    /// #458: skiff@8 ignores the tack/gybe tap, but it stays in the log format: logs sailed on older classes, taps and all,
+    /// still decode and encode back the same.
+    @Test func oldTackGybeTapsStillDecode() throws {
+        let json = #"{"tick": 12, "seat": 1, "tap": "tackGybe"}"#
+        let record = try JSONDecoder().decode(InputRecord.self, from: Data(json.utf8))
+        #expect(record.tick == 12 && record.seat == 1 && record.kind == .tap(.tackGybe))
+        let again = try JSONDecoder().decode(InputRecord.self, from: JSONEncoder().encode(record))
+        #expect(again == record)
+    }
+
     @Test func malformedInputRecordsAreRejected() throws {
         let malformed = [
             #"{"tick": 1, "seat": 0, "tap": "tackGybe", "rudder": 10, "ease": false}"#,

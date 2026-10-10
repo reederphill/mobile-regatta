@@ -19,7 +19,9 @@ public struct BoatClass: DataFileContent, Equatable {
     /// Logs sailed on one replay on the simulation version that sailed them (ADR 0002).
     /// Schema 4 (#434, ADR 0011) is schema 3 with two optional autohelm values: whether a centred rudder hands her to
     /// the autohelm (`AutohelmTuning.holdsWhenCentred`, absent true) and how close to the new groove a tap lets go
-    /// (`AutohelmTuning.handBack`). A schema-2 or -3 class, or a schema-4 one without them, sails exactly as before.
+    /// (`AutohelmTuning.handBack`). #458 adds three more optional values to schema 4: the rudder drag's exponent
+    /// (`Steering.rudderDragExponent`), irons recovery (`Steering.headToWindFallOffCentredRate`) and whether the tap
+    /// sails the turn (`AutohelmTuning.sailsTap`). A schema-2 or -3 class, or a schema-4 one without them, sails exactly as before.
     public static let supportedSchemaVersions = [2, 3, 4]
 
     /// Name shown to players.
@@ -78,6 +80,19 @@ public struct BoatClass: DataFileContent, Equatable {
         public var rudderSlew: Double
         /// How the autohelm steers (ADR 0007).
         public var autohelm: AutohelmTuning
+        /// The power of the rudder in the rudder drag (schema 4's `rudderDragExponent`, #458; 1, linear, when the file
+        /// leaves it out): she loses `rudderDrag × |rudder|^rudderDragExponent` of her speed per second. At 2 half rudder
+        /// costs a quarter of full rudder's drag, so a smooth turn pays less than a slam. At least 1.
+        public var rudderDragExponent = 1.0
+        /// Irons recovery (schema 4's `headToWindFallOffCentredDegreesPerSecond`, #458), radians per second, or nil when
+        /// the file leaves it out: with the rudder centred inside the no-go she falls off at the greater of this and
+        /// `headToWindFallOffRate`, scaled by how little steerage she has, so a boat let go in irons gets away. A held
+        /// rudder never triggers it. Nil sails `headToWindFallOffRate` alone, as every class before skiff@8.
+        public var headToWindFallOffCentredRate: Double?
+
+        /// The fall-off rate with the rudder centred inside the no-go: `headToWindFallOffCentredRate`, or
+        /// `headToWindFallOffRate` for a class without it.
+        public var ironsFallOffRate: Double { headToWindFallOffCentredRate ?? headToWindFallOffRate }
 
         /// Full-rudder turn rate at speed through the water `speed` (m/s), radians per second.
         public func turnRate(speed: Double) -> Double {
@@ -119,6 +134,10 @@ public struct BoatClass: DataFileContent, Equatable {
         /// With `holdsWhenCentred` false, how close to its aim the tap's autohelm brings her past the boom before
         /// it lets go and centres the rudder, radians (schema 4's `handBackDegrees`; 3° when the file leaves it out).
         public var handBack = deg2rad(3)
+        /// Whether the tack/gybe tap sails the turn (schema 4's `sailsTap`, #458, ADR 0011; true when the file leaves it
+        /// out). False: the tap is logged and does nothing else (no autohelm turn, no roll tack): she tacks and gybes by
+        /// hand (skiff@8).
+        public var sailsTap = true
     }
 
     /// How the boat gets on and off the plane (schema 3, #248). Downwind and reaching only: forward of
@@ -1027,17 +1046,25 @@ private struct BoatClassSchema3Additions: Decodable {
 
 // MARK: - Schema 4
 
-/// What the boat class file's schema 4 adds to schema 3 (#434, ADR 0011): two optional autohelm values. Left out,
-/// the class sails as a schema-3 one: the autohelm holds a centred rudder, and a tap lets go 3° from the groove.
+/// What the boat class file's schema 4 adds to schema 3 (#434, ADR 0011): optional autohelm values, and from #458 the
+/// rudder drag's exponent, irons recovery and whether the tap sails the turn. Left out, the class sails as a schema-3
+/// one: the autohelm holds a centred rudder, a tap lets go 3° from the groove and sails the turn, the drag is linear in
+/// the rudder and she falls off head to wind at `headToWindFallOffDegreesPerSecond` alone.
 private struct BoatClassSchema4Additions: Decodable {
     struct Steering: Decodable {
         struct Autohelm: Decodable {
             /// A JSON bool, or the number 0 or 1: a tuned copy (`TunedCopy`) writes numbers only.
             let holdsWhenCentred: FlagValue?
             let handBackDegrees: Double?
+            /// #458: a JSON bool, or the number 0 or 1, as `holdsWhenCentred`.
+            let sailsTap: FlagValue?
         }
 
         let autohelm: Autohelm?
+        /// #458: M1, the power of the rudder in the rudder drag. Absent: 1.
+        let rudderDragExponent: Double?
+        /// #458: irons recovery. Absent: the class falls off at `headToWindFallOffDegreesPerSecond` alone.
+        let headToWindFallOffCentredDegreesPerSecond: Double?
     }
 
     /// A flag as a JSON bool or a number.
@@ -1061,19 +1088,33 @@ private struct BoatClassSchema4Additions: Decodable {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
             if !condition { throw DataFileError.invalidContent(kind: BoatClass.kind, id: id, reason: reason()) }
         }
+        func flag(_ value: FlagValue?, _ name: String) throws -> Bool? {
+            switch value {
+            case .bool(let flag): return flag
+            case .number(let number):
+                try check(number == 0 || number == 1, "autohelm \(name) must be true, false, 0 or 1")
+                return number == 1
+            case nil: return nil
+            }
+        }
+        if let exponent = steering?.rudderDragExponent {
+            try check(exponent.isFinite && exponent >= 1, "rudder drag exponent must be 1 or more")
+            boatClass.steering.rudderDragExponent = exponent
+        }
+        if let centred = steering?.headToWindFallOffCentredDegreesPerSecond {
+            try check(centred.isFinite && centred >= 0, "centred head-to-wind fall-off must not be negative")
+            boatClass.steering.headToWindFallOffCentredRate = deg2rad(centred)
+        }
         guard let helm = steering?.autohelm else { return }
-        switch helm.holdsWhenCentred {
-        case .bool(let flag):
-            boatClass.steering.autohelm.holdsWhenCentred = flag
-        case .number(let number):
-            try check(number == 0 || number == 1, "autohelm holdsWhenCentred must be true, false, 0 or 1")
-            boatClass.steering.autohelm.holdsWhenCentred = number == 1
-        case nil:
-            break
+        if let holds = try flag(helm.holdsWhenCentred, "holdsWhenCentred") {
+            boatClass.steering.autohelm.holdsWhenCentred = holds
         }
         if let degrees = helm.handBackDegrees {
             try check(degrees.isFinite && degrees > 0 && degrees < 90, "autohelm hand-back must be in 0 exclusive ..<90°")
             boatClass.steering.autohelm.handBack = deg2rad(degrees)
+        }
+        if let sails = try flag(helm.sailsTap, "sailsTap") {
+            boatClass.steering.autohelm.sailsTap = sails
         }
     }
 }

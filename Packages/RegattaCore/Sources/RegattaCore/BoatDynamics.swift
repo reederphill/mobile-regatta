@@ -1,3 +1,5 @@
+import Foundation
+
 /// How one boat moves through one tick, from her boat class alone (ADR 0004): momentum, steering,
 /// rudder drag, head-to-wind fall-off, the ease, the boom crossing on a tack or gybe, and for a class
 /// that has them (schema 3, #248) planing and the automatic spinnaker. Pure: no events, no other boats, no rules.
@@ -79,14 +81,17 @@ public enum BoatDynamics {
     /// - Full rudder turns at `steering.turnRate(speed:)`: from `minTurnRate` stopped up to `topTurnRate`.
     /// - Inside close-hauled (below the polar's best upwind angle) a boat without steerage falls off
     ///   towards close-hauled at `headToWindFallOffRate`, scaled by how little of her top turn rate the
-    ///   speed gives her (the class's turn-rate curve): at full way she carries on straight.
+    ///   speed gives her (the class's turn-rate curve): at full way she carries on straight. With the rudder centred
+    ///   inside the no-go, a class with irons recovery (`headToWindFallOffCentredRate`, #458) falls off at the greater
+    ///   of the two rates instead.
     /// - Speed approaches the polar target with the class's time constants: `speedingUp` when below it,
     ///   `slowingDown` above it, `noGo` inside the no-go zone (below the polar's first sailing row, where
     ///   the sail can't draw and the target is 0), and `ease.timeConstant` towards the eased target
     ///   (`ease.speedFraction` of the polar's).
     /// - A class whose wind shadow is a speed loss (#220, #263) multiplies the target by `env.shadow`, and while
     ///   shadowed slows down to it at the shadow's own `WindShadow.slowingDown`.
-    /// - Rudder drag takes `rudderDrag` of the speed per second at full rudder.
+    /// - Rudder drag takes `rudderDrag` of the speed per second at full rudder, and `|rudder|^rudderDragExponent` of
+    ///   that at part rudder (linear unless the class says otherwise, #458).
     /// - The boom crosses (`boomCrosses`) on the tick the bow passes head to wind (a tack), or when she
     ///   bears away by the lee past the polar's `byTheLeeLimit` (a gybe). By the lee the speed target is
     ///   the polar mirrored past dead downwind, less `byTheLeePenalty`.
@@ -107,7 +112,14 @@ public enum BoatDynamics {
         if abs(relative) < closeHauled {
             // Falls off away from the wind; exactly head to wind she falls onto starboard tack.
             let steerage = steering.turnRate(speed: s.speed) / steering.topTurnRate
-            let fallOff = steering.headToWindFallOffRate * max(0, 1 - steerage) * dt
+            let fallOff: Double
+            if let centred = steering.headToWindFallOffCentredRate, abs(s.rudder) <= Autohelm.deadBand,
+               abs(relative) < noGoAngle(polar) {
+                // Irons recovery (#458): let go in the no-go, she falls off harder the less steerage she has.
+                fallOff = max(steering.headToWindFallOffRate, centred) * max(0, 1 - steerage) * dt
+            } else {
+                fallOff = steering.headToWindFallOffRate * max(0, 1 - steerage) * dt
+            }
             turn += relative >= 0 ? -min(fallOff, closeHauled - relative) : min(fallOff, closeHauled + relative)
         }
         s.heading = wrapAngle(s.heading + turn)
@@ -141,7 +153,12 @@ public enum BoatDynamics {
             timeConstant = shadowSlowingDown ?? boatClass.momentum.slowingDown
         }
         s.speed += (target - s.speed) * min(1, dt / timeConstant)
-        s.speed -= s.speed * abs(s.rudder) * steering.rudderDrag * dt
+        if steering.rudderDragExponent == 1 {
+            s.speed -= s.speed * abs(s.rudder) * steering.rudderDrag * dt
+        } else {
+            // M1 (#458): the drag goes with a power of the rudder, so a part-rudder turn pays less than a slam.
+            s.speed -= s.speed * pow(abs(s.rudder), steering.rudderDragExponent) * steering.rudderDrag * dt
+        }
         s.speed = max(0, s.speed)
         s.position += Vec2.heading(s.heading) * s.speed * dt + env.current * dt
         return s

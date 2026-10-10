@@ -363,7 +363,8 @@ public final class Race {
             switch tap {
             case .tackGybe:
                 let b = boats[i]
-                guard !b.isGhost else { break }
+                // A class whose tap doesn't sail the turn (#458, skiff@8): logged above, nothing else. She tacks by hand.
+                guard !b.isGhost, boatClass.steering.autohelm.sailsTap else { break }
                 if boatClass.rollTack != nil, isInTack(b) {
                     // A second tap during a tack is the roll (#222, #263): one a tack, any after it ignored.
                     if b.roll == nil { boats[i].roll = .pending(tapTick: tick) } // timed in `sailRoll`

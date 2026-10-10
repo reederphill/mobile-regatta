@@ -61,6 +61,7 @@ enum SkiffFixtures {
         5: "ce105fbd37ca455498592ea9ae4e47a34a5e255617b2490019a1360330261b80",
         6: "4c20609ea59408e6ea81cb58d2aa3dba8365d24fcbe8ba883c819e6071d097e8",
         7: "4b3c9e3212fca5d39816e3adb5bb46d091fed874df75e44d6b938959c810dba1",
+        8: "10ab7b48a294111482c361024728474cbba077dec4f342b3bc8da2bda36b16fc",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -642,9 +643,9 @@ enum SkiffFixtures {
         for block in ["/hull", "/polar", "/momentum", "/steering", "/windShadow", "/contact", "/ease", "/planing", "/spinnaker", "/byTheLee"] {
             #expect(file.header.placeholders.contains(block), "\(block) should be a placeholder")
         }
-        // #263's roll tack, from version 3 on.
+        // #263's roll tack, from version 3 on, until version 8 (#458) tacks by hand.
         #expect(file.header.placeholders.contains("/rollTack") == (file.content.rollTack != nil))
-        #expect((file.content.rollTack != nil) == (version >= 3))
+        #expect((file.content.rollTack != nil) == (version >= 3 && version < 8))
         // The ILCA files stay bundled for replays (ADR 0002): version 3 still loads beside it.
         #expect(try BoatClassFile.bundled(id: Fixtures.classID, version: 3).schemaVersion == 2)
     }
