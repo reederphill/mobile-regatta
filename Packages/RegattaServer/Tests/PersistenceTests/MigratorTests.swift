@@ -48,10 +48,11 @@ import Testing
             #expect(try await migrator.up(database) == all)
             #expect(try await migrator.applied(database) == all)
             #expect(try await tables(database)
-                == ["data_files", "players", "race_files", "race_logs", "races", "schema_migrations", "sessions", "terms_acceptances"])
+                == ["data_files", "players", "race_files", "race_logs", "race_players", "race_results", "races", "schema_migrations", "sessions",
+                    "terms_acceptances"])
             #expect(try await migrator.up(database) == [])
 
-            #expect(try await migrator.down(database, to: 3) == [6, 5, 4])
+            #expect(try await migrator.down(database, to: 3) == [7, 6, 5, 4])
             #expect(try await migrator.applied(database) == [1, 2, 3])
             #expect(try await tables(database) == ["data_files", "players", "schema_migrations", "sessions"])
 
