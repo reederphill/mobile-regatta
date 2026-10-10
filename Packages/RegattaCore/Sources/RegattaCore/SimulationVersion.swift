@@ -239,7 +239,7 @@ import Glibc
 ///    (`holdsWhenCentred` false), so every default race steers by hand, players and bots. A race naming skiff@6, or any
 ///    other class, sails as on 35, bit for bit.
 /// 37: skiff@8 (#458), on 36: tack and gybe by hand. Boat class schema 4 adds `steering.rudderDragExponent` (absent 1;
-///    M1, skiff@8 sails 2: the rudder drag goes with the rudder squared), `steering.headToWindFallOffCentredDegreesPerSecond`
+///    M1, skiff@8 sails 3: the rudder drag goes with the cube of the rudder), `steering.headToWindFallOffCentredDegreesPerSecond`
 ///    (absent: none; irons recovery, with the rudder centred inside the no-go she falls off at the greater of it and the
 ///    head-to-wind fall-off, scaled by how little steerage she has) and `steering.autohelm.sailsTap` (absent true; false,
 ///    the tack/gybe tap is logged and does nothing else). skiff@8 has no roll tack. Every race naming any older class,

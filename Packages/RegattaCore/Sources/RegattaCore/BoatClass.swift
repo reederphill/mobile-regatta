@@ -81,8 +81,8 @@ public struct BoatClass: DataFileContent, Equatable {
         /// How the autohelm steers (ADR 0007).
         public var autohelm: AutohelmTuning
         /// The power of the rudder in the rudder drag (schema 4's `rudderDragExponent`, #458; 1, linear, when the file
-        /// leaves it out): she loses `rudderDrag × |rudder|^rudderDragExponent` of her speed per second. At 2 half rudder
-        /// costs a quarter of full rudder's drag, so a smooth turn pays less than a slam. At least 1.
+        /// leaves it out): she loses `rudderDrag × |rudder|^rudderDragExponent` of her speed per second. At 3 (skiff@8)
+        /// half rudder costs an eighth of full rudder's drag, so a moderate rudder tacks for less than a slam. At least 1.
         public var rudderDragExponent = 1.0
         /// Irons recovery (schema 4's `headToWindFallOffCentredDegreesPerSecond`, #458), radians per second, or nil when
         /// the file leaves it out: with the rudder centred inside the no-go she falls off at the greater of this and

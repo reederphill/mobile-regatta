@@ -61,7 +61,7 @@ enum SkiffFixtures {
         5: "ce105fbd37ca455498592ea9ae4e47a34a5e255617b2490019a1360330261b80",
         6: "4c20609ea59408e6ea81cb58d2aa3dba8365d24fcbe8ba883c819e6071d097e8",
         7: "4b3c9e3212fca5d39816e3adb5bb46d091fed874df75e44d6b938959c810dba1",
-        8: "10ab7b48a294111482c361024728474cbba077dec4f342b3bc8da2bda36b16fc",
+        8: "ce0f7d4c3f9188ffa7c251727a591c042bb4d683239e1dbccb758a7933801c58",
     ]
 
     static func bytes(version: Int = version) throws -> Data {

@@ -228,7 +228,7 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/steering/minTurnRateDegreesPerSecond", "Least turn rate", unit: "°/s", 1...30, step: 0.5),
                     TuningSlider(.boatClass, "/steering/rudderSlewPerSecond", "Rudder slew", unit: " /s", 1...20, step: 0.5),
                     TuningSlider(.boatClass, "/steering/rudderDragPerSecond", "Rudder drag", unit: " /s", 0...0.8, step: 0.005),
-                    // #458, from skiff@8: the drag's power of the rudder (2: half rudder, a quarter of the drag), and how fast
+                    // #458, from skiff@8: the drag's power of the rudder (skiff@8's 3: half rudder, an eighth of the drag), and how fast
                     // she falls off let go in irons with the rudder centred.
                     TuningSlider(.boatClass, "/steering/rudderDragExponent", "Rudder drag power", 1...4, step: 0.25),
                     TuningSlider(.boatClass, "/steering/headToWindFallOffCentredDegreesPerSecond", "Irons fall-off, rudder centred",

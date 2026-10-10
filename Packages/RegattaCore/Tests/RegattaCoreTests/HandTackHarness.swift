@@ -13,8 +13,8 @@ enum HandTack {
     enum Helm: CaseIterable {
         /// Full rudder until a fifth of a second's turn short of the new groove, then the hold law.
         case slam
-        /// The same at 75 % and 50 % rudder.
-        case rudder75, rudder50
+        /// The same at 75 %, 60 %, 50 % and 25 % rudder.
+        case rudder75, rudder60, rudder50, rudder25
         /// Full rudder, easing to a quarter over the last 20° (35°) before the groove, then the hold law.
         case smooth20, smooth35
         /// Bear off 10° or 15° first and hold it 3 s or 5 s, then a full-rudder tack.
@@ -222,7 +222,9 @@ enum HandTack {
             switch helm {
             case .slam: return held(heading: heading, speed: speed, aim: aim, magnitude: 1)
             case .rudder75: return held(heading: heading, speed: speed, aim: aim, magnitude: 0.75)
+            case .rudder60: return held(heading: heading, speed: speed, aim: aim, magnitude: 0.6)
             case .rudder50: return held(heading: heading, speed: speed, aim: aim, magnitude: 0.5)
+            case .rudder25: return held(heading: heading, speed: speed, aim: aim, magnitude: 0.25)
             case .smooth20: return smooth(heading: heading, aim: aim, ease: 20)
             case .smooth35: return smooth(heading: heading, aim: aim, ease: 35)
             case .bear10x3: return bear(t: t, heading: heading, speed: speed, wind: wind, angle: angle, aim: aim, degrees: 10, hold: 3)
