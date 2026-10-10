@@ -5,10 +5,36 @@ import Testing
 /// A race for bot tests: `seats` (by default seat 0 human and seven bots) and the wind seed derived
 /// from `seed`, as RegattaCoreTests does.
 func botRace(seats: [SeatKind] = [.human] + Array(repeating: .bot, count: 7), laps: Int = 2,
-             prestartSeconds: Int = 45, seed: UInt64, boatClass: FileRef = RaceFiles.defaults.boatClass.ref) -> Race {
+             prestartSeconds: Int = 45, seed: UInt64, boatClass: FileRef = BotConductTests.waterClass) -> Race {
     let setup = try! RaceSetup(raceSeed: RaceSeed(seed), seats: seats, laps: laps,
                                startSequenceTicks: prestartSeconds * Race.tickRate, boatClass: boatClass)
     return Race(setup: setup, windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1))
+}
+
+/// Runs a test with the bot tests' race builders (`botRace` and each suite's own, by `BotConductTests.waterClass`)
+/// sailing another bundled skiff than the default class.
+struct SkiffPin: TestTrait, TestScoping {
+    var version: Int
+
+    func provideScope(for test: Test, testCase: Test.Case?,
+                      performing function: @Sendable () async throws -> Void) async throws {
+        let ref = try BoatClassFile.bundled(id: "skiff", version: version).ref
+        try await BotConductTests.$waterClass.withValue(ref) { try await function() }
+    }
+}
+
+extension Trait where Self == SkiffPin {
+    /// skiff@7, the default class from #437 to #461: every boat steers by hand, the autohelm sails the tack/gybe tap,
+    /// the rudder's drag is linear and there is a roll tack. A scene fitted to the tap's turn, or one whose bots don't
+    /// yet sail it on skiff@8's hand tacks, names it ("until #455": that ticket un-pins it).
+    static var onSkiffSeven: Self { SkiffPin(version: 7) }
+}
+
+/// The rudder a bot turns a penalty turn with, to `direction` (-1 port, 1 starboard), on the default class:
+/// `HandTackTable.penaltyFraction` of full on a class that turns by hand (skiff@8, #459), hard over on an older one.
+func penaltyHelm(_ direction: Double = 1) -> BoatInput {
+    let byHand = !RaceFiles.defaults.boatClass.content.steering.autohelm.sailsTap
+    return BoatInput(rudder: direction * (byHand ? HandTackTable.penaltyFraction : 1))
 }
 
 /// Every seat sailed by a bot, as `-demo` sails yours.
@@ -50,7 +76,9 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
             let phase = record.seat % BotDriver.decisionInterval
             #expect((record.tick - 1 + phase).isMultiple(of: 3), "seat \(record.seat) changed input at tick \(record.tick), off its decision ticks")
         }
-        #expect(inputs.contains { if case .tap(.tackGybe) = $0.kind { true } else { false } }, "bots tack and gybe with the tap")
+        // On the default class bots tack and gybe by hand (#459): no tap. (On an older class they tap:
+        // `BotHandTackTests.skiffSevenBotsAreBitIdentical` holds those races.)
+        #expect(!inputs.contains { if case .tap(.tackGybe) = $0.kind { true } else { false } }, "a bot tapped on a class that turns by hand")
     }
 
     /// The phase spreads the fleet's decisions over the three ticks.
@@ -67,6 +95,8 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         sail(race, &controllers, ticks: 1_500 * Race.tickRate)
         let finishers = race.boats.filter { $0.status == .finished }
         #expect(race.isOver)
+        // Five of eight. On the first skiff@8 (a penalty turn by hand 13 to 30 s from slow) the finish window closed on the
+        // boats that turned them and seed 42 finished four; since #461's fall-off retune seven finish.
         #expect(finishers.count >= 5, "finished: \(finishers.map(\.id)), statuses: \(race.boats.map(\.status))")
     }
 
@@ -247,8 +277,9 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
 }
 
 @Suite struct BotPenaltyTurnTests {
-    /// The bot's rudder hard over to `direction` (−1 port, 1 starboard), as a held input.
-    static func hardOver(_ direction: Double) -> Int8 { BoatInput(rudder: direction).rudder }
+    /// The bot's penalty-turn rudder to `direction` (−1 port, 1 starboard), as a held input: hard over on a class whose
+    /// tap sails her turns, 70 % of it on the default class (`penaltyHelm`).
+    static func hardOver(_ direction: Double) -> Int8 { penaltyHelm(direction).rudder }
 
     /// Seat 0 at `offset` from the windward mark, 20 s into the sequence, owing a turn with `turned` of it already
     /// turned (60° unless given: her rounding counts towards it) whose clock started `since` seconds ago, and seat 1
@@ -378,12 +409,21 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         sail(race, &controllers, ticks: 2 * complete) { race in
             kinds += race.drainEvents().map(\.kind)
             let rudder = race.heldInputs[0].rudder
-            if race.boats[0].penaltyTurnsOwed > 0 && (!held.isEmpty || abs(Int(rudder)) == 127) { held.insert(rudder) }
+            if race.boats[0].penaltyTurnsOwed > 0 && (!held.isEmpty || abs(rudder) == Self.hardOver(1)) { held.insert(rudder) }
         }
         #expect(kinds.filter { $0 == .penaltyServed(seat: 0) }.count == 2)
-        #expect(!kinds.contains(.penaltyReset(seat: 0)))
+        let byHand = !RaceFiles.defaults.boatClass.content.steering.autohelm.sailsTap
+        // By hand (skiff@8, #461) she may turn the second the other way before it has started (the rules' 30°): slow
+        // from the first, she bears away rather than luff straight back into the wind.
+        #expect(byHand || !kinds.contains(.penaltyReset(seat: 0)))
         #expect(!kinds.contains { if case .disqualified(seat: 0, _) = $0 { true } else { false } })
         #expect(race.boats[0].penaltyTurnsOwed == 0 && race.boats[0].status == .racing)
-        #expect(held.count == 1 && held.allSatisfy { abs(Int($0)) == 127 }, "\(held)")
+        // By hand not one rudder: she takes some off to gather way before the tack, and puts it hard over where the
+        // turn's own would crawl through the wind.
+        if byHand {
+            #expect(held.contains(Self.hardOver(1)) || held.contains(Self.hardOver(-1)), "\(held)")
+        } else {
+            #expect(held.count == 1 && held.allSatisfy { abs($0) == Self.hardOver(1) }, "\(held)")
+        }
     }
 }

@@ -30,6 +30,12 @@ import RegattaServices
 ///   (#361: a UI test that waits for the results spends less of its watch before the gun).
 /// - `-laps <n>` sails every practice race `n` laps, 1…9, instead of the setup's (#354: a UI test that waits for the
 ///   results sails a short race, so a slow simulator still reaches them).
+/// - `-beatMetres <n>` (with `-uitesting`, Debug builds) caps every practice race's beat at `n` metres, 120…360
+///   (#473), where the rules configuration caps it at 360: the race sails a tuned copy of the rules configuration
+///   with that one number changed, as the tuning panel would write it (`Tuning.beatCapped(at:)`), never an override
+///   in the simulation. For a UI test that waits for the results of a race too slow to tick through a full beat (a
+///   sixteen-boat one): the finish window and every other rule stand. No shorter than 120 m: sixteen bots finish
+///   on that, but on 90 m few do and on 60 m none, and the race runs to its time limit.
 /// - `-hideScene` draws none of a live race's world (#361): the scene still moves every node, and the HUD and results
 ///   show, but SpriteKit rasterises nothing, so a UI test waiting for the results doesn't hang on the runner's GPU.
 /// - `-appearance light|dark` overrides the system appearance, for UI tests of the menus in both (#108).
@@ -91,6 +97,10 @@ struct LaunchOptions: Equatable {
         }
     }
 
+    /// What `-beatMetres` takes: up to the rules configuration's own cap, and no shorter than a beat a sixteen-boat
+    /// fleet of bots still finishes on.
+    static let beatMetresRange = 120.0...360.0
+
     /// Boats in the `-perf` race, the largest fleet.
     static let perfFleetSize = 16
 
@@ -130,6 +140,8 @@ struct LaunchOptions: Equatable {
     #if DEBUG
     var tuning = false
     var fps120 = false
+    /// `-beatMetres`: honoured only with `-uitesting` (`AppModel`).
+    var beatMetres: Double?
     #endif
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
@@ -158,7 +170,7 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
-            case "-fakeServices", "-referenceRace":
+            case "-fakeServices", "-referenceRace", "-beatMetres":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             #endif
@@ -189,7 +201,7 @@ struct LaunchOptions: Equatable {
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
         #if DEBUG
-        flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace"])
+        flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace", "-beatMetres"])
         #endif
         return flags
     }()
@@ -262,6 +274,10 @@ struct LaunchOptions: Equatable {
             }
         case "-completedRaces":
             if let n = Int(value), n >= 0 { completedRaces = n } else { reject(argument, value, "a whole number ≥ 0") }
+        #if DEBUG
+        case "-beatMetres":
+            if let n = Double(value), Self.beatMetresRange.contains(n) { beatMetres = n } else { reject(argument, value, "a number of metres, 120…360") }
+        #endif
         case "-fakeServices":
             if let scenario = FakeServiceScenario(rawValue: value) {
                 fakeServices = scenario
@@ -287,6 +303,10 @@ struct LaunchOptions: Equatable {
     /// Whether the Debug FPS, node and draw-count overlay shows. UI tests and render fixtures hide it,
     /// so their screenshots are deterministic.
     var showsDebugStats: Bool { !uiTesting && fixture == nil }
+
+    /// Whether the main menu's build identifier shows (#473, Debug builds; `BuildIdentity`). UI tests and render
+    /// fixtures hide it like the stats overlay, so no reference and no UI test sees it.
+    var showsBuildIdentity: Bool { showsDebugStats }
 
     /// The colour-vision filter over a live race: `-vision`'s, in Debug builds only (#111). A render fixture
     /// names its own.

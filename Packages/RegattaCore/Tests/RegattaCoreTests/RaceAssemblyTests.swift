@@ -6,9 +6,11 @@ import Testing
 @Suite struct RaceAssemblyTests {
     static let windSeed = WindSeed(0x81)
 
-    static func setup(seats: [SeatKind] = [.human, .bot, .bot, .human], venue: FileRef = RaceFiles.defaults.venue.ref,
+    static func setup(seats: [SeatKind] = [.human, .bot, .bot, .human], boatClass: FileRef = RaceFiles.defaults.boatClass.ref,
+                      venue: FileRef = RaceFiles.defaults.venue.ref,
                       conditions: FileRef = RaceFiles.defaults.conditions.ref) throws -> RaceSetup {
-        try RaceSetup(raceSeed: RaceSeed(81), seats: seats, startSequenceTicks: 900, venue: venue, conditions: conditions)
+        try RaceSetup(raceSeed: RaceSeed(81), seats: seats, startSequenceTicks: 900, boatClass: boatClass, venue: venue,
+                      conditions: conditions)
     }
 
     /// The test venue (it has a current) with gusty-offshore@2, which it pairs, from a catalog.

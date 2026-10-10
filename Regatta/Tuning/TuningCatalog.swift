@@ -132,7 +132,9 @@ enum TuningCatalog {
 
     /// The Auto tiller (#436): whether a centred rudder hands her to the autohelm (#434, ADR 0011).
     static let autoTiller = FileFlag(slot: .boatClass, pointer: "/steering/autohelm/holdsWhenCentred", absent: 1, schemaVersion: 4)
-    static let fileFlags = [autoTiller]
+    /// Whether the tack/gybe tap sails the turn (#458, skiff@8 off: she tacks by hand).
+    static let tapSailsTurn = FileFlag(slot: .boatClass, pointer: "/steering/autohelm/sailsTap", absent: 1, schemaVersion: 4)
+    static let fileFlags = [autoTiller, tapSailsTurn]
 
     /// `grooveColumns`: each driving polar column of the boat class being tuned, and its wind speed in knots.
     /// `fullSteeragePoint`: the index of its turn-rate curve's last point, from whose speed she turns at the top
@@ -220,12 +222,18 @@ enum TuningCatalog {
                 applies: .nextRace,
                 sliders: [
                     TuningSlider(.boatClass, "/momentum/speedingUpSeconds", "Speeding up", unit: " s", 0.5...10, step: 0.1),
-                    TuningSlider(.boatClass, "/momentum/slowingDownSeconds", "Slowing down", unit: " s", 0.5...10, step: 0.1),
+                    TuningSlider(.boatClass, "/momentum/slowingDownSeconds", "Slowing down", unit: " s", 0.5...20, step: 0.1),
                     TuningSlider(.boatClass, "/momentum/noGoSeconds", "Stopping in the no-go", unit: " s", 0.5...10, step: 0.1),
                     TuningSlider(.boatClass, "/steering/topTurnRateDegreesPerSecond", "Top turn rate", unit: "°/s", 5...60, step: 1),
                     TuningSlider(.boatClass, "/steering/minTurnRateDegreesPerSecond", "Least turn rate", unit: "°/s", 1...30, step: 0.5),
                     TuningSlider(.boatClass, "/steering/rudderSlewPerSecond", "Rudder slew", unit: " /s", 1...20, step: 0.5),
                     TuningSlider(.boatClass, "/steering/rudderDragPerSecond", "Rudder drag", unit: " /s", 0...0.8, step: 0.005),
+                    // #458, from skiff@8: the drag's power of the rudder (skiff@8's 3: half rudder, an eighth of the drag), and how fast
+                    // she falls off let go in irons with the rudder centred.
+                    TuningSlider(.boatClass, "/steering/rudderDragExponent", "Rudder drag power", 1...4, step: 0.25),
+                    TuningSlider(.boatClass, "/steering/headToWindFallOffCentredDegreesPerSecond", "Irons fall-off, rudder centred",
+                                 unit: "°/s", 0...40, step: 1),
+                    TuningSlider(.boatClass, tapSailsTurn.pointer, "Tap sails the tack (1 on, 0 off)", 0...1, step: 1),
                 ] + (fullSteeragePoint.map {
                     [TuningSlider(.boatClass, "/steering/turnRateCurve/\($0)/speedKnots", "Full steering from", unit: " kn",
                                   0.5...10, step: 0.5)]
@@ -346,7 +354,7 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "boat", title: "Boat",
-                note: "How boats heel, flutter and flog, their wakes and shadow hatches, and the boat-side cues and rule cues (#117, #121, #122, #123, #220, #222). Drawn only: never logged.",
+                note: "How boats heel and flutter, their wakes and shadow hatches, and the boat-side cues and rule cues (#117, #121, #122, #123, #220, #222). Drawn only: never logged.",
                 applies: .live,
                 sliders: [
                     // Past 1 still counts: heel is capped at 1 after the gain, so more heels her sooner and
@@ -355,10 +363,6 @@ enum TuningCatalog {
                     boat("heelFullKnots", "Overpowered at", \.heelFullKnots, 8...30, 0.5, unit: " kn"),
                     boat("starvedFullLoss", "Starved flutter at", \.starvedFullLoss, 0.1...0.8, 0.05),
                     boat("flutterDegrees", "Flutter", \.flutterDegrees, 0...20, 0.5, unit: "°"),
-                    boat("flogSeconds", "Roll-miss flog", \.flogSeconds, 0...4, 0.1, unit: " s"),
-                    boat("rollRingAlpha", "Roll ring", \.rollRingAlpha, 0...1, 0.05),
-                    boat("rollRingHulls", "Roll ring size", \.rollRingHulls, 0.5...3, 0.1, unit: " hulls"),
-                    boat("rollRingSeconds", "Roll result shows", \.rollRingSeconds, 0.2...2, 0.1, unit: " s"),
                     boat("ghostAlpha", "Ghost fade", \.ghostAlpha, 0.1...0.9, 0.05),
                     // #121: wakes, cones and backwind.
                     boat("wakeMaxHulls", "Wake length", \.wakeMaxHulls, 0...10, 0.25, unit: " hulls"),
@@ -368,7 +372,6 @@ enum TuningCatalog {
                     boat("wakePressureFan", "Wake pressure fan", \.wakePressureFan, 0...3, 0.1),
                     boat("wakeAlpha", "Wake alpha", \.wakeAlpha, 0...1, 0.02),
                     boat("wakePlaningBoost", "Planing wake", \.wakePlaningBoost, 1...2.5, 0.05),
-                    boat("wakeFlareGain", "Roll-hit flare", \.wakeFlareGain, 0...2, 0.1),
                     boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.4, 0.01),
                     boat("backwindShare", "Backwind hatch", \.backwindShare, 0...6, 0.1),
                     boat("backwindFeather", "Backwind edge softness", \.backwindFeather, 0...8, 0.5, unit: " pt"),

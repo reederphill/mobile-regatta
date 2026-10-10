@@ -21,7 +21,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
                           adds planing, the automatic spinnaker, by-the-lee loss and the averaged groove wind
   PolarTable.swift        polar by TWA × TWS, bilinear, with best upwind and downwind VMG derived at load
   Sails.swift             the automatic spinnaker's states and the planing hysteresis (#248)
-  Resources/boat-classes/ boat class files, `<id>@<version>.json`; races sail `skiff@2` by default
+  Resources/boat-classes/ boat class files, `<id>@<version>.json`; races sail `skiff@8` by default
   Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns; schema 2 adds the keyed wind's wobble and ramps
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast
@@ -119,7 +119,6 @@ Regatta/                The iOS app
   Game/BoatNode.swift     batched boat sprites: hull, outline, sail, heel, ghost fade
   Game/BoatEffects.swift  each boat's wake string, wind-shadow cone and backwind; the fleet's one ConeLayer
   Game/WakeShape.swift    a wake's alpha (and V numbers) from speed through the water and pressure
-  Game/RollRing.swift     your roll tack ring: the window after the crossing, a hit's burst, a miss's collapse
   Game/ShadowShapes.swift the cone's and backwind's outlines, from core's ShadowCone sizes
   Game/ChartLayer.swift   the chart: race-area boundary and hatch, land and relief, landmarks, shallows tint, marks and line
   Game/ChartMarks.swift   which marks are the active leg's (orange) or grey, and the rounding-side arrow (pure)
@@ -398,7 +397,7 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
 - `-demo` starts a race with a bot controller attached to your seat too. Useful for watching the AI.
 - `-perf` starts a 16-boat demo race for profiling.
 - `-seed <n>` sails every race on race seed `n`, with the wind seed pinned to it too, so the whole race reproduces.
-- `-referenceRace <n>` (Debug builds, #367) sails reference race `n` (1…16, `reference-regatta@1.json`) with you in
+- `-referenceRace <n>` (Debug builds, #367) sails reference race `n` (1…16, `reference-regatta@3.json`) with you in
   seat 0: the pinned race the bot suite sails with a stand-in (`BotRaceHarness.runReference`), on untuned files with
   the pressure overlay off. It looks like any practice race.
 - `-timescale <n>` runs the simulation at `n`× real time.
@@ -447,7 +446,7 @@ is, each frame (`WaterTests.waterUpdateStaysCheap` prints its cost).
 ## Playing
 
 - Hold the **left** or **right** half of the screen to steer. Short taps make small corrections.
-- **Tack / Gybe** swings you through the wind onto the mirror-image angle.
+- Steer through the wind to tack or gybe: there is no button.
 - You start in a row below the line, reaching towards the pin on the autohelm until you steer.
 - Keep all of your hull below the line at the gun. If any of it is over (OCS), sail back until all of it
   is below the line, then start. While you sail back, keep clear of everyone else.

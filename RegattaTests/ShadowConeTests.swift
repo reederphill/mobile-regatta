@@ -37,8 +37,7 @@ import Testing
         let effects = BoatEffects(seat: boat.id, boatClass: boatClass, pointsPerMeter: ppm, style: .standard)
         effects.nodes.forEach(scene.addChild)
         let pose = BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass)
-        effects.update(with: boat, pose: pose, style: .standard, quality: .full, time: 0, dt: 0, settled: true,
-                       isFlogging: false)
+        effects.update(with: boat, pose: pose, style: .standard, quality: .full, time: 0, dt: 0, settled: true)
         return (scene, effects)
     }
 
@@ -85,7 +84,7 @@ import Testing
         let boat = Self.boat(headingDegrees: -45, boomSide: .port, apparentDegrees: -18)
         let effects = BoatEffects(seat: 2, boatClass: Self.boatClass, pointsPerMeter: Self.ppm, style: .standard)
         effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: true, boatClass: Self.boatClass),
-                       style: .standard, quality: .full, time: 0, dt: 0, settled: true, isFlogging: false)
+                       style: .standard, quality: .full, time: 0, dt: 0, settled: true)
         #expect(effects.backwind.isHidden && !effects.trail.isHidden)
         #expect(effects.nodes.count == 2, "her backwind and wake string; no cone (#377)")
     }
@@ -188,7 +187,7 @@ import Testing
         after.apparentWind = Wind(direction: deg2rad(-55), speed: 9)
         func draw(_ effects: BoatEffects, _ boat: Boat, dt: Double, settled: Bool = false, style: BoatStyle = .standard) {
             effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass), style: style,
-                           quality: .full, time: 0, dt: dt, settled: settled, isFlogging: false)
+                           quality: .full, time: 0, dt: dt, settled: settled)
         }
         let effects = BoatEffects(seat: 2, boatClass: boatClass, pointsPerMeter: Self.ppm, style: .standard)
         draw(effects, before, dt: 0) // the first frame draws at hers

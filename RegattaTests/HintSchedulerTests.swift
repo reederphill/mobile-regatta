@@ -341,7 +341,7 @@ import Testing
     }
 
     /// The device's first race is the engine's, whatever the session says (nothing sets `GameSession.isFirstRace`): on
-    /// the default class (skiff@7, hand steering) the centred-rudder hint shows after the first race's 5 s of steering,
+    /// the default class (skiff@8, hand steering) the centred-rudder hint shows after the first race's 5 s of steering,
     /// not the later races' 20 s (#437).
     @Test func firstRaceOnDeviceShowsCentredRudderAfterFiveSecondsOfSteering() throws {
         let rig = Rig(progress: HintProgressStore(), isFirstRaceOnDevice: true)

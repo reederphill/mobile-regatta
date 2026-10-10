@@ -63,6 +63,16 @@ struct Tuning: Codable, Equatable {
         }
     }
 
+    /// The rules configuration's cap on the beat, metres (`CourseLayout.beat`).
+    static let beatCapPointer = "/raceFormat/beatSizing/maxMetres"
+
+    /// The files as bundled but for the beat, capped at `metres` (`-beatMetres`, #473): a UI test's short course.
+    static func beatCapped(at metres: Double) -> Tuning {
+        var tuning = Tuning()
+        tuning.rulesValues[beatCapPointer] = metres
+        return tuning
+    }
+
     /// Whether any data file value differs from its file: the race sails tuned copies.
     var tunesFiles: Bool { TuningSlot.allCases.contains { !self[values: $0].isEmpty } }
     /// Whether any value at all differs from the files and the standard look: the TUNED badge.

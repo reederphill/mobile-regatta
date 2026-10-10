@@ -72,7 +72,8 @@ jobs:
       # the whole test, so no test's own waits add up to more than 3.5 min (RaceUITestCase); the slowest
       # passing test, a render fixture, takes about 2. A failed test runs once more, as in ci.yml: the
       # simulator now and then fails to launch the app ("Failed to get background assertion"). A test that
-      # fails twice fails the job.
+      # fails twice fails the job. The sixteen-boat practice race asks for 7 min itself
+      # (executionTimeAllowance, #473), which the maximum of 420 lets it have.
       - name: xcodebuild test (unit + UI) on iOS 27, iPhone and iPad
         env:
           # A failed reference compare leaves its render here, uploaded below as render-actuals (#215; ci.yml).
@@ -83,7 +84,7 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPad Air 13-inch (M4),OS=27.0' \
             -disable-concurrent-destination-testing \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 300 \
-            -maximum-test-execution-time-allowance 300 \
+            -maximum-test-execution-time-allowance 420 \
             -retry-tests-on-failure -test-iterations 2 \
             -derivedDataPath DerivedData -resultBundlePath Regatta-ios27.xcresult
       - name: Test failures

@@ -29,9 +29,6 @@ struct HUDState {
     var legCount = 1
     /// The wind angle she sails at (the sailing wind's); the HUD doesn't show it.
     var twaDegrees = 0.0
-    /// The turn the tack button's tap will sail (#437): the sim's own choice (`Autohelm.tackOrGybe`), through the wind
-    /// with it forward of the beam, through the stern abaft it, so the button's word never disagrees with the turn.
-    var tapTurn: TapTurn = .tack
     /// The wind over the ground at your boat (#15): knots, and the compass direction it blows from, radians. Nobody
     /// else's shadow is in it: you read the shadow from the wakes, not the HUD (#15).
     var windKnots = 0.0
@@ -54,18 +51,6 @@ struct HUDState {
     /// The live leaderboard (#268), from the latest tick's standings and gaps.
     var leaderboard = LeaderboardState()
 
-    enum TapTurn: Equatable {
-        case tack, gybe
-
-        /// The turn a tap sails at `sailingAngle` (`Boat.sailingAngle`).
-        init(sailingAngle: Double) {
-            self = Autohelm.tackOrGybe(sailingAngle: sailingAngle).target == .groove(.upwind) ? .tack : .gybe
-        }
-
-        /// The tack button's word.
-        var label: String { self == .tack ? "TACK" : "GYBE" }
-    }
-
     init() {}
 
     /// The HUD for `world`'s latest tick, from your seat. `isBot` marks the bots on the minimap (#19): the roster's,
@@ -81,7 +66,6 @@ struct HUDState {
         status = p.status
         closeTick = frame.closeTick
         twaDegrees = rad2deg(p.twa)
-        tapTurn = TapTurn(sailingAngle: p.sailingAngle)
         // `windOverGround` is the wind at her before anyone's shadow: the HUD shows that (#15).
         windKnots = knots(metresPerSecond: p.windOverGround.speed)
         windDirection = p.windOverGround.direction

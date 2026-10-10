@@ -35,14 +35,14 @@ import RegattaCore
         return session
     }
 
-    /// Every #22 row, with #219's groove snap and #222's roll hit: the table says it, an event for you plays it, and
+    /// Every #22 row, with #219's groove snap: the table says it, an event for you plays it, and
     /// the session plays it as the generator call it names.
     @Test func eventTableCoversEveryHapticRow() {
         let expected: [RaceCue: HapticPattern] = [
             .sequenceTick: .light, .gun: .heavy, .ocs: .notify(.warning), .callAgainstMe: .notify(.error),
             .callForMe: .notify(.success), .markTouch: .notify(.error), .penaltyDone: .notify(.success),
             .rounding: .light, .finish: .notify(.success), .protestFiled: .light, .contact: .heavy,
-            .disqualified: .notify(.error), .grooveSnap: .light, .rollHit: .light,
+            .disqualified: .notify(.error), .grooveSnap: .light,
         ]
         #expect(RaceCue.haptics == expected)
         #expect(Set(RaceCue.allCases) == Set(expected.keys), "every cue has a row")
@@ -54,7 +54,6 @@ import RegattaCore
             .rounding: .rounded(seat: me, mark: "windward mark"), .finish: .finished(seat: me, place: 1),
             .protestFiled: .protestRecorded(seat: me, target: 1, matchedIncidentId: nil), .contact: .contact(SeatPair(me, 1)),
             .disqualified: .disqualified(seat: me, reason: "Unserved penalty"), .grooveSnap: .grooveSnap(seat: me),
-            .rollHit: .rollHit(seat: me),
         ]
         for (cue, kind) in events {
             var presenter = RaceEventPresenter(me: me)
@@ -123,13 +122,13 @@ import RegattaCore
         #expect(presenter.present([Self.call(.clearAstern, offender: 1, victim: 2, incident: 11)]) == Presentation())
     }
 
-    /// Nothing fires for a tack tap, a puff or wind shadow (#22, #112, #220): puffs and shadow have no race event,
-    /// and the moments you see on the water have no cue.
+    /// Nothing fires for a tack tap, a roll, a puff or wind shadow (#22, #112, #220, #460): puffs and shadow have no
+    /// race event, and the moments you see on the water have no cue.
     @Test func noHapticForTackTapPuffOrShadow() {
         let me = Self.me
         var presenter = RaceEventPresenter(me: me)
         let seen: [RaceEvent.Kind] = [
-            .tacked(seat: me), .gybed(seat: me), .rollMissed(seat: me), .penaltyStarted(seat: me),
+            .tacked(seat: me), .gybed(seat: me), .rollHit(seat: me), .rollMissed(seat: me), .penaltyStarted(seat: me),
             .penaltyReset(seat: me), .started(seat: me), .cleared(seat: me), .becameGhost(seat: me),
             .firstFinish(closeTick: 10), .obstructionContact(seat: me, kind: .land),
             .obstructionContact(seat: me, kind: .mark),
@@ -138,9 +137,7 @@ import RegattaCore
 
         let recorder = HapticsTests.RecordingGenerator()
         let session = Self.session(recorder)
-        session.tackOrGybe()
-        session.pressTack(at: 10)
-        session.releaseTack(at: 11)
+        session.driver.tap(.tackGybe)
         // Your own tack, as the race reports it.
         session.consume([Self.event(.tacked(seat: session.driver.myBoatIndex))])
         #expect(recorder.calls.isEmpty, "\(recorder.calls)")
@@ -176,7 +173,7 @@ import RegattaCore
     @Test func anEventWithAnIdSeenBeforeIsNotPresentedAgain() {
         let me = Self.me
         var presenter = RaceEventPresenter(me: me)
-        let kinds: [RaceEvent.Kind] = [.ocsNotice(recipient: me), .rollMissed(seat: me),
+        let kinds: [RaceEvent.Kind] = [.ocsNotice(recipient: me), .rounded(seat: me, mark: "pin"),
                                        .markTouch(seat: me, mark: "pin"), .penaltyServed(seat: me), .finished(seat: me, place: 1)]
         for (k, kind) in kinds.enumerated() {
             let event = RaceEvent(tick: 10 + k, kind: kind, id: UInt32(k + 1))
@@ -184,35 +181,24 @@ import RegattaCore
             #expect(presenter.present([event]) == Presentation(), "\(kind) again")
         }
         #expect(presenter.present([RaceEvent(tick: 20, kind: .ocsNotice(recipient: me), id: 9)]) != Presentation())
-        let offline = RaceEvent(tick: 30, kind: .rollMissed(seat: me))
+        let offline = RaceEvent(tick: 30, kind: .rounded(seat: me, mark: "pin"))
         #expect(presenter.present([offline]) != Presentation())
         #expect(presenter.present([offline]) != Presentation())
     }
 
-    /// Your roll tap's hit plays a haptic (#222); a miss plays none, and nor does another boat's hit.
-    @Test func rollHitGivesHapticMissDoesNot() {
-        let recorder = HapticsTests.RecordingGenerator()
-        let session = Self.session(recorder)
-        let me = session.driver.myBoatIndex
-        session.consume([Self.event(.rollMissed(seat: me))])
-        session.consume([Self.event(.rollHit(seat: (me + 1) % 3))])
-        #expect(recorder.calls.isEmpty)
-        session.consume([Self.event(.rollHit(seat: me))])
-        #expect(recorder.calls == ["impact 0.5"])
-    }
-
-    /// Your roll tack's result is read as well as seen (#222), overriding #124's "a miss has no cue": a hit and a miss each
-    /// present a short `.roll` notice, a hit's with its haptic cue and a miss's with none, and another boat's roll presents
-    /// nothing.
-    @Test func yourRollTacksResultPresentsANotice() {
+    /// A roll tack has no haptic, sound or notice (#460): the app has no tap for one, so a hit or a miss, yours (an
+    /// old log's) or a bot's, presents nothing and plays nothing.
+    @Test func aRollTackPresentsNothing() {
         let me = Self.me
         var presenter = RaceEventPresenter(me: me)
-        let hit = presenter.present([Self.event(.rollHit(seat: me))])
-        #expect(hit.cues == [.rollHit] && hit.notices == [PresentedNotice(kind: .roll, text: RuleWords.rollHit)])
-        let miss = presenter.present([Self.event(.rollMissed(seat: me))])
-        #expect(miss.cues.isEmpty && miss.notices == [PresentedNotice(kind: .roll, text: RuleWords.rollMissed)])
-        #expect(presenter.present([Self.event(.rollHit(seat: me + 1)), Self.event(.rollMissed(seat: me + 1))]) == Presentation(),
-                "another boat's roll")
+        for seat in [me, me + 1] {
+            #expect(presenter.present([Self.event(.rollHit(seat: seat)), Self.event(.rollMissed(seat: seat))]) == Presentation())
+        }
+        let recorder = HapticsTests.RecordingGenerator()
+        let session = Self.session(recorder)
+        session.consume([Self.event(.rollHit(seat: session.driver.myBoatIndex))])
+        #expect(recorder.calls.isEmpty)
+        #expect(!RaceCue.allCases.contains { "\($0)".lowercased().contains("roll") })
     }
 
     /// #228: the first keep-clear call made while your autohelm held says so, once per device, in place of the rule's

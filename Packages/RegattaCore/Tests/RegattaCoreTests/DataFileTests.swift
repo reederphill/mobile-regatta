@@ -48,8 +48,11 @@ enum SkiffFixtures {
     static let classID = "skiff"
     /// The version most fixtures edit: skiff@6, the autohelm on (schema 3). The default class is `defaultVersion`.
     static let version = 6
-    /// The default class's version (`RaceFiles.defaults`): skiff@7, skiff@6 with the autohelm off (#437).
-    static let defaultVersion = 7
+    /// The default class's version (`RaceFiles.defaults`): skiff@8, tacking and gybing by hand (#461).
+    static let defaultVersion = 8
+    /// skiff@7, the last class whose autohelm sails the tack/gybe tap, with a roll tack and linear rudder drag (the
+    /// default from #437 to #461): for tests of the tap, the roll, and a penalty turn hard over in about 10 s.
+    static let tapClass: FileRef = try! BoatClassFile.bundled(id: classID, version: 7).ref
     /// SHA-256 of each bundled `Resources/boat-classes/skiff@<version>.json`. A released file never changes
     /// (ADR 0004): if one fails, ship the change as the next version instead of editing it. Version 1 stays
     /// bundled for the logs sailed on it (ADR 0002).
@@ -61,6 +64,7 @@ enum SkiffFixtures {
         5: "ce105fbd37ca455498592ea9ae4e47a34a5e255617b2490019a1360330261b80",
         6: "4c20609ea59408e6ea81cb58d2aa3dba8365d24fcbe8ba883c819e6071d097e8",
         7: "4b3c9e3212fca5d39816e3adb5bb46d091fed874df75e44d6b938959c810dba1",
+        8: "8045fbbd0f30a69bd3c3e2353b9b49c05cea7a7e73a3186070b772b8b9f1681f",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -158,7 +162,7 @@ enum SkiffFixtures {
         }
         #expect(BoatClass.supportedSchemaVersions == [2, 3, 4])
         #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.defaultVersion)).ref,
-                "races sail skiff@7 unless told otherwise (#248, #89, #263, #298, #377, #437)")
+                "races sail skiff@8 unless told otherwise (#248, #89, #263, #298, #377, #437, #461)")
     }
 
     @Test func missingHeaderIsMalformed() throws {
@@ -642,9 +646,9 @@ enum SkiffFixtures {
         for block in ["/hull", "/polar", "/momentum", "/steering", "/windShadow", "/contact", "/ease", "/planing", "/spinnaker", "/byTheLee"] {
             #expect(file.header.placeholders.contains(block), "\(block) should be a placeholder")
         }
-        // #263's roll tack, from version 3 on.
+        // #263's roll tack, from version 3 on, until version 8 (#458) tacks by hand.
         #expect(file.header.placeholders.contains("/rollTack") == (file.content.rollTack != nil))
-        #expect((file.content.rollTack != nil) == (version >= 3))
+        #expect((file.content.rollTack != nil) == (version >= 3 && version < 8))
         // The ILCA files stay bundled for replays (ADR 0002): version 3 still loads beside it.
         #expect(try BoatClassFile.bundled(id: Fixtures.classID, version: 3).schemaVersion == 2)
     }

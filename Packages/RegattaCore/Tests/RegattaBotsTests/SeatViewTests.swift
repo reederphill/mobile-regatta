@@ -94,7 +94,8 @@ import Testing
     /// A bot's view of a race with players and bots, held inputs, a rule call and a named roster: no field
     /// for another boat's input, rule 18 records or incident memory, or anyone's name. Another boat shows
     /// only what is drawn of her, and the race's own world snapshot, which has all of these, fails the scan.
-    @Test func noFieldForHeldInputsRule18RecordsOrNames() throws {
+    /// On skiff@7, so the scanned views hold an engaged autohelm (a bot's tap; the default, skiff@8, sails none, #458).
+    @Test(.onSkiffSeven) func noFieldForHeldInputsRule18RecordsOrNames() throws {
         let race = botRace(seats: [.human, .bot, .human] + Array(repeating: .bot, count: 9), seed: 98)
         var controllers = SeatControllers(setup: race.setup)
         var views: [SeatView] = []

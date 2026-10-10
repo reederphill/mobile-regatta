@@ -76,6 +76,31 @@ import Testing
         #expect(fires(.noGo, racing { $0.noGoSeconds = 1 }) == nil)
         #expect(fires(.noGo, racing { $0.noGoSeconds = 2 })?.leader == .vane)
         #expect(fires(.noGo, racing { $0.noGoSeconds = 2; $0.inManoeuvre = true }) == nil)
+        #expect(fires(.noGo, racing { $0.noGoSeconds = 2; $0.steeringSeconds = 0.5 }) == nil, "a turn in progress")
+    }
+
+    /// #460: with no Tack button the no-go hint says to steer through the wind, and it never nags a hand tack on its
+    /// way through the no-go zone: only a centred rudder, pinched or in irons, fires it.
+    @Test func tooCloseToTheWindSaysSteer() throws {
+        let hint = HintCatalogue.hint(.noGo)
+        for steering in [DeviceSettings.Steering.halves, .tiller] {
+            #expect(hint.text.text(for: steering) == "Too close to the wind. Steer through it.")
+        }
+        #expect(HintID.noGo.rawValue == "no_go", "its progress key is saved on devices")
+        for hint in HintCatalogue.all {
+            let words = hint.text.halves + " " + hint.text.tiller
+            #expect(!words.localizedCaseInsensitiveContains("tap tack") && !words.contains("button"), "\(hint.id)")
+        }
+        #expect(fires(.noGo, racing { $0.noGoSeconds = 60; $0.steeringSeconds = 60 }) == nil, "however slow the turn")
+        #expect(fires(.noGo, racing { $0.noGoSeconds = 60 })?.leader == .vane, "let go in irons")
+
+        // Help's Steering page says the same, under Let go, and has no Buttons section.
+        let url = RaceDriverTests.repoRoot.appending(path: "Regatta/UI/Help/HelpTopics.swift")
+        let help = try String(contentsOf: url, encoding: .utf8)
+        let letGo = try #require(help.range(of: "HelpSection(heading: \"Let go\""))
+        let section = help[letGo.lowerBound...].prefix(400)
+        #expect(section.contains("\"Steer through the wind to tack or gybe.\""))
+        #expect(!help.contains("heading: \"Buttons\"") && !help.contains("Tack: tap"))
     }
 
     @Test func lettingGoFiresEarlyInTheFirstRace() {
@@ -127,11 +152,11 @@ import Testing
                                 showsLaylines: false, isFirstRace: true, lettingGoRetired: false, tuning: t)
         }
         #expect(try snapshot(Self.autohelmOnFiles()).autohelmHolds)
-        #expect(!snapshot(.defaults).autohelmHolds, "the default class, skiff@7, steers by hand (#437)")
+        #expect(!snapshot(.defaults).autohelmHolds, "the default class, skiff@8, steers by hand (#437, #461)")
     }
 
-    /// Practice files whose autohelm doesn't hold a centred rudder: the defaults, since the default class is skiff@7
-    /// (#437; before it, the Auto tiller's tuned copy, #436).
+    /// Practice files whose autohelm doesn't hold a centred rudder: the defaults, since the default class is skiff@8
+    /// (#461; skiff@7 from #437; before it, the Auto tiller's tuned copy, #436).
     static func handSteeredFiles() throws -> PracticeFiles { .defaults }
 
     /// Practice files sailing skiff@6, whose autohelm holds a centred rudder (the default until #437).
@@ -231,10 +256,12 @@ import Testing
     }
 
     /// #436: on a hand-steered class a tap's autohelm (the tack and the hand-back) isn't letting go, so the
-    /// centred-rudder hint still fires afterwards and letting go is never learned for it.
+    /// centred-rudder hint still fires afterwards and letting go is never learned for it. On skiff@7, hand-steered
+    /// with a tap the autohelm sails: the default, skiff@8, sails no tap (#458).
     @Test func aTappedTackOnAHandSteeredClassIsNotLettingGo() throws {
         var config = RaceConfig(opponents: 1, prestartSeconds: 1, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
         config.files = try Self.handSteeredFiles()
+        config.files.boatClass = try BoatClassFile.bundled(id: "skiff", version: 7).ref
         let driver = PracticeDriver(config: config)
         var o = HintObservations()
         func run(_ rudder: Int8, seconds: Double) {

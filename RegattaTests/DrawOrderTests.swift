@@ -22,7 +22,7 @@ import Testing
             #expect(shared.isEmpty, "\(name): \(shared.count) z's drawn by more than one node, in \(layers)")
             // Each boat's backwind and wake string (#121), hidden ones too (the ribbons are their own layer, under
             // them); each boat's heel shadow, right-of-way glow (#348, drawn hidden or not), hull, outline and sail;
-            // your glow and roll ring too.
+            // and your glow (the roll ring went with the Tack button, #460).
             #expect(boats > 1, "\(name)")
             // The wake and sail are named for the render-quality ladder (#127), so they read as layers of their own here.
             let effects = drawn.filter { ["effects", "wake"].contains($0.layer) }
@@ -33,7 +33,7 @@ import Testing
             let ribbons = drawn.filter { $0.layer == "turbulenceTrails" }
             let effectsBottom = effects.map(\.z).min() ?? 0
             #expect(ribbons.allSatisfy { $0.z < effectsBottom }, "\(name): the ribbons under every boat's effects")
-            #expect(fleet.count == 5 * boats + 2, "\(name)")
+            #expect(fleet.count == 5 * boats + 1, "\(name)")
             #expect(drawn.filter { $0.layer == "course" }.count > 4, "\(name)")
             // The chart (#115): the boundary's band and line, the land and its relief, a landmark; shallows where
             // the venue has a current.

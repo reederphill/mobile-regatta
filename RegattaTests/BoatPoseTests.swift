@@ -83,22 +83,17 @@ import Testing
     }
 
     /// Starved (#220): the sail flutters when the pressure she feels is well under her own recent average, not in
-    /// clean air at her average; a roll hit snaps it full, a miss flogs.
-    @Test func starvedFlutterAndRollCues() {
+    /// clean air at her average. An older class's roll (a bot's, an old log's) changes nothing drawn (#460).
+    @Test func starvedFlutter() {
         let clean = BoatPose(Self.boat(averageKnots: 12), ease: false, isGhost: false, boatClass: Self.boatClass)
         #expect(clean.flutter == 0)
         let shadowed = BoatPose(Self.boat(shadow: 0.6, averageKnots: 12), ease: false, isGhost: false, boatClass: Self.boatClass)
         #expect(shadowed.flutter > 0.5)
-        var hit = Self.boat(shadow: 0.6, averageKnots: 12)
-        hit.roll = .hit
-        let snapped = BoatPose(hit, ease: false, isGhost: false, boatClass: Self.boatClass)
-        #expect(snapped.roll == .snap && snapped.flutter == 0)
-        var miss = Self.boat()
-        miss.roll = .missed
-        #expect(BoatPose(miss, ease: false, isGhost: false, boatClass: Self.boatClass).roll == .flog)
-        var pending = Self.boat()
-        pending.roll = .pending(tapTick: 3)
-        #expect(BoatPose(pending, ease: false, isGhost: false, boatClass: Self.boatClass).roll == nil)
+        for roll in [RollTack.hit, .missed, .pending(tapTick: 3)] {
+            var rolled = Self.boat(shadow: 0.6, averageKnots: 12)
+            rolled.roll = roll
+            #expect(BoatPose(rolled, ease: false, isGhost: false, boatClass: Self.boatClass) == shadowed, "\(roll)")
+        }
     }
 
     /// By the lee the boom is to windward: the sail stays on the boom's side, out as far as it goes with a small
@@ -133,29 +128,6 @@ import Testing
         let one = BoatPose(boat, ease: false, isGhost: false, boatClass: Self.boatClass).heel
         let two = BoatPose(boat, ease: false, isGhost: false, boatClass: Self.boatClass, style: double).heel
         #expect(one > 0 && one < 1 && two > one)
-    }
-
-    /// A roll miss flogs `flogSeconds` of race time from when it is first drawn, then stops though the race still
-    /// holds the miss; time running backwards (a re-prediction, a fixture drawn again) starts it over rather than
-    /// flogging for ever.
-    @Test func flogTimerRunsItsSecondsAndRestartsWhenTimeRunsBack() {
-        var timer = FlogTimer()
-        func flogs(_ roll: BoatPose.RollCue?, at time: Double) -> Bool {
-            timer.isFlogging(roll: roll, time: time, seconds: 1.5)
-        }
-        #expect(!flogs(nil, at: 10))
-        #expect(flogs(.flog, at: 10))
-        #expect(flogs(.flog, at: 11.4))
-        #expect(!flogs(.flog, at: 11.6))
-        #expect(!flogs(.flog, at: 30), "held miss, flog over")
-        // Time runs back before the start: a fresh flog from there, which then ends.
-        #expect(flogs(.flog, at: 5))
-        #expect(timer.start == 5)
-        #expect(!flogs(.flog, at: 7))
-        // The miss clears: a new one starts its own flog.
-        #expect(!flogs(.snap, at: 8))
-        #expect(timer.start == nil)
-        #expect(flogs(.flog, at: 9))
     }
 
     /// A saved style missing fields keeps the rest (the tuning panel's lenient decode).

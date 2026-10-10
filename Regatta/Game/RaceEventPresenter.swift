@@ -21,10 +21,8 @@ enum RaceCue: CaseIterable, Hashable {
     case disqualified
     /// Your autohelm snapped to the groove (#219, #230).
     case grooveSnap
-    /// Your roll tap hit (#222, #263); a miss has no haptic, only its notice.
-    case rollHit
 
-    /// The #22 table, completed by #219 (groove snap) and #222 (roll hit): one row a cue.
+    /// The #22 table, completed by #219 (groove snap): one row a cue.
     static let haptics: [RaceCue: HapticPattern] = [
         .sequenceTick: .light,
         .gun: .heavy,
@@ -39,8 +37,6 @@ enum RaceCue: CaseIterable, Hashable {
         .contact: .heavy,
         .disqualified: .notify(.error),
         .grooveSnap: .light,
-        // Untested on a device (#222): one constant to tune.
-        .rollHit: .light,
     ]
 
     var haptic: HapticPattern {
@@ -176,16 +172,10 @@ struct RaceEventPresenter {
             if pair.contains(me) { out.cues.append(.contact) }
         case .grooveSnap(let seat):
             if seat == me { out.cues.append(.grooveSnap) }
-        case .rollHit(let seat):
-            guard seat == me else { return }
-            out.cues.append(.rollHit)
-            out.notices.append(PresentedNotice(kind: .roll, text: RuleWords.rollHit))
-        case .rollMissed(let seat):
-            // Overrides #124: a miss has no haptic, but it is read, as a hit is (`BoatNode`'s ring shows it too).
-            if seat == me { out.notices.append(PresentedNotice(kind: .roll, text: RuleWords.rollMissed)) }
-        case .tacked, .gybed, .penaltyStarted, .penaltyReset, .started, .cleared, .becameGhost,
+        case .tacked, .gybed, .rollHit, .rollMissed, .penaltyStarted, .penaltyReset, .started, .cleared, .becameGhost,
              .firstFinish, .raceClosed, .markRoomNotice:
-            // Seen on the water or in the results, not felt (#22). `markRoomNotice` is reserved, never emitted (#403):
+            // Seen on the water or in the results, not felt (#22). An older class's roll tack (bots, old logs) has
+            // no cue or notice: nothing in the app taps it (#460). `markRoomNotice` is reserved, never emitted (#403):
             // the glow shows who owes mark-room (`Race.keepClearRelations(of:)`).
             break
         case .obstructionContact:

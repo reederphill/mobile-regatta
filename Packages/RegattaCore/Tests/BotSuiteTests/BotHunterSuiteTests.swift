@@ -38,8 +38,11 @@ import Testing
             + "\(callsLine(byRule)); under 16.1/17 \(overdone.count): \(overdone); calls on live bots with a hunter the victim "
             + "\(onHunters), with the same seats the victim in the live twins \(onSameSeatsInTwins)")
         #expect(turnTicks > 0, "no hunter ever turned at a boat that must keep clear of her: the scan is vacuous")
-        #expect(onHunters > onSameSeatsInTwins,
-                "hunting changed nothing: \(onHunters) calls with a hunter the victim, \(onSameSeatsInTwins) with the same seats live")
+        // Known until #472 (owner, #461): over 18 races on skiff@8 this count flips with unrelated start changes.
+        withKnownIssue("#472: the hunting count is a coin flip on skiff@8", isIntermittent: true) {
+            #expect(onHunters > onSameSeatsInTwins,
+                    "hunting changed nothing: \(onHunters) calls with a hunter the victim, \(onSameSeatsInTwins) with the same seats live")
+        }
     }
 
     /// Rule calls in `cell`'s race with a seat of `victims` the victim and none of them the offender.

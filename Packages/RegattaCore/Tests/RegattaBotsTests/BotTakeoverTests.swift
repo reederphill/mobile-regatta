@@ -33,7 +33,7 @@ import RegattaCore
     }
 
     /// A race of `fleetSize` with seat 0 the player's, and the others the fleet's bots.
-    static func race(seed: UInt64, fleetSize: Int = 6, boatClass: FileRef = RaceFiles.defaults.boatClass.ref) -> Race {
+    static func race(seed: UInt64, fleetSize: Int = 6, boatClass: FileRef = BotConductTests.waterClass) -> Race {
         botRace(seats: [.human] + Array(repeating: .bot, count: fleetSize - 1), laps: 1, prestartSeconds: 30, seed: seed,
                 boatClass: boatClass)
     }
@@ -247,14 +247,15 @@ import RegattaCore
             #expect(first.rudder == 0, "\(name): she leaves it to the autohelm first")
             for d in held {
                 let waiting = d.time - first.time < hold - 1e-9
-                #expect(waiting ? d.rudder == 0 : d.rudder == BoatInput.rudderRange.upperBound,
+                #expect(waiting ? d.rudder == 0 : d.rudder == penaltyHelm().rudder,
                         "\(name): at \(d.time - first.time) s rudder \(d.rudder)")
             }
             #expect(held.contains { $0.time - first.time >= hold }, "\(name): sailed past the bound")
         }
-        let near = try decisions(progress: deg2rad(90), rudder: -0.1)
-        #expect(near.allSatisfy { $0.rudder == BoatInput.rudderRange.upperBound }, "within a tick's slew: \(near.map(\.rudder))")
+        // 0.05: skiff@8's rudder slews 2 a second, 0.067 a tick (0.1 was within skiff@7's 5 a second).
+        let near = try decisions(progress: deg2rad(90), rudder: -0.05)
+        #expect(near.allSatisfy { $0.rudder == penaltyHelm().rudder }, "within a tick's slew: \(near.map(\.rudder))")
         let late = try decisions(progress: deg2rad(10), rudder: -0.6, startLeft: BotBrain.penaltyStartMargin / 2)
-        #expect(late.allSatisfy { $0.rudder == BoatInput.rudderRange.upperBound }, "near the start deadline: \(late.map(\.rudder))")
+        #expect(late.allSatisfy { $0.rudder == penaltyHelm().rudder }, "near the start deadline: \(late.map(\.rudder))")
     }
 }

@@ -12,7 +12,9 @@ import RegattaCore
 /// autohelm holds a groove's heading through it (#377).
 ///
 /// Her brain reads the angle it holds as her autohelm's (`view(_:)`), so it decides exactly as it does with the
-/// autohelm on. A rudder her brain holds off centre is hers, and lets the angle go. The tack/gybe tap is still the
+/// autohelm on. A rudder her brain holds off centre is hers, and lets the angle go: so too every tack and gybe on a
+/// class whose tap sails nothing (#459, `BotBrain+HandTurn.swift`). A rudder her brain lets go in irons (`centred`) is
+/// sent centred, and she holds no angle: holding one there would keep her in irons. The tack/gybe tap is still the
 /// race's autohelm's: hands off while it sails her, and once it hands her back she holds the groove it sailed her to,
 /// as the autohelm on would. For a class whose autohelm holds a centred rudder she does nothing: every input passes.
 /// Sees only her seat's view (#98), like the brain.
@@ -44,13 +46,19 @@ struct BotHelm: Sendable, Equatable {
 
     /// The held input she sends for `input`, her brain's decision on `view`, the seat's view as the race shows it, with
     /// the tack/gybe tap if `tapping`: then the rudder stays as her brain left it, centred, for the race's autohelm to
-    /// sail the tap (a rudder held off centre would cancel it).
-    mutating func input(_ input: BoatInput, _ view: SeatView, tapping: Bool = false) -> BoatInput {
+    /// sail the tap (a rudder held off centre would cancel it). `centred` (#459), her brain lets the rudder go in
+    /// irons: it is sent truly centred and she holds nothing, so the class's irons recovery falls her off.
+    mutating func input(_ input: BoatInput, _ view: SeatView, tapping: Bool = false, centred: Bool = false) -> BoatInput {
         let boatClass = view.boatClass
         guard !boatClass.steering.autohelm.holdsWhenCentred, !tapping else {
             held = nil
             steering = nil
             return input
+        }
+        if centred {
+            held = nil
+            steering = nil
+            return BoatInput(rudder: 0.0, ease: input.ease)
         }
         // Her brain steers: the rudder is hers, and the angle she held goes.
         guard abs(input.rudderValue) <= Autohelm.deadBand else {

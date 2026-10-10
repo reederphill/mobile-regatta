@@ -165,9 +165,10 @@ import RegattaCore
         #expect(HUDModel(HUDState(world: driver.renderWorld)).showsInstruments)
     }
 
-    /// Speed, Tack/Gybe and the apparent wind fit side by side on the narrowest phone (320 pt) without overlap, and
-    /// at an SE's, an iPhone 17's and the iPad letterboxes; the row's height is the controls' (the edge arrow's
-    /// clearance, `rowHeight`, is unchanged).
+    /// Speed and the apparent wind sit side by side as a pair, centred on the row with the 8 pt gap between them
+    /// (#460: no Tack/Gybe between them), and fit on the narrowest phone (320 pt), an SE's, an iPhone 17's, a Pro
+    /// Max's and the iPad letterboxes; the row's height is the controls' (the edge arrow's clearance, `rowHeight`,
+    /// is unchanged).
     @Test func bottomRowFitsAtEveryRaceWidth() {
         func letterbox(_ screen: CGSize, landscape: Bool) -> CGFloat {
             let window = landscape ? CGSize(width: screen.height, height: screen.width) : screen
@@ -179,11 +180,19 @@ import RegattaCore
         let widestKnots = HUDLayout.width(of: HUDModel.knotsText(48), size: RaceControls.angleSize)
         let widestSpeed = HUDLayout.width(of: HUDModel.speedText(knots: 29.9), size: RaceControls.speedSize,
                                           weight: .heavy)
-        for width in [320, 375, 402] + iPads {
+        #expect(RaceControls.spacing == 8)
+        for width in [320, 375, 402, 430] + iPads {
             let instrument = RaceControls.instrumentWidth(rowWidth: width)
-            let row = 2 * RaceControls.edge + RaceControls.tackWidth + 2 * RaceControls.spacing + 2 * instrument
+            let row = 2 * RaceControls.edge + RaceControls.spacing + 2 * instrument
             #expect(row <= width + 0.001, "at \(width) pt the row needs \(row) pt")
-            #expect(instrument >= 70, "at \(width) pt an instrument gets \(instrument) pt")
+            #expect(instrument == RaceControls.instrumentMaxWidth, "at \(width) pt an instrument gets \(instrument) pt")
+            // The pair is centred: as far from the leading edge as from the trailing one, inside the margins.
+            let pair = RaceControls.instrumentPair(rowWidth: width)
+            #expect(abs(pair.lowerBound - (width - pair.upperBound)) < 0.001, "at \(width) pt the pair sits at \(pair)")
+            #expect(abs((pair.upperBound - pair.lowerBound) - (2 * instrument + RaceControls.spacing)) < 0.001)
+            #expect(pair.lowerBound >= RaceControls.edge - 0.001)
+            // VoiceOver's Ease element (bottom leading, 44 pt under a UI test at 7 pt in) stays clear of it.
+            #expect(pair.lowerBound >= 7 + 44, "at \(width) pt the pair starts at \(pair.lowerBound)")
             let inside = instrument - 2 * RaceControls.instrumentInset
             #expect(widestAngle * RaceControls.minimumScale <= inside, "at \(width) pt \(widestAngle) in \(inside)")
             #expect(widestKnots <= inside && widestSpeed <= inside, "at \(width) pt")
@@ -201,12 +210,36 @@ import RegattaCore
         let url = RaceDriverTests.repoRoot.appending(path: "Regatta/UI/RaceControls.swift")
         let source = try String(contentsOf: url, encoding: .utf8)
         let start = try #require(source.range(of: "struct InstrumentRow"))
-        let end = try #require(source.range(of: "/// One control's face"))
+        let end = try #require(source.range(of: "/// VoiceOver's Ease (#453)"))
         let instruments = String(source[start.lowerBound..<end.lowerBound])
         for colour in ["CuePalette", "Palette.", "orange", ".red", ".green", ".yellow", ".tint", "Color("] {
             #expect(!instruments.contains(colour), "the instruments use \(colour)")
         }
         #expect(instruments.contains(".foregroundStyle(.white)"))
         #expect(instruments.contains(".allowsHitTesting(false)"), "never a tap target")
+    }
+
+    /// #460: the Tack/Gybe button, the roll ring and their plumbing are gone from the app, tests and UI tests. The
+    /// driver's tap stays (`RaceDriver.tap(.tackGybe)`: old logs, the sim and the online protocol carry it).
+    @Test func noTackButtonOrRollRingRemains() throws {
+        let gone = ["RollRing", "TackHold", "pressTack", "releaseTack", "rollRing", "HoldButton", "race-" + "tack",
+                    "tackWidth", "TapTurn", "FlogTimer", "FlareTimer", "isFlogging", "wakeFlare", "RollCue",
+                    "controlReleases"]
+        let root = RaceDriverTests.repoRoot
+        var scanned = 0
+        for folder in ["Regatta", "RegattaTests", "RegattaUITests"] {
+            let files = try #require(FileManager.default.enumerator(at: root.appending(path: folder),
+                                                                    includingPropertiesForKeys: nil))
+            for case let url as URL in files where url.pathExtension == "swift" {
+                // This test names them.
+                guard url.lastPathComponent != "InstrumentsTests.swift" else { continue }
+                let source = try String(contentsOf: url, encoding: .utf8)
+                scanned += 1
+                for word in gone { #expect(!source.contains(word), "\(url.lastPathComponent) has \(word)") }
+            }
+        }
+        #expect(scanned > 100, "\(scanned) files scanned")
+        let controls = try String(contentsOf: root.appending(path: "Regatta/UI/RaceControls.swift"), encoding: .utf8)
+        #expect(controls.contains("race-ease") && controls.contains("race-speed") && controls.contains("race-apparent-wind"))
     }
 }

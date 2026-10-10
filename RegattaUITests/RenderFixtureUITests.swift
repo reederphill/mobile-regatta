@@ -92,7 +92,7 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         try assertAllMatchReferences(["hud-prestart", "hud-racing", "hud-ocs", "hud-afterfirstfinish"])
     }
 
-    /// The bottom row's instruments (#457): your speed left and the apparent wind right of Tack/Gybe's empty slot, on
+    /// The bottom row's instruments (#457): your speed and the apparent wind as a pair, centred (#460), on
     /// `hud-racing`'s tick. Its reference comes from CI's `render-actuals` (`scripts/adopt-references.sh`).
     @MainActor func testInstrumentsFixtureMatchesReference() throws {
         try assertAllMatchReferences(["hud-instruments"])

@@ -33,7 +33,7 @@ let package = Package(
         // Bots sail seats through RegattaCore's public input API only (#60), on the server and the device.
         // The bot-tier file (#102): each tier's skill band and a Mixed fleet's shares, versioned, byte for byte.
         // The reference regatta (#367): pinned races the app and the bot suite build identically.
-        .target(name: "RegattaBots", dependencies: ["RegattaCore"], resources: [.copy("bot-tiers@3.json"), .copy("reference-regatta@1.json"), .copy("reference-regatta@2.json")]),
+        .target(name: "RegattaBots", dependencies: ["RegattaCore"], resources: [.copy("bot-tiers@3.json"), .copy("reference-regatta@1.json"), .copy("reference-regatta@2.json"), .copy("reference-regatta@3.json")]),
         // regatta-replay record-fixture (#466) sails bot races, so it links RegattaBots.
         .executableTarget(name: "regatta-replay", dependencies: ["RegattaCore", "RegattaBots"]),
         // Offline tooling (#83): an overview PNG per venue × conditions pairing into docs/venues, for review (#84).

@@ -5,7 +5,7 @@ import RegattaCore
 /// #104: a dropped player takes their boat back (CONTEXT.md **Handback**): the seat swaps from the cautious bot to the
 /// player between steps (`SeatControllers.handBack`), and the boat keeps everything the race holds for her.
 @Suite struct HandbackTests {
-    static func race(seed: UInt64, fleetSize: Int = 4, boatClass: FileRef = RaceFiles.defaults.boatClass.ref) -> Race {
+    static func race(seed: UInt64, fleetSize: Int = 4, boatClass: FileRef = BotConductTests.waterClass) -> Race {
         botRace(seats: [.human] + Array(repeating: .bot, count: fleetSize - 1), laps: 1, prestartSeconds: 30, seed: seed, boatClass: boatClass)
     }
 
@@ -65,8 +65,9 @@ import RegattaCore
         guard race.boats[0].penaltyTurnsOwed > 0,
               race.boats.dropFirst().allSatisfy({ ($0.position - race.boats[0].position).length > BotTakeoverTests.clearWater })
         else { return false }
+        // Started (the rules' 30°): two seconds hard over from slow, a skiff@8 turns a hair less (seed 2, #461).
         let progressAtDrop = abs(race.boats[0].penaltyProgress)
-        #expect(progressAtDrop > deg2rad(30), "seed \(seed): \(rad2deg(progressAtDrop))° into the turn at the drop")
+        guard progressAtDrop > deg2rad(30) else { return false }
         controllers.takeOver(seat: 0, raceSeed: race.setup.raceSeed, cautious: true)
         let owed = race.boats[0].penaltyTurnsOwed
         // The bot turns on for a second; the turn served or not, its progress never falls on its own.

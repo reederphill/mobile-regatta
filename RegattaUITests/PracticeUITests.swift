@@ -118,13 +118,24 @@ final class PracticeUITests: RaceUITestCase {
     /// A sixteen-boat practice race (fifteen bots, the setup's largest fleet) runs to its results with every boat in
     /// them. One lap (`-laps 1`) from a 10 s start (`-startSeconds 10`) at `-timescale 32` with the scene hidden
     /// (`-hideScene`), as `RaceFinishUITests` sails: painting on the GPU-less runner held the race past this watch.
-    /// Sixteen boats' ticks fill the scene's tick budget at about two a frame, so the race runs at 40-56 ticks a
-    /// second whatever the timescale, and it closes about 9,700 ticks in (the first finish plus the finish window; no
-    /// launch option shortens a practice race's close). The watch is 250 s: at 44 ticks/s (main, 2026-10-05) the
-    /// close comes at about 220 s. With about 25 s of launch and setup that stays inside CI's 300 s allowance, past
-    /// `RaceUITestCase`'s usual 3.5 min of waits: this one test needs it.
+    ///
+    /// The beat is 120 m (`-beatMetres 120`), a third of the rules' 360 m, so what this proves is the sixteen-boat
+    /// fleet from the setup page sailing a whole short race to its close and all sixteen rows in the results, not the
+    /// length of a real course. Sixteen boats' ticks fill the scene's tick budget at about two a frame, so the race
+    /// runs at 28-46 ticks a second whatever the timescale (#473: 43 and 46 on two CI runs, 28 on a slow runner), and
+    /// on the full beat it closes 10,498 ticks in (skiff@8; 10,531 on skiff@7): 240 s at 44 ticks/s and 375 s at 28,
+    /// past any watch CI's 5 min allowance held. On 120 m it closes 6,713 ticks in: the 300 of the start sequence,
+    /// the first finish 2,813 after the gun, and the finish window's 3,600, which no option shortens (your boat never
+    /// starts, so the window runs in full). `PracticeSetupTests.sixteenBoatUITestRaceClosesInsideItsTickBudget`
+    /// sails the same race without the UI and holds it under 7,100 ticks.
+    ///
+    /// The watch is 330 s: 6,713 ticks take 153 s at 44 ticks/s, 168 s at 40 and 240 s at 28, so the watch has 37 %
+    /// over the slowest run seen (30 % at the 7,100-tick budget). With about 25 s of launch and setup that is past
+    /// `RaceUITestCase`'s usual 3.5 min of waits and CI's 5 min default, so this one test asks for 7 min
+    /// (`executionTimeAllowance`, under ci.yml's and ios27.yml's `-maximum-test-execution-time-allowance 420`).
     @MainActor func testFifteenBotRaceRunsFullLength() throws {
-        let app = openSetup(["-laps", "1", "-startSeconds", "10", "-timescale", "32", "-hideScene"])
+        executionTimeAllowance = 420
+        let app = openSetup(["-laps", "1", "-startSeconds", "10", "-timescale", "32", "-hideScene", "-beatMetres", "120"])
         let stepper = fleetStepper(app)
         XCTAssertTrue(stepper.waitForExistence(timeout: 10), "no fleet stepper")
         let increment = stepper.buttons["Increment"].exists
@@ -134,7 +145,8 @@ final class PracticeUITests: RaceUITestCase {
         startFromSetup(app)
 
         let results = app.staticTexts["race-results"]
-        let finish = watch(results, until: .now.addingTimeInterval(250)) { _ in true }
+        let finish = watch(results, until: .now.addingTimeInterval(330)) { _ in true }
+        reportPace(app, named: "practice-sixteen-boats-pace")
         XCTAssertTrue(finish.seen, "the sixteen-boat race never reached its results")
         XCTAssertEqual(app.descendants(matching: .any).matching(identifier: "results-row").count, 16,
                        "the results don't hold all sixteen boats")

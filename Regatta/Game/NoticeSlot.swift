@@ -1,10 +1,9 @@
 import Foundation
 
 /// What a notice is about (#114, #15): the HUD's one notice line carries these and nothing else. Today's other race
-/// moments (the gun, a rounding, a finish) are felt as haptics, not read; your roll tack's result is read as well as seen
-/// (`BoatNode`'s ring), since it is over in a moment.
+/// moments (the gun, a rounding, a finish) are felt as haptics, not read.
 enum NoticeKind: String, CaseIterable, Codable {
-    case ocs, ruleCall, roll, penalty, latency, hint
+    case ocs, ruleCall, penalty, latency, hint
 }
 
 /// How each kind of notice behaves in the slot: a data table, so its order is read in one place (#114).
@@ -26,8 +25,6 @@ enum NoticeTable {
     static let rows: [NoticeKind: NoticeRule] = [
         .ocs: NoticeRule(priority: 60, seconds: 6, maxWait: 2, symbol: "exclamationmark.triangle.fill", holdsHints: true),
         .ruleCall: NoticeRule(priority: 50, seconds: 6, maxWait: 6, symbol: "flag.fill", holdsHints: true),
-        // How your roll tack went (#222): a moment, gone before it is stale.
-        .roll: NoticeRule(priority: 35, seconds: 1.8, maxWait: 1, symbol: "arrow.triangle.2.circlepath", holdsHints: false),
         .penalty: NoticeRule(priority: 30, seconds: 5, maxWait: 4, symbol: "arrow.clockwise", holdsHints: false),
         .latency: NoticeRule(priority: 20, seconds: 10, maxWait: 30, symbol: "wifi.exclamationmark", holdsHints: false),
         // About 4 s (#23): one short line, read at a glance.

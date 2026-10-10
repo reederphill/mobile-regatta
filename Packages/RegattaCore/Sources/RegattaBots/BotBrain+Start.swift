@@ -41,6 +41,9 @@ extension BotBrain {
     static let trafficAllowance = 0.6
     /// Seconds a tack onto starboard takes her, on port, before she can sail at her spot.
     static let tackSeconds = 4.0
+    /// The same for `view`'s class, timing her tack onto starboard for her run in (`startAim`):
+    /// `HandTackTable.startTackSeconds` on one she tacks by hand (#461).
+    static func tackSeconds(_ view: SeatView) -> Double { turnsByHand(view) ? HandTackTable.startTackSeconds : tackSeconds }
     /// Waiting along the line, how far away from it past parallel she sails.
     static let waitOffLine = deg2rad(5)
     /// Waiting deeper, her sailing angle: nearly dead downwind, so she reaches along the line far less for each
@@ -176,7 +179,7 @@ extension BotBrain {
         let joins = b.tack == .starboard
             ? toSpot >= hold - Self.fetchMargin && landingRoom(b, view, hold: hold) > 0
             : toSpot >= hold + Self.joinMargin
-                || secondsToLine(b, view, angle: go.angle, ease: false, within: arrival) + Self.tackSeconds >= arrival
+                || secondsToLine(b, view, angle: go.angle, ease: false, within: arrival) + Self.tackSeconds(view) >= arrival
         // Over the line before the gun, she runs back below it as an OCS boat would, on her own tack. Over is any
         // point of her hull (`hullDepth`), as the race calls it: easing along the line with her bow up, her windward
         // bow quarter crosses it before her bow does (#388, seed 9 of `aBotTakingOverBeforeTheGunStarts`).
@@ -194,12 +197,14 @@ extension BotBrain {
                 ?? toSetup(b, view, spot: spot, hold: hold, arrival: arrival)
         }
 
-        let run = secondsToLine(b, view, angle: go.angle, ease: false, within: arrival) + (b.tack == .port ? Self.tackSeconds : 0)
+        let run = secondsToLine(b, view, angle: go.angle, ease: false, within: arrival)
+            + (b.tack == .port ? Self.tackSeconds(view) : turnUpSeconds(b, view, to: go.angle))
         let needed = run + max(0, run - Self.clearRunSeconds) * Self.trafficAllowance
         let going = b.ease == false && b.tack == .starboard
         if needed >= arrival - (going ? Self.goHysteresis : 0) { return go }
         let holdAim = Aim(angle: max(min(toSpot, toPin), hold), tack: .starboard, tolerance: Self.approachTolerance, ease: true)
         let holding = secondsToLine(b, view, angle: holdAim.angle, ease: true, within: arrival)
+            + turnUpSeconds(b, view, to: holdAim.angle)
         if holding >= arrival { return holdAim }
         return wait(b, view, spot: spot, hold: hold, early: arrival - holding, arrival: arrival)
             ?? toSetup(b, view, spot: spot, hold: hold, arrival: arrival)
@@ -220,6 +225,52 @@ extension BotBrain {
         return view.time < 0 && arrival < Self.tackSeconds
             && -line.side(b.position) < view.boatClass.hull.length * Self.setUpDepthLengths
             && nearestOnLine(b.position, line, clearOfEnds: 0).between
+    }
+
+    /// Seconds turning up from her sailing angle to `angle` on her own tack takes her by hand (#461), before she sails
+    /// at the line: none on a class whose tap sails her turns, nor when she is about as close to the wind already. Her
+    /// rudder's rate at the speed she has, or at `HandTackTable.startTurnUp.speed` of her close-hauled speed if that is
+    /// more (she turns up sheeted in, `sheetedInTurningUp`), `rudder` of it, and `slew` seconds for the rudder.
+    func turnUpSeconds(_ b: SeatView.OwnBoat, _ view: SeatView, to angle: Double) -> Double {
+        guard Self.turnsByHand(view) else { return 0 }
+        let table = HandTackTable.startTurnUp
+        let turn = abs(sailingAngle(b)) - angle
+        guard turn > table.from else { return 0 }
+        let speed = max(b.speed, closeHauledSpeed(b, view) * table.speed)
+        return turn / (view.boatClass.steering.turnRate(speed: speed) * table.rudder) + table.slew
+    }
+
+    /// On a class she turns by hand (#461), `aim` sheeted in while she is turning up to it from more than
+    /// `HandTackTable.startTurnUp.from` broader: with Ease she has a third of her speed, and the rudder turns her with
+    /// her speed (from a run with Ease, 8 to 10° a second: 12 s up to her hold). She lets the sheets out once there.
+    func sheetedInTurningUp(_ aim: Aim, _ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
+        guard Self.turnsByHand(view), aim.ease, aim.tack == b.tack, aim.groove == nil,
+              abs(sailingAngle(b)) - aim.angle > HandTackTable.startTurnUp.from else { return aim }
+        var sheeted = aim
+        sheeted.ease = false
+        return sheeted
+    }
+
+    /// "Reach along the line for speed" (#461): on a class she turns by hand, before the gun, held off her turn onto
+    /// the other tack (too slow to tack, or boats in the way), where her own tack's groove would put her over the line
+    /// before the gun, she reaches along the line instead, sheeted in for the speed to tack: a little towards it
+    /// (`HandTackTable.startReach.towards`) while that keeps her below it, else a little away (`waitOffLine`). Early is
+    /// over the line before the gun and within `HandTackTable.startReach.within` seconds: nil where her groove is not,
+    /// and there she sails it, and starts on it if the gun goes first. On port her groove took her over the line among
+    /// the starboard boats (OCS 0.07 of the start suite's boats; 0.04 with this).
+    func startReachAim(_ b: SeatView.OwnBoat, _ view: SeatView, groove: Aim) -> Aim? {
+        guard Self.turnsByHand(view), b.status == .prestart, view.time < 0 else { return nil }
+        let toGun = min(-view.time + Self.earliestLead, HandTackTable.startReach.within)
+        func early(_ aim: Aim) -> Bool {
+            secondsToLine(b, view, heading: aim.heading(wind: b.windDirection), ease: false, within: toGun) < toGun
+        }
+        guard early(groove) else { return nil }
+        let line = view.course.startLine
+        let along = b.tack == .starboard ? line.pin.position - line.committee.position : line.committee.position - line.pin.position
+        let parallel = abs(wrapAngle(b.windDirection - along.bearing))
+        let towards = Aim(angle: min(parallel - HandTackTable.startReach.towards, HandTackTable.startReach.broadest), tack: b.tack)
+        if towards.angle > groove.angle, !early(towards) { return towards }
+        return Aim(angle: min(parallel + Self.waitOffLine, Self.returnAngle), tack: b.tack)
     }
 
     /// Sailing to her setup point (`approachPoint`), sheeted in.

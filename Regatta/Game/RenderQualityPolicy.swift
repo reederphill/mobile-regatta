@@ -60,9 +60,8 @@ nonisolated struct RenderQualityPolicy: Equatable, Sendable {
     }
 }
 
-/// How much of a boat's sail animation draws (#127): all of it, or none of the flutter, luff shiver, belly pump or flog
-/// swing on boats far from yours (`BoatStyle.farBoatHulls`). Her heel, her sail's trim and side (the boom) and a roll
-/// miss killing her wake draw in either; your own boat and ghosts always draw in full. (#120's sailors, post-1.0, would
+/// How much of a boat's sail animation draws (#127): all of it, or none of the flutter, luff shiver or belly pump on
+/// boats far from yours (`BoatStyle.farBoatHulls`). Her heel and her sail's trim and side (the boom) draw in either; your own boat and ghosts always draw in full. (#120's sailors, post-1.0, would
 /// drop here too.)
 nonisolated enum SailDetail: Sendable {
     case full, farReduced

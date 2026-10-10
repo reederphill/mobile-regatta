@@ -77,4 +77,21 @@ import Testing
         #expect(worst < 1, "a bot strayed \(worst) hull lengths from today's track")
         #expect(mean < 0.5, "the bots strayed \(mean) hull lengths on average")
     }
+
+    /// #459: a rudder her brain lets go in irons (`BotDecision.centred`) is sent truly centred and she holds no angle,
+    /// where a centred rudder otherwise has her take the angle she is on and steer to hold it; a turn's rudder is her
+    /// brain's, passed as it is.
+    @Test func stalledBotCentresItsRudder() throws {
+        let race = try Self.race(seed: 5, boatClass: BoatClassFile.bundled(id: "skiff", version: 8), seats: 2)
+        for _ in 0..<(50 * Race.tickRate) { race.step() }
+        let view = race.seatView(for: 0)
+        var helm = BotHelm()
+        _ = helm.input(.neutral, view)
+        #expect(helm.held != nil, "a centred rudder is an angle held by hand")
+        #expect(helm.input(BoatInput(rudder: 0.0, ease: true), view, centred: true) == BoatInput(rudder: 0.0, ease: true))
+        #expect(helm.held == nil)
+        let turn = BoatInput(rudder: 0.75)
+        #expect(helm.input(turn, view) == turn)
+        #expect(helm.held == nil)
+    }
 }

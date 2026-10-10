@@ -118,7 +118,7 @@ enum HintCatalogue {
         Hint(id: .startSequence, delivery: .engine, text: HintText(halves: "Hold both sides to ease.",
                                                                     tiller: "Pull down to ease."),
              isPlaceholderCopy: true, learning: .never, trigger: HintTriggers.startSequence),
-        Hint(id: .noGo, delivery: .engine, text: HintText("Too close to the wind. Let go, or tap Tack."),
+        Hint(id: .noGo, delivery: .engine, text: HintText("Too close to the wind. Steer through it."),
              isPlaceholderCopy: true, learning: .tacked, trigger: HintTriggers.noGo),
         Hint(id: .markZone, delivery: .engine, text: HintText("Round the mark on the arrow's side."),
              isPlaceholderCopy: true, learning: .rounded, trigger: HintTriggers.markZone),

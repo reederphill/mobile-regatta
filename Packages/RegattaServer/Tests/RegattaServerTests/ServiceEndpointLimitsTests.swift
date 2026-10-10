@@ -60,14 +60,24 @@ import Testing
     }
 
     @Test func aConnectionWithNoFramesForTheIdleTimeoutIsClosed() async throws {
-        let endpoint = Self.endpoint(idle: .milliseconds(400))
+        // No sleep here is compared against the timeout (a loaded CI runner stalled this test for over a second,
+        // #473): the close is timed from the last moment a frame can have crossed, and must come no sooner.
+        let idle = Duration.seconds(1)
+        let endpoint = Self.endpoint(idle: idle)
+        var quietSince = ContinuousClock.now
         let (link, connection, _) = try await ServiceFixtures.signedIn(endpoint, "quiet")
-        // A request at 250 ms keeps it open past the first 400 ms.
-        try await Task.sleep(for: .milliseconds(250))
-        _ = try await RemoteTermsService(connection).status()
-        try await Task.sleep(for: .milliseconds(250))
-        #expect(link.closeReason == nil)
-        #expect(await Self.eventually { link.closeReason != nil })
+        // A request part-way through starts the timeout again. On a runner stalled past the whole timeout the
+        // connection has already idled out and the request fails: then the close is timed from the sign-in.
+        try await Task.sleep(for: .milliseconds(300))
+        let beforeRequest = ContinuousClock.now
+        if (try? await RemoteTermsService(connection).status()) != nil {
+            #expect(link.closeReason == nil)
+            quietSince = beforeRequest
+        } else {
+            #expect(beforeRequest - quietSince >= idle, "the request failed on a connection that wasn't idle yet")
+        }
+        #expect(await Self.eventually(.seconds(20)) { link.closeReason != nil })
+        #expect(ContinuousClock.now - quietSince >= idle, "closed before the idle timeout")
         #expect(link.closeReason == "idle")
     }
 

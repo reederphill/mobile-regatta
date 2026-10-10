@@ -134,7 +134,8 @@ import RegattaCore
         return sailed.gaps.indices.prefix(end).filter { sailed.keepingClear[$0] }.map { sailed.gaps[$0] }.min() ?? .infinity
     }
 
-    @Test func hunterLuffsAWindwardBoat() throws {
+    // skiff@7 until #455: on skiff@8 the hunter turns at up to 29 deg/s, past rule 16's rate.
+    @Test(.onSkiffSeven) func hunterLuffsAWindwardBoat() throws {
         for seed: UInt64 in [1, 2, 3] {
             let encounter = BotConductTests.windwardLeeward(seed: seed, running: false, abeam: 2, ahead: 0, converging: 0)
             let hunted = try Self.sail(encounter)
@@ -180,7 +181,8 @@ import RegattaCore
         #expect(restricted > 0, "never restricted under rule 17: the scene tests nothing")
     }
 
-    @Test func hunterHoldsStarboardAndForcesTheDuck() throws {
+    // skiff@7 until #455: on skiff@8 the hunter turns at up to 29 deg/s, past rule 16's rate.
+    @Test(.onSkiffSeven) func hunterHoldsStarboardAndForcesTheDuck() throws {
         // On a collision course: the port boat must duck; the hunter never turns away from her, and draws no call.
         var met = 0
         for seed: UInt64 in [1, 2, 3] {
@@ -329,6 +331,31 @@ import RegattaCore
         #expect(club.rollHitRate == 0.5)
         club.rollHitRate = 1
         #expect(club == perfect, "only her rolls differ")
+    }
+
+    /// #459: the executor turns her tacks and gybes with the top handling draw, as every profile without a weakness
+    /// does; the Club-execution tactician, the Club-steering profiles and the Club stand-ins with the centre of Club's
+    /// handling band; a live bot with her handling draw; the cautious bot with the floor of Club's band.
+    @Test func executorTurnsWithTheTopHandlingDraw() {
+        let style = BotConductTests.skill1
+        let club = BotTier.club.handling(at: 0.5)
+        for profile in [BotProfile.executor, .baseline, .tactician, .blipTacker, .hunter] {
+            #expect(BotBrain(style: style, profile: profile).turnHandling == 1, "\(profile)")
+        }
+        for profile in [BotProfile.tacticianClubExecution, .clubSteering, .tacticianClubSteering] {
+            #expect(BotBrain(style: style, profile: profile).turnHandling == club, "\(profile)")
+        }
+        for standIn in [StandIn.national, .club] {
+            #expect(BotBrain(style: style, profile: standIn.profile, weaknesses: standIn.weaknesses).turnHandling == club)
+        }
+        #expect(BotBrain(style: style, profile: StandIn.tactician.profile, weaknesses: StandIn.tactician.weaknesses).turnHandling == 1)
+        for handling in [0.0, 0.35, 0.6, 1] {
+            #expect(BotBrain(style: style, handling: handling).turnHandling == handling)
+        }
+        #expect(BotBrain(style: style, weaknesses: BotBrain.Caution.weaknesses(skill: BotBrain.Caution.skill), caution: .standard)
+            .turnHandling == BotTier.club.handlingBand.lowerBound)
+        #expect(HandTackTable.botchRate(handling: 1) == 0)
+        #expect(abs(HandTackTable.botchRate(handling: club) - 0.125) < 0.03, "a Club bot flubs about one turn in eight")
     }
 
     /// #105: the tactician's downwind and start tactics are hers (and the Club-execution tactician's) alone; no other

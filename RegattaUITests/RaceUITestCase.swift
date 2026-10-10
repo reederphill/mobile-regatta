@@ -4,10 +4,11 @@ import XCTest
 /// test's launch never has to stop an app still racing (a long race left running made the simulator
 /// fail to terminate or launch the app in CI).
 ///
-/// CI stops any test at 5 min (`-maximum-test-execution-time-allowance 300` in ci.yml and ios27.yml), and a
+/// CI stops any test at 5 min (`-default-test-execution-time-allowance 300` in ci.yml and ios27.yml), and a
 /// test stopped there fails without its own message. So a test's waits, this launch's included, add up to
 /// at most 3.5 min, leaving room for the launch itself (up to 30 s on the iOS 27 simulator), set-up and
-/// tear-down.
+/// tear-down. A test that can't fit asks for more itself (`executionTimeAllowance`), up to the 7 min of
+/// `-maximum-test-execution-time-allowance 420`: only `PracticeUITests.testFifteenBotRaceRunsFullLength` does.
 class RaceUITestCase: XCTestCase {
     override func setUp() {
         continueAfterFailure = false

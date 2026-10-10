@@ -137,7 +137,7 @@ extension BotBrain {
         let owedProgress = b.penalty?.progress
         if b.penaltyTurnsOwed != 0 {
             // As `penaltyInput` gives a turn up: in its first half, not after giving it up, while she can turn it again.
-            guard let owed = b.penalty, !penaltyGivenUp, owed.progress < .pi, canGiveUpTurn(owed, view) else { return nil }
+            guard let owed = b.penalty, !penaltyGivenUp, owed.progress < .pi, canGiveUpTurn(owed, b, view) else { return nil }
         }
         let hull = view.boatClass.hull
         let clear = hull.length * Self.guardLengths

@@ -223,7 +223,7 @@ public struct BotMatrix: Codable, Hashable, Sendable {
     public var autohelmOff = false
 
     /// The bots steer by hand: the matrix sails a copy with the autohelm off, or the default class's autohelm already
-    /// doesn't hold a centred rudder (skiff@7, the default since #437).
+    /// doesn't hold a centred rudder (skiff@7 and skiff@8, the default since #437 and #461).
     public var handSteers: Bool {
         autohelmOff || !RaceFiles.defaults.boatClass.content.steering.autohelm.holdsWhenCentred
     }

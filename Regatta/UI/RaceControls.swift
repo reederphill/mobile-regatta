@@ -1,10 +1,11 @@
 import RegattaCore
 import SwiftUI
 
-/// The race's bottom row (#15, #112): Tack/Gybe bottom centre, your speed to its left and the apparent wind to its
-/// right (#457), HUD chrome, white on translucent black: orange is the active leg's alone (#22, G7). Nothing on the
-/// water is tappable, since touching the water steers, and the instruments never are. Ease is a gesture (#453), so it
-/// has no button; VoiceOver's Ease is an element with nothing to see (`EaseAccessibilityElement`).
+/// The race's bottom row (#15, #112): your speed and the apparent wind side by side, bottom centre (#457, #460), HUD
+/// chrome, white on translucent black: orange is the active leg's alone (#22, G7). Nothing on the water is tappable,
+/// since touching the water steers, and the instruments never are. There is no Tack/Gybe button: you steer through
+/// the wind (#454, #460). Ease is a gesture (#453), so it has no button; VoiceOver's Ease is an element with nothing
+/// to see (`EaseAccessibilityElement`).
 struct RaceControls: View {
     let session: GameSession
 
@@ -16,19 +17,14 @@ struct RaceControls: View {
     /// How far the row reaches up from the bottom of the safe area: the edge arrow (#122) keeps above it.
     static let rowHeight = controlHeight + bottomPadding
 
-    /// The row's side margin, Tack/Gybe's width, and the gap between it and each instrument.
+    /// The row's side margin, and the gap between the two instruments.
     static let edge: CGFloat = 16
-    static let tackWidth: CGFloat = 120
     static let spacing: CGFloat = 8
 
     var body: some View {
-        InstrumentRow(hud: session.hud) {
-            HoldButton(title: session.hud.tapTurn.label, width: Self.tackWidth, identifier: "race-tack",
-                       isEnabled: isRacing, releases: session.controlReleases,
-                       onPress: { session.pressTack(at: Self.now) }, onRelease: { session.releaseTack(at: Self.now) })
-        }
-        .padding(.horizontal, Self.edge)
-        // Where the Ease button was, bottom left: in the side margin, clear of the speed instrument (#457).
+        InstrumentRow(hud: session.hud)
+            .padding(.horizontal, Self.edge)
+        // Where the Ease button was, bottom left: in the side margin, clear of the centred instruments (#457, #460).
         .overlay(alignment: .bottomLeading) {
             EaseAccessibilityElement(session: session, isEnabled: isRacing)
                 .padding(.leading, 7)
@@ -36,19 +32,16 @@ struct RaceControls: View {
         .padding(.bottom, Self.bottomPadding)
     }
 
-    /// A render fixture's bottom row (#457 `hud-instruments`): the instruments in their places, Tack/Gybe's slot
-    /// empty, as the fixtures draw no controls.
+    /// A render fixture's bottom row (#457 `hud-instruments`): the instruments in their places.
     static func fixtureRow(hud: HUDState) -> some View {
-        InstrumentRow(hud: hud) {
-            Color.clear.frame(width: tackWidth, height: controlHeight)
-        }
-        .padding(.horizontal, edge)
-        .padding(.bottom, bottomPadding)
+        InstrumentRow(hud: hud)
+            .padding(.horizontal, edge)
+            .padding(.bottom, bottomPadding)
     }
 
     // MARK: The instruments (#457)
 
-    /// The instruments' widest: on a phone wider than an SE they stop here, either side of Tack/Gybe.
+    /// The instruments' widest: every phone's row has room for the pair at this width.
     static let instrumentMaxWidth: CGFloat = 104
     /// Inside an instrument, each side.
     static let instrumentInset: CGFloat = 6
@@ -59,10 +52,18 @@ struct RaceControls: View {
     /// How far a line may shrink to fit before it would truncate.
     static let minimumScale: CGFloat = 0.7
 
-    /// Each instrument's width in a race rect `rowWidth` points wide: what's left either side of Tack/Gybe, up to
-    /// `instrumentMaxWidth`.
+    /// Each instrument's width in a race rect `rowWidth` points wide: half of what the margins and the gap leave, up
+    /// to `instrumentMaxWidth`.
     static func instrumentWidth(rowWidth: CGFloat) -> CGFloat {
-        min(instrumentMaxWidth, (rowWidth - 2 * edge - tackWidth - 2 * spacing) / 2)
+        min(instrumentMaxWidth, (rowWidth - 2 * edge - spacing) / 2)
+    }
+
+    /// Where the pair sits in a race rect `rowWidth` points wide: the speed instrument's leading edge and the
+    /// apparent wind's trailing edge, the pair centred on the row with `spacing` between them.
+    static func instrumentPair(rowWidth: CGFloat) -> ClosedRange<CGFloat> {
+        let pair = 2 * instrumentWidth(rowWidth: rowWidth) + spacing
+        let leading = (rowWidth - pair) / 2
+        return leading...(leading + pair)
     }
 
     /// The widest the apparent wind's first line reads: the angle in the number face, the side word beside it.
@@ -72,27 +73,23 @@ struct RaceControls: View {
         guard let side else { return number }
         return number + 3 + HUDLayout.width(of: side, size: sideSize, weight: .semibold)
     }
-
-    /// Wall-clock seconds for the Tack/Gybe hold (#222): the hold is the player's, not the simulation's.
-    private static var now: Double { ProcessInfo.processInfo.systemUptime }
 }
 
-/// The bottom row (#457): your speed left, `center` (Tack/Gybe) in the middle, the apparent wind right, each
-/// instrument as wide as `RaceControls.instrumentWidth` gives it. The instruments fade out once you're done
-/// (`HUDModel.showsInstruments`) and keep their places, so Tack/Gybe never moves.
-struct InstrumentRow<Center: View>: View {
+/// The bottom row (#457, #460): your speed and the apparent wind as a pair, centred on the row, each instrument as
+/// wide as `RaceControls.instrumentWidth` gives it (`RaceControls.instrumentPair`). The instruments fade out once
+/// you're done (`HUDModel.showsInstruments`).
+struct InstrumentRow: View {
     let hud: HUDState
-    @ViewBuilder let center: Center
 
     private var model: HUDModel { HUDModel(hud) }
 
     var body: some View {
+        // Each takes half the row, less the gap, and keeps to the middle: the faces stop at `instrumentMaxWidth`.
         HStack(spacing: RaceControls.spacing) {
             SpeedInstrument(model: model)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            center
-            ApparentWindInstrument(model: model)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+            ApparentWindInstrument(model: model)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }
@@ -168,94 +165,9 @@ private struct ApparentWindInstrument: View {
     }
 }
 
-/// One control's face: white on translucent black with a white stroke, brighter while held.
-private struct ControlLabel: View {
-    let title: String
-    let width: CGFloat
-    let isHeld: Bool
-    @Environment(\.isEnabled) private var isEnabled
-
-    var body: some View {
-        Text(title)
-            .font(.headline.weight(.heavy))
-            .tracking(1.5)
-            .frame(width: width, height: RaceControls.controlHeight)
-            .background(.black.opacity(isHeld ? 0.2 : 0.5), in: .capsule)
-            .background(.white.opacity(isHeld ? 0.35 : 0), in: .capsule)
-            .overlay(Capsule().strokeBorder(.white, lineWidth: 2))
-            .foregroundStyle(.white)
-            .opacity(isEnabled ? 1 : 0.5)
-            .shadow(radius: 6, y: 3)
-    }
-}
-
-/// A button that reports its press and its release (#222 Tack/Gybe). A pause overlay steals the touch without ending
-/// the gesture, so a pause (or the button going away or disabled) lets go of it too, without a release.
-private struct HoldButton: View {
-    let title: String
-    let width: CGFloat
-    let identifier: String
-    let isEnabled: Bool
-    /// `GameSession.controlReleases`: a change lets go without releasing (an overlay took the touches).
-    let releases: Int
-    let onPress: () -> Void
-    let onRelease: () -> Void
-    @State private var isHeld = false
-    /// A finger is on the button (reset by SwiftUI when the touch ends or is cancelled).
-    @GestureState private var isTouching = false
-    /// The controls were let go under a finger still down: that touch presses nothing until it lifts, so a press
-    /// from before Help (or a pause) never comes back as a stale tack.
-    @State private var ignoresTouch = false
-
-    var body: some View {
-        ControlLabel(title: title, width: width, isHeld: isHeld)
-            .contentShape(.capsule)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .updating($isTouching) { _, touching, _ in touching = true }
-                    .onChanged { _ in
-                        guard !isHeld, !ignoresTouch else { return }
-                        isHeld = true
-                        onPress()
-                    }
-                    .onEnded { _ in
-                        guard isHeld else { return }
-                        isHeld = false
-                        onRelease()
-                    }
-            )
-            .disabled(!isEnabled)
-            .onChange(of: releases) {
-                isHeld = false
-                ignoresTouch = isTouching
-            }
-            .onChange(of: isEnabled) { _, enabled in
-                guard !enabled, isHeld else { return }
-                isHeld = false
-                ignoresTouch = isTouching
-                onRelease()
-            }
-            .onChange(of: isTouching) { _, touching in
-                if !touching { ignoresTouch = false }
-            }
-            .onDisappear {
-                isHeld = false
-                ignoresTouch = false
-            }
-            .accessibilityElement()
-            .accessibilityLabel(title.capitalized)
-            .accessibilityAddTraits(.isButton)
-            .accessibilityIdentifier(identifier)
-            .accessibilityAction {
-                onPress()
-                onRelease()
-            }
-    }
-}
-
 /// VoiceOver's Ease (#453): Ease is a gesture on the water, which VoiceOver can't make, so this element (`race-ease`)
 /// toggles it, its value On or Off. Nothing to see: a 2 pt square bottom left, where the Ease button was, in the
-/// row's side margin clear of the speed instrument (#457), so a UI test's tap reaches it (XCUITest taps an element's
+/// row's side margin clear of the instruments (#457, #460), so a UI test's tap reaches it (XCUITest taps an element's
 /// frame) and no thumb on the water ever does.
 private struct EaseAccessibilityElement: View {
     let session: GameSession

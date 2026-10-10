@@ -126,7 +126,7 @@ A computer-helmed boat that fills an empty seat in a fleet. A bot also sails a d
 _Avoid_: AI, CPU
 
 **Bot tier**:
-How well a bot sails: **Club**, **Regional** or **National**. A tier sets two bands, drawn apart for each bot: her tactics skill and her handling skill (how well she steers by hand). The bands overlap, so a sharp tactician can have a sloppy helm. Online, bots are matched to the fleet's ratings instead of using a fixed tier.
+How well a bot sails: **Club**, **Regional** or **National**. A tier sets two bands, drawn apart for each bot: her tactics skill and her handling skill (how well she steers by hand, and on a class that tacks by hand, how well she turns her tacks and gybes, [#459](https://github.com/reederphill/mobile-regatta/issues/459)). The bands overlap, so a sharp tactician can have a sloppy helm. Online, bots are matched to the fleet's ratings instead of using a fixed tier.
 _Avoid_: difficulty, level
 
 **Cautious bot**:
@@ -134,7 +134,7 @@ The bot that sails a dropped player's boat until they come back: a Club bot at t
 _Avoid_: easy bot, autopilot
 
 **Executor**:
-A bot-suite profile only: perfect handling with groove-only tactics (#426): every roll tack hit and, steering by hand (ADR 0011), no steering error. #426's parity between handling and tactics is read against her.
+A bot-suite profile only: perfect handling with groove-only tactics (#426): the top handling draw, h = 1 (the best hand tack and gybe, no botch, [#459](https://github.com/reederphill/mobile-regatta/issues/459)) and no hand-steering error (ADR 0011). On an older class with a roll tack she hits every roll. #426's parity between handling and tactics is read against her.
 _Avoid_: perfect bot
 
 **Watchdog**:
@@ -269,7 +269,7 @@ The thin vermillion arrow under your hull, one hull length, pointing to the wind
 _Avoid_: wind arrow, wind indicator
 
 **Instruments**:
-The race HUD's two figures in the bottom row, beside Tack/Gybe: your speed through the water in knots to one decimal, and the apparent wind (the wind your sails feel, your own motion in it) as its angle off the bow with the side it comes over and its speed, "38° port" over "21 kn". White on translucent black, no target, band or graph; hidden once you're done. The ground wind stays the top readout ("from" a compass bearing) and the wind vane.
+The race HUD's two figures, a pair centred in the bottom row ([#460](https://github.com/reederphill/mobile-regatta/issues/460)): your speed through the water in knots to one decimal, and the apparent wind (the wind your sails feel, your own motion in it) as its angle off the bow with the side it comes over and its speed, "38° port" over "21 kn". White on translucent black, no target, band or graph; hidden once you're done. The ground wind stays the top readout ("from" a compass bearing) and the wind vane.
 _Avoid_: dials, gauges, AWA/AWS
 
 **Right-of-way glow**:
@@ -413,7 +413,7 @@ Letting the sheets out so the sail flaps and the boat slows, e.g. to hold positi
 _Avoid_: luff (in the rules, luffing means turning toward the wind)
 
 **Autohelm**:
-What steers the boat whenever nobody is holding the rudder, for a class whose autohelm holds a centred rudder (`holdsWhenCentred`, ADR 0011; every class today): it holds the angle to the true wind she had when the rudder was centred, snapping to the groove when close to it. It never tacks or gybes by itself, and it sails the tack/gybe tap. Off, a centred rudder holds her heading, and the autohelm only sails the tap, handing back a centred rudder within 3° of the new groove.
+What steers the boat whenever nobody is holding the rudder, for a class whose autohelm holds a centred rudder (`holdsWhenCentred`, ADR 0011; every class today): it holds the angle to the true wind she had when the rudder was centred, snapping to the groove when close to it. It never tacks or gybes by itself, and it sails the tack/gybe tap. Off, a centred rudder holds her heading, and the autohelm only sails the tap, handing back a centred rudder within 3° of the new groove. The tap has no UI ([#460](https://github.com/reederphill/mobile-regatta/issues/460)): the app has no Tack/Gybe button, a player steers through the wind on every class, and only bots on older classes and old logs tap.
 _Avoid_: autopilot, lock, helm (to helm is what a player does)
 
 **Groove**:
@@ -423,11 +423,11 @@ The best-VMG angle to the wind for the wind strength at the boat, upwind or down
 A tick on the wind vane at the groove on the boat's tack. The vane locks to it while the autohelm holds the groove; a pinch or foot shows as a short arc from it to the angle held. With the autohelm off she steers by hand ([#436](https://github.com/reederphill/mobile-regatta/issues/436)): the vane locks to the tick when she sails within the lock angle of the groove, and the arc runs from it to her own angle, as the sail's pinch/foot shape does.
 
 **Tack cost**:
-What a tack loses against sailing on: the distance made good upwind, in hull lengths, over the tack and the speed she takes to get back. About a hull length from close-hauled with the autohelm sailing the tap; it decides which shifts are worth tacking on.
+What a tack loses against sailing on: the distance made good upwind, in hull lengths, over the tack and the speed she takes to get back. About a hull length from close-hauled with the autohelm sailing the tap; it decides which shifts are worth tacking on. On skiff@8, the default class ([#458](https://github.com/reederphill/mobile-regatta/issues/458), [#461](https://github.com/reederphill/mobile-regatta/issues/461)), every tack is hand-steered and the tap does nothing: the best tack is a moderate rudder (about half), about 0.95 hull lengths at 10 kn, a slam costs about half a length more, a very gentle turn more still, and in light air bearing off first pays. About 2 kn of boat speed is enough to carry a tack through at 40 % rudder or more (slower from less, never stuck), a penalty turn from a standstill takes about 25 s, and only a slight held rudder in light air hangs her in the no-go (the owner's ruling of 2026-10-10: fall-off 2°/s against a held rudder, a knee in the turn-rate curve at 1.15 kn). Bots tack and gybe it by hand as well as their handling lets them ([#459](https://github.com/reederphill/mobile-regatta/issues/459)).
 _Avoid_: tack penalty (a penalty is a rules turn)
 
 **Roll tack**:
-A second tack/gybe tap during a tack, timed on the boom crossing. Close enough to the crossing it hits and she loses less speed until close-hauled; too early or too late it misses and costs her speed. It never makes a tack better than not tacking.
+A second tack/gybe tap during a tack, timed on the boom crossing. Close enough to the crossing it hits and she loses less speed until close-hauled; too early or too late it misses and costs her speed. It never makes a tack better than not tacking. Not on skiff@8 ([#458](https://github.com/reederphill/mobile-regatta/issues/458)), which tacks by hand; the older classes keep it for their logs. Legacy for bots too ([#459](https://github.com/reederphill/mobile-regatta/issues/459)): on skiff@8 a bot's tack is as good as her handling, and no roll skill is read. No UI ([#460](https://github.com/reederphill/mobile-regatta/issues/460)): a player can't tap, and the app draws no ring, flog, flare or notice for a bot's or an old log's roll.
 _Avoid_: double tap (fine as UI copy), roll gybe (a gybe has no roll yet)
 
 **Pinch** / **foot**:

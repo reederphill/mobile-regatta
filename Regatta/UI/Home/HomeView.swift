@@ -34,6 +34,11 @@ struct HomeView: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("home")
             }
+            #if DEBUG
+            .safeAreaInset(edge: .bottom) {
+                if model.launchOptions.showsBuildIdentity { buildIdentity }
+            }
+            #endif
             .menuBackground()
             .navigationTitle("Regatta")
             .navigationBarTitleDisplayMode(.inline)
@@ -107,6 +112,19 @@ struct HomeView: View {
         }
         .buttonStyle(.bordered)
         .accessibilityIdentifier("tuning")
+    }
+
+    /// Which commit this build is (#473), Debug builds only and never in a UI test or a render fixture.
+    private var buildIdentity: some View {
+        Text(BuildIdentity.current.label)
+            .font(MenuFont.body(.caption2))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 16)
+            .padding(.bottom, 4)
+            .accessibilityIdentifier("build-id")
     }
     #endif
 

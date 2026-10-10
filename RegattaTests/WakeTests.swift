@@ -134,31 +134,21 @@ import Testing
         node.children.flatMap { [(ObjectIdentifier($0), $0)] + descendants(of: $0) }
     }
 
-    /// A roll miss kills her wake while the sail flogs and it comes back after; a hit flares it, briefly (#222).
-    @Test func rollCuesFlareAndKillTheWake() {
+    /// A roll, hit or missed, leaves her wake as it was (#460): no flare, and it never dies.
+    @Test func aRollLeavesTheWakeAlone() {
         let style = BoatStyle.standard
         let effects = BoatEffects(seat: 1, boatClass: Self.boatClass, pointsPerMeter: 8, style: style)
         var boat = Self.boat(speed: 6)
         let calm = BoatPose(boat, ease: false, isGhost: false, boatClass: Self.boatClass)
-        effects.update(with: boat, pose: calm, style: style, quality: .full, time: 0, dt: 0, settled: true,
-                       isFlogging: false)
-        let even = effects.shape?.alpha ?? 0
-        #expect(even > 0)
-
-        boat.roll = .hit
-        let hit = BoatPose(boat, ease: false, isGhost: false, boatClass: Self.boatClass)
-        effects.update(with: boat, pose: hit, style: style, quality: .full, time: 1, dt: 0, settled: true,
-                       isFlogging: false)
-        #expect((effects.shape?.length ?? 0) > WakeShape(boat, boatClass: Self.boatClass, style: style, quality: .full).length)
-        effects.update(with: boat, pose: hit, style: style, quality: .full, time: 1 + style.wakeFlareSeconds + 0.1,
-                       dt: 0, settled: true, isFlogging: false)
-        #expect(effects.shape?.alpha == even, "the flare is over")
-
-        boat.roll = .missed
-        let miss = BoatPose(boat, ease: false, isGhost: false, boatClass: Self.boatClass)
-        effects.update(with: boat, pose: miss, style: style, quality: .full, time: 3, dt: 0, settled: true,
-                       isFlogging: true)
-        #expect(effects.shape?.alpha == 0 && effects.trail.isHidden)
+        effects.update(with: boat, pose: calm, style: style, quality: .full, time: 0, dt: 0, settled: true)
+        let even = effects.shape
+        #expect((even?.alpha ?? 0) > 0)
+        for roll in [RollTack.hit, .missed] {
+            boat.roll = roll
+            let pose = BoatPose(boat, ease: false, isGhost: false, boatClass: Self.boatClass)
+            effects.update(with: boat, pose: pose, style: style, quality: .full, time: 1, dt: 0, settled: true)
+            #expect(effects.shape == even && !effects.trail.isHidden, "\(roll)")
+        }
     }
 }
 
