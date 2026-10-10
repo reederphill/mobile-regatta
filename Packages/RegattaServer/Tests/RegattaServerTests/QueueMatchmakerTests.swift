@@ -232,7 +232,8 @@ actor LaunchLog {
         clock.advance(60)
         await queue.step()
         let fleet = try #require(await log.fleets.first)
-        let startSeconds = Double(RaceSetup.defaultStartSequenceTicks) / Double(Race.tickRate)
+        // The briefing, then the sequence (#147, G2).
+        let startSeconds = Double(fleet.setup.startSequenceTicks) / Double(Race.tickRate)
         clock.advance(startSeconds - 1)
         await queue.step()
         clock.advance(1)

@@ -61,3 +61,24 @@ public struct AllGone: Hashable, Sendable {
         self.isMassDrop = isMassDrop
     }
 }
+
+/// A human who left her race between fleet lock and the gun (#26, #147): what the queue's briefing-leave count hears.
+/// Before the gun the host tells it each such seat once: at the leave for one who left for good, at the gun for one with
+/// no connection then (a drop not back in time, the app backgrounded after lock, or never joined). A race cancelled before
+/// the gun reports nobody it hadn't already.
+public struct BriefingLeave: Sendable, Equatable {
+    public enum Kind: Sendable, Equatable {
+        /// She left for good (`RaceHost.leave`): a fleet bot has the seat.
+        case left
+        /// Her seat had no connection at the gun: she can still rejoin after it (#66), but the leave counts.
+        case absentAtGun
+    }
+
+    public let seat: Int
+    public let kind: Kind
+
+    public init(seat: Int, kind: Kind) {
+        self.seat = seat
+        self.kind = kind
+    }
+}

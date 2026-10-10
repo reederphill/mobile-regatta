@@ -141,6 +141,9 @@ public actor RaceHost {
     private let clock: any HostClock
     private let onBehind: (@Sendable (_ ticksBehind: Int) -> Void)?
     private let onAllGone: (@Sendable (_ allGone: AllGone) -> Void)?
+    private let onBriefingLeave: (@Sendable (_ leave: BriefingLeave) -> Void)?
+    /// Human seats already reported as briefing leaves: each at most once.
+    private var briefingLeavesReported: Set<Int> = []
     /// Makes the wind keys from the secret wind seed (#75), ahead of the race's own chain, which holds keys
     /// only through its current window. Same seed and chain, so the keys are the race's.
     private var keyGenerator: WindKeyGenerator
@@ -172,10 +175,12 @@ public actor RaceHost {
     /// by RegattaBots; the rest wait `firstInputHoldTicks` for a player to attach, then are dropped until
     /// one does. `roster` defaults to "Seat n" names.
     /// `onAllGone` fires once when every human is gone and the grace is over (G3; #148 closes the race).
+    /// `onBriefingLeave` hears each human who left before the gun (#147, `BriefingLeave`).
     public init(setup: RaceSetup, windSeed: WindSeed, clock: any HostClock, options: RaceHostOptions = RaceHostOptions(),
                 roster: [RosterEntry]? = nil,
                 onBehind: (@Sendable (_ ticksBehind: Int) -> Void)? = nil,
-                onAllGone: (@Sendable (_ allGone: AllGone) -> Void)? = nil) {
+                onAllGone: (@Sendable (_ allGone: AllGone) -> Void)? = nil,
+                onBriefingLeave: (@Sendable (_ leave: BriefingLeave) -> Void)? = nil) {
         let race = Race(setup: setup, windSeed: windSeed)
         self.race = race
         bots = SeatControllers(setup: setup)
@@ -184,6 +189,7 @@ public actor RaceHost {
         self.options = options
         self.onBehind = onBehind
         self.onAllGone = onAllGone
+        self.onBriefingLeave = onBriefingLeave
         do {
             keyGenerator = try WindKeyGenerator(windSeed: windSeed, setup: race.windSetup, windows: race.wind.windows)
         } catch {
@@ -269,6 +275,7 @@ public actor RaceHost {
         for seat in expired { dropBoat(seat) }
         checkAllGone()
         guard cancelled == nil else { return }
+        if race.tick == 0 { reportAbsentAtGun() }
         for seat in seats.indices { acknowledge(seat) }
         for event in race.drainEvents() {
             noteResults(event)
@@ -425,6 +432,7 @@ public actor RaceHost {
             race.record(.botTookOver(.fleet), seat: seat)
             bots[seat] = .bot(BotDriver(seat: seat, raceSeed: race.setup.raceSeed))
             seats[seat].holdDeadline = nil
+            reportBriefingLeave(seat, .left)
         } else {
             race.record(.left, seat: seat)
             startHold(seat)
@@ -434,6 +442,20 @@ public actor RaceHost {
         checkAllGone()
         if race.isOver { close() }
         return true
+    }
+
+    /// Reports `seat` as a briefing leave, once.
+    private func reportBriefingLeave(_ seat: Int, _ kind: BriefingLeave.Kind) {
+        guard briefingLeavesReported.insert(seat).inserted else { return }
+        onBriefingLeave?(BriefingLeave(seat: seat, kind: kind))
+    }
+
+    /// At the gun: every human seat with no connection, that didn't leave for good, left the briefing and wasn't back by
+    /// the gun (#147, owner Q6): a drop, backgrounding after lock, or a seat never joined. One back by now doesn't count.
+    private func reportAbsentAtGun() {
+        for seat in humanSeats where seats[seat].transport == nil && gone[seat]?.kind != .left {
+            reportBriefingLeave(seat, .absentAtGun)
+        }
     }
 
     /// Starts `seat`'s input hold, if a player sails it: from its last held input or now, whichever is later.
@@ -594,6 +616,8 @@ public actor RaceHost {
     @discardableResult
     public func close() -> RaceOutcome {
         if let outcome { return outcome }
+        // Over before the gun (every human gone, G3): whoever isn't back never came back by the gun.
+        if race.tick < 0, race.isOver, cancelled == nil { reportAbsentAtGun() }
         let outcome = RaceOutcome(standings: race.standings(), digest: race.digest(), log: log, results: race.results)
         self.outcome = outcome
         // A cancelled race told its seats so; it has no close to send.

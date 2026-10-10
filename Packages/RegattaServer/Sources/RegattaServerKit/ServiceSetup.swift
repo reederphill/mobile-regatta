@@ -12,8 +12,10 @@ import X509
 extension ServiceEndpoint {
     /// The endpoint `config` describes, over `store`: the real Game Center verifier when Apple's root is configured,
     /// the dev verifier otherwise (only in `ENV=dev`); the queue (#146) locking its races onto `registry`, each race
-    /// registered, streamed and closed by the lifecycle (#148) into `archive` (memory by default: a dev server).
+    /// registered, streamed and closed by the lifecycle (#148) into `archive` (memory by default: a dev server); its
+    /// suspensions, attestation flags and briefing-leave cooldowns in `restrictions` (#147).
     public static func make(config: ServerConfig, store: any AccountStore, archive: any RaceArchive = InMemoryRaceArchive(),
+                            restrictions: any RestrictionStore = InMemoryRestrictionStore(),
                             registry: RaceRegistry? = nil, fetcher: (any CertificateFetching)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
         let verifier: any GameCenterVerifier
@@ -35,7 +37,8 @@ extension ServiceEndpoint {
             settings: queue, registry: registry,
             draw: RaceDraw(pairings: OnlinePairing.bundled(venues: queue.venues),
                            seeds: FixtureWindSeedPools(poolSize: queue.windSeedPoolSize, reuseCap: queue.windSeedReuseCap)),
-            tokenKey: config.tokenKey, tokenLifetime: config.tokenLifetime, launch: lifecycle.launcher())
+            tokenKey: config.tokenKey, tokenLifetime: config.tokenLifetime, restrictions: restrictions, runningRaces: lifecycle,
+            launch: lifecycle.launcher())
         return ServiceEndpoint(
             config: ServiceEndpointConfig(termsVersion: identity.termsVersion, sessionLifetime: identity.sessionLifetime,
                                           streamIdleTimeout: identity.streamIdleTimeout, frameCap: identity.frameCap,
@@ -97,8 +100,8 @@ extension ServiceEndpoint {
         case ("TermsService", "versionBumped"):
             guard current >= 2 else { return HTTPReply(.conflict, error: "versionBumped needs TERMS_VERSION of 2 or more") }
             return await signedIn(accepting: current - 1)
-        // The queue (#146). Cooldown and suspension are dev-arranged in the matchmaker (#146 Q1): the real cooldown
-        // rule is #147's, suspensions #26's.
+        // The queue (#146). Cooldown and suspension are written to the restriction store (#147), as the briefing-leave
+        // rule and #153's suspensions write them.
         case ("QueueService", "joinable"): return await signedIn(accepting: current)
         case ("QueueService", "cooldown"):
             return await signedIn(accepting: current) { await $0.arrangeCooldown(player, seconds: Self.contractCooldownSeconds) }

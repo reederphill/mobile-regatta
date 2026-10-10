@@ -15,11 +15,12 @@ import Testing
 
     /// A dev config the suites can run on: the Terms suite's `versionBumped` situation needs an older version to have
     /// accepted; the Queue suite's `joinable` waits for fleet lock, so it locks 3 s after the oldest join (long enough
-    /// to see the queued state and leave before it).
+    /// to see the queued state and leave before it), and never holds for the RaceSession suite's races' finishers (#147).
     static func config() -> ServerConfig {
         var config = ServerConfig.dev()
         config.identity.termsVersion = 2
         config.queue.lockAfter = 3
+        config.queue.catchFinishers = nil
         return config
     }
 

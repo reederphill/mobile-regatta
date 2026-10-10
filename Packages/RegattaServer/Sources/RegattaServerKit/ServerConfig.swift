@@ -74,6 +74,9 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `REGATTA_APPLE_ROOT_PEM` | none | a PEM file of the certificates Game Center's key must chain to; unset in dev = dev verifier |
 /// | `REGATTA_DATABASE_URL` | none | Postgres (ADR 0009); unset in dev = accounts in memory |
 /// | `QUEUE_LOCK_SECONDS` | `60` | seconds from the oldest queued player's join to fleet lock (#146); short for the contract runner |
+/// | `CATCH_FINISHERS` | on | `off`: no hold on the lock for a running race's finishers (G2, #147); the contract runner's server |
+/// | `CATCH_FINISHERS_OFFSET_SECONDS` | `15` | a held lock comes this long after the running race's expected close (G2) |
+/// | `CATCH_FINISHERS_MAX_HOLD_SECONDS` | `180` | the oldest queued player's longest wait, join to lock, for a hold (G2) |
 /// | `SIMULTANEOUS_LOSS_POLICY` | `cancel` | a mass drop (G3): `cancel` (no results, no rating) or `ret` (RET in leave order, rated per #30) (#148) |
 public struct ServerConfig: Sendable {
     public var environment: ServerEnvironment
@@ -129,6 +132,13 @@ public struct ServerConfig: Sendable {
                                   serverBuild: env["SERVER_BUILD"] ?? "dev", maxRaces: maxRaces)
         config.identity.termsVersion = try int("TERMS_VERSION", default: 1, in: 1...1_000_000)
         config.queue.lockAfter = TimeInterval(try int("QUEUE_LOCK_SECONDS", default: 60, in: 1...600))
+        switch env["CATCH_FINISHERS"] {
+        case nil, "on": config.queue.catchFinishers = CatchFinishers(
+            offset: TimeInterval(try int("CATCH_FINISHERS_OFFSET_SECONDS", default: 15, in: 0...300)),
+            maxHold: TimeInterval(try int("CATCH_FINISHERS_MAX_HOLD_SECONDS", default: 180, in: 0...1800)))
+        case "off": config.queue.catchFinishers = nil
+        case let value?: throw .invalid(variable: "CATCH_FINISHERS", value: value, expected: "on or off")
+        }
         if let policy = env["SIMULTANEOUS_LOSS_POLICY"] {
             guard let value = SimultaneousLossPolicy(rawValue: policy) else {
                 throw .invalid(variable: "SIMULTANEOUS_LOSS_POLICY", value: policy,

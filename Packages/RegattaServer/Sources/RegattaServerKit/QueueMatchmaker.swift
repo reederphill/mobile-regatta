@@ -1,10 +1,14 @@
 import Crypto
 import Foundation
+import Persistence
+import RaceHost
 import RegattaCore
 import RegattaServices
 
 // The one global queue (#16, #146): players join and leave freely; the fleet locks when 16 humans are queued, or 60 s
-// after the oldest joined; bots fill it to 10 boats; one fleet fills at a time. At lock the race is drawn (venue ×
+// after the oldest joined, or later to catch a running race's finishers (G2, #147); bots fill it to 10 boats; one fleet
+// fills at a time. Suspended, failed-attestation and cooling-down players are refused (#147, `RestrictionStore`); a human
+// who leaves between lock and gun counts towards the cooldown (`BriefingLeaveTracker`). At lock the race is drawn (venue ×
 // conditions × tide state and a wind seed, `RaceDraw`), started on the race registry, and each human gets a race token
 // for their seat (`ServerRaceSessionService.handOff`). The gun goes into the lobby as a system line (#17, #36).
 //
@@ -30,7 +34,15 @@ public struct QueueSettings: Sendable, Equatable {
     /// The venues online races are drawn from (the newest bundled version of each); nil: every bundled venue but the dev venue.
     public var venues: [String]?
     public var laps = RaceSetup.defaultLaps
-    public var startSequenceTicks = RaceSetup.defaultStartSequenceTicks
+    /// The briefing after fleet lock (15 s online, CONTEXT), the first part of the race's pre-gun ticks.
+    public var briefingTicks = 15 * Race.tickRate
+    /// The race's pre-gun ticks (`RaceSetup.startSequenceTicks`): the briefing, then the rules' 60 s sequence, so the gun
+    /// is 75 s after lock (G2).
+    public var startSequenceTicks = 15 * Race.tickRate + RaceSetup.defaultStartSequenceTicks
+    /// Holding the lock for a running race's finishers (G2); nil: the 1-minute rule only.
+    public var catchFinishers: CatchFinishers? = CatchFinishers()
+    /// Leaving the briefing: 3 in an hour cost 5 minutes (#26, owner Q1).
+    public var briefingLeaves = BriefingLeaveRule()
 
     public init() {}
 }
@@ -43,6 +55,13 @@ public struct LockedFleet: Sendable {
     /// In seat order: seat `i` is `humans[i]`; the seats after them are bots.
     public let humans: [AccountPlayer]
     public let drawn: DrawnRace
+    /// Hears each human who leaves the race before the gun (the queue's briefing-leave count, #147).
+    public var onBriefingLeave: (@Sendable (BriefingLeave) -> Void)?
+
+    /// The roster name of `seat`: the humans by name in seat order, the bots after them "Seat n" (stub names until #149).
+    public static func seatName(_ seat: Int, humans: [String]) -> String {
+        seat < humans.count ? humans[seat] : "Seat \(seat + 1)"
+    }
 }
 
 /// Starts a locked fleet's race; calls `closed` once when it closes. Throws if it can't be started.
@@ -62,6 +81,9 @@ struct QueueBook: Sendable {
     typealias Entry = QueueEntry
 
     private(set) var entries: [Entry] = []
+    /// A hold on the lock for a running race's finishers (G2), and whose wait it is: it applies only while she is the
+    /// oldest queued.
+    var hold: (oldest: Entry, hold: CatchFinishers.Hold)?
 
     var count: Int { entries.count }
 
@@ -79,10 +101,18 @@ struct QueueBook: Sendable {
     /// Puts a fleet that couldn't sail back at the head of the queue, in its order.
     mutating func restore(_ fleet: [Entry]) { entries = fleet + entries }
 
-    /// When the fleet locks: at once with `fleetCap` humans, else `lockAfter` after the oldest joined. Nil when empty.
+    /// The hold, if it is for the oldest queued now.
+    var currentHold: CatchFinishers.Hold? {
+        guard let hold, let oldest = entries.first, hold.oldest == oldest else { return nil }
+        return hold.hold
+    }
+
+    /// When the fleet locks: at once with `fleetCap` humans, else at the hold for a running race's finishers, else
+    /// `lockAfter` after the oldest joined. Nil when empty.
     func lockTime(_ settings: QueueSettings) -> Date? {
         guard let oldest = entries.first else { return nil }
-        return entries.count >= settings.fleetCap ? oldest.joinedAt : oldest.joinedAt + settings.lockAfter
+        if entries.count >= settings.fleetCap { return oldest.joinedAt }
+        return currentHold?.lockAt ?? oldest.joinedAt + settings.lockAfter
     }
 
     func isLockDue(at now: Date, _ settings: QueueSettings) -> Bool {
@@ -134,9 +164,14 @@ public actor QueueMatchmaker {
     private var races: [UUID: [String]] = [:]
     private var watchers: [String: [UUID: AsyncStream<QueueState>.Continuation]] = [:]
     private var lastPushed: [String: [UUID: QueueState]] = [:]
-    /// Dev-arranged for the contract runner only (#146 Q1): the real cooldown rules are #147's, suspensions #26's.
-    private var cooldowns: [String: Date] = [:]
-    private var suspensions: [String: Int64?] = [:]
+    /// Suspensions, failed attestations and cooldowns, stored (#147).
+    public nonisolated let restrictions: any RestrictionStore
+    /// Counts briefing leaves into cooldowns.
+    public nonisolated let briefingLeaves: BriefingLeaveTracker
+    /// The races the queue catches finishers from (G2); nil: none.
+    private let runningRaces: (any RunningRaces)?
+    /// Each watched, queued or locked player's restrictions as last read from the store: `state(of:)` reads these.
+    private var restricted: [String: PlayerRestrictions] = [:]
     private var guns: [(due: Date, line: SystemLine)] = []
     private var gunWatchers: [UUID: AsyncStream<SystemLine>.Continuation] = [:]
     /// Fleets locked, and the last one: for tests and logs.
@@ -148,6 +183,7 @@ public actor QueueMatchmaker {
     public init(settings: QueueSettings, registry: RaceRegistry, draw: RaceDraw, tokenKey: SymmetricKey, tokenLifetime: TimeInterval,
                 random: SeededRandom = .system(), now: @escaping @Sendable () -> Date = { Date() },
                 bands: @escaping RatingBands = { [$0] },
+                restrictions: any RestrictionStore = InMemoryRestrictionStore(), runningRaces: (any RunningRaces)? = nil,
                 launch: RaceLauncher? = nil) {
         self.settings = settings
         self.registry = registry
@@ -157,6 +193,9 @@ public actor QueueMatchmaker {
         self.random = random
         self.now = now
         self.bands = bands
+        self.restrictions = restrictions
+        self.runningRaces = runningRaces
+        briefingLeaves = BriefingLeaveTracker(store: restrictions, rule: settings.briefingLeaves, now: now)
         self.launch = launch ?? Self.registryLauncher(registry)
     }
 
@@ -190,15 +229,50 @@ public actor QueueMatchmaker {
         gunWatchers = [:]
     }
 
-    /// Time has moved: locks a fleet that is due, fires the guns that are due, ends cooldowns, and pushes the
-    /// countdown to everyone watching.
+    /// Time has moved: re-reads the queued players' restrictions (one suspended or flagged meanwhile leaves the queue),
+    /// moves the hold for a running race's finishers, locks a fleet that is due, fires the guns that are due, and pushes
+    /// the countdown (and cooldowns running out) to everyone watching.
     public func step() async {
+        for entry in book.entries { await loadRestrictions(entry.player.teamPlayerID) }
+        for entry in book.entries where restricted[entry.player.teamPlayerID]?.refusal(at: now()) != nil {
+            book.remove(entry.player.teamPlayerID)
+        }
+        await refreshHold()
         let time = now()
         if book.isLockDue(at: time, settings) { await lockFleet(at: time) }
         let due = guns.filter { $0.due <= time }
         guns.removeAll { $0.due <= time }
         for gun in due { for watcher in gunWatchers.values { watcher.yield(gun.line) } }
-        cooldowns = cooldowns.filter { $0.value > time }
+        pushAll()
+    }
+
+    /// Re-decides the hold for a running race's finishers (G2) from each running race's expected close now.
+    private func refreshHold() async {
+        guard let rule = settings.catchFinishers, let runningRaces, let oldest = book.entries.first,
+              book.count < settings.fleetCap else { return }
+        let running = await runningRaces.runningRaces()
+        // The queue may have moved while the races were read.
+        guard book.entries.first == oldest else { return }
+        let time = now()
+        let closes = running.map { (id: $0.id, close: time + Double($0.ticksToClose) / Double(Race.tickRate)) }
+        book.hold = rule.hold(oldestJoinedAt: oldest.joinedAt, lockAfter: settings.lockAfter, races: closes, current: book.currentHold)
+            .map { (oldest, $0) }
+    }
+
+    /// Reads the player's restrictions from the store; on a store failure keeps what was read last.
+    private func loadRestrictions(_ id: String) async {
+        do {
+            restricted[id] = try await restrictions.restrictions(of: id)
+        } catch {
+            FileHandle.standardError.write(Data("RegattaServer: can't read \(id)'s restrictions: \(error)\n".utf8))
+        }
+    }
+
+    /// The player's restrictions changed in the store (#153's suspension, #158's attestation): re-read them; one now
+    /// refused leaves the queue.
+    public func restrictionsChanged(_ id: String) async {
+        await loadRestrictions(id)
+        if restricted[id]?.refusal(at: now()) != nil { book.remove(id) }
         pushAll()
     }
 
@@ -207,7 +281,7 @@ public actor QueueMatchmaker {
     /// What the queue looks like to `id` now.
     public func state(of id: String) -> QueueState {
         let time = now()
-        if let refusal = restriction(of: id, at: time) { return .unavailable(refusal) }
+        if let refusal = restricted[id]?.refusal(at: time) { return .unavailable(refusal) }
         if handOffs[id] != nil { return .fleetLocked }
         if let fleet = starting[id] { return .queued(QueuedStatus(queuedPlayers: fleet, secondsToLock: 0)) }
         if book.contains(id), let seconds = book.secondsToLock(at: time, settings) {
@@ -216,29 +290,17 @@ public actor QueueMatchmaker {
         return .idle
     }
 
-    private func restriction(of id: String, at time: Date) -> QueueRefusal? {
-        if let until = suspensions[id] {
-            if let until, Double(until) <= time.timeIntervalSince1970 {
-                suspensions[id] = nil
-            } else {
-                return .suspended(until: until)
-            }
-        }
-        if let until = cooldowns[id], until > time {
-            return .cooldown(secondsRemaining: Int(until.timeIntervalSince(time).rounded(.up)))
-        }
-        return nil
-    }
-
     public func join(_ player: AccountPlayer) async throws(QueueError) {
         let id = player.teamPlayerID
+        await loadRestrictions(id)
         switch state(of: id) {
         case .unavailable(let refusal): throw .refused(refusal)
         case .queued, .fleetLocked: throw .alreadyQueued
         case .idle: break
         }
+        book.add(player, at: now())
+        await refreshHold()
         let time = now()
-        book.add(player, at: time)
         if book.isLockDue(at: time, settings) { await lockFleet(at: time) }
         pushAll()
     }
@@ -278,16 +340,19 @@ public actor QueueMatchmaker {
             book.restore(fleet)
             return
         }
-        let locked = LockedFleet(raceID: raceID, setup: setup, windSeed: drawn.windSeed, humans: humans, drawn: drawn)
+        var locked = LockedFleet(raceID: raceID, setup: setup, windSeed: drawn.windSeed, humans: humans, drawn: drawn)
+        locked.onBriefingLeave = { leave in Task { await self.briefingLeave(raceID, leave) } }
         // While the race starts (the actor is free meanwhile) the fleet shows as queued with nothing left on the clock:
         // `.fleetLocked` and the hand-off come only once its race is in the registry, so a token always finds its race.
         for player in humans { starting[player.teamPlayerID] = humans.count }
+        races[raceID] = humans.map(\.teamPlayerID)
         do {
             try await launch(locked) { Task { await self.raceClosed(raceID) } }
         } catch {
             // The race couldn't start (the server is full): the fleet goes back to the head of the queue. Its wind seed
             // stays retired.
             for player in humans { starting[player.teamPlayerID] = nil }
+            races[raceID] = nil
             book.restore(fleet)
             pushAll()
             return
@@ -298,7 +363,6 @@ public actor QueueMatchmaker {
             guard let bytes = RaceToken(raceID: raceID, seat: seat, expiresAt: expiry).signed(with: tokenKey) else { continue }
             handOffs[player.teamPlayerID] = HandOff(raceID: RaceID(raceID.uuidString.lowercased()), token: RegattaServices.RaceToken(bytes: bytes))
         }
-        races[raceID] = humans.map(\.teamPlayerID)
         let gunAt = time + Double(settings.startSequenceTicks) / Double(Race.tickRate)
         guns.append((gunAt, .gun(venue: drawn.pairing.venue.content.displayName, boats: setup.fleetSize, humans: humans.count)))
         fleetsLocked += 1
@@ -306,9 +370,23 @@ public actor QueueMatchmaker {
         pushAll()
     }
 
+    /// A human left the race between lock and gun (#147): it counts towards her cooldown. One who left for good is free
+    /// to queue again at once (after any cooldown); one whose seat was empty at the gun can still rejoin it (#66).
+    func briefingLeave(_ raceID: UUID, _ leave: BriefingLeave) async {
+        guard let players = races[raceID], players.indices.contains(leave.seat) else { return }
+        let id = players[leave.seat]
+        await briefingLeaves.recordLeave(id, race: raceID)
+        if leave.kind == .left, handOffs[id]?.raceID.rawValue == raceID.uuidString.lowercased() {
+            handOffs[id] = nil
+            races[raceID]?[leave.seat] = ""
+        }
+        await loadRestrictions(id)
+        pushAll()
+    }
+
     /// The race closed: its players are free to queue again.
     func raceClosed(_ raceID: UUID) {
-        for id in races.removeValue(forKey: raceID) ?? [] { handOffs[id] = nil }
+        for id in races.removeValue(forKey: raceID) ?? [] where !id.isEmpty { handOffs[id] = nil }
         pushAll()
     }
 
@@ -343,7 +421,8 @@ public actor QueueMatchmaker {
         return stream
     }
 
-    private func watch(_ id: String, _ token: UUID, _ continuation: AsyncStream<QueueState>.Continuation) {
+    private func watch(_ id: String, _ token: UUID, _ continuation: AsyncStream<QueueState>.Continuation) async {
+        if restricted[id] == nil { await loadRestrictions(id) }
         let current = state(of: id)
         continuation.yield(current)
         watchers[id, default: [:]][token] = continuation
@@ -356,6 +435,7 @@ public actor QueueMatchmaker {
         if watchers[id]?.isEmpty == true {
             watchers[id] = nil
             lastPushed[id] = nil
+            if !book.contains(id), handOffs[id] == nil, starting[id] == nil { restricted[id] = nil }
         }
     }
 
@@ -389,10 +469,10 @@ public actor QueueMatchmaker {
 
     // MARK: Dev arrangements (#146 Q1)
 
-    /// Dev only (`POST /dev/situation`): a queue cooldown of `seconds` for the player. #147 owns the real rule.
-    public func arrangeCooldown(_ id: String, seconds: TimeInterval) {
-        cooldowns[id] = now() + seconds
-        pushAll()
+    /// Dev only (`POST /dev/situation`): a queue cooldown of `seconds` for the player, written to the store.
+    public func arrangeCooldown(_ id: String, seconds: TimeInterval) async {
+        try? await restrictions.setCooldown(id, until: now() + seconds)
+        await restrictionsChanged(id)
     }
 
     /// Dev only (`POST /dev/situation`, #148): the queue locks now with the player in it, so the RaceSession contract's
@@ -402,9 +482,9 @@ public actor QueueMatchmaker {
         await lockFleet(at: now())
     }
 
-    /// Dev only: an online racing suspension until `until` (Unix seconds), nil for permanent. #26 owns the real store.
-    public func arrangeSuspension(_ id: String, until: Int64?) {
-        suspensions[id] = .some(until)
-        pushAll()
+    /// Dev only: an online racing suspension until `until` (Unix seconds), nil for permanent, written to the store.
+    public func arrangeSuspension(_ id: String, until: Int64?) async {
+        try? await restrictions.setSuspension(id, StoredSuspension(until: until.map { Date(timeIntervalSince1970: Double($0)) }))
+        await restrictionsChanged(id)
     }
 }

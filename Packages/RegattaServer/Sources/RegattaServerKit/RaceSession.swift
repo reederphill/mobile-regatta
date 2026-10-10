@@ -33,17 +33,19 @@ public actor RaceSession {
     /// second join for the seat (one token, two sockets) is refused here rather than racing the first.
     private var claiming: Set<Int> = []
 
-    /// `roster` names the seats (RaceHost's "Seat n" by default); `onProgress` hears each change to the results so far.
+    /// `roster` names the seats (RaceHost's "Seat n" by default); `onProgress` hears each change to the results so far;
+    /// `onBriefingLeave` each human who left between fleet lock and the gun (#147, `RaceHost`'s).
     public init(id: UUID = UUID(), setup: RaceSetup, windSeed: WindSeed, closeAtTick: Int? = nil,
                 clock: any HostClock = SystemClock(), options: RaceHostOptions = RaceHostOptions(), roster: [RosterEntry]? = nil,
-                onProgress: (@Sendable () -> Void)? = nil) {
+                onProgress: (@Sendable () -> Void)? = nil, onBriefingLeave: (@Sendable (BriefingLeave) -> Void)? = nil) {
         self.id = id
         self.setup = setup
         self.closeAtTick = closeAtTick
         self.clock = clock
         self.onProgress = onProgress
         humanSeats = Set(setup.seats.indices.filter { setup.seats[$0] == .human })
-        host = RaceHost(setup: setup, windSeed: windSeed, clock: clock, options: options, roster: roster)
+        host = RaceHost(setup: setup, windSeed: windSeed, clock: clock, options: options, roster: roster,
+                        onBriefingLeave: onBriefingLeave)
     }
 
     /// A race for the instant-race endpoint: the clients in seats 0…n−1, bots after them up to
@@ -82,6 +84,14 @@ public actor RaceSession {
         guard holders[seat] == ObjectIdentifier(transport) else { return }
         holders[seat] = nil
         await host.disconnect(seat: seat)
+    }
+
+    /// The player in `seat` leaves for good (`RaceHost.leave`): before the gun a fleet bot takes it and the leave counts
+    /// at once (#147). No race message asks for it yet; a dropped connection is `leave(seat:transport:)`.
+    @discardableResult
+    public func quit(seat: Int) async -> Bool {
+        holders[seat] = nil
+        return await host.leave(seat: seat)
     }
 
     // MARK: - Driving

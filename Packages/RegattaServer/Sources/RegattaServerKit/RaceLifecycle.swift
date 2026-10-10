@@ -71,7 +71,7 @@ public protocol RaceLifecycleProviding: Sendable {
     func lastRace(of playerID: String) async throws -> LastRace?
 }
 
-public actor RaceLifecycle: RaceLifecycleProviding {
+public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     public nonisolated let settings: RaceLifecycleSettings
     public nonisolated let archive: any RaceArchive
     private let tokenKey: SymmetricKey
@@ -132,24 +132,26 @@ public actor RaceLifecycle: RaceLifecycleProviding {
     public nonisolated func launcher(clock: any HostClock = SystemClock()) -> RaceLauncher {
         { fleet, closed in
             let session = self.session(id: fleet.raceID, setup: fleet.setup, windSeed: fleet.windSeed,
-                                       names: fleet.humans.map(\.alias), clock: clock)
+                                       names: fleet.humans.map(\.alias), clock: clock, onBriefingLeave: fleet.onBriefingLeave)
             try await self.launch(session, players: fleet.humans.map(\.teamPlayerID), venue: fleet.drawn.pairing.venue.content.displayName,
                                   then: closed)
         }
     }
 
     /// A session for a lifecycle race: the humans named in seat order, bots "Seat n" (#149 names them), the lifecycle's
-    /// all-gone rules, and its results changes reported here.
+    /// all-gone rules, and its results changes reported here. `onBriefingLeave` (the queue's, #147) hears its humans who
+    /// leave before the gun; a dev-arranged race has none.
     public nonisolated func session(id: UUID, setup: RaceSetup, windSeed: WindSeed, names: [String], clock: any HostClock = SystemClock(),
-                                    options: RaceHostOptions? = nil) -> RaceSession {
+                                    options: RaceHostOptions? = nil,
+                                    onBriefingLeave: (@Sendable (BriefingLeave) -> Void)? = nil) -> RaceSession {
         let roster = setup.seats.indices.map { seat in
-            RosterEntry(name: seat < names.count ? names[seat] : "Seat \(seat + 1)", colorIndex: seat)
+            RosterEntry(name: LockedFleet.seatName(seat, humans: names), colorIndex: seat)
         }
         return RaceSession(id: id, setup: setup, windSeed: windSeed, clock: clock, options: options ?? settings.hostOptions, roster: roster,
                            onProgress: { [weak self] in
                                guard let self else { return }
                                Task { await self.progress(id) }
-                           })
+                           }, onBriefingLeave: onBriefingLeave)
     }
 
     /// Registers `session` (its `races` row, running, with its players in seats 0…), starts it, and runs the close
@@ -203,6 +205,18 @@ public actor RaceLifecycle: RaceLifecycleProviding {
         guard let id = seated[playerID], let live = races[id], let seat = live.seats[playerID] else { return nil }
         let host = live.session.host
         return (id, seat, RaceClockReading(tick: await host.tick, expectedCloseTick: await host.expectedCloseTick))
+    }
+
+    /// Every race running here that hasn't ended, with the ticks to its expected close (`Race.expectedCloseTick`): what
+    /// the queue catches finishers from (#147, G2).
+    public func runningRaces() async -> [RunningRace] {
+        var running: [RunningRace] = []
+        for (id, live) in races where !closing.contains(id) {
+            let host = live.session.host
+            guard await !host.isEnded else { continue }
+            running.append(RunningRace(id: id, ticksToClose: max(0, await host.expectedCloseTick - (await host.tick))))
+        }
+        return running
     }
 
     /// Whether the player can take her boat back: her race is past the gun, not closed, and she didn't leave it (#16,
