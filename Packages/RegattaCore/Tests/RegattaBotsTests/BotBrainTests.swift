@@ -7,7 +7,7 @@ import RegattaCore
     /// inside her corridor to the mark, `offGroove` radians further off the wind than her groove with nobody
     /// holding her rudder; seat 1, nobody's, far off to one side.
     static func beatingRace(seed: UInt64, offGroove: Double,
-                            boatClass: FileRef = RaceFiles.defaults.boatClass.ref) throws -> Race {
+                            boatClass: FileRef = BotConductTests.waterClass) throws -> Race {
         let race = botRace(seats: [.bot, .human], seed: seed, boatClass: boatClass)
         let c = race.course
         let lineCentre = (c.startLine.pin.position + c.startLine.committee.position) * 0.5

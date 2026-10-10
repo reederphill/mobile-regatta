@@ -5,7 +5,7 @@ import RegattaCore
 /// #104: a dropped player takes their boat back (CONTEXT.md **Handback**): the seat swaps from the cautious bot to the
 /// player between steps (`SeatControllers.handBack`), and the boat keeps everything the race holds for her.
 @Suite struct HandbackTests {
-    static func race(seed: UInt64, fleetSize: Int = 4, boatClass: FileRef = RaceFiles.defaults.boatClass.ref) -> Race {
+    static func race(seed: UInt64, fleetSize: Int = 4, boatClass: FileRef = BotConductTests.waterClass) -> Race {
         botRace(seats: [.human] + Array(repeating: .bot, count: fleetSize - 1), laps: 1, prestartSeconds: 30, seed: seed, boatClass: boatClass)
     }
 

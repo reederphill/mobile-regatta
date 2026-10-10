@@ -21,7 +21,7 @@ Packages/RegattaCore/   The simulation: pure Swift, no UI, unit tested
                           adds planing, the automatic spinnaker, by-the-lee loss and the averaged groove wind
   PolarTable.swift        polar by TWA × TWS, bilinear, with best upwind and downwind VMG derived at load
   Sails.swift             the automatic spinnaker's states and the planing hysteresis (#248)
-  Resources/boat-classes/ boat class files, `<id>@<version>.json`; races sail `skiff@2` by default
+  Resources/boat-classes/ boat class files, `<id>@<version>.json`; races sail `skiff@8` by default
   Conditions.swift        conditions file schema: strength range, oscillation, trend, build, puff columns; schema 2 adds the keyed wind's wobble and ramps
   Resources/conditions/   the four conditions files, `<id>@<version>.json`
   WindSetup.swift         the public wind setup drawn from the race seed, its briefing forecast
@@ -397,7 +397,7 @@ Parsed by `LaunchOptions`; bad values are logged and ignored.
 - `-demo` starts a race with a bot controller attached to your seat too. Useful for watching the AI.
 - `-perf` starts a 16-boat demo race for profiling.
 - `-seed <n>` sails every race on race seed `n`, with the wind seed pinned to it too, so the whole race reproduces.
-- `-referenceRace <n>` (Debug builds, #367) sails reference race `n` (1…16, `reference-regatta@1.json`) with you in
+- `-referenceRace <n>` (Debug builds, #367) sails reference race `n` (1…16, `reference-regatta@3.json`) with you in
   seat 0: the pinned race the bot suite sails with a stand-in (`BotRaceHarness.runReference`), on untuned files with
   the pressure overlay off. It looks like any practice race.
 - `-timescale <n>` runs the simulation at `n`× real time.

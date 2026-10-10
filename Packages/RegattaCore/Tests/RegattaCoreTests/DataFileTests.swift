@@ -48,8 +48,11 @@ enum SkiffFixtures {
     static let classID = "skiff"
     /// The version most fixtures edit: skiff@6, the autohelm on (schema 3). The default class is `defaultVersion`.
     static let version = 6
-    /// The default class's version (`RaceFiles.defaults`): skiff@7, skiff@6 with the autohelm off (#437).
-    static let defaultVersion = 7
+    /// The default class's version (`RaceFiles.defaults`): skiff@8, tacking and gybing by hand (#461).
+    static let defaultVersion = 8
+    /// skiff@7, the last class whose autohelm sails the tack/gybe tap, with a roll tack and linear rudder drag (the
+    /// default from #437 to #461): for tests of the tap, the roll, and a penalty turn hard over in about 10 s.
+    static let tapClass: FileRef = try! BoatClassFile.bundled(id: classID, version: 7).ref
     /// SHA-256 of each bundled `Resources/boat-classes/skiff@<version>.json`. A released file never changes
     /// (ADR 0004): if one fails, ship the change as the next version instead of editing it. Version 1 stays
     /// bundled for the logs sailed on it (ADR 0002).
@@ -159,7 +162,7 @@ enum SkiffFixtures {
         }
         #expect(BoatClass.supportedSchemaVersions == [2, 3, 4])
         #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.defaultVersion)).ref,
-                "races sail skiff@7 unless told otherwise (#248, #89, #263, #298, #377, #437)")
+                "races sail skiff@8 unless told otherwise (#248, #89, #263, #298, #377, #437, #461)")
     }
 
     @Test func missingHeaderIsMalformed() throws {

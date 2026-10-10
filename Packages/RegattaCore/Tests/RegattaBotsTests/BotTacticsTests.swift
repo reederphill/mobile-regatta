@@ -93,7 +93,7 @@ import Testing
         /// `veer`: the wind veered that much off the course's axis, radians (#329): a header on port, a lift on starboard.
         /// `boatClass`: the class sailed (the default, skiff@6, unless told otherwise).
         init(seats: [SeatKind] = [.bot, .bot], seed: UInt64, veer: Double = 0,
-             boatClass: FileRef = RaceFiles.defaults.boatClass.ref) {
+             boatClass: FileRef = BotConductTests.waterClass) {
             let drawn = botRace(seats: seats, seed: seed, boatClass: boatClass)
             for _ in 0..<(drawn.setup.startSequenceTicks + Race.tickRate) { drawn.step() }
             let c = drawn.course
@@ -207,7 +207,8 @@ import Testing
     /// windward, nobody at her helm, tacks onto port: the National bot tacks with her within a few seconds; a Club bot
     /// (skill 0.4) later, if at all (#223: "a Club bot covers badly and late"); one sailing her own race (engagement 0)
     /// not at all. No rule call.
-    @Test func coversABoatThatTacksAway() throws {
+    // skiff@7 until #455: on skiff@8 the covered boat's hand tack isn't read inside the scene.
+    @Test(.onSkiffSeven) func coversABoatThatTacksAway() throws {
         for seed in Self.fleetSeeds {
             func cover(skill: Double, engagement: Double) throws -> Double? {
                 let scene = Scene(seed: seed)
@@ -248,7 +249,7 @@ import Testing
     /// `justTacked`: she tacked onto port `tackedAgo` seconds ago, well inside her tack interval (`Tactics.tackInterval`).
     static func portMeetsStarboard(seed: UInt64, ahead: Double, leeward: Double = 3.5, engagement: Double = 1,
                                    seconds: Double = 12, justTacked: Bool = false, tackedAgo: Double = 1,
-                                   boatClass: FileRef = RaceFiles.defaults.boatClass.ref) throws
+                                   boatClass: FileRef = BotConductTests.waterClass) throws
         -> (tapped: Int?, kinds: [RaceEvent.Kind], race: Race, closest: Double, backwinded: Bool,
             tacked: (ahead: Double, leeward: Double)?, gates: LeeBowGates, from: Int) {
         let scene = Scene(seed: seed, boatClass: boatClass)
@@ -310,7 +311,8 @@ import Testing
     /// and 20) 12 starts land crossable lee-bows, about 2.4 L ahead and 0.7 L to leeward once tacked, never closer than
     /// 1.7 L, no rule call; the same 12 with the zone a fan (renders review 2) and a wedge from a point at her mast (review 3). skiff@5's trapezoid (`trapezoidClass`, `FleetTactics.leeBowAstern`) lee-bows from 5.8 L as
     /// before.
-    @Test func leeBowsInsteadOfDuckingWhenPossible() throws {
+    // skiff@7 until #455: on skiff@8's hand tack she lands her lee-bow without backwinding the other boat.
+    @Test(.onSkiffSeven) func leeBowsInsteadOfDuckingWhenPossible() throws {
         for seed in Self.fleetSeeds {
             let trapezoid = try Self.portMeetsStarboard(seed: seed, ahead: 5.8, boatClass: Self.trapezoidClass)
             #expect(BotConductTests.calls(trapezoid.kinds).isEmpty, "seed \(seed): \(BotConductTests.calls(trapezoid.kinds))")
@@ -345,7 +347,8 @@ import Testing
     /// onto port a second before, still lee-bows the starboard boat she can just cross, clear and with no rule call. Her
     /// tack on a boat's wind is hers to choose, so it waits for the interval: crossing well ahead of the starboard boat
     /// a second after a tack (`crossingAhead`), she holds port past the chance. From 5.5 L ahead on skiff@6 (#377).
-    @Test func leeBowAnswersInsideTheTackInterval() throws {
+    // skiff@7 until #455: the scene reads the tick of her tack's tap, and on skiff@8's hand tack she lands without backwinding the other boat.
+    @Test(.onSkiffSeven) func leeBowAnswersInsideTheTackInterval() throws {
         #expect(BotBrain.FleetTactics.leeBowInsideTackInterval)
         let separation = BotBrain.FleetTactics.leeBowMinSeparation
         for seed in Self.fleetSeeds {
@@ -369,7 +372,8 @@ import Testing
     /// (`FleetTactics.leeBowExemptEngagement`); at the lee-bow's floor (`FleetTactics.leeBowEngagement`) she waits
     /// out the interval, as for any tack of her choosing. And not right after a tack (`leeBowMinSeparation`, #338
     /// review): a second after one, a combative bot holds port past the separation.
-    @Test func leeBowsInsideTheIntervalOnlyCombative() throws {
+    // skiff@7 until #455: the scene reads the tick of her tack's tap; on skiff@8 she tacks by hand and taps nothing.
+    @Test(.onSkiffSeven) func leeBowsInsideTheIntervalOnlyCombative() throws {
         let separation = BotBrain.FleetTactics.leeBowMinSeparation
         for seed in Self.fleetSeeds {
             let combative = try Self.portMeetsStarboard(seed: seed, ahead: 5.5, seconds: 8, justTacked: true, tackedAgo: separation)
@@ -419,7 +423,8 @@ import Testing
     /// the starboard boat sits in her wind shadow; her tack completes clear, with no rule 13 or 15 call, nor any other.
     /// #329: with her plan leaning to starboard (`crossingAhead`'s header on port), so the tack pays in these winds
     /// (`FleetTactics.shadowCost`, `FleetTacticsTuningTests.tackOnWindPayoffBinds`).
-    @Test func tackOnWindCompletesClear() throws {
+    // skiff@7 until #455: the scene reads the tick of her tack's tap; on skiff@8 she tacks by hand and taps nothing.
+    @Test(.onSkiffSeven) func tackOnWindCompletesClear() throws {
         for seed in Self.fleetSeeds {
             let sailed = try Self.crossingAhead(seed: seed, together: true)
             #expect(sailed.tapped != nil, "seed \(seed): she didn't tack on her wind")
@@ -432,7 +437,8 @@ import Testing
     /// #234 acceptance (#220: cover, tack on wind and lee-bow pay when the shadow costs 0.7–1.5 L): the starboard boat a
     /// National bot tacks on the wind of loses half a hull length or more over the 16 s against her twin, the same boat
     /// in the same water with the port boat 400 m off.
-    @Test func tackOnWindCostsTheVictimAtLeastHalfAHullLength() throws {
+    // skiff@7 until #455: the scene reads the tick of her tack's tap; on skiff@8 she tacks by hand and taps nothing.
+    @Test(.onSkiffSeven) func tackOnWindCostsTheVictimAtLeastHalfAHullLength() throws {
         for seed in Self.fleetSeeds {
             let victim = try Self.crossingAhead(seed: seed, together: true)
             let twin = try Self.crossingAhead(seed: seed, together: false)

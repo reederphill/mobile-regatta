@@ -203,9 +203,10 @@ import Testing
 
     // MARK: - In a race
 
-    /// Seat 0 close-hauled on starboard in the race's wind, seat 1 well out of her way.
+    /// Seat 0 close-hauled on starboard in the race's wind, seat 1 well out of her way. On skiff@7, whose autohelm
+    /// sails the tap these tests turn her with (the default, skiff@8, has none, #458).
     func closeHauledRace() throws -> Race {
-        let race = testRace(seats: [.human, .human], seed: 3)
+        let race = testRace(seats: [.human, .human], seed: 3, boatClass: SkiffFixtures.tapClass)
         for _ in 0..<10 { race.step() }
         var snapshot = race.exportSnapshot()
         var boat = snapshot.seats[0].boat

@@ -242,8 +242,9 @@ import Glibc
 ///    M1, skiff@8 sails 3: the rudder drag goes with the cube of the rudder), `steering.headToWindFallOffCentredDegreesPerSecond`
 ///    (absent: none; irons recovery, with the rudder centred inside the no-go she falls off at the greater of it and the
 ///    head-to-wind fall-off, scaled by how little steerage she has) and `steering.autohelm.sailsTap` (absent true; false,
-///    the tack/gybe tap is logged and does nothing else). skiff@8 has no roll tack. Every race naming any older class,
-///    the default skiff@7 included, sails as on 36, bit for bit.
+///    the tack/gybe tap is logged and does nothing else). skiff@8 has no roll tack. Races sail skiff@8 by default
+///    (#461), so every default race tacks and gybes by hand, players and bots. A race naming any older class, skiff@7
+///    included, sails as on 36, bit for bit.
 public let simulationRevision = 37
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`

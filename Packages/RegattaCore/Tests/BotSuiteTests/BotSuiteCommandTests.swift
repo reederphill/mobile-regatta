@@ -217,7 +217,7 @@ import Testing
         var held = copy.content
         held.steering.autohelm.holdsWhenCentred = true
         #expect(held == bundled.content && copy.ref != bundled.ref)
-        // The default class (skiff@7, #437) already steers by hand: it is its own hand-steered copy.
+        // The default class (skiff@8, #461; skiff@7 from #437) already steers by hand: it is its own hand-steered copy.
         let skiff7 = RaceFiles.defaults.boatClass
         #expect(try BotRaceHarness.handSteered(skiff7).ref == skiff7.ref)
         let setup = try BotRaceHarness.raceSetup(for: cell)
@@ -229,7 +229,7 @@ import Testing
     /// loudly.
     @Test func handlingMixNeedsHandSteeringAndFleetsOfFour() throws {
         try BotMatrix(seeds: [1], fleetSizes: [5], tierMixes: [.national], profileMixes: [.handling], autohelmOff: true).validate()
-        // The default class steers by hand since #437 (skiff@7), so the mix needs no `--autohelm off` on it.
+        // The default class steers by hand since #437 (skiff@7, then skiff@8, #461), so the mix needs no `--autohelm off` on it.
         try BotMatrix(seeds: [1], fleetSizes: [5], tierMixes: [.national], profileMixes: [.handling]).validate()
         for size in [2, 3] {
             #expect(throws: BotSuiteError.self) {

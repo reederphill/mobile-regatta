@@ -133,9 +133,11 @@ import Testing
         #expect(mismatches.isEmpty, "\(mismatches.count) mismatches, first: \(mismatches.prefix(3))")
 
         // Port meets starboard bow to bow below the line (`RaceAssemblyTests.predictionModeNeverEmitsRuleEvents`),
-        // then both turn hard one way: the offender serves her turn; later the other way, giving a turn up.
+        // then both turn hard one way: the offender serves her turn; later the other way, giving a turn up. On
+        // skiff@7, which turns hard over in about 10 s: the default, skiff@8, stalls her with the rudder's cubed drag
+        // and serves nothing inside these 900 ticks (#458).
         for rudder: Int8 in [127, -127] {
-            let setup = try RaceAssemblyTests.setup(seats: [.human, .human])
+            let setup = try RaceAssemblyTests.setup(seats: [.human, .human], boatClass: SkiffFixtures.tapClass)
             let authoritative = Race(setup: setup, windSeed: RaceAssemblyTests.windSeed)
             let prediction = try Self.prediction(of: authoritative, through: 1200, windSeed: RaceAssemblyTests.windSeed)
             var snapshot = authoritative.exportSnapshot()
@@ -197,8 +199,10 @@ import Testing
     /// A prediction never serves a penalty turn itself: its progress runs on past a full turn (the arc,
     /// `OwedPenalty.progress`, waits just short of one) until the server's `penaltyServed` comes, which carries the
     /// turning past the full turn into the next owed turn as the server did, however late it comes.
+    /// On skiff@7, which turns two turns hard over inside the 800 ticks (skiff@8's cubed rudder drag makes it one, #458).
     @Test func aPredictionNeverServesAPenaltyTurnItself() throws {
-        let setup = try RaceSetup(raceSeed: RaceSeed(96), seats: [.human, .bot], startSequenceTicks: 60)
+        let setup = try RaceSetup(raceSeed: RaceSeed(96), seats: [.human, .bot], startSequenceTicks: 60,
+                                  boatClass: SkiffFixtures.tapClass)
         let authoritative = Race(setup: setup, windSeed: WindSeed(96))
         let prediction = try Self.prediction(of: authoritative, through: 900, windSeed: WindSeed(96))
         for race in [authoritative, prediction] {

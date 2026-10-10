@@ -14,7 +14,7 @@ import Testing
         return race.digest()
     }
 
-    /// Old classes sail the tap and the roll exactly as before #459: an all-bot race on skiff@7 (the default class, the
+    /// Old classes sail the tap and the roll exactly as before #459: an all-bot race on skiff@7 (the default class until #461, the
     /// autohelm off, a roll tack) and on skiff@6 (the autohelm on), pinned on #458's tip before any bot code changed.
     @Test func skiffSevenBotsAreBitIdentical() throws {
         let seven = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 7))

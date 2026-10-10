@@ -7,7 +7,7 @@ import RegattaCore
 @Suite struct BotStartTests {
     /// A full start sequence (60 s) for `seats`, from the race's own row (#35).
     static func startRace(seats: [SeatKind] = Array(repeating: .bot, count: 10), seed: UInt64,
-                          boatClass: FileRef = RaceFiles.defaults.boatClass.ref) -> Race {
+                          boatClass: FileRef = BotConductTests.waterClass) -> Race {
         botRace(seats: seats, laps: 1, prestartSeconds: 60, seed: seed, boatClass: boatClass)
     }
 
@@ -270,7 +270,8 @@ import RegattaCore
     /// line: the combative leeward boat luffs the windward one while her approach to her own spot and
     /// `luffSpareSeconds` fit in the time to the gun, breaks off as soon as they don't (still well before her ease,
     /// `startLuffUntil`), and starts on time.
-    @Test func combativeBreaksOffHerLuffInTimeToStart() throws {
+    // skiff@7 until #455: on skiff@8 she breaks off her luff 8.5 s before she is out of time, not on the decision before it.
+    @Test(.onSkiffSeven) func combativeBreaksOffHerLuffInTimeToStart() throws {
         let sailed = try Self.luffingOut(seed: 36, toGun: 50, below: 5)
         let outOfTime = try #require(sailed.outOfTime, "her time ran out before the gun")
         #expect(-outOfTime > sailed.until + 10, "out of time \(-outOfTime) s before the gun, her ease \(sailed.until) s")

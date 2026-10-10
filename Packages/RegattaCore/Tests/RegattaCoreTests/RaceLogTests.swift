@@ -266,8 +266,9 @@ enum ScriptedLog {
         #expect(try #require(race.log).inputs.count == 1)
     }
 
+    /// On skiff@7: the default class's autohelm sails no tap (#458, `TapOnSkiffEightTests`).
     @Test func tapAppliesOnce() throws {
-        let race = testRace(seats: [.human, .human], seed: 3)
+        let race = testRace(seats: [.human, .human], seed: 3, boatClass: SkiffFixtures.tapClass)
         let t = race.tick + 10
         #expect(race.tap(.tackGybe, seat: 0, atTick: t) == t)
         #expect(race.tap(.protest(target: 1), seat: 0, atTick: t) == t)

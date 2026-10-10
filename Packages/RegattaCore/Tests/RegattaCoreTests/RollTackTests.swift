@@ -129,8 +129,9 @@ import Testing
         // race puts her until she's close-hauled and lets her autohelm take the groove, then tacks with a roll on the
         // crossing (a hit) and, later, tacks again with a roll straight after the tap (a miss). Replaying the log
         // gives the same digest and the same roll events.
+        // On skiff@7: the default, skiff@8, has no tap and no roll tack (#458).
         let setup = try RaceSetup(raceSeed: RaceSeed(263), seats: [.human, .human], laps: 1,
-                                  startSequenceTicks: 90 * Race.tickRate)
+                                  startSequenceTicks: 90 * Race.tickRate, boatClass: SkiffFixtures.tapClass)
         let live = Race(setup: setup, windSeed: WindSeed(263))
         var steering = true
         var tacks: [Int] = []
