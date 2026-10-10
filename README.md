@@ -119,7 +119,6 @@ Regatta/                The iOS app
   Game/BoatNode.swift     batched boat sprites: hull, outline, sail, heel, ghost fade
   Game/BoatEffects.swift  each boat's wake string, wind-shadow cone and backwind; the fleet's one ConeLayer
   Game/WakeShape.swift    a wake's alpha (and V numbers) from speed through the water and pressure
-  Game/RollRing.swift     your roll tack ring: the window after the crossing, a hit's burst, a miss's collapse
   Game/ShadowShapes.swift the cone's and backwind's outlines, from core's ShadowCone sizes
   Game/ChartLayer.swift   the chart: race-area boundary and hatch, land and relief, landmarks, shallows tint, marks and line
   Game/ChartMarks.swift   which marks are the active leg's (orange) or grey, and the rounding-side arrow (pure)
@@ -442,7 +441,7 @@ is, each frame (`WaterTests.waterUpdateStaysCheap` prints its cost).
 ## Playing
 
 - Hold the **left** or **right** half of the screen to steer. Short taps make small corrections.
-- **Tack / Gybe** swings you through the wind onto the mirror-image angle.
+- Steer through the wind to tack or gybe: there is no button.
 - You start in a row below the line, reaching towards the pin on the autohelm until you steer.
 - Keep all of your hull below the line at the gun. If any of it is over (OCS), sail back until all of it
   is below the line, then start. While you sail back, keep clear of everyone else.
