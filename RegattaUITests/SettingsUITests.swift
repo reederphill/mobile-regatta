@@ -107,12 +107,15 @@ final class SettingsUITests: RaceUITestCase {
 
     /// The live leaderboard (#268) is on by default: up on the HUD once the gun has gone. Turned off in Settings, a
     /// race after the gun has no board. The test turns it back on, so the next test starts from the defaults. The
-    /// waits add up to under 3.5 min (`RaceUITestCase`): each race's start sequence runs at 8× (about 8-15 s).
+    /// waits add up to under 3.5 min (`RaceUITestCase`): each race has a 5 s start sequence (`-startSeconds 5`) at
+    /// real time, so the app is never behind on its ticks while the test asks about the board. At `-timescale 8` a
+    /// slow CI runner took 46 s and 66 s to reach the gun and answered each query about the board in 30 s (#473: the
+    /// test ran into its 5 min allowance in tear-down, and the terminate there failed).
     /// The first launch clears the device's settings (`-resetSettings`) and so does a launch at tear-down, whether or
     /// not the test got that far: a try that failed with the board turned off no longer fails the retry's first check.
     @MainActor func testLiveLeaderboardToggleHidesBoard() {
         resetSettingsAtTearDown()
-        var app = launchRace(["-timescale", "8", "-resetSettings"])
+        var app = launchRace(["-startSeconds", "5", "-resetSettings"])
         XCTAssertTrue(waitForGun(app), "the race never reached the gun")
         let board = app.descendants(matching: .any)["race-leaderboard"].firstMatch
         XCTAssertTrue(board.waitForExistence(timeout: 15), "no live leaderboard after the gun with the setting on")
@@ -127,7 +130,7 @@ final class SettingsUITests: RaceUITestCase {
         XCTAssertEqual(value(toggle), "0", "the toggle didn't flip off")
         app.terminate()
 
-        app = launchRace(["-timescale", "8"])
+        app = launchRace(["-startSeconds", "5"])
         XCTAssertTrue(waitForGun(app), "the race never reached the gun")
         XCTAssertFalse(app.descendants(matching: .any)["race-leaderboard"].firstMatch.waitForExistence(timeout: 5),
                        "the live leaderboard shows with the setting off")

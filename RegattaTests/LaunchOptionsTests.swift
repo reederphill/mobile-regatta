@@ -371,6 +371,30 @@ import RegattaServices
         let pinned = try #require(parse("-referenceRace", "2", "-seed", "1", "-laps", "1").launchRaceConfig())
         #expect(pinned.setup == ReferenceRegatta.race(2).setup)
     }
+
+    /// `-beatMetres <n>` (#473, Debug builds) takes a beat of 120…360 m; anything else is refused. A UI test run sails
+    /// it as a tuning of the rules configuration's cap alone, in memory; without `-uitesting` it changes nothing.
+    @Test func beatMetresParsesAndTunesTheBeatCapForUITests() {
+        #expect(parse("-beatMetres", "120").beatMetres == 120)
+        #expect(parse("-beatMetres", "360").problems.isEmpty)
+        #expect(parse().beatMetres == nil)
+        for bad in ["119", "361", "0", "short"] {
+            let options = parse("-beatMetres", bad)
+            #expect(options.beatMetres == nil, "\(bad)")
+            #expect(options.problems.count == 1, "\(bad)")
+        }
+        let valueless = parse("-beatMetres", "-hideScene")
+        #expect(valueless.beatMetres == nil && valueless.hidesScene)
+        #expect(valueless.problems == ["-beatMetres needs a value"])
+
+        let model = AppModel(launchOptions: parse("-uitesting", "-beatMetres", "120"))
+        #expect(model.tuning.tuning == .beatCapped(at: 120))
+        #expect(model.tuning.tuning.rulesValues == [Tuning.beatCapPointer: 120])
+        #expect(model.tuning.problems.isEmpty, "the tuned rules configuration loads")
+        #expect(AppModel(launchOptions: parse("-uitesting")).tuning.tuning == Tuning())
+        #expect(AppModel(launchOptions: parse("-beatMetres", "120")).tuning.tuning.rulesValues[Tuning.beatCapPointer] == nil,
+                "only a UI test run sails it")
+    }
     #endif
     /// My boat's launch arguments (#136): `-myBoat` stands in for Try it's deep link.
     @Test func parsesMyBoat() {

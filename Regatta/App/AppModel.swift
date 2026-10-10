@@ -191,6 +191,8 @@ final class AppModel {
         controls = ControlSettings(deviceSettings, launchOptions: launchOptions)
         #if DEBUG
         tuning = TuningModel(store: launchOptions.uiTesting ? .inMemory : .standard)
+        // `-beatMetres` (#473): a UI test's practice races sail a short beat, on the in-memory tuning only.
+        if launchOptions.uiTesting, let beat = launchOptions.beatMetres { tuning.load(.beatCapped(at: beat)) }
         #endif
         sceneState.isRaceSequenceShowing = false
         controls.savesZoomMultiplier = { [weak self] multiplier in self?.deviceSettings.zoomMultiplier = multiplier }
