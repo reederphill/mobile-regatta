@@ -33,6 +33,7 @@ enum TackSweep {
             case 2: try stage2(options, book: book)
             case 3: try stage3(options, book: book)
             case 4: try stage4(options, book: book)
+            case 5: try stage5(options, book: book)
             default:
                 fputs("tack-sweep: --stage must be 0...4\n\(Options.usage)\n", stderr)
                 return 2
@@ -457,11 +458,13 @@ enum TackSweep {
     // MARK: - One run
 
     static func run(_ helm: Helm, _ maneuver: Maneuver, _ cell: Cell, params: SweepParams, boat: BoatClass,
-                    book: WindBook) throws -> RunMetrics {
+                    book: WindBook, series: [(Double, Double)]? = nil,
+                    twinSeries: [(Double, Double)]? = nil) throws -> RunMetrics {
         let seconds = helm.seconds(maneuver)
         let ticks = Int((seconds / dt).rounded())
         let groove: Autohelm.Groove = maneuver == .tack ? .upwind : .downwind
-        let wind0 = book.sample(knots: cell.knots, seed: cell.seed, tick: 0)
+        let sampled0 = book.sample(knots: cell.knots, seed: cell.seed, tick: 0)
+        let wind0: (direction: Double, speed: Double) = series?.first.map { (direction: $0.0, speed: $0.1) } ?? sampled0
         let angle = Autohelm.grooveAngle(groove, tws: wind0.speed, boatClass: boat)
         let boom = BoomSide.port
         let heading0 = compass(wind: wind0.direction, sailingAngle: angle, boom: boom)
@@ -489,14 +492,17 @@ enum TackSweep {
         var dropHelm: Vec2?, dropTwin: Vec2?
         let base = params.mechanics()
         for tick in 0..<ticks {
-            let (dir, speed) = book.sample(knots: cell.knots, seed: cell.seed, tick: tick)
+            let sampled = book.sample(knots: cell.knots, seed: cell.seed, tick: tick)
+            let (dir, speed) = series.flatMap { tick < $0.count ? $0[tick] : nil } ?? sampled
+            let (twinDir, twinSpeed) = twinSeries.flatMap { tick < $0.count ? $0[tick] : nil } ?? (dir, speed)
             let env = BoatDynamics.Environment(windDirection: dir, windSpeed: speed)
+            let twinEnv = BoatDynamics.Environment(windDirection: twinDir, windSpeed: twinSpeed)
             let context = HelmContext(t: Double(tick) * dt, heading: helmState.heading, speed: helmState.speed,
                                       rudder: helmState.rudder, boom: helmState.boomSide, planing: helmState.isPlaning,
                                       windDir: dir, tws: speed, turnSign: turnSign, startBoom: boom, boat: boat,
                                       maneuver: maneuver == .tack ? .tack : .gybe)
             let command = pilot.command(context)
-            let origin = compass(wind: dir, sailingAngle: Autohelm.grooveAngle(groove, tws: speed, boatClass: boat), boom: boom)
+            let origin = compass(wind: twinDir, sailingAngle: Autohelm.grooveAngle(groove, tws: twinSpeed, boatClass: boat), boom: boom)
             let twinCommand = holdLaw(heading: twinState.heading, aim: origin)
             let aim = context.finalAim(offsetDeg: 0)
             var helmProbe = base
@@ -508,11 +514,11 @@ enum TackSweep {
             twinProbe.aimErrorRadians = .pi
             if base.isOff {
                 helmState = BoatDynamics.advance(helmState, control: .init(rudder: command), env: env, boatClass: boat, dt: dt)
-                twinState = BoatDynamics.advance(twinState, control: .init(rudder: twinCommand), env: env, boatClass: boat, dt: dt)
+                twinState = BoatDynamics.advance(twinState, control: .init(rudder: twinCommand), env: twinEnv, boatClass: boat, dt: dt)
             } else {
                 helmState = BoatDynamics.advance(helmState, control: .init(rudder: command), env: env, boatClass: boat, dt: dt,
                                                 probe: helmProbe, clock: &helmClock)
-                twinState = BoatDynamics.advance(twinState, control: .init(rudder: twinCommand), env: env, boatClass: boat, dt: dt,
+                twinState = BoatDynamics.advance(twinState, control: .init(rudder: twinCommand), env: twinEnv, boatClass: boat, dt: dt,
                                                 probe: twinProbe, clock: &twinClock)
             }
             let t = Double(tick + 1) * dt
@@ -701,6 +707,290 @@ enum TackSweep {
         let helmMade = (helmRace.boats[0].position - start).dot(along)
         let twinMade = (twinRace.boats[0].position - twinStart).dot(along)
         return (twinMade - helmMade) / hull
+    }
+
+    // MARK: - Stage 5 (owner 2026-10-09)
+
+    static func stage5(_ options: Options, book: WindBook) throws {
+        let started = Date()
+        guard let winner = try loadRows("refine-best.json").first else { throw SweepError.empty }
+        let m1 = shipping(winner.params, lag: false)
+        let m1m3 = shipping(winner.params, lag: true)
+        print("Stage 5: planing and by-the-lee reset to skiff@7")
+        let cardA = try score(m1, book: book, mode: .full, jobs: options.jobs)
+        let cardB = try score(m1m3, book: book, mode: .full, jobs: options.jobs)
+        print(String(format: "(a) M1 only  score %.3f", cardA.score))
+        print(cardA.table)
+        print(String(format: "(b) M1+M3    score %.3f  lag %.3f s", cardB.score, m1m3.driveLagSeconds))
+        print(cardB.table)
+        var ship = m1
+        var shipCard = cardA
+        if gybeOffTarget(cardA) {
+            print("Gybe term off target with planing reset. Refining steering and momentum; planing stays at skiff@7.")
+            let refined = try refine(m1, knobs: Array(SweepParams.knobs.prefix(9)), book: book, jobs: options.jobs)
+            ship = refined.params
+            shipCard = refined.card
+            print(String(format: "Refined shipping score %.3f", shipCard.score))
+            print(shipCard.table)
+            print(ship.lines)
+        } else {
+            print("Gybe terms 6 and 7 hold with planing reset. Shipping set is (a), no steering refine.")
+        }
+        try lossTable(ship, book: book, jobs: options.jobs)
+        try stuckSensitivity(ship, book: book, jobs: options.jobs)
+        try raceConfirm(ship, book: book, jobs: options.jobs)
+        print(String(format: "Stage 5 wall %.0f s", Date().timeIntervalSince(started)))
+        _ = shipCard
+    }
+
+    static func shipping(_ base: SweepParams, lag: Bool) -> SweepParams {
+        var p = base
+        p.onSpeed = 8
+        p.offSpeed = 6
+        p.onMaxAWA = 90
+        p.byTheLeeLoss = 0.02
+        p.collapse = 10
+        p.byTheLeeLimit = 20
+        p.dragExponent = 2
+        p.dragTurnRateTerm = 0
+        p.overshootCost = 0
+        p.windBandDegrees = 0
+        p.windBandRateFactor = 1
+        p.settleDegrees = 0
+        p.settleBonus = 0
+        p.driveLagSeconds = lag ? base.driveLagSeconds : 0
+        p.dePlaneRampSeconds = 0
+        p.byTheLeeExponent = 1
+        return p
+    }
+
+    static func gybeOffTarget(_ card: Scorecard) -> Bool {
+        abs(card.bestGybe - 1.10) > 0.14 || card.slowGybe < 0.6 || card.slowGybe > 1.5
+    }
+
+    static func lossTable(_ params: SweepParams, book: WindBook, jobs: Int) throws {
+        let boat = try boatClass(params)
+        struct Item: Sendable { var helm: Helm; var maneuver: Maneuver; var cell: Cell }
+        var items: [Item] = []
+        for knots in [6.0, 10.0, 14.0] {
+            for entry in [0.70, 0.85, 1.0] {
+                for seed in [Int?]( [nil, 1, 2, 3, 4, 5, 6] ) {
+                    let cell = Cell(knots: knots, entry: entry, seed: seed)
+                    for helm in Helm.tack { items.append(Item(helm: helm, maneuver: .tack, cell: cell)) }
+                    for helm in Helm.gybe { items.append(Item(helm: helm, maneuver: .gybe, cell: cell)) }
+                }
+            }
+        }
+        let metrics = try inParallel(items, jobs: jobs) { item in
+            try run(item.helm, item.maneuver, item.cell, params: params, boat: boat, book: book)
+        }
+        var buckets: [String: [Double]] = [:]
+        for (item, metric) in zip(items, metrics) {
+            let loss = item.maneuver == .gybe ? metric.loss30 : metric.loss25
+            let key = "\(item.helm.rawValue)|\(item.maneuver.rawValue)|\(item.cell.knots)|\(item.cell.entry)"
+            buckets[key, default: []].append(loss)
+        }
+        var text = "# Loss table, shipping set\n\nMean over steady and gusty seeds 1–6. Tack window 25 s, gybe window 30 s.\n\n"
+        text += "| helm | maneuver | wind kn | entry | L |\n|---|---|---:|---:|---:|\n"
+        let helms = Helm.tack.map { ($0, Maneuver.tack) } + Helm.gybe.map { ($0, Maneuver.gybe) }
+        for (helm, maneuver) in helms {
+            for knots in [6.0, 10.0, 14.0] {
+                for entry in [0.70, 0.85, 1.0] {
+                    let key = "\(helm.rawValue)|\(maneuver.rawValue)|\(knots)|\(entry)"
+                    let values = buckets[key] ?? []
+                    let mean = values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
+                    text += String(format: "| %@ | %@ | %.0f | %.2f | %.3f |\n", helm.rawValue, maneuver.rawValue, knots, entry, mean)
+                }
+            }
+        }
+        try text.write(to: resultsDir.appendingPathComponent("loss-table.md"), atomically: true, encoding: .utf8)
+        try text.write(to: outDir.appendingPathComponent("loss-table.md"), atomically: true, encoding: .utf8)
+        print("wrote results/loss-table.md (\(helms.count) helms)")
+    }
+
+    static func stuckSensitivity(_ params: SweepParams, book: WindBook, jobs: Int) throws {
+        let axes: [(String, WritableKeyPath<SweepParams, Double>, [Double])] = [
+            ("headToWindFallOff", \.fallOff, [1, 2, 3, 4, 6]),
+            ("noGo", \.noGo, [2.5, 4, 4.8, 5.79, 8]),
+            ("rudderSlew", \.rudderSlew, [2, 4, 5, 8, 10]),
+        ]
+        print("Stuck sensitivity (tack terms, one at a time from the shipping set)")
+        var lines = ["| knob | value | stuck s | best | slam | gentle | light | strong | holds |",
+                     "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
+        for (name, path, values) in axes {
+            for value in values {
+                var trial = params
+                trial[keyPath: path] = value
+                let card = try score(trial, book: book, mode: .tack, jobs: jobs)
+                let holds = tackHolds(card)
+                let mark = abs(value - params[keyPath: path]) < 1e-6 ? " (ship)" : ""
+                print(String(format: "  %@ %.2f%@  stuck %.2f  best %.3f slam %.3f gentle %.3f light %.3f strong %.3f  %@",
+                             name, value, mark, card.stuck, card.bestTack, card.slamTack, card.gentle, card.light, card.strong,
+                             holds && card.stuck < 10 ? "under 10s, tack holds" : (card.stuck < 10 ? "under 10s, tack breaks" : "stuck stays over 10s")))
+                lines.append(String(format: "| %@ | %.2f%@ | %.2f | %.3f | %.3f | %.3f | %.3f | %.3f | %@ |",
+                                    name, value, mark, card.stuck, card.bestTack, card.slamTack, card.gentle, card.light, card.strong,
+                                    holds ? "yes" : "no"))
+            }
+        }
+        let text = lines.joined(separator: "\n") + "\n"
+        try text.write(to: resultsDir.appendingPathComponent("stuck.md"), atomically: true, encoding: .utf8)
+        print("wrote results/stuck.md")
+    }
+
+    static func tackHolds(_ card: Scorecard) -> Bool {
+        abs(card.bestTack - 0.95) < 0.15 && abs(card.slamTack - 1.10) < 0.15 && card.gentle <= 0.7
+            && card.light >= 0.25 && card.minSpeed >= 0.4 && card.maxDecel <= 4
+    }
+
+    static func raceConfirm(_ params: SweepParams, book: WindBook, jobs: Int) throws {
+        print("Race confirm: same race, sail-on reference, TWS set to the cell")
+        try explainSignFlip(params)
+        let boat = try boatClass(params)
+        for knots in [10.0, 14.0] {
+            let best = try bestTackHelm(params, knots: knots, boat: boat, book: book, jobs: jobs)
+            print(String(format: "  %.0f kn best helm %@", knots, best.rawValue))
+            struct Job: Sendable { var seed: Int; var helm: Helm }
+            let jobsList = (1...6).flatMap { seed in [Job(seed: seed, helm: .slam), Job(seed: seed, helm: best)] }
+            let rows = try inParallel(jobsList, jobs: jobs) { job -> (Job, Double, Double, Double) in
+                let cell = Cell(knots: knots, entry: 1, seed: job.seed)
+                let harness = try run(job.helm, .tack, cell, params: params, boat: boat, book: book).loss25
+                let pair = try raceVersusReference(job.helm, seed: job.seed, knots: knots, entry: 1, params: params)
+                return (job, harness, pair.race, pair.point)
+            }
+            for helm in [Helm.slam, best] {
+                let mine = rows.filter { $0.0.helm == helm }
+                let h = mine.map(\.1).mean
+                let r = mine.map(\.2).mean
+                let p = mine.map(\.3).mean
+                print(String(format: "  %.0f kn %@  harness %.3f  race %.3f  point-wind %.3f  race-harness %+.3f",
+                             knots, helm.rawValue, h, r, p, r - h))
+                for row in mine.sorted(by: { $0.0.seed < $1.0.seed }) {
+                    print(String(format: "    seed %d  harness %.3f  race %.3f  point %.3f",
+                                 row.0.seed, row.1, row.2, row.3))
+                }
+            }
+        }
+    }
+
+    static func bestTackHelm(_ params: SweepParams, knots: Double, boat: BoatClass, book: WindBook, jobs: Int) throws -> Helm {
+        let helms = Helm.tack.filter(\.countsForBest)
+        struct Item: Sendable { var helm: Helm; var seed: Int }
+        let items = helms.flatMap { helm in (1...6).map { Item(helm: helm, seed: $0) } }
+        let losses = try inParallel(items, jobs: jobs) { item -> Double in
+            try run(item.helm, .tack, Cell(knots: knots, entry: 1, seed: item.seed), params: params, boat: boat, book: book).loss25
+        }
+        var sum: [Helm: Double] = [:]
+        var n: [Helm: Double] = [:]
+        for (item, loss) in zip(items, losses) {
+            sum[item.helm, default: 0] += loss
+            n[item.helm, default: 0] += 1
+        }
+        return helms.min { (sum[$0] ?? 0) / (n[$0] ?? 1) < (sum[$1] ?? 0) / (n[$1] ?? 1) } ?? .slam
+    }
+
+    static func explainSignFlip(_ params: SweepParams) throws {
+        let file = try tunedFile(params)
+        let race = try makeRace(file: file, knots: nil, seed: 1)
+        race.step()
+        let origin = race.boats[0].position
+        let windThere = race.groundWind(at: origin)
+        let area = race.course.raceArea
+        let moved = area.centre + race.course.right * (area.halfWidth * 0.4)
+        let windMoved = race.groundWind(at: moved)
+        let turn = rad2deg(wrapAngle(windMoved.direction - windThere.direction))
+        print(String(format: "Sign flip: stage 4 aimed on the wind at the boat's start (%.1f kn) then measured along the wind after moving her across the course (%.1f kn, direction %+.1f deg). It also left gusty-offshore at its file strength, 14–20 kn, while the dynamics number was the same gust shape scaled to 10 kn. The race and the dynamics were not the same wind.",
+                     knots(metresPerSecond: windThere.speed), knots(metresPerSecond: windMoved.speed), turn))
+    }
+
+    static func raceVersusReference(_ helm: Helm, seed: Int, knots wanted: Double, entry: Double,
+                                    params: SweepParams) throws -> (race: Double, point: Double) {
+        let file = try tunedFile(params)
+        let race = try makeRace(file: file, knots: wanted, seed: seed)
+        race.step()
+        let area = race.course.raceArea
+        let boat = file.content
+        let spot = area.centre + race.course.right * (area.halfWidth * 0.4)
+        let gap = boat.hull.length * 12
+        let helmPos = spot + race.course.right * (gap / 2)
+        let twinPos = spot - race.course.right * (gap / 2)
+        let wind = race.groundWind(at: helmPos)
+        let angle = Autohelm.grooveAngle(.upwind, tws: wind.speed, boatClass: boat)
+        let heading = compass(wind: wind.direction, sailingAngle: angle, boom: .port)
+        let target = BoatDynamics.polarTarget(relativeWind: angle, boomSide: .port, tws: wind.speed,
+                                              isPlaning: false, spinnaker: .down, boatClass: boat)
+        var snap = race.exportSnapshot()
+        for (seat, position) in [(0, helmPos), (1, twinPos)] {
+            snap.seats[seat].boat.position = position
+            snap.seats[seat].boat.heading = heading
+            snap.seats[seat].boat.speed = entry * target
+            snap.seats[seat].boat.boomSide = .port
+            snap.seats[seat].boat.rudder = 0
+            snap.seats[seat].boat.desiredRudder = 0
+            snap.seats[seat].boat.autohelm = nil
+            snap.seats[seat].heldInput = .neutral
+            snap.seats[seat].boat.isPlaning = false
+            snap.seats[seat].boat.spinnaker = .down
+        }
+        try race.importSnapshot(snap)
+        let session = ProbeSession(mechanics: params.mechanics())
+        ProbeSlot.current = session
+        defer { ProbeSlot.current = nil }
+        let ticks = 25 * Race.tickRate
+        let start0 = race.boats[0].position
+        let start1 = race.boats[1].position
+        let along = Vec2.heading(wind.direction)
+        let tap = Autohelm.tackOrGybe(sailingAngle: angle)
+        let turnSign = tap.rudder(sailingAngle: angle, boomSide: .port, tws: wind.speed, boatClass: boat) >= 0 ? 1.0 : -1.0
+        var pilot = Pilot(helm: helm, maneuver: .tack)
+        var helmSeries: [(Double, Double)] = []
+        var twinSeries: [(Double, Double)] = []
+        helmSeries.reserveCapacity(ticks)
+        twinSeries.reserveCapacity(ticks)
+        for _ in 0..<ticks {
+            let helmWind = race.groundWind(at: race.boats[0].position)
+            let twinWind = race.groundWind(at: race.boats[1].position)
+            helmSeries.append((helmWind.direction, helmWind.speed))
+            twinSeries.append((twinWind.direction, twinWind.speed))
+            let b = race.boats[0]
+            let context = HelmContext(t: race.time, heading: b.heading, speed: b.speed, rudder: b.rudder,
+                                      boom: b.boomSide, planing: b.isPlaning, windDir: helmWind.direction, tws: helmWind.speed,
+                                      turnSign: turnSign, startBoom: .port, boat: boat, maneuver: .tack)
+            race.apply(BoatInput(rudder: pilot.command(context)), seat: 0, atTick: race.tick + 1)
+            let origin = compass(wind: twinWind.direction,
+                                sailingAngle: Autohelm.grooveAngle(.upwind, tws: twinWind.speed, boatClass: boat),
+                                boom: .port)
+            let hold = holdLaw(heading: race.boats[1].heading, aim: origin)
+            race.apply(BoatInput(rudder: hold), seat: 1, atTick: race.tick + 1)
+            race.step()
+        }
+        let raceLoss = ((race.boats[1].position - start1).dot(along) - (race.boats[0].position - start0).dot(along)) / hull
+        let point = try run(helm, .tack, Cell(knots: wanted, entry: entry, seed: seed), params: params, boat: boat,
+                           book: WindBook(series: [:], offset: [:]), series: helmSeries, twinSeries: twinSeries).loss25
+        return (raceLoss, point)
+    }
+
+    static func makeRace(file: BoatClassFile, knots wanted: Double?, seed: Int) throws -> Race {
+        let venue = try VenueFile.bundled(id: "dev-venue", version: 7)
+        var catalog = RaceFileCatalog()
+        try catalog.boatClasses.add(file)
+        let conditions: ConditionsFile
+        if let wanted {
+            guard let data = try ConditionsFile.bundledData(id: "gusty-offshore", version: 7) else {
+                throw SweepError.message("gusty-offshore@7 is not bundled")
+            }
+            conditions = try TunedCopy.make(Conditions.self, base: data, values: [
+                "/strength/minKnots": wanted,
+                "/strength/maxKnots": wanted,
+            ], tune: 1).file
+            try catalog.conditions.add(conditions)
+        } else {
+            conditions = try ConditionsFile.bundled(id: "gusty-offshore", version: 7)
+        }
+        let setup = try RaceSetup(raceSeed: RaceSeed(UInt64(seed)), seats: [.human, .human], laps: 1,
+                                 startSequenceTicks: 1, boatClass: file.ref, venue: venue.ref,
+                                 conditions: conditions.ref)
+        return try Race(setup: setup, files: try RaceFiles(resolving: setup, from: catalog),
+                       mode: .authoritative(windSeed: BotRaceHarness.windSeed(for: UInt64(seed))))
     }
 }
 
@@ -1241,7 +1531,7 @@ struct Options {
     var cut: Int?
 
     static let usage = """
-    regatta-botsuite tack-sweep [--stage 0|1|2|3|4] [--jobs n] [--report]
+    regatta-botsuite tack-sweep [--stage 0|1|2|3|4|5] [--jobs n] [--report]
         [--case <helm> --maneuver tack|gybe|run --knots n --entry f]
     """
 

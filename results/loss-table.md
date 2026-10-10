@@ -1,35 +1,348 @@
-# Tack sweep
+# Loss table, shipping set
 
-Score 113.12890357817659
+Mean over steady and gusty seeds 1–6. Tack window 25 s, gybe window 30 s.
 
-| k | measure | value |
-|---|---|---|
-| 1 | best tack L | 0.9480622984295337 |
-| 2 | slam tack L | 1.0759307714738229 |
-| 3 | gentle gap | 0.11896157700310565 |
-| 4 | light-air bearoff gap | 0.2958027700607854 |
-| 5 | strong-air bearoff gap | 0.08779325503265249 |
-| 6 | best gybe L | 1.1002904055369398 |
-| 7 | slow gybe gap | 1.0310245685292845 |
-| 8 | re-plane s | 0.0 |
-| 9 | VMG gain / de-plane / cost | -0.04614458875274984 / 0.0 / 0.0 |
-| 10 | stuck / rescue | 16.1071428571432 / 22.23333333333333 |
-| 11 | min speed / decel | 0.4999506870017082 / 3.4712387403482787 |
-
-## Parameters
-
-/byTheLee/speedLossPerDegree = 0.01
-/byTheLee/spinnakerCollapseDegrees = 9.5
-/momentum/noGoSeconds = 5.791666666666666
-/momentum/slowingDownSeconds = 14.0
-/momentum/speedingUpSeconds = 4.5
-/planing/offSpeedKnots = 4.0
-/planing/onMaxAWADegrees = 80.0
-/planing/onSpeedKnots = 6.0
-/polar/byTheLeeLimit/0/degrees = 21.0
-/steering/headToWindFallOffDegreesPerSecond = 6.0
-/steering/minTurnRateDegreesPerSecond = 4.0
-/steering/rudderDragPerSecond = 0.26666666666666666
-/steering/rudderSlewPerSecond = 2.0
-/steering/topTurnRateDegreesPerSecond = 48.0
-/steering/turnRateCurve/1/speedKnots = 4.666666666666666
+| helm | maneuver | wind kn | entry | L |
+|---|---|---:|---:|---:|
+| slam | tack | 6 | 0.70 | 1.283 |
+| slam | tack | 6 | 0.85 | 1.004 |
+| slam | tack | 6 | 1.00 | 0.881 |
+| slam | tack | 10 | 0.70 | 1.080 |
+| slam | tack | 10 | 0.85 | 1.012 |
+| slam | tack | 10 | 1.00 | 1.029 |
+| slam | tack | 14 | 0.70 | 1.078 |
+| slam | tack | 14 | 0.85 | 1.069 |
+| slam | tack | 14 | 1.00 | 1.132 |
+| rudder75 | tack | 6 | 0.70 | 1.310 |
+| rudder75 | tack | 6 | 0.85 | 0.967 |
+| rudder75 | tack | 6 | 1.00 | 0.802 |
+| rudder75 | tack | 10 | 0.70 | 1.108 |
+| rudder75 | tack | 10 | 0.85 | 0.990 |
+| rudder75 | tack | 10 | 1.00 | 0.969 |
+| rudder75 | tack | 14 | 0.70 | 1.109 |
+| rudder75 | tack | 14 | 0.85 | 1.060 |
+| rudder75 | tack | 14 | 1.00 | 1.073 |
+| rudder50 | tack | 6 | 0.70 | 1.641 |
+| rudder50 | tack | 6 | 0.85 | 1.129 |
+| rudder50 | tack | 6 | 1.00 | 0.866 |
+| rudder50 | tack | 10 | 0.70 | 1.371 |
+| rudder50 | tack | 10 | 0.85 | 1.166 |
+| rudder50 | tack | 10 | 1.00 | 1.067 |
+| rudder50 | tack | 14 | 0.70 | 1.390 |
+| rudder50 | tack | 14 | 0.85 | 1.243 |
+| rudder50 | tack | 14 | 1.00 | 1.178 |
+| rudder25 | tack | 6 | 0.70 | 5.337 |
+| rudder25 | tack | 6 | 0.85 | 3.942 |
+| rudder25 | tack | 6 | 1.00 | 2.197 |
+| rudder25 | tack | 10 | 0.70 | 2.908 |
+| rudder25 | tack | 10 | 0.85 | 2.347 |
+| rudder25 | tack | 10 | 1.00 | 2.030 |
+| rudder25 | tack | 14 | 0.70 | 2.866 |
+| rudder25 | tack | 14 | 0.85 | 2.481 |
+| rudder25 | tack | 14 | 1.00 | 2.198 |
+| smooth20 | tack | 6 | 0.70 | 1.246 |
+| smooth20 | tack | 6 | 0.85 | 0.959 |
+| smooth20 | tack | 6 | 1.00 | 0.830 |
+| smooth20 | tack | 10 | 0.70 | 1.061 |
+| smooth20 | tack | 10 | 0.85 | 0.987 |
+| smooth20 | tack | 10 | 1.00 | 1.001 |
+| smooth20 | tack | 14 | 0.70 | 1.065 |
+| smooth20 | tack | 14 | 0.85 | 1.051 |
+| smooth20 | tack | 14 | 1.00 | 1.112 |
+| smooth35 | tack | 6 | 0.70 | 1.288 |
+| smooth35 | tack | 6 | 0.85 | 0.984 |
+| smooth35 | tack | 6 | 1.00 | 0.841 |
+| smooth35 | tack | 10 | 0.70 | 1.118 |
+| smooth35 | tack | 10 | 0.85 | 1.028 |
+| smooth35 | tack | 10 | 1.00 | 1.029 |
+| smooth35 | tack | 14 | 0.70 | 1.127 |
+| smooth35 | tack | 14 | 0.85 | 1.096 |
+| smooth35 | tack | 14 | 1.00 | 1.144 |
+| over5 | tack | 6 | 0.70 | 1.281 |
+| over5 | tack | 6 | 0.85 | 1.008 |
+| over5 | tack | 6 | 1.00 | 0.892 |
+| over5 | tack | 10 | 0.70 | 1.075 |
+| over5 | tack | 10 | 0.85 | 1.016 |
+| over5 | tack | 10 | 1.00 | 1.043 |
+| over5 | tack | 14 | 0.70 | 1.056 |
+| over5 | tack | 14 | 0.85 | 1.058 |
+| over5 | tack | 14 | 1.00 | 1.131 |
+| over10 | tack | 6 | 0.70 | 1.312 |
+| over10 | tack | 6 | 0.85 | 1.046 |
+| over10 | tack | 6 | 1.00 | 0.938 |
+| over10 | tack | 10 | 0.70 | 1.104 |
+| over10 | tack | 10 | 0.85 | 1.056 |
+| over10 | tack | 10 | 1.00 | 1.096 |
+| over10 | tack | 14 | 0.70 | 1.068 |
+| over10 | tack | 14 | 0.85 | 1.080 |
+| over10 | tack | 14 | 1.00 | 1.165 |
+| over20 | tack | 6 | 0.70 | 1.570 |
+| over20 | tack | 6 | 0.85 | 1.316 |
+| over20 | tack | 6 | 1.00 | 1.223 |
+| over20 | tack | 10 | 0.70 | 1.720 |
+| over20 | tack | 10 | 0.85 | 1.692 |
+| over20 | tack | 10 | 1.00 | 1.764 |
+| over20 | tack | 14 | 0.70 | 1.811 |
+| over20 | tack | 14 | 0.85 | 1.842 |
+| over20 | tack | 14 | 1.00 | 1.954 |
+| under5 | tack | 6 | 0.70 | 1.320 |
+| under5 | tack | 6 | 0.85 | 1.035 |
+| under5 | tack | 6 | 1.00 | 0.903 |
+| under5 | tack | 10 | 0.70 | 1.189 |
+| under5 | tack | 10 | 0.85 | 1.115 |
+| under5 | tack | 10 | 1.00 | 1.126 |
+| under5 | tack | 14 | 0.70 | 1.219 |
+| under5 | tack | 14 | 0.85 | 1.203 |
+| under5 | tack | 14 | 1.00 | 1.256 |
+| under10 | tack | 6 | 0.70 | 1.409 |
+| under10 | tack | 6 | 0.85 | 1.122 |
+| under10 | tack | 6 | 1.00 | 0.988 |
+| under10 | tack | 10 | 0.70 | 1.392 |
+| under10 | tack | 10 | 0.85 | 1.311 |
+| under10 | tack | 10 | 1.00 | 1.320 |
+| under10 | tack | 14 | 0.70 | 1.459 |
+| under10 | tack | 14 | 0.85 | 1.441 |
+| under10 | tack | 14 | 1.00 | 1.494 |
+| under20 | tack | 6 | 0.70 | 1.985 |
+| under20 | tack | 6 | 0.85 | 1.862 |
+| under20 | tack | 6 | 1.00 | 1.803 |
+| under20 | tack | 10 | 0.70 | 2.631 |
+| under20 | tack | 10 | 0.85 | 2.476 |
+| under20 | tack | 10 | 1.00 | 2.429 |
+| under20 | tack | 14 | 0.70 | 2.844 |
+| under20 | tack | 14 | 0.85 | 2.752 |
+| under20 | tack | 14 | 1.00 | 2.742 |
+| release25 | tack | 6 | 0.70 | 7.116 |
+| release25 | tack | 6 | 0.85 | 6.990 |
+| release25 | tack | 6 | 1.00 | 6.856 |
+| release25 | tack | 10 | 0.70 | 10.670 |
+| release25 | tack | 10 | 0.85 | 10.503 |
+| release25 | tack | 10 | 1.00 | 10.337 |
+| release25 | tack | 14 | 0.70 | 12.220 |
+| release25 | tack | 14 | 0.85 | 12.019 |
+| release25 | tack | 14 | 1.00 | 11.815 |
+| release60 | tack | 6 | 0.70 | 2.169 |
+| release60 | tack | 6 | 0.85 | 2.003 |
+| release60 | tack | 6 | 1.00 | 1.954 |
+| release60 | tack | 10 | 0.70 | 3.692 |
+| release60 | tack | 10 | 0.85 | 3.838 |
+| release60 | tack | 10 | 1.00 | 4.075 |
+| release60 | tack | 14 | 0.70 | 4.649 |
+| release60 | tack | 14 | 0.85 | 4.942 |
+| release60 | tack | 14 | 1.00 | 5.319 |
+| release25rescue | tack | 6 | 0.70 | 7.346 |
+| release25rescue | tack | 6 | 0.85 | 7.352 |
+| release25rescue | tack | 6 | 1.00 | 6.245 |
+| release25rescue | tack | 10 | 0.70 | 8.672 |
+| release25rescue | tack | 10 | 0.85 | 5.543 |
+| release25rescue | tack | 10 | 1.00 | 4.077 |
+| release25rescue | tack | 14 | 0.70 | 6.677 |
+| release25rescue | tack | 14 | 0.85 | 4.768 |
+| release25rescue | tack | 14 | 1.00 | 4.169 |
+| release60rescue | tack | 6 | 0.70 | 2.081 |
+| release60rescue | tack | 6 | 0.85 | 1.908 |
+| release60rescue | tack | 6 | 1.00 | 1.836 |
+| release60rescue | tack | 10 | 0.70 | 2.808 |
+| release60rescue | tack | 10 | 0.85 | 2.825 |
+| release60rescue | tack | 10 | 1.00 | 2.898 |
+| release60rescue | tack | 14 | 0.70 | 3.216 |
+| release60rescue | tack | 14 | 0.85 | 3.284 |
+| release60rescue | tack | 14 | 1.00 | 3.402 |
+| bear10x3 | tack | 6 | 0.70 | 1.091 |
+| bear10x3 | tack | 6 | 0.85 | 1.066 |
+| bear10x3 | tack | 6 | 1.00 | 1.069 |
+| bear10x3 | tack | 10 | 0.70 | 1.186 |
+| bear10x3 | tack | 10 | 0.85 | 1.236 |
+| bear10x3 | tack | 10 | 1.00 | 1.312 |
+| bear10x3 | tack | 14 | 0.70 | 1.249 |
+| bear10x3 | tack | 14 | 0.85 | 1.324 |
+| bear10x3 | tack | 14 | 1.00 | 1.434 |
+| bear10x5 | tack | 6 | 0.70 | 1.066 |
+| bear10x5 | tack | 6 | 0.85 | 1.078 |
+| bear10x5 | tack | 6 | 1.00 | 1.112 |
+| bear10x5 | tack | 10 | 0.70 | 1.242 |
+| bear10x5 | tack | 10 | 0.85 | 1.304 |
+| bear10x5 | tack | 10 | 1.00 | 1.391 |
+| bear10x5 | tack | 14 | 0.70 | 1.321 |
+| bear10x5 | tack | 14 | 0.85 | 1.407 |
+| bear10x5 | tack | 14 | 1.00 | 1.517 |
+| bear15x3 | tack | 6 | 0.70 | 1.235 |
+| bear15x3 | tack | 6 | 0.85 | 1.218 |
+| bear15x3 | tack | 6 | 1.00 | 1.251 |
+| bear15x3 | tack | 10 | 0.70 | 1.340 |
+| bear15x3 | tack | 10 | 0.85 | 1.422 |
+| bear15x3 | tack | 10 | 1.00 | 1.534 |
+| bear15x3 | tack | 14 | 0.70 | 1.413 |
+| bear15x3 | tack | 14 | 0.85 | 1.527 |
+| bear15x3 | tack | 14 | 1.00 | 1.672 |
+| bear15x5 | tack | 6 | 0.70 | 1.261 |
+| bear15x5 | tack | 6 | 0.85 | 1.283 |
+| bear15x5 | tack | 6 | 1.00 | 1.344 |
+| bear15x5 | tack | 10 | 0.70 | 1.454 |
+| bear15x5 | tack | 10 | 0.85 | 1.551 |
+| bear15x5 | tack | 10 | 1.00 | 1.677 |
+| bear15x5 | tack | 14 | 0.70 | 1.543 |
+| bear15x5 | tack | 14 | 0.85 | 1.668 |
+| bear15x5 | tack | 14 | 1.00 | 1.817 |
+| slam | gybe | 6 | 0.70 | 1.282 |
+| slam | gybe | 6 | 0.85 | 1.291 |
+| slam | gybe | 6 | 1.00 | 1.693 |
+| slam | gybe | 10 | 0.70 | 1.657 |
+| slam | gybe | 10 | 0.85 | 1.698 |
+| slam | gybe | 10 | 1.00 | 1.799 |
+| slam | gybe | 14 | 0.70 | 1.765 |
+| slam | gybe | 14 | 0.85 | 1.895 |
+| slam | gybe | 14 | 1.00 | 2.003 |
+| rudder75 | gybe | 6 | 0.70 | 1.139 |
+| rudder75 | gybe | 6 | 0.85 | 1.124 |
+| rudder75 | gybe | 6 | 1.00 | 1.133 |
+| rudder75 | gybe | 10 | 0.70 | 1.522 |
+| rudder75 | gybe | 10 | 0.85 | 1.504 |
+| rudder75 | gybe | 10 | 1.00 | 1.532 |
+| rudder75 | gybe | 14 | 0.70 | 1.618 |
+| rudder75 | gybe | 14 | 0.85 | 1.682 |
+| rudder75 | gybe | 14 | 1.00 | 1.715 |
+| rudder50 | gybe | 6 | 0.70 | 1.033 |
+| rudder50 | gybe | 6 | 0.85 | 0.962 |
+| rudder50 | gybe | 6 | 1.00 | 0.893 |
+| rudder50 | gybe | 10 | 0.70 | 1.438 |
+| rudder50 | gybe | 10 | 0.85 | 1.352 |
+| rudder50 | gybe | 10 | 1.00 | 1.276 |
+| rudder50 | gybe | 14 | 0.70 | 1.551 |
+| rudder50 | gybe | 14 | 0.85 | 1.524 |
+| rudder50 | gybe | 14 | 1.00 | 1.450 |
+| rudder25 | gybe | 6 | 0.70 | 1.022 |
+| rudder25 | gybe | 6 | 0.85 | 0.809 |
+| rudder25 | gybe | 6 | 1.00 | 0.575 |
+| rudder25 | gybe | 10 | 0.70 | 1.532 |
+| rudder25 | gybe | 10 | 0.85 | 1.332 |
+| rudder25 | gybe | 10 | 1.00 | 1.034 |
+| rudder25 | gybe | 14 | 0.70 | 1.701 |
+| rudder25 | gybe | 14 | 0.85 | 1.508 |
+| rudder25 | gybe | 14 | 1.00 | 1.205 |
+| smooth20 | gybe | 6 | 0.70 | 1.226 |
+| smooth20 | gybe | 6 | 0.85 | 1.231 |
+| smooth20 | gybe | 6 | 1.00 | 1.275 |
+| smooth20 | gybe | 10 | 0.70 | 1.600 |
+| smooth20 | gybe | 10 | 0.85 | 1.610 |
+| smooth20 | gybe | 10 | 1.00 | 1.679 |
+| smooth20 | gybe | 14 | 0.70 | 1.756 |
+| smooth20 | gybe | 14 | 0.85 | 1.832 |
+| smooth20 | gybe | 14 | 1.00 | 1.882 |
+| smooth35 | gybe | 6 | 0.70 | 1.205 |
+| smooth35 | gybe | 6 | 0.85 | 1.199 |
+| smooth35 | gybe | 6 | 1.00 | 1.233 |
+| smooth35 | gybe | 10 | 0.70 | 1.592 |
+| smooth35 | gybe | 10 | 0.85 | 1.573 |
+| smooth35 | gybe | 10 | 1.00 | 1.605 |
+| smooth35 | gybe | 14 | 0.70 | 1.740 |
+| smooth35 | gybe | 14 | 0.85 | 1.768 |
+| smooth35 | gybe | 14 | 1.00 | 1.763 |
+| over5 | gybe | 6 | 0.70 | 1.340 |
+| over5 | gybe | 6 | 0.85 | 1.358 |
+| over5 | gybe | 6 | 1.00 | 1.771 |
+| over5 | gybe | 10 | 0.70 | 1.718 |
+| over5 | gybe | 10 | 0.85 | 1.798 |
+| over5 | gybe | 10 | 1.00 | 1.924 |
+| over5 | gybe | 14 | 0.70 | 1.850 |
+| over5 | gybe | 14 | 0.85 | 2.013 |
+| over5 | gybe | 14 | 1.00 | 2.156 |
+| over10 | gybe | 6 | 0.70 | 1.497 |
+| over10 | gybe | 6 | 0.85 | 1.525 |
+| over10 | gybe | 6 | 1.00 | 1.953 |
+| over10 | gybe | 10 | 0.70 | 1.873 |
+| over10 | gybe | 10 | 0.85 | 2.002 |
+| over10 | gybe | 10 | 1.00 | 2.154 |
+| over10 | gybe | 14 | 0.70 | 2.058 |
+| over10 | gybe | 14 | 0.85 | 2.254 |
+| over10 | gybe | 14 | 1.00 | 2.433 |
+| over20 | gybe | 6 | 0.70 | 1.945 |
+| over20 | gybe | 6 | 0.85 | 1.987 |
+| over20 | gybe | 6 | 1.00 | 2.445 |
+| over20 | gybe | 10 | 0.70 | 2.517 |
+| over20 | gybe | 10 | 0.85 | 2.731 |
+| over20 | gybe | 10 | 1.00 | 2.944 |
+| over20 | gybe | 14 | 0.70 | 2.827 |
+| over20 | gybe | 14 | 0.85 | 3.095 |
+| over20 | gybe | 14 | 1.00 | 3.349 |
+| under5 | gybe | 6 | 0.70 | 1.306 |
+| under5 | gybe | 6 | 0.85 | 1.308 |
+| under5 | gybe | 6 | 1.00 | 1.346 |
+| under5 | gybe | 10 | 0.70 | 1.720 |
+| under5 | gybe | 10 | 0.85 | 1.735 |
+| under5 | gybe | 10 | 1.00 | 1.813 |
+| under5 | gybe | 14 | 0.70 | 2.089 |
+| under5 | gybe | 14 | 0.85 | 2.148 |
+| under5 | gybe | 14 | 1.00 | 2.181 |
+| under10 | gybe | 6 | 0.70 | 1.382 |
+| under10 | gybe | 6 | 0.85 | 1.375 |
+| under10 | gybe | 6 | 1.00 | 1.411 |
+| under10 | gybe | 10 | 0.70 | 1.884 |
+| under10 | gybe | 10 | 0.85 | 1.892 |
+| under10 | gybe | 10 | 1.00 | 1.944 |
+| under10 | gybe | 14 | 0.70 | 3.486 |
+| under10 | gybe | 14 | 0.85 | 3.304 |
+| under10 | gybe | 14 | 1.00 | 3.080 |
+| under20 | gybe | 6 | 0.70 | 1.531 |
+| under20 | gybe | 6 | 0.85 | 1.509 |
+| under20 | gybe | 6 | 1.00 | 1.824 |
+| under20 | gybe | 10 | 0.70 | 2.693 |
+| under20 | gybe | 10 | 0.85 | 2.611 |
+| under20 | gybe | 10 | 1.00 | 2.425 |
+| under20 | gybe | 14 | 0.70 | 2.713 |
+| under20 | gybe | 14 | 0.85 | 2.617 |
+| under20 | gybe | 14 | 1.00 | 2.347 |
+| release25 | gybe | 6 | 0.70 | 2.557 |
+| release25 | gybe | 6 | 0.85 | 1.879 |
+| release25 | gybe | 6 | 1.00 | 1.319 |
+| release25 | gybe | 10 | 0.70 | 5.953 |
+| release25 | gybe | 10 | 0.85 | 5.711 |
+| release25 | gybe | 10 | 1.00 | 4.553 |
+| release25 | gybe | 14 | 0.70 | 6.691 |
+| release25 | gybe | 14 | 0.85 | 6.069 |
+| release25 | gybe | 14 | 1.00 | 4.741 |
+| release60 | gybe | 6 | 0.70 | 4.927 |
+| release60 | gybe | 6 | 0.85 | 3.926 |
+| release60 | gybe | 6 | 1.00 | 3.927 |
+| release60 | gybe | 10 | 0.70 | 10.327 |
+| release60 | gybe | 10 | 0.85 | 9.120 |
+| release60 | gybe | 10 | 1.00 | 8.291 |
+| release60 | gybe | 14 | 0.70 | 10.497 |
+| release60 | gybe | 14 | 0.85 | 9.780 |
+| release60 | gybe | 14 | 1.00 | 8.988 |
+| release25rescue | gybe | 6 | 0.70 | 1.726 |
+| release25rescue | gybe | 6 | 0.85 | 1.442 |
+| release25rescue | gybe | 6 | 1.00 | 1.489 |
+| release25rescue | gybe | 10 | 0.70 | 2.812 |
+| release25rescue | gybe | 10 | 0.85 | 2.588 |
+| release25rescue | gybe | 10 | 1.00 | 2.162 |
+| release25rescue | gybe | 14 | 0.70 | 3.267 |
+| release25rescue | gybe | 14 | 0.85 | 2.985 |
+| release25rescue | gybe | 14 | 1.00 | 2.447 |
+| release60rescue | gybe | 6 | 0.70 | 2.273 |
+| release60rescue | gybe | 6 | 0.85 | 1.945 |
+| release60rescue | gybe | 6 | 1.00 | 2.163 |
+| release60rescue | gybe | 10 | 0.70 | 8.015 |
+| release60rescue | gybe | 10 | 0.85 | 3.516 |
+| release60rescue | gybe | 10 | 1.00 | 3.247 |
+| release60rescue | gybe | 14 | 0.70 | 4.566 |
+| release60rescue | gybe | 14 | 0.85 | 4.250 |
+| release60rescue | gybe | 14 | 1.00 | 3.883 |
+| linger2 | gybe | 6 | 0.70 | 1.567 |
+| linger2 | gybe | 6 | 0.85 | 1.457 |
+| linger2 | gybe | 6 | 1.00 | 1.724 |
+| linger2 | gybe | 10 | 0.70 | 2.214 |
+| linger2 | gybe | 10 | 0.85 | 2.147 |
+| linger2 | gybe | 10 | 1.00 | 2.041 |
+| linger2 | gybe | 14 | 0.70 | 2.420 |
+| linger2 | gybe | 14 | 0.85 | 2.398 |
+| linger2 | gybe | 14 | 1.00 | 2.246 |
+| linger4 | gybe | 6 | 0.70 | 1.877 |
+| linger4 | gybe | 6 | 0.85 | 1.673 |
+| linger4 | gybe | 6 | 1.00 | 1.823 |
+| linger4 | gybe | 10 | 0.70 | 2.803 |
+| linger4 | gybe | 10 | 0.85 | 2.671 |
+| linger4 | gybe | 10 | 1.00 | 2.400 |
+| linger4 | gybe | 14 | 0.70 | 3.114 |
+| linger4 | gybe | 14 | 0.85 | 3.004 |
+| linger4 | gybe | 14 | 1.00 | 2.653 |
