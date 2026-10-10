@@ -70,6 +70,18 @@ public enum HandTackTable {
     /// A penalty turn's rudder, as a share of full, whatever her handling: hard over, the rudder's drag stops her head
     /// to wind in every turn (8 to 10 s stuck, the turn through the wind at a crawl), as a slammed tack from slow.
     public static let penaltyFraction = 0.7
+    /// Radians per second: a penalty turn's rudder turning her through the wind slower than this, she puts it hard
+    /// over, from `penaltyLuffMargin` radians outside close-hauled.
+    public static let penaltyCrawl = deg2rad(8)
+    public static let penaltyLuffMargin = deg2rad(10)
+    /// "Speed before the tack": luffing up through a penalty turn inside `from` radians off the wind, under `speed` of
+    /// her close-hauled speed, she turns on with `rudder` only, until `penaltyLuffMargin` outside close-hauled.
+    public static let penaltyBuild = (from: deg2rad(110), speed: 0.75, rudder: 0.35)
+    /// A penalty turn's time by hand (`BotBrain.penaltyTurnSeconds`): the turn's rudder leaves her about `speed` of her
+    /// close-hauled speed, the tack at the end of it takes about `crawl` seconds more, and she wants `margin` seconds
+    /// to spare before she puts a turn off or gives one up. On the wind (inside `luffFirstAngle`) with `luffFirstSpeed`
+    /// of her close-hauled speed she luffs first.
+    public static let penaltyTurn = (speed: 0.4, crawl: 9.0, margin: 3.0, luffFirstAngle: deg2rad(90), luffFirstSpeed: 0.6)
     /// Seconds at most she waits, centred, for steerage to turn a penalty on.
     public static let stallWait = 8.0
 
@@ -142,11 +154,86 @@ extension BotBrain {
     /// The rudder she turns a penalty turn with, a share of full: all of it on a class whose tap sails her turns.
     static func penaltyRudder(_ view: SeatView) -> Double { turnsByHand(view) ? HandTackTable.penaltyFraction : 1 }
 
+    /// The rudder she turns her penalty turn on with now, a share of full, turning `turn`'s way (+1 to starboard):
+    /// `penaltyRudder(view)`, but hard over inside close-hauled, luffing or head to wind, once that rudder would turn
+    /// her through the wind at under `HandTackTable.penaltyCrawl`: slow there, the fall-off takes most of a part
+    /// rudder's turn, and a tick of turning back gives the whole turn up (`Race.turnPenalty`; on a class without the
+    /// autohelm every tick is hers).
+    func penaltyRudder(_ b: SeatView.OwnBoat, _ turn: Double, _ owed: OwedPenalty, _ view: SeatView) -> Double {
+        let rudder = Self.penaltyRudder(view)
+        guard Self.turnsByHand(view) else { return rudder }
+        let steering = view.boatClass.steering
+        let closeHauled = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).twa
+        // Turning to starboard (+) luffs her with the wind over her starboard side (`relativeWind` > 0).
+        let luffing = turn * b.relativeWind > 0
+        // "Speed before the tack": luffing up from a reach, slow, she takes rudder off to gather way.
+        let build = HandTackTable.penaltyBuild
+        // Not when the turn is whole before she is head to wind: there is no tack to gather way for.
+        if luffing, 2 * .pi - owed.progress > b.twa, b.twa >= closeHauled + HandTackTable.penaltyLuffMargin, b.twa < build.from,
+           b.speed < closeHauledSpeed(b, view) * build.speed {
+            return build.rudder
+        }
+        guard b.twa < closeHauled + HandTackTable.penaltyLuffMargin, luffing || b.twa < closeHauled else { return rudder }
+        let rate = steering.turnRate(speed: b.speed)
+        let fallOff = luffing ? steering.headToWindFallOffRate * max(0, 1 - rate / steering.topTurnRate) : 0
+        return rudder * rate - fallOff < HandTackTable.penaltyCrawl ? 1 : rudder
+    }
+
+    /// Seconds a whole penalty turn takes her by hand from here, roughly: all the way round at the rate
+    /// `penaltyRudder` turns her at the speed it leaves her (`HandTackTable.penaltyTurn.speed` of close-hauled, whatever
+    /// she has now: the rudder's drag takes it), and `crawl` seconds more through the wind.
+    func penaltyTurnSeconds(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        let table = HandTackTable.penaltyTurn
+        let speed = closeHauledSpeed(b, view) * table.speed
+        return 2 * .pi / (Self.penaltyRudder(view) * view.boatClass.steering.turnRate(speed: speed)) + table.crawl
+    }
+
+    /// Whether, on a class she turns by hand, a turn started later (put off, or given up to turn again) can still be
+    /// whole by its complete deadline: `penaltyTurnSeconds` and `HandTackTable.penaltyTurn.margin` to spare. Always on
+    /// a class whose tap sails her turns: its turn fits the rules' deadlines from anywhere.
+    func hasTimeToTurnLater(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard Self.turnsByHand(view) else { return true }
+        let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
+        return left > penaltyTurnSeconds(b, view) + HandTackTable.penaltyTurn.margin
+    }
+
+    /// "Tack while she has the speed": the way (+1 to starboard) she starts a penalty turn by hand on the wind (inside
+    /// `HandTackTable.penaltyTurn.luffFirstAngle`), or nil off it. With way on she luffs: bearing away first she comes
+    /// to the tack last, slowed by the whole turn's rudder, and crawls through the wind. Slow, she bears away: a luff
+    /// from there is that crawl at once, and the reach and the gybe give her what speed there is for the tack.
+    func penaltyLuffFirst(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double? {
+        let table = HandTackTable.penaltyTurn
+        guard Self.turnsByHand(view), b.twa < table.luffFirstAngle else { return nil }
+        return penaltyBearAwayFirst(b, view).map { -$0 }
+    }
+
+    /// The way (+1 to starboard) that bears her away, for a penalty turn she starts by hand on the wind (inside
+    /// `HandTackTable.penaltyTurn.luffFirstAngle`) under `luffFirstSpeed` of her close-hauled speed, or nil: this
+    /// before the way a boat near her would have her turn, and the way she turns a turn she has not started (the
+    /// rules' 30°) once she is luffing that slow.
+    func penaltyBearAwayFirst(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double? {
+        let table = HandTackTable.penaltyTurn
+        guard b.twa < table.luffFirstAngle, isSlowForPenaltyTurn(b, view) else { return nil }
+        return b.relativeWind > 0 ? -1 : 1
+    }
+
+    /// Whether, on a class she turns by hand, she is too slow to turn a penalty turn up through the wind, or to give
+    /// one up and turn it again the other way (`canGiveUpTurn`): under `HandTackTable.penaltyTurn.luffFirstSpeed` of
+    /// her close-hauled speed in clear air. From a standstill head to wind the rudder turns her 3° a second.
+    func isSlowForPenaltyTurn(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        Self.turnsByHand(view)
+            && b.speed < view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).speed * HandTackTable.penaltyTurn.luffFirstSpeed
+    }
+
+    /// Whether she turns a penalty turn on through a stall rather than let go (`centresStalled`): on a class without
+    /// the autohelm a let-go head to wind falls her back the way she came, and that gives the turn up.
+    func turnsPenaltyThroughStall(_ b: SeatView.OwnBoat) -> Bool { b.penalty != nil && penaltyTurn != nil }
+
     /// Whether her class leaves tacks and gybes to her hand: its tap sails nothing.
     static func turnsByHand(_ view: SeatView) -> Bool { !view.boatClass.steering.autohelm.sailsTap }
 
     /// Her close-hauled speed in the wind she has, m/s: what `canTap` measures a tack's speed against.
-    private func closeHauledSpeed(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+    func closeHauledSpeed(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
         view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).speed * b.speedShadow
     }
 
@@ -242,8 +329,8 @@ extension BotBrain {
     /// "Let go in irons": whether she holds the rudder truly centred now, stalled short of head to wind
     /// (`HandTackTable.stall`). The class's irons recovery (#458) falls her off only on a centred rudder; a held one,
     /// hers through a turn or her hand's holding an angle (`BotHelm`), keeps her there. She steers again once she has
-    /// steerage or is out of the no-go zone; owing a penalty turn, whose rudder would take her straight back into the
-    /// wind, only with steerage (or after `stallWait`). A centred rudder turns no penalty back (`Race.turnPenalty`).
+    /// steerage or is out of the no-go zone; owing a penalty turn she has not begun, only with steerage (or after
+    /// `stallWait`). A penalty turn she is turning she never lets go (`turnsPenaltyThroughStall`, #461).
     mutating func centresStalled(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         let stalled = HandTackTable.stall
         let last = stall

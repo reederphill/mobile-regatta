@@ -261,8 +261,9 @@ struct BotBrain: Sendable {
             return BotDecision(input: .neutral)
         }
         judgeEncounters(boat, view)
-        // Stalled in irons on a class she turns by hand, she lets the rudder go until she has steerage (#459).
-        if byHand, centresStalled(boat, view) {
+        // Stalled in irons on a class she turns by hand, she lets the rudder go until she has steerage (#459), but
+        // not turning a penalty turn (#461): falling back would give it up.
+        if byHand, !turnsPenaltyThroughStall(boat), centresStalled(boat, view) {
             handTurn = nil
             var decision = BotDecision(input: .neutral)
             decision.centred = true
@@ -420,7 +421,7 @@ struct BotBrain: Sendable {
         let servedOne = owed.progress < penaltyProgress - .pi
         penaltyProgress = owed.progress
         if servedOne, penaltyTurn != nil, let mark = nearestMark(b, view),
-           mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance, canPutOffTurn(owed, view) {
+           mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance, canPutOffTurn(owed, b, view) {
             penaltyTurn = nil
             penaltyGivenUp = false
         }
@@ -436,8 +437,14 @@ struct BotBrain: Sendable {
             return steer(b, toHeading: clear.heading, view)
         }
         let markAway = nearestMark(b, view).map { Self.away(from: $0.offset, b) }
+        // By hand, luffing slow into the wind with the turn not yet started: she turns it the other way (#461).
+        if markAway == nil, let away = penaltyBearAwayFirst(b, view), away != turn, !owed.isStarted {
+            penaltyTurn = away
+            penaltyHeldSince = nil
+            return turningOn(b, away, owed, view)
+        }
         guard let keepClear, keepClear.away != turn, (markAway ?? keepClear.away) == keepClear.away, !penaltyGivenUp,
-              owed.progress < .pi, canGiveUpTurn(owed, view) else {
+              owed.progress < .pi, canGiveUpTurn(owed, b, view) else {
             return turningOn(b, turn, owed, view)
         }
         penaltyTurn = keepClear.away
@@ -465,13 +472,13 @@ struct BotBrain: Sendable {
     mutating func turningOn(_ b: SeatView.OwnBoat, _ turn: Double, _ owed: OwedPenalty, _ view: SeatView) -> BoatInput {
         guard let helm = b.autohelm, !helm.isTapping, owed.progress > 0,
               turn * b.rudder < -view.boatClass.steering.rudderSlew * Self.tickStep,
-              owed.isStarted || canPutOffTurn(owed, view) else {
+              owed.isStarted || canPutOffTurn(owed, b, view) else {
             penaltyHeldSince = nil
-            return BoatInput(rudder: turn * Self.penaltyRudder(view))
+            return BoatInput(rudder: turn * penaltyRudder(b, turn, owed, view))
         }
         let since = penaltyHeldSince ?? view.time
         penaltyHeldSince = since
-        return view.time - since < Self.penaltyHoldSeconds ? .neutral : BoatInput(rudder: turn * Self.penaltyRudder(view))
+        return view.time - since < Self.penaltyHoldSeconds ? .neutral : BoatInput(rudder: turn * penaltyRudder(b, turn, owed, view))
     }
 
     /// The way she turns her current penalty turn, starting it now, or nil while she holds it off (`penaltyInput`).
@@ -482,28 +489,29 @@ struct BotBrain: Sendable {
         let crowded = crowd != nil
             && (b.status != .racing || (readsThePack && !isOnLastLeg(b, view) && !putOffEndsAtAMark(b, view, owed)))
         if crowded || mark.map({ $0.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance }) == true,
-           canPutOffTurn(owed, view) {
+           canPutOffTurn(owed, b, view) {
             return nil
         }
         // Away from the nearest mark, if one is near, else from the nearest boat in her water (#351): turning to
         // starboard (+) circles to her right.
-        let turn = mark.map { Self.away(from: $0.offset, b) }
-            ?? crowd.flatMap { readsThePack ? Self.away(from: $0.position - b.position, b) : nil } ?? style.penaltyDirection
+        let turn = mark.map { Self.away(from: $0.offset, b) } ?? penaltyBearAwayFirst(b, view)
+            ?? crowd.flatMap { readsThePack ? Self.away(from: $0.position - b.position, b) : nil }
+            ?? penaltyLuffFirst(b, view) ?? style.penaltyDirection
         penaltyTurn = turn
         return turn
     }
 
     /// Whether she may still put her current turn off, waiting to start it: until `penaltyStartMargin` before its
     /// start deadline.
-    private func canPutOffTurn(_ owed: OwedPenalty, _ view: SeatView) -> Bool {
-        owed.startDeadlineTick - view.tick > RulesConfig.ticks(Self.penaltyStartMargin)
+    private func canPutOffTurn(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        owed.startDeadlineTick - view.tick > RulesConfig.ticks(Self.penaltyStartMargin) && hasTimeToTurnLater(owed, b, view)
     }
 
     /// Whether she may give her current turn up to keep clear (rule 21.2) and turn it all again: until
     /// `penaltyStartMargin` before its start deadline (`canPutOffTurn`) and `penaltyCompleteMargin` before its
     /// complete deadline.
-    func canGiveUpTurn(_ owed: OwedPenalty, _ view: SeatView) -> Bool {
-        canPutOffTurn(owed, view)
+    func canGiveUpTurn(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        canPutOffTurn(owed, b, view) && !isSlowForPenaltyTurn(b, view)
             && owed.completeDeadlineTick - view.tick > RulesConfig.ticks(Self.penaltyCompleteMargin)
     }
 

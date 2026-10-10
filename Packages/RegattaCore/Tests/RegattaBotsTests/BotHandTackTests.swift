@@ -32,8 +32,11 @@ import Testing
         /// Each boat's boom crossings with the wind forward of the beam (tacks) and abaft it (gybes), racing.
         var tacks: [Int]
         var gybes: [Int]
-        /// Each boat's longest spell in irons, seconds: under 30 % of her close-hauled speed inside the no-go zone.
+        /// Each boat's longest spell in irons, seconds: under 30 % of her close-hauled speed inside the no-go zone,
+        /// owing no penalty turn; and owing one (`turnStuck`): slow, she turns it on through the wind at a crawl
+        /// rather than let go, which would give the turn up (#461).
         var stuck: [Double]
+        var turnStuck: [Double]
         var tackGybeTaps: Int
         var finished: Int
     }
@@ -50,7 +53,8 @@ import Testing
         } ?? allBots(race)
         let count = race.boats.count
         var fleet = Fleet(tacks: Array(repeating: 0, count: count), gybes: Array(repeating: 0, count: count),
-                          stuck: Array(repeating: 0, count: count), tackGybeTaps: 0, finished: 0)
+                          stuck: Array(repeating: 0, count: count), turnStuck: Array(repeating: 0, count: count),
+                          tackGybeTaps: 0, finished: 0)
         var booms = race.boats.map(\.boomSide)
         var spell = Array(repeating: 0.0, count: count)
         let polar = race.boatClass.polar
@@ -71,7 +75,11 @@ import Testing
                 booms[seat] = boat.boomSide
                 let stuck = twa < noGo && boat.speed < 0.3 * polar.bestUpwind(tws: wind.speed).speed
                 spell[seat] = stuck ? spell[seat] + Race.dt : 0
-                fleet.stuck[seat] = max(fleet.stuck[seat], spell[seat])
+                if boat.penaltyTurnsOwed > 0 {
+                    fleet.turnStuck[seat] = max(fleet.turnStuck[seat], spell[seat])
+                } else {
+                    fleet.stuck[seat] = max(fleet.stuck[seat], spell[seat])
+                }
             }
         }
         fleet.tackGybeTaps = try #require(race.log).inputs.filter { $0.kind == .tap(.tackGybe) }.count
@@ -121,6 +129,8 @@ import Testing
             let fleet = try Self.fleet(seed: seed, seconds: 600, handling: 0)
             print("BOTHANDTACK floor seed \(seed): tacks \(fleet.tacks) gybes \(fleet.gybes) stuck \(fleet.stuck.map { ($0 * 10).rounded() / 10 })")
             #expect(fleet.stuck.allSatisfy { $0 <= 10 }, "seed \(seed): seconds in irons by boat: \(fleet.stuck)")
+            // A penalty turn from slow crawls through the wind, 3° a second from a standstill (seed 1: 11.6 s).
+            #expect(fleet.turnStuck.allSatisfy { $0 <= 16 }, "seed \(seed): seconds in irons owing a turn: \(fleet.turnStuck)")
             #expect(fleet.tackGybeTaps == 0)
         }
     }
@@ -375,8 +385,9 @@ import Testing
     }
 
     /// A bot owed a penalty turn on skiff@8 turns it, at 70 % rudder (`HandTackTable.penaltyFraction`), inside its
-    /// deadline: from her groove at speed, and from a stall short of head to wind 60° into it (she lets go, falls off,
-    /// and turns it on the same way).
+    /// deadline: from her groove at speed, and from a stall short of head to wind 60° into it (she puts the rudder
+    /// hard over and turns on through the wind without letting go, #461: a let-go there falls her back, and on a
+    /// class without the autohelm that gives the turn up).
     @Test func penaltyTurnsAreCompletedOnSkiffEight() throws {
         for stalled in [false, true] {
             let (race, _) = try Self.alone(seed: 3) { snapshot, water in
@@ -399,11 +410,11 @@ import Testing
             print("BOTHANDTACK penalty stalled=\(stalled): served at \(race.time) s, centred decisions \(centred)")
             #expect(race.boats[0].penaltyTurnsOwed == 0 && race.boats[0].status == .racing,
                     "stalled \(stalled): owes \(race.boats[0].penaltyTurnsOwed), \(race.boats[0].status)")
-            // Stalled, the rudder held over itself turns her back before she lets go (a standing boat falls off faster
-            // than her rudder turns her, on every class): the race gives that turn up, and she turns it all again.
             let reset = kinds.contains { if case .penaltyReset = $0 { true } else { false } }
+            // Stalled, the scene's first ticks fall her back before her rudder is over: that one turn is given up.
             #expect(stalled || !reset, "she gave the turn up")
-            #expect(!stalled || centred > 0, "stalled, she never let the rudder go")
+            #expect(centred == 0, "stalled \(stalled): she let the rudder go")
+            #expect(race.time < (stalled ? 20 : 14), "stalled \(stalled): served at \(race.time) s")
         }
     }
 }

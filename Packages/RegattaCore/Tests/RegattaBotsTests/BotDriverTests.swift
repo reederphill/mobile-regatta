@@ -413,6 +413,13 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         #expect(!kinds.contains(.penaltyReset(seat: 0)))
         #expect(!kinds.contains { if case .disqualified(seat: 0, _) = $0 { true } else { false } })
         #expect(race.boats[0].penaltyTurnsOwed == 0 && race.boats[0].status == .racing)
-        #expect(held.count == 1 && held.allSatisfy { abs($0) == Self.hardOver(1) }, "\(held)")
+        // By hand (skiff@8, #461) one way, but not one rudder: she takes some off to gather way before the tack, and
+        // puts it hard over where the turn's own would crawl through the wind.
+        if RaceFiles.defaults.boatClass.content.steering.autohelm.sailsTap {
+            #expect(held.count == 1 && held.allSatisfy { abs($0) == Self.hardOver(1) }, "\(held)")
+        } else {
+            #expect(held.contains(Self.hardOver(1)) || held.contains(Self.hardOver(-1)), "\(held)")
+            #expect(held.allSatisfy { $0 > 0 } || held.allSatisfy { $0 < 0 }, "\(held)")
+        }
     }
 }
