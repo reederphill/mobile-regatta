@@ -288,6 +288,10 @@ struct LaunchOptions: Equatable {
     /// so their screenshots are deterministic.
     var showsDebugStats: Bool { !uiTesting && fixture == nil }
 
+    /// Whether the main menu's build identifier shows (#473, Debug builds; `BuildIdentity`). UI tests and render
+    /// fixtures hide it like the stats overlay, so no reference and no UI test sees it.
+    var showsBuildIdentity: Bool { showsDebugStats }
+
     /// The colour-vision filter over a live race: `-vision`'s, in Debug builds only (#111). A render fixture
     /// names its own.
     var raceVision: VisionFilter {
