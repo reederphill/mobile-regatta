@@ -1,3 +1,5 @@
+import Foundation
+
 /// How one boat moves through one tick, from her boat class alone (ADR 0004): momentum, steering,
 /// rudder drag, head-to-wind fall-off, the ease, the boom crossing on a tack or gybe, and for a class
 /// that has them (schema 3, #248) planing and the automatic spinnaker. Pure: no events, no other boats, no rules.
@@ -142,6 +144,121 @@ public enum BoatDynamics {
         }
         s.speed += (target - s.speed) * min(1, dt / timeConstant)
         s.speed -= s.speed * abs(s.rudder) * steering.rudderDrag * dt
+        s.speed = max(0, s.speed)
+        s.position += Vec2.heading(s.heading) * s.speed * dt + env.current * dt
+        return s
+    }
+
+    /// `advance` with the #465 probe mechanics. `probe.isOff` calls the stock function and does not
+    /// read `clock`. The harness owns `clock` between ticks.
+    public static func advance(_ state: State, control: Control, env: Environment, boatClass: BoatClass, dt: Double,
+                               probe: ProbeMechanics, clock: inout ProbeClock) -> State {
+        if probe.isOff { return advance(state, control: control, env: env, boatClass: boatClass, dt: dt) }
+        let steering = boatClass.steering
+        let polar = boatClass.polar
+        var s = state
+
+        let slew = steering.rudderSlew * dt
+        s.rudder += (control.rudder - s.rudder).clamped(to: -slew...slew)
+
+        var turn: Double
+        if probe.windBandRadians > 0 {
+            var rate = steering.turnRate(speed: s.speed)
+            let sailing = abs(s.boomSide.sailingAngle(relativeWind: wrapAngle(env.windDirection - s.heading)))
+            if sailing < probe.windBandRadians { rate *= probe.windBandRateFactor }
+            turn = s.rudder * rate * dt
+        } else {
+            turn = s.rudder * steering.turnRate(speed: s.speed) * dt
+        }
+        let relative = wrapAngle(env.windDirection - (s.heading + turn))
+        let closeHauled = polar.bestUpwind(tws: env.windSpeed).twa
+        if abs(relative) < closeHauled {
+            let steerage = steering.turnRate(speed: s.speed) / steering.topTurnRate
+            let fallOff = steering.headToWindFallOffRate * max(0, 1 - steerage) * dt
+            turn += relative >= 0 ? -min(fallOff, closeHauled - relative) : min(fallOff, closeHauled + relative)
+        }
+        s.heading = wrapAngle(s.heading + turn)
+
+        let relativeWind = wrapAngle(env.windDirection - s.heading)
+        if boomCrosses(sailingAngle: s.boomSide.sailingAngle(relativeWind: relativeWind), tws: env.windSpeed, polar: polar) != nil {
+            s.boomSide = s.boomSide.opposite
+        }
+
+        let twa = abs(relativeWind)
+        if let kite = boatClass.spinnaker { s.spinnaker = s.spinnaker.next(twa: twa, dt: dt, tuning: kite) }
+        if let planing = boatClass.planing {
+            s.isPlaning = planing.isPlaning(was: s.isPlaning, twa: twa, speed: s.speed, tws: env.windSpeed)
+        }
+        let inNoGo = twa < noGoAngle(polar)
+        func shapedTarget(isPlaning: Bool) -> Double {
+            var target = polarTarget(relativeWind: relativeWind, boomSide: s.boomSide, tws: env.windSpeed,
+                                     isPlaning: isPlaning, spinnaker: s.spinnaker, boatClass: boatClass)
+            guard probe.byTheLeeExponent != 1, let graded = boatClass.byTheLee else { return target }
+            let sailing = s.boomSide.sailingAngle(relativeWind: relativeWind)
+            guard BoomSide.isByTheLee(sailing) else { return target }
+            let angle = Double.pi + sailing
+            let linear = graded.speedFactor(byTheLee: angle)
+            guard linear > 1e-12 else { return target }
+            let deg = rad2deg(angle)
+            let lossAtTen = graded.speedLossPerRadian * deg2rad(10)
+            let powered = max(0, 1 - lossAtTen * pow(deg / 10, probe.byTheLeeExponent))
+            return target / linear * powered
+        }
+        var target = control.sailing && !inNoGo ? shapedTarget(isPlaning: s.isPlaning) : 0
+        if probe.dePlaneRampSeconds > 0, let planing = boatClass.planing, !s.isPlaning, twa >= planing.fromTWA {
+            clock.offPlaneSeconds += dt
+            let blend = min(1, clock.offPlaneSeconds / probe.dePlaneRampSeconds)
+            if blend < 1, control.sailing, !inNoGo {
+                let onPlane = shapedTarget(isPlaning: true)
+                target = onPlane + (target - onPlane) * blend
+            }
+        } else {
+            clock.offPlaneSeconds = 0
+        }
+        let shadowSlowingDown = env.shadow < 1 ? boatClass.windShadow.slowingDown : nil
+        if shadowSlowingDown != nil { target *= env.shadow }
+        var timeConstant: Double
+        if control.ease && control.sailing {
+            target *= boatClass.ease.speedFraction
+            timeConstant = target > s.speed ? boatClass.momentum.speedingUp : boatClass.ease.timeConstant
+        } else if target > s.speed {
+            timeConstant = boatClass.momentum.speedingUp
+        } else if inNoGo {
+            timeConstant = boatClass.momentum.noGo
+        } else {
+            timeConstant = shadowSlowingDown ?? boatClass.momentum.slowingDown
+        }
+        let settleOn = probe.settleRadians > 0 || probe.driveLagSeconds > 0
+        if settleOn {
+            if probe.driveLagSeconds > 0, abs(s.rudder) > 0.3, probe.degreesPastGroove > 0 {
+                clock.driveLagRemaining = probe.driveLagSeconds
+            } else {
+                clock.driveLagRemaining = max(0, clock.driveLagRemaining - dt)
+            }
+        }
+        let suspend = settleOn && clock.driveLagRemaining > 0 && target > s.speed
+        let settle = settleOn && !suspend && target > s.speed && probe.settleRadians > 0
+            && probe.aimErrorRadians < probe.settleRadians && abs(s.rudder) <= 0.3 && probe.settleBonus != 0
+        if suspend {
+            // Speeding up is suspended: the approach term is zero. Drag still applies below.
+        } else if settle {
+            let faster = timeConstant * (1 - probe.settleBonus)
+            s.speed += (target - s.speed) * min(1, dt / faster)
+        } else {
+            s.speed += (target - s.speed) * min(1, dt / timeConstant)
+        }
+        let dragShaped = probe.dragExponent != 1 || probe.dragTurnRateTerm != 0
+        let past = probe.overshootCost > 0 && probe.degreesPastGroove > 0 && abs(s.rudder) > Autohelm.deadBand
+        if dragShaped || past {
+            let magnitude = abs(s.rudder)
+            let powered = probe.dragExponent == 1 ? magnitude : pow(magnitude, probe.dragExponent)
+            let rate = steering.turnRate(speed: s.speed) / steering.topTurnRate
+            let shaped = powered + probe.dragTurnRateTerm * rate * rate
+            let extra = past ? probe.overshootCost * probe.degreesPastGroove : 0
+            s.speed -= s.speed * (shaped + extra) * steering.rudderDrag * dt
+        } else {
+            s.speed -= s.speed * abs(s.rudder) * steering.rudderDrag * dt
+        }
         s.speed = max(0, s.speed)
         s.position += Vec2.heading(s.heading) * s.speed * dt + env.current * dt
         return s

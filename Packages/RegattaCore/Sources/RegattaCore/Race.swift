@@ -716,13 +716,21 @@ public final class Race {
 
         let before = b.heading
         let speedBefore = b.speed
-        let moved = BoatDynamics.advance(
-            BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder, boomSide: b.boomSide,
-                               isPlaning: b.isPlaning, spinnaker: b.spinnaker),
-            control: BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: !b.isGhost),
-            env: BoatDynamics.Environment(windDirection: b.sailingWind.direction, windSpeed: tws, current: b.current,
-                                          shadow: b.speedShadow(in: boatClass)),
-            boatClass: boatClass, dt: dt)
+        let probeState = BoatDynamics.State(position: b.position, heading: b.heading, speed: b.speed, rudder: b.rudder,
+                                            boomSide: b.boomSide, isPlaning: b.isPlaning, spinnaker: b.spinnaker)
+        let probeControl = BoatDynamics.Control(rudder: b.desiredRudder, ease: heldInputs[i].ease, sailing: !b.isGhost)
+        let probeEnv = BoatDynamics.Environment(windDirection: b.sailingWind.direction, windSpeed: tws, current: b.current,
+                                               shadow: b.speedShadow(in: boatClass))
+        // #465: the tack sweep's probe session, on this thread only. No session is the stock advance.
+        let moved: BoatDynamics.State
+        if let session = ProbeSlot.current, !session.mechanics.isOff {
+            var clock = session.clock(for: i)
+            moved = BoatDynamics.advance(probeState, control: probeControl, env: probeEnv, boatClass: boatClass, dt: dt,
+                                        probe: session.mechanics, clock: &clock)
+            session.setClock(clock, for: i)
+        } else {
+            moved = BoatDynamics.advance(probeState, control: probeControl, env: probeEnv, boatClass: boatClass, dt: dt)
+        }
         b.position = moved.position
         b.heading = moved.heading
         b.speed = moved.speed

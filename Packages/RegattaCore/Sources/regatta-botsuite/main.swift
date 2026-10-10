@@ -6,4 +6,5 @@ import Foundation
 
 let arguments = Array(CommandLine.arguments.dropFirst())
 if arguments.first == "results-seed" { exit(ResultsSeedProbe.main(arguments: Array(arguments.dropFirst()))) }
+if arguments.first == "tack-sweep" { exit(TackSweep.main(arguments: Array(arguments.dropFirst()))) }
 exit(BotSuiteCommand.main(arguments: arguments))
