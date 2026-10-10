@@ -1,5 +1,9 @@
 import RegattaCore
 
+/// Legacy: classes with a roll tack (#459). A class whose tap sails nothing (`AutohelmTuning.sailsTap` false, skiff@8)
+/// has none, and a bot there turns by hand (`BotBrain+HandTurn.swift`): nothing here is called for her, and her tack's
+/// quality is her handling's, not `rollHitRate`'s. Kept so older classes' bots sail to the bit; #461 decides its end.
+///
 /// Her roll tacks (#222, #263): the second tack/gybe tap through a tack, which the class times on the boom crossing
 /// (`BoatClass.RollTackTuning`). She sends it exactly as a player does. Whether it hits is her skill's
 /// (`BotWeaknesses.rollHitRate`, #102), drawn from her own stream as she taps the tack; below `rollSkillFloor` she

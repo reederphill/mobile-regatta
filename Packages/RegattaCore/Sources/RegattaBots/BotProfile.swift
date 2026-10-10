@@ -24,12 +24,16 @@ public enum BotProfile: String, Codable, CaseIterable, Hashable, Sendable {
     /// when it is hers to, and hunts only racing (pre-start fighting is #337's). Her tunables: `BotBrain.Hunter`
     /// (`BotBrain+Hunter.swift`).
     case hunter
-    /// Execution without tactics (#222, #105): the baseline's tactics, but rolling every tack and hitting every roll,
-    /// with no angle noise (`BotWeaknesses.none`). A measuring profile for the suite only: the "execution never beats
-    /// tactics" check races her against `tacticianClubExecution`.
+    /// Execution without tactics (#222, #105, #426): the baseline's tactics with perfect handling: the top handling
+    /// draw (`BotBrain.turnHandling` 1: the best hand tack and gybe, never flubbed, #459) and no hand-steering error,
+    /// with no angle noise (`BotWeaknesses.none`). On a class with a roll tack (legacy) she rolls every tack and hits
+    /// every roll. A measuring profile for the suite only: the "execution never beats tactics" check races her against
+    /// `tacticianClubExecution`.
     case executor
-    /// The tactician at Club-level execution (#222, #105): her tactics, but half her rolls miss
-    /// (`clubExecutionRollHitRate`; rolls only, the orchestrator's ruling on #105). A measuring profile for the suite only.
+    /// The tactician at Club-level execution (#222, #105): her tactics, but she turns her tacks and gybes by hand as
+    /// the centre of Club's handling band does (#459, `BotBrain.turnHandling`); on a class with a roll tack (legacy)
+    /// half her rolls miss instead (`clubExecutionRollHitRate`; rolls only, the orchestrator's ruling on #105). A
+    /// measuring profile for the suite only.
     case tacticianClubExecution
     /// The baseline steering by hand at Club level (#435): her tactics and no weaknesses, but Club's shift lag, wander
     /// and overshoot (`BotWeaknesses.clubHandSteering`), felt only in a class whose autohelm doesn't hold a centred
@@ -41,7 +45,8 @@ public enum BotProfile: String, Codable, CaseIterable, Hashable, Sendable {
 }
 
 extension BotProfile {
-    /// The share of `tacticianClubExecution`'s rolls that hit (#105: "half its rolls miss").
+    /// The share of `tacticianClubExecution`'s rolls that hit (#105: "half its rolls miss"). Legacy (#459): read only
+    /// on a class with a roll tack; on a class bots turn by hand her handling is Club's centre instead.
     static let clubExecutionRollHitRate = 0.5
 
     /// What she sails with at `skill`: no weaknesses (`BotWeaknesses.none`, #102), but for `tacticianClubExecution`,

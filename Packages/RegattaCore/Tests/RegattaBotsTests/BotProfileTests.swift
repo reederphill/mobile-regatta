@@ -331,6 +331,31 @@ import RegattaCore
         #expect(club == perfect, "only her rolls differ")
     }
 
+    /// #459: the executor turns her tacks and gybes with the top handling draw, as every profile without a weakness
+    /// does; the Club-execution tactician, the Club-steering profiles and the Club stand-ins with the centre of Club's
+    /// handling band; a live bot with her handling draw; the cautious bot with the floor of Club's band.
+    @Test func executorTurnsWithTheTopHandlingDraw() {
+        let style = BotConductTests.skill1
+        let club = BotTier.club.handling(at: 0.5)
+        for profile in [BotProfile.executor, .baseline, .tactician, .blipTacker, .hunter] {
+            #expect(BotBrain(style: style, profile: profile).turnHandling == 1, "\(profile)")
+        }
+        for profile in [BotProfile.tacticianClubExecution, .clubSteering, .tacticianClubSteering] {
+            #expect(BotBrain(style: style, profile: profile).turnHandling == club, "\(profile)")
+        }
+        for standIn in [StandIn.national, .club] {
+            #expect(BotBrain(style: style, profile: standIn.profile, weaknesses: standIn.weaknesses).turnHandling == club)
+        }
+        #expect(BotBrain(style: style, profile: StandIn.tactician.profile, weaknesses: StandIn.tactician.weaknesses).turnHandling == 1)
+        for handling in [0.0, 0.35, 0.6, 1] {
+            #expect(BotBrain(style: style, handling: handling).turnHandling == handling)
+        }
+        #expect(BotBrain(style: style, weaknesses: BotBrain.Caution.weaknesses(skill: BotBrain.Caution.skill), caution: .standard)
+            .turnHandling == BotTier.club.handlingBand.lowerBound)
+        #expect(HandTackTable.botchRate(handling: 1) == 0)
+        #expect(abs(HandTackTable.botchRate(handling: club) - 0.125) < 0.03, "a Club bot flubs about one turn in eight")
+    }
+
     /// #105: the tactician's downwind and start tactics are hers (and the Club-execution tactician's) alone; no other
     /// profile plays them, and a live bot only high in the National band (#366,
     /// `BotTacticsTests.liveTacticsRampMonotonicThroughNational`). Not the hunter: she stays #355's tactician, hunting

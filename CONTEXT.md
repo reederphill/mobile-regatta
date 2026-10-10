@@ -126,7 +126,7 @@ A computer-helmed boat that fills an empty seat in a fleet. A bot also sails a d
 _Avoid_: AI, CPU
 
 **Bot tier**:
-How well a bot sails: **Club**, **Regional** or **National**. A tier sets two bands, drawn apart for each bot: her tactics skill and her handling skill (how well she steers by hand). The bands overlap, so a sharp tactician can have a sloppy helm. Online, bots are matched to the fleet's ratings instead of using a fixed tier.
+How well a bot sails: **Club**, **Regional** or **National**. A tier sets two bands, drawn apart for each bot: her tactics skill and her handling skill (how well she steers by hand, and on a class that tacks by hand, how well she turns her tacks and gybes, [#459](https://github.com/reederphill/mobile-regatta/issues/459)). The bands overlap, so a sharp tactician can have a sloppy helm. Online, bots are matched to the fleet's ratings instead of using a fixed tier.
 _Avoid_: difficulty, level
 
 **Cautious bot**:
@@ -134,7 +134,7 @@ The bot that sails a dropped player's boat until they come back: a Club bot at t
 _Avoid_: easy bot, autopilot
 
 **Executor**:
-A bot-suite profile only: perfect handling with groove-only tactics (#426): every roll tack hit and, steering by hand (ADR 0011), no steering error. #426's parity between handling and tactics is read against her.
+A bot-suite profile only: perfect handling with groove-only tactics (#426): the top handling draw, h = 1 (the best hand tack and gybe, no botch, [#459](https://github.com/reederphill/mobile-regatta/issues/459)) and no hand-steering error (ADR 0011). On an older class with a roll tack she hits every roll. #426's parity between handling and tactics is read against her.
 _Avoid_: perfect bot
 
 **Watchdog**:
@@ -423,11 +423,11 @@ The best-VMG angle to the wind for the wind strength at the boat, upwind or down
 A tick on the wind vane at the groove on the boat's tack. The vane locks to it while the autohelm holds the groove; a pinch or foot shows as a short arc from it to the angle held. With the autohelm off she steers by hand ([#436](https://github.com/reederphill/mobile-regatta/issues/436)): the vane locks to the tick when she sails within the lock angle of the groove, and the arc runs from it to her own angle, as the sail's pinch/foot shape does.
 
 **Tack cost**:
-What a tack loses against sailing on: the distance made good upwind, in hull lengths, over the tack and the speed she takes to get back. About a hull length from close-hauled with the autohelm sailing the tap; it decides which shifts are worth tacking on. On skiff@8 ([#458](https://github.com/reederphill/mobile-regatta/issues/458)) every tack is hand-steered and the tap does nothing: a slam costs about 1.03 hull lengths at 10 kn, a 75 % rudder turn about 0.06 less, and in light air bearing off first pays.
+What a tack loses against sailing on: the distance made good upwind, in hull lengths, over the tack and the speed she takes to get back. About a hull length from close-hauled with the autohelm sailing the tap; it decides which shifts are worth tacking on. On skiff@8 ([#458](https://github.com/reederphill/mobile-regatta/issues/458)) every tack is hand-steered and the tap does nothing: a slam costs about 1.03 hull lengths at 10 kn, a 75 % rudder turn about 0.06 less, and in light air bearing off first pays. Bots tack and gybe it by hand as well as their handling lets them ([#459](https://github.com/reederphill/mobile-regatta/issues/459)).
 _Avoid_: tack penalty (a penalty is a rules turn)
 
 **Roll tack**:
-A second tack/gybe tap during a tack, timed on the boom crossing. Close enough to the crossing it hits and she loses less speed until close-hauled; too early or too late it misses and costs her speed. It never makes a tack better than not tacking. Not on skiff@8 ([#458](https://github.com/reederphill/mobile-regatta/issues/458)), which tacks by hand; the older classes keep it for their logs.
+A second tack/gybe tap during a tack, timed on the boom crossing. Close enough to the crossing it hits and she loses less speed until close-hauled; too early or too late it misses and costs her speed. It never makes a tack better than not tacking. Not on skiff@8 ([#458](https://github.com/reederphill/mobile-regatta/issues/458)), which tacks by hand; the older classes keep it for their logs. Legacy for bots too ([#459](https://github.com/reederphill/mobile-regatta/issues/459)): on skiff@8 a bot's tack is as good as her handling, and no roll skill is read.
 _Avoid_: double tap (fine as UI copy), roll gybe (a gybe has no roll yet)
 
 **Pinch** / **foot**:

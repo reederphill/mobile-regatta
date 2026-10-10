@@ -129,7 +129,8 @@ public struct BotWeaknesses: Hashable, Sendable {
 
     /// Metres ahead a bot that notices every puff looks: the far end of `BotBrain.puffLookAhead`.
     public static let fullPuffPerception = 150.0
-    /// The skill below which she never rolls a tack (#263).
+    /// The skill below which she never rolls a tack (#263). Legacy (#459): only a class with a roll tack; on a class
+    /// bots turn by hand nothing reads it, nor `rollHitRate`: her handling sets her tacks (`HandTackTable`).
     public static let rollSkillFloor = 0.4
 
     /// Radians, at most, by which a bot of `skill` misreads the start line's bias: growing with the square of her

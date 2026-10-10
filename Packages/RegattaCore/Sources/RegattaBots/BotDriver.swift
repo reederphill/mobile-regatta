@@ -39,7 +39,7 @@ public struct BotDriver: Sendable {
     /// Whether the decision she holds is the suite's hunter turning at the boat she hunts (#355, `BotBrain.hunting`):
     /// a luff, or a turn that brings a boat that must keep clear of her closer. Never for a live bot.
     public private(set) var isHuntingTurn = false
-    /// Her taps that played a fleet tactic (#234), by tactic, and her decisions luffing a windward boat before her start
+    /// Her taps (on a class she turns by hand, #459, her hand turns) that played a fleet tactic (#234), by tactic, and her decisions luffing a windward boat before her start
     /// (#337, `BotBrain.startLuffing`): what the suite counts by engagement band.
     public private(set) var leeBowTaps = 0
     public private(set) var tackOnWindTaps = 0
@@ -136,16 +136,15 @@ public struct BotDriver: Sendable {
     mutating func drive(_ race: Race, seeing view: SeatView) -> BotDecision {
         precondition(view.seat == seat && view.tick == race.tick, "seat \(seat) at tick \(race.tick) given the view of seat \(view.seat) at tick \(view.tick)")
         var decision = brain.decide(helm.view(view))
-        decision.input = helm.input(decision.input, view, tapping: decision.tap != nil)
+        decision.input = helm.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred)
         decisions += 1
         isHuntingTurn = decision.hunt == .turn
-        if decision.tap != nil {
-            switch decision.play {
-            case .leeBow: leeBowTaps += 1
-            case .tackOnWind: tackOnWindTaps += 1
-            case .cover: coverTaps += 1
-            case .holdLane, nil: break
-            }
+        // A play is her tap's, or on a class she turns by hand (#459) the decision she puts the rudder over on.
+        switch decision.play {
+        case .leeBow: leeBowTaps += 1
+        case .tackOnWind: tackOnWindTaps += 1
+        case .cover: coverTaps += 1
+        case .holdLane, nil: break
         }
         if decision.startLuff { startLuffDecisions += 1 }
         let next = race.tick + 1

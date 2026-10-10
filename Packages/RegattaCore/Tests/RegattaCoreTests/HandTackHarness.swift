@@ -100,6 +100,61 @@ enum HandTack {
         return metrics
     }
 
+    /// #459: a tack (from the upwind groove) or a gybe (from the downwind groove, after `warmUp` seconds sailing it) as
+    /// a bot's hand turns it (`BotBrain.handTurning`): `fraction` of full rudder, eased to a quarter of it over the last
+    /// `ease` degrees (0: held to the end), to `over` degrees past the new groove, then the hold law. The loss against
+    /// the twin, hull lengths made good to windward (to leeward for a gybe), `seconds` after the rudder goes over, and
+    /// the seconds stuck (`Metrics.stuck`).
+    static func turn(gybe: Bool, fraction: Double, ease: Double = 0, over: Double = 0, cell: Cell,
+                     boatClass boat: BoatClass, seconds: Double? = nil, warmUp: Double = 15) -> (loss: Double, stuck: Double) {
+        let groove: Autohelm.Groove = gybe ? .downwind : .upwind
+        let warm = gybe ? Int((warmUp / dt).rounded()) : 0
+        let ticks = warm + Int(((seconds ?? (gybe ? 30 : 25)) / dt).rounded())
+        let wind0 = WindBook.shared.sample(knots: cell.knots, seed: cell.seed, tick: 0)
+        let angle0 = Autohelm.grooveAngle(groove, tws: wind0.speed, boatClass: boat)
+        let boom = BoomSide.port
+        let target = BoatDynamics.polarTarget(relativeWind: angle0, boomSide: boom, tws: wind0.speed, isPlaning: false,
+                                              spinnaker: .down, boatClass: boat)
+        var helmState = BoatDynamics.State(heading: compass(wind: wind0.direction, sailingAngle: angle0, boom: boom),
+                                           speed: cell.entry * target, boomSide: boom)
+        var twinState = helmState
+        // Turning to starboard (+) luffs her with the boom to port.
+        let turnSign: Double = gybe ? -1 : 1
+        let along = Vec2.heading(wind0.direction) * (gybe ? -1 : 1)
+        let noGo = BoatDynamics.noGoAngle(boat.polar)
+        var done = false
+        var stuck = 0.0
+        for tick in 0..<ticks {
+            let (dir, tws) = WindBook.shared.sample(knots: cell.knots, seed: cell.seed, tick: tick)
+            let env = BoatDynamics.Environment.constant(windDirection: dir, windSpeed: tws)
+            let angle = Autohelm.grooveAngle(groove, tws: tws, boatClass: boat)
+            let origin = compass(wind: dir, sailingAngle: angle, boom: boom)
+            let aim = compass(wind: dir, sailingAngle: angle, boom: boom.opposite)
+            var command = holdLaw(heading: helmState.heading, aim: tick < warm ? origin : aim)
+            if tick >= warm, !done {
+                var remaining = headingRemaining(from: helmState.heading, to: aim + turnSign * deg2rad(over), turnSign: turnSign)
+                if helmState.boomSide == boom, remaining < 0 { remaining += 2 * .pi }
+                var rudder = fraction
+                var end = fraction * boat.steering.turnRate(speed: helmState.speed) * 0.2
+                if ease > 5 {
+                    end = max(end * 0.25, deg2rad(5))
+                    if remaining < deg2rad(ease) {
+                        rudder *= 1 + (0.25 - 1) * ((deg2rad(ease) - remaining) / (deg2rad(ease) - deg2rad(5))).clamped(to: 0...1)
+                    }
+                }
+                if remaining > end { command = quantise(turnSign * rudder) } else { done = true }
+            }
+            helmState = BoatDynamics.advance(helmState, control: .init(rudder: command), env: env, boatClass: boat, dt: dt)
+            twinState = BoatDynamics.advance(twinState, control: .init(rudder: holdLaw(heading: twinState.heading, aim: origin)),
+                                             env: env, boatClass: boat, dt: dt)
+            guard tick >= warm, !gybe else { continue }
+            let grooveTarget = BoatDynamics.polarTarget(relativeWind: -angle, boomSide: boom.opposite, tws: tws,
+                                                        isPlaning: false, spinnaker: .down, boatClass: boat)
+            if helmState.speed < 0.3 * max(grooveTarget, 1e-6), abs(wrapAngle(dir - helmState.heading)) < noGo { stuck += dt }
+        }
+        return ((twinState.position.dot(along) - helmState.position.dot(along)) / boat.hull.length, stuck)
+    }
+
     static func mean(_ cells: [Cell], _ value: (Cell) -> Double) -> Double {
         cells.map(value).reduce(0, +) / Double(cells.count)
     }
