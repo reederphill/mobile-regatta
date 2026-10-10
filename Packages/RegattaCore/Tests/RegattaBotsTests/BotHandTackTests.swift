@@ -276,6 +276,60 @@ import Testing
         #expect(measured[0].flubbed == 0)
     }
 
+    /// "Bear off to build speed": in light air, slow but fast enough to tack, a good helm bears away for 3 s before
+    /// she puts the rudder over; a poor one, or anyone in a breeze, turns at once.
+    @Test func goodHelmBearsOffFirstInLightAir() throws {
+        /// Seat 0 beating on starboard at 80 % of her speed in light-and-patchy's wind, told to tack: whether she
+        /// bore off first, how far, and the tack she ends on.
+        func tack(seed: UInt64, handling: Double) throws -> (knots: Double, boreOff: Bool, furthest: Double, tack: Tack) {
+            let conditions = try ConditionsFile.bundled(id: "light-and-patchy", version: 7)
+            let venue = try VenueFile.bundled(id: "dev-venue", version: 7)
+            let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: [.bot, .bot], laps: 2, startSequenceTicks: Race.tickRate,
+                                      boatClass: Self.skiffEight.ref, venue: venue.ref, conditions: conditions.ref)
+            let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+                                mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)))
+            for _ in 0..<(2 * Race.tickRate) { race.step() }
+            let course = race.course
+            let centre = course.startLine.centre + course.upwind * (course.beat * 0.35)
+            let wind = race.groundWind(at: centre)
+            let up = race.boatClass.polar.bestUpwind(tws: wind.speed)
+            var snapshot = race.exportSnapshot()
+            for seat in 0...1 {
+                snapshot.seats[seat].boat.position = centre + course.upwind.rightPerp * (Double(seat) * 400)
+                snapshot.seats[seat].boat.heading = wind.direction - up.twa
+                snapshot.seats[seat].boat.speed = up.speed * 0.8
+                snapshot.seats[seat].boat.boomSide = .port
+                snapshot.seats[seat].boat.status = .racing
+                snapshot.seats[seat].boat.legIndex = 0
+                snapshot.seats[seat].boat.roundingStage = 0
+                snapshot.seats[seat].boat.rudder = 0
+                snapshot.seats[seat].boat.penaltyTurnsOwed = 0
+                snapshot.seats[seat].heldInput = .neutral
+            }
+            try race.importSnapshot(snapshot)
+            var hand = Hand(seat: 0, race: race, handling: handling)
+            hand.brain.plannedTack = .port
+            var boreOff = false, furthest = 0.0
+            for _ in 0..<(10 * Race.tickRate) {
+                hand.drive(race)
+                if hand.brain.handTurn?.bearOffUntil != nil { boreOff = true }
+                race.step()
+                let boat = race.boats[0]
+                if boat.tack == .starboard {
+                    furthest = max(furthest, abs(wrapAngle(race.groundWind(at: boat.position).direction - boat.heading)) - up.twa)
+                }
+            }
+            return (knots(metresPerSecond: wind.speed), boreOff, furthest, race.boats[0].tack)
+        }
+        let light = try firstSeed(in: 1...40) { try tack(seed: $0, handling: 1).knots < 7 }
+        let good = try tack(seed: light, handling: 1)
+        #expect(good.boreOff && good.furthest > deg2rad(6), "\(good)")
+        #expect(good.tack == .port, "she tacked after it")
+        let poor = try tack(seed: light, handling: 0.6)
+        #expect(!poor.boreOff && poor.furthest < deg2rad(3) && poor.tack == .port, "\(poor)")
+        print("BOTHANDTACK bear-off seed \(light): \(good.knots) kn, bore off \(rad2deg(good.furthest))°")
+    }
+
     // MARK: - Irons and penalty turns
 
     /// Stalled short of head to wind with the rudder held over, she lets it go, truly centred, and is sailing again
