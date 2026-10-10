@@ -26,6 +26,16 @@ import Testing
         return scheduler.settle(slot: slot, now: time, progress: progress)
     }
 
+    /// The start-sequence hint says how this scheme eases (#453): there is no Ease button.
+    @Test func startSequenceHintSaysHowThisSchemeEases() {
+        let text = HintCatalogue.hint(.startSequence).text
+        #expect(text.text(for: .halves) == "Hold both sides to ease.")
+        #expect(text.text(for: .tiller) == "Pull down to ease.")
+        for steering in DeviceSettings.Steering.allCases {
+            #expect(!text.text(for: steering).contains("Hold Ease"), "no Ease button to hold")
+        }
+    }
+
     @Test func spacingAtLeast3s() {
         let progress = HintProgressStore()
         var slot = NoticeSlot()
@@ -255,9 +265,10 @@ import Testing
         private(set) var retired: [(id: HintID, mode: HintRetirement)] = []
 
         init(progress: HintProgressStore, prestartSeconds: Double = 10, catalogue: [Hint] = HintCatalogue.engine,
-             isFirstRaceOnDevice: Bool = false) {
-            let config = RaceConfig(opponents: 2, prestartSeconds: prestartSeconds, seed: 1,
+             isFirstRaceOnDevice: Bool = false, files: PracticeFiles = .defaults) {
+            var config = RaceConfig(opponents: 2, prestartSeconds: prestartSeconds, seed: 1,
                                     windSeed: RaceConfig.windSeed(pinnedTo: 1))
+            config.files = files
             driver = PracticeDriver(config: config)
             engine = HintEngine(progress: progress, catalogue: catalogue, isFirstRaceOnDevice: isFirstRaceOnDevice)
             engine.onRetired = { [unowned self] id, mode in retired.append((id, mode)) }
@@ -309,9 +320,10 @@ import Testing
 
     /// After the first steer takes the held steering hint down, letting go shows once you've steered without a break
     /// for the first race's threshold, and not before.
+    /// On skiff@6 (#437): letting go is for a class whose autohelm holds a centred rudder; skiff@7's is centredRudder.
     @Test func firstRaceLettingGoShowsAfterTheFirstSteerAndTheSteeringThreshold() throws {
         let progress = HintProgressStore()
-        let rig = Rig(progress: progress, isFirstRaceOnDevice: true)
+        let rig = Rig(progress: progress, isFirstRaceOnDevice: true, files: try HintTriggerTests.autohelmOnFiles())
         rig.isFirstRace = true
         rig.run(10 + 2)
         #expect(rig.slot.showing?.text == HintID.raceStart.rawValue)
@@ -326,6 +338,23 @@ import Testing
         let time = try #require(shown.first)
         #expect(time >= firstSteer + HintTuning.standard.lettingGoFirstRaceSeconds - 0.1, "letting go at \(time) s")
         #expect(rig.posts.filter { $0.id == .lettingGo || $0.id == .raceStart }.map(\.id) == [.raceStart, .lettingGo])
+    }
+
+    /// The device's first race is the engine's, whatever the session says (nothing sets `GameSession.isFirstRace`): on
+    /// the default class (skiff@7, hand steering) the centred-rudder hint shows after the first race's 5 s of steering,
+    /// not the later races' 20 s (#437).
+    @Test func firstRaceOnDeviceShowsCentredRudderAfterFiveSecondsOfSteering() throws {
+        let rig = Rig(progress: HintProgressStore(), isFirstRaceOnDevice: true)
+        #expect(!rig.isFirstRace)
+        rig.run(10 + 2)
+        rig.rudder = Autohelm.deadBand + 0.05
+        let firstSteer = rig.driver.renderWorld.time
+        rig.run(12)
+        let shown = rig.posted(.centredRudder)
+        #expect(shown.count == 1, "\(rig.posts)")
+        let time = try #require(shown.first)
+        #expect(time >= firstSteer + HintTuning.standard.lettingGoFirstRaceSeconds - 0.1 && time < firstSteer + 12, "at \(time) s")
+        #expect(rig.posted(.lettingGo).isEmpty)
     }
 
     /// A situation that lasts shows its hint once, not again at every gap: it shows again only after its trigger has

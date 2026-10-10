@@ -143,10 +143,13 @@ struct WindRevealTests {
         }
         #expect(expected.keys.contains(windows.start(of: 3)))
 
-        // The server's wind: a seeded race, stepped to each tick the client sampled.
-        let server = Race(setup: rig.setup, windSeed: rig.windSeed)
+        // The server's wind: the seeded race's key chain (`chain`, the generator a seeded race steps) through the last
+        // window the client sampled, sampled at each tick it did. Not a seeded race stepped there: nothing sails its boats,
+        // and on a class that steers by hand (skiff@7, #437) they foul one another until every one is DSQ and the race
+        // closes (tick 2246), after which it never steps again (#467).
+        let last = try #require(expected.keys.max())
+        let server = Race(setup: rig.setup, revealedWindKeys: try chain(rig, through: windows.window(containing: last)))
         for at in expected.keys.sorted() {
-            while server.tick < at { server.step() }
             guard let (points, wind) = expected[at] else { continue }
             #expect(try points.map { try server.wind.sample($0, tick: at) } == wind, "tick \(at)")
         }

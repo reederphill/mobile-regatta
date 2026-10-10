@@ -268,6 +268,10 @@ The line from a mark along which a boat, at her best angle to the wind, can just
 The thin vermillion arrow under your hull, one hull length, pointing to the wind over the ground. No label and no numbers; it carries the groove tick.
 _Avoid_: wind arrow, wind indicator
 
+**Instruments**:
+The race HUD's two figures in the bottom row, beside Tack/Gybe: your speed through the water in knots to one decimal, and the apparent wind (the wind your sails feel, your own motion in it) as its angle off the bow with the side it comes over and its speed, "38° port" over "21 kn". White on translucent black, no target, band or graph; hidden once you're done. The ground wind stays the top readout ("from" a compass bearing) and the wind vane.
+_Avoid_: dials, gauges, AWA/AWS
+
 **Right-of-way glow**:
 The wordless halo round another boat that says who keeps clear: red on a boat you must keep clear of, green on a boat that must keep clear of you. It fades in from nothing as she comes within a short range, to full strength close in; mark-room shows the same way within that range, a boat owing it red and the boat owed it green (mark-room has no notice of its own, and the umpire's calls don't change: rule 18 isn't right of way), and a ghost has none. Online the glows are the server umpire's, mark-room included. The core's `RightOfWayGlyph` is its red/green kind (the name dates from when these were a ⚠ and a chevron).
 _Avoid_: boat label, rights icon, glyph

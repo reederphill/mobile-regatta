@@ -210,23 +210,27 @@ import Testing
         #expect(try BotSuiteOptions(arguments: ["--autohelm", "on"]).autohelmOff == false)
         #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--autohelm", "sideways"]) }
 
-        let bundled = RaceFiles.defaults.boatClass
+        // skiff@6, the autohelm on: the copy is the bundled class but for the autohelm.
+        let bundled = try BoatClassFile.bundled(id: "skiff", version: 6)
         let copy = try BotRaceHarness.handSteered(bundled)
         #expect(!copy.content.steering.autohelm.holdsWhenCentred)
         var held = copy.content
         held.steering.autohelm.holdsWhenCentred = true
         #expect(held == bundled.content && copy.ref != bundled.ref)
+        // The default class (skiff@7, #437) already steers by hand: it is its own hand-steered copy.
+        let skiff7 = RaceFiles.defaults.boatClass
+        #expect(try BotRaceHarness.handSteered(skiff7).ref == skiff7.ref)
         let setup = try BotRaceHarness.raceSetup(for: cell)
-        #expect(setup.boatClass == copy.ref)
+        #expect(setup.boatClass == skiff7.ref)
     }
 
-    /// #435: the handling mix measures hand steering, which shows only with the autohelm off, and deals four profiles
-    /// by turns, so a matrix naming it without `autohelmOff`, or sailing it in a fleet under four, fails loudly.
-    @Test func handlingMixNeedsTheAutohelmOffAndFleetsOfFour() throws {
+    /// #435: the handling mix measures hand steering, which shows only with the autohelm off (`autohelmOff`, or the
+    /// default class since #437), and deals four profiles by turns, so a matrix sailing it in a fleet under four fails
+    /// loudly.
+    @Test func handlingMixNeedsHandSteeringAndFleetsOfFour() throws {
         try BotMatrix(seeds: [1], fleetSizes: [5], tierMixes: [.national], profileMixes: [.handling], autohelmOff: true).validate()
-        #expect(throws: BotSuiteError.self) {
-            try BotMatrix(seeds: [1], fleetSizes: [5], tierMixes: [.national], profileMixes: [.handling]).validate()
-        }
+        // The default class steers by hand since #437 (skiff@7), so the mix needs no `--autohelm off` on it.
+        try BotMatrix(seeds: [1], fleetSizes: [5], tierMixes: [.national], profileMixes: [.handling]).validate()
         for size in [2, 3] {
             #expect(throws: BotSuiteError.self) {
                 try BotMatrix(seeds: [1], fleetSizes: [size, 10], tierMixes: [.national], profileMixes: [.live, .handling],
@@ -236,9 +240,7 @@ import Testing
         // A small fleet the handling mix doesn't sail in (`mixFleetSizes`) is no matter.
         try BotMatrix(seeds: [1], fleetSizes: [2, 10], tierMixes: [.national], profileMixes: [.live, .handling],
                       mixFleetSizes: [.handling: 10], autohelmOff: true).validate()
-        #expect(throws: BotSuiteError.self) {
-            try BotSuiteOptions(arguments: ["--profile-mix", "handling", "--fleet-size", "5"]).matrix()
-        }
+        _ = try BotSuiteOptions(arguments: ["--profile-mix", "handling", "--fleet-size", "5"]).matrix()
         #expect(throws: BotSuiteError.self) {
             try BotSuiteOptions(arguments: ["--profile-mix", "handling", "--autohelm", "off", "--fleet-size", "2"]).matrix()
         }

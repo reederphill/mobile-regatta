@@ -235,7 +235,10 @@ import Glibc
 ///    heading on every seat, the tap hands back within the hand-back of the new groove, bots steer by hand (`BotHelm`),
 ///    and the escape simulation predicts a centred rudder straight. Every class before schema 4, and races on skiff@6,
 ///    sail as on 34, bit for bit.
-public let simulationRevision = 35
+/// 36: races sail skiff@7 by default (#437), on 35: skiff@6 with the autohelm off a centred rudder
+///    (`holdsWhenCentred` false), so every default race steers by hand, players and bots. A race naming skiff@6, or any
+///    other class, sails as on 35, bit for bit.
+public let simulationRevision = 36
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

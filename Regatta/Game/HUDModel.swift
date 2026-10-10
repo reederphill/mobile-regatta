@@ -71,4 +71,52 @@ struct HUDModel {
     static func screenAngle(ofCompass compass: Double, viewHeading: Double) -> Double {
         wrapAngle(compass - viewHeading)
     }
+
+    // MARK: The instruments (#457)
+
+    /// The bottom row's speed and apparent wind show from the start of the race scene, the approach included, and
+    /// hide once you're done (finished, DSQ, or a ghost at the close): the HUD speaks of the racing boat only.
+    var showsInstruments: Bool {
+        hud.status.isRacingOrStarting && !hud.isGhost
+    }
+
+    /// Your speed through the water, one decimal, smoothed: "6.4" (over "kn").
+    var speedText: String { Self.speedText(knots: hud.shownInstruments.speedKnots) }
+    /// The apparent wind's angle off the bow and the side it comes over: "38° port", "38° starboard"; no side word
+    /// dead ahead or dead astern.
+    var apparentAngleText: String { Self.apparentAngleText(angle: hud.shownInstruments.apparentAngle) }
+    /// The apparent wind's speed, whole knots: "21 kn".
+    var apparentSpeedText: String { Self.knotsText(hud.shownInstruments.apparentKnots) }
+
+    /// VoiceOver's values (read on demand, never announced): "6.4 knots", "38 degrees port, 21 knots".
+    var speedAccessibilityValue: String { "\(speedText) knots" }
+    var apparentAccessibilityValue: String {
+        let (degrees, side) = Self.apparentAngleParts(angle: hud.shownInstruments.apparentAngle)
+        let knots = Int(max(0, hud.shownInstruments.apparentKnots).rounded())
+        let angle = "\(degrees) \(degrees == 1 ? "degree" : "degrees")" + (side.map { " \($0)" } ?? "")
+        return "\(angle), \(knots) \(knots == 1 ? "knot" : "knots")"
+    }
+
+    static func speedText(knots: Double) -> String {
+        // Never "-0.0": a boat pushed backwards reads 0.0.
+        let tenths = (knots * 10).rounded() / 10
+        return String(format: "%.1f", tenths > 0 ? tenths : 0)
+    }
+
+    static func knotsText(_ knots: Double) -> String {
+        "\(Int(max(0, knots).rounded())) kn"
+    }
+
+    static func apparentAngleText(angle: Double) -> String {
+        let (degrees, side) = apparentAngleParts(angle: angle)
+        return side.map { "\(degrees)° \($0)" } ?? "\(degrees)°"
+    }
+
+    /// Whole degrees off the bow, 0...180, and "port" or "starboard"; nil at 0° and 180°.
+    static func apparentAngleParts(angle: Double) -> (degrees: Int, side: String?) {
+        let wrapped = wrapAngle(angle)
+        let degrees = Int(abs(rad2deg(wrapped)).rounded())
+        guard degrees > 0, degrees < 180 else { return (degrees, nil) }
+        return (degrees, wrapped > 0 ? "starboard" : "port")
+    }
 }

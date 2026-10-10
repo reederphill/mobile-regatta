@@ -8,6 +8,9 @@
 //
 // regatta-replay freeze-ticks [--check] <fixtures folder> <table.json> picks render fixtures' freeze ticks by a
 // condition on their logs instead (#404, `FreezeTicks`, `scripts/record-fixtures.sh`).
+//
+// regatta-replay record-fixture [--scene <log>] [--seeds <n>] <fixtures folder> <table.json> <scenes.json> records
+// those logs, one short bot race per scene (#466, `RecordFixture`).
 import Foundation
 import RegattaCore
 
@@ -18,6 +21,7 @@ func fail(_ message: String, status: Int32) -> Never {
 
 var arguments = Array(CommandLine.arguments.dropFirst())
 if arguments.first == "freeze-ticks" { exit(FreezeTicks.main(arguments: Array(arguments.dropFirst()))) }
+if arguments.first == "record-fixture" { exit(RecordFixture.main(arguments: Array(arguments.dropFirst()))) }
 let anyVersion = arguments.contains("--any-version")
 arguments.removeAll { $0 == "--any-version" }
 guard arguments.count == 1, !arguments[0].hasPrefix("-") else {

@@ -46,7 +46,7 @@ enum VisualCounterpart: Equatable {
     case activeMarkAdvances
     /// Your finished place in the HUD, then the results (#24).
     case finishedPlace
-    /// The sail flapping while you hold Ease (#112).
+    /// The sail flapping while Ease is on (#112).
     case sailFlutter
     /// The HUD's wind readout and the vane.
     case windReadout

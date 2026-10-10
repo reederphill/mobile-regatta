@@ -126,22 +126,18 @@ import Testing
             return HintSnapshot(world: PracticeDriver(config: config).renderWorld, observations: HintObservations(),
                                 showsLaylines: false, isFirstRace: true, lettingGoRetired: false, tuning: t)
         }
-        #expect(snapshot(.defaults).autohelmHolds)
-        #expect(try !snapshot(Self.handSteeredFiles()).autohelmHolds)
+        #expect(try snapshot(Self.autohelmOnFiles()).autohelmHolds)
+        #expect(!snapshot(.defaults).autohelmHolds, "the default class, skiff@7, steers by hand (#437)")
     }
 
-    /// Practice files sailing the default class with its autohelm off (#434's `holdsWhenCentred` 0), as the tuning
-    /// panel's Auto tiller makes them (#436).
-    static func handSteeredFiles() throws -> PracticeFiles {
-        let pointer = "/steering/autohelm/holdsWhenCentred"
-        let key = RaceFiles.defaults.boatClass.ref.key
-        let base = try #require(try BoatClassFile.bundledData(id: key.id, version: key.version))
-        let readied = TunedCopy.readyingFlag(at: pointer, in: base, absent: 1, schemaVersion: 4)
-        let tuned = try TunedCopy.make(BoatClass.self, base: readied, values: [pointer: 0], tune: 1)
+    /// Practice files whose autohelm doesn't hold a centred rudder: the defaults, since the default class is skiff@7
+    /// (#437; before it, the Auto tiller's tuned copy, #436).
+    static func handSteeredFiles() throws -> PracticeFiles { .defaults }
+
+    /// Practice files sailing skiff@6, whose autohelm holds a centred rudder (the default until #437).
+    static func autohelmOnFiles() throws -> PracticeFiles {
         var files = PracticeFiles.defaults
-        try files.catalog.boatClasses.add(tuned.file)
-        files.boatClass = tuned.file.ref
-        files.tunedFiles[tuned.file.ref] = tuned.data
+        files.boatClass = try BoatClassFile.bundled(id: "skiff", version: 6).ref
         return files
     }
 
@@ -201,8 +197,10 @@ import Testing
     // MARK: Real frames
 
     /// Steering a real practice boat both ways is seen, by race time, and letting go after steering counts as let go.
-    @Test func observationsSeeSteeringBothWaysAndLettingGo() {
-        let config = RaceConfig(opponents: 1, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+    /// On skiff@6 (#437): letting go is a centred rudder the autohelm holds, which the default, skiff@7, has not.
+    @Test func observationsSeeSteeringBothWaysAndLettingGo() throws {
+        var config = RaceConfig(opponents: 1, prestartSeconds: 30, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
+        config.files = try Self.autohelmOnFiles()
         let driver = PracticeDriver(config: config)
         var o = HintObservations()
         func run(_ rudder: Int8, seconds: Double) {

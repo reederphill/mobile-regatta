@@ -97,7 +97,7 @@ import Testing
 
     /// The lee-bow's cost in distance made good (#376's measure, `LeeBowTests`' geometry, 3 L ahead and 1.5 L to leeward):
     /// seat 0's distance made good upwind over the 20 s from the end of seat 1's tack, lost against the clean twin, in the
-    /// default class (skiff@6: ribbons, header 8°) and in a tuned copy whose header turns nothing (0°; at lull 0 the
+    /// pinned class (`OpenWater`: skiff@6, ribbons, header 8°) and in a tuned copy whose header turns nothing (0°; at lull 0 the
     /// backwind then costs nothing, so what is left is the ribbons and the tack). The owner's reference (#377, from
     /// #376): today's box cost 1.50 L, and the header about +5% of it. Print only, under the fleet runs' switch
     /// (`ShadowModelFleetTests`, `REGATTA_SHADOW_FLEET=1`). Since the header's zone is the upwash beside the lee-bower's

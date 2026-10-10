@@ -83,13 +83,15 @@ private struct HelpSection: View {
 
 /// Both steering schemes, with a small picture each, then letting go and steering by hand (the groove tick, pinch and
 /// foot and the vane's arc, #219, #436: hand steering is the way the game is played, the Auto tiller tuning never
-/// mentioned) and the two buttons, in a few short lines.
+/// mentioned) and the Tack button, in a few short lines. Each scheme card says how it eases (#453).
 private struct SteeringHelp: View {
     var body: some View {
         // TODO-COPY (#171): every line on this page.
         HStack(alignment: .top, spacing: 16) {
-            SchemeCard(title: "Halves", line: "Hold a side to turn that way.") { HalvesDiagram() }
-            SchemeCard(title: "Tiller", line: "Touch and slide sideways.") { TillerDiagram() }
+            SchemeCard(title: "Halves", lines: ["Hold a side to turn that way.", "Hold both sides to ease."]) {
+                HalvesDiagram()
+            }
+            SchemeCard(title: "Tiller", lines: ["Touch and slide sideways.", "Pull down to ease."]) { TillerDiagram() }
         }
         HelpSection(heading: "Let go", lines: [
             "Let go and she sails straight on.",
@@ -97,14 +99,14 @@ private struct SteeringHelp: View {
             "Pinch above it or foot below it: the arc shows how far.",
         ])
         HelpSection(heading: "Buttons", lines: [
-            "Ease: hold to slow down. Tack: tap to turn; you come out on the groove.",
+            "Tack: tap to turn; you come out on the groove.",
         ])
     }
 }
 
 private struct SchemeCard<Diagram: View>: View {
     let title: String
-    let line: String
+    let lines: [String]
     @ViewBuilder let diagram: () -> Diagram
 
     var body: some View {
@@ -115,9 +117,11 @@ private struct SchemeCard<Diagram: View>: View {
                 .background(Color(uiColor: ChartPalette.water.uiColor), in: .rect(cornerRadius: 10))
                 .accessibilityHidden(true)
             Text(title).font(MenuFont.heading(.headline))
-            Text(line)
-                .font(MenuFont.body(.subheadline))
-                .fixedSize(horizontal: false, vertical: true)
+            ForEach(lines, id: \.self) { line in
+                Text(line)
+                    .font(MenuFont.body(.subheadline))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -236,7 +240,7 @@ private struct SoundsHelp: View {
             "A horn at the end: you finished.",
         ])
         HelpSection(heading: "On the water", lines: [
-            "Wind and water follow the breeze and your speed. Hold Ease and the sail flaps.",
+            "Wind and water follow the breeze and your speed. Ease and the sail flaps.",
         ])
     }
 }

@@ -27,12 +27,22 @@ struct HUDState {
     var fleet = 1
     var legNumber = 1
     var legCount = 1
-    /// The wind angle she sails at (the sailing wind's): the controls read it (`isUpwind`), the HUD doesn't show it.
+    /// The wind angle she sails at (the sailing wind's); the HUD doesn't show it.
     var twaDegrees = 0.0
+    /// The turn the tack button's tap will sail (#437): the sim's own choice (`Autohelm.tackOrGybe`), through the wind
+    /// with it forward of the beam, through the stern abaft it, so the button's word never disagrees with the turn.
+    var tapTurn: TapTurn = .tack
     /// The wind over the ground at your boat (#15): knots, and the compass direction it blows from, radians. Nobody
     /// else's shadow is in it: you read the shadow from the wakes, not the HUD (#15).
     var windKnots = 0.0
     var windDirection = 0.0
+    /// Your boat's instruments at the latest tick, raw (#457): speed through the water and the apparent wind.
+    var instruments = InstrumentReading()
+    /// The same, display-smoothed by the session (`InstrumentSmoother`): what the bottom row shows. The raw reading
+    /// until the session smooths it.
+    var shownInstruments = InstrumentReading()
+    /// You're a ghost (`RenderWorld.isGhost(ofSeat:)`): finished, DSQ, or OCS or unstarted at the close.
+    var isGhost = false
     var boats: [MiniBoat] = []
     var course: CourseLayout?
     /// The marks of the leg you're sailing, drawn orange on the minimap; the rest are grey (#22, G7).
@@ -44,7 +54,17 @@ struct HUDState {
     /// The live leaderboard (#268), from the latest tick's standings and gaps.
     var leaderboard = LeaderboardState()
 
-    var isUpwind: Bool { twaDegrees < 90 }
+    enum TapTurn: Equatable {
+        case tack, gybe
+
+        /// The turn a tap sails at `sailingAngle` (`Boat.sailingAngle`).
+        init(sailingAngle: Double) {
+            self = Autohelm.tackOrGybe(sailingAngle: sailingAngle).target == .groove(.upwind) ? .tack : .gybe
+        }
+
+        /// The tack button's word.
+        var label: String { self == .tack ? "TACK" : "GYBE" }
+    }
 
     init() {}
 
@@ -61,9 +81,13 @@ struct HUDState {
         status = p.status
         closeTick = frame.closeTick
         twaDegrees = rad2deg(p.twa)
+        tapTurn = TapTurn(sailingAngle: p.sailingAngle)
         // `windOverGround` is the wind at her before anyone's shadow: the HUD shows that (#15).
         windKnots = knots(metresPerSecond: p.windOverGround.speed)
         windDirection = p.windOverGround.direction
+        instruments = InstrumentReading(boat: p)
+        shownInstruments = instruments
+        isGhost = world.isGhost(ofSeat: me)
         fleet = frame.boats.count
         place = frame.place(of: me)
         leaderboard = LeaderboardState(frame: frame, me: me)

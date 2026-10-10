@@ -62,6 +62,7 @@ import UIKit
     @Test func openingHelpReleasesTheControls() throws {
         let session = GameSession(config: RaceConfig(opponents: 1, seed: 1, windSeed: 1))
         session.setEase(true)
+        session.setGestureEase(true)
         // A finger on the tiller, slid hard over.
         let finger = "finger"
         session.scene.steering.scheme = .tiller
@@ -70,7 +71,7 @@ import UIKit
         #expect(session.scene.steering.rudder != 0)
         let releases = session.controlReleases
         session.releaseControls()
-        #expect(!session.isEasing)
+        #expect(!session.isEasing && !session.isGestureEasing && !session.isVoiceOverEasing, "both eases let go (#453)")
         #expect(session.scene.steering.rudder == 0, "the rudder is centred")
         #expect(session.scene.steering.tillerKnob == nil, "nothing held")
         session.scene.steering.touchMoved(finger, to: CGPoint(x: 0, y: 300))

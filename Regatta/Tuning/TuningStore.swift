@@ -20,6 +20,8 @@ struct Tuning: Codable, Equatable {
     var boat = BoatStyle.standard
     /// The hints' thresholds (#129).
     var hint = HintTuning.standard
+    /// The ease gesture's thresholds (#453).
+    var ease = EaseGestureTuning.standard
     /// The pressure overlay on the water (#289): a look for tuning by, not a tuning, so never the TUNED badge.
     var showsPressure = false
 
@@ -65,10 +67,10 @@ struct Tuning: Codable, Equatable {
     var tunesFiles: Bool { TuningSlot.allCases.contains { !self[values: $0].isEmpty } }
     /// Whether any value at all differs from the files and the standard look: the TUNED badge.
     var isTuned: Bool { tunesFiles || water != .standard || camera != .standard || boat != .standard
-        || hint != .standard }
+        || hint != .standard || ease != .standard }
 
     private enum CodingKeys: String, CodingKey {
-        case name, boatClass, conditions, rulesConfiguration, boatClassValues, conditionsValues, rulesValues, water, camera, boat, hint, showsPressure
+        case name, boatClass, conditions, rulesConfiguration, boatClassValues, conditionsValues, rulesValues, water, camera, boat, hint, ease, showsPressure
     }
 
     /// Lenient: a value this build no longer has, or a render style saved before it gained a field, falls back
@@ -86,6 +88,7 @@ struct Tuning: Codable, Equatable {
         camera = (try? c.decode(CameraStyle.self, forKey: .camera)) ?? .standard
         boat = (try? c.decode(BoatStyle.self, forKey: .boat)) ?? .standard
         hint = (try? c.decode(HintTuning.self, forKey: .hint)) ?? .standard
+        ease = (try? c.decode(EaseGestureTuning.self, forKey: .ease)) ?? .standard
         showsPressure = (try? c.decode(Bool.self, forKey: .showsPressure)) ?? false
     }
 

@@ -92,6 +92,12 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         try assertAllMatchReferences(["hud-prestart", "hud-racing", "hud-ocs", "hud-afterfirstfinish"])
     }
 
+    /// The bottom row's instruments (#457): your speed left and the apparent wind right of Tack/Gybe's empty slot, on
+    /// `hud-racing`'s tick. Its reference comes from CI's `render-actuals` (`scripts/adopt-references.sh`).
+    @MainActor func testInstrumentsFixtureMatchesReference() throws {
+        try assertAllMatchReferences(["hud-instruments"])
+    }
+
     // The live leaderboard (#268): the compact board under the clock and place, and tapped open.
 
     /// The compact board on the fleet log mid-race (you 4th of 6: leader, a skip, the boat ahead, you, the boat

@@ -7,8 +7,11 @@ import Testing
 @Suite struct KeysOnlyRaceTests {
     static let windSeed = WindSeed(0xC0FFEE)
 
+    /// On skiff@6, whose autohelm holds the idle humans' wind angle: on the default, skiff@7 (#437), seats 0 and 3,
+    /// never steered, hold their headings into each other (a rule 12 call by tick 518 whatever the bots do).
     static func setup() throws -> RaceSetup {
-        try RaceSetup(raceSeed: RaceSeed(64), seats: [.human, .bot, .bot, .human], startSequenceTicks: 900)
+        try RaceSetup(raceSeed: RaceSeed(64), seats: [.human, .bot, .bot, .human], startSequenceTicks: 900,
+                      boatClass: BoatClassFile.bundled(id: "skiff", version: 6).ref)
     }
 
     /// The server's keys, as its generator makes them, through `window`.

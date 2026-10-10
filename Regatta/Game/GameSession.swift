@@ -55,8 +55,13 @@ final class GameSession {
     /// A race from the practice setup (#235): your finish goes into the practice history. A launch argument's or an
     /// online race doesn't.
     @ObservationIgnored var recordsPracticeHistory = false
-    /// The Ease button is held (#99, #112): the scene sends it with the rudder every frame.
-    var isEasing = false
+    /// Ease is on (#99, #112, #453): the gesture's (both halves held, or the tiller pulled down) or VoiceOver's.
+    /// The scene sends it with the rudder every frame.
+    var isEasing: Bool { isGestureEasing || isVoiceOverEasing }
+    /// The steering gesture eases (#453): the scene sets it from its `SteeringInterpreter`.
+    private(set) var isGestureEasing = false
+    /// VoiceOver's Ease (`race-ease`, or the water's Ease action) is on.
+    private(set) var isVoiceOverEasing = false
     /// The tiller's track and knob while a tiller drag is held (#112): the scene sets it, `RaceView` draws it.
     var tillerKnob: SteeringInterpreter.TillerKnob?
     /// This is the player's first race: the halves edge labels show (#23), and the results offer Race online and Help
@@ -171,6 +176,7 @@ final class GameSession {
                              ladderLines: fixture.ladderLines ?? defaults.ladderLines)
         vision = fixture.vision
         showsHUDInFixture = fixture.hud != nil
+        showsInstrumentsInFixture = fixture.hud?.instruments ?? false
         // The board only where the fixture asks for it (#268), held open if it says so: the session's controls are
         // its own here, never the app's.
         controls.showsLeaderboard = fixture.hud?.leaderboard != nil
@@ -227,6 +233,9 @@ final class GameSession {
     /// A render fixture that draws the HUD over its scene (#114).
     var showsFixtureHUD: Bool { driver.isFrozen && showsHUDInFixture }
     @ObservationIgnored private var showsHUDInFixture = false
+    /// A render fixture that draws the bottom row's instruments too (#457).
+    var showsFixtureInstruments: Bool { showsFixtureHUD && showsInstrumentsInFixture }
+    @ObservationIgnored private var showsInstrumentsInFixture = false
 
     /// The halves' faint "‹ Port / Starboard ›" edge labels show in the first race only, and only in halves (#23).
     var showsEdgeLabels: Bool { Self.showsEdgeLabels(isFirstRace: isFirstRace, steering: controls.steering) }
@@ -254,19 +263,39 @@ final class GameSession {
         tackOrGybe()
     }
 
-    /// The Ease button is held or let go (#99).
+    /// VoiceOver's Ease is put on or let go (#99, #453). Ease stays on while the gesture holds it.
     func setEase(_ easing: Bool) {
-        if isEasing && !easing {
-            easeReleases.count += 1
-            easeReleases.knots = knots(metresPerSecond: myBoat.speed)
-        }
-        isEasing = easing
+        updateEase { isVoiceOverEasing = easing }
     }
 
     /// VoiceOver's Ease (#112): an accessibility action can't hold, so the first activation holds Ease and the
     /// second lets it go.
     func toggleEase() {
-        setEase(!isEasing)
+        setEase(!isVoiceOverEasing)
+    }
+
+    /// The steering gesture's ease (#453), from the scene as it changes: a light haptic tick on and off for the
+    /// tiller's pull, whose thumb has no other feel of the line.
+    func setGestureEase(_ easing: Bool, ticks: Bool = false) {
+        guard easing != isGestureEasing else { return }
+        updateEase { isGestureEasing = easing }
+        if ticks { haptics.impact(intensity: 0.4) }
+    }
+
+    /// Makes a change to either ease, recording a release (`easeReleases`) when Ease as a whole goes off.
+    private func updateEase(_ change: () -> Void) {
+        let was = isEasing
+        change()
+        if was && !isEasing {
+            easeReleases.count += 1
+            easeReleases.knots = knots(metresPerSecond: myBoat.speed)
+        }
+    }
+
+    /// The ease gesture's thresholds (#453): the debug tuning panel's, live.
+    var easeTuning: EaseGestureTuning {
+        get { scene.steering.easeTuning }
+        set { scene.steering.easeTuning = newValue }
     }
 
     /// How many times Ease has been let go, and your boat's speed in knots the moment it last was: UI tests read it
@@ -287,7 +316,8 @@ final class GameSession {
     /// Lets go of steering and Ease, and tells the held buttons (`controlReleases`): an overlay is taking the touches,
     /// the pause menu or Help (#135), which an online race keeps running under with the rudder centred.
     func releaseControls() {
-        isEasing = false
+        isVoiceOverEasing = false
+        isGestureEasing = false
         scene.resetInput()
         controlReleases += 1
     }
@@ -303,6 +333,9 @@ final class GameSession {
     }
 
     func refreshHUD() { refreshHUD(samplesPressure: true) }
+
+    /// The bottom row's instruments' display smoothing (#457), in race time.
+    @ObservationIgnored private var instrumentSmoother = InstrumentSmoother()
 
     /// The scene steps the live race for the first time (`GameScene.update`): the notice slot's clock starts again
     /// from here (#129). The steering hint is posted as the race is set up, before its clock shows, and setting up
@@ -332,6 +365,7 @@ final class GameSession {
         let world = driver.renderWorld
         let roster = roster
         var hud = HUDState(world: world) { roster[$0].isBot }
+        hud.shownInstruments = instrumentSmoother.step(hud.instruments, at: hud.clock)
         hud.pressureImage = samplesPressure ? minimapField.refresh(world) : minimapField.image
         self.hud = hud
         if !driver.isFrozen {
@@ -417,7 +451,8 @@ final class GameSession {
     private func finishForPlayer(showsAt: Date?) {
         if !playerDone {
             playerDone = true
-            isEasing = false
+            isVoiceOverEasing = false
+            isGestureEasing = false
             finishedAt = showsAt
         }
         if showsAt == nil { finishedAt = nil; showsResults = true }

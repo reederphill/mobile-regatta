@@ -2,7 +2,8 @@ import SwiftUI
 import RegattaCore
 
 /// The race HUD (#114, #15): the clock and your place top left, the ground wind top centre, the course-up minimap top
-/// right, and one notice line under them. Nothing else: no speed, no instruments, no start aids, no shadow readout.
+/// right, and one notice line under them. Nothing else: no start aids, no shadow readout; the speed and apparent wind
+/// are the bottom row's (#457, `RaceControls`).
 /// Its colours keep to the reserved-colour rule (#22, G7): the clock is the cue yellow in the start sequence and the
 /// countdown to the close, and everything else is white on translucent black. Nothing reads by red or green (#5,
 /// #15): a notice's tone is its symbol. Under the clock and place, from the gun to the close, the live leaderboard
@@ -15,6 +16,11 @@ struct HUDView: View {
     var heading: () -> Double = { 0 }
     /// Stops the per-frame redraw while the race is paused.
     var isPaused = false
+    /// A frozen render fixture: the leaderboard holds still as in a pause, but the wind arrow keeps reading `heading`
+    /// every frame. A fixture refreshes the HUD once, as its session is made, before the scene's first settled frame
+    /// turns the camera; an arrow that stopped there would show whichever heading its last read caught, which hangs
+    /// on the frame rate and so differs by thermal tier (#127, #467).
+    var isFrozen = false
     /// Settings' Live leaderboard (#268).
     var showsLeaderboard = false
     var isLeaderboardExpanded = false
@@ -77,7 +83,7 @@ struct HUDView: View {
                 .onTapGesture(perform: toggleLeaderboard)
                 .accessibilityHidden(true)
                 .padding(.top, HUDLayout.placeTop)
-            LeaderboardView(state: hud.leaderboard, isExpanded: isLeaderboardExpanded, isPaused: isPaused,
+            LeaderboardView(state: hud.leaderboard, isExpanded: isLeaderboardExpanded, isPaused: isPaused || isFrozen,
                             toggle: toggleLeaderboard)
                 .padding(.top, HUDLayout.boardTop)
         }

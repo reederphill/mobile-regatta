@@ -337,10 +337,13 @@ import RegattaCore
     }
 
     /// #228's words come from your boat's autohelm in the driver's frame as the call is consumed: holding, they show;
-    /// with the rudder held off centre (no autohelm), the rule's plain words do.
+    /// with the rudder held off centre (no autohelm), the rule's plain words do. On skiff@6 (#437), whose autohelm holds a
+    /// centred rudder.
     @Test func sessionReadsTheFramesAutohelmForKeepClearWords() throws {
         for holding in [true, false] {
-            let driver = PracticeDriver(config: Self.config)
+            var config = Self.config
+            config.files = try HintTriggerTests.autohelmOnFiles()
+            let driver = PracticeDriver(config: config)
             let session = GameSession(driver: driver, roster: driver.roster)
             session.now = { Self.t0 }
             let me = driver.myBoatIndex

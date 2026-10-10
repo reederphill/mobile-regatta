@@ -5,5 +5,5 @@
   "vision" : "none",
   "view" : "courseUp",
   "ruleCues" : true,
-  "hud" : { "seat" : 1, "hint" : "red_glow" }
+  "hud" : { "seat" : 2, "hint" : "red_glow" }
 }

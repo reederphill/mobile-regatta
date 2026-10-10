@@ -100,8 +100,8 @@ struct RaceView: View {
             .ignoresSafeArea()
     }
 
-    /// A frozen render fixture (#62): the scene, and the HUD if the fixture asks for it (#114), never the
-    /// controls, so a UI test's screenshot of `render-fixture` is the render and nothing else. Its
+    /// A frozen render fixture (#62): the scene, and the HUD if the fixture asks for it (#114) with the bottom row's
+    /// instruments if it asks for them too (#457), never the controls, so a UI test's screenshot of `render-fixture` is the render and nothing else. Its
     /// accessibility value is `bottomInset`, the safe-area inset at the bottom of the race rect in points: the
     /// home-indicator band, which the UI tests leave out of the diff because the system dims and hides the
     /// indicator on its own timer.
@@ -110,6 +110,12 @@ struct RaceView: View {
             scene
             if session.showsFixtureHUD {
                 hudView
+            }
+            if session.showsFixtureInstruments {
+                VStack {
+                    Spacer()
+                    RaceControls.fixtureRow(hud: session.hud)
+                }
             }
         }
             .accessibilityElement()
@@ -124,6 +130,10 @@ struct RaceView: View {
             scene
                 // In the scene view's own points, where the scene reads the touches (#112).
                 .overlay { TillerIndicator(knob: session.tillerKnob).ignoresSafeArea() }
+                // VoiceOver can't make the ease gesture (#453): the water's Ease action toggles it, like `race-ease`.
+                .accessibilityElement()
+                .accessibilityLabel("Water")
+                .accessibilityAction(named: "Ease") { session.toggleEase() }
 
             if session.showsEdgeLabels {
                 EdgeLabels()
@@ -207,7 +217,7 @@ struct RaceView: View {
     /// open the board (#268).
     private var hudView: some View {
         HUDView(hud: session.hud, notice: session.notice, heading: { [scene = session.scene] in scene.viewHeading },
-                isPaused: session.isPaused || session.driver.isFrozen,
+                isPaused: session.isPaused, isFrozen: session.driver.isFrozen,
                 showsLeaderboard: session.controls.showsLeaderboard,
                 isLeaderboardExpanded: session.isLeaderboardExpanded,
                 toggleLeaderboard: { [session] in session.toggleLeaderboard() })

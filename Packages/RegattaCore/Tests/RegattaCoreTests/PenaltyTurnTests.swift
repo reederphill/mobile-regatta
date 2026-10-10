@@ -174,12 +174,14 @@ func openWaterPenaltyRules(_ stacking: RulesConfig.StackedPenaltyDeadlines) -> R
     }
 
     /// The owner (#89): a skiff's 360 shouldn't take 14–22 s, as skiff@1's did. On skiff@2, skiff@3 (#263) and skiff@4, skiff@5
-    /// (#298) and skiff@6 (#377, the default), a clean turn, the rudder hard over from the call in open water, is served in about 10 s, and within 11 s,
+    /// (#298) and skiff@6 (#377; the default skiff@7, #437, turns as it does), a clean turn, the rudder hard over from the call in open water, is served in about 10 s, and within 11 s,
     /// at 8, 12 and 16 kn, whichever way round she turns it.
     @Test(arguments: [8.0, 12, 16])
     func skiffCleanTurnTakesAboutTenSeconds(knots: Double) throws {
+        // skiff@6, whose autohelm holds her placed angle before the call (`race`); the default, skiff@7 (#437), is
+        // skiff@6 with the autohelm off a centred rudder, which a rudder held hard over never reads.
         let skiff = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.version).ref
-        #expect(skiff == RaceFiles.defaults.boatClass.ref && skiff.version == 6)
+        #expect(skiff.version == 6)
         for rudder in [1.0, -1.0] {
             let race = try race(boatClass: skiff, wind: steadyWind(knots: knots))
             let call = race.tick

@@ -212,7 +212,8 @@ final class HintEngine {
         guard canPick || !spent.isEmpty else { return nil }
         lastEvaluated = now
         let snapshot = HintSnapshot(world: world, observations: observations, showsLaylines: showsLaylines,
-                                    isFirstRace: isFirstRace, lettingGoRetired: progress.isRetired(.lettingGo),
+                                    isFirstRace: isFirstRace || isFirstRaceOnDevice,
+                                    lettingGoRetired: progress.isRetired(.lettingGo),
                                     tuning: thresholds)
         var chosen: (hint: Hint, leader: HintTarget?, held: Bool)?
         for hint in catalogue {

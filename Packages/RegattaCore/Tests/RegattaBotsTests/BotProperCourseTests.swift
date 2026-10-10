@@ -22,7 +22,8 @@ extension BotConductTests {
 
         init(seed: UInt64, shift: Double, restricted: Bool, abeam: Double = 2, fromMark: Double? = nil,
              ahead: Double = 0) throws {
-            let probe = botRace(seats: [.bot, .bot], seed: seed)
+            // skiff@6: the scenario has the autohelm hold her angle through the shift (#437).
+            let probe = try botRace(seats: [.bot, .bot], seed: seed, boatClass: BotHelmTests.autohelmOn().ref)
             let c = probe.course
             let leg = try #require(c.legs.firstIndex(of: .round(CourseLayout.offsetIndex)))
             let windward = c.elements[CourseLayout.windwardIndex].marks[0].position

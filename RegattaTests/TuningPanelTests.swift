@@ -153,7 +153,7 @@ import RegattaCore
         defer { try? FileManager.default.removeItem(at: root) }
         let ids = Set(model.groups.flatMap(\.sliders).map(\.id))
         for gone in ["/windShadow/lossCloseIn", "/windShadow/coneWidthAtEndHullLengths", "/windShadow/backwind/loss"] {
-            #expect(!ids.contains("boatClass:" + gone), "\(gone) moves nothing in skiff@6")
+            #expect(!ids.contains("boatClass:" + gone), "\(gone) moves nothing in skiff@7")
         }
         model.set(try slider("boatClass:/windShadow/ribbons/peakLoss", in: model), to: 0.3)
         model.set(try slider("boatClass:/windShadow/ribbons/buildSeconds", in: model), to: 1.5)
@@ -381,9 +381,9 @@ import RegattaCore
     }
 
     /// #436: the Steering group, first, holds the Auto tiller, a 0/1 slider on the class's
-    /// `steering.autohelm.holdsWhenCentred` (#434). The default class leaves it out, so it reads 1 (on); 0 sails a
-    /// tuned copy from the next race whose autohelm doesn't hold a centred rudder, every boat's, and exports as a
-    /// schema-4 next version; back to 1 is untuned again.
+    /// `steering.autohelm.holdsWhenCentred` (#434). The default class, skiff@7 (#437), sets it false, so it reads 0
+    /// (off); 1 sails a tuned copy from the next race whose autohelm holds a centred rudder, every boat's, and exports as
+    /// a schema-4 next version; back to 0 is untuned again.
     @Test func autoTillerSliderTargetsClassValue() throws {
         let (model, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -391,22 +391,21 @@ import RegattaCore
         let tiller = try slider("boatClass:/steering/autohelm/holdsWhenCentred", in: model)
         #expect(group.id == "steering" && group.title == "Steering" && group.applies == .nextRace)
         #expect(group.sliders.map(\.id) == [tiller.id] && tiller.range == 0...1 && tiller.step == 1)
-        #expect(model.fileValue(tiller) == 1 && model.value(tiller) == 1 && !model.tuning.isTuned)
+        #expect(model.fileValue(tiller) == 0 && model.value(tiller) == 0 && !model.tuning.isTuned)
 
-        model.set(tiller, to: 0)
-        #expect(model.value(tiller) == 0 && model.isChanged(tiller) && model.problems.isEmpty)
+        model.set(tiller, to: 1)
+        #expect(model.value(tiller) == 1 && model.isChanged(tiller) && model.problems.isEmpty)
         var config = Self.config
         config.files = model.practiceFiles()
         #expect(config.files.boatClass.tune == 1)
         let session = GameSession(config: config)
-        #expect(try !#require(session.driver as? PracticeDriver).boatClass.steering.autohelm.holdsWhenCentred)
+        #expect(try #require(session.driver as? PracticeDriver).boatClass.steering.autohelm.holdsWhenCentred)
 
         let urls = try model.exportFiles()
         let skiff = try BoatClassFile(data: Data(contentsOf: urls[0]))
-        #expect(skiff.header.schemaVersion == 4 && !skiff.content.steering.autohelm.holdsWhenCentred)
-        #expect(skiff.header.placeholders.last == "/steering/autohelm/holdsWhenCentred")
+        #expect(skiff.header.schemaVersion == 4 && skiff.content.steering.autohelm.holdsWhenCentred)
 
-        model.set(tiller, to: 1)
+        model.set(tiller, to: 0)
         #expect(!model.tuning.isTuned && model.practiceFiles().boatClass.tune == nil)
         // Back at the file's value, the race sails the bundled files byte for byte: no readied copy.
         let untouched = model.practiceFiles()

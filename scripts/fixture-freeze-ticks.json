@@ -6,25 +6,34 @@
         "afterFirstFinish": true, "racing": true, "ghostsInView": 1, "racingInView": 3, "sailsWorkingInView": 1
     },
     {
+        "fixtures": ["hud-racing", "hud-instruments", "hud-leaderboard", "hud-leaderboard-deuteranopia",
+                     "hud-leaderboard-greyscale", "hud-leaderboard-protanopia", "hud-leaderboard-tritanopia",
+                     "hud-leaderboard-washout", "hud-leaderboard-expanded"],
+        "log": "fleet.racelog.json",
+        "leg": 0, "racing": true, "racingInView": 5, "place": [3, 6]
+    },
+    {
         "fixtures": ["rules-call", "rules-call-deuteranopia", "rules-call-greyscale", "rules-call-protanopia",
                      "rules-call-tritanopia", "rules-call-washout"],
-        "log": "fleet.racelog.json",
-        "leg": 0, "yourCall": "10", "liveRules": ["21.2", "10"], "yourTurn": "either", "sailsWorkingInView": 1
+        "log": "rules-call.racelog.json",
+        "leg": 0, "yourCall": "10", "liveRules": ["21.2", "10"], "yourTurn": "either", "sailsWorkingInView": 1, "view": [17, 17],
+        "glows": ["giveWay"]
     },
     {
         "fixtures": ["rules-penalty", "rules-penalty-deuteranopia", "rules-penalty-greyscale", "rules-penalty-protanopia",
                      "rules-penalty-tritanopia", "rules-penalty-washout"],
-        "log": "fleet.racelog.json", "seat": 0,
-        "leg": 0, "yourCall": "10", "liveRules": ["10"], "yourTurn": "owed", "sailsWorkingInView": 1
+        "log": "rules-penalty.racelog.json", "seat": 0,
+        "leg": 0, "yourCall": "10", "liveRules": ["10"], "yourTurn": "owed", "sailsWorkingInView": 1, "view": [17, 17],
+        "glows": ["giveWay", "hasRight"]
     },
     {
         "fixtures": ["cues", "cues-deuteranopia", "cues-greyscale", "cues-protanopia", "cues-tritanopia", "cues-washout"],
-        "log": "fleet.racelog.json",
-        "leg": 0, "racing": true, "groove": "pinching", "markInView": false, "sailsWorkingInView": 2
+        "log": "cues.racelog.json",
+        "leg": 0, "racing": true, "groove": "pinching", "grooveDegrees": [2, 15], "markInView": false, "sailsWorkingInView": 2
     },
     {
         "fixtures": ["cues-footed"],
-        "log": "fleet.racelog.json",
-        "leg": 0, "racing": true, "groove": "footing", "markInView": false, "sailsWorkingInView": 2
+        "log": "cues.racelog.json",
+        "leg": 0, "racing": true, "groove": "footing", "grooveDegrees": [2, 15], "markInView": false, "sailsWorkingInView": 2
     }
 ]

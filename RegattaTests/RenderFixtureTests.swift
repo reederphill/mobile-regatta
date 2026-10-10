@@ -158,8 +158,8 @@ import UIKit
         #expect(session.scene.showsHintLeader)
     }
 
-    /// The rule-cue fixtures (#123) through every filter, on the fleet's log (#377: your port-starboard call on the first
-    /// beat): `rules-call` draws two rule-call lines, the arc counting your started turn's complete deadline and glows;
+    /// The rule-cue fixtures (#123) through every filter, each on its own scene's log (#466; #377: your port-starboard
+    /// call before the gun): `rules-call` draws two rule-call lines, the arc counting your started turn's complete deadline and glows;
     /// `rules-penalty` your unstarted turn's arc, both glows and the HUD's live Turn notice. Both show a backwind wedge
     /// (#377). Every older fixture draws no rule cue, so its reference doesn't move.
     @Test func ruleFixturesShowTheRuleCues() throws {
@@ -194,7 +194,9 @@ import UIKit
         #expect(penalty.scene.shownGlows.contains { $0?.kind == .giveWay })
         #expect(penalty.scene.shownGlows.contains { $0?.kind == .hasRight })
         #expect(penalty.showsFixtureHUD)
-        #expect(penalty.notice?.kind == .penalty && penalty.notice?.text == "Turn · 20s / 40s")
+        // Unstarted: both clocks, to start and to complete (`PenaltyReadout.noticeText`), counting from the scene's call.
+        let turn = try #require(penalty.notice?.kind == .penalty ? penalty.notice?.text : nil)
+        #expect(turn.hasPrefix("Turn · ") && turn.contains(" / "), "\(turn)")
         #expect(Self.wedgesOnScreen(penalty.scene) >= 1, "no backwind wedge in view")
 
         for name in ["prestart", "fleet", "cues", "hud-prestart", "hud-racing"] {
@@ -204,7 +206,30 @@ import UIKit
         }
     }
 
-    /// The live leaderboard fixtures (#268): compact through every filter, and tapped open, on `hud-racing`'s tick.
+    /// The instruments fixture (#457) is `hud-racing` with the bottom row's speed and apparent wind; every older HUD
+    /// fixture draws without them, so its reference doesn't move. A frozen fixture shows the raw reading (its first).
+    @Test func instrumentsFixtureShowsTheInstruments() throws {
+        let (fixture, log) = try RenderFixture.load(named: "hud-instruments", in: Self.fixtures)
+        let (racing, _) = try RenderFixture.load(named: "hud-racing", in: Self.fixtures)
+        var expected = racing
+        expected.hud?.instruments = true
+        #expect(fixture == expected)
+        let session = try GameSession(fixture: fixture, log: log)
+        #expect(session.showsFixtureInstruments)
+        let model = HUDModel(session.hud)
+        #expect(model.showsInstruments)
+        #expect(session.hud.shownInstruments == session.hud.instruments)
+        #expect(session.hud.instruments.speedKnots > 1 && session.hud.instruments.apparentKnots > 1)
+        #expect(model.apparentAngleText.hasSuffix("port") || model.apparentAngleText.hasSuffix("starboard"))
+
+        for name in ["hud-prestart", "hud-racing", "hud-ocs", "hud-afterfirstfinish", "hud-leaderboard", "hud-hint-leader"] {
+            let (older, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            #expect(try !GameSession(fixture: older, log: log).showsFixtureInstruments, "\(name)")
+        }
+    }
+
+    /// The live leaderboard fixtures (#268): compact through every filter, and tapped open, on `hud-racing`'s tick (its
+    /// row in scripts/fixture-freeze-ticks.json: racing on the first beat among the fleet, you 3rd to 6th, #467).
     /// The board is opt-in, so #114's HUD fixtures draw without it and keep their references.
     @Test func leaderboardFixturesShowTheBoard() throws {
         let (compact, log) = try RenderFixture.load(named: "hud-leaderboard", in: Self.fixtures)
@@ -212,14 +237,29 @@ import UIKit
         #expect(session.controls.showsLeaderboard && !session.isLeaderboardExpanded)
         let board = session.hud.leaderboard
         #expect(board.isVisible)
-        let lines = board.entries(expanded: false).map { entry -> String in
+        // The board's shape, not its numbers, so a re-record (`scripts/record-fixtures.sh`) needs no edit here: the whole
+        // fleet ranked, and compact lines of the leader first, the boat ahead of you, you (starred, not leading, so the
+        // board shows a gap) and the boat behind, in place order, with a separator wherever the places skip.
+        #expect(board.rows.count == session.driver.renderWorld.boats.count)
+        let me = try #require(board.me, "you're in the standings")
+        #expect(me.place > 1, "you lead at the fixture's tick, so the board shows no gap to the leader")
+        let entries = board.entries(expanded: false)
+        let rows = entries.compactMap { entry -> LeaderboardState.Row? in
+            if case .row(let row) = entry { row } else { nil }
+        }
+        let lines = entries.map { entry -> String in
             switch entry {
             case .row(let row): "\(row.place):\(row.gap.text)\(row.isMe ? "*" : "")"
             case .separator: "sep"
             }
         }
-        // The log's own seat, 4th of 6 at the tick: the leader, a skip, the boat ahead, you and the boat behind.
-        #expect(lines == ["1:Leader", "sep", "3:+32 m", "4:+72 m*", "5:+84 m"])
+        let wanted = Set([1, me.place - 1, me.place, me.place + 1].filter { (1...board.rows.count).contains($0) })
+        #expect(rows.map(\.place) == wanted.sorted(), "\(lines)")
+        #expect(rows.first?.place == 1 && rows.first?.gap == .leader && rows.filter(\.isMe).map(\.place) == [me.place], "\(lines)")
+        let gaps = rows.dropFirst().map { row -> Int? in if case .metres(let metres) = row.gap { metres } else { nil } }
+        #expect(gaps.allSatisfy { $0 != nil } && gaps.map { $0 ?? 0 } == gaps.map { $0 ?? 0 }.sorted(), "\(lines)")
+        let separators = entries.indices.filter { if case .separator = entries[$0] { true } else { false } }.count
+        #expect(separators == zip(rows, rows.dropFirst()).filter { $1.place > $0.place + 1 }.count, "\(lines)")
 
         for vision in VisionFilter.allCases where vision != .none {
             let (fixture, _) = try RenderFixture.load(named: "hud-leaderboard-\(vision.rawValue)", in: Self.fixtures)
@@ -284,16 +324,20 @@ import UIKit
         }
     }
 
-    /// The fleet fixture (#117) is a bot race recorded on skiff@6, the default class (re-recorded on seed 19 for #377, so
-    /// the references draw its backwind wedge; a log replays on the class it names, so it stays skiff@6 when the default
-    /// moves on), frozen after the first finish and before the close, with a ghost, at least three racing boats and a
-    /// backwind wedge in the boat camera's view; its five twins are the same frame through each other filter.
+    /// The fleet fixture (#117) is its own scene's bot race (#466, `scripts/fixture-scenes.json`: recorded by
+    /// `scripts/record-fixtures.sh --record` on the default class, your seat heading up once a ghost is in view), frozen
+    /// after the first finish and before the close, with a ghost, at least three racing boats and a backwind wedge in
+    /// the boat camera's view; its five twins are the same frame through each other filter.
     @Test func fleetFixtureShowsAGhostAmongTheFleet() throws {
         let (fixture, log) = try RenderFixture.load(named: "fleet", in: Self.fixtures)
         #expect(fixture.camera == .boat && fixture.vision == VisionFilter.none)
-        // Its recorded class, the default when it was recorded (#377). Re-recording it on a later default moves every
-        // fleet, cues, hud and rules reference that shares it, which is the owner's call (#354).
-        #expect(log.header.setup.boatClass.id == "skiff" && log.header.setup.boatClass.version == 6)
+        // Every scene log sails the default class (#466): after a default switch `scripts/record-fixtures.sh --record`
+        // re-records them all, and CI's renders of the new framing are the owner's to adopt (#354).
+        #expect(log.header.setup.boatClass == RaceFiles.defaults.boatClass.ref)
+        for scene in ["rules-call", "rules-penalty", "cues"] {
+            let (_, sceneLog) = try RenderFixture.load(named: scene, in: Self.fixtures)
+            #expect(sceneLog.header.setup.boatClass == RaceFiles.defaults.boatClass.ref, "\(scene)")
+        }
         let world = try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
         #expect(!world.frame.isOver)
         #expect(!world.isGhost(ofSeat: world.myBoatIndex))
