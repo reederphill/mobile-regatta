@@ -214,6 +214,33 @@ private func file(_ id: String, _ version: Int, _ text: String) -> (FileRef, Dat
         }
     }
 
+    /// #146 (R11): a session keeps the creation time it was given; trimming a player's sessions deletes the expired
+    /// ones and all but the newest live ones, never the one it protects, and leaves other players' alone.
+    @Test func testSessionTrimKeepsTheNewestAndTheProtectedOne() async throws {
+        try await TestDatabase.withMigratedSchema { database in
+            let players = PlayerStore(database)
+            try await players.signIn(teamPlayerID: "T:1", gamePlayerID: "G:1", displayName: "One")
+            try await players.signIn(teamPlayerID: "T:2", gamePlayerID: "G:2", displayName: "Two")
+            let sessions = SessionStore(database)
+            let start = Date(timeIntervalSince1970: 1_791_460_800)
+            var made: [Session] = []
+            for index in 0..<4 {
+                made.append(try await sessions.create(playerID: "T:1", tokenHash: Data([UInt8(index)]), expiresAt: start + 3_600,
+                                                      createdAt: start + Double(index)))
+            }
+            #expect(made[2].createdAt == start + 2)
+            let expired = try await sessions.create(playerID: "T:1", tokenHash: Data([40]), expiresAt: start + 10, createdAt: start + 5)
+            let other = try await sessions.create(playerID: "T:2", tokenHash: Data([50]), expiresAt: start + 3_600, createdAt: start)
+            // Protect the oldest: it stays, with the newest other one; the middle two and the expired one go.
+            let deleted = try await sessions.trim(playerID: "T:1", keep: 2, protecting: made[0].id, at: start + 60)
+            #expect(deleted == 3)
+            let left = try await sessions.sessions(playerID: "T:1").map(\.id)
+            #expect(Set(left) == [made[0].id, made[3].id])
+            #expect(!left.contains(expired.id))
+            #expect(try await sessions.sessions(playerID: "T:2").map(\.id) == [other.id])
+        }
+    }
+
     /// Terms acceptances record player, version and time; the newest version counts, and re-accepting keeps the first time.
     @Test func testTermsAcceptancesRecordPlayerVersionAndTime() async throws {
         try await TestDatabase.withMigratedSchema { database in

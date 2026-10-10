@@ -105,8 +105,25 @@ extension QueueState {
 // MARK: - Race session
 
 extension HandOff {
-    public init(wire: WireHandOff) { self.init(raceID: RaceID(wire.raceID), token: RaceToken(bytes: wire.token)) }
-    public var wire: WireHandOff { WireHandOff(raceID: raceID.rawValue, token: token.bytes) }
+    public init(wire: WireHandOff) {
+        self.init(raceID: RaceID(wire.raceID), token: RaceToken(bytes: wire.token), briefing: wire.briefing.map(BriefingPayload.init(wire:)))
+    }
+
+    public var wire: WireHandOff { WireHandOff(raceID: raceID.rawValue, token: token.bytes, briefing: briefing?.wire) }
+}
+
+extension BriefingPayload {
+    public init(wire: WireBriefing) {
+        self.init(setup: wire.setup, tide: wire.tide,
+                  fleet: wire.fleet.map { BriefingSeat(name: $0.name, isBot: $0.isBot, livery: $0.livery, rating: $0.rating) },
+                  yourSeat: wire.yourSeat, briefingSeconds: wire.briefingSeconds, gunInSeconds: wire.gunInSeconds)
+    }
+
+    public var wire: WireBriefing {
+        WireBriefing(setup: setup, tide: tide,
+                     fleet: fleet.map { WireBriefingSeat(name: $0.name, isBot: $0.isBot, livery: $0.livery, rating: $0.rating) },
+                     yourSeat: yourSeat, briefingSeconds: briefingSeconds, gunInSeconds: gunInSeconds)
+    }
 }
 
 extension RejoinOffer {

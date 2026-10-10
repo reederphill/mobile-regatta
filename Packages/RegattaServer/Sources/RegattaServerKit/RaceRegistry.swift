@@ -20,14 +20,14 @@ public actor RaceRegistry {
     }
 
     /// Starts driving `session` on the wall clock; it leaves the registry when it closes.
-    /// `onClose` hears how it closed.
-    public func start(_ session: RaceSession, onClose: (@Sendable (RaceOutcome) -> Void)? = nil) throws(StartError) {
+    /// `onClose` hears how it ended (#148: the close pipeline, `RaceLifecycle`).
+    public func start(_ session: RaceSession, onClose: (@Sendable (RaceEnd) -> Void)? = nil) throws(StartError) {
         guard races.count < maxRaces else { throw .full }
         races[session.id] = session
         drivers[session.id] = Task { [weak self] in
-            let outcome = await session.run()
+            let end = await session.run()
             await self?.remove(session.id)
-            onClose?(outcome)
+            onClose?(end)
         }
     }
 

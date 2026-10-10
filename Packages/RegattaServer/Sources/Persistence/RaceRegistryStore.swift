@@ -15,6 +15,23 @@ public struct RaceRecord: Sendable, Equatable {
     public let endedAt: Date?
     /// The data files the race names at race start (#32), by id.
     public let files: [DataFileKey]
+    /// Set when it closes (#148): `Race.digest()` at the close, the simulation version it sailed and the server's
+    /// toolchain. Nil while running and for a cancelled race.
+    public var digest: UInt64? = nil
+    public var simulationVersion: String? = nil
+    public var toolchain: String? = nil
+}
+
+/// A player's seat in a registered race (#148).
+public struct RaceSeatHolder: Sendable, Equatable {
+    /// The player's `team_player_id`: she must be stored.
+    public let playerID: String
+    public let seat: Int
+
+    public init(playerID: String, seat: Int) {
+        self.playerID = playerID
+        self.seat = seat
+    }
 }
 
 /// The race registry (#30): each race the server starts, its state and the data files it names.
@@ -24,9 +41,9 @@ public struct RaceRegistryStore: Sendable {
 
     /// Registers a running race naming `files`, each of which must already be in the data-file store with that
     /// hash (the server names each file's hash at race start, #32). A tuned copy, or a file id named twice, is refused
-    /// before anything is written.
+    /// before anything is written. `players` are its human seats' players (#148), each stored.
     @discardableResult
-    public func create(id: UUID = UUID(), files: [FileRef] = []) async throws -> RaceRecord {
+    public func create(id: UUID = UUID(), files: [FileRef] = [], players: [RaceSeatHolder] = []) async throws -> RaceRecord {
         var named: Set<String> = []
         for file in files {
             guard file.tune == nil else { throw PersistenceError.tunedFile(file.key) }
@@ -47,6 +64,11 @@ public struct RaceRegistryStore: Sendable {
                 try await connection.query("""
                     INSERT INTO race_files (race_id, file_id, file_version) VALUES (\(id), \(file.id), \(file.version))
                     """, logger: database.logger)
+            }
+            for player in players {
+                try await connection.query(
+                    "INSERT INTO race_players (race_id, player_id, seat) VALUES (\(id), \(player.playerID), \(player.seat))",
+                    logger: database.logger)
             }
             return try await Self.record(id, on: connection, logger: database.logger)!
         }
@@ -100,6 +122,7 @@ public struct RaceRegistryStore: Sendable {
             guard state == .cancelled else {
                 throw PersistenceError.raceNotInState(id, expected: .cancelled, actual: state)
             }
+            // Its players and any results go with it (ON DELETE CASCADE); a cancelled race has no results.
             try await connection.query("DELETE FROM race_logs WHERE race_id = \(id)", logger: database.logger)
             try await connection.query("DELETE FROM races WHERE id = \(id)", logger: database.logger)
         }
@@ -126,22 +149,23 @@ public struct RaceRegistryStore: Sendable {
         throw PersistenceError.raceNotFound(id)
     }
 
-    private static func record(_ id: UUID, on connection: PostgresConnection, logger: Logger) async throws -> RaceRecord? {
+    static func record(_ id: UUID, on connection: PostgresConnection, logger: Logger) async throws -> RaceRecord? {
         let rows = try await connection.query(
-            "SELECT state, created_at, ended_at FROM races WHERE id = \(id)", logger: logger)
-        var found: (RaceState, Date, Date?)?
-        for try await (state, created, ended) in rows.decode((String, Date, Date?).self) {
+            "SELECT state, created_at, ended_at, digest, sim_version, toolchain FROM races WHERE id = \(id)", logger: logger)
+        var found: (RaceState, Date, Date?, Int64?, String?, String?)?
+        for try await (state, created, ended, digest, version, toolchain) in rows.decode((String, Date, Date?, Int64?, String?, String?).self) {
             guard let state = RaceState(rawValue: state) else { continue }
-            found = (state, created, ended)
+            found = (state, created, ended, digest, version, toolchain)
         }
-        guard let (state, created, ended) = found else { return nil }
+        guard let (state, created, ended, digest, version, toolchain) = found else { return nil }
         let files = try await connection.query(
             "SELECT file_id, file_version FROM race_files WHERE race_id = \(id) ORDER BY file_id", logger: logger)
         var keys: [DataFileKey] = []
         for try await (fileID, version) in files.decode((String, Int).self) {
             keys.append(DataFileKey(id: fileID, version: version))
         }
-        return RaceRecord(id: id, state: state, createdAt: created, endedAt: ended, files: keys)
+        return RaceRecord(id: id, state: state, createdAt: created, endedAt: ended, files: keys,
+                          digest: digest.map { UInt64(bitPattern: $0) }, simulationVersion: version, toolchain: toolchain)
     }
 }
 

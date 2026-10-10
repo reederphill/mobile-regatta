@@ -16,12 +16,15 @@ import Testing
         }
     }
 
-    /// Acceptance (#145): the Identity and Terms contract suites through the runner against the server on Postgres.
+    /// Acceptance (#145, #148): the served contract suites (Identity, Terms, Queue, RaceSession) through the runner against the
+    /// server on Postgres.
     @Test func identityAndTermsSuitesPassAgainstTheServerOnPostgres() async throws {
         try await EndpointDatabase.withMigratedSchema { database in
             let config = ServiceEndpointContractTests.config()
             let server = try await RegattaHTTPServer.start(
-                config: config, services: try ServiceEndpoint.make(config: config, store: PostgresAccountStore(database)))
+                config: config, services: try ServiceEndpoint.make(config: config, store: PostgresAccountStore(database),
+                                                                   archive: PostgresRaceArchive(database),
+                                                                   restrictions: PlayerRestrictionStore(database)))
             do {
                 try await ServiceEndpointContractTests.run(ServiceEndpointContractTests.served, against: "ws://127.0.0.1:\(server.port)")
             } catch {

@@ -35,11 +35,18 @@ public struct ServiceEndpointConfig: Sendable {
     public var maxOpenStreamsBeforeSignIn: Int
     /// The player's last online session time (G8) moves on lobby, queue or race use at most this often.
     public var sessionTouchInterval: TimeInterval
+    /// A connection past `Hello` that isn't signed in this long after it (or after signing out) is closed (#146, R4).
+    public var signInDeadline: Duration
+    /// A connection with no frame either way (a WebSocket ping counts) for this long is closed (#146, R4).
+    public var idleTimeout: Duration
     public var serverBuild: String
 
     public init(termsVersion: Int = 1, sessionLifetime: TimeInterval = 30 * 86_400, streamIdleTimeout: Duration = .seconds(60),
                 frameCap: Int = serviceFrameLimit, preSignInFrameCap: Int = 1 << 14, maxOpenStreams: Int = 16,
-                maxOpenStreamsBeforeSignIn: Int = 4, sessionTouchInterval: TimeInterval = 3_600, serverBuild: String = "dev") {
+                maxOpenStreamsBeforeSignIn: Int = 4, sessionTouchInterval: TimeInterval = 3_600,
+                signInDeadline: Duration = .seconds(10), idleTimeout: Duration = .seconds(120), serverBuild: String = "dev") {
+        self.signInDeadline = signInDeadline
+        self.idleTimeout = idleTimeout
         self.termsVersion = termsVersion
         self.sessionLifetime = sessionLifetime
         self.streamIdleTimeout = streamIdleTimeout
@@ -54,6 +61,11 @@ public struct ServiceEndpointConfig: Sendable {
 
 /// The services behind the gate, one set per signed-in connection: later tickets (#146 on) fill these in. A request
 /// to one that isn't there closes the connection, as on the loopback.
+///
+/// Every stream a backend returns is read one item per client `StreamNext`, so a client that stops reading leaves
+/// the items in the stream's own buffer: each must be bounded (#146, R6). A stream of states coalesces to the
+/// latest (`bufferingNewest(1)`), a stream of events keeps a fixed number (`bufferingNewest(n)`); none is unbounded.
+/// A backend that is also `ConnectionScoped` hears when its connection ends.
 public struct ServiceBackends: Sendable {
     public typealias Factory<Service> = @Sendable (AccountPlayer) -> Service?
 
@@ -80,16 +92,29 @@ public struct ServiceBackends: Sendable {
     public static let none = ServiceBackends()
 }
 
+/// A backend that holds something for its connection (a place in the queue): told once when the connection ends,
+/// or when the connection signs in as someone else.
+public protocol ConnectionScoped: Sendable {
+    func connectionEnded() async
+}
+
 /// Everything a service connection needs from the server.
 public struct ServiceEndpoint: Sendable {
     public let config: ServiceEndpointConfig
     public let sessions: SessionAuthority
     public let backends: ServiceBackends
+    /// The global queue (#146), when the server has one: the server drives it, and `POST /dev/situation` arranges it.
+    public let matchmaker: QueueMatchmaker?
+    /// The queue's races from fleet lock to the close (#148): race connections ask it about races that aren't running.
+    public let lifecycle: RaceLifecycle?
 
-    public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none) {
+    public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
+                matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
+        self.matchmaker = matchmaker
+        self.lifecycle = lifecycle
     }
 
     public var store: any AccountStore { sessions.store }
@@ -124,6 +149,11 @@ public actor ServiceConnectionHandler {
     private var lastTouch: Date?
     /// Mirrors `identity.signedIn != nil`, for the frame and stream caps.
     private var isSignedIn = false
+    /// Closes a connection that isn't signed in `signInDeadline` after `Hello` or a sign-out (R4).
+    private var signInDeadline: Task<Void, Never>?
+    /// Closes a connection with no frame either way for `idleTimeout` (R4).
+    private var idleWatch: Task<Void, Never>?
+    private var lastActivity = ContinuousClock.now
 
     /// The backend services for the signed-in player, made once per session.
     private struct Backends {
@@ -133,6 +163,12 @@ public actor ServiceConnectionHandler {
         var profile: (any ProfileService)?
         var analytics: (any AnalyticsTransport)?
         var deletion: (any DataDeletionService)?
+
+        /// The ones that hold something for the connection.
+        var scoped: [any ConnectionScoped] {
+            let all: [Any?] = [queue, raceSession, lobby, profile, analytics, deletion]
+            return all.compactMap { $0 as? any ConnectionScoped }
+        }
     }
 
     public init(endpoint: ServiceEndpoint, sink: any ServiceFrameSink) {
@@ -144,6 +180,7 @@ public actor ServiceConnectionHandler {
 
     /// One frame from the client.
     public func receive(_ bytes: [UInt8]) async {
+        lastActivity = .now
         switch phase {
         case .closed: return
         case .awaitingHello: hello(bytes)
@@ -160,9 +197,21 @@ public actor ServiceConnectionHandler {
     /// The transport closed.
     public func ended() async {
         phase = .closed
-        for stream in streams.values { stream.idle?.cancel() }
-        streams = [:]
+        tearDown()
         await identity.finish()
+        for backend in backends?.scoped ?? [] { await backend.connectionEnded() }
+        backends = nil
+    }
+
+    /// A frame the handler doesn't see (a WebSocket ping) arrived: the connection isn't idle.
+    public func noteActivity() { lastActivity = .now }
+
+    /// Stops every timer and every pending read: nothing outlives the connection (R6).
+    private func tearDown() {
+        signInDeadline?.cancel()
+        idleWatch?.cancel()
+        for stream in streams.values { stream.cancel() }
+        streams = [:]
     }
 
     // MARK: Handshake
@@ -174,6 +223,42 @@ public actor ServiceConnectionHandler {
         guard SeatConnection.canSail(clientSimulationVersion: hello.simulationVersion) else { return updateRequired(.simulationVersion) }
         phase = .open
         send(.helloAck(HelloAck(serverBuild: endpoint.config.serverBuild)))
+        armSignInDeadline()
+        watchIdle()
+    }
+
+    // MARK: Deadlines (R4)
+
+    private func armSignInDeadline() {
+        signInDeadline?.cancel()
+        let deadline = endpoint.config.signInDeadline
+        signInDeadline = Task {
+            try? await Task.sleep(for: deadline)
+            guard !Task.isCancelled else { return }
+            self.signInDeadlinePassed()
+        }
+    }
+
+    private func signInDeadlinePassed() {
+        guard !isSignedIn else { return }
+        close("no sign-in in time")
+    }
+
+    private func watchIdle() {
+        let timeout = endpoint.config.idleTimeout
+        idleWatch = Task {
+            while !Task.isCancelled {
+                guard let remaining = self.idleRemaining(timeout) else { return }
+                guard remaining > .zero else { return self.close("idle") }
+                try? await Task.sleep(for: remaining)
+            }
+        }
+    }
+
+    /// How long until the connection is idle, or nil once it's closed.
+    private func idleRemaining(_ timeout: Duration) -> Duration? {
+        guard phase != .closed else { return nil }
+        return timeout - (ContinuousClock.now - lastActivity)
     }
 
     private func updateRequired(_ reason: UpdateRequired.Reason) {
@@ -196,7 +281,7 @@ public actor ServiceConnectionHandler {
         case .streamNext(let next):
             streamNext(next)
         case .streamClose(let close):
-            streams.removeValue(forKey: close.stream)?.idle?.cancel()
+            streams.removeValue(forKey: close.stream)?.cancel()
         case .identityRequest(let request):
             // The one stream a signed-out connection opens on its own: the Identity contract reads `signedOut` on it.
             if request.call == .openStateUpdates {
@@ -281,6 +366,10 @@ public actor ServiceConnectionHandler {
         }
         switch outcome {
         case .signedIn(let token, let session):
+            // A new sign-in on this connection ends the session it had (R11), unless it resumed that same one.
+            if let previous = await identity.signedIn, previous.sessionID != session.sessionID {
+                await endpoint.sessions.signOut(previous)
+            }
             await setSession(session)
             return .signedIn(token: token, player: session.gameCenterPlayer.wire)
         case .refused(let refusal):
@@ -291,10 +380,12 @@ public actor ServiceConnectionHandler {
     private func setSession(_ session: SignedInSession?) async {
         let previous = await identity.signedIn
         if previous?.player.teamPlayerID != session?.player.teamPlayerID {
+            for backend in backends?.scoped ?? [] { await backend.connectionEnded() }
             backends = session.map { Self.backends(endpoint.backends, $0.player) }
         }
         lastTouch = session.map { _ in endpoint.sessions.now() }
         isSignedIn = session != nil
+        if isSignedIn { signInDeadline?.cancel() } else if previous != nil { armSignInDeadline() }
         sink.allowFrames(upTo: isSignedIn ? endpoint.config.frameCap : endpoint.config.preSignInFrameCap)
         await identity.set(session)
     }
@@ -374,11 +465,19 @@ public actor ServiceConnectionHandler {
 
     // MARK: Streams
 
-    /// A stream the client opened: each `StreamNext` takes its next item; one read at a time.
+    /// A stream the client opened: each `StreamNext` takes its next item; one read at a time. Its read and idle
+    /// timer are cancelled when it closes, expires or the connection ends (R6): a pending read is never left
+    /// awaiting a backend stream nobody will answer for.
     private final class OpenStream: @unchecked Sendable {
         let next: @Sendable (UInt32) async -> Message?
         var reading = false
         var idle: Task<Void, Never>?
+        var read: Task<Void, Never>?
+
+        func cancel() {
+            idle?.cancel()
+            read?.cancel()
+        }
 
         init<Element: Sendable>(_ stream: AsyncStream<Element>, reply: @escaping @Sendable (UInt32, Element) -> Message) {
             let box = IteratorBox(stream.makeAsyncIterator())
@@ -402,7 +501,7 @@ public actor ServiceConnectionHandler {
         guard !stream.reading else { return close("two reads of stream \(next.stream) at once") }
         stream.reading = true
         stream.idle?.cancel()
-        Task {
+        stream.read = Task {
             let item = await stream.next(next.id)
             self.delivered(item, for: next, stream)
         }
@@ -411,6 +510,7 @@ public actor ServiceConnectionHandler {
     private func delivered(_ item: Message?, for next: StreamNext, _ stream: OpenStream) {
         guard phase == .open else { return }
         stream.reading = false
+        stream.read = nil
         guard let item, streams[next.stream] === stream else {
             if streams[next.stream] === stream { streams[next.stream] = nil }
             return reply(.streamEnd(StreamEnd(id: next.id)))
@@ -431,6 +531,7 @@ public actor ServiceConnectionHandler {
     private func expire(_ id: UInt32, _ stream: OpenStream) {
         guard streams[id] === stream, !stream.reading else { return }
         streams[id] = nil
+        stream.cancel()
     }
 
     /// Open streams, for tests.
@@ -445,12 +546,14 @@ public actor ServiceConnectionHandler {
         seq &+= 1
         guard let bytes = try? Frame(seq: seq, tick: 0, message: message).encoded() else { return close("unencodable \(message.type)") }
         guard bytes.count <= endpoint.config.frameCap else { return close("\(message.type) over the frame cap") }
+        lastActivity = .now
         sink.send(bytes)
     }
 
     private func close(_ reason: String) {
         guard phase != .closed else { return }
         phase = .closed
+        tearDown()
         sink.close(reason: reason)
     }
 }

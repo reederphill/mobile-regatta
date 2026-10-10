@@ -21,15 +21,63 @@ public struct RaceToken: Hashable, Sendable {
     public var joinRace: JoinRace { JoinRace(token: bytes) }
 }
 
-/// The player's seat in a fleet that has locked.
+/// The player's seat in a fleet that has locked, and what its briefing shows (#147; nil on a rejoin's hand-off).
 public struct HandOff: Equatable, Sendable {
     public var raceID: RaceID
     public var token: RaceToken
+    public var briefing: BriefingPayload?
 
-    public init(raceID: RaceID, token: RaceToken) {
+    public init(raceID: RaceID, token: RaceToken, briefing: BriefingPayload? = nil) {
         self.raceID = raceID
         self.token = token
+        self.briefing = briefing
     }
+}
+
+/// One boat in the briefing's fleet (#15, #16, #21).
+public struct BriefingSeat: Equatable, Sendable {
+    public var name: String
+    public var isBot: Bool
+    /// Locked at fleet lock: the player's stored livery, a bot's drawn one (#21). Sail numbers as the fleet shows them.
+    public var livery: Livery
+    /// Nil for a bot; 1500 for every human until ratings exist (#151).
+    public var rating: Int?
+
+    public init(name: String, isBot: Bool, livery: Livery, rating: Int?) {
+        self.name = name
+        self.isBot = isBot
+        self.livery = livery
+        self.rating = rating
+    }
+}
+
+/// What the 15 s online briefing shows (#130's `BriefingModel`, #15, #16), from fleet lock: the public setup (venue,
+/// conditions, class, laps, sequence: the client words the wind, shifts, puffs, current and course from its files), the
+/// tide state, the fleet, her seat and the server's timings. Never the wind seed or keys (ADR 0001), a tide graph, a
+/// course map or a numeric forecast.
+public struct BriefingPayload: Equatable, Sendable {
+    public var setup: RaceSetup
+    /// The tide state, as `RaceStart.tide` (`.none` until #78's schema 1).
+    public var tide: VersionedPayload
+    /// By seat.
+    public var fleet: [BriefingSeat]
+    public var yourSeat: Int
+    /// How long the briefing shows (15 s), then the sequence to the gun.
+    public var briefingSeconds: Int
+    /// From fleet lock to the gun (75 s).
+    public var gunInSeconds: Int
+
+    public init(setup: RaceSetup, tide: VersionedPayload = .none, fleet: [BriefingSeat], yourSeat: Int, briefingSeconds: Int, gunInSeconds: Int) {
+        self.setup = setup
+        self.tide = tide
+        self.fleet = fleet
+        self.yourSeat = yourSeat
+        self.briefingSeconds = briefingSeconds
+        self.gunInSeconds = gunInSeconds
+    }
+
+    /// Whether `seat` is hers.
+    public func isMe(_ seat: Int) -> Bool { seat == yourSeat }
 }
 
 /// The server's race clock, in race ticks (`Race.tickRate` a second), when the service last read it.

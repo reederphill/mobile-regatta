@@ -16,6 +16,8 @@ public struct AccountPlayer: Sendable, Equatable {
 public struct AccountSession: Sendable, Equatable {
     public var id: UUID
     public var playerID: String
+    /// When it was opened: its absolute lifetime runs from here (#146, R11).
+    public var createdAt: Date
     public var expiresAt: Date
     public var restrictions: SessionRestrictions
 }
@@ -31,7 +33,11 @@ public protocol AccountStore: Sendable {
     func player(teamPlayerID: String) async throws -> AccountPlayer?
     /// Records a signed-in online session (G8's retention clock).
     func touchSession(teamPlayerID: String, at time: Date) async throws
-    func createSession(playerID: String, tokenHash: Data, expiresAt: Date, restrictions: SessionRestrictions) async throws -> AccountSession
+    func createSession(playerID: String, tokenHash: Data, expiresAt: Date, restrictions: SessionRestrictions, at time: Date) async throws -> AccountSession
+    /// Caps the player's sessions: deletes its expired ones and all but the newest `keep`, never `protecting` (#146, R11).
+    func trimSessions(playerID: String, keep: Int, protecting: UUID, at time: Date) async throws
+    /// Deletes every session expired at `time`; returns how many (#146, R11).
+    func deleteExpiredSessions(at time: Date) async throws -> Int
     func session(tokenHash: Data, at time: Date) async throws -> AccountSession?
     /// Slides an unexpired session's expiry and takes the restrictions Game Center reports now.
     func refreshSession(id: UUID, expiresAt: Date, restrictions: SessionRestrictions, at time: Date) async throws -> AccountSession?
@@ -70,9 +76,17 @@ public struct PostgresAccountStore: AccountStore {
         try await players.touchSession(teamPlayerID: teamPlayerID, at: time)
     }
 
-    public func createSession(playerID: String, tokenHash: Data, expiresAt: Date, restrictions: SessionRestrictions) async throws -> AccountSession {
-        Self.session(try await sessions.create(playerID: playerID, tokenHash: tokenHash, expiresAt: expiresAt, restrictions: restrictions))
+    public func createSession(playerID: String, tokenHash: Data, expiresAt: Date, restrictions: SessionRestrictions,
+                              at time: Date) async throws -> AccountSession {
+        Self.session(try await sessions.create(playerID: playerID, tokenHash: tokenHash, expiresAt: expiresAt, restrictions: restrictions,
+                                               createdAt: time))
     }
+
+    public func trimSessions(playerID: String, keep: Int, protecting: UUID, at time: Date) async throws {
+        try await sessions.trim(playerID: playerID, keep: keep, protecting: protecting, at: time)
+    }
+
+    public func deleteExpiredSessions(at time: Date) async throws -> Int { try await sessions.deleteExpired(at: time) }
 
     public func session(tokenHash: Data, at time: Date) async throws -> AccountSession? {
         try await sessions.session(tokenHash: tokenHash, at: time).map(Self.session)
@@ -91,7 +105,8 @@ public struct PostgresAccountStore: AccountStore {
     }
 
     static func session(_ session: Session) -> AccountSession {
-        AccountSession(id: session.id, playerID: session.playerID, expiresAt: session.expiresAt, restrictions: session.restrictions)
+        AccountSession(id: session.id, playerID: session.playerID, createdAt: session.createdAt, expiresAt: session.expiresAt,
+                       restrictions: session.restrictions)
     }
 }
 
@@ -99,6 +114,9 @@ public struct PostgresAccountStore: AccountStore {
 public actor InMemoryAccountStore: AccountStore {
     private var players: [String: AccountPlayer] = [:]
     private var sessions: [Data: AccountSession] = [:]
+    /// Creation order, to break ties between sessions opened at the same time.
+    private var order: [UUID: Int] = [:]
+    private var created = 0
     private var terms: [String: Set<Int>] = [:]
     /// Each player's last online session, for tests.
     public private(set) var lastSession: [String: Date] = [:]
@@ -119,11 +137,30 @@ public actor InMemoryAccountStore: AccountStore {
 
     public func touchSession(teamPlayerID: String, at time: Date) { lastSession[teamPlayerID] = time }
 
-    public func createSession(playerID: String, tokenHash: Data, expiresAt: Date, restrictions: SessionRestrictions) throws -> AccountSession {
-        let session = AccountSession(id: UUID(), playerID: playerID, expiresAt: expiresAt, restrictions: restrictions)
+    public func createSession(playerID: String, tokenHash: Data, expiresAt: Date, restrictions: SessionRestrictions,
+                              at time: Date) throws -> AccountSession {
+        let session = AccountSession(id: UUID(), playerID: playerID, createdAt: time, expiresAt: expiresAt, restrictions: restrictions)
         sessions[tokenHash] = session
+        created += 1
+        order[session.id] = created
         return session
     }
+
+    public func trimSessions(playerID: String, keep: Int, protecting: UUID, at time: Date) {
+        let live = sessions.values.filter { $0.playerID == playerID && $0.id != protecting && $0.expiresAt > time }
+            .sorted { ($0.createdAt, order[$0.id] ?? 0) > ($1.createdAt, order[$1.id] ?? 0) }
+        let kept = Set(live.prefix(max(0, keep - 1)).map(\.id))
+        sessions = sessions.filter { $0.value.playerID != playerID || $0.value.id == protecting || kept.contains($0.value.id) }
+    }
+
+    public func deleteExpiredSessions(at time: Date) -> Int {
+        let before = sessions.count
+        sessions = sessions.filter { $0.value.expiresAt > time }
+        return before - sessions.count
+    }
+
+    /// The player's sessions, live or expired, for tests.
+    public func sessions(playerID: String) -> [AccountSession] { sessions.values.filter { $0.playerID == playerID } }
 
     public func session(tokenHash: Data, at time: Date) -> AccountSession? {
         guard let session = sessions[tokenHash], session.expiresAt > time else { return nil }

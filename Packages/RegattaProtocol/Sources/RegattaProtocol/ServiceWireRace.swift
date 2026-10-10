@@ -3,23 +3,127 @@ import RegattaCore
 // The race session on the wire (#109, #24): the hand-off token, rejoin and the race clock, the results stream with
 // each seat's incident list, cancellation, the rating push and the last race.
 
-/// The seat in a fleet that has locked: the race, and the token `JoinRace` sends unread.
+/// The seat in a fleet that has locked: the race, the token `JoinRace` sends unread, and the briefing (#147; a rejoin's
+/// hand-off has none).
 public struct WireHandOff: Equatable, Sendable {
     public var raceID: String
     public var token: [UInt8]
+    public var briefing: WireBriefing?
 
-    public init(raceID: String, token: [UInt8]) {
+    public init(raceID: String, token: [UInt8], briefing: WireBriefing? = nil) {
         self.raceID = raceID
         self.token = token
+        self.briefing = briefing
     }
 
     func encode(to w: inout WireWriter) throws {
         try w.text(raceID, "raceID")
         try w.blob(token, limit: WireLimit.token, "token")
+        try w.optional(briefing) { try $1.encode(to: &$0) }
     }
 
     init(from r: inout WireReader) throws {
-        self.init(raceID: try r.text("raceID"), token: try r.blob(limit: WireLimit.token, "token"))
+        self.init(raceID: try r.text("raceID"), token: try r.blob(limit: WireLimit.token, "token"),
+                  briefing: try r.optional("briefing") { try WireBriefing(from: &$0) })
+    }
+}
+
+/// One boat in the briefing's fleet (#15, #21): name, bot or not, livery, rating (nil for a bot).
+public struct WireBriefingSeat: Equatable, Sendable {
+    public var name: String
+    public var isBot: Bool
+    public var livery: Livery
+    public var rating: Int?
+
+    public init(name: String, isBot: Bool, livery: Livery, rating: Int?) {
+        self.name = name
+        self.isBot = isBot
+        self.livery = livery
+        self.rating = rating
+    }
+}
+
+/// The 15 s briefing's data, sent with the hand-off at fleet lock (#147, #130): the public race setup (its seat kinds as
+/// the fleet's bot flags, as in `RaceStart`), the tide state, the fleet, her seat, and the server's timings. Never the
+/// wind seed or keys: the client derives the wind, shifts, puffs, current and course words from the setup's files.
+/// Schema-versioned: a decoder refuses a schema it doesn't know.
+public struct WireBriefing: Equatable, Sendable {
+    public static let schema: UInt8 = 1
+
+    public var setup: RaceSetup
+    public var tide: VersionedPayload
+    /// By seat, as many as `setup.seats`; each `isBot` is that seat's kind.
+    public var fleet: [WireBriefingSeat]
+    public var yourSeat: Int
+    public var briefingSeconds: Int
+    public var gunInSeconds: Int
+
+    public init(setup: RaceSetup, tide: VersionedPayload, fleet: [WireBriefingSeat], yourSeat: Int, briefingSeconds: Int, gunInSeconds: Int) {
+        self.setup = setup
+        self.tide = tide
+        self.fleet = fleet
+        self.yourSeat = yourSeat
+        self.briefingSeconds = briefingSeconds
+        self.gunInSeconds = gunInSeconds
+    }
+
+    func encode(to w: inout WireWriter) throws {
+        guard setup.seats.count == fleet.count,
+              zip(setup.seats, fleet).allSatisfy({ ($0 == .bot) == $1.isBot }) else { throw WireError.outOfRange("fleet") }
+        guard setup.seats.indices.contains(yourSeat) else { throw WireError.outOfRange("yourSeat") }
+        w.u8(Self.schema)
+        try w.index(yourSeat, "yourSeat")
+        try w.string(setup.simulationVersion, limit: WireLimit.string, "simulationVersion")
+        w.u64(setup.raceSeed.value)
+        try w.count(setup.laps, limit: RaceStart.maxLaps, "laps")
+        try w.count(setup.startSequenceTicks, limit: RaceStart.maxStartSequenceTicks, "startSequenceTicks")
+        for file in [setup.boatClass, setup.venue, setup.conditions, setup.rulesConfiguration] { try file.encode(to: &w) }
+        try w.list(fleet, limit: WireLimit.seats, "fleet") { w, seat in
+            w.bool(seat.isBot)
+            try w.text(seat.name, "fleet.name")
+            try seat.livery.encode(to: &w)
+            w.optional(seat.rating) { $0.int($1) }
+        }
+        try tide.encode(to: &w, "tide")
+        try w.count(briefingSeconds, limit: Self.maxSeconds, "briefingSeconds")
+        try w.count(gunInSeconds, limit: Self.maxSeconds, "gunInSeconds")
+    }
+
+    /// Far beyond a briefing or a start sequence.
+    static let maxSeconds = 3600
+
+    init(from r: inout WireReader) throws {
+        guard try r.u8() == Self.schema else { throw WireError.invalidValue("briefing.schema") }
+        let yourSeat = try r.index()
+        let simulationVersion = try r.string(limit: WireLimit.string, "simulationVersion")
+        let raceSeed = RaceSeed(try r.u64())
+        let laps = try Self.number(&r, limit: RaceStart.maxLaps, "laps")
+        let startSequenceTicks = try Self.number(&r, limit: RaceStart.maxStartSequenceTicks, "startSequenceTicks")
+        let files = try (0..<4).map { _ in try FileRef(from: &r) }
+        let fleet = try r.list(limit: WireLimit.seats, "fleet") { r in
+            let isBot = try r.bool("fleet.isBot")
+            return WireBriefingSeat(name: try r.text("fleet.name"), isBot: isBot, livery: try Livery(from: &r),
+                                    rating: try r.optional("fleet.rating") { try $0.int("fleet.rating") })
+        }
+        let setup: RaceSetup
+        do {
+            setup = try RaceSetup(simulationVersion: simulationVersion, raceSeed: raceSeed, seats: fleet.map { $0.isBot ? .bot : .human },
+                                  laps: laps, startSequenceTicks: startSequenceTicks, boatClass: files[0], venue: files[1],
+                                  conditions: files[2], rulesConfiguration: files[3])
+        } catch {
+            throw WireError.invalidValue("setup")
+        }
+        guard setup.seats.indices.contains(yourSeat) else { throw WireError.invalidValue("yourSeat") }
+        self.init(setup: setup, tide: try VersionedPayload(from: &r, "tide"), fleet: fleet, yourSeat: yourSeat,
+                  briefingSeconds: try Self.number(&r, limit: Self.maxSeconds, "briefingSeconds"),
+                  gunInSeconds: try Self.number(&r, limit: Self.maxSeconds, "gunInSeconds"))
+    }
+
+    /// A non-negative number up to `limit` (a count's encoding, without `count`'s check against the bytes left).
+    private static func number(_ r: inout WireReader, limit: Int, _ field: String) throws -> Int {
+        let n = try r.varint(field)
+        guard n <= UInt64(limit) else { throw WireError.invalidValue(field) }
+        return Int(n)
     }
 }
 
