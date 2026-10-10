@@ -1,6 +1,6 @@
 {
   "log" : "rules-penalty.racelog.json",
-  "freezeTick" : -1180,
+  "freezeTick" : 630,
   "camera" : "boat",
   "vision" : "greyscale",
   "view" : "courseUp",

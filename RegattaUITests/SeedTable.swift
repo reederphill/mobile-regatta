@@ -4,6 +4,6 @@
 enum SeedTable {
     /// `ResultsUITests.testSheetAppearsAbout3sAfterFinishWhileSceneRenders`: the `-demo -laps 1` race on which your
     /// boat finishes at least 1680 ticks (14 s at `-timescale 4`) before the close. Probed: she finishes at tick
-    /// 7063, the race closes at 9433.
+    /// 6799, the race closes at 9598.
     static let resultsSheet: UInt64 = 3
 }
