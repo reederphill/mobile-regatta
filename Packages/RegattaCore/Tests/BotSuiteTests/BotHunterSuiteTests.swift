@@ -6,55 +6,90 @@ import Testing
 
 /// #355 acceptance: in the hunters mix (`ProfileMix.hunters`) the suite's hunter (`BotProfile.hunter`) sails to the edge
 /// of the rules, so she draws calls under 16.1 or 17 only when she overdoes it: the count is reported, never asserted to
-/// zero. The scan isn't vacuous: she held her hunting turn at a boat that must keep clear of her on `hunterTurnTicks`
-/// ticks, and her hunting tells: the live bots draw more calls with a hunter the victim than with the same seats the
-/// victim in the race's live twin (every seat a live bot).
+/// zero. The scan isn't vacuous (#472), measured on her own turns and not on the calls the live bots draw: in most
+/// races she held her hunting turn at a boat that must keep clear of her (`hunterTurnTicks`), she turned on those ticks
+/// (`HunterTurns.radians`), and she turned inside rule 16.1's course-change rate on all but a few of them.
+///
+/// Not the calls on the live bots with a hunter the victim against the same seats of the live twins, #355's first
+/// measure: hunting inside rule 16.1's rate draws next to none (the live bots keep clear), and most of those calls
+/// fall before the start, where she doesn't hunt. Over 18 races on skiff@8, four disjoint seed sets: 24, 15, 21, 22
+/// calls against 24, 12, 22, 16 in the twins, and 24, 15, 18, 17 with her hunting switched off.
 @Suite struct BotHunterSuiteTests {
+    /// Of the races, the share in which a hunter turned at a boat at least: 16 to 18 of 18 on four seed sets (a hunter
+    /// alone in a fleet of five can sail a race with no boat to hunt).
+    static let minRacesTurningShare = 2.0 / 3
+    /// Hunting-turn ticks a race, at least, over the scan: 189 to 229 measured (3393 to 4116 over 18 races).
+    static let minTurnTicksPerRace = 90
+    /// Of rule 16.1's course-change rate, the least she turns at on a hunting-turn tick, on average: she turns at
+    /// `BotBrain.Hunter.rateShare` (0.8) of it or her held rudder's rate; 0.75 to 0.77 measured.
+    static let minMeanRateShare = 0.4
+    /// Of her hunting-turn ticks, the share faster than rule 16.1's rate at most: 0.014 to 0.027 measured on skiff@8
+    /// (she carries the rate of a turn by hand into a hunting turn), each a turn rule 16.1 can be called on.
+    static let maxOverRateShare = 0.06
+
     @Test func huntersDrawRule16Or17CallsOnlyWhenTheyOverdoIt() throws {
-        let matrix = BotMatrix(seeds: [1, 2, 3], fleetSizes: [5, 10, 16], tierMixes: [.national, .mixed],
-                               profileMixes: [.hunters], laps: 1)
-        var turnTicks = 0
+        let scan = try Self.scan(seeds: Self.seeds)
+        print("BotHunterSuiteTests: \(scan.line)")
+        #expect(Double(scan.racesTurning) >= Self.minRacesTurningShare * Double(scan.races),
+                "hunters turned at a boat that must keep clear of them in \(scan.racesTurning) of \(scan.races) races")
+        #expect(scan.turnTicks >= Self.minTurnTicksPerRace * scan.races,
+                "hunters barely turned at a boat that must keep clear of them: the scan is vacuous (\(scan.turnTicks) ticks)")
+        let rate = try #require(scan.courseChangeRate)
+        #expect(scan.meanRate >= Self.minMeanRateShare * rate && scan.meanRate <= rate,
+                "hunting turns at \(fixed(rad2deg(scan.meanRate), 1)) deg/s on average, rule 16.1's rate \(fixed(rad2deg(rate), 1))")
+        #expect(Double(scan.ticksOverRate) <= Self.maxOverRateShare * Double(scan.turnTicks),
+                "\(scan.ticksOverRate) of \(scan.turnTicks) hunting-turn ticks faster than rule 16.1's rate")
+    }
+
+    static let seeds: [UInt64] = [1, 2, 3]
+
+    /// The hunters mix over `seeds`: three fleet sizes, two tier mixes, a race each.
+    struct Scan {
+        var races = 0, racesTurning = 0
+        var turnTicks = 0, ticksOverRate = 0
+        var radians = 0.0, peakRate = 0.0
+        var courseChangeRate: Double?
+        var onHunters = 0
+        var hunterCalls: [String: Int] = [:]
         var overdone: [String] = []
-        var byRule: [String: Int] = [:]
-        var onHunters = 0, onSameSeatsInTwins = 0
-        for cell in matrix.cells {
-            let result = try BotRaceHarness.run(cell, cautiousSeats: [])
-            var twinCell = cell
-            twinCell.profileMix = .live
-            turnTicks += try #require(result.hunterTurnTicks)
-            let hunters = Set(result.seats.indices.filter { result.seats[$0].profile == .hunter })
-            for call in try #require(result.ruleCalls) {
-                if hunters.contains(call.victim) && !hunters.contains(call.offender) { onHunters += 1 }
-                guard hunters.contains(call.offender) else { continue }
-                byRule[call.rule, default: 0] += 1
-                if call.rule == RacingRule.changingCourse.rawValue || call.rule == RacingRule.properCourse.rawValue {
-                    overdone.append("seed \(cell.seed) \(cell.tierMix) \(cell.fleetSize) tick \(call.tick): \(call.rule) on \(call.offender)")
-                }
-            }
-            // The twin's calls on the other seats, against the hunters' seats sailed by live bots.
-            onSameSeatsInTwins += try Self.calls(in: twinCell, against: hunters)
-        }
-        print("BotHunterSuiteTests: \(matrix.cells.count) races, \(turnTicks) hunter turn ticks, calls on hunters "
-            + "\(callsLine(byRule)); under 16.1/17 \(overdone.count): \(overdone); calls on live bots with a hunter the victim "
-            + "\(onHunters), with the same seats the victim in the live twins \(onSameSeatsInTwins)")
-        #expect(turnTicks > 0, "no hunter ever turned at a boat that must keep clear of her: the scan is vacuous")
-        // Known until #472 (owner, #461): over 18 races on skiff@8 this count flips with unrelated start changes.
-        withKnownIssue("#472: the hunting count is a coin flip on skiff@8", isIntermittent: true) {
-            #expect(onHunters > onSameSeatsInTwins,
-                    "hunting changed nothing: \(onHunters) calls with a hunter the victim, \(onSameSeatsInTwins) with the same seats live")
+
+        /// Radians a second she turned at over her hunting-turn ticks.
+        var meanRate: Double { turnTicks == 0 ? 0 : radians / Double(turnTicks) * Double(Race.tickRate) }
+
+        var line: String {
+            "\(races) races, \(racesTurning) with hunter turn ticks, \(turnTicks) in all at \(fixed(rad2deg(meanRate), 1)) deg/s "
+                + "(\(ticksOverRate) over rule 16.1's \(courseChangeRate.map { fixed(rad2deg($0), 1) } ?? "-"), peak "
+                + "\(fixed(rad2deg(peakRate), 1))); calls on hunters \(callsLine(hunterCalls)); under 16.1/17 \(overdone.count): "
+                + "\(overdone); calls on live bots with a hunter the victim \(onHunters)"
         }
     }
 
-    /// Rule calls in `cell`'s race with a seat of `victims` the victim and none of them the offender.
-    static func calls(in cell: BotRaceCell, against victims: Set<Int>) throws -> Int {
-        var count = 0
-        _ = try BotRaceHarness.run(cell, cautiousSeats: []) { _, events in
-            for event in events {
-                guard case .ruleCall(let call) = event.kind else { continue }
-                if victims.contains(call.victim) && !victims.contains(call.offender) { count += 1 }
+    static func scan(seeds: [UInt64]) throws -> Scan {
+        let matrix = BotMatrix(seeds: seeds, fleetSizes: [5, 10, 16], tierMixes: [.national, .mixed],
+                               profileMixes: [.hunters], laps: 1)
+        var scan = Scan()
+        for cell in matrix.cells {
+            let result = try BotRaceHarness.run(cell, cautiousSeats: [])
+            let ticks = try #require(result.hunterTurnTicks)
+            let turns = try #require(result.hunterTurns)
+            scan.races += 1
+            if ticks > 0 { scan.racesTurning += 1 }
+            scan.turnTicks += ticks
+            scan.ticksOverRate += turns.ticksOverCourseChangeRate
+            scan.radians += turns.radians
+            scan.peakRate = max(scan.peakRate, turns.peakRate)
+            scan.courseChangeRate = turns.courseChangeRate
+            let hunters = Set(result.seats.indices.filter { result.seats[$0].profile == .hunter })
+            for call in try #require(result.ruleCalls) {
+                if hunters.contains(call.victim) && !hunters.contains(call.offender) { scan.onHunters += 1 }
+                guard hunters.contains(call.offender) else { continue }
+                scan.hunterCalls[call.rule, default: 0] += 1
+                if call.rule == RacingRule.changingCourse.rawValue || call.rule == RacingRule.properCourse.rawValue {
+                    scan.overdone.append("seed \(cell.seed) \(cell.tierMix) \(cell.fleetSize) tick \(call.tick): \(call.rule) on \(call.offender)")
+                }
             }
         }
-        return count
+        return scan
     }
 }
 

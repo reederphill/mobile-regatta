@@ -345,6 +345,8 @@ public struct RaceResult: Codable, Hashable, Sendable {
     /// The ticks its hunters held their hunting turn at a boat that must keep clear of them (`HuntTally`, a luff or a
     /// turn bringing it closer), in a race of the hunters mix (#355); nil otherwise.
     public var hunterTurnTicks: Int? = nil
+    /// How its hunters turned on those ticks (#472, `HuntTally`), in a race of the hunters mix; nil otherwise.
+    public var hunterTurns: HunterTurns? = nil
     /// Its rule 16.1 calls, for the watchdog (#105); nil in a race not sailed by the harness.
     public var rule161: Rule161Calls? = nil
     /// The executor against the tactician at Club-level execution (#105), in a race that has both; nil otherwise.
@@ -1189,6 +1191,20 @@ extension BotRaceCell {
     var isAllNationalLive: Bool { tierMix == .national && profileMix == .live }
 }
 
+/// How a race's hunters turned on their hunting-turn ticks (#472, `RaceResult.hunterTurnTicks`), read as rule 16.1's
+/// course-change test reads a turn: a heading's change over a tick.
+public struct HunterTurns: Codable, Hashable, Sendable {
+    /// The headings' changes over those ticks, summed, radians: over the ticks' seconds, the mean rate she turned at.
+    public var radians: Double
+    /// The ticks she turned faster than the rules' course-change rate (`incidents.escape.changesCourse`): a turn of
+    /// hers rule 16.1 can be called on.
+    public var ticksOverCourseChangeRate: Int
+    /// The fastest she turned on one of those ticks, radians a second.
+    public var peakRate: Double
+    /// The rules' course-change rate the race was sailed under, radians a second; nil under rules without one.
+    public var courseChangeRate: Double?
+}
+
 /// The hunters scenario over a run (#355): how the live bots fare against hunters (`BotProfile.hunter`) that sail to
 /// the edge of the rules, and how the hunters fare under them. Over the races of the hunters mix, and their live
 /// twins: the same cell (seed, venue, conditions, tide, fleet, tier mix, laps) with every seat a live bot, when the run
@@ -1413,6 +1429,9 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
     public var axes: AxesSummary? = nil
     /// The same over the handling mix's profiles (tactics or none, a perfect or Club hand); nil when none sailed.
     public var handlingAxes: AxesSummary? = nil
+    /// `--diagnose`'s tables (#471): late starters, penalty episodes, pre-start calls and non-finishers by cause; nil,
+    /// and left out of the JSON, in a run without it.
+    public var diagnose: DiagnoseSummary? = nil
     public var timings: RunTimings
     /// Why the run misses the thresholds; empty when it passes.
     public var breaches: [String]
@@ -1621,6 +1640,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         if !thresholds.placeholders.isEmpty { lines.append("placeholder keys: \(thresholds.placeholders.count)") }
         lines.append(passed ? "gate: pass" : "gate: FAIL")
         lines += breaches.map { "  \($0)" }
+        if let diagnose { lines += diagnose.lines }
         return lines
     }
 }
