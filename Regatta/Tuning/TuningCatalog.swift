@@ -132,7 +132,9 @@ enum TuningCatalog {
 
     /// The Auto tiller (#436): whether a centred rudder hands her to the autohelm (#434, ADR 0011).
     static let autoTiller = FileFlag(slot: .boatClass, pointer: "/steering/autohelm/holdsWhenCentred", absent: 1, schemaVersion: 4)
-    static let fileFlags = [autoTiller]
+    /// Whether the tack/gybe tap sails the turn (#458, skiff@8 off: she tacks by hand).
+    static let tapSailsTurn = FileFlag(slot: .boatClass, pointer: "/steering/autohelm/sailsTap", absent: 1, schemaVersion: 4)
+    static let fileFlags = [autoTiller, tapSailsTurn]
 
     /// `grooveColumns`: each driving polar column of the boat class being tuned, and its wind speed in knots.
     /// `fullSteeragePoint`: the index of its turn-rate curve's last point, from whose speed she turns at the top
@@ -226,6 +228,12 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/steering/minTurnRateDegreesPerSecond", "Least turn rate", unit: "°/s", 1...30, step: 0.5),
                     TuningSlider(.boatClass, "/steering/rudderSlewPerSecond", "Rudder slew", unit: " /s", 1...20, step: 0.5),
                     TuningSlider(.boatClass, "/steering/rudderDragPerSecond", "Rudder drag", unit: " /s", 0...0.8, step: 0.005),
+                    // #458, from skiff@8: the drag's power of the rudder (2: half rudder, a quarter of the drag), and how fast
+                    // she falls off let go in irons with the rudder centred.
+                    TuningSlider(.boatClass, "/steering/rudderDragExponent", "Rudder drag power", 1...4, step: 0.25),
+                    TuningSlider(.boatClass, "/steering/headToWindFallOffCentredDegreesPerSecond", "Irons fall-off, rudder centred",
+                                 unit: "°/s", 0...40, step: 1),
+                    TuningSlider(.boatClass, tapSailsTurn.pointer, "Tap sails the tack (1 on, 0 off)", 0...1, step: 1),
                 ] + (fullSteeragePoint.map {
                     [TuningSlider(.boatClass, "/steering/turnRateCurve/\($0)/speedKnots", "Full steering from", unit: " kn",
                                   0.5...10, step: 0.5)]
