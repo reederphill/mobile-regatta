@@ -36,7 +36,22 @@ public struct RaceSessionServiceContract: ContractSuite {
         try await require(!handOff.token.bytes.isEmpty, "the hand-off token is empty")
         try await require(handOff.token.joinRace.token == handOff.token.bytes, "the join message doesn't carry the token unread")
         try await require(try await service.handOff().raceID == handOff.raceID, "a second hand-off is for another race")
+        try await briefing(handOff.briefing)
         try await requireThrows(RaceSessionError.noRace, "rejoin() with no race in progress") { try await service.rejoin() }
+    }
+
+    /// The fleet-lock hand-off carries the briefing (#147): the fleet by seat as the setup has it, her seat a human one in
+    /// it, the bots unrated, and the gun after the briefing.
+    private func briefing(_ briefing: BriefingPayload?) async throws {
+        guard let briefing else { try fail("the hand-off has no briefing") }
+        try await require(briefing.fleet.count == briefing.setup.seats.count, "the briefing's fleet has \(briefing.fleet.count) boats")
+        try await require(zip(briefing.fleet, briefing.setup.seats).allSatisfy { $0.isBot == ($1 == .bot) },
+                          "the briefing's bots aren't the setup's")
+        try await require(briefing.fleet.indices.contains(briefing.yourSeat) && !briefing.fleet[briefing.yourSeat].isBot,
+                          "the briefing's seat \(briefing.yourSeat) isn't a human in the fleet")
+        try await require(briefing.fleet.allSatisfy { !$0.isBot || $0.rating == nil }, "a bot has a rating")
+        try await require(briefing.briefingSeconds > 0 && briefing.gunInSeconds > briefing.briefingSeconds,
+                          "the briefing shows \(briefing.briefingSeconds) s of a \(briefing.gunInSeconds) s wait for the gun")
     }
 
     /// A rejoin offers a token for her seat and a race clock that makes sense.

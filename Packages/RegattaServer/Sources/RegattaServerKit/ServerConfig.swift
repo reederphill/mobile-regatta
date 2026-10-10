@@ -1,6 +1,7 @@
 import Crypto
 import Foundation
 import Persistence
+import RaceHost
 import RegattaProtocol
 
 /// The deployment the server runs in: the `ENV` variable. Only `dev` exists for now (#67): the server has
@@ -72,6 +73,11 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `REGATTA_TEAM_ID` | `8S5TQ65X3B` | the Apple Developer team (README; final in #49) |
 /// | `REGATTA_APPLE_ROOT_PEM` | none | a PEM file of the certificates Game Center's key must chain to; unset in dev = dev verifier |
 /// | `REGATTA_DATABASE_URL` | none | Postgres (ADR 0009); unset in dev = accounts in memory |
+/// | `QUEUE_LOCK_SECONDS` | `60` | seconds from the oldest queued player's join to fleet lock (#146); short for the contract runner |
+/// | `CATCH_FINISHERS` | on | `off`: no hold on the lock for a running race's finishers (G2, #147); the contract runner's server |
+/// | `CATCH_FINISHERS_OFFSET_SECONDS` | `15` | a held lock comes this long after the running race's expected close (G2) |
+/// | `CATCH_FINISHERS_MAX_HOLD_SECONDS` | `180` | the oldest queued player's longest wait, join to lock, for a hold (G2) |
+/// | `SIMULTANEOUS_LOSS_POLICY` | `cancel` | a mass drop (G3): `cancel` (no results, no rating) or `ret` (RET in leave order, rated per #30) (#148) |
 public struct ServerConfig: Sendable {
     public var environment: ServerEnvironment
     public var auth: SeatAuthPolicy
@@ -85,6 +91,12 @@ public struct ServerConfig: Sendable {
     public var handshakeTimeout: Duration = .seconds(10)
     /// Identity, sessions and the Terms of Use (#145).
     public var identity = IdentitySettings()
+    /// Connections held at once on `/service` and `/race`, per address and in all (#146).
+    public var connectionLimits = ConnectionLimits()
+    /// The queue and the races it locks (#146).
+    public var queue = QueueSettings()
+    /// Races from fleet lock to the close (#148): the all-gone rules and the mass-drop policy.
+    public var lifecycle = RaceLifecycleSettings()
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
@@ -119,6 +131,21 @@ public struct ServerConfig: Sendable {
                                   tokenKey: key, tokenLifetime: TimeInterval(lifetime),
                                   serverBuild: env["SERVER_BUILD"] ?? "dev", maxRaces: maxRaces)
         config.identity.termsVersion = try int("TERMS_VERSION", default: 1, in: 1...1_000_000)
+        config.queue.lockAfter = TimeInterval(try int("QUEUE_LOCK_SECONDS", default: 60, in: 1...600))
+        switch env["CATCH_FINISHERS"] {
+        case nil, "on": config.queue.catchFinishers = CatchFinishers(
+            offset: TimeInterval(try int("CATCH_FINISHERS_OFFSET_SECONDS", default: 15, in: 0...300)),
+            maxHold: TimeInterval(try int("CATCH_FINISHERS_MAX_HOLD_SECONDS", default: 180, in: 0...1800)))
+        case "off": config.queue.catchFinishers = nil
+        case let value?: throw .invalid(variable: "CATCH_FINISHERS", value: value, expected: "on or off")
+        }
+        if let policy = env["SIMULTANEOUS_LOSS_POLICY"] {
+            guard let value = SimultaneousLossPolicy(rawValue: policy) else {
+                throw .invalid(variable: "SIMULTANEOUS_LOSS_POLICY", value: policy,
+                               expected: SimultaneousLossPolicy.allCases.map(\.rawValue).joined(separator: " or "))
+            }
+            config.lifecycle.allGone.simultaneousLossPolicy = value
+        }
         if let bundle = env["REGATTA_BUNDLE_ID"], !bundle.isEmpty { config.identity.bundleID = bundle }
         if let team = env["REGATTA_TEAM_ID"], !team.isEmpty { config.identity.teamID = team }
         if let path = env["REGATTA_APPLE_ROOT_PEM"], !path.isEmpty {
@@ -164,8 +191,18 @@ public struct IdentitySettings: Sendable {
     public var appleRootsPEM: String?
     /// Sessions slide: this long from the last sign-in or resume.
     public var sessionLifetime: TimeInterval = 30 * 86_400
+    /// No more than this long from the first sign-in or resume, however often it slides (#146, R11).
+    public var absoluteSessionLifetime: TimeInterval = 90 * 86_400
+    /// Sessions one player holds at once; a new one past it ends the oldest (#146, R11).
+    public var maxSessionsPerPlayer = 5
+    /// How often expired sessions are deleted (#146, R11).
+    public var sessionSweepInterval: Duration = .seconds(3_600)
     /// A service stream nobody reads for this long is dropped.
     public var streamIdleTimeout: Duration = .seconds(60)
+    /// A service connection past `Hello` that hasn't signed in this long after it is closed (#146, R4).
+    public var signInDeadline: Duration = .seconds(10)
+    /// A service connection with no frame either way for this long is closed (#146, R4).
+    public var connectionIdleTimeout: Duration = .seconds(120)
     /// The largest service frame either way.
     public var frameCap = serviceFrameLimit
     /// Postgres, or nil: accounts in memory (dev only).

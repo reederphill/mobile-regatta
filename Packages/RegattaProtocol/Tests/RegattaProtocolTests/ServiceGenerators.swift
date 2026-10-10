@@ -49,6 +49,17 @@ extension Gen {
         Livery(design: DesignID(string()), colours: list(0...4) { SwatchID($0.string(1...12)) }, sailNumber: anyInt())
     }
 
+    /// The fleet-lock briefing (#147): the fleet's bot flags are the setup's seat kinds.
+    mutating func briefing() -> WireBriefing {
+        let setup = setup()
+        return WireBriefing(
+            setup: setup, tide: payload(),
+            fleet: setup.seats.map { kind in
+                WireBriefingSeat(name: string(), isBot: kind == .bot, livery: livery(), rating: kind == .bot ? nil : maybe { $0.anyInt() })
+            },
+            yourSeat: int(0...(setup.fleetSize - 1)), briefingSeconds: int(0...3600), gunInSeconds: int(0...3600))
+    }
+
     mutating func ruleCall(incidentId: Int) -> RuleCall {
         let deadlines = bool() ? (tick(), tick()) : nil
         return RuleCall(incidentId: incidentId, tick: tick(), rule: pick(RacingRule.allCases), offender: seat(), victim: seat(),
@@ -216,7 +227,7 @@ extension Gen {
             }
             return .queueReply(ServiceReply(id: id, result: result))
         case .raceSessionReply:
-            let handOff = WireHandOff(raceID: string(), token: bytes(0...64))
+            let handOff = WireHandOff(raceID: string(), token: bytes(0...64), briefing: maybe { $0.briefing() })
             let result: RaceSessionResult = switch int(0...7) {
             case 0: .handOff(handOff)
             case 1: .rejoin(WireRejoinOffer(handOff: handOff, seat: seat(), tick: tick(), expectedCloseTick: maybe { $0.tick() }))

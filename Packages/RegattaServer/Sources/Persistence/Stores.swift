@@ -152,12 +152,13 @@ public struct SessionStore: Sendable {
     let database: Database
     public init(_ database: Database) { self.database = database }
 
+    /// A new session. `createdAt` starts its absolute lifetime (#146); nil: the database's now.
     @discardableResult
     public func create(playerID: String, tokenHash: Data, expiresAt: Date, restrictions: SessionRestrictions = .unrestricted,
-                       id: UUID = UUID()) async throws -> Session {
+                       id: UUID = UUID(), createdAt: Date? = nil) async throws -> Session {
         let rows = try await database.client.query("""
-            INSERT INTO sessions (id, player_id, token_hash, expires_at, underage, communication_restricted, multiplayer_restricted)
-            VALUES (\(id), \(playerID), \(tokenHash), \(expiresAt), \(restrictions.isUnderage),
+            INSERT INTO sessions (id, player_id, token_hash, created_at, expires_at, underage, communication_restricted, multiplayer_restricted)
+            VALUES (\(id), \(playerID), \(tokenHash), COALESCE(\(createdAt), now()), \(expiresAt), \(restrictions.isUnderage),
                 \(restrictions.isPersonalizedCommunicationRestricted), \(restrictions.isMultiplayerGamingRestricted))
             RETURNING id, player_id, token_hash, created_at, expires_at, underage, communication_restricted, multiplayer_restricted
             """, logger: database.logger)
@@ -199,6 +200,29 @@ public struct SessionStore: Sendable {
         let rows = try await database.client.query("DELETE FROM sessions WHERE id = \(id) RETURNING id",
                                                    logger: database.logger)
         return try await rows.collect().count == 1
+    }
+
+    /// Caps the player's sessions (#146, R11): deletes the expired ones and all but the newest `keep` of the rest,
+    /// never `protecting` (the session just opened). Returns how many it deleted.
+    @discardableResult
+    public func trim(playerID: String, keep: Int, protecting: UUID, at now: Date = Date()) async throws -> Int {
+        let others = max(0, keep - 1)
+        let rows = try await database.client.query("""
+            DELETE FROM sessions WHERE player_id = \(playerID) AND id <> \(protecting) AND (expires_at <= \(now) OR id NOT IN (
+                SELECT id FROM sessions WHERE player_id = \(playerID) AND id <> \(protecting) AND expires_at > \(now)
+                ORDER BY created_at DESC, id LIMIT \(others)))
+            RETURNING id
+            """, logger: database.logger)
+        return try await rows.collect().count
+    }
+
+    /// The player's sessions, newest first (expired ones too): for tests and the session cap.
+    public func sessions(playerID: String) async throws -> [Session] {
+        let rows = try await database.client.query("""
+            SELECT id, player_id, token_hash, created_at, expires_at, underage, communication_restricted, multiplayer_restricted
+            FROM sessions WHERE player_id = \(playerID) ORDER BY created_at DESC, id
+            """, logger: database.logger)
+        return try await Self.sessions(rows)
     }
 
     /// Deletes sessions expired at `now`. Returns how many.

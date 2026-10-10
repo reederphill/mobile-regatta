@@ -264,6 +264,11 @@ with it, the signature is checked against Apple's chain. It reads:
 | `REGATTA_BUNDLE_ID`, `REGATTA_TEAM_ID` | `com.phillreeder.regatta`, `8S5TQ65X3B` | what Game Center signs, and the team (final values: #49) |
 | `REGATTA_APPLE_ROOT_PEM` | none | PEM file with Apple's root and the intermediate that issues Game Center's key (Game Center serves the leaf only); self-signed certificates are the anchors, the rest chain links; required outside dev (ADR 0010) |
 | `REGATTA_DATABASE_URL` | none | Postgres (migrations run at start, orphaned races cancelled); unset in dev keeps accounts in memory |
+| `QUEUE_LOCK_SECONDS` | `60` | seconds from the oldest queued player's join to fleet lock (#146); the contract runner's server uses a few |
+| `CATCH_FINISHERS` | on | `off`: the queue never holds its lock for a running race's finishers (G2, #147); the contract runner's server sets it |
+| `CATCH_FINISHERS_OFFSET_SECONDS` | `15` | a held lock comes this long after the running race's expected close (G2, #147) |
+| `CATCH_FINISHERS_MAX_HOLD_SECONDS` | `180` | the oldest queued player waits at most this long, join to lock, for a hold (G2, #147) |
+| `SIMULTANEOUS_LOSS_POLICY` | `cancel` | a mass drop (G3: 2+ humans all dropped within 2 s, nobody back in 30 s): `cancel` (no results, no rating) or `ret` (RET in leave order, rated per #30) (#148) |
 
 `POST /dev/instant-race?clients=N` starts a race now for N clients (1…16), with bots filling it to 10 boats,
 and answers each client's seat and signed race token. `raceSeconds=S` closes the race S seconds after the gun,

@@ -7,7 +7,8 @@ import RegattaServices
 
 // Signing in on the service endpoint (#145): a Game Center identity signature, verified, opens a session whose token
 // (32 random bytes; only its SHA-256 is stored) resumes it on later connections. Sessions slide: each sign-in or
-// resume moves the expiry to `sessionLifetime` from now. The restrictions Game Center reports are taken from the
+// resume moves the expiry to `sessionLifetime` from now, but never past `absoluteLifetime` from the first sign-in, and a
+// player holds at most `maxSessionsPerPlayer` (a new one ends the oldest); expired rows are swept (#146, R11). The restrictions Game Center reports are taken from the
 // client with each sign-in or resume and stored on the session; TODO(#158): they travel inside the App Attest–asserted
 // request once #158 lands, and are trusted only then.
 
@@ -31,13 +32,20 @@ public struct SessionAuthority: Sendable {
     public let store: any AccountStore
     public let verifier: any GameCenterVerifier
     public let lifetime: TimeInterval
+    /// However often it slides, a session ends this long after it was opened (#146, R11).
+    public let absoluteLifetime: TimeInterval
+    /// Sessions a player holds at once: a sign-in past it ends the oldest (#146, R11).
+    public let maxSessionsPerPlayer: Int
     public let now: @Sendable () -> Date
 
     public init(store: any AccountStore, verifier: any GameCenterVerifier, lifetime: TimeInterval = 30 * 86_400,
+                absoluteLifetime: TimeInterval = 90 * 86_400, maxSessionsPerPlayer: Int = 5,
                 now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
         self.verifier = verifier
         self.lifetime = lifetime
+        self.absoluteLifetime = max(absoluteLifetime, 1)
+        self.maxSessionsPerPlayer = max(maxSessionsPerPlayer, 1)
         self.now = now
     }
 
@@ -68,7 +76,9 @@ public struct SessionAuthority: Sendable {
             let token = Self.newToken()
             let time = now()
             let session = try await store.createSession(playerID: teamPlayerID, tokenHash: Self.hash(token),
-                                                        expiresAt: time + lifetime, restrictions: restrictions)
+                                                        expiresAt: time + min(lifetime, absoluteLifetime), restrictions: restrictions,
+                                                        at: time)
+            try await store.trimSessions(playerID: teamPlayerID, keep: maxSessionsPerPlayer, protecting: session.id, at: time)
             try await store.touchSession(teamPlayerID: teamPlayerID, at: time)
             let identity = IdentitySignature(
                 gamePlayerID: GamePlayerID(signature.gamePlayerID), teamPlayerID: teamPlayerID, publicKeyURL: signature.publicKeyURL,
@@ -91,7 +101,12 @@ public struct SessionAuthority: Sendable {
             else { return .refused(.sessionExpired) }
             guard account.gamePlayerID == player.gamePlayerID else { return .refused(.gamePlayerIDConflict) }
             let restrictions = SessionRestrictions(wire: player)
-            guard let refreshed = try await store.refreshSession(id: session.id, expiresAt: time + lifetime, restrictions: restrictions, at: time)
+            let expiry = min(time + lifetime, session.createdAt + absoluteLifetime)
+            guard expiry > time else {
+                try await store.deleteSession(id: session.id)
+                return .refused(.sessionExpired)
+            }
+            guard let refreshed = try await store.refreshSession(id: session.id, expiresAt: expiry, restrictions: restrictions, at: time)
             else { return .refused(.sessionExpired) }
             try await store.touchSession(teamPlayerID: account.teamPlayerID, at: time)
             var named = account
@@ -105,6 +120,12 @@ public struct SessionAuthority: Sendable {
 
     public func signOut(_ session: SignedInSession) async {
         try? await store.deleteSession(id: session.sessionID)
+    }
+
+    /// Deletes every expired session (#146, R11). Returns how many, or nil when the store failed.
+    @discardableResult
+    public func sweepExpired() async -> Int? {
+        try? await store.deleteExpiredSessions(at: now())
     }
 
     static func newToken() -> [UInt8] {

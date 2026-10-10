@@ -51,7 +51,18 @@ enum Fixtures {
     // MARK: Race session
 
     static let race = RaceID("race-7")
-    static let handOff = HandOff(raceID: race, token: RaceToken(bytes: [0xA1, 0xB2, 0xC3]))
+    static let handOff = HandOff(raceID: race, token: RaceToken(bytes: [0xA1, 0xB2, 0xC3]), briefing: briefing)
+    /// The fleet-lock briefing (#147): the player in seat 0 of 2 humans and 2 bots.
+    static let briefing: BriefingPayload = {
+        let setup = try! RaceSetup(raceSeed: RaceSeed(7), seats: [.human, .human, .bot, .bot])
+        let livery = Livery(design: DesignID("skiff-plain"), colours: [SwatchID("sky-blue"), SwatchID("white")], sailNumber: 7)
+        return BriefingPayload(setup: setup, fleet: [
+            BriefingSeat(name: "Ana", isBot: false, livery: livery, rating: 1500),
+            BriefingSeat(name: "Wren", isBot: false, livery: livery, rating: 1500),
+            BriefingSeat(name: "Bot Marlin", isBot: true, livery: livery, rating: nil),
+            BriefingSeat(name: "Bot Skua", isBot: true, livery: livery, rating: nil),
+        ], yourSeat: 0, briefingSeconds: 15, gunInSeconds: 75)
+    }()
     /// Seat 0 is the player.
     static let roster = [
         RosterEntry(name: "Ana", colorIndex: 0), RosterEntry(name: "Wren", colorIndex: 1),
