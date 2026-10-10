@@ -898,8 +898,8 @@ enum TackSweep {
         let moved = area.centre + race.course.right * (area.halfWidth * 0.4)
         let windMoved = race.groundWind(at: moved)
         let turn = rad2deg(wrapAngle(windMoved.direction - windThere.direction))
-        print(String(format: "Sign flip: stage 4 aimed on the wind at the boat's start (%.1f kn) then measured along the wind after moving her across the course (%.1f kn, direction %+.1f deg). It also left gusty-offshore at its file strength, 14–20 kn, while the dynamics number was the same gust shape scaled to 10 kn. The race and the dynamics were not the same wind.",
-                     knots(metresPerSecond: windThere.speed), knots(metresPerSecond: windMoved.speed), turn))
+        print(String(format: "Sign flip check: moving her across the course changes the wind by %.1f kn and %+.1f deg (seed 1, native strength %.1f kn). Stage 4 compared that native 14–20 kn race, slam only, with dynamics on a gust shape scaled to 10 kn.",
+                     knots(metresPerSecond: windMoved.speed - windThere.speed), turn, knots(metresPerSecond: windThere.speed)))
     }
 
     static func raceVersusReference(_ helm: Helm, seed: Int, knots wanted: Double, entry: Double,
