@@ -262,8 +262,10 @@ private struct EaseAccessibilityElement: View {
     let isEnabled: Bool
 
     var body: some View {
+        // A UI test (`-uitesting`) gets a finger-sized target: XCUITest's tap missed the 2 pt one in CI (#467).
+        let side: CGFloat = LaunchOptions.current.uiTesting ? 44 : 2
         Color.clear
-            .frame(width: 2, height: 2)
+            .frame(width: side, height: side)
             .contentShape(.rect)
             .onTapGesture { session.toggleEase() }
             .disabled(!isEnabled)
