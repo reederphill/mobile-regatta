@@ -9,8 +9,8 @@ import Testing
 /// screen, the wind vane's groove tick, lock and arc, the pinch/foot sail shape, and ladder lines across the axis.
 @MainActor @Suite struct BoatCueTests {
     static let boatClass = Race.defaultBoatClass
-    /// The default class with an autohelm that holds a centred rudder (skiff@6's): the default, skiff@7, steers by
-    /// hand (#437), so a test of a held rudder on a holding class names this.
+    /// The default class with an autohelm that holds a centred rudder (skiff@6's): the default, skiff@8, steers by
+    /// hand (#437, #461), so a test of a held rudder on a holding class names this.
     static let holdingClass: BoatClass = {
         var holding = Race.defaultBoatClass
         holding.steering.autohelm.holdsWhenCentred = true
@@ -194,7 +194,7 @@ import Testing
             #expect(RenderFixtureTests.wedgesOnScreen(scene) >= 2, "\(name): \(RenderFixtureTests.wedgesOnScreen(scene)) wedges in view")
 
             let world = session.driver.renderWorld
-            // Her offset as the cues read it: by hand on the default class, skiff@7 (#437), or the autohelm's in a tap.
+            // Her offset as the cues read it: by hand on the default class, skiff@8 (#437, #461), or the autohelm's in a tap.
             let reading = world.autohelm(ofSeat: world.myBoatIndex)
             let hand = HandSteering(world.me, reading: reading, boatClass: world.boatClass)
             let offset = try #require(hand?.offset ?? reading?.offsetFromGroove)

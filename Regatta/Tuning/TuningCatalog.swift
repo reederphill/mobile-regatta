@@ -222,7 +222,7 @@ enum TuningCatalog {
                 applies: .nextRace,
                 sliders: [
                     TuningSlider(.boatClass, "/momentum/speedingUpSeconds", "Speeding up", unit: " s", 0.5...10, step: 0.1),
-                    TuningSlider(.boatClass, "/momentum/slowingDownSeconds", "Slowing down", unit: " s", 0.5...10, step: 0.1),
+                    TuningSlider(.boatClass, "/momentum/slowingDownSeconds", "Slowing down", unit: " s", 0.5...20, step: 0.1),
                     TuningSlider(.boatClass, "/momentum/noGoSeconds", "Stopping in the no-go", unit: " s", 0.5...10, step: 0.1),
                     TuningSlider(.boatClass, "/steering/topTurnRateDegreesPerSecond", "Top turn rate", unit: "°/s", 5...60, step: 1),
                     TuningSlider(.boatClass, "/steering/minTurnRateDegreesPerSecond", "Least turn rate", unit: "°/s", 1...30, step: 0.5),

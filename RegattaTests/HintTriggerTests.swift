@@ -152,11 +152,11 @@ import Testing
                                 showsLaylines: false, isFirstRace: true, lettingGoRetired: false, tuning: t)
         }
         #expect(try snapshot(Self.autohelmOnFiles()).autohelmHolds)
-        #expect(!snapshot(.defaults).autohelmHolds, "the default class, skiff@7, steers by hand (#437)")
+        #expect(!snapshot(.defaults).autohelmHolds, "the default class, skiff@8, steers by hand (#437, #461)")
     }
 
-    /// Practice files whose autohelm doesn't hold a centred rudder: the defaults, since the default class is skiff@7
-    /// (#437; before it, the Auto tiller's tuned copy, #436).
+    /// Practice files whose autohelm doesn't hold a centred rudder: the defaults, since the default class is skiff@8
+    /// (#461; skiff@7 from #437; before it, the Auto tiller's tuned copy, #436).
     static func handSteeredFiles() throws -> PracticeFiles { .defaults }
 
     /// Practice files sailing skiff@6, whose autohelm holds a centred rudder (the default until #437).
@@ -256,10 +256,12 @@ import Testing
     }
 
     /// #436: on a hand-steered class a tap's autohelm (the tack and the hand-back) isn't letting go, so the
-    /// centred-rudder hint still fires afterwards and letting go is never learned for it.
+    /// centred-rudder hint still fires afterwards and letting go is never learned for it. On skiff@7, hand-steered
+    /// with a tap the autohelm sails: the default, skiff@8, sails no tap (#458).
     @Test func aTappedTackOnAHandSteeredClassIsNotLettingGo() throws {
         var config = RaceConfig(opponents: 1, prestartSeconds: 1, seed: 1, windSeed: RaceConfig.windSeed(pinnedTo: 1))
         config.files = try Self.handSteeredFiles()
+        config.files.boatClass = try BoatClassFile.bundled(id: "skiff", version: 7).ref
         let driver = PracticeDriver(config: config)
         var o = HintObservations()
         func run(_ rudder: Int8, seconds: Double) {

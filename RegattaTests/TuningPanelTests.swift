@@ -95,7 +95,8 @@ import RegattaCore
         defer { try? FileManager.default.removeItem(at: root) }
         let sliders = model.groups.flatMap(\.sliders)
         // The pressure field's sliders name numbers only in schema-3 to -5 conditions (`pressureFieldIsTunable`).
-        for slider in sliders where !Self.isPressureField(slider) {
+        // The roll tack's sliders name numbers only in a class with a roll tack (`rollTackIsTunableOnAnOlderClass`).
+        for slider in sliders where !Self.isPressureField(slider) && !Self.isRollTack(slider) {
             let file = model.fileValue(slider)
             #expect(file != nil, "\(slider.id) names nothing in its file")
             if let file { #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider") }
@@ -107,6 +108,23 @@ import RegattaCore
         #expect(sliders.contains { $0.id == "boatClass:/steering/turnRateCurve/\(point)/speedKnots" })
         #expect(Set(sliders.map(\.id)).count == sliders.count)
     }
+
+    /// #461: the default class, skiff@8, has no roll tack (#458), so the Roll tack group's sliders are "not in this
+    /// file" on it; on skiff@7, still bundled and pickable, each names its number.
+    @Test func rollTackIsTunableOnAnOlderClass() throws {
+        let (model, root) = model()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let rolls = model.groups.flatMap(\.sliders).filter(Self.isRollTack)
+        #expect(rolls.count == 3)
+        #expect(rolls.allSatisfy { model.fileValue($0) == nil }, "skiff@8 has no roll tack")
+        model.setBase(.boatClass, DataFileKey(id: "skiff", version: 7))
+        for slider in rolls {
+            let file = try #require(model.fileValue(slider), "\(slider.id) names nothing in skiff@7")
+            #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider")
+        }
+    }
+
+    private static func isRollTack(_ slider: TuningSlider) -> Bool { slider.id.hasPrefix("boatClass:/rollTack/") }
 
     /// Tuned values become tuned copies at the race start: the practice race resolves them from its catalog and
     /// sails them (bots too), and its log, kept with them beside it as it leaves, replays to its digest.
@@ -153,7 +171,7 @@ import RegattaCore
         defer { try? FileManager.default.removeItem(at: root) }
         let ids = Set(model.groups.flatMap(\.sliders).map(\.id))
         for gone in ["/windShadow/lossCloseIn", "/windShadow/coneWidthAtEndHullLengths", "/windShadow/backwind/loss"] {
-            #expect(!ids.contains("boatClass:" + gone), "\(gone) moves nothing in skiff@7")
+            #expect(!ids.contains("boatClass:" + gone), "\(gone) moves nothing in the default class")
         }
         model.set(try slider("boatClass:/windShadow/ribbons/peakLoss", in: model), to: 0.3)
         model.set(try slider("boatClass:/windShadow/ribbons/buildSeconds", in: model), to: 1.5)
@@ -381,7 +399,7 @@ import RegattaCore
     }
 
     /// #436: the Steering group, first, holds the Auto tiller, a 0/1 slider on the class's
-    /// `steering.autohelm.holdsWhenCentred` (#434). The default class, skiff@7 (#437), sets it false, so it reads 0
+    /// `steering.autohelm.holdsWhenCentred` (#434). The default class (skiff@8, #461; skiff@7 before it, #437) sets it false, so it reads 0
     /// (off); 1 sails a tuned copy from the next race whose autohelm holds a centred rudder, every boat's, and exports as
     /// a schema-4 next version; back to 0 is untuned again.
     @Test func autoTillerSliderTargetsClassValue() throws {
