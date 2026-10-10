@@ -280,9 +280,8 @@ enum SkiffEight {
 }
 
 /// #459: the hand turn a bot steers (`BotBrain.handTurning`, its rudder from `HandTackTable` in RegattaBots), measured
-/// on skiff@8 as #458 measured the tack (`HandTack.turn`): the anchors that table's placeholders stand on. A gybe was
-/// measured on #456's set only before; on skiff@8 it costs about half of that table (slam 0.90 L against 1.80), and is
-/// still cheaper the gentler it is.
+/// on skiff@8 as #458 measured the tack (`HandTack.turn`): the anchors that table's placeholders stand on, on the
+/// owner's ruling of 2026-10-09 (#458: the rudder drag cubed).
 @Suite struct HandTurnProfileTests {
     let boat = SkiffEight.boatClass
 
@@ -293,45 +292,62 @@ enum SkiffEight {
         }
     }
 
-    /// The good helm's tack (75 % rudder, eased over the last 20°) is #458's best, and the slam its slam: means over
-    /// the seven winds, whose six gusty ones shift under her (one tack gains 1.6 L on it, another loses 2.9). In the
-    /// steady wind alone, as a bot's tack measured against a twin from each tack in turn reads
-    /// (`BotHandTackTests.tackLossFallsWithHandlingOnSkiffEight`), the same turn loses about 1.33 L at 10 kn.
-    @Test func goodTackIsTheBestAndASlamCostsMore() {
-        let good = loss(0.75, ease: 20), slam = loss(1)
-        #expect(abs(good - 0.971) <= 0.05, "75 % eased: \(good) L")
-        #expect(abs(slam - 1.031) <= 0.05, "slam: \(slam) L")
-        #expect(good < slam)
-        let steady = HandTack.turn(gybe: false, fraction: 0.75, ease: 20, cell: .init(knots: 10, entry: 1, seed: nil), boatClass: boat).loss
-        #expect(abs(steady - 1.33) <= 0.05, "75 % eased in the steady wind: \(steady) L")
+    func stuck(_ fraction: Double, over: Double = 0, knots: Double, entry: Double) -> Double {
+        HandTack.Cell.all(knots: knots, entry: entry).map {
+            HandTack.turn(gybe: false, fraction: fraction, over: over, cell: $0, boatClass: boat).stuck
+        }.max()!
     }
 
-    /// A gybe is cheaper the less rudder she holds: 0.52 L at 35 %, 0.90 at full (10 kn).
+    /// The good helm's tack (60 % rudder, eased over the last 20°) is #458's best to 0.01 L, Club's centre's (77 %)
+    /// a tenth more, and a slam half a length more: means over the seven winds, whose six gusty ones shift under her.
+    /// In the steady wind alone, as a bot's tack measured against a twin from each tack in turn reads
+    /// (`BotHandTackTests.tackLossFallsWithHandlingOnSkiffEight`), the good turn loses about 1.30 L at 10 kn.
+    @Test func goodTackIsTheBestAndASlamCostsMore() {
+        let good = loss(0.6, ease: 20), club = loss(0.77, ease: 8), slam = loss(1)
+        #expect(abs(good - 0.96) <= 0.05, "60 % eased: \(good) L")
+        #expect(abs(slam - 1.48) <= 0.05, "slam: \(slam) L")
+        #expect(good < club && club < slam - 0.2, "Club's centre: \(club) L")
+        #expect((0.4...0.65).contains(slam - good))
+        let steady = HandTack.turn(gybe: false, fraction: 0.6, ease: 20, cell: .init(knots: 10, entry: 1, seed: nil), boatClass: boat).loss
+        #expect(abs(steady - 1.30) <= 0.05, "60 % eased in the steady wind: \(steady) L")
+    }
+
+    /// A gybe is cheaper the less rudder she holds: 0.33 L at 30 %, 1.17 at full (10 kn).
     @Test func gentleGybeCostsLeast() {
-        let gentle = loss(gybe: true, 0.35), half = loss(gybe: true, 0.5), slam = loss(gybe: true, 1)
-        #expect(abs(gentle - 0.52) <= 0.1, "35 %: \(gentle) L")
-        #expect(abs(slam - 0.90) <= 0.1, "full: \(slam) L")
+        let gentle = loss(gybe: true, 0.3), half = loss(gybe: true, 0.5), slam = loss(gybe: true, 1)
+        #expect(abs(gentle - 0.33) <= 0.1, "30 %: \(gentle) L")
+        #expect(abs(slam - 1.17) <= 0.1, "full: \(slam) L")
         #expect(gentle < half && half < slam)
     }
 
-    /// A flubbed turn costs lengths, never a stall: over-steered 25° to 35° a tack loses about 1.4 to 1.85 L and a
-    /// cranked gybe about 1.4 to 1.65; under-steered at half rudder, from the slowest she tacks at in light air, she is
-    /// under 30 % of her speed in the no-go for 2 s.
+    /// A flubbed turn costs lengths, never a stall. Over-steered 20° to 30°, a good helm's tack loses about 1.14 to
+    /// 1.52 L (0.95 clean) and a slam 1.92 to 2.31 (1.48); a cranked gybe 1.63 to 1.96. Under-steered at 35 % rudder, in the breeze she
+    /// under-steers in (over 8 kn; `HandTackTable.underSteer`), a tack loses about 1.23 L. From the slowest she tacks at, none of them leaves her
+    /// stuck 5 s; in light air 35 % would (19 s), which is why she never under-steers there.
     @Test func flubbedTurnCostsLengthsNeverAStall() {
-        for (fraction, over, range) in [(0.75, 25.0, 1.3...1.5), (1, 35, 1.75...1.95)] {
+        let good = loss(0.6), slam = loss(1)
+        for (fraction, over, range) in [(0.6, 20.0, 1.0...1.3), (0.6, 30, 1.4...1.65), (1, 20, 1.8...2.05), (1, 30, 2.2...2.45)] {
             let lost = loss(fraction, over: over)
             #expect(range.contains(lost), "tack at \(fraction) over \(over)°: \(lost) L")
+            #expect(lost > (fraction < 1 ? good : slam) + 0.15)
         }
-        let gybe = loss(gybe: true, 1, over: 30)
-        #expect((1.3...1.7).contains(gybe), "gybe cranked 30° past: \(gybe) L")
-        #expect(loss(0.5) - loss(0.75) < 0.2)
+        for (over, range) in [(20.0, 1.5...1.75), (30, 1.85...2.1)] {
+            let gybe = loss(gybe: true, 1, over: over)
+            #expect(range.contains(gybe), "gybe cranked \(over)° past: \(gybe) L")
+        }
+        let under = loss(0.35)
+        #expect((1.1...1.35).contains(under) && under > good + 0.2, "under-steered: \(under) L against \(good)")
         for knots in [6.0, 10, 14] {
-            for cell in HandTack.Cell.all(knots: knots, entry: 0.75) {
-                for (fraction, over) in [(0.5, 0.0), (0.75, 35), (1, 35)] {
-                    let stuck = HandTack.turn(gybe: false, fraction: fraction, over: over, cell: cell, boatClass: boat).stuck
-                    #expect(stuck <= 5, "\(cell) at \(fraction) over \(over)°: \(stuck) s stuck")
-                }
+            for (fraction, over) in [(0.6, 0.0), (0.6, 30), (1, 30)] {
+                let spell = stuck(fraction, over: over, knots: knots, entry: 0.75)
+                #expect(spell <= 5, "\(knots) kn at \(fraction) over \(over)°: \(spell) s stuck")
             }
         }
+        for knots in [8.0, 10, 14] {
+            let spell = stuck(0.35, knots: knots, entry: 0.75)
+            #expect(spell <= 5, "\(knots) kn under-steered: \(spell) s stuck")
+        }
+        // The cliff she keeps off: too little rudder in light air.
+        #expect(stuck(0.35, knots: 6, entry: 0.75) > 10)
     }
 }

@@ -454,7 +454,8 @@ struct BotBrain: Sendable {
     /// this has settled there, and waiting on would run the turn out of time (a missed-penalty disqualification).
     static let penaltyHoldSeconds = 0.5
 
-    /// Her input turning her current penalty turn on `turn`'s way: the rudder hard over that way, unless the autohelm
+    /// Her input turning her current penalty turn on `turn`'s way: the rudder hard over that way (on a class she turns
+    /// by hand, `HandTackTable.penaltyFraction` of it: `penaltyRudder`), unless the autohelm
     /// has her (she let go, or took the boat over from a player who had, #219) with its rudder still over the other
     /// way. The tick she takes the helm her rudder only slews part way back (the class's `rudderSlew`), so her heading
     /// goes on turning back that tick, driven by her: the race gives the turn up (`penaltyReset`, #350). She leaves the
@@ -466,11 +467,11 @@ struct BotBrain: Sendable {
               turn * b.rudder < -view.boatClass.steering.rudderSlew * Self.tickStep,
               owed.isStarted || canPutOffTurn(owed, view) else {
             penaltyHeldSince = nil
-            return BoatInput(rudder: turn)
+            return BoatInput(rudder: turn * Self.penaltyRudder(view))
         }
         let since = penaltyHeldSince ?? view.time
         penaltyHeldSince = since
-        return view.time - since < Self.penaltyHoldSeconds ? .neutral : BoatInput(rudder: turn)
+        return view.time - since < Self.penaltyHoldSeconds ? .neutral : BoatInput(rudder: turn * Self.penaltyRudder(view))
     }
 
     /// The way she turns her current penalty turn, starting it now, or nil while she holds it off (`penaltyInput`).

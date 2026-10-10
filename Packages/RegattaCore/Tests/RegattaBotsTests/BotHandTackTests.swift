@@ -245,10 +245,10 @@ import Testing
     }
 
     /// A tack's quality follows the handling draw: the better her handling the less a tack costs her, and none
-    /// stalls. The top draw's costs what the best hand tack does: 1.39 L in this water's 9 to 13 kn, the #458 harness's
-    /// 75 % eased turn in a steady wind (1.33 L at 10 kn, 1.44 at 12; `HandTurnProfileTests`). #458's 0.97 is that
-    /// turn's mean over its seven winds, six of them shifting under one tack; here each water is tacked from both
-    /// tacks, so a shift's gain on one is its loss on the other.
+    /// stalls. The top draw's costs what the best hand tack does: 1.37 L in this water's 9 to 13 kn, the #458 harness's
+    /// 60 % eased turn in a steady wind (1.30 L at 10 kn; `HandTurnProfileTests`). #458's 0.95 is that turn's mean
+    /// over its seven winds, six of them shifting under one tack; here each water is tacked from both tacks, so a
+    /// shift's gain on one is its loss on the other. The floor of the fleet's draws slams it and flubs half: 2.2 L.
     @Test func tackLossFallsWithHandlingOnSkiffEight() throws {
         let levels = [1.0, 0.7, 0.4, 0.1]
         let measured = try levels.map { try Self.turns(gybe: false, handling: $0) }
@@ -257,8 +257,8 @@ import Testing
         }
         let loss = measured.map(\.loss)
         #expect(loss[0] <= loss[1] + 0.02 && loss[1] <= loss[2] + 0.04, "\(loss)")
-        #expect(loss[3] > loss[0] + 0.1, "\(loss)")
-        #expect(abs(loss[0] - 1.39) <= 0.1, "the top draw's tack: \(loss[0]) L")
+        #expect(loss[3] > loss[0] + 0.4, "\(loss)")
+        #expect(abs(loss[0] - 1.37) <= 0.1, "the top draw's tack: \(loss[0]) L")
         #expect(measured[0].flubbed == 0)
         #expect(measured.allSatisfy { $0.stuck <= 5 })
     }
@@ -374,8 +374,9 @@ import Testing
         _ = centred
     }
 
-    /// A bot owed a penalty turn on skiff@8 turns it, hard over as ever, inside its deadline: from her groove at
-    /// speed, and from a stall short of head to wind 60° into it (she lets go, falls off, and turns it on the same way).
+    /// A bot owed a penalty turn on skiff@8 turns it, at 70 % rudder (`HandTackTable.penaltyFraction`), inside its
+    /// deadline: from her groove at speed, and from a stall short of head to wind 60° into it (she lets go, falls off,
+    /// and turns it on the same way).
     @Test func penaltyTurnsAreCompletedOnSkiffEight() throws {
         for stalled in [false, true] {
             let (race, _) = try Self.alone(seed: 3) { snapshot, water in
@@ -398,7 +399,7 @@ import Testing
             print("BOTHANDTACK penalty stalled=\(stalled): served at \(race.time) s, centred decisions \(centred)")
             #expect(race.boats[0].penaltyTurnsOwed == 0 && race.boats[0].status == .racing,
                     "stalled \(stalled): owes \(race.boats[0].penaltyTurnsOwed), \(race.boats[0].status)")
-            // Stalled, the hard-over rudder itself turns her back before she lets go (a standing boat falls off faster
+            // Stalled, the rudder held over itself turns her back before she lets go (a standing boat falls off faster
             // than her rudder turns her, on every class): the race gives that turn up, and she turns it all again.
             let reset = kinds.contains { if case .penaltyReset = $0 { true } else { false } }
             #expect(stalled || !reset, "she gave the turn up")

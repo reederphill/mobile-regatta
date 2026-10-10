@@ -5,30 +5,36 @@ import RegattaCore
 // (`BotBrain.turnHandling`, #443), not a roll skill. A class whose tap sails the turn keeps the tap and the roll
 // (`BotBrain+Roll.swift`), untouched. Internal heuristics, never shown to a player:
 //
-// - "Three-quarter rudder, eased out": a good helm turns a tack at part rudder and eases it over the last degrees
-//   onto the new groove; a poor one slams it hard over (`HandTackTable.tackFraction`, `tackEase`).
+// - "A moderate rudder, eased out": a good helm turns a tack at a little over half rudder and eases it over the last
+//   degrees onto the new groove; the poorer she is the more she puts on, to a slam hard over, which costs her half a
+//   length (`HandTackTable.tackFraction`, `tackEase`).
 // - "Gybe gently": a good helm gybes with little rudder, a slow wide turn; a poor one cranks it, which costs her the
 //   most (`HandTackTable.gybeFraction`).
 // - "Bear off to build speed": in light air, slow but fast enough to tack, a good helm bears away a few degrees for
 //   a few seconds first (`HandTackTable.bearOff`).
 // - "Flubbed it": now and then, the more often the worse her handling, she under-steers the turn or sails past her
-//   new groove (`HandTackTable.botchRate`). A flubbed turn costs her lengths, never a stall.
+//   new groove (`HandTackTable.botchRate`). A flubbed turn costs her lengths, never a stall: too little rudder
+//   stalls her in light air, so she under-steers only in a breeze.
 // - "Let go in irons": stalled short of head to wind she centres the rudder, truly, until the boat falls off and
 //   has steerage again (`centresStalled`): the class's irons recovery works only on a centred rudder (#458).
 
 /// The hand turn's placeholder values (#459), one table for the owner to tune (#461), as `HandSteeringTable` is the
-/// hand steering's. Anchors, skiff@8 at 10 kn from full speed (#458's harness, `HandTurnProfileTests`): a tack at
-/// 75 % rudder loses about 0.97 hull lengths, a slam 1.03, the ease-out nothing either way; a gybe 0.52 at 35 % rudder
-/// and 0.90 hard over; a tack over-steered 25° to 35° about 1.4 to 1.85, a cranked gybe as far past about 1.4 to 1.65.
+/// hand steering's. Anchors, skiff@8 at 10 kn from full speed on the owner's ruling of 2026-10-09 (#458's harness,
+/// `HandTurnProfileTests`): a tack at 60 % rudder eased out loses about 0.96 hull lengths (0.95 held; 50 % the same),
+/// 75 % 1.07, a slam 1.48, 35 % 1.23; a gybe 0.33 at 30 % rudder and 1.17 hard over; a tack at 60 % over-steered 20°
+/// to 30° about 1.14 to 1.52 and a slam as far past 1.92 to 2.31, a cranked gybe 1.63 to 1.96.
 public enum HandTackTable {
     /// A tack's rudder, as a share of full: `good` at `goodHandling` or better, rising in a line to `poor` at
-    /// `poorHandling` or worse.
-    public static let tackFraction = (good: 0.75, poor: 1.0)
-    public static let tackHandling = (good: 0.8, poor: 0.5)
-    /// Radians before her new groove from which a good helm eases the tack's rudder (none at `tackHandling.poor`).
+    /// `poorHandling` or worse. 60 %, not the 50 % that measures a hair better at 10 kn: in light air from the slowest
+    /// she tacks at, 50 % is on the edge of a stall (5 kn from 70 % of her speed: 20 s stuck; 55 %, 4 s). Club's centre
+    /// (0.55) turns at about 77 %, about 1.1 lengths.
+    public static let tackFraction = (good: 0.6, poor: 1.0)
+    public static let tackHandling = (good: 0.8, poor: 0.2)
+    /// Radians before her new groove from which a good helm eases the tack's rudder (none at `tackHandling.poor`). At
+    /// 60 % it costs her 0.01 lengths; the more rudder she has on the more it saves (0.09 of a slam's).
     public static let tackEase = deg2rad(20)
     /// A gybe's rudder, as `tackFraction`: little for a good helm, hard over for a poor one.
-    public static let gybeFraction = (good: 0.35, poor: 1.0)
+    public static let gybeFraction = (good: 0.3, poor: 1.0)
     public static let gybeHandling = (good: 0.7, poor: 0.3)
     /// The eased rudder ends at this share of the turn's, this close to the groove (the #458 harness's `smooth`).
     public static let easedShare = 0.25
@@ -40,13 +46,15 @@ public enum HandTackTable {
     public static let botchRate = 0.5
     /// The share of her flubbed tacks she under-steers; the rest, and every flubbed gybe, she over-steers.
     public static let underSteerShare = 0.25
-    /// A flubbed tack under-steered: this share of her rudder, never under `underSteerFloor`. At 40 % rudder, from the
-    /// slowest she tacks at in 6 kn, she sat 16 s in irons; at half she is through in 2 s. It costs little in a
-    /// breeze (0.1 L at 10 kn) and more in light air (0.3 L at 6 kn from that speed).
-    public static let underSteer = 0.55
-    public static let underSteerFloor = 0.5
+    /// A flubbed tack under-steered: this rudder, in more than `underSteerWind` (m/s) and only by a helm whose own
+    /// rudder is `underSteerFrom` or less (a slam under-steered would tack better). 35 % rudder costs 0.28 lengths more
+    /// than the best at 10 kn and 0.5 at 14; in light air it stalls her (6 kn from the slowest she tacks at: 19 s
+    /// stuck at 36 %), so there, and for a helm with more rudder on, the flub is an over-steer.
+    public static let underSteer = 0.35
+    public static let underSteerWind = metresPerSecond(knots: 8)
+    public static let underSteerFrom = 0.85
     /// A flubbed turn over-steered: radians past her new groove, drawn in this range.
-    public static let overSteer = deg2rad(25)...deg2rad(35)
+    public static let overSteer = deg2rad(20)...deg2rad(30)
 
     /// "Bear off to build speed": at this handling or better, in this much wind or less (m/s), under this share of
     /// her close-hauled speed, she bears away `angle` for `seconds` before a tack. In more wind it only costs her.
@@ -59,6 +67,9 @@ public enum HandTackTable {
     /// "Let go in irons": within `margin` of the no-go zone, under `slow` of her close-hauled speed and turning at
     /// under `turnRate` for `seconds`, she centres the rudder until she has `steerage` of that speed or is out of it.
     public static let stall = (margin: deg2rad(3), slow: 0.3, turnRate: deg2rad(2), seconds: 0.5, steerage: 0.5)
+    /// A penalty turn's rudder, as a share of full, whatever her handling: hard over, the rudder's drag stops her head
+    /// to wind in every turn (8 to 10 s stuck, the turn through the wind at a crawl), as a slammed tack from slow.
+    public static let penaltyFraction = 0.7
     /// Seconds at most she waits, centred, for steerage to turn a penalty on.
     public static let stallWait = 8.0
 
@@ -128,6 +139,9 @@ extension BotBrain {
         return (1 - weaknesses.shiftLag / HandSteeringTable.shiftLagScale).clamped(to: 0...1)
     }
 
+    /// The rudder she turns a penalty turn with, a share of full: all of it on a class whose tap sails her turns.
+    static func penaltyRudder(_ view: SeatView) -> Double { turnsByHand(view) ? HandTackTable.penaltyFraction : 1 }
+
     /// Whether her class leaves tacks and gybes to her hand: its tap sails nothing.
     static func turnsByHand(_ view: SeatView) -> Bool { !view.boatClass.steering.autohelm.sailsTap }
 
@@ -150,8 +164,8 @@ extension BotBrain {
             let under = handTurnRng.unit() < HandTackTable.underSteerShare
             let past = handTurnRng.range(HandTackTable.overSteer.lowerBound, HandTackTable.overSteer.upperBound)
             turn.ease = 0
-            if isTack && under {
-                turn.fraction = max(turn.fraction * HandTackTable.underSteer, HandTackTable.underSteerFloor)
+            if isTack, under, b.polarWindSpeed > HandTackTable.underSteerWind, turn.fraction <= HandTackTable.underSteerFrom {
+                turn.fraction = HandTackTable.underSteer
             } else {
                 // A gybe is cheaper gentle, so a flubbed one is never under-steered: she cranks it past her groove.
                 if !isTack { turn.fraction = HandTackTable.gybeFraction.poor }
