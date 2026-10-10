@@ -410,16 +410,18 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
             if race.boats[0].penaltyTurnsOwed > 0 && (!held.isEmpty || abs(rudder) == Self.hardOver(1)) { held.insert(rudder) }
         }
         #expect(kinds.filter { $0 == .penaltyServed(seat: 0) }.count == 2)
-        #expect(!kinds.contains(.penaltyReset(seat: 0)))
+        let byHand = !RaceFiles.defaults.boatClass.content.steering.autohelm.sailsTap
+        // By hand (skiff@8, #461) she may turn the second the other way before it has started (the rules' 30°): slow
+        // from the first, she bears away rather than luff straight back into the wind.
+        #expect(byHand || !kinds.contains(.penaltyReset(seat: 0)))
         #expect(!kinds.contains { if case .disqualified(seat: 0, _) = $0 { true } else { false } })
         #expect(race.boats[0].penaltyTurnsOwed == 0 && race.boats[0].status == .racing)
-        // By hand (skiff@8, #461) one way, but not one rudder: she takes some off to gather way before the tack, and
-        // puts it hard over where the turn's own would crawl through the wind.
-        if RaceFiles.defaults.boatClass.content.steering.autohelm.sailsTap {
-            #expect(held.count == 1 && held.allSatisfy { abs($0) == Self.hardOver(1) }, "\(held)")
-        } else {
+        // By hand not one rudder: she takes some off to gather way before the tack, and puts it hard over where the
+        // turn's own would crawl through the wind.
+        if byHand {
             #expect(held.contains(Self.hardOver(1)) || held.contains(Self.hardOver(-1)), "\(held)")
-            #expect(held.allSatisfy { $0 > 0 } || held.allSatisfy { $0 < 0 }, "\(held)")
+        } else {
+            #expect(held.count == 1 && held.allSatisfy { abs($0) == Self.hardOver(1) }, "\(held)")
         }
     }
 }

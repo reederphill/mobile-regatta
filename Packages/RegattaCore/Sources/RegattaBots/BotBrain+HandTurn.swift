@@ -85,6 +85,14 @@ public enum HandTackTable {
     /// Seconds at most she waits, centred, for steerage to turn a penalty on.
     public static let stallWait = 8.0
 
+    /// Seconds a tack onto starboard takes her before her start, by hand, before she can sail at her spot
+    /// (`BotBrain.tackSeconds`): the turn, and the way it costs her won back.
+    public static let startTackSeconds = 9.0
+
+    /// The least rudder of a gybe before her start, a share of full: a gentle gybe (`gybeFraction.good`) is 12 s and
+    /// 30 m of water downwind of the line.
+    public static let startGybeFraction = 0.7
+
     /// `values.good` at `handling.good` or better, in a line to `values.poor` at `handling.poor` or worse.
     static func ramp(_ h: Double, _ values: (good: Double, poor: Double), _ handling: (good: Double, poor: Double)) -> Double {
         let t = ((handling.good - h) / (handling.good - handling.poor)).clamped(to: 0...1)
@@ -247,6 +255,8 @@ extension BotBrain {
         var turn = HandTurn(isTack: isTack, toTack: aim.tack, sign: isTack ? luff : -luff,
                             fraction: isTack ? HandTackTable.tackFraction(handling: h) : HandTackTable.gybeFraction(handling: h),
                             ease: isTack ? HandTackTable.tackEase(handling: h) : 0, overSteer: 0, started: view.time)
+        // Before her start a gybe is for getting round, not for the lengths it saves: more rudder (#461).
+        if !isTack, b.status != .racing { turn.fraction = max(turn.fraction, HandTackTable.startGybeFraction) }
         if handTurnRng.unit() < HandTackTable.botchRate(handling: h) {
             let under = handTurnRng.unit() < HandTackTable.underSteerShare
             let past = handTurnRng.range(HandTackTable.overSteer.lowerBound, HandTackTable.overSteer.upperBound)

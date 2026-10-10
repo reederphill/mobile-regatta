@@ -41,6 +41,9 @@ extension BotBrain {
     static let trafficAllowance = 0.6
     /// Seconds a tack onto starboard takes her, on port, before she can sail at her spot.
     static let tackSeconds = 4.0
+    /// The same for `view`'s class, timing her tack onto starboard for her run in (`startAim`):
+    /// `HandTackTable.startTackSeconds` on one she tacks by hand (#461).
+    static func tackSeconds(_ view: SeatView) -> Double { turnsByHand(view) ? HandTackTable.startTackSeconds : tackSeconds }
     /// Waiting along the line, how far away from it past parallel she sails.
     static let waitOffLine = deg2rad(5)
     /// Waiting deeper, her sailing angle: nearly dead downwind, so she reaches along the line far less for each
@@ -176,7 +179,7 @@ extension BotBrain {
         let joins = b.tack == .starboard
             ? toSpot >= hold - Self.fetchMargin && landingRoom(b, view, hold: hold) > 0
             : toSpot >= hold + Self.joinMargin
-                || secondsToLine(b, view, angle: go.angle, ease: false, within: arrival) + Self.tackSeconds >= arrival
+                || secondsToLine(b, view, angle: go.angle, ease: false, within: arrival) + Self.tackSeconds(view) >= arrival
         // Over the line before the gun, she runs back below it as an OCS boat would, on her own tack. Over is any
         // point of her hull (`hullDepth`), as the race calls it: easing along the line with her bow up, her windward
         // bow quarter crosses it before her bow does (#388, seed 9 of `aBotTakingOverBeforeTheGunStarts`).
@@ -194,7 +197,7 @@ extension BotBrain {
                 ?? toSetup(b, view, spot: spot, hold: hold, arrival: arrival)
         }
 
-        let run = secondsToLine(b, view, angle: go.angle, ease: false, within: arrival) + (b.tack == .port ? Self.tackSeconds : 0)
+        let run = secondsToLine(b, view, angle: go.angle, ease: false, within: arrival) + (b.tack == .port ? Self.tackSeconds(view) : 0)
         let needed = run + max(0, run - Self.clearRunSeconds) * Self.trafficAllowance
         let going = b.ease == false && b.tack == .starboard
         if needed >= arrival - (going ? Self.goHysteresis : 0) { return go }

@@ -49,13 +49,27 @@ import Testing
         _ = race.drainEvents()
     }
 
-    /// Sails `race` for `seconds` with the harness's tally, tapping each seat's tack in `taps` (seconds from now).
+    /// Sails `race` for `seconds` with the harness's tally, tapping each seat's tack in `taps` (seconds from now). On a
+    /// class whose tap sails nothing (skiff@8, #461) the seat tacks by hand instead: 60 % rudder towards the wind from
+    /// the tap's tick, let go close-hauled on her new tack.
     private func tally(_ race: Race, seconds: Double, taps: [(seat: Int, at: Double)] = []) -> [SeatMetrics] {
         var tally = RaceTally(race: race)
         let start = race.tick
+        let byHand = !race.boatClass.steering.autohelm.sailsTap
+        var tackingFrom: [Int: Tack] = [:]
         for _ in 0..<Int(seconds * Double(Race.tickRate)) {
             for tap in taps where race.tick - start == Int(tap.at * Double(Race.tickRate)) {
-                race.tap(.tackGybe, seat: tap.seat, atTick: race.tick + 1)
+                guard byHand else {
+                    race.tap(.tackGybe, seat: tap.seat, atTick: race.tick + 1)
+                    continue
+                }
+                let boat = race.boats[tap.seat]
+                tackingFrom[tap.seat] = boat.tack
+                race.apply(BoatInput(rudder: boat.boomSide == .port ? 0.6 : -0.6), seat: tap.seat, atTick: race.tick + 1)
+            }
+            for (seat, from) in tackingFrom where race.boats[seat].tack != from && race.boats[seat].twa >= deg2rad(40) {
+                race.apply(.neutral, seat: seat, atTick: race.tick + 1)
+                tackingFrom[seat] = nil
             }
             race.step()
             tally.record(race, events: race.drainEvents())
