@@ -164,36 +164,6 @@ import RegattaCore
     }
 }
 
-/// #437 Q4: the tack button says the turn its tap will sail, the sim's own choice (`Autohelm.tackOrGybe`), not a fixed
-/// 90° on the HUD's wind angle: through the wind forward of the beam, through the stern abaft it, on a reach too.
-@MainActor @Suite struct TackButtonLabelTests {
-    @Test func labelsTheTurnTheTapSailsOnAReach() {
-        let driver = PracticeDriver(config: RaceDriverTests.config)
-        let frame = driver.currentFrame
-        let me = driver.myBoatIndex
-        func hud(sailingAngle degrees: Double, boom: BoomSide = .port) -> HUDState {
-            var boats = frame.boats
-            boats[me].boomSide = boom
-            boats[me].heading = wrapAngle(boats[me].windDirection - (boom == .port ? 1 : -1) * deg2rad(degrees))
-            let moved = TickFrame(tick: frame.tick, boats: boats, standings: frame.standings, wind: frame.wind, isOver: frame.isOver)
-            return HUDState(world: RenderWorld(course: driver.course, boatClass: driver.boatClass, myBoatIndex: me,
-                                               previous: moved, current: moved, alpha: 1))
-        }
-        for (angle, turn) in [(45.0, HUDState.TapTurn.tack), (80, .tack), (89, .tack), (91, .gybe), (100, .gybe), (150, .gybe)] {
-            for boom in [BoomSide.port, .starboard] {
-                let h = hud(sailingAngle: angle, boom: boom)
-                #expect(h.tapTurn == turn, "\(angle)° on \(boom)")
-                let tap = Autohelm.tackOrGybe(sailingAngle: deg2rad(angle)).target
-                #expect((tap == .groove(.upwind)) == (h.tapTurn == .tack), "the label and the sim's tap agree at \(angle)°")
-            }
-        }
-        #expect(hud(sailingAngle: 80).tapTurn.label == "TACK")
-        #expect(hud(sailingAngle: 100).tapTurn.label == "GYBE")
-        // By the lee, short of the boom crossing: still a gybe.
-        #expect(hud(sailingAngle: 190).tapTurn == .gybe)
-    }
-}
-
 @MainActor @Suite struct TickClockTests {
     /// Ticks run for `seconds` of real time at `fps`.
     private func ticks(fps: Int, seconds: Int, timescale: Double = 1) -> Int {

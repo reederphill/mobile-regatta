@@ -313,7 +313,7 @@ import RegattaCore
         model.set(try slider("camera.lookAheadSeconds", in: model), to: 3)
         #expect(session.scene.waterStyle.fullTonePuffGain == 0.2)
         #expect(session.scene.cameraStyle.lookAheadSeconds == 3)
-        // The boat group (#117): heel, flutter and flog feel values.
+        // The boat group (#117): heel and flutter feel values.
         model.set(try slider("boat.heelScale", in: model), to: 1.5)
         #expect(session.scene.boatStyle.heelScale == 1.5)
         #expect(session.isTuned)

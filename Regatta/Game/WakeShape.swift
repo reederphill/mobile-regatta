@@ -8,8 +8,7 @@ nonisolated enum WakeQuality: Sendable {
     case short
 }
 
-/// How a boat's wake is drawn this frame (#15, #220, #121): its alpha is the pressure she feels, and a roll miss
-/// kills it and a hit flares it. (Its V and streak numbers are the shape's, kept for the tuning panel; the wake the
+/// How a boat's wake is drawn this frame (#15, #220, #121): its alpha is the pressure she feels. (Its V and streak numbers are the shape's, kept for the tuning panel; the wake the
 /// scene draws is her stern's track, `BoatEffects.trail`.) Pure: presentation only,
 /// nothing here reaches the race (ADR 0002).
 ///
@@ -61,15 +60,6 @@ nonisolated struct WakeShape: Equatable, Sendable {
     init(_ boat: Boat, boatClass: BoatClass, style: BoatStyle, quality: WakeQuality) {
         self.init(speedThroughWater: boat.speedThroughWater, hullLength: boatClass.hull.length,
                   pressure: BoatPose.pressure(boat), isPlaning: boat.isPlaning, style: style, quality: quality)
-    }
-
-    /// This wake at `level` of itself: 0 dies (a roll miss, #222), above 1 flares (a roll hit). Its alpha stays
-    /// at most 1 and its spread at most 60 degrees.
-    func scaled(by level: Double) -> WakeShape {
-        let level = max(level, 0)
-        return WakeShape(length: length * level, halfAngle: min(halfAngle * level, .pi / 3),
-                         alpha: min(alpha * level, 1), streakLength: streakLength * level,
-                         streakAlpha: min(streakAlpha * level, 1))
     }
 
     /// The step from `self` towards `target` after `dt` race seconds at `rate` per second (exponential).

@@ -83,7 +83,8 @@ private struct HelpSection: View {
 
 /// Both steering schemes, with a small picture each, then letting go and steering by hand (the groove tick, pinch and
 /// foot and the vane's arc, #219, #436: hand steering is the way the game is played, the Auto tiller tuning never
-/// mentioned) and the Tack button, in a few short lines. Each scheme card says how it eases (#453).
+/// mentioned), and tacking and gybing by steering through the wind (#460), in a few short lines. Each scheme card says
+/// how it eases (#453).
 private struct SteeringHelp: View {
     var body: some View {
         // TODO-COPY (#171): every line on this page.
@@ -97,9 +98,7 @@ private struct SteeringHelp: View {
             "Let go and she sails straight on.",
             "Steer to the tick on the vane, the groove, the best angle.",
             "Pinch above it or foot below it: the arc shows how far.",
-        ])
-        HelpSection(heading: "Buttons", lines: [
-            "Tack: tap to turn; you come out on the groove.",
+            "Steer through the wind to tack or gybe.",
         ])
     }
 }

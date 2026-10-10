@@ -36,13 +36,11 @@ import RegattaCore
         #expect(heard.calls.contains("impact 1.0"), "the gun")
     }
 
-    /// The tack tap has no haptic (#112, #124).
+    /// The tack tap has no haptic (#112, #124): the driver's, as the app has no button for it (#460).
     @Test func aTackTapPlaysNoHaptic() {
         let heard = RecordingGenerator()
         let session = GameSession(config: Self.config, haptics: GatedHaptics(generator: heard, isOn: true))
-        session.tackOrGybe()
-        session.pressTack(at: 10)
-        session.releaseTack(at: 11)
+        session.driver.tap(.tackGybe)
         #expect(heard.calls.isEmpty)
     }
 

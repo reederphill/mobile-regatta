@@ -382,7 +382,7 @@ import Testing
         let boatClass = ShadowConeTests.boatClass
         let effects = BoatEffects(seat: 2, boatClass: boatClass, pointsPerMeter: ShadowConeTests.ppm, style: .standard)
         effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass),
-                       style: .standard, quality: .full, time: 0, dt: 0, settled: true, isFlogging: false,
+                       style: .standard, quality: .full, time: 0, dt: 0, settled: true,
                        backwindSail: sail, backwindSide: side)
         return (effects.backwind.alpha, effects.backwind.isHidden, effects.backwind.xScale)
     }

@@ -116,9 +116,9 @@ import RegattaCore
         for _ in 0..<1000 where !done() { await Task.yield() }
     }
 
-    /// At `.farReduced` a boat far from yours draws her sail at its trim and fullness, with no flutter, luff shiver,
-    /// belly pump or flog swing; a near one, yours and every boat at `.full` still swing. Her heel is the same either
-    /// way, and a roll miss still kills her wake.
+    /// At `.farReduced` a boat far from yours draws her sail at its trim and fullness, with no flutter, luff shiver or
+    /// belly pump; a near one, yours and every boat at `.full` still swing. Her heel is the same either way, and so
+    /// is her wake.
     @Test func farBoatsDropSailDetailOnly() throws {
         let style = BoatStyle.standard
         let boatClass = WakeTests.boatClass
@@ -146,16 +146,10 @@ import RegattaCore
             #expect(abs(node.hullXScale - far.hullXScale) < 1e-9, "heel is the same at any distance")
         }
 
-        // A roll miss: the far boat's sail doesn't flog, but her wake dies as a near one's does.
-        var flog = pose
-        flog.flutter = 0
-        flog.luffLift = 0
-        flog.roll = .flog
-        let farFlog = drawn(.farReduced, hulls: 20, pose: flog), nearFlog = drawn(.farReduced, hulls: 2, pose: flog)
-        #expect(abs(farFlog.sailLook.rotation - trim) < 1e-6)
-        #expect(abs(nearFlog.sailLook.rotation - trim) > 1e-3)
-        #expect(farFlog.effects.trail.alpha == nearFlog.effects.trail.alpha)
-        #expect(farFlog.effects.shape == nearFlog.effects.shape)
+        // Her wake is the same far or near.
+        let near = drawn(.farReduced, hulls: 2, pose: pose)
+        #expect(far.effects.trail.alpha == near.effects.trail.alpha)
+        #expect(far.effects.shape == near.effects.shape)
 
         // Off the edge, she eases back to full detail rather than popping.
         let easing = drawn(.farReduced, hulls: 20, pose: pose)

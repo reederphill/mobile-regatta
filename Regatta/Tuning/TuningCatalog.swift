@@ -354,7 +354,7 @@ enum TuningCatalog {
                 ]),
             TuningGroup(
                 id: "boat", title: "Boat",
-                note: "How boats heel, flutter and flog, their wakes and shadow hatches, and the boat-side cues and rule cues (#117, #121, #122, #123, #220, #222). Drawn only: never logged.",
+                note: "How boats heel and flutter, their wakes and shadow hatches, and the boat-side cues and rule cues (#117, #121, #122, #123, #220, #222). Drawn only: never logged.",
                 applies: .live,
                 sliders: [
                     // Past 1 still counts: heel is capped at 1 after the gain, so more heels her sooner and
@@ -363,10 +363,6 @@ enum TuningCatalog {
                     boat("heelFullKnots", "Overpowered at", \.heelFullKnots, 8...30, 0.5, unit: " kn"),
                     boat("starvedFullLoss", "Starved flutter at", \.starvedFullLoss, 0.1...0.8, 0.05),
                     boat("flutterDegrees", "Flutter", \.flutterDegrees, 0...20, 0.5, unit: "°"),
-                    boat("flogSeconds", "Roll-miss flog", \.flogSeconds, 0...4, 0.1, unit: " s"),
-                    boat("rollRingAlpha", "Roll ring", \.rollRingAlpha, 0...1, 0.05),
-                    boat("rollRingHulls", "Roll ring size", \.rollRingHulls, 0.5...3, 0.1, unit: " hulls"),
-                    boat("rollRingSeconds", "Roll result shows", \.rollRingSeconds, 0.2...2, 0.1, unit: " s"),
                     boat("ghostAlpha", "Ghost fade", \.ghostAlpha, 0.1...0.9, 0.05),
                     // #121: wakes, cones and backwind.
                     boat("wakeMaxHulls", "Wake length", \.wakeMaxHulls, 0...10, 0.25, unit: " hulls"),
@@ -376,7 +372,6 @@ enum TuningCatalog {
                     boat("wakePressureFan", "Wake pressure fan", \.wakePressureFan, 0...3, 0.1),
                     boat("wakeAlpha", "Wake alpha", \.wakeAlpha, 0...1, 0.02),
                     boat("wakePlaningBoost", "Planing wake", \.wakePlaningBoost, 1...2.5, 0.05),
-                    boat("wakeFlareGain", "Roll-hit flare", \.wakeFlareGain, 0...2, 0.1),
                     boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.4, 0.01),
                     boat("backwindShare", "Backwind hatch", \.backwindShare, 0...6, 0.1),
                     boat("backwindFeather", "Backwind edge softness", \.backwindFeather, 0...8, 0.5, unit: " pt"),

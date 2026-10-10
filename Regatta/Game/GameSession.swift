@@ -135,8 +135,6 @@ final class GameSession {
     @ObservationIgnored private var toldUpdateRequired = false
     /// Every haptic goes through here, so Settings' Haptics off silences them all (#110).
     @ObservationIgnored private let haptics: any Haptics
-    /// The Tack/Gybe button's hold and release (#222).
-    @ObservationIgnored private var tackHold = TackHold()
 
     /// A practice race on the device, your boat in `livery` (#136). `timescale` runs the simulation that many times real
     /// time (`-timescale`, for tests).
@@ -244,25 +242,6 @@ final class GameSession {
         isFirstRace && steering == .halves
     }
 
-    /// One tack/gybe tap. With `-demo` a bot sails your seat, and the driver refuses it. No haptic (#112).
-    @discardableResult func tackOrGybe() -> Bool {
-        driver.tap(.tackGybe)
-    }
-
-    /// The Tack/Gybe button goes down at wall-clock `time`: the tap that starts the tack or gybe, unless the boat is
-    /// already in one (#222).
-    func pressTack(at time: Double) {
-        guard tackHold.press(at: time, inManoeuvre: TackHold.isInManoeuvre(myBoat)) else { return }
-        if !tackOrGybe() { tackHold.pressRefused() }
-    }
-
-    /// The Tack/Gybe button comes up at wall-clock `time`: after a hold, the roll, if the boat is still in the tack
-    /// the press began. The sim times it against the boom crossing (#263).
-    func releaseTack(at time: Double) {
-        guard tackHold.release(at: time, inTack: TackHold.isInTack(myBoat)) else { return }
-        tackOrGybe()
-    }
-
     /// VoiceOver's Ease is put on or let go (#99, #453). Ease stays on while the gesture holds it.
     func setEase(_ easing: Bool) {
         updateEase { isVoiceOverEasing = easing }
@@ -313,17 +292,13 @@ final class GameSession {
         if isPaused { sound.silence() }
     }
 
-    /// Lets go of steering and Ease, and tells the held buttons (`controlReleases`): an overlay is taking the touches,
-    /// the pause menu or Help (#135), which an online race keeps running under with the rudder centred.
+    /// Lets go of steering and Ease: an overlay is taking the touches, the pause menu or Help (#135), which an online
+    /// race keeps running under with the rudder centred.
     func releaseControls() {
         isVoiceOverEasing = false
         isGestureEasing = false
         scene.resetInput()
-        controlReleases += 1
     }
-
-    /// How many times the controls have been let go (`releaseControls`): Ease and Tack/Gybe let go on each.
-    private(set) var controlReleases = 0
 
     /// The app went to the background (`SceneState.phase`, #25): a practice race pauses, so the pause menu is up on
     /// return. Not a finished race or a render fixture; an online race keeps running (#141).

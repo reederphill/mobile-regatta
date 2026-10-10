@@ -39,13 +39,14 @@ import RegattaCore
         #expect(results.rows.filter(\.isPlayer).map(\.id) == [me])
     }
 
-    /// Under `-demo` the tack button doesn't reach the bot-sailed seat; in a normal race it does. The bot taps
-    /// that seat itself (#231), so under `-demo` the proof is the same race without the press: the same log.
-    @Test func tackButtonOnlyReachesAHumanSeat() throws {
+    /// Under `-demo` the driver's tack/gybe tap doesn't reach the bot-sailed seat; in a normal race it does (the
+    /// app has no button for it, #460: old logs and tests tap through the driver). The bot taps that seat itself
+    /// (#231), so under `-demo` the proof is the same race without the tap: the same log.
+    @Test func theDriversTapOnlyReachesAHumanSeat() throws {
         let demoConfig = RaceConfig(opponents: 3, seed: 1, windSeed: 2, botSailsYourBoat: true)
         let (demo, unpressed) = (GameSession(config: demoConfig), GameSession(config: demoConfig))
         let normal = GameSession(config: Self.config)
-        for session in [demo, normal] { session.tackOrGybe() }
+        for session in [demo, normal] { session.driver.tap(.tackGybe) }
         for session in [demo, unpressed, normal] { session.driver.tick(Race.dt) }
         func log(_ session: GameSession) throws -> RaceLog { try #require(session.driver as? PracticeDriver).log }
         let (demoLog, unpressedLog, normalLog) = (try log(demo), try log(unpressed), try log(normal))
@@ -85,23 +86,14 @@ import RegattaCore
         #expect(session.notice?.text.contains("fouled you") == true, "and stays")
     }
 
-    /// Your roll tack's result is read as well as seen (#222): a hit and a miss each post a short notice, and another
-    /// boat's roll posts none.
-    @Test func yourRollTacksResultPostsANotice() {
+    /// A roll tack's result posts no notice (#460): nothing in the app taps a roll, and a bot's or an old log's is
+    /// not yours to read.
+    @Test func aRollTackPostsNoNotice() {
         let session = GameSession(config: Self.config)
         session.now = { Date(timeIntervalSinceReferenceDate: 0) }
         let me = session.driver.myBoatIndex
-        let other = (0..<4).first { $0 != me } ?? 1
-        session.consume([RaceEvent(tick: 0, kind: .rollHit(seat: other)), RaceEvent(tick: 0, kind: .rollMissed(seat: other))])
-        #expect(session.notice?.kind != .roll, "another boat's roll posts nothing")
-        session.consume([RaceEvent(tick: 1, kind: .rollHit(seat: me))])
-        #expect(session.notice?.kind == .roll && session.notice?.text.contains("clean") == true,
-                "\(String(describing: session.notice))")
-        session.now = { Date(timeIntervalSinceReferenceDate: 5) }
-        session.refreshHUD()
-        session.consume([RaceEvent(tick: 2, kind: .rollMissed(seat: me))])
-        #expect(session.notice?.kind == .roll && session.notice?.text.contains("missed") == true,
-                "\(String(describing: session.notice))")
+        session.consume([RaceEvent(tick: 1, kind: .rollHit(seat: me)), RaceEvent(tick: 2, kind: .rollMissed(seat: me))])
+        #expect(session.notice == nil, "\(String(describing: session.notice))")
     }
 
     /// A tap opens the live leaderboard to the whole fleet (#268); the next tap closes it, and so do 5 s of

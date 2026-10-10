@@ -2,7 +2,7 @@ import Foundation
 import RegattaCore
 
 /// How a boat is drawn this frame (#117, #22): which side her sail is on and how far it is trimmed out, how hard
-/// it flutters, how far she heels, whether a roll tack's cue shows, and whether she is a ghost. The one place a
+/// it flutters, how far she heels, and whether she is a ghost. The one place a
 /// boat's look is derived from her state.
 ///
 /// A pure function of existing sim state: the boat's public fields, her held ease (`BoatInput.ease`, which every
@@ -15,14 +15,6 @@ import RegattaCore
 /// same for every boat in the same state, as the rest. #127's far tier keeps `heel` and `sailSide` apart from
 /// `flutter`.
 nonisolated struct BoatPose: Equatable, Sendable {
-    /// The cue a roll tack (#222, #263) shows while it lasts.
-    enum RollCue: Equatable, Sendable {
-        /// A hit: the sail snaps full, no flutter.
-        case snap
-        /// A miss: the sail flogs hard (`BoatStyle.flogSeconds` from when it is first drawn).
-        case flog
-    }
-
     /// The side the boom and sail are on (`Boat.boomSide`): to leeward, except by the lee. It crosses only when
     /// she tacks or gybes, so the sail swings across on a gybe.
     var sailSide: BoomSide
@@ -33,9 +25,8 @@ nonisolated struct BoatPose: Equatable, Sendable {
     /// `BoatStyle.maxTrimDegrees`.
     var sailTrim: Double
     /// How hard the sail flutters, 0 (drawing) to 1 (flapping): eased, head to wind, by the lee or starved of
-    /// pressure. A roll miss's flog is `roll`, on top.
+    /// pressure.
     var flutter: Double
-    var roll: RollCue?
     /// How far she heels, 0 (upright) to 1 (overpowered): her hull drawn narrower and her drop shadow offset to
     /// leeward (`leeSide`).
     var heel: Double
@@ -60,7 +51,6 @@ nonisolated struct BoatPose: Equatable, Sendable {
             // Limp, amidships: she isn't sailing any more.
             sailTrim = 0
             flutter = 0
-            roll = nil
             heel = 0
             return
         }
@@ -97,15 +87,6 @@ nonisolated struct BoatPose: Equatable, Sendable {
         }
         flutter = max(flutter, Self.starved(boat, style: style) * style.starvedFlutter)
 
-        switch boat.roll {
-        case .hit:
-            roll = .snap
-            flutter = 0
-        case .missed:
-            roll = .flog
-        case .pending, nil:
-            roll = nil
-        }
         self.flutter = flutter.clamped(to: 0...1)
 
         heel = ease || headToWind ? 0 : Self.heel(felt: Self.feltWind(boat), twa: twa, style: style)
@@ -180,7 +161,7 @@ nonisolated struct BoatPose: Equatable, Sendable {
 }
 
 /// Every number boats are drawn with (#117), in one value, the same for every boat: the heel ramp and look, the
-/// sail's trim and flutter, the roll cues, your glow and the ghost's fade. The debug tuning panel (#232) puts a
+/// sail's trim and flutter, your glow and the ghost's fade. The debug tuning panel (#232) puts a
 /// slider on the feel values, and `GameScene.boatStyle` takes a new one live. App-side and never logged: nothing
 /// here reaches the simulation. Every default is a placeholder until tuned there.
 nonisolated struct BoatStyle: Codable, Equatable, Sendable {
@@ -222,17 +203,6 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var starvedDeadband = 0.05
     var starvedFullLoss = 0.35
     var starvedFlutter = 0.8
-
-    // MARK: Roll tack (#222)
-
-    /// A missed roll's flog: its swing either side, degrees, and how long it lasts, seconds.
-    var flogDegrees = 18.0
-    var flogSeconds = 1.5
-    /// Your roll ring (#222): its alpha, its radius at its widest in hull lengths (where the approach starts), and how
-    /// long a hit's or a miss's result shows, race seconds.
-    var rollRingAlpha = 0.9
-    var rollRingHulls = 1.6
-    var rollRingSeconds = 1.3
 
     // MARK: Your boat, ghosts
 
@@ -284,9 +254,6 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     var wakeStreakAlpha = 0.5
     /// How fast the wake follows her speed and pressure, per race second.
     var wakeEaseRate = 4.0
-    /// A roll hit's flare (#222): how much bigger and brighter her wake starts, fading over this many seconds.
-    var wakeFlareGain = 0.6
-    var wakeFlareSeconds = 0.8
     /// The short wake tier's (#127) length, a share of the full one's; it has no centre streak.
     var wakeShortShare = 0.5
 
@@ -383,7 +350,7 @@ nonisolated extension BoatStyle {
             (.headToWindMarginDegrees, \.headToWindMarginDegrees), (.headToWindTrimDegrees, \.headToWindTrimDegrees),
             (.flutterDegrees, \.flutterDegrees), (.byTheLeeFlutter, \.byTheLeeFlutter),
             (.starvedDeadband, \.starvedDeadband), (.starvedFullLoss, \.starvedFullLoss),
-            (.starvedFlutter, \.starvedFlutter), (.flogDegrees, \.flogDegrees), (.flogSeconds, \.flogSeconds),
+            (.starvedFlutter, \.starvedFlutter),
             (.glowAlpha, \.glowAlpha), (.ghostAlpha, \.ghostAlpha),
             (.ghostSailBelly, \.ghostSailBelly), (.flapBellyLoss, \.flapBellyLoss),
             (.flutterSwingRate, \.flutterSwingRate), (.flapBellyRate, \.flapBellyRate),
@@ -392,11 +359,8 @@ nonisolated extension BoatStyle {
             (.wakeSpreadDegrees, \.wakeSpreadDegrees), (.wakePressureFan, \.wakePressureFan),
             (.wakeAlpha, \.wakeAlpha), (.wakePlaningBoost, \.wakePlaningBoost),
             (.wakeTrailSeconds, \.wakeTrailSeconds), (.wakeTrailWidth, \.wakeTrailWidth),
-            (.rollRingSeconds, \.rollRingSeconds), (.rollRingAlpha, \.rollRingAlpha),
-            (.rollRingHulls, \.rollRingHulls),
             (.wakeStreakShare, \.wakeStreakShare), (.wakeStreakWidth, \.wakeStreakWidth),
             (.wakeStreakAlpha, \.wakeStreakAlpha), (.wakeEaseRate, \.wakeEaseRate),
-            (.wakeFlareGain, \.wakeFlareGain), (.wakeFlareSeconds, \.wakeFlareSeconds),
             (.wakeShortShare, \.wakeShortShare), (.coneAlpha, \.coneAlpha), (.backwindShare, \.backwindShare), (.shadowFollowSeconds, \.shadowFollowSeconds), (.backwindFeather, \.backwindFeather),
             (.hatchSpacing, \.hatchSpacing), (.hatchLineWidth, \.hatchLineWidth),
             (.vaneLengthHulls, \.vaneLengthHulls),
@@ -420,46 +384,3 @@ nonisolated extension BoatStyle {
     }
 }
 
-/// A roll miss's flog (#222) as a boat draws it: `BoatStyle.flogSeconds` of race time from when the miss is first
-/// drawn, though the race holds the miss until she is close-hauled. Presentation state, one per boat.
-nonisolated struct FlogTimer: Equatable, Sendable {
-    /// When the current miss's flog began, race seconds, while she has one.
-    private(set) var start: Double?
-
-    /// Whether the sail flogs at race time `time` with `roll` showing, for `seconds` from first seen. Time that
-    /// runs backwards (an online re-prediction, a fixture drawn again) starts the flog over from `time`, so a
-    /// start in the future never counts as flogging for ever.
-    mutating func isFlogging(roll: BoatPose.RollCue?, time: Double, seconds: Double) -> Bool {
-        guard roll == .flog else {
-            start = nil
-            return false
-        }
-        if let start, time >= start {
-            return time - start < seconds
-        }
-        start = time
-        return seconds > 0
-    }
-}
-
-/// A roll hit's wake flare (#222) as a boat draws it: from 1 when the hit is first drawn down to 0 over
-/// `BoatStyle.wakeFlareSeconds` of race time, though the race holds the hit until she is close-hauled. Time that
-/// runs backwards starts it over, as `FlogTimer`. Presentation state, one per boat.
-nonisolated struct FlareTimer: Equatable, Sendable {
-    /// When the current hit's flare began, race seconds, while she has one.
-    private(set) var start: Double?
-
-    /// How much of the flare is left at race time `time` with `roll` showing, 0 to 1.
-    mutating func flare(roll: BoatPose.RollCue?, time: Double, seconds: Double) -> Double {
-        guard roll == .snap else {
-            start = nil
-            return 0
-        }
-        if let start, time >= start {
-            guard seconds > 0 else { return 0 }
-            return max(0, 1 - (time - start) / seconds)
-        }
-        start = time
-        return seconds > 0 ? 1 : 0
-    }
-}

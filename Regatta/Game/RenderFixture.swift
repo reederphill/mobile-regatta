@@ -58,8 +58,8 @@ struct RenderFixture: Codable, Equatable {
         var leaderboard: Leaderboard? = nil
         /// A hint the fixture shows for good, by id, with its leader line (#129): `"hint": "red_glow"`.
         var hint: HintID? = nil
-        /// The bottom row's instruments (#457), speed and apparent wind, in their places beside Tack/Gybe's empty
-        /// slot; nil leaves them off, so the HUD fixtures before #457 keep their references.
+        /// The bottom row's instruments (#457), speed and apparent wind, as a pair centred in the row (#460);
+        /// nil leaves them off, so the HUD fixtures before #457 keep their references.
         var instruments: Bool? = nil
     }
 

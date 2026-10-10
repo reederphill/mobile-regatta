@@ -94,7 +94,7 @@ enum SoundCue: CaseIterable, Hashable {
     /// The sound a presenter cue plays, or nil. The sequence ticks and the gun are the race clock's
     /// (`SoundSchedule`): sounding the gun's event too would play it twice online. Calls between other boats
     /// never reach here (the presenter drops them), and protests, contact, a mark touch (rule 31), a served turn, a
-    /// DSQ, the groove snap and the roll are felt and seen, not heard.
+    /// DSQ and the groove snap are felt and seen, not heard.
     // An exhaustive switch: a new `RaceCue` doesn't compile until it chooses.
     init?(_ cue: RaceCue) {
         switch cue {
@@ -102,8 +102,7 @@ enum SoundCue: CaseIterable, Hashable {
         case .callAgainstMe, .callForMe: self = .whistle
         case .rounding: self = .bell
         case .finish: self = .finishHorn
-        case .sequenceTick, .gun, .markTouch, .penaltyDone, .protestFiled, .contact, .disqualified, .grooveSnap,
-             .rollHit:
+        case .sequenceTick, .gun, .markTouch, .penaltyDone, .protestFiled, .contact, .disqualified, .grooveSnap:
             return nil
         }
     }

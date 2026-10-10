@@ -16,7 +16,7 @@ final class BoatEffects {
     let backwind: SKSpriteNode
     /// The wake: a string of the track her stern has sailed over the last `BoatStyle.wakeTrailSeconds`, in world
     /// space, so it bends with her turns and the current carries it (the string of #15). Its alpha is the
-    /// pressure's (`WakeShape`): a roll miss kills it, a hit flares it.
+    /// pressure's (`WakeShape`).
     let trail = SKShapeNode()
 
     /// The nodes the scene adds to its effects layer.
@@ -40,7 +40,6 @@ final class BoatEffects {
     private var followed: (heading: Double, wind: Double)?
     /// The wake drawn last frame, eased towards each frame's (`BoatStyle.wakeEaseRate`).
     private(set) var shape: WakeShape?
-    private var flare = FlareTimer()
     /// Where her stern has been, world points, oldest first, each with the race time it was there.
     private var history: [(point: CGPoint, time: Double)] = []
     /// The race time the history last took a sample.
@@ -71,13 +70,11 @@ final class BoatEffects {
         trail.zPosition = Layer.wake + slot
     }
 
-    /// Draws `boat`'s effects in `pose` at race time `time`. `isFlogging` is her sail's roll-miss flog this frame
-    /// (`FlogTimer`): her wake dies while it lasts and comes back with it (#222). `settled` draws the wake straight
-    /// at its target, with no easing (a frozen render fixture). `backwindSail`, 0...1, her backwind level, scales her
+    /// Draws `boat`'s effects in `pose` at race time `time`. `settled` draws the wake straight at its target, with no easing (a frozen render fixture). `backwindSail`, 0...1, her backwind level, scales her
     /// backwind's alpha and `backwindSide` (nil: her windward side now) is the side it lies on (#377,
     /// `RenderWorld.backwind(ofSeat:)`): a fading zone keeps the side it was cast on past her boom crossing.
     func update(with boat: Boat, pose: BoatPose, style: BoatStyle, quality: WakeQuality, time: Double, dt: Double,
-                settled: Bool, isFlogging: Bool, backwindSail: Double = 1, backwindSide: Tack? = nil) {
+                settled: Bool, backwindSail: Double = 1, backwindSide: Tack? = nil) {
         // Her backwind trails her: it turns after her heading and her apparent wind, not with them, as the air she
         // disturbed does (`BoatStyle.shadowFollowSeconds`). Drawn only; core's backwind is cast at once.
         let followed = follow(heading: boat.heading, wind: boat.apparentWind.direction, dt: dt,
@@ -101,10 +98,7 @@ final class BoatEffects {
         backwind.yScale = CGFloat(ShadowShapes.backwindScale(boatClass.windShadow, speed: boat.speedThroughWater))
         backwind.alpha = CGFloat(style.coneAlpha * style.backwindShare * presence)
 
-        // A roll miss kills the wake; a hit flares it, fading (#222).
-        let flare = flare.flare(roll: pose.roll, time: time, seconds: style.wakeFlareSeconds)
-        let level = isFlogging ? 0 : 1 + style.wakeFlareGain * flare
-        let target = WakeShape(boat, boatClass: boatClass, style: style, quality: quality).scaled(by: level)
+        let target = WakeShape(boat, boatClass: boatClass, style: style, quality: quality)
         let shape = settled ? target : (shape ?? target).eased(towards: target, dt: dt, rate: style.wakeEaseRate)
         self.shape = shape
 

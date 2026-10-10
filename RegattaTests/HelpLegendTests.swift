@@ -57,7 +57,7 @@ import UIKit
         return drawn ? data : nil
     }
 
-    /// Opening Help over a race lets go of the controls (#135): Ease is let go and the held buttons are told, and
+    /// Opening Help over a race lets go of the controls (#135): Ease is let go, and
     /// a race that can't pause (online) keeps running.
     @Test func openingHelpReleasesTheControls() throws {
         let session = GameSession(config: RaceConfig(opponents: 1, seed: 1, windSeed: 1))
@@ -69,7 +69,6 @@ import UIKit
         session.scene.steering.touchBegan(finger, at: CGPoint(x: 100, y: 300), midX: 200)
         session.scene.steering.touchMoved(finger, to: CGPoint(x: 200, y: 300))
         #expect(session.scene.steering.rudder != 0)
-        let releases = session.controlReleases
         session.releaseControls()
         #expect(!session.isEasing && !session.isGestureEasing && !session.isVoiceOverEasing, "both eases let go (#453)")
         #expect(session.scene.steering.rudder == 0, "the rudder is centred")
@@ -77,7 +76,6 @@ import UIKit
         session.scene.steering.touchMoved(finger, to: CGPoint(x: 0, y: 300))
         #expect(session.scene.steering.rudder == 0, "the finger still down steers nothing")
         #expect(!session.isPaused, "Help alone doesn't pause the race")
-        #expect(session.controlReleases == releases + 1)
 
         let (fixture, log) = try RenderFixture.load(named: "prestart", in: RenderFixtureTests.fixtures)
         let frozen = try GameSession(fixture: fixture, log: log)

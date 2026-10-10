@@ -91,6 +91,8 @@ struct HintSnapshot: Equatable {
     var markZone: Vec2?
     /// How long you've held the rudder off centre without a break (the autohelm not holding) since the gun, seconds.
     var steeringSeconds = 0.0
+    /// The rudder is held off centre now.
+    var isSteering: Bool { steeringSeconds > 0 }
     /// Your first race (#134): letting go shows earlier.
     var isFirstRace = false
     /// You've let the autohelm hold after steering, this race.
@@ -115,8 +117,11 @@ enum HintTriggers {
         s.status == .prestart && s.raceTime <= -t.startSequenceLatestSeconds ? HintFiring(leader: nil) : nil
     }
 
+    /// Too close to the wind with the rudder centred: a pinch left alone, or in irons. Never while you steer, as a
+    /// hand tack sits in the no-go zone on its way through the wind (#460).
     static func noGo(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {
-        s.status == .racing && !s.inManoeuvre && s.noGoSeconds >= t.noGoSeconds ? HintFiring(leader: .vane) : nil
+        s.status == .racing && !s.inManoeuvre && !s.isSteering && s.noGoSeconds >= t.noGoSeconds
+            ? HintFiring(leader: .vane) : nil
     }
 
     static func markZone(_ s: HintSnapshot, _ t: HintTuning) -> HintFiring? {

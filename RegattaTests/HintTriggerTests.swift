@@ -76,6 +76,31 @@ import Testing
         #expect(fires(.noGo, racing { $0.noGoSeconds = 1 }) == nil)
         #expect(fires(.noGo, racing { $0.noGoSeconds = 2 })?.leader == .vane)
         #expect(fires(.noGo, racing { $0.noGoSeconds = 2; $0.inManoeuvre = true }) == nil)
+        #expect(fires(.noGo, racing { $0.noGoSeconds = 2; $0.steeringSeconds = 0.5 }) == nil, "a turn in progress")
+    }
+
+    /// #460: with no Tack button the no-go hint says to steer through the wind, and it never nags a hand tack on its
+    /// way through the no-go zone: only a centred rudder, pinched or in irons, fires it.
+    @Test func tooCloseToTheWindSaysSteer() throws {
+        let hint = HintCatalogue.hint(.noGo)
+        for steering in [DeviceSettings.Steering.halves, .tiller] {
+            #expect(hint.text.text(for: steering) == "Too close to the wind. Steer through it.")
+        }
+        #expect(HintID.noGo.rawValue == "no_go", "its progress key is saved on devices")
+        for hint in HintCatalogue.all {
+            let words = hint.text.halves + " " + hint.text.tiller
+            #expect(!words.localizedCaseInsensitiveContains("tap tack") && !words.contains("button"), "\(hint.id)")
+        }
+        #expect(fires(.noGo, racing { $0.noGoSeconds = 60; $0.steeringSeconds = 60 }) == nil, "however slow the turn")
+        #expect(fires(.noGo, racing { $0.noGoSeconds = 60 })?.leader == .vane, "let go in irons")
+
+        // Help's Steering page says the same, under Let go, and has no Buttons section.
+        let url = RaceDriverTests.repoRoot.appending(path: "Regatta/UI/Help/HelpTopics.swift")
+        let help = try String(contentsOf: url, encoding: .utf8)
+        let letGo = try #require(help.range(of: "HelpSection(heading: \"Let go\""))
+        let section = help[letGo.lowerBound...].prefix(400)
+        #expect(section.contains("\"Steer through the wind to tack or gybe.\""))
+        #expect(!help.contains("heading: \"Buttons\"") && !help.contains("Tack: tap"))
     }
 
     @Test func lettingGoFiresEarlyInTheFirstRace() {
