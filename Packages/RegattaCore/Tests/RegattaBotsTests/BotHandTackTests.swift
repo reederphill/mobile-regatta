@@ -33,8 +33,8 @@ import Testing
         var tacks: [Int]
         var gybes: [Int]
         /// Each boat's longest spell in irons, seconds: under 30 % of her close-hauled speed inside the no-go zone,
-        /// owing no penalty turn; and owing one (`turnStuck`): slow, she turns it on through the wind at a crawl
-        /// rather than let go, which would give the turn up (#461).
+        /// owing no penalty turn; and owing one (`turnStuck`): slow, she turns it on through the wind rather than let
+        /// go, which would give the turn up (#461).
         var stuck: [Double]
         var turnStuck: [Double]
         var tackGybeTaps: Int
@@ -127,10 +127,12 @@ import Testing
     @Test func noBotSitsInIronsAtTheFloorDraw() throws {
         for seed in UInt64(1)...4 {
             let fleet = try Self.fleet(seed: seed, seconds: 600, handling: 0)
-            print("BOTHANDTACK floor seed \(seed): tacks \(fleet.tacks) gybes \(fleet.gybes) stuck \(fleet.stuck.map { ($0 * 10).rounded() / 10 })")
+            print("BOTHANDTACK floor seed \(seed): tacks \(fleet.tacks) gybes \(fleet.gybes) stuck \(fleet.stuck.map { ($0 * 10).rounded() / 10 }) owing a turn \(fleet.turnStuck.map { ($0 * 10).rounded() / 10 })")
             #expect(fleet.stuck.allSatisfy { $0 <= 10 }, "seed \(seed): seconds in irons by boat: \(fleet.stuck)")
-            // A penalty turn from slow crawls through the wind, 3° a second from a standstill (seed 1: 11.6 s).
-            #expect(fleet.turnStuck.allSatisfy { $0 <= 16 }, "seed \(seed): seconds in irons owing a turn: \(fleet.turnStuck)")
+            // Owing a turn she turns on through the wind rather than let go: #459's 10 s holds there too since #461's
+            // fall-off retune (the worst is 4.0 s, seed 2; 11.6 s before it, when a turn from a standstill crawled
+            // through the wind at 3° a second).
+            #expect(fleet.turnStuck.allSatisfy { $0 <= 10 }, "seed \(seed): seconds in irons owing a turn: \(fleet.turnStuck)")
             #expect(fleet.tackGybeTaps == 0)
         }
     }
@@ -350,9 +352,10 @@ import Testing
             snapshot.seats[0].boat.speed = 0.05
         }
         var hand = Hand(seat: 0, race: race, handling: 0.5)
-        // Mid-tack onto port, as she stalled.
+        // Mid-tack onto port, as she stalled: on a fifth of the rudder, which the fall-off holds at a standstill since
+        // #461's retune (2°/s against the floor's 8; half rudder, which stalled her before it, now turns her through).
         hand.brain.plannedTack = .port
-        hand.brain.handTurn = BotBrain.HandTurn(isTack: true, toTack: .port, sign: 1, fraction: 0.5, ease: 0, overSteer: 0,
+        hand.brain.handTurn = BotBrain.HandTurn(isTack: true, toTack: .port, sign: 1, fraction: 0.2, ease: 0, overSteer: 0,
                                                 started: race.time)
         var centred = 0, stuck = 0.0
         let noGo = BoatDynamics.noGoAngle(race.boatClass.polar)
