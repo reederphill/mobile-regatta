@@ -1,5 +1,6 @@
 import Crypto
 import Foundation
+import Persistence
 import RegattaLoadClient
 import RaceHost
 import RegattaCore
@@ -47,17 +48,70 @@ actor StartedRaces {
     }
 }
 
+/// The in-memory archive with a close that can fail, or wait until it is let go (#469).
+final class FaultyArchive: RaceArchive {
+    struct Refused: Error {}
+
+    let inner: InMemoryRaceArchive
+    private let state = Mutex<(closeFailures: Int, closes: Int, held: Bool, waiting: [CheckedContinuation<Void, Never>])>((0, 0, false, []))
+
+    init(_ inner: InMemoryRaceArchive) { self.inner = inner }
+
+    /// The next `times` closes fail.
+    func failCloses(_ times: Int) { state.withLock { $0.closeFailures = times } }
+    /// Closes asked for, failed or not.
+    var closes: Int { state.withLock { $0.closes } }
+    /// Closes wait, from now until `letGo()`.
+    func hold() { state.withLock { $0.held = true } }
+    func letGo() {
+        let waiting = state.withLock { state in
+            defer { state.waiting = [] }
+            state.held = false
+            return state.waiting
+        }
+        for continuation in waiting { continuation.resume() }
+    }
+
+    func close(_ race: ClosedRaceRecord) async throws {
+        let fails = state.withLock { state -> Bool in
+            state.closes += 1
+            guard state.closeFailures > 0 else { return false }
+            state.closeFailures -= 1
+            return true
+        }
+        if fails { throw Refused() }
+        await withCheckedContinuation { continuation in
+            let held = state.withLock { state -> Bool in
+                if state.held { state.waiting.append(continuation) }
+                return state.held
+            }
+            if !held { continuation.resume() }
+        }
+        try await inner.close(race)
+    }
+
+    func register(_ race: UUID, players: [RaceSeatHolder]) async throws { try await inner.register(race, players: players) }
+    func cancel(_ race: UUID) async throws { try await inner.cancel(race) }
+    func cancelOrphans() async throws -> [UUID] { try await inner.cancelOrphans() }
+    func state(of race: UUID) async throws -> RaceState? { try await inner.state(of: race) }
+    func lastRace(of playerID: String) async throws -> StoredRaceResult? { try await inner.lastRace(of: playerID) }
+    func closedRace(_ race: UUID) async throws -> ClosedRaceRecord? { try await inner.closedRace(race) }
+}
+
 /// #148's lifecycle over an in-memory archive, its races driven by hand on a manual clock.
 struct LifecycleRig {
     static let key = SymmetricKey(size: .bits256)
     let clock = ManualHostClock()
     let archive = InMemoryRaceArchive()
+    /// What the lifecycle writes through: `archive`, with faults a test asks for.
+    let faults: FaultyArchive
     let started = StartedRaces()
     let lifecycle: RaceLifecycle
 
     init(settings: RaceLifecycleSettings = RaceLifecycleSettings()) {
         let started = started
-        lifecycle = RaceLifecycle(settings: settings, archive: archive, tokenKey: Self.key, tokenLifetime: 600, toolchain: "test",
+        faults = FaultyArchive(archive)
+        lifecycle = RaceLifecycle(settings: settings, archive: faults, tokenKey: Self.key, tokenLifetime: 600, toolchain: "test",
                                   start: { session, ended in await started.started(session, ended) })
     }
 

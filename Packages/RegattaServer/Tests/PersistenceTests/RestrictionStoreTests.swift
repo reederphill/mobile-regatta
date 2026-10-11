@@ -30,6 +30,25 @@ import Testing
         }
     }
 
+    /// #469: the queue reads everyone queued in one query; a player who isn't stored, or has nothing set, has none.
+    @Test func manyPlayersRestrictionsComeInOneRead() async throws {
+        try await TestDatabase.withMigratedSchema { database in
+            for name in ["a", "b", "c"] {
+                _ = try await PlayerStore(database).signIn(teamPlayerID: "T:\(name)", gamePlayerID: "G:\(name)", displayName: name)
+            }
+            let store = PlayerRestrictionStore(database)
+            try await store.setCooldown("T:a", until: Self.time + 300)
+            try await store.setSuspension("T:b", .permanent)
+            try await store.setAttestationFailed("T:b", true)
+            let read = try await store.restrictions(of: ["T:a", "T:b", "T:c", "T:nobody", "T:a"])
+            #expect(read == ["T:a": PlayerRestrictions(cooldownUntil: Self.time + 300),
+                             "T:b": PlayerRestrictions(suspension: .permanent, attestationFailed: true),
+                             "T:c": .none, "T:nobody": .none])
+            for id in ["T:a", "T:b", "T:c"] { #expect(try await store.restrictions(of: id) == read[id]) }
+            #expect(try await store.restrictions(of: [String]()) == [:])
+        }
+    }
+
     @Test func suspensionsAreTimedOrPermanentAndLift() async throws {
         try await TestDatabase.withMigratedSchema { database in
             _ = try await PlayerStore(database).signIn(teamPlayerID: "T:a", gamePlayerID: "G:a", displayName: "a")

@@ -25,10 +25,11 @@ public final class WebSocketServiceLink: ServiceLink, @unchecked Sendable {
     private let channel: any Channel
     private let state = Mutex(State())
 
-    /// Opens `ws://host:port/service`.
-    public static func connect(host: String, port: Int, group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> WebSocketServiceLink {
+    /// Opens `ws://host:port/service`. `headers` go on the upgrade request, as a reverse proxy's would.
+    public static func connect(host: String, port: Int, headers: [(String, String)] = [],
+                               group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws -> WebSocketServiceLink {
         let channel = try await WebSocketClient.connect(host: host, port: port, path: ServerPath.service, maxMessage: serviceFrameLimit,
-                                                        counter: ByteCounter(), group: group)
+                                                        counter: ByteCounter(), extraHeaders: headers, group: group)
         let link = WebSocketServiceLink(channel: channel.channel)
         link.startReading(channel)
         return link

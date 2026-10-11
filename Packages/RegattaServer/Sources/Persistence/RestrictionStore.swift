@@ -49,6 +49,22 @@ public struct PlayerRestrictionStore: Sendable {
         return .none
     }
 
+    /// The restrictions of each of `playerIDs`, in one query (#469): the queue reads everyone queued at once, every
+    /// second. A player who isn't stored has none.
+    public func restrictions(of playerIDs: [String]) async throws -> [String: PlayerRestrictions] {
+        var read = Dictionary(playerIDs.map { ($0, PlayerRestrictions.none) }, uniquingKeysWith: { first, _ in first })
+        guard !playerIDs.isEmpty else { return read }
+        let rows = try await database.client.query("""
+            SELECT team_player_id, cooldown_until, racing_suspended_until, racing_suspended_permanent, attestation_failed
+            FROM players WHERE team_player_id = ANY(\(playerIDs))
+            """, logger: database.logger)
+        for try await (id, cooldown, suspendedUntil, permanent, attestation) in rows.decode((String, Date?, Date?, Bool, Bool).self) {
+            let suspension: StoredSuspension? = permanent ? .permanent : suspendedUntil.map { StoredSuspension(until: $0) }
+            read[id] = PlayerRestrictions(cooldownUntil: cooldown, suspension: suspension, attestationFailed: attestation)
+        }
+        return read
+    }
+
     /// Her briefing leaves at or after `since`, oldest first. Older rows are deleted: only the rolling window counts.
     public func briefingLeaves(of playerID: String, since: Date) async throws -> [Date] {
         try await database.transaction { connection in

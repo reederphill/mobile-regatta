@@ -1,5 +1,6 @@
 import Foundation
 import NIOCore
+import NIOHTTP1
 import Persistence
 import RegattaLoadClient
 import RegattaProtocol
@@ -39,14 +40,30 @@ import Testing
     // MARK: R4
 
     @Test func aConnectionThatDoesntSignInInTimeIsClosed() async throws {
-        let endpoint = Self.endpoint(signIn: .milliseconds(200))
+        // No sleep here is compared against the deadline, as in the idle test below (#473, #469): the fixture used to
+        // have to sign in inside a 200 ms deadline, which a loaded runner misses. The close is timed from before the
+        // connection opened and must come no sooner than the deadline; the connection that signs in is checked after
+        // its own deadline has certainly passed.
+        let deadline = Duration.seconds(1)
+        let endpoint = Self.endpoint(signIn: deadline)
+        let opened = ContinuousClock.now
         let late = try await InProcessServiceLink.open(endpoint)
-        let (signedIn, held, _) = try await ServiceFixtures.signedIn(endpoint, "prompt")
-        #expect(await Self.eventually { late.closeReason != nil })
+        let beforeSignIn = ContinuousClock.now
+        // On a runner stalled past the whole deadline the sign-in itself comes too late and fails: then only that it
+        // wasn't refused inside the deadline is checked.
+        let prompt = try? await ServiceFixtures.signedIn(endpoint, "prompt")
+        if prompt == nil {
+            #expect(ContinuousClock.now - beforeSignIn >= deadline, "the sign-in failed on a connection inside its deadline")
+        }
+        #expect(await Self.eventually(.seconds(20)) { late.closeReason != nil })
+        #expect(ContinuousClock.now - opened >= deadline, "closed before the sign-in deadline")
         #expect(late.closeReason == "no sign-in in time")
-        try await Task.sleep(for: .milliseconds(300))
-        #expect(signedIn.closeReason == nil)
-        withExtendedLifetime(held) {}
+        if let (signedIn, held, _) = prompt {
+            // Past the signed-in connection's own deadline, however late it opened: it stays.
+            try await ContinuousClock().sleep(until: ContinuousClock.now + deadline + .milliseconds(200))
+            #expect(signedIn.closeReason == nil)
+            withExtendedLifetime(held) {}
+        }
     }
 
     @Test func signingOutStartsTheSignInDeadlineAgain() async throws {
@@ -120,6 +137,121 @@ import Testing
         #expect(try await hello(four))
         two.close()
         four.close()
+    }
+
+    // MARK: Behind a proxy (#469)
+
+    private static let proxy = try? SocketAddress(ipAddress: "10.0.0.1", port: 443)
+
+    /// No header is trusted by default: whatever a client sends, its connection counts under the socket's address.
+    @Test func noForwardedAddressIsTrustedUnlessConfigured() {
+        let headers = HTTPHeaders([("X-Forwarded-For", "203.0.113.7"), ("Fly-Client-IP", "203.0.113.7"), ("Forwarded", "for=203.0.113.7")])
+        #expect(ClientAddressRule().key(remote: Self.proxy, headers: headers) == "10.0.0.1")
+        #expect(ServerConfig.dev().clientAddress == ClientAddressRule())
+        #expect(ServerConfig.dev().clientAddress.header == nil)
+    }
+
+    /// With the proxy's header named, the caps count the client the proxy vouches for: two clients behind one proxy
+    /// have a cap each, where before they shared the proxy's.
+    @Test func addressCapsCountTheForwardedClientNotTheProxy() {
+        let rule = ClientAddressRule(header: "Fly-Client-IP")
+        func key(_ client: String) -> String? { rule.key(remote: Self.proxy, headers: HTTPHeaders([("fly-client-ip", client)])) }
+        #expect(key("203.0.113.7") == "203.0.113.7")
+        let counter = ConnectionCounter(perAddress: 2, total: 10)
+        let held = [counter.acquire(key: key("203.0.113.7")), counter.acquire(key: key("203.0.113.7"))]
+        #expect(held.allSatisfy { $0 != nil })
+        #expect(counter.acquire(key: key("203.0.113.7")) == nil)
+        #expect(counter.acquire(key: key("198.51.100.9")) != nil)
+        // By the socket's address, as before the setting, the third connection of all would have been refused.
+        let unaware = ConnectionCounter(perAddress: 2, total: 10)
+        #expect(unaware.acquire(Self.proxy) != nil && unaware.acquire(Self.proxy) != nil)
+        #expect(unaware.acquire(Self.proxy) == nil)
+        // A connection without the header, or with something that isn't an address, counts under the socket's.
+        #expect(rule.key(remote: Self.proxy, headers: HTTPHeaders()) == "10.0.0.1")
+        #expect(key("unknown") == "10.0.0.1")
+        #expect(key("") == "10.0.0.1")
+    }
+
+    /// A list header: the entry the trusted proxies vouch for, counted from the right; what the client wrote to its
+    /// left is never used.
+    @Test func aForwardedListIsReadFromTheRightByTrustedHops() {
+        let headers = HTTPHeaders([("X-Forwarded-For", "192.0.2.66, 203.0.113.7"), ("X-Forwarded-For", "198.51.100.9")])
+        func key(_ hops: Int) -> String? {
+            ClientAddressRule(header: "X-Forwarded-For", trustedHops: hops).key(remote: Self.proxy, headers: headers)
+        }
+        #expect(key(1) == "198.51.100.9")
+        #expect(key(2) == "203.0.113.7")
+        #expect(key(3) == "192.0.2.66")
+        // Fewer entries than trusted proxies: not a request that came through them all.
+        #expect(key(4) == "10.0.0.1")
+        // The forms a proxy writes an address in.
+        for (entry, expected) in [("203.0.113.7:4711", "203.0.113.7"), (" 203.0.113.7 ", "203.0.113.7"),
+                                  ("[2001:db8:1:2::9]:4711", "2001:db8:1:2::/64"), ("2001:db8:1:2::9", "2001:db8:1:2::/64")] {
+            #expect(ClientAddressRule(header: "X-Real-IP").key(remote: Self.proxy, headers: HTTPHeaders([("X-Real-IP", entry)])) == expected)
+        }
+    }
+
+    /// An IPv6 client is capped by its /64: other addresses of the same prefix don't get a cap of their own.
+    @Test func ipv6ClientsAreCappedByTheir64Prefix() throws {
+        func address(_ text: String) throws -> SocketAddress { try SocketAddress(ipAddress: text, port: 1) }
+        #expect(ClientAddressRule.key(try address("2001:db8:1:2::1")) == "2001:db8:1:2::/64")
+        #expect(ClientAddressRule.key(try address("2001:db8:1:2:ffff:ffff:ffff:ffff")) == "2001:db8:1:2::/64")
+        #expect(ClientAddressRule.key(try address("2001:db8:1:3::1")) == "2001:db8:1:3::/64")
+        // IPv4, and IPv4 reaching a dual-stack socket, are the IPv4 address either way.
+        #expect(ClientAddressRule.key(try address("::ffff:10.0.0.1")) == "10.0.0.1")
+        #expect(ClientAddressRule.key(try address("10.0.0.1")) == "10.0.0.1")
+        #expect(ClientAddressRule.key(nil) == nil)
+
+        let counter = ConnectionCounter(perAddress: 2, total: 10)
+        let held = [counter.acquire(try address("2001:db8:1:2::1")), counter.acquire(try address("2001:db8:1:2::2"))]
+        #expect(held.allSatisfy { $0 != nil })
+        #expect(counter.acquire(try address("2001:db8:1:2:aaaa::3")) == nil)
+        #expect(counter.acquire(try address("2001:db8:1:3::1")) != nil)
+        #expect(counter.open.addresses == 2)
+        held[0]?.release()
+        #expect(counter.acquire(try address("2001:db8:1:2:aaaa::3")) != nil)
+    }
+
+    @Test func theServerConfigReadsTheClientAddressSetting() throws {
+        #expect(try ServerConfig.load(from: ["ENV": "dev"]).clientAddress == ClientAddressRule())
+        #expect(try ServerConfig.load(from: ["ENV": "dev", "CLIENT_ADDRESS_HEADER": "Fly-Client-IP"]).clientAddress
+            == ClientAddressRule(header: "Fly-Client-IP", trustedHops: 1))
+        #expect(try ServerConfig.load(from: ["ENV": "dev", "CLIENT_ADDRESS_HEADER": "X-Forwarded-For", "CLIENT_ADDRESS_TRUSTED_HOPS": "2"])
+            .clientAddress == ClientAddressRule(header: "X-Forwarded-For", trustedHops: 2))
+        for bad in [["CLIENT_ADDRESS_HEADER": ""], ["CLIENT_ADDRESS_HEADER": "X Forwarded: For"], ["CLIENT_ADDRESS_TRUSTED_HOPS": "2"],
+                    ["CLIENT_ADDRESS_HEADER": "X-Forwarded-For", "CLIENT_ADDRESS_TRUSTED_HOPS": "0"]] {
+            #expect(throws: ServerConfigError.self) { try ServerConfig.load(from: bad.merging(["ENV": "dev"]) { first, _ in first }) }
+        }
+    }
+
+    /// Over the socket, every connection from one address as behind a proxy: with the proxy's header configured each
+    /// client has its own cap, and a client over its cap is closed before it's read.
+    @Test func theServerCapsByTheForwardedAddressBehindAProxy() async throws {
+        var config = ServerConfig.dev()
+        config.connectionLimits.servicePerAddress = 1
+        config.clientAddress = ClientAddressRule(header: "Fly-Client-IP")
+        let server = try await RegattaHTTPServer.start(config: config)
+        defer { Task { await server.shutdown() } }
+        func hello(_ client: String?) async throws -> (link: WebSocketServiceLink, accepted: Bool) {
+            let link = try await WebSocketServiceLink.connect(host: "127.0.0.1", port: server.port,
+                                                              headers: client.map { [("Fly-Client-IP", $0)] } ?? [])
+            link.send(try Frame(seq: 1, tick: 0, message: .hello(Hello(clientBuild: "test", files: []))).encoded())
+            guard let reply = await link.nextOpeningFrame() else { return (link, false) }
+            if case .helloAck = try Frame(decoding: reply).message { return (link, true) }
+            return (link, false)
+        }
+        let first = try await hello("203.0.113.7"), second = try await hello("198.51.100.9")
+        #expect(first.accepted && second.accepted)
+        #expect(try await hello("203.0.113.7").accepted == false)
+        // IPv6 clients of one /64 share a cap.
+        let third = try await hello("2001:db8:1:2::1")
+        #expect(third.accepted)
+        #expect(try await hello("2001:db8:1:2::2").accepted == false)
+        // Without the header the connection counts under the socket's own address.
+        let direct = try await hello(nil)
+        #expect(direct.accepted)
+        #expect(try await hello(nil).accepted == false)
+        for held in [first, second, third, direct] { held.link.close() }
     }
 
     // MARK: R6

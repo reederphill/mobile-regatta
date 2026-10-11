@@ -43,11 +43,12 @@ extension RaceSims {
                 settings.startSequenceTicks = 90
                 settings.botFloor = 3
                 settings.catchFinishers = nil
-                let clock = clock
+                let clock = clock, lifecycle = rig.lifecycle
                 matchmaker = QueueMatchmaker(settings: settings, registry: RaceRegistry(),
                                              draw: RaceDraw(pairings: OnlinePairing.bundled(), seeds: FixtureWindSeedPools(poolSize: 8)),
                                              tokenKey: LifecycleRig.key, tokenLifetime: 600, random: SeededRandom(seed: 147), now: { clock.now },
-                                             restrictions: store, launch: rig.lifecycle.launcher(clock: rig.clock))
+                                             restrictions: store, seatReleased: { await lifecycle.seatReleased($0, race: $1) },
+                                             launch: rig.lifecycle.launcher(clock: rig.clock))
             }
 
             /// Queues `players` and locks their fleet; returns its race.
@@ -104,6 +105,33 @@ extension RaceSims {
             try await queue.join(QueueMatchmakerTests.player(0))
             // The count started again: one more leave is the first of three.
             #expect(await tracker.recordLeave("T:0", race: nil) == nil)
+        }
+
+        /// #469: one player's leaves are counted one after the other. Two at once, the first still waiting on the store
+        /// with nothing yet written: the second waits for it, sees the cooldown the first started, and isn't counted into
+        /// it. (The tracker's actor alone lets the second in while the first waits.)
+        @Test func twoLeavesAtOnceAreCountedOneAfterTheOther() async throws {
+            let clock = VirtualClock(Self.time), store = QueueRefusalTests.FaultyStore()
+            let tracker = BriefingLeaveTracker(store: store, now: { clock.now })
+            #expect(await tracker.recordLeave("T:0", race: nil) == nil)
+            #expect(await tracker.recordLeave("T:0", race: nil) == nil)
+            let before = store.reads.single
+            // The third leave has read "no cooldown" and waits on the store with it.
+            store.fault = .hangingOnceAfterReading
+            let third = Task { await tracker.recordLeave("T:0", race: nil) }
+            #expect(await eventually { store.reads.single == before + 1 })
+            store.fault = .none
+            // A fourth arrives meanwhile. It must not reach the store before the third is done.
+            let fourth = Task { await tracker.recordLeave("T:0", race: nil) }
+            #expect(await eventually(seconds: 0.2) { store.reads.single > before + 1 } == false)
+            store.release()
+            #expect(await third.value == Self.time + 300)
+            #expect(await fourth.value == nil)
+            #expect(try await store.inner.restrictions(of: "T:0").cooldownUntil == Self.time + 300)
+            #expect(try await store.inner.briefingLeaves(of: "T:0", since: .distantPast) == [])
+            // Another player's leave doesn't wait on hers.
+            #expect(await tracker.recordLeave("T:1", race: nil) == nil)
+            #expect(try await store.inner.briefingLeaves(of: "T:1", since: .distantPast).count == 1)
         }
 
         /// Acceptance: backgrounding after lock (her race connection drops) counts, when she isn't back by the gun (owner
@@ -191,6 +219,8 @@ extension RaceSims {
             #expect(await race.quit(seat: 0))
             #expect(await eventually { (try? await queue.leaves(player.teamPlayerID)) == 1 })
             #expect(await eventually { await queue.matchmaker.state(of: player.teamPlayerID) == .idle })
+            // The lifecycle heard it (#469): the race is no longer hers.
+            #expect(await eventually { await queue.rig.lifecycle.seat(of: player.teamPlayerID) == nil })
             try await queue.matchmaker.join(player)
             // Nothing more at the gun for a seat she already left.
             await queue.rig.run(race, to: 1)

@@ -38,7 +38,7 @@ extension ServiceEndpoint {
             draw: RaceDraw(pairings: OnlinePairing.bundled(venues: queue.venues),
                            seeds: FixtureWindSeedPools(poolSize: queue.windSeedPoolSize, reuseCap: queue.windSeedReuseCap)),
             tokenKey: config.tokenKey, tokenLifetime: config.tokenLifetime, restrictions: restrictions, runningRaces: lifecycle,
-            launch: lifecycle.launcher())
+            seatReleased: { await lifecycle.seatReleased($0, race: $1) }, launch: lifecycle.launcher())
         return ServiceEndpoint(
             config: ServiceEndpointConfig(termsVersion: identity.termsVersion, sessionLifetime: identity.sessionLifetime,
                                           streamIdleTimeout: identity.streamIdleTimeout, frameCap: identity.frameCap,

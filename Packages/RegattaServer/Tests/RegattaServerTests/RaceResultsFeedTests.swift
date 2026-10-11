@@ -90,6 +90,24 @@ extension RaceSims {
             #expect(read.count == 1)
         }
 
+        /// #469: results and rating streams dropped as soon as they are opened leave no watcher: the rating change that
+        /// comes next isn't sent to a stream nobody holds, but kept for the one she opens.
+        @Test func streamsDroppedAtOnceLeaveNoWatcherToSwallowARatingChange() async throws {
+            let rig = LifecycleRig(settings: LifecycleRig.quickGrace())
+            let race = try await rig.race(["T:0"])
+            for _ in 0..<50 {
+                _ = rig.lifecycle.results(for: "T:0")
+                _ = rig.lifecycle.ratingChanges(for: "T:0")
+            }
+            #expect(!rig.lifecycle.resultWatchers.isWatched("T:0"))
+            #expect(!rig.lifecycle.ratingWatchers.isWatched("T:0"))
+            await rig.runUntilEnded(race, limit: 300)
+            await rig.end(race)
+            #expect(rig.lifecycle.resultWatchers.keys.isEmpty && rig.lifecycle.ratingWatchers.keys.isEmpty)
+            let change = await collect(rig.lifecycle.ratingChanges(for: "T:0")) { _ in true }
+            #expect(change == [RatingChange(raceID: RaceResultsFeed.raceID(race.id), outcome: .unrated)])
+        }
+
         /// Acceptance: the last race is the one she last finished in, until her next race ends; a cancelled race doesn't
         /// replace it; an unrated close pushes `.unrated`; the stream's closed report is the last race's.
         @Test func lastRaceUntilNextRaceEnds() async throws {

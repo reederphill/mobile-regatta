@@ -63,7 +63,9 @@ public enum LoadClientError: Error, Equatable, Sendable, CustomStringConvertible
 
 /// A client WebSocket on NIO: the HTTP upgrade at `path`, then whole messages (fragments aggregated up to `maxMessage`).
 enum WebSocketClient {
+    /// `extraHeaders` go on the upgrade request (a test standing in for a reverse proxy sets the client's address).
     static func connect(host: String, port: Int, path: String, maxMessage: Int, counter: ByteCounter,
+                        extraHeaders: [(String, String)] = [],
                         group: any EventLoopGroup) async throws -> NIOAsyncChannel<WebSocketFrame, WebSocketFrame> {
         enum Upgrade: Sendable {
             case websocket(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>)
@@ -88,6 +90,7 @@ enum WebSocketClient {
                     var headers = HTTPHeaders()
                     headers.add(name: "Host", value: "\(host):\(port)")
                     headers.add(name: "Content-Length", value: "0")
+                    for (name, value) in extraHeaders { headers.add(name: name, value: value) }
                     let configuration = NIOTypedHTTPClientUpgradeConfiguration(
                         upgradeRequestHead: HTTPRequestHead(version: .http1_1, method: .GET, uri: path, headers: headers),
                         upgraders: [upgrader],
