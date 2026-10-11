@@ -340,6 +340,8 @@ extension BotBrain {
                             ease: isTack ? HandTackTable.tackEase(handling: h) : 0, overSteer: 0, started: view.time)
         // Before her start a gybe is for getting round, not for the lengths it saves: more rudder (#461).
         if !isTack, b.status != .racing { turn.fraction = max(turn.fraction, HandTackTable.startGybeFraction) }
+        // "A gybe within her skill" (#462): on a class a slammed gybe takes off the plane, no more rudder than keeps her on.
+        if !isTack, b.status == .racing, Self.hasPlaningRule(view.boatClass) { turn.fraction = min(turn.fraction, PlaningTable.safeGybe) }
         if handTurnRng.unit() < HandTackTable.botchRate(handling: h) {
             let under = handTurnRng.unit() < HandTackTable.underSteerShare
             let past = handTurnRng.range(HandTackTable.overSteer.lowerBound, HandTackTable.overSteer.upperBound)
