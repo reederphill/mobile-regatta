@@ -69,9 +69,9 @@ import Testing
             + "(max \(fixed(summary.maxPreGunIronsSeconds)))")
         #expect(summary.races == 200 && summary.seats == 2_000)
         #expect(summary.ocsShare <= (try #require(limits.maxOCSShare)), "OCS \(summary.ocsShare)")
-        // Known until #471 (owner, #461): on skiff@8 bots start late (on time 0.47, mean start 10.7 s).
+        // Known until #477 (owner, #461 and #471): on skiff@8 bots start late (on time 0.46, mean start 10.3 s); the cause is the start row.
         let minOnTimeShare = try #require(limits.minOnTimeShare)
-        withKnownIssue("#471: bots start late by hand on skiff@8", isIntermittent: true) {
+        withKnownIssue("#477: the start row jams a hand-steered fleet, so bots start late on skiff@8", isIntermittent: true) {
             #expect(summary.onTimeShare >= minOnTimeShare, "on time \(summary.onTimeShare)")
         }
         #expect(summary.meanPreGunIronsSeconds <= (try #require(limits.maxMeanPreGunIronsSeconds)),
