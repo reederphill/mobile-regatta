@@ -57,4 +57,45 @@ import Testing
         client.leave()
         #expect(transport.outbox.filter { $0.message == .leaveRace }.count == 1)
     }
+
+    /// #150: a dropped player's seat is marked disconnected by a `RosterChange` and cleared by the next; nothing else
+    /// of her entry moves, and it is no race event.
+    @Test func rosterChangeMarksAndClearsDisconnected() throws {
+        let setup = try RaceSetup(raceSeed: RaceSeed(150), seats: [.human, .human, .bot], laps: 1, startSequenceTicks: 600)
+        let race = Race(setup: setup, windSeed: WindSeed(0x150))
+        var generator = try WindKeyGenerator(windSeed: WindSeed(0x150), setup: race.windSetup, windows: race.wind.windows)
+        let roster = ["Ann", "Bea", "Gannet"].enumerated().map { RosterEntry(name: $1, colorIndex: $0) }
+        let start = RaceStart(yourSeat: 0, setup: setup, roster: roster, windKeys: generator.keys(through: 1))
+        let transport = ManualTransport()
+        let client = RaceClient(start: start, transport: transport)
+        #expect(client.roster.map(\.isDisconnected) == [false, false, false])
+
+        var gone = roster[1]
+        gone.isDisconnected = true
+        try transport.deliver(Frame(seq: 1, tick: -450, message: .rosterChange(RosterChange(seat: 1, entry: gone))))
+        client.update(now: 0)
+        #expect(client.roster.map(\.isDisconnected) == [false, true, false])
+        #expect(client.roster[1].name == "Bea" && !client.roster[1].isBot && client.roster[1].colorIndex == 1)
+        #expect(client.predicted.start.setup.seats == [.human, .human, .bot])
+        #expect(client.drainServerEvents().isEmpty)
+
+        // Seen again after a resync: the whole entry, so nothing changes.
+        try transport.deliver(Frame(seq: 2, tick: -440, message: .rosterChange(RosterChange(seat: 1, entry: gone))))
+        client.update(now: 16_667)
+        #expect(client.roster.map(\.isDisconnected) == [false, true, false])
+
+        // She is back: the mark goes with the next change.
+        try transport.deliver(Frame(seq: 3, tick: -400, message: .rosterChange(RosterChange(seat: 1, entry: roster[1]))))
+        client.update(now: 33_334)
+        #expect(client.roster == start.roster)
+        #expect(client.drainServerEvents().isEmpty)
+
+        // A rejoin's `RaceStart` carries the marks as they stand.
+        var current = roster
+        current[1] = gone
+        try transport.deliver(Frame(seq: 6, tick: -300, message: .raceStart(RaceStart(yourSeat: 0, setup: setup, roster: current,
+                                                                                    windKeys: start.windKeys))))
+        client.update(now: 50_000)
+        #expect(client.roster.map(\.isDisconnected) == [false, true, false])
+    }
 }
