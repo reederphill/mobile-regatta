@@ -98,8 +98,8 @@ struct InstrumentRow: View {
 /// tone of its own: no reserved cue colour, nothing read by colour (#22, #15, #454).
 private struct InstrumentFace<Content: View>: View {
     let isShown: Bool
-    /// PROTOTYPE (#485): red over the face, 0...1 (the speed tile on the plane).
-    var red = 0.0
+    /// PROTOTYPE (#485): yellow over the face, 0...1 (the speed tile on the plane). Figures go dark from 0.5.
+    var yellow = 0.0
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -109,10 +109,10 @@ private struct InstrumentFace<Content: View>: View {
             .padding(.horizontal, RaceControls.instrumentInset)
             .frame(maxWidth: RaceControls.instrumentMaxWidth)
             .frame(height: RaceControls.controlHeight)
-            .background(Color(red: 0.86, green: 0.08, blue: 0.10).opacity(red), in: .rect(cornerRadius: 14))
+            .background(Color(red: 1.0, green: 0.89, blue: 0.10).opacity(yellow), in: .rect(cornerRadius: 14))
             .background(.black.opacity(0.5), in: .rect(cornerRadius: 14))
-            .animation(.linear(duration: 0.08), value: red)
-            .foregroundStyle(.white)
+            .animation(.linear(duration: 0.08), value: yellow)
+            .foregroundStyle(yellow >= 0.5 ? Color(red: 0.08, green: 0.07, blue: 0.0) : Color.white)
             .shadow(radius: 6, y: 3)
             .opacity(isShown ? 1 : 0)
             .animation(.easeOut(duration: 0.3), value: isShown)
@@ -128,7 +128,7 @@ private struct SpeedInstrument: View {
     let model: HUDModel
 
     var body: some View {
-        InstrumentFace(isShown: model.showsInstruments, red: model.hud.planingLevel) {
+        InstrumentFace(isShown: model.showsInstruments, yellow: model.hud.planingLevel) {
             VStack(spacing: -2) {
                 Text(model.speedText)
                     .font(HUDFont.number(size: RaceControls.speedSize, weight: .heavy))

@@ -343,7 +343,7 @@ final class GameSession {
         let roster = roster
         var hud = HUDState(world: world) { roster[$0].isBot }
         hud.shownInstruments = instrumentSmoother.step(hud.instruments, at: hud.clock)
-        // PROTOTYPE (#485): the red speed tile. Eased in race time; a frozen fixture and a switched-off cue show none.
+        // PROTOTYPE (#485): the yellow speed tile. Eased in race time; a frozen fixture and a switched-off cue show none.
         let style = scene.boatStyle
         let planes = world.me.isPlaning && style.planingTile >= 0.5 && !driver.isFrozen
         let step = hud.clock - (tileClock ?? hud.clock)

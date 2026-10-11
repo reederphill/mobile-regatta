@@ -398,8 +398,8 @@ enum TuningCatalog {
                     // #462: on and off the plane her wake lifts and settles, never snaps.
                     boat("wakePlaningSeconds", "Planing wake comes and goes over", \.wakePlaningSeconds, 0...4, 0.1, unit: " s"),
                     // PROTOTYPE (#485): the planing cue. The first of each pair is a switch: 1 on, 0 off.
-                    boat("planingTile", "Planing: red speed tile (1 on, 0 off)", \.planingTile, 0...1, 1),
-                    boat("planingTileAlpha", "Planing tile red", \.planingTileAlpha, 0...1, 0.05),
+                    boat("planingTile", "Planing: yellow speed tile (1 on, 0 off)", \.planingTile, 0...1, 1),
+                    boat("planingTileAlpha", "Planing tile yellow", \.planingTileAlpha, 0...1, 0.05),
                     boat("planingTileSeconds", "Planing tile comes and goes over", \.planingTileSeconds, 0...3, 0.1, unit: " s"),
                     boat("cornerWakes", "Planing: stern-corner wakes (1 on, 0 off)", \.cornerWakes, 0...1, 1),
                     boat("cornerWakeLengthShare", "Corner wake length (of the middle wake)", \.cornerWakeLengthShare, 0.1...1, 0.05),

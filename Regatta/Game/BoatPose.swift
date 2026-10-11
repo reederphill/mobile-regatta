@@ -254,9 +254,9 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
 
     // MARK: PROTOTYPE (#485): the planing cue. Never merged; every value a debug slider.
 
-    /// The speed tile turns red while your boat planes: 1 on, 0 off (a slider standing in for a switch).
+    /// The speed tile turns yellow while your boat planes: 1 on, 0 off (a slider standing in for a switch).
     var planingTile = 1.0
-    /// The red's alpha over the tile's own face, and the race seconds it comes and goes over (`PlaningEase`).
+    /// The yellow's alpha over the tile's own face, and the race seconds it comes and goes over (`PlaningEase`).
     var planingTileAlpha = 0.85
     var planingTileSeconds = 0.4
     /// Two more wake lines, one at each stern corner, while a boat planes: 1 on, 0 off.
