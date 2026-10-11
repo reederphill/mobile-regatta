@@ -41,8 +41,8 @@ import RegattaCore
         /// The leg boats sail there: to the windward mark, or running, to the gate.
         let leg: Int
 
-        init(seed: UInt64, running: Bool = false) {
-            race = botRace(seats: [.bot, .bot], seed: seed, boatClass: BotConductTests.waterClass)
+        init(seed: UInt64, running: Bool = false, seats: Int = 2) {
+            race = botRace(seats: Array(repeating: .bot, count: seats), seed: seed, boatClass: BotConductTests.waterClass)
             for _ in 0..<(race.setup.startSequenceTicks + Race.tickRate) { race.step() }
             let c = race.course
             centre = c.startLine.centre + c.upwind * (c.beat * (running ? 0.7 : 0.35))
@@ -112,10 +112,11 @@ import RegattaCore
         var brain: BotBrain
 
         init(seat: Int, plannedTack: Tack?, race: Race, skill: Double = 1, weaknesses: BotWeaknesses? = nil,
-             caution: BotBrain.Caution? = nil, profile: BotProfile? = nil) {
+             caution: BotBrain.Caution? = nil, profile: BotProfile? = nil, penaltyDirection: Double = 1) {
             self.seat = seat
             var style = BotConductTests.skill1
             style.skill = skill
+            style.penaltyDirection = penaltyDirection
             brain = BotBrain(style: style, profile: profile, seed: UInt64(seat + 1), weaknesses: weaknesses, caution: caution)
             if profile == nil {
                 // #366: a scripted encounter sails a live bot's own tactics (#102), as at the bottom of the National band,
@@ -760,7 +761,8 @@ import RegattaCore
 
     /// Racing on the beat (#351): seat 0 just called, owing a turn she hasn't started, beating on starboard; seat 1
     /// beating beside her on the same tack, `across` hull lengths to her starboard (negative: to port) and `ahead` hull
-    /// lengths ahead, inside `BotBrain.penaltyBoatClearance`. On `legIndex` if given (the water's leg by default).
+    /// lengths ahead, inside `BotBrain.penaltyBoatClearance` (by hand, in the water of both circles she could turn,
+    /// `BotBrain.PenaltySweeps.isCrowded`, #486). On `legIndex` if given (the water's leg by default).
     static func racingPenalised(seed: UInt64, ahead: Double, across: Double, legIndex: Int? = nil) throws -> Race {
         let water = Water(seed: seed)
         let heading = water.beat(.starboard)
@@ -780,10 +782,11 @@ import RegattaCore
     /// The pairs `racingPenalised` sails: abeam to either side, and overlapped ahead and astern.
     static let racingPenalisedPairs: [(ahead: Double, across: Double)] = [(0, 1.5), (0, -1.5), (1, 1.2), (-1, -1.2)]
 
-    /// #351 acceptance: racing, a bot that owes a turn with another boat in her water (`BotBrain.penaltyBoatClearance`)
-    /// puts it off and sails on rather than turning it at once through her: she isn't 30° into it in the first 2 s, she
-    /// isn't called 21.2 (before, a penalised boat turning in the pack collected 21.2 calls from boats that had nothing to
-    /// do with her first foul), and she still serves it in time (no missed-penalty disqualification).
+    /// #351 acceptance: racing, a bot that owes a turn with another boat in her water (`BotBrain.penaltyBoatClearance`;
+    /// by hand, both her turn's sweeps cross it, #486) puts it off and sails on rather than turning it at once through
+    /// her: she isn't 30° into it in the first 2 s, she isn't called 21.2 (before, a penalised boat turning in the pack
+    /// collected 21.2 calls from boats that had nothing to do with her first foul), and she still serves it in time (no
+    /// missed-penalty disqualification).
     // skiff@7 until #455: on skiff@8 seed 3 draws a rule 21.2 call on the turning boat (tried again after #471's step C:
     // the same, the boat abeam to leeward).
     @Test(.onSkiffSeven) func racingPenaltyInACrowdIsPutOffAndDoesNotCascade() throws {
@@ -932,6 +935,131 @@ import RegattaCore
             }
             #expect(started, "seed \(seed): not 30° into her turn 2 s after it was hers")
         }
+    }
+
+    /// Racing on the beat (#486): seat 0 just called, owing a turn she hasn't started, beating on starboard at
+    /// close-hauled speed; every other seat (as many as `others`) on the reciprocal of her course at that speed,
+    /// running back down past her, `ahead` hull lengths ahead of her and `across` to her starboard (negative: to port).
+    static func sweepScene(seed: UInt64, _ others: [(ahead: Double, across: Double)]) throws -> Race {
+        let water = Water(seed: seed, seats: others.count + 1)
+        let heading = water.beat(.starboard)
+        let forward = Vec2.heading(heading)
+        let speed = water.up.speed
+        return try place(water, [Placement(position: water.centre, heading: heading, speed: speed)] + others.map {
+            Placement(position: water.centre + forward * water.length * $0.ahead + forward.rightPerp * water.length * $0.across,
+                      heading: heading + .pi, speed: speed)
+        }) { snapshot in
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyProgress = 0
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+        }
+    }
+
+    /// What `sailSweepScene` saw of seat 0: the way her turn went (the sign of her progress once 30° in) and the
+    /// seconds from the call it took; the seconds from the call at which she chose her turn's way, and the clear
+    /// sweeps (−1 port, 1 starboard) she had as she chose it; how far seat 1 was past her once she was 30° in; and the
+    /// race's events.
+    struct Swept {
+        var way: Double?
+        var thirtyIn: Double?
+        var chosen: Double?
+        var clearChoosing: [Double] = []
+        /// Metres seat 1 had sailed on past her, along its own heading, when she was 30° in (negative: still to come).
+        var passedThirtyIn: Double?
+        var kinds: [RaceEvent.Kind] = []
+    }
+
+    /// Sails `race` for `seconds` with only seat 0's bot at the helm (the others hold what their autohelms hold), at
+    /// `skill` with its weaknesses, turning penalties `penaltyDirection`'s way in open water.
+    static func sailSweepScene(_ race: Race, seconds: Double, skill: Double = 1, penaltyDirection: Double) -> Swept {
+        var pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: skill, weaknesses: BotWeaknesses(skill: skill),
+                          penaltyDirection: penaltyDirection)
+        let from = race.time
+        var swept = Swept()
+        for _ in 0..<Int(seconds * Double(Race.tickRate)) where !race.isOver {
+            let view = race.seatView(for: 0)
+            let clear = [-1.0, 1.0].filter { pilot.brain.turnSweep(view.own, view, direction: $0) == nil }
+            let wasChosen = pilot.brain.penaltyTurn != nil
+            _ = pilot.drive(race)
+            if !wasChosen, pilot.brain.penaltyTurn != nil, swept.chosen == nil {
+                swept.chosen = race.time - from
+                swept.clearChoosing = clear
+            }
+            race.step()
+            swept.kinds += race.drainEvents().map(\.kind)
+            let boat = race.boats[0]
+            if swept.way == nil, abs(boat.penaltyProgress) >= deg2rad(30) {
+                swept.way = boat.penaltyProgress > 0 ? 1 : -1
+                swept.thirtyIn = race.time - from
+                swept.passedThirtyIn = (race.boats[1].position - boat.position).dot(Vec2.heading(race.boats[1].heading))
+            }
+        }
+        return swept
+    }
+
+    /// The ways (−1 port, 1 starboard) whose sweep is clear for seat 0 of `race` as it stands, for a bot at `skill`.
+    static func clearSweeps(_ race: Race, skill: Double = 1) -> [Double] {
+        let pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: skill, weaknesses: BotWeaknesses(skill: skill))
+        let view = race.seatView(for: 0)
+        return [-1.0, 1.0].filter { pilot.brain.turnSweep(view.own, view, direction: $0) == nil }
+    }
+
+    /// #486 acceptance: a boat coming down on one side of her, through the circle she would turn that way, and open
+    /// water on the other: she turns towards the open side, though her own way (`BotStyle.penaltyDirection`) is
+    /// towards the boat, and the nearest boat (a boat close astern on the open side, sailing away) would turn her
+    /// towards it too. Before #486 she turned her own way into the boat: neither boat was within 2.5 hull lengths of her.
+    @Test func penaltyTurnStartsTheWayItsSweepIsClear() throws {
+        for side in [1.0, -1.0] {
+            let others: [(ahead: Double, across: Double)] = [(6, 2.1 * side), (-3.5, -1.0 * side)]
+            // A seed whose scene crosses only the circle on the boat's side.
+            let seed = try firstSeed(in: 1...20) { Self.clearSweeps(try Self.sweepScene(seed: $0, others)) == [-side] }
+            let race = try Self.sweepScene(seed: seed, others)
+            let near = race.boats[2].position - race.boats[0].position
+            #expect(near.length < (race.boats[1].position - race.boats[0].position).length, "the open side's boat is nearest")
+            let swept = Self.sailSweepScene(race, seconds: 8, penaltyDirection: side)
+            #expect(swept.way == -side, "seed \(seed) side \(side): turned \(String(describing: swept.way))")
+        }
+    }
+
+    /// #486 acceptance: boats coming down through both her circles, the nearer, on her starboard side, soon past her:
+    /// she sails on, putting her turn off, while both sweeps cross a boat, and starts once one is clear, that way (her
+    /// own way is the other), inside the start deadline's `penaltyStartMargin`.
+    @Test func penaltyTurnIsPutOffWhileBothSweepsCross() throws {
+        let others: [(ahead: Double, across: Double)] = [(3, 2.0), (8, -2.0)]
+        let start = RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.start
+        let seed = try firstSeed(in: 1...20) { Self.clearSweeps(try Self.sweepScene(seed: $0, others)).isEmpty }
+        let swept = Self.sailSweepScene(try Self.sweepScene(seed: seed, others), seconds: 20, penaltyDirection: -1)
+        let chosen = try #require(swept.chosen, "seed \(seed): she never chose a way")
+        #expect(chosen > 0, "seed \(seed): she started at once")
+        #expect(swept.clearChoosing == [1], "seed \(seed): clear \(swept.clearChoosing) as she chose at \(chosen) s")
+        #expect(swept.way == 1, "seed \(seed): turned \(String(describing: swept.way))")
+        let thirtyIn = try #require(swept.thirtyIn, "seed \(seed): never 30° in")
+        #expect(thirtyIn < start - BotBrain.penaltyStartMargin, "seed \(seed): 30° in at \(thirtyIn) s")
+    }
+
+    /// #486 acceptance: a Club bot (the centre of the band) owing a turn, with a boat running back down past her close
+    /// to windward, through both circles she could turn: she waits for it to pass (it is astern of her when she is 30°
+    /// in), is called for nothing, touches nothing, and serves the turn. Before #486 a Club bot read no pack and turned
+    /// at once, her own way: into it.
+    @Test func clubBotWaitsForAPassingBoat() throws {
+        let club = BotTier.club.skill(at: 0.5)
+        let others: [(ahead: Double, across: Double)] = [(3, 0.6)]
+        let complete = RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.complete
+        // A seed whose boat crosses both circles, and whose turn by hand leaves her time to wait for it to pass.
+        let seed = try firstSeed(in: 1...20) { seed in
+            let race = try Self.sweepScene(seed: seed, others)
+            let view = race.seatView(for: 0)
+            let pilot = Pilot(seat: 0, plannedTack: nil, race: race, skill: club, weaknesses: BotWeaknesses(skill: club))
+            return Self.clearSweeps(race, skill: club).isEmpty
+                && pilot.brain.penaltyTurnSeconds(view.own, view) + HandTackTable.penaltyTurn.margin + 6 < complete
+        }
+        let swept = Self.sailSweepScene(try Self.sweepScene(seed: seed, others), seconds: 45, skill: club, penaltyDirection: 1)
+        let calls = Self.calls(swept.kinds)
+        #expect(!calls.contains("21.2 on 0"), "seed \(seed): \(calls)")
+        #expect(!swept.kinds.contains { if case .contact = $0 { true } else { false } }, "seed \(seed): contact")
+        let passed = try #require(swept.passedThirtyIn, "seed \(seed): never 30° in")
+        #expect(passed > 0, "seed \(seed): the boat was \(-passed) m short of passing her as she was 30° in")
+        #expect(swept.kinds.contains(.penaltyServed(seat: 0)), "seed \(seed): not served")
     }
 
     /// Before the gun, `toGun` seconds before it below the line: seat 0 beating on starboard, seat 1 reaching across on
