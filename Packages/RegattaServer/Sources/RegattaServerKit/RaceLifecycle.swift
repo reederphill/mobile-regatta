@@ -37,6 +37,9 @@ public struct RaceLifecycleSettings: Sendable, Equatable {
     /// The result codes that count as a completed online race in the profile and towards earned designs (G6): never
     /// RET, never a cancelled race.
     public var earnedProgressResultCodes: Set<ResultCode> = [.finished, .byDistance, .dsq, .ocs]
+    /// A finish the cautious bot sailed for a dropped player counts for her rating if she dropped less than this many
+    /// race ticks before it; otherwise she is rated as retired (#150, `CoveredFinish`). `COVERED_FINISH_GRACE_SECONDS`.
+    public var coveredFinishGraceTicks = CoveredFinish.defaultGraceTicks
 
     public init() {
         allGone = AllGoneConfig()
@@ -424,7 +427,10 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     /// (`RaceLog.humanSeatsAtGun`), each at her stored place, whatever her code: a player who left after the gun is
     /// one of them, retired, and so loses to everyone still racing; she gets her `.rated` change although she has
     /// released her seat (it names its race, so it can't be taken for her next one's). Never rated: bots, a seat given
-    /// away before the gun, a player who wasn't back by the gun. If the rating step fails the race still closes, the
+    /// away before the gun, a player who wasn't back by the gun. A finish the cautious bot sailed while its player was
+    /// gone (#150, `CoveredFinish`) is rated at its place only if she dropped less than
+    /// `coveredFinishGraceTicks` before it, else as a retirement; it is never a completed race or a win in her
+    /// counts, and never the winner's line. The results, the log and the digest are the race's own either way. If the rating step fails the race still closes, the
     /// failure is logged and nobody is pushed a change: never a false `.unrated`. Only the players still seated in it hear any of that: one who
     /// released her seat, or sits in a later race, hears nothing from this one (#469). A race without results (cancelled, or closed where it stood
     /// by a shutdown) is cancelled: no results, no rating, and each stream ends with `.cancelled`.
@@ -455,11 +461,18 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         let seats = live.seats.sorted { $0.value < $1.value }.compactMap { player, seat in
             givenAway.contains(seat) ? nil : results.row(of: seat).map { (player: player, row: $0) }
         }
+        // A finish the bot sailed while she was gone (#150): never completed or won; rated at its place only inside the grace.
+        let covered = CoveredFinish.standings(results: results, log: outcome.log, graceTicks: settings.coveredFinishGraceTicks)
         let stats = seats.map {
-            PlayerRaceStat(playerID: $0.player, completed: settings.earnedProgressResultCodes.contains($0.row.code),
-                           won: $0.row.place == 1 && $0.row.code == .finished)
+            let own = covered[$0.row.seat] == nil
+            return PlayerRaceStat(playerID: $0.player, completed: own && settings.earnedProgressResultCodes.contains($0.row.code),
+                                  won: own && $0.row.place == 1 && $0.row.code == .finished)
         }
-        let participants = seats.filter { atGun.contains($0.row.seat) }.map { RatingInput.Participant(playerID: $0.player, place: $0.row.place) }
+        let participants = seats.filter { atGun.contains($0.row.seat) }.map {
+            let place = covered[$0.row.seat] == .coveredTooLate
+                ? CoveredFinish.retiredPlace(of: $0.row.seat, results: results, log: outcome.log) : $0.row.place
+            return RatingInput.Participant(playerID: $0.player, place: place)
+        }
         let stored: (summary: RaceSummary, incidents: IncidentIndex)
         let record: ClosedRaceRecord
         do {
@@ -495,7 +508,7 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         // Every rated player, seated or not: one who left after the gun was rated as retired, and is told.
         for change in rating?.changes ?? [] { push(RatingChange(raceID: raceID, outcome: Self.outcome(change)), to: change.playerID) }
         if !changes.isEmpty { rated?(changes.keys.sorted()) }
-        if let line = stored.summary.winnerLine { for continuation in lineWatchers.values { continuation.yield(line) } }
+        if let line = stored.summary.winnerLine(sailedWhileGone: Set(covered.keys)) { for continuation in lineWatchers.values { continuation.yield(line) } }
     }
 
     private enum Stored {
