@@ -485,6 +485,8 @@ struct BotBrain: Sendable {
 
     /// The way she turns her current penalty turn, starting it now, or nil while she holds it off (`penaltyInput`).
     private mutating func startPenaltyTurn(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty) -> Double? {
+        // By hand, called with the gun close, she starts first and turns at once after it (#471).
+        if startsBeforeHerTurn(owed, b, view) { return nil }
         let mark = nearestMark(b, view)
         let crowd = nearestCrowding(b, view)
         let readsThePack = skill >= Self.penaltyPutOffSkill

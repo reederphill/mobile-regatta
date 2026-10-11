@@ -82,6 +82,14 @@ public enum HandTackTable {
     /// to spare before she puts a turn off or gives one up. On the wind (inside `luffFirstAngle`) with `luffFirstSpeed`
     /// of her close-hauled speed she luffs first.
     public static let penaltyTurn = (speed: 0.4, crawl: 9.0, margin: 3.0, luffFirstAngle: deg2rad(90), luffFirstSpeed: 0.6)
+    /// "Start first, then turn" (`BotBrain.startsBeforeHerTurn`, #471): at least `turnIn` seconds for the rules' 30°
+    /// once she is over the line (the rudder's slew, the 30° at the turn's rudder, a second to spare; more when slow),
+    /// reckoned at `speed` of her close-hauled speed while her crossing is further off than that; `spare` seconds over
+    /// the turn itself before the complete deadline; from `late` seconds after the gun her run to the line is reckoned
+    /// on the heading she sails, not close-hauled on her tack. Measured on the quick loops (80 all-Club and 160
+    /// all-National 10-boat races) with the crowd's put-off gone: boats more than 10 s late for a turn before the
+    /// start 335 a thousand without it and 265 with it (Club), 186 and 153 (National).
+    public static let penaltyStartFirst = (turnIn: 2.0, spare: 4.0, late: 2.0, speed: 0.6)
     /// Seconds at most she waits, centred, for steerage to turn a penalty on.
     public static let stallWait = 8.0
 
@@ -219,6 +227,32 @@ extension BotBrain {
         guard Self.turnsByHand(view) else { return true }
         let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
         return left > penaltyTurnSeconds(b, view) + HandTackTable.penaltyTurn.margin
+    }
+
+    /// "Start first, then turn" (#471, the owner's ruling of 2026-10-10): called before her start, owing the one turn,
+    /// with the gun so close that she can cross the line and still be the rules' 30° into her turn by its start
+    /// deadline, she sails her start and turns at once after it. Exactly: the seconds until she crosses (the gun, or
+    /// her run to the line from her speed now if that is later: close-hauled on her tack, and from
+    /// `HandTackTable.penaltyStartFirst.late` seconds after the gun on the heading she sails) and the seconds the 30°
+    /// take her there (`turnIn`) fit before the start deadline, and the same crossing, a whole turn (`penaltyTurnSeconds`
+    /// less its crawl: she crosses with way on) and `spare` fit before the complete deadline. Under the rules' 20 s and
+    /// 40 s that is a crossing no later than 18 s after the call in a breeze: a boat on the line at the gun, called in
+    /// the last 18 s; one 5 s late to the line, in the last 13. In light or dirty air the turn's own time binds first
+    /// (a turn of 28 s with its spare: a crossing 12 s after the call). Reckoned again at every decision: when her
+    /// start slips past it, or she is called again, she turns where she is.
+    func startsBeforeHerTurn(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard Self.turnsByHand(view), b.status == .prestart, owed.turnsOwed == 1 else { return false }
+        let table = HandTackTable.penaltyStartFirst
+        let toStart = Double(owed.startDeadlineTick - view.tick) * Self.tickStep
+        let toComplete = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
+        let angle = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).twa
+        let heading = view.time > table.late ? b.heading : b.windDirection + (b.tack == .starboard ? -angle : angle)
+        let cross = max(-view.time, secondsToLine(b, view, heading: heading, ease: false, within: toStart))
+        let speed = cross > table.turnIn ? max(b.speed, table.speed * closeHauledSpeed(b, view)) : b.speed
+        let rate = Self.penaltyRudder(view) * view.boatClass.steering.turnRate(speed: speed)
+        let turnIn = max(table.turnIn, 1 + Self.penaltyStartedAngle / rate)
+        return cross + turnIn <= toStart
+            && cross + penaltyTurnSeconds(b, view) - HandTackTable.penaltyTurn.crawl + table.spare <= toComplete
     }
 
     /// "Tack while she has the speed": the way (+1 to starboard) she starts a penalty turn by hand on the wind (inside
