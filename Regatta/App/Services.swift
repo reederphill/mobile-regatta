@@ -1,4 +1,6 @@
+import Foundation
 import Observation
+import RegattaServiceClient
 import RegattaServices
 import SwiftUI
 
@@ -41,18 +43,53 @@ struct LobbyStatus: Equatable {
 /// services' streams.
 @MainActor @Observable
 final class OnlineStatus {
+    /// The online session under the services' identity, terms and queue state, and the device identity under it (#161).
+    nonisolated struct Session: Sendable {
+        let session: OnlineSession
+        let device: any DeviceIdentitySource
+    }
+
     private(set) var isOnline: Bool
     private(set) var lobbyStatus = LobbyStatus()
     let services: ServiceSet
+    /// Where the online session stands; nil with no session (no service endpoint: the app as before #161).
+    private(set) var sessionPhase: SessionPhase?
+    /// The device's Game Center player, with a session: she may be signed in on the phone before, or without, a session.
+    private(set) var devicePlayer: DevicePlayer?
+    /// What the queue's state stream last refused her for (a suspension, the cooldown), if it did.
+    private(set) var queueLine: RestrictionLine?
+    /// A Race online tap is waiting for the session: the button's spinner.
+    private(set) var isOpeningSession = false
+    /// The last Race online tap got no session. An unreachable server is only said after one.
+    private(set) var tapFailed = false
+    /// What the terms ask of her, by the server's version against the bundled text's.
+    private(set) var termsPrompt = TermsPrompt.none
+    private let session: Session?
+    private let now: () -> Date
 
     /// `isOnline` starts at `isInitiallyOnline` until the connectivity service says: optimistic for the device's
     /// path, so Race online doesn't flash "Offline", and `isInitiallyOnline(_:)` for a launch's fakes, so the
     /// offline scenario isn't online for its first frame (#314).
-    init(services: ServiceSet, isInitiallyOnline: Bool = true) {
+    init(services: ServiceSet, isInitiallyOnline: Bool = true, session: Session? = nil, now: @escaping () -> Date = Date.init) {
         self.services = services
+        self.session = session
+        self.now = now
         isOnline = isInitiallyOnline
         Task { [weak self] in
-            for await status in services.connectivity.statusUpdates() { self?.isOnline = status.isOnline }
+            for await status in services.connectivity.statusUpdates() {
+                self?.isOnline = status.isOnline
+                // Offline the session tries nothing; back online it connects at once (#161).
+                await session?.session.setOnline(status.isOnline)
+            }
+        }
+        if let session {
+            sessionPhase = .idle
+            Task { [weak self] in
+                for await phase in session.session.phaseUpdates() { self?.show(phase) }
+            }
+            Task { [weak self] in
+                for await player in session.device.playerUpdates() { await self?.deviceChanged(player) }
+            }
         }
         Task { [weak self] in await self?.refreshAccount() }
         // Game Center can sign the player out, or change her restrictions, at any time (#314).
@@ -73,16 +110,55 @@ final class OnlineStatus {
         case .queued(let queued): lobbyStatus.queuedPlayers = queued.queuedPlayers
         case .idle, .unavailable, .fleetLocked: lobbyStatus.queuedPlayers = nil
         }
+        // A cooldown's seconds are counted from now (#161).
+        queueLine = RestrictionLine(queue: queue, now: now())
+    }
+
+    /// The phone's Game Center player changed (#161).
+    func deviceChanged(_ player: DevicePlayer?) async {
+        devicePlayer = player
+        await refreshAccount()
+    }
+
+    func show(_ phase: SessionPhase) {
+        sessionPhase = phase
+        if case .open = phase { tapFailed = false }
+    }
+
+    /// The scene became active, or went to the background: the session's socket follows (#161).
+    func setSceneActive(_ active: Bool) {
+        guard let session else { return }
+        Task { await session.session.setActive(active) }
+    }
+
+    /// The line under Race online for what the server or the session says, when the gating matrix has none of its
+    /// own ("Offline", "Practice races only"): an update, a suspension, the cooldown, a refusal, and, after a tap
+    /// that failed, an unreachable server (#161).
+    var restrictionLine: RestrictionLine? {
+        if !isOnline || !lobbyStatus.canRaceOnline { return nil }
+        if termsPrompt == .updateRequired { return .updateRequired }
+        if let sessionPhase {
+            let line = RestrictionLine(phase: sessionPhase, tapFailed: tapFailed)
+            if let line, !line.allowsTap { return line }
+            if case .open = sessionPhase, let queueLine { return queueLine }
+            return line
+        }
+        return queueLine
     }
 
     /// Reads the player, her restrictions and the terms again: after signing in, say. Terms that can't be read
     /// are due (`LocalTermsService` already falls back to what the device last recorded).
     func refreshAccount() async {
-        let player = await services.identity.state().player
+        var player = await services.identity.state().player
         let terms = player == nil ? nil : try? await services.terms.status()
+        // A player who can neither chat nor race online gets no session (#161), but is no less signed in: Race
+        // online still says "Practice races only".
+        if player == nil, let devicePlayer, !devicePlayer.canUseOnline { player = devicePlayer.player }
+        // With a session the server says which terms are current: newer than the bundled text, there is no sheet.
+        termsPrompt = session == nil ? .none : TermsPrompt(status: terms, bundled: TermsOfUse.version)
         lobbyStatus.isSignedIn = player != nil
         lobbyStatus.hasAcceptedTerms = terms?.isAccepted ?? false
-        lobbyStatus.termsVersion = terms?.current
+        lobbyStatus.termsVersion = termsPrompt == .updateRequired ? nil : terms?.current
         lobbyStatus.canChat = player?.canChat ?? true
         lobbyStatus.canRaceOnline = player?.canRaceOnline ?? true
     }
@@ -104,8 +180,21 @@ final class OnlineStatus {
     /// whether the terms are due. A player who turns out to be multiplayer-restricted but can chat still gets the
     /// terms straight after signing in, for the lobby; one who can do neither gets nothing (question 1).
     func passGate(analytics: Analytics) async -> GateStep {
-        if access.next == .signIn, !(await signIn(analytics: analytics)) { return .stopped }
+        if access.next == .signIn {
+            // With Game Center already signed in on the phone, the tap is waiting for the session alone (#161).
+            isOpeningSession = devicePlayer != nil
+            let signedIn = await signIn(analytics: analytics)
+            isOpeningSession = false
+            if let session { show(await session.session.phase) }
+            if !signedIn {
+                tapFailed = session != nil && devicePlayer?.canUseOnline == true
+                return .stopped
+            }
+        }
+        tapFailed = false
         let access = access
+        // Terms newer than the text this build carries: nothing to agree to until an update (#161).
+        if termsPrompt == .updateRequired || restrictionLine.map({ !$0.allowsTap }) == true { return .stopped }
         if access.termsDue { return .terms }
         return access.next == .proceed ? .proceed : .stopped
     }
@@ -113,17 +202,20 @@ final class OnlineStatus {
     /// Game Center's sign-in, from Race online or the lobby's Sign in: true when it signed the player in. Logs the
     /// prompt's answer, and the funnel's "GC signed in" step (#128).
     @discardableResult func signIn(analytics: Analytics) async -> Bool {
+        // Game Center's sheet was only a prospect if nobody was signed in on the phone (#161).
+        let prompts = devicePlayer == nil
         let signedIn = await services.identity.signIn().player != nil
-        analytics.log(.gameCenterPrompt(accepted: signedIn))
-        if signedIn { analytics.log(.practiceToOnline(.gameCenterSignedIn)) }
+        if prompts { analytics.log(.gameCenterPrompt(accepted: signedIn)) }
+        if signedIn, prompts { analytics.log(.practiceToOnline(.gameCenterSignedIn)) }
         await refreshAccount()
         return signedIn
     }
 
     /// The Terms of Use sheet's I agree (#34): accepts the version the sheet showed, and logs the funnel's "terms
     /// accepted" step (#128). False when it didn't take: a newer version came, or the service failed.
-    func acceptTerms(analytics: Analytics) async -> Bool {
-        guard let version = lobbyStatus.termsVersion else { return false }
+    /// `shown` is the version the sheet opened with (#161): that one is accepted, even if another is current by now.
+    func acceptTerms(_ shown: TermsVersion? = nil, analytics: Analytics) async -> Bool {
+        guard let version = shown ?? lobbyStatus.termsVersion else { return false }
         let accepted = (try? await services.terms.accept(version))?.isAccepted ?? false
         if accepted { analytics.log(.practiceToOnline(.termsAccepted)) }
         await refreshAccount()

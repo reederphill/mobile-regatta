@@ -4,8 +4,20 @@ import SwiftUI
 /// The Terms of Use the app asks the player to accept (#34): placeholders until the real text and its lawyer pass
 /// (#171). A material change to the text bumps `version`, and the sheet asks again.
 nonisolated enum TermsOfUse {
-    /// The version the device's `LocalTermsService` asks for until the server says (#161).
-    static let version = TermsVersion(1)
+    /// The version of the text below. With no server, the device's `LocalTermsService` asks for it; with one, the
+    /// server says which version is current, and one newer than this asks for an update, not for an "I agree" to
+    /// text the player can't see (#161). `-termsVersion` stands in for a build with newer text (Debug).
+    static let version: TermsVersion = {
+        #if DEBUG
+        // Read from the arguments here (`LaunchOptions`, which checks them, is the main actor's).
+        let arguments = ProcessInfo.processInfo.arguments
+        if let flag = arguments.firstIndex(of: "-termsVersion"), arguments.indices.contains(flag + 1),
+           let version = Int(arguments[flag + 1]), version >= 1 {
+            return TermsVersion(version)
+        }
+        #endif
+        return TermsVersion(1)
+    }()
 
     static let lines = [
         // TODO-COPY (#171)

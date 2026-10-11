@@ -46,6 +46,9 @@ import RegattaServices
 ///   `RenderQualityPolicy`); every build draws at 60 without it. Debug builds only: other builds don't know it.
 /// - `-briefing practice|online` opens on the briefing (#130) for the launch race (`RaceConfig.launch()`, and `-seed`), with
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
+/// - `-devIdentity <n>` (Debug builds, with `-onlineHost`) signs in to the dev server as the dev player `n` in place
+///   of Game Center, with `-devRestrictions underage,communication,multiplayer` as her restrictions; `-termsVersion
+///   <n>` is the bundled Terms of Use text's version (#161).
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued`,
 ///   `cancelled-race`, `online-results`, `online-results-unrated` or `terms-bump` (`FakeServiceScenario`). Debug builds only (#314): other builds don't know it, so a release
@@ -142,6 +145,12 @@ struct LaunchOptions: Equatable {
     var fps120 = false
     /// `-beatMetres`: honoured only with `-uitesting` (`AppModel`).
     var beatMetres: Double?
+    /// `-devIdentity <n>`: signed in as the dev player `n` against a dev server, in place of Game Center (#161).
+    var devIdentity: Int?
+    /// `-devRestrictions underage,communication,multiplayer`: the dev player's Game Center restrictions.
+    var devRestrictions: Set<DevIdentity.Restriction> = []
+    /// `-termsVersion <n>`: the version of the bundled Terms of Use text, for the end-to-end run's terms bump.
+    var termsVersion: Int?
     #endif
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
@@ -170,7 +179,7 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
-            case "-fakeServices", "-referenceRace", "-beatMetres":
+            case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             #endif
@@ -201,7 +210,8 @@ struct LaunchOptions: Equatable {
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
         #if DEBUG
-        flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace", "-beatMetres"])
+        flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
+                         "-termsVersion"])
         #endif
         return flags
     }()
@@ -277,6 +287,17 @@ struct LaunchOptions: Equatable {
         #if DEBUG
         case "-beatMetres":
             if let n = Double(value), Self.beatMetresRange.contains(n) { beatMetres = n } else { reject(argument, value, "a number of metres, 120…360") }
+        case "-devIdentity":
+            if let n = Int(value), n >= 0 { devIdentity = n } else { reject(argument, value, "a whole number ≥ 0") }
+        case "-devRestrictions":
+            let named = value.split(separator: ",").map { DevIdentity.Restriction(rawValue: String($0)) }
+            if !named.isEmpty, !named.contains(nil) {
+                devRestrictions = Set(named.compactMap { $0 })
+            } else {
+                reject(argument, value, "underage, communication or multiplayer, separated by commas")
+            }
+        case "-termsVersion":
+            if let n = Int(value), n >= 1 { termsVersion = n } else { reject(argument, value, "a whole number ≥ 1") }
         #endif
         case "-fakeServices":
             if let scenario = FakeServiceScenario(rawValue: value) {

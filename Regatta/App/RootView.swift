@@ -14,6 +14,8 @@ struct RootView: View {
     @State private var showsOnlineStub = false
     /// The Terms of Use sheet came from Race online's gate for a player who can race: I agree goes on to the queue.
     @State private var racesAfterTerms = false
+    /// The terms' version the sheet opened with: what its I agree accepts (#161).
+    @State private var termsShown: TermsVersion?
     /// I agree took; what waits on the sheet runs once it's gone (`termsSheetDismissed`).
     @State private var agreedToTerms = false
     /// The `-onlineResults` harness's results stream (#133), while it shows.
@@ -144,7 +146,9 @@ struct RootView: View {
     private func raceOnline() {
         model.analytics.log(.practiceToOnline(.raceOnlineTapped))
         #if DEBUG
-        if model.launchOptions.online || model.launchOptions.onlineHost != nil { return startOnlineRace() }
+        // A dev identity (#161) goes through the gate like a player.
+        let skipsGate = model.launchOptions.online || (model.launchOptions.onlineHost != nil && model.launchOptions.devIdentity == nil)
+        if skipsGate { return startOnlineRace() }
         #endif
         guard let onlineStatus else { return enterQueue() }
         Task {
@@ -169,6 +173,7 @@ struct RootView: View {
     private func showTerms(thenRace: Bool) {
         racesAfterTerms = thenRace
         agreedToTerms = false
+        termsShown = onlineStatus?.lobbyStatus.termsVersion
         model.sheet = .terms
     }
 
@@ -177,7 +182,11 @@ struct RootView: View {
     private func agreeToTerms() {
         guard let onlineStatus else { return model.sheet = nil }
         Task {
-            guard await onlineStatus.acceptTerms(analytics: model.analytics) else { return }
+            // The version the sheet showed, not whatever is current by the tap (#161).
+            guard await onlineStatus.acceptTerms(termsShown, analytics: model.analytics) else {
+                termsShown = onlineStatus.lobbyStatus.termsVersion
+                return
+            }
             agreedToTerms = true
             model.sheet = nil
         }
