@@ -14,6 +14,7 @@ let package = Package(
     products: [
         .library(name: "RaceHost", targets: ["RaceHost"]),
         .library(name: "Persistence", targets: ["Persistence"]),
+        .library(name: "Ratings", targets: ["Ratings"]),
         .library(name: "GameCenterIdentity", targets: ["GameCenterIdentity"]),
         .executable(name: "RegattaServer", targets: ["RegattaServer"]),
         .executable(name: "regatta-loadclient", targets: ["regatta-loadclient"]),
@@ -62,6 +63,10 @@ let package = Package(
                 .product(name: "SwiftASN1", package: "swift-asn1"),
             ]
         ),
+        // Ratings (#151, ADR 0012): Glicko-2 with weighted games and one race as its pairs. Pure, Foundation only; the
+        // store applies it inside the transaction that closes a race.
+        .target(name: "Ratings"),
+        .testTarget(name: "RatingsTests", dependencies: ["Ratings"]),
         // The dev endpoints' JSON (#67), shared by the server and the load client. Foundation only.
         .target(name: "RegattaDevAPI"),
         // Everything the executable does, as a library the tests start in-process: config and the
@@ -74,6 +79,7 @@ let package = Package(
                 // Identity, sessions and the Terms of Use (#145).
                 "GameCenterIdentity",
                 "Persistence",
+                "Ratings",
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
                 .product(name: "RegattaServices", package: "RegattaServices"),
@@ -94,6 +100,7 @@ let package = Package(
         .target(
             name: "Persistence",
             dependencies: [
+                "Ratings",
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "PostgresNIO", package: "postgres-nio"),
             ]
@@ -139,6 +146,7 @@ let package = Package(
             name: "PersistenceTests",
             dependencies: [
                 "Persistence",
+                "Ratings",
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "PostgresNIO", package: "postgres-nio"),
             ]
@@ -181,6 +189,7 @@ let package = Package(
                 // The service endpoint (#145): its clients, the contract runner, and Postgres for its persistence tests.
                 "GameCenterIdentity",
                 "Persistence",
+                "Ratings",
                 .product(name: "RegattaServices", package: "RegattaServices"),
                 .product(name: "RegattaServiceClient", package: "RegattaServices"),
                 .product(name: "RegattaServiceContracts", package: "RegattaServices"),
