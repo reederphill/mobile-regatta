@@ -166,7 +166,9 @@ import Testing
     /// A restriction store that can fail or hang, and counts its reads.
     final class FaultyStore: RestrictionStore {
         struct Unreachable: Error {}
-        enum Fault { case none, failing, hanging }
+        /// `hangingOnceAfterReading`: the next read of one player's restrictions reads them, then hangs with what it
+        /// read (a slow answer, stale by the time it arrives).
+        enum Fault { case none, failing, hanging, hangingOnceAfterReading }
 
         let inner = InMemoryRestrictionStore()
         private let state = Mutex<(fault: Fault, single: Int, batch: Int, hung: [CheckedContinuation<Void, Never>])>((.none, 0, 0, []))
@@ -177,10 +179,11 @@ import Testing
         }
         var reads: (single: Int, batch: Int) { state.withLock { ($0.single, $0.batch) } }
 
-        /// Lets every hung read go.
+        /// Lets every hung read go, and reads answer again.
         func release() {
             let hung = state.withLock { state in
                 defer { state.hung = [] }
+                if state.fault == .hangingOnceAfterReading { state.fault = .none }
                 return state.hung
             }
             for continuation in hung { continuation.resume() }
@@ -191,12 +194,20 @@ import Testing
             switch fault {
             case .none: return
             case .failing: throw Unreachable()
-            case .hanging: await withCheckedContinuation { continuation in state.withLock { $0.hung.append(continuation) } }
+            case .hanging, .hangingOnceAfterReading: await withCheckedContinuation { continuation in state.withLock { $0.hung.append(continuation) } }
             }
         }
 
         func restrictions(of playerID: String) async throws -> PlayerRestrictions {
-            state.withLock { $0.single += 1 }
+            let stale = state.withLock { state -> Bool in
+                state.single += 1
+                return state.fault == .hangingOnceAfterReading
+            }
+            if stale {
+                let restrictions = try await inner.restrictions(of: playerID)
+                try await read()
+                return restrictions
+            }
             try await read()
             return try await inner.restrictions(of: playerID)
         }

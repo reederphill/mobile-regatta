@@ -164,14 +164,17 @@ public struct BriefingLeaveRule: Sendable, Equatable {
 
 /// Counts briefing leaves (#26, #147): a human who leaves after her fleet locked and before the gun. The `leaves`th
 /// within the rolling `window` starts a cooldown until that leave + `cooldown`, and the count starts again from zero
-/// (owner Q2). A leave while cooling down lengthens nothing and isn't counted. Serialised per tracker, so two leaves
-/// of hers can't both miss the third.
+/// (owner Q2). A leave while cooling down lengthens nothing and isn't counted. One player's leaves are counted one after
+/// the other (`inFlight`: the actor alone doesn't do that, it lets a second leave in while the first waits on the
+/// store), so two of hers at once can't both miss the third, nor one be counted into a cooldown the other just started.
 public actor BriefingLeaveTracker {
     public nonisolated let rule: BriefingLeaveRule
     private let store: any RestrictionStore
     private let now: @Sendable () -> Date
     /// Store failures, for the log and tests.
     public private(set) var failures: [String] = []
+    /// Each player's leave being counted now: her next waits for it (#469).
+    private var inFlight: [String: Task<Date?, Never>] = [:]
 
     public init(store: any RestrictionStore, rule: BriefingLeaveRule = BriefingLeaveRule(), now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
@@ -183,6 +186,18 @@ public actor BriefingLeaveTracker {
     @discardableResult
     public func recordLeave(_ playerID: String, race: UUID?) async -> Date? {
         let time = now()
+        let earlier = inFlight[playerID]
+        let counting = Task {
+            _ = await earlier?.value
+            return await self.count(playerID, race: race, at: time)
+        }
+        inFlight[playerID] = counting
+        let until = await counting.value
+        if inFlight[playerID] == counting { inFlight[playerID] = nil }
+        return until
+    }
+
+    private func count(_ playerID: String, race: UUID?, at time: Date) async -> Date? {
         do {
             if let until = try await store.restrictions(of: playerID).cooldownUntil, until > time { return nil }
             try await store.recordBriefingLeave(playerID, race: race, at: time)

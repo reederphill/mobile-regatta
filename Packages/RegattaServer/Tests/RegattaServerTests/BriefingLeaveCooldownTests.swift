@@ -107,6 +107,33 @@ extension RaceSims {
             #expect(await tracker.recordLeave("T:0", race: nil) == nil)
         }
 
+        /// #469: one player's leaves are counted one after the other. Two at once, the first still waiting on the store
+        /// with nothing yet written: the second waits for it, sees the cooldown the first started, and isn't counted into
+        /// it. (The tracker's actor alone lets the second in while the first waits.)
+        @Test func twoLeavesAtOnceAreCountedOneAfterTheOther() async throws {
+            let clock = VirtualClock(Self.time), store = QueueRefusalTests.FaultyStore()
+            let tracker = BriefingLeaveTracker(store: store, now: { clock.now })
+            #expect(await tracker.recordLeave("T:0", race: nil) == nil)
+            #expect(await tracker.recordLeave("T:0", race: nil) == nil)
+            let before = store.reads.single
+            // The third leave has read "no cooldown" and waits on the store with it.
+            store.fault = .hangingOnceAfterReading
+            let third = Task { await tracker.recordLeave("T:0", race: nil) }
+            #expect(await eventually { store.reads.single == before + 1 })
+            store.fault = .none
+            // A fourth arrives meanwhile. It must not reach the store before the third is done.
+            let fourth = Task { await tracker.recordLeave("T:0", race: nil) }
+            #expect(await eventually(seconds: 0.2) { store.reads.single > before + 1 } == false)
+            store.release()
+            #expect(await third.value == Self.time + 300)
+            #expect(await fourth.value == nil)
+            #expect(try await store.inner.restrictions(of: "T:0").cooldownUntil == Self.time + 300)
+            #expect(try await store.inner.briefingLeaves(of: "T:0", since: .distantPast) == [])
+            // Another player's leave doesn't wait on hers.
+            #expect(await tracker.recordLeave("T:1", race: nil) == nil)
+            #expect(try await store.inner.briefingLeaves(of: "T:1", since: .distantPast).count == 1)
+        }
+
         /// Acceptance: backgrounding after lock (her race connection drops) counts, when she isn't back by the gun (owner
         /// Q6); a drop she comes back from before the gun doesn't. A seat never joined counts when the gun finds it empty.
         @Test func backgroundingAfterLockCountsAsALeave() async throws {
