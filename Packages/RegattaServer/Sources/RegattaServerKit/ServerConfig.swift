@@ -78,6 +78,8 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `CATCH_FINISHERS_OFFSET_SECONDS` | `15` | a held lock comes this long after the running race's expected close (G2) |
 /// | `CATCH_FINISHERS_MAX_HOLD_SECONDS` | `180` | the oldest queued player's longest wait, join to lock, for a hold (G2) |
 /// | `SIMULTANEOUS_LOSS_POLICY` | `cancel` | a mass drop (G3): `cancel` (no results, no rating) or `ret` (RET in leave order, rated per #30) (#148) |
+/// | `CLIENT_ADDRESS_HEADER` | none | the header a trusted reverse proxy sets to the client's address (`Fly-Client-IP`, `X-Forwarded-For`); the per-address connection caps count it instead of the socket's address. Unset: no header is trusted (#469) |
+/// | `CLIENT_ADDRESS_TRUSTED_HOPS` | `1` | with `CLIENT_ADDRESS_HEADER`: which entry of a list header, from the right, is the client's (one per trusted proxy in the chain) (#469) |
 public struct ServerConfig: Sendable {
     public var environment: ServerEnvironment
     public var auth: SeatAuthPolicy
@@ -93,6 +95,8 @@ public struct ServerConfig: Sendable {
     public var identity = IdentitySettings()
     /// Connections held at once on `/service` and `/race`, per address and in all (#146).
     public var connectionLimits = ConnectionLimits()
+    /// Whose address a connection is counted under: the socket's, or a trusted proxy's header (#469).
+    public var clientAddress = ClientAddressRule()
     /// The queue and the races it locks (#146).
     public var queue = QueueSettings()
     /// Races from fleet lock to the close (#148): the all-gone rules and the mass-drop policy.
@@ -145,6 +149,15 @@ public struct ServerConfig: Sendable {
                                expected: SimultaneousLossPolicy.allCases.map(\.rawValue).joined(separator: " or "))
             }
             config.lifecycle.allGone.simultaneousLossPolicy = value
+        }
+        if let header = env["CLIENT_ADDRESS_HEADER"] {
+            let token = header.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_") }
+            guard !header.isEmpty, token else {
+                throw .invalid(variable: "CLIENT_ADDRESS_HEADER", value: header, expected: "a header name, such as Fly-Client-IP or X-Forwarded-For")
+            }
+            config.clientAddress = ClientAddressRule(header: header, trustedHops: try int("CLIENT_ADDRESS_TRUSTED_HOPS", default: 1, in: 1...16))
+        } else if let hops = env["CLIENT_ADDRESS_TRUSTED_HOPS"] {
+            throw .invalid(variable: "CLIENT_ADDRESS_TRUSTED_HOPS", value: hops, expected: "CLIENT_ADDRESS_HEADER to be set with it")
         }
         if let bundle = env["REGATTA_BUNDLE_ID"], !bundle.isEmpty { config.identity.bundleID = bundle }
         if let team = env["REGATTA_TEAM_ID"], !team.isEmpty { config.identity.teamID = team }

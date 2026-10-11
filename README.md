@@ -269,6 +269,12 @@ with it, the signature is checked against Apple's chain. It reads:
 | `CATCH_FINISHERS_OFFSET_SECONDS` | `15` | a held lock comes this long after the running race's expected close (G2, #147) |
 | `CATCH_FINISHERS_MAX_HOLD_SECONDS` | `180` | the oldest queued player waits at most this long, join to lock, for a hold (G2, #147) |
 | `SIMULTANEOUS_LOSS_POLICY` | `cancel` | a mass drop (G3: 2+ humans all dropped within 2 s, nobody back in 30 s): `cancel` (no results, no rating) or `ret` (RET in leave order, rated per #30) (#148) |
+| `CLIENT_ADDRESS_HEADER` | none | behind a reverse proxy: the request header the proxy sets to the client's address (`Fly-Client-IP` on Fly, `X-Forwarded-For` behind a load balancer). The per-address connection caps then count that address, not the proxy's. Unset, no header is trusted and the socket's address counts. Set it only when every connection comes through the proxy: a client reaching the server directly could put any address in it (#469) |
+| `CLIENT_ADDRESS_TRUSTED_HOPS` | `1` | with `CLIENT_ADDRESS_HEADER`, for a header that lists addresses: which entry from the right is the client's, one per trusted proxy in the chain (#469) |
+
+The per-address connection caps (8 on `/service`, 32 on `/race`) count an IPv4 address, or an IPv6 address's /64 prefix.
+A staging or production server behind a proxy must set `CLIENT_ADDRESS_HEADER`, or all its clients share one address's
+cap (#167).
 
 `POST /dev/instant-race?clients=N` starts a race now for N clients (1…16), with bots filling it to 10 boats,
 and answers each client's seat and signed race token. `raceSeconds=S` closes the race S seconds after the gun,

@@ -10,8 +10,9 @@ import RegattaDevAPI
 /// channels; one task per connection.
 public final class RegattaHTTPServer: Sendable {
     private enum Connection {
-        case race(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>)
-        case service(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>, NIOLoopBound<WebSocketFrameGate>)
+        /// `client`: what the connection is counted under for the per-address cap (`ClientAddressRule.key`).
+        case race(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>, client: String?)
+        case service(NIOAsyncChannel<WebSocketFrame, WebSocketFrame>, NIOLoopBound<WebSocketFrameGate>, client: String?)
         case http(NIOAsyncChannel<HTTPServerRequestPart, HTTPPart<HTTPResponseHead, ByteBuffer>>)
     }
 
@@ -40,6 +41,7 @@ public final class RegattaHTTPServer: Sendable {
         _ = try SeatAuthPolicy.for(config.environment)
         let services = try services ?? ServiceEndpoint.make(config: config, store: InMemoryAccountStore())
         let frameCap = services.config.frameCap, preSignInFrameCap = services.config.preSignInFrameCap
+        let clientAddress = config.clientAddress
         // The queue locks its races onto the registry the race connections find them in.
         let registry = services.matchmaker?.registry ?? RaceRegistry(maxRaces: config.maxRaces)
         let listener = try await ServerBootstrap(group: group)
@@ -49,7 +51,7 @@ public final class RegattaHTTPServer: Sendable {
             .childChannelOption(.tcpOption(.tcp_nodelay), value: 1)
             .bind(host: config.host, port: config.port) { channel in
                 channel.eventLoop.makeCompletedFuture {
-                    try Self.configure(channel, frameCap: frameCap, preSignInFrameCap: preSignInFrameCap)
+                    try Self.configure(channel, frameCap: frameCap, preSignInFrameCap: preSignInFrameCap, clientAddress: clientAddress)
                 }
             }
         do {
@@ -124,7 +126,8 @@ public final class RegattaHTTPServer: Sendable {
         _ = await task.value
     }
 
-    private static func configure(_ channel: any Channel, frameCap: Int, preSignInFrameCap: Int) throws -> EventLoopFuture<Connection> {
+    private static func configure(_ channel: any Channel, frameCap: Int, preSignInFrameCap: Int,
+                                  clientAddress: ClientAddressRule) throws -> EventLoopFuture<Connection> {
         // One WebSocket upgrader per path, so each path's decoder has its own frame limit: a race frame over
         // `maxClientMessage` is refused at its header, before its payload is buffered; a service frame may run to the
         // service's cap once signed in, and to `preSignInFrameCap` before (the gate ahead of the decoder, which the
@@ -136,18 +139,19 @@ public final class RegattaHTTPServer: Sendable {
         }
         let race = NIOTypedWebSocketServerUpgrader<Connection>(
             maxFrameSize: maxClientMessage, shouldUpgrade: shouldUpgrade,
-            upgradePipelineHandler: { channel, _ in
+            upgradePipelineHandler: { channel, head in
                 channel.eventLoop.makeCompletedFuture {
                     try channel.pipeline.syncOperations.addHandler(
                         NIOWebSocketFrameAggregator(minNonFinalFragmentSize: 0, maxAccumulatedFrameCount: 64,
                                                     maxAccumulatedFrameSize: maxClientMessage))
-                    return Connection.race(try NIOAsyncChannel(wrappingChannelSynchronously: channel))
+                    return Connection.race(try NIOAsyncChannel(wrappingChannelSynchronously: channel),
+                                           client: clientAddress.key(remote: channel.remoteAddress, headers: head.headers))
                 }
             }
         )
         let service = NIOTypedWebSocketServerUpgrader<Connection>(
             maxFrameSize: max(maxClientMessage, frameCap), shouldUpgrade: shouldUpgrade,
-            upgradePipelineHandler: { channel, _ in
+            upgradePipelineHandler: { channel, head in
                 channel.eventLoop.makeCompletedFuture {
                     let pipeline = channel.pipeline.syncOperations
                     let gate = WebSocketFrameGate(limit: preSignInFrameCap)
@@ -157,7 +161,8 @@ public final class RegattaHTTPServer: Sendable {
                         NIOWebSocketFrameAggregator(minNonFinalFragmentSize: 0, maxAccumulatedFrameCount: 4096,
                                                     maxAccumulatedFrameSize: frameCap))
                     return Connection.service(try NIOAsyncChannel(wrappingChannelSynchronously: channel),
-                                              NIOLoopBound(gate, eventLoop: channel.eventLoop))
+                                              NIOLoopBound(gate, eventLoop: channel.eventLoop),
+                                              client: clientAddress.key(remote: channel.remoteAddress, headers: head.headers))
                 }
             }
         )
@@ -183,12 +188,12 @@ public final class RegattaHTTPServer: Sendable {
     private static func serve(_ connection: EventLoopFuture<Connection>, handler: RequestHandler, counters: Counters) async {
         do {
             switch try await connection.get() {
-            case .race(let channel):
-                guard let slot = counters.race.acquire(channel.channel.remoteAddress) else { return try await refuse(channel) }
+            case .race(let channel, let client):
+                guard let slot = counters.race.acquire(key: client) else { return try await refuse(channel) }
                 defer { slot.release() }
                 try await serveRace(channel, handler: handler)
-            case .service(let channel, let gate):
-                guard let slot = counters.service.acquire(channel.channel.remoteAddress) else { return try await refuse(channel) }
+            case .service(let channel, let gate, let client):
+                guard let slot = counters.service.acquire(key: client) else { return try await refuse(channel) }
                 defer { slot.release() }
                 try await serveService(channel, gate: gate, handler: handler)
             case .http(let channel): try await serveHTTP(channel, handler: handler)
