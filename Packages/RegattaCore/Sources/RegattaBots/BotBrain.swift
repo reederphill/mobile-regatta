@@ -525,10 +525,16 @@ struct BotBrain: Sendable {
     /// wind already, she turns as far away from the nearest boat), which is under the rules' 30° and starts nothing,
     /// and sails that heading sheeted in for `seconds` at most: room, and way to turn with. Her input, or nil once
     /// she turns: clear of every boat, out of time (`canPutOffTurn`), 30° in, a boat that heading closes with, a
-    /// mark near or no room to leeward (`startPenaltyTurn` decides those), or starting first.
+    /// mark near or no room to leeward (`startPenaltyTurn` decides those), racing on the last leg or with her next
+    /// mark close (`putOffEndsAtAMark`), or starting first.
     private mutating func clearingRoom(_ b: SeatView.OwnBoat, _ owed: OwedPenalty, _ view: SeatView) -> BoatInput? {
         let table = HandTackTable.penaltyClear
         guard Self.turnsByHand(view), !penaltyClearing.isDone, !startsBeforeHerTurn(owed, b, view) else { return nil }
+        // Not where she starts her turn at once whoever is near (#351): on the last leg, or with her next mark close.
+        guard b.status != .racing || !isOnLastLeg(b, view) && !putOffEndsAtAMark(b, view, owed) else {
+            penaltyClearing.isDone = true
+            return nil
+        }
         let nearest = view.others.filter { !$0.isGhost }
             .min { ($0.position - b.position).length < ($1.position - b.position).length }
         if penaltyClearing.since == nil, let nearest {

@@ -740,7 +740,8 @@ import RegattaCore
     /// as she does racing (#100), rather than turning on into the boats around her: the turn doesn't collect further
     /// 21.2 calls, and she never owes more than the one. Before, #99 held the turn hard over whoever was near, and one
     /// boat went from one turn owed to four in 2 s.
-    // skiff@7 until #455: on skiff@8 seeds 5 and 7 draw a rule 15 call on the penalised boat.
+    // skiff@7 until #455: on skiff@8 seeds 5 and 7 draw a rule 15 call on the penalised boat (tried again after #471's
+    // step C: the same two, a second turn owed).
     @Test(.onSkiffSeven) func prestartPenaltyDoesNotCascade() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 5, 7] {
@@ -783,7 +784,8 @@ import RegattaCore
     /// puts it off and sails on rather than turning it at once through her: she isn't 30° into it in the first 2 s, she
     /// isn't called 21.2 (before, a penalised boat turning in the pack collected 21.2 calls from boats that had nothing to
     /// do with her first foul), and she still serves it in time (no missed-penalty disqualification).
-    // skiff@7 until #455: on skiff@8 seed 3 draws a rule 21.2 call on the turning boat.
+    // skiff@7 until #455: on skiff@8 seed 3 draws a rule 21.2 call on the turning boat (tried again after #471's step C:
+    // the same, the boat abeam to leeward).
     @Test(.onSkiffSeven) func racingPenaltyInACrowdIsPutOffAndDoesNotCascade() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 5, 7] {
@@ -803,6 +805,117 @@ import RegattaCore
             }
         }
         #expect(failures.isEmpty, "\(failures.joined(separator: "\n"))")
+    }
+
+    /// Before the gun on the default class (#471): seat 0 beating on starboard `below` hull lengths under the middle of
+    /// the line, `toGun` seconds before the gun, just called and owing a turn she hasn't started; seat 1 on the same
+    /// course `across` hull lengths to her starboard (to windward of her).
+    static func prestartCalled(seed: UInt64, toGun: Int, below: Double, across: Double) throws -> Race {
+        let water = Water(seed: seed, toGun: toGun, below: below)
+        let heading = water.beat(.starboard)
+        let speed = water.up.speed * 0.8
+        return try place(water, [
+            Placement(position: water.centre, heading: heading, speed: speed, status: .prestart),
+            Placement(position: water.centre + Vec2.heading(heading).rightPerp * water.length * across, heading: heading,
+                      speed: speed, status: .prestart),
+        ]) { snapshot in
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyProgress = 0
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+        }
+    }
+
+    /// What `penalisedBeforeTheGun` saw of seat 0: the race clock when she was first 30° into a turn (her own sailing
+    /// counts towards it), when she was 30° into the turn she then served, and when she started; the turns she owed as
+    /// she started, and the race's events.
+    struct Served {
+        var firstThirtyIn: Double?
+        var thirtyIn: Double?
+        var started: Double?
+        var owedStarting = 0
+        var kinds: [RaceEvent.Kind] = []
+
+        var resets: Int { kinds.filter { $0 == .penaltyReset(seat: 0) }.count }
+        var isServed: Bool { kinds.contains(.penaltyServed(seat: 0)) }
+        var isDisqualified: Bool { kinds.contains { if case .disqualified(seat: 0, _) = $0 { true } else { false } } }
+    }
+
+    static func penalisedBeforeTheGun(_ race: Race, seconds: Double, skill: Double = 1) -> Served {
+        var served = Served()
+        var wasIn = false
+        served.kinds = sail(race, seconds: seconds, skill: skill) { race in
+            let boat = race.boats[0]
+            let isIn = abs(boat.penaltyProgress) >= deg2rad(30)
+            if isIn, served.firstThirtyIn == nil { served.firstThirtyIn = race.time }
+            if isIn, !wasIn { served.thirtyIn = race.time }
+            wasIn = isIn
+            if served.started == nil, boat.status == .racing {
+                served.started = race.time
+                served.owedStarting = boat.penaltyTurnsOwed
+            }
+        }
+        return served
+    }
+
+    /// #471, "start first, then turn" (the owner's ruling of 2026-10-10), on the default class: called 8 s before the
+    /// gun a few lengths under the line, her turn's start deadline is 12 s after it. She sails her start, crosses
+    /// still owing the turn, is 30° into the turn she serves only after she has started and inside its deadline (the
+    /// scene's two-boat line is short, so its end marks hold her off to the start margin, #461), and serves it. Called
+    /// 30 s before the gun the deadline falls before it: she turns where she is.
+    @Test func aLateCallIsServedAfterTheStart() throws {
+        for seed: UInt64 in [3, 5, 7] {
+            let late = Self.penalisedBeforeTheGun(try Self.prestartCalled(seed: seed, toGun: 8, below: 4, across: 12), seconds: 50)
+            let started = try #require(late.started, "seed \(seed): she never started")
+            let thirtyIn = try #require(late.thirtyIn, "seed \(seed): she never turned")
+            #expect(started < 6, "seed \(seed): started \(started) s after the gun")
+            #expect(late.owedStarting == 1, "seed \(seed): she had served her turn before she started")
+            #expect(thirtyIn > started && thirtyIn <= 12, "seed \(seed): 30° in at \(thirtyIn) s, started at \(started) s")
+            #expect(late.isServed && !late.isDisqualified, "seed \(seed): \(late.kinds.filter { $0 != .penaltyStarted(seat: 0) }.suffix(3))")
+
+            let early = Self.penalisedBeforeTheGun(try Self.prestartCalled(seed: seed, toGun: 30, below: 4, across: 12), seconds: 50)
+            let turned = try #require(early.firstThirtyIn, "seed \(seed): she never turned")
+            #expect(turned < -10, "seed \(seed): called 30 s before the gun, 30° in at \(turned) s")
+            #expect(early.isServed && !early.isDisqualified)
+        }
+    }
+
+    /// #471: before her start on the default class she doesn't put her turn off for a boat in her water (by hand that
+    /// wait sailed her into the turn's 30° and out again, a started turn given up 1.5 times an episode): with a boat
+    /// a length and a half to windward 40 s before the gun she bears away for room, is 30° in inside 9 s, never gives
+    /// the turn up, and serves it inside its deadline.
+    @Test func beforeHerStartShePutsNoTurnOffInTheCrowd() throws {
+        for seed: UInt64 in [3, 5, 7] {
+            let seen = Self.penalisedBeforeTheGun(try Self.prestartCalled(seed: seed, toGun: 40, below: 6, across: 1.5), seconds: 40)
+            let thirtyIn = try #require(seen.firstThirtyIn, "seed \(seed): she never turned")
+            #expect(thirtyIn < -31, "seed \(seed): 30° in at \(thirtyIn) s")
+            #expect(seen.resets == 0, "seed \(seed): she gave a started turn up \(seen.resets) times")
+            #expect(seen.isServed && !seen.isDisqualified, "seed \(seed)")
+        }
+    }
+
+    /// #471, "bear away, then turn" (the owner's ruling of 2026-10-10), on the default class, for a Club bot racing
+    /// (she doesn't put the turn off for the pack): with a boat abeam to windward inside three lengths she bears away
+    /// first, under the rules' 30° for the first 2 s and 10° or more off her course by then, and turns after it; alone
+    /// she is 30° into her turn inside 2.5 s.
+    @Test func bearsAwayForRoomBeforeHerTurn() throws {
+        for seed: UInt64 in [3, 5] {
+            func sailed(across: Double) throws -> (twoSeconds: Double, thirtyIn: Double?, served: Bool) {
+                let race = try Self.racingPenalised(seed: seed, ahead: 0, across: across)
+                let heading = race.boats[0].heading, from = race.time
+                var twoSeconds = 0.0, thirtyIn: Double?
+                let kinds = Self.sail(race, seconds: 45, skill: 0.5) { race in
+                    if race.time - from <= 2 { twoSeconds = wrapAngle(race.boats[0].heading - heading) }
+                    if thirtyIn == nil, abs(race.boats[0].penaltyProgress) >= deg2rad(30) { thirtyIn = race.time - from }
+                }
+                return (twoSeconds, thirtyIn, kinds.contains(.penaltyServed(seat: 0)))
+            }
+            let beside = try sailed(across: 1.5)
+            // On starboard she bears away to port: her heading falls.
+            #expect(beside.twoSeconds < -deg2rad(10) && beside.twoSeconds > -deg2rad(30), "seed \(seed): \(rad2deg(beside.twoSeconds))°")
+            #expect((beside.thirtyIn ?? 0) > 2 && beside.served, "seed \(seed): \(String(describing: beside.thirtyIn))")
+            let alone = try sailed(across: 12)
+            #expect((alone.thirtyIn ?? 9) < 2.5 && alone.served, "seed \(seed): \(String(describing: alone.thirtyIn))")
+        }
     }
 
     /// #351: on the last leg she can't finish owing a turn, so there she starts it at once, crowd or not.

@@ -334,14 +334,19 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         }
     }
 
-    /// #351: below `penaltyPutOffSkill` (a Club or Regional bot) she starts her turn at once in the pack, her own way,
-    /// as before #351.
+    /// #351: below `penaltyPutOffSkill` (a Club or Regional bot) she doesn't put her turn off in the pack. On a class
+    /// whose tap sails her turns she starts it at once, her own way, as before #351; by hand (#471) she first bears
+    /// away for room (`BotBrain.clearingRoom`), the same rudder whichever way she turns penalties, and no turn's.
     @Test func belowNationalSkillABotStartsItsTurnAtOnceInThePack() throws {
+        let byHand = !RaceFiles.defaults.boatClass.content.steering.autohelm.sailsTap
+        var rudders: [Int8] = []
         for direction in [1.0, -1.0] {
             let (rudder, _) = try decide(atOffset: .zero, penaltyDirection: direction, turned: 0, other: Vec2(3, 4),
                                          inOpenWater: true, skill: BotBrain.penaltyPutOffSkill - 0.01)
-            #expect(rudder == Self.hardOver(direction))
+            if !byHand { #expect(rudder == Self.hardOver(direction)) }
+            rudders.append(rudder)
         }
+        if byHand { #expect(rudders[0] == rudders[1] && rudders[0] != 0, "\(rudders)") }
     }
 
     /// #351: racing in open water (not on the last leg) with a boat within `penaltyBoatClearance`, she puts her turn
