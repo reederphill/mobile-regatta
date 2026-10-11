@@ -290,6 +290,24 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/rollTack/missSpeedFactor", "Speed after a miss", 0.5...1, step: 0.01),
                 ]),
             TuningGroup(
+                id: "planing", title: "Planing",
+                note: "Getting on and off the plane (#248, #462). She gets on at the speed below with the apparent wind forward of the angle, and drops off under the lower speed. From skiff@9 two more ways off, at every wind strength: with the apparent wind aft of that angle, under a share of her polar speed (a slammed or lingering gybe); and with the rudder near centre, under the apparent wind speed below (too deep, or a lull), getting back on only with the higher one.",
+                applies: .nextRace,
+                sliders: [
+                    TuningSlider(.boatClass, "/planing/onSpeedKnots", "Gets on from", unit: " kn", 4...14, step: 0.5),
+                    TuningSlider(.boatClass, "/planing/offSpeedKnots", "Drops off below", unit: " kn", 2...12, step: 0.5),
+                    TuningSlider(.boatClass, "/planing/onMaxAWADegrees", "Apparent wind forward of", unit: "°", 40...180, step: 5),
+                    // #462, from skiff@9: "Not in this file" before.
+                    TuningSlider(.boatClass, "/planing/stayOnSpeedShare", "Stays on above this share of polar speed", 0...1,
+                                 step: 0.05),
+                    TuningSlider(.boatClass, "/planing/apparentWind/offKnots", "Drops off under apparent wind", unit: " kn",
+                                 0.5...8, step: 0.25),
+                    TuningSlider(.boatClass, "/planing/apparentWind/onKnots", "Gets on from apparent wind", unit: " kn",
+                                 0.5...8, step: 0.25),
+                    TuningSlider(.boatClass, "/planing/apparentWind/rudderWithin", "Apparent wind counts with rudder within",
+                                 0...1, step: 0.05),
+                ]),
+            TuningGroup(
                 id: "raceFormat", title: "Race format",
                 note: "The race area's width (a fraction of the beat) and how widely the fleet starts (line lengths, #223).",
                 applies: .nextRace,

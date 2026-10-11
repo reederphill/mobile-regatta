@@ -65,6 +65,7 @@ enum SkiffFixtures {
         6: "4c20609ea59408e6ea81cb58d2aa3dba8365d24fcbe8ba883c819e6071d097e8",
         7: "4b3c9e3212fca5d39816e3adb5bb46d091fed874df75e44d6b938959c810dba1",
         8: "8045fbbd0f30a69bd3c3e2353b9b49c05cea7a7e73a3186070b772b8b9f1681f",
+        9: "fdbacd1c5754c5d9bfe017d897bdc980b3214fd297ecd2141f895b2095d455d5",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -639,7 +640,7 @@ enum SkiffFixtures {
         #expect(ContentHash(of: data).hex == SkiffFixtures.pinnedHashes[version],
                 "a released file never changes (ADR 0004): ship the change as the next version")
         let file = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: version)
-        // Version 7 (#437) is schema 4: schema 3 plus the autohelm's hold (#434).
+        // Version 7 (#437) is schema 4: schema 3 plus the autohelm's hold (#434); 8 (#458) and 9 (#462) add their own values to it.
         #expect(file.schemaVersion == (version >= 7 ? 4 : 3) && file.id == "skiff" && file.version == version)
         #expect(file.content.name == "Skiff")
         // Every value is a placeholder: every top-level block is listed.
