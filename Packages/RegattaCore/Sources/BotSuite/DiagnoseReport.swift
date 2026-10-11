@@ -21,6 +21,28 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
     public var penaltiesOwed: [OwedRow]
     public var preStartCalls: [CallsRow]
     public var nonFinishers: [NonFinishRow]
+    /// Planing off the wind (#462); empty on a class that doesn't plane.
+    public var planing: [PlaningRow]
+
+    /// `tier`'s planing off the wind (`PlaningObservation`), a boat a race unless said.
+    public struct PlaningRow: Codable, Hashable, Sendable {
+        public var tier: String
+        public var boats: Int
+        public var runSeconds: Double
+        public var offSeconds: Double
+        /// Off the plane, of all the tier's seconds running.
+        public var offShare: Double
+        public var gybes: Double
+        public var falls: Double
+        /// By what took her off (`PlaningObservation.Cause.rawValue`, every cause a key).
+        public var fallsByCause: [String: Double]
+        /// The share of the tier's gybes with a fall off the plane.
+        public var fallsPerGybe: Double
+        /// Seconds off the plane a fall, of the falls that ended back on it while she ran.
+        public var secondsOff: Spread?
+        /// Back on the plane within `RaceObserver.backOnSeconds`, of the falls she ran on for that long after.
+        public var backOnShare: Double
+    }
 
     /// A tier's starts.
     public struct StartRow: Codable, Hashable, Sendable {
@@ -222,6 +244,22 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
             }
             return NonFinishCause.allCases.map { cause in row(cause.rawValue, out.filter { $0.cause == cause }) } + [row(Self.all, out)]
         }
+        planing = groups.compactMap { group in
+            let seen = group.boats.map(\.planing)
+            let count = Double(max(seen.count, 1))
+            func sum(_ value: KeyPath<PlaningObservation, Double>) -> Double { seen.reduce(0) { $0 + $1[keyPath: value] } }
+            func total(_ value: KeyPath<PlaningObservation, Int>) -> Int { seen.reduce(0) { $0 + $1[keyPath: value] } }
+            guard sum(\.runSeconds) > 0 else { return nil }
+            return PlaningRow(tier: group.name, boats: seen.count, runSeconds: sum(\.runSeconds) / count,
+                              offSeconds: sum(\.offSeconds) / count, offShare: sum(\.offSeconds) / sum(\.runSeconds),
+                              gybes: Double(total(\.gybes)) / count, falls: Double(total(\.falls)) / count,
+                              fallsByCause: Dictionary(uniqueKeysWithValues: PlaningObservation.Cause.allCases.map { cause in
+                                  (cause.rawValue, Double(seen.reduce(0) { $0 + ($1.fallsByCause[cause] ?? 0) }) / count)
+                              }),
+                              fallsPerGybe: share(total(\.gybesWithAFall), of: total(\.gybes)),
+                              secondsOff: Spread(seen.flatMap(\.secondsOff)),
+                              backOnShare: share(total(\.fallsBackOn), of: total(\.fallsWatched)))
+        }
     }
 
     // MARK: - Text
@@ -298,6 +336,18 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
             finishRows.append(cells)
         }
         lines += table(finishRows)
+        if !planing.isEmpty {
+            lines.append("planing off the wind, a boat a race: seconds running and off the plane (share), gybes, falls off the "
+                + "plane (by cause: a gybe, too deep, a lull or a shadow, slow), the share of gybes with a fall, seconds off a fall "
+                + "(median / p90), and falls she is back on from within \(Int(RaceObserver.backOnSeconds)) s")
+            let causes = PlaningObservation.Cause.allCases.map(\.rawValue)
+            lines += table([["tier", "running s", "off s", "off", "gybes", "falls"] + causes + ["falls/gybe", "s off a fall", "back on"]]
+                + printed(planing, \.tier).map { row in
+                    [row.tier, fixed(row.runSeconds, 1), fixed(row.offSeconds, 1), fixed(row.offShare, 3), fixed(row.gybes), fixed(row.falls)]
+                        + causes.map { fixed(row.fallsByCause[$0] ?? 0) }
+                        + [fixed(row.fallsPerGybe, 3), spread(row.secondsOff), fixed(row.backOnShare, 3)]
+                })
+        }
         return lines
     }
 }

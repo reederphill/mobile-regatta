@@ -18,6 +18,8 @@ public struct BotSuiteOptions: Hashable, Sendable {
     /// `--autohelm off` (#435): sail every race on a copy of its class with the autohelm off a centred rudder, so the
     /// bots steer by hand; nil or `on` sails the matrix's setting.
     public var autohelmOff: Bool?
+    /// `--boat-class id@version` (#462): sail every race on that bundled class instead of the default.
+    public var boatClass: String?
     /// Races sailed at once; nil for `BotSuite.defaultJobs`. 1 sails them one after another.
     public var jobs: Int?
     /// Where to write the JSON report; `-` for stdout (the text report then goes to stderr).
@@ -41,6 +43,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
                                  cautious, rivals, rankStability, handling (repeatable)
           --autohelm <on|off>    off: sail each race on a copy of its class with the autohelm off a centred
                                  rudder, so the bots steer by hand (default: the matrix's, the class as bundled)
+          --boat-class <id@v>    sail every race on that bundled class (e.g. skiff@9) instead of the default
           --laps <n>             laps per race instead of the matrix's
           --json <path|->        write the JSON report there (- for stdout)
           --diagnose             also print, and write under the JSON's "diagnose" key, why boats start late,
@@ -84,6 +87,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
                 case "off": autohelmOff = true
                 case let text: throw BotSuiteError.usage("--autohelm: on or off, not \(text)")
                 }
+            case "--boat-class": boatClass = try value(flag)
             case "--json": jsonPath = try value(flag)
             case "--jobs": jobs = try number(flag)
             case "--diagnose": diagnose = true
@@ -112,6 +116,10 @@ public struct BotSuiteOptions: Hashable, Sendable {
         }
         if let laps { matrix.laps = laps }
         if let autohelmOff { matrix.autohelmOff = autohelmOff }
+        if let boatClass {
+            _ = try BotRaceHarness.bundledClass(boatClass)
+            matrix.boatClass = boatClass
+        }
         try matrix.validate()
         return matrix
     }

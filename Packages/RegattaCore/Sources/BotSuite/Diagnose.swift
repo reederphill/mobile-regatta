@@ -294,10 +294,45 @@ public struct FinishObservation: Hashable, Sendable {
     public init(status: BoatStatus) { self.status = status }
 }
 
+/// What the observer saw of a boat's planing off the wind (#462): her seconds running and off the plane, her gybes,
+/// and her falls off the plane. Running is racing at `RaceObserver.runningTWA` or broader, owing no penalty turn, in a
+/// wind whose downwind groove planes (the polar's speed there at the class's `onSpeed` or more).
+public struct PlaningObservation: Hashable, Sendable {
+    public var runSeconds = 0.0
+    /// Of them, off the plane.
+    public var offSeconds = 0.0
+    /// Her gybes racing, penalty turns aside.
+    public var gybes = 0
+    /// Of them, those with a fall off the plane from `RaceObserver.gybeFallWindow.before` seconds before the boom
+    /// crossed to `after` seconds after it.
+    public var gybesWithAFall = 0
+    /// Her falls off the plane while running.
+    public var falls = 0
+    /// Of them, by what took her off (`Cause`), a gybe's first.
+    public var fallsByCause: [Cause: Int] = [:]
+
+    /// What took her off the plane, the first that holds: a `gybe` (her boom crossed within
+    /// `RaceObserver.gybeFallWindow` of it); `rounding`: within `RaceObserver.roundingSeconds` after she rounded a
+    /// mark onto the leg (bearing away before she is up to speed); too little apparent wind with the rudder near centre (the class's
+    /// `apparentWind`), sailing more than `RaceObserver.deepDegrees` deeper than the groove of her wind (`deep`) or not
+    /// (`lull`: the wind dropped, or a boat's shadow took it); else `slow`: her speed (a turn, a boat, a mark).
+    public enum Cause: String, CaseIterable, Codable, Hashable, Sendable { case gybe, rounding, deep, lull, slow }
+    /// Of them, those she was still running for `RaceObserver.backOnSeconds` after, or back on the plane sooner: the
+    /// ones that show whether she got back on.
+    public var fallsWatched = 0
+    /// Of those, back on the plane within `RaceObserver.backOnSeconds`.
+    public var fallsBackOn = 0
+    /// Seconds off the plane for each fall that ended back on it while she ran.
+    public var secondsOff: [Double] = []
+
+    public init() {}
+}
+
 /// What `--diagnose` saw of one boat in one race.
 public struct BoatDiagnosis: Hashable, Sendable {
     public var tier: BotTier
     public var start: StartObservation
+    public var planing = PlaningObservation()
     public var episodes: [PenaltyEpisode] = []
     /// The penalty turns she was given in the race: her rule calls that cost one, and her mark touches.
     public var turnsOwed = 0
@@ -334,6 +369,16 @@ public struct RaceObserver {
     static let heldOverRudder = 0.5
     static let finishWindowSeconds = 90
     static let touchWindowSeconds = 120
+    /// Running, for the planing table (#462): this far off the wind or broader, radians.
+    static let runningTWA = deg2rad(100)
+    /// A fall off the plane is a gybe's from this long before her boom crosses to this long after it, seconds.
+    static let gybeFallWindow = (before: 3.0, after: 8.0)
+    /// A fall she is back on the plane from within this, seconds, is one she recovered from.
+    static let backOnSeconds = 15.0
+    /// A fall for want of apparent wind this far deeper than the groove, degrees, is one for sailing too deep.
+    static let deepDegrees = 3.0
+    /// A fall this long after she rounded a mark, seconds, is the rounding's.
+    static let roundingSeconds = 15.0
 
     private let rate = Race.tickRate
     private let line: CourseLayout.Line
@@ -378,6 +423,18 @@ public struct RaceObserver {
     private var atEdge: [[Bool]]
     private var samples: [Int]
 
+    private var planing: [PlaningObservation]
+    private var wasPlaning: [Bool]
+    private var wasRunning: [Bool]
+    /// The tick of each seat's fall off the plane she has not yet got back on from, while she runs.
+    private var fallTick: [Int?]
+    private var fallTicks: [[Int]]
+    /// Each fall's cause but for a gybe's, which is known only once her boom has crossed.
+    private var fallCauses: [[PlaningObservation.Cause]]
+    /// Each seat's leg after the tick before, and the tick she came onto it.
+    private var onLeg: [(index: Int, sinceTick: Int)]
+    private var gybeTicks: [[Int]]
+
     public init(race: Race) {
         let count = race.boats.count
         line = race.course.startLine
@@ -401,6 +458,14 @@ public struct RaceObserver {
         metresToGo = Array(repeating: Array(repeating: 0, count: Self.finishWindowSeconds + 1), count: count)
         atEdge = Array(repeating: Array(repeating: false, count: Self.finishWindowSeconds + 1), count: count)
         samples = Array(repeating: 0, count: count)
+        planing = Array(repeating: PlaningObservation(), count: count)
+        wasPlaning = race.boats.map(\.isPlaning)
+        wasRunning = Array(repeating: false, count: count)
+        fallTick = Array(repeating: nil, count: count)
+        fallTicks = Array(repeating: [], count: count)
+        fallCauses = Array(repeating: [], count: count)
+        onLeg = race.boats.map { ($0.legIndex, race.tick) }
+        gybeTicks = Array(repeating: [], count: count)
     }
 
     /// Her polar speed for the wind she has at the angle she sails, close-hauled if she points higher, with her
@@ -435,6 +500,7 @@ public struct RaceObserver {
                 open[seat] = turn
             }
             recordRecovery(seat, boat, race)
+            recordPlaning(seat, boat, race)
             if tick.isMultiple(of: rate) {
                 let slot = samples[seat] % (Self.finishWindowSeconds + 1)
                 metresToGo[seat][slot] = race.distanceToFinish(of: boat)
@@ -501,6 +567,9 @@ public struct RaceObserver {
             episodes[seat][index].secondsTurning = seconds(tick - started)
             open[seat] = nil
             recovering[seat] = (index, tick)
+        case .gybed(let seat) where race.boats[seat].status == .racing && !race.boats[seat].isTakingPenalty:
+            planing[seat].gybes += 1
+            gybeTicks[seat].append(tick)
         case .tacked(let seat), .gybed(let seat):
             // Under a `tackAndGybe` penalty (#487) the crossing that served a turn is the turn's too.
             guard startTicks[seat] == nil, !race.boats[seat].isTakingPenalty, !(tackAndGybe && servedTick[seat] == tick),
@@ -579,6 +648,45 @@ public struct RaceObserver {
         recovering[seat] = nil
     }
 
+    /// One tick of a boat's planing (#462, `PlaningObservation`).
+    private mutating func recordPlaning(_ seat: Int, _ boat: Boat, _ race: Race) {
+        defer { wasPlaning[seat] = boat.isPlaning }
+        guard let tuning = race.boatClass.planing else { return }
+        if boat.legIndex != onLeg[seat].index { onLeg[seat] = (boat.legIndex, race.tick) }
+        let tws = boat.polarWindSpeed(in: race.boatClass)
+        let running = boat.status == .racing && boat.penaltyTurnsOwed == 0 && boat.twa >= Self.runningTWA
+            && race.boatClass.polar.bestDownwind(tws: tws).speed >= tuning.onSpeed
+        defer { wasRunning[seat] = running }
+        let step = 1 / Double(rate)
+        if let fell = fallTick[seat] {
+            let off = seconds(race.tick - fell)
+            if boat.isPlaning || !running {
+                if boat.isPlaning { planing[seat].secondsOff.append(off) }
+                if boat.isPlaning || off >= Self.backOnSeconds {
+                    planing[seat].fallsWatched += 1
+                    if boat.isPlaning, off <= Self.backOnSeconds { planing[seat].fallsBackOn += 1 }
+                }
+                fallTick[seat] = nil
+            }
+        }
+        guard running else { return }
+        planing[seat].runSeconds += step
+        if !boat.isPlaning { planing[seat].offSeconds += step }
+        if wasPlaning[seat], wasRunning[seat], !boat.isPlaning {
+            planing[seat].falls += 1
+            fallTick[seat] = race.tick
+            fallTicks[seat].append(race.tick)
+            var cause = PlaningObservation.Cause.slow
+            if let wind = tuning.apparentWind, abs(boat.rudder) <= wind.rudderWithin,
+               BoatClass.PlaningTuning.apparentWindSpeed(twa: boat.twa, speed: boat.speed, tws: tws) < wind.offSpeed(tws: tws) {
+                let groove = race.boatClass.polar.bestDownwind(tws: tws).twa
+                cause = boat.twa > groove + deg2rad(Self.deepDegrees) ? .deep : .lull
+            }
+            if onLeg[seat].index > 0, seconds(race.tick - onLeg[seat].sinceTick) <= Self.roundingSeconds { cause = .rounding }
+            fallCauses[seat].append(cause)
+        }
+    }
+
     private func seconds(_ ticks: Int) -> Double { Double(ticks) / Double(rate) }
 
     /// Each seat's diagnosis once the race is sailed; `tiers` are the seats' tiers.
@@ -607,6 +715,17 @@ public struct RaceObserver {
             finish.touchedLate = lastTouchTick[seat].map { lastOnWaterTick[seat] - $0 < Self.touchWindowSeconds * rate } ?? false
             var diagnosis = BoatDiagnosis(tier: tiers[seat], start: start, finish: finish)
             diagnosis.episodes = episodes[seat]
+            diagnosis.planing = planing[seat]
+            if let fell = fallTick[seat], seconds(race.tick - fell) >= Self.backOnSeconds { diagnosis.planing.fallsWatched += 1 }
+            let window = Self.gybeFallWindow
+            func isGybes(_ fall: Int, _ gybe: Int) -> Bool {
+                seconds(fall - gybe) >= -window.before && seconds(fall - gybe) <= window.after
+            }
+            diagnosis.planing.gybesWithAFall = gybeTicks[seat].filter { gybe in fallTicks[seat].contains { isGybes($0, gybe) } }.count
+            for (fall, cause) in zip(fallTicks[seat], fallCauses[seat]) {
+                let cause = gybeTicks[seat].contains { isGybes(fall, $0) } ? .gybe : cause
+                diagnosis.planing.fallsByCause[cause, default: 0] += 1
+            }
             diagnosis.turnsOwed = turnsOwed[seat]
             return diagnosis
         }
