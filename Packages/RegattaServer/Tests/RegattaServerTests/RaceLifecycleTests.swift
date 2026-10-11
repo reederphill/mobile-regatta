@@ -212,6 +212,86 @@ extension RaceSims {
             #expect(await collect(stream) { if case .cancelled = $0 { true } else { false } }.last == .cancelled(.serverShutdown))
         }
 
+        // MARK: The store at the close (#469)
+
+        /// A race that sailed to its close, unrated, with its human's results stream held.
+        private func sailed(_ rig: LifecycleRig) async throws -> (race: RaceSession, updates: AsyncStream<RaceUpdate>) {
+            let race = try await rig.race(["T:0"])
+            let updates = rig.lifecycle.results(for: "T:0")
+            await rig.runUntilEnded(race, limit: 300)
+            #expect(await race.host.outcome?.results != nil)
+            return (race, updates)
+        }
+
+        private static func quickRetries() -> RaceLifecycleSettings {
+            var settings = LifecycleRig.quickGrace()
+            settings.closeRetryDelay = .milliseconds(1)
+            return settings
+        }
+
+        /// #469: a close the store refuses is written again: the race closes for its players once the store has it.
+        @Test func aCloseTheStoreRefusesOnceIsWrittenAgain() async throws {
+            let rig = LifecycleRig(settings: Self.quickRetries())
+            let (race, updates) = try await sailed(rig)
+            rig.faults.failCloses(2)
+            await rig.end(race)
+            #expect(rig.faults.closes == 3)
+            #expect(try await rig.archive.state(of: race.id) == .closed)
+            guard case .report(let final)? = await collect(updates, until: { if case .report(let report) = $0 { report.isClosed } else { true } }).last else {
+                Issue.record("no closed report")
+                return
+            }
+            #expect(final.isClosed)
+            #expect(try await rig.lifecycle.lastRace(of: "T:0")?.report == final)
+            #expect(await rig.lifecycle.archiveFailures.count == 2)
+        }
+
+        /// #469: a race the store won't close isn't closed for its players either: after the tries it is cancelled, in
+        /// the store and on their streams, with no results and no rating change.
+        @Test func aRaceTheStoreWontCloseIsCancelledForItsPlayers() async throws {
+            let rig = LifecycleRig(settings: Self.quickRetries())
+            let (race, updates) = try await sailed(rig)
+            rig.faults.failCloses(.max)
+            await rig.end(race)
+            #expect(rig.faults.closes == 3)
+            #expect(try await rig.archive.state(of: race.id) == .cancelled)
+            #expect(try await rig.archive.closedRace(race.id) == nil)
+            let read = await collect(updates) { if case .cancelled = $0 { true } else { false } }
+            #expect(read.last == .cancelled(.unspecified))
+            #expect(read.allSatisfy { if case .report(let report) = $0 { !report.isClosed } else { true } })
+            #expect(await collect(rig.lifecycle.results(for: "T:0")) { _ in true } == [.cancelled(.unspecified)])
+            #expect(try await rig.lifecycle.lastRace(of: "T:0") == nil)
+            #expect(await rig.lifecycle.endedState(of: race.id) == .cancelled)
+            // No rating change was kept for her: the next race's is the first she reads.
+            rig.faults.failCloses(0)
+            let next = try await rig.race(["T:0"], seed: 2)
+            await rig.runUntilEnded(next, limit: 300)
+            await rig.end(next)
+            let nextID = RaceResultsFeed.raceID(next.id)
+            #expect(await collect(rig.lifecycle.ratingChanges(for: "T:0")) { $0.raceID == nextID } == [RatingChange(raceID: nextID, outcome: .unrated)])
+        }
+
+        /// #469: a race connection that asks about a race in its close pipeline (the registry has let go of it, the store
+        /// still says running) is answered after the pipeline, with how it ended: closed, not cancelled.
+        @Test func aRaceInItsClosePipelineIsntCalledCancelled() async throws {
+            let rig = LifecycleRig(settings: LifecycleRig.quickGrace())
+            let (race, _) = try await sailed(rig)
+            rig.faults.hold()
+            let pipeline = Task { await rig.end(race) }
+            #expect(await eventually { rig.faults.closes == 1 })
+            #expect(try await rig.archive.state(of: race.id) == .running)
+            let asked = Task { await rig.lifecycle.endedState(of: race.id) }
+            // Give the question time to be asked while the close is still being written.
+            for _ in 0..<50 { await Task.yield() }
+            try await Task.sleep(for: .milliseconds(20))
+            rig.faults.letGo()
+            #expect(await asked.value == .closed)
+            await pipeline.value
+            #expect(await rig.lifecycle.endedState(of: race.id) == .closed)
+            // A race this lifecycle never ran, or one it cancelled: cancelled, at once.
+            #expect(await rig.lifecycle.endedState(of: UUID()) == .cancelled)
+        }
+
         /// Acceptance: every human gone (one, then the other more than 2 s later) closes via `closeAllGone` at the trigger's
         /// tick, the humans RET by leave order, the latest gone highest; the stored log replays to the stored digest.
         @Test func everyHumanGoneClosesViaCloseAllGoneRankedByLeaveOrder() async throws {

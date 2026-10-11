@@ -25,6 +25,10 @@ public struct RaceLifecycleSettings: Sendable, Equatable {
     public var briefingTicks = 15 * Race.tickRate
     /// A rating change the player hasn't read yet is kept for her, at most this many (#24).
     public var pendingRatingChanges = 16
+    /// How often the close is written to the store before the race is given up as cancelled, and the wait between
+    /// tries (#469).
+    public var closeAttempts = 3
+    public var closeRetryDelay: Duration = .milliseconds(500)
 
     public init() {
         allGone = AllGoneConfig()
@@ -105,6 +109,8 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     private var pendingRatings: [String: [RatingChange]] = [:]
     nonisolated let ratingWatchers = StreamWatchers<RatingChange>()
     private var lineWatchers: [UUID: AsyncStream<SystemLine>.Continuation] = [:]
+    /// Race connections waiting for a race's close pipeline to finish (`endedState`).
+    private var endWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
     /// Store failures, for the log and tests.
     public private(set) var archiveFailures: [String] = []
 
@@ -188,6 +194,7 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     private func unregister(_ id: UUID) {
         guard let live = races.removeValue(forKey: id) else { return }
         for player in live.seats.keys where seated[player] == id { seated[player] = nil }
+        for waiter in endWaiters.removeValue(forKey: id) ?? [] { waiter.resume() }
     }
 
     /// The player gave her seat in `race` up for good (#469): the queue calls this when it frees her (a leave before
@@ -257,8 +264,14 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     }
 
     /// What a race connection is told about a race that isn't running (#30): closed, or cancelled (a race this
-    /// process never ran is one a crash left: cancelled).
+    /// process never ran is one a crash left: cancelled). For a race the registry has just let go of (the only time a
+    /// race connection asks): one still registered here is in its close pipeline, or about to be, and the store still
+    /// says `running`, so the answer waits for the pipeline and is what the store says after it (#469: never
+    /// "cancelled" for a race that then closes).
     public func endedState(of race: UUID) async -> RaceState {
+        if races[race] != nil {
+            await withCheckedContinuation { waiter in endWaiters[race, default: []].append(waiter) }
+        }
         do {
             return try await archive.state(of: race) == .closed ? .closed : .cancelled
         } catch {
@@ -355,6 +368,12 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         await races[race]?.session.host.cancel(reason)
     }
 
+    /// The store is the word on how a race ended (#469): players are told it closed only once the store says so. A
+    /// close the store refuses is tried `closeAttempts` times; if it still isn't stored the race is cancelled, in the
+    /// store and for its players: no results, no rating change, no winner's line, as for a crash (#30). (If the
+    /// cancel can't be written either, the row stays `running` until the next start's orphan cancel makes it
+    /// `cancelled`: the same answer.)
+    ///
     /// The race ended (the registry's `onClose`): the close pipeline. A race with results is stored (log, digest,
     /// versions, results, all at once), each player's stream ends with her closed report, unrated players get
     /// `.unrated`, and the lobby gets the winner's line. Only the players still seated in it hear any of that: one who
@@ -381,17 +400,20 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         let summary = RaceSummary(venue: live.venue, roster: await host.rosterEntries, results: results,
                                   turnsServed: await host.liveResults().turnsServed)
         let incidents = outcome.log.incidentIndex ?? IncidentIndex()
-        var stored = (summary: summary, incidents: incidents)
+        let stored: (summary: RaceSummary, incidents: IncidentIndex)
+        let record: ClosedRaceRecord
         do {
-            let record = ClosedRaceRecord(id: id, log: try outcome.log.jsonData(pretty: false), digest: outcome.digest,
-                                          simulationVersion: outcome.log.header.simulationVersion, toolchain: toolchain,
-                                          results: try summary.encoded(), incidents: try RaceResultsFeed.encode(incidents), rated: results.rated)
+            record = ClosedRaceRecord(id: id, log: try outcome.log.jsonData(pretty: false), digest: outcome.digest,
+                                      simulationVersion: outcome.log.header.simulationVersion, toolchain: toolchain,
+                                      results: try summary.encoded(), incidents: try RaceResultsFeed.encode(incidents), rated: results.rated)
             // The reports are read back from the bytes stored, so the stream's last report is the last race's.
             stored = (try RaceSummary(decoding: record.results), try RaceResultsFeed.decodeIncidents(record.incidents))
-            try await archive.close(record)
         } catch {
-            archiveFailures.append("close \(id): \(error)")
+            fail("close \(id): \(error)")
+            return await cancelled(id, live, reason: .unspecified)
         }
+        // Not stored: not closed. The store and the players are told the same thing.
+        guard await store(record) else { return await cancelled(id, live, reason: .unspecified) }
         for (player, seat) in seatedPlayers(id, live) {
             let report = RaceResultsFeed.closed(id, seat: seat, summary: stored.summary, incidents: stored.incidents)
             ended[player] = .closed(report)
@@ -401,8 +423,29 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         if let line = stored.summary.winnerLine { for continuation in lineWatchers.values { continuation.yield(line) } }
     }
 
+    /// Writes the close, at most `closeAttempts` times. True once the store has it (also when a try that seemed to
+    /// fail did go through: the store is asked).
+    private func store(_ record: ClosedRaceRecord) async -> Bool {
+        let attempts = max(1, settings.closeAttempts)
+        for attempt in 1...attempts {
+            do {
+                try await archive.close(record)
+                return true
+            } catch {
+                fail("close \(record.id), try \(attempt) of \(attempts): \(error)")
+                if attempt < attempts { try? await Task.sleep(for: settings.closeRetryDelay) }
+            }
+        }
+        return (try? await archive.state(of: record.id)) == .closed
+    }
+
+    private func fail(_ failure: String) {
+        archiveFailures.append(failure)
+        FileHandle.standardError.write(Data("RegattaServer: race store: \(failure)\n".utf8))
+    }
+
     private func cancelled(_ id: UUID, _ live: Live, reason: RaceCancelled.Reason) async {
-        do { try await archive.cancel(id) } catch { archiveFailures.append("cancel \(id): \(error)") }
+        do { try await archive.cancel(id) } catch { fail("cancel \(id): \(error)") }
         for (player, _) in seatedPlayers(id, live) {
             ended[player] = .cancelled(reason)
             resultWatchers.finish(player, last: .cancelled(reason))
@@ -430,6 +473,8 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
 
     /// Server shutdown: the streams end.
     public func stop() {
+        for waiter in endWaiters.values.flatMap({ $0 }) { waiter.resume() }
+        endWaiters = [:]
         resultWatchers.finishAll()
         ratingWatchers.finishAll()
         for continuation in lineWatchers.values { continuation.finish() }
