@@ -271,6 +271,9 @@ struct Gen {
         case .inputTap: message = .inputTap(tap())
         case .ping: message = .ping(Ping(clientTime: u64()))
         case .requestResync: message = .requestResync
+        case .leaveRace: message = .leaveRace
+        case .rosterChange:
+            message = .rosterChange(RosterChange(seat: int(0...15), entry: RosterEntry(name: string(), colorIndex: int(0...255), isBot: bool())))
         case .helloAck: message = .helloAck(HelloAck(serverBuild: string()))
         case .updateRequired:
             // Any code: the known ones and codes from a newer server.
@@ -280,7 +283,7 @@ struct Gen {
             let setup = setup()
             message = .raceStart(RaceStart(
                 yourSeat: int(0...(setup.fleetSize - 1)), setup: setup,
-                roster: (0..<setup.fleetSize).map { _ in RosterEntry(name: string(), colorIndex: int(0...255)) },
+                roster: (0..<setup.fleetSize).map { _ in RosterEntry(name: string(), colorIndex: int(0...255), isBot: bool()) },
                 tide: payload(), windKeys: windKeys()))
         case .resync:
             let n = int(2...16)

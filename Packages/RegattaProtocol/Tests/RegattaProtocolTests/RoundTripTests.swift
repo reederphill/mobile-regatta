@@ -281,7 +281,7 @@ import Testing
     @Test func messageDirectionsAndStreams() {
         for type in MessageType.allCases {
             let clientSends: Set<MessageType> = [
-                .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync,
+                .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync, .leaveRace,
                 // Service requests (#143).
                 .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
                 .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .sessionRequest,
@@ -290,7 +290,61 @@ import Testing
         }
         #expect(MessageType.inputHeld.stream == .input && MessageType.inputTap.stream == .input)
         #expect(MessageType.event.stream == .reliable && MessageType.windKey.stream == .reliable)
+        #expect(MessageType.rosterChange.stream == .reliable && MessageType.leaveRace.stream == .other)
         #expect(MessageType.snapshot.stream == .other)
+    }
+
+    /// #149: a seat's flag says who the setup gives it to and whether a bot sails it now, so a human seat a bot took
+    /// before the gun shows as a bot and is still a human seat in the setup (the log header's, the digest's).
+    @Test func rosterBotFlagRoundTrips() throws {
+        let setup = try RaceSetup(raceSeed: RaceSeed(149), seats: [.human, .human, .bot])
+        let roster = [RosterEntry(name: "Ann", colorIndex: 0), RosterEntry(name: "Skua", colorIndex: 1, isBot: true),
+                      RosterEntry(name: "Gannet", colorIndex: 2, isBot: true)]
+        let start = RaceStart(yourSeat: 0, setup: setup, roster: roster)
+        let bytes = try Frame(seq: 1, tick: -1800, message: .raceStart(start)).encoded()
+        guard case .raceStart(let back) = try Frame(decoding: bytes).message else {
+            Issue.record("not a RaceStart")
+            return
+        }
+        #expect(back == start)
+        #expect(back.setup.seats == [.human, .human, .bot])
+        #expect(back.roster.map(\.isBot) == [false, true, true])
+        // A setup's bot seat is a bot whatever the entry said.
+        let plain = RaceStart(yourSeat: 0, setup: setup, roster: roster.map { RosterEntry(name: $0.name, colorIndex: $0.colorIndex) })
+        #expect(plain.roster.map(\.isBot) == [false, false, true])
+        // A flag the encoder never writes is refused: the seat table starts after the count, at the first flag.
+        let count = try #require(bytes.firstIndex(of: 3, after: Frame.headerSize, followedBy: [RaceStart.SeatFlag.human.rawValue, 3] + Array("Ann".utf8)))
+        var bad = bytes
+        bad[count + 1] = 3
+        #expect(throws: WireError.invalidValue("roster.isBot")) { try Frame(decoding: bad) }
+
+        // The results report's roster carries it too.
+        let report = WireRaceReport(raceID: "r", seat: 0, roster: roster, results: RaceResults(rows: [], rated: false), sailing: [0, 1, 2],
+                                    incidents: [], isClosed: false, flaggedSeats: [])
+        let reply = Message.raceSessionReply(ServiceReply(id: 1, result: .update(.report(report))))
+        #expect(try Frame(decoding: Frame(seq: 1, tick: 0, message: reply).encoded()).message == reply)
+    }
+
+    @Test func leaveRaceRoundTrips() throws {
+        let bytes = try Frame(seq: 9, tick: -300, message: .leaveRace).encoded()
+        #expect(bytes.count == Frame.headerSize && bytes[0] == 7)
+        let frame = try Frame(decoding: bytes)
+        #expect(frame.message == .leaveRace && frame.seq == 9 && frame.tick == -300)
+        #expect(throws: (any Error).self) { try Frame(decoding: bytes + [0]) }
+    }
+
+    @Test func rosterChangeRoundTrips() throws {
+        let change = RosterChange(seat: 4, entry: RosterEntry(name: "Kittiwake", colorIndex: 4, isBot: true))
+        let bytes = try Frame(seq: 12, tick: -451, message: .rosterChange(change)).encoded()
+        #expect(bytes[0] == 26)
+        let frame = try Frame(decoding: bytes)
+        #expect(frame.message == .rosterChange(change) && frame.seq == 12 && frame.tick == -451)
+        let back = RosterChange(seat: 0, entry: RosterEntry(name: "Ann", colorIndex: 0))
+        #expect(try Frame(decoding: Frame(seq: 1, tick: 0, message: .rosterChange(back)).encoded()).message == .rosterChange(back))
+        // A seat no fleet has, a flag that isn't a flag, and a short frame are refused.
+        #expect(throws: (any Error).self) { try Frame(decoding: [26, 1, 0, 0, 0, 0, 0, 0, 0, 64, 1, 65, 0, 1]) }
+        #expect(throws: (any Error).self) { try Frame(decoding: Array(bytes.dropLast()) + [2]) }
+        #expect(throws: (any Error).self) { try Frame(decoding: Array(bytes.dropLast())) }
     }
 
     @Test func eventAudiences() {
@@ -350,4 +404,11 @@ func relabel(_ boat: Boat, isPlayer: Bool) -> Boat {
     copy.finishTime = boat.finishTime
     copy.place = boat.place
     return copy
+}
+
+private extension Array where Element == UInt8 {
+    /// The first index past `start` holding `byte` and followed by `rest`.
+    func firstIndex(of byte: UInt8, after start: Int, followedBy rest: [UInt8]) -> Int? {
+        indices.first { $0 > start && self[$0] == byte && $0 + rest.count < count && Array(self[($0 + 1)...($0 + rest.count)]) == rest }
+    }
 }

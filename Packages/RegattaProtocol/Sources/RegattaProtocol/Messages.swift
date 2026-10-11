@@ -138,10 +138,27 @@ public struct RosterEntry: Equatable, Sendable {
     /// The player's handle or the bot's sailing name.
     public var name: String
     public var colorIndex: Int
+    /// A bot sails the seat (#19, #149): one the setup gives to a bot, or one its player gave up before the gun, which
+    /// a bot sails from then on under a sailing name. The app draws the bot glyph beside the name.
+    public var isBot: Bool
 
-    public init(name: String, colorIndex: Int) {
+    public init(name: String, colorIndex: Int, isBot: Bool = false) {
         self.name = name
         self.colorIndex = colorIndex
+        self.isBot = isBot
+    }
+}
+
+/// Server → client, on the reliable stream (#149): `seat`'s roster entry from now on. Sent when a player gives her
+/// seat up before the gun and a bot takes it: the name becomes a sailing name and `isBot` is set. The setup's seat
+/// kinds never change (a seat the setup gave a player stays a human seat in every replay).
+public struct RosterChange: Equatable, Sendable {
+    public var seat: Int
+    public var entry: RosterEntry
+
+    public init(seat: Int, entry: RosterEntry) {
+        self.seat = seat
+        self.entry = entry
     }
 }
 
@@ -208,9 +225,10 @@ public enum WindKeyWire {
 /// (ADR 0001). Per client: `yourSeat` differs.
 public struct RaceStart: Equatable, Sendable {
     public var yourSeat: Int
-    /// On the wire its seat kinds travel only as the roster's bot flags.
+    /// On the wire its seat kinds travel only in the seat table's flags (`SeatFlag`).
     public var setup: RaceSetup
-    /// By seat, as many as `setup.seats`.
+    /// By seat, as many as `setup.seats`. A seat the setup gives to a bot is always `isBot` (the initialiser sets it);
+    /// a human seat's is set once a bot has taken it for good (#149).
     public var roster: [RosterEntry]
     /// Tide state (#78). Placeholder until #78 defines schema 1: `.none`.
     public var tide: VersionedPayload
@@ -226,8 +244,19 @@ public struct RaceStart: Equatable, Sendable {
         self.yourSeat = yourSeat
         self.setup = setup
         self.roster = roster
+        for seat in roster.indices where setup.seats.indices.contains(seat) && setup.seats[seat] == .bot { self.roster[seat].isBot = true }
         self.tide = tide
         self.windKeys = windKeys
+    }
+
+    /// A seat's byte in the seat table (#149): who the setup gives it to, and whether a bot sails it now.
+    enum SeatFlag: UInt8 {
+        /// The setup's human seat, sailed by its player.
+        case human = 0
+        /// The setup's bot seat.
+        case bot = 1
+        /// The setup's human seat, given up before the gun: a bot sails it. Still a human seat in the setup.
+        case takenOver = 2
     }
 }
 
@@ -567,6 +596,22 @@ extension UpdateRequired {
     }
 }
 
+extension RosterChange {
+    func encode(to w: inout WireWriter) throws {
+        try w.index(seat, "seat")
+        try w.string(entry.name, limit: WireLimit.string, "roster.name")
+        try w.index(entry.colorIndex, "roster.colorIndex")
+        w.bool(entry.isBot)
+    }
+
+    init(from r: inout WireReader) throws {
+        let seat = try r.index()
+        guard seat < WireLimit.seats else { throw WireError.invalidValue("seat") }
+        self.init(seat: seat, entry: RosterEntry(name: try r.string(limit: WireLimit.string, "roster.name"), colorIndex: try r.index(),
+                                                 isBot: try r.bool("roster.isBot")))
+    }
+}
+
 extension JoinRace {
     func encode(to w: inout WireWriter) throws { try w.blob(token, limit: WireLimit.token, "token") }
     init(from r: inout WireReader) throws { token = try r.blob(limit: WireLimit.token, "token") }
@@ -615,10 +660,11 @@ extension RaceStart {
             w.bool(true)
             try file.encode(to: &w)
         }
-        // The seat table: the bot flag, then the rest of the roster metadata.
+        // The seat table: the seat's flag, then the rest of the roster metadata.
         try w.count(roster.count, limit: WireLimit.seats, "roster")
         for (kind, entry) in zip(setup.seats, roster) {
-            w.bool(kind == .bot)
+            let flag: SeatFlag = kind == .bot ? .bot : entry.isBot ? .takenOver : .human
+            w.u8(flag.rawValue)
             try w.string(entry.name, limit: WireLimit.string, "roster.name")
             try w.index(entry.colorIndex, "roster.colorIndex")
         }
@@ -643,8 +689,10 @@ extension RaceStart {
         var kinds: [SeatKind] = []
         var roster: [RosterEntry] = []
         for _ in 0..<n {
-            kinds.append(try r.bool("roster.isBot") ? .bot : .human)
-            roster.append(RosterEntry(name: try r.string(limit: WireLimit.string, "roster.name"), colorIndex: try r.index()))
+            guard let flag = SeatFlag(rawValue: try r.u8()) else { throw WireError.invalidValue("roster.isBot") }
+            kinds.append(flag == .bot ? .bot : .human)
+            roster.append(RosterEntry(name: try r.string(limit: WireLimit.string, "roster.name"), colorIndex: try r.index(),
+                                      isBot: flag != .human))
         }
         let setup: RaceSetup
         do {

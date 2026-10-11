@@ -90,7 +90,7 @@ extension Gen {
         let n = int(1...16)
         return WireRaceReport(
             raceID: string(), seat: int(0...(n - 1)),
-            roster: (0..<n).map { _ in RosterEntry(name: string(), colorIndex: int(0...255)) },
+            roster: (0..<n).map { _ in RosterEntry(name: string(), colorIndex: int(0...255), isBot: bool()) },
             results: results(), sailing: list(0...n) { $0.int(0...(n - 1)) },
             incidents: list(0...3) { g in
                 WireSeatIncidents(seat: g.seat(), incidents: g.list(0...4) { $0.incident() },
