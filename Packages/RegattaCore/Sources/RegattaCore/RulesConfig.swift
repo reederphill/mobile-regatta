@@ -30,7 +30,10 @@ public struct RulesConfig: DataFileContent {
     /// -3 file has none (nil), and its races run no escape simulation: rules 15 and 16.1 are never called.
     /// Schema 5 (#345) adds rule 17's limits (`Incidents.properCourse`); a schema-1 to -4 file has none (nil), and
     /// its races never call rule 17.
-    public static let supportedSchemaVersions = [1, 2, 3, 4, 5]
+    /// Schema 6 (#487) adds what a penalty turn is (`Penalty.turn`, absent `fullCircle`); a `tackAndGybe` file has
+    /// no start deadline (`startSeconds`) and no started turn (`startedTurnDegrees`). A schema-1 to -5 file means
+    /// `fullCircle`.
+    public static let supportedSchemaVersions = [1, 2, 3, 4, 5, 6]
 
     public var incidents: Incidents
     /// The rule 18 zone.
@@ -176,7 +179,8 @@ public struct RulesConfig: DataFileContent {
 
     /// A penalty turn's deadlines (#9, #89): each owed turn has a clock, and must be started (turned
     /// `startedTurn`) `start` seconds after it and completed `complete` seconds after it, or she is
-    /// disqualified. When the clock starts is `stackedPenaltyDeadlines`'s.
+    /// disqualified. When the clock starts is `stackedPenaltyDeadlines`'s. What a turn is is `turn`'s (#487): under
+    /// `tackAndGybe` there is no start deadline, so `start` is `complete` and `startedTurn` 0 (neither is read).
     public struct Penalty: Sendable, Equatable {
         /// Seconds after the turn's clock starts by which it must be started.
         public var start: Double
@@ -186,6 +190,18 @@ public struct RulesConfig: DataFileContent {
         public var startedTurn: Double
         /// When each owed turn's clock starts (schema 3; a schema-1 or -2 file means `fromCall`).
         public var stackedPenaltyDeadlines: StackedPenaltyDeadlines
+        /// What serves a turn (schema 6, #487; a schema-1 to -5 file means `fullCircle`).
+        public var turn: PenaltyTurn = .fullCircle
+    }
+
+    /// What a penalty turn is (#487).
+    public enum PenaltyTurn: String, Sendable, Equatable, CaseIterable {
+        /// 360° of heading one way, counted from her heading tick by tick (#9, #89, #219): every file before schema 6.
+        case fullCircle
+        /// One tack and one gybe made turning the same way, in either order (RRS 44.2): counted at the boom's
+        /// crossings, the heading turned between them free (`Race`'s `crossPenalty`). One limit, `complete`, from the
+        /// turn's clock; no start deadline and no started turn.
+        case tackAndGybe
     }
 
     /// When an owed penalty turn's clock starts, for a boat owing more than one (G4, #89). Owed turns are
@@ -262,7 +278,7 @@ public struct RulesConfig: DataFileContent {
 
     public init(fileData: Data, header: DataFileHeader) throws {
         switch header.schemaVersion {
-        case 1, 2, 3, 4, 5:
+        case 1, 2, 3, 4, 5, 6:
             // Duplicate keys were already refused by `DataFile`, so every parse below reads the same file.
             let document = try JSONDecoder().decode(RulesConfigSchema.self, from: fileData)
             try document.rejectUnknownFields(in: fileData)
@@ -286,14 +302,16 @@ public struct RulesConfig: DataFileContent {
 
 public typealias RulesConfigFile = DataFile<RulesConfig>
 
-// MARK: - Schemas 1 to 5
+// MARK: - Schemas 1 to 6
 
-/// The rules configuration file, schema versions 1 to 5, as written. Documented in `docs/rules-file.md`.
+/// The rules configuration file, schema versions 1 to 6, as written. Documented in `docs/rules-file.md`.
 /// Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths` (#85): required in schema 2
 /// and later, refused in schema 1. Schema 3 is schema 2 plus `raceFormat.penalty.stackedPenaltyDeadlines`
 /// (#89): required in schema 3 and later, refused before it. Schema 4 is schema 3 plus
 /// `incidents.escape.changesCourseDegreesPerSecond` (#92): required in schema 4 and later, refused before it.
 /// Schema 5 is schema 4 plus `incidents.properCourse` (#345): required in schema 5, refused before it.
+/// Schema 6 is schema 5 plus `raceFormat.penalty.turn` (#487): optional (absent `fullCircle`), refused before it; a
+/// `tackAndGybe` penalty drops `startSeconds` and `startedTurnDegrees`, which every other penalty requires.
 struct RulesConfigSchema: Decodable {
     let schemaVersion: Int
     let id: String
@@ -389,14 +407,18 @@ struct RulesConfigSchema: Decodable {
 
     struct RaceFormat: Decodable {
         struct Penalty: Decodable {
-            let startSeconds: Double
+            /// Every schema; refused under schema 6's `tackAndGybe`.
+            let startSeconds: Double?
             let completeSeconds: Double
-            let startedTurnDegrees: Double
+            /// Every schema; refused under schema 6's `tackAndGybe`.
+            let startedTurnDegrees: Double?
             /// Schema 3.
             let stackedPenaltyDeadlines: String?
+            /// Schema 6.
+            let turn: String?
 
             enum CodingKeys: String, CodingKey, CaseIterable {
-                case startSeconds, completeSeconds, startedTurnDegrees, stackedPenaltyDeadlines
+                case startSeconds, completeSeconds, startedTurnDegrees, stackedPenaltyDeadlines, turn
             }
         }
 
@@ -481,7 +503,7 @@ struct RulesConfigSchema: Decodable {
         }
     }
 
-    /// Every field schemas 1 to 5 have, from each type's `CodingKeys`, so it can't drift from the decoder.
+    /// Every field schemas 1 to 6 have, from each type's `CodingKeys`, so it can't drift from the decoder.
     static let fields: FieldTree = .object(CodingKeys.self, [
         .incidents: .object(Incidents.CodingKeys.self, [
             .nearMissSweep: .object(NearMissSweep.CodingKeys.self),
@@ -503,7 +525,7 @@ struct RulesConfigSchema: Decodable {
     ])
 
     /// Validates the file and converts it to code units. Throws `DataFileError.invalidContent`, or `malformed`
-    /// for a schema-2 to -5 file without a field its schema requires.
+    /// for a schema-2 to -6 file without a field its schema requires.
     func rulesConfig(id: String, schemaVersion: Int, fileData: Data) throws -> RulesConfig {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
             if !condition { throw DataFileError.invalidContent(kind: RulesConfig.kind, id: id, reason: reason()) }
@@ -577,11 +599,41 @@ struct RulesConfigSchema: Decodable {
 
         let format = raceFormat
         try duration(format.startSequenceSeconds, "raceFormat.startSequenceSeconds")
-        try duration(format.penalty.startSeconds, "raceFormat.penalty.startSeconds")
+        // Schema 6's penalty turn: optional there (absent `fullCircle`), refused before it. A `tackAndGybe` turn has no
+        // start deadline and no started turn: its file has neither, and every other file needs both.
+        var turn = RulesConfig.PenaltyTurn.fullCircle
+        if let value = format.penalty.turn {
+            try check(schemaVersion >= 6, "raceFormat.penalty.turn needs schema 6")
+            guard let parsed = RulesConfig.PenaltyTurn(rawValue: value) else {
+                throw DataFileError.invalidContent(
+                    kind: RulesConfig.kind, id: id, reason: "raceFormat.penalty.turn must be one of "
+                        + RulesConfig.PenaltyTurn.allCases.map(\.rawValue).joined(separator: ", "))
+            }
+            turn = parsed
+        }
         try duration(format.penalty.completeSeconds, "raceFormat.penalty.completeSeconds")
-        try check(format.penalty.completeSeconds >= format.penalty.startSeconds,
-                  "raceFormat.penalty.completeSeconds must not be before startSeconds")
-        let startedTurn = try angle(format.penalty.startedTurnDegrees, "raceFormat.penalty.startedTurnDegrees", max: 360)
+        let start: Double, startedTurn: Double
+        switch turn {
+        case .fullCircle:
+            guard let startSeconds = format.penalty.startSeconds else {
+                throw DataFileError.malformed(kind: RulesConfig.kind, reason: "a fullCircle penalty needs raceFormat.penalty.startSeconds")
+            }
+            guard let startedTurnDegrees = format.penalty.startedTurnDegrees else {
+                throw DataFileError.malformed(
+                    kind: RulesConfig.kind, reason: "a fullCircle penalty needs raceFormat.penalty.startedTurnDegrees")
+            }
+            try duration(startSeconds, "raceFormat.penalty.startSeconds")
+            try check(format.penalty.completeSeconds >= startSeconds,
+                      "raceFormat.penalty.completeSeconds must not be before startSeconds")
+            start = startSeconds
+            startedTurn = try angle(startedTurnDegrees, "raceFormat.penalty.startedTurnDegrees", max: 360)
+        case .tackAndGybe:
+            try check(format.penalty.startSeconds == nil, "a tackAndGybe penalty has no raceFormat.penalty.startSeconds")
+            try check(format.penalty.startedTurnDegrees == nil,
+                      "a tackAndGybe penalty has no raceFormat.penalty.startedTurnDegrees")
+            start = format.penalty.completeSeconds
+            startedTurn = 0
+        }
         // Schema 4's "changes course" test: required in schema 4, refused before it, where there is none.
         var changesCourse: Double?
         if schemaVersion >= 4 {
@@ -663,8 +715,8 @@ struct RulesConfigSchema: Decodable {
             onABeat: .init(maxTrueWindAngle: beatAngle, windwardLegOnly: onABeat.windwardLegOnly),
             raceFormat: .init(
                 startSequence: format.startSequenceSeconds,
-                penalty: .init(start: format.penalty.startSeconds, complete: format.penalty.completeSeconds,
-                               startedTurn: startedTurn, stackedPenaltyDeadlines: stacking),
+                penalty: .init(start: start, complete: format.penalty.completeSeconds,
+                               startedTurn: startedTurn, stackedPenaltyDeadlines: stacking, turn: turn),
                 protestWindow: format.protestWindowSeconds,
                 finishWindow: format.finishWindowSeconds,
                 timeLimit: format.timeLimitSeconds,

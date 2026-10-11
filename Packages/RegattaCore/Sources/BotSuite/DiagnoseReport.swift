@@ -85,6 +85,12 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
         /// Started turns given up, an episode; and by cause (`ResetCause.rawValue`, every cause a key).
         public var resetsPerEpisode: Double
         public var resetsPerEpisodeByCause: [String: Double]
+        /// Under a `tackAndGybe` penalty (#487): recrosses, and first crossings voided by a rounding, an episode
+        /// (`PenaltyEpisode.recrosses`, `roundingVoids`); 0 under `fullCircle`.
+        public var recrossesPerEpisode: Double
+        public var roundingVoidsPerEpisode: Double
+        /// Calls on a boat turning (taking a penalty), an episode (`PenaltyEpisode.callsWhileTurning`).
+        public var callsWhileTurningPerEpisode: Double
         /// Episodes of two calls or more.
         public var stackedShare: Double
         public var turnsServed: Int
@@ -244,7 +250,8 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
             }
             lines += table(rows)
         }
-        lines.append("penalty episodes; timings are median / p90 seconds over the served one-turn episodes (n): call to 30° in, "
+        lines.append("penalty episodes; timings are median / p90 seconds over the served one-turn episodes (n): call to 30° in "
+            + "(the first crossing under tackAndGybe), "
             + "turning, served to 90 % of target speed, total; then every served episode's seconds a turn")
         func spread(_ spread: Spread?) -> String { spread.map { "\(fixed($0.median, 1)) / \(fixed($0.p90, 1))" } ?? "-" }
         let shown = penaltyEpisodes.filter { $0.tier == Self.all || ($0.phase == Self.all && !single) }
@@ -255,14 +262,16 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
             [name($0), "\($0.episodes)", "\($0.oneTurnEpisodes)", spread($0.secondsToStarted), spread($0.secondsTurning),
              spread($0.secondsRecovering), spread($0.secondsTotal), spread($0.secondsPerTurn)]
         })
-        lines.append("started turns given up, an episode, by cause; episodes of 2+ calls; turns served with more than "
+        lines.append("started turns given up, an episode, by cause; recrosses and rounding voids (tackAndGybe) and calls on a "
+            + "boat turning, an episode; episodes of 2+ calls; turns served with more than "
             + "\(Int(Self.slowTurnSeconds)) s gone; episodes ending in a DSQ, and owed at the end")
         var resetRows: [[String]] = [["", "resets"] + ResetCause.allCases.map(\.label)
-            + ["2+ calls", "turns", "> \(Int(Self.slowTurnSeconds)) s", "dsq", "open"]]
+            + ["recross", "void", "calls turning", "2+ calls", "turns", "> \(Int(Self.slowTurnSeconds)) s", "dsq", "open"]]
         for row in shown {
             var cells: [String] = [name(row), fixed(row.resetsPerEpisode, 3)]
             for cause in ResetCause.allCases { cells.append(fixed(row.resetsPerEpisodeByCause[cause.rawValue] ?? 0, 3)) }
-            cells += [fixed(row.stackedShare, 3), "\(row.turnsServed)", fixed(row.slowTurnShare, 4), "\(row.disqualified)", "\(row.open)"]
+            cells += [fixed(row.recrossesPerEpisode, 3), fixed(row.roundingVoidsPerEpisode, 3),
+                      fixed(row.callsWhileTurningPerEpisode, 3), fixed(row.stackedShare, 3), "\(row.turnsServed)", fixed(row.slowTurnShare, 4), "\(row.disqualified)", "\(row.open)"]
             resetRows.append(cells)
         }
         lines += table(resetRows)
@@ -321,6 +330,9 @@ extension DiagnoseSummary.EpisodeRow {
             (cause.rawValue, Double(episodes.reduce(0) { $0 + ($1.resets[cause] ?? 0) }) / count)
         })
         resetsPerEpisode = Double(episodes.reduce(0) { $0 + $1.resets.values.reduce(0, +) }) / count
+        recrossesPerEpisode = Double(episodes.reduce(0) { $0 + $1.recrosses }) / count
+        roundingVoidsPerEpisode = Double(episodes.reduce(0) { $0 + $1.roundingVoids }) / count
+        callsWhileTurningPerEpisode = Double(episodes.reduce(0) { $0 + $1.callsWhileTurning }) / count
         stackedShare = share(episodes.filter { $0.calls >= 2 }.count, of: episodes.count)
         let turns = episodes.flatMap(\.turnSeconds)
         turnsServed = turns.count

@@ -196,4 +196,153 @@ import Testing
         #expect(predicted.race.boats[2].penaltyClockTick == -560)
         #expect(predicted.resails == 1 && predicted.cappedResails == 1)
     }
+
+    /// #487: under fleet-rules@6 a prediction counts a penalty turn's crossings as the server does, but never serves
+    /// it: on the tick the server serves the turn, the prediction holds the second crossing (both shown made) and
+    /// still owes it, until the server's `penaltyServed` serves it. A recross the prediction undoes itself, as the
+    /// server does, on the same tick: the server's `penaltyReset` then changes nothing.
+    @Test func predictionHoldsTheSecondCrossingForTheServer() throws {
+        let rules = try RulesConfigFile.bundled(id: "fleet-rules", version: 6)
+        let dinghy = try BoatClassFile.bundled(id: "ilca-dinghy", version: 3)
+        let setup = try RaceSetup(raceSeed: RaceSeed(64), seats: [.human, .human], laps: 1, startSequenceTicks: 600,
+                                  boatClass: dinghy.ref, rulesConfiguration: rules.ref)
+        let host = Race(setup: setup, windSeed: WindSeed(0x5EED))
+        var generator = try WindKeyGenerator(windSeed: WindSeed(0x5EED), setup: host.windSetup, windows: host.wind.windows)
+        let prediction = Race(setup: setup, revealedWindKeys: generator.keys(through: host.wind.windows.window(containing: 1_800)))
+        host.step()
+        // Seat 0 owes a turn, seat 1 well clear of her.
+        var world = host.exportSnapshot()
+        world.seats[0].boat.penaltyTurnsOwed = 1
+        world.seats[0].boat.penaltyClockTick = world.tick
+        world.seats[1].boat.position = world.seats[0].boat.position + host.course.right * 60
+        try host.importSnapshot(world)
+        try prediction.importSnapshot(world)
+        _ = host.drainEvents()
+
+        func helm(_ rudder: Double) {
+            for race in [host, prediction] { _ = race.apply(BoatInput(rudder: rudder), seat: 0, atTick: race.tick + 1) }
+        }
+        /// Steps both until the host emits `stop` for seat 0 (at most 20 s); the host's events on that tick.
+        func sail(until stop: RaceEvent.Kind) throws -> [RaceEvent.Kind] {
+            for _ in 0..<(20 * Race.tickRate) {
+                host.step()
+                try prediction.tryStep()
+                _ = prediction.drainEvents()
+                #expect(prediction.boats[0].heading == host.boats[0].heading, "the prediction sails as the server")
+                let kinds = host.drainEvents().map(\.kind)
+                if kinds.contains(stop) { return kinds }
+            }
+            Issue.record("no \(stop) in 20 s")
+            return []
+        }
+        func sameCrossings() -> Bool {
+            let p = prediction.boats[0], h = host.boats[0]
+            return p.penaltyTurnsOwed == h.penaltyTurnsOwed && p.penaltyDirection == h.penaltyDirection
+                && p.penaltyFirstCrossing == h.penaltyFirstCrossing && p.penaltyDirectionLocked == h.penaltyDirectionLocked
+        }
+
+        // The first crossing, turning to starboard: the prediction counts it as the server does.
+        helm(1)
+        _ = try sail(until: .penaltyStarted(seat: 0))
+        #expect(host.boats[0].penaltyDirection == 1 && host.boats[0].penaltyFirstCrossing != nil)
+        #expect(sameCrossings() && prediction.boats[0].isTakingPenalty)
+
+        // Back across it: the recross, which the prediction undoes itself; the server's reset changes nothing.
+        helm(-1)
+        _ = try sail(until: .penaltyReset(seat: 0))
+        #expect(host.boats[0].penaltyDirection == -1 && sameCrossings())
+        prediction.apply(authoritative: RaceEvent(tick: host.tick, kind: .penaltyReset(seat: 0)))
+        #expect(sameCrossings())
+
+        // On round to the other kind: the server serves it; the prediction holds it, owing the turn still.
+        let kinds = try sail(until: .penaltyServed(seat: 0))
+        #expect(kinds.contains(.tacked(seat: 0)) || kinds.contains(.gybed(seat: 0)))
+        #expect(host.boats[0].penaltyTurnsOwed == 0 && host.owedPenalty(ofSeat: 0) == nil)
+        let held = try #require(prediction.owedPenalty(ofSeat: 0))
+        #expect(prediction.boats[0].penaltyTurnsOwed == 1 && prediction.boats[0].penaltyCrossingHeld)
+        #expect(held.isStarted && held.hasTacked && held.hasGybed && held.direction == -1)
+        // Sailing on, nothing more counts until the server's word.
+        host.step()
+        try prediction.tryStep()
+        #expect(prediction.boats[0].penaltyTurnsOwed == 1 && prediction.boats[0].penaltyCrossingHeld)
+        prediction.apply(authoritative: RaceEvent(tick: host.tick - 1, kind: .penaltyServed(seat: 0)))
+        let served = prediction.boats[0]
+        #expect(served.penaltyTurnsOwed == 0 && served.penaltyClockTick == nil && !served.penaltyCrossingHeld)
+        #expect(served.penaltyDirection == 0 && served.penaltyFirstCrossing == nil && !served.isTakingPenalty)
+        #expect(prediction.owedPenalty(ofSeat: 0) == nil)
+    }
+
+    /// #487, fleet-rules@6: a turn that becomes current while she is rounding has its clock pending until she is clear
+    /// of the mark. The prediction holds it pending as the server does, from the server's call (no deadline) and from
+    /// the server's `penaltyServed` of the turn before, and starts it itself on the same tick as the server.
+    @Test func predictionStartsAPendingClockWithTheServer() throws {
+        let rules = try RulesConfigFile.bundled(id: "fleet-rules", version: 6)
+        let dinghy = try BoatClassFile.bundled(id: "ilca-dinghy", version: 3)
+        let setup = try RaceSetup(raceSeed: RaceSeed(64), seats: [.human, .human], laps: 1, startSequenceTicks: 600,
+                                  boatClass: dinghy.ref, rulesConfiguration: rules.ref)
+        let host = Race(setup: setup, windSeed: WindSeed(0x5EED))
+        var generator = try WindKeyGenerator(windSeed: WindSeed(0x5EED), setup: host.windSetup, windows: host.wind.windows)
+        let keys = generator.keys(through: host.wind.windows.window(containing: 1_800))
+        let prediction = Race(setup: setup, revealedWindKeys: keys)
+        let called = Race(setup: setup, revealedWindKeys: keys)
+        host.step()
+        let complete = RulesConfig.ticks(rules.content.raceFormat.penalty.complete)
+        // Seat 0 racing, 4 m past the windward mark and sailing away from it (in its zone: rounding), owing two turns,
+        // the first's tack made to starboard; seat 1 well clear.
+        let mark = try #require(host.course.elements[CourseLayout.windwardIndex].marks.first)
+        var world = host.exportSnapshot()
+        world.seats[0].boat.status = .racing
+        world.seats[0].boat.legIndex = 0
+        world.seats[0].boat.roundingStage = 0
+        world.seats[0].boat.position = mark.position + Vec2.heading(world.seats[0].boat.heading) * 4
+        world.seats[1].boat.position = world.seats[0].boat.position + host.course.right * 60
+        var owing = world
+        owing.seats[0].boat.penaltyTurnsOwed = 2
+        owing.seats[0].boat.penaltyClockTick = world.tick
+        owing.seats[0].boat.penaltyDirection = 1
+        owing.seats[0].boat.penaltyFirstCrossing = .tack
+        try prediction.importSnapshot(owing)
+        // The server served the first turn there: the second is current, its clock pending.
+        var served = owing
+        served.seats[0].boat.penaltyTurnsOwed = 1
+        served.seats[0].boat.penaltyClockTick = nil
+        served.seats[0].boat.penaltyFirstCrossing = nil
+        served.seats[0].boat.penaltyDirectionLocked = true
+        try host.importSnapshot(served)
+        _ = host.drainEvents()
+        prediction.apply(authoritative: RaceEvent(tick: host.tick, kind: .penaltyServed(seat: 0)))
+        #expect(prediction.boats[0].penaltyTurnsOwed == 1 && prediction.boats[0].penaltyClockTick == nil)
+        #expect(prediction.boats[0].penaltyDirectionLocked)
+        let pending = try #require(prediction.owedPenalty(ofSeat: 0))
+        #expect(pending.isClockPending && pending.completeDeadlineTick == host.tick + complete)
+        #expect(host.owedPenalty(ofSeat: 0) == pending)
+
+        // A call there: the server's call has no deadline, so the prediction's clock is pending; one with a deadline
+        // starts it at the call.
+        try called.importSnapshot(world)
+        func call(deadline: Int?) -> RaceEvent {
+            RaceEvent(tick: world.tick, kind: .ruleCall(RuleCall(
+                incidentId: 0, tick: world.tick, rule: .portStarboard, offender: 0, victim: 1, leg: 0, turnsOwed: 1,
+                startDeadlineTick: deadline, completeDeadlineTick: deadline)))
+        }
+        called.apply(authoritative: call(deadline: nil))
+        #expect(called.boats[0].penaltyTurnsOwed == 1 && called.boats[0].penaltyClockTick == nil)
+        try called.importSnapshot(world)
+        called.apply(authoritative: call(deadline: world.tick + complete))
+        #expect(called.boats[0].penaltyClockTick == world.tick)
+
+        // Sailing out of the zone, both start the clock on the same tick.
+        for _ in 0..<(20 * Race.tickRate) {
+            host.step()
+            try prediction.tryStep()
+            _ = prediction.drainEvents()
+            _ = host.drainEvents()
+            #expect(prediction.boats[0].penaltyClockTick == host.boats[0].penaltyClockTick)
+            if host.boats[0].penaltyClockTick != nil { break }
+        }
+        let clock = try #require(host.boats[0].penaltyClockTick)
+        #expect(clock == host.tick && clock > world.tick + Race.tickRate, "started clear of the mark, not at once")
+        #expect(prediction.owedPenalty(ofSeat: 0) == host.owedPenalty(ofSeat: 0))
+        #expect(host.owedPenalty(ofSeat: 0)?.completeDeadlineTick == clock + complete)
+    }
 }

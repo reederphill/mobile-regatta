@@ -111,6 +111,14 @@ struct Gen {
         let draw = Int(abs(boat.penaltyProgress) * 1000)
         boat.tackCrossingTick = boat.isTacking ? -(draw % 255) : nil
         boat.roll = [nil, RollTack.pending(tapTick: -(draw % 64)), .hit, .missed][boat.legIndex / 4 % 4]
+        // #487, derived likewise: a turn's way, first crossing and lock, every consistent mix, only while owing.
+        if boat.penaltyTurnsOwed > 0 {
+            boat.penaltyDirection = [0, 1, -1][draw % 3]
+            if boat.penaltyDirection != 0 {
+                boat.penaltyFirstCrossing = [nil, PenaltyCrossing.tack, .gybe][draw / 3 % 3]
+                boat.penaltyDirectionLocked = draw / 9 % 2 == 1
+            }
+        }
         return WorldSnapshot.Seat(boat: boat, heldInput: input())
     }
 
@@ -161,6 +169,15 @@ struct Gen {
             let rollDraw = UInt8(truncatingIfNeeded: seat.y >> 8)
             seat.roll = [nil, WireRoll.pending(ticksAgo: rollDraw & 63), .hit, .missed][Int(rollDraw >> 6)]
             seat.tackCrossingTicks = seat.isTacking ? min(UInt8(truncatingIfNeeded: seat.x >> 8), UInt8(WireSeat.maxCrossingTicks)) : nil
+            // #487, derived likewise: a turn's way, first crossing and lock, every consistent mix, only while owing.
+            if seat.penaltyTurnsOwed > 0 {
+                let draw = Int(UInt16(truncatingIfNeeded: seat.y >> 16))
+                seat.penaltyDirection = [0, 1, -1][draw % 3]
+                if seat.penaltyDirection != 0 {
+                    seat.penaltyFirstCrossing = [nil, PenaltyCrossing.tack, .gybe][draw / 3 % 3]
+                    seat.penaltyDirectionLocked = draw / 9 % 2 == 1
+                }
+            }
             return seat
         }
     }

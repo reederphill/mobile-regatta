@@ -1,4 +1,4 @@
-# Rules configuration file, schema versions 1 to 4
+# Rules configuration file, schema versions 1 to 6
 
 The rules configuration is an immutable, versioned data file (ADR 0004, #32, #73), loaded by
 `DataFile<RulesConfig>` (`RulesConfigFile`) through the same loader as boat classes and venues. It holds
@@ -27,6 +27,9 @@ changes; a change ships as `<id>@<version + 1>.json`.
 - `fleet-rules@5` (bundled, schema 5): version 4 plus `incidents.properCourse` (#345, rule 17): 2 hull lengths,
   5° on a beat, 8° on a reach or run, a 4 s "promptly sails astern" window. The default (`RaceFiles.defaults`,
   `Race.defaultRulesConfiguration`).
+- `fleet-rules@6` (bundled, schema 6): version 5 with `penalty.turn` `tackAndGybe` (#487): a penalty turn is one
+  tack and one gybe turning the same way, completed within 40 s of its clock, which starts when she is clear of
+  the mark she is rounding; no `startSeconds`, no `startedTurnDegrees`. Not the default yet.
 
 Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths`, the start row's spacing floor:
 required in schema 2, refused in schema 1. A schema-1 file has no floor (`RulesConfig.StartRow.minimumSpacing`
@@ -40,10 +43,13 @@ escape simulation: rules 15 and 16.1 are never called, which is what they did.
 Schema 5 is schema 4 plus `incidents.properCourse`: required in schema 5, refused before it. A schema-1 to -4
 file has none (`RulesConfig.Incidents.properCourse` is nil): the umpire keeps no rule 17 records, and rule 17
 is never called, which is what they did.
+Schema 6 is schema 5 plus `raceFormat.penalty.turn`: optional in schema 6 (absent `fullCircle`), refused before
+it. A `tackAndGybe` penalty has no `startSeconds` and no `startedTurnDegrees` (refused); a `fullCircle` one, and
+every file before schema 6, requires both, and means what it meant: 360° one way.
 The tables' `v1` column gives version 1's values; version 2's are the same, plus that floor, version
 3's the same again, plus `sequential` stacking and its looser penalty deadlines (marked v3), and version 4's
 the same again, plus the "changes course" rate (marked v4), and version 5's the same again, plus rule 17's
-limits (marked v5).
+limits (marked v5); version 6's the same again, with the `tackAndGybe` penalty turn (marked v6).
 
 ## Units
 
@@ -199,9 +205,10 @@ opposite tacks when both are on a beat (18.1(a)).
 | Field | Unit | v1 | Meaning |
 |---|---|---|---|
 | `startSequenceSeconds` | s | 60 | Sequence start to gun. `RaceSetup.defaultStartSequenceTicks`. |
-| `penalty.startSeconds` | s | 15 (v3: 20) | Each owed penalty turn must be started this long after its clock starts, or she is disqualified (`missedStart`) … |
-| `penalty.completeSeconds` | s ≥ start | 30 (v3: 40) | … and completed this long after it (`missedComplete`). v3 loosens #9's 15 s and 30 s a little (the owner, #89). |
-| `penalty.startedTurnDegrees` | degrees, (0, 360] | 30 | Turned this far, the turn counts as started. |
+| `penalty.turn` | `fullCircle` or `tackAndGybe`; schema 6 | — (v6: `tackAndGybe`) | What serves an owed turn (#487). `fullCircle`: 360° of heading one way. `tackAndGybe`: one tack and one gybe made turning the same way, in either order (RRS 44.2), counted at the boom's crossings; a crossing on a tick her heading didn't turn, or in the zone of the mark she is rounding or has just rounded, counts for nothing; completing a rounding stage between the crossings voids the first; crossing back (the same kind the other way) undoes a crossing, and in her first owed turn starts the turn the other way; later owed turns go the first one's way. Rule 21.2 binds her from the first counting crossing until the turn is served. Under `tackAndGybe` a turn that becomes current while she is rounding starts its clock once she is clear of the mark. Absent: `fullCircle`. |
+| `penalty.startSeconds` | s; not under `tackAndGybe` | 15 (v3: 20; v6: —) | Each owed penalty turn must be started this long after its clock starts, or she is disqualified (`missedStart`) … |
+| `penalty.completeSeconds` | s ≥ start | 30 (v3: 40) | … and completed this long after it (`missedComplete`). v3 loosens #9's 15 s and 30 s a little (the owner, #89). Under `tackAndGybe` the only limit. |
+| `penalty.startedTurnDegrees` | degrees, (0, 360]; not under `tackAndGybe` | 30 (v6: —) | Turned this far, the turn counts as started. |
 | `penalty.stackedPenaltyDeadlines` | `sequential` or `fromCall`; schema 3 | — (v3: `sequential`) | When an owed turn's clock starts (#89, G4). Owed turns are served in order, each a call's one turn. `sequential`: at the later of its call and the completion of the turn before it, so a turn queued behind another gets its full start and complete windows once that one is done. `fromCall`: at its own call, however many turns are owed ahead of it. Absent before schema 3: `fromCall`. |
 | `protestWindowSeconds` | s | 15 | After an incident's last contact (or its opening, for a near miss), a protest is linked to it for this long, inclusive (#94). A later protest is still recorded, linked to no incident. |
 | `finishWindowSeconds` | s | 120 | After the first finish, the rest can finish for this long. |
@@ -233,7 +240,14 @@ turn (turned `startedTurnDegrees`) at its start deadline, or completed it by its
 disqualified and a ghost at that tick. Under fleet-rules@3 (20 s and 40 s), two calls 5 s apart
 (at t and t + 5 s), the first turn completed at c: the first turn's deadlines are t + 20 s and t + 40 s
 either way; the second's are c + 20 s and c + 40 s under `sequential`, and t + 25 s and t + 45 s under
-`fromCall`. The other values are loaded,
+`fromCall`. From #487, under `penalty.turn` `tackAndGybe` (fleet-rules@6) a turn is served at its second
+counting crossing (a tack and a gybe the same way), and the one deadline is `completeSeconds` from its clock
+(`missedComplete`); a rule call's and `OwedPenalty`'s start deadline is that complete deadline. A turn that
+becomes current (called, or the turn before it served) while she is rounding (in the zone of the mark she is
+rounding or has just rounded) has its clock pending (`Boat.penaltyClockTick` nil): it starts at the end of the
+first tick she is clear of the mark, and once started runs on through any later rounding (the owner, 2026-10-11).
+While pending the rule call has no deadlines, as a queued turn's, and `OwedPenalty` shows the whole limit from now
+(`isClockPending`). The other values are loaded,
 checked and exposed for the tickets that use them (#80–#96); until then the race keeps its old
 behaviour. From #86 the race closes at `finishWindowSeconds` after the first finish, capped by
 `timeLimitSeconds` after the gun (`Race.closeTick`). From #91 rule 18 reads the zone, `markRoomGiven`,

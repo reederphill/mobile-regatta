@@ -16,6 +16,10 @@ public struct RecordedBoat: Sendable, Equatable {
     public var legIndex: Int
     public var penaltyTurnsOwed: Int
     public var penaltyProgress: Double
+    /// A `tackAndGybe` penalty's way and first crossing (#487): with `penaltyTurnsOwed`, what rule 21.2 reads
+    /// (`Boat.isTakingPenalty`).
+    public var penaltyDirection: Int
+    public var penaltyFirstCrossing: PenaltyCrossing?
     /// Where the wind she sailed in this tick blew from (`Boat.sailingWind`), radians.
     public var windDirection: Double
     /// The sailing wind's speed this tick, before any shadow (`Boat.sailingWind`), m/s.
@@ -40,6 +44,8 @@ public struct RecordedBoat: Sendable, Equatable {
         legIndex = boat.legIndex
         penaltyTurnsOwed = boat.penaltyTurnsOwed
         penaltyProgress = boat.penaltyProgress
+        penaltyDirection = boat.penaltyDirection
+        penaltyFirstCrossing = boat.penaltyFirstCrossing
         windDirection = boat.sailingWind.direction
         windSpeed = boat.sailingWind.speed
         shadow = boat.shadow
@@ -62,6 +68,8 @@ public struct RecordedBoat: Sendable, Equatable {
         boat.legIndex = legIndex
         boat.penaltyTurnsOwed = penaltyTurnsOwed
         boat.penaltyProgress = penaltyProgress
+        boat.penaltyDirection = penaltyDirection
+        boat.penaltyFirstCrossing = penaltyFirstCrossing
         boat.sailingWind = Wind(direction: windDirection, speed: windSpeed)
         boat.shadow = shadow
         boat.averagedWindSpeed = grooveWindSpeed

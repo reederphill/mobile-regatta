@@ -40,7 +40,7 @@ public enum SnapshotQuantisation {
     public static let spinnakerStep = Race.dt
 
     /// Bytes per seat in a wire snapshot.
-    public static let bytesPerSeat = 28
+    public static let bytesPerSeat = 29
 
     static func quantise(_ value: Double, step: Double, in range: ClosedRange<Int>, _ field: String) throws -> Int {
         guard value.isFinite else { throw WireError.outOfRange(field) }
@@ -215,8 +215,8 @@ public struct WireSeat: Hashable, Sendable {
     public var autohelm: WireAutohelm?
     public var penaltyProgress: Int16
     /// #89: ticks since the current penalty turn's clock started (`Boat.penaltyClockTick`), before the
-    /// snapshot's tick; 0 while she owes none. A client that joins or resyncs mid-penalty predicts the turn's
-    /// deadlines from it.
+    /// snapshot's tick; 0 while she owes none, or while its clock is pending (`penaltyClockPending`). A client that
+    /// joins or resyncs mid-penalty predicts the turn's deadlines from it.
     public var penaltyClock: UInt16
     public var heldInput: BoatInput
     public var isTacking: Bool
@@ -237,6 +237,15 @@ public struct WireSeat: Hashable, Sendable {
     /// the same as one exactly that far back (a miss; windows are well short of it).
     public var roll: WireRoll?
     public var tackCrossingTicks: UInt8?
+    /// #487: a `tackAndGybe` penalty's crossings (`Boat.penaltyDirection`, `penaltyFirstCrossing`,
+    /// `penaltyDirectionLocked`): the current turn's way (−1, 0, +1), its first counting crossing, and whether a
+    /// served turn has fixed the way of the rest. All at rest while she owes none, and under a `fullCircle` penalty.
+    public var penaltyDirection: Int8
+    public var penaltyFirstCrossing: PenaltyCrossing?
+    public var penaltyDirectionLocked: Bool
+    /// #487: under a `tackAndGybe` penalty, the current turn's clock waits for her to be clear of the mark she is
+    /// rounding (`Boat.penaltyClockTick` nil while she owes a turn); `penaltyClock` is then 0.
+    public var penaltyClockPending: Bool
 
     /// The most ticks ago a tack's crossing is carried as.
     public static let maxCrossingTicks = 254
@@ -245,7 +254,9 @@ public struct WireSeat: Hashable, Sendable {
         x: Int32, y: Int32, heading: Int16, speed: UInt16, rudder: Int16, autohelm: WireAutohelm?, penaltyProgress: Int16,
         heldInput: BoatInput, isTacking: Bool, boomSide: BoomSide, status: BoatStatus, penaltyTurnsOwed: UInt8,
         roundingStage: UInt8, legIndex: UInt8, isPlaning: Bool = false, spinnaker: WireSpinnaker = .down,
-        averagedWindSpeed: UInt16? = nil, penaltyClock: UInt16 = 0, roll: WireRoll? = nil, tackCrossingTicks: UInt8? = nil
+        averagedWindSpeed: UInt16? = nil, penaltyClock: UInt16 = 0, roll: WireRoll? = nil, tackCrossingTicks: UInt8? = nil,
+        penaltyDirection: Int8 = 0, penaltyFirstCrossing: PenaltyCrossing? = nil, penaltyDirectionLocked: Bool = false,
+        penaltyClockPending: Bool = false
     ) {
         self.x = x
         self.y = y
@@ -267,6 +278,10 @@ public struct WireSeat: Hashable, Sendable {
         self.averagedWindSpeed = averagedWindSpeed
         self.roll = roll
         self.tackCrossingTicks = tackCrossingTicks
+        self.penaltyDirection = penaltyDirection
+        self.penaltyFirstCrossing = penaltyFirstCrossing
+        self.penaltyDirectionLocked = penaltyDirectionLocked
+        self.penaltyClockPending = penaltyClockPending
     }
 
     /// Quantises a seat of the world at `tick`, the snapshot's (the penalty clock goes relative to it). Throws
@@ -287,10 +302,9 @@ public struct WireSeat: Hashable, Sendable {
         boomSide = b.boomSide
         status = b.status
         guard let owed = UInt8(exactly: b.penaltyTurnsOwed), owed <= 127 else { throw WireError.outOfRange("penaltyTurnsOwed") }
-        if owed > 0 {
-            guard let clock = b.penaltyClockTick, let since = UInt16(exactly: tick - clock) else {
-                throw WireError.outOfRange("penaltyClockTick")
-            }
+        penaltyClockPending = owed > 0 && b.penaltyClockTick == nil
+        if owed > 0, let clock = b.penaltyClockTick {
+            guard let since = UInt16(exactly: tick - clock) else { throw WireError.outOfRange("penaltyClockTick") }
             penaltyClock = since
         } else {
             penaltyClock = 0
@@ -310,6 +324,20 @@ public struct WireSeat: Hashable, Sendable {
             guard tick >= $0 else { throw WireError.outOfRange("tackCrossingTick") }
             return UInt8(min(tick - $0, Self.maxCrossingTicks))
         }
+        guard (-1...1).contains(b.penaltyDirection) else { throw WireError.outOfRange("penaltyDirection") }
+        penaltyDirection = Int8(b.penaltyDirection)
+        penaltyFirstCrossing = b.penaltyFirstCrossing
+        penaltyDirectionLocked = b.penaltyDirectionLocked
+        guard Self.crossingsAreConsistent(owed: owed, direction: penaltyDirection, first: penaltyFirstCrossing,
+                                          locked: penaltyDirectionLocked)
+        else { throw WireError.outOfRange("penaltyCrossings") }
+    }
+
+    /// Whether a `tackAndGybe` penalty's crossings (#487) can be: none while she owes no turn, and a first crossing
+    /// or a lock only with the turn's way set.
+    static func crossingsAreConsistent(owed: UInt8, direction: Int8, first: PenaltyCrossing?, locked: Bool) -> Bool {
+        guard owed > 0 else { return direction == 0 && first == nil && !locked }
+        return direction != 0 || (first == nil && !locked)
     }
 
     /// Overwrites the fields the wire carries, at `tick` (the snapshot's); the rest of `seat`
@@ -328,7 +356,7 @@ public struct WireSeat: Hashable, Sendable {
         seat.boat.boomSide = boomSide
         seat.boat.status = status
         seat.boat.penaltyTurnsOwed = Int(penaltyTurnsOwed)
-        seat.boat.penaltyClockTick = penaltyTurnsOwed > 0 ? tick - Int(penaltyClock) : nil
+        seat.boat.penaltyClockTick = penaltyTurnsOwed > 0 && !penaltyClockPending ? tick - Int(penaltyClock) : nil
         var queued = seat.boat.queuedPenaltyCallTicks.filter { $0 <= tick }
         queued.removeFirst(max(0, queued.count - max(0, Int(penaltyTurnsOwed) - 1)))
         seat.boat.queuedPenaltyCallTicks = queued
@@ -339,26 +367,37 @@ public struct WireSeat: Hashable, Sendable {
         seat.boat.averagedWindSpeed = averagedWindSpeed.map { Double($0) * Q.speedStep }
         seat.boat.roll = roll?.roll(tick: tick)
         seat.boat.tackCrossingTick = tackCrossingTicks.map { tick - Int($0) }
+        seat.boat.penaltyDirection = Int(penaltyDirection)
+        seat.boat.penaltyFirstCrossing = penaltyFirstCrossing
+        seat.boat.penaltyDirectionLocked = penaltyDirectionLocked
+        // The server never holds a crossing: a prediction holds its own again as it sails on from here (#487).
+        seat.boat.penaltyCrossingHeld = false
         seat.heldInput = heldInput
     }
 
-    // Layout, 28 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autohelm angle int16
+    // Layout, 29 bytes: x int24, y int24, heading int16, speed uint16, rudder int16, autohelm angle int16
     // (0 for the groove or without an autohelm), penalty progress int16, held rudder int8, then two flag
     // bytes and the leg index; then (#248) a sails byte, the spinnaker's ticks left uint8 (0 unless it is
     // going up or coming down) and the averaged wind uint16 (0 without one); then (#89) the penalty clock
     // uint16 (0 while no turn is owed); then (#263) the roll byte (`WireRoll.byte`, 0 without one) and the tack
-    // crossing's ticks ago plus one (0 without one).
+    // crossing's ticks ago plus one (0 without one); then (#487) the penalty crossings byte.
     //   flags:  bit 0 ease, bit 1 has autohelm, bit 2 tacking, bits 3–5 status, bit 6 boom to starboard,
     //           bit 7 the autohelm is sailing the tap
     //   counts: bits 0–2 penalty turns owed (its low 3 bits), bits 3–5 rounding stage, bit 6 the autohelm
     //           holds the groove, bit 7 that groove is the downwind one
     //   sails:  bits 0–1 spinnaker (down, going up, up, coming down), bit 2 planing, bit 3 has an averaged
     //           wind; bits 4–7 penalty turns owed (its high 4 bits, #89)
+    //   penalty crossings (#487): bits 0–1 the turn's way (0 none, 1 to starboard, 2 to port), bits 2–3 its first
+    //           crossing (0 none, 1 a tack, 2 a gybe), bit 4 the way locked, bit 5 the clock pending (the penalty
+    //           clock then 0); bits 6–7 zero. Zero while no turn is owed, and a crossing or a lock only with a way.
     // Every autohelm bit is zero without an autohelm, and the downwind bit without the groove.
 
     func encode(to w: inout WireWriter) throws {
         guard penaltyTurnsOwed <= 127 else { throw WireError.outOfRange("penaltyTurnsOwed") }
         guard penaltyTurnsOwed > 0 || penaltyClock == 0 else { throw WireError.outOfRange("penaltyClock") }
+        guard !penaltyClockPending || (penaltyTurnsOwed > 0 && penaltyClock == 0) else {
+            throw WireError.outOfRange("penaltyClock")
+        }
         guard roundingStage <= 7 else { throw WireError.outOfRange("roundingStage") }
         guard rudder != Int16.min else { throw WireError.outOfRange("rudder") } // −1 is −32 767
         try w.i24(x, "position.x")
@@ -393,6 +432,14 @@ public struct WireSeat: Hashable, Sendable {
         w.u8(roll?.byte ?? 0)
         guard tackCrossingTicks.map({ Int($0) <= Self.maxCrossingTicks }) ?? true else { throw WireError.outOfRange("tackCrossingTick") }
         w.u8(tackCrossingTicks.map { $0 + 1 } ?? 0)
+        guard (-1...1).contains(penaltyDirection), Self.crossingsAreConsistent(
+            owed: penaltyTurnsOwed, direction: penaltyDirection, first: penaltyFirstCrossing, locked: penaltyDirectionLocked)
+        else { throw WireError.outOfRange("penaltyCrossings") }
+        var crossings: UInt8 = penaltyDirection == 1 ? 1 : penaltyDirection == -1 ? 2 : 0
+        crossings |= (penaltyFirstCrossing?.code ?? 0) << 2
+        if penaltyDirectionLocked { crossings |= 1 << 4 }
+        if penaltyClockPending { crossings |= 1 << 5 }
+        w.u8(crossings)
     }
 
     init(from r: inout WireReader) throws {
@@ -416,6 +463,14 @@ public struct WireSeat: Hashable, Sendable {
         roll = try WireRoll.decode(try r.u8())
         let crossing = try r.u8()
         tackCrossingTicks = crossing == 0 ? nil : crossing - 1
+        let crossings = try r.u8()
+        let way = crossings & 0b11, firstCode = crossings >> 2 & 0b11
+        guard way != 3, crossings >> 6 == 0 else { throw WireError.invalidValue("penaltyCrossings") }
+        penaltyDirection = way == 1 ? 1 : way == 2 ? -1 : 0
+        penaltyFirstCrossing = firstCode == 0 ? nil : PenaltyCrossing(code: firstCode)
+        guard firstCode == 0 || penaltyFirstCrossing != nil else { throw WireError.invalidValue("penaltyCrossings") }
+        penaltyDirectionLocked = crossings & 1 << 4 != 0
+        penaltyClockPending = crossings & 1 << 5 != 0
         guard let kite = WireSpinnaker(code: sails & 0b11, ticksLeft: ticksLeft) else {
             throw WireError.invalidValue("spinnaker")
         }
@@ -439,7 +494,13 @@ public struct WireSeat: Hashable, Sendable {
         self.status = status
         penaltyTurnsOwed = counts & 0b111 | (sails >> 4) << 3
         guard penaltyTurnsOwed > 0 || penaltyClock == 0 else { throw WireError.invalidValue("penaltyClock") }
+        guard !penaltyClockPending || (penaltyTurnsOwed > 0 && penaltyClock == 0) else {
+            throw WireError.invalidValue("penaltyClock")
+        }
         roundingStage = counts >> 3 & 0b111
+        guard Self.crossingsAreConsistent(owed: penaltyTurnsOwed, direction: penaltyDirection, first: penaltyFirstCrossing,
+                                          locked: penaltyDirectionLocked)
+        else { throw WireError.invalidValue("penaltyCrossings") }
     }
 }
 
@@ -478,6 +539,7 @@ public enum SnapshotFields {
         "boat.status", "boat.legIndex", "boat.roundingStage",
         "boat.penaltyTurnsOwed", "boat.penaltyProgress", "boat.penaltyClockTick", "boat.isTacking", "boat.boomSide",
         "boat.isPlaning", "boat.spinnaker", "boat.averagedWindSpeed", "boat.roll", "boat.tackCrossingTick",
+        "boat.penaltyDirection", "boat.penaltyFirstCrossing", "boat.penaltyDirectionLocked",
         "heldInput.rudder", "heldInput.ease",
     ]
 
@@ -495,6 +557,7 @@ public enum SnapshotFields {
         "boat.shadow": "derived: recomputed from the fleet at the start of every step",
         "boat.finishTime": "event state (`EventState`, from Resync and the reliable `finished` event), applied with every snapshot",
         "boat.place": "event state (`EventState`, from Resync and the reliable `finished` event), applied with every snapshot",
+        "boat.penaltyCrossingHeld": "a prediction's alone (#96, #487): its second crossing of a `tackAndGybe` turn, held for the server's `penaltyServed`; the server never holds one, so `WireSeat.apply` clears it and the prediction holds its own again as it sails on",
         "boat.queuedPenaltyCallTicks": "a queued penalty turn's call tick starts its clock only under `fromCall` stacking (rules schema 1 and 2); under `sequential`, every hosted race's, its clock starts when it becomes current. The wire carries the current turn's clock (`boat.penaltyClockTick`); the receiver keeps its own queue, trimmed to the turns owed (`WireSeat.apply`) (#89)",
     ]
 }

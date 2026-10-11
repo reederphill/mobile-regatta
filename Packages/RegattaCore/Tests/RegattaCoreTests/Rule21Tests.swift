@@ -66,4 +66,28 @@ import Testing
         let turning = try Self.call(offWind: .pi / 2, edit: penalised(progress: deg2rad(45)))
         #expect(turning?.rule == .takingAPenalty && turning?.offender == 0 && turning?.victim == 1)
     }
+
+    /// Under a `tackAndGybe` penalty (#487, fleet-rules@6), 21.2 binds her from the turn's first counting crossing
+    /// until it is served: owing a turn with no crossing made she keeps her rights; with its first crossing made she
+    /// keeps clear; between owed turns (one served, its way kept for the next, no crossing yet) she keeps her rights
+    /// again. `Boat.isTakingPenalty` reads the state, whatever the race's rules.
+    @Test func takingAPenaltyFromTheFirstCrossingUntilServed() throws {
+        func penalised(direction: Int, first: PenaltyCrossing?, locked: Bool = false) -> (inout WorldSnapshot) -> Void {
+            { snapshot in
+                snapshot.seats[0].boat.penaltyTurnsOwed = 1
+                snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+                snapshot.seats[0].boat.penaltyDirection = direction
+                snapshot.seats[0].boat.penaltyFirstCrossing = first
+                snapshot.seats[0].boat.penaltyDirectionLocked = locked
+            }
+        }
+        let owing = try Self.call(offWind: .pi / 2, edit: penalised(direction: 0, first: nil))
+        #expect(owing?.rule == .windwardLeeward && owing?.offender == 1)
+        for first in PenaltyCrossing.allCases {
+            let crossed = try Self.call(offWind: .pi / 2, edit: penalised(direction: -1, first: first))
+            #expect(crossed?.rule == .takingAPenalty && crossed?.offender == 0 && crossed?.victim == 1, "\(first)")
+        }
+        let between = try Self.call(offWind: .pi / 2, edit: penalised(direction: 1, first: nil, locked: true))
+        #expect(between?.rule == .windwardLeeward && between?.offender == 1)
+    }
 }

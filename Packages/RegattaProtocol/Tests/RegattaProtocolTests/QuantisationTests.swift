@@ -53,6 +53,9 @@ let wireFieldBounds: [String: @Sendable (WorldSnapshot.Seat, WorldSnapshot.Seat)
         default: return false
         }
     },
+    "boat.penaltyDirection": { $0.boat.penaltyDirection == $1.boat.penaltyDirection },
+    "boat.penaltyFirstCrossing": { $0.boat.penaltyFirstCrossing == $1.boat.penaltyFirstCrossing },
+    "boat.penaltyDirectionLocked": { $0.boat.penaltyDirectionLocked == $1.boat.penaltyDirectionLocked },
     "heldInput.rudder": { $0.heldInput.rudder == $1.heldInput.rudder },
     "heldInput.ease": { $0.heldInput.ease == $1.heldInput.ease },
 ]

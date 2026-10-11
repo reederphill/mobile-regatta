@@ -83,7 +83,8 @@ public struct RuleCall: Sendable, Hashable, Codable {
     public let turnsOwed: Int
     /// The tick by which the offender must have started her penalty turn, when its clock is fixed at the call:
     /// always under `fromCall` stacking, and under `sequential` when she owed nothing before it. Nil when the
-    /// turn queues behind an earlier owed one, whose completion starts its clock. The boat's penalty state is
+    /// turn queues behind an earlier owed one, whose completion starts its clock, or (#487, fleet-rules@6) when she is
+    /// rounding a mark, its clock pending until she is clear of it. The boat's penalty state is
     /// the source of truth (`Race.owedPenalty(ofSeat:)`).
     public let startDeadlineTick: Int?
     /// The tick by which she must have completed it; nil exactly when `startDeadlineTick` is.
