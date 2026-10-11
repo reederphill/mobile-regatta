@@ -1,4 +1,5 @@
 import Foundation
+import RegattaBots
 import RegattaCore
 import RegattaProtocol
 @testable import RegattaServerKit
@@ -39,7 +40,7 @@ import Testing
             // The fleet by seat: the humans by name rated 1500 (#151 later), the bots labelled and unrated, everyone in a
             // livery, sail numbers unique.
             #expect(briefing.fleet.count == 10)
-            #expect(briefing.fleet.map(\.name) == ["P0", "P1"] + (3...10).map { "Seat \($0)" })
+            #expect(briefing.fleet.map(\.name) == ["P0", "P1"] + FleetRoster(setup: fleet.setup).entries.dropFirst(2).compactMap(\.sailingName))
             #expect(briefing.fleet.map(\.isBot) == [false, false] + Array(repeating: true, count: 8))
             #expect(briefing.fleet.map(\.rating) == [1500, 1500] + Array(repeating: nil, count: 8))
             #expect(briefing.fleet[0].livery == Self.ownLivery)
@@ -59,6 +60,43 @@ import Testing
             }
             #expect(!String(decoding: frame, as: UTF8.self).contains(String(seed, radix: 16)))
         }
+    }
+
+    /// #149: a bot shows under her sailing name with the bot label, in the free starter livery her seat's seed draws
+    /// (the seed the client draws it from), and with no rating; a human's rating is the one the fleet's median came from.
+    @Test func botsHaveSailingNamesTheSeedsLiveryAndNoRating() async throws {
+        let clock = VirtualClock(), log = LaunchLog()
+        let queue = QueueMatchmaker(settings: QueueSettings(), registry: RaceRegistry(),
+                                    draw: RaceDraw(pairings: OnlinePairing.bundled(), seeds: FixtureWindSeedPools(poolSize: 8)),
+                                    tokenKey: QueueMatchmakerTests.key, tokenLifetime: 600, random: SeededRandom(seed: 149),
+                                    now: { clock.now },
+                                    ratings: { $0.teamPlayerID == "T:0" ? 1720 : 1480 },
+                                    launch: { fleet, closed in try await log.record(fleet, closed) })
+        for index in 0..<3 { try await queue.join(QueueMatchmakerTests.player(index)) }
+        clock.advance(60)
+        await queue.step()
+        let fleet = try #require(await log.fleets.first)
+        let briefing = try #require(try await queue.handOff(for: "T:1").briefing)
+        let catalogue = try #require(OnlineBriefing.catalogue)
+        let setup = fleet.setup
+        #expect(briefing.fleet.count == 10)
+        #expect(briefing.fleet.prefix(3).map(\.rating) == [1720, 1480, 1480])
+        #expect(briefing.fleet.prefix(3).allSatisfy { !$0.isBot })
+        let names = FleetRoster(setup: setup)
+        for seat in 3..<10 {
+            let bot = briefing.fleet[seat]
+            #expect(bot.isBot && bot.rating == nil)
+            #expect(bot.name == names[seat].sailingName && FleetRoster.sailingNames.contains(bot.name))
+            let drawn = try #require(catalogue.botLivery(boatClass: setup.boatClass.id, seed: botSeed(raceSeed: setup.raceSeed, seat: seat)))
+            // Hers but for the sail number, which the fleet may have moved (#21).
+            #expect(bot.livery.design == drawn.design && bot.livery.colours == drawn.colours)
+            let design = try #require(catalogue.designs(for: setup.boatClass.id).first { $0.id == bot.livery.design })
+            #expect(design.acquisition.isFree)
+        }
+        #expect(Set(briefing.fleet.map(\.name)).count == 10)
+        #expect(Set(briefing.fleet.map(\.livery.sailNumber)).count == 10)
+        // Every human gets the same fleet.
+        #expect(try await queue.handOff(for: "T:0").briefing?.fleet == briefing.fleet)
     }
 
     /// A rejoin's hand-off has no briefing: the briefing is over by the gun.

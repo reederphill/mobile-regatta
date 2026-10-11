@@ -291,6 +291,10 @@ public actor RaceHost {
         return (fill + taken).sorted { $0.seat < $1.seat }
     }
 
+    /// The bots' sailing names as they stand (#149): the setup's bot seats and each seat taken over since. Their
+    /// liveries are `BotDressing.livery(seat:catalogue:)` (#159 puts them on the wire).
+    public var botDressing: BotDressing { dressing }
+
     /// Whether the player at `seat` left (#16): her seat can't be rejoined.
     public func hasLeft(seat: Int) -> Bool { gone.indices.contains(seat) && gone[seat]?.kind == .left }
 

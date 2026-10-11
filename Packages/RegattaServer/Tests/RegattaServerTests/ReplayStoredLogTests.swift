@@ -43,6 +43,43 @@ extension RaceSims {
             #endif
         }
 
+        /// #149, ADR 0002: a race with a seat given up before the gun, the bot's inputs in its log from where she took
+        /// the boat, replays to the stored digest without a brain: in this process and in a new one.
+        @Test func aPreGunTakeoverReplaysToTheStoredDigestInNewProcess() async throws {
+            let rig = LifecycleRig(settings: LifecycleRig.quickGrace())
+            let race = try await rig.race(["T:0", "T:1"], seats: 6, startSequenceTicks: 150)
+            let transports = [KeptTransport(), KeptTransport()]
+            for seat in 0..<2 { try await race.join(seat: seat, transport: transports[seat]) }
+            var seq: UInt32 = 0
+            await rig.sail(race, [0, 1], to: -90, seq: &seq)
+            #expect(await race.quit(seat: 1, transport: transports[1]))
+            await rig.sail(race, [0], to: 200, seq: &seq)
+            await race.leave(seat: 0, transport: transports[0])
+            await rig.runUntilEnded(race, limit: 800)
+            await rig.end(race)
+            let stored = try #require(try await rig.archive.closedRace(race.id))
+
+            let log = try RaceLog(jsonData: stored.log)
+            // The setup still gives the seat to a player; the log says who sailed it from when.
+            #expect(log.header.setup.seats == [.human, .human, .bot, .bot, .bot, .bot])
+            #expect(log.seatEvents.filter { $0.seat == 1 }.map(\.kind) == [.joined(.human), .leftBeforeGun, .botTookOver(.fleet)])
+            #expect(log.seatEvents.first { $0.kind == .leftBeforeGun }?.tick == -90)
+            // Her inputs before the leave, the bot's after it, and the fill bots' all through.
+            #expect(log.inputs.contains { $0.seat == 1 && $0.tick > -90 })
+            #expect(Set(log.inputs.map(\.seat)).isSuperset(of: [1, 2, 3, 4, 5]))
+            #expect(stored.bots.map(\.source) == [.takeover, .fill, .fill, .fill, .fill])
+            // Nothing of the bots but their inputs is in the log: no skill, rating or map.
+            let text = String(decoding: stored.log, as: UTF8.self)
+            for word in ["skill", "rating", "mapVersion", "handling"] { #expect(!text.contains(word)) }
+            #expect(try Replayer.digest(of: log) == stored.digest)
+
+            #if os(macOS) || os(Linux)
+            let (status, printed) = try replay(stored.log)
+            #expect(status == 0)
+            #expect(printed == hex64(stored.digest))
+            #endif
+        }
+
         @Test func aLogFromAnotherSimulationVersionIsRefused() async throws {
             let stored = try await storedRace()
             let text = String(decoding: stored.log, as: UTF8.self)

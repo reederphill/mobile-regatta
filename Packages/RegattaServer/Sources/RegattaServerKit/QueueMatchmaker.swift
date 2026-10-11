@@ -2,11 +2,14 @@ import Crypto
 import Foundation
 import Persistence
 import RaceHost
+import RegattaBots
 import RegattaCore
+import RegattaProtocol
 import RegattaServices
 
 // The one global queue (#16, #146): players join and leave freely; the fleet locks when 16 humans are queued, or 60 s
-// after the oldest joined, or later to catch a running race's finishers (G2, #147); bots fill it to 10 boats; one fleet
+// after the oldest joined, or later to catch a running race's finishers (G2, #147); bots fill it to 10 boats, each rated
+// at the fleet's median human rating give or take 150 (#19, #149, `FleetFill`); one fleet
 // fills at a time. Suspended, failed-attestation and cooling-down players are refused (#147, `RestrictionStore`); a human
 // who leaves between lock and gun counts towards the cooldown (`BriefingLeaveTracker`). A full server draws nothing, and a
 // race that can't start is tried again with a growing delay, then its fleet dropped (`LaunchRetry`, #469). At lock the race is drawn (venue ×
@@ -23,7 +26,7 @@ public struct QueueSettings: Sendable, Equatable {
     public var fleetCap = 16
     /// Seconds from the oldest entry's join to fleet lock.
     public var lockAfter: TimeInterval = 60
-    /// Boats a race has at least: bots fill the seats after the humans' (stub bots until #149).
+    /// Boats a race has at least: bots fill the seats after the humans' (#149: at the fleet's level, `FleetFill`).
     public var botFloor = 10
     /// Rating bands split the queue only when more than this many are queued (#146; the bands are a later ticket's).
     public var bandsAbove = 16
@@ -79,14 +82,40 @@ public struct LockedFleet: Sendable {
     /// In seat order: seat `i` is `humans[i]`; the seats after them are bots.
     public let humans: [AccountPlayer]
     public let drawn: DrawnRace
+    /// Each human's rating at lock, in seat order (`RatingSource`; 1500 for everyone until #151).
+    public let ratings: [Int]
+    /// The fleet's bots (#149): rated at the median of `ratings`, give or take 150.
+    public let fill: FleetFill
     /// Hears each human who leaves the race before the gun (the queue's briefing-leave count, #147).
     public var onBriefingLeave: (@Sendable (BriefingLeave) -> Void)?
+    /// Hears each human who leaves the race for good after the gun (#149): the queue frees her.
+    public var onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)?
 
-    /// The roster name of `seat`: the humans by name in seat order, the bots after them "Seat n" (stub names until #149).
-    public static func seatName(_ seat: Int, humans: [String]) -> String {
-        seat < humans.count ? humans[seat] : "Seat \(seat + 1)"
+    public init(raceID: UUID, setup: RaceSetup, windSeed: WindSeed, humans: [AccountPlayer], drawn: DrawnRace, ratings: [Int]? = nil) {
+        self.raceID = raceID
+        self.setup = setup
+        self.windSeed = windSeed
+        self.humans = humans
+        self.drawn = drawn
+        let ratings = ratings ?? Array(repeating: OnlineBriefing.provisionalRating, count: humans.count)
+        self.ratings = ratings
+        fill = FleetFill(humanRatings: ratings, fallback: OnlineBriefing.provisionalRating)
+    }
+
+    /// A race's roster at fleet lock (#149): the humans by name in seat order (`humans[i]` in seat `i`), each bot seat
+    /// under its sailing name (`BotDressing`, what a client derives from the setup alone) and marked a bot.
+    public static func roster(setup: RaceSetup, humans: [String]) -> [RosterEntry] {
+        let dressing = BotDressing(setup: setup)
+        return setup.seats.indices.map { seat in
+            if let name = dressing.names[seat] { return RosterEntry(name: name, colorIndex: seat, isBot: true) }
+            return RosterEntry(name: humans.indices.contains(seat) ? humans[seat] : "Seat \(seat + 1)", colorIndex: seat)
+        }
     }
 }
+
+/// A player's rating, for the fleet's median (#149) and the briefing. #151 supplies the real one; until then nobody
+/// passes one and everyone is `OnlineBriefing.provisionalRating`. One that throws counts as that rating too.
+public typealias RatingSource = @Sendable (AccountPlayer) async throws -> Int
 
 /// Starts a locked fleet's race; calls `closed` once when it closes. Throws if it can't be started.
 public typealias RaceLauncher = @Sendable (_ fleet: LockedFleet, _ closed: @escaping @Sendable () -> Void) async throws -> Void
@@ -199,6 +228,8 @@ public actor QueueMatchmaker {
     private let runningRaces: (any RunningRaces)?
     /// Each human's stored livery (#21), for the briefing; nil, or none stored: a starter livery.
     private let liveries: LiverySource?
+    /// Each human's rating (#149, #151); nil: everyone's is the provisional rating.
+    private let ratings: RatingSource?
     /// Hears each seat the queue frees before its race closes (the lifecycle's, #469); nil: nobody.
     private let seatReleased: SeatReleased?
     /// Each watched, queued or locked player's restrictions as last read from the store: what the queue shows and
@@ -224,7 +255,7 @@ public actor QueueMatchmaker {
                 random: SeededRandom = .system(), now: @escaping @Sendable () -> Date = { Date() },
                 bands: @escaping RatingBands = { [$0] },
                 restrictions: any RestrictionStore = InMemoryRestrictionStore(), runningRaces: (any RunningRaces)? = nil,
-                liveries: LiverySource? = nil, seatReleased: SeatReleased? = nil,
+                liveries: LiverySource? = nil, ratings: RatingSource? = nil, seatReleased: SeatReleased? = nil,
                 launch: RaceLauncher? = nil) {
         self.settings = settings
         self.registry = registry
@@ -237,6 +268,7 @@ public actor QueueMatchmaker {
         self.restrictions = restrictions
         self.runningRaces = runningRaces
         self.liveries = liveries
+        self.ratings = ratings
         self.seatReleased = seatReleased
         briefingLeaves = BriefingLeaveTracker(store: restrictions, rule: settings.briefingLeaves, now: now)
         self.launch = launch ?? Self.registryLauncher(registry)
@@ -245,7 +277,9 @@ public actor QueueMatchmaker {
     /// Starts each race on `registry`, on the wall clock.
     public static func registryLauncher(_ registry: RaceRegistry) -> RaceLauncher {
         { fleet, closed in
-            let session = RaceSession(id: fleet.raceID, setup: fleet.setup, windSeed: fleet.windSeed)
+            let session = RaceSession(id: fleet.raceID, setup: fleet.setup, windSeed: fleet.windSeed,
+                                      roster: LockedFleet.roster(setup: fleet.setup, humans: fleet.humans.map(\.alias)),
+                                      onBriefingLeave: fleet.onBriefingLeave, fleet: fleet.fill, onLeftAfterGun: fleet.onLeftAfterGun)
             try await registry.start(session) { _ in closed() }
         }
     }
@@ -424,12 +458,14 @@ public actor QueueMatchmaker {
             launchFailed(fleet, error)
             return
         }
-        var locked = LockedFleet(raceID: raceID, setup: setup, windSeed: drawn.windSeed, humans: humans, drawn: drawn)
-        locked.onBriefingLeave = { leave in Task { await self.briefingLeave(raceID, leave) } }
         // While the race starts (the actor is free meanwhile) the fleet shows as queued with nothing left on the clock:
         // `.fleetLocked` and the hand-off come only once its race is in the registry, so a token always finds its race.
         for player in humans { starting[player.teamPlayerID] = humans.count }
         races[raceID] = humans.map(\.teamPlayerID)
+        var locked = LockedFleet(raceID: raceID, setup: setup, windSeed: drawn.windSeed, humans: humans, drawn: drawn,
+                                 ratings: await ratings(of: humans))
+        locked.onBriefingLeave = { leave in Task { await self.briefingLeave(raceID, leave) } }
+        locked.onLeftAfterGun = { seat in Task { await self.releaseSeat(raceID, seat: seat) } }
         do {
             try await launch(locked) { Task { await self.raceClosed(raceID) } }
         } catch {
@@ -484,6 +520,22 @@ public actor QueueMatchmaker {
         FileHandle.standardError.write(Data("RegattaServer: a race couldn't start (failure \(launchFailures)); next try in \(Int(delay)) s (\(players)): \(error)\n".utf8))
     }
 
+    /// Each human's rating, in seat order, for the fleet's median and the briefing (#149). One the source can't give
+    /// (it throws, or takes longer than a restrictions read may) is the provisional rating: a fleet never waits on it.
+    private func ratings(of humans: [AccountPlayer]) async -> [Int] {
+        guard let source = ratings else { return Array(repeating: OnlineBriefing.provisionalRating, count: humans.count) }
+        var read: [Int] = []
+        for player in humans {
+            do {
+                read.append(try await withDeadline(settings.restrictionReadTimeout) { try await source(player) })
+            } catch {
+                FileHandle.standardError.write(Data("RegattaServer: can't read the rating of \(player.teamPlayerID): \(error)\n".utf8))
+                read.append(OnlineBriefing.provisionalRating)
+            }
+        }
+        return read
+    }
+
     /// A human left the race between lock and gun (#147): it counts towards her cooldown. One who left for good is free
     /// to queue again at once (after any cooldown); one whose seat was empty at the gun can still rejoin it (#66).
     func briefingLeave(_ raceID: UUID, _ leave: BriefingLeave) async {
@@ -497,9 +549,10 @@ public actor QueueMatchmaker {
 
     /// The player in `seat` of the race gave it up for good: she is free to queue again at once, and the lifecycle
     /// hears that the race is no longer hers (#469), so its close can't touch the race she queues into next. Called
-    /// for a leave before the gun; #149's `leaveRace` after the gun calls it too (until then such a player stays
-    /// `.fleetLocked` to the close). Nothing for a seat already released.
+    /// for a leave before the gun (after it is counted), and for a `LeaveRace` after the gun (#149,
+    /// `LockedFleet.onLeftAfterGun`), which counts nothing. Nothing for a seat already released.
     func releaseSeat(_ raceID: UUID, seat: Int) async {
+        defer { pushAll() }
         guard let players = races[raceID], players.indices.contains(seat), !players[seat].isEmpty else { return }
         let id = players[seat]
         races[raceID]?[seat] = ""

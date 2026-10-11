@@ -86,6 +86,45 @@ import Testing
         }
     }
 
+    /// #149: a closed race's bots are written with the close and read back as written; a cancelled race has none.
+    @Test func botsRoundTripAndACancelledRaceHasNone() async throws {
+        try await TestDatabase.withMigratedSchema { database in
+            try await Self.players(database, "T:a", "T:b")
+            let registry = RaceRegistryStore(database), results = RaceResultStore(database)
+            let bots = [
+                StoredRaceBot(seat: 1, source: .takeover, rating: 1362, skill: 0.4948, handling: 0.61, mapVersion: 1, takenTick: -1200),
+                StoredRaceBot(seat: 2, source: .fill, rating: 1650, skill: 0.65, handling: 0.4125, mapVersion: 1),
+                StoredRaceBot(seat: 3, source: .fill, rating: 1500, skill: 0.55, handling: 0.75, mapVersion: 1),
+            ]
+            let seats = [RaceSeatHolder(playerID: "T:a", seat: 0), RaceSeatHolder(playerID: "T:b", seat: 1)]
+            let race = try await registry.create(players: seats)
+            #expect(try await results.bots(of: race.id).isEmpty)
+            let base = Self.closed(race.id)
+            let record = ClosedRaceRecord(id: race.id, log: base.log, digest: base.digest, simulationVersion: base.simulationVersion,
+                                          toolchain: base.toolchain, results: base.results, incidents: base.incidents, rated: true, bots: bots)
+            try await results.close(record)
+            #expect(try await results.bots(of: race.id) == bots)
+            // The seat a bot took before the gun isn't its player's last race; the other player's is.
+            #expect(try await results.lastRace(of: "T:a")?.raceID == race.id)
+            #expect(try await results.lastRace(of: "T:b") == nil)
+
+            // A seat is a bot's once, and a source is one of the two.
+            let twice = try await registry.create()
+            let again = ClosedRaceRecord(id: twice.id, log: base.log, digest: 2, simulationVersion: "sim/1", toolchain: "swift-test",
+                                         results: base.results, incidents: base.incidents, rated: false, bots: [bots[1], bots[1]])
+            await #expect(throws: (any Error).self) { try await results.close(again) }
+            #expect(try await registry.race(twice.id)?.state == .running)
+            #expect(try await results.bots(of: twice.id).isEmpty)
+
+            // A cancelled race has none, and a race's bots go with it.
+            let cancelled = try await registry.create(players: [RaceSeatHolder(playerID: "T:a", seat: 0)])
+            try await registry.cancel(cancelled.id)
+            #expect(try await results.bots(of: cancelled.id).isEmpty)
+            try await registry.delete(race.id)
+            #expect(try await results.bots(of: race.id).isEmpty)
+        }
+    }
+
     /// A player's races go with her (G8).
     @Test func testDeletingAPlayerDeletesHerSeats() async throws {
         try await TestDatabase.withMigratedSchema { database in

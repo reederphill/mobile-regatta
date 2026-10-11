@@ -2,6 +2,7 @@ import Crypto
 import Foundation
 import Persistence
 import RaceHost
+import RegattaBots
 import RegattaCore
 import RegattaProtocol
 @testable import RegattaServerKit
@@ -320,9 +321,51 @@ extension RaceSims {
             #expect(stored.digest == outcome.digest)
             #expect(stored.simulationVersion == RegattaCore.simulationVersion && stored.toolchain == "test")
             #expect(try Replayer.digest(of: RaceLog(jsonData: stored.log)) == stored.digest)
-            let line = await collect(lines, seconds: 30) { _ in true }
-            #expect(line.count == 1)
-            if case .winner(let venue, _)? = line.first { #expect(venue == "Test Bay") } else { Issue.record("no winner line: \(line)") }
+            // Both humans retired, so a bot won: the lobby hears nothing (#149: a bot never shows in the lobby).
+            #expect(try RaceSummary(decoding: stored.results).winnerLine == nil)
+            let line = await collect(lines, seconds: 0.3) { _ in true }
+            #expect(line.isEmpty)
+        }
+
+        /// #149: a closed race stores its bots, the ones that filled the fleet and the one that took a seat before the
+        /// gun, with the rating, skill and map version each sailed at. A dropped player's covered boat isn't one, and a
+        /// cancelled race stores none.
+        @Test func aClosedRaceStoresItsBots() async throws {
+            let rig = LifecycleRig(settings: LifecycleRig.quickGrace())
+            let race = try await rig.race(["T:0", "T:1"], seats: 5)
+            let transports = [KeptTransport(), KeptTransport()]
+            for seat in 0..<2 { try await race.join(seat: seat, transport: transports[seat]) }
+            await rig.run(race, to: -30)
+            #expect(await race.quit(seat: 1, transport: transports[1]))
+            var seq: UInt32 = 0
+            await rig.sail(race, [0], to: 60, seq: &seq)
+            // Her connection goes: the boat is covered, the seat stays hers.
+            await race.leave(seat: 0, transport: transports[0])
+            await rig.runUntilEnded(race, limit: 600)
+            #expect(await race.host.outcome?.results != nil)
+            let dressing = try #require(await rig.lifecycle.botDressing(of: race.id))
+            #expect(dressing.names[0] == nil && dressing.names.dropFirst().allSatisfy { $0 != nil })
+            await rig.end(race)
+
+            let stored = try #require(try await rig.archive.closedRace(race.id))
+            let fleet = FleetFill(medianRating: 1500)
+            #expect(stored.bots.map(\.seat) == [1, 2, 3, 4])
+            #expect(stored.bots.map(\.source) == [.takeover, .fill, .fill, .fill])
+            #expect(stored.bots.map(\.takenTick) == [-30, nil, nil, nil])
+            for bot in stored.bots {
+                let plan = fleet.plan(seat: bot.seat, raceSeed: race.setup.raceSeed)
+                #expect(bot.rating == plan.rating && bot.skill == plan.skill && bot.handling == plan.handling)
+                #expect((1350...1650).contains(bot.rating) && bot.mapVersion == BotRatingMap.currentVersion)
+            }
+            // The race she left before the gun was a bot's to sail: never her last race. The other player's it is.
+            #expect(try await rig.lifecycle.lastRace(of: "T:1") == nil)
+            #expect(try await rig.lifecycle.lastRace(of: "T:0")?.report.raceID == RaceResultsFeed.raceID(race.id))
+            #expect(await rig.lifecycle.botDressing(of: race.id) == nil)
+
+            let cancelled = try await rig.race(["T:2"], seats: 4)
+            await rig.lifecycle.cancel(cancelled.id)
+            await rig.end(cancelled)
+            #expect(try await rig.archive.closedRace(cancelled.id) == nil)
         }
     }
 }

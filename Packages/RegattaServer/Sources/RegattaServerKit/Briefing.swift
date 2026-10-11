@@ -1,5 +1,6 @@
 import Crypto
 import Foundation
+import RegattaBots
 import RegattaCore
 import RegattaProtocol
 import RegattaServices
@@ -10,14 +11,16 @@ import RegattaServices
 /// A player's stored livery (#21), nil if she has none: the profile store's, once the server has one.
 public typealias LiverySource = @Sendable (AccountPlayer) async -> Livery?
 
-enum OnlineBriefing {
-    /// Until ratings exist (#151), every human's.
-    static let provisionalRating = 1500
+public enum OnlineBriefing {
+    /// Until ratings exist (#151), every human's: what `RatingSource` gives when nobody supplies one, or it fails.
+    public static let provisionalRating = 1500
     static let catalogue: LiveryCatalogue? = try? LiveryCatalogueFile.bundled(id: "livery-catalogue", version: 1).content
 
     /// One payload per human, in seat order. `stored` is each human's own livery, if she has one; the rest get a starter
-    /// livery (stable per player), the bots a drawn one (from the race seed). Sail numbers are the fleet's (#21: a shared
-    /// number shows another for this race).
+    /// livery (stable per player); a bot wears her seat's (`BotDressing.livery`, from `botSeed(raceSeed:seat:)`, the
+    /// seed the client draws a bot's livery from), under her sailing name, with no rating (#19, #149). A human's rating
+    /// is the fleet's (`LockedFleet.ratings`, the one the bots' median came from). Sail numbers are the fleet's (#21: a
+    /// shared number shows another for this race).
     static func payloads(_ fleet: LockedFleet, stored: [Livery?], settings: QueueSettings) -> [BriefingPayload] {
         let setup = fleet.setup
         let boatClass = setup.boatClass.id
@@ -26,13 +29,14 @@ enum OnlineBriefing {
                 if let own = stored.indices.contains(seat) ? stored[seat] : nil { return own }
                 return catalogue?.newPlayerLivery(boatClass: boatClass, seed: stableSeed(fleet.humans[seat].teamPlayerID)) ?? fallback(seat)
             }
-            return catalogue?.botLivery(boatClass: boatClass, seed: setup.raceSeed.value &+ UInt64(seat)) ?? fallback(seat)
+            return catalogue.flatMap { BotDressing.livery(seat: seat, raceSeed: setup.raceSeed, boatClass: boatClass, catalogue: $0) }
+                ?? fallback(seat)
         }
         for (seat, number) in LiveryCatalogue.raceSailNumbers(liveries.map(\.sailNumber)).enumerated() { liveries[seat].sailNumber = number }
-        let names = fleet.humans.map(\.alias)
+        let roster = LockedFleet.roster(setup: setup, humans: fleet.humans.map(\.alias))
         let seats = setup.seats.indices.map { seat in
-            BriefingSeat(name: LockedFleet.seatName(seat, humans: names), isBot: setup.seats[seat] == .bot, livery: liveries[seat],
-                         rating: setup.seats[seat] == .bot ? nil : provisionalRating)
+            BriefingSeat(name: roster[seat].name, isBot: roster[seat].isBot, livery: liveries[seat],
+                         rating: roster[seat].isBot ? nil : (fleet.ratings.indices.contains(seat) ? fleet.ratings[seat] : provisionalRating))
         }
         return fleet.humans.indices.map { seat in
             BriefingPayload(setup: setup, tide: .none, fleet: seats, yourSeat: seat,
