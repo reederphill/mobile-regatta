@@ -258,7 +258,15 @@ import Glibc
 ///    Rule 21.2 binds her from the first counting crossing until the turn is served. Races sail fleet-rules@6 by
 ///    default (#490), so every default race's penalty turn is a tack and a gybe; a race naming fleet-rules@5 or older
 ///    sails as on 37, bit for bit (the new state is hashed only under `tackAndGybe`).
-public let simulationRevision = 38
+/// 39: skiff@9 (#462), on 38: a bad gybe, a run too deep and a lull take her off the plane. Boat class schema 4 adds
+///    `planing.stayOnSpeedShare` (absent: none; on the plane with the apparent wind aft of `onMaxAWADegrees` she drops
+///    off below that share of the polar's speed at her angle and wind) and `planing.apparentWind` (absent: none; with
+///    the rudder within `rudderWithin` of centre she drops off with the apparent wind under `offKnots`, and gets on
+///    only with `onKnots` or more). The rule reads her rudder and the polar and keeps no state: boats, the digest's
+///    fields, snapshots and the wire are as on 38. skiff@9 sails 0.70 and 4.0 / 4.5 kn / 0.2 at every wind strength.
+///    Races still sail skiff@8 by default; a race naming it or any older class sails as on 38, bit for bit, and the
+///    golden digest is 38's.
+public let simulationRevision = 39
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
