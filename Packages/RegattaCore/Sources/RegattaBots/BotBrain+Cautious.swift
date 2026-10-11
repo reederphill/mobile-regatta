@@ -137,7 +137,10 @@ extension BotBrain {
         let owedProgress = b.penalty?.progress
         if b.penaltyTurnsOwed != 0 {
             // As `penaltyInput` gives a turn up: in its first half, not after giving it up, while she can turn it again.
-            guard let owed = b.penalty, !penaltyGivenUp, owed.progress < .pi, canGiveUpTurn(owed, b, view) else { return nil }
+            // Under fleet-rules@6 (#488) turning back costs nothing: she looks while she has time for what is left.
+            guard let owed = b.penalty,
+                  Self.turnsByCrossings(view) ? hasTimeToTurnLater(owed, b, view)
+                      : !penaltyGivenUp && owed.progress < .pi && canGiveUpTurn(owed, b, view) else { return nil }
         }
         let hull = view.boatClass.hull
         let clear = hull.length * Self.guardLengths

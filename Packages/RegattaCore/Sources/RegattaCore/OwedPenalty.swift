@@ -30,9 +30,13 @@ public struct OwedPenalty: Sendable, Equatable {
     /// Under a `tackAndGybe` penalty (#487): the way the current turn goes, +1 to starboard, −1 to port, 0 before
     /// its way is set (`Boat.penaltyDirection`). Always 0 under a `fullCircle` penalty.
     public let direction: Int
+    /// Under a `tackAndGybe` penalty: whether `direction` is the first served turn's of this sequence, which every
+    /// later turn goes (RRS 44.2, `Boat.penaltyDirectionLocked`): a crossing back then only undoes the turn's first,
+    /// never turns it round (#488's bots read it). Always false under a `fullCircle` penalty.
+    public let isDirectionLocked: Bool
 
     public init(turnsOwed: Int, startDeadlineTick: Int, completeDeadlineTick: Int, progress: Double, isStarted: Bool,
-                hasTacked: Bool = false, hasGybed: Bool = false, direction: Int = 0) {
+                hasTacked: Bool = false, hasGybed: Bool = false, direction: Int = 0, isDirectionLocked: Bool = false) {
         self.turnsOwed = turnsOwed
         self.startDeadlineTick = startDeadlineTick
         self.completeDeadlineTick = completeDeadlineTick
@@ -41,13 +45,14 @@ public struct OwedPenalty: Sendable, Equatable {
         self.hasTacked = hasTacked
         self.hasGybed = hasGybed
         self.direction = direction
+        self.isDirectionLocked = isDirectionLocked
     }
 
     /// `boat`'s owed penalty under `penalty` at tick `now`, or nil while she owes none. A prediction's progress past a
     /// full turn (#96: the server serves it) shows just short of one until the server's word comes; under a
     /// `tackAndGybe` penalty its held second crossing shows as made, and a pending clock (#487) the whole limit from
-    /// `now` (without `now`, nil).
-    public init?(_ boat: Boat, penalty: RulesConfig.Penalty, now: Int? = nil) {
+    /// `now`.
+    public init?(_ boat: Boat, penalty: RulesConfig.Penalty, now: Int) {
         guard boat.penaltyTurnsOwed > 0 else { return nil }
         let pending = boat.penaltyClockTick == nil
         guard let clock = boat.penaltyClockTick ?? (penalty.turn == .tackAndGybe ? now : nil) else { return nil }
@@ -61,7 +66,8 @@ public struct OwedPenalty: Sendable, Equatable {
             let first = boat.penaltyFirstCrossing, held = boat.penaltyCrossingHeld
             self.init(turnsOwed: boat.penaltyTurnsOwed, startDeadlineTick: complete, completeDeadlineTick: complete,
                       progress: 0, isStarted: first != nil || held,
-                      hasTacked: held || first == .tack, hasGybed: held || first == .gybe, direction: boat.penaltyDirection)
+                      hasTacked: held || first == .tack, hasGybed: held || first == .gybe, direction: boat.penaltyDirection,
+                      isDirectionLocked: boat.penaltyDirectionLocked)
         }
         isClockPending = pending
     }

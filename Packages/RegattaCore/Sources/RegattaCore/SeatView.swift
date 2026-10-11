@@ -69,6 +69,9 @@ public struct SeatView: Sendable, Equatable {
 
     /// The class every boat sails (ADR 0004): hull, polar and handling, all public.
     public let boatClass: BoatClass
+    /// The race's penalty turn (the rules file's `raceFormat.penalty.turn`, #487): a full circle, or one tack and one
+    /// gybe. Public, as the rules are: the bots sail each its own way (#488).
+    public let penaltyKind: RulesConfig.PenaltyTurn
 
     /// The tide forecast (ADR 0003, #78) over race ticks `window` for `points` and every wet node: what the
     /// briefing shows, worked out from the public `current`.
@@ -90,7 +93,7 @@ public struct SeatView: Sendable, Equatable {
 
         let zone = shared.course.markZone(of: boat, hull: boat.hull(outline: boatClass.hull.outline))
         own = OwnBoat(boat, ease: race.heldInputs[seat].ease, boatClass: boatClass, penalty: race.rules.raceFormat.penalty,
-                      zone: zone.map(Zone.init), markRoom: race.markRoomNotices(of: seat),
+                      now: race.tick, zone: zone.map(Zone.init), isRounding: race.isRounding(boat), markRoom: race.markRoomNotices(of: seat),
                       properCourse: race.properCourseNotice(of: seat, course: shared.course, boatClass: boatClass))
         let rights = race.rightsOfWay(of: seat)
         var others: [OtherBoat] = []
@@ -114,6 +117,7 @@ public struct SeatView: Sendable, Equatable {
         laylines = Laylines(for: shared.course.legSailed(status: boat.status, legIndex: boat.legIndex), in: shared.course,
                             polar: boatClass.polar, wind: race.heldGroundWind(at:))
         self.boatClass = boatClass
+        penaltyKind = race.rules.raceFormat.penalty.turn
     }
 
     /// This view with her own autohelm's reading as `reading`: for a class whose autohelm doesn't hold a centred rudder
@@ -216,6 +220,11 @@ public struct SeatView: Sendable, Equatable {
         /// The zone of the mark rule 18 tests her against (#91, #101), as the scene draws it around the mark; nil
         /// unless she is racing.
         public let zone: Zone?
+        /// Whether she is rounding a mark as the race counts it for a `tackAndGybe` penalty (#487, `Race.isRounding`):
+        /// racing, some of her hull in the zone of a mark her leg rounds or of the one she has just rounded, where her
+        /// penalty turn's crossings count for nothing. Wider than `zone`, which is the one mark rule 18 tests her
+        /// against: a bot reads it to sail her turn's crossings outside (#488).
+        public let isRounding: Bool
         /// The mark-room notices told her (#91, #101): each rule 18 record naming her, while it lasts. The umpire's
         /// alone, so none in a prediction (ADR 0005).
         public let markRoom: [MarkRoomNotice]
@@ -224,8 +233,8 @@ public struct SeatView: Sendable, Equatable {
         /// umpire's alone, so nil in a prediction (ADR 0005), and nil while no record names her leeward.
         public let properCourse: ProperCourseNotice?
 
-        init(_ boat: Boat, ease: Bool, boatClass: BoatClass, penalty: RulesConfig.Penalty, zone: Zone?,
-             markRoom: [MarkRoomNotice], properCourse: ProperCourseNotice?) {
+        init(_ boat: Boat, ease: Bool, boatClass: BoatClass, penalty: RulesConfig.Penalty, now: Int, zone: Zone?,
+             isRounding: Bool, markRoom: [MarkRoomNotice], properCourse: ProperCourseNotice?) {
             position = boat.position
             heading = boat.heading
             speed = boat.speed
@@ -238,7 +247,7 @@ public struct SeatView: Sendable, Equatable {
             legIndex = boat.legIndex
             roundingStage = boat.roundingStage
             penaltyTurnsOwed = boat.penaltyTurnsOwed
-            self.penalty = OwedPenalty(boat, penalty: penalty)
+            self.penalty = OwedPenalty(boat, penalty: penalty, now: now)
             windOverGround = boat.windOverGround
             sailingWind = boat.sailingWind
             shadow = boat.shadow
@@ -246,6 +255,7 @@ public struct SeatView: Sendable, Equatable {
             grooveWindSpeed = boat.grooveWindSpeed(in: boatClass)
             speedShadow = boat.speedShadow(in: boatClass)
             self.zone = zone
+            self.isRounding = isRounding
             self.markRoom = markRoom
             self.properCourse = properCourse
         }

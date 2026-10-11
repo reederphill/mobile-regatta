@@ -220,8 +220,12 @@ extension BotBrain {
         let luffing = turn * b.relativeWind > 0
         // "Speed before the tack": luffing up from a reach, slow, she takes rudder off to gather way.
         let build = HandTackTable.penaltyBuild
-        // Not when the turn is whole before she is head to wind: there is no tack to gather way for.
-        if luffing, 2 * .pi - owed.progress > b.twa, b.twa >= closeHauled + HandTackTable.penaltyLuffMargin, b.twa < build.from,
+        // Not when the turn is whole before she is head to wind: there is no tack to gather way for (under fleet-rules@6,
+        // #488: when this way's turn has its tack).
+        let tackToCome = Self.turnsByCrossings(view)
+            ? !owed.hasTacked || Double(owed.direction) != turn
+            : 2 * .pi - owed.progress > b.twa
+        if luffing, tackToCome, b.twa >= closeHauled + HandTackTable.penaltyLuffMargin, b.twa < build.from,
            b.speed < closeHauledSpeed(b, view) * build.speed {
             return build.rudder
         }
@@ -235,9 +239,121 @@ extension BotBrain {
     /// `penaltyRudder` turns her at the speed it leaves her (`HandTackTable.penaltyTurn.speed` of close-hauled, whatever
     /// she has now: the rudder's drag takes it), and `crawl` seconds more through the wind.
     func penaltyTurnSeconds(_ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        penaltyTurnSeconds(b, view, angle: 2 * .pi, throughWind: true)
+    }
+
+    /// Seconds `angle` radians of a penalty turn take her by hand, at `penaltyTurnSeconds`' rate, and the crawl through
+    /// the wind if `throughWind`: the tack is among them.
+    func penaltyTurnSeconds(_ b: SeatView.OwnBoat, _ view: SeatView, angle: Double, throughWind: Bool) -> Double {
         let table = HandTackTable.penaltyTurn
         let speed = closeHauledSpeed(b, view) * table.speed
-        return 2 * .pi / (Self.penaltyRudder(view) * view.boatClass.steering.turnRate(speed: speed)) + table.crawl
+        return angle / (Self.penaltyRudder(view) * view.boatClass.steering.turnRate(speed: speed)) + (throughWind ? table.crawl : 0)
+    }
+
+    /// Under fleet-rules@6 (#488): seconds what is left of her current turn takes her by hand turning `direction`'s
+    /// way (+1 to starboard): the angle to its crossings left (`penaltyTurnLeft`) at `penaltyTurnSeconds`' rate, and
+    /// the crawl while its tack is to come.
+    func penaltyTurnSeconds(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty, direction: Double) -> Double {
+        let left = penaltyCrossingsLeft(owed, direction: direction)
+        return penaltyTurnSeconds(b, view, angle: penaltyTurnLeft(b, owed, view, direction: direction), throughWind: left.tack)
+    }
+
+    /// "Time from what's left" (#488): seconds her current turn has left to take her, what the deadline reckonings read
+    /// (`hasTimeToTurnLater`, `markHoldLeavesTheTurn`, `startsBeforeHerTurn`, `latestStartSeconds`). Under a full-circle
+    /// penalty the whole circle (`penaltyTurnSeconds`); under fleet-rules@6 what is left of it her way (a later turn's,
+    /// the first's; else the way she turns it), or before she has one, the shorter way.
+    func penaltyTurnLeftSeconds(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        guard Self.turnsByCrossings(view) else { return penaltyTurnSeconds(b, view) }
+        if let way = penaltyWayHeld(owed) { return penaltyTurnSeconds(b, view, owed, direction: way) }
+        return min(penaltyTurnSeconds(b, view, owed, direction: -1), penaltyTurnSeconds(b, view, owed, direction: 1))
+    }
+
+    /// Under fleet-rules@6: the way her current turn goes, if it has one: a later turn's (the first turn's, RRS 44.2),
+    /// else the way she is turning it, else the way its first crossing set.
+    func penaltyWayHeld(_ owed: OwedPenalty) -> Double? {
+        if owed.isDirectionLocked, owed.direction != 0 { return Double(owed.direction) }
+        return penaltyTurn ?? (owed.direction != 0 ? Double(owed.direction) : nil)
+    }
+
+    /// Under fleet-rules@6 (#488): the counting crossings her current turn still needs, turned `direction`'s way: its
+    /// tack and gybe less the one it has made that way; the other way, both (a crossing back is the first of a turn
+    /// that way, or for a later turn undoes its first: both are to make again either way).
+    func penaltyCrossingsLeft(_ owed: OwedPenalty, direction: Double) -> (tack: Bool, gybe: Bool) {
+        owed.direction == 0 || Double(owed.direction) == direction ? (!owed.hasTacked, !owed.hasGybed) : (true, true)
+    }
+
+    /// Under fleet-rules@6 (#488): radians of turning `direction`'s way to the last of her current turn's crossings left
+    /// (`penaltyTurnAngle`), from her wind angle and side.
+    func penaltyTurnLeft(_ b: SeatView.OwnBoat, _ owed: OwedPenalty, _ view: SeatView, direction: Double) -> Double {
+        let left = penaltyCrossingsLeft(owed, direction: direction)
+        return Self.penaltyTurnAngle(twa: b.twa, luffing: direction * b.relativeWind > 0, tack: left.tack, gybe: left.gybe)
+    }
+
+    /// "Time the turn from the crossings left" (#488): radians of heading change from wind angle `twa`, `luffing` (her
+    /// turn's way towards the wind) or bearing away, to the last of the crossings she needs: a tack through head to
+    /// wind, a gybe through dead downwind. Luffing, head to wind is `twa` on and dead downwind half a circle past it;
+    /// bearing away, dead downwind is π − `twa` on and head to wind half a circle past that. From close-hauled (45°)
+    /// luffing first is 225°, bearing away first 315°; from a run (160°) gybing first is 200°, luffing first 340°.
+    static func penaltyTurnAngle(twa: Double, luffing: Bool, tack: Bool, gybe: Bool) -> Double {
+        let toTack = luffing ? twa : 2 * .pi - twa
+        let toGybe = luffing ? twa + .pi : .pi - twa
+        return max(tack ? toTack : 0, gybe ? toGybe : 0)
+    }
+
+    /// Under fleet-rules@6 (#488): whether her current turn `direction`'s way (+1 to starboard) would run into a
+    /// rounding (#487) and so not count: a crossing it still needs falls where she is rounding a mark
+    /// (`SeatView.OwnBoat.isRounding`: within the zone, and half a hull, of a mark of the element her leg rounds or of
+    /// the one she has just rounded), or her path to its last crossing completes or undoes a rounding stage
+    /// (`CourseLayout.advance`), which voids a first crossing made before it (a circle over a gate's line, or across a
+    /// mark's rounding ray outside its zone). Not the finish line: owing a turn she doesn't finish, and nothing moves on
+    /// (fix round 3: read as a rounding, a turn begun beside the line was given up and recrossed). Her path is
+    /// `turnSweep`'s arc, to each crossing's angle (`penaltyTurnAngle`).
+    func penaltyCrossingRounds(_ b: SeatView.OwnBoat, _ owed: OwedPenalty, _ view: SeatView, direction: Double) -> Bool {
+        guard b.status == .racing else { return false }
+        let course = view.course
+        let marks = [b.legIndex, b.legIndex - 1].flatMap { leg -> [Vec2] in
+            guard course.legs.indices.contains(leg), case .round(let index) = course.legs[leg] else { return [] }
+            return course.elements[index].marks.map(\.position)
+        }
+        let left = penaltyCrossingsLeft(owed, direction: direction)
+        let luffing = direction * b.relativeWind > 0
+        let angles = [left.tack ? Self.penaltyTurnAngle(twa: b.twa, luffing: luffing, tack: true, gybe: false) : nil,
+                      left.gybe ? Self.penaltyTurnAngle(twa: b.twa, luffing: luffing, tack: false, gybe: true) : nil]
+            .compactMap { $0 }.sorted()
+        guard let last = angles.last else { return false }
+        let speed = closeHauledSpeed(b, view) * HandTackTable.penaltyTurn.speed
+        let rate = Self.penaltyRudder(view) * view.boatClass.steering.turnRate(speed: speed)
+        guard rate > 0 else { return false }
+        let reach = course.zoneRadius + view.boatClass.hull.length / 2
+        let start = CourseLayout.Progress(legIndex: b.legIndex, stage: b.roundingStage)
+        var progress = start
+        var position = b.position, heading = b.heading, turned = 0.0
+        var next = angles.startIndex
+        let step = Self.turnSweepStep / 2
+        while true {
+            while next < angles.endIndex, angles[next] <= turned + 1e-9 {
+                if marks.contains(where: { ($0 - position).length <= reach }) { return true }
+                next += 1
+            }
+            guard turned < last else { return false }
+            let dt = min(step, (last - turned) / rate)
+            let from = position
+            position += Vec2.heading(heading + direction * rate * dt / 2) * (speed * dt)
+            heading += direction * rate * dt
+            turned += rate * dt
+            course.advance(&progress, from: from, to: position)
+            // Over the finish line owing a turn she doesn't finish, and nothing moves on (`Race.updateProgress`).
+            if progress != start, !progress.finished { return true }
+        }
+    }
+
+    /// Under fleet-rules@6 (#488): the way (+1 to starboard) whose turn is shorter from here (`penaltyTurnSeconds`), the
+    /// first turn's alone for a later one; even, "luff first" with way on, else her own way.
+    func shorterPenaltyWay(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty) -> Double {
+        if owed.isDirectionLocked, owed.direction != 0 { return Double(owed.direction) }
+        let port = penaltyTurnSeconds(b, view, owed, direction: -1), starboard = penaltyTurnSeconds(b, view, owed, direction: 1)
+        if abs(port - starboard) > Self.turnSweepStep { return port < starboard ? -1 : 1 }
+        return penaltyLuffFirst(b, view) ?? style.penaltyDirection
     }
 
     /// Seconds between the points `turnSweep` samples her path at (#486): a few degrees of her circle each.
@@ -306,7 +422,7 @@ extension BotBrain {
     func hasTimeToTurnLater(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         guard Self.turnsByHand(view) else { return true }
         let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
-        return left > penaltyTurnSeconds(b, view) + HandTackTable.penaltyTurn.margin
+        return left > penaltyTurnLeftSeconds(owed, b, view) + HandTackTable.penaltyTurn.margin
     }
 
     /// Whether a penalty turn held off for a mark close aboard (`startPenaltyTurn`) still leaves her the turn: always
@@ -319,7 +435,7 @@ extension BotBrain {
     func markHoldLeavesTheTurn(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         guard Self.turnsByHand(view) else { return true }
         let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
-        return left > penaltyTurnSeconds(b, view) - HandTackTable.penaltyMarkHoldShort
+        return left > penaltyTurnLeftSeconds(owed, b, view) - HandTackTable.penaltyMarkHoldShort
     }
 
     /// "Start first, then turn" (#471, the owner's ruling of 2026-10-10): called before her start, owing the one turn,
@@ -341,11 +457,15 @@ extension BotBrain {
         let angle = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).twa
         let heading = view.time > table.late ? b.heading : b.windDirection + (b.tack == .starboard ? -angle : angle)
         let cross = max(-view.time, secondsToLine(b, view, heading: heading, ease: false, within: toStart))
+        // Under fleet-rules@6 (#488) the start deadline is the complete one: she crosses by her latest start, the
+        // whole turn left and `penaltyStartMargin` to spare (`latestStartSeconds`). Read against the start deadline,
+        // a call 23 s before the gun waited for it, and the turn begun after it was 4 s short.
+        if Self.turnsByCrossings(view) { return cross <= latestStartSeconds(owed, b, view) }
         let speed = cross > table.turnIn ? max(b.speed, table.speed * closeHauledSpeed(b, view)) : b.speed
         let rate = Self.penaltyRudder(view) * view.boatClass.steering.turnRate(speed: speed)
         let turnIn = max(table.turnIn, 1 + Self.penaltyStartedAngle / rate)
         return cross + turnIn <= toStart
-            && cross + penaltyTurnSeconds(b, view) - HandTackTable.penaltyTurn.crawl + table.spare <= toComplete
+            && cross + penaltyTurnLeftSeconds(owed, b, view) - HandTackTable.penaltyTurn.crawl + table.spare <= toComplete
     }
 
     /// "Tack while she has the speed": the way (+1 to starboard) she starts a penalty turn by hand on the wind (inside
@@ -379,6 +499,10 @@ extension BotBrain {
     /// Whether she turns a penalty turn on through a stall rather than let go (`centresStalled`): on a class without
     /// the autohelm a let-go head to wind falls her back the way she came, and that gives the turn up.
     func turnsPenaltyThroughStall(_ b: SeatView.OwnBoat) -> Bool { b.penalty != nil && penaltyTurn != nil }
+
+    /// Whether the race's penalty turn is one tack and one gybe (fleet-rules@6, #487) rather than a full circle: the
+    /// bots sail it by its crossings (#488).
+    static func turnsByCrossings(_ view: SeatView) -> Bool { view.penaltyKind == .tackAndGybe }
 
     /// Whether her class leaves tacks and gybes to her hand: its tap sails nothing.
     static func turnsByHand(_ view: SeatView) -> Bool { !view.boatClass.steering.autohelm.sailsTap }
@@ -501,7 +625,7 @@ extension BotBrain {
             // Owing a turn she has not begun, never past the last of her time to start it (`penaltyStartMargin`, #471):
             // held off for the committee boat, luffed into irons keeping clear, a boat waited centred for steerage
             // through her start deadline and was disqualified.
-            let out = b.penalty.map { view.time - since >= HandTackTable.stallWait || !canPutOffToStartMargin($0, view) }
+            let out = b.penalty.map { view.time - since >= HandTackTable.stallWait || !canPutOffToStartMargin($0, b, view) }
                 ?? !inIrons
             guard !hasSteerage, !out else {
                 stall.centredSince = nil

@@ -475,4 +475,50 @@ import Testing
         #expect(try holds(slack: 1))
         #expect(try !holds(slack: -1))
     }
+
+    /// #488 acceptance: under fleet-rules@6 a penalty turn's time is reckoned from the crossings it has left, the way it
+    /// turns, from her wind angle and side (`BotBrain.penaltyTurnAngle`), not a whole circle: from close-hauled, luffing
+    /// first is about 225° (the tack at her wind angle, the gybe half a circle on), bearing away first about 315°; from a
+    /// run, gybing first is shorter; with one crossing made, only the other's angle is left. Seconds: that angle at the
+    /// turn's rate (`penaltyTurnSeconds`' reckoning), and the crawl through the wind only while the tack is to come.
+    @Test(.onSixRules) func penaltyTurnSecondsFromTheCrossingsLeft() throws {
+        let angle = BotBrain.penaltyTurnAngle
+        let closeHauled = deg2rad(45), run = deg2rad(160)
+        func degrees(_ radians: Double) -> Double { (rad2deg(radians) * 1e6).rounded() / 1e6 }
+        #expect(degrees(angle(closeHauled, true, true, true)) == 225)
+        #expect(degrees(angle(closeHauled, false, true, true)) == 315)
+        #expect(degrees(angle(run, false, true, true)) == 200)
+        #expect(degrees(angle(run, true, true, true)) == 340)
+        #expect(angle(run, false, true, true) < angle(run, true, true, true), "from a run, gybing first is shorter")
+        // Tacked, bearing away to the gybe; gybed, luffing to the tack.
+        #expect(degrees(angle(deg2rad(40), false, false, true)) == 140)
+        #expect(degrees(angle(deg2rad(150), true, true, false)) == 150)
+        #expect(angle(closeHauled, true, false, false) == 0)
+
+        let (race, _) = try Self.alone(seed: 3) { snapshot, _ in
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+        }
+        #expect(race.rules.raceFormat.penalty.turn == .tackAndGybe)
+        let view = race.seatView(for: 0)
+        let b = view.own
+        let owed = try #require(b.penalty)
+        let brain = Hand(seat: 0, race: race, handling: 0.5).brain
+        let speed = brain.closeHauledSpeed(b, view) * HandTackTable.penaltyTurn.speed
+        let rate = HandTackTable.penaltyFraction * view.boatClass.steering.turnRate(speed: speed)
+        let luff: Double = b.relativeWind > 0 ? 1 : -1
+        let crawl = HandTackTable.penaltyTurn.crawl
+        let luffing = angle(b.twa, true, true, true), bearingAway = angle(b.twa, false, true, true)
+        #expect(abs(brain.penaltyTurnSeconds(b, view, owed, direction: luff) - (luffing / rate + crawl)) < 1e-9)
+        #expect(abs(brain.penaltyTurnSeconds(b, view, owed, direction: -luff) - (bearingAway / rate + crawl)) < 1e-9)
+        #expect(brain.penaltyTurnSeconds(b, view, owed, direction: luff) < brain.penaltyTurnSeconds(b, view),
+                "luffing first from close-hauled is shorter than the whole circle")
+        // Tacked already, that way: the gybe is all that is left, and no crawl.
+        let tacked = OwedPenalty(turnsOwed: 1, startDeadlineTick: owed.completeDeadlineTick,
+                                 completeDeadlineTick: owed.completeDeadlineTick, progress: 0, isStarted: true,
+                                 hasTacked: true, direction: Int(-luff))
+        #expect(abs(brain.penaltyTurnSeconds(b, view, tacked, direction: -luff) - angle(b.twa, false, false, true) / rate) < 1e-9)
+        // The other way from a turn under way (a recross): both crossings again.
+        #expect(abs(brain.penaltyTurnSeconds(b, view, tacked, direction: luff) - (luffing / rate + crawl)) < 1e-9)
+    }
 }

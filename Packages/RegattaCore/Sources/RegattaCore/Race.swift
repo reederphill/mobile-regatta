@@ -1424,8 +1424,8 @@ public final class Race {
     /// Whether `b` is rounding a mark (#487), where a `tackAndGybe` penalty's crossing counts for nothing (so a tack
     /// onto the layline and a gybe round the mark are no free penalty): racing, with some of her hull in the zone
     /// (`CourseLayout.zoneRadius`, as `CourseLayout.markZone` measures it) of a mark of the element her leg rounds,
-    /// or of the element she has just rounded, the leg before.
-    private func isRounding(_ b: Boat) -> Bool {
+    /// or of the element she has just rounded, the leg before. Her `SeatView.OwnBoat.isRounding` (#488's bots read it).
+    func isRounding(_ b: Boat) -> Bool {
         guard b.status == .racing else { return false }
         let hull = b.hull(outline: boatClass.hull.outline)
         func inZone(ofLeg leg: Int) -> Bool {
