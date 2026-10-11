@@ -46,7 +46,7 @@ public struct BotDriver: Sendable {
     public private(set) var coverTaps = 0
     public private(set) var startLuffDecisions = 0
 
-    private var brain: BotBrain
+    private(set) var brain: BotBrain
     /// Her own hand on the helm for a class whose autohelm doesn't hold a centred rudder (#434); idle otherwise.
     private var helm: BotHelm
 

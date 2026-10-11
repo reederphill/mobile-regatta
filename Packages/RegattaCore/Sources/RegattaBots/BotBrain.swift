@@ -165,6 +165,13 @@ struct BotBrain: Sendable {
     var handTurn: HandTurn?
     /// Her draws for her flubbed hand turns (#459): a stream of her seed of its own, drawn only by the hand turn.
     var handTurnRng: SplitMix64
+    /// What she is doing about a fall off the plane (#462, `planingAim`): only on a class with the new planing rule.
+    var replane: Replane?
+    /// Her draws for it: a stream of her seed of its own.
+    var planingRng: SplitMix64
+    /// The angle her plan asked of `planingAim` at her last decision off the wind and the one it gave, radians, and
+    /// when: for tests and probes.
+    var planingAimed = (asked: 0.0, sailed: 0.0, time: -Double.infinity)
     /// What she knows of a stall in irons (#459, `centresStalled`): only on a class she turns by hand.
     var stall = Stall()
     /// What she has made of the boats around her (#234, `observeFleet`): each one's tack, when she saw it tack, and
@@ -212,6 +219,7 @@ struct BotBrain: Sendable {
         tacticsRng = SplitMix64(seed: seed, stream: Self.tacticsStream)
         turnHandling = Self.turnHandling(profile: profile, weaknesses: self.weaknesses, caution: caution)
         handTurnRng = SplitMix64(seed: seed, stream: Self.handTurnStream)
+        planingRng = SplitMix64(seed: seed, stream: Self.planingStream)
     }
 
     private var skill: Double { style.skill }
@@ -748,13 +756,13 @@ struct BotBrain: Sendable {
             let side = error != 0 ? -windSign * error : windSign
             return BoatInput(rudder: side < 0 ? -Self.noGoRudder : Self.noGoRudder)
         }
-        if let held = b.autohelm, Self.holds(held, aim, boatClass) { return .neutral }
+        if let held = b.autohelm, !aim.insists, Self.holds(held, aim, boatClass) { return .neutral }
         let tuning = boatClass.steering.autohelm
         let letGo = aim.groove.map { ($0 == .upwind ? tuning.upwindSnap : tuning.downwindSnap) * Self.grooveLetGo } ?? Self.letGoError
         guard abs(error) > letGo else {
             return b.autohelm == nil ? .neutral : rudder(b, error)
         }
-        return rudder(b, error)
+        return bearingAwayGently(rudder(b, error), error, b, view)
     }
 
     /// Whether the autohelm's `held` target sails `aim`: its groove, or an angle within the aim's tolerance.
@@ -985,11 +993,13 @@ struct BotBrain: Sendable {
             }
             setTack(gybe, view)
             let aim = Aim.groove(.downwind, tack: gybe, angle: down)
-            return downwindAim(b, view, aim: distance > Self.tacticalRange ? missingGroove(aim, b, view) : aim)
+            return downwindAim(b, view, aim: distance > Self.tacticalRange ? missingGroove(aim, b, view) : aim,
+                               nearMark: distance < PlaningTable.markRange)
         }
 
         plannedTack = b.tack
-        return downwindAim(b, view, aim: Aim(heading: bearing, b, tolerance: Self.reachTolerance))
+        return downwindAim(b, view, aim: Aim(heading: bearing, b, tolerance: Self.reachTolerance),
+                           nearMark: distance < PlaningTable.markRange)
     }
 
     /// How far the angle held on a reach may drift off the one her mark needs before she steers again.
@@ -1214,7 +1224,7 @@ struct BotBrain: Sendable {
     }
 
     /// Whether every mark is more than `lengths` hull lengths clear of the boat.
-    private func isClearOfMarks(_ b: SeatView.OwnBoat, _ view: SeatView, lengths: Double) -> Bool {
+    func isClearOfMarks(_ b: SeatView.OwnBoat, _ view: SeatView, lengths: Double) -> Bool {
         let room = view.boatClass.hull.length * lengths
         return view.course.obstacles.allSatisfy { ($0.position - b.position).length > $0.radius + room }
     }
@@ -1234,6 +1244,9 @@ struct Aim: Equatable {
     var tolerance: Double
     /// Sheets let out (`BoatInput.ease`): she sails the angle at the class's eased fraction of her speed.
     var ease = false
+    /// She steers for it from the angle she is at now, whatever her hand holds (#462, `BotBrain.floorAim`'s reflex):
+    /// an angle within the hold's width of what she holds is otherwise taken as held.
+    var insists = false
 
     init(angle: Double, tack: Tack, tolerance: Double = deg2rad(1.5), ease: Bool = false) {
         self.tack = tack
