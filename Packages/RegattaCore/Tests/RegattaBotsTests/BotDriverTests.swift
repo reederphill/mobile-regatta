@@ -5,9 +5,11 @@ import Testing
 /// A race for bot tests: `seats` (by default seat 0 human and seven bots) and the wind seed derived
 /// from `seed`, as RegattaCoreTests does.
 func botRace(seats: [SeatKind] = [.human] + Array(repeating: .bot, count: 7), laps: Int = 2,
-             prestartSeconds: Int = 45, seed: UInt64, boatClass: FileRef = BotConductTests.waterClass) -> Race {
+             prestartSeconds: Int = 45, seed: UInt64, boatClass: FileRef = BotConductTests.waterClass,
+             rules: FileRef = BotConductTests.waterRules) -> Race {
     let setup = try! RaceSetup(raceSeed: RaceSeed(seed), seats: seats, laps: laps,
-                               startSequenceTicks: prestartSeconds * Race.tickRate, boatClass: boatClass)
+                               startSequenceTicks: prestartSeconds * Race.tickRate, boatClass: boatClass,
+                               rulesConfiguration: rules)
     return Race(setup: setup, windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1))
 }
 
@@ -21,6 +23,21 @@ struct SkiffPin: TestTrait, TestScoping {
         let ref = try BoatClassFile.bundled(id: "skiff", version: version).ref
         try await BotConductTests.$waterClass.withValue(ref) { try await function() }
     }
+}
+
+/// Runs a test with the bot tests' race builders (`botRace`, by `BotConductTests.waterRules`) racing under fleet-rules@6:
+/// a penalty turn is one tack and one gybe the same way (#487), which the bots sail as #488 has them.
+struct SixRules: TestTrait, TestScoping {
+    func provideScope(for test: Test, testCase: Test.Case?,
+                      performing function: @Sendable () async throws -> Void) async throws {
+        let ref = try RulesConfigFile.bundled(id: "fleet-rules", version: 6).ref
+        try await BotConductTests.$waterRules.withValue(ref) { try await function() }
+    }
+}
+
+extension Trait where Self == SixRules {
+    /// fleet-rules@6 (#487): the tack-and-gybe penalty turn.
+    static var onSixRules: Self { SixRules() }
 }
 
 extension Trait where Self == SkiffPin {

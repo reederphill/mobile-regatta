@@ -137,6 +137,11 @@ struct BotBrain: Sendable {
     /// When she began leaving her current penalty turn to the autohelm, its rudder still over the other way
     /// (`turningOn`); nil while she isn't.
     var penaltyHeldSince: Double?
+    /// Under fleet-rules@6 (#488): the turns she owed, and her turn's way as the rules had it
+    /// (`OwedPenalty.direction`), when she last looked (`crossingsPenaltyInput`): fewer owed means she has just served
+    /// one; a new way, that a crossing set or turned it round.
+    var penaltyOwed = 0
+    var penaltyWaySeen = 0
     /// What she has made of her own wind and speed so far (`observe`).
     var senses = Senses()
     /// What her skill costs her (#102): a live bot's, from her skill; a bot-suite profile's, none.
@@ -418,16 +423,21 @@ struct BotBrain: Sendable {
             penaltyRead = nil
             penaltyHeldSince = nil
             penaltyClearing = PenaltyClearing()
+            penaltyOwed = 0
+            penaltyWaySeen = 0
             return nil
         }
         if let reading = readPenaltyTurn(b, view, owed) { return reading }
+        // Under fleet-rules@6 by hand, a turn is its crossings (#488): `crossingsPenaltyInput`. A class whose tap sails
+        // her turns sails them as under @5 (the rudder hard over: the circle makes both crossings).
+        if Self.turnsByCrossings(view), Self.turnsByHand(view) { return crossingsPenaltyInput(b, view, owed) }
         // Between one turn and the next she owes, with a mark close aboard: she stops turning and sails clear of it
         // before the next, as she would before her first (`startPenaltyTurn`). Turning on there sweeps the same
         // circle, and a circle that touched the mark touches it again, owing another turn each time round (#102).
         let servedOne = owed.progress < penaltyProgress - .pi
         penaltyProgress = owed.progress
         if servedOne, penaltyTurn != nil, let mark = nearestMark(b, view),
-           mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance, canPutOffToStartMargin(owed, view) {
+           mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance, canPutOffToStartMargin(owed, b, view) {
             penaltyTurn = nil
             penaltyGivenUp = false
         }
@@ -471,6 +481,169 @@ struct BotBrain: Sendable {
         penaltyGivenUp = true
         penaltyHeldSince = nil
         return BoatInput(rudder: keepClear.away)
+    }
+
+    /// Her held input for her penalty turns under fleet-rules@6 on a class she turns by hand (#488, the owner's ruling
+    /// of 2026-10-11), or nil while she has none to turn yet. A turn is one tack and one gybe made turning the same way
+    /// (#487), and turning back without crossing the wind costs nothing, so she no longer commits to a turn once begun.
+    /// She starts it as under @5 (`startPenaltyTurn`: the pack, a mark close aboard, starting first before her start,
+    /// clearing room), but times it from the crossings it has left (`penaltyTurnLeftSeconds`, `latestStartSeconds`)
+    /// and, both ways clear, turns the shorter way (`shorterPenaltyWay`: luffing first from close-hauled). A later turn
+    /// goes the first's way (RRS 44.2, `OwedPenalty.isDirectionLocked`).
+    ///
+    /// "Dodge, then carry on": at every decision she sweeps what is left of her turn (`turnSweep` over
+    /// `penaltyTurnLeft`). A boat crossing it inside her keep-clear lookahead, or about to hit her once she is taking the
+    /// penalty (rule 21.2, `penaltyKeepClear`) as the turn sweeps her towards it: if the other way's sweep is clear (and
+    /// the turn may go that way, with time for it) she turns that way, a crossing back only changing the turn's way;
+    /// otherwise she steers off, away from the boat, sheeted for speed (`steer`), freely, and turns on the same way once
+    /// her sweep is clear. Inside a mark's zone her crossings count for nothing (#487), so she plans none there: she
+    /// sails her rounding (keeping clear under 21.2) and starts again once round, while her time allows. With no time
+    /// to spare (`hasTimeToTurnLater`) she turns on whoever is near. Gone under @6: `penaltyGivenUp` (the once, first
+    /// half, towards-only give-up), `turningOn`'s hold-off for the autohelm (#350), and never easing the rudder mid-turn.
+    private mutating func crossingsPenaltyInput(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty) -> BoatInput? {
+        let servedOne = owed.turnsOwed < penaltyOwed
+        penaltyOwed = owed.turnsOwed
+        // A crossing set her turn's way, or turned it round (a recross, hers or not): she turns on that way.
+        if owed.direction != penaltyWaySeen, owed.direction != 0 { penaltyTurn = Double(owed.direction) }
+        penaltyWaySeen = owed.direction
+        if servedOne {
+            penaltyClearing.isDone = true
+            // Between turns with a mark close aboard: she sails clear of it before the next, as under @5 (#102).
+            if penaltyTurn != nil, let mark = nearestMark(b, view),
+               mark.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance, canPutOffToStartMargin(owed, b, view) {
+                penaltyTurn = nil
+            }
+        }
+        let locked = owed.isDirectionLocked && owed.direction != 0
+        let keepClear = owed.isStarted ? penaltyKeepClear(b, view) : nil
+        // Rounding: a crossing where she is rounding a mark counts for nothing, and rounding voids a half-made turn
+        // (#487). She sails her rounding and out of it (keeping clear under 21.2) whatever her time, and turns once
+        // her crossings fall clear of it: turned there, the time went and the crossings didn't count. A turn that
+        // became current while she was rounding has no clock yet (`OwedPenalty.isClockPending`): its deadline reads the
+        // whole limit from now, and the clock starts once she is clear of the mark.
+        func sailOn() -> BoatInput? {
+            penaltyTurn = nil
+            guard let keepClear, !crossesEarly(b, view, heading: keepClear.heading) else { return nil }
+            return steer(b, toHeading: keepClear.heading, view)
+        }
+        // "Turn before the mark" (the owner's ruling of 2026-10-12): her clock running, the next mark's zone ahead and
+        // no time to round it and then turn (`penaltyMarkAhead`), she turns now if the turn's crossings fall clear of
+        // the zone (a crowd, a mark close aboard or clearing room no longer holding her off), else holds the rounding
+        // off, sailing away from the mark keeping clear of every boat (she isn't rounding), until they do; in the zone
+        // already with too little time to sail on through it, she sails out of it the same way.
+        let markAhead = penaltyMarkAhead(b, owed, view)
+        func holdOff(_ mark: Vec2) -> BoatInput {
+            penaltyTurn = nil
+            if let clear = penaltyKeepClear(b, view) { return steer(b, toHeading: clear.heading, view) }
+            let away = sailable((b.position - mark).bearing, wind: b.windDirection)
+            let heading = avoidMarks(b, view, desired: away) ?? away
+            return steer(b, toHeading: avoidEdges(b, view, desired: heading) ?? heading, view)
+        }
+        if b.isRounding {
+            if let markAhead, markAhead.inZone { return holdOff(markAhead.mark) }
+            return sailOn()
+        }
+        // The way she turns, if its crossings left fall clear of a rounding; else the other, if hers to turn; else none.
+        func clearOfRounding(_ way: Double) -> Double? {
+            guard penaltyCrossingRounds(b, owed, view, direction: way) else { return way }
+            return locked || penaltyCrossingRounds(b, owed, view, direction: -way) ? nil : -way
+        }
+        if penaltyTurn == nil, let markAhead {
+            var sweeps = PenaltySweeps()
+            if locked { sweeps.only = Double(owed.direction) }
+            let way = penaltyWay(b, view, owed, sweeps, markAway: nearestMark(b, view).map { Self.away(from: $0.offset, b) })
+            guard let turn = clearOfRounding(way) else { return holdOff(markAhead.mark) }
+            penaltyTurn = turn
+            return BoatInput(rudder: turn * penaltyRudder(b, turn, owed, view))
+        }
+        guard let turn = penaltyTurn else {
+            var sweeps = PenaltySweeps()
+            if locked {
+                let way = Double(owed.direction)
+                sweeps.only = way
+                let conflict = turnSweep(b, view, direction: way, angle: penaltyTurnLeft(b, owed, view, direction: way))
+                if way < 0 { sweeps.port = conflict } else { sweeps.starboard = conflict }
+            } else {
+                sweeps = PenaltySweeps(
+                    port: turnSweep(b, view, direction: -1, angle: penaltyTurnLeft(b, owed, view, direction: -1)),
+                    starboard: turnSweep(b, view, direction: 1, angle: penaltyTurnLeft(b, owed, view, direction: 1)))
+            }
+            if let input = clearingRoom(b, owed, view, sweeps) { return input }
+            if let start = startPenaltyTurn(b, view, owed, sweeps) {
+                guard let turn = clearOfRounding(start) else { return sailOn() }
+                penaltyTurn = turn
+                return BoatInput(rudder: turn * penaltyRudder(b, turn, owed, view))
+            }
+            // Not turning it yet: as under @5, she keeps clear if 21.2 binds her (a crossing of her own sailing started
+            // it), and before her start while putting it off in the crowd (#280).
+            let puttingOff = b.status == .prestart && -view.time > Self.penaltyPutOffKeepClearSeconds
+            guard let clear = keepClear ?? (puttingOff ? penaltyKeepClear(b, view) : nil),
+                  !crossesEarly(b, view, heading: clear.heading) else { return nil }
+            return steer(b, toHeading: clear.heading, view)
+        }
+        var way = turn
+        // By hand, luffing slow into the wind before the turn's first crossing: she turns it the other way (#461), if
+        // that way's sweep is clear (#486).
+        if !locked, !owed.isStarted, nearestMark(b, view) == nil, let away = penaltyBearAwayFirst(b, view), away != way,
+           turnSweep(b, view, direction: away, angle: penaltyTurnLeft(b, owed, view, direction: away)) == nil {
+            way = away
+            penaltyTurn = away
+        }
+        guard let clear = clearOfRounding(way) else { return markAhead.map { holdOff($0.mark) } ?? sailOn() }
+        if clear != way {
+            way = clear
+            penaltyTurn = clear
+        }
+        let onward = BoatInput(rudder: way * penaltyRudder(b, way, owed, view))
+        // Dodging spends her time: only while her latest start, `penaltyStartMargin` to spare, is still to come.
+        guard latestStartSeconds(owed, b, view) > 0 else { return onward }
+        let conflict = turnSweep(b, view, direction: way, angle: penaltyTurnLeft(b, owed, view, direction: way))
+        let soon = conflict.flatMap { $0.seconds < keepClearLookahead ? $0 : nil }
+        let towards = keepClear.flatMap { $0.away != way ? $0 : nil }
+        guard soon != nil || towards != nil else { return onward }
+        // The other way, if it is clear and hers to turn, with time for all it has left.
+        let other = -way
+        let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
+        if !locked, left > penaltyTurnSeconds(b, view, owed, direction: other) + HandTackTable.penaltyTurn.margin,
+           turnSweep(b, view, direction: other, angle: penaltyTurnLeft(b, owed, view, direction: other)) == nil,
+           towards.map({ $0.away == other }) ?? true {
+            penaltyTurn = other
+            return BoatInput(rudder: other * penaltyRudder(b, other, owed, view))
+        }
+        // Steer off, away from the boat, and turn on once clear. Before her start, not over the line early: a heading
+        // that would carry her over before the gun leaves her to her start plan meanwhile, as putting a turn off does.
+        let heading = towards?.heading ?? soon.map { penaltyDodgeHeading(b, view, from: $0.boat) } ?? b.heading
+        guard !crossesEarly(b, view, heading: heading) else { return nil }
+        return steer(b, toHeading: heading, view)
+    }
+
+    /// Under fleet-rules@6 (#488, "turn before the mark", the owner's ruling of 2026-10-12): the mark of her leg whose
+    /// zone her running clock would see her reach (`zoneRadius` and half a hull, as `penaltyCrossingRounds` reads it)
+    /// with no time left after rounding it to turn what is left of her turn (`penaltyTurnLeftSeconds` and its margin),
+    /// a rounding taken as her time through the zone at her speed; `inZone` while she is in it, with too little time to
+    /// sail on through it. Nil while her clock is pending, she isn't racing, or the zone is beyond her time.
+    func penaltyMarkAhead(_ b: SeatView.OwnBoat, _ owed: OwedPenalty, _ view: SeatView) -> (mark: Vec2, inZone: Bool)? {
+        guard b.status == .racing, !owed.isClockPending, view.course.legs.indices.contains(b.legIndex),
+              case .round(let index) = view.course.legs[b.legIndex],
+              let mark = view.course.elements[index].marks.map(\.position)
+                .min(by: { ($0 - b.position).length < ($1 - b.position).length }) else { return nil }
+        let reach = view.course.zoneRadius + view.boatClass.hull.length / 2
+        let distance = (mark - b.position).length - reach
+        let speed = max(b.speed, closeHauledSpeed(b, view) / 2)
+        let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
+        let turn = penaltyTurnLeftSeconds(owed, b, view) + HandTackTable.penaltyTurn.margin
+        if distance <= 0 { return left < reach / speed + turn ? (mark, true) : nil }
+        let toZone = distance / speed
+        return toZone < left && left < toZone + 2 * reach / speed + turn ? (mark, false) : nil
+    }
+
+    /// The heading she steers off a boat `other` crossing her penalty turn's sweep (#488): away from it as
+    /// `penaltyKeepClear` steers, 35° off her heading, off any mark or the race area's edge.
+    private func penaltyDodgeHeading(_ b: SeatView.OwnBoat, _ view: SeatView, from other: SeatView.OtherBoat) -> Double {
+        let away = Self.away(from: other.position - b.position, b)
+        let clear = sailable(b.heading + away * deg2rad(35), wind: b.windDirection)
+        let heading = avoidMarks(b, view, desired: clear) ?? clear
+        return avoidEdges(b, view, desired: heading) ?? heading
     }
 
     /// One tick of the race, seconds, from the rules' tick count for a second (the brain holds no race, #98).
@@ -523,10 +696,10 @@ struct BotBrain: Sendable {
         // (`markHoldLeavesTheTurn`, #471): in light air a turn by hand is longer than the start margin leaves.
         let markClose = mark.map({ $0.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance }) == true
         if crowded && canPutOffTurn(owed, b, view)
-            || markClose && canPutOffToStartMargin(owed, view) && markHoldLeavesTheTurn(owed, b, view) {
+            || markClose && canPutOffToStartMargin(owed, b, view) && markHoldLeavesTheTurn(owed, b, view) {
             return nil
         }
-        let turn = penaltyWay(b, view, sweeps, markAway: mark.map { Self.away(from: $0.offset, b) })
+        let turn = penaltyWay(b, view, owed, sweeps, markAway: mark.map { Self.away(from: $0.offset, b) })
         penaltyTurn = turn
         return turn
     }
@@ -539,8 +712,14 @@ struct BotBrain: Sendable {
     /// With neither clear (she can put it off no longer, or doesn't, on the last leg or near her next mark): away from
     /// the mark, else bearing away first when slow, else the way a boat crosses later (by more than a sweep step), else
     /// away from the boat crossing first, the nearer if both cross as soon (#351's away from the nearest boat).
-    private func penaltyWay(_ b: SeatView.OwnBoat, _ view: SeatView, _ sweeps: PenaltySweeps,
+    /// Under fleet-rules@6 (#488): a later turn goes the first's way (`PenaltySweeps.only`), and with both clear the
+    /// shorter turn wins after the mark and "bear away first" (`shorterPenaltyWay`): luffing first from close-hauled.
+    private func penaltyWay(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty, _ sweeps: PenaltySweeps,
                             markAway: Double?) -> Double {
+        if let only = sweeps.only { return only }
+        if Self.turnsByCrossings(view), sweeps.port == nil, sweeps.starboard == nil {
+            return markAway ?? penaltyBearAwayFirst(b, view) ?? shorterPenaltyWay(b, view, owed)
+        }
         switch (sweeps.port, sweeps.starboard) {
         case (nil, .some): return -1
         case (.some, nil): return 1
@@ -571,7 +750,7 @@ struct BotBrain: Sendable {
             && (b.status != .racing || readsThePack && !isOnLastLeg(b, view) && !putOffEndsAtAMark(b, view, owed))
         let markClose = mark.map({ $0.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance }) == true
         if crowded && canPutOffTurn(owed, b, view)
-            || markClose && canPutOffToStartMargin(owed, view) && markHoldLeavesTheTurn(owed, b, view) {
+            || markClose && canPutOffToStartMargin(owed, b, view) && markHoldLeavesTheTurn(owed, b, view) {
             return nil
         }
         let turn = mark.map { Self.away(from: $0.offset, b) } ?? penaltyBearAwayFirst(b, view)
@@ -666,12 +845,24 @@ struct BotBrain: Sendable {
     /// Whether she may still put her current turn off, waiting to start it: until `penaltyStartMargin` before its
     /// start deadline.
     private func canPutOffTurn(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
-        canPutOffToStartMargin(owed, view) && hasTimeToTurnLater(owed, b, view)
+        canPutOffToStartMargin(owed, b, view) && hasTimeToTurnLater(owed, b, view)
     }
 
     /// Whether her current turn's start deadline is further off than `penaltyStartMargin`.
-    func canPutOffToStartMargin(_ owed: OwedPenalty, _ view: SeatView) -> Bool {
-        owed.startDeadlineTick - view.tick > RulesConfig.ticks(Self.penaltyStartMargin)
+    /// Under fleet-rules@6 (#488), with no start deadline: whether her latest start (`latestStartSeconds`) is still to come.
+    func canPutOffToStartMargin(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard Self.turnsByCrossings(view) else {
+            return owed.startDeadlineTick - view.tick > RulesConfig.ticks(Self.penaltyStartMargin)
+        }
+        return latestStartSeconds(owed, b, view) > 0
+    }
+
+    /// Under fleet-rules@6 (#488): seconds until the latest she can start her current turn and still serve it, working
+    /// back from its one limit (40 s from its clock): the limit, less what is left of the turn (`penaltyTurnLeftSeconds`),
+    /// less `penaltyStartMargin`.
+    func latestStartSeconds(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Double {
+        Double(owed.completeDeadlineTick - view.tick) * Self.tickStep - penaltyTurnLeftSeconds(owed, b, view)
+            - Self.penaltyStartMargin
     }
 
     /// Whether she may give her current turn up to keep clear (rule 21.2) and turn it all again: until
@@ -715,10 +906,15 @@ struct BotBrain: Sendable {
     struct PenaltySweeps {
         var port: (boat: SeatView.OtherBoat, seconds: Double)?
         var starboard: (boat: SeatView.OtherBoat, seconds: Double)?
+        /// Under fleet-rules@6 (#488), a later turn's one way (the first turn's, RRS 44.2): the other isn't swept.
+        var only: Double?
 
         /// Whether boats cross both circles: she is in a crowd she waits out before her turn (#486; #351 and #99 had
-        /// any boat within 2.5 hull lengths of her now).
-        var isCrowded: Bool { port != nil && starboard != nil }
+        /// any boat within 2.5 hull lengths of her now). With one way only, whether a boat crosses that one.
+        var isCrowded: Bool {
+            guard let only else { return port != nil && starboard != nil }
+            return (only < 0 ? port : starboard) != nil
+        }
     }
 
     /// Her whole turn's sweeps both ways from here and now.
@@ -734,7 +930,9 @@ struct BotBrain: Sendable {
     private func putOffEndsAtAMark(_ b: SeatView.OwnBoat, _ view: SeatView, _ owed: OwedPenalty) -> Bool {
         guard view.course.legs.indices.contains(b.legIndex), case .round(let index) = view.course.legs[b.legIndex]
         else { return false }
-        let seconds = max(0, Double(owed.startDeadlineTick - view.tick) / Double(RulesConfig.ticks(1)) - Self.penaltyStartMargin)
+        let seconds = Self.turnsByCrossings(view)
+            ? max(0, latestStartSeconds(owed, b, view))
+            : max(0, Double(owed.startDeadlineTick - view.tick) / Double(RulesConfig.ticks(1)) - Self.penaltyStartMargin)
         let reach = view.boatClass.hull.length * (Self.penaltyMarkClearance + 3) + b.speed * seconds
         return view.course.elements[index].marks.contains { ($0.position - b.position).length - $0.radius < reach }
     }
