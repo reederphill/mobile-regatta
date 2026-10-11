@@ -40,6 +40,8 @@ final class BoatEffects {
     private var followed: (heading: Double, wind: Double)?
     /// The wake drawn last frame, eased towards each frame's (`BoatStyle.wakeEaseRate`).
     private(set) var shape: WakeShape?
+    /// How far on the plane her wake is drawn, settling and lifting over `BoatStyle.wakePlaningSeconds` (#462).
+    private(set) var planing: PlaningEase?
     /// Where her stern has been, world points, oldest first, each with the race time it was there.
     private var history: [(point: CGPoint, time: Double)] = []
     /// The race time the history last took a sample.
@@ -98,7 +100,11 @@ final class BoatEffects {
         backwind.yScale = CGFloat(ShadowShapes.backwindScale(boatClass.windShadow, speed: boat.speedThroughWater))
         backwind.alpha = CGFloat(style.coneAlpha * style.backwindShare * presence)
 
-        let target = WakeShape(boat, boatClass: boatClass, style: style, quality: quality)
+        // On or off the plane her wake settles or lifts (#462); the first frame, and a frozen one, draw her as she is.
+        var planing = settled ? PlaningEase(isPlaning: boat.isPlaning) : planing ?? PlaningEase(isPlaning: boat.isPlaning)
+        planing.advance(isPlaning: boat.isPlaning, dt: dt, seconds: style.wakePlaningSeconds)
+        self.planing = planing
+        let target = WakeShape(boat, boatClass: boatClass, style: style, quality: quality, planing: planing.level)
         let shape = settled ? target : (shape ?? target).eased(towards: target, dt: dt, rate: style.wakeEaseRate)
         self.shape = shape
 
