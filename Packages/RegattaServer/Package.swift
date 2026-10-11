@@ -67,6 +67,10 @@ let package = Package(
         // store applies it inside the transaction that closes a race.
         .target(name: "Ratings"),
         .testTarget(name: "RatingsTests", dependencies: ["Ratings"]),
+        // The lobby's free-text filter (#152): the Unicode clean-up and limits, the vendored offline word list and its
+        // matcher, and the classifier seam with its breaker. Pure, Foundation only.
+        .target(name: "ChatFilter", resources: [.copy("WordLists")]),
+        .testTarget(name: "ChatFilterTests", dependencies: ["ChatFilter"]),
         // The dev endpoints' JSON (#67), shared by the server and the load client. Foundation only.
         .target(name: "RegattaDevAPI"),
         // Everything the executable does, as a library the tests start in-process: config and the
@@ -80,6 +84,8 @@ let package = Package(
                 "GameCenterIdentity",
                 "Persistence",
                 "Ratings",
+                // The lobby's filter (#152).
+                "ChatFilter",
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
                 .product(name: "RegattaServices", package: "RegattaServices"),
@@ -190,6 +196,7 @@ let package = Package(
                 "GameCenterIdentity",
                 "Persistence",
                 "Ratings",
+                "ChatFilter",
                 .product(name: "RegattaServices", package: "RegattaServices"),
                 .product(name: "RegattaServiceClient", package: "RegattaServices"),
                 .product(name: "RegattaServiceContracts", package: "RegattaServices"),
