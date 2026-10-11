@@ -67,6 +67,9 @@ public struct LockedFleet: Sendable {
 /// Starts a locked fleet's race; calls `closed` once when it closes. Throws if it can't be started.
 public typealias RaceLauncher = @Sendable (_ fleet: LockedFleet, _ closed: @escaping @Sendable () -> Void) async throws -> Void
 
+/// Tells the race lifecycle that a player gave her seat in a race up for good (`RaceLifecycle.seatReleased`).
+public typealias SeatReleased = @Sendable (_ playerID: String, _ race: UUID) async -> Void
+
 /// A queued player, since when.
 public struct QueueEntry: Sendable, Equatable {
     public let player: AccountPlayer
@@ -172,6 +175,8 @@ public actor QueueMatchmaker {
     private let runningRaces: (any RunningRaces)?
     /// Each human's stored livery (#21), for the briefing; nil, or none stored: a starter livery.
     private let liveries: LiverySource?
+    /// Hears each seat the queue frees before its race closes (the lifecycle's, #469); nil: nobody.
+    private let seatReleased: SeatReleased?
     /// Each watched, queued or locked player's restrictions as last read from the store: `state(of:)` reads these.
     private var restricted: [String: PlayerRestrictions] = [:]
     private var guns: [(due: Date, line: SystemLine)] = []
@@ -186,7 +191,7 @@ public actor QueueMatchmaker {
                 random: SeededRandom = .system(), now: @escaping @Sendable () -> Date = { Date() },
                 bands: @escaping RatingBands = { [$0] },
                 restrictions: any RestrictionStore = InMemoryRestrictionStore(), runningRaces: (any RunningRaces)? = nil,
-                liveries: LiverySource? = nil,
+                liveries: LiverySource? = nil, seatReleased: SeatReleased? = nil,
                 launch: RaceLauncher? = nil) {
         self.settings = settings
         self.registry = registry
@@ -199,6 +204,7 @@ public actor QueueMatchmaker {
         self.restrictions = restrictions
         self.runningRaces = runningRaces
         self.liveries = liveries
+        self.seatReleased = seatReleased
         briefingLeaves = BriefingLeaveTracker(store: restrictions, rule: settings.briefingLeaves, now: now)
         self.launch = launch ?? Self.registryLauncher(registry)
     }
@@ -381,15 +387,24 @@ public actor QueueMatchmaker {
     /// A human left the race between lock and gun (#147): it counts towards her cooldown. One who left for good is free
     /// to queue again at once (after any cooldown); one whose seat was empty at the gun can still rejoin it (#66).
     func briefingLeave(_ raceID: UUID, _ leave: BriefingLeave) async {
-        guard let players = races[raceID], players.indices.contains(leave.seat) else { return }
+        guard let players = races[raceID], players.indices.contains(leave.seat), !players[leave.seat].isEmpty else { return }
         let id = players[leave.seat]
         await briefingLeaves.recordLeave(id, race: raceID)
-        if leave.kind == .left, handOffs[id]?.raceID.rawValue == raceID.uuidString.lowercased() {
-            handOffs[id] = nil
-            races[raceID]?[leave.seat] = ""
-        }
+        if leave.kind == .left { await releaseSeat(raceID, seat: leave.seat) }
         await loadRestrictions(id)
         pushAll()
+    }
+
+    /// The player in `seat` of the race gave it up for good: she is free to queue again at once, and the lifecycle
+    /// hears that the race is no longer hers (#469), so its close can't touch the race she queues into next. Called
+    /// for a leave before the gun; #149's `leaveRace` after the gun calls it too (until then such a player stays
+    /// `.fleetLocked` to the close). Nothing for a seat already released.
+    func releaseSeat(_ raceID: UUID, seat: Int) async {
+        guard let players = races[raceID], players.indices.contains(seat), !players[seat].isEmpty else { return }
+        let id = players[seat]
+        races[raceID]?[seat] = ""
+        if handOffs[id]?.raceID.rawValue == raceID.uuidString.lowercased() { handOffs[id] = nil }
+        await seatReleased?(id, raceID)
     }
 
     /// The race closed: its players are free to queue again.

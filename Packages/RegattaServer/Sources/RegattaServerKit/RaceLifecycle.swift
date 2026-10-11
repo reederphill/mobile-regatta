@@ -189,6 +189,22 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         for player in live.seats.keys where seated[player] == id { seated[player] = nil }
     }
 
+    /// The player gave her seat in `race` up for good (#469): the queue calls this when it frees her (a leave before
+    /// the gun, `QueueMatchmaker.releaseSeat`; #149's `leaveRace`). From here that race is no longer hers: she can't
+    /// rejoin it, her results stream for it ends without a last word, and its close or cancel says nothing to her, so it
+    /// can't reach the stream, the ending or the rating changes of a race she queues into meanwhile. Nothing for a
+    /// race she isn't seated in (her next race registered first: the `seated` check in the close covers that order).
+    public func seatReleased(_ playerID: String, race: UUID) {
+        guard seated[playerID] == race else { return }
+        seated[playerID] = nil
+        for continuation in resultWatchers.removeValue(forKey: playerID)?.values ?? [:].values { continuation.finish() }
+    }
+
+    /// The race's human seats whose players still sit in it: not one who released her seat, or sits in a later race.
+    private func seatedPlayers(_ id: UUID, _ live: Live) -> [(player: String, seat: Int)] {
+        live.seats.filter { seated[$0.key] == id }.map { ($0.key, $0.value) }
+    }
+
     // MARK: Reading
 
     /// The race's phase, nil for a race that isn't running here.
@@ -286,12 +302,12 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     /// The race's results changed: every watching player gets her report.
     func progress(_ id: UUID) async {
         guard let live = races[id] else { return }
-        let watching = live.seats.filter { resultWatchers[$0.key] != nil }
-        guard !watching.isEmpty else { return }
+        guard seatedPlayers(id, live).contains(where: { resultWatchers[$0.player] != nil }) else { return }
         let host = live.session.host
         let results = await host.liveResults(), roster = await host.rosterEntries
         guard races[id] != nil, !closing.contains(id) else { return }
-        for (player, seat) in watching {
+        // Read again after the host: a player may have released her seat, or opened her stream, meanwhile.
+        for (player, seat) in seatedPlayers(id, live) where resultWatchers[player] != nil {
             let report = RaceResultsFeed.live(id, seat: seat, roster: roster, results: results)
             for continuation in resultWatchers[player]?.values ?? [:].values { continuation.yield(.report(report)) }
         }
@@ -355,7 +371,8 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
 
     /// The race ended (the registry's `onClose`): the close pipeline. A race with results is stored (log, digest,
     /// versions, results, all at once), each player's stream ends with her closed report, unrated players get
-    /// `.unrated`, and the lobby gets the winner's line. A race without results (cancelled, or closed where it stood
+    /// `.unrated`, and the lobby gets the winner's line. Only the players still seated in it hear any of that: one who
+    /// released her seat, or sits in a later race, hears nothing from this one (#469). A race without results (cancelled, or closed where it stood
     /// by a shutdown) is cancelled: no results, no rating, and each stream ends with `.cancelled`.
     public func ended(_ id: UUID, _ end: RaceEnd) async {
         guard let live = races[id], closing.insert(id).inserted else { return }
@@ -389,7 +406,7 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         } catch {
             archiveFailures.append("close \(id): \(error)")
         }
-        for (player, seat) in live.seats {
+        for (player, seat) in seatedPlayers(id, live) {
             let report = RaceResultsFeed.closed(id, seat: seat, summary: stored.summary, incidents: stored.incidents)
             ended[player] = .closed(report)
             for continuation in resultWatchers.removeValue(forKey: player)?.values ?? [:].values {
@@ -403,7 +420,7 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
 
     private func cancelled(_ id: UUID, _ live: Live, reason: RaceCancelled.Reason) async {
         do { try await archive.cancel(id) } catch { archiveFailures.append("cancel \(id): \(error)") }
-        for player in live.seats.keys {
+        for (player, _) in seatedPlayers(id, live) {
             ended[player] = .cancelled(reason)
             for continuation in resultWatchers.removeValue(forKey: player)?.values ?? [:].values {
                 continuation.yield(.cancelled(reason))

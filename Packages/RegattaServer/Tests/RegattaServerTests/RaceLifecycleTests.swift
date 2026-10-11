@@ -146,6 +146,72 @@ extension RaceSims {
             #expect(last.report.results.rated && last.report.isClosed)
         }
 
+        /// #469: a player who left her old race for good and sits in a new one hears nothing of the old race's close: it
+        /// doesn't end or feed her new race's results stream, doesn't become her ending, and pushes her no rating change.
+        /// Either order holds: the queue told the lifecycle her seat was released, or (the hook lost the race to her next
+        /// fleet's lock) her new race registered first.
+        @Test(arguments: [true, false]) func aLeftPlayersOldRaceDoesntTouchHerNewRace(released: Bool) async throws {
+            let rig = LifecycleRig(settings: LifecycleRig.quickGrace())
+            let old = try await rig.race(["T:0", "T:1"], seed: 1)
+            if released {
+                await rig.lifecycle.seatReleased("T:0", race: old.id)
+                #expect(await rig.lifecycle.seat(of: "T:0") == nil)
+                #expect(await collect(rig.lifecycle.results(for: "T:0")) { _ in true } == [])
+            }
+            let new = try await rig.race(["T:0"], seed: 2)
+            let oldID = RaceResultsFeed.raceID(old.id), newID = RaceResultsFeed.raceID(new.id)
+            let stream = rig.lifecycle.results(for: "T:0")
+
+            // The old race closes, unrated, with her new race running: its other human sails on past the gun, then goes.
+            let transport = KeptTransport()
+            try await old.join(seat: 1, transport: transport)
+            var seq: UInt32 = 0
+            await rig.sail(old, [1], to: 60, seq: &seq)
+            await old.leave(seat: 1, transport: transport)
+            await rig.runUntilEnded(old, limit: 600)
+            #expect(try #require(await old.host.outcome?.results).rated == false)
+            await rig.end(old)
+            #expect(try await rig.archive.state(of: old.id) == .closed)
+            // The player still in it has its last word and its rating change.
+            let stayed = await collect(rig.lifecycle.results(for: "T:1")) { _ in true }
+            guard case .report(let last)? = stayed.first else { Issue.record("no closed report: \(stayed)"); return }
+            #expect(last.raceID == oldID && last.isClosed)
+            #expect(await collect(rig.lifecycle.ratingChanges(for: "T:1")) { _ in true } == [RatingChange(raceID: oldID, outcome: .unrated)])
+            // She is still in her new race, and a stream opened now is the new race's.
+            #expect(await rig.lifecycle.seat(of: "T:0")?.race == new.id)
+            guard case .report(let now)? = await collect(rig.lifecycle.results(for: "T:0"), until: { _ in true }).first else {
+                Issue.record("no report of her new race")
+                return
+            }
+            #expect(now.raceID == newID && !now.isClosed)
+
+            // Her new race closes: the stream she held through the old race's close ends with the new race's report, and
+            // her only rating change is the new race's.
+            await rig.runUntilEnded(new, limit: 300)
+            await rig.end(new)
+            let held = await collect(stream) { if case .report(let report) = $0 { report.isClosed } else { true } }
+            #expect(held.allSatisfy { if case .report(let report) = $0 { report.raceID == newID } else { false } })
+            guard case .report(let final)? = held.last else { Issue.record("no closed report: \(held)"); return }
+            #expect(final.raceID == newID && final.isClosed)
+            #expect(await collect(rig.lifecycle.ratingChanges(for: "T:0")) { $0.raceID == newID } == [RatingChange(raceID: newID, outcome: .unrated)])
+            #expect(try await rig.lifecycle.lastRace(of: "T:0")?.report.raceID == newID)
+        }
+
+        /// #469: a race cancelled after she left it says nothing to her either.
+        @Test func aLeftPlayersOldRaceCancelledDoesntTouchHerNewRace() async throws {
+            let rig = LifecycleRig()
+            let old = try await rig.race(["T:0", "T:1"], seed: 1)
+            let new = try await rig.race(["T:0"], seed: 2)
+            let stream = rig.lifecycle.results(for: "T:0")
+            await rig.lifecycle.cancel(old.id)
+            await rig.end(old)
+            #expect(await collect(rig.lifecycle.results(for: "T:1")) { _ in true } == [.cancelled(.unspecified)])
+            #expect(await rig.lifecycle.seat(of: "T:0")?.race == new.id)
+            await rig.lifecycle.cancel(new.id, reason: .serverShutdown)
+            await rig.end(new)
+            #expect(await collect(stream) { if case .cancelled = $0 { true } else { false } }.last == .cancelled(.serverShutdown))
+        }
+
         /// Acceptance: every human gone (one, then the other more than 2 s later) closes via `closeAllGone` at the trigger's
         /// tick, the humans RET by leave order, the latest gone highest; the stored log replays to the stored digest.
         @Test func everyHumanGoneClosesViaCloseAllGoneRankedByLeaveOrder() async throws {

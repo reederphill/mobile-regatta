@@ -43,11 +43,12 @@ extension RaceSims {
                 settings.startSequenceTicks = 90
                 settings.botFloor = 3
                 settings.catchFinishers = nil
-                let clock = clock
+                let clock = clock, lifecycle = rig.lifecycle
                 matchmaker = QueueMatchmaker(settings: settings, registry: RaceRegistry(),
                                              draw: RaceDraw(pairings: OnlinePairing.bundled(), seeds: FixtureWindSeedPools(poolSize: 8)),
                                              tokenKey: LifecycleRig.key, tokenLifetime: 600, random: SeededRandom(seed: 147), now: { clock.now },
-                                             restrictions: store, launch: rig.lifecycle.launcher(clock: rig.clock))
+                                             restrictions: store, seatReleased: { await lifecycle.seatReleased($0, race: $1) },
+                                             launch: rig.lifecycle.launcher(clock: rig.clock))
             }
 
             /// Queues `players` and locks their fleet; returns its race.
@@ -191,6 +192,8 @@ extension RaceSims {
             #expect(await race.quit(seat: 0))
             #expect(await eventually { (try? await queue.leaves(player.teamPlayerID)) == 1 })
             #expect(await eventually { await queue.matchmaker.state(of: player.teamPlayerID) == .idle })
+            // The lifecycle heard it (#469): the race is no longer hers.
+            #expect(await eventually { await queue.rig.lifecycle.seat(of: player.teamPlayerID) == nil })
             try await queue.matchmaker.join(player)
             // Nothing more at the gun for a seat she already left.
             await queue.rig.run(race, to: 1)
