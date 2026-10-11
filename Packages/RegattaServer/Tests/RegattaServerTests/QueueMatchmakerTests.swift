@@ -1,5 +1,7 @@
 import Crypto
 import Foundation
+import RaceHost
+import RegattaBots
 import RegattaCore
 @testable import RegattaServerKit
 import RegattaServices
@@ -82,6 +84,100 @@ struct CountingSeeds: WindSeedSource {
     }
 
     // MARK: Acceptance
+
+    /// Acceptance (#149): three humans queue, and the race that starts has ten boats: seven bots under sailing names,
+    /// in free starter liveries, sailing at the fleet's level.
+    @Test func threeHumansQueueAFleetOfTenWithNamedBotsAndStarterLiveries() async throws {
+        let clock = VirtualClock(), registry = RaceRegistry()
+        let queue = QueueMatchmaker(settings: QueueSettings(), registry: registry,
+                                    draw: RaceDraw(pairings: OnlinePairing.bundled(), seeds: FixtureWindSeedPools(poolSize: 8)),
+                                    tokenKey: Self.key, tokenLifetime: 600, random: SeededRandom(seed: 149), now: { clock.now })
+        for index in 0..<3 { try await queue.join(Self.player(index)) }
+        clock.advance(60)
+        await queue.step()
+        let fleet = try #require(await queue.lastFleet)
+        let setup = fleet.setup
+        #expect(setup.seats == Array(repeating: .human, count: 3) + Array(repeating: .bot, count: 7))
+        #expect(fleet.ratings == [1500, 1500, 1500] && fleet.fill.medianRating == 1500)
+
+        // The race the registry is running: its roster and its bots.
+        let session = try #require(await registry.session(fleet.raceID))
+        let roster = await session.host.rosterEntries
+        #expect(roster.map(\.isBot) == [false, false, false] + Array(repeating: true, count: 7))
+        #expect(roster.prefix(3).map(\.name) == ["P0", "P1", "P2"])
+        #expect(Array(roster.dropFirst(3).map(\.name)) == FleetRoster(setup: setup).entries.dropFirst(3).compactMap(\.sailingName))
+        #expect(Set(roster.map(\.name)).count == 10)
+        let bots = await session.host.botSeats
+        #expect(bots.map(\.seat) == Array(3..<10) && bots.allSatisfy { $0.source == .fill })
+        for bot in bots {
+            #expect((1350...1650).contains(bot.plan.rating))
+            #expect(bot.plan.skill == BotRatingMap.bundled.skill(rating: bot.plan.rating))
+            guard case .bot(let driver) = await session.host.controller(seat: bot.seat) else {
+                Issue.record("seat \(bot.seat) isn't a fleet bot")
+                continue
+            }
+            #expect(driver.style.skill == bot.plan.skill && driver.handling == bot.plan.handling)
+        }
+        for seat in 0..<3 { #expect(await session.host.controller(seat: seat).isHuman) }
+
+        // Each wears the free starter livery her seat's seed draws.
+        let catalogue = try #require(OnlineBriefing.catalogue)
+        let briefing = try #require(try await queue.handOff(for: "T:0").briefing)
+        #expect(briefing.fleet.map(\.name) == roster.map(\.name) && briefing.fleet.map(\.isBot) == roster.map(\.isBot))
+        for seat in 3..<10 {
+            let drawn = try #require(BotDressing(setup: setup).livery(seat: seat, catalogue: catalogue))
+            #expect(briefing.fleet[seat].livery.design == drawn.design && briefing.fleet[seat].livery.colours == drawn.colours)
+            #expect(catalogue.designs(for: setup.boatClass.id).first { $0.id == drawn.design }?.acquisition.isFree == true)
+        }
+        await session.host.cancel(.unspecified)
+        await queue.stop()
+    }
+
+    /// #149: the bots are rated at the median of the humans' ratings, give or take 150, and sail at the skill the map
+    /// gives that rating; a rating that can't be read counts as 1500. Asking for ratings draws nothing of the queue's
+    /// random numbers: the same seed locks the same race.
+    @Test func botSkillsFollowTheFleetsMedianRating() async throws {
+        func lock(_ ratings: RatingSource?) async throws -> LockedFleet {
+            let clock = VirtualClock(), log = LaunchLog()
+            let queue = QueueMatchmaker(settings: QueueSettings(), registry: RaceRegistry(),
+                                        draw: RaceDraw(pairings: OnlinePairing.bundled(), seeds: FixtureWindSeedPools(poolSize: 8)),
+                                        tokenKey: Self.key, tokenLifetime: 600, random: SeededRandom(seed: 149), now: { clock.now },
+                                        ratings: ratings, launch: { fleet, closed in try await log.record(fleet, closed) })
+            for index in 0..<3 { try await queue.join(Self.player(index)) }
+            clock.advance(60)
+            await queue.step()
+            return try #require(await log.fleets.first)
+        }
+        struct NoRating: Error {}
+        let plain = try await lock(nil)
+        let strong = try await lock { player in
+            switch player.teamPlayerID {
+            case "T:0": 2050
+            case "T:1": 1900
+            default: throw NoRating()
+            }
+        }
+        let weak = try await lock { _ in 1100 }
+        // The same draw whatever the ratings.
+        #expect(strong.raceID == plain.raceID && strong.setup == plain.setup && strong.windSeed == plain.windSeed)
+        #expect(weak.raceID == plain.raceID && weak.setup == plain.setup)
+
+        #expect(plain.ratings == [1500, 1500, 1500] && plain.fill.medianRating == 1500)
+        #expect(strong.ratings == [2050, 1900, 1500] && strong.fill.medianRating == 1900)
+        #expect(weak.ratings == [1100, 1100, 1100] && weak.fill.medianRating == 1100)
+        let seed = plain.setup.raceSeed, map = BotRatingMap.bundled
+        for seat in 3..<10 {
+            let low = weak.fill.plan(seat: seat, raceSeed: seed), mid = plain.fill.plan(seat: seat, raceSeed: seed)
+            let high = strong.fill.plan(seat: seat, raceSeed: seed)
+            #expect((1750...2050).contains(high.rating) && (950...1250).contains(low.rating))
+            // One seat's offset is the same in every fleet: only the median moves her.
+            #expect(high.rating - 1900 == mid.rating - 1500 && mid.rating - 1500 == low.rating - 1100)
+            #expect(high.skill == map.skill(rating: high.rating) && low.skill == map.skill(rating: low.rating))
+            #expect(low.skill < mid.skill && mid.skill < high.skill)
+        }
+        // The briefing shows each human the rating the median came from.
+        #expect(OnlineBriefing.payloads(strong, stored: [], settings: QueueSettings())[0].fleet.prefix(3).map(\.rating) == [2050, 1900, 1500])
+    }
 
     /// Acceptance: the 16th human locks the fleet at once, with no bots.
     @Test func theSixteenthHumanLocksImmediately() async throws {

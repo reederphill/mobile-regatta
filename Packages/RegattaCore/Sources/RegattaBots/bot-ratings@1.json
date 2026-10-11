@@ -1,0 +1,11 @@
+{
+  "id": "bot-ratings",
+  "version": 1,
+  "notes": "Version 1 (#149): placeholders, for the owner to tune (#177, #389). The rating an online bot is given, turned into the skill she sails at: straight lines between the points, flat outside them. 1500, a new player's rating, is skill 0.55 (the top of Club), so a new player usually finishes mid-pack.",
+  "points": [
+    { "rating": 1000, "skill": 0.35 },
+    { "rating": 1500, "skill": 0.55 },
+    { "rating": 1800, "skill": 0.75 },
+    { "rating": 2200, "skill": 1.0 }
+  ]
+}

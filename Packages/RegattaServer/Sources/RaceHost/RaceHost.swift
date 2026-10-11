@@ -82,6 +82,31 @@ public struct LiveResults: Hashable, Sendable {
     }
 }
 
+/// A seat a bot sails in a race with a fleet (`RaceHost.init`'s `fleet`, #149): what is stored with the race for the
+/// shadow ratings (#177). Never a dropped player's covered boat: that seat stays hers.
+public struct BotSeat: Hashable, Sendable {
+    public enum Source: String, Hashable, Sendable {
+        /// The setup's bot seat: filled at fleet lock.
+        case fill
+        /// A human seat its player gave up before the gun.
+        case takeover
+    }
+
+    public var seat: Int
+    public var source: Source
+    /// Her rating, skill, handling and the map version (`FleetFill.plan`).
+    public var plan: BotPlan
+    /// The tick the bot took the seat at; nil for a fill bot, who had it from the start.
+    public var takenTick: Int?
+
+    public init(seat: Int, source: Source, plan: BotPlan, takenTick: Int? = nil) {
+        self.seat = seat
+        self.source = source
+        self.plan = plan
+        self.takenTick = takenTick
+    }
+}
+
 /// The race server's core (#65): one authoritative `Race`, stepped at 30 Hz on the injected clock, with
 /// no rewind (ADR 0005). Each input applies at its stamped tick if that hasn't been simulated, else at the
 /// next tick, and the race log is exactly what the host applied (#18). Bots sail their seats through the
@@ -95,7 +120,8 @@ public struct LiveResults: Hashable, Sendable {
 /// with a neutral input and a cautious bot sails the dropped boat until the player rejoins. A seat that
 /// attaches and sends no held input is dropped the same way, `firstInputHoldTicks` after the attach, and
 /// a seat no player attaches to `firstInputHoldTicks` after the host starts. A seat left before the gun
-/// goes to a fleet bot for good (#35); left after it, the boat takes the dropped-boat path.
+/// goes to a fleet bot for good (#35, #149): her roster entry becomes a bot's, under a sailing name, and every attached
+/// seat is told (`RosterChange`). Left after it, the boat takes the dropped-boat path.
 /// When every human is gone, `onAllGone` fires once, after the grace (G3).
 ///
 /// Wind (#95): the host makes the wind keys from the secret wind seed and reveals each on
@@ -137,7 +163,14 @@ public actor RaceHost {
     public let options: RaceHostOptions
     private let race: Race
     private var bots: SeatControllers
-    private let roster: [RosterEntry]
+    private var roster: [RosterEntry]
+    /// The online fleet its bots are drawn for (#149); nil: a Mixed fleet's draw (`BotDriver(seat:raceSeed:)`).
+    private let fleet: FleetFill?
+    /// The bots' sailing names: the setup's, and each seat taken over since.
+    private var dressing: BotDressing
+    /// Human seats a fleet bot took before the gun, with the tick, in the order taken.
+    private var takeovers: [(seat: Int, tick: Int)] = []
+    private let onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)?
     private let clock: any HostClock
     private let onBehind: (@Sendable (_ ticksBehind: Int) -> Void)?
     private let onAllGone: (@Sendable (_ allGone: AllGone) -> Void)?
@@ -173,18 +206,34 @@ public actor RaceHost {
 
     /// A host for a new race, at the start of its sequence now. Seats the setup marks `.bot` are sailed
     /// by RegattaBots; the rest wait `firstInputHoldTicks` for a player to attach, then are dropped until
-    /// one does. `roster` defaults to "Seat n" names.
+    /// one does. `roster` defaults to "Seat n" names; a bot seat's entry is always marked a bot's.
+    /// `fleet` (#149), for an online race: its bot seats, and a seat left before the gun, are sailed at the fleet's
+    /// level (`FleetFill.driver`) and recorded (`botSeats`); nil keeps the Mixed-fleet draw and records none.
+    /// `onLeftAfterGun` hears each human who left for good after the gun (#149: the queue frees her).
     /// `onAllGone` fires once when every human is gone and the grace is over (G3; #148 closes the race).
     /// `onBriefingLeave` hears each human who left before the gun (#147, `BriefingLeave`).
     public init(setup: RaceSetup, windSeed: WindSeed, clock: any HostClock, options: RaceHostOptions = RaceHostOptions(),
                 roster: [RosterEntry]? = nil,
                 onBehind: (@Sendable (_ ticksBehind: Int) -> Void)? = nil,
                 onAllGone: (@Sendable (_ allGone: AllGone) -> Void)? = nil,
-                onBriefingLeave: (@Sendable (_ leave: BriefingLeave) -> Void)? = nil) {
+                onBriefingLeave: (@Sendable (_ leave: BriefingLeave) -> Void)? = nil,
+                fleet: FleetFill? = nil,
+                onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)? = nil) {
         let race = Race(setup: setup, windSeed: windSeed)
         self.race = race
-        bots = SeatControllers(setup: setup)
-        self.roster = roster ?? race.boats.map { RosterEntry(name: "Seat \($0.id + 1)", colorIndex: $0.colorIndex) }
+        self.fleet = fleet
+        self.onLeftAfterGun = onLeftAfterGun
+        dressing = BotDressing(setup: setup)
+        if let fleet {
+            bots = SeatControllers(setup.seats.indices.map { seat in
+                setup.seats[seat] == .bot ? .bot(fleet.driver(seat: seat, raceSeed: setup.raceSeed)) : .human
+            })
+        } else {
+            bots = SeatControllers(setup: setup)
+        }
+        var roster = roster ?? race.boats.map { RosterEntry(name: "Seat \($0.id + 1)", colorIndex: $0.colorIndex) }
+        for seat in roster.indices where setup.seats.indices.contains(seat) && setup.seats[seat] == .bot { roster[seat].isBot = true }
+        self.roster = roster
         self.clock = clock
         self.options = options
         self.onBehind = onBehind
@@ -231,6 +280,21 @@ public actor RaceHost {
     public var firstTick: Int { startTick }
     /// `Race.expectedCloseTick` (#16, #147).
     public var expectedCloseTick: Int { race.expectedCloseTick }
+    /// The seats bots sail in a race with a fleet (#149), by seat: the setup's bot seats, and each human seat a bot
+    /// took before the gun. Empty without a fleet. A dropped player's covered boat is never one.
+    public var botSeats: [BotSeat] {
+        guard let fleet else { return [] }
+        let seed = race.setup.raceSeed
+        let fill = race.setup.seats.indices.filter { race.setup.seats[$0] == .bot }
+            .map { BotSeat(seat: $0, source: .fill, plan: fleet.plan(seat: $0, raceSeed: seed)) }
+        let taken = takeovers.map { BotSeat(seat: $0.seat, source: .takeover, plan: fleet.plan(seat: $0.seat, raceSeed: seed), takenTick: $0.tick) }
+        return (fill + taken).sorted { $0.seat < $1.seat }
+    }
+
+    /// The bots' sailing names as they stand (#149): the setup's bot seats and each seat taken over since. Their
+    /// liveries are `BotDressing.livery(seat:catalogue:)` (#159 puts them on the wire).
+    public var botDressing: BotDressing { dressing }
+
     /// Whether the player at `seat` left (#16): her seat can't be rejoined.
     public func hasLeft(seat: Int) -> Bool { gone.indices.contains(seat) && gone[seat]?.kind == .left }
 
@@ -417,10 +481,13 @@ public actor RaceHost {
         transport.close()
     }
 
-    /// The player at `seat` leaves, closing its transport. Before the gun a fleet bot takes the seat for
-    /// good, sailing on from where the boat is (#16, #35); after it the boat takes the dropped-boat path.
-    /// Either way the seat is gone and can't rejoin. False for a bot seat, a seat that already left, a
-    /// seat out of range or a closed race.
+    /// The player at `seat` leaves, closing its transport. Before the gun (`tick < 0`) a fleet bot takes the seat for
+    /// good, sailing on from where the boat is (#16, #35, #149): the helm is released with a neutral input at the next
+    /// tick, as for a dropped boat, and the bot's first decision comes within `BotDriver.decisionInterval` ticks; she
+    /// races to win, at the fleet's level when the host has a fleet. The seat's roster entry becomes hers (a sailing
+    /// name, `isBot`) and every attached seat gets the `RosterChange`. After the gun the boat takes the dropped-boat
+    /// path and the roster is untouched. Either way the seat is gone and can't rejoin. False for a bot seat, a seat
+    /// that already left, a seat out of range or a closed race.
     @discardableResult
     public func leave(seat: Int) -> Bool {
         guard !isEnded, humanSeats.contains(seat), gone[seat]?.kind != .left else { return false }
@@ -430,8 +497,14 @@ public actor RaceHost {
         if race.tick < 0 {
             race.record(.leftBeforeGun, seat: seat)
             race.record(.botTookOver(.fleet), seat: seat)
-            bots[seat] = .bot(BotDriver(seat: seat, raceSeed: race.setup.raceSeed))
+            race.apply(.neutral, seat: seat, atTick: race.tick + 1)
+            let seed = race.setup.raceSeed
+            bots.takeOver(seat: seat, driver: fleet?.driver(seat: seat, raceSeed: seed) ?? BotDriver(seat: seat, raceSeed: seed))
             seats[seat].holdDeadline = nil
+            takeovers.append((seat, race.tick))
+            roster[seat] = RosterEntry(name: dressing.takeOver(seat: seat), colorIndex: roster[seat].colorIndex, isBot: true)
+            enqueueReliable(.rosterChange(RosterChange(seat: seat, entry: roster[seat])), to: .everyone)
+            flushReliable()
             reportBriefingLeave(seat, .left)
         } else {
             race.record(.left, seat: seat)
@@ -439,6 +512,7 @@ public actor RaceHost {
         }
         markGone(seat, .left)
         transport?.close()
+        if race.tick >= 0 { onLeftAfterGun?(seat) }
         checkAllGone()
         if race.isOver { close() }
         return true
@@ -528,6 +602,15 @@ public actor RaceHost {
         guard let resync = try? Resync(raceSeed: race.setup.raceSeed, world: race.exportSnapshot(), windKeys: revealed,
                                        nextEventSeq: seats[seat].reliableSeq) else { return }
         send(.resync(resync), to: seat)
+        // A resync restarts the reliable stream past any roster change the seat missed, and doesn't carry the roster:
+        // the seats taken over go again, after it (#149). The whole entry each time, so one seen twice changes nothing.
+        guard !takeovers.isEmpty, seats[seat].transport != nil else { return }
+        for taken in takeovers {
+            seats[seat].reliableQueue.append(Frame(seq: seats[seat].reliableSeq, tick: race.tick,
+                                                   message: .rosterChange(RosterChange(seat: taken.seat, entry: roster[taken.seat]))))
+            seats[seat].reliableSeq += 1
+        }
+        flushReliable()
     }
 
     // MARK: - Input

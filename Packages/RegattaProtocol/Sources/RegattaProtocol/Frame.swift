@@ -10,6 +10,8 @@ public enum MessageType: UInt8, Sendable, CaseIterable {
     case inputTap = 4
     case ping = 5
     case requestResync = 6
+    /// The player gives her seat up for good (#149).
+    case leaveRace = 7
     // Server → client.
     case helloAck = 16
     case updateRequired = 17
@@ -21,6 +23,8 @@ public enum MessageType: UInt8, Sendable, CaseIterable {
     case pong = 23
     case raceCancelled = 24
     case raceClosed = 25
+    /// A seat's roster entry changed (#149): on the reliable stream.
+    case rosterChange = 26
     // Service messages (#143, `ServiceMessages.swift`), client → server: a request to each service, then streams.
     case identityRequest = 64
     case termsRequest = 65
@@ -50,9 +54,9 @@ public enum MessageType: UInt8, Sendable, CaseIterable {
 
     public var direction: Direction {
         switch self {
-        case .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync: .clientToServer
+        case .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync, .leaveRace: .clientToServer
         case .helloAck, .updateRequired, .raceStart, .resync, .snapshot, .event, .windKey, .pong, .raceCancelled,
-             .raceClosed: .serverToClient
+             .raceClosed, .rosterChange: .serverToClient
         case .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
              .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .sessionRequest: .clientToServer
         case .identityReply, .termsReply, .queueReply, .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply,
@@ -64,7 +68,7 @@ public enum MessageType: UInt8, Sendable, CaseIterable {
     public enum Stream: Sendable {
         /// The client's inputs, held and taps together, from 1; `InputAck.seq` refers to it.
         case input
-        /// The server's reliable stream to one client, `Event` and `WindKey` together, contiguous
+        /// The server's reliable stream to one client, `Event`, `WindKey` and `RosterChange` together, contiguous
         /// from 1, so a gap means a lost frame; `EventState.nextEventSeq` resumes it after a `Resync`.
         case reliable
         /// The sender's count of its other messages; informational only.
@@ -74,7 +78,7 @@ public enum MessageType: UInt8, Sendable, CaseIterable {
     public var stream: Stream {
         switch self {
         case .inputHeld, .inputTap: .input
-        case .event, .windKey: .reliable
+        case .event, .windKey, .rosterChange: .reliable
         default: .other
         }
     }
@@ -91,6 +95,11 @@ public enum Message: Equatable, Sendable {
     case ping(Ping)
     /// Client → server: send me a `Resync`, e.g. a wind key I need is missing (#64). Empty.
     case requestResync
+    /// Client → server, from a seated connection (#149): I give my seat up for good. Before the gun a bot of the
+    /// fleet's level takes the boat from where it is and the seat is a bot's from then on; after it the boat is
+    /// covered as a dropped boat's is and retires at the close. Either way she can't rejoin it and is free to queue
+    /// again. Empty. Ignored from a connection without a seat, twice, or once the race has ended.
+    case leaveRace
     case helloAck(HelloAck)
     case updateRequired(UpdateRequired)
     case raceStart(RaceStart)
@@ -103,6 +112,8 @@ public enum Message: Equatable, Sendable {
     case pong(Pong)
     case raceCancelled(RaceCancelled)
     case raceClosed(RaceClosed)
+    /// A seat's roster entry from now on (#149), on the reliable stream.
+    case rosterChange(RosterChange)
     // Service messages (#143): see `ServiceMessages.swift`.
     case identityRequest(ServiceRequest<IdentityCall>)
     case termsRequest(ServiceRequest<TermsCall>)
@@ -134,6 +145,7 @@ public enum Message: Equatable, Sendable {
         case .inputTap: .inputTap
         case .ping: .ping
         case .requestResync: .requestResync
+        case .leaveRace: .leaveRace
         case .helloAck: .helloAck
         case .updateRequired: .updateRequired
         case .raceStart: .raceStart
@@ -144,6 +156,7 @@ public enum Message: Equatable, Sendable {
         case .pong: .pong
         case .raceCancelled: .raceCancelled
         case .raceClosed: .raceClosed
+        case .rosterChange: .rosterChange
         case .identityRequest: .identityRequest
         case .termsRequest: .termsRequest
         case .queueRequest: .queueRequest
@@ -228,7 +241,7 @@ public struct Frame: Equatable, Sendable {
         case .inputHeld(let input): input.encode(to: &w)
         case .inputTap(let tap): try tap.encode(to: &w)
         case .ping(let m): w.u64(m.clientTime)
-        case .requestResync: break
+        case .requestResync, .leaveRace: break
         case .helloAck(let m): try m.encode(to: &w)
         case .updateRequired(let m): try m.encode(to: &w)
         case .raceStart(let m): try m.encode(to: &w)
@@ -241,6 +254,7 @@ public struct Frame: Equatable, Sendable {
             w.u16(m.sinceTickMicros)
         case .raceCancelled(let m): w.u8(try m.reason.canonicalCode())
         case .raceClosed(let m): try m.results.encode(to: &w, "results")
+        case .rosterChange(let m): try m.encode(to: &w)
         case .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
              .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .identityReply, .termsReply, .queueReply,
              .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd, .sessionRequest,
@@ -264,6 +278,7 @@ public struct Frame: Equatable, Sendable {
         case .inputTap: message = .inputTap(try BoatTap(from: &r))
         case .ping: message = .ping(Ping(clientTime: try r.u64()))
         case .requestResync: message = .requestResync
+        case .leaveRace: message = .leaveRace
         case .helloAck: message = .helloAck(try HelloAck(from: &r))
         case .updateRequired: message = .updateRequired(try UpdateRequired(from: &r))
         case .raceStart: message = .raceStart(try RaceStart(from: &r))
@@ -275,6 +290,7 @@ public struct Frame: Equatable, Sendable {
         case .raceCancelled:
             message = .raceCancelled(RaceCancelled(reason: RaceCancelled.Reason(code: try r.u8())))
         case .raceClosed: message = .raceClosed(RaceClosed(results: try VersionedPayload(from: &r, "results")))
+        case .rosterChange: message = .rosterChange(try RosterChange(from: &r))
         case .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
              .analyticsRequest, .deletionRequest, .streamNext, .streamClose, .identityReply, .termsReply, .queueReply,
              .raceSessionReply, .lobbyReply, .profileReply, .analyticsReply, .deletionReply, .streamEnd, .sessionRequest,

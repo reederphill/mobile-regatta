@@ -64,6 +64,9 @@ public final class RaceClient {
     public private(set) var status: Status = .synchronising
     /// The client's tick: the one the race is sailed to, and after which inputs are stamped.
     public private(set) var clientTick: Int
+    /// Who sails each seat now, by seat (#149): the `RaceStart`'s roster, with each `RosterChange` since applied. A
+    /// seat whose player gave it up before the gun shows a bot's sailing name and `isBot` from then on.
+    public private(set) var roster: [RosterEntry]
 
     private var reliable = ReliableStream(next: 1)
     private var serverEvents: [RaceEvent] = []
@@ -85,6 +88,7 @@ public final class RaceClient {
                 joiningUnderway: Bool = false) {
         self.transport = transport
         predicted = PredictedRace(start: start)
+        roster = start.roster
         stamper = InputStamper(limits: limits)
         clientTick = predicted.tick
         if joiningUnderway { awaitResync() }
@@ -108,6 +112,14 @@ public final class RaceClient {
     public func drainServerEvents() -> [RaceEvent] {
         defer { serverEvents.removeAll() }
         return serverEvents
+    }
+
+    /// Gives the seat up for good (#149, `Message.leaveRace`): before the gun a bot takes the boat, after it she is
+    /// covered and retires at the close; either way there is no rejoining, and the server closes the connection.
+    /// Sent at once, whatever the clock sync; nothing if the connection is down or the race has ended.
+    public func leave() {
+        guard transport.isConnected, !closed else { return }
+        send(.leaveRace, tick: clientTick)
     }
 
     /// Carries on over a new connection, after a reconnect and join (#68): asks for a resync straight
@@ -216,7 +228,7 @@ public final class RaceClient {
                 stats.snapshotsRefused += 1
                 wantsResync = true
             }
-        case .event, .windKey:
+        case .event, .windKey, .rosterChange:
             for ready in reliable.receive(frame, now: now) { deliver(ready) }
         case .resync(let resync):
             do {
@@ -242,12 +254,13 @@ public final class RaceClient {
             // the resync's `nextEventSeq` keeps the stream past what was shown.
             lastSurfacedSeq = 0
             predicted = PredictedRace(start: start)
+            roster = start.roster
             clientTick = max(clientTick, predicted.tick)
             reliable = ReliableStream(next: 1)
             awaitResync()
         case .raceClosed, .raceCancelled:
             closed = true
-        case .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync, .helloAck, .updateRequired:
+        case .hello, .joinRace, .inputHeld, .inputTap, .ping, .requestResync, .leaveRace, .helloAck, .updateRequired:
             break
         // Service messages (#143) go over the service link, not the race transport.
         case .identityRequest, .termsRequest, .queueRequest, .raceSessionRequest, .lobbyRequest, .profileRequest,
@@ -273,6 +286,9 @@ public final class RaceClient {
             predicted.record(event, seq: frame.seq)
         case .windKey(let key):
             predicted.reveal(key, seq: frame.seq)
+        case .rosterChange(let change):
+            // The whole entry, so applying one again (after a resync) changes nothing.
+            if roster.indices.contains(change.seat) { roster[change.seat] = change.entry }
         default:
             break
         }

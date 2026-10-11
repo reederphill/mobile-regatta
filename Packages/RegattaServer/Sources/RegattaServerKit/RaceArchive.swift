@@ -17,7 +17,8 @@ public protocol RaceArchive: Sendable {
     func cancelOrphans() async throws -> [UUID]
     /// Nil for a race this archive never registered.
     func state(of race: UUID) async throws -> RaceState?
-    /// The newest closed race the player sat in, with her seat (#24).
+    /// The newest closed race the player sat in, with her seat (#24); not one whose seat a bot took from her before
+    /// the gun (#149, `ClosedRaceRecord.bots`).
     func lastRace(of playerID: String) async throws -> StoredRaceResult?
     /// A closed race as it was written, nil unless it closed.
     func closedRace(_ race: UUID) async throws -> ClosedRaceRecord?
@@ -51,7 +52,8 @@ public struct PostgresRaceArchive: RaceArchive {
               let log = try await RaceLogStore(database).log(for: race),
               let results = try await RaceResultStore(database).results(for: race) else { return nil }
         return ClosedRaceRecord(id: race, log: log, digest: digest, simulationVersion: version, toolchain: toolchain,
-                                results: results.results, incidents: results.incidents, rated: results.rated)
+                                results: results.results, incidents: results.incidents, rated: results.rated,
+                                bots: try await RaceResultStore(database).bots(of: race))
     }
 }
 
@@ -100,7 +102,10 @@ public final class InMemoryRaceArchive: RaceArchive {
 
     public func lastRace(of playerID: String) async throws -> StoredRaceResult? {
         entries.withLock { state in
-            let theirs = state.races.filter { $0.value.state == .closed && $0.value.players.contains { $0.playerID == playerID } }
+            let theirs = state.races.filter { _, entry in
+                guard entry.state == .closed, let seat = entry.players.first(where: { $0.playerID == playerID })?.seat else { return false }
+                return !(entry.closed?.bots.contains { $0.seat == seat && $0.source == .takeover } ?? false)
+            }
             guard let (id, entry) = theirs.max(by: { $0.value.closeOrder < $1.value.closeOrder }), let closed = entry.closed else { return nil }
             return StoredRaceResult(raceID: id, seat: entry.players.first { $0.playerID == playerID }?.seat, results: closed.results,
                                     incidents: closed.incidents, rated: closed.rated, endedAt: entry.endedAt ?? Date())

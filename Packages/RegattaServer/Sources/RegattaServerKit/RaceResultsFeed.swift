@@ -14,6 +14,23 @@ public struct RaceSummary: Codable, Sendable, Equatable {
     public struct Entry: Codable, Sendable, Equatable {
         public var name: String
         public var colorIndex: Int
+        /// A bot sailed the seat (#149). Absent in rows stored before it: read as false.
+        public var isBot: Bool
+
+        public init(name: String, colorIndex: Int, isBot: Bool = false) {
+            self.name = name
+            self.colorIndex = colorIndex
+            self.isBot = isBot
+        }
+
+        private enum CodingKeys: String, CodingKey { case name, colorIndex, isBot }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            colorIndex = try c.decode(Int.self, forKey: .colorIndex)
+            isBot = try c.decodeIfPresent(Bool.self, forKey: .isBot) ?? false
+        }
     }
 
     public struct Row: Codable, Sendable, Equatable {
@@ -34,13 +51,13 @@ public struct RaceSummary: Codable, Sendable, Equatable {
 
     public init(venue: String, roster: [RosterEntry], results: RaceResults, turnsServed: [Int]) {
         self.venue = venue
-        self.roster = roster.map { Entry(name: $0.name, colorIndex: $0.colorIndex) }
+        self.roster = roster.map { Entry(name: $0.name, colorIndex: $0.colorIndex, isBot: $0.isBot) }
         rows = results.rows.map { Row(seat: $0.seat, place: $0.place, code: $0.code.rawValue, finishTick: $0.finishTick) }
         rated = results.rated
         self.turnsServed = turnsServed
     }
 
-    public var rosterEntries: [RosterEntry] { roster.map { RosterEntry(name: $0.name, colorIndex: $0.colorIndex) } }
+    public var rosterEntries: [RosterEntry] { roster.map { RosterEntry(name: $0.name, colorIndex: $0.colorIndex, isBot: $0.isBot) } }
 
     public var results: RaceResults {
         RaceResults(rows: rows.map { SeatResult(seat: $0.seat, place: $0.place, code: ResultCode(rawValue: $0.code) ?? .ret,
@@ -49,10 +66,13 @@ public struct RaceSummary: Codable, Sendable, Equatable {
     }
 
     /// The lobby's line at the close (#36, owner 2026-10-09: one "X won" line): the first row's sailor, if she finished
-    /// or was placed by distance; none when nobody raced (an all-gone close before anyone started).
+    /// or was placed by distance; none when nobody raced (an all-gone close before anyone started), and none when a bot
+    /// won (#149, owner 2026-10-10: a bot never shows in the lobby, and the line names a human winner only).
     public var winnerLine: SystemLine? {
         let placed = [ResultCode.finished.rawValue, ResultCode.byDistance.rawValue]
-        guard let first = rows.first, placed.contains(first.code), roster.indices.contains(first.seat) else { return nil }
+        guard let first = rows.first, placed.contains(first.code), roster.indices.contains(first.seat), !roster[first.seat].isBot else {
+            return nil
+        }
         return .winner(venue: venue, nickname: roster[first.seat].name)
     }
 

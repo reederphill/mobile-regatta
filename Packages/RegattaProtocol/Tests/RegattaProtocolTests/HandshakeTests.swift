@@ -54,9 +54,9 @@ import Testing
     /// Message type codes are fixed for good.
     @Test func messageTypeCodesArePinned() {
         let codes: [MessageType: UInt8] = [
-            .hello: 1, .joinRace: 2, .inputHeld: 3, .inputTap: 4, .ping: 5, .requestResync: 6,
+            .hello: 1, .joinRace: 2, .inputHeld: 3, .inputTap: 4, .ping: 5, .requestResync: 6, .leaveRace: 7,
             .helloAck: 16, .updateRequired: 17, .raceStart: 18, .resync: 19, .snapshot: 20, .event: 21,
-            .windKey: 22, .pong: 23, .raceCancelled: 24, .raceClosed: 25,
+            .windKey: 22, .pong: 23, .raceCancelled: 24, .raceClosed: 25, .rosterChange: 26,
             // Service messages (#143).
             .identityRequest: 64, .termsRequest: 65, .queueRequest: 66, .raceSessionRequest: 67, .lobbyRequest: 68,
             .profileRequest: 69, .analyticsRequest: 70, .deletionRequest: 71, .streamNext: 72, .streamClose: 73, .sessionRequest: 74,

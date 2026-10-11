@@ -104,9 +104,9 @@ import Testing
     /// parties, a call names its own incident, and nobody protests herself.
     @Test func incidentRecordsAreChecked() throws {
         func report(incident: [UInt8] = [], protest: [UInt8] = []) -> [UInt8] {
-            // id 0, report: raceID "", seat 0, roster 1 ("" colour 0), results unrated none, sailing none, one seat's
+            // id 0, report: raceID "", seat 0, roster 1 ("" colour 0, no bot), results unrated none, sailing none, one seat's
             // incidents, not closed, no flags.
-            [0, 2, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, incident.isEmpty ? 0 : 1] + incident + [0, protest.isEmpty ? 0 : 1] + protest + [0, 0, 0]
+            [0, 2, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, incident.isEmpty ? 0 : 1] + incident + [0, protest.isEmpty ? 0 : 1] + protest + [0, 0, 0]
         }
         // Incident 5: tick 0, leg 0, seats 1 and 2, contact, nobody exonerated, then its outcome.
         let incident: [UInt8] = [5, 0, 0, 0, 0, 0, 0, 1, 2, 0, 0]

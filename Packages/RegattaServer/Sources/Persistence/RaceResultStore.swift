@@ -1,6 +1,37 @@
 import Foundation
 import PostgresNIO
 
+/// A seat a bot sailed for itself in a closed race (#149, `race_bots`): for the shadow ratings (#177).
+public struct StoredRaceBot: Sendable, Equatable {
+    public enum Source: String, Sendable, Equatable {
+        /// A bot's seat from fleet lock.
+        case fill
+        /// A seat its player gave up before the gun.
+        case takeover
+    }
+
+    public let seat: Int
+    public let source: Source
+    /// The rating it was given, and the skill and handling it sailed at.
+    public let rating: Int
+    public let skill: Double
+    public let handling: Double
+    /// The version of the rating map (`bot-ratings@n.json`) that gave the skill.
+    public let mapVersion: Int
+    /// The tick a takeover bot took the seat at; nil for a fill bot.
+    public let takenTick: Int?
+
+    public init(seat: Int, source: Source, rating: Int, skill: Double, handling: Double, mapVersion: Int, takenTick: Int? = nil) {
+        self.seat = seat
+        self.source = source
+        self.rating = rating
+        self.skill = skill
+        self.handling = handling
+        self.mapVersion = mapVersion
+        self.takenTick = takenTick
+    }
+}
+
 /// A race as it closed (#148): what the close writes, in one transaction.
 public struct ClosedRaceRecord: Sendable, Equatable {
     public let id: UUID
@@ -15,9 +46,12 @@ public struct ClosedRaceRecord: Sendable, Equatable {
     public let incidents: Data
     /// At least 2 humans at the gun (#30).
     public let rated: Bool
+    /// The seats bots sailed for themselves, by seat (#149).
+    public let bots: [StoredRaceBot]
 
     public init(id: UUID, log: Data, digest: UInt64, simulationVersion: String, toolchain: String, results: Data, incidents: Data,
-                rated: Bool) {
+                rated: Bool, bots: [StoredRaceBot] = []) {
+        self.bots = bots
         self.id = id
         self.log = log
         self.digest = digest
@@ -50,7 +84,8 @@ public struct StoredRaceResult: Sendable, Equatable {
 }
 
 /// Closed races' results (#148, ADR 0009): written once with the close, never for a cancelled race. A player's last
-/// race is the newest closed race she sat in, so it stays hers until her next race closes (#24).
+/// race is the newest closed race she sat in, so it stays hers until her next race closes (#24); a race whose seat
+/// she gave up before the gun isn't one (#149: a bot sailed it, and its result is the bot's).
 public struct RaceResultStore: Sendable {
     let database: Database
     public init(_ database: Database) { self.database = database }
@@ -74,6 +109,13 @@ public struct RaceResultStore: Sendable {
             try await connection.query("""
                 INSERT INTO race_results (race_id, results, incidents, rated) VALUES (\(race.id), \(race.results), \(race.incidents), \(race.rated))
                 """, logger: logger)
+            for bot in race.bots {
+                try await connection.query("""
+                    INSERT INTO race_bots (race_id, seat, source, rating, skill, handling, map_version, taken_tick)
+                    VALUES (\(race.id), \(bot.seat), \(bot.source.rawValue), \(bot.rating), \(bot.skill), \(bot.handling), \(bot.mapVersion),
+                            \(bot.takenTick))
+                    """, logger: logger)
+            }
             return try await RaceRegistryStore.record(race.id, on: connection, logger: logger)!
         }
     }
@@ -90,12 +132,28 @@ public struct RaceResultStore: Sendable {
         return nil
     }
 
-    /// The newest closed race `playerID` sat in, with her seat; nil before her first (#24). A cancelled race isn't one.
+    /// The race's bots by seat (#149); none unless it closed.
+    public func bots(of race: UUID) async throws -> [StoredRaceBot] {
+        let rows = try await database.client.query("""
+            SELECT seat, source, rating, skill, handling, map_version, taken_tick FROM race_bots WHERE race_id = \(race) ORDER BY seat
+            """, logger: database.logger)
+        var bots: [StoredRaceBot] = []
+        for try await (seat, source, rating, skill, handling, version, taken) in rows.decode((Int, String, Int, Double, Double, Int, Int?).self) {
+            guard let source = StoredRaceBot.Source(rawValue: source) else { continue }
+            bots.append(StoredRaceBot(seat: seat, source: source, rating: rating, skill: skill, handling: handling, mapVersion: version,
+                                      takenTick: taken))
+        }
+        return bots
+    }
+
+    /// The newest closed race `playerID` sat in, with her seat; nil before her first (#24). A cancelled race isn't one,
+    /// nor is one whose seat a bot took from her before the gun (#149).
     public func lastRace(of playerID: String) async throws -> StoredRaceResult? {
         let rows = try await database.client.query("""
             SELECT r.id, p.seat, rr.results, rr.incidents, rr.rated, r.ended_at
             FROM race_players p JOIN races r ON r.id = p.race_id JOIN race_results rr ON rr.race_id = r.id
             WHERE p.player_id = \(playerID) AND r.state = 'closed'
+                AND NOT EXISTS (SELECT 1 FROM race_bots b WHERE b.race_id = p.race_id AND b.seat = p.seat AND b.source = 'takeover')
             ORDER BY r.ended_at DESC, r.created_at DESC, r.id DESC LIMIT 1
             """, logger: database.logger)
         for try await (id, seat, results, incidents, rated, ended) in rows.decode((UUID, Int, Data, Data, Bool, Date).self) {

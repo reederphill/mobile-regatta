@@ -215,6 +215,7 @@ public struct WireRaceReport: Equatable, Sendable {
         try w.list(roster, limit: WireLimit.seats, "roster") { w, entry in
             try w.string(entry.name, limit: WireLimit.string, "roster.name")
             try w.index(entry.colorIndex, "roster.colorIndex")
+            w.bool(entry.isBot)
         }
         try results.encode(to: &w)
         try w.seats(sailing, "sailing")
@@ -227,7 +228,8 @@ public struct WireRaceReport: Equatable, Sendable {
         self.init(
             raceID: try r.text("raceID"), seat: try r.index(),
             roster: try r.list(limit: WireLimit.seats, "roster") {
-                RosterEntry(name: try $0.string(limit: WireLimit.string, "roster.name"), colorIndex: try $0.index())
+                RosterEntry(name: try $0.string(limit: WireLimit.string, "roster.name"), colorIndex: try $0.index(),
+                            isBot: try $0.bool("roster.isBot"))
             },
             results: try RaceResults(from: &r), sailing: try r.seats("sailing"),
             incidents: try r.list(limit: WireLimit.seats, "incidents") { try WireSeatIncidents(from: &$0) },

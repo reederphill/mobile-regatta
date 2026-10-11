@@ -2,6 +2,7 @@ import Crypto
 import Foundation
 import Persistence
 import RaceHost
+import RegattaBots
 import RegattaCore
 import RegattaProtocol
 import RegattaServices
@@ -139,26 +140,30 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     public nonisolated func launcher(clock: any HostClock = SystemClock()) -> RaceLauncher {
         { fleet, closed in
             let session = self.session(id: fleet.raceID, setup: fleet.setup, windSeed: fleet.windSeed,
-                                       names: fleet.humans.map(\.alias), clock: clock, onBriefingLeave: fleet.onBriefingLeave)
+                                       names: fleet.humans.map(\.alias), clock: clock, onBriefingLeave: fleet.onBriefingLeave,
+                                       fleet: fleet.fill, onLeftAfterGun: fleet.onLeftAfterGun)
             try await self.launch(session, players: fleet.humans.map(\.teamPlayerID), venue: fleet.drawn.pairing.venue.content.displayName,
                                   then: closed)
         }
     }
 
-    /// A session for a lifecycle race: the humans named in seat order, bots "Seat n" (#149 names them), the lifecycle's
-    /// all-gone rules, and its results changes reported here. `onBriefingLeave` (the queue's, #147) hears its humans who
-    /// leave before the gun; a dev-arranged race has none.
+    /// A session for a lifecycle race: the humans named in seat order, the bots under their sailing names and marked
+    /// bots (#149, `LockedFleet.roster`), the lifecycle's all-gone rules, and its results changes reported here.
+    /// `fleet`: the level its bots sail at (the locked fleet's; a fleet at the provisional rating otherwise).
+    /// `onBriefingLeave` (the queue's, #147) hears its humans who leave before the gun and `onLeftAfterGun` (#149)
+    /// those who leave for good after it; a dev-arranged race has neither.
     public nonisolated func session(id: UUID, setup: RaceSetup, windSeed: WindSeed, names: [String], clock: any HostClock = SystemClock(),
                                     options: RaceHostOptions? = nil,
-                                    onBriefingLeave: (@Sendable (BriefingLeave) -> Void)? = nil) -> RaceSession {
-        let roster = setup.seats.indices.map { seat in
-            RosterEntry(name: LockedFleet.seatName(seat, humans: names), colorIndex: seat)
-        }
-        return RaceSession(id: id, setup: setup, windSeed: windSeed, clock: clock, options: options ?? settings.hostOptions, roster: roster,
-                           onProgress: { [weak self] in
-                               guard let self else { return }
-                               Task { await self.progress(id) }
-                           }, onBriefingLeave: onBriefingLeave)
+                                    onBriefingLeave: (@Sendable (BriefingLeave) -> Void)? = nil,
+                                    fleet: FleetFill? = nil,
+                                    onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)? = nil) -> RaceSession {
+        RaceSession(id: id, setup: setup, windSeed: windSeed, clock: clock, options: options ?? settings.hostOptions,
+                    roster: LockedFleet.roster(setup: setup, humans: names),
+                    onProgress: { [weak self] in
+                        guard let self else { return }
+                        Task { await self.progress(id) }
+                    }, onBriefingLeave: onBriefingLeave,
+                    fleet: fleet ?? FleetFill(medianRating: OnlineBriefing.provisionalRating), onLeftAfterGun: onLeftAfterGun)
     }
 
     /// Registers `session` (its `races` row, running, with its players in seats 0…), starts it, and runs the close
@@ -229,6 +234,13 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         guard let id = seated[playerID], let live = races[id], let seat = live.seats[playerID] else { return nil }
         let host = live.session.host
         return (id, seat, RaceClockReading(tick: await host.tick, expectedCloseTick: await host.expectedCloseTick))
+    }
+
+    /// A running race's bots as they are dressed now (#149): their sailing names by seat, a seat taken over since
+    /// fleet lock included, and (`BotDressing.livery`) their liveries. For #159, which puts the fleet's liveries on
+    /// the wire. Nil for a race that isn't running here.
+    public func botDressing(of race: UUID) async -> BotDressing? {
+        await races[race]?.session.host.botDressing
     }
 
     /// Every race running here that hasn't ended, with the ticks to its expected close (`Race.expectedCloseTick`): what
@@ -342,6 +354,8 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     }
 
     /// The last race the player sat in that closed, until her next one closes (#24). Rating nil until ratings exist.
+    /// A race she left before the gun is never it (#149: a bot sailed her seat, and the result is the bot's); one she
+    /// left after the gun is, once it closes, with her boat's result (retired, #150).
     public func lastRace(of playerID: String) async throws -> LastRace? {
         guard let stored = try await archive.lastRace(of: playerID), let seat = stored.seat else { return nil }
         let report = RaceResultsFeed.closed(stored.raceID, seat: seat, summary: try RaceSummary(decoding: stored.results),
@@ -405,7 +419,12 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         do {
             record = ClosedRaceRecord(id: id, log: try outcome.log.jsonData(pretty: false), digest: outcome.digest,
                                       simulationVersion: outcome.log.header.simulationVersion, toolchain: toolchain,
-                                      results: try summary.encoded(), incidents: try RaceResultsFeed.encode(incidents), rated: results.rated)
+                                      results: try summary.encoded(), incidents: try RaceResultsFeed.encode(incidents), rated: results.rated,
+                                      bots: await host.botSeats.map {
+                                          StoredRaceBot(seat: $0.seat, source: $0.source == .fill ? .fill : .takeover, rating: $0.plan.rating,
+                                                        skill: $0.plan.skill, handling: $0.plan.handling, mapVersion: $0.plan.mapVersion,
+                                                        takenTick: $0.takenTick)
+                                      })
             // The reports are read back from the bytes stored, so the stream's last report is the last race's.
             stored = (try RaceSummary(decoding: record.results), try RaceResultsFeed.decodeIncidents(record.incidents))
         } catch {

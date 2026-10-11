@@ -13,7 +13,8 @@ import RegattaProtocol
 ///    human seat that no connection holds. Then the race's host takes over: `RaceStart`, and the race.
 ///    A good token for a race that isn't running gets `RaceCancelled` (#30, #148: one a restart lost, or cancelled),
 ///    or `RaceClosed` if the lifecycle closed it, and the connection closes normally.
-/// 3. Everything after goes to `RaceHost.receive(_:from:)`.
+/// 3. Everything after goes to `RaceHost.receive(_:from:)`, but `LeaveRace` (#149): the seat's player leaves for good
+///    (`RaceSession.quit`), and the host closes the connection. From a connection that isn't seated it is out of turn.
 ///
 /// Anything out of turn, or a bad token, closes the connection with a policy-violation close: the
 /// protocol has no join-refused message. So does not being seated within `ServerConfig.handshakeTimeout`
@@ -52,7 +53,13 @@ struct SeatConnection {
         switch phase {
         case .awaitingHello: hello(bytes)
         case .awaitingJoin: await join(bytes)
-        case .seated(let session, let seat): await session.host.receive(bytes, from: seat)
+        case .seated(let session, let seat):
+            // Read by its type code alone: the rest is the host's to decode, once.
+            if bytes.count == Frame.headerSize, bytes[0] == MessageType.leaveRace.rawValue {
+                await session.quit(seat: seat, transport: transport)
+            } else {
+                await session.host.receive(bytes, from: seat)
+            }
         case .closed: break
         }
     }

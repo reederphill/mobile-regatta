@@ -48,11 +48,11 @@ import Testing
             #expect(try await migrator.up(database) == all)
             #expect(try await migrator.applied(database) == all)
             #expect(try await tables(database)
-                == ["briefing_leaves", "data_files", "players", "race_files", "race_logs", "race_players", "race_results", "races",
+                == ["briefing_leaves", "data_files", "players", "race_bots", "race_files", "race_logs", "race_players", "race_results", "races",
                     "schema_migrations", "sessions", "terms_acceptances"])
             #expect(try await migrator.up(database) == [])
 
-            #expect(try await migrator.down(database, to: 3) == [8, 7, 6, 5, 4])
+            #expect(try await migrator.down(database, to: 3) == [9, 8, 7, 6, 5, 4])
             #expect(try await migrator.applied(database) == [1, 2, 3])
             #expect(try await tables(database) == ["data_files", "players", "schema_migrations", "sessions"])
 
@@ -63,6 +63,21 @@ import Testing
 
             #expect(try await migrator.up(database) == all)
             #expect(try await migrator.down(database, to: 0) == all.reversed())
+        }
+    }
+
+    /// #149: migration 0009 adds `race_bots` alone, and takes it away again.
+    @Test(TestDatabase.available) func testRaceBotsMigrationGoesUpAndDown() async throws {
+        try await TestDatabase.withFreshSchema { database in
+            let migrator = try Migrator()
+            try await migrator.up(database)
+            let with = try await tables(database)
+            #expect(with.contains("race_bots"))
+            #expect(try await migrator.down(database, to: 8) == [9])
+            #expect(try await tables(database) == with.filter { $0 != "race_bots" })
+            #expect(try await migrator.applied(database) == Array(1...8))
+            #expect(try await migrator.up(database) == [9])
+            #expect(try await tables(database) == with)
         }
     }
 
