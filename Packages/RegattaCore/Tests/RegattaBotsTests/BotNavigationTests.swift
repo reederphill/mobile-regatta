@@ -322,7 +322,8 @@ import RegattaCore
     /// clock started long enough ago that its complete deadline is 12 s off: she holds her turn hard over, gives nothing
     /// up, and serves it inside the deadline. With the deadline far off she gives it up, as ever.
     /// skiff@7 until #455: on skiff@8 her turn at 70 % rudder doesn't finish inside the 12 s this scene leaves her, and
-    /// she is disqualified.
+    /// she is disqualified. Tried again after #471's step C: the same (a turn by hand from 60° in takes her over 12 s,
+    /// and she is called 21.2 on the way).
     @Test(.onSkiffSeven) func penaltyTurnNearItsDeadlineIsNotGivenUp() throws {
         let style = BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
         let hardOver = BoatInput(rudder: 1.0)
