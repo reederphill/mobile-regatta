@@ -79,10 +79,15 @@ import Testing
     @Test func aConnectionWithNoFramesForTheIdleTimeoutIsClosed() async throws {
         // No sleep here is compared against the timeout (a loaded CI runner stalled this test for over a second,
         // #473): the close is timed from the last moment a frame can have crossed, and must come no sooner.
-        let idle = Duration.seconds(1)
+        let idle = Duration.seconds(2)
         let endpoint = Self.endpoint(idle: idle)
         var quietSince = ContinuousClock.now
-        let (link, connection, _) = try await ServiceFixtures.signedIn(endpoint, "quiet")
+        // On a runner stalled past the whole timeout even the sign-in comes too late and finds the connection closed
+        // (#493's CI run): then only that it wasn't closed inside the timeout is checked.
+        guard let (link, connection, _) = try? await ServiceFixtures.signedIn(endpoint, "quiet") else {
+            #expect(ContinuousClock.now - quietSince >= idle, "the sign-in failed on a connection that wasn't idle yet")
+            return
+        }
         // A request part-way through starts the timeout again. On a runner stalled past the whole timeout the
         // connection has already idled out and the request fails: then the close is timed from the sign-in.
         try await Task.sleep(for: .milliseconds(300))
