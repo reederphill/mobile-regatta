@@ -90,6 +90,12 @@ public enum HandTackTable {
     /// all-National 10-boat races) with the crowd's put-off gone: boats more than 10 s late for a turn before the
     /// start 335 a thousand without it and 265 with it (Club), 186 and 153 (National).
     public static let penaltyStartFirst = (turnIn: 2.0, spare: 4.0, late: 2.0, speed: 0.6)
+    /// "Bear away, then turn" (`BotBrain.clearingRoom`, #471): with a boat within `lengths` hull lengths she bears away
+    /// `angle`, under the rules' 30°, and sails that heading sheeted in for `seconds` at most before she turns, unless
+    /// it brings her `closing` metres nearer a boat inside her keep-clear distance. The
+    /// owner's ruling for how it looks; on the quick loops it moved no number (calls on a boat turning, Club: 256
+    /// without it, 249 with it; over 8 s, 260).
+    public static let penaltyClear = (angle: deg2rad(25), seconds: 3.5, lengths: 3.0, closing: 0.5)
     /// Seconds at most she waits, centred, for steerage to turn a penalty on.
     public static let stallWait = 8.0
 
@@ -157,6 +163,15 @@ extension BotBrain {
         var bearOffUntil: Double?
 
         var isTurning: Bool { bearOffUntil == nil }
+    }
+
+    /// Clearing room before a penalty turn by hand (`clearingRoom`, #471).
+    struct PenaltyClearing: Sendable, Equatable {
+        /// Since when, and the heading she holds; nil before she begins.
+        var since: Double?
+        var heading = 0.0
+        /// Done for the turns she owes now: she turns.
+        var isDone = false
     }
 
     /// What she knows of a stall (`centresStalled`).

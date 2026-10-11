@@ -180,6 +180,8 @@ struct BotBrain: Sendable {
     var takingOver = false
     /// A penalty turn she took over part-turned with the rudder centred, whose way she is reading (`readPenaltyTurn`).
     var penaltyRead: PenaltyRead?
+    /// The room she clears before a penalty turn by hand (`clearingRoom`, #471).
+    var penaltyClearing = PenaltyClearing()
     /// The boats around her as she saw them at her last decision, by seat (`guarded`): the cautious bot's only.
     var seen: [Seen?] = []
     /// Whether she holds her aim within her proper course while told she is restricted under rule 17
@@ -414,6 +416,7 @@ struct BotBrain: Sendable {
             penaltyProgress = 0
             penaltyRead = nil
             penaltyHeldSince = nil
+            penaltyClearing = PenaltyClearing()
             return nil
         }
         if let reading = readPenaltyTurn(b, view, owed) { return reading }
@@ -428,6 +431,9 @@ struct BotBrain: Sendable {
             penaltyGivenUp = false
         }
         let keepClear = owed.isStarted ? penaltyKeepClear(b, view) : nil
+        // By hand, a short bear-away for room before she starts the turn (#471); the next she owes she turns on into.
+        if servedOne { penaltyClearing.isDone = true }
+        if penaltyTurn == nil, let input = clearingRoom(b, owed, view) { return input }
         guard let turn = penaltyTurn ?? startPenaltyTurn(b, view, owed) else {
             // Not turning it yet, but 30° into it all the same (a rounding counts towards it): she keeps clear. Before
             // her start, putting it off in the crowd while the gun is further off than `penaltyPutOffKeepClearSeconds`,
@@ -512,6 +518,44 @@ struct BotBrain: Sendable {
             ?? penaltyLuffFirst(b, view) ?? style.penaltyDirection
         penaltyTurn = turn
         return turn
+    }
+
+    /// "Bear away, then turn" (#471, the owner's ruling of 2026-10-10): on a class she turns by hand, with a boat
+    /// within `HandTackTable.penaltyClear.lengths` of her, before she starts a turn she bears away `angle` (off the
+    /// wind already, she turns as far away from the nearest boat), which is under the rules' 30° and starts nothing,
+    /// and sails that heading sheeted in for `seconds` at most: room, and way to turn with. Her input, or nil once
+    /// she turns: clear of every boat, out of time (`canPutOffTurn`), 30° in, a boat that heading closes with, a
+    /// mark near or no room to leeward (`startPenaltyTurn` decides those), or starting first.
+    private mutating func clearingRoom(_ b: SeatView.OwnBoat, _ owed: OwedPenalty, _ view: SeatView) -> BoatInput? {
+        let table = HandTackTable.penaltyClear
+        guard Self.turnsByHand(view), !penaltyClearing.isDone, !startsBeforeHerTurn(owed, b, view) else { return nil }
+        let nearest = view.others.filter { !$0.isGhost }
+            .min { ($0.position - b.position).length < ($1.position - b.position).length }
+        if penaltyClearing.since == nil, let nearest {
+            let bearAway: Double = b.relativeWind > 0 ? -1 : 1
+            let way = b.twa < .pi / 2 + table.angle ? bearAway : Self.away(from: nearest.position - b.position, b)
+            penaltyClearing.since = view.time
+            penaltyClearing.heading = sailable(b.heading + way * table.angle, wind: b.windDirection)
+        }
+        let heading = penaltyClearing.heading
+        guard let since = penaltyClearing.since, let nearest,
+              (nearest.position - b.position).length < view.boatClass.hull.length * table.lengths,
+              view.time - since < table.seconds, !owed.isStarted, canPutOffTurn(owed, b, view),
+              nearestMark(b, view) == nil, hasGybeRoom(b, view),
+              !view.others.contains(where: { closes($0, b, view, heading: heading) }) else {
+            penaltyClearing.isDone = true
+            return nil
+        }
+        return steer(b, toHeading: heading, view)
+    }
+
+    /// Whether sailing `heading` brings her closer to `other` than she is now, and within `keepClearLengths` of her,
+    /// inside `HandTackTable.penaltyClear.seconds`.
+    private func closes(_ other: SeatView.OtherBoat, _ b: SeatView.OwnBoat, _ view: SeatView, heading: Double) -> Bool {
+        guard !other.isGhost else { return false }
+        let now = (other.position - b.position).length
+        let closest = Self.closestApproach(of: other, to: b, heading: heading, lookahead: HandTackTable.penaltyClear.seconds)
+        return closest < view.boatClass.hull.length * keepClearLengths && closest < now - HandTackTable.penaltyClear.closing
     }
 
     /// Whether she may still put her current turn off, waiting to start it: until `penaltyStartMargin` before its
