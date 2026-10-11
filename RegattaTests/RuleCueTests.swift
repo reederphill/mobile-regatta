@@ -6,6 +6,8 @@ import Testing
 /// #123 acceptance: the penalty arc and Turn notice (`PenaltyReadout`), the rule-call lines (`RuleCallLines`), the
 /// glows' range and fade (`GlowSelection`) and the live penalty notice (`NoticeSlot.setLive`).
 @MainActor @Suite struct RuleCueTests {
+    typealias Marks = PenaltyReadout.TurnMarks
+
     /// A turn whose clock started at tick `clock`, under start/complete windows of `start`/`complete` seconds.
     static func owed(clock: Int = 300, start: Double, complete: Double, turns: Int = 1, started: Bool = false) -> OwedPenalty {
         OwedPenalty(turnsOwed: turns, startDeadlineTick: clock + Int(start) * Race.tickRate,
@@ -73,6 +75,96 @@ import Testing
         #expect(PenaltyReadout(frame: frame, seat: 0)?.noticeText == "Turn · 11s / 31s")
         #expect(PenaltyReadout(frame: frame, seat: 1) == nil)
         #expect(frame.extrapolatedBackOneTick().owed == owed)
+    }
+
+    /// A fleet-rules@6 turn (#487) whose clock started at tick `clock`: one limit, `complete` seconds.
+    static func tackAndGybe(clock: Int = 300, complete: Double = 40, turns: Int = 1, tacked: Bool = false,
+                            gybed: Bool = false, direction: Int = 0) -> OwedPenalty {
+        let deadline = clock + Int(complete) * Race.tickRate
+        return OwedPenalty(turnsOwed: turns, startDeadlineTick: deadline, completeDeadlineTick: deadline, progress: 0,
+                           isStarted: tacked || gybed, hasTacked: tacked, hasGybed: gybed, direction: direction)
+    }
+
+    /// #489: under fleet-rules@6 the arc counts down the one 40 s limit from the call and the Turn notice gives that
+    /// one countdown, never a "start by" part; the marks are lit as the tack and the gybe are made, the barbs pointing
+    /// the turn's way. A fleet-rules@5 turn has no marks.
+    @Test func tackAndGybeReadoutCountsOneLimitWithItsMarks() {
+        for elapsed in [0.0, 9, 25, 39] {
+            let readout = PenaltyReadout(owed: Self.tackAndGybe(), tick: 300 + Int(elapsed) * Race.tickRate,
+                                         startSeconds: 40, completeSeconds: 40, turn: .tackAndGybe)
+            #expect(readout.phase == .complete)
+            #expect(abs(readout.arcFraction - (40 - elapsed) / 40) < 1e-9, "\(elapsed) s in")
+            #expect(readout.marks == Marks(isTackLit: false, isGybeLit: false, direction: 0))
+        }
+        let nine = PenaltyReadout(owed: Self.tackAndGybe(), tick: 300 + 9 * Race.tickRate, startSeconds: 40,
+                                  completeSeconds: 40, turn: .tackAndGybe)
+        #expect(nine.noticeText == "Turn · 31s")
+        let two = PenaltyReadout(owed: Self.tackAndGybe(turns: 2), tick: 300 + 9 * Race.tickRate, startSeconds: 40,
+                                 completeSeconds: 40, turn: .tackAndGybe)
+        #expect(two.noticeText == "Turn · 31s ×2")
+        let past = PenaltyReadout(owed: Self.tackAndGybe(), tick: 300 + 60 * Race.tickRate, startSeconds: 40,
+                                  completeSeconds: 40, turn: .tackAndGybe)
+        #expect(past.arcFraction == 0 && past.noticeText == "Turn · 0s")
+
+        // Tacked turning clockwise (to starboard): the tack half lit, its barb clockwise; a recross keeps it lit and
+        // turns the barb round; gybed first turning anticlockwise, the gybe half.
+        func marks(_ owed: OwedPenalty) -> PenaltyReadout.TurnMarks? {
+            PenaltyReadout(owed: owed, tick: 400, startSeconds: 40, completeSeconds: 40, turn: .tackAndGybe).marks
+        }
+        #expect(marks(Self.tackAndGybe(tacked: true, direction: 1)) == Marks(isTackLit: true, isGybeLit: false, direction: 1))
+        #expect(marks(Self.tackAndGybe(tacked: true, direction: -1)) == Marks(isTackLit: true, isGybeLit: false, direction: -1))
+        #expect(marks(Self.tackAndGybe(gybed: true, direction: -1)) == Marks(isTackLit: false, isGybeLit: true, direction: -1))
+
+        // Fleet-rules@5: no marks, its two countdowns as before.
+        let older = PenaltyReadout(owed: Self.owed(start: 20, complete: 40), tick: 300 + 9 * Race.tickRate,
+                                   startSeconds: 20, completeSeconds: 40)
+        #expect(older.marks == nil && older.noticeText == "Turn · 11s / 31s")
+    }
+
+    /// #489: a served fleet-rules@6 turn lights both marks for half a second of race time, its barbs the served
+    /// turn's way (kept from the frames before: the race clears a last turn's way as it serves it), over the next
+    /// owed turn's countdown or alone; then the next turn shows both grey, or nothing does. Not under fleet-rules@5.
+    @Test func servedTurnFlashesBothMarksForHalfASecond() throws {
+        var flash = ServedTurnFlash()
+        #expect(!flash.isShowing(at: 0))
+        flash.follow(Self.tackAndGybe(tacked: true, direction: -1))
+        flash.follow(nil)
+        #expect(flash.direction == -1)
+        flash.served(at: 1000)
+        let window = Int((ServedTurnFlash.seconds * Double(Race.tickRate)).rounded(.up))
+        #expect(!flash.isShowing(at: 999))
+        #expect(flash.isShowing(at: 1000) && flash.isShowing(at: 1000 + window - 1))
+        #expect(!flash.isShowing(at: 1000 + window))
+
+        let driver = PracticeDriver(config: RaceDriverTests.config)
+        let base = driver.currentFrame
+        var penalty = try #require(base.penalty)
+        penalty.turn = .tackAndGybe
+        func frame(tick: Int, owed seat0: OwedPenalty?, penalty: RulesConfig.Penalty) -> TickFrame {
+            var owed = [OwedPenalty?](repeating: nil, count: base.boats.count)
+            owed[0] = seat0
+            return TickFrame(tick: tick, boats: base.boats, standings: base.standings, wind: base.wind, isOver: false,
+                             owed: owed, penalty: penalty)
+        }
+        // The last turn served: both lit alone, no countdown, then nothing.
+        let alone = try #require(PenaltyReadout(frame: frame(tick: 1005, owed: nil, penalty: penalty), seat: 0, served: flash))
+        #expect(alone.marks == Marks(isTackLit: true, isGybeLit: true, direction: -1))
+        #expect(alone.arcFraction == 0 && alone.turnsOwed == 0)
+        #expect(PenaltyReadout(frame: frame(tick: 1000 + window, owed: nil, penalty: penalty), seat: 0, served: flash) == nil)
+        #expect(PenaltyReadout(frame: frame(tick: 1005, owed: nil, penalty: penalty), seat: 0) == nil)
+        // Another owed: both lit over its countdown, then both grey.
+        let next = Self.tackAndGybe(clock: 1000, direction: -1)
+        let flashing = try #require(PenaltyReadout(frame: frame(tick: 1005, owed: next, penalty: penalty), seat: 0,
+                                                   served: flash))
+        #expect(flashing.marks == Marks(isTackLit: true, isGybeLit: true, direction: -1) && flashing.arcFraction > 0.99)
+        let after = try #require(PenaltyReadout(frame: frame(tick: 1000 + window, owed: next, penalty: penalty), seat: 0,
+                                                served: flash))
+        #expect(after.marks == Marks(isTackLit: false, isGybeLit: false, direction: -1))
+        // Fleet-rules@5 has no flash.
+        let older = try #require(base.penalty)
+        #expect(PenaltyReadout(frame: frame(tick: 1005, owed: nil, penalty: older), seat: 0, served: flash) == nil)
+        #expect(PenaltyReadout(frame: frame(tick: 1005, owed: Self.owed(clock: 1000, start: 20, complete: 40),
+                                            penalty: older), seat: 0, served: flash)?.marks == nil)
     }
 
     private static func call(_ tick: Int, _ rule: RacingRule = .portStarboard, offender: Int = 1, victim: Int = 2) -> RuleCall {

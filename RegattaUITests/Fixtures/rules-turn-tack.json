@@ -1,0 +1,9 @@
+{
+  "log" : "rules-turn.racelog.json",
+  "freezeTick" : -1240,
+  "camera" : "boat",
+  "vision" : "none",
+  "view" : "courseUp",
+  "ruleCues" : true,
+  "hud" : { "seat" : 0 }
+}

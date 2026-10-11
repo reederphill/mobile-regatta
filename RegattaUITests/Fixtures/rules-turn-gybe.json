@@ -1,0 +1,9 @@
+{
+  "log" : "rules-turn-gybe.racelog.json",
+  "freezeTick" : -1280,
+  "camera" : "boat",
+  "vision" : "none",
+  "view" : "courseUp",
+  "ruleCues" : true,
+  "hud" : { "seat" : 0 }
+}

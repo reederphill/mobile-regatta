@@ -108,6 +108,8 @@ struct RaceEventPresenter {
     /// A seat's label as the HUD shows it (`FleetRoster.label(of:playerSeat:)`).
     let name: (Int) -> String
     let seen: RuleSeenStore
+    /// The race's penalty turn (`raceFormat.penalty.turn`): which penalty line a call against you spells out (#489).
+    let penaltyTurn: RulesConfig.PenaltyTurn
 
     private var presentedCalls: Set<RuleCall> = []
     /// The server's ids of the events presented (`RaceEvent.id`, #96): online, an event delivered again is never
@@ -118,9 +120,11 @@ struct RaceEventPresenter {
     private var lastCountdownSecond = Int.max
     private var isLagWarning = false
 
-    init(me: Int, seen: RuleSeenStore = RuleSeenStore(), name: @escaping (Int) -> String = { "Boat \($0 + 1)" }) {
+    init(me: Int, seen: RuleSeenStore = RuleSeenStore(), penaltyTurn: RulesConfig.PenaltyTurn = .fullCircle,
+         name: @escaping (Int) -> String = { "Boat \($0 + 1)" }) {
         self.me = me
         self.seen = seen
+        self.penaltyTurn = penaltyTurn
         self.name = name
     }
 
@@ -155,7 +159,7 @@ struct RaceEventPresenter {
             out.cues.append(.markTouch)
             // Rule 31 is always against you: its first touch spells it out with the penalty line.
             if !hasSeen(.ruleAgainst(.touchingMark)) {
-                out.notices.append(notice(.ruleCall, RuleWords.firstMarkTouch(mark),
+                out.notices.append(notice(.ruleCall, RuleWords.firstMarkTouch(mark, turn: penaltyTurn),
                                           marks: [.rule(.touchingMark), .ruleAgainst(.touchingMark)]))
             }
         case .penaltyServed(let seat):
@@ -192,12 +196,14 @@ struct RaceEventPresenter {
         let owesTurn = call.turnsOwed > 0
         let rule = call.rule
         if against, autohelmHolding, RuleWords.keepClearRules.contains(rule), !hasSeen(.autohelmKeepClear) {
-            let text = RuleWords.firstCall(rule, against: true, other: other, owesTurn: owesTurn, autohelm: true)
+            let text = RuleWords.firstCall(rule, against: true, other: other, owesTurn: owesTurn, autohelm: true,
+                                           turn: penaltyTurn)
             return notice(.ruleCall, text, marks: [.autohelmKeepClear, .rule(rule), .ruleAgainst(rule)])
         }
         let marks: [SeenMark] = against ? [.rule(rule), .ruleAgainst(rule)] : [.rule(rule)]
         guard !hasSeen(marks[marks.count - 1]) else { return nil }
-        return notice(.ruleCall, RuleWords.firstCall(rule, against: against, other: other, owesTurn: owesTurn),
+        return notice(.ruleCall, RuleWords.firstCall(rule, against: against, other: other, owesTurn: owesTurn,
+                                                     turn: penaltyTurn),
                       marks: marks)
     }
 

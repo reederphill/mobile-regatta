@@ -1,3 +1,4 @@
+import RegattaCore
 import SwiftUI
 
 /// One on-water symbol the Help legend shows (#135, #23): its name and one plain line, as data, apart from its
@@ -57,7 +58,10 @@ enum LegendItem: String, CaseIterable, Identifiable, Sendable {
         case .nextMark: "Round it on the arrow's side. The ring is its zone."
         case .otherMark: "Not yet."
         case .ruleCall: "A boat broke a rule. The badge is its number."
-        case .penaltyArc: "Time left to do your penalty turn."
+        // Under fleet-rules@6 (#489) the arc also shows the turn's tack and gybe; never "360" or "spin".
+        case .penaltyArc: RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.turn == .tackAndGybe
+            ? "Time left for your penalty turn: one tack and one gybe, turning the same way."
+            : "Time left to do your penalty turn."
         }
     }
 }

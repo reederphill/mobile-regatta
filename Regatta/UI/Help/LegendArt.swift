@@ -242,9 +242,18 @@ struct LegendShot {
         case .penaltyArc:
             let penalty = race.rules.raceFormat.penalty
             let ticks = Double(Race.tickRate)
-            let owed = OwedPenalty(turnsOwed: 1, startDeadlineTick: race.tick + Int(penalty.start * 0.7 * ticks),
+            let owed: OwedPenalty
+            switch penalty.turn {
+            case .fullCircle:
+                owed = OwedPenalty(turnsOwed: 1, startDeadlineTick: race.tick + Int(penalty.start * 0.7 * ticks),
                                    completeDeadlineTick: race.tick + Int(penalty.complete * ticks), progress: 0,
                                    isStarted: false)
+            case .tackAndGybe:
+                // Fleet-rules@6 (#489): one limit, the tack made turning clockwise, the gybe still to come.
+                let deadline = race.tick + Int(penalty.complete * 0.7 * ticks)
+                owed = OwedPenalty(turnsOwed: 1, startDeadlineTick: deadline, completeDeadlineTick: deadline, progress: 0,
+                                   isStarted: true, hasTacked: true, direction: 1)
+            }
             return LegendShot(boats: [mine(p)], zoom: 0.9, ruleCues: true, owed: [owed])
         }
     }

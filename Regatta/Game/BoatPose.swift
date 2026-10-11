@@ -325,6 +325,11 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// The penalty arc's radius, hull lengths from your boat's centre, and its width, screen points.
     var penaltyArcRadiusHulls = 0.9
     var penaltyArcWidth = 4.0
+    /// Under a `tackAndGybe` penalty (fleet-rules@6, #489): the turn's tack and gybe marks sit this many screen points
+    /// inside the arc (centre to centre), and their width, screen points: the owner's sketch's proportions (marks just
+    /// inside the ring) at the arc's own 4-point width.
+    var penaltyMarkInset = 7.0
+    var penaltyMarkWidth = 4.0
 
     // MARK: Render quality (#127)
 
@@ -375,6 +380,7 @@ nonisolated extension BoatStyle {
             (.rightOfWayGlowBlur, \.rightOfWayGlowBlur),
             (.ruleCallLineSeconds, \.ruleCallLineSeconds), (.ruleCallFadeSeconds, \.ruleCallFadeSeconds),
             (.penaltyArcRadiusHulls, \.penaltyArcRadiusHulls), (.penaltyArcWidth, \.penaltyArcWidth),
+            (.penaltyMarkInset, \.penaltyMarkInset), (.penaltyMarkWidth, \.penaltyMarkWidth),
             (.farBoatHulls, \.farBoatHulls),
         ]
         for (key, path) in fields {

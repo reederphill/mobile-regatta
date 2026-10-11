@@ -210,6 +210,38 @@ import UIKit
         }
     }
 
+    /// The fleet-rules@6 penalty arc (#489) on its own scenes' logs (`scripts/fixture-scenes.json`: your turn luffed
+    /// at once, or borne away): `rules-turn` just called, neither crossing made, both marks grey; `rules-turn-tack` the
+    /// tack made, its half lit with its barb; `rules-turn-gybe` the gybe made first. Each with the arc and the HUD's
+    /// one-countdown Turn notice. Every fleet-rules@5-or-older fixture draws no marks, so its reference doesn't move.
+    @Test func tackAndGybeFixturesShowTheTurnMarks() throws {
+        func session(_ name: String) throws -> GameSession {
+            let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            #expect(log.header.setup.rulesConfiguration.id == "fleet-rules" && log.header.setup.rulesConfiguration.version == 6,
+                    "\(name)")
+            #expect(fixture.ruleCues == true, "\(name)")
+            let session = try GameSession(fixture: fixture, log: log)
+            SKView(frame: CGRect(x: 0, y: 0, width: 402, height: 874)).presentScene(session.scene)
+            session.scene.update(0)
+            return session
+        }
+        for (name, marks) in [("rules-turn", "tack=grey gybe=grey barbs=0"), ("rules-turn-tack", "tack=lit gybe=grey barbs=1"),
+                              ("rules-turn-gybe", "tack=grey gybe=lit barbs=1")] {
+            let turn = try session(name)
+            #expect(turn.scene.ruleCueSummary.hasSuffix("arc=1"), "\(name): \(turn.scene.ruleCueSummary)")
+            #expect(turn.scene.penaltyMarksSummary == marks, "\(name)")
+            let notice = try #require(turn.notice?.kind == .penalty ? turn.notice?.text : nil, "\(name)")
+            #expect(notice.hasPrefix("Turn · ") && !notice.contains(" / "), "\(name): \(notice)")
+        }
+        for name in ["rules-call", "rules-penalty", "prestart", "fleet", "cues"] {
+            let (fixture, log) = try RenderFixture.load(named: name, in: Self.fixtures)
+            let older = try GameSession(fixture: fixture, log: log)
+            SKView(frame: CGRect(x: 0, y: 0, width: 402, height: 874)).presentScene(older.scene)
+            older.scene.update(0)
+            #expect(older.scene.penaltyMarksSummary == "none", "\(name)")
+        }
+    }
+
     /// The instruments fixture (#457) is `hud-racing` with the bottom row's speed and apparent wind; every older HUD
     /// fixture draws without them, so its reference doesn't move. A frozen fixture shows the raw reading (its first).
     @Test func instrumentsFixtureShowsTheInstruments() throws {
@@ -339,7 +371,7 @@ import UIKit
         // Every scene log sails the default class (#466): after a default switch `scripts/record-fixtures.sh --record`
         // re-records them all, and CI's renders of the new framing are the owner's to adopt (#354).
         #expect(log.header.setup.boatClass == RaceFiles.defaults.boatClass.ref)
-        for scene in ["rules-call", "rules-penalty", "cues"] {
+        for scene in ["rules-call", "rules-penalty", "cues", "rules-turn", "rules-turn-gybe"] {
             let (_, sceneLog) = try RenderFixture.load(named: scene, in: Self.fixtures)
             #expect(sceneLog.header.setup.boatClass == RaceFiles.defaults.boatClass.ref, "\(scene)")
         }

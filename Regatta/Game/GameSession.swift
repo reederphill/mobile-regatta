@@ -212,7 +212,9 @@ final class GameSession {
         self.sound = RaceSound(output: sound)
         self.controls = controls
         let me = driver.myBoatIndex
-        presenter = RaceEventPresenter(me: me, seen: rulesSeen) { roster.label(of: $0, playerSeat: me) }
+        presenter = RaceEventPresenter(me: me, seen: rulesSeen, penaltyTurn: driver.currentFrame.penalty?.turn ?? .fullCircle) {
+            roster.label(of: $0, playerSeat: me)
+        }
         // `-vision` (Debug); a fixture sets its own after this.
         vision = LaunchOptions.current.raceVision
         scene = GameScene(driver: driver, roster: roster)
@@ -405,6 +407,8 @@ final class GameSession {
             switch event.kind {
             case .penaltyServed(let seat):
                 servedTurns[seat, default: 0] += 1
+                // Your arc's served flash (#489), in race time from the tick it is shown on.
+                if seat == me { scene.servedTurn.served(at: driver.currentFrame.tick) }
             case .finished(me, _):
                 finishForPlayer(showsAt: now().addingTimeInterval(Self.resultsDelay))
             case .disqualified(me, _):

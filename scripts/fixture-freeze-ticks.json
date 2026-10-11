@@ -34,6 +34,21 @@
         "glows": ["giveWay", "hasRight"]
     },
     {
+        "fixtures": ["rules-turn"],
+        "log": "rules-turn.racelog.json", "seat": 0, "camera": "race", "clear": [210, 110, 20], "zoom": [0.6, 1.0],
+        "leg": 0, "yourTurn": "owed", "yourCrossing": "none"
+    },
+    {
+        "fixtures": ["rules-turn-tack"],
+        "log": "rules-turn.racelog.json", "seat": 0, "camera": "race", "clear": [210, 110, 20], "zoom": [0.6, 1.0],
+        "leg": 0, "yourCrossing": "tack"
+    },
+    {
+        "fixtures": ["rules-turn-gybe"],
+        "log": "rules-turn-gybe.racelog.json", "seat": 0, "camera": "race", "clear": [210, 110, 20], "zoom": [0.6, 1.0],
+        "leg": 0, "yourCrossing": "gybe"
+    },
+    {
         "fixtures": ["cues", "cues-deuteranopia", "cues-greyscale", "cues-protanopia", "cues-tritanopia", "cues-washout"],
         "log": "cues.racelog.json", "camera": "race",
         "leg": 0, "racing": true, "groove": "pinching", "grooveDegrees": [2, 15], "markInView": false, "sailsWorkingInView": 2
