@@ -18,6 +18,15 @@ import RegattaCore
 // - "The kite goes soft, she heads up": her hand wanders off the angle she aims at; when the one she is at is about
 //   to drop her she luffs from there, a good helm sooner than a poor one.
 // - "Not at the mark": close to her mark she sails for it, on the plane or off.
+//
+// Bots err on the side of caution (the owner's ruling of 2026-10-11): each sails within her own skill, a safer line for
+// herself and nothing to do with the boats around her.
+// - "Inside her own hand": she aims above the plane's edge by what her hand wanders (`ownRunAngle`), so its
+//   excursions stay on the plane: nothing for a perfect hand, 10° above her groove for Club's centre.
+// - "Come down as she gathers speed": slow out of a rounding she bears away only as fast as her speed lets her stay
+//   on, however deep her mark or a missed groove asks her to sail (`floorAim`'s reach, from her groove).
+// - "A gybe within her skill": a helm who would slam gybes on half rudder, a wider, slower arc that stays on the plane
+//   (`PlaningTable.safeGybe`, `startHandTurn`); a flubbed gybe is still cranked, and falls.
 
 /// The planing heuristics' values (#462), one table to tune, as `HandTackTable` is the hand turn's.
 public enum PlaningTable {
@@ -64,6 +73,21 @@ public enum PlaningTable {
     public static let bearsAwayGently = true
     /// Hull lengths from a mark inside which she bears away with all the rudder its rounding asks.
     public static let gentleMarkLengths = 3.0
+
+    /// "Inside her own hand" (the owner's ruling of 2026-10-11, bots err on the side of caution): she aims this share
+    /// of her hand's wander running (`BotWeaknesses.wander` times `HandSteeringTable.downwindWander`) above the
+    /// deepest angle that keeps `floorMargin`. More than the wander itself: her lag on a shift and her overshoot carry
+    /// her past it (measured: a hand that wanders 13° was dropped 15° deep of her aim). In 9 to 13 kn Club's centre
+    /// (handling 0.55) aims 10° to 11° above her groove and the floor of her band 18°, National's (0.8) 1° to 2°; a
+    /// perfect hand sails her groove.
+    /// Measured on the mixed quick loop, Club / Regional / National falls for want of apparent wind a boat a race:
+    /// 1.40 / 1.54 / 0.85 at 0, 1.08 / 1.19 / 1.06 at 1, 0.67 / 0.82 / 1.14 at 1.3, 0.51 / 0.61 / 0.74 at 1.6.
+    public static let handMargin = 1.6
+    /// "A gybe within her skill": racing, the most rudder she gybes with, a share of full, whatever her handling
+    /// (`HandTackTable.gybeFraction` gives a poor helm all of it). Half is on the plane from every speed she gybes at;
+    /// at 75 % she fell entering slow (70 % of her polar speed; 60 %: gybe falls 1.89 to 1.57 a boat a race for Club,
+    /// 50 %: 1.29). A flubbed gybe is still cranked hard over, and falls.
+    public static let safeGybe = 0.5
 }
 
 extension BotBrain {
@@ -219,7 +243,9 @@ extension BotBrain {
             return fast(angle)
         }
         let actual = abs(sailingAngle(b))
-        let highest = max(planing.fromTWA, aim.angle - PlaningTable.floorReach)
+        // Reckoned from her groove, not from an aim far below it (a groove she misses, a mark dead downwind): slow out
+        // of a rounding she comes down as she gathers speed, however deep she is asked to sail.
+        let highest = max(planing.fromTWA, min(aim.angle, polar.bestDownwind(tws: now).twa) - PlaningTable.floorReach)
         // The reflex: the angle she is at is about to drop her.
         if PlaningTable.luffsOnASoftKite, actual > highest, aim.tack == b.tack {
             let margin = HandTackTable.ramp(turnHandling, PlaningTable.reflexMargin, PlaningTable.noticeHandling)
@@ -233,11 +259,38 @@ extension BotBrain {
             }
         }
         var angle = aim.angle
-        guard !keeps(angle) else { return aim }
-        while angle > highest, !keeps(angle) { angle -= PlaningTable.floorStep }
-        // No further up from where she is than a step: she holds what she has while she gathers speed.
-        if angle < actual { angle = min(aim.angle, max(angle, actual - PlaningTable.luffStep)) }
-        return Aim(angle: max(angle, highest), tack: aim.tack, tolerance: deg2rad(2))
+        let held = !keeps(angle)
+        if held {
+            while angle > highest, !keeps(angle) { angle -= PlaningTable.floorStep }
+            // No further up from where she is than a step: she holds what she has while she gathers speed.
+            if angle < actual { angle = min(aim.angle, max(angle, actual - PlaningTable.luffStep)) }
+            angle = max(angle, highest)
+        }
+        // Inside her own hand: the same angle wherever her hand has her now, or she would give it up just as it
+        // carries her deep.
+        let own = ownRunAngle(b, view, deepest: aim.angle)
+        if own < angle { return Aim(angle: own, tack: aim.tack, tolerance: deg2rad(2)) }
+        return held ? Aim(angle: angle, tack: aim.tack, tolerance: deg2rad(2)) : aim
+    }
+
+    /// "Inside her own hand": the deepest angle, no deeper than `deepest`, from which her hand's wander leaves her on
+    /// the plane: `PlaningTable.handMargin` of her wander running deeper than it she still has `floorMargin` of
+    /// apparent wind over the class's floor, at her polar speed in the wind her groove reads. A boat sailing within her
+    /// own skill: a helm with no wander sails `deepest`; a poor one sails hotter, and further for it.
+    func ownRunAngle(_ b: SeatView.OwnBoat, _ view: SeatView, deepest: Double) -> Double {
+        let hand = PlaningTable.handMargin * weaknesses.wander * HandSteeringTable.downwindWander
+        guard hand > 0, let planing = view.boatClass.planing, let floor = planing.apparentWind else { return deepest }
+        let polar = view.boatClass.polar
+        let tws = senses.grooveWind ?? b.polarWindSpeed
+        let need = floor.offSpeed(tws: tws) + PlaningTable.floorMargin
+        let highest = max(planing.fromTWA, deepest - PlaningTable.floorReach)
+        var angle = deepest
+        while angle > highest {
+            let deep = min(angle + hand, .pi)
+            if BoatClass.PlaningTuning.apparentWindSpeed(twa: deep, speed: polar.speed(twa: deep, tws: tws), tws: tws) >= need { break }
+            angle -= PlaningTable.floorStep
+        }
+        return angle
     }
 
     /// "Bear away gently": `input`, her helm's rudder for an aim `error` radians off, with no more rudder than she

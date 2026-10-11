@@ -251,6 +251,157 @@ import Testing
         #expect(try rudder(handling: 1, planing: true, boatClass: BotHandTackTests.skiffEight) > 0.99)
     }
 
+    /// `hand`'s bot with the hand steering of `handling` (its wander, lag and overshoot; `Hand`'s own has none): her
+    /// brain reckons with it, and her helm steers by it if `steers`.
+    static func wandering(_ hand: inout BotHandTackTests.Hand, _ race: Race, handling: Double, steers: Bool = false, seed: UInt64 = 1) {
+        var brain = BotBrain(style: BotConductTests.skill1, profile: .baseline, seed: seed,
+                             weaknesses: BotWeaknesses(skill: 1, handling: handling))
+        brain.tactics.headerThreshold = nil
+        brain.tactics.downwindShiftThreshold = nil
+        brain.tactics.corridor = 100
+        brain.plannedTack = race.boats[0].tack
+        brain.laylineError = (race.boats[0].legIndex, .pi / 3)
+        brain.senses = hand.brain.senses
+        hand.brain = brain
+        if steers { hand.helm = BotHelm(hand: HandSteering(brain.weaknesses, seed: seed)) }
+    }
+
+    /// "Inside her own hand" (bots err on the side of caution): planing in her groove, a perfect hand sails the groove
+    /// she is asked for; the poorer her handling the further above it she aims, by what her hand wanders: 1.6 of her
+    /// wander running deeper than her aim she still has the apparent wind the class planes on and half a knot. It is
+    /// the same angle when her hand has carried her deep of it. On skiff@8 she sails as asked.
+    @Test func sheAimsInsideHerOwnHand() throws {
+        for seed in UInt64(1)...6 {
+            var hotter: [Double] = []
+            for handling in [1.0, 0.8, 0.55, 0.35] {
+                var (race, hand, _) = try Self.runner(seed: seed, planing: true, handling: handling)
+                Self.wandering(&hand, race, handling: handling)
+                let view = Self.seen(race, &hand)
+                let tws = view.own.polarWindSpeed
+                let polar = view.boatClass.polar
+                let groove = Aim.groove(.downwind, tack: .starboard, angle: polar.bestDownwind(tws: tws).twa)
+                let sailed = hand.brain.downwindAim(view.own, view, aim: groove)
+                hotter.append(rad2deg(groove.angle - sailed.angle))
+                let wander = PlaningTable.handMargin * hand.brain.weaknesses.wander * HandSteeringTable.downwindWander
+                let deep = min(sailed.angle + wander, .pi)
+                let apparent = BoatClass.PlaningTuning.apparentWindSpeed(twa: deep, speed: polar.speed(twa: deep, tws: tws), tws: tws)
+                let floor = try #require(view.boatClass.planing?.apparentWind)
+                #expect(apparent >= floor.offSpeed(tws: tws) + PlaningTable.floorMargin - 0.05, "seed \(seed), h \(handling): \(apparent) m/s")
+                if handling == 1 { #expect(sailed == groove, "seed \(seed)") }
+                // Her hand has carried her 7° deep: the same aim.
+                var (deepRace, deepHand, _) = try Self.runner(seed: seed, planing: true, deep: deg2rad(7), handling: handling)
+                Self.wandering(&deepHand, deepRace, handling: handling)
+                let deepView = Self.seen(deepRace, &deepHand)
+                let again = deepHand.brain.downwindAim(deepView.own, deepView, aim: groove)
+                if !again.insists { #expect(abs(again.angle - sailed.angle) < deg2rad(0.01), "seed \(seed), h \(handling): \(rad2deg(again.angle))° deep, \(rad2deg(sailed.angle))° in her groove") }
+            }
+            print("BOTPLANING own hand seed \(seed): above her groove by handling 1 / 0.8 / 0.55 / 0.35: \(hotter.map { ($0 * 10).rounded() / 10 })°")
+            #expect(hotter[0] == 0 && hotter[1] <= hotter[2] && hotter[2] <= hotter[3], "seed \(seed): \(hotter)")
+            #expect(hotter[1] <= 3, "seed \(seed): a good hand \(hotter[1])° above her groove")
+            #expect(hotter[2] >= 2 && hotter[3] >= hotter[2] + 3, "seed \(seed): \(hotter)")
+        }
+        var (race, hand, _) = try Self.runner(seed: 3, planing: true, handling: 0.35, boatClass: BotHandTackTests.skiffEight)
+        Self.wandering(&hand, race, handling: 0.35)
+        let view = Self.seen(race, &hand)
+        let groove = Aim.groove(.downwind, tack: .starboard, angle: view.boatClass.polar.bestDownwind(tws: view.own.polarWindSpeed).twa)
+        #expect(hand.brain.downwindAim(view.own, view, aim: groove) == groove)
+    }
+
+    /// And sailed: a Club helm (handling 0.45), her hand wandering as a Club hand does, runs 20 s on the plane (to
+    /// where she turns for her mark) without leaving it.
+    @Test func clubHandStaysOnThePlaneDownTheRun() throws {
+        var total = 0.0
+        for seed in UInt64(1)...6 {
+            var (race, hand, _) = try Self.runner(seed: seed, planing: true, handling: 0.45)
+            Self.wandering(&hand, race, handling: 0.45, steers: true, seed: seed)
+            var off = 0.0, deepest = 0.0
+            for _ in 0..<(20 * Race.tickRate) {
+                hand.drive(race)
+                race.step()
+                let boat = race.boats[0]
+                if !boat.isPlaning { off += Race.dt }
+                deepest = max(deepest, rad2deg(boat.twa - race.boatClass.polar.bestDownwind(tws: boat.polarWindSpeed(in: race.boatClass)).twa))
+            }
+            print("BOTPLANING club run seed \(seed): off the plane \(off) s of 20, deepest \(deepest)° past her groove")
+            total += off
+        }
+        #expect(total <= 1, "off the plane \(total) s of 120")
+    }
+
+    /// "Come down as she gathers speed": round the windward mark at 55 % of her speed, 30° above her groove, asked
+    /// for a mark dead downwind (or a groove she misses 25° deep), she aims no deeper than she is, well above her
+    /// groove, in five waters of six (before the caution round: never more than 40° above what she was asked, 137°,
+    /// where she fell; in the sixth, 14 kn, she has the speed to plane dead downwind); sailed on, she comes down to
+    /// her groove without leaving the plane.
+    @Test func slowSheComesDownAsSheGathersSpeed() throws {
+        var held = 0
+        for seed in UInt64(1)...6 {
+            var (race, hand, _) = try Self.runner(seed: seed, planing: true, speed: 0.55, deep: deg2rad(-30), handling: 0.55)
+            let view = Self.seen(race, &hand)
+            let groove = view.boatClass.polar.bestDownwind(tws: view.own.polarWindSpeed).twa
+            let sailed = hand.brain.downwindAim(view.own, view, aim: Aim(angle: deg2rad(177), tack: .starboard))
+            print("BOTPLANING come down seed \(seed): groove \(rad2deg(groove))°, at \(rad2deg(view.own.twa))°, asked 177°, aims \(rad2deg(sailed.angle))°")
+            if sailed.angle <= view.own.twa + deg2rad(2) { held += 1 }
+            var off = 0.0
+            for _ in 0..<(20 * Race.tickRate) {
+                hand.drive(race)
+                race.step()
+                if !race.boats[0].isPlaning { off += Race.dt }
+            }
+            let boat = race.boats[0]
+            let now = race.boatClass.polar.bestDownwind(tws: boat.polarWindSpeed(in: race.boatClass)).twa
+            print("BOTPLANING come down seed \(seed): off \(off) s, after 20 s \(rad2deg(boat.twa - now))° off her groove")
+            #expect(off == 0, "seed \(seed): off the plane \(off) s")
+            // Down to her groove, or past it for her mark (seed 2's is close below her).
+            #expect(now - boat.twa < deg2rad(2), "seed \(seed): \(rad2deg(boat.twa - now))° off her groove")
+        }
+        #expect(held >= 5, "held above her groove in \(held) waters of 6")
+    }
+
+    /// "A gybe within her skill": racing on skiff@9 a helm who would slam (handling 0.3: all the rudder) gybes on half
+    /// of it, a wider arc that keeps her on the plane; a good helm on her own 30 %. A flubbed gybe is still cranked
+    /// hard over past her groove, and falls. On skiff@8 the poor helm slams as ever.
+    @Test func poorHelmGybesWithinHerSkill() throws {
+        struct Gybe { var fraction = 0.0, flubbed = false, fell = false, gybed = false }
+        func gybe(seed: UInt64, handling: Double, boatClass: BoatClassFile = Self.skiffNine) throws -> Gybe {
+            var (race, hand, _) = try Self.runner(seed: seed, planing: true, handling: handling, boatClass: boatClass)
+            hand.brain = { var brain = hand.brain; brain.handTurnRng = SplitMix64(seed: seed, stream: BotBrain.handTurnStream); return brain }()
+            var result = Gybe()
+            let from = race.boats[0].boomSide
+            for tick in 0..<(12 * Race.tickRate) {
+                if tick == 2 * Race.tickRate { hand.brain.plannedTack = race.boats[0].tack.other }
+                hand.drive(race)
+                if let turn = hand.brain.handTurn, !turn.isTack {
+                    result.fraction = turn.fraction
+                    result.flubbed = turn.overSteer > 0
+                }
+                race.step()
+                if race.boats[0].boomSide != from { result.gybed = true }
+                if !race.boats[0].isPlaning { result.fell = true }
+            }
+            return result
+        }
+        var clean = 0, flubbed = 0
+        for seed in UInt64(1)...12 {
+            let poor = try gybe(seed: seed, handling: 0.3)
+            print("BOTPLANING gybe seed \(seed) h 0.3: rudder \(poor.fraction), flubbed \(poor.flubbed), fell \(poor.fell)")
+            #expect(poor.gybed, "seed \(seed)")
+            if poor.flubbed {
+                flubbed += 1
+                #expect(poor.fraction == HandTackTable.gybeFraction.poor && poor.fell, "seed \(seed): a flubbed gybe at \(poor.fraction), fell \(poor.fell)")
+            } else {
+                clean += 1
+                #expect(poor.fraction == PlaningTable.safeGybe, "seed \(seed): \(poor.fraction)")
+                #expect(!poor.fell, "seed \(seed): fell off the plane in a gybe on half rudder")
+            }
+            let good = try gybe(seed: seed, handling: 1)
+            #expect(good.fraction == HandTackTable.gybeFraction.good && !good.fell && good.gybed, "seed \(seed): \(good)")
+        }
+        #expect(clean >= 6 && flubbed >= 1, "\(clean) clean, \(flubbed) flubbed")
+        let eight = try gybe(seed: 1, handling: 0.3, boatClass: BotHandTackTests.skiffEight)
+        #expect(eight.flubbed || eight.fraction == HandTackTable.gybeFraction.poor, "skiff@8: \(eight.fraction)")
+    }
+
     /// Penalty circles from the plane (#462: gybe first she drops off it on skiff@9): a bot planing on her run, owed a
     /// turn, turns it at 70 % rudder inside the rules' deadline on skiff@9 as on skiff@8, in about the seconds she
     /// reckons a turn takes her and less (`penaltyTurnSeconds`, which her mark-hold and start-first conditions read,
