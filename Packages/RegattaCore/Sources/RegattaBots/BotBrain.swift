@@ -498,7 +498,7 @@ struct BotBrain: Sendable {
         let readsThePack = skill >= Self.penaltyPutOffSkill
         // By hand she doesn't wait in the crowd before her start (#471): the 10 s or so a turn by hand leaves her to
         // put it off (`hasTimeToTurnLater`) she sailed her start plan and kept clear in the crowd, was 30° into the
-        // turn by that sailing as often as by her own rudder (437 of 964 starts before the start on the all-Club
+        // turn by that sailing as often as by her own rudder (507 of 968 starts before the start on the all-Club
         // loop), under rule 21.2 from there, and gave it up with her next turn the other way: 1.46 started turns
         // given up an episode before the start, 0.72 turning at once. A call with the gun close she starts first for.
         let waitsInTheCrowd = b.status != .racing && !Self.turnsByHand(view)
