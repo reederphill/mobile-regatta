@@ -103,6 +103,8 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         let venue: String
         /// Each human seat's player, by player.
         let seats: [String: Int]
+        /// A queue race: the lobby hears its finishers and its winner (#152). A dev-arranged race says nothing.
+        let announces: Bool
     }
 
     private enum Ended {
@@ -121,7 +123,10 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     nonisolated let resultWatchers = StreamWatchers<RaceUpdate>()
     private var pendingRatings: [String: [RatingChange]] = [:]
     nonisolated let ratingWatchers = StreamWatchers<RatingChange>()
-    private var lineWatchers: [UUID: AsyncStream<SystemLine>.Continuation] = [:]
+    /// The lobby (#152): hears each queue race's finishers (the silence window ends) and its winner; nil: nobody.
+    private let lobby: (any LobbyRaceEvents)?
+    /// The players of each announcing race the lobby has been told finished.
+    private var toldFinished: [UUID: Set<String>] = [:]
     /// Race connections waiting for a race's close pipeline to finish (`endedState`).
     private var endWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
     /// Store failures, for the log and tests.
@@ -129,7 +134,8 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
 
     public init(settings: RaceLifecycleSettings = RaceLifecycleSettings(), archive: any RaceArchive, tokenKey: SymmetricKey,
                 tokenLifetime: TimeInterval, toolchain: String, now: @escaping @Sendable () -> Date = { Date() },
-                rated: (@Sendable ([String]) -> Void)? = nil, start: @escaping RaceStarter) {
+                rated: (@Sendable ([String]) -> Void)? = nil, lobby: (any LobbyRaceEvents)? = nil, start: @escaping RaceStarter) {
+        self.lobby = lobby
         self.settings = settings
         self.archive = archive
         self.tokenKey = tokenKey
@@ -143,9 +149,9 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     /// Races start on `registry`, on the wall clock.
     public init(settings: RaceLifecycleSettings = RaceLifecycleSettings(), archive: any RaceArchive, tokenKey: SymmetricKey,
                 tokenLifetime: TimeInterval, toolchain: String, registry: RaceRegistry, now: @escaping @Sendable () -> Date = { Date() },
-                rated: (@Sendable ([String]) -> Void)? = nil) {
+                rated: (@Sendable ([String]) -> Void)? = nil, lobby: (any LobbyRaceEvents)? = nil) {
         self.init(settings: settings, archive: archive, tokenKey: tokenKey, tokenLifetime: tokenLifetime, toolchain: toolchain, now: now,
-                  rated: rated, start: { session, ended in try await registry.start(session, onClose: ended) })
+                  rated: rated, lobby: lobby, start: { session, ended in try await registry.start(session, onClose: ended) })
     }
 
     // MARK: Starting
@@ -155,9 +161,9 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         { fleet, closed in
             let session = self.session(id: fleet.raceID, setup: fleet.setup, windSeed: fleet.windSeed,
                                        names: fleet.humans.map(\.alias), clock: clock, onBriefingLeave: fleet.onBriefingLeave,
-                                       fleet: fleet.fill, onLeftAfterGun: fleet.onLeftAfterGun)
+                                       fleet: fleet.fill, onLeftAfterGun: fleet.onLeftAfterGun, onGun: fleet.onGun)
             try await self.launch(session, players: fleet.humans.map(\.teamPlayerID), venue: fleet.drawn.pairing.venue.content.displayName,
-                                  then: closed)
+                                  announces: true, then: closed)
         }
     }
 
@@ -170,21 +176,25 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
                                     options: RaceHostOptions? = nil,
                                     onBriefingLeave: (@Sendable (BriefingLeave) -> Void)? = nil,
                                     fleet: FleetFill? = nil,
-                                    onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)? = nil) -> RaceSession {
+                                    onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)? = nil,
+                                    onGun: (@Sendable (_ humansAtGun: Int) -> Void)? = nil) -> RaceSession {
         RaceSession(id: id, setup: setup, windSeed: windSeed, clock: clock, options: options ?? settings.hostOptions,
                     roster: LockedFleet.roster(setup: setup, humans: names),
                     onProgress: { [weak self] in
                         guard let self else { return }
                         Task { await self.progress(id) }
                     }, onBriefingLeave: onBriefingLeave,
-                    fleet: fleet ?? FleetFill(medianRating: OnlineBriefing.provisionalRating), onLeftAfterGun: onLeftAfterGun)
+                    fleet: fleet ?? FleetFill(medianRating: OnlineBriefing.provisionalRating), onLeftAfterGun: onLeftAfterGun,
+                    onGun: onGun)
     }
 
     /// Registers `session` (its `races` row, running, with its players in seats 0…), starts it, and runs the close
     /// pipeline when it ends, then `closed`. Throws, registering nothing, if it can't be stored or started.
-    public func launch(_ session: RaceSession, players: [String], venue: String, then closed: @escaping @Sendable () -> Void = {}) async throws {
+    /// `announces`: a queue race, whose finishers and winner the lobby hears (#152).
+    public func launch(_ session: RaceSession, players: [String], venue: String, announces: Bool = false,
+                       then closed: @escaping @Sendable () -> Void = {}) async throws {
         try await archive.register(session.id, players: players.enumerated().map { RaceSeatHolder(playerID: $1, seat: $0) })
-        register(session, players: players, venue: venue)
+        register(session, players: players, venue: venue, announces: announces)
         do {
             try await start(session) { end in
                 Task {
@@ -201,9 +211,9 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
 
     /// Records the players' seats without storing or starting anything: `launch`'s first half, for tests that drive a
     /// session by hand and end it with `ended(_:_:)`.
-    func register(_ session: RaceSession, players: [String], venue: String) {
+    func register(_ session: RaceSession, players: [String], venue: String, announces: Bool = false) {
         let seats = Dictionary(uniqueKeysWithValues: players.enumerated().map { ($1, $0) })
-        races[session.id] = Live(session: session, venue: venue, seats: seats)
+        races[session.id] = Live(session: session, venue: venue, seats: seats, announces: announces)
         for player in players {
             seated[player] = session.id
             ended[player] = nil
@@ -212,6 +222,7 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
 
     private func unregister(_ id: UUID) {
         guard let live = races.removeValue(forKey: id) else { return }
+        toldFinished[id] = nil
         for player in live.seats.keys where seated[player] == id { seated[player] = nil }
         for waiter in endWaiters.removeValue(forKey: id) ?? [] { waiter.resume() }
     }
@@ -337,10 +348,17 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     /// The race's results changed: every watching player gets her report.
     func progress(_ id: UUID) async {
         guard let live = races[id] else { return }
-        guard seatedPlayers(id, live).contains(where: { resultWatchers.hasPrimed($0.player) }) else { return }
+        // The lobby hears each of a queue race's players once her seat has a result (#152): her silence ends.
+        let tells = live.announces && lobby != nil && seatedPlayers(id, live).contains { !(toldFinished[id]?.contains($0.player) ?? false) }
+        guard tells || seatedPlayers(id, live).contains(where: { resultWatchers.hasPrimed($0.player) }) else { return }
         let host = live.session.host
         let results = await host.liveResults(), roster = await host.rosterEntries
         guard races[id] != nil, !closing.contains(id) else { return }
+        if tells {
+            for (player, seat) in seatedPlayers(id, live) where results.finishers.contains(where: { $0.seat == seat }) || !results.sailing.contains(seat) {
+                if toldFinished[id, default: []].insert(player).inserted { lobby?.finished(race: id, player: player) }
+            }
+        }
         // Read again after the host: a player may have released her seat, or opened her stream, meanwhile.
         for (player, seat) in seatedPlayers(id, live) where resultWatchers.hasPrimed(player) {
             resultWatchers.send(.report(RaceResultsFeed.live(id, seat: seat, roster: roster, results: results)), to: player)
@@ -393,18 +411,6 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         .rated(before: Rating(value: change.before.displayed, isProvisional: change.before.isProvisional),
                after: Rating(value: change.after.displayed, isProvisional: change.after.isProvisional))
     }
-
-    /// The lobby's lines from the close: one "X won" per race (#36). #152's lobby takes this stream; newest 64 kept.
-    /// Every line from now on.
-    public func systemLines() -> AsyncStream<SystemLine> {
-        let (stream, continuation) = AsyncStream<SystemLine>.makeStream(bufferingPolicy: .bufferingNewest(64))
-        let token = UUID()
-        continuation.onTermination = { _ in Task { await self.unwatchLines(token) } }
-        lineWatchers[token] = continuation
-        return stream
-    }
-
-    private func unwatchLines(_ token: UUID) { lineWatchers[token] = nil }
 
     // MARK: The close
 
@@ -508,7 +514,11 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         // Every rated player, seated or not: one who left after the gun was rated as retired, and is told.
         for change in rating?.changes ?? [] { push(RatingChange(raceID: raceID, outcome: Self.outcome(change)), to: change.playerID) }
         if !changes.isEmpty { rated?(changes.keys.sorted()) }
-        if let line = stored.summary.winnerLine(sailedWhileGone: Set(covered.keys)) { for continuation in lineWatchers.values { continuation.yield(line) } }
+        // The lobby's "X won" (#36, #152): a queue race's human winner who sailed her own finish, by her roster name.
+        if live.announces, case .winner(let venue, let nickname)? = stored.summary.winnerLine(sailedWhileGone: Set(covered.keys)),
+           let first = stored.summary.results.rows.first, let winner = live.seats.first(where: { $0.value == first.seat })?.key {
+            lobby?.winner(race: id, venue: venue, nickname: nickname, playerID: winner)
+        }
     }
 
     private enum Stored {
@@ -571,7 +581,5 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         endWaiters = [:]
         resultWatchers.finishAll()
         ratingWatchers.finishAll()
-        for continuation in lineWatchers.values { continuation.finish() }
-        lineWatchers = [:]
     }
 }

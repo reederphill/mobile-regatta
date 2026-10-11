@@ -85,6 +85,8 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `COVERED_FINISH_GRACE_SECONDS` | `60` | a finish the cautious bot sails for a dropped player counts for her rating if she dropped less than this before it, else she is rated as retired; 0…3600 (#150) |
 /// | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PEM`, `GC_LEADERBOARD_ID` | none | the App Store Connect team key (id, issuer, a PEM file of its P-256 private key) and the Game Center leaderboard's id: all four, or none (no leaderboard mirror) (#151, #55) |
 /// | `LEADERBOARD_SWEEP_SECONDS` | `300` | how often unsent leaderboard scores are tried again (#151) |
+/// | `OPENAI_MODERATION_API_KEY` | none | the lobby's toxicity classifier (#152): asked for each free-text post that passes the word list; required outside `ENV=dev`. Without it the word list alone filters |
+/// | `CHAT_EXTRA_BLOCKED_PHRASES` | none | dev only: comma-separated phrases the lobby's filter blocks besides the word list |
 public struct ServerConfig: Sendable {
     public var environment: ServerEnvironment
     public var auth: SeatAuthPolicy
@@ -109,6 +111,8 @@ public struct ServerConfig: Sendable {
     /// The Game Center leaderboard mirror (#151); nil: off.
     public var leaderboard: AppStoreConnectConfig?
     public var leaderboardMirror = LeaderboardMirrorSettings()
+    /// The lobby (#152): its limits, the classifier's key and a dev server's extra blocked phrases.
+    public var chat = ChatSettings()
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
@@ -202,6 +206,14 @@ public struct ServerConfig: Sendable {
             throw .invalid(variable: missing, value: "(unset)", expected: "all of \(mirror.joined(separator: ", ")), or none")
         }
         config.leaderboardMirror.sweepInterval = .seconds(try int("LEADERBOARD_SWEEP_SECONDS", default: 300, in: 5...86_400))
+        if let key = env["OPENAI_MODERATION_API_KEY"], !key.isEmpty {
+            config.chat.moderationKey = key
+        } else if !environment.isDev {
+            throw .invalid(variable: "OPENAI_MODERATION_API_KEY", value: "(unset)", expected: "the moderation key outside ENV=dev")
+        }
+        if environment.isDev, let phrases = env["CHAT_EXTRA_BLOCKED_PHRASES"] {
+            config.chat.extraBlockedPhrases = phrases.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
         do {
             config.identity.database = try DatabaseConfiguration.fromEnvironment(env)
         } catch {
@@ -221,6 +233,19 @@ public struct ServerConfig: Sendable {
         self.serverBuild = serverBuild
         self.maxRaces = maxRaces
     }
+}
+
+/// The lobby's chat (#152).
+public struct ChatSettings: Sendable {
+    public var lobby = LobbySettings()
+    /// `OPENAI_MODERATION_API_KEY` (#51): the toxicity classifier is asked only when it is set. Without it (dev only)
+    /// free text is filtered by the word list alone.
+    public var moderationKey: String?
+    /// `CHAT_EXTRA_BLOCKED_PHRASES` (dev only, comma-separated): phrases the filter blocks besides the word list, so
+    /// the contract runner has one that is safe to print. Ignored outside `ENV=dev`.
+    public var extraBlockedPhrases: [String] = []
+
+    public init() {}
 }
 
 /// Identity, sessions and the Terms of Use (#145).

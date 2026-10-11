@@ -464,25 +464,48 @@ struct CountingSeeds: WindSeedSource {
 
     // MARK: The gun
 
-    /// The gun's system line for the lobby (#17, #36), at the end of the start sequence: venue name, boats, humans.
-    @Test func theGunGoesToTheLobbyAtTheEndOfTheStartSequence() async throws {
-        let clock = VirtualClock(), log = LaunchLog()
-        let queue = Self.make(clock, log)
-        var lines = await queue.gunLines().makeAsyncIterator()
+    /// The lobby hears the fleet lock (#152: the silence window) and, from the race the fleet carries the hook to, its
+    /// gun (#17, #36): venue name, boats, and the humans the race says were at it. Then each seat given up, and the close.
+    @Test func theLobbyHearsTheLockTheGunTheLeaveAndTheClose() async throws {
+        let clock = VirtualClock(), log = LaunchLog(), lobby = RecordingLobby()
+        let queue = QueueMatchmaker(settings: QueueSettings(), registry: RaceRegistry(),
+                                    draw: RaceDraw(pairings: OnlinePairing.bundled(), seeds: FixtureWindSeedPools(poolSize: 8)),
+                                    tokenKey: Self.key, tokenLifetime: 600, random: SeededRandom(seed: 152), now: { clock.now },
+                                    lobby: lobby, launch: { fleet, closed in try await log.record(fleet, closed) })
         try await queue.join(Self.player(0))
         try await queue.join(Self.player(1))
         clock.advance(60)
         await queue.step()
         let fleet = try #require(await log.fleets.first)
-        // The briefing, then the sequence (#147, G2).
-        let startSeconds = Double(fleet.setup.startSequenceTicks) / Double(Race.tickRate)
-        clock.advance(startSeconds - 1)
-        await queue.step()
-        clock.advance(1)
-        await queue.step()
+        #expect(lobby.events.all == [.locked(["T:0", "T:1"])])
+        // The race fires the fleet's hook at its gun: one of the two was at it.
+        let venue = fleet.drawn.pairing.venue.content.displayName
+        fleet.onGun?(1)
+        #expect(lobby.lines == [.gun(venue: venue, boats: 10, humans: 1)])
+        // Nobody at the gun: the lobby is told, and posts no line.
+        fleet.onGun?(0)
+        #expect(lobby.lines.count == 1)
+        // A leave after the gun frees her; the close frees whoever is left.
+        fleet.onLeftAfterGun?(1)
+        for _ in 0..<200 where !lobby.events.all.contains(.left("T:1")) { await Task.yield() }
+        await queue.raceClosed(fleet.raceID)
+        #expect(Array(lobby.events.all.suffix(2)) == [.left("T:1"), .ended(["T:0"])])
         await queue.stop()
-        #expect(await lines.next() == .gun(venue: fleet.drawn.pairing.venue.content.displayName, boats: 10, humans: 2))
-        #expect(await lines.next() == nil)
+    }
+
+    /// #152: a fleet whose race can't start is no longer silent.
+    @Test func aFailedLaunchEndsTheFleetsSilence() async throws {
+        let clock = VirtualClock(), log = LaunchLog(), lobby = RecordingLobby()
+        let queue = QueueMatchmaker(settings: QueueSettings(), registry: RaceRegistry(),
+                                    draw: RaceDraw(pairings: OnlinePairing.bundled(), seeds: FixtureWindSeedPools(poolSize: 8)),
+                                    tokenKey: Self.key, tokenLifetime: 600, random: SeededRandom(seed: 152), now: { clock.now },
+                                    lobby: lobby, launch: { fleet, closed in try await log.record(fleet, closed) })
+        await log.failing(LaunchLog.Refused(), times: 1)
+        try await queue.join(Self.player(0))
+        clock.advance(60)
+        await queue.step()
+        #expect(lobby.events.all == [.locked(["T:0"]), .ended(["T:0"])])
+        await queue.stop()
     }
 
     // MARK: The draw

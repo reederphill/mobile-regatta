@@ -1,3 +1,4 @@
+import ChatFilter
 import Foundation
 import GameCenterIdentity
 import NIOCore
@@ -17,10 +18,17 @@ extension ServiceEndpoint {
     /// from `ratings` (an in-memory archive's own book by default, so a dev server shows what its closes rated): one
     /// read per fleet lock for the briefing and the bots' level, one per profile request. With `config.leaderboard`
     /// the Game Center leaderboard mirrors each rated close (`submitter`: App Store Connect unless a test passes one).
+    ///
+    /// The lobby (#152) keeps its lines and blocks in `lobbyStore` (memory by default). Its free text is filtered by
+    /// `wordList` (the build's bundled list unless a test passes one; a build without one starts only in dev, on the
+    /// dev phrases alone) and then by `classifier`: OpenAI's, only when its key is configured, unless a test passes
+    /// one. `moderation` is #153's; until then nobody is muted and nothing can be reported.
     public static func make(config: ServerConfig, store: any AccountStore, archive: any RaceArchive = InMemoryRaceArchive(),
                             restrictions: any RestrictionStore = InMemoryRestrictionStore(), ratings: (any RatingBook)? = nil,
                             registry: RaceRegistry? = nil, fetcher: (any CertificateFetching)? = nil,
-                            submitter: (any LeaderboardSubmitting)? = nil) throws -> ServiceEndpoint {
+                            submitter: (any LeaderboardSubmitting)? = nil, lobbyStore: (any LobbyStore)? = nil,
+                            wordList: ChatWordList? = nil, classifier: (any ToxicityClassifier)? = nil,
+                            moderation: (any LobbyModeration)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
         let verifier: any GameCenterVerifier
         if let pem = identity.appleRootsPEM {
@@ -45,15 +53,37 @@ extension ServiceEndpoint {
             rated = { players in Task { await mirror.rated(players) } }
             Task { await mirror.start() }
         }
+        var words: ChatWordList
+        if let wordList {
+            words = wordList
+        } else {
+            do {
+                words = try ChatWordList.bundled()
+            } catch {
+                guard config.environment.isDev else {
+                    throw ServerConfigError.invalid(variable: "the chat word list", value: "(not bundled)", expected: "\(error)")
+                }
+                FileHandle.standardError.write(Data("RegattaServer: \(error): free text is filtered by CHAT_EXTRA_BLOCKED_PHRASES alone (dev)\n".utf8))
+                words = .empty
+            }
+        }
+        if config.environment.isDev { words = words.adding(config.chat.extraBlockedPhrases) }
+        var checker = classifier
+        if checker == nil, let key = config.chat.moderationKey { checker = try OpenAIModerationClassifier(key: key) }
+        var lobbySettings = config.chat.lobby
+        lobbySettings.rating = rating
+        let hub = LobbyHub(settings: lobbySettings, store: lobbyStore ?? InMemoryLobbyStore(), ratings: book,
+                           moderation: moderation ?? NoModeration(), wordList: words, classifier: checker.map { ClassifierGate($0) })
         let lifecycle = RaceLifecycle(settings: config.lifecycle, archive: archive, tokenKey: config.tokenKey,
-                                      tokenLifetime: config.tokenLifetime, toolchain: config.serverBuild, registry: registry, rated: rated)
+                                      tokenLifetime: config.tokenLifetime, toolchain: config.serverBuild, registry: registry, rated: rated,
+                                      lobby: hub)
         let matchmaker = QueueMatchmaker(
             settings: queue, registry: registry,
             draw: RaceDraw(pairings: OnlinePairing.bundled(venues: queue.venues),
                            seeds: FixtureWindSeedPools(poolSize: queue.windSeedPoolSize, reuseCap: queue.windSeedReuseCap)),
             tokenKey: config.tokenKey, tokenLifetime: config.tokenLifetime, restrictions: restrictions, runningRaces: lifecycle,
             fleetRatings: { humans in try await book.ratings(of: humans.map(\.teamPlayerID)).mapValues(\.displayed) },
-            seatReleased: { await lifecycle.seatReleased($0, race: $1) }, launch: lifecycle.launcher())
+            seatReleased: { await lifecycle.seatReleased($0, race: $1) }, lobby: hub, launch: lifecycle.launcher())
         return ServiceEndpoint(
             config: ServiceEndpointConfig(termsVersion: identity.termsVersion, sessionLifetime: identity.sessionLifetime,
                                           streamIdleTimeout: identity.streamIdleTimeout, frameCap: identity.frameCap,
@@ -64,22 +94,24 @@ extension ServiceEndpoint {
                                        maxSessionsPerPlayer: identity.maxSessionsPerPlayer),
             backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
                                       raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
+                                      lobby: { ServerLobbyService(hub: hub, player: $0) },
                                       profile: { ServerProfileService(player: $0, ratings: book, restrictions: restrictions, config: rating) }),
-            matchmaker: matchmaker, lifecycle: lifecycle)
+            matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub)
     }
 
     /// `POST /dev/situation` (dev only): puts the test account in the contract situation asked for, and says how
     /// the client signs in for it. Only the suites this server serves: Identity and Terms (#145), Queue (#146),
-    /// RaceSession (#148).
+    /// RaceSession (#148), Lobby (#152).
     func arrange(_ request: DevSituationRequest) async -> HTTPReply {
         let current = config.termsVersion
-        func signedIn(accepting version: Int?, multiplayerRestricted: Bool = false,
+        func signedIn(accepting version: Int?, multiplayerRestricted: Bool = false, underage: Bool = false,
                       then arrange: (QueueMatchmaker) async -> Void = { _ in }) async -> HTTPReply {
             do {
                 _ = try await store.signIn(teamPlayerID: request.teamPlayerID, gamePlayerID: request.gamePlayerID, alias: "Contract")
                 if let version { try await store.acceptTerms(playerID: request.teamPlayerID, version: version, at: sessions.now()) }
                 if let matchmaker { await arrange(matchmaker) }
-                return HTTPReply(.ok, json: DevSituationResponse(signIn: true, isMultiplayerGamingRestricted: multiplayerRestricted))
+                return HTTPReply(.ok, json: DevSituationResponse(signIn: true, isUnderage: underage,
+                                                                 isMultiplayerGamingRestricted: multiplayerRestricted))
             } catch {
                 return HTTPReply(.conflict, error: "can't arrange the test account: \(error)")
             }
@@ -91,8 +123,25 @@ extension ServiceEndpoint {
         if request.service == "RaceSessionService", matchmaker == nil || lifecycle == nil {
             return HTTPReply(.notFound, error: "this server has no races")
         }
+        if request.service == "LobbyService", lobby == nil || matchmaker == nil {
+            return HTTPReply(.notFound, error: "this server has no lobby")
+        }
         let account = AccountPlayer(teamPlayerID: request.teamPlayerID, gamePlayerID: request.gamePlayerID, alias: "Contract")
-        let lifecycle = lifecycle
+        let lifecycle = lifecycle, lobby = lobby
+        /// The lobby, open to her (#152): free text unlocked unless `locked`, and the room holding a system line and then
+        /// a line by another player, seeded here. `standing`: hers, set on the dev server's `NoModeration`.
+        func lobbyOpen(locked: Bool = false, standing: ChatStanding = .clear) async -> HTTPReply {
+            await signedIn(accepting: current) { _ in
+                guard let lobby else { return }
+                if !locked { lobby.devUnlock(player) }
+                (lobby.moderation as? NoModeration)?.set(standing, for: player)
+                let other = AccountPlayer(teamPlayerID: player + "-other", gamePlayerID: request.gamePlayerID + "-other", alias: "Contract Crew")
+                guard (try? await store.signIn(teamPlayerID: other.teamPlayerID, gamePlayerID: other.gamePlayerID, alias: other.alias)) != nil else { return }
+                lobby.gun(race: UUID(), venue: "Dev Bay", boats: 10, humans: 2)
+                await lobby.settled()
+                await lobby.devPost("fair winds", by: other)
+            }
+        }
         /// A race of hers, arranged on the lifecycle, then `then` with its id.
         func raced(graceTicks: Int? = nil, pastGun: Bool = false,
                    then: @escaping (RaceLifecycle, UUID) async -> Void = { _, _ in }) async -> HTTPReply {
@@ -134,6 +183,24 @@ extension ServiceEndpoint {
         case ("RaceSessionService", "cancelled"):
             return await raced { lifecycle, race in await lifecycle.cancel(race, reason: .unspecified) }
         case ("RaceSessionService", "noRace"): return await signedIn(accepting: current)
+        // The lobby (#152). `racing`: the queue locks her fleet (the silence window), and she gives her seat up a
+        // moment after her feed has opened, so the feed shows the lobby opening again.
+        case ("LobbyService", "open"): return await lobbyOpen()
+        case ("LobbyService", "freeTextLocked"): return await lobbyOpen(locked: true)
+        case ("LobbyService", "muted"):
+            return await lobbyOpen(standing: .muted(until: Int64(sessions.now().timeIntervalSince1970) + 3600, isAutomatic: false))
+        case ("LobbyService", "banned"): return await lobbyOpen(standing: .banned)
+        case ("LobbyService", "racing"):
+            return await signedIn(accepting: current) { matchmaker in
+                guard let lobby, let race = await matchmaker.arrangeLock(account) else { return }
+                lobby.devAfterNextFeed(of: player) {
+                    try? await Task.sleep(for: Self.contractSilenceHold)
+                    await matchmaker.arrangeRelease(player, race: race)
+                }
+            }
+        case ("LobbyService", "notSignedIn"): return HTTPReply(.ok, json: DevSituationResponse(signIn: false))
+        case ("LobbyService", "termsNotAccepted"): return await signedIn(accepting: nil)
+        case ("LobbyService", "communicationRestricted"): return await signedIn(accepting: current, underage: true)
         default:
             return HTTPReply(.notFound, error: "\(request.service).\(request.situation) isn't served yet")
         }
@@ -143,6 +210,9 @@ extension ServiceEndpoint {
 extension ServiceEndpoint {
     /// The Queue contract's `cooldown` situation: long enough to show a countdown, short enough for the runner.
     static let contractCooldownSeconds: TimeInterval = 3
+    /// The Lobby contract's `racing` situation: how long after her feed opens she stays silent. Long enough for the
+    /// suite to read the feed's first words and the state they must equal, one call later.
+    static let contractSilenceHold: Duration = .seconds(2)
 }
 
 /// Fetches Game Center's certificate over HTTPS (HTTP/1.1 on NIO with NIOSSL: no FoundationNetworking on Linux). The

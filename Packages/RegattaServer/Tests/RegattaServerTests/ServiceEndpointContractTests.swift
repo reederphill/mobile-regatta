@@ -4,29 +4,33 @@ import RegattaDevAPI
 import RegattaLoadClient
 import RegattaServerKit
 import RegattaServiceClient
+import RegattaServiceContracts
 import Testing
 
-/// #109's Identity, Terms (#145) and Queue (#146) contract suites through #143's runner against the real server: a `RegattaServer`
+/// #109's Identity, Terms (#145), Queue (#146), RaceSession (#148) and Lobby (#152: its chat half) contract suites through #143's runner against the real server: a `RegattaServer`
 /// started in process on a free port, reached over its `/service` WebSocket by `WebSocketServiceConnector`, which
 /// arranges each situation with `POST /dev/situation`. `CONTRACT_ENDPOINT` runs them against a server started elsewhere.
 @Suite(.timeLimit(.minutes(2))) struct ServiceEndpointContractTests {
-    /// The suites the server serves as of #148.
-    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession]
+    /// The suites the server serves as of #152. Of the Lobby suite it serves the chat; reports are #153's.
+    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession, .lobby]
+    static let lobbyParts: Set<LobbyServiceContract.Part> = [.chat]
 
     /// A dev config the suites can run on: the Terms suite's `versionBumped` situation needs an older version to have
     /// accepted; the Queue suite's `joinable` waits for fleet lock, so it locks 3 s after the oldest join (long enough
     /// to see the queued state and leave before it), and never holds for the RaceSession suite's races' finishers (#147).
+    /// The Lobby suite needs a phrase the filter blocks (`CHAT_EXTRA_BLOCKED_PHRASES` on a server started elsewhere).
     static func config() -> ServerConfig {
         var config = ServerConfig.dev()
         config.identity.termsVersion = 2
         config.queue.lockAfter = 3
         config.queue.catchFinishers = nil
+        config.chat.extraBlockedPhrases = [LobbyServiceContract.filteredText]
         return config
     }
 
     static func run(_ suites: [ContractSuiteID], against endpoint: String) async throws {
         for suite in suites {
-            try await ContractRunner.run(suite, over: .endpoint(endpoint, connector: WebSocketServiceConnector()))
+            try await ContractRunner.run(suite, over: .endpoint(endpoint, connector: WebSocketServiceConnector()), lobbyParts: lobbyParts)
         }
     }
 

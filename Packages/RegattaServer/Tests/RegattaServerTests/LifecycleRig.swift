@@ -48,6 +48,40 @@ actor StartedRaces {
     }
 }
 
+/// What the queue and the lifecycle told the lobby (#152), in order.
+final class RecordingLobby: LobbyRaceEvents {
+    enum Event: Equatable, Sendable {
+        case locked([String])
+        case finished(String)
+        case left(String)
+        case ended([String])
+        case gun(venue: String, boats: Int, humans: Int)
+        case winner(venue: String, nickname: String, playerID: String)
+    }
+
+    let events = Kept<Event>()
+
+    func fleetLocked(race: UUID, humans: [String]) { events.append(.locked(humans)) }
+    func finished(race: UUID, player: String) { events.append(.finished(player)) }
+    func left(race: UUID, player: String) { events.append(.left(player)) }
+    func raceEnded(race: UUID, players: [String]) { events.append(.ended(players)) }
+    func gun(race: UUID, venue: String, boats: Int, humans: Int) { events.append(.gun(venue: venue, boats: boats, humans: humans)) }
+    func winner(race: UUID, venue: String, nickname: String, playerID: String) {
+        events.append(.winner(venue: venue, nickname: nickname, playerID: playerID))
+    }
+
+    /// The system lines the lobby would post, in order (a gun with no humans is none).
+    var lines: [SystemLine] {
+        events.all.compactMap { event in
+            switch event {
+            case .gun(let venue, let boats, let humans): humans > 0 ? .gun(venue: venue, boats: boats, humans: humans) : nil
+            case .winner(let venue, let nickname, _): .winner(venue: venue, nickname: nickname)
+            default: nil
+            }
+        }
+    }
+}
+
 /// The in-memory archive with a close that can fail, or wait until it is let go (#469).
 final class FaultyArchive: RaceArchive {
     struct Refused: Error {}
@@ -111,12 +145,14 @@ struct LifecycleRig {
 
     /// The players each rated close reported (the leaderboard mirror's hook, #151).
     let ratedPlayers = Kept<[String]>()
+    /// What the lifecycle told the lobby (#152).
+    let lobby = RecordingLobby()
 
     init(settings: RaceLifecycleSettings = RaceLifecycleSettings(), now: @escaping @Sendable () -> Date = { Date() }) {
         let started = started, ratedPlayers = ratedPlayers
         faults = FaultyArchive(archive)
         lifecycle = RaceLifecycle(settings: settings, archive: faults, tokenKey: Self.key, tokenLifetime: 600, toolchain: "test", now: now,
-                                  rated: { ratedPlayers.append($0) },
+                                  rated: { ratedPlayers.append($0) }, lobby: lobby,
                                   start: { session, ended in await started.started(session, ended) })
     }
 
@@ -128,12 +164,14 @@ struct LifecycleRig {
         return settings
     }
 
-    /// A race for `players` in seats 0…, bots after them to `seats`, started (not driven) through the lifecycle.
-    func race(_ players: [String], seats: Int = 4, startSequenceTicks: Int = 60, seed: UInt64 = 148) async throws -> RaceSession {
+    /// A race for `players` in seats 0…, bots after them to `seats`, started (not driven) through the lifecycle, as a
+    /// queue race (`announces`: the lobby hears of it) unless told otherwise.
+    func race(_ players: [String], seats: Int = 4, startSequenceTicks: Int = 60, seed: UInt64 = 148,
+              announces: Bool = true) async throws -> RaceSession {
         let kinds: [SeatKind] = (0..<seats).map { $0 < players.count ? .human : .bot }
         let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: kinds, laps: 1, startSequenceTicks: startSequenceTicks)
         let session = lifecycle.session(id: UUID(), setup: setup, windSeed: WindSeed(seed), names: players.map { "N" + $0 }, clock: clock)
-        try await lifecycle.launch(session, players: players, venue: "Test Bay")
+        try await lifecycle.launch(session, players: players, venue: "Test Bay", announces: announces)
         return session
     }
 
