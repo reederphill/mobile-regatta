@@ -506,7 +506,7 @@ Sailing a few degrees above the groove (closer to the wind, slower) or below it 
 _Avoid_: pinch for the two-finger zoom gesture; call that **pinch-zoom**
 
 **Heat up**:
-Heading up from the downwind groove while she is still on the plane and the wind drops, so she stays on it instead of falling off (**Planing**). A bot's tactic (`heatsUpInLulls`), not used in another boat's wind shadow, where heading up only sails her further into it ([#263](https://github.com/reederphill/mobile-regatta/issues/263)); a player does it by steering. Heading up to get back on after falling off is the bot's `replanes`.
+Heading up from the downwind groove while she is still on the plane and the wind drops, so she stays on it instead of falling off (**Planing**). A bot's tactic (`heatsUpInLulls`), not used in another boat's wind shadow, where heading up only sails her further into it ([#263](https://github.com/reederphill/mobile-regatta/issues/263)); a player does it by steering. Heading up to get back on after falling off is the bot's `replanes`. On a class a bad gybe, a deep run or a lull takes off the plane (skiff@9, [#462](https://github.com/reederphill/mobile-regatta/issues/462)) every bot heads up after a fall, as well as her **Handling** lets her, and sails no deeper than keeps her apparent wind; only reading a lull before it drops her stays a tactic.
 _Avoid_: luff up (in the rules, luffing means turning toward the wind)
 
 **Livery**:

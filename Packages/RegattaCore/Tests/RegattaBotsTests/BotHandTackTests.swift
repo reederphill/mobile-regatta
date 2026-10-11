@@ -54,8 +54,9 @@ import Testing
 
     /// An all-bot race on skiff@8 for `seconds`: the fleet's normal draw, or every bot's handling `handling`; seat 0
     /// the cautious bot's from a minute after the gun if `cautiousTakeover`.
-    static func fleet(seed: UInt64, seconds: Int, handling: Double? = nil, cautiousTakeover: Bool = false) throws -> Fleet {
-        let race = try BotHelmTests.race(seed: seed, boatClass: skiffEight)
+    static func fleet(seed: UInt64, seconds: Int, handling: Double? = nil, cautiousTakeover: Bool = false,
+                      boatClass: BoatClassFile = skiffEight) throws -> Fleet {
+        let race = try BotHelmTests.race(seed: seed, boatClass: boatClass)
         var controllers = handling.map { handling in
             SeatControllers(race.boats.indices.map { seat in
                 let skill = BotTier.mixedFleetDraw(seed: botSeed(raceSeed: race.setup.raceSeed, seat: seat)).skill
