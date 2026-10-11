@@ -100,14 +100,7 @@ struct ChatWordListTests {
 
     /// The vendored list: it loads, blocks, and passes the Scunthorpe words and the quick-chat phrases.
     @Test func theBundledListLoads() throws {
-        guard let list = try? ChatWordList.bundled() else {
-            // The list isn't in this build yet (WordLists/VENDORED.md): a server outside dev refuses to start without it
-            // (`LobbyEndpointTests.aBuildWithoutTheWordListStartsOnlyInDev`). Take this branch out once it is vendored.
-            withKnownIssue("the vendored word list isn't in the build yet") {
-                Issue.record("Sources/ChatFilter/WordLists has no <language>.txt")
-            }
-            return
-        }
+        let list = try ChatWordList.bundled()
         #expect(list.count > 500)
         #expect(list.blocks("shit") && list.blocks("sh1t"))
         for text in ["Scunthorpe", "assassin", "classic", "cockpit", "fair winds", "good race", "one more?", "gg", "well sailed", "starboard!"] {
