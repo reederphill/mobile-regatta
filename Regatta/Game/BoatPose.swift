@@ -248,6 +248,9 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// Planing (#245, #248): her wake is this much longer, wider and brighter, at least 1 (`WakeShape` holds it
     /// there). A placeholder until #220's look.
     var wakePlaningBoost = 1.2
+    /// Falling off the plane or getting back on (#462), that look goes or comes over this many race seconds
+    /// (`PlaningEase`): she settles and lifts, and never flickers on the edge. A debug slider; 0 is at once.
+    var wakePlaningSeconds = 1.0
     /// The centre streak: its length, a share of the V's, its width, metres, and its alpha, a share of the V's.
     var wakeStreakShare = 0.6
     var wakeStreakWidth = 0.18
@@ -358,6 +361,7 @@ nonisolated extension BoatStyle {
             (.wakeFullSpeed, \.wakeFullSpeed), (.wakeMaxHulls, \.wakeMaxHulls),
             (.wakeSpreadDegrees, \.wakeSpreadDegrees), (.wakePressureFan, \.wakePressureFan),
             (.wakeAlpha, \.wakeAlpha), (.wakePlaningBoost, \.wakePlaningBoost),
+            (.wakePlaningSeconds, \.wakePlaningSeconds),
             (.wakeTrailSeconds, \.wakeTrailSeconds), (.wakeTrailWidth, \.wakeTrailWidth),
             (.wakeStreakShare, \.wakeStreakShare), (.wakeStreakWidth, \.wakeStreakWidth),
             (.wakeStreakAlpha, \.wakeStreakAlpha), (.wakeEaseRate, \.wakeEaseRate),

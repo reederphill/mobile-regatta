@@ -395,6 +395,8 @@ enum TuningCatalog {
                     boat("wakePressureFan", "Wake pressure fan", \.wakePressureFan, 0...3, 0.1),
                     boat("wakeAlpha", "Wake alpha", \.wakeAlpha, 0...1, 0.02),
                     boat("wakePlaningBoost", "Planing wake", \.wakePlaningBoost, 1...2.5, 0.05),
+                    // #462: on and off the plane her wake lifts and settles, never snaps.
+                    boat("wakePlaningSeconds", "Planing wake comes and goes over", \.wakePlaningSeconds, 0...4, 0.1, unit: " s"),
                     boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.4, 0.01),
                     boat("backwindShare", "Backwind hatch", \.backwindShare, 0...6, 0.1),
                     boat("backwindFeather", "Backwind edge softness", \.backwindFeather, 0...8, 0.5, unit: " pt"),

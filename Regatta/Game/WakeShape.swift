@@ -39,12 +39,13 @@ nonisolated struct WakeShape: Equatable, Sendable {
     }
 
     /// The wake of a boat sailing `speedThroughWater` m/s with a hull `hullLength` metres long, feeling `pressure`
-    /// times her recent average wind (`BoatPose.pressure`), planing or not.
-    init(speedThroughWater: Double, hullLength: Double, pressure: Double, isPlaning: Bool, style: BoatStyle,
+    /// times her recent average wind (`BoatPose.pressure`), `planing` of the way on the plane: 0 off it, 1 on it,
+    /// between them while her wake settles or lifts (`PlaningEase.level`, #462).
+    init(speedThroughWater: Double, hullLength: Double, pressure: Double, planing level: Double, style: BoatStyle,
          quality: WakeQuality) {
         let share = style.wakeFullSpeed > 0 ? (speedThroughWater / style.wakeFullSpeed).clamped(to: 0...1) : 1
         // Never below 1: planing never shortens her wake, whatever a saved style says.
-        let planing = isPlaning ? max(style.wakePlaningBoost, 1) : 1
+        let planing = 1 + (max(style.wakePlaningBoost, 1) - 1) * level.clamped(to: 0...1)
         let tier = quality == .short ? max(style.wakeShortShare, 0) : 1
         length = max(hullLength, 0) * max(style.wakeMaxHulls, 0) * share * planing * tier
         // A puff fans the V and a lull narrows it; never folded shut, never splayed flat.
@@ -56,10 +57,12 @@ nonisolated struct WakeShape: Equatable, Sendable {
         streakAlpha = quality == .short ? 0 : (alpha * style.wakeStreakAlpha).clamped(to: 0...1)
     }
 
-    /// `boat`'s wake in `boatClass`.
-    init(_ boat: Boat, boatClass: BoatClass, style: BoatStyle, quality: WakeQuality) {
+    /// `boat`'s wake in `boatClass`, `planing` of the way on the plane; nil: all the way on or off, as she is (a
+    /// frozen frame, with nothing to ease from).
+    init(_ boat: Boat, boatClass: BoatClass, style: BoatStyle, quality: WakeQuality, planing level: Double? = nil) {
         self.init(speedThroughWater: boat.speedThroughWater, hullLength: boatClass.hull.length,
-                  pressure: BoatPose.pressure(boat), isPlaning: boat.isPlaning, style: style, quality: quality)
+                  pressure: BoatPose.pressure(boat), planing: level ?? PlaningEase(isPlaning: boat.isPlaning).level,
+                  style: style, quality: quality)
     }
 
     /// The step from `self` towards `target` after `dt` race seconds at `rate` per second (exponential).
@@ -69,5 +72,37 @@ nonisolated struct WakeShape: Equatable, Sendable {
         return WakeShape(length: mix(length, target.length), halfAngle: mix(halfAngle, target.halfAngle),
                          alpha: mix(alpha, target.alpha), streakLength: mix(streakLength, target.streakLength),
                          streakAlpha: mix(streakAlpha, target.streakAlpha))
+    }
+}
+
+/// How far on the plane a boat is drawn (#462): her wake's planing look (`BoatStyle.wakePlaningBoost`) comes and goes
+/// over `BoatStyle.wakePlaningSeconds` instead of with the flag, so a fall off the plane reads as her settling and
+/// getting back on as her lifting, and a boat held on the edge of the plane never flickers. Pure: drawn only, nothing
+/// here reaches the race (ADR 0002).
+///
+/// `progress` runs straight between 0 and 1 at 1 / seconds, turning round wherever it is when the flag flips back;
+/// `level`, what is drawn, is its smoothstep, so it leaves and arrives gently and no frame moves it more than
+/// `1.5 * dt / seconds`.
+nonisolated struct PlaningEase: Equatable, Sendable {
+    /// 0 off the plane, 1 on it.
+    private(set) var progress: Double
+
+    /// All the way on or off, as she is.
+    init(isPlaning: Bool) {
+        progress = isPlaning ? 1 : 0
+    }
+
+    /// The share of the planing look to draw, 0...1.
+    var level: Double { progress * progress * (3 - 2 * progress) }
+
+    /// `dt` race seconds on, towards on or off the plane, the whole way taking `seconds`; at once with none.
+    mutating func advance(isPlaning: Bool, dt: Double, seconds: Double) {
+        let target: Double = isPlaning ? 1 : 0
+        guard seconds > 0 else {
+            progress = target
+            return
+        }
+        let step = max(dt, 0) / seconds
+        progress = isPlaning ? min(progress + step, target) : max(progress - step, target)
     }
 }
