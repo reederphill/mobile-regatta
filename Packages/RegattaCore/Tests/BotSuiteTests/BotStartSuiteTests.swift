@@ -6,8 +6,7 @@ import Testing
 
 /// #99: the bots' start sequence, over the fleets its acceptance names. The start's numbers (`StartSummary`) are
 /// taken over all-National ten-boat fleets of live bots, gated by the thresholds' `start` limits (the suite
-/// thresholds file's v1 placeholders): OCS at the gun, starting on time, time in irons before the gun, and
-/// pin-style bots seeded at the committee end of the row working down the line to start in its pin third.
+/// thresholds file's v1 placeholders): OCS at the gun, starting on time, and time in irons before the gun.
 @Suite struct BotStartSuiteTests {
     /// The bundled conditions, a seed's conditions by turns.
     static let conditions = ["classic-oscillating@3", "gusty-offshore@3", "light-and-patchy@3", "sea-breeze@3"]
@@ -67,8 +66,7 @@ import Testing
         // The run's numbers, for the log.
         print("BOTSTART ocs \(fixed(summary.ocsShare, 3)), on time \(fixed(summary.onTimeShare, 3)) "
             + "(mean start \(fixed(summary.meanStartSeconds)) s), pre-gun irons \(fixed(summary.meanPreGunIronsSeconds, 3)) s/boat "
-            + "(max \(fixed(summary.maxPreGunIronsSeconds))), pin third \(summary.pinThirdShare.map { fixed($0, 3) } ?? "-") "
-            + "of \(summary.pinStyleFromCommitteeSeats)")
+            + "(max \(fixed(summary.maxPreGunIronsSeconds)))")
         #expect(summary.races == 200 && summary.seats == 2_000)
         #expect(summary.ocsShare <= (try #require(limits.maxOCSShare)), "OCS \(summary.ocsShare)")
         // Known until #471 (owner, #461): on skiff@8 bots start late (on time 0.47, mean start 10.7 s).
@@ -78,16 +76,6 @@ import Testing
         }
         #expect(summary.meanPreGunIronsSeconds <= (try #require(limits.maxMeanPreGunIronsSeconds)),
                 "pre-gun irons \(summary.meanPreGunIronsSeconds) s/boat")
-    }
-
-    /// #99 acceptance: pin-style bots (their spot in the line's pin third) seeded in committee slots (the row's
-    /// slots off the line's committee third or past its end) work down the line and start in its pin third: at
-    /// least 68 % of them (the bundled gate).
-    @Test func pinStyleBotsFromCommitteeSlotsReachThePinThird() throws {
-        let summary = try Self.summary()
-        #expect(summary.pinStyleFromCommitteeSeats >= 150, "\(summary.pinStyleFromCommitteeSeats) pin-style bots from committee slots")
-        let share = try #require(summary.pinThirdShare)
-        #expect(share >= (try #require(try Self.limits().minPinThirdShare)), "pin third \(share)")
     }
 
     private func seat(_ seat: Int, ocs: Bool = false, start: Double? = 1, irons: Double = 0, startSpot: Double = 0.5,
@@ -107,8 +95,7 @@ import Testing
     }
 
     /// The summary counts OCS, starts on time (within `StartSummary.onTimeSeconds`, a boat that never started
-    /// not), irons before the gun, and the pin-style seats from committee slots and where they started; over the
-    /// all-National live ten-boat fleets only.
+    /// not) and irons before the gun; over the all-National live ten-boat fleets only.
     @Test func startSummaryCountsTheAllNationalFleets() throws {
         let national = race([
             seat(0, ocs: true, start: 12), seat(1, start: 0.4, irons: 2), seat(2, start: 3.0), seat(3, start: 3.1),
@@ -126,31 +113,25 @@ import Testing
         #expect(summary.ocsShare == 1.0 / 8)
         #expect(summary.onTimeShare == 5.0 / 8, "3.0 s is on time, 3.1 s isn't")
         #expect(summary.meanPreGunIronsSeconds == 0.25 && summary.maxPreGunIronsSeconds == 2)
-        #expect(summary.pinStyleFromCommitteeSeats == 3, "seat 7's slot is off the middle third")
-        #expect(summary.pinThirdShare == 1.0 / 3, "seat 4 never started, seat 6 started in the middle third")
         #expect(StartSummary([mixed, skillGap, sixteen]) == nil, "no all-National live ten-boat fleet sailed")
-        #expect(try #require(StartSummary([race([seat(0)])])).pinThirdShare == nil)
     }
 
     /// Each start limit breaches on its own, and only for a run that sailed an all-National live ten-boat fleet.
     @Test func startLimitsBreachOnTheirOwn() throws {
         var thresholds = unmissableThresholds()
-        thresholds.start = StartLimits(maxOCSShare: 0.05, minOnTimeShare: 0.6, maxMeanPreGunIronsSeconds: 1, minPinThirdShare: 0.7)
+        thresholds.start = StartLimits(maxOCSShare: 0.05, minOnTimeShare: 0.6, maxMeanPreGunIronsSeconds: 1)
         let calm = BotSuiteReport.RunTimings(maxP99Ms: 1, maxMs: 1)
-        func breaches(ocs: Double = 0, onTime: Double = 1, irons: Double = 0, pinThird: Double? = 1) throws -> [String] {
+        func breaches(ocs: Double = 0, onTime: Double = 1, irons: Double = 0) throws -> [String] {
             var summary = try #require(StartSummary([race([seat(0)])]))
             summary.ocsShare = ocs
             summary.onTimeShare = onTime
             summary.meanPreGunIronsSeconds = irons
-            summary.pinThirdShare = pinThird
             return thresholds.breaches(tiers: [:], timings: calm, start: summary)
         }
-        #expect(try breaches(ocs: 0.05, onTime: 0.6, irons: 1, pinThird: 0.7).isEmpty, "limits are inclusive")
+        #expect(try breaches(ocs: 0.05, onTime: 0.6, irons: 1).isEmpty, "limits are inclusive")
         #expect(try breaches(ocs: 0.06) == ["start: OCS 0.06 > 0.05"])
         #expect(try breaches(onTime: 0.55) == ["start: on time 0.55 < 0.60"])
         #expect(try breaches(irons: 1.5) == ["start: pre-gun irons 1.50 s/boat > 1.00"])
-        #expect(try breaches(pinThird: 0.5) == ["start: pin third 0.50 < 0.70"])
-        #expect(try breaches(pinThird: nil).isEmpty, "no pin-style boat from a committee slot, nothing to gate")
         #expect(thresholds.breaches(tiers: [:], timings: calm, start: nil).isEmpty, "no all-National ten-boat fleet sailed")
     }
 
@@ -159,8 +140,7 @@ import Testing
     @Test func bundledThresholdsGateTheStart() throws {
         let start = try Self.limits()
         #expect(start.maxOCSShare == 0.05 && start.minOnTimeShare == 0.6)
-        // #377: the pin third lowered from 0.70 to 0.68 under the ribbons and header; the owner kept 0.68 after #388.
-        #expect(start.maxMeanPreGunIronsSeconds == 1 && start.minPinThirdShare == 0.68)
+        #expect(start.maxMeanPreGunIronsSeconds == 1)
         let old = try JSONDecoder().decode(BotThresholds.self, from: Data(#"{"maxP99TickMs": 10, "tiers": {}}"#.utf8))
         #expect(old.start == nil)
     }
@@ -209,7 +189,7 @@ import Testing
         let object = try #require(JSONSerialization.jsonObject(with: Data(run.stdout.utf8)) as? [String: Any])
         let start = try #require(object["start"] as? [String: Any])
         for key in ["races", "seats", "ocsShare", "onTimeShare", "meanStartSeconds", "meanPreGunIronsSeconds",
-                    "maxPreGunIronsSeconds", "pinStyleFromCommitteeSeats"] {
+                    "maxPreGunIronsSeconds"] {
             #expect(start[key] != nil, "start has no \(key)")
         }
         let report = try JSONDecoder().decode(BotSuiteReport.self, from: Data(run.stdout.utf8))
