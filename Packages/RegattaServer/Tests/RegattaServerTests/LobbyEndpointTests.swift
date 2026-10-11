@@ -156,6 +156,25 @@ import Testing
         // Without a key nothing is built that could call out.
         #expect(try ServiceEndpoint.make(config: plain, store: InMemoryAccountStore(), wordList: .empty).lobby != nil)
     }
+
+    /// Owner 2026-10-11: the offline word list always applies. A build without one starts only in dev (on the dev
+    /// phrases alone); outside dev it refuses, and the dev phrases are ignored there.
+    @Test func aBuildWithoutTheWordListStartsOnlyInDev() throws {
+        var dev = ServerConfig.dev()
+        dev.chat.extraBlockedPhrases = ["contract filtered phrase"]
+        var production = dev
+        production.environment = .other("production")
+        let list = ChatWordList(entries: ["bitch"])
+        let missing: () throws -> ChatWordList = { throw ChatWordList.BundleError.missing }
+
+        let devWithout = try ServiceEndpoint.chatWordList(config: dev, bundled: missing)
+        #expect(devWithout.blocks("a contract filtered phrase") && !devWithout.blocks("bitch"))
+        let devWith = try ServiceEndpoint.chatWordList(config: dev) { list }
+        #expect(devWith.blocks("a contract filtered phrase") && devWith.blocks("bitch"))
+        #expect(throws: ServerConfigError.self) { _ = try ServiceEndpoint.chatWordList(config: production, bundled: missing) }
+        let live = try ServiceEndpoint.chatWordList(config: production) { list }
+        #expect(live.blocks("bitch") && !live.blocks("a contract filtered phrase"))
+    }
 }
 
 // MARK: - The classifier's adapter, against a stub

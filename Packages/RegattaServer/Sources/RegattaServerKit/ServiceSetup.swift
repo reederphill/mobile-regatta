@@ -53,21 +53,7 @@ extension ServiceEndpoint {
             rated = { players in Task { await mirror.rated(players) } }
             Task { await mirror.start() }
         }
-        var words: ChatWordList
-        if let wordList {
-            words = wordList
-        } else {
-            do {
-                words = try ChatWordList.bundled()
-            } catch {
-                guard config.environment.isDev else {
-                    throw ServerConfigError.invalid(variable: "the chat word list", value: "(not bundled)", expected: "\(error)")
-                }
-                FileHandle.standardError.write(Data("RegattaServer: \(error): free text is filtered by CHAT_EXTRA_BLOCKED_PHRASES alone (dev)\n".utf8))
-                words = .empty
-            }
-        }
-        if config.environment.isDev { words = words.adding(config.chat.extraBlockedPhrases) }
+        let words = try chatWordList(config: config) { try wordList ?? ChatWordList.bundled() }
         var checker = classifier
         if checker == nil, let key = config.chat.moderationKey { checker = try OpenAIModerationClassifier(key: key) }
         var lobbySettings = config.chat.lobby
@@ -97,6 +83,21 @@ extension ServiceEndpoint {
                                       lobby: { ServerLobbyService(hub: hub, player: $0) },
                                       profile: { ServerProfileService(player: $0, ratings: book, restrictions: restrictions, config: rating) }),
             matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub)
+    }
+
+    /// The lobby's word list (#152, owner 2026-10-11: the offline list always applies). Outside `ENV=dev` it is the
+    /// build's list, and a build without one doesn't start. A dev server without one says so and goes on; in dev the
+    /// extra phrases are added.
+    static func chatWordList(config: ServerConfig, bundled: () throws -> ChatWordList) throws -> ChatWordList {
+        let isDev = config.environment.isDev
+        do {
+            let words = try bundled()
+            return isDev ? words.adding(config.chat.extraBlockedPhrases) : words
+        } catch {
+            guard isDev else { throw ServerConfigError.invalid(variable: "the chat word list", value: "(not bundled)", expected: "\(error)") }
+            FileHandle.standardError.write(Data("RegattaServer: \(error): free text is filtered by CHAT_EXTRA_BLOCKED_PHRASES alone (dev)\n".utf8))
+            return ChatWordList.empty.adding(config.chat.extraBlockedPhrases)
+        }
     }
 
     /// `POST /dev/situation` (dev only): puts the test account in the contract situation asked for, and says how

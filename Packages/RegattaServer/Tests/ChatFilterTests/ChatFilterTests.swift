@@ -98,17 +98,20 @@ struct ChatWordListTests {
         #expect(!Self.list.blocks("contract filtered phrase"))
     }
 
-    /// The vendored list, once it is in the build: it loads, blocks, and passes the Scunthorpe words.
+    /// The vendored list: it loads, blocks, and passes the Scunthorpe words and the quick-chat phrases.
     @Test func theBundledListLoads() throws {
-        do {
-            let list = try ChatWordList.bundled()
-            #expect(list.count > 500)
-            #expect(list.blocks("shit") && list.blocks("sh1t"))
-            for text in ["Scunthorpe", "assassin", "classic", "cockpit", "fair winds", "good race", "one more?"] {
-                #expect(!list.blocks(text), "\(text)")
+        guard let list = try? ChatWordList.bundled() else {
+            // The list isn't in this build yet (WordLists/VENDORED.md): a server outside dev refuses to start without it
+            // (`LobbyEndpointTests.aBuildWithoutTheWordListStartsOnlyInDev`). Take this branch out once it is vendored.
+            withKnownIssue("the vendored word list isn't in the build yet") {
+                Issue.record("Sources/ChatFilter/WordLists has no <language>.txt")
             }
-        } catch ChatWordList.BundleError.missing {
-            // Not vendored in this build: the server refuses to start outside dev (`LobbyTests`).
+            return
+        }
+        #expect(list.count > 500)
+        #expect(list.blocks("shit") && list.blocks("sh1t"))
+        for text in ["Scunthorpe", "assassin", "classic", "cockpit", "fair winds", "good race", "one more?", "gg", "well sailed", "starboard!"] {
+            #expect(!list.blocks(text), "\(text)")
         }
     }
 }

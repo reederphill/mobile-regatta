@@ -275,6 +275,8 @@ with it, the signature is checked against Apple's chain. It reads:
 | `COVERED_FINISH_GRACE_SECONDS` | `60` | a dropped player's boat is sailed by the cautious bot; if it finishes less than this long after she dropped, the place counts for her rating, otherwise she is rated as retired. Never a completed race or a win either way (#150) |
 | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PEM`, `GC_LEADERBOARD_ID` | none | the Game Center leaderboard mirror (#151): an App Store Connect team key (its id, the issuer id, a PEM file of its P-256 private key) and the leaderboard's id. All four, or none: without them no score is sent. The leaderboard must keep the most recent score, not the best (#55) |
 | `LEADERBOARD_SWEEP_SECONDS` | `300` | how often leaderboard scores that weren't sent are tried again (#151) |
+| `OPENAI_MODERATION_API_KEY` | none | the lobby's toxicity classifier (#152, #51): each free-text post that passes the bundled word list is also checked by OpenAI's moderation endpoint (the text only). Required outside `ENV=dev`. Unset, nothing is called and the word list alone filters. When the classifier can't answer, the post goes through on the word list |
+| `CHAT_EXTRA_BLOCKED_PHRASES` | none | `ENV=dev` only: comma-separated phrases the lobby's filter blocks besides the word list (the contract runner needs `contract filtered phrase`) |
 
 The per-address connection caps (8 on `/service`, 32 on `/race`) count an IPv4 address, or an IPv6 address's /64 prefix.
 A staging or production server behind a proxy must set `CLIENT_ADDRESS_HEADER`, or all its clients share one address's

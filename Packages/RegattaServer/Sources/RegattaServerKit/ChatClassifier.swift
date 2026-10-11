@@ -49,9 +49,15 @@ public final class ClassifierGate: Sendable {
         } catch {
             outcome = .unavailable(.error)
         }
-        state.withLock { state in
+        let opened = state.withLock { state in
             state.inFlight -= 1
+            let wasOpen = state.breaker.isOpen
             if case .unavailable = outcome { state.breaker.failed(at: now()) } else { state.breaker.succeeded() }
+            return !wasOpen && state.breaker.isOpen
+        }
+        // Once per opening, and never the text: the lobby's counters have the rest.
+        if opened, case .unavailable(let why) = outcome {
+            FileHandle.standardError.write(Data("RegattaServer: the chat classifier isn't answering (\(why.rawValue)): free text passes on the word list alone\n".utf8))
         }
         return outcome
     }

@@ -182,6 +182,22 @@ _Avoid_: room, channel
 The fixed set of phrases and emotes a player can post to the lobby with one tap.
 _Avoid_: emotes (as the umbrella term), canned messages
 
+**System line**:
+A lobby line the server posts itself: a queue race's gun (venue, boats, humans at the gun) or its human winner. Never filtered, never reportable. Bots never post, and a bot's win is no line.
+_Avoid_: announcement, bot message
+
+**Silence window**:
+The time a player can neither read nor post in the lobby: from her fleet lock until her own boat has a result, she gives her seat up for good, or the race ends. After it she sees the last hour's lines.
+_Avoid_: mute (a mute is a chat penalty), race mode
+
+**Communication restriction**:
+Game Center's `isUnderage` or `isPersonalizedCommunicationRestricted` on a player's account. The lobby is closed to her, chat and quick-chat both, and her connection never carries a chat line.
+_Avoid_: mute, chat ban (those are penalties)
+
+**Not sent**:
+What a post is when the filter blocks it (the bundled word list, or the classifier flagging it) or the server can't record it. Only its sender sees it, greyed out; it is never stored or shown to anyone else.
+_Avoid_: shadow-ban, masked
+
 **Fleet lock**:
 The moment an online race's boats are fixed and the briefing begins. Leaving before the gun costs nothing; a bot takes the seat.
 

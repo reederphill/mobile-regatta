@@ -361,13 +361,14 @@ public final class LobbyHub: LobbyRaceEvents, Sendable {
     private func prime(_ token: UUID, _ player: String) async {
         do {
             try await ensureLoaded()
-            for _ in 0..<4 {
+            for attempt in 0..<4 {
                 let epoch = state.withLock { $0.epochs[player, default: 0] }
                 let facts = try await facts(of: player)
                 let time = now()
                 let (done, cut): (Bool, Continuation?) = state.withLock { state in
                     guard var feed = state.feeds[token] else { return (true, nil) }
-                    guard state.epochs[player, default: 0] == epoch else { return (false, nil) }
+                    // Her facts were refreshed while they were read: read them again (a few times at most).
+                    guard state.epochs[player, default: 0] == epoch || attempt == 3 else { return (false, nil) }
                     feed.primed = true
                     state.feeds[token] = feed
                     if case .dropped = feed.continuation.yield(.state(lobbyState(player, facts, state, at: time))) {
@@ -473,7 +474,8 @@ public final class LobbyHub: LobbyRaceEvents, Sendable {
     /// Posts for `player`. Returns the line as she sees it: sent, or not sent. Throws `LobbyError` for a refusal.
     public func post(_ draft: Draft, by player: AccountPlayer) async throws -> LobbyMessage {
         let id = player.teamPlayerID
-        try? await ensureLoaded()
+        // The blocks and the last hour, from the store: without them nothing is sent.
+        let loaded = (try? await ensureLoaded()) != nil
         expireSilences()
         // 1. The silence window.
         if state.withLock({ $0.isSilenced(id, at: now(), limit: settings.silenceLimit) }) { throw LobbyError.closed(.racing) }
@@ -524,7 +526,7 @@ public final class LobbyHub: LobbyRaceEvents, Sendable {
             }
             return LobbyMessage(id: MessageID("unsent-\(number)"), kind: .post(LobbyPost(author: author, body: body, delivery: .notSent)))
         }
-        guard readable, rated != nil else { return notSent() }
+        guard loaded, readable, rated != nil else { return notSent() }
         // 5. The limits: hers, then the room's. From here the post has used her slot, sent or not.
         let time = now()
         if let wait = state.withLock({ takeSlot(id, &$0, at: time) }) { throw LobbyError.rateLimited(retryAfterSeconds: wait) }
