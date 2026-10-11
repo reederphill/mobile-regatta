@@ -198,7 +198,9 @@ let package = Package(
                 .product(name: "Crypto", package: "swift-crypto"),
                 // Built so a test can replay a stored race log in its own process (#148).
                 .product(name: "regatta-replay", package: "RegattaCore"),
-            ]
+            ],
+            // Read from the source tree (#151: the App Store Connect request the leaderboard mirror is pinned to).
+            exclude: ["Fixtures"]
         ),
     ]
 )

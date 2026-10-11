@@ -9,8 +9,11 @@ import Synchronization
 public protocol RaceArchive: Sendable {
     /// A race starts: `running`, with its human seats' players.
     func register(_ race: UUID, players: [RaceSeatHolder]) async throws
-    /// A running race closed: its log, digest, versions and results, all at once.
-    func close(_ race: ClosedRaceRecord) async throws
+    /// A running race closed: its log, digest, versions and results, its players' profile counts and (for a rated race)
+    /// their ratings, all at once (#151). Returns what became of the ratings: a rating step that failed doesn't fail
+    /// the close (`RatingState.failed`). Exactly once: only a `running` race closes.
+    @discardableResult
+    func close(_ race: ClosedRaceRecord) async throws -> RatingOutcome
     /// A running race was cancelled: no results, no log.
     func cancel(_ race: UUID) async throws
     /// Server start: every race still `running` was left by a crash (#30). Cancels them and returns their ids.
@@ -34,7 +37,8 @@ public struct PostgresRaceArchive: RaceArchive {
         try await RaceRegistryStore(database).create(id: race, players: players)
     }
 
-    public func close(_ race: ClosedRaceRecord) async throws { try await RaceResultStore(database).close(race) }
+    @discardableResult
+    public func close(_ race: ClosedRaceRecord) async throws -> RatingOutcome { try await RaceResultStore(database).closing(race).rating }
 
     public func cancel(_ race: UUID) async throws { try await RaceRegistryStore(database).cancel(race) }
 
@@ -69,8 +73,10 @@ public final class InMemoryRaceArchive: RaceArchive {
     }
 
     private let entries = Mutex<(races: [UUID: Entry], closes: Int)>(([:], 0))
+    /// The ratings its closes write (#151): what a dev server's briefing and profile read.
+    public let ratings: InMemoryRatingBook
 
-    public init() {}
+    public init(ratings: InMemoryRatingBook = InMemoryRatingBook()) { self.ratings = ratings }
 
     public func register(_ race: UUID, players: [RaceSeatHolder]) async throws {
         try entries.withLock { state in
@@ -79,11 +85,14 @@ public final class InMemoryRaceArchive: RaceArchive {
         }
     }
 
-    public func close(_ race: ClosedRaceRecord) async throws {
+    @discardableResult
+    public func close(_ race: ClosedRaceRecord) async throws -> RatingOutcome {
         try entries.withLock { state in
             let entry = try Self.running(race.id, in: state.races)
             state.closes += 1
             state.races[race.id] = Entry(state: .closed, players: entry.players, closed: race, endedAt: Date(), closeOrder: state.closes)
+            // Under the races' lock: closed and rated at once, as the Postgres close.
+            return ratings.score(race)
         }
     }
 
@@ -107,8 +116,10 @@ public final class InMemoryRaceArchive: RaceArchive {
                 return !(entry.closed?.bots.contains { $0.seat == seat && $0.source == .takeover } ?? false)
             }
             guard let (id, entry) = theirs.max(by: { $0.value.closeOrder < $1.value.closeOrder }), let closed = entry.closed else { return nil }
-            return StoredRaceResult(raceID: id, seat: entry.players.first { $0.playerID == playerID }?.seat, results: closed.results,
-                                    incidents: closed.incidents, rated: closed.rated, endedAt: entry.endedAt ?? Date())
+            var stored = StoredRaceResult(raceID: id, seat: entry.players.first { $0.playerID == playerID }?.seat, results: closed.results,
+                                          incidents: closed.incidents, rated: closed.rated, endedAt: entry.endedAt ?? Date())
+            (stored.ratingState, stored.ratingChange) = ratings.rated(id, player: playerID)
+            return stored
         }
     }
 

@@ -1,0 +1,11 @@
+{
+  "data": {
+    "type": "gameCenterLeaderboardEntrySubmissions",
+    "attributes": {
+      "bundleId": "com.phillreeder.regatta",
+      "scopedPlayerId": "G:ann",
+      "score": 1713,
+      "vendorIdentifier": "regatta.rating"
+    }
+  }
+}

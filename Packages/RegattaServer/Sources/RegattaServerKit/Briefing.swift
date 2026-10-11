@@ -12,7 +12,8 @@ import RegattaServices
 public typealias LiverySource = @Sendable (AccountPlayer) async -> Livery?
 
 public enum OnlineBriefing {
-    /// Until ratings exist (#151), every human's: what `RatingSource` gives when nobody supplies one, or it fails.
+    /// A new player's rating (#151, `RatingConfig.startRating`), and what a fleet's humans count as when their ratings
+    /// can't be read. The briefing shows the number alone, never the provisional badge (owner 2026-10-10).
     public static let provisionalRating = 1500
     static let catalogue: LiveryCatalogue? = try? LiveryCatalogueFile.bundled(id: "livery-catalogue", version: 1).content
 
