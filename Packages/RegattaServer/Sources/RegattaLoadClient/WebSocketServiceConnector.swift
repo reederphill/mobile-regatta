@@ -10,11 +10,14 @@ import Synchronization
 /// A service connection over a NIO WebSocket (`/service`, #145), as `ServiceConnection` reads it (`ServiceLink`).
 /// The connection's opening (the version handshake, and the session call) is read frame by frame through
 /// `nextOpeningFrame()`; `handOver()` then sends every later frame to `incoming`.
-public final class WebSocketServiceLink: ServiceLink, @unchecked Sendable {
+///
+/// It is a `SessionLink` too (#161): `ping()` is a WebSocket ping, answered by the server's pong.
+public final class WebSocketServiceLink: SessionLink, @unchecked Sendable {
     // @unchecked: the mutable state is behind `state`; the rest are Sendable lets set in init.
     private struct State {
         var handedOver = false
         var closed = false
+        var pings: [CheckedContinuation<Void, any Error>] = []
     }
 
     public let incoming: AsyncStream<[UInt8]>
@@ -52,6 +55,8 @@ public final class WebSocketServiceLink: ServiceLink, @unchecked Sendable {
                         if state.withLock({ $0.handedOver }) { incomingContinuation.yield(bytes) } else { openingContinuation.yield(bytes) }
                     case .ping:
                         try await outbound.write(WebSocketFrame(fin: true, opcode: .pong, maskKey: .random(), data: frame.unmaskedData))
+                    case .pong:
+                        answerPings(with: nil)
                     case .connectionClose:
                         return
                     default:
@@ -62,6 +67,30 @@ public final class WebSocketServiceLink: ServiceLink, @unchecked Sendable {
             state.withLock { $0.closed = true }
             openingContinuation.finish()
             incomingContinuation.finish()
+            answerPings(with: ServiceLinkError.closed)
+        }
+    }
+
+    /// One ping, answered by the server's pong. Throws when the link has closed, or closes first.
+    public func ping() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            let open = state.withLock { state in
+                if !state.closed { state.pings.append(continuation) }
+                return !state.closed
+            }
+            guard open else { return continuation.resume(throwing: ServiceLinkError.closed) }
+            channel.writeAndFlush(WebSocketFrame(fin: true, opcode: .ping, maskKey: .random(), data: channel.allocator.buffer(capacity: 0)),
+                                  promise: nil)
+        }
+    }
+
+    private func answerPings(with error: (any Error)?) {
+        let waiting = state.withLock { state in
+            defer { state.pings = [] }
+            return state.pings
+        }
+        for continuation in waiting {
+            if let error { continuation.resume(throwing: error) } else { continuation.resume() }
         }
     }
 
@@ -86,6 +115,7 @@ public final class WebSocketServiceLink: ServiceLink, @unchecked Sendable {
             return !state.closed
         }
         guard first else { return }
+        answerPings(with: ServiceLinkError.closed)
         var data = channel.allocator.buffer(capacity: 2)
         data.write(webSocketErrorCode: .normalClosure)
         let channel = channel
