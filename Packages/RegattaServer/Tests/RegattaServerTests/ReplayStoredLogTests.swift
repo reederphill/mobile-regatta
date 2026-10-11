@@ -80,6 +80,56 @@ extension RaceSims {
             #endif
         }
 
+        /// #150, ADR 0002: a race with a covered boat (dropped, sailed by the cautious bot, taken back, dropped again
+        /// to the close) replays to the stored digest with no brain: the bot's inputs are in the log as anyone's.
+        @Test func aDropAndRejoinReplaysToTheStoredDigestInNewProcess() async throws {
+            let rig = LifecycleRig(settings: LifecycleRig.quickGrace())
+            let race = try await rig.race(["T:0", "T:1"], seats: 6, startSequenceTicks: 150)
+            let transports = [KeptTransport(), KeptTransport(), KeptTransport()]
+            for seat in 0..<2 { try await race.join(seat: seat, transport: transports[seat]) }
+            var seq: UInt32 = 0
+            await rig.sail(race, [0, 1], to: -60, seq: &seq)
+            // Seat 1 drops before the gun, is covered through it, and is back at 300.
+            await race.leave(seat: 1, transport: transports[1])
+            await rig.sail(race, [0], to: 300, seq: &seq)
+            #expect(await race.host.controller(seat: 1).driver?.isCautious == true)
+            #expect(await race.host.rosterEntries[1].isDisconnected)
+            try await race.join(seat: 1, transport: transports[2])
+            await rig.sail(race, [0, 1], to: 420, seq: &seq)
+            #expect(await race.host.controller(seat: 1).isHuman)
+            // Gone again, and seat 0 with her: the race closes with both boats covered.
+            await race.leave(seat: 1, transport: transports[2])
+            await rig.sail(race, [0], to: 600, seq: &seq)
+            await race.leave(seat: 0, transport: transports[0])
+            await rig.runUntilEnded(race, limit: 1_200)
+            #expect(await race.host.controller(seat: 0).driver?.isCautious == true)
+            #expect(await race.host.controller(seat: 1).driver?.isCautious == true)
+            await rig.end(race)
+            let stored = try #require(try await rig.archive.closedRace(race.id))
+
+            let log = try RaceLog(jsonData: stored.log)
+            #expect(log.header.setup.seats == [.human, .human, .bot, .bot, .bot, .bot])
+            let kinds = log.seatEvents.filter { $0.seat == 1 }.map(\.kind)
+            #expect(kinds == [.joined(.human), .disconnected, .dropped, .botTookOver(.cautious), .rejoined,
+                              .disconnected, .dropped, .botTookOver(.cautious)])
+            let ticks = log.seatEvents.filter { $0.seat == 1 && $0.kind == .dropped }.map(\.tick)
+            // The bot's inputs for her seat while she was gone, hers in between, and none of the bot's then.
+            #expect(log.inputs.contains { $0.seat == 1 && $0.tick > ticks[0] + 1 && $0.tick <= 300 })
+            #expect(log.inputs.contains { $0.seat == 1 && $0.tick > ticks[1] + 1 })
+            // The log says nothing of the bot but her inputs, and nothing of the mark.
+            let text = String(decoding: stored.log, as: UTF8.self)
+            for word in ["skill", "caution", "isDisconnected", "handling"] { #expect(!text.contains(word)) }
+            #expect(stored.bots.map(\.source) == [.fill, .fill, .fill, .fill], "a covered boat is no bot seat")
+            #expect(try Replayer.digest(of: log) == stored.digest)
+            #expect(try Replayer.replay(log).results == RaceSummary(decoding: stored.results).results)
+
+            #if os(macOS) || os(Linux)
+            let (status, printed) = try replay(stored.log)
+            #expect(status == 0)
+            #expect(printed == hex64(stored.digest))
+            #endif
+        }
+
         @Test func aLogFromAnotherSimulationVersionIsRefused() async throws {
             let stored = try await storedRace()
             let text = String(decoding: stored.log, as: UTF8.self)

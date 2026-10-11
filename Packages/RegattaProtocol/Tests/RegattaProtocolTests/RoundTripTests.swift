@@ -67,7 +67,8 @@ import Testing
         var gen = Gen(seed: 0x7121)
         for type in MessageType.allCases {
             let bytes = try gen.frame(type).encoded()
-            for length in 0..<bytes.count {
+            // One prefix is a frame: a `RosterChange` without its last byte is its shape before #150's mark.
+            for length in 0..<bytes.count where !(type == .rosterChange && length == bytes.count - 1) {
                 #expect(throws: WireError.self) { try Frame(decoding: Array(bytes[..<length])) }
             }
             #expect(throws: WireError.trailingBytes(1)) { try Frame(decoding: bytes + [0]) }
@@ -315,7 +316,7 @@ import Testing
         // A flag the encoder never writes is refused: the seat table starts after the count, at the first flag.
         let count = try #require(bytes.firstIndex(of: 3, after: Frame.headerSize, followedBy: [RaceStart.SeatFlag.human.rawValue, 3] + Array("Ann".utf8)))
         var bad = bytes
-        bad[count + 1] = 3
+        bad[count + 1] = 4
         #expect(throws: WireError.invalidValue("roster.isBot")) { try Frame(decoding: bad) }
 
         // The results report's roster carries it too.
@@ -344,7 +345,72 @@ import Testing
         // A seat no fleet has, a flag that isn't a flag, and a short frame are refused.
         #expect(throws: (any Error).self) { try Frame(decoding: [26, 1, 0, 0, 0, 0, 0, 0, 0, 64, 1, 65, 0, 1]) }
         #expect(throws: (any Error).self) { try Frame(decoding: Array(bytes.dropLast()) + [2]) }
-        #expect(throws: (any Error).self) { try Frame(decoding: Array(bytes.dropLast())) }
+        #expect(throws: (any Error).self) { try Frame(decoding: Array(bytes.dropLast(2))) }
+    }
+
+    /// #150: the disconnected mark. `RaceStart`'s seat flag 3 and one more bool at the end of a `RosterChange`; the
+    /// shapes from before it still decode, as not disconnected.
+    @Test func rosterDisconnectedFlagRoundTrips() throws {
+        let setup = try RaceSetup(raceSeed: RaceSeed(150), seats: [.human, .human, .human, .bot])
+        let roster = [RosterEntry(name: "Ann", colorIndex: 0), RosterEntry(name: "Bea", colorIndex: 1, isDisconnected: true),
+                      RosterEntry(name: "Skua", colorIndex: 2, isBot: true), RosterEntry(name: "Gannet", colorIndex: 3)]
+        let start = RaceStart(yourSeat: 0, setup: setup, roster: roster)
+        let bytes = try Frame(seq: 1, tick: 3600, message: .raceStart(start)).encoded()
+        guard case .raceStart(let back) = try Frame(decoding: bytes).message else {
+            Issue.record("not a RaceStart")
+            return
+        }
+        #expect(back == start)
+        #expect(back.roster.map(\.isDisconnected) == [false, true, false, false])
+        #expect(back.roster.map(\.isBot) == [false, false, true, true])
+        // Still her seat in the setup, under her name.
+        #expect(back.setup.seats == [.human, .human, .human, .bot] && back.roster[1].name == "Bea")
+        // Her flag is 3; the other three are 0, 2 and 1 as before.
+        let table = try #require(bytes.firstIndex(of: 4, after: Frame.headerSize, followedBy: [0, 3] + Array("Ann".utf8)))
+        #expect(bytes[table + 1 + 1 + 1 + 3 + 1] == RaceStart.SeatFlag.disconnected.rawValue)
+        // A bot's seat is never disconnected, whatever the entry said: the same bytes as without it.
+        var marked = roster
+        marked[2].isDisconnected = true
+        marked[3].isDisconnected = true
+        #expect(RaceStart(yourSeat: 0, setup: setup, roster: marked) == start)
+        // A `RaceStart` with no mark has the bytes it had before the flag existed (flags 0, 0, 2, 1).
+        var unmarked = roster
+        unmarked[1].isDisconnected = false
+        let plain = try Frame(seq: 1, tick: 3600, message: .raceStart(RaceStart(yourSeat: 0, setup: setup, roster: unmarked))).encoded()
+        var expected = bytes
+        expected[table + 1 + 1 + 1 + 3 + 1] = RaceStart.SeatFlag.human.rawValue
+        #expect(plain == expected)
+
+        // `RosterChange`: the mark is the last byte.
+        let dropped = RosterChange(seat: 1, entry: roster[1])
+        let change = try Frame(seq: 7, tick: 3615, message: .rosterChange(dropped)).encoded()
+        #expect(change.last == 1 && change[change.count - 2] == 0)
+        #expect(try Frame(decoding: change).message == .rosterChange(dropped))
+        let returned = RosterChange(seat: 1, entry: RosterEntry(name: "Bea", colorIndex: 1))
+        let cleared = try Frame(seq: 8, tick: 3700, message: .rosterChange(returned)).encoded()
+        #expect(try Frame(decoding: cleared).message == .rosterChange(returned))
+        // The shape before #150, ending after `isBot`, decodes as not disconnected: a bot's change and a player's.
+        #expect(try Frame(decoding: Array(cleared.dropLast())).message == .rosterChange(returned))
+        let bot = RosterChange(seat: 2, entry: roster[2])
+        let botBytes = try Frame(seq: 9, tick: -300, message: .rosterChange(bot)).encoded()
+        #expect(try Frame(decoding: Array(botBytes.dropLast())).message == .rosterChange(bot))
+        // A bot that is disconnected isn't a thing: not written, not read. Nor is a mark that isn't a bool.
+        #expect(throws: WireError.outOfRange("roster.isDisconnected")) {
+            try Frame(seq: 1, tick: 0, message: .rosterChange(RosterChange(seat: 2, entry: RosterEntry(name: "Skua", colorIndex: 2, isBot: true,
+                                                                                                       isDisconnected: true)))).encoded()
+        }
+        #expect(throws: WireError.invalidValue("roster.isDisconnected")) { try Frame(decoding: Array(botBytes.dropLast()) + [1]) }
+        #expect(throws: (any Error).self) { try Frame(decoding: Array(change.dropLast()) + [2]) }
+
+        // A results report's roster has no mark: its bytes are what they were.
+        let report = WireRaceReport(raceID: "r", seat: 0, roster: roster, results: RaceResults(rows: [], rated: false), sailing: [0, 1, 2, 3],
+                                    incidents: [], isClosed: false, flaggedSeats: [])
+        let reply = Message.raceSessionReply(ServiceReply(id: 1, result: .update(.report(report))))
+        var clean = report
+        clean.roster = unmarked
+        let cleanReply = Message.raceSessionReply(ServiceReply(id: 1, result: .update(.report(clean))))
+        #expect(try Frame(seq: 1, tick: 0, message: reply).encoded() == Frame(seq: 1, tick: 0, message: cleanReply).encoded())
+        #expect(try Frame(decoding: Frame(seq: 1, tick: 0, message: reply).encoded()).message == cleanReply)
     }
 
     @Test func eventAudiences() {

@@ -28,4 +28,31 @@ import RegattaCore
         print("BotBenchmarkTests: 15 brains at 10 Hz, \(perFrame) ms per frame on the host (worst \(ms(worst)) ms, \(ticks) ticks)")
         #expect(perFrame < 2, "\(perFrame) ms per frame")
     }
+
+    /// #150: the server's worst case, every human of a full race dropped at once (a mass drop's 30 s grace): sixteen
+    /// cautious brains, each taking her boat over where it is, deciding at 10 Hz. The cautious bot is the heaviest
+    /// brain (she sails each candidate helm ahead in her head). Measured as the fifteen above, on the host.
+    @Test func sixteenCautiousBrainsAt10HzUnder2msPerFrame() {
+        let race = botRace(seats: Array(repeating: .human, count: 16), prestartSeconds: 60, seed: 172)
+        var controllers = SeatControllers(setup: race.setup)
+        for seat in 0..<16 { controllers.takeOver(seat: seat, raceSeed: race.setup.raceSeed, cautious: true) }
+        #expect(controllers.seats.allSatisfy { $0.driver?.isCautious == true })
+        let clock = ContinuousClock()
+        var total = Duration.zero
+        var worst = Duration.zero
+        var ticks = 0
+        for _ in 0..<(Race.tickRate * 240) where !race.isOver {
+            let start = clock.now
+            controllers.drive(race)
+            let spent = start.duration(to: clock.now)
+            total += spent
+            worst = max(worst, spent)
+            ticks += 1
+            race.step()
+        }
+        let ms = { (d: Duration) in Double(d.components.seconds) * 1_000 + Double(d.components.attoseconds) / 1e15 }
+        let perFrame = ms(total) / Double(ticks)
+        print("BotBenchmarkTests: 16 cautious brains at 10 Hz, \(perFrame) ms per frame on the host (worst \(ms(worst)) ms, \(ticks) ticks)")
+        #expect(perFrame < 2, "\(perFrame) ms per frame")
+    }
 }

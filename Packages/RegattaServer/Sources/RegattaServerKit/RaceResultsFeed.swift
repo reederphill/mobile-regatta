@@ -76,6 +76,13 @@ public struct RaceSummary: Codable, Sendable, Equatable {
         return .winner(venue: venue, nickname: roster[first.seat].name)
     }
 
+    /// `winnerLine`, but none when the first row's finish was sailed by the cautious bot while its player was gone
+    /// (#150, `CoveredFinish.standings`): that finish is nobody's win.
+    public func winnerLine(sailedWhileGone: Set<Int>) -> SystemLine? {
+        guard let first = rows.first, !sailedWhileGone.contains(first.seat) else { return nil }
+        return winnerLine
+    }
+
     public func encoded() throws -> Data { try RaceResultsFeed.encoder.encode(self) }
 
     public init(decoding data: Data) throws { self = try JSONDecoder().decode(RaceSummary.self, from: data) }

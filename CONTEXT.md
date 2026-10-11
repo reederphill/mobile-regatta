@@ -130,8 +130,12 @@ How well a bot sails: **Club**, **Regional** or **National**. A tier sets two ba
 _Avoid_: difficulty, level
 
 **Cautious bot**:
-The bot that sails a dropped player's boat until they come back: a Club bot at the bottom of Club's band, not a fourth tier. It takes the boat from wherever she is, always gives way, early and wide, and never attacks, so dropping never helps.
+The bot that sails a dropped player's boat until they come back: a Club bot at the bottom of Club's band, not a fourth tier. It takes the boat from wherever she is, always gives way, early and wide, and never attacks, so dropping never helps. She races the course to the finish and serves a penalty the player owed. What makes her cautious is named in `BotBrain+Cautious` (`BotBrain.Caution`, tuned by #105): Club's lowest skill and handling, no rule misjudged, every clearance widened, a longer look ahead for a boat she must keep clear of, each helm sailed ahead in her head before she takes it (`guarded`), a pre-start waiting clear of the line's ends, and no engagement. Accepted only because nobody is steering the boat: no fleet bot sails like this.
 _Avoid_: easy bot, autopilot
+
+**Covered boat**:
+A dropped player's boat while the cautious bot sails it ([#150](https://github.com/reederphill/mobile-regatta/issues/150)): from the end of the input hold (half a second after her last input, a second if she never sent one) until she is back or the race closes. Not a bot seat: her name, no bot glyph, only the disconnected mark on the roster, gone the moment she is back. Still gone at the close with the boat not home, she is RET. A finish the bot sailed while she was gone counts for her rating at its place if she dropped less than a minute before it, otherwise she is rated as retired; either way it is not a completed race, not a win and not the lobby's "won" line. A finish she sailed herself, before dropping or after coming back, is hers in full.
+_Avoid_: bot seat, replacement, AFK boat
 
 **Fleet fill**:
 The bots that bring an online fleet up to 10 boats at fleet lock. Each is rated at the fleet's median human rating, give or take 150, and sails at the skill the versioned rating map (`bot-ratings@n.json`) gives that rating ([#149](https://github.com/reederphill/mobile-regatta/issues/149)). She has a sailing name and a free starter livery from her seat's seed, no rating on show, and never appears in the lobby.

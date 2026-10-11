@@ -142,16 +142,21 @@ public struct RosterEntry: Equatable, Sendable {
     /// A bot sails the seat (#19, #149): one the setup gives to a bot, or one its player gave up before the gun, which
     /// a bot sails from then on under a sailing name. The app draws the bot glyph beside the name.
     public var isBot: Bool
+    /// The seat's player is disconnected (#21, #150): her hold ran out and the cautious bot is sailing her boat until
+    /// she is back. Still her seat: her name, never `isBot`. Set while a race runs only; a closed report has none.
+    public var isDisconnected: Bool
 
-    public init(name: String, colorIndex: Int, isBot: Bool = false) {
+    public init(name: String, colorIndex: Int, isBot: Bool = false, isDisconnected: Bool = false) {
         self.name = name
         self.colorIndex = colorIndex
         self.isBot = isBot
+        self.isDisconnected = isDisconnected
     }
 }
 
 /// Server → client, on the reliable stream (#149): `seat`'s roster entry from now on. Sent when a player gives her
-/// seat up before the gun and a bot takes it: the name becomes a sailing name and `isBot` is set. The setup's seat
+/// seat up before the gun and a bot takes it: the name becomes a sailing name and `isBot` is set. Also sent when a
+/// player's boat is dropped and when she is back (#150): only `isDisconnected` changes. The setup's seat
 /// kinds never change (a seat the setup gave a player stays a human seat in every replay).
 public struct RosterChange: Equatable, Sendable {
     public var seat: Int
@@ -229,7 +234,8 @@ public struct RaceStart: Equatable, Sendable {
     /// On the wire its seat kinds travel only in the seat table's flags (`SeatFlag`).
     public var setup: RaceSetup
     /// By seat, as many as `setup.seats`. A seat the setup gives to a bot is always `isBot` (the initialiser sets it);
-    /// a human seat's is set once a bot has taken it for good (#149).
+    /// a human seat's is set once a bot has taken it for good (#149). A human seat whose player is disconnected is
+    /// marked `isDisconnected` (#150); a bot's seat never is.
     public var roster: [RosterEntry]
     /// Tide state (#78). Placeholder until #78 defines schema 1: `.none`.
     public var tide: VersionedPayload
@@ -246,6 +252,8 @@ public struct RaceStart: Equatable, Sendable {
         self.setup = setup
         self.roster = roster
         for seat in roster.indices where setup.seats.indices.contains(seat) && setup.seats[seat] == .bot { self.roster[seat].isBot = true }
+        // A bot's seat is never disconnected (#150): the seat table has one flag a seat.
+        for seat in self.roster.indices where self.roster[seat].isBot { self.roster[seat].isDisconnected = false }
         self.tide = tide
         self.windKeys = windKeys
     }
@@ -258,6 +266,8 @@ public struct RaceStart: Equatable, Sendable {
         case bot = 1
         /// The setup's human seat, given up before the gun: a bot sails it. Still a human seat in the setup.
         case takenOver = 2
+        /// The setup's human seat, still its player's, who is disconnected (#150): the cautious bot covers her boat.
+        case disconnected = 3
     }
 }
 
@@ -599,17 +609,24 @@ extension UpdateRequired {
 
 extension RosterChange {
     func encode(to w: inout WireWriter) throws {
+        guard !(entry.isBot && entry.isDisconnected) else { throw WireError.outOfRange("roster.isDisconnected") }
         try w.index(seat, "seat")
         try w.string(entry.name, limit: WireLimit.string, "roster.name")
         try w.index(entry.colorIndex, "roster.colorIndex")
         w.bool(entry.isBot)
+        w.bool(entry.isDisconnected)
     }
 
+    /// The mark's bool is the body's last byte, added by #150: a body that ends after `isBot` (the shape before it)
+    /// reads as not disconnected. A bot's seat is never disconnected.
     init(from r: inout WireReader) throws {
         let seat = try r.index()
         guard seat < WireLimit.seats else { throw WireError.invalidValue("seat") }
-        self.init(seat: seat, entry: RosterEntry(name: try r.string(limit: WireLimit.string, "roster.name"), colorIndex: try r.index(),
-                                                 isBot: try r.bool("roster.isBot")))
+        let name = try r.string(limit: WireLimit.string, "roster.name"), colorIndex = try r.index()
+        let isBot = try r.bool("roster.isBot")
+        let isDisconnected = r.remaining > 0 ? try r.bool("roster.isDisconnected") : false
+        guard !(isBot && isDisconnected) else { throw WireError.invalidValue("roster.isDisconnected") }
+        self.init(seat: seat, entry: RosterEntry(name: name, colorIndex: colorIndex, isBot: isBot, isDisconnected: isDisconnected))
     }
 }
 
@@ -664,7 +681,7 @@ extension RaceStart {
         // The seat table: the seat's flag, then the rest of the roster metadata.
         try w.count(roster.count, limit: WireLimit.seats, "roster")
         for (kind, entry) in zip(setup.seats, roster) {
-            let flag: SeatFlag = kind == .bot ? .bot : entry.isBot ? .takenOver : .human
+            let flag: SeatFlag = kind == .bot ? .bot : entry.isBot ? .takenOver : entry.isDisconnected ? .disconnected : .human
             w.u8(flag.rawValue)
             try w.string(entry.name, limit: WireLimit.string, "roster.name")
             try w.index(entry.colorIndex, "roster.colorIndex")
@@ -693,7 +710,7 @@ extension RaceStart {
             guard let flag = SeatFlag(rawValue: try r.u8()) else { throw WireError.invalidValue("roster.isBot") }
             kinds.append(flag == .bot ? .bot : .human)
             roster.append(RosterEntry(name: try r.string(limit: WireLimit.string, "roster.name"), colorIndex: try r.index(),
-                                      isBot: flag != .human))
+                                      isBot: flag == .bot || flag == .takenOver, isDisconnected: flag == .disconnected))
         }
         let setup: RaceSetup
         do {

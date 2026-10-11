@@ -44,7 +44,9 @@ extension RaceSims {
             let entry = await race.host.rosterEntries[1]
             #expect(entry.isBot && FleetRoster.sailingNames.contains(entry.name))
             #expect(transports[0].messages.contains(.rosterChange(RosterChange(seat: 1, entry: entry))))
-            #expect(await race.host.rosterEntries[0] == RosterEntry(name: "P0", colorIndex: 0))
+            // The other player's entry is still hers (she has sent nothing yet, so her boat is covered and marked, #150).
+            let other = await race.host.rosterEntries[0]
+            #expect(other.name == "P0" && other.colorIndex == 0 && !other.isBot)
 
             // Counted at once, once; she is free, the race is no longer hers, and she may queue again.
             #expect(await eventually { (try? await queue.leaves("T:1")) == 1 })
@@ -65,7 +67,8 @@ extension RaceSims {
         }
 
         /// After the gun (decision, #149): she is free to queue at once and the race is no longer hers; nothing is
-        /// counted, her boat is covered as a dropped boat is, and nobody's roster changes.
+        /// counted, her boat is covered as a dropped boat is (#150: by the cautious bot, marked disconnected), and no
+        /// name or seat kind changes.
         @Test func leaveAfterTheGunFreesHerAndCountsNothing() async throws {
             let queue = QueueRig()
             let players = [QueueMatchmakerTests.player(0), QueueMatchmakerTests.player(1)]
@@ -83,9 +86,12 @@ extension RaceSims {
             try await queue.matchmaker.join(players[1])
             await queue.rig.sail(race, [0], to: 60, seq: &seq)
             if case .dropped = await race.host.controller(seat: 1) {} else { Issue.record("seat 1 isn't covered") }
-            #expect(await race.host.rosterEntries == roster)
+            #expect(await race.host.controller(seat: 1).driver?.isCautious == true)
+            var marked = roster
+            marked[1].isDisconnected = true
+            #expect(await race.host.rosterEntries == marked)
             #expect(await race.host.botSeats.allSatisfy { $0.source == .fill })
-            #expect(!transports[0].messages.contains { $0.type == .rosterChange })
+            #expect(transports[0].messages.filter { $0.type == .rosterChange } == [.rosterChange(RosterChange(seat: 1, entry: marked[1]))])
             #expect(try await queue.leaves("T:1") == 0)
             #expect(await queue.matchmaker.state(of: "T:0") == .fleetLocked)
         }

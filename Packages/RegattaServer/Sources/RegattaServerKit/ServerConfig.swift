@@ -2,6 +2,7 @@ import Crypto
 import Foundation
 import Persistence
 import RaceHost
+import RegattaCore
 import RegattaProtocol
 
 /// The deployment the server runs in: the `ENV` variable. Only `dev` exists for now (#67): the server has
@@ -81,6 +82,7 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `CLIENT_ADDRESS_HEADER` | none | the header a trusted reverse proxy sets to the client's address (`Fly-Client-IP`, `X-Forwarded-For`); the per-address connection caps count it instead of the socket's address. Unset: no header is trusted (#469) |
 /// | `CLIENT_ADDRESS_TRUSTED_HOPS` | `1` | with `CLIENT_ADDRESS_HEADER`: which entry of a list header, from the right, is the client's (one per trusted proxy in the chain) (#469) |
 /// | `RATING_WEIGHT_EXPONENT` | `0.5` | a rated race with m opponents weighs each of its games m^-x (ADR 0012): 0.5 is 1/√m; 0…1 (#151) |
+/// | `COVERED_FINISH_GRACE_SECONDS` | `60` | a finish the cautious bot sails for a dropped player counts for her rating if she dropped less than this before it, else she is rated as retired; 0…3600 (#150) |
 /// | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PEM`, `GC_LEADERBOARD_ID` | none | the App Store Connect team key (id, issuer, a PEM file of its P-256 private key) and the Game Center leaderboard's id: all four, or none (no leaderboard mirror) (#151, #55) |
 /// | `LEADERBOARD_SWEEP_SECONDS` | `300` | how often unsent leaderboard scores are tried again (#151) |
 public struct ServerConfig: Sendable {
@@ -174,6 +176,12 @@ public struct ServerConfig: Sendable {
             config.identity.appleRootsPEM = pem
         } else if !environment.isDev {
             throw .invalid(variable: "REGATTA_APPLE_ROOT_PEM", value: "(unset)", expected: "Apple's root outside ENV=dev")
+        }
+        if let text = env["COVERED_FINISH_GRACE_SECONDS"] {
+            guard let seconds = Int(text), (0...3600).contains(seconds) else {
+                throw .invalid(variable: "COVERED_FINISH_GRACE_SECONDS", value: text, expected: "whole seconds in 0...3600")
+            }
+            config.lifecycle.coveredFinishGraceTicks = seconds * Race.tickRate
         }
         if let text = env["RATING_WEIGHT_EXPONENT"] {
             guard let exponent = Double(text), (0...1).contains(exponent) else {
