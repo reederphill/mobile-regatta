@@ -81,6 +81,9 @@ extension BoatClass.PlaningTuning {
     /// - With the rudder within `apparentWind.rudderWithin` of centre she drops off with the apparent wind under
     ///   `apparentWind.offSpeed`: sailed too deep, or in a lull, she outruns her wind.
     /// - Off the plane she gets on only with the apparent wind at `apparentWind.onSpeed` or more.
+    /// - Both apparent wind speeds taper in very light wind, to `apparentWind.offWindShare` and `onWindShare` of `tws`
+    ///   where that is less (`ApparentWind.offSpeed(tws:)`): from the wind at which the share reaches the fixed speed
+    ///   up, nothing differs.
     ///
     /// The same at every wind strength. `was` is the only state: nothing is remembered between ticks.
     public func isPlaning(was: Bool, twa: Double, speed: Double, tws: Double, rudder: Double, polar: PolarTable) -> Bool {
@@ -90,7 +93,7 @@ extension BoatClass.PlaningTuning {
         let apparentSpeed = Self.apparentWindSpeed(twa: twa, speed: speed, tws: tws)
         guard was else {
             guard twa >= fromTWA && speed >= onSpeed else { return false }
-            if let apparentWind, apparentSpeed < apparentWind.onSpeed { return false }
+            if let apparentWind, apparentSpeed < apparentWind.onSpeed(tws: tws) { return false }
             return Self.apparentWindCosine(twa: twa, speed: speed, tws: tws) >= cos(onMaxAWA)
         }
         guard twa >= offBelowTWA && speed >= offSpeed else { return false }
@@ -98,7 +101,7 @@ extension BoatClass.PlaningTuning {
            speed < stayOnSpeedShare * polar.speed(twa: twa, tws: tws) {
             return false
         }
-        if let apparentWind, apparentSpeed < apparentWind.offSpeed, abs(rudder) <= apparentWind.rudderWithin { return false }
+        if let apparentWind, apparentSpeed < apparentWind.offSpeed(tws: tws), abs(rudder) <= apparentWind.rudderWithin { return false }
         return true
     }
 

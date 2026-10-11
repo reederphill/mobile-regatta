@@ -183,12 +183,30 @@ public struct BoatClass: DataFileContent, Equatable {
             /// apparent wind of every gybe falls to nothing, so a gybe sailed through with the rudder over never
             /// starves her, and one held there with the rudder centred does.
             public var rudderWithin: Double
+            /// In very light wind the two speeds taper with it (`offWindShare`, `onWindShare`; the owner's ruling of
+            /// 2026-10-11): she drops off under the lesser of `offSpeed` and this share of the true wind speed her
+            /// sails see, and gets on from the lesser of `onSpeed` and `onWindShare` of it. Continuous: skiff@9's 0.6
+            /// and 0.675 give 4.0 and 4.5 kn from 6.67 kn of wind up, and 3.6 and 4.05 kn at 6 kn, where the fixed
+            /// speeds sat within a tenth of a knot of a planing boat's apparent wind. Nil when the file leaves them
+            /// out: no taper, the fixed speeds at every wind.
+            public var offWindShare: Double?
+            public var onWindShare: Double?
 
-            public init(offSpeed: Double, onSpeed: Double, rudderWithin: Double) {
+            public init(offSpeed: Double, onSpeed: Double, rudderWithin: Double, offWindShare: Double? = nil,
+                        onWindShare: Double? = nil) {
                 self.offSpeed = offSpeed
                 self.onSpeed = onSpeed
                 self.rudderWithin = rudderWithin
+                self.offWindShare = offWindShare
+                self.onWindShare = onWindShare
             }
+
+            /// The apparent wind speed under which she drops off the plane in a true wind of `tws` (m/s): `offSpeed`,
+            /// or `offWindShare` of the wind where that is less.
+            public func offSpeed(tws: Double) -> Double { offWindShare.map { min(offSpeed, $0 * tws) } ?? offSpeed }
+            /// The apparent wind speed from which she gets on the plane in a true wind of `tws` (m/s): `onSpeed`, or
+            /// `onWindShare` of the wind where that is less.
+            public func onSpeed(tws: Double) -> Double { onWindShare.map { min(onSpeed, $0 * tws) } ?? onSpeed }
         }
 
         /// The off-the-plane speed at `twa` (radians) in `tws` (m/s): the reference column's speed at
@@ -1120,6 +1138,9 @@ private struct BoatClassSchema4Additions: Decodable {
             let offKnots: Double
             let onKnots: Double
             let rudderWithin: Double
+            /// Absent, both: no taper in light wind.
+            let offWindShare: Double?
+            let onWindShare: Double?
         }
 
         /// Absent: no share of her polar speed is asked of her.
@@ -1144,9 +1165,16 @@ private struct BoatClassSchema4Additions: Decodable {
                       && apparent.onKnots >= apparent.offKnots,
                       "planing apparent wind speeds must be positive, getting on at no less than she drops off")
             try check(apparent.rudderWithin >= 0 && apparent.rudderWithin <= 1, "planing apparent wind rudder limit must be 0...1")
+            try check((apparent.offWindShare == nil) == (apparent.onWindShare == nil),
+                      "planing apparent wind shares of the wind come together: offWindShare and onWindShare, or neither")
+            if let off = apparent.offWindShare, let on = apparent.onWindShare {
+                try check(off.isFinite && off > 0 && on.isFinite && on >= off,
+                          "planing apparent wind shares of the wind must be positive, getting on at no less than she drops off")
+            }
             boatClass.planing?.apparentWind = .init(offSpeed: metresPerSecond(knots: apparent.offKnots),
                                                     onSpeed: metresPerSecond(knots: apparent.onKnots),
-                                                    rudderWithin: apparent.rudderWithin)
+                                                    rudderWithin: apparent.rudderWithin,
+                                                    offWindShare: apparent.offWindShare, onWindShare: apparent.onWindShare)
         }
         func flag(_ value: FlagValue?, _ name: String) throws -> Bool? {
             switch value {

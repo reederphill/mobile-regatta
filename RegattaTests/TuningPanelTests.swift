@@ -134,7 +134,7 @@ import RegattaCore
         defer { try? FileManager.default.removeItem(at: root) }
         let planing = try #require(model.groups.first { $0.id == "planing" }).sliders
         let stayOn = planing.filter(Self.isPlaningStayOn)
-        #expect(planing.count == 7 && stayOn.count == 4)
+        #expect(planing.count == 9 && stayOn.count == 6)
         #expect(stayOn.allSatisfy { model.fileValue($0) == nil }, "skiff@8 has neither value")
         model.setBase(.boatClass, DataFileKey(id: "skiff", version: 9))
         for slider in planing {

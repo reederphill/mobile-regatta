@@ -306,6 +306,11 @@ enum TuningCatalog {
                                  0.5...8, step: 0.25),
                     TuningSlider(.boatClass, "/planing/apparentWind/rudderWithin", "Apparent wind counts with rudder within",
                                  0...1, step: 0.05),
+                    // The light-air taper: the lesser of the speed above and this share of the true wind.
+                    TuningSlider(.boatClass, "/planing/apparentWind/offWindShare", "Drops off under this share of the wind",
+                                 0.1...1.5, step: 0.025),
+                    TuningSlider(.boatClass, "/planing/apparentWind/onWindShare", "Gets on from this share of the wind",
+                                 0.1...1.5, step: 0.025),
                 ]),
             TuningGroup(
                 id: "raceFormat", title: "Race format",
