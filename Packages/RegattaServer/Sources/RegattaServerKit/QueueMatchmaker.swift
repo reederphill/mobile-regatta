@@ -44,6 +44,8 @@ public struct QueueSettings: Sendable, Equatable {
     public var catchFinishers: CatchFinishers? = CatchFinishers()
     /// Leaving the briefing: 3 in an hour cost 5 minutes (#26, owner Q1).
     public var briefingLeaves = BriefingLeaveRule()
+    /// The longest a read of the restriction store may hold the queue up (#469): past it the read counts as failed.
+    public var restrictionReadTimeout: Duration = .seconds(2)
     /// A locked fleet whose race can't start: when it is tried again, and when it is given up (#469).
     public var launchRetry = LaunchRetry()
 
@@ -274,10 +276,16 @@ public actor QueueMatchmaker {
     /// Time has moved: re-reads the queued players' restrictions (one suspended or flagged meanwhile leaves the queue),
     /// moves the hold for a running race's finishers, locks a fleet that is due, fires the guns that are due, and pushes
     /// the countdown (and cooldowns running out) to everyone watching.
+    ///
+    /// The whole queue's restrictions are one store read, bounded by `restrictionReadTimeout` (#469), so the lock is
+    /// never later than that. A read that fails changes nothing: each queued player keeps what was read last (she had
+    /// a good read when she joined). One with nothing ever read leaves the queue: unknown is no leave to race.
     public func step() async {
-        for entry in book.entries { await loadRestrictions(entry.player.teamPlayerID) }
-        for entry in book.entries where restricted[entry.player.teamPlayerID]?.refusal(at: now()) != nil {
-            book.remove(entry.player.teamPlayerID)
+        await loadRestrictions(book.entries.map(\.player.teamPlayerID))
+        let readAt = now()
+        for entry in book.entries {
+            let id = entry.player.teamPlayerID
+            if restricted[id].map({ $0.refusal(at: readAt) != nil }) ?? true { book.remove(id) }
         }
         await refreshHold()
         await lockIfDue()
@@ -301,14 +309,24 @@ public actor QueueMatchmaker {
             .map { (oldest, $0) }
     }
 
-    /// Reads the player's restrictions from the store; on a store failure keeps what was read last.
-    private func loadRestrictions(_ id: String) async {
+    /// Reads the players' restrictions from the store, all in one read of at most `restrictionReadTimeout`. False if
+    /// it failed or took too long: then what was read last stays as it is.
+    @discardableResult
+    private func loadRestrictions(_ ids: [String]) async -> Bool {
+        guard !ids.isEmpty else { return true }
         do {
-            restricted[id] = try await restrictions.restrictions(of: id)
+            let store = restrictions
+            let read = try await withDeadline(settings.restrictionReadTimeout) { try await store.restrictions(of: ids) }
+            for id in ids { restricted[id] = read[id] ?? PlayerRestrictions.none }
+            return true
         } catch {
-            FileHandle.standardError.write(Data("RegattaServer: can't read \(id)'s restrictions: \(error)\n".utf8))
+            FileHandle.standardError.write(Data("RegattaServer: can't read the restrictions of \(ids.count) player(s): \(error)\n".utf8))
+            return false
         }
     }
+
+    @discardableResult
+    private func loadRestrictions(_ id: String) async -> Bool { await loadRestrictions([id]) }
 
     /// The player's restrictions changed in the store (#153's suspension, #158's attestation): re-read them; one now
     /// refused leaves the queue.
@@ -340,13 +358,16 @@ public actor QueueMatchmaker {
         return .idle
     }
 
-    public func join(_ player: AccountPlayer) async throws(QueueError) {
+    /// Joins the queue. Throws `QueueError` for a refusal, and `RestrictionsUnreadable` when her restrictions can't be
+    /// read now (#469, failing closed: what was read earlier isn't enough to let her in).
+    public func join(_ player: AccountPlayer) async throws {
         let id = player.teamPlayerID
-        await loadRestrictions(id)
+        let read = await loadRestrictions(id)
         defer { evictUnusedRestrictions() }
+        guard read else { throw RestrictionsUnreadable() }
         switch cachedState(of: id) {
-        case .unavailable(let refusal): throw .refused(refusal)
-        case .queued, .fleetLocked: throw .alreadyQueued
+        case .unavailable(let refusal): throw QueueError.refused(refusal)
+        case .queued, .fleetLocked: throw QueueError.alreadyQueued
         case .idle: break
         }
         book.add(player, at: now())

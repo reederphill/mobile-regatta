@@ -2,6 +2,7 @@ import Foundation
 import Persistence
 @testable import RegattaServerKit
 import RegattaServices
+import Synchronization
 import Testing
 
 /// #147: the queue refuses a suspended player (with the end time, none for a permanent ban), a failed attestation, and a
@@ -158,5 +159,158 @@ import Testing
         await rig.queue.step()
         #expect(await eventually { await rig.queue.cachedRestrictions == 0 })
         #expect(rig.queue.watchers.keys.isEmpty)
+    }
+
+    // MARK: Reading the store (#469)
+
+    /// A restriction store that can fail or hang, and counts its reads.
+    final class FaultyStore: RestrictionStore {
+        struct Unreachable: Error {}
+        enum Fault { case none, failing, hanging }
+
+        let inner = InMemoryRestrictionStore()
+        private let state = Mutex<(fault: Fault, single: Int, batch: Int, hung: [CheckedContinuation<Void, Never>])>((.none, 0, 0, []))
+
+        var fault: Fault {
+            get { state.withLock { $0.fault } }
+            set { state.withLock { $0.fault = newValue } }
+        }
+        var reads: (single: Int, batch: Int) { state.withLock { ($0.single, $0.batch) } }
+
+        /// Lets every hung read go.
+        func release() {
+            let hung = state.withLock { state in
+                defer { state.hung = [] }
+                return state.hung
+            }
+            for continuation in hung { continuation.resume() }
+        }
+
+        /// A hung read doesn't notice being cancelled, as a call stuck in a dead connection doesn't.
+        private func read() async throws {
+            switch fault {
+            case .none: return
+            case .failing: throw Unreachable()
+            case .hanging: await withCheckedContinuation { continuation in state.withLock { $0.hung.append(continuation) } }
+            }
+        }
+
+        func restrictions(of playerID: String) async throws -> PlayerRestrictions {
+            state.withLock { $0.single += 1 }
+            try await read()
+            return try await inner.restrictions(of: playerID)
+        }
+
+        func restrictions(of playerIDs: [String]) async throws -> [String: PlayerRestrictions] {
+            state.withLock { $0.batch += 1 }
+            try await read()
+            return try await inner.restrictions(of: playerIDs)
+        }
+
+        func briefingLeaves(of playerID: String, since: Date) async throws -> [Date] { try await inner.briefingLeaves(of: playerID, since: since) }
+        func recordBriefingLeave(_ playerID: String, race: UUID?, at time: Date) async throws {
+            try await inner.recordBriefingLeave(playerID, race: race, at: time)
+        }
+        func clearBriefingLeaves(of playerID: String) async throws { try await inner.clearBriefingLeaves(of: playerID) }
+        func setCooldown(_ playerID: String, until: Date?) async throws { try await inner.setCooldown(playerID, until: until) }
+        func setSuspension(_ playerID: String, _ suspension: StoredSuspension?) async throws { try await inner.setSuspension(playerID, suspension) }
+        func setAttestationFailed(_ playerID: String, _ failed: Bool) async throws { try await inner.setAttestationFailed(playerID, failed) }
+    }
+
+    static func queue(_ store: FaultyStore, _ clock: VirtualClock, _ log: LaunchLog, readTimeout: Duration = .seconds(2)) -> QueueMatchmaker {
+        var settings = QueueSettings()
+        settings.restrictionReadTimeout = readTimeout
+        return QueueMatchmaker(settings: settings, registry: RaceRegistry(),
+                               draw: RaceDraw(pairings: OnlinePairing.bundled(), seeds: FixtureWindSeedPools(poolSize: 8)),
+                               tokenKey: QueueMatchmakerTests.key, tokenLifetime: 600, now: { clock.now }, restrictions: store,
+                               launch: { fleet, closed in try await log.record(fleet, closed) })
+    }
+
+    /// #469, failing closed: a player whose restrictions can't be read isn't queued, suspended or not; the queue doesn't
+    /// take the store's silence for a clean record. Once the store answers, the suspended player is refused by name and
+    /// the other joins.
+    @Test func aPlayerWhoseRestrictionsCantBeReadIsNotQueued() async throws {
+        let store = FaultyStore(), clock = VirtualClock()
+        let queue = Self.queue(store, clock, LaunchLog())
+        try await store.inner.setSuspension("T:0", .permanent)
+        store.fault = .failing
+        await #expect(throws: RestrictionsUnreadable.self) { try await queue.join(Self.player) }
+        await #expect(throws: RestrictionsUnreadable.self) { try await queue.join(QueueMatchmakerTests.player(1)) }
+        #expect(await queue.queuedCount == 0)
+        clock.advance(60)
+        await queue.step()
+        #expect(await queue.fleetsLocked == 0)
+        store.fault = .none
+        await #expect(throws: QueueError.refused(.suspended(until: nil))) { try await queue.join(Self.player) }
+        try await queue.join(QueueMatchmakerTests.player(1))
+        #expect(await queue.queuedCount == 1)
+    }
+
+    /// #469: a good read earlier doesn't let her in when the read at her join fails (she may have been suspended since).
+    @Test func aJoinNeedsAFreshReadEvenWithAnEarlierOne() async throws {
+        let store = FaultyStore(), clock = VirtualClock()
+        let queue = Self.queue(store, clock, LaunchLog())
+        var states = queue.stateUpdates(for: "T:0").makeAsyncIterator()
+        #expect(await states.next() == .idle)
+        try await store.inner.setSuspension("T:0", .permanent)
+        store.fault = .failing
+        await #expect(throws: RestrictionsUnreadable.self) { try await queue.join(Self.player) }
+        #expect(await queue.queuedCount == 0)
+    }
+
+    /// #469: a read that hangs is given up at `restrictionReadTimeout`: the join fails closed instead of waiting on it.
+    @Test func aHungReadAtJoinFailsClosedAtTheTimeout() async throws {
+        let store = FaultyStore(), clock = VirtualClock()
+        let queue = Self.queue(store, clock, LaunchLog(), readTimeout: .milliseconds(50))
+        store.fault = .hanging
+        await #expect(throws: RestrictionsUnreadable.self) { try await queue.join(Self.player) }
+        #expect(await queue.queuedCount == 0)
+        store.release()
+    }
+
+    /// #469: each step reads the whole queue's restrictions in one store call, and a read that fails or hangs doesn't
+    /// hold the lock back: the queued players keep what was read when they joined, and the fleet locks on time.
+    @Test func aStepReadsTheQueueOnceAndAFailedOrHungReadDoesntHoldTheLock() async throws {
+        let store = FaultyStore(), clock = VirtualClock(), log = LaunchLog()
+        let queue = Self.queue(store, clock, log, readTimeout: .milliseconds(50))
+        for index in 0..<5 { try await queue.join(QueueMatchmakerTests.player(index)) }
+        let before = store.reads
+        clock.advance(1)
+        await queue.step()
+        #expect(store.reads.batch == before.batch + 1)
+        #expect(store.reads.single == before.single)
+
+        // The store stops answering: nobody is dropped for it.
+        store.fault = .failing
+        clock.advance(1)
+        await queue.step()
+        #expect(await queue.queuedCount == 5)
+        store.fault = .hanging
+        clock.advance(58)
+        await queue.step()
+        #expect(await queue.fleetsLocked == 1)
+        #expect(await log.fleets.first?.humans.count == 5)
+        store.release()
+
+        // Back again, a suspension written meanwhile takes its player out at the next step.
+        store.fault = .none
+        try await queue.join(QueueMatchmakerTests.player(7))
+        try await store.inner.setSuspension("T:7", .permanent)
+        clock.advance(1)
+        await queue.step()
+        #expect(await queue.queuedCount == 0)
+    }
+
+    /// #469: the deadline itself: the work's result inside the limit, `DeadlineExceeded` past it even when the work
+    /// ignores its cancel.
+    @Test func aDeadlineGivesUpOnWorkThatDoesntAnswer() async throws {
+        #expect(try await withDeadline(.seconds(30)) { 7 } == 7)
+        await #expect(throws: FaultyStore.Unreachable.self) { try await withDeadline(.seconds(30)) { throw FaultyStore.Unreachable() } }
+        let store = FaultyStore()
+        store.fault = .hanging
+        await #expect(throws: DeadlineExceeded.self) {
+            _ = try await withDeadline(.milliseconds(20)) { try await store.restrictions(of: "T:0") }
+        }
+        store.release()
     }
 }
