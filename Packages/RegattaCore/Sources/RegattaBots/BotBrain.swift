@@ -490,8 +490,14 @@ struct BotBrain: Sendable {
         let mark = nearestMark(b, view)
         let crowd = nearestCrowding(b, view)
         let readsThePack = skill >= Self.penaltyPutOffSkill
+        // By hand she doesn't wait in the crowd before her start (#471): the 10 s or so a turn by hand leaves her to
+        // put it off (`hasTimeToTurnLater`) she sailed her start plan and kept clear in the crowd, was 30° into the
+        // turn by that sailing as often as by her own rudder (437 of 964 starts before the start on the all-Club
+        // loop), under rule 21.2 from there, and gave it up with her next turn the other way: 1.46 started turns
+        // given up an episode before the start, 0.72 turning at once. A call with the gun close she starts first for.
+        let waitsInTheCrowd = b.status != .racing && !Self.turnsByHand(view)
         let crowded = crowd != nil
-            && (b.status != .racing || (readsThePack && !isOnLastLeg(b, view) && !putOffEndsAtAMark(b, view, owed)))
+            && (waitsInTheCrowd || b.status == .racing && readsThePack && !isOnLastLeg(b, view) && !putOffEndsAtAMark(b, view, owed))
         // A mark close aboard holds her off to the start margin whatever the time a turn by hand takes her (#461):
         // turned beside it she touches it, and owes another (cut short as a boat's put-off is, the all-National
         // fleets' mark contacts rose from 0.19 to 0.25 a boat).
