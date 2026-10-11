@@ -75,11 +75,11 @@ final class RenderFixtureUITests: RenderFixtureTestCase {
         try assertAllMatchReferences(["water-light-and-patchy", "water-gusty-offshore", "water-pressure"])
     }
 
-    // The fleet (#117): hulls with their outlines, your glow, heel, sails, and a ghost that must read "not racing"
-    // through every filter (#30).
+    // The fleet (#117): hulls with their outlines, your glow, heel and sails, through every filter. The ghost that must
+    // read "not racing" (#30) is `hud-afterfirstfinish`'s since #474.
 
-    /// A bot race on the default files just after the first boat finished: her ghost and at least three racing
-    /// boats around yours (through every vision filter in `RenderFixtureFilterUITests`).
+    /// A bot race on the default files in open water on the first beat: at least four boats racing, sails working,
+    /// with the windward mark in view (through every vision filter in `RenderFixtureFilterUITests`).
     @MainActor func testFleetFixtureMatchesReferences() throws {
         try assertAllMatchReferences(["fleet"])
     }

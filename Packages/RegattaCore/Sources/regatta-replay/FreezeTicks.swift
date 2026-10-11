@@ -4,11 +4,13 @@
 // the row gives is the freeze tick of each fixture the row names. Without --check each fixture's `freezeTick` is
 // rewritten in place, nothing else in its file; with --check nothing is written and each row reports whether the
 // committed tick is the one its condition picks. Exits 1 when a row's condition is never met (or, with --check, when a
-// committed tick differs), 2 on a usage error.
+// committed tick differs), 2 on a usage error. `--explain` rewrites nothing either: it prints what each row's committed
+// frame holds (the boats racing in view and the nearest's distance; the race camera's zoom), for choosing a condition.
 //
 // The conditions read the core race only (no scene): where a fixture's test checks a drawn thing, its condition
 // reads what draws it (a backwind wedge: a boat's `backwindSail`; a ghost: `isGhost`; a rule cue line: a rule call
-// in its last 8 s; the boat camera's view: a box around your boat 2 s ahead, as `RenderFixtureTests` reads it).
+// in its last 8 s; the boat camera's view: a box around your boat 2 s ahead, as `RenderFixtureTests` reads it; the
+// race camera's: its settled frame on the phone's screen, `RaceCameraFrame`).
 import Foundation
 import RegattaCore
 
@@ -23,6 +25,17 @@ struct FreezeTickRow: Decodable {
     /// The view box's half extents in metres, centred 2 s ahead of your boat (default the boat camera's at an iPhone
     /// 402 x 874 pt screen, 1.25 times over, 8 pt a metre, as `RenderFixtureTests.fleetFixtureShowsAGhostAmongTheFleet`).
     var view: [Double]?
+    /// "race": in view means drawn on the phone's screen by the race camera (`RaceCameraFrame`: course up, the heading
+    /// lead, the shot's zoom), as the app draws a fixture with `"view": "courseUp"`, and `view` isn't read. Nil: the
+    /// `view` box, which is the north-up boat camera's frame (a fixture with no `view`). `freeze-ticks` refuses a row
+    /// whose fixtures draw the other camera, so the boats a row counts are the boats its renders show (#474).
+    var camera: String?
+    /// With the race camera: the points of the screen's top, bottom and each side that don't count as in view, what
+    /// the HUD and controls cover and a boat's own length off the edge (default none).
+    var clear: [Double]?
+    /// With the race camera: its zoom inside these bounds, both included (open water 0.7, mark rounding 0.9 or
+    /// wider, close quarters 1.6), so a scene's boats keep their size from one recording to the next.
+    var zoom: [Double]?
 
     // The conditions: each one given must hold.
     /// Your leg (0: the first beat).
@@ -50,6 +63,19 @@ struct FreezeTickRow: Decodable {
     /// The rules of the calls in their 8 s on screen, newest first, exactly (`RuleCalls.active(... seconds: 8 ...)`'s
     /// badges: one rule cue line each).
     var liveRules: [String]?
+    /// How many calls are in their 8 s on screen, exactly, whatever their rules: that many rule cue lines. Looser than
+    /// `liveRules` where a scene wants a second line and not which rule draws it (#474: `rules-call`, where a 21.2
+    /// call inside your rule 10 call's 8 s is rare before the gun).
+    var liveCalls: Int?
+    /// Every one of those calls is short of its fade (its last `callFadeSeconds`, `BoatStyle.ruleCallFadeSeconds`): its
+    /// line and badge are drawn at full strength.
+    var callsUnfaded: Bool?
+    /// Both boats of every one of those calls are in view: each line is drawn end to end.
+    var callsInView: Bool?
+    /// The boats of those calls, any two of them, are at least this many hull lengths apart (centre to centre): past
+    /// the moment of the call, where they are drawn over one another under the badge, to where each line shows between
+    /// its two boats (#474).
+    var callsApart: Double?
     /// One of those calls is on you, under this rule ("10": port/starboard).
     var yourCall: String?
     /// Your penalty turn: "owed" (called, not started), "turning", or "either" (its arc shows).
@@ -63,6 +89,8 @@ struct FreezeTickRow: Decodable {
     var grooveDegrees: [Double]?
 
     static let callSeconds = 8
+    static let callFadeSeconds = 1.5
+    static let noClear = [0.0, 0, 0]
     static let defaultView = [402 * 1.25 / 2 / 8, 874 * 1.25 / 2 / 8]
 }
 
@@ -72,9 +100,10 @@ enum FreezeTicks {
     static func main(arguments: [String]) -> Int32 {
         var arguments = arguments
         let check = arguments.contains("--check")
-        arguments.removeAll { $0 == "--check" }
+        let explain = arguments.contains("--explain")
+        arguments.removeAll { $0 == "--check" || $0 == "--explain" }
         guard arguments.count == 2 else {
-            FileHandle.standardError.write(Data("usage: regatta-replay freeze-ticks [--check] <fixtures folder> <table.json>\n".utf8))
+            FileHandle.standardError.write(Data("usage: regatta-replay freeze-ticks [--check | --explain] <fixtures folder> <table.json>\n".utf8))
             return 2
         }
         let folder = URL(fileURLWithPath: arguments[0])
@@ -83,6 +112,12 @@ enum FreezeTicks {
             var status: Int32 = 0
             for row in rows {
                 let name = row.fixtures.first ?? "?"
+                if explain {
+                    let text = try String(contentsOf: folder.appendingPathComponent(name + ".json"), encoding: .utf8)
+                    let log = try RaceLog(jsonData: Data(contentsOf: folder.appendingPathComponent(row.log)))
+                    print("\(name): \(try explained(row, log: log, tick: committedTick(text, name)))")
+                    continue
+                }
                 guard let tick = try firstTick(row, log: RaceLog(jsonData: Data(contentsOf: folder.appendingPathComponent(row.log)))) else {
                     print("\(name): no tick in \(row.log) meets the condition")
                     status = 1
@@ -91,6 +126,11 @@ enum FreezeTicks {
                 for fixture in row.fixtures {
                     let url = folder.appendingPathComponent(fixture + ".json")
                     let text = try String(contentsOf: url, encoding: .utf8)
+                    if let camera = try cameraMismatch(row, fixture: fixture, text: text) {
+                        print("\(fixture): \(camera)")
+                        status = 1
+                        continue
+                    }
                     let committed = try committedTick(text, fixture)
                     if committed == tick {
                         print("\(fixture): \(tick)")
@@ -108,6 +148,44 @@ enum FreezeTicks {
             FileHandle.standardError.write(Data("regatta-replay: \(error)\n".utf8))
             return 1
         }
+    }
+
+    /// Why `row`'s in-view conditions don't read the camera `fixture` is drawn from, or nil when they do: the race
+    /// camera for `"view": "courseUp"`, the box for the north-up boat camera (no `view`).
+    static func cameraMismatch(_ row: FreezeTickRow, fixture: String, text: String) throws -> String? {
+        struct Drawn: Decodable { var view: String? }
+        if let camera = row.camera, camera != "race" { return "its row's camera is \"\(camera)\": only \"race\" is known" }
+        let view = try JSONDecoder().decode(Drawn.self, from: Data(text.utf8)).view
+        switch (row.camera, view) {
+        case (nil, nil), ("race"?, "courseUp"?): return nil
+        case (nil, let view?): return "drawn with \"view\": \"\(view)\", so its row needs \"camera\": \"race\""
+        case (_?, let view): return "its row reads the race camera, but it's drawn with \"view\": \(view ?? "none")"
+        }
+    }
+
+    /// What `row`'s frame holds at `tick` of `log`, in a line.
+    static func explained(_ row: FreezeTickRow, log: RaceLog, tick: Int) throws -> String {
+        var cut = log
+        cut.inputs.removeAll { $0.tick > tick }
+        cut.seatEvents.removeAll { $0.tick > tick }
+        cut.finalTick = tick
+        let race = try Replayer.replay(cut, requireMatchingVersion: false)
+        let me = row.seat ?? log.header.setup.seats.firstIndex(of: .human) ?? 0
+        let boat = race.boats[me]
+        let hull = race.boatClass.hull.length
+        let racing = race.boats.indices.filter { !race.boats[$0].isGhost && race.boats[$0].status == .racing }
+        let nearest = racing.filter { $0 != me }.map { (race.boats[$0].position - boat.position).length / hull }.min() ?? .infinity
+        var line = String(format: "tick %d, leg %d, place %d, %.1f m/s, nearest %.1f hulls", tick, boat.legIndex,
+                          race.place(of: me), boat.velocity.length, nearest)
+        let view = row.view ?? FreezeTickRow.defaultView
+        let centre = boat.position + boat.velocity * 2
+        let boxed = racing.filter { abs(race.boats[$0].position.x - centre.x) < view[0] && abs(race.boats[$0].position.y - centre.y) < view[1] }
+        line += "; racing in the box \(boxed.count)"
+        let frame = RaceCameraFrame(race, me: me)
+        let clear = row.clear.flatMap { $0.count == 3 ? $0 : nil } ?? FreezeTickRow.noClear
+        return line + String(format: "; race camera zoom %.2f, racing on screen %d (clear of the HUD %d)", frame.zoom,
+                             racing.filter { frame.shows(race.boats[$0].position, clear: FreezeTickRow.noClear) }.count,
+                             racing.filter { frame.shows(race.boats[$0].position, clear: clear) }.count)
     }
 
     /// The first tick of `log`, every `row.step` ticks, meeting the row's conditions, or nil.
@@ -172,15 +250,21 @@ enum FreezeTicks {
         if let racing = row.racing, (boat.status == .racing) != racing { return false }
         if let after = row.afterFirstFinish, (firstFinish && !race.isOver) != after { return false }
 
-        let centre = boat.position + boat.velocity * 2
-        let inView = race.boats.indices.filter { seat in
-            let p = race.boats[seat].position
-            return abs(p.x - centre.x) < view[0] && abs(p.y - centre.y) < view[1]
+        // In view: on the race camera's screen, or in the boat camera's box.
+        let shows: (Vec2) -> Bool
+        if row.camera != nil {
+            let frame = RaceCameraFrame(race, me: me)
+            if let zoom = row.zoom, zoom.count == 2, !(zoom[0]...zoom[1]).contains(frame.zoom) { return false }
+            let clear = row.clear.flatMap { $0.count == 3 ? $0 : nil } ?? FreezeTickRow.noClear
+            shows = { frame.shows($0, clear: clear) }
+        } else {
+            let centre = boat.position + boat.velocity * 2
+            shows = { abs($0.x - centre.x) < view[0] && abs($0.y - centre.y) < view[1] }
         }
+        let inView = race.boats.indices.filter { shows(race.boats[$0].position) }
         if let markInView = row.markInView {
             guard race.course.legs.indices.contains(boat.legIndex) else { return false }
-            let mark = race.course.targetPosition(for: race.course.legs[boat.legIndex])
-            if (abs(mark.x - centre.x) < view[0] && abs(mark.y - centre.y) < view[1]) != markInView { return false }
+            if shows(race.course.targetPosition(for: race.course.legs[boat.legIndex])) != markInView { return false }
         }
         if let n = row.ghostsInView, inView.filter({ race.boats[$0].isGhost }).count < n { return false }
         if let n = row.racingInView, inView.filter({ !race.boats[$0].isGhost && race.boats[$0].status == .racing }).count < n {
@@ -203,6 +287,24 @@ enum FreezeTicks {
 
         let live = calls.filter { race.tick - $0.tick < FreezeTickRow.callSeconds * Race.tickRate }
         if let rules = row.liveRules, live.reversed().map(\.rule.rawValue) != rules { return false }
+        if let count = row.liveCalls, live.count != count { return false }
+        if row.callsUnfaded == true {
+            let fading = Double(FreezeTickRow.callSeconds) - FreezeTickRow.callFadeSeconds
+            if live.contains(where: { Double(race.tick - $0.tick) >= fading * Double(Race.tickRate) }) { return false }
+        }
+        if row.callsInView == true,
+           live.contains(where: { !shows(race.boats[$0.offender].position) || !shows(race.boats[$0.victim].position) }) {
+            return false
+        }
+        if let hulls = row.callsApart {
+            let called = Set(live.flatMap { [$0.offender, $0.victim] }).sorted()
+            let apart = hulls * race.boatClass.hull.length
+            for (index, a) in called.enumerated() {
+                if called[(index + 1)...].contains(where: { (race.boats[$0].position - race.boats[a].position).length < apart }) {
+                    return false
+                }
+            }
+        }
         if let rule = row.yourCall, !live.contains(where: { $0.offender == me && $0.rule.rawValue == rule }) { return false }
 
         switch row.yourTurn {
