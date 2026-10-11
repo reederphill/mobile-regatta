@@ -22,7 +22,7 @@
                      "rules-call-tritanopia", "rules-call-washout"],
         "log": "rules-call.racelog.json", "camera": "race", "zoom": [0.6, 1.0],
         "leg": 0, "yourCall": "10", "liveCalls": 2, "yourTurn": "either", "sailsWorkingInView": 1,
-        "callsUnfaded": true, "callsInView": true, "callsApart": 1.5,
+        "callsUnfaded": true, "callsInView": true, "callsApart": 1.0,
         "glows": ["giveWay"]
     },
     {
