@@ -18,21 +18,49 @@ final class VirtualClock: Sendable {
 
 /// The races a matchmaker launched, without sailing them.
 actor LaunchLog {
+    /// A launch the store or the registry refused for a reason of the fleet's own.
+    struct Refused: Error {}
+
     private(set) var fleets: [LockedFleet] = []
+    /// Every launch asked for, started or not.
+    private(set) var attempts: [LockedFleet] = []
     private var closers: [UUID: @Sendable () -> Void] = [:]
-    var failNext = false
+    private var failure: (error: any Error, times: Int)?
+    private var refusedPlayers: Set<String> = []
 
     func record(_ fleet: LockedFleet, _ closed: @escaping @Sendable () -> Void) throws {
-        if failNext {
-            failNext = false
-            throw RaceRegistry.StartError.full
+        attempts.append(fleet)
+        if let failure, failure.times > 0 {
+            self.failure?.times -= 1
+            throw failure.error
         }
+        if fleet.humans.contains(where: { refusedPlayers.contains($0.teamPlayerID) }) { throw Refused() }
         fleets.append(fleet)
         closers[fleet.raceID] = closed
     }
 
     func close(_ id: UUID) { closers.removeValue(forKey: id)?() }
-    func failing() { failNext = true }
+    /// The next `times` launches fail with `error` (by default as a full registry does).
+    func failing(_ error: any Error = RaceRegistry.StartError.full, times: Int = 1) { failure = (error, times) }
+    /// Every fleet with this player in it fails to launch, for good (a player the store refuses).
+    func refusing(_ player: String) { refusedPlayers.insert(player) }
+}
+
+/// A wind seed source that counts what the draw takes.
+struct CountingSeeds: WindSeedSource {
+    final class Count: Sendable {
+        private let count = Mutex(0)
+        func add() { count.withLock { $0 += 1 } }
+        var value: Int { count.withLock { $0 } }
+    }
+
+    let taken = Count()
+    var pools = FixtureWindSeedPools(poolSize: 8)
+
+    mutating func take(for pairing: WindSeedPool.Pairing) -> WindSeed? {
+        taken.add()
+        return pools.take(for: pairing)
+    }
 }
 
 /// #146: the matchmaker on a virtual clock. Time moves only by `clock.advance` and `step()`; nothing sails.
@@ -41,8 +69,10 @@ actor LaunchLog {
 
     static func make(_ clock: VirtualClock, _ log: LaunchLog, settings: QueueSettings = QueueSettings(), poolSize: Int = 8,
                      pairings: [OnlinePairing] = OnlinePairing.bundled(), seed: UInt64 = 1,
-                     bands: RatingBands? = nil) -> QueueMatchmaker {
-        QueueMatchmaker(settings: settings, registry: RaceRegistry(), draw: RaceDraw(pairings: pairings, seeds: FixtureWindSeedPools(poolSize: poolSize)),
+                     bands: RatingBands? = nil, registry: RaceRegistry = RaceRegistry(),
+                     seeds: (any WindSeedSource)? = nil) -> QueueMatchmaker {
+        QueueMatchmaker(settings: settings, registry: registry,
+                        draw: RaceDraw(pairings: pairings, seeds: seeds ?? FixtureWindSeedPools(poolSize: poolSize)),
                         tokenKey: key, tokenLifetime: 600, random: SeededRandom(seed: seed), now: { clock.now },
                         bands: bands ?? { [$0] }, launch: { fleet, closed in try await log.record(fleet, closed) })
     }
@@ -168,13 +198,129 @@ actor LaunchLog {
         clock.advance(30)
         try await queue.join(Self.player(1))
         clock.advance(30)
-        await log.failing()
+        // The registry's last place went to another race between the check and the start, eight times over.
+        await log.failing(times: 8)
+        for attempt in 1...8 {
+            await queue.step()
+            #expect(await log.attempts.count == attempt)
+            #expect(await queue.fleetsLocked == 0)
+            #expect(await queue.queuedCount == 2)
+            #expect(await queue.state(of: "T:1") == .queued(QueuedStatus(queuedPlayers: 2, secondsToLock: 0)))
+            // Not again at once (#469), and never counted against the fleet: the same short wait each time.
+            await queue.step()
+            #expect(await log.attempts.count == attempt)
+            clock.advance(2)
+        }
         await queue.step()
-        #expect(await queue.fleetsLocked == 0)
-        #expect(await queue.queuedCount == 2)
-        #expect(await queue.state(of: "T:1") == .queued(QueuedStatus(queuedPlayers: 2, secondsToLock: 0)))
-        await queue.step()
+        #expect(await queue.fleetsDropped == 0)
         #expect(await log.fleets.first?.humans.map(\.teamPlayerID) == ["T:0", "T:1"])
+    }
+
+    // MARK: Launch failures (#469)
+
+    /// #469: a race that can't start is tried again after 2 s, then 4 s, then 8 s, never every second; each try draws
+    /// its own race. A launch that works ends the run of failures.
+    @Test func aFailedLaunchBacksOffBeforeItsNextTry() async throws {
+        let clock = VirtualClock(), log = LaunchLog()
+        let queue = Self.make(clock, log)
+        try await queue.join(Self.player(0))
+        await log.failing(LaunchLog.Refused(), times: 3)
+        clock.advance(60)
+        await queue.step()
+        #expect(await log.attempts.count == 1)
+        #expect(await queue.state(of: "T:0") == .queued(QueuedStatus(queuedPlayers: 1, secondsToLock: 0)))
+        // A step a second: the tries come 2, 6 and 14 s after the first.
+        var tries: [Int] = []
+        for _ in 1...14 {
+            clock.advance(1)
+            await queue.step()
+            tries.append(await log.attempts.count)
+        }
+        #expect(tries == [1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4])
+        #expect(Set(await log.attempts.map(\.raceID)).count == 4)
+        #expect(await queue.fleetsLocked == 1)
+        #expect(await queue.fleetsDropped == 0)
+        #expect(await queue.state(of: "T:0") == .fleetLocked)
+
+        // The next fleet's first failure waits 2 s again, not 16.
+        try await queue.join(Self.player(1))
+        await log.failing(LaunchLog.Refused(), times: 1)
+        clock.advance(60)
+        await queue.step()
+        clock.advance(1)
+        await queue.step()
+        #expect(await log.attempts.count == 5)
+        clock.advance(1)
+        await queue.step()
+        #expect(await log.attempts.count == 6)
+        #expect(await queue.fleetsLocked == 2)
+    }
+
+    /// #469: a fleet whose race can never start (the store refuses one of its players) is dropped after five tries, and
+    /// the players queued behind it lock on their own time: the head of the queue isn't pinned for ever.
+    @Test func afterFiveFailedLaunchesTheFleetAtTheHeadIsDroppedAndTheQueueMovesOn() async throws {
+        let clock = VirtualClock(), log = LaunchLog()
+        var settings = QueueSettings()
+        settings.fleetCap = 2
+        let queue = Self.make(clock, log, settings: settings)
+        await log.refusing("T:0")
+        var states = queue.stateUpdates(for: "T:1").makeAsyncIterator()
+        #expect(await states.next() == .idle)
+        try await queue.join(Self.player(0))
+        // The second human fills the fleet: it locks at once, and its race can't start.
+        try await queue.join(Self.player(1))
+        #expect(await log.attempts.count == 1)
+        #expect(await states.next() == .queued(QueuedStatus(queuedPlayers: 2, secondsToLock: 0)))
+        clock.advance(1)
+        try await queue.join(Self.player(2))
+        // Tries 2…5 come 2, 6, 14 and 30 s after the first; the fifth failure drops the fleet.
+        var tries: [Int] = []
+        for _ in 2...30 {
+            clock.advance(1)
+            await queue.step()
+            tries.append(await log.attempts.count)
+        }
+        #expect(tries.last == 5)
+        #expect(tries.filter { $0 == 2 }.count == 4 && tries.filter { $0 == 3 }.count == 8 && tries.filter { $0 == 4 }.count == 16)
+        #expect(await log.attempts.allSatisfy { $0.humans.map(\.teamPlayerID) == ["T:0", "T:1"] })
+        #expect(await queue.fleetsDropped == 1)
+        #expect(await queue.fleetsLocked == 0)
+        // The dropped players are idle and free to join again; the player behind them is still queued, on her own clock.
+        #expect(await states.next() == .idle)
+        #expect(await queue.state(of: "T:0") == .idle)
+        #expect(await queue.queuedCount == 1)
+        #expect(await queue.state(of: "T:2") == .queued(QueuedStatus(queuedPlayers: 1, secondsToLock: 31)))
+        clock.advance(31)
+        await queue.step()
+        #expect(await log.attempts.count == 6)
+        #expect(await log.fleets.map { $0.humans.map(\.teamPlayerID) } == [["T:2"]])
+        #expect(await queue.state(of: "T:2") == .fleetLocked)
+        try await queue.join(Self.player(1))
+    }
+
+    /// #469: a full server draws nothing: no launch, no race id, no wind seed, however long it stays full; the fleet
+    /// waits at the head, is never dropped, and may leave.
+    @Test func aFullServerDrawsNothingAndDropsNobody() async throws {
+        let clock = VirtualClock(), log = LaunchLog()
+        let seeds = CountingSeeds()
+        let queue = Self.make(clock, log, registry: RaceRegistry(maxRaces: 0), seeds: seeds)
+        try await queue.join(Self.player(0))
+        for _ in 0..<180 {
+            clock.advance(1)
+            await queue.step()
+        }
+        #expect(await log.attempts.isEmpty)
+        #expect(seeds.taken.value == 0)
+        #expect(await queue.fleetsDropped == 0)
+        #expect(await queue.state(of: "T:0") == .queued(QueuedStatus(queuedPlayers: 1, secondsToLock: 0)))
+        try await queue.leave("T:0")
+        // With room the same draw is taken.
+        let roomy = Self.make(clock, log, seeds: seeds)
+        try await roomy.join(Self.player(0))
+        clock.advance(60)
+        await roomy.step()
+        #expect(await log.attempts.count == 1)
+        #expect(seeds.taken.value == 1)
     }
 
     // MARK: Pushes
