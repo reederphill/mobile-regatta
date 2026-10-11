@@ -506,9 +506,11 @@ struct BotBrain: Sendable {
             && (waitsInTheCrowd || b.status == .racing && readsThePack && !isOnLastLeg(b, view) && !putOffEndsAtAMark(b, view, owed))
         // A mark close aboard holds her off to the start margin whatever the time a turn by hand takes her (#461):
         // turned beside it she touches it, and owes another (cut short as a boat's put-off is, the all-National
-        // fleets' mark contacts rose from 0.19 to 0.25 a boat).
+        // fleets' mark contacts rose from 0.19 to 0.25 a boat). But no longer than leaves her the turn itself
+        // (`markHoldLeavesTheTurn`, #471): in light air a turn by hand is longer than the start margin leaves.
         let markClose = mark.map({ $0.clearance < view.boatClass.hull.length * Self.penaltyMarkClearance }) == true
-        if crowded && canPutOffTurn(owed, b, view) || markClose && canPutOffToStartMargin(owed, view) {
+        if crowded && canPutOffTurn(owed, b, view)
+            || markClose && canPutOffToStartMargin(owed, view) && markHoldLeavesTheTurn(owed, b, view) {
             return nil
         }
         // Away from the nearest mark, if one is near, else from the nearest boat in her water (#351): turning to
@@ -571,7 +573,7 @@ struct BotBrain: Sendable {
     }
 
     /// Whether her current turn's start deadline is further off than `penaltyStartMargin`.
-    private func canPutOffToStartMargin(_ owed: OwedPenalty, _ view: SeatView) -> Bool {
+    func canPutOffToStartMargin(_ owed: OwedPenalty, _ view: SeatView) -> Bool {
         owed.startDeadlineTick - view.tick > RulesConfig.ticks(Self.penaltyStartMargin)
     }
 

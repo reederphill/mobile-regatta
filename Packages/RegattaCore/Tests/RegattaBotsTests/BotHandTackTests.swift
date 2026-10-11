@@ -420,4 +420,59 @@ import Testing
             #expect(race.time < (stalled ? 20 : 14), "stalled \(stalled): served at \(race.time) s")
         }
     }
+
+    /// Stalled short of head to wind owing a turn she has not begun, with its start deadline close (#471): she lets
+    /// the rudder go for steerage only until `penaltyStartMargin` before the deadline, then turns with what way she
+    /// has, and is not disqualified. Waiting on centred (for steerage, or `HandTackTable.stallWait`), a National boat
+    /// held off her turn by the committee boat and luffed into irons keeping clear sat through her start deadline.
+    @Test func stalledOwingATurnSheTurnsBeforeItsStartDeadline() throws {
+        let toStart = 7.0
+        let penalty = try Self.alone(seed: 3).race.rules.raceFormat.penalty
+        let (race, _) = try Self.alone(seed: 3) { snapshot, water in
+            snapshot.seats[0].boat.penaltyTurnsOwed = 1
+            snapshot.seats[0].boat.penaltyProgress = 0
+            snapshot.seats[0].boat.penaltyClockTick = snapshot.tick - RulesConfig.ticks(penalty.start - toStart)
+            snapshot.seats[0].boat.heading = water.heading(.starboard, deg2rad(12))
+            snapshot.seats[0].boat.speed = 0.05
+        }
+        var hand = Hand(seat: 0, race: race, handling: 0.5)
+        let from = race.time
+        // As she stalled, the turn not begun (held off for a mark): the rudder let go already.
+        hand.brain.stall.centredSince = from
+        var centredLate = 0, centred = 0
+        var kinds: [RaceEvent.Kind] = []
+        for _ in 0..<(45 * Race.tickRate) where race.boats[0].penaltyTurnsOwed > 0 && race.boats[0].status == .racing {
+            if hand.drive(race)?.centred == true {
+                centred += 1
+                if race.time - from > toStart - BotBrain.penaltyStartMargin + 0.5 { centredLate += 1 }
+            }
+            race.step()
+            kinds += race.drainEvents().map(\.kind)
+        }
+        print("BOTHANDTACK stalled owing a turn: \(race.boats[0].status), owes \(race.boats[0].penaltyTurnsOwed) at \(race.time - from) s, centred \(centred)")
+        #expect(centred > 0, "she never let the rudder go: the scene is not the stall")
+        #expect(centredLate == 0, "she let the rudder go inside her start margin")
+        #expect(!kinds.contains { if case .disqualified = $0 { true } else { false } }, "disqualified: \(race.boats[0].status)")
+        #expect(race.boats[0].penaltyTurnsOwed == 0 && race.boats[0].status == .racing)
+    }
+
+    /// A mark close aboard holds a penalty turn by hand off only while the turn itself still fits its complete
+    /// deadline (`markHoldLeavesTheTurn`, #471): in light air the turn is longer than the 26 s the start margin leaves.
+    @Test func aMarkHoldsHerTurnOffOnlyWhileTheTurnFits() throws {
+        /// Whether the hold still stands with `slack` seconds more than the hold must leave her to its complete deadline.
+        func holds(slack: Double) throws -> Bool {
+            let (probe, _) = try Self.alone(seed: 3)
+            let own = probe.seatView(for: 0)
+            let seconds = Hand(seat: 0, race: probe, handling: 0.5).brain.penaltyTurnSeconds(own.own, own)
+            let (race, _) = try Self.alone(seed: 3) { snapshot, _ in
+                snapshot.seats[0].boat.penaltyTurnsOwed = 1
+                snapshot.seats[0].boat.penaltyClockTick = snapshot.tick
+                    - RulesConfig.ticks(probe.rules.raceFormat.penalty.complete - seconds + HandTackTable.penaltyMarkHoldShort - slack)
+            }
+            let view = race.seatView(for: 0)
+            return Hand(seat: 0, race: race, handling: 0.5).brain.markHoldLeavesTheTurn(try #require(view.own.penalty), view.own, view)
+        }
+        #expect(try holds(slack: 1))
+        #expect(try !holds(slack: -1))
+    }
 }

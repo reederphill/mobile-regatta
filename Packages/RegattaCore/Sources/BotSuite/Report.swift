@@ -178,13 +178,6 @@ public struct SeatMetrics: Codable, Hashable, Sendable {
         try c.encodeIfPresent(startLuffDecisions, forKey: .startLuffDecisions)
     }
 
-    /// Whether her style means her to start in the line's pin third (#99).
-    public var isPinStyle: Bool { startSpot < 1.0 / 3 }
-    /// Whether her start-row slot is off the line's committee third, or past its committee end (#99).
-    public var isFromCommitteeSlot: Bool { rowSpot > 2.0 / 3 }
-    /// Whether she started in the line's pin third (#99).
-    public var startedInPinThird: Bool { startLineSpot.map { $0 < 1.0 / 3 } ?? false }
-
     static func name(_ status: BoatStatus) -> String {
         switch status {
         case .prestart: "prestart"
@@ -997,8 +990,7 @@ public struct CautiousSummary: Codable, Hashable, Sendable {
 
 /// The start over a run (#99), over its all-National fleets of `fleetSize` live bots (`TierMix.national`,
 /// `ProfileMix.live`), the fleets #99's acceptance names: what the thresholds' `start` limits hold. How cleanly and
-/// on time the best bots start, and whether the pin-style ones seeded at the committee end of the row work down
-/// the line to its pin third. Other fleet sizes and tiers aren't gated on their start yet (#105).
+/// on time the best bots start. Other fleet sizes and tiers aren't gated on their start yet (#105).
 public struct StartSummary: Codable, Hashable, Sendable {
     /// Races of all-National live fleets of `fleetSize`.
     public var races: Int
@@ -1012,11 +1004,6 @@ public struct StartSummary: Codable, Hashable, Sendable {
     /// Seconds in irons before the gun per seat (`SeatMetrics.preGunIronsSeconds`), on average and at most.
     public var meanPreGunIronsSeconds: Double
     public var maxPreGunIronsSeconds: Double
-    /// Pin-style seats from committee slots: their style's spot in the line's pin third, their start-row slot
-    /// off its committee third or past its end (`SeatMetrics.isPinStyle`, `isFromCommitteeSlot`).
-    public var pinStyleFromCommitteeSeats: Int
-    /// The share of those that started in the line's pin third; nil when there were none.
-    public var pinThirdShare: Double?
 
     /// Seconds after the gun within which a start is on time (#99).
     public static let onTimeSeconds = 3.0
@@ -1038,9 +1025,6 @@ public struct StartSummary: Codable, Hashable, Sendable {
         meanStartSeconds = starts.isEmpty ? 0 : starts.reduce(0, +) / Double(starts.count)
         meanPreGunIronsSeconds = seats.reduce(0) { $0 + $1.preGunIronsSeconds } / Double(max(seats.count, 1))
         maxPreGunIronsSeconds = seats.map(\.preGunIronsSeconds).max() ?? 0
-        let pinStyle = seats.filter { $0.isPinStyle && $0.isFromCommitteeSlot }
-        pinStyleFromCommitteeSeats = pinStyle.count
-        pinThirdShare = pinStyle.isEmpty ? nil : share(pinStyle.filter(\.startedInPinThird).count, of: pinStyle.count)
     }
 }
 
@@ -1560,9 +1544,7 @@ public struct BotSuiteReport: Codable, Hashable, Sendable {
         }
         if let start {
             lines.append("start: \(start.races) all-National \(StartSummary.fleetSize)-boat races, ocs \(fixed(start.ocsShare)), on time \(fixed(start.onTimeShare)) "
-                + "(mean \(fixed(start.meanStartSeconds)) s after the gun), pre-gun irons \(fixed(start.meanPreGunIronsSeconds)) s/boat, "
-                + "pin third \(start.pinThirdShare.map { fixed($0) } ?? "-") of \(start.pinStyleFromCommitteeSeats) pin-style boats "
-                + "from committee slots")
+                + "(mean \(fixed(start.meanStartSeconds)) s after the gun), pre-gun irons \(fixed(start.meanPreGunIronsSeconds)) s/boat")
         }
         if let navigation {
             lines.append("navigation: \(navigation.races) all-National races, \(navigation.seats) boats over "

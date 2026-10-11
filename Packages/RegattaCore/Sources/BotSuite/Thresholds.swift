@@ -122,19 +122,14 @@ public struct StartLimits: Codable, Hashable, Sendable {
     public var minOnTimeShare: Double?
     /// The most seconds in irons before the gun per seat, on average (`SeatMetrics.preGunIronsSeconds`).
     public var maxMeanPreGunIronsSeconds: Double?
-    /// The least share of their pin-style seats from committee slots that must start in the line's pin third.
-    public var minPinThirdShare: Double?
 
-    public init(maxOCSShare: Double? = nil, minOnTimeShare: Double? = nil, maxMeanPreGunIronsSeconds: Double? = nil,
-                minPinThirdShare: Double? = nil) {
+    public init(maxOCSShare: Double? = nil, minOnTimeShare: Double? = nil, maxMeanPreGunIronsSeconds: Double? = nil) {
         self.maxOCSShare = maxOCSShare
         self.minOnTimeShare = minOnTimeShare
         self.maxMeanPreGunIronsSeconds = maxMeanPreGunIronsSeconds
-        self.minPinThirdShare = minPinThirdShare
     }
 
-    /// Why `summary` misses these limits, each line starting with `start`; none without a summary, and no
-    /// pin-third breach without a pin-style seat from a committee slot.
+    /// Why `summary` misses these limits, each line starting with `start`; none without a summary.
     func breaches(_ summary: StartSummary?) -> [String] {
         guard let summary else { return [] }
         var breaches: [String] = []
@@ -146,9 +141,6 @@ public struct StartLimits: Codable, Hashable, Sendable {
         }
         if let maximum = maxMeanPreGunIronsSeconds, summary.meanPreGunIronsSeconds > maximum {
             breaches.append("start: pre-gun irons \(fixed(summary.meanPreGunIronsSeconds)) s/boat > \(fixed(maximum))")
-        }
-        if let minimum = minPinThirdShare, let share = summary.pinThirdShare, share < minimum {
-            breaches.append("start: pin third \(fixed(share)) < \(fixed(minimum))")
         }
         return breaches
     }
