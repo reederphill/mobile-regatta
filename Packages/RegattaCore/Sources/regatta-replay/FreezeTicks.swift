@@ -63,11 +63,19 @@ struct FreezeTickRow: Decodable {
     /// The rules of the calls in their 8 s on screen, newest first, exactly (`RuleCalls.active(... seconds: 8 ...)`'s
     /// badges: one rule cue line each).
     var liveRules: [String]?
+    /// How many calls are in their 8 s on screen, exactly, whatever their rules: that many rule cue lines. Looser than
+    /// `liveRules` where a scene wants a second line and not which rule draws it (#474: `rules-call`, where a 21.2
+    /// call inside your rule 10 call's 8 s is rare before the gun).
+    var liveCalls: Int?
     /// Every one of those calls is short of its fade (its last `callFadeSeconds`, `BoatStyle.ruleCallFadeSeconds`): its
     /// line and badge are drawn at full strength.
     var callsUnfaded: Bool?
     /// Both boats of every one of those calls are in view: each line is drawn end to end.
     var callsInView: Bool?
+    /// The boats of those calls, any two of them, are at least this many hull lengths apart (centre to centre): past
+    /// the moment of the call, where they are drawn over one another under the badge, to where each line shows between
+    /// its two boats (#474).
+    var callsApart: Double?
     /// One of those calls is on you, under this rule ("10": port/starboard).
     var yourCall: String?
     /// Your penalty turn: "owed" (called, not started), "turning", or "either" (its arc shows).
@@ -279,6 +287,7 @@ enum FreezeTicks {
 
         let live = calls.filter { race.tick - $0.tick < FreezeTickRow.callSeconds * Race.tickRate }
         if let rules = row.liveRules, live.reversed().map(\.rule.rawValue) != rules { return false }
+        if let count = row.liveCalls, live.count != count { return false }
         if row.callsUnfaded == true {
             let fading = Double(FreezeTickRow.callSeconds) - FreezeTickRow.callFadeSeconds
             if live.contains(where: { Double(race.tick - $0.tick) >= fading * Double(Race.tickRate) }) { return false }
@@ -286,6 +295,15 @@ enum FreezeTicks {
         if row.callsInView == true,
            live.contains(where: { !shows(race.boats[$0.offender].position) || !shows(race.boats[$0.victim].position) }) {
             return false
+        }
+        if let hulls = row.callsApart {
+            let called = Set(live.flatMap { [$0.offender, $0.victim] }).sorted()
+            let apart = hulls * race.boatClass.hull.length
+            for (index, a) in called.enumerated() {
+                if called[(index + 1)...].contains(where: { (race.boats[$0].position - race.boats[a].position).length < apart }) {
+                    return false
+                }
+            }
         }
         if let rule = row.yourCall, !live.contains(where: { $0.offender == me && $0.rule.rawValue == rule }) { return false }
 

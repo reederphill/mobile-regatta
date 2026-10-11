@@ -160,7 +160,8 @@ import UIKit
 
     /// The rule-cue fixtures (#123) through every filter, each on its own scene's log (#466; #377: your port-starboard
     /// call; #474: at a framing short of close quarters, their rows' `zoom`, which before the gun is the pre-start
-    /// shot's): `rules-call` draws two rule-call lines, the arc counting your started turn's complete deadline and glows;
+    /// shot's): `rules-call` draws two rule-call lines (yours under rule 10 and one more, whichever rule, their boats
+    /// apart), the arc counting your started turn's complete deadline and glows;
     /// `rules-penalty` your unstarted turn's arc, both glows and the HUD's live Turn notice. Both show a backwind wedge
     /// (#377). Every older fixture draws no rule cue, so its reference doesn't move.
     @Test func ruleFixturesShowTheRuleCues() throws {
@@ -187,7 +188,9 @@ import UIKit
         #expect(call.scene.shownGlows.contains { $0?.kind == .giveWay })
         #expect(!call.showsFixtureHUD, "no HUD in this fixture")
         let calls = call.ruleCalls.active(at: call.driver.currentFrame.time, seconds: 8, fadeSeconds: 1.5)
-        #expect(calls.map(\.badge) == ["21.2", "10"])
+        // Two lines at full strength, one of them your rule 10 call; the other is whichever rule the scene drew (#474).
+        #expect(calls.count == 2 && calls.allSatisfy { $0.alpha == 1 }, "\(calls)")
+        #expect(calls.contains { $0.badge == "10" && $0.offender == call.driver.renderWorld.myBoatIndex }, "\(calls)")
         #expect(Self.wedgesOnScreen(call.scene) >= 1, "no backwind wedge in view")
 
         let penalty = try session("rules-penalty")

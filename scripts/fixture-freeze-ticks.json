@@ -21,8 +21,8 @@
         "fixtures": ["rules-call", "rules-call-deuteranopia", "rules-call-greyscale", "rules-call-protanopia",
                      "rules-call-tritanopia", "rules-call-washout"],
         "log": "rules-call.racelog.json", "camera": "race", "zoom": [0.6, 1.0],
-        "leg": 0, "yourCall": "10", "liveRules": ["21.2", "10"], "yourTurn": "either", "sailsWorkingInView": 1,
-        "callsUnfaded": true, "callsInView": true,
+        "leg": 0, "yourCall": "10", "liveCalls": 2, "yourTurn": "either", "sailsWorkingInView": 1,
+        "callsUnfaded": true, "callsInView": true, "callsApart": 1.5,
         "glows": ["giveWay"]
     },
     {
