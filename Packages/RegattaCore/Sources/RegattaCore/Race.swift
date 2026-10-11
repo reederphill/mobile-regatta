@@ -1693,37 +1693,9 @@ public final class Race {
         emit(.raceClosed(results: scored))
     }
 
-    /// Who is at a seat, from the seat events (#16, #30, G3).
-    private struct Presence {
-        /// A human seat nobody gave away before the gun (a fleet bot takes a seat left then, #16).
-        var isHuman: Bool
-        /// Whether its last joining, rejoining, drop or leaving at or before the gun was a joining or a
-        /// rejoining: the human was there at the gun.
-        var wasAtGun = false
-        /// Whether its last joining, rejoining, drop or leaving was a drop or a leaving. A disconnection
-        /// doesn't count until the input hold runs out and the seat drops (G3). A seat nobody ever
-        /// attached to drops too (#195).
-        var isGone = false
-    }
+    private typealias Presence = SeatPresence
 
-    private func presence() -> [Presence] {
-        var seats = setup.seats.map { Presence(isHuman: $0 == .human) }
-        for event in seatEvents {
-            switch event.kind {
-            case .leftBeforeGun:
-                seats[event.seat].isHuman = false
-            case .joined, .rejoined:
-                seats[event.seat].isGone = false
-                if event.tick <= 0 { seats[event.seat].wasAtGun = true }
-            case .dropped, .left:
-                seats[event.seat].isGone = true
-                if event.tick <= 0 { seats[event.seat].wasAtGun = false }
-            case .disconnected, .botTookOver:
-                break
-            }
-        }
-        return seats
-    }
+    private func presence() -> [Presence] { SeatPresence.of(seats: setup.seats, events: seatEvents) }
 
     /// The results as the race stands (`RaceResults`): finishers by finish, boats racing by ladder distance
     /// (`ladderDistanceToFinish(of:)`, #267), then DSQ, OCS (never started included) and RET. A human seat gone at the close whose boat
