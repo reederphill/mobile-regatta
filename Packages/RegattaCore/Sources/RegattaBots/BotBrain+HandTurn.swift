@@ -96,6 +96,11 @@ public enum HandTackTable {
     /// owner's ruling for how it looks; on the quick loops it moved no number (calls on a boat turning, Club: 256
     /// without it, 249 with it; over 8 s, 260).
     public static let penaltyClear = (angle: deg2rad(25), seconds: 3.5, lengths: 3.0, closing: 0.5)
+    /// Seconds under `BotBrain.penaltyTurnSeconds` that a mark close aboard may leave her for a penalty turn it
+    /// holds off (`BotBrain.markHoldLeavesTheTurn`, #471): the reckoning is some seconds long in light air (33 s
+    /// where the turn took 29), and beside a mark every second held is water gained. At 0 a floor-handling boat sat
+    /// 13 s in irons owing a turn (`noBotSitsInIronsAtTheFloorDraw`, seed 2); at 3, 0.
+    public static let penaltyMarkHoldShort = 3.0
     /// Seconds at most she waits, centred, for steerage to turn a penalty on.
     public static let stallWait = 8.0
 
@@ -242,6 +247,19 @@ extension BotBrain {
         guard Self.turnsByHand(view) else { return true }
         let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
         return left > penaltyTurnSeconds(b, view) + HandTackTable.penaltyTurn.margin
+    }
+
+    /// Whether a penalty turn held off for a mark close aboard (`startPenaltyTurn`) still leaves her the turn: always
+    /// on a class whose tap sails her turns; by hand, while the seconds to its complete deadline are more than the
+    /// turn takes her (`penaltyTurnSeconds`) less `HandTackTable.penaltyMarkHoldShort`. The hold ran to
+    /// `penaltyStartMargin` before the start deadline whatever the wind, 26 s before the complete deadline: in a
+    /// breeze the turn fits that (and the hold is as long as before), in 4 to 5 kn it took her 28 to 29 s, and two
+    /// National boats held off at the windward mark in light air were 33° and 41° short at the deadline,
+    /// disqualified (#471).
+    func markHoldLeavesTheTurn(_ owed: OwedPenalty, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard Self.turnsByHand(view) else { return true }
+        let left = Double(owed.completeDeadlineTick - view.tick) * Self.tickStep
+        return left > penaltyTurnSeconds(b, view) - HandTackTable.penaltyMarkHoldShort
     }
 
     /// "Start first, then turn" (#471, the owner's ruling of 2026-10-10): called before her start, owing the one turn,
@@ -409,7 +427,8 @@ extension BotBrain {
     /// (`HandTackTable.stall`). The class's irons recovery (#458) falls her off only on a centred rudder; a held one,
     /// hers through a turn or her hand's holding an angle (`BotHelm`), keeps her there. She steers again once she has
     /// steerage or is out of the no-go zone; owing a penalty turn she has not begun, only with steerage (or after
-    /// `stallWait`). A penalty turn she is turning she never lets go (`turnsPenaltyThroughStall`, #461).
+    /// `stallWait`, or once its start deadline is within `penaltyStartMargin`, when she turns it whatever way she
+    /// has). A penalty turn she is turning she never lets go (`turnsPenaltyThroughStall`, #461).
     mutating func centresStalled(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         let stalled = HandTackTable.stall
         let last = stall
@@ -419,7 +438,11 @@ extension BotBrain {
         let inIrons = b.twa < BoatDynamics.noGoAngle(view.boatClass.polar) + stalled.margin
         if let since = last.centredSince {
             let hasSteerage = b.speed >= groove * stalled.steerage
-            let out = b.penalty == nil ? !inIrons : view.time - since >= HandTackTable.stallWait
+            // Owing a turn she has not begun, never past the last of her time to start it (`penaltyStartMargin`, #471):
+            // held off for the committee boat, luffed into irons keeping clear, a boat waited centred for steerage
+            // through her start deadline and was disqualified.
+            let out = b.penalty.map { view.time - since >= HandTackTable.stallWait || !canPutOffToStartMargin($0, view) }
+                ?? !inIrons
             guard !hasSteerage, !out else {
                 stall.centredSince = nil
                 stall.slowSince = nil
