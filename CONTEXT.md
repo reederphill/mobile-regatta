@@ -133,6 +133,14 @@ _Avoid_: difficulty, level
 The bot that sails a dropped player's boat until they come back: a Club bot at the bottom of Club's band, not a fourth tier. It takes the boat from wherever she is, always gives way, early and wide, and never attacks, so dropping never helps.
 _Avoid_: easy bot, autopilot
 
+**Fleet fill**:
+The bots that bring an online fleet up to 10 boats at fleet lock. Each is rated at the fleet's median human rating, give or take 150, and sails at the skill the versioned rating map (`bot-ratings@n.json`) gives that rating ([#149](https://github.com/reederphill/mobile-regatta/issues/149)). She has a sailing name and a free starter livery from her seat's seed, no rating on show, and never appears in the lobby.
+_Avoid_: filler, AI opponents
+
+**Bot seat**:
+A seat a bot sails for herself: a fleet-fill seat, or a seat whose player left for good before the gun, which a bot of the fleet's level takes from where the boat is and races to win. The roster shows a sailing name and the bot glyph from then on. A dropped player's boat sailed by the cautious bot is not a bot seat: it stays the player's.
+_Avoid_: replacement, substitute
+
 **Executor**:
 A bot-suite profile only: perfect handling with groove-only tactics (#426): the top handling draw, h = 1 (the best hand tack and gybe, no botch, [#459](https://github.com/reederphill/mobile-regatta/issues/459)) and no hand-steering error (ADR 0011). On an older class with a roll tack she hits every roll. #426's parity between handling and tactics is read against her: the `execution` mix races her against the tactician at Club's tacks and gybes, and the parity band is each winning 0.4–0.6 of the races.
 _Avoid_: perfect bot
