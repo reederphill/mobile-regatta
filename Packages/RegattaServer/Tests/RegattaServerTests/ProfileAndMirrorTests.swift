@@ -336,7 +336,9 @@ private final class MockPoster: HTTPSPosting {
         let mirror = LeaderboardMirror(book: book, submitter: Hung(), settings: settings)
         let started = ContinuousClock.now
         await mirror.rated(["T:ann", "T:bo", "T:cy"])
-        #expect(ContinuousClock.now - started < .seconds(5))
+        // The submissions hang for 60 s; anything well under that is the 50 ms timeout at work. A loaded runner took
+        // 11 s here once, so the bound is half the hang, not a few seconds.
+        #expect(ContinuousClock.now - started < .seconds(30))
         #expect(await mirror.failed == 3 && book.mirrorFailures(of: "T:ann") == 1)
     }
 
