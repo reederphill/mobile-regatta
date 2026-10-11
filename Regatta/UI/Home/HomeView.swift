@@ -9,6 +9,21 @@ struct HomeView: View {
     var online: HomeOnlineActions
     @Environment(\.isOnline) private var isOnline
     @Environment(\.lobbyStatus) private var lobbyStatus
+    #if DEBUG
+    /// When the #161 design-gate preview came up: its cooldown counts from here.
+    @State private var previewStart = Date()
+    #endif
+
+    /// The #161 design gate's state to draw (`-gatePreview`), in a Debug build.
+    private var gatePreview: GatePreviewState {
+        #if DEBUG
+        if let preview = model.launchOptions.gatePreview {
+            return GatePreviewState(line: preview.line(since: previewStart), isConnecting: preview == .connecting,
+                                    termsSaveFailed: preview == .termsSaveFailed, lobbyUnreachable: preview == .lobbyUnreachable)
+        }
+        #endif
+        return GatePreviewState()
+    }
 
     var body: some View {
         NavigationStack(path: $model.path) {
@@ -25,8 +40,8 @@ struct HomeView: View {
                     if let lastRace = model.lastRace {
                         LastRaceRow(lastRace: lastRace) { model.sheet = .lastRace }
                     }
-                    LobbyPanel(state: LobbyPanelState(isOnline: isOnline, status: lobbyStatus), onSignIn: online.signIn,
-                               onReviewTerms: { model.sheet = .terms })
+                    LobbyPanel(state: gatePreview.lobbyUnreachable ? .unreachable : LobbyPanelState(isOnline: isOnline, status: lobbyStatus),
+                               onSignIn: online.signIn, onReviewTerms: { model.sheet = .terms })
                 }
                 .padding(.vertical, 20)
                 .readableColumn()
@@ -50,7 +65,8 @@ struct HomeView: View {
         .tint(ChromePalette.tint)
         .sheet(item: $model.sheet, onDismiss: online.sheetDismissed) { sheet in
             if sheet == .terms {
-                TermsSheet(version: lobbyStatus.termsVersion, agree: online.agreeToTerms, close: { model.sheet = nil })
+                TermsSheet(version: lobbyStatus.termsVersion, saveFailed: gatePreview.termsSaveFailed, agree: online.agreeToTerms,
+                           close: { model.sheet = nil })
             } else if sheet == .lastRace, let lastRace = model.lastRace {
                 // Your last race's results, reopened (#24, #132): large, with Close only.
                 ResultsView(model: lastRace, buttons: .reopened(close: { model.sheet = nil }), presentation: .page)
@@ -64,10 +80,22 @@ struct HomeView: View {
 
     private var raceOnline: some View {
         let availability = RaceOnlineAvailability(isOnline: isOnline, lobbyStatus: lobbyStatus)
+        let preview = gatePreview
         return Button(action: online.raceOnline) {
             VStack(spacing: 2) {
                 Text("Race online").font(MenuFont.heading(.title2))
-                if let reason = availability.reason {
+                if preview.isConnecting {
+                    // V2: waiting for the session after a tap. A small spinner, no words.
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(ChromePalette.onTint)
+                        .accessibilityIdentifier("race-online-connecting")
+                } else if let line = preview.line {
+                    // V1: the server's or the session's line; the cooldown counts down each second.
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(line.text(now: context.date)).font(MenuFont.body(.subheadline)).monospacedDigit()
+                    }
+                } else if let reason = availability.reason {
                     Text(reason).font(MenuFont.body(.subheadline))
                 }
             }
@@ -78,8 +106,13 @@ struct HomeView: View {
         }
         .buttonStyle(.borderedProminent)
         .controlSize(.large)
-        .disabled(!availability.isEnabled)
+        .disabled(preview.isConnecting || !(preview.line?.allowsTap ?? availability.isEnabled))
         .accessibilityIdentifier("race-online")
+        #if DEBUG
+        .onAppear {
+            if preview.termsSaveFailed { model.sheet = .terms }
+        }
+        #endif
     }
 
     private var practice: some View {
@@ -173,9 +206,19 @@ struct HomeOnlineActions {
     var sheetDismissed: () -> Void = {}
 }
 
+/// What #161's design-gate preview draws on Home; nothing, outside a Debug `-gatePreview` launch.
+struct GatePreviewState {
+    var line: RestrictionLine?
+    var isConnecting = false
+    var termsSaveFailed = false
+    var lobbyUnreachable = false
+}
+
 /// What the lobby area shows, from connectivity and the player's account (#25), by the gating matrix (#138).
 enum LobbyPanelState: Equatable {
     case offline
+    /// The server didn't answer (#161, V4): only the design-gate preview makes it until B2.
+    case unreachable
     case signIn
     case acceptTerms
     /// Hide lobby chat is on, or Game Center restricts the player's chat (#17, #34): the queue's size and the
@@ -222,6 +265,13 @@ private struct LobbyPanel: View {
         case .offline:
             heading("You're offline", systemImage: "wifi.slash")
             detail("Practice races work offline.")
+        case .unreachable:
+            // TODO-COPY (#171)
+            heading("Can't reach the server", systemImage: "icloud.slash")
+            // TODO-COPY (#171)
+            Button("Try again", action: onSignIn)
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("lobby-retry")
         case .signIn:
             heading("Sign in to Game Center to chat", systemImage: "person.crop.circle.badge.checkmark")
             Button("Sign in", action: onSignIn)

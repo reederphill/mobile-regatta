@@ -151,6 +151,8 @@ struct LaunchOptions: Equatable {
     var devRestrictions: Set<DevIdentity.Restriction> = []
     /// `-termsVersion <n>`: the version of the bundled Terms of Use text, for the end-to-end run's terms bump.
     var termsVersion: Int?
+    /// `-gatePreview <state>`: draws one of #161's proposed visual states on Home, for the design gate.
+    var gatePreview: GatePreview?
     #endif
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
@@ -179,7 +181,7 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
-            case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion":
+            case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-gatePreview":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             #endif
@@ -211,7 +213,7 @@ struct LaunchOptions: Equatable {
                           "-onlineResults"]
         #if DEBUG
         flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
-                         "-termsVersion"])
+                         "-termsVersion", "-gatePreview"])
         #endif
         return flags
     }()
@@ -295,6 +297,12 @@ struct LaunchOptions: Equatable {
                 devRestrictions = Set(named.compactMap { $0 })
             } else {
                 reject(argument, value, "underage, communication or multiplayer, separated by commas")
+            }
+        case "-gatePreview":
+            if let preview = GatePreview(rawValue: value) {
+                gatePreview = preview
+            } else {
+                reject(argument, value, GatePreview.allCases.map(\.rawValue).joined(separator: ", "))
             }
         case "-termsVersion":
             if let n = Int(value), n >= 1 { termsVersion = n } else { reject(argument, value, "a whole number ≥ 1") }

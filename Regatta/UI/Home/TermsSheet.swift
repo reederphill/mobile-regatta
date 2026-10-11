@@ -38,6 +38,8 @@ nonisolated enum TermsOfUse {
 struct TermsSheet: View {
     /// The version shown and accepted.
     let version: TermsVersion?
+    /// The last I agree couldn't be saved (#161, V3): the sheet stays, with a short line.
+    var saveFailed = false
     var agree: () -> Void
     var close: () -> Void
 
@@ -60,6 +62,13 @@ struct TermsSheet: View {
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
+                    if saveFailed {
+                        // TODO-COPY (#171)
+                        Text("Couldn't save. Try again.")
+                            .font(MenuFont.body(.footnote))
+                            .foregroundStyle(ChromePalette.flagRed)
+                            .accessibilityIdentifier("terms-save-failed")
+                    }
                     Button(action: agree) {
                         // The page's `menuBackground` text colour would otherwise reach the label: navy on the navy fill.
                         Text("I agree").font(MenuFont.heading(.headline)).foregroundStyle(ChromePalette.onTint)
