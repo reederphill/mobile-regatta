@@ -116,12 +116,12 @@ import Testing
             #expect(try await registry.race(twice.id)?.state == .running)
             #expect(try await results.bots(of: twice.id).isEmpty)
 
-            // A cancelled race has none, and a race's bots go with it.
+            // A cancelled race has none, and the closed race's are still as written.
             let cancelled = try await registry.create(players: [RaceSeatHolder(playerID: "T:a", seat: 0)])
             try await registry.cancel(cancelled.id)
             #expect(try await results.bots(of: cancelled.id).isEmpty)
-            try await registry.delete(race.id)
-            #expect(try await results.bots(of: race.id).isEmpty)
+            #expect(try await results.lastRace(of: "T:a")?.raceID == race.id)
+            #expect(try await results.bots(of: race.id) == bots)
         }
     }
 
