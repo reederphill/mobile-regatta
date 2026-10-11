@@ -72,7 +72,8 @@ final class FaultyArchive: RaceArchive {
         for continuation in waiting { continuation.resume() }
     }
 
-    func close(_ race: ClosedRaceRecord) async throws {
+    @discardableResult
+    func close(_ race: ClosedRaceRecord) async throws -> Persistence.RatingOutcome {
         let fails = state.withLock { state -> Bool in
             state.closes += 1
             guard state.closeFailures > 0 else { return false }
@@ -87,7 +88,7 @@ final class FaultyArchive: RaceArchive {
             }
             if !held { continuation.resume() }
         }
-        try await inner.close(race)
+        return try await inner.close(race)
     }
 
     func register(_ race: UUID, players: [RaceSeatHolder]) async throws { try await inner.register(race, players: players) }
@@ -108,10 +109,14 @@ struct LifecycleRig {
     let started = StartedRaces()
     let lifecycle: RaceLifecycle
 
-    init(settings: RaceLifecycleSettings = RaceLifecycleSettings()) {
-        let started = started
+    /// The players each rated close reported (the leaderboard mirror's hook, #151).
+    let ratedPlayers = Kept<[String]>()
+
+    init(settings: RaceLifecycleSettings = RaceLifecycleSettings(), now: @escaping @Sendable () -> Date = { Date() }) {
+        let started = started, ratedPlayers = ratedPlayers
         faults = FaultyArchive(archive)
-        lifecycle = RaceLifecycle(settings: settings, archive: faults, tokenKey: Self.key, tokenLifetime: 600, toolchain: "test",
+        lifecycle = RaceLifecycle(settings: settings, archive: faults, tokenKey: Self.key, tokenLifetime: 600, toolchain: "test", now: now,
+                                  rated: { ratedPlayers.append($0) },
                                   start: { session, ended in await started.started(session, ended) })
     }
 

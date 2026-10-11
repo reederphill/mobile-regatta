@@ -80,6 +80,9 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `SIMULTANEOUS_LOSS_POLICY` | `cancel` | a mass drop (G3): `cancel` (no results, no rating) or `ret` (RET in leave order, rated per #30) (#148) |
 /// | `CLIENT_ADDRESS_HEADER` | none | the header a trusted reverse proxy sets to the client's address (`Fly-Client-IP`, `X-Forwarded-For`); the per-address connection caps count it instead of the socket's address. Unset: no header is trusted (#469) |
 /// | `CLIENT_ADDRESS_TRUSTED_HOPS` | `1` | with `CLIENT_ADDRESS_HEADER`: which entry of a list header, from the right, is the client's (one per trusted proxy in the chain) (#469) |
+/// | `RATING_WEIGHT_EXPONENT` | `0.5` | a rated race with m opponents weighs each of its games m^-x (ADR 0012): 0.5 is 1/√m; 0…1 (#151) |
+/// | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PEM`, `GC_LEADERBOARD_ID` | none | the App Store Connect team key (id, issuer, a PEM file of its P-256 private key) and the Game Center leaderboard's id: all four, or none (no leaderboard mirror) (#151, #55) |
+/// | `LEADERBOARD_SWEEP_SECONDS` | `300` | how often unsent leaderboard scores are tried again (#151) |
 public struct ServerConfig: Sendable {
     public var environment: ServerEnvironment
     public var auth: SeatAuthPolicy
@@ -101,6 +104,9 @@ public struct ServerConfig: Sendable {
     public var queue = QueueSettings()
     /// Races from fleet lock to the close (#148): the all-gone rules and the mass-drop policy.
     public var lifecycle = RaceLifecycleSettings()
+    /// The Game Center leaderboard mirror (#151); nil: off.
+    public var leaderboard: AppStoreConnectConfig?
+    public var leaderboardMirror = LeaderboardMirrorSettings()
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
@@ -169,6 +175,25 @@ public struct ServerConfig: Sendable {
         } else if !environment.isDev {
             throw .invalid(variable: "REGATTA_APPLE_ROOT_PEM", value: "(unset)", expected: "Apple's root outside ENV=dev")
         }
+        if let text = env["RATING_WEIGHT_EXPONENT"] {
+            guard let exponent = Double(text), (0...1).contains(exponent) else {
+                throw .invalid(variable: "RATING_WEIGHT_EXPONENT", value: text, expected: "a number in 0...1")
+            }
+            config.lifecycle.rating.weightExponent = exponent
+        }
+        let mirror = ["ASC_KEY_ID", "ASC_ISSUER_ID", "ASC_PRIVATE_KEY_PEM", "GC_LEADERBOARD_ID"]
+        let given = mirror.filter { !(env[$0] ?? "").isEmpty }
+        if given.count == mirror.count {
+            let path = env["ASC_PRIVATE_KEY_PEM"] ?? ""
+            guard let pem = try? String(contentsOfFile: path, encoding: .utf8), (try? P256.Signing.PrivateKey(pemRepresentation: pem)) != nil else {
+                throw .invalid(variable: "ASC_PRIVATE_KEY_PEM", value: path, expected: "a readable PEM file of a P-256 private key")
+            }
+            config.leaderboard = AppStoreConnectConfig(keyID: env["ASC_KEY_ID"] ?? "", issuerID: env["ASC_ISSUER_ID"] ?? "", privateKeyPEM: pem,
+                                                       leaderboardID: env["GC_LEADERBOARD_ID"] ?? "", bundleID: config.identity.bundleID)
+        } else if !given.isEmpty, let missing = mirror.first(where: { !given.contains($0) }) {
+            throw .invalid(variable: missing, value: "(unset)", expected: "all of \(mirror.joined(separator: ", ")), or none")
+        }
+        config.leaderboardMirror.sweepInterval = .seconds(try int("LEADERBOARD_SWEEP_SECONDS", default: 300, in: 5...86_400))
         do {
             config.identity.database = try DatabaseConfiguration.fromEnvironment(env)
         } catch {

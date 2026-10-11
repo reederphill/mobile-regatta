@@ -2,6 +2,7 @@ import Crypto
 import Foundation
 import Persistence
 import RaceHost
+import Ratings
 import RegattaBots
 import RegattaCore
 import RegattaProtocol
@@ -11,7 +12,8 @@ import RegattaServices
 // cancelled. The persisted states are `running | closed | cancelled` (#144's registry); the phases between are read from
 // the host's tick (`RacePhase`). The lifecycle knows each player's seat, so the service can offer a rejoin after the gun
 // (#16, #66) and refuse the queue meanwhile; streams each player her results until the close (#24); and runs the close:
-// the log, digest and results stored at once, the final report, the rating change, the winner's line in the lobby.
+// the log, digest, results, profile counts and ratings stored at once (#151), the final report, each player's rating
+// change, the winner's line in the lobby.
 // A race every human left is ended by its host at the all-gone trigger (G3): `Race.closeAllGone` at the trigger's tick, so
 // the log replays it (ADR 0002), or, for a mass drop under `simultaneousLossPolicy = cancel`, a cancel like a crash (#30).
 //
@@ -30,6 +32,11 @@ public struct RaceLifecycleSettings: Sendable, Equatable {
     /// tries (#469).
     public var closeAttempts = 3
     public var closeRetryDelay: Duration = .milliseconds(500)
+    /// The ratings' parameters (#151, ADR 0012). `RATING_WEIGHT_EXPONENT` sets `weightExponent`.
+    public var rating = RatingConfig()
+    /// The result codes that count as a completed online race in the profile and towards earned designs (G6): never
+    /// RET, never a cancelled race.
+    public var earnedProgressResultCodes: Set<ResultCode> = [.finished, .byDistance, .dsq, .ocs]
 
     public init() {
         allGone = AllGoneConfig()
@@ -85,6 +92,8 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     /// Recorded with each closed race (Q6: `ServerConfig.serverBuild`).
     private let toolchain: String
     private let start: RaceStarter
+    /// Hears the players a close has just rated, after it is stored (the leaderboard mirror, #151); nil: nobody.
+    private let rated: (@Sendable ([String]) -> Void)?
 
     private struct Live {
         let session: RaceSession
@@ -117,21 +126,23 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
 
     public init(settings: RaceLifecycleSettings = RaceLifecycleSettings(), archive: any RaceArchive, tokenKey: SymmetricKey,
                 tokenLifetime: TimeInterval, toolchain: String, now: @escaping @Sendable () -> Date = { Date() },
-                start: @escaping RaceStarter) {
+                rated: (@Sendable ([String]) -> Void)? = nil, start: @escaping RaceStarter) {
         self.settings = settings
         self.archive = archive
         self.tokenKey = tokenKey
         self.tokenLifetime = tokenLifetime
         self.toolchain = toolchain
         self.now = now
+        self.rated = rated
         self.start = start
     }
 
     /// Races start on `registry`, on the wall clock.
     public init(settings: RaceLifecycleSettings = RaceLifecycleSettings(), archive: any RaceArchive, tokenKey: SymmetricKey,
-                tokenLifetime: TimeInterval, toolchain: String, registry: RaceRegistry, now: @escaping @Sendable () -> Date = { Date() }) {
+                tokenLifetime: TimeInterval, toolchain: String, registry: RaceRegistry, now: @escaping @Sendable () -> Date = { Date() },
+                rated: (@Sendable ([String]) -> Void)? = nil) {
         self.init(settings: settings, archive: archive, tokenKey: tokenKey, tokenLifetime: tokenLifetime, toolchain: toolchain, now: now,
-                  start: { session, ended in try await registry.start(session, onClose: ended) })
+                  rated: rated, start: { session, ended in try await registry.start(session, onClose: ended) })
     }
 
     // MARK: Starting
@@ -333,8 +344,9 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         }
     }
 
-    /// Rating changes for the player as they come, starting with any she hasn't read (#24). Until ratings exist (Q5) an
-    /// unrated race pushes `.unrated` and a rated one nothing.
+    /// Rating changes for the player as they come, starting with any she hasn't read (#24): `.rated` with her rating
+    /// before and after for a race she was rated in, `.unrated` for one that didn't move it (#151). The ones she
+    /// hasn't read are kept in memory only: after a restart the profile and `lastRace` still show the change.
     public nonisolated func ratingChanges(for playerID: String) -> AsyncStream<RatingChange> {
         let (stream, token) = ratingWatchers.open(playerID, bufferingPolicy: .bufferingNewest(settings.pendingRatingChanges))
         Task { await self.watchRatings(playerID, token) }
@@ -353,14 +365,30 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         pendingRatings[playerID] = Array((pendingRatings[playerID, default: []] + [change]).suffix(settings.pendingRatingChanges))
     }
 
-    /// The last race the player sat in that closed, until her next one closes (#24). Rating nil until ratings exist.
+    /// The last race the player sat in that closed, until her next one closes (#24), with what it did to her rating,
+    /// read from the store (#151): `.rated` if it rated her, `.unrated` if it didn't, nil only for a race whose rating
+    /// step failed (nobody's rating moved, and nothing false is said about it).
     /// A race she left before the gun is never it (#149: a bot sailed her seat, and the result is the bot's); one she
     /// left after the gun is, once it closes, with her boat's result (retired, #150).
     public func lastRace(of playerID: String) async throws -> LastRace? {
         guard let stored = try await archive.lastRace(of: playerID), let seat = stored.seat else { return nil }
         let report = RaceResultsFeed.closed(stored.raceID, seat: seat, summary: try RaceSummary(decoding: stored.results),
                                             incidents: try RaceResultsFeed.decodeIncidents(stored.incidents))
-        return LastRace(report: report, rating: nil)
+        let raceID = RaceResultsFeed.raceID(stored.raceID)
+        let rating: RatingChange? = if let change = stored.ratingChange {
+            RatingChange(raceID: raceID, outcome: Self.outcome(change))
+        } else if stored.ratingState == .failed {
+            nil
+        } else {
+            RatingChange(raceID: raceID, outcome: .unrated)
+        }
+        return LastRace(report: report, rating: rating)
+    }
+
+    /// A stored change as the player sees it: the rounded rating and the provisional badge, before and after.
+    static func outcome(_ change: StoredRatingChange) -> RegattaServices.RatingOutcome {
+        .rated(before: Rating(value: change.before.displayed, isProvisional: change.before.isProvisional),
+               after: Rating(value: change.after.displayed, isProvisional: change.after.isProvisional))
     }
 
     /// The lobby's lines from the close: one "X won" per race (#36). #152's lobby takes this stream; newest 64 kept.
@@ -389,8 +417,15 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     /// `cancelled`: the same answer.)
     ///
     /// The race ended (the registry's `onClose`): the close pipeline. A race with results is stored (log, digest,
-    /// versions, results, all at once), each player's stream ends with her closed report, unrated players get
-    /// `.unrated`, and the lobby gets the winner's line. Only the players still seated in it hear any of that: one who
+    /// versions, results, profile counts and ratings, all at once), each player's stream ends with her closed report,
+    /// every rated player gets her `.rated` change and the others `.unrated`, and the lobby gets the winner's line.
+    ///
+    /// Ratings (#151, ADR 0012). A rated race (at least 2 humans at the gun) rates the humans who were at the gun
+    /// (`RaceLog.humanSeatsAtGun`), each at her stored place, whatever her code: a player who left after the gun is
+    /// one of them, retired, and so loses to everyone still racing; she gets her `.rated` change although she has
+    /// released her seat (it names its race, so it can't be taken for her next one's). Never rated: bots, a seat given
+    /// away before the gun, a player who wasn't back by the gun. If the rating step fails the race still closes, the
+    /// failure is logged and nobody is pushed a change: never a false `.unrated`. Only the players still seated in it hear any of that: one who
     /// released her seat, or sits in a later race, hears nothing from this one (#469). A race without results (cancelled, or closed where it stood
     /// by a shutdown) is cancelled: no results, no rating, and each stream ends with `.cancelled`.
     public func ended(_ id: UUID, _ end: RaceEnd) async {
@@ -414,17 +449,30 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         let summary = RaceSummary(venue: live.venue, roster: await host.rosterEntries, results: results,
                                   turnsServed: await host.liveResults().turnsServed)
         let incidents = outcome.log.incidentIndex ?? IncidentIndex()
+        let bots = await host.botSeats
+        // Her seat is still hers unless she gave it away before the gun (a bot's result isn't hers to count).
+        let givenAway = Set(bots.filter { $0.source == .takeover }.map(\.seat)), atGun = Set(outcome.log.humanSeatsAtGun)
+        let seats = live.seats.sorted { $0.value < $1.value }.compactMap { player, seat in
+            givenAway.contains(seat) ? nil : results.row(of: seat).map { (player: player, row: $0) }
+        }
+        let stats = seats.map {
+            PlayerRaceStat(playerID: $0.player, completed: settings.earnedProgressResultCodes.contains($0.row.code),
+                           won: $0.row.place == 1 && $0.row.code == .finished)
+        }
+        let participants = seats.filter { atGun.contains($0.row.seat) }.map { RatingInput.Participant(playerID: $0.player, place: $0.row.place) }
         let stored: (summary: RaceSummary, incidents: IncidentIndex)
         let record: ClosedRaceRecord
         do {
             record = ClosedRaceRecord(id: id, log: try outcome.log.jsonData(pretty: false), digest: outcome.digest,
                                       simulationVersion: outcome.log.header.simulationVersion, toolchain: toolchain,
                                       results: try summary.encoded(), incidents: try RaceResultsFeed.encode(incidents), rated: results.rated,
-                                      bots: await host.botSeats.map {
+                                      bots: bots.map {
                                           StoredRaceBot(seat: $0.seat, source: $0.source == .fill ? .fill : .takeover, rating: $0.plan.rating,
                                                         skill: $0.plan.skill, handling: $0.plan.handling, mapVersion: $0.plan.mapVersion,
                                                         takenTick: $0.takenTick)
-                                      })
+                                      },
+                                      rating: results.rated ? RatingInput(participants: participants, ratedAt: now(), config: settings.rating) : nil,
+                                      stats: stats)
             // The reports are read back from the bytes stored, so the stream's last report is the last race's.
             stored = (try RaceSummary(decoding: record.results), try RaceResultsFeed.decodeIncidents(record.incidents))
         } catch {
@@ -432,30 +480,44 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
             return await cancelled(id, live, reason: .unspecified)
         }
         // Not stored: not closed. The store and the players are told the same thing.
-        guard await store(record) else { return await cancelled(id, live, reason: .unspecified) }
+        guard case .stored(let rating) = await store(record) else { return await cancelled(id, live, reason: .unspecified) }
+        let raceID = RaceResultsFeed.raceID(id)
+        // A rating step that failed, or a close whose answer was lost, says nothing about ratings to anyone.
+        let settled = rating.map { $0.state != .failed } ?? false
+        let changes = Dictionary((rating?.changes ?? []).map { ($0.playerID, $0) }, uniquingKeysWith: { first, _ in first })
+        if let rating, rating.state == .failed { fail("rating \(id): \(rating.failure ?? "failed"); the race closed without it") }
         for (player, seat) in seatedPlayers(id, live) {
             let report = RaceResultsFeed.closed(id, seat: seat, summary: stored.summary, incidents: stored.incidents)
             ended[player] = .closed(report)
             resultWatchers.finish(player, last: .report(report))
-            if !results.rated { push(RatingChange(raceID: RaceResultsFeed.raceID(id), outcome: .unrated), to: player) }
+            if settled, changes[player] == nil { push(RatingChange(raceID: raceID, outcome: .unrated), to: player) }
         }
+        // Every rated player, seated or not: one who left after the gun was rated as retired, and is told.
+        for change in rating?.changes ?? [] { push(RatingChange(raceID: raceID, outcome: Self.outcome(change)), to: change.playerID) }
+        if !changes.isEmpty { rated?(changes.keys.sorted()) }
         if let line = stored.summary.winnerLine { for continuation in lineWatchers.values { continuation.yield(line) } }
     }
 
-    /// Writes the close, at most `closeAttempts` times. True once the store has it (also when a try that seemed to
+    private enum Stored {
+        /// The store has the close, with what became of the ratings; nil when a try that seemed to fail did go
+        /// through, and its answer was lost.
+        case stored(Persistence.RatingOutcome?)
+        case refused
+    }
+
+    /// Writes the close, at most `closeAttempts` times. Stored once the store has it (also when a try that seemed to
     /// fail did go through: the store is asked).
-    private func store(_ record: ClosedRaceRecord) async -> Bool {
+    private func store(_ record: ClosedRaceRecord) async -> Stored {
         let attempts = max(1, settings.closeAttempts)
         for attempt in 1...attempts {
             do {
-                try await archive.close(record)
-                return true
+                return .stored(try await archive.close(record))
             } catch {
                 fail("close \(record.id), try \(attempt) of \(attempts): \(error)")
                 if attempt < attempts { try? await Task.sleep(for: settings.closeRetryDelay) }
             }
         }
-        return (try? await archive.state(of: record.id)) == .closed
+        return (try? await archive.state(of: record.id)) == .closed ? .stored(nil) : .refused
     }
 
     private func fail(_ failure: String) {
