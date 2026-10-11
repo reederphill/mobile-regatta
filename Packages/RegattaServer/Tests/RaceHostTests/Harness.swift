@@ -1,4 +1,5 @@
 import RaceHost
+import RegattaBots
 import RegattaCore
 import RegattaProtocol
 import Synchronization
@@ -48,9 +49,13 @@ struct Rig {
     var behindAlerts: [Int] { alerts.ticks }
     /// Every time the all-gone hook fired.
     var allGones: [AllGone] { allGoneLog.fired }
+    private let leaveLog = LeaveLog()
+    /// Every briefing leave the host reported (#147), and every seat it reported as left after the gun (#149).
+    var briefingLeaves: [BriefingLeave] { leaveLog.briefing }
+    var leftAfterGun: [Int] { leaveLog.afterGun }
 
     init(humans: Int = 1, seats: Int = 4, startSequenceTicks: Int = 300, options: RaceHostOptions = RaceHostOptions(),
-         firstInputHold: Bool = false, windSeed: WindSeed = WindSeed(0x65)) async throws {
+         firstInputHold: Bool = false, windSeed: WindSeed = WindSeed(0x65), fleet: FleetFill? = nil) async throws {
         var options = options
         if !firstInputHold { options.firstInputHoldTicks = .max / 2 }
         let kinds: [SeatKind] = (0..<seats).map { $0 < humans ? .human : .bot }
@@ -58,9 +63,13 @@ struct Rig {
         self.windSeed = windSeed
         let alerts = alerts
         let allGoneLog = allGoneLog
+        let leaveLog = leaveLog
         host = RaceHost(setup: setup, windSeed: windSeed, clock: clock, options: options,
                         onBehind: { ticks in alerts.append(ticks) },
-                        onAllGone: { allGone in allGoneLog.append(allGone) })
+                        onAllGone: { allGone in allGoneLog.append(allGone) },
+                        onBriefingLeave: { leave in leaveLog.append(leave) },
+                        fleet: fleet,
+                        onLeftAfterGun: { seat in leaveLog.appendAfterGun(seat) })
         #expect(await host.attach(seat: 0, transport: seat0))
     }
 
@@ -86,4 +95,12 @@ final class AllGoneLog: Sendable {
     private let log = Mutex<[AllGone]>([])
     func append(_ allGone: AllGone) { log.withLock { $0.append(allGone) } }
     var fired: [AllGone] { log.withLock { $0 } }
+}
+
+final class LeaveLog: Sendable {
+    private let log = Mutex<(briefing: [BriefingLeave], afterGun: [Int])>(([], []))
+    func append(_ leave: BriefingLeave) { log.withLock { $0.briefing.append(leave) } }
+    func appendAfterGun(_ seat: Int) { log.withLock { $0.afterGun.append(seat) } }
+    var briefing: [BriefingLeave] { log.withLock { $0.briefing } }
+    var afterGun: [Int] { log.withLock { $0.afterGun } }
 }
