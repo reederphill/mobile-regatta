@@ -117,7 +117,9 @@ public struct BotSeat: Hashable, Sendable {
 ///
 /// Seats (#66): a player attaches with `attach(seat:transport:)`. When a seat's held inputs stop, whether
 /// its socket closed or not, the host holds its last input `inputHoldTicks` (#18), then releases the helm
-/// with a neutral input and a cautious bot sails the dropped boat until the player rejoins. A seat that
+/// with a neutral input and the cautious bot (#104, #150: `BotDriver.cautious`) sails the dropped boat until the
+/// player rejoins: a covered boat. Her roster entry is marked `isDisconnected` from the drop to the rejoin, and every
+/// attached seat is told each time (`RosterChange`); her name and seat kind never change. A seat that
 /// attaches and sends no held input is dropped the same way, `firstInputHoldTicks` after the attach, and
 /// a seat no player attaches to `firstInputHoldTicks` after the host starts. A seat left before the gun
 /// goes to a fleet bot for good (#35, #149): her roster entry becomes a bot's, under a sailing name, and every attached
@@ -170,6 +172,9 @@ public actor RaceHost {
     private var dressing: BotDressing
     /// Human seats a fleet bot took before the gun, with the tick, in the order taken.
     private var takeovers: [(seat: Int, tick: Int)] = []
+    /// Human seats whose roster entry was ever marked disconnected (#150): a resync sends their entries again, marked
+    /// or cleared, since the seat asking may have missed either change.
+    private var everMarked: Set<Int> = []
     private let onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)?
     private let clock: any HostClock
     private let onBehind: (@Sendable (_ ticksBehind: Int) -> Void)?
@@ -274,7 +279,8 @@ public actor RaceHost {
     /// `seat`'s boat as of the last tick simulated.
     public func boat(seat: Int) -> Boat { race.boats[seat] }
     public var revealedWindKeys: [WindKey] { revealed }
-    /// Who sails each seat, by seat.
+    /// Who sails each seat, by seat. A dropped player's seat is marked `isDisconnected` while the cautious bot covers
+    /// her boat (#150); never once the race has closed.
     public var rosterEntries: [RosterEntry] { roster }
     /// The tick the race starts at: `-startSequenceTicks`.
     public var firstTick: Int { startTick }
@@ -460,9 +466,11 @@ public actor RaceHost {
         seats[seat].transport = transport
         seats[seat].hasJoined = true
         seats[seat].holdDeadline = race.tick + options.firstInputHoldTicks
-        bots[seat] = .human
+        bots.handBack(seat: seat)
         gone[seat] = nil
         race.record(rejoin ? .rejoined : .joined(.human), seat: seat)
+        // Her mark goes before her `RaceStart` is built; the others hear it on their reliable streams (#150).
+        setDisconnected(false, seat: seat, telling: .others)
         send(.raceStart(RaceStart(yourSeat: seat, setup: race.setup, roster: roster, windKeys: revealed)), to: seat)
         if race.tick > startTick { sendResync(to: seat) }
         return true
@@ -549,7 +557,10 @@ public actor RaceHost {
     }
 
     /// The hold on `seat` ran out at the tick just simulated, where its neutral input applied: the seat
-    /// is dropped (unless it left) and a cautious bot sails it. Stub: a fleet-style driver until #150.
+    /// is dropped (unless it left) and the cautious bot covers the boat (#150), before the gun or after it, taking her
+    /// as she is (`SeatControllers.takeOver`): her first decision comes on her seat's phase, within
+    /// `BotDriver.decisionInterval` ticks. The seat is marked disconnected from this tick, the one `.dropped` is
+    /// recorded at, so a gap shorter than the hold shows nothing.
     private func dropBoat(_ seat: Int) {
         seats[seat].holdDeadline = nil
         if gone[seat]?.kind != .left {
@@ -557,16 +568,35 @@ public actor RaceHost {
             markGone(seat, .dropped)
         }
         race.record(.botTookOver(.cautious), seat: seat)
-        bots[seat] = .dropped(BotDriver(seat: seat, raceSeed: race.setup.raceSeed))
+        bots.takeOver(seat: seat, raceSeed: race.setup.raceSeed, cautious: true)
+        setDisconnected(true, seat: seat, telling: .everyone)
     }
 
     /// A dropped seat that is still attached sends inputs again: the player takes the boat back, as on a
-    /// rejoin, and gets a `Resync` since the bot has been sailing it.
+    /// rejoin, and gets a `Resync` since the bot has been sailing it. Her mark goes for everyone, her too, ahead of
+    /// the resync on her stream.
     private func resume(_ seat: Int) {
-        bots[seat] = .human
+        bots.handBack(seat: seat)
         gone[seat] = nil
         race.record(.rejoined, seat: seat)
+        setDisconnected(false, seat: seat, telling: .everyone)
         sendResync(to: seat)
+    }
+
+    private enum MarkAudience { case everyone, others }
+
+    /// Sets or clears `seat`'s disconnected mark (#150) and tells every attached seat (`.others`: but `seat` herself,
+    /// who is about to get the roster in a `RaceStart`), if it changed. A bot's seat has none.
+    private func setDisconnected(_ isDisconnected: Bool, seat: Int, telling audience: MarkAudience) {
+        guard roster.indices.contains(seat), !roster[seat].isBot, roster[seat].isDisconnected != isDisconnected else { return }
+        roster[seat].isDisconnected = isDisconnected
+        everMarked.insert(seat)
+        let change = Message.rosterChange(RosterChange(seat: seat, entry: roster[seat]))
+        for other in seats.indices where seats[other].transport != nil && !(audience == .others && other == seat) {
+            seats[other].reliableQueue.append(Frame(seq: seats[other].reliableSeq, tick: race.tick, message: change))
+            seats[other].reliableSeq += 1
+        }
+        flushReliable()
     }
 
     /// Notes that `seat` went now. A dropped seat that then leaves keeps its place in the order.
@@ -612,11 +642,14 @@ public actor RaceHost {
                                        nextEventSeq: seats[seat].reliableSeq) else { return }
         send(.resync(resync), to: seat)
         // A resync restarts the reliable stream past any roster change the seat missed, and doesn't carry the roster:
-        // the seats taken over go again, after it (#149). The whole entry each time, so one seen twice changes nothing.
-        guard !takeovers.isEmpty, seats[seat].transport != nil else { return }
-        for taken in takeovers {
+        // the seats taken over go again, after it (#149), then every seat that was ever marked disconnected, as it
+        // stands now (#150: the mark or its clearing may be what was missed). The whole entry each time, so one seen
+        // twice changes nothing.
+        let again = takeovers.map(\.seat) + everMarked.subtracting(takeovers.map(\.seat)).sorted()
+        guard !again.isEmpty, seats[seat].transport != nil else { return }
+        for changed in again {
             seats[seat].reliableQueue.append(Frame(seq: seats[seat].reliableSeq, tick: race.tick,
-                                                   message: .rosterChange(RosterChange(seat: taken.seat, entry: roster[taken.seat]))))
+                                                   message: .rosterChange(RosterChange(seat: changed, entry: roster[changed]))))
             seats[seat].reliableSeq += 1
         }
         flushReliable()
@@ -712,6 +745,8 @@ public actor RaceHost {
         if race.tick < 0, race.isOver, cancelled == nil { reportAbsentAtGun() }
         let outcome = RaceOutcome(standings: race.standings(), digest: race.digest(), log: log, results: race.results)
         self.outcome = outcome
+        // A closed race has no one disconnected (#150): its reports' rosters carry no mark.
+        for seat in roster.indices { roster[seat].isDisconnected = false }
         // A cancelled race told its seats so; it has no close to send.
         guard cancelled == nil else { return outcome }
         flushReliable()

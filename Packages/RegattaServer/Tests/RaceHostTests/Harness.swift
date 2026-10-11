@@ -55,11 +55,12 @@ struct Rig {
     var leftAfterGun: [Int] { leaveLog.afterGun }
 
     init(humans: Int = 1, seats: Int = 4, startSequenceTicks: Int = 300, options: RaceHostOptions = RaceHostOptions(),
-         firstInputHold: Bool = false, windSeed: WindSeed = WindSeed(0x65), fleet: FleetFill? = nil) async throws {
+         firstInputHold: Bool = false, windSeed: WindSeed = WindSeed(0x65), fleet: FleetFill? = nil,
+         laps: Int = 1, raceSeed: RaceSeed = RaceSeed(65)) async throws {
         var options = options
         if !firstInputHold { options.firstInputHoldTicks = .max / 2 }
         let kinds: [SeatKind] = (0..<seats).map { $0 < humans ? .human : .bot }
-        setup = try RaceSetup(raceSeed: RaceSeed(65), seats: kinds, laps: 1, startSequenceTicks: startSequenceTicks)
+        setup = try RaceSetup(raceSeed: raceSeed, seats: kinds, laps: laps, startSequenceTicks: startSequenceTicks)
         self.windSeed = windSeed
         let alerts = alerts
         let allGoneLog = allGoneLog

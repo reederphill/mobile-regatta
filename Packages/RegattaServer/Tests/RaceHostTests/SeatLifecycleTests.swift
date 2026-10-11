@@ -48,8 +48,11 @@ struct SeatLifecycleTests {
         } else {
             #expect(records.contains { $0.tick == drop && $0.input == .neutral })
         }
+        // The cautious bot covers her boat (#150), and the seat is marked disconnected from the drop.
+        #expect(await rig.host.controller(seat: 0).driver?.isCautious == true)
+        #expect(await rig.host.rosterEntries[0].isDisconnected)
         // After the neutral input the bot decides on its seat's usual phase, and sends for the next tick.
-        let driver = BotDriver(seat: 0, raceSeed: rig.setup.raceSeed)
+        let driver = BotDriver.cautious(seat: 0, raceSeed: rig.setup.raceSeed)
         #expect(records.filter { $0.tick > drop }.allSatisfy { driver.decides(atTick: $0.tick - 1) })
         #expect(log.seatEvents.filter { $0.tick == drop }.map(\.kind) == [.dropped, .botTookOver(.cautious)])
     }

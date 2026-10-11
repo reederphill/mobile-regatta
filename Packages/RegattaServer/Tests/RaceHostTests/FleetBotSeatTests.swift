@@ -177,7 +177,11 @@ struct FleetBotSeatTests {
         if case .dropped = await rig.host.controller(seat: 0) {} else { Issue.record("seat 0 is \(await rig.host.controller(seat: 0))") }
         #expect(await rig.host.hasLeft(seat: 0))
         #expect(await !rig.host.attach(seat: 0, transport: RecordingTransport()))
-        #expect(await rig.host.rosterEntries == roster)
+        // Her name, no bot's glyph: only the disconnected mark of a covered boat (#150).
+        var covered = roster
+        covered[0].isDisconnected = true
+        #expect(await rig.host.rosterEntries == covered)
+        #expect(rosterChanges(seat1) == [RosterChange(seat: 0, entry: covered[0])])
     }
 
     @Test func aDropBackBeforeTheGunHandsBackAndCountsNothing() async throws {
@@ -189,10 +193,13 @@ struct FleetBotSeatTests {
         await rig.send(held(30), seq: 1, stamp: -280)
         await rig.run(to: -260)
         await rig.host.disconnect(seat: 0)
-        // The hold (0.5 s), then the stub that covers a dropped boat: her seat, not a bot's.
+        // The hold (0.5 s), then the cautious bot covers the dropped boat (#150): her seat, not a bot's, marked
+        // disconnected and nothing else.
         await rig.run(to: -200)
         if case .dropped = await rig.host.controller(seat: 0) {} else { Issue.record("seat 0 is \(await rig.host.controller(seat: 0))") }
-        #expect(await rig.host.rosterEntries == roster)
+        var marked = roster
+        marked[0].isDisconnected = true
+        #expect(await rig.host.rosterEntries == marked)
         #expect(await rig.host.botSeats.map(\.source) == [.fill, .fill])
         #expect(await !rig.host.hasLeft(seat: 0))
 
@@ -203,11 +210,18 @@ struct FleetBotSeatTests {
         #expect(await rig.host.log.seatEvents.last == SeatEvent(tick: -200, seat: 0, kind: .rejoined))
         #expect(raceStarts(back).first?.roster == roster)
         await rig.host.receive(try Frame(seq: 1, tick: -199, message: held(10)).encoded(), from: 0)
+        var seq: UInt32 = 1
+        for tick in stride(from: -190, through: 0, by: 10) {
+            await rig.run(to: tick)
+            seq += 1
+            await rig.host.receive(try Frame(seq: seq, tick: tick + 1, message: held(10)).encoded(), from: 0)
+        }
         await rig.run(to: 5)
-        // Nothing counted, nobody relabelled, nobody told anything.
+        // Nothing counted, nobody relabelled; the other seat saw only her mark come and go.
         #expect(rig.briefingLeaves.isEmpty && rig.leftAfterGun.isEmpty)
         #expect(await rig.host.rosterEntries == roster)
-        #expect(rosterChanges(seat1).isEmpty && rosterChanges(back).isEmpty)
+        #expect(rosterChanges(seat1) == [RosterChange(seat: 0, entry: marked[0]), RosterChange(seat: 0, entry: roster[0])])
+        #expect(rosterChanges(back) == [RosterChange(seat: 0, entry: roster[0])], "her own entry again, after the resync")
         #expect(await rig.host.botSeats.map(\.source) == [.fill, .fill])
     }
 
@@ -223,10 +237,12 @@ struct FleetBotSeatTests {
         await rig.run(to: 60)
         #expect(rig.briefingLeaves == [BriefingLeave(seat: 0, kind: .absentAtGun)])
         #expect(rig.leftAfterGun.isEmpty)
-        // Her seat still: covered, never a bot seat, no new name.
+        // Her seat still: covered, never a bot seat, no new name; only the disconnected mark (#150).
         if case .dropped = await rig.host.controller(seat: 0) {} else { Issue.record("seat 0 is \(await rig.host.controller(seat: 0))") }
-        #expect(await rig.host.rosterEntries == roster)
-        #expect(rosterChanges(seat1).isEmpty)
+        var marked = roster
+        marked[0].isDisconnected = true
+        #expect(await rig.host.rosterEntries == marked)
+        #expect(rosterChanges(seat1) == [RosterChange(seat: 0, entry: marked[0])])
         #expect(await rig.host.botSeats.map(\.source) == [.fill, .fill])
         #expect(await !rig.host.hasLeft(seat: 0))
         // And she can take the boat back after the gun (#148).
