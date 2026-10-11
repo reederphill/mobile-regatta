@@ -247,7 +247,15 @@ import Glibc
 ///    before 37 first shipped: about 2 kn is enough to complete a tack). Races sail skiff@8 by default
 ///    (#461), so every default race tacks and gybes by hand, players and bots. A race naming any older class, skiff@7
 ///    included, sails as on 36, bit for bit.
-public let simulationRevision = 37
+/// 38: skiff@9 (#462), on 37: a bad gybe, a run too deep and a lull take her off the plane. Boat class schema 4 adds
+///    `planing.stayOnSpeedShare` (absent: none; on the plane with the apparent wind aft of `onMaxAWADegrees` she drops
+///    off below that share of the polar's speed at her angle and wind) and `planing.apparentWind` (absent: none; with
+///    the rudder within `rudderWithin` of centre she drops off with the apparent wind under `offKnots`, and gets on
+///    only with `onKnots` or more). The rule reads her rudder and the polar and keeps no state: boats, the digest's
+///    fields, snapshots and the wire are as on 37. skiff@9 sails 0.70 and 4.0 / 4.5 kn / 0.2 at every wind strength.
+///    Races still sail skiff@8 by default; a race naming it or any older class sails as on 37, bit for bit, and the
+///    golden digest is 37's.
+public let simulationRevision = 38
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are
