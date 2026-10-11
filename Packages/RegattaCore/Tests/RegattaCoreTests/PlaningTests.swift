@@ -589,3 +589,49 @@ enum SkiffNine {
         }
     }
 }
+
+/// PROTOTYPE (#485): the plane margin reads the rule's two edges.
+@Suite struct PlaneMarginPrototypeTests {
+    static let knot = metresPerSecond(knots: 1)
+    let polar = SkiffNine.boatClass.polar
+    let rule = SkiffNine.boatClass.planing!
+
+    func margin(_ rule: BoatClass.PlaningTuning? = nil, on: Bool = true, twa: Double, share: Double, tws: Double) -> Double {
+        let speed = share * polar.speed(twa: deg2rad(twa), tws: tws * Self.knot)
+        return (rule ?? self.rule).planeMargin(isPlaning: on, twa: deg2rad(twa), speed: speed, tws: tws * Self.knot, polar: polar)
+    }
+
+    @Test func marginIsTheNearerEdge() throws {
+        // Off the plane: none. On her polar speed in a breeze, well clear of both edges: all of it.
+        #expect(margin(on: false, twa: 140, share: 1, tws: 16) == 0)
+        #expect(margin(twa: 140, share: 1, tws: 16) == 1)
+        // The speed edge: half way between the stay-on share and her polar speed is half; at and under the share, none.
+        let stayOn = try #require(rule.stayOnSpeedShare)
+        var speedOnly = rule
+        speedOnly.apparentWind = nil
+        #expect(abs(margin(speedOnly, twa: 150, share: (1 + stayOn) / 2, tws: 16) - 0.5) < 1e-9)
+        #expect(margin(speedOnly, twa: 150, share: stayOn, tws: 16) == 0)
+        #expect(margin(speedOnly, twa: 150, share: stayOn - 0.1, tws: 16) == 0)
+        // The apparent wind edge: at the floor none, 1.5 kn over it half, and it never passes where the rule lets go.
+        let floor = try #require(rule.apparentWind).offSpeed(tws: 12 * Self.knot)
+        var windOnly = rule
+        windOnly.stayOnSpeedShare = nil
+        var last = 1.0
+        for deep in stride(from: 140.0, through: 180, by: 1) {
+            let twa = deg2rad(deep), speed = polar.speed(twa: twa, tws: 12 * Self.knot)
+            let apparent = BoatClass.PlaningTuning.apparentWindSpeed(twa: twa, speed: speed, tws: 12 * Self.knot)
+            let m = windOnly.planeMargin(isPlaning: true, twa: twa, speed: speed, tws: 12 * Self.knot, polar: polar)
+            #expect(abs(m - ((apparent - floor) / (3 * Self.knot)).clamped(to: 0...1)) < 1e-9)
+            // Wherever the rule drops her (rudder centred), the margin has already run out.
+            if !windOnly.isPlaning(was: true, twa: twa, speed: speed, tws: 12 * Self.knot, rudder: 0, polar: polar) { #expect(m == 0) }
+            last = m
+        }
+        _ = last
+        // A class without the rule: 1 while she planes.
+        var plain = rule
+        plain.stayOnSpeedShare = nil
+        plain.apparentWind = nil
+        #expect(margin(plain, twa: 170, share: 0.5, tws: 16) == 1)
+        #expect(margin(plain, on: false, twa: 170, share: 1, tws: 16) == 0)
+    }
+}

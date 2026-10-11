@@ -38,6 +38,10 @@ struct HUDState {
     /// The same, display-smoothed by the session (`InstrumentSmoother`): what the bottom row shows. The raw reading
     /// until the session smooths it.
     var shownInstruments = InstrumentReading()
+    /// PROTOTYPE (#485): how red the speed tile is, 0...1 (your boat on the plane, eased by the session), and whether
+    /// she planes (VoiceOver's word).
+    var planingLevel = 0.0
+    var isPlaning = false
     /// You're a ghost (`RenderWorld.isGhost(ofSeat:)`): finished, DSQ, or OCS or unstarted at the close.
     var isGhost = false
     var boats: [MiniBoat] = []

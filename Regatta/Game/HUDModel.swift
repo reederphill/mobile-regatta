@@ -89,7 +89,7 @@ struct HUDModel {
     var apparentSpeedText: String { Self.knotsText(hud.shownInstruments.apparentKnots) }
 
     /// VoiceOver's values (read on demand, never announced): "6.4 knots", "38 degrees port, 21 knots".
-    var speedAccessibilityValue: String { "\(speedText) knots" }
+    var speedAccessibilityValue: String { "\(speedText) knots" + (hud.isPlaning ? ", planing" : "") }
     var apparentAccessibilityValue: String {
         let (degrees, side) = Self.apparentAngleParts(angle: hud.shownInstruments.apparentAngle)
         let knots = Int(max(0, hud.shownInstruments.apparentKnots).rounded())

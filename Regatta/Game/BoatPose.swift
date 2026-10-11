@@ -251,6 +251,29 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// Falling off the plane or getting back on (#462), that look goes or comes over this many race seconds
     /// (`PlaningEase`): she settles and lifts, and never flickers on the edge. A debug slider; 0 is at once.
     var wakePlaningSeconds = 1.0
+
+    // MARK: PROTOTYPE (#485): the planing cue. Never merged; every value a debug slider.
+
+    /// The speed tile turns red while your boat planes: 1 on, 0 off (a slider standing in for a switch).
+    var planingTile = 1.0
+    /// The red's alpha over the tile's own face, and the race seconds it comes and goes over (`PlaningEase`).
+    var planingTileAlpha = 0.85
+    var planingTileSeconds = 0.4
+    /// Two more wake lines, one at each stern corner, while a boat planes: 1 on, 0 off.
+    var cornerWakes = 1.0
+    /// Their longest (the plane margin at 1), a share of the middle wake's seconds of track; their width, points;
+    /// their alpha; and how far out from her centreline they start, a share of half her beam.
+    var cornerWakeLengthShare = 0.6
+    var cornerWakeWidth = 1.25
+    var cornerWakeAlpha = 0.4
+    var cornerWakeOffsetShare = 1.0
+    /// The plane margin's ranges (`PlaningTuning.planeMargin`): the share of her on-plane polar speed at which the
+    /// speed edge reads comfortable (from the class's stay-on share, 0), and the knots of apparent wind over the
+    /// floor at which the wind edge does.
+    var planeMarginFullSpeedShare = 1.0
+    var planeMarginApparentKnots = 3.0
+    /// How fast the corner wakes' length follows the margin, per race second (exponential), so it never jumps.
+    var cornerWakeEaseRate = 3.0
     /// The centre streak: its length, a share of the V's, its width, metres, and its alpha, a share of the V's.
     var wakeStreakShare = 0.6
     var wakeStreakWidth = 0.18
@@ -362,6 +385,12 @@ nonisolated extension BoatStyle {
             (.wakeSpreadDegrees, \.wakeSpreadDegrees), (.wakePressureFan, \.wakePressureFan),
             (.wakeAlpha, \.wakeAlpha), (.wakePlaningBoost, \.wakePlaningBoost),
             (.wakePlaningSeconds, \.wakePlaningSeconds),
+            (.planingTile, \.planingTile), (.planingTileAlpha, \.planingTileAlpha),
+            (.planingTileSeconds, \.planingTileSeconds), (.cornerWakes, \.cornerWakes),
+            (.cornerWakeLengthShare, \.cornerWakeLengthShare), (.cornerWakeWidth, \.cornerWakeWidth),
+            (.cornerWakeAlpha, \.cornerWakeAlpha), (.cornerWakeOffsetShare, \.cornerWakeOffsetShare),
+            (.planeMarginFullSpeedShare, \.planeMarginFullSpeedShare),
+            (.planeMarginApparentKnots, \.planeMarginApparentKnots), (.cornerWakeEaseRate, \.cornerWakeEaseRate),
             (.wakeTrailSeconds, \.wakeTrailSeconds), (.wakeTrailWidth, \.wakeTrailWidth),
             (.wakeStreakShare, \.wakeStreakShare), (.wakeStreakWidth, \.wakeStreakWidth),
             (.wakeStreakAlpha, \.wakeStreakAlpha), (.wakeEaseRate, \.wakeEaseRate),

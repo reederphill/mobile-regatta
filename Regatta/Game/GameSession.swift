@@ -311,6 +311,8 @@ final class GameSession {
 
     /// The bottom row's instruments' display smoothing (#457), in race time.
     @ObservationIgnored private var instrumentSmoother = InstrumentSmoother()
+    @ObservationIgnored private var tileEase = PlaningEase(isPlaning: false)
+    @ObservationIgnored private var tileClock: Double?
 
     /// The scene steps the live race for the first time (`GameScene.update`): the notice slot's clock starts again
     /// from here (#129). The steering hint is posted as the race is set up, before its clock shows, and setting up
@@ -341,6 +343,15 @@ final class GameSession {
         let roster = roster
         var hud = HUDState(world: world) { roster[$0].isBot }
         hud.shownInstruments = instrumentSmoother.step(hud.instruments, at: hud.clock)
+        // PROTOTYPE (#485): the red speed tile. Eased in race time; a frozen fixture and a switched-off cue show none.
+        let style = scene.boatStyle
+        let planes = world.me.isPlaning && style.planingTile >= 0.5 && !driver.isFrozen
+        let step = hud.clock - (tileClock ?? hud.clock)
+        tileClock = hud.clock
+        if step < 0 || step > 1 { tileEase = PlaningEase(isPlaning: planes) }
+        tileEase.advance(isPlaning: planes, dt: step, seconds: style.planingTileSeconds)
+        hud.planingLevel = tileEase.level * style.planingTileAlpha.clamped(to: 0...1)
+        hud.isPlaning = planes
         hud.pressureImage = samplesPressure ? minimapField.refresh(world) : minimapField.image
         self.hud = hud
         if !driver.isFrozen {

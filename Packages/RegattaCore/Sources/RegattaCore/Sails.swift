@@ -105,6 +105,33 @@ extension BoatClass.PlaningTuning {
         return true
     }
 
+    /// PROTOTYPE (#485): how far a planing boat is above the nearer of the two edges of `isPlaning(was:twa:speed:tws:rudder:polar:)`,
+    /// 0...1: 1 comfortably on the plane, 0 at the edge, and 0 when she is not planing. A pure read of the rule: no
+    /// state, nothing in the digest. A class without the rule (neither `stayOnSpeedShare` nor `apparentWind`): 1 while
+    /// she planes.
+    ///
+    /// - The speed edge, counted only where the rule tests it (the apparent wind aft of `onMaxAWA`): her speed as a
+    ///   share of the polar's at her angle and wind, from `stayOnSpeedShare` (0) up to `fullSpeedShare` (1).
+    /// - The apparent wind edge: her apparent wind speed from the floor (`ApparentWind.offSpeed(tws:)`, taper and
+    ///   all; 0) up to `apparentRange` m/s over it (1). Read whatever the rudder: the rule lets her off this edge
+    ///   only with the rudder near centre, but the wind in her sails is as thin with it over.
+    public func planeMargin(isPlaning: Bool, twa: Double, speed: Double, tws: Double, polar: PolarTable,
+                            fullSpeedShare: Double = 1.0, apparentRange: Double = metresPerSecond(knots: 3)) -> Double {
+        guard isPlaning else { return 0 }
+        var margin = 1.0
+        if let stayOnSpeedShare, Self.apparentWindCosine(twa: twa, speed: speed, tws: tws) < cos(onMaxAWA) {
+            let polarSpeed = polar.speed(twa: twa, tws: tws)
+            let share = polarSpeed > 0 ? speed / polarSpeed : 1
+            let range = fullSpeedShare - stayOnSpeedShare
+            margin = min(margin, range > 0 ? (share - stayOnSpeedShare) / range : (share >= stayOnSpeedShare ? 1 : 0))
+        }
+        if let apparentWind {
+            let over = Self.apparentWindSpeed(twa: twa, speed: speed, tws: tws) - apparentWind.offSpeed(tws: tws)
+            margin = min(margin, apparentRange > 0 ? over / apparentRange : (over >= 0 ? 1 : 0))
+        }
+        return min(max(margin, 0), 1)
+    }
+
     /// The apparent wind speed (m/s) of a boat sailing at `speed` (m/s) at `twa` (radians) to a true wind of `tws`
     /// (m/s): the true wind plus her own, over the bow.
     public static func apparentWindSpeed(twa: Double, speed: Double, tws: Double) -> Double {

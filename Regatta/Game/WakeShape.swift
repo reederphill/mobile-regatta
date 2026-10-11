@@ -75,6 +75,18 @@ nonisolated struct WakeShape: Equatable, Sendable {
     }
 }
 
+/// PROTOTYPE (#485): a boat's plane margin, 0...1, read from the sim's rule (`PlaningTuning.planeMargin`) with the
+/// style's ranges; a class with no planing has none.
+nonisolated enum PlaneMargin {
+    static func of(_ boat: Boat, boatClass: BoatClass, style: BoatStyle) -> Double {
+        guard let planing = boatClass.planing else { return 0 }
+        return planing.planeMargin(isPlaning: boat.isPlaning, twa: boat.twa, speed: boat.speed,
+                                   tws: boat.polarWindSpeed(in: boatClass), polar: boatClass.polar,
+                                   fullSpeedShare: style.planeMarginFullSpeedShare,
+                                   apparentRange: metresPerSecond(knots: style.planeMarginApparentKnots))
+    }
+}
+
 /// How far on the plane a boat is drawn (#462): her wake's planing look (`BoatStyle.wakePlaningBoost`) comes and goes
 /// over `BoatStyle.wakePlaningSeconds` instead of with the flag, so a fall off the plane reads as her settling and
 /// getting back on as her lifting, and a boat held on the edge of the plane never flickers. Pure: drawn only, nothing

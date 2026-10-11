@@ -123,10 +123,37 @@ final class PracticeDriver: RaceDriver {
         }
         queuedTaps.removeAll()
         Signpost.botBrains.measure { seats.drive(race) }
+        prototypeHelm(atTick: next)
         Signpost.simStep.measure { race.step() }
         events += race.drainEvents()
         previousFrame = currentFrame
         currentFrame = TickFrame(race: race, keepClearOf: myBoatIndex)
         return currentFrame
+    }
+
+    // MARK: PROTOTYPE (#485)
+
+    /// `-planingHelm <race seconds>,<degrees a second>[,<rudder limit %>[,<deepest angle>]]`: from that race time a scripted hand takes
+    /// your boat's helm off the demo bot and holds the true wind angle she had then, bearing away at that rate (0: a
+    /// held angle, to wait for a lull). For the capture strips only.
+    private static let prototypeHelmPlan: (start: Double, rate: Double, limit: Double, deepest: Double)? = {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-planingHelm"), i + 1 < args.count else { return nil }
+        let parts = args[i + 1].split(separator: ",").compactMap { Double($0) }
+        guard parts.count >= 2 else { return nil }
+        return (parts[0], parts[1], parts.count > 2 ? parts[2] / 100 : 0.18, parts.count > 3 ? parts[3] : 178)
+    }()
+    private static var prototypeHelmFrom: Double?
+
+    private func prototypeHelm(atTick next: Int) {
+        guard let plan = Self.prototypeHelmPlan, currentFrame.time >= plan.start else { return }
+        let boat = race.boats[myBoatIndex]
+        let from = Self.prototypeHelmFrom ?? rad2deg(boat.twa)
+        Self.prototypeHelmFrom = from
+        let target = min(from + plan.rate * (currentFrame.time - plan.start), plan.deepest)
+        // Wind over her starboard side: bearing away is a turn to port.
+        let side: Double = boat.relativeWind >= 0 ? -1 : 1
+        let rudder = (side * (target - rad2deg(boat.twa)) * 0.05).clamped(to: -plan.limit...plan.limit)
+        _ = race.apply(BoatInput(rudder: Int8((rudder * 127).rounded())), seat: myBoatIndex, atTick: next)
     }
 }

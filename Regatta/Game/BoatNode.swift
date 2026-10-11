@@ -135,7 +135,10 @@ final class BoatNode: SKNode {
         effects.update(with: boat, pose: pose, style: style, quality: wakeQuality, time: time, dt: dt,
                        settled: settled, backwindSail: backwindSail, backwindSide: backwindSide)
         sail.isHidden = hidesDecoration
-        if hidesDecoration { effects.trail.isHidden = true }
+        if hidesDecoration {
+            effects.trail.isHidden = true
+            effects.corners.isHidden = true
+        }
 
         glow?.alpha = CGFloat(style.glowAlpha)
         fade.shouldEnableEffects = pose.isGhost

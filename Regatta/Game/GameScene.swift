@@ -44,6 +44,7 @@ final class GameScene: SKScene {
         }
     }
     /// How boats are drawn (#117): the debug tuning panel's (#232) seam, live, even on a paused race.
+    private static let logsPlaning = ProcessInfo.processInfo.arguments.contains("-planingLog")
     var boatStyle = BoatStyle.standard {
         didSet { needsPausedRender = true }
     }
@@ -327,6 +328,19 @@ final class GameScene: SKScene {
         // isn't painted (`-hideScene`): they are pure paint and most of a 16-boat frame's render (#377), so a hidden
         // race spends its frame on ticks. They come back with the next frame painted.
         if paintsWorld { trailLayer.update(wake: world.frame.wake, time: world.time, style: boatStyle) }
+        // PROTOTYPE (#485): `-planingLog` prints your boat's plane flag, margin and corner wake share each frame.
+        if Self.logsPlaning, !settled {
+            let b = world.me, fx = boatNodes[world.myBoatIndex].effects
+            let near = world.boats.enumerated().filter { $0.offset != world.myBoatIndex && $0.element.isPlaning
+                && ($0.element.position - me).length / hull < 8 }.count
+            print(String(format: "PLN t=%.2f wall=%.3f on=%d margin=%.2f corner=%.2f level=%.2f tws=%.1f twa=%.0f kn=%.1f aws=%.1f rudder=%.2f leg=%d fleetOn=%d nearOn=%d",
+                         world.time, Date().timeIntervalSince1970, b.isPlaning ? 1 : 0, fx.margin, fx.cornerShare ?? 0,
+                         fx.planing?.level ?? 0, knots(metresPerSecond: b.polarWindSpeed(in: world.boatClass)), rad2deg(b.twa),
+                         knots(metresPerSecond: b.speed),
+                         knots(metresPerSecond: BoatClass.PlaningTuning.apparentWindSpeed(twa: b.twa, speed: b.speed, tws: b.polarWindSpeed(in: world.boatClass))),
+                         b.rudder, b.legIndex, world.boats.filter(\.isPlaning).count, near))
+            fflush(stdout)
+        }
 
         syncCamera()
         rig.visibleInsets = viewInsets

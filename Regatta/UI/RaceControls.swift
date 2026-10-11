@@ -98,6 +98,8 @@ struct InstrumentRow: View {
 /// tone of its own: no reserved cue colour, nothing read by colour (#22, #15, #454).
 private struct InstrumentFace<Content: View>: View {
     let isShown: Bool
+    /// PROTOTYPE (#485): red over the face, 0...1 (the speed tile on the plane).
+    var red = 0.0
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -107,7 +109,9 @@ private struct InstrumentFace<Content: View>: View {
             .padding(.horizontal, RaceControls.instrumentInset)
             .frame(maxWidth: RaceControls.instrumentMaxWidth)
             .frame(height: RaceControls.controlHeight)
+            .background(Color(red: 0.86, green: 0.08, blue: 0.10).opacity(red), in: .rect(cornerRadius: 14))
             .background(.black.opacity(0.5), in: .rect(cornerRadius: 14))
+            .animation(.linear(duration: 0.08), value: red)
             .foregroundStyle(.white)
             .shadow(radius: 6, y: 3)
             .opacity(isShown ? 1 : 0)
@@ -124,7 +128,7 @@ private struct SpeedInstrument: View {
     let model: HUDModel
 
     var body: some View {
-        InstrumentFace(isShown: model.showsInstruments) {
+        InstrumentFace(isShown: model.showsInstruments, red: model.hud.planingLevel) {
             VStack(spacing: -2) {
                 Text(model.speedText)
                     .font(HUDFont.number(size: RaceControls.speedSize, weight: .heavy))

@@ -18,9 +18,14 @@ final class BoatEffects {
     /// space, so it bends with her turns and the current carries it (the string of #15). Its alpha is the
     /// pressure's (`WakeShape`).
     let trail = SKShapeNode()
+    /// PROTOTYPE (#485): the two stern-corner wakes of a planing boat, one path; their length is her plane margin.
+    let corners = SKShapeNode()
+    /// Her plane margin this frame, and the share of the corner wakes' longest drawn (eased towards margin x level).
+    private(set) var margin = 0.0
+    private(set) var cornerShare: Double?
 
     /// The nodes the scene adds to its effects layer.
-    var nodes: [SKNode] { [backwind, trail] }
+    var nodes: [SKNode] { [backwind, trail, corners] }
 
     /// How many nodes she draws on the water: `nodes` and their children (the `-perf` log).
     var nodeCount: Int { nodes.reduce(0) { $0 + 1 + $1.children.count } }
@@ -43,7 +48,7 @@ final class BoatEffects {
     /// How far on the plane her wake is drawn, settling and lifting over `BoatStyle.wakePlaningSeconds` (#462).
     private(set) var planing: PlaningEase?
     /// Where her stern has been, world points, oldest first, each with the race time it was there.
-    private var history: [(point: CGPoint, time: Double)] = []
+    private var history: [(point: CGPoint, time: Double, right: CGVector)] = []
     /// The race time the history last took a sample.
     private var lastSample = -Double.infinity
     private static let sampleInterval = 0.1
@@ -70,6 +75,13 @@ final class BoatEffects {
         let slot = DrawOrder.z(seat)
         backwind.zPosition = Layer.backwind + slot
         trail.zPosition = Layer.wake + slot
+        corners.strokeColor = CuePalette.cueWhite.uiColor
+        corners.lineCap = .round
+        corners.lineJoin = .round
+        corners.alpha = 0
+        corners.isHidden = true
+        corners.name = "cornerWakes"
+        corners.zPosition = Layer.wake + slot
     }
 
     /// Draws `boat`'s effects in `pose` at race time `time`. `settled` draws the wake straight at its target, with no easing (a frozen render fixture). `backwindSail`, 0...1, her backwind level, scales her
@@ -111,7 +123,9 @@ final class BoatEffects {
         // Her stern's track, in world space: the current bends it, as it bends the water.
         let sternPoint = CGPoint(x: stern.x * ppm, y: stern.y * ppm)
         let seconds = quality == .short ? style.wakeTrailSeconds * max(style.wakeShortShare, 0) : style.wakeTrailSeconds
-        record(sternPoint, boat: boat, time: time, seconds: seconds, ghost: pose.isGhost, settled: settled)
+        // Her starboard hand, a unit vector in scene space: the corner wakes start that far out either side.
+        let right = CGVector(dx: boat.forward.y, dy: -boat.forward.x)
+        record(sternPoint, right: right, boat: boat, time: time, seconds: seconds, ghost: pose.isGhost, settled: settled)
 
         let path = CGMutablePath()
         if let first = history.first {
@@ -123,6 +137,59 @@ final class BoatEffects {
         trail.lineWidth = CGFloat(style.wakeTrailWidth)
         trail.alpha = CGFloat(shape.alpha) * (pose.isGhost ? CGFloat(style.ghostAlpha) : 1)
         trail.isHidden = history.isEmpty || trail.alpha < 0.005
+
+        // PROTOTYPE (#485): the stern-corner wakes. Their length is her plane margin times how far on the plane she
+        // is drawn, eased so it never jumps; a frozen fixture draws none (references unaffected).
+        margin = PlaneMargin.of(boat, boatClass: boatClass, style: style)
+        let wanted = style.cornerWakes >= 0.5 && !settled && !pose.isGhost ? margin * planing.level : 0
+        let k = style.cornerWakeEaseRate > 0 ? 1 - exp(-max(dt, 0) * style.cornerWakeEaseRate) : 1
+        let share = (cornerShare ?? wanted) + (wanted - (cornerShare ?? wanted)) * k
+        cornerShare = share
+        let window = seconds * style.cornerWakeLengthShare.clamped(to: 0...1) * share
+        let offset = CGFloat(style.cornerWakeOffsetShare * boatClass.hull.beam / 2) * ppm
+        let cornerPath = CGMutablePath()
+        if window > 0.02, !history.isEmpty {
+            let from = time - window
+            for side in [CGFloat(-1), 1] {
+                func out(_ p: CGPoint, _ r: CGVector) -> CGPoint { CGPoint(x: p.x + r.dx * offset * side, y: p.y + r.dy * offset * side) }
+                var started = false
+                var before: (point: CGPoint, time: Double, right: CGVector)?
+                for sample in history {
+                    guard sample.time >= from else {
+                        before = sample
+                        continue
+                    }
+                    if !started {
+                        // Its far end, between two samples, so it grows and shrinks smoothly.
+                        if let before, sample.time > before.time {
+                            let t = CGFloat((from - before.time) / (sample.time - before.time))
+                            let a = out(before.point, before.right), b = out(sample.point, sample.right)
+                            cornerPath.move(to: CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t))
+                            cornerPath.addLine(to: b)
+                        } else {
+                            cornerPath.move(to: out(sample.point, sample.right))
+                        }
+                        started = true
+                    } else {
+                        cornerPath.addLine(to: out(sample.point, sample.right))
+                    }
+                }
+                let now = out(sternPoint, right)
+                if started {
+                    cornerPath.addLine(to: now)
+                } else if let before, time > before.time {
+                    let t = CGFloat((from - before.time) / (time - before.time))
+                    let a = out(before.point, before.right)
+                    cornerPath.move(to: CGPoint(x: a.x + (now.x - a.x) * t, y: a.y + (now.y - a.y) * t))
+                    cornerPath.addLine(to: now)
+                }
+            }
+        }
+        corners.path = cornerPath
+        corners.lineWidth = CGFloat(style.cornerWakeWidth)
+        // Fading in over its first tenth, so it doesn't pop at a stub's length.
+        corners.alpha = CGFloat(style.cornerWakeAlpha * min(1, share * 10))
+        corners.isHidden = cornerPath.isEmpty || corners.alpha < 0.005
     }
 
     /// Moves the heading and apparent wind her shadow is drawn along `dt` race seconds towards hers (exponential, over
@@ -144,14 +211,14 @@ final class BoatEffects {
     /// `seconds`, and a ghost's string drawn in as she stops casting one. Time that runs backwards (an online
     /// re-prediction) starts it over. `settled` (a frozen fixture) lays it straight astern at her speed over the
     /// ground, as if she had always sailed that way.
-    private func record(_ point: CGPoint, boat: Boat, time: Double, seconds: Double, ghost: Bool, settled: Bool) {
+    private func record(_ point: CGPoint, right: CGVector, boat: Boat, time: Double, seconds: Double, ghost: Bool, settled: Bool) {
         if settled {
             let astern = boat.velocityOverGround * -1
             let steps = max(Int(seconds / Self.sampleInterval), 0)
             history = (1...max(steps, 1)).reversed().map { step in
                 let back = Double(step) * Self.sampleInterval
                 return (point: CGPoint(x: point.x + CGFloat(astern.x * back) * ppm,
-                                       y: point.y + CGFloat(astern.y * back) * ppm), time: time - back)
+                                       y: point.y + CGFloat(astern.y * back) * ppm), time: time - back, right: right)
             }
             lastSample = time
             return
@@ -163,7 +230,7 @@ final class BoatEffects {
             if ghost {
                 if !history.isEmpty { history.removeFirst() }
             } else {
-                history.append((point: point, time: time))
+                history.append((point: point, time: time, right: right))
             }
         }
         history.removeAll { time - $0.time > seconds }
