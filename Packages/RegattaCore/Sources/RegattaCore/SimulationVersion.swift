@@ -264,6 +264,9 @@ import Glibc
 ///    the rudder within `rudderWithin` of centre she drops off with the apparent wind under `offKnots`, and gets on
 ///    only with `onKnots` or more). The rule reads her rudder and the polar and keeps no state: boats, the digest's
 ///    fields, snapshots and the wire are as on 38. skiff@9 sails 0.70 and 4.0 / 4.5 kn / 0.2 at every wind strength.
+///    In very light wind the two apparent wind speeds taper with it (`planing.apparentWind.offWindShare` and
+///    `onWindShare`, absent: no taper; the owner's ruling of 2026-10-11): the lesser of the speed and that share of the
+///    true wind her sails see. skiff@9 sails 0.6 and 0.675: 4.0 / 4.5 kn from 6.67 kn of wind up, 3.6 / 4.05 kn at 6 kn.
 ///    Races still sail skiff@8 by default; a race naming it or any older class sails as on 38, bit for bit, and the
 ///    golden digest is 38's.
 public let simulationRevision = 39
