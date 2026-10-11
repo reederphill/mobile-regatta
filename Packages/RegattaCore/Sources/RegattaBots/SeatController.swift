@@ -49,6 +49,14 @@ public struct SeatControllers: Sendable {
             : .bot(BotDriver(seat: seat, raceSeed: raceSeed).takingOver())
     }
 
+    /// `driver`, built by the caller, takes `seat` over for good (#149: an online fleet's bot, `FleetFill.driver`): a
+    /// `.bot` seat from here, her plan rebuilt from the seat's view on her first decision (`BotDriver.takingOver()`).
+    /// Sends nothing, as `takeOver(seat:raceSeed:cautious:)`.
+    public mutating func takeOver(seat: Int, driver: BotDriver) {
+        precondition(driver.seat == seat, "seat \(seat) given the driver of seat \(driver.seat)")
+        seats[seat] = .bot(driver.takingOver())
+    }
+
     /// Hands `seat` back to its player (#19, #104), after `race.step()` and before the next `drive`: no bot input is
     /// pending then (a bot's decision on a tick applies on the next, which the step has applied), so the player's
     /// inputs apply from the next tick. Called between `drive` and `step`, the bot's decision for the next tick stands. The
