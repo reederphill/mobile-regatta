@@ -100,9 +100,10 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     private var seated: [String: UUID] = [:]
     /// The player's race that ended, until her next one starts: what her results stream says now.
     private var ended: [String: Ended] = [:]
-    private var resultWatchers: [String: [UUID: AsyncStream<RaceUpdate>.Continuation]] = [:]
+    /// The results and rating streams players hold, registered and removed synchronously (#469).
+    nonisolated let resultWatchers = StreamWatchers<RaceUpdate>()
     private var pendingRatings: [String: [RatingChange]] = [:]
-    private var ratingWatchers: [String: [UUID: AsyncStream<RatingChange>.Continuation]] = [:]
+    nonisolated let ratingWatchers = StreamWatchers<RatingChange>()
     private var lineWatchers: [UUID: AsyncStream<SystemLine>.Continuation] = [:]
     /// Store failures, for the log and tests.
     public private(set) var archiveFailures: [String] = []
@@ -197,7 +198,7 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     public func seatReleased(_ playerID: String, race: UUID) {
         guard seated[playerID] == race else { return }
         seated[playerID] = nil
-        for continuation in resultWatchers.removeValue(forKey: playerID)?.values ?? [:].values { continuation.finish() }
+        resultWatchers.finish(playerID)
     }
 
     /// The race's human seats whose players still sit in it: not one who released her seat, or sits in a later race.
@@ -270,76 +271,61 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     /// The player's results: her race's report now and at each change, ending with the closed report, or `.cancelled`.
     /// Coalesced to the newest. With no race it ends at once; after her race ended it says how, until her next.
     public nonisolated func results(for playerID: String) -> AsyncStream<RaceUpdate> {
-        let (stream, continuation) = AsyncStream<RaceUpdate>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        let token = UUID()
-        continuation.onTermination = { _ in Task { await self.unwatchResults(playerID, token) } }
-        Task { await self.watchResults(playerID, token, continuation) }
+        let (stream, token) = resultWatchers.open(playerID, bufferingPolicy: .bufferingNewest(1))
+        Task { await self.watchResults(playerID, token) }
         return stream
     }
 
-    private func watchResults(_ playerID: String, _ token: UUID, _ continuation: AsyncStream<RaceUpdate>.Continuation) async {
-        if let id = seated[playerID], let live = races[id], let seat = live.seats[playerID] {
-            resultWatchers[playerID, default: [:]][token] = continuation
+    private func watchResults(_ playerID: String, _ token: UUID) async {
+        // A race in its close pipeline that has already said its last words (`ended` is set) is over for her.
+        if ended[playerID] == nil, let id = seated[playerID], let live = races[id], let seat = live.seats[playerID] {
+            guard resultWatchers.prime(playerID, token) else { return }
             let report = RaceResultsFeed.live(id, seat: seat, roster: await live.session.host.rosterEntries,
                                               results: await live.session.host.liveResults())
-            // The race may have ended meanwhile: then the stream already has its last word.
-            if races[id] != nil { continuation.yield(.report(report)) }
+            // The race may have ended, or she released her seat, meanwhile: then the stream has had its last word and
+            // is gone.
+            if races[id] != nil, seated[playerID] == id { resultWatchers.send(.report(report), to: playerID, token) }
             return
         }
-        switch ended[playerID] {
-        case .closed(let report): continuation.yield(.report(report))
-        case .cancelled(let reason): continuation.yield(.cancelled(reason))
-        case nil: break
+        let last: RaceUpdate? = switch ended[playerID] {
+        case .closed(let report): .report(report)
+        case .cancelled(let reason): .cancelled(reason)
+        case nil: nil
         }
-        continuation.finish()
-    }
-
-    private func unwatchResults(_ playerID: String, _ token: UUID) {
-        resultWatchers[playerID]?[token] = nil
-        if resultWatchers[playerID]?.isEmpty == true { resultWatchers[playerID] = nil }
+        resultWatchers.finish(playerID, token, last: last)
     }
 
     /// The race's results changed: every watching player gets her report.
     func progress(_ id: UUID) async {
         guard let live = races[id] else { return }
-        guard seatedPlayers(id, live).contains(where: { resultWatchers[$0.player] != nil }) else { return }
+        guard seatedPlayers(id, live).contains(where: { resultWatchers.hasPrimed($0.player) }) else { return }
         let host = live.session.host
         let results = await host.liveResults(), roster = await host.rosterEntries
         guard races[id] != nil, !closing.contains(id) else { return }
         // Read again after the host: a player may have released her seat, or opened her stream, meanwhile.
-        for (player, seat) in seatedPlayers(id, live) where resultWatchers[player] != nil {
-            let report = RaceResultsFeed.live(id, seat: seat, roster: roster, results: results)
-            for continuation in resultWatchers[player]?.values ?? [:].values { continuation.yield(.report(report)) }
+        for (player, seat) in seatedPlayers(id, live) where resultWatchers.hasPrimed(player) {
+            resultWatchers.send(.report(RaceResultsFeed.live(id, seat: seat, roster: roster, results: results)), to: player)
         }
     }
 
     /// Rating changes for the player as they come, starting with any she hasn't read (#24). Until ratings exist (Q5) an
     /// unrated race pushes `.unrated` and a rated one nothing.
     public nonisolated func ratingChanges(for playerID: String) -> AsyncStream<RatingChange> {
-        let (stream, continuation) = AsyncStream<RatingChange>.makeStream(bufferingPolicy: .bufferingNewest(settings.pendingRatingChanges))
-        let token = UUID()
-        continuation.onTermination = { _ in Task { await self.unwatchRatings(playerID, token) } }
-        Task { await self.watchRatings(playerID, token, continuation) }
+        let (stream, token) = ratingWatchers.open(playerID, bufferingPolicy: .bufferingNewest(settings.pendingRatingChanges))
+        Task { await self.watchRatings(playerID, token) }
         return stream
     }
 
-    private func watchRatings(_ playerID: String, _ token: UUID, _ continuation: AsyncStream<RatingChange>.Continuation) {
-        for change in pendingRatings.removeValue(forKey: playerID) ?? [] { continuation.yield(change) }
-        ratingWatchers[playerID, default: [:]][token] = continuation
+    /// The changes she hasn't read go to the stream first; they stay kept if it has gone already.
+    private func watchRatings(_ playerID: String, _ token: UUID) {
+        let pending = pendingRatings.removeValue(forKey: playerID) ?? []
+        if !ratingWatchers.prime(playerID, token, pending), !pending.isEmpty { pendingRatings[playerID] = pending }
     }
 
-    private func unwatchRatings(_ playerID: String, _ token: UUID) {
-        ratingWatchers[playerID]?[token] = nil
-        if ratingWatchers[playerID]?.isEmpty == true { ratingWatchers[playerID] = nil }
-    }
-
+    /// To her streams, or kept for her next one when none has had its first words yet.
     private func push(_ change: RatingChange, to playerID: String) {
-        if let watchers = ratingWatchers[playerID], !watchers.isEmpty {
-            for continuation in watchers.values { continuation.yield(change) }
-        } else {
-            pendingRatings[playerID, default: []].append(change)
-            pendingRatings[playerID] = Array(pendingRatings[playerID]!.suffix(settings.pendingRatingChanges))
-        }
+        guard ratingWatchers.send(change, to: playerID) == 0 else { return }
+        pendingRatings[playerID] = Array((pendingRatings[playerID, default: []] + [change]).suffix(settings.pendingRatingChanges))
     }
 
     /// The last race the player sat in that closed, until her next one closes (#24). Rating nil until ratings exist.
@@ -409,10 +395,7 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         for (player, seat) in seatedPlayers(id, live) {
             let report = RaceResultsFeed.closed(id, seat: seat, summary: stored.summary, incidents: stored.incidents)
             ended[player] = .closed(report)
-            for continuation in resultWatchers.removeValue(forKey: player)?.values ?? [:].values {
-                continuation.yield(.report(report))
-                continuation.finish()
-            }
+            resultWatchers.finish(player, last: .report(report))
             if !results.rated { push(RatingChange(raceID: RaceResultsFeed.raceID(id), outcome: .unrated), to: player) }
         }
         if let line = stored.summary.winnerLine { for continuation in lineWatchers.values { continuation.yield(line) } }
@@ -422,10 +405,7 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         do { try await archive.cancel(id) } catch { archiveFailures.append("cancel \(id): \(error)") }
         for (player, _) in seatedPlayers(id, live) {
             ended[player] = .cancelled(reason)
-            for continuation in resultWatchers.removeValue(forKey: player)?.values ?? [:].values {
-                continuation.yield(.cancelled(reason))
-                continuation.finish()
-            }
+            resultWatchers.finish(player, last: .cancelled(reason))
         }
     }
 
@@ -450,11 +430,9 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
 
     /// Server shutdown: the streams end.
     public func stop() {
-        for watchers in resultWatchers.values { for continuation in watchers.values { continuation.finish() } }
-        for watchers in ratingWatchers.values { for continuation in watchers.values { continuation.finish() } }
+        resultWatchers.finishAll()
+        ratingWatchers.finishAll()
         for continuation in lineWatchers.values { continuation.finish() }
-        resultWatchers = [:]
-        ratingWatchers = [:]
         lineWatchers = [:]
     }
 }

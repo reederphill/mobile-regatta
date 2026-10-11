@@ -100,4 +100,63 @@ import Testing
         await rig.queue.restrictionsChanged("T:1")
         #expect(await rig.queue.queuedCount == 0)
     }
+
+    // MARK: The restrictions cache (#469)
+
+    /// #469: a stream re-reads her restrictions when it opens: a suspension written since her last read, which nobody
+    /// told the queue of, shows in its first state.
+    @Test func watchingReadsHerRestrictionsAfresh() async throws {
+        let rig = Rig()
+        try await rig.queue.join(Self.player)
+        try await rig.store.setSuspension("T:0", .permanent)
+        var states = rig.queue.stateUpdates(for: "T:0").makeAsyncIterator()
+        #expect(await states.next() == .unavailable(.suspended(until: nil)))
+    }
+
+    /// #469: the queue keeps a player's restrictions only while she is queued, locked or watching.
+    @Test func restrictionsAreKeptOnlyForPlayersQueuedLockedOrWatching() async throws {
+        let rig = Rig()
+        // Refused, asked about, changed: with nobody watching, nothing is kept.
+        try await rig.store.setAttestationFailed("T:9", true)
+        await #expect(throws: QueueError.refused(.attestationFailed)) { try await rig.queue.join(QueueMatchmakerTests.player(9)) }
+        #expect(await rig.queue.state(of: "T:9") == .unavailable(.attestationFailed))
+        await rig.queue.restrictionsChanged("T:9")
+        #expect(await rig.queue.cachedRestrictions == 0)
+        // Queued: kept. Left: gone.
+        try await rig.queue.join(Self.player)
+        #expect(await rig.queue.cachedRestrictions == 1)
+        try await rig.queue.leave("T:0")
+        #expect(await rig.queue.cachedRestrictions == 0)
+        // Watching: kept, through a join and a leave, until her stream ends.
+        do {
+            let stream = rig.queue.stateUpdates(for: "T:0")
+            var states = stream.makeAsyncIterator()
+            #expect(await states.next() == .idle)
+            try await rig.queue.join(Self.player)
+            try await rig.queue.leave("T:0")
+            #expect(await rig.queue.cachedRestrictions == 1)
+            withExtendedLifetime(stream) {}
+        }
+        #expect(!rig.queue.watchers.isWatched("T:0"))
+        #expect(await eventually { await rig.queue.cachedRestrictions == 0 })
+        // Locked: kept until her race closes.
+        try await rig.queue.join(Self.player)
+        rig.clock.advance(60)
+        await rig.queue.step()
+        #expect(await rig.queue.state(of: "T:0") == .fleetLocked)
+        #expect(await rig.queue.cachedRestrictions == 1)
+        await rig.log.close(try #require(await rig.log.fleets.first).raceID)
+        #expect(await eventually { await rig.queue.cachedRestrictions == 0 })
+    }
+
+    /// #469: a stream dropped as soon as it is opened leaves no watcher (its removal can't come before its
+    /// registration) and nothing cached.
+    @Test func aStreamDroppedAtOnceLeavesNoWatcher() async throws {
+        let rig = Rig()
+        for _ in 0..<200 { _ = rig.queue.stateUpdates(for: "T:0") }
+        #expect(!rig.queue.watchers.isWatched("T:0"))
+        await rig.queue.step()
+        #expect(await eventually { await rig.queue.cachedRestrictions == 0 })
+        #expect(rig.queue.watchers.keys.isEmpty)
+    }
 }

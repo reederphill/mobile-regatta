@@ -187,8 +187,8 @@ public actor QueueMatchmaker {
     /// Players whose fleet has locked and whose race is starting, with the fleet's size.
     private var starting: [String: Int] = [:]
     private var races: [UUID: [String]] = [:]
-    private var watchers: [String: [UUID: AsyncStream<QueueState>.Continuation]] = [:]
-    private var lastPushed: [String: [UUID: QueueState]] = [:]
+    /// The state streams players hold, registered and removed synchronously (#469).
+    nonisolated let watchers = StreamWatchers<QueueState>()
     /// Suspensions, failed attestations and cooldowns, stored (#147).
     public nonisolated let restrictions: any RestrictionStore
     /// Counts briefing leaves into cooldowns.
@@ -199,8 +199,12 @@ public actor QueueMatchmaker {
     private let liveries: LiverySource?
     /// Hears each seat the queue frees before its race closes (the lifecycle's, #469); nil: nobody.
     private let seatReleased: SeatReleased?
-    /// Each watched, queued or locked player's restrictions as last read from the store: `state(of:)` reads these.
+    /// Each watched, queued or locked player's restrictions as last read from the store: what the queue shows and
+    /// decides by. Read when she starts watching (again each time, #469), when she joins, each step while she is
+    /// queued, on a briefing leave and on `restrictionsChanged`. Nobody else's is kept: `evictUnusedRestrictions`.
     private var restricted: [String: PlayerRestrictions] = [:]
+    /// How many players' restrictions are cached, for tests.
+    var cachedRestrictions: Int { restricted.count }
     private var guns: [(due: Date, line: SystemLine)] = []
     private var gunWatchers: [UUID: AsyncStream<SystemLine>.Continuation] = [:]
     /// Launches that failed in a row, and when the fleet at the head may be tried again (`LaunchRetry`).
@@ -264,6 +268,7 @@ public actor QueueMatchmaker {
         driver = nil
         for watcher in gunWatchers.values { watcher.finish() }
         gunWatchers = [:]
+        watchers.finishAll()
     }
 
     /// Time has moved: re-reads the queued players' restrictions (one suspended or flagged meanwhile leaves the queue),
@@ -315,8 +320,16 @@ public actor QueueMatchmaker {
 
     // MARK: The queue
 
-    /// What the queue looks like to `id` now.
-    public func state(of id: String) -> QueueState {
+    /// What the queue looks like to `id` now. For a player whose restrictions aren't cached (she isn't watching, queued
+    /// or locked) they are read for this answer and not kept.
+    public func state(of id: String) async -> QueueState {
+        if restricted[id] == nil { await loadRestrictions(id) }
+        defer { evictUnusedRestrictions() }
+        return cachedState(of: id)
+    }
+
+    /// The state from the cached restrictions and the book as they are.
+    private func cachedState(of id: String) -> QueueState {
         let time = now()
         if let refusal = restricted[id]?.refusal(at: time) { return .unavailable(refusal) }
         if handOffs[id] != nil { return .fleetLocked }
@@ -330,7 +343,8 @@ public actor QueueMatchmaker {
     public func join(_ player: AccountPlayer) async throws(QueueError) {
         let id = player.teamPlayerID
         await loadRestrictions(id)
-        switch state(of: id) {
+        defer { evictUnusedRestrictions() }
+        switch cachedState(of: id) {
         case .unavailable(let refusal): throw .refused(refusal)
         case .queued, .fleetLocked: throw .alreadyQueued
         case .idle: break
@@ -501,40 +515,35 @@ public actor QueueMatchmaker {
     // MARK: Watching
 
     /// The player's queue state now, then each change; coalesced to the latest, so a slow reader never piles them up.
+    /// The stream is registered before this returns and removed the moment it ends (#469); its first state comes once
+    /// her restrictions are read.
     public nonisolated func stateUpdates(for id: String) -> AsyncStream<QueueState> {
-        let (stream, continuation) = AsyncStream<QueueState>.makeStream(bufferingPolicy: .bufferingNewest(1))
-        let token = UUID()
-        continuation.onTermination = { _ in Task { await self.unwatch(id, token) } }
-        Task { await self.watch(id, token, continuation) }
+        let (stream, token) = watchers.open(id, bufferingPolicy: .bufferingNewest(1)) { Task { await self.evictUnusedRestrictions() } }
+        Task { await self.watch(id, token) }
         return stream
     }
 
-    private func watch(_ id: String, _ token: UUID, _ continuation: AsyncStream<QueueState>.Continuation) async {
-        if restricted[id] == nil { await loadRestrictions(id) }
-        let current = state(of: id)
-        continuation.yield(current)
-        watchers[id, default: [:]][token] = continuation
-        lastPushed[id, default: [:]][token] = current
-    }
-
-    private func unwatch(_ id: String, _ token: UUID) {
-        watchers[id]?[token] = nil
-        lastPushed[id]?[token] = nil
-        if watchers[id]?.isEmpty == true {
-            watchers[id] = nil
-            lastPushed[id] = nil
-            if !book.contains(id), handOffs[id] == nil, starting[id] == nil { restricted[id] = nil }
-        }
+    /// Reads her restrictions afresh (a cached entry may be as old as her last stream, #469) and gives the stream its
+    /// first state. A stream that has gone meanwhile gets nothing, and what was read for it isn't kept.
+    private func watch(_ id: String, _ token: UUID) async {
+        await loadRestrictions(id)
+        watchers.prime(id, token, [cachedState(of: id)])
+        evictUnusedRestrictions()
     }
 
     /// Sends each watcher its state, if it changed since the last it was sent.
     private func pushAll() {
-        for (id, streams) in watchers {
-            let current = state(of: id)
-            for (token, continuation) in streams where lastPushed[id]?[token] != current {
-                continuation.yield(current)
-                lastPushed[id, default: [:]][token] = current
-            }
+        for id in watchers.keys { watchers.sendIfChanged(cachedState(of: id), to: id) }
+        evictUnusedRestrictions()
+    }
+
+    /// Forgets the cached restrictions of every player who is neither queued, locked nor watching (#469): the cache
+    /// holds no more than the connections and the fleets do.
+    private func evictUnusedRestrictions() {
+        guard !restricted.isEmpty else { return }
+        let queued = Set(book.entries.map(\.player.teamPlayerID))
+        restricted = restricted.filter { id, _ in
+            queued.contains(id) || handOffs[id] != nil || starting[id] != nil || watchers.isWatched(id)
         }
     }
 
