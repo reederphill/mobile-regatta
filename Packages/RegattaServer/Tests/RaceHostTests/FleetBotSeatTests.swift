@@ -5,7 +5,7 @@ import RegattaProtocol
 import Testing
 
 /// #149: an online race's bot seats on the host. Fill bots sail at the fleet's level from the start; a seat its
-/// player gives up before the gun (`tick < 0`) goes to a bot of that level for good, where the boat is, under a
+/// player gives up before the gun (`tick <= 0`, as the race reads presence) goes to a bot of that level for good, where the boat is, under a
 /// sailing name; a seat that merely dropped stays its player's. The gun is at tick 0.
 struct FleetBotSeatTests {
     static let fleet = FleetFill(medianRating: 1500)
@@ -138,20 +138,30 @@ struct FleetBotSeatTests {
         #expect(try Replayer.digest(of: outcome.log) == outcome.digest)
     }
 
-    @Test func aLeaveAtTickZeroIsAfterTheGun() async throws {
-        // One tick before the gun is still before it.
-        let early = try await Rig(humans: 2, seats: 4, fleet: Self.fleet)
-        await early.run(to: -1)
-        #expect(await early.host.leave(seat: 0))
-        #expect(await early.host.rosterEntries[0].isBot)
-        #expect(early.briefingLeaves == [BriefingLeave(seat: 0, kind: .left)] && early.leftAfterGun.isEmpty)
-        #expect(await early.host.botSeats.contains { $0.seat == 0 && $0.source == .takeover && $0.takenTick == -1 })
+    /// The host's "before the gun" is the race's own (`SeatPresence`: a leave stamped tick 0 or earlier means she wasn't
+    /// at the gun), so the takeover and the rating never disagree about a leaver (review of #151).
+    @Test func aLeaveAtTickZeroIsBeforeTheGun() async throws {
+        // One tick before the gun, and the tick the gun fires in: a fleet bot takes the seat, and she wasn't at the gun.
+        for tick in [-1, 0] {
+            let early = try await Rig(humans: 2, seats: 4, fleet: Self.fleet)
+            #expect(await early.host.attach(seat: 1, transport: RecordingTransport()))
+            await early.run(to: tick)
+            #expect(await early.host.leave(seat: 0))
+            #expect(await early.host.rosterEntries[0].isBot)
+            #expect(early.briefingLeaves == [BriefingLeave(seat: 0, kind: .left)] && early.leftAfterGun.isEmpty)
+            #expect(await early.host.botSeats.contains { $0.seat == 0 && $0.source == .takeover && $0.takenTick == tick })
+            #expect(await early.host.log.seatEvents.contains(SeatEvent(tick: tick, seat: 0, kind: .leftBeforeGun)))
+            #expect(await !early.host.log.seatEvents.contains { $0.kind == .left })
+            #expect(await !early.host.log.humanSeatsAtGun.contains(0))
+            await early.run(to: 15)
+            if case .bot = await early.host.controller(seat: 0) {} else { Issue.record("seat 0 is \(await early.host.controller(seat: 0))") }
+        }
 
-        // At the gun's tick it is after it: the dropped-boat path for good, no bot seat, no new name.
+        // The tick after: she was at the gun. The dropped-boat path for good, no bot seat, no new name.
         let rig = try await Rig(humans: 2, seats: 4, fleet: Self.fleet)
         let seat1 = RecordingTransport()
         #expect(await rig.host.attach(seat: 1, transport: seat1))
-        await rig.run(to: 0)
+        await rig.run(to: 1)
         let roster = await rig.host.rosterEntries
         #expect(await rig.host.leave(seat: 0))
         #expect(rig.leftAfterGun == [0])
@@ -159,10 +169,11 @@ struct FleetBotSeatTests {
         #expect(await rig.host.rosterEntries == roster)
         #expect(rosterChanges(seat1).isEmpty)
         #expect(await rig.host.botSeats.map(\.source) == [.fill, .fill])
-        #expect(await rig.host.log.seatEvents.contains(SeatEvent(tick: 0, seat: 0, kind: .left)))
+        #expect(await rig.host.log.seatEvents.contains(SeatEvent(tick: 1, seat: 0, kind: .left)))
         #expect(await !rig.host.log.seatEvents.contains { $0.kind == .leftBeforeGun })
+        #expect(await rig.host.log.humanSeatsAtGun.contains(0))
         #expect(await rig.host.controller(seat: 0).isHuman)
-        await rig.run(to: 15)
+        await rig.run(to: 16)
         if case .dropped = await rig.host.controller(seat: 0) {} else { Issue.record("seat 0 is \(await rig.host.controller(seat: 0))") }
         #expect(await rig.host.hasLeft(seat: 0))
         #expect(await !rig.host.attach(seat: 0, transport: RecordingTransport()))

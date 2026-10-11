@@ -187,6 +187,57 @@ extension RaceSims {
             #expect(try await rig.lifecycle.lastRace(of: "T:1")?.rating?.outcome == .rated(before: rating(1500), after: rating(1338)))
         }
 
+        /// One definition of "at the gun" (review of #151): the race's own (`SeatPresence`), by which a leave stamped
+        /// tick 0, the tick the gun fires in, is a leave before the gun. So a leaver at −1 or 0 is taken over by a fleet
+        /// bot and has nothing of the race: no rating, no counts, not her last race. At 1 she was at the gun: her boat is
+        /// covered as a dropped boat, she is rated as retired, counted, and the race is her last. Never a mix.
+        @Test(arguments: [-1, 0, 1]) func aLeaverIsTakenOverOrAtTheGunNeverBoth(tick: Int) async throws {
+            let rig = Self.rig()
+            let race = try await rig.race(["T:0", "T:1", "T:2"], seats: 4)
+            let transports = (0..<3).map { _ in KeptTransport() }
+            for seat in 0..<3 { try await race.join(seat: seat, transport: transports[seat]) }
+            var seq: UInt32 = 0
+            await rig.sail(race, [0, 1, 2], to: tick, seq: &seq)
+            #expect(await race.host.tick == tick)
+            #expect(await race.quit(seat: 2, transport: transports[2]))
+            await rig.lifecycle.seatReleased("T:2", race: race.id)
+            await rig.sail(race, [0, 1], to: 60, seq: &seq)
+            let atGun = tick > 0
+            switch await race.host.controller(seat: 2) {
+            case .bot: #expect(!atGun, "a fleet bot took a seat left after the gun")
+            case .dropped: #expect(atGun, "a seat left before the gun went the dropped-boat path")
+            default: Issue.record("seat 2 is still hers")
+            }
+            #expect(await race.host.rosterEntries[2].isBot == !atGun)
+            for (index, seat) in [1, 0].enumerated() {
+                await race.leave(seat: seat, transport: transports[seat])
+                if index == 0 { await rig.sail(race, [0], to: 150, seq: &seq) }
+            }
+            await rig.runUntilEnded(race, limit: 1_800)
+            let outcome = try #require(await race.host.outcome)
+            #expect(outcome.log.humanSeatsAtGun == (atGun ? [0, 1, 2] : [0, 1]))
+            #expect(outcome.log.seatEvents.contains { $0.seat == 2 && $0.kind == (atGun ? .left : .leftBeforeGun) })
+            await rig.end(race)
+
+            let record = try #require(try await rig.archive.closedRace(race.id))
+            let everyone = ["T:0", "T:1", "T:2"], hers = atGun ? everyone : ["T:0", "T:1"]
+            #expect(record.bots.contains { $0.seat == 2 && $0.source == .takeover } == !atGun)
+            #expect(record.rating?.participants.map(\.playerID) == hers)
+            #expect(record.stats.map(\.playerID) == hers)
+            #expect(rig.archive.ratings.changes(of: race.id).map(\.playerID) == hers)
+            #expect(try await rig.archive.ratings.ratings(of: ["T:2"]).isEmpty == !atGun)
+            let last = try await rig.lifecycle.lastRace(of: "T:2")
+            if atGun {
+                #expect(try #require(outcome.results).row(of: 2)?.code == .ret)
+                #expect(record.stats.first { $0.playerID == "T:2" }.map { !$0.won } == true)
+                guard case .rated? = last?.rating?.outcome else { Issue.record("the leaver at the gun wasn't rated"); return }
+                #expect(await pushed(rig.lifecycle, "T:2").count == 1)
+            } else {
+                #expect(last == nil)
+                #expect(await pushed(rig.lifecycle, "T:2", expecting: 0).isEmpty)
+            }
+        }
+
         /// A participant whose account went during the race (#160): with fewer than 2 left the race is skipped.
         @Test func deletedParticipantIsSkipped() async throws {
             let rig = Self.rig()
