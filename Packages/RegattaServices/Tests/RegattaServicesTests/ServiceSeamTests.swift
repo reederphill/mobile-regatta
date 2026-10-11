@@ -13,6 +13,12 @@ import Testing
         }
         #expect(lobby?.suite == "LobbyService")
         #expect(lobby?.message.contains("reported line still shows") == true)
+        // #152: the suite's two halves. The leak is in reporting: the chat half passes it, the reports half catches it.
+        try await LobbyServiceContract().run(parts: [.chat]) { LeakyLobby(base: Fixtures.lobby($0)) }
+        let reports = await ContractSeamTests.violation {
+            try await LobbyServiceContract().run(parts: [.reports]) { LeakyLobby(base: Fixtures.lobby($0)) }
+        }
+        #expect(reports?.message.contains("reported line still shows") == true)
 
         let profile = await ContractSeamTests.violation {
             try await ProfileServiceContract().run { LaxProfile(base: Fixtures.profile($0)) }

@@ -29,18 +29,34 @@ public struct LobbyServiceContract: ContractSuite {
     public static let humanSeat = 1
     public static let botSeat = 2
 
+    /// The suite in two halves (#152): a server serves the chat before it serves reports (#153).
+    public enum Part: Hashable, Sendable, CaseIterable {
+        /// Reading, posting, the filter, blocking, standings, the silence window, the gate's closures.
+        case chat
+        /// Reporting a line, a player and a race seat.
+        case reports
+    }
+
     public let name = "LobbyService"
 
     public init() {}
 
     public func run(_ makeService: (Situation) async throws -> any LobbyService) async throws {
-        try await openLobby(makeService(.open))
-        try await posting(makeService(.open))
-        try await refusedPostsDontCount(makeService(.open))
-        try await contactsAreStripped(makeService(.open))
-        try await filteredIsNotSent(makeService(.open))
-        try await blocking(makeService(.open))
-        try await reporting(makeService(.open))
+        try await run(parts: Set(Part.allCases), makeService)
+    }
+
+    /// Runs the checks of `parts`. The situations are the same for both.
+    public func run(parts: Set<Part>, _ makeService: (Situation) async throws -> any LobbyService) async throws {
+        if parts.contains(.chat) {
+            try await openLobby(makeService(.open))
+            try await posting(makeService(.open))
+            try await refusedPostsDontCount(makeService(.open))
+            try await contactsAreStripped(makeService(.open))
+            try await filteredIsNotSent(makeService(.open))
+            try await blocking(makeService(.open))
+        }
+        if parts.contains(.reports) { try await reporting(makeService(.open)) }
+        guard parts.contains(.chat) else { return }
         try await freeTextLocked(makeService(.freeTextLocked))
         try await muted(makeService(.muted))
         try await banned(makeService(.banned))
