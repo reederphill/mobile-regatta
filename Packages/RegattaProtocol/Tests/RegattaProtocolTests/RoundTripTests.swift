@@ -164,6 +164,9 @@ import Testing
         plain[0].averagedWindSpeed = nil
         plain[0].penaltyTurnsOwed = 0
         plain[0].penaltyClock = 0
+        plain[0].penaltyDirection = 0 // #487: no crossings with no turn owed
+        plain[0].penaltyFirstCrossing = nil
+        plain[0].penaltyDirectionLocked = false
         let sails = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: plain))).encoded()
         func sailsMutated(_ offset: Int, _ change: (inout UInt8) -> Void) -> [UInt8] {
             var bytes = sails
@@ -204,6 +207,88 @@ import Testing
         #expect(try back.varint("v") == .max)
     }
 
+    /// #487: a `tackAndGybe` penalty's crossings (the turn's way, its first crossing, the lock) cross the wire in one
+    /// byte, every consistent mix exactly, and a pending clock (bit 5: rounding, the clock not yet started) as a
+    /// clock of none; a receiver's held crossing (a prediction's alone) is cleared. A byte no world can have (a fourth
+    /// way or crossing, reserved bits, a crossing or lock with no way, any with no turn owed, a pending clock with
+    /// ticks on it or no turn owed) is refused, and a world that can't be carried throws on encode.
+    @Test func penaltyCrossingsRoundTrip() throws {
+        let base = WorldSnapshot.Seat(boat: Boat(id: 0, isPlayer: true, colorIndex: 0, position: .zero, heading: 0, speed: 0),
+                                      heldInput: .neutral)
+        func owing(_ direction: Int, _ first: PenaltyCrossing?, _ locked: Bool) -> WorldSnapshot.Seat {
+            var seat = base
+            seat.boat.penaltyTurnsOwed = 2
+            seat.boat.penaltyClockTick = -30
+            seat.boat.penaltyDirection = direction
+            seat.boat.penaltyFirstCrossing = first
+            seat.boat.penaltyDirectionLocked = locked
+            return seat
+        }
+        var pending = owing(1, .tack, false)
+        pending.boat.penaltyClockTick = nil
+        var sent = [base, owing(0, nil, false), pending]
+        for direction in [1, -1] {
+            for first in [nil, PenaltyCrossing.tack, .gybe] {
+                for locked in [false, true] { sent.append(owing(direction, first, locked)) }
+            }
+        }
+        for seat in sent {
+            let wire = try WireSeat(seat, tick: 0)
+            let bytes = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: [wire, wire]))).encoded()
+            #expect(bytes.count == Frame.headerSize + 1 + 1 + 2 * SnapshotQuantisation.bytesPerSeat)
+            guard case .snapshot(let decoded) = try Frame(decoding: bytes).message else {
+                Issue.record("not a snapshot")
+                continue
+            }
+            #expect(decoded.seats[0] == wire)
+            var received = base
+            received.boat.penaltyTurnsOwed = 1
+            received.boat.penaltyClockTick = -10
+            received.boat.penaltyDirection = 1
+            received.boat.penaltyFirstCrossing = .gybe
+            received.boat.penaltyCrossingHeld = true // the receiver's prediction held its second crossing
+            decoded.seats[0].apply(to: &received, tick: 0)
+            #expect(received.boat.penaltyDirection == seat.boat.penaltyDirection)
+            #expect(received.boat.penaltyFirstCrossing == seat.boat.penaltyFirstCrossing)
+            #expect(received.boat.penaltyDirectionLocked == seat.boat.penaltyDirectionLocked)
+            #expect(received.boat.penaltyClockTick == seat.boat.penaltyClockTick)
+            #expect(!received.boat.penaltyCrossingHeld)
+        }
+
+        let good = try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: [try WireSeat(owing(1, .tack, true), tick: 0),
+                                                                                   try WireSeat(base, tick: 0)]))).encoded()
+        let seat0 = Frame.headerSize + 1 + 1, crossings = 28
+        #expect(good[seat0 + crossings] == 1 | 1 << 2 | 1 << 4)
+        func with(_ seat: Int, _ byte: UInt8) -> [UInt8] {
+            var bytes = good
+            bytes[seat0 + seat * SnapshotQuantisation.bytesPerSeat + crossings] = byte
+            return bytes
+        }
+        _ = try Frame(decoding: with(0, 2 | 2 << 2)) // to port, a gybe, not locked
+        for bad: UInt8 in [3, 1 | 3 << 2, 1 | 1 << 6, 1 | 1 << 7, 1 << 2, 1 << 4] {
+            #expect(throws: WireError.invalidValue("penaltyCrossings"), "\(bad)") { try Frame(decoding: with(0, bad)) }
+        }
+        // Seat 1 owes no turn: no way either.
+        #expect(throws: WireError.invalidValue("penaltyCrossings")) { try Frame(decoding: with(1, 1)) }
+        // A pending clock: only with a turn owed, and no ticks on the clock (seat 0's has 30).
+        #expect(throws: WireError.invalidValue("penaltyClock")) { try Frame(decoding: with(0, 1 | 1 << 5)) }
+        #expect(throws: WireError.invalidValue("penaltyClock")) { try Frame(decoding: with(1, 1 << 5)) }
+
+        var wide = owing(1, nil, false)
+        wide.boat.penaltyDirection = 2
+        #expect(throws: WireError.outOfRange("penaltyDirection")) { try WireSeat(wide, tick: 0) }
+        #expect(throws: WireError.outOfRange("penaltyCrossings")) { try WireSeat(owing(0, .tack, false), tick: 0) }
+        var free = base
+        free.boat.penaltyDirection = 1
+        #expect(throws: WireError.outOfRange("penaltyCrossings")) { try WireSeat(free, tick: 0) }
+        var wire = try WireSeat(base, tick: 0)
+        wire.penaltyFirstCrossing = .gybe
+        wire.penaltyDirection = -1
+        #expect(throws: WireError.outOfRange("penaltyCrossings")) {
+            try Frame(seq: 0, tick: 0, message: .snapshot(Snapshot(seats: [wire, wire]))).encoded()
+        }
+    }
+
     @Test func valuesTheWireCantCarryThrowOnEncode() throws {
         var gen = Gen(seed: 0x0E0E)
         func encode(_ message: Message, tick: Int = 0) throws { _ = try Frame(seq: 0, tick: tick, message: message).encoded() }
@@ -227,11 +312,12 @@ import Testing
         world.seats[0].boat.penaltyTurnsOwed = 128
         world.seats[0].boat.penaltyClockTick = world.tick
         #expect(throws: WireError.outOfRange("penaltyTurnsOwed")) { try Snapshot(world: world) }
-        // #89: a turn owed has a clock, at most 65 535 ticks before the snapshot's tick and never after it.
+        // #89: a turn owed has a clock, at most 65 535 ticks before the snapshot's tick and never after it, or
+        // (#487) none yet, pending: the race refuses that outside a `tackAndGybe` penalty (`Race.invalidField`).
         world.seats[0].boat.penaltyTurnsOwed = 127
         _ = try Snapshot(world: world)
         world.seats[0].boat.penaltyClockTick = nil
-        #expect(throws: WireError.outOfRange("penaltyClockTick")) { try Snapshot(world: world) }
+        #expect(try Snapshot(world: world).seats[0].penaltyClockPending)
         world.seats[0].boat.penaltyClockTick = world.tick - 65_536
         #expect(throws: WireError.outOfRange("penaltyClockTick")) { try Snapshot(world: world) }
         world.seats[0].boat.penaltyClockTick = world.tick + 1
@@ -239,6 +325,9 @@ import Testing
         seats = gen.wireSeats(2)
         seats[0].penaltyTurnsOwed = 0
         seats[0].penaltyClock = 1
+        #expect(throws: WireError.outOfRange("penaltyClock")) { try encode(.snapshot(Snapshot(seats: seats))) }
+        seats[0].penaltyClock = 0
+        seats[0].penaltyClockPending = true
         #expect(throws: WireError.outOfRange("penaltyClock")) { try encode(.snapshot(Snapshot(seats: seats))) }
         world = gen.world(seats: 2)
         world.seats[0].boat.legIndex = 256
@@ -455,6 +544,9 @@ func relabel(_ boat: Boat, isPlayer: Bool) -> Boat {
     copy.penaltyProgress = boat.penaltyProgress
     copy.penaltyClockTick = boat.penaltyClockTick
     copy.queuedPenaltyCallTicks = boat.queuedPenaltyCallTicks
+    copy.penaltyDirection = boat.penaltyDirection
+    copy.penaltyFirstCrossing = boat.penaltyFirstCrossing
+    copy.penaltyDirectionLocked = boat.penaltyDirectionLocked
     copy.isTacking = boat.isTacking
     copy.tackCrossingTick = boat.tackCrossingTick
     copy.roll = boat.roll

@@ -90,13 +90,28 @@ public struct Boat: Identifiable, Sendable {
     /// turning past that carries into the next one (`Race`).
     public var penaltyProgress = 0.0
     /// The tick the current penalty turn's clock started: its start and complete deadlines run from here
-    /// (`Race.owedPenalty(ofSeat:)`). Nil while she owes none.
+    /// (`Race.owedPenalty(ofSeat:)`). Nil while she owes none, and under a `tackAndGybe` penalty (#487) while the
+    /// current turn's clock is pending: it became current while she was rounding a mark, and starts when she is clear.
     public var penaltyClockTick: Int?
     /// The call tick of each owed turn queued behind the current one, oldest first: under `fromCall` stacking
     /// a queued turn's clock starts at its call (`RulesConfig.StackedPenaltyDeadlines`). At most
     /// `penaltyTurnsOwed − 1` of them; a queued turn with none listed (a wire snapshot's, which carries only
     /// the current turn's clock) starts its clock when it becomes current.
     public var queuedPenaltyCallTicks: [Int] = []
+    /// Under a `tackAndGybe` penalty (#487, fleet-rules@6): the way the current turn goes, the sign of her turning at
+    /// its first counting crossing (+1 to starboard, −1 to port); 0 before it. Kept between owed turns once one is
+    /// served (`penaltyDirectionLocked`). Always 0 under a `fullCircle` penalty, whose direction is `penaltyProgress`'s sign.
+    public var penaltyDirection = 0
+    /// Under a `tackAndGybe` penalty (#487): the counting crossing the current turn has made, nil before its first
+    /// and after it is served. Always nil under a `fullCircle` penalty.
+    public var penaltyFirstCrossing: PenaltyCrossing?
+    /// Under a `tackAndGybe` penalty (#487): a turn she owed has been served, so every later turn she owes goes its
+    /// way, `penaltyDirection` (RRS 44.2, "in the same direction"): a crossing the other way counts for nothing but
+    /// to undo one. Cleared once she owes none.
+    public var penaltyDirectionLocked = false
+    /// A prediction's (#96, #487) second crossing of the current turn, held until the server's `penaltyServed`: the
+    /// prediction never serves a turn itself. Always false in the authoritative race; not on the wire.
+    public var penaltyCrossingHeld = false
     /// Rule 13: past head to wind but not yet close-hauled.
     public var isTacking = false
     /// The tick the boom crossed on the tack she is in (#263): set with `isTacking`, cleared with it. What a roll
@@ -220,8 +235,20 @@ public struct Boat: Identifiable, Sendable {
         averagedWindSpeed = average + (now - average) * min(1, dt / timeConstant)
     }
 
+    /// Puts a `tackAndGybe` penalty's crossing state (#487) at rest: no way, no crossing, nothing held.
+    mutating func clearPenaltyCrossings() {
+        penaltyDirection = 0
+        penaltyFirstCrossing = nil
+        penaltyDirectionLocked = false
+        penaltyCrossingHeld = false
+    }
+
+    /// Rule 21.2's "taking a penalty": she owes a turn and has started it. Under a `fullCircle` penalty, turned more
+    /// than 30° of it (#88); under `tackAndGybe` (#487), made its first counting crossing, until it is served. Each
+    /// penalty kind leaves the other's state at rest (`penaltyProgress` 0, `penaltyFirstCrossing` nil), so one test
+    /// reads both.
     public var isTakingPenalty: Bool {
-        penaltyTurnsOwed > 0 && abs(penaltyProgress) > deg2rad(30)
+        penaltyTurnsOwed > 0 && (abs(penaltyProgress) > deg2rad(30) || penaltyFirstCrossing != nil || penaltyCrossingHeld)
     }
 
     /// The boat class's hull `outline` (`BoatClass.Hull.outline`, boat frame) in world coordinates. Convex.
@@ -229,5 +256,26 @@ public struct Boat: Identifiable, Sendable {
         let f = forward
         let r = f.rightPerp
         return outline.map { position + r * $0.x + f * $0.y }
+    }
+}
+
+/// A counting crossing of a `tackAndGybe` penalty turn (#487): the boom crossing with the wind forward of abeam (a
+/// tack) or abaft it (a gybe).
+public enum PenaltyCrossing: Sendable, Equatable, CaseIterable {
+    case tack
+    case gybe
+
+    /// The other kind: what serves a turn whose first crossing is this.
+    public var other: PenaltyCrossing { self == .tack ? .gybe : .tack }
+
+    /// A stable code for the digest and the wire: 1 a tack, 2 a gybe (0 is none).
+    public var code: UInt8 { self == .tack ? 1 : 2 }
+
+    public init?(code: UInt8) {
+        switch code {
+        case 1: self = .tack
+        case 2: self = .gybe
+        default: return nil
+        }
     }
 }

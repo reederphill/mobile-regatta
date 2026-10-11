@@ -247,7 +247,17 @@ import Glibc
 ///    before 37 first shipped: about 2 kn is enough to complete a tack). Races sail skiff@8 by default
 ///    (#461), so every default race tacks and gybes by hand, players and bots. A race naming any older class, skiff@7
 ///    included, sails as on 36, bit for bit.
-public let simulationRevision = 37
+/// 38: fleet-rules@6 (#487), on 37: rules schema 6 adds `raceFormat.penalty.turn` (absent `fullCircle`). Under
+///    `tackAndGybe` a penalty turn is one tack and one gybe made turning the same way, counted at the boom's crossings
+///    (`Boat.penaltyDirection`, `penaltyFirstCrossing`, `penaltyDirectionLocked`): a crossing on a tick her heading
+///    didn't turn or while rounding a mark counts for nothing, completing a rounding stage between the crossings voids
+///    the first, a recross undoes a crossing (in the first owed turn it turns the turn the other way), later owed turns
+///    go the first one's way, and the one limit is 40 s from the turn's clock (`missedComplete`; no start deadline). A
+///    turn that becomes current while she is rounding has its clock pending (`Boat.penaltyClockTick` nil) until the end
+///    of the first tick she is clear of the mark; once started it runs on through any later rounding.
+///    Rule 21.2 binds her from the first counting crossing until the turn is served. Not the default: a race naming
+///    fleet-rules@5 or older sails as on 37, bit for bit (the new state is hashed only under `tackAndGybe`).
+public let simulationRevision = 38
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

@@ -78,7 +78,9 @@ struct FreezeTickRow: Decodable {
     var callsApart: Double?
     /// One of those calls is on you, under this rule ("10": port/starboard).
     var yourCall: String?
-    /// Your penalty turn: "owed" (called, not started), "turning", or "either" (its arc shows).
+    /// Your penalty turn: "owed" (called, not started), "turning", or "either" (its arc shows). Started is
+    /// `Boat.isTakingPenalty`: 30° in, or under a `tackAndGybe` penalty (#487, fleet-rules@6) its first counting
+    /// crossing made, until served.
     var yourTurn: String?
     /// Your offset from the groove, the autohelm's or by hand on a class whose autohelm doesn't hold (`grooveOffset`):
     /// "pinching" (inside it) or "footing" (outside it).

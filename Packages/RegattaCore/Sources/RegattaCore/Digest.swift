@@ -61,6 +61,14 @@ public extension Race {
             h.combine(b.penaltyClockTick)
             h.combine(b.queuedPenaltyCallTicks.count)
             for call in b.queuedPenaltyCallTicks { h.combine(call) }
+            // A `tackAndGybe` penalty's crossings (#487), hashed only under it: a race on a `fullCircle` file (every
+            // file before fleet-rules@6) hashes as it did.
+            if rules.raceFormat.penalty.turn == .tackAndGybe {
+                h.combine(b.penaltyDirection)
+                h.combine(Int(b.penaltyFirstCrossing?.code ?? 0))
+                h.combine(b.penaltyDirectionLocked)
+                h.combine(b.penaltyCrossingHeld)
+            }
             h.combine(b.isTacking)
             h.combine(b.tackCrossingTick)
             h.combine(b.roll?.digestCode)

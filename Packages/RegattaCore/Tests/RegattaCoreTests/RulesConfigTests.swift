@@ -247,8 +247,8 @@ import Testing
         #expect(throws: needsSchema4) {
             try RulesConfigFile(data: Self.tampered(#""schemaVersion": 4"#, #""schemaVersion": 3"#, version: 4))
         }
-        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 6, supported: [1, 2, 3, 4, 5])) {
-            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 5"#, #""schemaVersion": 6"#))
+        #expect(throws: DataFileError.unsupportedSchemaVersion(kind: kind, found: 7, supported: [1, 2, 3, 4, 5, 6])) {
+            try RulesConfigFile(data: Self.tampered(#""schemaVersion": 5"#, #""schemaVersion": 7"#))
         }
     }
 
@@ -429,6 +429,63 @@ import Testing
             #expect(call.startDeadlineTick == call.tick + 15 * Race.tickRate)
             #expect(call.completeDeadlineTick == call.tick + 30 * Race.tickRate)
             #expect(call.turnsOwed == 1)
+        }
+    }
+
+    /// fleet-rules@6 (schema 6, #487) is @5 with a `tackAndGybe` penalty turn: completed within 40 s of its clock, no
+    /// start deadline (`start` is `complete`) and no started turn; every other value the same. It is not the default.
+    /// @1 to @5 still parse as before: a `fullCircle` turn.
+    @Test func fleetRulesSixParsesTackAndGybe() throws {
+        let v5 = try RulesConfigFile.bundled(id: "fleet-rules", version: 5)
+        let v6 = try RulesConfigFile.bundled(id: "fleet-rules", version: 6)
+        #expect(v6.header.schemaVersion == 6)
+        #expect(v5.ref == RaceFiles.defaults.rulesConfiguration.ref && v6.ref != Race.defaultRulesConfiguration.ref)
+        let penalty = v6.content.raceFormat.penalty
+        #expect(penalty == RulesConfig.Penalty(start: 40, complete: 40, startedTurn: 0, stackedPenaltyDeadlines: .sequential,
+                                               turn: .tackAndGybe))
+        for version in 1...5 {
+            #expect(try RulesConfigFile.bundled(id: "fleet-rules", version: version).content.raceFormat.penalty.turn == .fullCircle)
+        }
+        #expect(v5.content.raceFormat.penalty == RulesConfig.Penalty(start: 20, complete: 40, startedTurn: deg2rad(30),
+                                                                      stackedPenaltyDeadlines: .sequential))
+        var format = v6.content.raceFormat
+        format.penalty = v5.content.raceFormat.penalty
+        #expect(format == v5.content.raceFormat)
+        #expect(v6.content.incidents == v5.content.incidents && v6.content.zone == v5.content.zone)
+        #expect(v6.content.markRoomGiven == v5.content.markRoomGiven && v6.content.onABeat == v5.content.onABeat)
+        #expect(v6.content.builderValues == v5.content.builderValues && v6.header.placeholders == v5.header.placeholders)
+    }
+
+    /// The penalty turn is schema 6's: refused before it; under `tackAndGybe` no start deadline or started turn, under
+    /// `fullCircle` (written or absent) both.
+    @Test func penaltyTurnNeedsSchema6() throws {
+        let kind = RulesConfig.kind
+        let turn = #""turn": "tackAndGybe","#
+        // In a schema-5 file.
+        #expect(throws: DataFileError.invalidContent(kind: kind, id: "fleet-rules", reason: "raceFormat.penalty.turn needs schema 6")) {
+            try RulesConfigFile(data: Self.tampered(#""startSeconds": 20,"#, #""startSeconds": 20, "turn": "fullCircle","#))
+        }
+        // A schema-6 fullCircle file is a schema-5 penalty, written or absent.
+        let six = { (data: Data) in Data(String(decoding: data, as: UTF8.self)
+            .replacingOccurrences(of: #""schemaVersion": 5"#, with: #""schemaVersion": 6"#).utf8) }
+        for written in [#""startSeconds": 20, "turn": "fullCircle","#, #""startSeconds": 20,"#] {
+            let file = try RulesConfigFile(data: six(Self.tampered(#""startSeconds": 20,"#, written)))
+            #expect(file.content.raceFormat.penalty == (try RulesConfigFile.bundled(id: "fleet-rules", version: 5)).content.raceFormat.penalty)
+        }
+        #expect(throws: DataFileError.invalidContent(
+            kind: kind, id: "fleet-rules", reason: "raceFormat.penalty.turn must be one of fullCircle, tackAndGybe")) {
+            try RulesConfigFile(data: Self.tampered(turn, #""turn": "threeSixty","#, version: 6))
+        }
+        #expect(throws: DataFileError.invalidContent(
+            kind: kind, id: "fleet-rules", reason: "a tackAndGybe penalty has no raceFormat.penalty.startSeconds")) {
+            try RulesConfigFile(data: Self.tampered(turn, turn + #" "startSeconds": 20,"#, version: 6))
+        }
+        #expect(throws: DataFileError.invalidContent(
+            kind: kind, id: "fleet-rules", reason: "a tackAndGybe penalty has no raceFormat.penalty.startedTurnDegrees")) {
+            try RulesConfigFile(data: Self.tampered(turn, turn + #" "startedTurnDegrees": 30,"#, version: 6))
+        }
+        #expect(throws: DataFileError.malformed(kind: kind, reason: "a fullCircle penalty needs raceFormat.penalty.startSeconds")) {
+            try RulesConfigFile(data: Self.tampered(turn, "", version: 6))
         }
     }
 }

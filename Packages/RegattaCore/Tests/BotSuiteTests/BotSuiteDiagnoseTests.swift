@@ -230,6 +230,44 @@ import Testing
         #expect(boats[0].finish.metresMadeInLast90Seconds != nil, "100 s on the water")
     }
 
+    /// Under fleet-rules@6 (#487) the observer reads a reset as a recross (a crossing back on its tick) or a rounding's
+    /// void, never as a 30° turn given up; the turn's first crossing is its start, the crossing that serves it is not a
+    /// late turn, and a call made while she is taking a penalty counts as a call on a boat turning.
+    @Test func observerReadsCrossingsUnderTackAndGybe() throws {
+        let cell = Self.cell()
+        let base = try BotRaceHarness.raceSetup(for: cell)
+        let setup = try RaceSetup(simulationVersion: base.simulationVersion, raceSeed: base.raceSeed, seats: base.seats,
+                                  laps: base.laps, startSequenceTicks: base.startSequenceTicks, boatClass: base.boatClass,
+                                  venue: base.venue, conditions: base.conditions,
+                                  rulesConfiguration: try RulesConfigFile.bundled(id: "fleet-rules", version: 6).ref)
+        let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
+                            mode: .authoritative(windSeed: BotRaceHarness.windSeed(for: cell.seed)))
+        #expect(race.rules.raceFormat.penalty.turn == .tackAndGybe)
+        let rate = Race.tickRate
+        let script: [Int: [RaceEvent.Kind]] = [
+            -30 * rate: [.markTouch(seat: 0, mark: "pin")],
+            -28 * rate: [.penaltyStarted(seat: 0), .tacked(seat: 0)],
+            -26 * rate: [.penaltyReset(seat: 0), .tacked(seat: 0)],
+            -22 * rate: [.penaltyReset(seat: 0)],
+            -21 * rate: [.penaltyStarted(seat: 0), .gybed(seat: 0)],
+            -15 * rate: [.penaltyServed(seat: 0), .tacked(seat: 0)],
+        ]
+        var observer = RaceObserver(race: race)
+        while race.tick < -10 * rate {
+            race.step()
+            _ = race.drainEvents()
+            observer.record(race, events: (script[race.tick] ?? []).map { RaceEvent(tick: race.tick, kind: $0) })
+            try #require(race.boats[0].penaltyTurnsOwed == 0, "seat 0 was called at \(race.tick): script another seed")
+        }
+        let boats = observer.boats(of: race, tiers: [.national, .club])
+        let episode = try #require(boats[0].episodes.first)
+        #expect(episode.recrosses == 1 && episode.roundingVoids == 1 && episode.resets.isEmpty)
+        #expect(episode.outcome == .served && episode.turnsServed == 1)
+        #expect(episode.secondsToStarted == 2 && episode.secondsTurning == 13, "started at the first crossing")
+        #expect(boats[0].start.lateTurns == 0, "every crossing was the turn's: the serving one too")
+        #expect(episode.callsWhileTurning == 0)
+    }
+
     /// A race's digest after `seconds` from the gun, its bots sailing it, with a `RaceObserver` watching or not.
     static func digest(boatClass: BoatClassFile, seed: UInt64, seconds: Int, observed: Bool) throws -> (digest: UInt64, boats: [BoatDiagnosis]) {
         var catalog = RaceFileCatalog()

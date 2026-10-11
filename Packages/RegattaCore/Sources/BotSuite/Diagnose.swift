@@ -205,16 +205,28 @@ public struct PenaltyEpisode: Hashable, Sendable {
     public var calls = 1
     public var turnsServed = 0
     public var outcome = Outcome.open
-    /// From the call to 30° into the first turn; nil if she never got there.
+    /// From the call to 30° into the first turn (under a `tackAndGybe` penalty, #487: its first counting crossing);
+    /// nil if she never got there.
     public var secondsToStarted: Double?
     /// From there to owing nothing.
     public var secondsTurning: Double?
     /// From owing nothing to 90 % of her target speed (`RaceObserver.targetSpeed`); nil if she was called again
     /// first, left the water, or took longer than `RaceObserver.recoverySeconds`.
     public var secondsRecovering: Double?
-    /// Its started turns given up, by cause.
+    /// Its started turns given up, by cause (a `fullCircle` penalty's: under `tackAndGybe` a reset is a recross or a
+    /// rounding's void, counted below).
     public var resets: [ResetCause: Int] = [:]
-    /// Each turn served: seconds from its clock (the call, or the turn before it served) to served.
+    /// Under a `tackAndGybe` penalty (#487): her crossings back over a counting crossing (`penaltyReset` on a tick she
+    /// tacked or gybed), and the first crossings voided by a rounding (`penaltyReset` on a tick she didn't).
+    public var recrosses = 0
+    public var roundingVoids = 0
+    /// The calls in it made while she was taking a penalty (`Boat.isTakingPenalty`, rule 21.2's window): calls on a
+    /// boat turning.
+    public var callsWhileTurning = 0
+    /// Each turn served: seconds from its clock's start (the call, or the turn before it served; under a `tackAndGybe`
+    /// penalty, #487, a turn that became current while she was rounding starts its clock once she is clear of the mark)
+    /// to served. The wait for a pending clock is not counted here: it is in `secondsToStarted`, which runs from the
+    /// call.
     public var turnSeconds: [Double] = []
 
     public init(phase: PenaltyPhase, callSeconds: Double) {
@@ -329,6 +341,11 @@ public struct RaceObserver {
     private let legs: Int
     private let noGo: Double
     private let hullLength: Double
+    /// The race's penalty is a tack and a gybe (#487, fleet-rules@6): a reset is a recross or a rounding's void.
+    private let tackAndGybe: Bool
+    /// Each seat's last tick a turn was served, and the seats that tacked or gybed on the tick being recorded.
+    private var servedTick: [Int?]
+    private var crossedNow: Set<Int> = []
 
     private var starts: [StartObservation]
     private var startTicks: [Int?]
@@ -336,10 +353,11 @@ public struct RaceObserver {
     private var turnsOwed: [Int]
     private var turnsServed: [Int]
 
-    /// The episode each seat has open: its first call's tick, the current turn's clock, and its started turn, if any.
+    /// The episode each seat has open: its first call's tick, the current turn's clock (nil while it is pending, #487),
+    /// and its started turn, if any.
     private struct Open {
         var callTick: Int
-        var clockTick: Int
+        var clockTick: Int?
         var startedTick: Int?
         var isStarted = false
         var heldOver = false
@@ -367,6 +385,8 @@ public struct RaceObserver {
         legs = race.course.legs.count
         noGo = BoatDynamics.noGoAngle(race.boatClass.polar)
         hullLength = race.boatClass.hull.length
+        tackAndGybe = race.rules.raceFormat.penalty.turn == .tackAndGybe
+        servedTick = Array(repeating: nil, count: count)
         starts = Array(repeating: StartObservation(), count: count)
         startTicks = Array(repeating: nil, count: count)
         episodes = Array(repeating: [], count: count)
@@ -393,12 +413,22 @@ public struct RaceObserver {
 
     public mutating func record(_ race: Race, events: [RaceEvent]) {
         let tick = race.tick
+        crossedNow = Set(events.compactMap { event -> Int? in
+            switch event.kind {
+            case .tacked(let seat), .gybed(let seat): seat
+            default: nil
+            }
+        })
         for event in events { record(event, race) }
         for (seat, boat) in race.boats.enumerated() {
             defer { progress[seat] = boat.penaltyProgress }
             guard !boat.isGhost else { continue }
             lastOnWaterTick[seat] = tick
             if startTicks[seat] == nil { recordStart(seat, boat, race) }
+            if var turn = open[seat], turn.clockTick == nil, let clock = boat.penaltyClockTick {
+                turn.clockTick = clock // a pending clock started, clear of the mark (#487)
+                open[seat] = turn
+            }
             if var turn = open[seat], turn.isStarted, !turn.heldOver, boat.penaltyProgress != 0,
                race.heldInputs[seat].rudderValue * (boat.penaltyProgress < 0 ? -1 : 1) >= Self.heldOverRudder {
                 turn.heldOver = true
@@ -431,6 +461,14 @@ public struct RaceObserver {
             turn.isStarted = true
             turn.heldOver = false
             open[seat] = turn
+        case .penaltyReset(let seat) where tackAndGybe:
+            // A recross (a crossing back on this tick) or a rounding's void (#487). A recross in her first owed turn
+            // leaves the turn started, the other way: it is started while she has a crossing.
+            guard var turn = open[seat] else { break }
+            let index = episodes[seat].count - 1
+            if crossedNow.contains(seat) { episodes[seat][index].recrosses += 1 } else { episodes[seat][index].roundingVoids += 1 }
+            turn.isStarted = race.boats[seat].penaltyFirstCrossing != nil
+            open[seat] = turn
         case .penaltyReset(let seat):
             guard var turn = open[seat], turn.isStarted else { break }
             let boats = race.boats
@@ -445,10 +483,11 @@ public struct RaceObserver {
         case .penaltyServed(let seat):
             guard var turn = open[seat] else { break }
             let index = episodes[seat].count - 1
+            servedTick[seat] = tick
             turnsServed[seat] += 1
             episodes[seat][index].turnsServed += 1
-            episodes[seat][index].turnSeconds.append(seconds(tick - turn.clockTick))
-            turn.clockTick = tick
+            episodes[seat][index].turnSeconds.append(seconds(tick - (turn.clockTick ?? tick)))
+            turn.clockTick = tackAndGybe ? race.boats[seat].penaltyClockTick : tick
             turn.owed -= 1
             // Served without the 30° announced (carried over from the turn before): started when it was served.
             if turn.startedTick == nil { turn.startedTick = tick }
@@ -463,7 +502,8 @@ public struct RaceObserver {
             open[seat] = nil
             recovering[seat] = (index, tick)
         case .tacked(let seat), .gybed(let seat):
-            guard startTicks[seat] == nil, !race.boats[seat].isTakingPenalty,
+            // Under a `tackAndGybe` penalty (#487) the crossing that served a turn is the turn's too.
+            guard startTicks[seat] == nil, !race.boats[seat].isTakingPenalty, !(tackAndGybe && servedTick[seat] == tick),
                   tick >= -Self.lateTurnWindowSeconds * rate, tick < Self.startWindowSeconds * rate else { break }
             starts[seat].lateTurns += 1
         case .disqualified(let seat, let reason):
@@ -483,12 +523,13 @@ public struct RaceObserver {
             turn.owed += 1
             open[seat] = turn
             episodes[seat][episodes[seat].count - 1].calls += 1
+            if race.boats[seat].isTakingPenalty { episodes[seat][episodes[seat].count - 1].callsWhileTurning += 1 }
             return
         }
         let boat = race.boats[seat]
         let phase = PenaltyPhase.at(tick: race.tick, status: boat.status, leg: boat.legIndex, legs: legs)
         episodes[seat].append(PenaltyEpisode(phase: phase, callSeconds: seconds(race.tick)))
-        open[seat] = Open(callTick: race.tick, clockTick: race.tick)
+        open[seat] = Open(callTick: race.tick, clockTick: tackAndGybe ? race.boats[seat].penaltyClockTick : race.tick)
         recovering[seat] = nil
     }
 

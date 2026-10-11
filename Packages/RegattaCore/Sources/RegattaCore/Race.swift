@@ -505,6 +505,7 @@ public final class Race {
         resolveObstacleContacts()
         resolveEdgeContacts()
         for i in boats.indices { updateProgress(i, from: previous[i]) }
+        startPendingPenaltyClocks()
         checkForEnd()
     }
 
@@ -734,7 +735,12 @@ public final class Race {
         b.boomSide = moved.boomSide
         let turn = wrapAngle(b.heading - before)
 
-        if b.penaltyTurnsOwed > 0 { turnPenalty(&b, seat: i, turn: turn, playerDriven: playerDriven) }
+        if b.penaltyTurnsOwed > 0 {
+            switch rules.raceFormat.penalty.turn {
+            case .fullCircle: turnPenalty(&b, seat: i, turn: turn, playerDriven: playerDriven)
+            case .tackAndGybe: if crossing { crossPenalty(&b, seat: i, kind: b.twa < .pi / 2 ? .tack : .gybe, turn: turn) }
+            }
+        }
 
         // Rule 13: from the boom crossing head to wind until close-hauled on the new tack.
         if crossing {
@@ -1268,18 +1274,24 @@ public final class Race {
     /// `resolveObstacleContacts`).
     /// Owed turns add up with no cap and are served in order. With none owed it is the current turn at once,
     /// and its clock starts now; otherwise it queues behind the turns she owes, and its clock starts when it
-    /// becomes current (`startNextPenaltyClock`). Returns the turn's clock tick when it is fixed now, for the
-    /// rule call's deadlines: always under `fromCall` stacking, and under `sequential` only when she owed none.
+    /// becomes current (`startNextPenaltyClock`). Under a `tackAndGybe` penalty (#487, fleet-rules@6) a turn that
+    /// becomes current while she is rounding (`isRounding`) has its clock pending, `Boat.penaltyClockTick` nil,
+    /// until the first tick's end she is clear of the mark (`startPendingPenaltyClocks`). Returns the turn's clock
+    /// tick when it is fixed now, for the rule call's deadlines: always under `fromCall` stacking, and under
+    /// `sequential` only when she owed none and its clock isn't pending.
     /// Internal for tests, which call it as a call on the current tick would. A prediction owes the turn the
-    /// server called at `callTick`, the event's (`apply(authoritative:)`, #96).
+    /// server called at `callTick`, the event's (`apply(authoritative:)`, #96), its clock pending as `clockPending`
+    /// says (the server's call says it), or else as she is rounding now.
     @discardableResult
-    func penalize(_ i: Int, calledAt callTick: Int? = nil) -> Int? {
+    func penalize(_ i: Int, calledAt callTick: Int? = nil, clockPending: Bool? = nil) -> Int? {
         let tick = callTick ?? self.tick
         if boats[i].penaltyTurnsOwed == 0 {
             boats[i].penaltyTurnsOwed = 1
             boats[i].penaltyProgress = 0
-            boats[i].penaltyClockTick = tick
-            return tick
+            boats[i].clearPenaltyCrossings()
+            let pending = rules.raceFormat.penalty.turn == .tackAndGybe && (clockPending ?? isRounding(boats[i]))
+            boats[i].penaltyClockTick = pending ? nil : tick
+            return boats[i].penaltyClockTick
         }
         boats[i].penaltyTurnsOwed += 1
         boats[i].queuedPenaltyCallTicks.append(tick)
@@ -1352,21 +1364,115 @@ public final class Race {
         b.penaltyProgress = progress
     }
 
+    /// Counts seat `i`'s boom crossing this tick, a `kind` (a tack, the wind forward of abeam; otherwise a gybe), on
+    /// her current `tackAndGybe` penalty turn (#487, fleet-rules@6), `turn` the tick's heading change, radians. A
+    /// turn is one tack and one gybe made turning the same way, in either order (RRS 44.2): the heading turned
+    /// between them, and who steers it (the player or the autohelm, which never tacks or gybes by itself), don't
+    /// matter, so turning back without crossing the wind keeps the crossing.
+    ///
+    /// A crossing counts for nothing on a tick her heading didn't turn (a wind shift flipping the boom), or while
+    /// she is rounding a mark (`isRounding`). Otherwise, its way the sign of `turn`:
+    /// - The turn's first: sets its way (`penaltyDirection`) and announces it (`penaltyStarted`); rule 21.2 binds
+    ///   her from here (`Boat.isTakingPenalty`). Once a turn she owed is served, every later one must go its way
+    ///   (`penaltyDirectionLocked`): a first crossing the other way counts for nothing.
+    /// - The other kind, the same way: serves the turn (`penaltyServed`). The next owed turn's clock starts now
+    ///   (`startNextPenaltyClock`), with no crossing made.
+    /// - The same kind, the other way (the recross): undoes the crossing (`penaltyReset`). In her first owed turn
+    ///   it is the first crossing of the turn the other way; in a later one the turn has no crossing again, its
+    ///   way kept.
+    /// - The same kind the same way, or the other kind the other way, counts for nothing.
+    ///
+    /// A prediction (#96) counts as the server does but never serves a turn: it holds the second crossing
+    /// (`Boat.penaltyCrossingHeld`, crossings after it counting for nothing) until the server's `penaltyServed`
+    /// (`apply(authoritative:)`), so a turn is never served twice.
+    private func crossPenalty(_ b: inout Boat, seat i: Int, kind: PenaltyCrossing, turn: Double) {
+        let way = turn > 0 ? 1 : turn < 0 ? -1 : 0
+        guard way != 0, !b.penaltyCrossingHeld, !isRounding(b) else { return }
+        guard let first = b.penaltyFirstCrossing else {
+            if b.penaltyDirectionLocked && way != b.penaltyDirection { return }
+            b.penaltyDirection = way
+            b.penaltyFirstCrossing = kind
+            emit(.penaltyStarted(seat: i))
+            return
+        }
+        if way == b.penaltyDirection && kind == first.other {
+            guard umpire != nil else {
+                b.penaltyCrossingHeld = true
+                return
+            }
+            b.penaltyTurnsOwed -= 1
+            emit(.penaltyServed(seat: i))
+            if b.penaltyTurnsOwed == 0 {
+                b.clearPenaltyCrossings()
+                b.penaltyClockTick = nil
+                b.queuedPenaltyCallTicks = []
+            } else {
+                b.penaltyFirstCrossing = nil
+                b.penaltyDirectionLocked = true
+                startNextPenaltyClock(&b, now: tick)
+            }
+        } else if way != b.penaltyDirection && kind == first {
+            emit(.penaltyReset(seat: i))
+            if b.penaltyDirectionLocked {
+                b.penaltyFirstCrossing = nil
+            } else {
+                b.penaltyDirection = way
+            }
+        }
+    }
+
+    /// Whether `b` is rounding a mark (#487), where a `tackAndGybe` penalty's crossing counts for nothing (so a tack
+    /// onto the layline and a gybe round the mark are no free penalty): racing, with some of her hull in the zone
+    /// (`CourseLayout.zoneRadius`, as `CourseLayout.markZone` measures it) of a mark of the element her leg rounds,
+    /// or of the element she has just rounded, the leg before.
+    private func isRounding(_ b: Boat) -> Bool {
+        guard b.status == .racing else { return false }
+        let hull = b.hull(outline: boatClass.hull.outline)
+        func inZone(ofLeg leg: Int) -> Bool {
+            guard course.legs.indices.contains(leg), case .round(let index) = course.legs[leg] else { return false }
+            return course.elements[index].marks.contains {
+                Collision.distance(convex: hull, to: $0.position) <= course.zoneRadius
+            }
+        }
+        return inZone(ofLeg: b.legIndex) || inZone(ofLeg: b.legIndex - 1)
+    }
+
     /// Starts the clock of the owed turn that has just become current, now, as the rules' stacking says (G4):
     /// under `sequential` at the later of its call and now, the previous turn's completion; under `fromCall`
     /// at its call. A queued turn whose call the boat doesn't hold (`Boat.queuedPenaltyCallTicks`) starts now.
+    /// Under a `tackAndGybe` penalty (#487, fleet-rules@6) with `sequential` stacking its clock is pending
+    /// (`Boat.penaltyClockTick` nil) instead: `startPendingPenaltyClocks` starts it at this tick's end, or at the end
+    /// of the first tick after it she is clear of the mark (`isRounding`).
     private func startNextPenaltyClock(_ b: inout Boat, now tick: Int) {
         let call = b.queuedPenaltyCallTicks.isEmpty ? nil : b.queuedPenaltyCallTicks.removeFirst()
         switch rules.raceFormat.penalty.stackedPenaltyDeadlines {
+        case .sequential where rules.raceFormat.penalty.turn == .tackAndGybe: b.penaltyClockTick = nil
         case .sequential: b.penaltyClockTick = max(call ?? tick, tick)
         case .fromCall: b.penaltyClockTick = call ?? tick
         }
     }
 
+    /// Starts every pending penalty clock (#487, fleet-rules@6) of a boat clear of the mark (`isRounding` false), at
+    /// the end of the tick (`step()`): under a `tackAndGybe` penalty the clock of a turn that becomes current while she
+    /// is rounding starts when she is clear of the mark, and once started runs on through any later rounding. A
+    /// prediction starts them as the server does, sailing the same tick, and again after the server's word
+    /// (`apply(authoritative:)`).
+    private func startPendingPenaltyClocks() {
+        guard rules.raceFormat.penalty.turn == .tackAndGybe else { return }
+        for i in boats.indices { startPendingPenaltyClock(ofSeat: i) }
+    }
+
+    private func startPendingPenaltyClock(ofSeat i: Int) {
+        guard boats[i].penaltyTurnsOwed > 0, boats[i].penaltyClockTick == nil, !isRounding(boats[i]) else { return }
+        boats[i].penaltyClockTick = tick
+    }
+
     /// Disqualifies every boat that misses a penalty deadline on this tick (#9, #89), a ghost from this tick
     /// (#30): her current turn not started (turned the rules' `startedTurn`) at its start deadline
     /// (`missedStart`), or not completed by its complete deadline (`missedComplete`); under `fromCall` stacking
-    /// also a turn still queued at its own start deadline (`missedStart`). The turning this tick counts first.
+    /// also a turn still queued at its own start deadline (`missedStart`). The turning this tick counts first. Under a
+    /// `tackAndGybe` penalty (#487) there is no start deadline: only `missedComplete`, and a turn whose clock is pending
+    /// (rounding, `startPendingPenaltyClocks`) has no deadline yet.
     /// The authoritative race's alone: a disqualification is a rule event (ADR 0005), so a client shows it when
     /// the server sends it.
     private func enforcePenaltyDeadlines() {
@@ -1376,7 +1482,13 @@ public final class Race {
         for i in boats.indices where !boats[i].isGhost && boats[i].penaltyTurnsOwed > 0 {
             let boat = boats[i]
             guard let clock = boat.penaltyClockTick else { continue }
-            if tick >= clock + complete {
+            if penalty.turn == .tackAndGybe {
+                // One limit (#487): the turn completed by its complete deadline; under `fromCall` a queued turn's runs
+                // from its call.
+                let queuedMissed = penalty.stackedPenaltyDeadlines == .fromCall
+                    && boat.queuedPenaltyCallTicks.first.map { tick >= $0 + complete } == true
+                if tick >= clock + complete || queuedMissed { disqualify(i, reason: Race.missedComplete) }
+            } else if tick >= clock + complete {
                 disqualify(i, reason: Race.missedComplete)
             } else if tick == clock + start && abs(boat.penaltyProgress) < penalty.startedTurn {
                 disqualify(i, reason: Race.missedStart)
@@ -1419,18 +1531,31 @@ public final class Race {
         func has(_ seat: Int) -> Bool { boats.indices.contains(seat) }
         switch event.kind {
         case .ruleCall(let call) where call.turnsOwed > 0 && has(call.offender):
-            for _ in 0..<call.turnsOwed { penalize(call.offender, calledAt: event.tick) }
+            // The server's call says whether her clock is pending (#487): a turn current at once with no deadline.
+            let pending = boats[call.offender].penaltyTurnsOwed == 0 && call.completeDeadlineTick == nil
+            for _ in 0..<call.turnsOwed { penalize(call.offender, calledAt: event.tick, clockPending: pending) }
+            startPendingPenaltyClock(ofSeat: call.offender)
         case .markTouch(let seat, _) where has(seat):
             penalize(seat, calledAt: event.tick)
+            startPendingPenaltyClock(ofSeat: seat)
         case .penaltyReset(let seat) where has(seat):
-            boats[seat].penaltyProgress = 0
+            // Under `tackAndGybe` (#487) the prediction undoes a recross, and voids a crossing at a rounding, itself,
+            // sailing the same tick as the server (`crossPenalty`, `updateProgress`): the server's word changes nothing.
+            if rules.raceFormat.penalty.turn == .fullCircle { boats[seat].penaltyProgress = 0 }
         case .penaltyServed(let seat) where has(seat) && boats[seat].penaltyTurnsOwed > 0:
             var b = boats[seat]
             b.penaltyTurnsOwed -= 1
             if b.penaltyTurnsOwed == 0 {
                 b.penaltyProgress = 0
+                b.clearPenaltyCrossings()
                 b.penaltyClockTick = nil
                 b.queuedPenaltyCallTicks = []
+            } else if rules.raceFormat.penalty.turn == .tackAndGybe {
+                // The held second crossing served it (#487): the next turn has none, and goes its way.
+                b.penaltyFirstCrossing = nil
+                b.penaltyCrossingHeld = false
+                b.penaltyDirectionLocked = b.penaltyDirection != 0
+                startNextPenaltyClock(&b, now: event.tick)
             } else {
                 // The turning past the full turn carries into the next, as `turnPenalty` serves it.
                 let progress = b.penaltyProgress
@@ -1439,10 +1564,12 @@ public final class Race {
                 startNextPenaltyClock(&b, now: event.tick)
             }
             boats[seat] = b
+            if rules.raceFormat.penalty.turn == .tackAndGybe { startPendingPenaltyClock(ofSeat: seat) }
         case .disqualified(let seat, _) where has(seat):
             boats[seat].status = .dsq
             boats[seat].penaltyTurnsOwed = 0
             boats[seat].penaltyProgress = 0
+            boats[seat].clearPenaltyCrossings()
             boats[seat].penaltyClockTick = nil
             boats[seat].queuedPenaltyCallTicks = []
         case .ocsNotice(let seat) where has(seat) && boats[seat].status == .prestart:
@@ -1498,7 +1625,7 @@ public final class Race {
     /// Seat `seat`'s owed penalty turns as the HUD shows them (G4, #114), or nil while she owes none.
     public func owedPenalty(ofSeat seat: Int) -> OwedPenalty? {
         guard boats.indices.contains(seat) else { return nil }
-        return OwedPenalty(boats[seat], penalty: rules.raceFormat.penalty)
+        return OwedPenalty(boats[seat], penalty: rules.raceFormat.penalty, now: tick)
     }
 
     // MARK: - Start, roundings, finish
@@ -1553,12 +1680,25 @@ public final class Race {
                 if boats[i].penaltyTurnsOwed == 0 { finish(i) }
             } else {
                 if progress.legIndex > boats[i].legIndex { emit(.rounded(seat: i, mark: course.name(of: leg))) }
+                let advanced = progress.legIndex > boats[i].legIndex || progress.stage > boats[i].roundingStage
+                if advanced && rules.raceFormat.penalty.turn == .tackAndGybe { voidPenaltyCrossing(i) }
                 boats[i].legIndex = progress.legIndex
                 boats[i].roundingStage = progress.stage
             }
         case .finished, .dsq:
             break
         }
+    }
+
+    /// Seat `i` completed a rounding stage (#487) under a `tackAndGybe` penalty: a turn half done, its first crossing
+    /// made before the rounding, has that crossing voided (`penaltyReset`), so "tack onto the layline, round, gybe"
+    /// serves nothing. Its way goes back to unset unless a turn she owed has been served
+    /// (`Boat.penaltyDirectionLocked`). A prediction's held second crossing (the server served the turn) stays.
+    private func voidPenaltyCrossing(_ i: Int) {
+        guard boats[i].penaltyTurnsOwed > 0, boats[i].penaltyFirstCrossing != nil, !boats[i].penaltyCrossingHeld else { return }
+        boats[i].penaltyFirstCrossing = nil
+        if !boats[i].penaltyDirectionLocked { boats[i].penaltyDirection = 0 }
+        emit(.penaltyReset(seat: i))
     }
 
     /// Seat `i` crossed the finish line owing no penalty turn: she finishes, a ghost from this tick (#30). The
@@ -1583,6 +1723,7 @@ public final class Race {
         boats[i].status = .dsq
         boats[i].penaltyTurnsOwed = 0
         boats[i].penaltyProgress = 0
+        boats[i].clearPenaltyCrossings()
         boats[i].penaltyClockTick = nil
         boats[i].queuedPenaltyCallTicks = []
         emit(.disqualified(seat: i, reason: reason))
@@ -2147,17 +2288,28 @@ extension Race {
         }
         guard (0..<stages).contains(boat.roundingStage) else { return "roundingStage" }
         guard boat.penaltyTurnsOwed >= 0 else { return "penaltyTurnsOwed" }
-        // A clock and queued calls exactly while she owes a turn, none after the tick, the queue in call order.
+        // A clock and queued calls exactly while she owes a turn (under `tackAndGybe` the clock may be pending, nil,
+        // #487), none after the tick, the queue in call order.
         let ticks = -setup.startSequenceTicks...tick
         if boat.penaltyTurnsOwed == 0 {
             guard boat.penaltyClockTick == nil else { return "penaltyClockTick" }
+        } else if let clock = boat.penaltyClockTick {
+            guard ticks.contains(clock) else { return "penaltyClockTick" }
         } else {
-            guard let clock = boat.penaltyClockTick, ticks.contains(clock) else { return "penaltyClockTick" }
+            // A pending clock (#487): only under a `tackAndGybe` penalty.
+            guard rules.raceFormat.penalty.turn == .tackAndGybe else { return "penaltyClockTick" }
         }
         let queue = boat.queuedPenaltyCallTicks
         guard queue.count < max(boat.penaltyTurnsOwed, 1), queue.allSatisfy(ticks.contains),
               zip(queue, queue.dropFirst()).allSatisfy({ $0 <= $1 })
         else { return "queuedPenaltyCallTicks" }
+        // A `tackAndGybe` penalty's crossings (#487): a way of ±1 or 0, a crossing, a lock or a held crossing only
+        // while she owes a turn and with its way set, and a held crossing only after a first.
+        guard (-1...1).contains(boat.penaltyDirection), boat.penaltyTurnsOwed > 0 || boat.penaltyDirection == 0
+        else { return "penaltyDirection" }
+        guard boat.penaltyFirstCrossing == nil || boat.penaltyDirection != 0 else { return "penaltyFirstCrossing" }
+        guard !boat.penaltyDirectionLocked || boat.penaltyDirection != 0 else { return "penaltyDirectionLocked" }
+        guard !boat.penaltyCrossingHeld || boat.penaltyFirstCrossing != nil else { return "penaltyCrossingHeld" }
         return nil
     }
 }
