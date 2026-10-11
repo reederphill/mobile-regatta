@@ -23,6 +23,17 @@ import Testing
         #expect(hex64(six) == "0x3c5c84c4afc4054b")
     }
 
+    /// And skiff@8, the default class, sails exactly as before #462's bots layer (every change there is behind "the
+    /// class has the new planing rule", skiff@9's `stayOnSpeedShare` and `apparentWind`): all-bot races through the
+    /// start and the first beat, and through two laps with their runs, pinned on #462's core tip before any bot code
+    /// changed.
+    @Test func skiffEightBotsAreBitIdentical() throws {
+        let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
+        let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
+        #expect(hex64(short) == "0xe7ca6f96d8dc36ab")
+        #expect(hex64(long) == "0x6fb730becd1b93be")
+    }
+
     // MARK: - skiff@8: tacks and gybes by hand
 
     static let skiffEight = try! BoatClassFile.bundled(id: "skiff", version: 8)
