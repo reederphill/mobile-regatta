@@ -348,7 +348,7 @@ The wordless halo round another boat that says who keeps clear: red on a boat yo
 _Avoid_: boat label, rights icon, glyph
 
 **Penalty arc**:
-The orange arc round your boat while you owe a penalty turn: it counts down the start deadline until the turn is started, then the complete deadline. With it, a short "Turn" notice gives both countdowns.
+The orange arc round your boat while you owe a penalty turn. Under fleet-rules@6 (one tack and one gybe, turning the same way) it counts down the turn's one limit (the rules file's, from the turn's clock: its call, or once she is clear of the mark she was rounding, or once the turn before is served), and a short "Turn" notice gives that countdown. Just inside it sit the turn's two marks, the screen-up half for the tack and the screen-down half for the gybe: grey until that crossing is made, then orange, with a half arrow at its leading end showing the way the turn goes (it flips on a recross). When the turn is served both halves light for about half a second, then the next owed turn shows (both grey) or the arc goes. Under the older rules (fleet-rules@5 and before, a full circle) it counts down the start deadline until the turn is started, then the complete deadline, and the "Turn" notice gives both countdowns.
 _Avoid_: penalty timer, spin meter
 
 **Ladder line**:

@@ -82,6 +82,11 @@ struct FreezeTickRow: Decodable {
     /// `Boat.isTakingPenalty`: 30° in, or under a `tackAndGybe` penalty (#487, fleet-rules@6) its first counting
     /// crossing made, until served.
     var yourTurn: String?
+    /// Under a `tackAndGybe` penalty (#487, fleet-rules@6): the counting crossing your owed turn has made, the penalty
+    /// arc's lit half (#489): "none" (owing a turn, neither made: both halves grey), "tack" or "gybe" (that one made
+    /// first, the other still to come). A prediction's held second crossing never shows here: a log replays
+    /// authoritative.
+    var yourCrossing: String?
     /// Your offset from the groove, the autohelm's or by hand on a class whose autohelm doesn't hold (`grooveOffset`):
     /// "pinching" (inside it) or "footing" (outside it).
     var groove: String?
@@ -314,6 +319,13 @@ enum FreezeTicks {
         case "owed": if boat.penaltyTurnsOwed == 0 || boat.isTakingPenalty { return false }
         case "turning": if !boat.isTakingPenalty { return false }
         case "either": if boat.penaltyTurnsOwed == 0 && !boat.isTakingPenalty { return false }
+        default: return false
+        }
+        switch row.yourCrossing {
+        case nil: break
+        case "none": if boat.penaltyTurnsOwed == 0 || boat.penaltyFirstCrossing != nil { return false }
+        case "tack": if boat.penaltyTurnsOwed == 0 || boat.penaltyFirstCrossing != .tack { return false }
+        case "gybe": if boat.penaltyTurnsOwed == 0 || boat.penaltyFirstCrossing != .gybe { return false }
         default: return false
         }
         switch row.groove {

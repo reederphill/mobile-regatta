@@ -378,12 +378,18 @@ import RegattaCore
         func drainEvents() -> [RaceEvent] { practice.drainEvents() }
     }
 
-    /// The OCS notice is rule 29.1's, and no copy names a 360 or a 720 (#9).
+    /// The OCS notice is rule 29.1's, and no copy names a 360 or a 720 (#9), under either penalty turn: fleet-rules@6's
+    /// line is one tack and one gybe, turning the same way (#489).
     @Test func copyIsOneTurnAndOCSUnderRule29_1() {
         #expect(RuleWords.ocs.contains("29.1") && !RuleWords.ocs.contains("22"))
-        let texts = RacingRule.allCases.flatMap { rule in
-            [true, false].map { RuleWords.firstCall(rule, against: $0, other: "Boat 2", owesTurn: true) }
-        } + [RuleWords.firstMarkTouch("pin"), RuleWords.ocs, RuleWords.lag]
+        let texts = RulesConfig.PenaltyTurn.allCases.flatMap { turn in
+            RacingRule.allCases.flatMap { rule in
+                [true, false].map { RuleWords.firstCall(rule, against: $0, other: "Boat 2", owesTurn: true, turn: turn) }
+            } + [RuleWords.firstMarkTouch("pin", turn: turn)]
+        } + [RuleWords.ocs, RuleWords.lag]
+        #expect(RuleWords.firstMarkTouch("pin", turn: .tackAndGybe).contains("one tack and one gybe, turning the same way"))
+        #expect(RuleWords.firstMarkTouch("pin") == RuleWords.firstMarkTouch("pin", turn: .fullCircle))
+        #expect(RuleWords.firstMarkTouch("pin").contains(RuleWords.penaltyLine))
         for text in texts { #expect(!text.contains("360") && !text.contains("720") && !text.contains("spin"), "\(text)") }
     }
 }

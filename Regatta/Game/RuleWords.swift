@@ -31,6 +31,17 @@ enum RuleWords {
 
     // TODO-COPY (#171): one penalty turn, never "360" or "720" (#9, CONTEXT.md **Penalty turn**).
     static let penaltyLine = "Sail one full circle to clear it."
+    // TODO-COPY (#171): a fleet-rules@6 penalty turn (#489): never "360" or "spin" (CONTEXT.md _Avoid_).
+    static let tackAndGybeLine = "Make one tack and one gybe, turning the same way, to clear it."
+
+    /// The penalty line for the race's penalty turn: `penaltyLine` for a full circle (fleet-rules@5 and before),
+    /// `tackAndGybeLine` for a tack and a gybe (fleet-rules@6).
+    static func clearingLine(_ turn: RulesConfig.PenaltyTurn) -> String {
+        switch turn {
+        case .fullCircle: penaltyLine
+        case .tackAndGybe: tackAndGybeLine
+        }
+    }
 
     // TODO-COPY (#171): #228's example, for a keep-clear call made while your autohelm was holding.
     static let autohelmKeepClear = "Your boat kept its angle to the wind as it shifted; steer to keep clear"
@@ -40,16 +51,16 @@ enum RuleWords {
     /// rule's.
     // TODO-COPY (#171)
     static func firstCall(_ rule: RacingRule, against: Bool, other: String, owesTurn: Bool,
-                          autohelm: Bool = false) -> String {
+                          autohelm: Bool = false, turn: RulesConfig.PenaltyTurn = .fullCircle) -> String {
         let sentence = "\(autohelm ? autohelmKeepClear : plain(rule)) (rule \(rule.rawValue))."
         guard against else { return "\(sentence) \(other) fouled you." }
-        return "\(sentence) You fouled \(other)." + (owesTurn ? " \(penaltyLine)" : "")
+        return "\(sentence) You fouled \(other)." + (owesTurn ? " \(clearingLine(turn))" : "")
     }
 
     /// Touching a mark of your course, the first time (rule 31, #90).
     // TODO-COPY (#171)
-    static func firstMarkTouch(_ mark: String) -> String {
-        "\(plain(.touchingMark)) (rule 31): you touched the \(mark). \(penaltyLine)"
+    static func firstMarkTouch(_ mark: String, turn: RulesConfig.PenaltyTurn = .fullCircle) -> String {
+        "\(plain(.touchingMark)) (rule 31): you touched the \(mark). \(clearingLine(turn))"
     }
 
     /// The OCS notice, under rule 29.1 (never "Rule 22").

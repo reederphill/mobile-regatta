@@ -41,6 +41,10 @@ struct FixtureScene: Decodable {
     /// (`YourScript.headUp`).
     var yourScript: String?
     var scriptSeconds: Double?
+    /// With "penaltyTurnAtOnce": the way you turn, in place of towards the nearest other boat. "luff": towards the
+    /// wind, so the turn's first counting crossing is a tack; "bearAway": away from it, so it is a gybe (#489: the
+    /// fleet-rules@6 penalty arc's tack and gybe halves, each lit first in a scene of its own).
+    var turnWay: String?
     /// Your bot's chance of misjudging each encounter she must keep clear in (`BotWeaknesses.ruleMisjudgeRate`), in
     /// place of her draw's: 1 sails on through every one, so the rule calls the rules scenes show come on you.
     var yourRuleMisjudgeRate: Double?
@@ -190,7 +194,10 @@ enum RecordFixture {
     /// Your seat's script (`FixtureScene.yourScript`): seat 0, the setup's human seat.
     struct YourScript {
         enum Kind { case penaltyTurnAtOnce, headUpAfterFirstFinish }
+        /// Which way a scripted penalty turn goes (`FixtureScene.turnWay`).
+        enum Way { case towardsNearest, luff, bearAway }
         let kind: Kind
+        let way: Way
         let ticks: Int
         var seen = 0
         /// While a penalty turn is scripted: the rudder held and the tick a bot takes you back.
@@ -202,6 +209,11 @@ enum RecordFixture {
             case "penaltyTurnAtOnce": kind = .penaltyTurnAtOnce
             case "headUpAfterFirstFinish": kind = .headUpAfterFirstFinish
             default: return nil
+            }
+            switch scene.turnWay {
+            case "luff": way = .luff
+            case "bearAway": way = .bearAway
+            default: way = .towardsNearest
             }
             ticks = Int((scene.scriptSeconds ?? 6) * Double(Race.tickRate))
         }
@@ -223,7 +235,13 @@ enum RecordFixture {
                 let target = others.min { (race.boats[$0].position - boat.position).length
                     < (race.boats[$1].position - boat.position).length } ?? call.victim
                 let towards = race.boats[target].position - boat.position
-                let clockwise = boat.forward.x * towards.y - boat.forward.y * towards.x < 0
+                let clockwise: Bool
+                switch way {
+                case .towardsNearest: clockwise = boat.forward.x * towards.y - boat.forward.y * towards.x < 0
+                // Wind over the starboard side (relative > 0) is clockwise of the bow: luffing turns clockwise.
+                case .luff: clockwise = boat.relativeWind >= 0
+                case .bearAway: clockwise = boat.relativeWind < 0
+                }
                 turn = (clockwise ? 1 : -1, race.tick + ticks)
                 controllers[me] = .human
             }

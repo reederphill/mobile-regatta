@@ -129,6 +129,9 @@ final class GameScene: SKScene {
     var showsRuleCues = true
     /// The rule calls whose lines draw (#123): the session adds each one it drains.
     var ruleCalls = RuleCallLines()
+    /// Your last served penalty turn's flash on the arc (#489): the session tells it each serve it drains, and the scene
+    /// reads it each frame it draws your owed turn.
+    var servedTurn = ServedTurnFlash()
 
     private var lastUpdate: TimeInterval?
     /// The most wall-clock time a frame spends starting ticks: half a 60 Hz frame. A frame is at most
@@ -348,7 +351,9 @@ final class GameScene: SKScene {
         updateCues(world, dt: dt, settled: settled)
         ruleCues?.isHidden = !showsRuleCues
         if showsRuleCues {
-            ruleCues?.update(world, calls: ruleCalls, style: boatStyle, px: cam.xScale,
+            let mine = world.myBoatIndex
+            servedTurn.follow(world.frame.owed.indices.contains(mine) ? world.frame.owed[mine] : nil)
+            ruleCues?.update(world, calls: ruleCalls, served: servedTurn, style: boatStyle, px: cam.xScale,
                              rotation: cam.zRotation)
         } else {
             ruleCues?.reset()
@@ -372,6 +377,8 @@ final class GameScene: SKScene {
 
     /// What the rule cues show (#123), for tests: e.g. `glows=2 lines=1 arc=1`.
     var ruleCueSummary: String { ruleCues?.summary ?? "" }
+    /// The penalty arc's tack and gybe marks as drawn (#489, `RuleCueLayer.marksSummary`), for tests.
+    var penaltyMarksSummary: String { ruleCues?.marksSummary ?? "none" }
     /// The right-of-way glow each seat shows, for tests.
     var shownGlows: [RightOfWayGlow?] { ruleCues?.glows ?? [] }
     /// Whether a hint's leader line shows (#129), for tests.
