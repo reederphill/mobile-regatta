@@ -28,6 +28,8 @@ public actor RaceSession {
     private let clock: any HostClock
     /// Told when the results so far change (`RaceHost.resultsVersion`), from the driver (#148).
     private let onProgress: (@Sendable () -> Void)?
+    /// Told once the gun has gone, with how many humans were at it (#152: the lobby's gun line).
+    private let onGun: (@Sendable (_ humansAtGun: Int) -> Void)?
     /// The connection holding each seat, so a stale connection's goodbye can't drop a newer one.
     private var holders: [Int: ObjectIdentifier] = [:]
     /// Seats a join is claiming right now. `join` suspends on the host, and the actor is reentrant, so a
@@ -36,16 +38,20 @@ public actor RaceSession {
 
     /// `roster` names the seats (RaceHost's "Seat n" by default); `onProgress` hears each change to the results so far;
     /// `onBriefingLeave` each human who left between fleet lock and the gun (#147, `RaceHost`'s); `fleet` and
-    /// `onLeftAfterGun` are the host's (#149).
+    /// `onLeftAfterGun` are the host's (#149). `onGun` hears the gun once, from the driver, with the humans at it by the
+    /// rating rule (`RaceLog.humanSeatsAtGun`): after tick 1's step, when tick 0 is settled (a leave stamped with the
+    /// gun's tick is a leave before the gun).
     public init(id: UUID = UUID(), setup: RaceSetup, windSeed: WindSeed, closeAtTick: Int? = nil,
                 clock: any HostClock = SystemClock(), options: RaceHostOptions = RaceHostOptions(), roster: [RosterEntry]? = nil,
                 onProgress: (@Sendable () -> Void)? = nil, onBriefingLeave: (@Sendable (BriefingLeave) -> Void)? = nil,
-                fleet: FleetFill? = nil, onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)? = nil) {
+                fleet: FleetFill? = nil, onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)? = nil,
+                onGun: (@Sendable (_ humansAtGun: Int) -> Void)? = nil) {
         self.id = id
         self.setup = setup
         self.closeAtTick = closeAtTick
         self.clock = clock
         self.onProgress = onProgress
+        self.onGun = onGun
         humanSeats = Set(setup.seats.indices.filter { setup.seats[$0] == .human })
         host = RaceHost(setup: setup, windSeed: windSeed, clock: clock, options: options, roster: roster,
                         onBriefingLeave: onBriefingLeave, fleet: fleet, onLeftAfterGun: onLeftAfterGun)
@@ -112,8 +118,13 @@ public actor RaceSession {
     /// seat's connection. Returns how it ended: closed, or cancelled (`RaceHost.cancel`, a mass drop).
     public func run() async -> RaceEnd {
         var version = 0
+        var gunPending = onGun != nil
         while true {
             let step = await host.driveStep(closeAtTick: closeAtTick)
+            if gunPending, await host.tick >= 1 {
+                gunPending = false
+                if await host.cancelled == nil { onGun?(await host.log.humanSeatsAtGun.count) }
+            }
             if step.resultsVersion != version {
                 version = step.resultsVersion
                 onProgress?()

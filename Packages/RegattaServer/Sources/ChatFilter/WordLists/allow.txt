@@ -1,0 +1,1 @@
+# Words the lobby lets through although the vendored list has them (ours, not vendored). One per line.

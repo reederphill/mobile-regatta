@@ -301,7 +301,6 @@ extension RaceSims {
         /// tick, the humans RET by leave order, the latest gone highest; the stored log replays to the stored digest.
         @Test func everyHumanGoneClosesViaCloseAllGoneRankedByLeaveOrder() async throws {
             let rig = LifecycleRig()
-            let lines = await rig.lifecycle.systemLines()
             let race = try await rig.race(["T:0", "T:1"])
             let transports = [KeptTransport(), KeptTransport()]
             for seat in 0..<2 { try await race.join(seat: seat, transport: transports[seat]) }
@@ -327,8 +326,7 @@ extension RaceSims {
             #expect(try Replayer.digest(of: RaceLog(jsonData: stored.log)) == stored.digest)
             // Both humans retired, so a bot won: the lobby hears nothing (#149: a bot never shows in the lobby).
             #expect(try RaceSummary(decoding: stored.results).winnerLine == nil)
-            let line = await collect(lines, seconds: 0.3) { _ in true }
-            #expect(line.isEmpty)
+            #expect(rig.lobby.lines.isEmpty)
         }
 
         /// #149: a closed race stores its bots, the ones that filled the fleet and the one that took a seat before the

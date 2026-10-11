@@ -122,6 +122,7 @@ public final class RegattaHTTPServer: Sendable {
         await services.matchmaker?.stop()
         await registry.closeAll()
         await services.lifecycle?.stop()
+        services.lobby?.finish()
         task.cancel()
         _ = await task.value
     }
