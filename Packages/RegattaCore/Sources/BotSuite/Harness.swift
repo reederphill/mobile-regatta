@@ -35,7 +35,8 @@ public enum BotRaceHarness {
     public static func raceSetup(for cell: BotRaceCell) throws -> RaceSetup {
         let venue = try dataFileKey(cell.venue)
         let conditions = try dataFileKey(cell.conditions)
-        let boatClass = cell.autohelmOff == true ? try handSteered(RaceFiles.defaults.boatClass).ref : RaceFiles.defaults.boatClass.ref
+        let file = try classFile(for: cell)
+        let boatClass = cell.autohelmOff == true ? try handSteered(file).ref : file.ref
         return try RaceSetup(
             raceSeed: RaceSeed(cell.seed),
             seats: Array(repeating: .bot, count: cell.fleetSize),
@@ -51,8 +52,23 @@ public enum BotRaceHarness {
     static func raceFiles(for cell: BotRaceCell, setup: RaceSetup) throws -> RaceFiles {
         guard cell.autohelmOff == true else { return try RaceFiles(resolving: setup) }
         var catalog = RaceFileCatalog()
-        try catalog.boatClasses.add(handSteered(RaceFiles.defaults.boatClass))
+        try catalog.boatClasses.add(handSteered(classFile(for: cell)))
         return try RaceFiles(resolving: setup, from: catalog)
+    }
+
+    /// The class `cell` sails as bundled: the one it names (`BotRaceCell.boatClass`, #462), else the default.
+    static func classFile(for cell: BotRaceCell) throws -> BoatClassFile {
+        try cell.boatClass.map(bundledClass) ?? RaceFiles.defaults.boatClass
+    }
+
+    /// The bundled class named `id@version`.
+    static func bundledClass(_ name: String) throws -> BoatClassFile {
+        let key = try dataFileKey(name)
+        do {
+            return try BoatClassFile.bundled(id: key.id, version: key.version)
+        } catch {
+            throw BotSuiteError.matrix("no bundled class \(name): \(error)")
+        }
     }
 
     /// A copy of `file`, a bundled schema-3 or schema-4 class, with its autohelm off a centred rudder

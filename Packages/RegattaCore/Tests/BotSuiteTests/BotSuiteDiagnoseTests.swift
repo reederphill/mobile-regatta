@@ -264,6 +264,41 @@ import Testing
 
     // MARK: - The report
 
+    /// #462: the planing table, on skiff@9 (`--boat-class`, the class a bad gybe, a run too deep and a lull take off
+    /// the plane): every tier that ran has a row, its falls split by every cause, its shares inside 0...1; and the
+    /// observer still only reads.
+    @Test func planingTableOnSkiffNine() throws {
+        let options = try BotSuiteOptions(arguments: ["--boat-class", "skiff@9", "--seeds", "2", "--fleet-size", "5", "--tier-mix",
+                                                      "mixed", "--profile-mix", "live", "--diagnose"])
+        var matrix = try options.matrix()
+        #expect(matrix.boatClass == "skiff@9" && matrix.cells.allSatisfy { $0.boatClass == "skiff@9" })
+        matrix.venues = ["dev-venue@3"]
+        matrix.conditions = ["classic-oscillating@3"]
+        matrix.conditionsByVenue = [:]
+        let cell = try #require(matrix.cells.first)
+        #expect(try BotRaceHarness.raceSetup(for: cell).boatClass == BoatClassFile.bundled(id: "skiff", version: 9).ref)
+        let report = try BotSuite.run(matrix, thresholds: unmissableThresholds(), diagnose: true)
+        let summary = try #require(report.diagnose)
+        let tiers = [DiagnoseSummary.all] + BotTier.allCases.filter { tier in report.races.flatMap(\.seats).contains { $0.tier == tier } }.map(\.rawValue)
+        #expect(summary.planing.map(\.tier) == tiers)
+        for row in summary.planing {
+            #expect(row.runSeconds > 30 && row.offSeconds <= row.runSeconds && (0...1).contains(row.offShare), "\(row)")
+            #expect(Set(row.fallsByCause.keys) == Set(PlaningObservation.Cause.allCases.map(\.rawValue)))
+            #expect(abs(row.fallsByCause.values.reduce(0, +) - row.falls) < 1e-9, "\(row)")
+            #expect(row.gybes > 0 && (0...1).contains(row.fallsPerGybe) && (0...1).contains(row.backOnShare), "\(row)")
+        }
+        #expect(summary.lines.contains { $0.hasPrefix("planing off the wind") })
+        let nine = try BoatClassFile.bundled(id: "skiff", version: 9)
+        #expect(try Self.digest(boatClass: nine, seed: 471, seconds: 150, observed: true).digest
+                == Self.digest(boatClass: nine, seed: 471, seconds: 150, observed: false).digest)
+        // The default class's matrix and cells name no class, and encode as before.
+        let plain = try BotSuiteOptions(arguments: ["--seeds", "1"]).matrix()
+        #expect(plain.boatClass == nil && plain.cells.allSatisfy { $0.boatClass == nil })
+        #expect(!String(decoding: try JSONEncoder().encode(plain), as: UTF8.self).contains("boatClass"))
+        #expect(!String(decoding: try JSONEncoder().encode(try #require(plain.cells.first)), as: UTF8.self).contains("boatClass"))
+        #expect(throws: BotSuiteError.self) { try BotSuiteOptions(arguments: ["--boat-class", "skiff@99"]).matrix() }
+    }
+
     /// Off by default, and with it on the report gains its `diagnose` key and nothing else changes: the races, the
     /// summaries and the gate are the same bytes, and the text is the same lines with the tables after them.
     @Test func diagnoseAddsItsTablesAndChangesNothingElse() throws {
@@ -284,11 +319,11 @@ import Testing
         #expect(untimed(diagnosed.lines) == untimed(plain.lines) + summary.lines)
         #expect(summary.lines.first?.hasPrefix("diagnose: 4 races") == true)
 
-        // The JSON's shape: the seven keys, each table's rows in their fixed order.
+        // The JSON's shape: the eight keys, each table's rows in their fixed order.
         let json = try #require(JSONSerialization.jsonObject(with: diagnosed.jsonData()) as? [String: Any])
         let diagnose = try #require(json["diagnose"] as? [String: Any])
         #expect(Set(diagnose.keys) == ["races", "starts", "lateStarters", "penaltyEpisodes", "penaltiesOwed", "preStartCalls",
-                                       "nonFinishers"])
+                                       "nonFinishers", "planing"])
         let boats = diagnosed.races.flatMap(\.seats)
         let tiers = [DiagnoseSummary.all] + BotTier.allCases.filter { tier in boats.contains { $0.tier == tier } }.map(\.rawValue)
         #expect(tiers.count >= 2)
