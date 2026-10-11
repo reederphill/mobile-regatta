@@ -17,7 +17,10 @@
 # Ticks: one run rewrites each `freezeTick` in RegattaUITests/Fixtures/<name>.json to the first tick (every 10)
 # meeting its row's condition; nothing else in a fixture changes. The conditions read the core race only, so they
 # are the core half of what each fixture's test checks (RenderFixtureTests, BoatCueTests); the test still checks the
-# drawn half. Fixtures the table doesn't name keep their hand-set ticks (a fixed time into the log), and a recorded
+# drawn half. "In view" is the camera the row's fixtures are drawn from (#474): the north-up boat camera's box, or with
+# `"camera": "race"` the race camera's frame on the phone's screen (`RaceCameraFrame`); a row naming a fixture drawn
+# from the other camera is refused. `regatta-replay freeze-ticks --explain <fixtures> <table>` prints what each
+# committed frame holds (boats on screen, zoom). Fixtures the table doesn't name keep their hand-set ticks (a fixed time into the log), and a recorded
 # log reaches them. Look at the renders CI makes (render-actuals, scripts/adopt-references.sh) before adopting them.
 #
 # The tool is `regatta-replay` (Packages/RegattaCore, release build, through scripts/heavy.sh); the conditions are

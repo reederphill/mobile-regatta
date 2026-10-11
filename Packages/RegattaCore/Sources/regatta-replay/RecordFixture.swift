@@ -238,13 +238,14 @@ enum RecordFixture {
         }
 
         /// Once a boat has finished and her ghost is in your view, while you still race to the finish, you head up to
-        /// close-hauled and hold there: your sail working upwind casts the backwind wedge the fleet scene shows beside the ghost, where
+        /// close-hauled and hold there: your sail working upwind casts the backwind wedge `hud-afterfirstfinish` shows beside the ghost, where
         /// every boat running to a downwind finish casts none (#437).
         mutating func headUp(_ race: Race, _ controllers: inout SeatControllers) {
             let me = 0
             let boat = race.boats[me]
             if !headingUp {
-                // Once a ghost is in your view (as the fleet row reads it), at the finish with the boats around you.
+                // Once a ghost is in the boat camera's box (`FreezeTickRow.defaultView`), at the finish with the boats
+                // around you.
                 let centre = boat.position + boat.velocity * 2
                 let view = FreezeTickRow.defaultView
                 let ghostInView = race.boats.contains {

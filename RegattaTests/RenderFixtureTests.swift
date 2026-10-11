@@ -159,7 +159,8 @@ import UIKit
     }
 
     /// The rule-cue fixtures (#123) through every filter, each on its own scene's log (#466; #377: your port-starboard
-    /// call before the gun): `rules-call` draws two rule-call lines, the arc counting your started turn's complete deadline and glows;
+    /// call; #474: at a framing short of close quarters, their rows' `zoom`, which before the gun is the pre-start
+    /// shot's): `rules-call` draws two rule-call lines, the arc counting your started turn's complete deadline and glows;
     /// `rules-penalty` your unstarted turn's arc, both glows and the HUD's live Turn notice. Both show a backwind wedge
     /// (#377). Every older fixture draws no rule cue, so its reference doesn't move.
     @Test func ruleFixturesShowTheRuleCues() throws {
@@ -325,12 +326,13 @@ import UIKit
     }
 
     /// The fleet fixture (#117) is its own scene's bot race (#466, `scripts/fixture-scenes.json`: recorded by
-    /// `scripts/record-fixtures.sh --record` on the default class, your seat heading up once a ghost is in view), frozen
-    /// after the first finish and before the close, with a ghost, at least three racing boats and a backwind wedge in
-    /// the boat camera's view; its five twins are the same frame through each other filter.
-    @Test func fleetFixtureShowsAGhostAmongTheFleet() throws {
+    /// `scripts/record-fixtures.sh --record` on the default class), frozen in open water on the first beat (#474: its
+    /// own row again, no longer `hud-afterfirstfinish`'s moment at the finish): you racing among at least four boats
+    /// with the windward mark in the boat camera's view, sails working; its five twins are the same frame through each
+    /// other filter.
+    @Test func fleetFixtureShowsTheFleetInOpenWater() throws {
         let (fixture, log) = try RenderFixture.load(named: "fleet", in: Self.fixtures)
-        #expect(fixture.camera == .boat && fixture.vision == VisionFilter.none)
+        #expect(fixture.camera == .boat && fixture.view == nil && fixture.vision == VisionFilter.none)
         // Every scene log sails the default class (#466): after a default switch `scripts/record-fixtures.sh --record`
         // re-records them all, and CI's renders of the new framing are the owner's to adopt (#354).
         #expect(log.header.setup.boatClass == RaceFiles.defaults.boatClass.ref)
@@ -339,24 +341,81 @@ import UIKit
             #expect(sceneLog.header.setup.boatClass == RaceFiles.defaults.boatClass.ref, "\(scene)")
         }
         let world = try FixtureDriver(log: log, freezeTick: fixture.freezeTick).renderWorld
-        #expect(!world.frame.isOver)
-        #expect(!world.isGhost(ofSeat: world.myBoatIndex))
         let me = world.me
+        #expect(me.status == .racing && me.legIndex == 0)
+        #expect(!world.boats.indices.contains { world.isGhost(ofSeat: $0) }, "nobody has finished yet")
+        // The boat camera at the default zoom on iPhone 17 (402 x 874 points, scale 1/0.8), in metres.
         let center = me.position + me.velocity * 2
         let half = Vec2(402, 874) * 1.25 / 2 / Double(GameScene.pointsPerMeter)
-        let inView = world.boats.indices.filter { seat in
-            let p = world.boats[seat].position
-            return abs(p.x - center.x) < half.x && abs(p.y - center.y) < half.y
-        }
-        #expect(inView.filter { world.isGhost(ofSeat: $0) }.count >= 1, "\(inView)")
-        #expect(inView.filter { !world.isGhost(ofSeat: $0) }.count >= 3, "\(inView)")
+        func inView(_ p: Vec2) -> Bool { abs(p.x - center.x) < half.x && abs(p.y - center.y) < half.y }
+        let racing = world.boats.indices.filter { world.boats[$0].status == .racing && inView(world.boats[$0].position) }
+        #expect(racing.count >= 4, "\(racing)")
+        #expect(inView(world.course.targetPosition(for: world.course.legs[me.legIndex])), "the mark you sail for isn't in view")
         let (scene, _) = try DrawOrderTests.scene(fixture: "fleet")
-        #expect(Self.wedgesOnScreen(scene) >= 1, "no backwind wedge in view")
+        #expect(Self.wedgesOnScreen(scene) >= 2, "the fleet's sails aren't working in view")
+        // Not the HUD fixture's moment after the first finish, which draws the ghost (`hudFixturesShowWhatTheyAreFor`).
+        let (finish, _) = try RenderFixture.load(named: "hud-afterfirstfinish", in: Self.fixtures)
+        #expect(finish.log == fixture.log && finish.freezeTick > fixture.freezeTick)
         for vision in VisionFilter.allCases where vision != .none {
             let (twin, _) = try RenderFixture.load(named: "fleet-\(vision.rawValue)", in: Self.fixtures)
             var expected = fixture
             expected.vision = vision
             #expect(twin == expected, "\(vision)")
+        }
+    }
+
+    /// A row of `scripts/fixture-freeze-ticks.json`, as far as the app's camera can check it.
+    private struct FreezeRow: Decodable {
+        var fixtures: [String]
+        var camera: String?
+        var clear: [Double]?
+        var zoom: [Double]?
+        var racingInView: Int?
+        var ghostsInView: Int?
+        var markInView: Bool?
+    }
+
+    /// The freeze-tick rows count what the renders show (#474). A row's boats "in view" were once a north-up box of
+    /// water round your boat whatever camera drew its fixtures, so `hud-racing`'s five were two on the race camera's
+    /// close-quarters screen. Now a row whose fixtures draw the race camera (`"view": "courseUp"`) says so
+    /// (`"camera": "race"`: `regatta-replay`'s `RaceCameraFrame`, the settled rig again in the core tool), and here
+    /// the app's own rig agrees with each such row on its first fixture's frame: the zoom inside the row's bounds, and
+    /// at least the boats racing and ghosts it asks for drawn on the iPhone's screen, clear of what the row says the
+    /// HUD covers. The HUD row asks for five (the owner's floor is three, PR #467).
+    @Test func freezeRowsCountTheBoatsTheirCameraShows() throws {
+        let table = Self.fixtures.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("scripts/fixture-freeze-ticks.json")
+        let rows = try JSONDecoder().decode([FreezeRow].self, from: Data(contentsOf: table))
+        let hud = try #require(rows.first { $0.fixtures.contains("hud-racing") })
+        #expect(hud.camera == "race" && (hud.racingInView ?? 0) >= 3 && hud.clear != nil)
+        for row in rows {
+            for name in row.fixtures {
+                let (fixture, _) = try RenderFixture.load(named: name, in: Self.fixtures)
+                #expect(fixture.cameraMode == (row.camera == "race" ? .courseUp : .northUpFollow), "\(name)")
+            }
+            guard row.camera == "race", let name = row.fixtures.first else { continue }
+            let (scene, _) = try DrawOrderTests.scene(fixture: name)
+            // The phone's screen, as `RaceView` sizes the scene on iPhone 17 (`RaceViewportPolicy`): a scene of its
+            // own is a 390 x 844 placeholder.
+            scene.size = CGSize(width: 402, height: 874)
+            scene.update(0)
+            let world = scene.driver.renderWorld
+            if let zoom = row.zoom {
+                #expect((zoom[0] - 1e-9...zoom[1] + 1e-9).contains(scene.rig.zoom), "\(name): zoom \(scene.rig.zoom)")
+            }
+            let clear = row.clear ?? [0, 0, 0]
+            func shows(_ p: Vec2) -> Bool {
+                let q = scene.rig.project(p, sceneSize: scene.size)
+                return q.x > clear[2] && q.x < scene.size.width - clear[2] && q.y > clear[1] && q.y < scene.size.height - clear[0]
+            }
+            let shown = world.boats.indices.filter { shows(world.boats[$0].position) }
+            let racing = shown.filter { !world.isGhost(ofSeat: $0) && world.boats[$0].status == .racing }
+            #expect(racing.count >= row.racingInView ?? 0, "\(name): racing on screen \(racing)")
+            #expect(shown.filter { world.isGhost(ofSeat: $0) }.count >= row.ghostsInView ?? 0, "\(name): on screen \(shown)")
+            if let markInView = row.markInView {
+                let me = world.me
+                #expect(shows(world.course.targetPosition(for: world.course.legs[me.legIndex])) == markInView, "\(name)")
+            }
         }
     }
 
