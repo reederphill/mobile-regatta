@@ -64,7 +64,7 @@ A boat that broke a rule of Part 2 isn't penalised for it, because she was compe
 _Avoid_: acquittal, cleared
 
 **Hold course**:
-What a right-of-way boat does to keep her rights: rudder centred. The autohelm holds her wind angle, or for a class whose autohelm doesn't hold a centred rudder (ADR 0011), a player sails straight on her heading while a bot holds her angle by hand (`BotHelm`), still following a shift. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course.
+What a right-of-way boat does to keep her rights: rudder centred. On the default class (autohelm off, ADR 0011) a player sails straight on her heading while a bot holds her angle by hand (`BotHelm`), still following a shift; where the autohelm is on, it holds her wind angle. A turn the autohelm makes following a shift is still a course change under rule 16.1, but not one she initiated. Except while restricted under rule 17: a bot then bears away against a shift that would carry her above her proper course.
 _Avoid_: hold heading, stand on
 
 **Defend lane**:
@@ -134,7 +134,7 @@ The bot that sails a dropped player's boat until they come back: a Club bot at t
 _Avoid_: easy bot, autopilot
 
 **Executor**:
-A bot-suite profile only: perfect handling with groove-only tactics (#426): the top handling draw, h = 1 (the best hand tack and gybe, no botch, [#459](https://github.com/reederphill/mobile-regatta/issues/459)) and no hand-steering error (ADR 0011). On an older class with a roll tack she hits every roll. #426's parity between handling and tactics is read against her.
+A bot-suite profile only: perfect handling with groove-only tactics (#426): the top handling draw, h = 1 (the best hand tack and gybe, no botch, [#459](https://github.com/reederphill/mobile-regatta/issues/459)) and no hand-steering error (ADR 0011). On an older class with a roll tack she hits every roll. #426's parity between handling and tactics is read against her: the `execution` mix races her against the tactician at Club's tacks and gybes, and the parity band is each winning 0.4–0.6 of the races.
 _Avoid_: perfect bot
 
 **Watchdog**:
@@ -413,14 +413,14 @@ Letting the sheets out so the sail flaps and the boat slows, e.g. to hold positi
 _Avoid_: luff (in the rules, luffing means turning toward the wind)
 
 **Autohelm**:
-What steers the boat whenever nobody is holding the rudder, for a class whose autohelm holds a centred rudder (`holdsWhenCentred`, ADR 0011; every class today): it holds the angle to the true wind she had when the rudder was centred, snapping to the groove when close to it. It never tacks or gybes by itself, and it sails the tack/gybe tap. Off, a centred rudder holds her heading, and the autohelm only sails the tap, handing back a centred rudder within 3° of the new groove. The tap has no UI ([#460](https://github.com/reederphill/mobile-regatta/issues/460)): the app has no Tack/Gybe button, a player steers through the wind on every class, and only bots on older classes and old logs tap.
+What steers the boat whenever nobody is holding the rudder, on a class whose autohelm holds a centred rudder (`holdsWhenCentred`, ADR 0011): it holds the angle to the true wind she had when the rudder was centred, snapping to the groove when close to it. It never tacks or gybes by itself, and it sails the tack/gybe tap. The default class has it off, for every boat, players and bots (skiff@7, [#437](https://github.com/reederphill/mobile-regatta/issues/437); skiff@8, [#461](https://github.com/reederphill/mobile-regatta/issues/461)): a centred rudder holds her heading, and every shift and puff is hers to steer through. The older classes and old logs keep it on. Off, the tap still sails the turn on skiff@7, handing back a centred rudder within 3° of the new groove; on skiff@8 (`sailsTap` false) it does nothing. It is not a player setting: the Debug tuning menu is the only switch ([#436](https://github.com/reederphill/mobile-regatta/issues/436)). The tap has no UI ([#460](https://github.com/reederphill/mobile-regatta/issues/460)): the app has no Tack/Gybe button, a player steers through the wind on every class, and only bots on older classes and old logs tap.
 _Avoid_: autopilot, lock, helm (to helm is what a player does)
 
 **Groove**:
-The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. The autohelm snaps to it when let go close to it and follows it as the wind strength changes; with the autohelm off (ADR 0011) it is the angle to steer to by hand.
+The best-VMG angle to the wind for the wind strength at the boat, upwind or downwind. On the default class (autohelm off, ADR 0011) it is the angle you steer to by hand, and nothing snaps her to it. Where the autohelm is on, it snaps to the groove when let go close to it and follows it as the wind strength changes.
 
 **Groove tick**:
-A tick on the wind vane at the groove on the boat's tack. The vane locks to it while the autohelm holds the groove; a pinch or foot shows as a short arc from it to the angle held. With the autohelm off she steers by hand ([#436](https://github.com/reederphill/mobile-regatta/issues/436)): the vane locks to the tick when she sails within the lock angle of the groove, and the arc runs from it to her own angle, as the sail's pinch/foot shape does.
+A tick on the wind vane at the groove on the boat's tack. By hand, on the default class (autohelm off, ADR 0011, [#436](https://github.com/reederphill/mobile-regatta/issues/436)), the vane locks to the tick when she sails within the lock angle of the groove, and a pinch or foot shows as a short arc from it to her own angle, as the sail's pinch/foot shape does. Where the autohelm is on, the vane locks to it while the autohelm holds the groove, and the arc runs to the angle held.
 
 **Tack cost**:
 What a tack loses against sailing on: the distance made good upwind, in hull lengths, over the tack and the speed she takes to get back. About a hull length from close-hauled with the autohelm sailing the tap; it decides which shifts are worth tacking on. On skiff@8, the default class ([#458](https://github.com/reederphill/mobile-regatta/issues/458), [#461](https://github.com/reederphill/mobile-regatta/issues/461)), every tack is hand-steered and the tap does nothing: the best tack is a moderate rudder (about half), about 0.95 hull lengths at 10 kn, a slam costs about half a length more, a very gentle turn more still, and in light air bearing off first pays. About 2 kn of boat speed is enough to carry a tack through at 40 % rudder or more (slower from less, never stuck), a penalty turn from a standstill takes about 25 s, and only a slight held rudder in light air hangs her in the no-go (the owner's ruling of 2026-10-10: fall-off 2°/s against a held rudder, a knee in the turn-rate curve at 1.15 kn). Bots tack and gybe it by hand as well as their handling lets them ([#459](https://github.com/reederphill/mobile-regatta/issues/459)).
@@ -431,8 +431,12 @@ A second tack/gybe tap during a tack, timed on the boom crossing. Close enough t
 _Avoid_: double tap (fine as UI copy), roll gybe (a gybe has no roll yet)
 
 **Pinch** / **foot**:
-Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). The autohelm holds either until the player changes it; with it off (ADR 0011) the player holds it by hand. On a beat the groove is proper course, so a pinch beyond 5° is above proper course (rule 17).
+Sailing a few degrees above the groove (closer to the wind, slower) or below it (further from the wind, faster). On the default class (autohelm off, ADR 0011) the player holds either by hand, steering to keep it; where the autohelm is on, it holds either until the player changes it. On a beat the groove is proper course, so a pinch beyond 5° is above proper course (rule 17).
 _Avoid_: pinch for the two-finger zoom gesture; call that **pinch-zoom**
+
+**Heat up**:
+Heading up from the downwind groove while she is still on the plane and the wind drops, so she stays on it instead of falling off (**Planing**). A bot's tactic (`heatsUpInLulls`), not used in another boat's wind shadow, where heading up only sails her further into it ([#263](https://github.com/reederphill/mobile-regatta/issues/263)); a player does it by steering. Heading up to get back on after falling off is the bot's `replanes`.
+_Avoid_: luff up (in the rules, luffing means turning toward the wind)
 
 **Livery**:
 How a player's boat looks: a livery design, the colours filling it, and a sail number. Cosmetic only, and every other player sees it.
