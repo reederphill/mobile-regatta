@@ -179,8 +179,10 @@ public protocol HTTPSPosting: Sendable {
 public struct AppStoreConnectLeaderboard: LeaderboardSubmitting {
     public static let host = "api.appstoreconnect.apple.com"
     public static let path = "/v1/gameCenterLeaderboardEntrySubmissions"
-    /// A token is asked to live 20 minutes, App Store Connect's longest, and used for 15.
-    static let tokenLifetime: TimeInterval = 20 * 60
+    /// A token is asked to live 19 minutes and used for 15. App Store Connect refuses one whose `exp` is more than 20
+    /// minutes on by its own clock, so the minute less is the room a server clock may run ahead of Apple's; the reuse
+    /// window stays below the lifetime.
+    static let tokenLifetime: TimeInterval = 19 * 60
     static let tokenReuse: TimeInterval = 15 * 60
 
     let config: AppStoreConnectConfig
@@ -219,7 +221,7 @@ public struct AppStoreConnectLeaderboard: LeaderboardSubmitting {
     }
 
     /// An ES256 JWT as App Store Connect asks of a team key: header `alg`, `kid`, `typ`; claims `iss` (the issuer
-    /// id), `iat`, `exp` (at most 20 minutes on) and `aud` `appstoreconnect-v1`.
+    /// id), `iat`, `exp` (`tokenLifetime` on: under the 20 minutes allowed) and `aud` `appstoreconnect-v1`.
     public func token(at time: Date) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
