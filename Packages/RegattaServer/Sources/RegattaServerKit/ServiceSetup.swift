@@ -13,10 +13,14 @@ extension ServiceEndpoint {
     /// The endpoint `config` describes, over `store`: the real Game Center verifier when Apple's root is configured,
     /// the dev verifier otherwise (only in `ENV=dev`); the queue (#146) locking its races onto `registry`, each race
     /// registered, streamed and closed by the lifecycle (#148) into `archive` (memory by default: a dev server); its
-    /// suspensions, attestation flags and briefing-leave cooldowns in `restrictions` (#147).
+    /// suspensions, attestation flags and briefing-leave cooldowns in `restrictions` (#147). Ratings (#151) are read
+    /// from `ratings` (an in-memory archive's own book by default, so a dev server shows what its closes rated): one
+    /// read per fleet lock for the briefing and the bots' level, one per profile request. With `config.leaderboard`
+    /// the Game Center leaderboard mirrors each rated close (`submitter`: App Store Connect unless a test passes one).
     public static func make(config: ServerConfig, store: any AccountStore, archive: any RaceArchive = InMemoryRaceArchive(),
-                            restrictions: any RestrictionStore = InMemoryRestrictionStore(),
-                            registry: RaceRegistry? = nil, fetcher: (any CertificateFetching)? = nil) throws -> ServiceEndpoint {
+                            restrictions: any RestrictionStore = InMemoryRestrictionStore(), ratings: (any RatingBook)? = nil,
+                            registry: RaceRegistry? = nil, fetcher: (any CertificateFetching)? = nil,
+                            submitter: (any LeaderboardSubmitting)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
         let verifier: any GameCenterVerifier
         if let pem = identity.appleRootsPEM {
@@ -31,13 +35,24 @@ extension ServiceEndpoint {
         }
         let queue = config.queue
         let registry = registry ?? RaceRegistry(maxRaces: config.maxRaces)
+        let book: any RatingBook = ratings ?? (archive as? InMemoryRaceArchive)?.ratings ?? InMemoryRatingBook()
+        let rating = config.lifecycle.rating
+        var sender = submitter
+        if sender == nil, let key = config.leaderboard { sender = try AppStoreConnectLeaderboard(config: key, poster: try NIOHTTPSPoster()) }
+        var rated: (@Sendable ([String]) -> Void)?
+        if let sender {
+            let mirror = LeaderboardMirror(book: book, submitter: sender, settings: config.leaderboardMirror)
+            rated = { players in Task { await mirror.rated(players) } }
+            Task { await mirror.start() }
+        }
         let lifecycle = RaceLifecycle(settings: config.lifecycle, archive: archive, tokenKey: config.tokenKey,
-                                      tokenLifetime: config.tokenLifetime, toolchain: config.serverBuild, registry: registry)
+                                      tokenLifetime: config.tokenLifetime, toolchain: config.serverBuild, registry: registry, rated: rated)
         let matchmaker = QueueMatchmaker(
             settings: queue, registry: registry,
             draw: RaceDraw(pairings: OnlinePairing.bundled(venues: queue.venues),
                            seeds: FixtureWindSeedPools(poolSize: queue.windSeedPoolSize, reuseCap: queue.windSeedReuseCap)),
             tokenKey: config.tokenKey, tokenLifetime: config.tokenLifetime, restrictions: restrictions, runningRaces: lifecycle,
+            fleetRatings: { humans in try await book.ratings(of: humans.map(\.teamPlayerID)).mapValues(\.displayed) },
             seatReleased: { await lifecycle.seatReleased($0, race: $1) }, launch: lifecycle.launcher())
         return ServiceEndpoint(
             config: ServiceEndpointConfig(termsVersion: identity.termsVersion, sessionLifetime: identity.sessionLifetime,
@@ -48,7 +63,8 @@ extension ServiceEndpoint {
                                        absoluteLifetime: identity.absoluteSessionLifetime,
                                        maxSessionsPerPlayer: identity.maxSessionsPerPlayer),
             backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
-                                      raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) }),
+                                      raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
+                                      profile: { ServerProfileService(player: $0, ratings: book, restrictions: restrictions, config: rating) }),
             matchmaker: matchmaker, lifecycle: lifecycle)
     }
 

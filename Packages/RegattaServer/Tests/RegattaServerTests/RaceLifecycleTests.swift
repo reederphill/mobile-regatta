@@ -142,9 +142,13 @@ extension RaceSims {
             #expect(outcome.log.allGoneClose?.leaveOrder == [0, 1])
             await rig.end(race)
             #expect(try await rig.archive.state(of: race.id) == .closed)
-            // Rated: no `.unrated` push (ratings are a later ticket's).
+            // Rated (#151): the first gone is last and loses the duel; each is pushed her change, never `.unrated`.
             let last = try #require(try await rig.lifecycle.lastRace(of: "T:0"))
             #expect(last.report.results.rated && last.report.isClosed)
+            let lost = RatingChange(raceID: last.report.raceID, outcome: .rated(before: Rating(value: 1500, isProvisional: true),
+                                                                                after: Rating(value: 1338, isProvisional: true)))
+            #expect(last.rating == lost)
+            #expect(await collect(rig.lifecycle.ratingChanges(for: "T:0")) { _ in true } == [lost])
         }
 
         /// #469: a player who left her old race for good and sits in a new one hears nothing of the old race's close: it

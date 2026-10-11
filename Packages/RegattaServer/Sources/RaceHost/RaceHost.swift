@@ -481,7 +481,15 @@ public actor RaceHost {
         transport.close()
     }
 
-    /// The player at `seat` leaves, closing its transport. Before the gun (`tick < 0`) a fleet bot takes the seat for
+    /// Whether a seat event recorded now is "before the gun" as the race's own presence rule reads it (`SeatPresence`,
+    /// `RaceLog.humanSeatsAtGun`): stamped with a tick at or before 0. The gun fires in tick 0's step, and whoever is at
+    /// her seat when that tick ends was at the gun; a leave stamped 0 undoes that, so it is a leave before the gun, like
+    /// one stamped −1. The one definition `leave` goes by, so that the takeover, the rating, the profile counts and the
+    /// last race all say the same of her.
+    private var isBeforeGunForPresence: Bool { race.tick <= 0 }
+
+    /// The player at `seat` leaves, closing its transport. Before the gun (`isBeforeGunForPresence`: up to and
+    /// including tick 0, the tick the gun fires in) a fleet bot takes the seat for
     /// good, sailing on from where the boat is (#16, #35, #149): the helm is released with a neutral input at the next
     /// tick, as for a dropped boat, and the bot's first decision comes within `BotDriver.decisionInterval` ticks; she
     /// races to win, at the fleet's level when the host has a fleet. The seat's roster entry becomes hers (a sailing
@@ -494,7 +502,8 @@ public actor RaceHost {
         let transport = seats[seat].transport
         seats[seat].transport = nil
         seats[seat].reliableQueue.removeAll()
-        if race.tick < 0 {
+        let beforeGun = isBeforeGunForPresence
+        if beforeGun {
             race.record(.leftBeforeGun, seat: seat)
             race.record(.botTookOver(.fleet), seat: seat)
             race.apply(.neutral, seat: seat, atTick: race.tick + 1)
@@ -512,7 +521,7 @@ public actor RaceHost {
         }
         markGone(seat, .left)
         transport?.close()
-        if race.tick >= 0 { onLeftAfterGun?(seat) }
+        if !beforeGun { onLeftAfterGun?(seat) }
         checkAllGone()
         if race.isOver { close() }
         return true

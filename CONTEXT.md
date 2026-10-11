@@ -185,6 +185,17 @@ The moment an online race's boats are fixed and the briefing begins. Leaving bef
 An online race with at least two humans at the gun. Only results between humans move ratings.
 _Avoid_: ranked match
 
+**Rating**:
+A player's skill number from rated races (Glicko-2, ADR 0012), shown rounded: 1500 for a new player. It moves only on results against other humans who were at the gun; a win against bots counts as a win in the profile, never in the rating. Leaving a rated race after the gun is a retirement and is rated as one.
+_Avoid_: rank, ELO, score, MMR
+
+**Provisional**:
+A rating that hasn't settled yet, shown with a badge in the profile: from a player's first race until a rated race leaves her rating deviation at or under 90 (about 10 to 12 races in a fleet of 3 or 4 humans, 7 in a full fleet, 16 duels). The briefing's fleet list shows the number without the badge. A provisional rating is never sent to the Game Center leaderboard.
+_Avoid_: unranked, placement
+
+**Established**:
+No longer provisional, for good: time away makes the rating move faster on return, but the badge doesn't come back. Only an admin's reset undoes it.
+
 **Completed race**:
 An online race in which the player's result is finished, placed by ladder distance, DSQ or OCS: they stayed in the race. RET never counts, and a cancelled race counts for nothing. Earned liveries and the free-text unlock count completed races.
 _Avoid_: finished race (when DSQ and OCS are meant too)

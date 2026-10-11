@@ -271,6 +271,9 @@ with it, the signature is checked against Apple's chain. It reads:
 | `SIMULTANEOUS_LOSS_POLICY` | `cancel` | a mass drop (G3: 2+ humans all dropped within 2 s, nobody back in 30 s): `cancel` (no results, no rating) or `ret` (RET in leave order, rated per #30) (#148) |
 | `CLIENT_ADDRESS_HEADER` | none | behind a reverse proxy: the request header the proxy sets to the client's address (`Fly-Client-IP` on Fly, `X-Forwarded-For` behind a load balancer). The per-address connection caps then count that address, not the proxy's. Unset, no header is trusted and the socket's address counts. Set it only when every connection comes through the proxy: a client reaching the server directly could put any address in it (#469) |
 | `CLIENT_ADDRESS_TRUSTED_HOPS` | `1` | with `CLIENT_ADDRESS_HEADER`, for a header that lists addresses: which entry from the right is the client's, one per trusted proxy in the chain (#469) |
+| `RATING_WEIGHT_EXPONENT` | `0.5` | ratings (ADR 0012): a rated race with m human opponents weighs each of its games m^-x; 0.5 is 1/√m, 0 counts every pair in full, 1 makes every race worth one duel (#151) |
+| `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PEM`, `GC_LEADERBOARD_ID` | none | the Game Center leaderboard mirror (#151): an App Store Connect team key (its id, the issuer id, a PEM file of its P-256 private key) and the leaderboard's id. All four, or none: without them no score is sent. The leaderboard must keep the most recent score, not the best (#55) |
+| `LEADERBOARD_SWEEP_SECONDS` | `300` | how often leaderboard scores that weren't sent are tried again (#151) |
 
 The per-address connection caps (8 on `/service`, 32 on `/race`) count an IPv4 address, or an IPv6 address's /64 prefix.
 A staging or production server behind a proxy must set `CLIENT_ADDRESS_HEADER`, or all its clients share one address's

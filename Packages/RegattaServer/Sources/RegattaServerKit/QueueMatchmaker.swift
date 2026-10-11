@@ -129,6 +129,11 @@ public struct QueueEntry: Sendable, Equatable {
     public let joinedAt: Date
 }
 
+/// The ratings of a locking fleet's humans, by player, in one read (#151): the server's rating store. A player it
+/// doesn't name is new (the provisional rating). If it throws, or takes longer than a restrictions read may, everyone
+/// counts as that: a fleet never waits on it.
+public typealias FleetRatingSource = @Sendable ([AccountPlayer]) async throws -> [String: Int]
+
 /// Splits the queue into rating bands, best first (#146: a stub until ratings exist).
 public typealias RatingBands = @Sendable ([QueueEntry]) -> [[QueueEntry]]
 
@@ -230,6 +235,8 @@ public actor QueueMatchmaker {
     private let liveries: LiverySource?
     /// Each human's rating (#149, #151); nil: everyone's is the provisional rating.
     private let ratings: RatingSource?
+    /// The same, for the whole fleet in one read (#151): the server's. Used instead of `ratings` when given.
+    private let fleetRatings: FleetRatingSource?
     /// Hears each seat the queue frees before its race closes (the lifecycle's, #469); nil: nobody.
     private let seatReleased: SeatReleased?
     /// Each watched, queued or locked player's restrictions as last read from the store: what the queue shows and
@@ -255,8 +262,8 @@ public actor QueueMatchmaker {
                 random: SeededRandom = .system(), now: @escaping @Sendable () -> Date = { Date() },
                 bands: @escaping RatingBands = { [$0] },
                 restrictions: any RestrictionStore = InMemoryRestrictionStore(), runningRaces: (any RunningRaces)? = nil,
-                liveries: LiverySource? = nil, ratings: RatingSource? = nil, seatReleased: SeatReleased? = nil,
-                launch: RaceLauncher? = nil) {
+                liveries: LiverySource? = nil, ratings: RatingSource? = nil, fleetRatings: FleetRatingSource? = nil,
+                seatReleased: SeatReleased? = nil, launch: RaceLauncher? = nil) {
         self.settings = settings
         self.registry = registry
         self.draw = draw
@@ -269,6 +276,7 @@ public actor QueueMatchmaker {
         self.runningRaces = runningRaces
         self.liveries = liveries
         self.ratings = ratings
+        self.fleetRatings = fleetRatings
         self.seatReleased = seatReleased
         briefingLeaves = BriefingLeaveTracker(store: restrictions, rule: settings.briefingLeaves, now: now)
         self.launch = launch ?? Self.registryLauncher(registry)
@@ -523,6 +531,15 @@ public actor QueueMatchmaker {
     /// Each human's rating, in seat order, for the fleet's median and the briefing (#149). One the source can't give
     /// (it throws, or takes longer than a restrictions read may) is the provisional rating: a fleet never waits on it.
     private func ratings(of humans: [AccountPlayer]) async -> [Int] {
+        if let fleetRatings {
+            do {
+                let read = try await withDeadline(settings.restrictionReadTimeout) { try await fleetRatings(humans) }
+                return humans.map { read[$0.teamPlayerID] ?? OnlineBriefing.provisionalRating }
+            } catch {
+                FileHandle.standardError.write(Data("RegattaServer: can't read the fleet's ratings: \(error)\n".utf8))
+                return Array(repeating: OnlineBriefing.provisionalRating, count: humans.count)
+            }
+        }
         guard let source = ratings else { return Array(repeating: OnlineBriefing.provisionalRating, count: humans.count) }
         var read: [Int] = []
         for player in humans {

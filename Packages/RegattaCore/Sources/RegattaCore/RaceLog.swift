@@ -234,3 +234,46 @@ extension SeatEvent: Codable {
         }
     }
 }
+
+/// Who is at a seat, from the seat events (#16, #30, G3): what the race scores by (`Race.results`: RET, rated) and
+/// what a stored log says of its humans (`RaceLog.humanSeatsAtGun`), from the same code.
+struct SeatPresence {
+    /// A human seat nobody gave away before the gun (a fleet bot takes a seat left then, #16).
+    var isHuman: Bool
+    /// Whether its last joining, rejoining, drop or leaving at or before the gun was a joining or a
+    /// rejoining: the human was there at the gun.
+    var wasAtGun = false
+    /// Whether its last joining, rejoining, drop or leaving was a drop or a leaving. A disconnection
+    /// doesn't count until the input hold runs out and the seat drops (G3). A seat nobody ever
+    /// attached to drops too (#195).
+    var isGone = false
+
+    static func of(seats: [SeatKind], events: [SeatEvent]) -> [SeatPresence] {
+        var seats = seats.map { SeatPresence(isHuman: $0 == .human) }
+        for event in events {
+            switch event.kind {
+            case .leftBeforeGun:
+                seats[event.seat].isHuman = false
+            case .joined, .rejoined:
+                seats[event.seat].isGone = false
+                if event.tick <= 0 { seats[event.seat].wasAtGun = true }
+            case .dropped, .left:
+                seats[event.seat].isGone = true
+                if event.tick <= 0 { seats[event.seat].wasAtGun = false }
+            case .disconnected, .botTookOver:
+                break
+            }
+        }
+        return seats
+    }
+}
+
+extension RaceLog {
+    /// The seats whose humans were at the gun, ascending (#151): the seats a rated race rates. A seat given away
+    /// before the gun isn't one (a bot sails it), nor one whose player was gone at the gun and came back later. The
+    /// race is rated (`RaceResults.rated`) when there are at least 2; both read the same `SeatPresence`.
+    public var humanSeatsAtGun: [Int] {
+        let presence = SeatPresence.of(seats: header.setup.seats, events: seatEvents)
+        return presence.indices.filter { presence[$0].isHuman && presence[$0].wasAtGun }
+    }
+}

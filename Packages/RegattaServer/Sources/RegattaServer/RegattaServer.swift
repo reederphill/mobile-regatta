@@ -31,10 +31,14 @@ enum RegattaServerMain {
         }
         let server: RegattaHTTPServer
         do {
-            let (store, archive, restrictions) = try await stores(config)
+            let (store, archive, restrictions, ratings) = try await stores(config)
+            if config.leaderboard == nil {
+                FileHandle.standardOutput.write(Data("RegattaServer: no App Store Connect key: the leaderboard mirror is off\n".utf8))
+            }
             server = try await RegattaHTTPServer.start(config: config, services: try ServiceEndpoint.make(config: config, store: store,
                                                                                                          archive: archive,
-                                                                                                         restrictions: restrictions))
+                                                                                                         restrictions: restrictions,
+                                                                                                         ratings: ratings))
         } catch {
             FileHandle.standardError.write(Data("RegattaServer: can't start: \(error)\n".utf8))
             exit(1)
@@ -56,10 +60,11 @@ enum RegattaServerMain {
     /// Postgres when `REGATTA_DATABASE_URL` is set (ADR 0009): its pool runs for the life of the process, the
     /// migrations run, and races a crash left running are cancelled (`cancelOrphans`, #30, #148), before the listener
     /// binds. Otherwise, in dev, accounts and races live in memory (nothing to orphan).
-    private static func stores(_ config: ServerConfig) async throws -> (any AccountStore, any RaceArchive, any RestrictionStore) {
+    private static func stores(_ config: ServerConfig) async throws -> (any AccountStore, any RaceArchive, any RestrictionStore,
+                                                                         (any RatingBook)?) {
         guard let configuration = config.identity.database else {
             FileHandle.standardOutput.write(Data("RegattaServer: no REGATTA_DATABASE_URL: accounts and races in memory\n".utf8))
-            return (InMemoryAccountStore(), InMemoryRaceArchive(), InMemoryRestrictionStore())
+            return (InMemoryAccountStore(), InMemoryRaceArchive(), InMemoryRestrictionStore(), nil)
         }
         let database = Database(configuration)
         Task.detached { await database.run() }
@@ -68,6 +73,6 @@ enum RegattaServerMain {
         let orphans = try await archive.cancelOrphans()
         FileHandle.standardOutput.write(Data(
             "RegattaServer: Postgres: migrations applied \(applied), orphaned races cancelled \(orphans.count)\n".utf8))
-        return (PostgresAccountStore(database), archive, PlayerRestrictionStore(database))
+        return (PostgresAccountStore(database), archive, PlayerRestrictionStore(database), RatingStore(database))
     }
 }
