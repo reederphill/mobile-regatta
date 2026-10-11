@@ -1,5 +1,5 @@
 import Foundation
-import Ratings
+@testable import Ratings
 import Testing
 
 // #151. The expected numbers come from an independent throwaway implementation of the same formulas (the brief's
@@ -81,6 +81,24 @@ private func near(_ a: Double, _ b: Double, _ tolerance: Double = 0.05) -> Bool 
         var config = RatingConfig()
         config.tau = .nan
         #expect(throws: RatingError.self) { try Glicko2().updated([Glicko2.Game(opponentRating: 1500, opponentDeviation: 80, score: 1)], config: config) }
+    }
+
+    /// The volatility iteration (review of #151): where `f` is the same at both ends of the bracket the step is 0/0,
+    /// and the NaN it makes ends the loop on its own (no comparison with NaN holds). That is no convergence, not a root.
+    @Test func volatilityIterationRefusesAnIterateThatIsntFinite() throws {
+        func root(_ f: (Double) -> Double, _ a: Double, _ b: Double) throws -> Double {
+            try Glicko2.root(of: f, from: a, to: b, epsilon: 1e-6, maxIterations: 100)
+        }
+        // A sound bracket still converges: x³ = 2 between 0 and 2.
+        #expect(near(try root({ $0 * $0 * $0 - 2 }, 0, 2), 1.259921, 1e-5))
+        // f(A) == f(B) at once, and only after a first sound step.
+        #expect(throws: RatingError.noConvergence) { try root({ _ in 1 }, 0, 1) }
+        #expect(throws: RatingError.noConvergence) { try root({ $0 == 0 ? 2 : 1 }, 0, 1) }
+        // An end, or `f` there, that isn't finite: before the loop, in it, and with a bracket already closed.
+        #expect(throws: RatingError.noConvergence) { try root({ $0 }, -1, .nan) }
+        #expect(throws: RatingError.noConvergence) { try root({ $0 }, .infinity, .infinity) }
+        #expect(throws: RatingError.noConvergence) { try root({ $0 > 0.4 && $0 < 0.6 ? .nan : $0 - 0.5 }, 0, 1) }
+        #expect(throws: RatingError.noConvergence) { try root({ _ in .nan }, 1, 1) }
     }
 }
 

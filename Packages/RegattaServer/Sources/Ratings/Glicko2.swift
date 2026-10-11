@@ -133,7 +133,7 @@ public struct Glicko2: Sendable, Equatable {
             let ex = exp(x), d = phi * phi + v + ex
             return ex * (delta * delta - phi * phi - v - ex) / (2 * d * d) - (x - a) / (tau * tau)
         }
-        var A = a, B: Double
+        let B: Double
         if delta * delta > phi * phi + v {
             B = log(delta * delta - phi * phi - v)
         } else {
@@ -144,12 +144,26 @@ public struct Glicko2: Sendable, Equatable {
             }
             B = a - k * tau
         }
-        var fA = f(A), fB = f(B)
+        let result = exp(try root(of: f, from: a, to: B, epsilon: config.epsilon, maxIterations: config.maxIterations) / 2)
+        guard result.isFinite, result > 0 else { throw .notFinite("volatility") }
+        return result
+    }
+
+    /// The Illinois iteration of step 5: the end `A` of the bracket once `A` and `B` are within `epsilon`. Throws
+    /// `.noConvergence` when it takes more than `maxIterations` steps, and whenever an end of the bracket or `f` there
+    /// isn't finite: with `f(A) == f(B)` the step divides by 0, and a NaN end would end the loop (no comparison
+    /// with NaN holds) on an `A` that was never a root.
+    static func root(of f: (Double) -> Double, from a: Double, to b: Double, epsilon: Double,
+                     maxIterations: Int) throws(RatingError) -> Double {
+        var A = a, B = b, fA = f(A), fB = f(B)
         var steps = 0
-        while abs(B - A) > config.epsilon {
+        func isSound() -> Bool { A.isFinite && B.isFinite && fA.isFinite && fB.isFinite }
+        guard isSound() else { throw .noConvergence }
+        while abs(B - A) > epsilon {
             steps += 1
-            guard steps <= config.maxIterations, fA.isFinite, fB.isFinite else { throw .noConvergence }
+            guard steps <= maxIterations else { throw .noConvergence }
             let C = A + (A - B) * fA / (fB - fA), fC = f(C)
+            guard C.isFinite, fC.isFinite else { throw .noConvergence }
             if fC * fB <= 0 {
                 A = B
                 fA = fB
@@ -159,8 +173,7 @@ public struct Glicko2: Sendable, Equatable {
             B = C
             fB = fC
         }
-        let result = exp(A / 2)
-        guard result.isFinite, result > 0 else { throw .notFinite("volatility") }
-        return result
+        guard isSound() else { throw .noConvergence }
+        return A
     }
 }

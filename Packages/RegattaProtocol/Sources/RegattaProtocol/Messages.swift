@@ -14,7 +14,8 @@ import RegattaCore
 ///
 /// Before the first release it stays at 1 whatever changes (map #37, the #73 ruling): there is no older peer in the
 /// field to tell apart, so the service messages (#143, codes 64 and up) came in without a bump. The rule above
-/// applies from the first release on.
+/// applies from the first release on. So #149 added message types 7 and 26 and a third seat-flag value without a bump,
+/// because no version-1 build has shipped; the next wire change after a shipped build must bump it.
 public let wireProtocolVersion: UInt16 = 1
 
 /// Bytes whose shape is owned by a later ticket, tagged with that shape's schema, so the owner can

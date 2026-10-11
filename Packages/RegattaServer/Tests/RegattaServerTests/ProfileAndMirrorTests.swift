@@ -231,8 +231,10 @@ private final class MockPoster: HTTPSPosting {
         let parts = try client.token(at: someTime).split(separator: ".")
         #expect(try Self.decoded(parts[0]) == ["alg": "ES256", "kid": "2X9R4HXF34", "typ": "JWT"])
         let issued = Int(someTime.timeIntervalSince1970)
-        #expect(try Self.decoded(parts[1]) == ["iss": "57246542-96fe-1a63-e053-0824d011072a", "iat": "\(issued)", "exp": "\(issued + 1_200)",
+        #expect(try Self.decoded(parts[1]) == ["iss": "57246542-96fe-1a63-e053-0824d011072a", "iat": "\(issued)", "exp": "\(issued + 1_140)",
                                                  "aud": "appstoreconnect-v1"])
+        // Under Apple's 20 minutes, so a clock a little ahead of Apple's still signs a valid token; reused for less.
+        #expect(AppStoreConnectLeaderboard.tokenLifetime < 20 * 60 && AppStoreConnectLeaderboard.tokenReuse < AppStoreConnectLeaderboard.tokenLifetime)
         // One token serves 15 minutes of submissions, then a new one is signed.
         let entry = MirrorEntry(playerID: "T:a", gamePlayerID: "G:a", rating: 1500)
         try await client.submit(entry)
