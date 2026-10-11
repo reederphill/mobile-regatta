@@ -96,7 +96,8 @@ public enum BoatDynamics {
     ///   bears away by the lee past the polar's `byTheLeeLimit` (a gybe). By the lee the speed target is
     ///   the polar mirrored past dead downwind, less `byTheLeePenalty`.
     /// - A class with a spinnaker moves it on her new true wind angle (`Spinnaker.next`), and a class that
-    ///   planes decides whether she is on the plane from it and her speed so far (`PlaningTuning.isPlaning`);
+    ///   planes decides whether she is on the plane from it, her speed so far and, on a class that asks (#462), her
+    ///   rudder and her polar speed there (`PlaningTuning.isPlaning`);
     ///   the target is then `polarTarget`, which reads both.
     public static func advance(_ state: State, control: Control, env: Environment, boatClass: BoatClass, dt: Double) -> State {
         let steering = boatClass.steering
@@ -132,7 +133,8 @@ public enum BoatDynamics {
         let twa = abs(relativeWind)
         if let kite = boatClass.spinnaker { s.spinnaker = s.spinnaker.next(twa: twa, dt: dt, tuning: kite) }
         if let planing = boatClass.planing {
-            s.isPlaning = planing.isPlaning(was: s.isPlaning, twa: twa, speed: s.speed, tws: env.windSpeed)
+            s.isPlaning = planing.isPlaning(was: s.isPlaning, twa: twa, speed: s.speed, tws: env.windSpeed, rudder: s.rudder,
+                                            polar: polar)
         }
         let inNoGo = twa < noGoAngle(polar)
         var target = control.sailing && !inNoGo

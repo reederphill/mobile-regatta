@@ -96,7 +96,8 @@ import RegattaCore
         let sliders = model.groups.flatMap(\.sliders)
         // The pressure field's sliders name numbers only in schema-3 to -5 conditions (`pressureFieldIsTunable`).
         // The roll tack's sliders name numbers only in a class with a roll tack (`rollTackIsTunableOnAnOlderClass`).
-        for slider in sliders where !Self.isPressureField(slider) && !Self.isRollTack(slider) {
+        // The planing rule's stay-on sliders name numbers only from skiff@9 on (`planingRuleIsTunableOnSkiffNine`).
+        for slider in sliders where !Self.isPressureField(slider) && !Self.isRollTack(slider) && !Self.isPlaningStayOn(slider) {
             let file = model.fileValue(slider)
             #expect(file != nil, "\(slider.id) names nothing in its file")
             if let file { #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider") }
@@ -125,6 +126,26 @@ import RegattaCore
     }
 
     private static func isRollTack(_ slider: TuningSlider) -> Bool { slider.id.hasPrefix("boatClass:/rollTack/") }
+
+    /// #462: the planing rule's stay-on speed share and apparent wind have sliders, "not in this file" on the default
+    /// class, skiff@8; on skiff@9 each names its number, and the three older planing values name theirs on both.
+    @Test func planingRuleIsTunableOnSkiffNine() throws {
+        let (model, root) = model()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let planing = try #require(model.groups.first { $0.id == "planing" }).sliders
+        let stayOn = planing.filter(Self.isPlaningStayOn)
+        #expect(planing.count == 7 && stayOn.count == 4)
+        #expect(stayOn.allSatisfy { model.fileValue($0) == nil }, "skiff@8 has neither value")
+        model.setBase(.boatClass, DataFileKey(id: "skiff", version: 9))
+        for slider in planing {
+            let file = try #require(model.fileValue(slider), "\(slider.id) names nothing in skiff@9")
+            #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider")
+        }
+    }
+
+    private static func isPlaningStayOn(_ slider: TuningSlider) -> Bool {
+        slider.id == "boatClass:/planing/stayOnSpeedShare" || slider.id.hasPrefix("boatClass:/planing/apparentWind/")
+    }
 
     /// Tuned values become tuned copies at the race start: the practice race resolves them from its catalog and
     /// sails them (bots too), and its log, kept with them beside it as it leaves, replays to its digest.

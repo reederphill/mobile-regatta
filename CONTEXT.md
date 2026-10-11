@@ -407,7 +407,7 @@ _Avoid_: boat type, model
 v1.0's boat class: a fictional two-person 4.9 m high-performance dinghy with trapezes and an asymmetric spinnaker, modelled on the 49er.
 
 **Planing**:
-Sailing fast enough that the hull skims over the water instead of pushing through it. Downwind and on reaches a skiff is either on the plane or off it; once off, she has to head up to get back on.
+Sailing fast enough that the hull skims over the water instead of pushing through it. Downwind and on reaches a skiff is either on the plane or off it; once off, she has to head up to get back on. From skiff@9 ([#462](https://github.com/reederphill/mobile-regatta/issues/462)) she can lose it by steering: a slammed, cranked or lingering gybe comes out too slow with the wind behind her, and a run sailed too deep, or a lull, leaves her too little apparent wind; a clean gybe and the **Groove** keep it. One rule at every wind strength.
 _Avoid_: foiling (a different thing)
 
 **Spinnaker**:

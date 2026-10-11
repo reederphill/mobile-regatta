@@ -21,7 +21,9 @@ public struct BoatClass: DataFileContent, Equatable {
     /// the autohelm (`AutohelmTuning.holdsWhenCentred`, absent true) and how close to the new groove a tap lets go
     /// (`AutohelmTuning.handBack`). #458 adds three more optional values to schema 4: the rudder drag's exponent
     /// (`Steering.rudderDragExponent`), irons recovery (`Steering.headToWindFallOffCentredRate`) and whether the tap
-    /// sails the turn (`AutohelmTuning.sailsTap`). A schema-2 or -3 class, or a schema-4 one without them, sails exactly as before.
+    /// sails the turn (`AutohelmTuning.sailsTap`). #462 adds two optional planing values: the share of her polar speed she
+    /// stays on the plane above (`PlaningTuning.stayOnSpeedShare`) and the apparent wind she needs
+    /// (`PlaningTuning.apparentWind`). A schema-2 or -3 class, or a schema-4 one without them, sails exactly as before.
     public static let supportedSchemaVersions = [2, 3, 4]
 
     /// Name shown to players.
@@ -159,6 +161,35 @@ public struct BoatClass: DataFileContent, Equatable {
         public var offPlaneReferenceTWS: Double
         /// ...scaled by 1 + this × (TWS − `offPlaneReferenceTWS`), per m/s, and never faster than the polar.
         public var offPlaneGain: Double
+        /// On the plane with the apparent wind aft of `onMaxAWA`, she drops off it below this share of the polar's
+        /// (on-plane) speed at her true wind angle and wind (schema 4's `stayOnSpeedShare`, #462), or nil when the
+        /// file leaves it out: only `offSpeed` and `offBelowTWA` take her off, as every class before skiff@9. A fixed
+        /// `offSpeed` cannot fire in a breeze (a slammed gybe at 14 kn of wind still leaves her 10 kn); a share of her
+        /// own speed does at every wind. With the apparent wind forward of `onMaxAWA`, what gets her on the plane
+        /// keeps her on it, so she never drops off again on the way back up to speed. 0...1.
+        public var stayOnSpeedShare: Double?
+        /// The apparent wind she needs to plane (schema 4's `apparentWind`, #462), or nil when the file leaves it out:
+        /// the apparent wind's strength is not tested, as every class before skiff@9.
+        public var apparentWind: ApparentWind?
+
+        /// The apparent wind speed a planing boat needs (#462): sailed too deep, or in a lull, her own speed takes
+        /// the wind out of her sails and she drops off the plane.
+        public struct ApparentWind: Sendable, Equatable {
+            /// On the plane she drops off it with the apparent wind under this, m/s...
+            public var offSpeed: Double
+            /// ...and off it she gets on only with this or more, m/s (≥ `offSpeed`: no flicker between the two).
+            public var onSpeed: Double
+            /// `offSpeed` is tested only with the rudder within this of centre (0...1): through dead downwind the
+            /// apparent wind of every gybe falls to nothing, so a gybe sailed through with the rudder over never
+            /// starves her, and one held there with the rudder centred does.
+            public var rudderWithin: Double
+
+            public init(offSpeed: Double, onSpeed: Double, rudderWithin: Double) {
+                self.offSpeed = offSpeed
+                self.onSpeed = onSpeed
+                self.rudderWithin = rudderWithin
+            }
+        }
 
         /// The off-the-plane speed at `twa` (radians) in `tws` (m/s): the reference column's speed at
         /// `twa`, scaled by the wind strength, capped at the polar's (on-plane) speed.
@@ -1046,10 +1077,11 @@ private struct BoatClassSchema3Additions: Decodable {
 
 // MARK: - Schema 4
 
-/// What the boat class file's schema 4 adds to schema 3 (#434, ADR 0011): optional autohelm values, and from #458 the
-/// rudder drag's exponent, irons recovery and whether the tap sails the turn. Left out, the class sails as a schema-3
-/// one: the autohelm holds a centred rudder, a tap lets go 3° from the groove and sails the turn, the drag is linear in
-/// the rudder and she falls off head to wind at `headToWindFallOffDegreesPerSecond` alone.
+/// What the boat class file's schema 4 adds to schema 3 (#434, ADR 0011): optional autohelm values, from #458 the
+/// rudder drag's exponent, irons recovery and whether the tap sails the turn, and from #462 what keeps her on the plane.
+/// Left out, the class sails as a schema-3 one: the autohelm holds a centred rudder, a tap lets go 3° from the groove
+/// and sails the turn, the drag is linear in the rudder, she falls off head to wind at
+/// `headToWindFallOffDegreesPerSecond` alone, and only `offSpeedKnots` and `offBelowTWADegrees` take her off the plane.
 private struct BoatClassSchema4Additions: Decodable {
     struct Steering: Decodable {
         struct Autohelm: Decodable {
@@ -1082,11 +1114,39 @@ private struct BoatClassSchema4Additions: Decodable {
         }
     }
 
+    /// #462: what keeps her on the plane, beside schema 3's planing values (which `BoatClassSchema3Additions` reads).
+    struct Planing: Decodable {
+        struct ApparentWind: Decodable {
+            let offKnots: Double
+            let onKnots: Double
+            let rudderWithin: Double
+        }
+
+        /// Absent: no share of her polar speed is asked of her.
+        let stayOnSpeedShare: Double?
+        /// Absent: the apparent wind's strength is not tested.
+        let apparentWind: ApparentWind?
+    }
+
     let steering: Steering?
+    let planing: Planing?
 
     func apply(to boatClass: inout BoatClass, id: String) throws {
         func check(_ condition: Bool, _ reason: @autoclosure () -> String) throws {
             if !condition { throw DataFileError.invalidContent(kind: BoatClass.kind, id: id, reason: reason()) }
+        }
+        if let share = planing?.stayOnSpeedShare {
+            try check(share >= 0 && share <= 1, "planing stay-on speed share must be 0...1")
+            boatClass.planing?.stayOnSpeedShare = share
+        }
+        if let apparent = planing?.apparentWind {
+            try check(apparent.offKnots.isFinite && apparent.offKnots > 0 && apparent.onKnots.isFinite
+                      && apparent.onKnots >= apparent.offKnots,
+                      "planing apparent wind speeds must be positive, getting on at no less than she drops off")
+            try check(apparent.rudderWithin >= 0 && apparent.rudderWithin <= 1, "planing apparent wind rudder limit must be 0...1")
+            boatClass.planing?.apparentWind = .init(offSpeed: metresPerSecond(knots: apparent.offKnots),
+                                                    onSpeed: metresPerSecond(knots: apparent.onKnots),
+                                                    rudderWithin: apparent.rudderWithin)
         }
         func flag(_ value: FlagValue?, _ name: String) throws -> Bool? {
             switch value {

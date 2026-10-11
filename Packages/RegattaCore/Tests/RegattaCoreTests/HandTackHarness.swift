@@ -142,7 +142,9 @@ enum HandTack {
                         rudder *= 1 + (0.25 - 1) * ((deg2rad(ease) - remaining) / (deg2rad(ease) - deg2rad(5))).clamped(to: 0...1)
                     }
                 }
-                if remaining > end { command = quantise(turnSign * rudder) } else { done = true }
+                // A gybe never lets go before her boom is across (the bots' rule): in 19 kn and more the downwind groove is
+                // deeper than 160°, the boom crosses past it, and letting go at the groove left her by the lee (#462).
+                if remaining > end || (gybe && helmState.boomSide == boom) { command = quantise(turnSign * rudder) } else { done = true }
             }
             helmState = BoatDynamics.advance(helmState, control: .init(rudder: command), env: env, boatClass: boat, dt: dt)
             twinState = BoatDynamics.advance(twinState, control: .init(rudder: holdLaw(heading: twinState.heading, aim: origin)),

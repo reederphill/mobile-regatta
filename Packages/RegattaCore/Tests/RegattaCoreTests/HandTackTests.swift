@@ -280,6 +280,7 @@ enum SkiffEight {
         #expect(autohelm == a.steering.autohelm)
     }
 
+    /// The files before skiff@8 (`SkiffNineTests.olderClassesLoadUnchanged` holds skiff@8 and these to #462's values).
     @Test func olderClassesLoadUnchanged() throws {
         let files = try (1...7).map { try BoatClassFile.bundled(id: "skiff", version: $0) }
             + (3...5).map { try BoatClassFile.bundled(id: "ilca-dinghy", version: $0) } // 1 and 2 are schema 1: not sailed
