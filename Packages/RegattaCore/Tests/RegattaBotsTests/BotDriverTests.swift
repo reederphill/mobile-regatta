@@ -334,24 +334,29 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
         }
     }
 
-    /// #351: below `penaltyPutOffSkill` (a Club or Regional bot) she doesn't put her turn off in the pack. On a class
-    /// whose tap sails her turns she starts it at once, her own way, as before #351; by hand (#471) she first bears
-    /// away for room (`BotBrain.clearingRoom`), the same rudder whichever way she turns penalties, and no turn's.
-    @Test func belowNationalSkillABotStartsItsTurnAtOnceInThePack() throws {
+    /// #486: by hand a Club bot reads the pack too (before, below `penaltyPutOffSkill` she turned at once, her own way):
+    /// with a boat close aboard, in the water of the circles she would turn both ways, she first bears away for room
+    /// (`BotBrain.clearingRoom`, #471), the same rudder whichever way she turns penalties, and no turn's. On a class
+    /// whose tap sails her turns she starts it at once, her own way, as before #486 (#351).
+    @Test func aClubBotReadsThePackByHand() throws {
         let byHand = !RaceFiles.defaults.boatClass.content.steering.autohelm.sailsTap
+        let club = BotTier.club.skill(at: 0.5)
         var rudders: [Int8] = []
         for direction in [1.0, -1.0] {
             let (rudder, _) = try decide(atOffset: .zero, penaltyDirection: direction, turned: 0, other: Vec2(3, 4),
-                                         inOpenWater: true, skill: BotBrain.penaltyPutOffSkill - 0.01)
+                                         inOpenWater: true, skill: club)
             if !byHand { #expect(rudder == Self.hardOver(direction)) }
             rudders.append(rudder)
         }
-        if byHand { #expect(rudders[0] == rudders[1] && rudders[0] != 0, "\(rudders)") }
+        if byHand {
+            #expect(rudders[0] == rudders[1] && rudders[0] != 0, "\(rudders)")
+            #expect(!rudders.contains(Self.hardOver(1)) && !rudders.contains(Self.hardOver(-1)), "\(rudders)")
+        }
     }
 
-    /// #351: racing in open water (not on the last leg) with a boat within `penaltyBoatClearance`, she puts her turn
-    /// off and sails on (the same rudder whichever side she turns penalties to), until `penaltyStartMargin` before the
-    /// start deadline; then she turns hard over away from that boat.
+    /// #351: racing in open water (not on the last leg) with a boat close aboard (by hand, in both circles she could
+    /// turn, #486), she puts her turn off and sails on (the same rudder whichever side she turns penalties to), until
+    /// `penaltyStartMargin` before the start deadline; then she turns hard over away from that boat.
     @Test func inOpenWaterABotPutsHerTurnOffInThePackUntilItsDeadline() throws {
         let start = RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.start
         let late = start - BotBrain.penaltyStartMargin

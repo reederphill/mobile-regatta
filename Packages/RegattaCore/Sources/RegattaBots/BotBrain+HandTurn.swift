@@ -240,6 +240,66 @@ extension BotBrain {
         return 2 * .pi / (Self.penaltyRudder(view) * view.boatClass.steering.turnRate(speed: speed)) + table.crawl
     }
 
+    /// Seconds between the points `turnSweep` samples her path at (#486): a few degrees of her circle each.
+    static let turnSweepStep = 0.5
+
+    /// The share of a penalty turn's time she sees ahead in its sweep (`turnSweep`, #486): her keep-clear lookahead
+    /// (`keepClearLookahead`, 2.5 + 2 × skill seconds) as a share of the most skilled bot's, no more than all of it.
+    /// Club's centre (3.45 s) sees 77 % of the turn, National's top all of it, the cautious bot all of it.
+    var turnSweepShare: Double { min(1, keepClearLookahead / BotWeaknesses.keepClearLookahead(skill: 1)) }
+
+    /// "Sweep the whole circle" (#486, the owner's ruling of 2026-10-11): the first boat her penalty turn `direction`'s
+    /// way (+1 to starboard) would come within `roomLengths` hull lengths of, and the seconds into the turn she would,
+    /// or nil while its whole circle stays clear. A turn by hand is 10 to 25 s and more, and where boats are now says
+    /// little about where they will be as she comes round. Her clearance is the room a turn of hers towards a boat
+    /// takes (`roomDistance`, 2 lengths), not her keep-clear distance (1.3): at that, a boat abeam a length and a half
+    /// off on her course crossed neither circle once she had borne away a few degrees, and she luffed her turn back
+    /// into it. Her path: an arc at the rate `penaltyRudder` turns her at `HandTackTable.penaltyTurn.speed` of her
+    /// close-hauled speed (`penaltyTurnSeconds`' reckoning), `angle` radians of it (the whole turn by default; what is
+    /// left of one, for a turn under way), over that share of `penaltyTurnSeconds` and only the first `turnSweepShare`
+    /// of it: the less skilled see a conflict late in the turn later, but every tier sees one. Every other boat but a
+    /// ghost sails on in a straight line at her velocity (`closestApproach`), between samples `turnSweepStep` apart.
+    /// From `start` if given: where she would begin it, her heading there and the seconds from now she would
+    /// (`clearingHeading`'s reckoning), else from here and now. Cheap: at most a few dozen samples against the boats
+    /// that can reach her circle, while she owes a turn she hasn't started.
+    func turnSweep(_ b: SeatView.OwnBoat, _ view: SeatView, direction: Double, angle: Double = 2 * .pi,
+                   from start: (position: Vec2, heading: Double, seconds: Double)? = nil)
+        -> (boat: SeatView.OtherBoat, seconds: Double)? {
+        let speed = closeHauledSpeed(b, view) * HandTackTable.penaltyTurn.speed
+        let rate = Self.penaltyRudder(view) * view.boatClass.steering.turnRate(speed: speed)
+        guard rate > 0 else { return nil }
+        let horizon = penaltyTurnSeconds(b, view) * angle / (2 * .pi) * turnSweepShare
+        let clear = view.boatClass.hull.length * roomLengths
+        let delay = start?.seconds ?? 0
+        var position = start?.position ?? b.position
+        var heading = start?.heading ?? b.heading
+        // Her circle's diameter: she never leaves it, so a boat that can't come within `clear` of it never crosses it.
+        let reach = 2 * speed / rate + clear
+        let others = view.others.filter {
+            !$0.isGhost && ($0.position + $0.velocity * delay - position).length - $0.speed * horizon < reach
+        }
+        guard !others.isEmpty else { return nil }
+        let step = Self.turnSweepStep
+        var t = 0.0
+        while t < horizon {
+            let dt = min(step, horizon - t)
+            // Along the chord of this step's arc, at her speed: a few degrees of arc, a chord all but as long.
+            let turned = direction * rate * dt
+            let velocity = Vec2.heading(heading + turned / 2) * speed
+            for other in others {
+                let offset = other.position + other.velocity * (delay + t) - position
+                let closest = Self.closestApproach(offset: offset, relativeVelocity: other.velocity - velocity, lookahead: dt)
+                if closest < clear {
+                    return (other, t)
+                }
+            }
+            position += velocity * dt
+            heading += turned
+            t += dt
+        }
+        return nil
+    }
+
     /// Whether, on a class she turns by hand, a turn started later (put off, or given up to turn again) can still be
     /// whole by its complete deadline: `penaltyTurnSeconds` and `HandTackTable.penaltyTurn.margin` to spare. Always on
     /// a class whose tap sails her turns: its turn fits the rules' deadlines from anywhere.
