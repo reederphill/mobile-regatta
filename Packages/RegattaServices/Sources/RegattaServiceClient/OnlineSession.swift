@@ -239,6 +239,10 @@ public actor OnlineSession {
     /// The profile and the stored livery (#162). Gated like `raceSession`.
     public nonisolated var profile: any ProfileService { SessionProfileService(session: self) }
 
+    /// Whether the device has a Game Center player: with none there is no session to wait for, and the services answer
+    /// as the server would a signed-out caller.
+    fileprivate var hasPlayer: Bool { device != nil }
+
     /// `body` on the open connection, waiting up to `openWait` for one (`notConnected`) and `limit`, or `callTimeout`,
     /// for its answer (`timedOut`).
     fileprivate nonisolated func call<Answer: Sendable>(
@@ -248,9 +252,10 @@ public actor OnlineSession {
         return try await withDeadline(limit ?? settings.callTimeout, sleep: dependencies.sleep) { try await body(connection) }
     }
 
-    /// As `call`, but with no wait for a connection: with none open the server has let her place go already.
+    /// As `call`, but with no wait for a connection: with none open the server has let her place go already, and she is
+    /// not queued.
     fileprivate func leaveQueue() async throws {
-        guard let connection = live?.connection else { throw OnlineSessionError.notConnected }
+        guard let connection = live?.connection else { throw QueueError.notQueued }
         try await withDeadline(settings.leaveTimeout, sleep: dependencies.sleep) { try await RemoteQueueService(connection).leave() }
     }
 
@@ -323,7 +328,11 @@ public actor OnlineSession {
         let target = target
         // Already so: running or halted for her, or idle with nobody to connect for.
         let settled = target == nil ? (phase == .idle || updateRequired) : (runner != nil || halted)
-        if serving == target, settled { return }
+        if serving == target, settled {
+            // Nobody signed in on the device from the start: the queue's stream says so, as after a sign-out.
+            if device == nil { queueStates.send(.unavailable(.notSignedIn)) }
+            return
+        }
         stop()
         guard let target else {
             if !updateRequired { show(.idle) }
@@ -615,7 +624,10 @@ struct SessionQueueService: QueueService {
     let states: Broadcast<QueueState>
 
     func stateUpdates() -> AsyncStream<QueueState> { states.subscribe() }
-    func join() async throws { try await session.call { try await RemoteQueueService($0).join() } }
+    func join() async throws {
+        guard await session.hasPlayer else { throw QueueError.refused(.notSignedIn) }
+        try await session.call { try await RemoteQueueService($0).join() }
+    }
     func leave() async throws { try await session.leaveQueue() }
 }
 
@@ -644,8 +656,15 @@ struct SessionRaceSessionService: RaceSessionService {
 struct SessionProfileService: ProfileService {
     let session: OnlineSession
 
-    func profile() async throws -> Profile { try await session.call { try await RemoteProfileService($0).profile() } }
-    func saveLivery(_ livery: Livery) async throws -> Livery { try await session.call { try await RemoteProfileService($0).saveLivery(livery) } }
+    func profile() async throws -> Profile {
+        guard await session.hasPlayer else { throw ProfileError.notSignedIn }
+        return try await session.call { try await RemoteProfileService($0).profile() }
+    }
+
+    func saveLivery(_ livery: Livery) async throws -> Livery {
+        guard await session.hasPlayer else { throw ProfileError.notSignedIn }
+        return try await session.call { try await RemoteProfileService($0).saveLivery(livery) }
+    }
 }
 
 private enum Raced<Answer: Sendable>: Sendable {

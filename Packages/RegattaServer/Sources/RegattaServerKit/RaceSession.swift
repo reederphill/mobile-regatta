@@ -25,6 +25,9 @@ public actor RaceSession {
     public nonisolated let humanSeats: Set<Int>
     /// Dev override (#67): the tick at which the race is closed where it stands, if it hasn't ended.
     public nonisolated let closeAtTick: Int?
+    /// Whether the close at `closeAtTick` scores the race as it stands (`RaceHost.closeScoredNow`, a queue race's dev
+    /// length, #162) or leaves it without results, as the instant race's does.
+    public nonisolated let scoresDevClose: Bool
     private let clock: any HostClock
     /// Told when the results so far change (`RaceHost.resultsVersion`), from the driver (#148).
     private let onProgress: (@Sendable () -> Void)?
@@ -41,7 +44,7 @@ public actor RaceSession {
     /// `onLeftAfterGun` are the host's (#149). `onGun` hears the gun once, from the driver, with the humans at it by the
     /// rating rule (`RaceLog.humanSeatsAtGun`): after tick 1's step, when tick 0 is settled (a leave stamped with the
     /// gun's tick is a leave before the gun).
-    public init(id: UUID = UUID(), setup: RaceSetup, windSeed: WindSeed, closeAtTick: Int? = nil,
+    public init(id: UUID = UUID(), setup: RaceSetup, windSeed: WindSeed, closeAtTick: Int? = nil, scoresDevClose: Bool = false,
                 clock: any HostClock = SystemClock(), options: RaceHostOptions = RaceHostOptions(), roster: [RosterEntry]? = nil,
                 onProgress: (@Sendable () -> Void)? = nil, onBriefingLeave: (@Sendable (BriefingLeave) -> Void)? = nil,
                 fleet: FleetFill? = nil, onLeftAfterGun: (@Sendable (_ seat: Int) -> Void)? = nil,
@@ -49,6 +52,7 @@ public actor RaceSession {
         self.id = id
         self.setup = setup
         self.closeAtTick = closeAtTick
+        self.scoresDevClose = scoresDevClose
         self.clock = clock
         self.onProgress = onProgress
         self.onGun = onGun
@@ -120,7 +124,7 @@ public actor RaceSession {
         var version = 0
         var gunPending = onGun != nil
         while true {
-            let step = await host.driveStep(closeAtTick: closeAtTick)
+            let step = await host.driveStep(closeAtTick: closeAtTick, scored: scoresDevClose)
             if gunPending, await host.tick >= 1 {
                 gunPending = false
                 if await host.cancelled == nil { onGun?(await host.log.humanSeatsAtGun.count) }
@@ -154,9 +158,11 @@ extension RaceHost {
     /// One pass of the driver: simulates every tick due, closes the race if it's over or at `closeAtTick`,
     /// and says when the next tick is due (host clock), or nil once the race is closed or cancelled; and the results
     /// version (`resultsVersion`).
-    func driveStep(closeAtTick: Int?) -> (next: UInt64?, resultsVersion: Int) {
+    func driveStep(closeAtTick: Int?, scored: Bool = false) -> (next: UInt64?, resultsVersion: Int) {
         advance()
-        if !isEnded, let closeAtTick, tick >= closeAtTick { close() }
+        if !isEnded, let closeAtTick, tick >= closeAtTick {
+            if scored { closeScoredNow() } else { close() }
+        }
         guard !isEnded else { return (nil, resultsVersion) }
         return (time(ofTick: tick + 1), resultsVersion)
     }

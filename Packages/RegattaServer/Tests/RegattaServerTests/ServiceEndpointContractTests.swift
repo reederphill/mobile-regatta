@@ -110,6 +110,41 @@ import Testing
                 for session in opened { await session.shutdown() }
             }
             await #expect(throws: ContractRunnerError.notProvided(.queue)) { try await ContractRunner.run(.queue, services: services) }
+            await #expect(throws: ContractRunnerError.notProvided(.lobby)) { try await ContractRunner.run(.lobby, services: services) }
+        } catch {
+            await server.shutdown()
+            throw error
+        }
+        await server.shutdown()
+    }
+
+    /// Acceptance (#162): the Queue, RaceSession and Profile suites pass on the client's online session (its `queue`,
+    /// `raceSession` and `profile`, as the app holds them) against the real server over the real WebSocket.
+    @Test func queueRaceSessionAndProfilePassThroughTheOnlineSession() async throws {
+        let server = try await RegattaHTTPServer.start(config: Self.config())
+        let port = server.port
+        let sessions = Mutex<[OnlineSession]>([])
+        @Sendable func session(_ suite: ContractSuiteID, _ situation: String) async throws -> OnlineSession {
+            let session = try await Self.onlineSession(port: port, service: suite.suiteName, situation: situation)
+            sessions.withLock { $0.append(session) }
+            return session
+        }
+        let services = ContractServices(
+            identity: { try await session(.identity, "\($0)").identity },
+            terms: { try await session(.terms, "\($0)").terms },
+            queue: { try await session(.queue, "\($0)").queue },
+            raceSession: { try await session(.raceSession, "\($0)").raceSession },
+            profile: { try await session(.profile, "\($0)").profile })
+        do {
+            for suite in [ContractSuiteID.queue, .raceSession, .profile] {
+                try await ContractRunner.run(suite, services: services)
+                // The server allows an address 8 service connections.
+                let opened = sessions.withLock { sessions in
+                    defer { sessions = [] }
+                    return sessions
+                }
+                for session in opened { await session.shutdown() }
+            }
         } catch {
             await server.shutdown()
             throw error

@@ -304,6 +304,38 @@ public enum LoadClient {
         return (race, reports)
     }
 
+    /// Joins the seat `token` names and gives it up at once (`LeaveRace`, #162's queue player): before the gun a bot
+    /// takes it. Returns once the server has closed the connection, or 3 s on.
+    public static func leave(token: [UInt8], options: LoadClientOptions = LoadClientOptions(),
+                             group: any EventLoopGroup = MultiThreadedEventLoopGroup.singleton) async throws {
+        let origin = ContinuousClock.now
+        let micros: @Sendable () -> UInt64 = {
+            let (seconds, attoseconds) = (ContinuousClock.now - origin).components
+            return UInt64(seconds) * 1_000_000 + UInt64(attoseconds / 1_000_000_000_000)
+        }
+        let transport = try await WebSocketRaceTransport.connect(host: options.host, port: options.port, clock: micros, group: group)
+        do {
+            send(.hello(Hello(clientBuild: options.clientBuild, files: [])), seq: 1, on: transport)
+            _ = try await next(on: transport, within: options.handshakeTimeout, "HelloAck")
+            send(.joinRace(JoinRace(token: token)), seq: 2, on: transport)
+            let joined = try await next(on: transport, within: options.handshakeTimeout, "RaceStart")
+            guard case .raceStart(let start) = joined.message else {
+                throw LoadClientError.handshake("expected RaceStart, got \(joined.message.type)")
+            }
+            let client = RaceClient(start: start, transport: transport)
+            client.leave()
+            let closedBy = ContinuousClock.now + .seconds(3)
+            while transport.isConnected, ContinuousClock.now < closedBy {
+                _ = transport.receive()
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            await transport.close()
+        } catch {
+            await transport.close()
+            throw error
+        }
+    }
+
     // MARK: - Handshake
 
     private static func send(_ message: Message, seq: UInt32, on transport: WebSocketRaceTransport) {

@@ -29,9 +29,10 @@ import Testing
         await #expect(throws: QueueError.notQueued) { try await queue.leave() }
         #expect(rig.server.connects == 1)
 
-        // With no connection there is no place to give up: a leave says so at once.
+        // With no connection there is no place to give up (the server dropped it with the connection): a leave says so
+        // at once.
         await rig.session.setOnline(false)
-        await #expect(throws: OnlineSessionError.notConnected) { try await queue.leave() }
+        await #expect(throws: QueueError.notQueued) { try await queue.leave() }
         #expect(!rig.sleeper.requested.contains(SessionRig.openWait))
     }
 

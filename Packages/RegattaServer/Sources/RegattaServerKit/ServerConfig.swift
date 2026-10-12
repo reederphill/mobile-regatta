@@ -75,6 +75,8 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `REGATTA_APPLE_ROOT_PEM` | none | a PEM file of the certificates Game Center's key must chain to; unset in dev = dev verifier |
 /// | `REGATTA_DATABASE_URL` | none | Postgres (ADR 0009); unset in dev = accounts in memory |
 /// | `QUEUE_LOCK_SECONDS` | `60` | seconds from the oldest queued player's join to fleet lock (#146); short for the contract runner |
+/// | `QUEUE_RACE_SECONDS` | none | dev only: a queue race is closed this many seconds after the gun (5…3600) with results as it stands (the rest placed by distance), for a local demo or an e2e run (#162); refused outside `ENV=dev` |
+/// | `ALL_GONE_GRACE_SECONDS` | `30` | dev only: how long a race every human has left waits for one to come back before it closes (G3; 1…3600), so one e2e player can drop and rejoin (#162); refused outside `ENV=dev` |
 /// | `CATCH_FINISHERS` | on | `off`: no hold on the lock for a running race's finishers (G2, #147); the contract runner's server |
 /// | `CATCH_FINISHERS_OFFSET_SECONDS` | `15` | a held lock comes this long after the running race's expected close (G2) |
 /// | `CATCH_FINISHERS_MAX_HOLD_SECONDS` | `180` | the oldest queued player's longest wait, join to lock, for a hold (G2) |
@@ -170,6 +172,9 @@ public struct ServerConfig: Sendable {
             }
             config.lifecycle.allGone.simultaneousLossPolicy = value
         }
+        let knobs = try DevRaceKnobs(env: env, environment: environment)
+        config.lifecycle.queueRaceCloseAtTick = knobs.queueRaceCloseAtTick
+        if let grace = knobs.allGoneGraceTicks { config.lifecycle.allGone.graceTicks = grace }
         if let header = env["CLIENT_ADDRESS_HEADER"] {
             let token = header.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_") }
             guard !header.isEmpty, token else {
@@ -248,6 +253,26 @@ public struct ServerConfig: Sendable {
         self.tokenLifetime = tokenLifetime
         self.serverBuild = serverBuild
         self.maxRaces = maxRaces
+    }
+}
+
+/// The dev server's race overrides (#162): `QUEUE_RACE_SECONDS` and `ALL_GONE_GRACE_SECONDS`. Neither exists outside
+/// `ENV=dev`: set there, the server refuses to start.
+public struct DevRaceKnobs: Equatable, Sendable {
+    public var queueRaceCloseAtTick: Int?
+    public var allGoneGraceTicks: Int?
+
+    public init(env: [String: String], environment: ServerEnvironment) throws(ServerConfigError) {
+        func seconds(_ name: String, in range: ClosedRange<Int>) throws(ServerConfigError) -> Int? {
+            guard let text = env[name] else { return nil }
+            guard environment.isDev else { throw .invalid(variable: name, value: text, expected: "ENV=dev: it is a dev override") }
+            guard let parsed = Int(text), range.contains(parsed) else {
+                throw .invalid(variable: name, value: text, expected: "whole seconds in \(range.lowerBound)...\(range.upperBound)")
+            }
+            return parsed
+        }
+        queueRaceCloseAtTick = try seconds("QUEUE_RACE_SECONDS", in: 5...3600).map { $0 * Race.tickRate }
+        allGoneGraceTicks = try seconds("ALL_GONE_GRACE_SECONDS", in: 1...3600).map { $0 * Race.tickRate }
     }
 }
 
