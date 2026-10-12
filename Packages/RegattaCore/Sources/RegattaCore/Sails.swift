@@ -1,3 +1,5 @@
+import Foundation
+
 /// A boat's automatic spinnaker (#248): down, going up, up, or coming down. Only a class with a
 /// spinnaker (`BoatClass.spinnaker`, schema 3) ever leaves `down`; `BoatDynamics.advance` moves it.
 ///
@@ -103,6 +105,72 @@ extension BoatClass.PlaningTuning {
         }
         if let apparentWind, apparentSpeed < apparentWind.offSpeed(tws: tws), abs(rudder) <= apparentWind.rudderWithin { return false }
         return true
+    }
+
+    /// What the plane margin (`planeMargin(isPlaning:twa:speed:tws:polar:ranges:)`) counts as comfortably on the plane
+    /// (#492). Drawing's, not the rule's: nothing here is in a class file, and the sim never reads it.
+    public struct MarginRanges: Sendable, Equatable {
+        /// The share of the polar's (on-plane) speed at her angle and wind at which the speed edge reads 1; it reads 0
+        /// at the class's `stayOnSpeedShare`.
+        public var fullSpeedShare: Double
+        /// The apparent wind over the class's floor (`ApparentWind.offSpeed(tws:)`), m/s, at which the wind edge reads
+        /// 1; it reads 0 at the floor.
+        public var apparentRange: Double
+        /// The speed edge comes in over this much apparent wind angle forward of `onMaxAWA`, radians: none of it that
+        /// far forward or more, all of it from `onMaxAWA` aft.
+        public var angleBand: Double
+
+        public init(fullSpeedShare: Double = 1, apparentRange: Double = metresPerSecond(knots: 3),
+                    angleBand: Double = deg2rad(15)) {
+            self.fullSpeedShare = fullSpeedShare
+            self.apparentRange = apparentRange
+            self.angleBand = angleBand
+        }
+
+        public static let standard = MarginRanges()
+    }
+
+    /// How far a planing boat is from falling off the plane (#492), 0...1: 1 comfortably on it, 0 at the edge, and 0
+    /// off it. Read from the terms of `isPlaning(was:twa:speed:tws:rudder:polar:)`, with the same `twa`, `speed`, `tws`
+    /// and `polar`; pure, and for drawing only: no boat keeps it, nothing of it is in the digest or on the wire, and the
+    /// sim never asks. A class with neither `stayOnSpeedShare` nor `apparentWind`: 1 while she planes.
+    ///
+    /// The nearer of the rule's two edges:
+    ///
+    /// - The speed edge: her speed as a share of the polar's at her angle and wind, from `stayOnSpeedShare` (0) up to
+    ///   `ranges.fullSpeedShare` (1). The rule asks it only with the apparent wind aft of `onMaxAWA`, so forward of that
+    ///   she is as far from this edge as her apparent wind is from `onMaxAWA`, over `ranges.angleBand`, where that is
+    ///   more: a slow boat bearing away loses her margin over the band, not at a stroke as her apparent wind crosses,
+    ///   and with it forward by the band or more this edge reads 1 whatever her speed.
+    /// - The apparent wind edge: her apparent wind speed from the floor (`ApparentWind.offSpeed(tws:)`, taper and all;
+    ///   0) up to `ranges.apparentRange` over it (1).
+    ///
+    /// Where the rule drops her on either edge with the rudder centred, this is 0. Two things it leaves out on purpose:
+    /// the rule's rudder gate (`ApparentWind.rudderWithin`: the wind in her sails is as thin with the rudder over), and
+    /// the two older edges, `offSpeed` and `offBelowTWA`, so heading up forward of `offBelowTWA` drops her at whatever
+    /// this read.
+    public func planeMargin(isPlaning: Bool, twa: Double, speed: Double, tws: Double, polar: PolarTable,
+                            ranges: MarginRanges = .standard) -> Double {
+        guard isPlaning else { return 0 }
+        var margin = 1.0
+        if let stayOnSpeedShare {
+            let polarSpeed = polar.speed(twa: twa, tws: tws)
+            let share = polarSpeed > 0 ? speed / polarSpeed : 1
+            let onSpeed = Self.share(share - stayOnSpeedShare, of: ranges.fullSpeedShare - stayOnSpeedShare)
+            let apparentAngle = acos(Self.apparentWindCosine(twa: twa, speed: speed, tws: tws).clamped(to: -1...1))
+            let forward = Self.share(onMaxAWA - apparentAngle, of: ranges.angleBand)
+            margin = min(margin, max(onSpeed, forward))
+        }
+        if let apparentWind {
+            let over = Self.apparentWindSpeed(twa: twa, speed: speed, tws: tws) - apparentWind.offSpeed(tws: tws)
+            margin = min(margin, Self.share(over, of: ranges.apparentRange))
+        }
+        return margin
+    }
+
+    /// `amount` as a share of `range`, 0...1; with no range, 1 from nothing up and 0 below.
+    private static func share(_ amount: Double, of range: Double) -> Double {
+        range > 0 ? (amount / range).clamped(to: 0...1) : (amount >= 0 ? 1 : 0)
     }
 
     /// The apparent wind speed (m/s) of a boat sailing at `speed` (m/s) at `twa` (radians) to a true wind of `tws`
