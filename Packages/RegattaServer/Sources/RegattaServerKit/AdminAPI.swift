@@ -6,7 +6,8 @@ import RegattaCore
 import RegattaServices
 
 // The admin tool (#154; #17, #26, #34): the admin queue, each report's detail (the line, the player, the race) and each
-// fair-play flag's (#155), the decisions and penalties, the nickname override and the audit, as JSON routes under `/admin/` on the server's port.
+// fair-play flag's (#155), the decisions and penalties, the nickname override, the audit, and the measures and balance
+// queries (#157), as JSON routes under `/admin/` on the server's port.
 // Every request carries an admin's token (`Authorization: Bearer …`, `REGATTA_ADMIN_TOKENS`), and every action is taken
 // as the admin it names: a request without a known token is refused, whatever it asks for. A server without admin
 // tokens has no `/admin/` routes (404). `regatta-admin` is the command line over them.
@@ -44,13 +45,16 @@ public struct AdminAPI: Sendable {
     public let moderation: Moderation
     /// Where a race report's race is read; nil: none is shown.
     public let archive: (any RaceArchive)?
+    /// The measures and balance queries (#157); nil: the routes answer 404.
+    public let measures: MeasureQueries?
     /// Each token's SHA-256, so a token is compared in constant time.
     private let digests: [(digest: SHA256.Digest, admin: String)]
 
-    public init(settings: AdminSettings, moderation: Moderation, archive: (any RaceArchive)?) {
+    public init(settings: AdminSettings, moderation: Moderation, archive: (any RaceArchive)?, measures: MeasureQueries? = nil) {
         self.settings = settings
         self.moderation = moderation
         self.archive = archive
+        self.measures = measures
         digests = settings.tokens.map { (SHA256.hash(data: Data($0.key.utf8)), $0.value) }
     }
 
@@ -116,6 +120,12 @@ public struct AdminAPI: Sendable {
                     return HTTPReply(.badRequest, error: "decision is one of \(FlagDecision.allCases.map(\.rawValue).joined(separator: ", "))")
                 }
                 return HTTPReply(.ok, json: AdminFlag(try await moderation.decideFlag(id, decision, by: admin), at: moderation.now()))
+            case .measures:
+                guard let measures else { return HTTPReply(.notFound, error: "this server keeps no measures") }
+                return HTTPReply(.ok, json: try await measures.measures(days: params["days"].flatMap(Int.init) ?? 30))
+            case .balance:
+                guard let measures else { return HTTPReply(.notFound, error: "this server keeps no measures") }
+                return HTTPReply(.ok, json: try await measures.balance(days: params["days"].flatMap(Int.init) ?? 30, splits: params["splits"] != "0"))
             case .audit:
                 let actions = try await moderation.store.actions(about: params["player"], limit: limit(params))
                 return HTTPReply(.ok, json: AdminAudit(actions: actions.map(AdminAuditEntry.init)))
@@ -225,12 +235,16 @@ enum AdminRoute: Equatable {
     case lift(String, penalty: String)
     case flag(String)
     case decideFlag(String)
+    case measures
+    case balance
     case audit
 
     init?(_ parts: [String]) {
         switch (parts.count, parts.first) {
         case (1, "queue"): self = .queue
         case (1, "audit"): self = .audit
+        case (1, "measures"): self = .measures
+        case (1, "balance"): self = .balance
         case (2, "reports"): self = .report(parts[1])
         case (3, "reports") where parts[2] == "decide": self = .decide(parts[1])
         case (2, "flags"): self = .flag(parts[1])
@@ -251,7 +265,7 @@ enum AdminRoute: Equatable {
     /// Reads are GETs; everything that changes something is a POST.
     var method: HTTPMethod {
         switch self {
-        case .queue, .report, .player, .flag, .audit: .GET
+        case .queue, .report, .player, .flag, .measures, .balance, .audit: .GET
         case .decide, .penalize, .mute, .nicknameOverride, .lift, .decideFlag: .POST
         }
     }

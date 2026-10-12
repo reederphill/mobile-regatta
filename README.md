@@ -105,6 +105,7 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     OnlineData.swift         Delete my online data (#160): the plan, the erase, leaderboard blocks, the retention and inactivity jobs
     AdminAPI.swift           the admin tool (#154): /admin/ routes behind admin tokens, the queue, decisions, penalties, the audit
     FairPlay.swift           fair-play flags (#155): the nightly scan of the window's race logs, flags to the admin queue
+    Measures.swift           measures and balance queries (#157): queue, fleet, briefing, round-trip and Race again events; queries over logs
   GameCenterIdentity/      Game Center identity verification: Apple's chain, RSA PKCS#1 v1.5 over the signed payload
   RegattaServer/           the `RegattaServer` executable
   RegattaDevAPI/           the dev endpoints' JSON, shared by the server and the load client
@@ -308,7 +309,13 @@ player's penalties and other reports, and a race report's results and the seat's
 (`warning`, `suspension_24h`, `suspension_7d`, `permanent`, `rating_reset`); `mute <player>` (the next chat step);
 `nickname-override <player>`; `lift <player> <penalty-id>`; `flag <id>` and `decide-flag <id> dismiss|confirm` for the
 fair-play flags (#155), which the server raises into the same queue each night from the last 30 days' race logs and
-which never penalize anyone; `audit [player]`. Every action is in the audit. It isn't in
+which never penalize anyone; `audit [player]`; and the measures (#157): `measures [days]` (queue wait, humans per fleet,
+briefing leaves and cooldowns, drops, rejoins and RET, the round-trip distribution and the time over 250 ms, the Race
+again rate and the time from finish to re-queue) and `balance [days] [--no-splits]` (rule calls and protests per rule,
+start and leg splits by venue × conditions from a replay of each race, results by tier, the ratings' calibration by
+rating gap, each player's finish variance; races on tuned files left out). The server records what the measures need
+as its own analytics events (`queue_joined`, `queue_wait`, `fleet_locked`, `briefing_leave`, `round_trip`: it pings
+each seated race connection every 2 s). Every action is in the audit. It isn't in
 the container image: run it from a checkout, `swift run --package-path Packages/RegattaServer regatta-admin queue`.
 
 `regatta-loadclient` creates an instant race and sails every seat at once with `RaceClient` on a scripted helm,

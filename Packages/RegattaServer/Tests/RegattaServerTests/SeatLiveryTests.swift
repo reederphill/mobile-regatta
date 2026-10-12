@@ -266,4 +266,5 @@ struct UnreadableRatings: RatingBook {
     func mirrorPending(_ playerIDs: [String]?, maxFailures: Int, limit: Int) async throws -> [MirrorEntry] { throw Down() }
     func mirrored(_ playerID: String, rating: Int) async throws { throw Down() }
     func mirrorFailed(_ playerID: String) async throws { throw Down() }
+    func changes(of race: UUID) async throws -> [StoredRatingChange] { throw Down() }
 }

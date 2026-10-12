@@ -78,7 +78,7 @@ public struct RequestHandler: Sendable {
         self.services = services
         self.now = now
         admin = config.admin.tokens.isEmpty ? nil : services.flatMap { services in
-            services.moderation.map { AdminAPI(settings: config.admin, moderation: $0, archive: services.archive) }
+            services.moderation.map { AdminAPI(settings: config.admin, moderation: $0, archive: services.archive, measures: services.measures?.queries) }
         }
     }
 

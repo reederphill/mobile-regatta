@@ -302,4 +302,29 @@ enum AdminScenario {
             #expect(try await world.store.penalties(of: "T:gull").isEmpty)
         }
     }
+
+    /// The measures' events in Postgres (#157): recorded about the player, read back with their properties.
+    @Test func theMeasuresReadTheirEventsFromPostgres() async throws {
+        try await EndpointDatabase.withMigratedSchema { database in
+            let world = AdminWorld(accounts: PostgresAccountStore(database))
+            try await world.signIn(["a", "b"])
+            let analytics = AnalyticsEventStore(database)
+            let measures = ServerMeasures(analytics: AnalyticsIngest(store: analytics), archive: PostgresRaceArchive(database),
+                                          ratings: RatingStore(database))
+            await measures.record(.joined("T:a"))
+            await measures.record(.matched("T:a", waited: 30, humans: 2))
+            await measures.record(.matched("T:b", waited: 90, humans: 2))
+            await measures.record(.fleetLocked(humans: 2, boats: 10))
+            await measures.record(.briefingLeave("T:b", cooldown: 300))
+            let read = try await analytics.serverEvents(named: ["queue_wait", "fleet_locked"], since: Date() - 60)
+            #expect(read.map(\.name) == ["queue_wait", "queue_wait", "fleet_locked"])
+            #expect(read[0].playerID == "T:a")
+            #expect(read[0].properties == ["waited_s": .double(30), "outcome": .string("matched"), "humans": .int(2)])
+            #expect(read[2].playerID == nil && read[2].properties == ["humans": .int(2), "boats": .int(10)])
+            #expect(try await analytics.serverEvents(named: ["queue_wait"], since: Date() + 60).isEmpty)
+            let report = try await measures.queries.measures(days: 1)
+            #expect(report.queueWait.count == 2 && report.queueWait.max == 90 && report.fleets == 1)
+            #expect(report.briefingLeaves == .init(leaves: 1, players: 1, cooldowns: 1, cooldownSeconds: 300))
+        }
+    }
 }

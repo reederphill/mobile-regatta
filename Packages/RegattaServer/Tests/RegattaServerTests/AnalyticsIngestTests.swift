@@ -298,6 +298,7 @@ struct RollUpFails: AnalyticsStore {
     func purge(receivedBefore time: Date) async throws -> Int { try await base.purge(receivedBefore: time) }
     func daily(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsDaily] { try await base.daily(source, name) }
     func dailyProperties(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsPropertyStats] { try await base.dailyProperties(source, name) }
+    func serverEvents(named names: [String], since: Date) async throws -> [StoredAnalyticsEvent] { try await base.serverEvents(named: names, since: since) }
 }
 
 struct FailingAnalyticsStore: AnalyticsStore {
@@ -308,4 +309,5 @@ struct FailingAnalyticsStore: AnalyticsStore {
     func purge(receivedBefore time: Date) async throws -> Int { throw Down() }
     func daily(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsDaily] { throw Down() }
     func dailyProperties(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsPropertyStats] { throw Down() }
+    func serverEvents(named names: [String], since: Date) async throws -> [StoredAnalyticsEvent] { throw Down() }
 }
