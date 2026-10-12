@@ -8,12 +8,12 @@ import RegattaServiceContracts
 import RegattaServices
 import Testing
 
-/// #109's Identity, Terms (#145), Queue (#146), RaceSession (#148), Lobby (#152: its chat half) and AnalyticsTransport (#156) contract suites through #143's runner against the real server: a `RegattaServer`
+/// #109's Identity, Terms (#145), Queue (#146), RaceSession (#148), Lobby (#152: its chat half), AnalyticsTransport (#156) and Profile (#159) contract suites through #143's runner against the real server: a `RegattaServer`
 /// started in process on a free port, reached over its `/service` WebSocket by `WebSocketServiceConnector`, which
 /// arranges each situation with `POST /dev/situation`. `CONTRACT_ENDPOINT` runs them against a server started elsewhere.
 @Suite(.timeLimit(.minutes(2))) struct ServiceEndpointContractTests {
-    /// The suites the server serves as of #156. Of the Lobby suite it serves the chat; reports are #153's.
-    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession, .lobby, .analytics]
+    /// The suites the server serves as of #159. Of the Lobby suite it serves the chat; reports are #153's.
+    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession, .lobby, .analytics, .profile]
     static let lobbyParts: Set<LobbyServiceContract.Part> = [.chat]
 
     /// A dev config the suites can run on: the Terms suite's `versionBumped` situation needs an older version to have
@@ -37,7 +37,7 @@ import Testing
         }
     }
 
-    /// Acceptance (#145, #146, #148, #152, #156): the served suites pass against the real server through the runner.
+    /// Acceptance (#145, #146, #148, #152, #156, #159): the served suites pass against the real server through the runner.
     @Test func servedSuitesPassAgainstTheServer() async throws {
         let server = try await RegattaHTTPServer.start(config: Self.config())
         do {

@@ -100,6 +100,7 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     AccountStore.swift       players, sessions and terms acceptances: Postgres, or in memory for dev and tests
     ServiceSetup.swift       the endpoint from the config (Apple or dev verifier), the dev situations, the HTTPS fetch
     AnalyticsIngest.swift    usage analytics (#156): devices' batches by install id, the server's own events, the roll-up and purge
+    Liveries.swift           seat liveries (#159): stored per player, ownership, the lock, raced as a starter, earned unlocks
   GameCenterIdentity/      Game Center identity verification: Apple's chain, RSA PKCS#1 v1.5 over the signed payload
   RegattaServer/           the `RegattaServer` executable
   RegattaDevAPI/           the dev endpoints' JSON, shared by the server and the load client
@@ -110,6 +111,7 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     RaceRegistryStore.swift  races running, closed or cancelled, the files each names; orphans cancelled; logs (bytea)
     DataFileStore.swift      every version of every data file, by FileRef; a version never changes
     AnalyticsStore.swift     usage analytics (#156): raw events 90 days, the daily aggregates and the roll-up's arithmetic
+    LiveryStore.swift        players' stored liveries (#159), one per player, gone with her
   RegattaLoadClient/       RegattaClient over a NIO WebSocket: scripted helm, bytes and RTT measured; the
                            contract runner's WebSocketServiceConnector (#145)
   regatta-loadclient/      the `regatta-loadclient` executable

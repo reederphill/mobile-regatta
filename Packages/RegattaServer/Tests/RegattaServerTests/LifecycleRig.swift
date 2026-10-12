@@ -148,11 +148,13 @@ struct LifecycleRig {
     /// What the lifecycle told the lobby (#152).
     let lobby = RecordingLobby()
 
-    init(settings: RaceLifecycleSettings = RaceLifecycleSettings(), now: @escaping @Sendable () -> Date = { Date() }) {
+    /// `completed`: hears the players who completed each close (#159).
+    init(settings: RaceLifecycleSettings = RaceLifecycleSettings(), now: @escaping @Sendable () -> Date = { Date() },
+         completed: (@Sendable ([String]) async -> Void)? = nil) {
         let started = started, ratedPlayers = ratedPlayers
         faults = FaultyArchive(archive)
         lifecycle = RaceLifecycle(settings: settings, archive: faults, tokenKey: Self.key, tokenLifetime: 600, toolchain: "test", now: now,
-                                  rated: { ratedPlayers.append($0) }, lobby: lobby,
+                                  rated: { ratedPlayers.append($0) }, completed: completed, lobby: lobby,
                                   start: { session, ended in await started.started(session, ended) })
     }
 

@@ -15,7 +15,8 @@ import RegattaServices
 // `StreamNext` on it is answered `StreamEnd`). Every service behind the identity, session and terms calls is gated
 // (#34), deny by default: signed in, allowed by Game Center's restrictions, and the current Terms of Use accepted
 // (deleting the player's online data needs only the sign-in). The lobby and the queue answer a refusal in the shape
-// the `OnlineAccess` contracts expect; the rest close the connection.
+// the `OnlineAccess` contracts expect, and the profile answers `notSignedIn` to a signed-out connection (#159); the
+// rest close the connection.
 // Until a session is signed in the connection's frames are capped at `preSignInFrameCap`, at the frame's header.
 
 /// What the endpoint is run with.
@@ -119,10 +120,12 @@ public struct ServiceEndpoint: Sendable {
     public let analytics: AnalyticsIngest?
     /// The analytics roll-up and 90-day purge (#156): the server runs it while it listens.
     public let analyticsRetention: AnalyticsRetention?
+    /// The rating book (#151) the profile reads: `POST /dev/situation` arranges a player's counts on a dev server's.
+    public let ratings: (any RatingBook)?
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
                 matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil, lobby: LobbyHub? = nil,
-                analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil) {
+                analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil, ratings: (any RatingBook)? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
@@ -131,6 +134,7 @@ public struct ServiceEndpoint: Sendable {
         self.lobby = lobby
         self.analytics = analytics
         self.analyticsRetention = analyticsRetention
+        self.ratings = ratings
     }
 
     public var store: any AccountStore { sessions.store }
@@ -352,8 +356,16 @@ public actor ServiceConnectionHandler {
                 answer(await ServiceAnswers.raceSession(request.call, service)) { .raceSessionReply(ServiceReply(id: request.id, result: $0)) }
             }
         case .profileRequest(let request):
-            if let denial { return close("profile refused: \(denial)") }
-            guard let service = backends?.profile else { return close("no profile service") }
+            let service: any ProfileService
+            if let denial {
+                // Signed out, the profile answers as its contract says (#159); any other refusal closes.
+                guard case .notSignedIn = denial else { return close("profile refused: \(denial)") }
+                service = SignedOutProfileService()
+            } else if let profile = backends?.profile {
+                service = profile
+            } else {
+                return close("no profile service")
+            }
             answer(await ServiceAnswers.profile(request.call, service)) { .profileReply(ServiceReply(id: request.id, result: $0)) }
         case .analyticsRequest(let request):
             if let denial { return close("analytics refused: \(denial)") }
