@@ -24,6 +24,37 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
     /// Planing off the wind (#462); empty on a class that doesn't plane.
     public var planing: [PlaningRow]
 
+    /// Where the live bots lose their time (#462), by tactics skill, handling skill and kind of leg; empty when no live
+    /// bot sailed.
+    public var legs: [LegRow]
+
+    /// The legs of one kind (`LegKind.rawValue`) begun by the live bots of one tactics skill and one handling skill
+    /// (tiers, as `AxesSummary`'s buckets).
+    public struct LegRow: Codable, Hashable, Sendable {
+        public var skill: String
+        public var hand: String
+        public var kind: String
+        /// The bots of that skill and hand, and the legs of the kind they began.
+        public var boats: Int
+        public var legs: Int
+        /// Seconds after the first boat of her race onto the leg that she came onto it.
+        public var secondsBehind: Spread?
+        /// Sailed to their end.
+        public var completedShare: Double
+        /// Mean seconds over the fastest boat on the leg in her race, of the completed legs she was given no penalty
+        /// turn on, and of those she was; nil of none.
+        public var cleanLost: Double?
+        public var turnLost: Double?
+        /// The share of the legs begun with a penalty turn given on them; and turns, falls off the plane and gybes a
+        /// leg begun.
+        public var turnShare: Double
+        public var turns: Double
+        public var falls: Double
+        public var gybes: Double
+        /// Calls against her a leg begun, by rule (a mark touch under "31").
+        public var calls: [String: Double]
+    }
+
     /// `tier`'s planing off the wind (`PlaningObservation`), a boat a race unless said.
     public struct PlaningRow: Codable, Hashable, Sendable {
         public var tier: String
@@ -244,6 +275,29 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
             }
             return NonFinishCause.allCases.map { cause in row(cause.rawValue, out.filter { $0.cause == cause }) } + [row(Self.all, out)]
         }
+        legs = BotTier.allCases.flatMap { skill in
+            BotTier.allCases.flatMap { hand -> [LegRow] in
+                let bots = boats.filter { $0.skill == skill && $0.hand == hand }
+                guard !bots.isEmpty else { return [] }
+                return LegKind.allCases.compactMap { kind in
+                    let begun = bots.flatMap(\.legs).filter { $0.kind == kind }
+                    guard !begun.isEmpty else { return nil }
+                    let count = Double(begun.count)
+                    var calls: [String: Int] = [:]
+                    for leg in begun { calls.merge(leg.calls, uniquingKeysWith: +) }
+                    return LegRow(skill: skill.rawValue, hand: hand.rawValue, kind: kind.rawValue, boats: bots.count, legs: begun.count,
+                                  secondsBehind: Spread(begun.map(\.secondsBehind)),
+                                  completedShare: share(begun.filter { $0.seconds != nil }.count, of: begun.count),
+                                  cleanLost: mean(begun.filter { $0.turns == 0 }.compactMap(\.secondsLost)),
+                                  turnLost: mean(begun.filter { $0.turns > 0 }.compactMap(\.secondsLost)),
+                                  turnShare: share(begun.filter { $0.turns > 0 }.count, of: begun.count),
+                                  turns: Double(begun.reduce(0) { $0 + $1.turns }) / count,
+                                  falls: Double(begun.reduce(0) { $0 + $1.falls }) / count,
+                                  gybes: Double(begun.reduce(0) { $0 + $1.gybes }) / count,
+                                  calls: calls.mapValues { Double($0) / count })
+                }
+            }
+        }
         planing = groups.compactMap { group in
             let seen = group.boats.map(\.planing)
             let count = Double(max(seen.count, 1))
@@ -346,6 +400,20 @@ public struct DiagnoseSummary: Codable, Hashable, Sendable {
                     [row.tier, fixed(row.runSeconds, 1), fixed(row.offSeconds, 1), fixed(row.offShare, 3), fixed(row.gybes), fixed(row.falls)]
                         + causes.map { fixed(row.fallsByCause[$0] ?? 0) }
                         + [fixed(row.fallsPerGybe, 3), spread(row.secondsOff), fixed(row.backOnShare, 3)]
+                })
+        }
+        if !legs.isEmpty {
+            lines.append("legs by tactics skill and handling (live bots): legs begun, seconds behind the first boat onto the leg "
+                + "(median / p90), the share sailed to their end, mean seconds over the race's fastest boat on the leg without a "
+                + "penalty turn and with one, the share with one; turns, falls off the plane and gybes a leg; calls a leg by rule")
+            let rules = RacingRule.allCases.map(\.rawValue).filter { rule in legs.contains { $0.calls[rule] != nil } }
+            lines += table([["skill", "hand", "leg", "boats", "legs", "behind s", "to its end", "clean s", "turn s", "with a turn",
+                             "turns", "falls", "gybes"] + rules]
+                + legs.map { row in
+                    [row.skill, row.hand, LegKind(rawValue: row.kind)?.label ?? row.kind, "\(row.boats)", "\(row.legs)",
+                     spread(row.secondsBehind), fixed(row.completedShare, 3), text(row.cleanLost, 1), text(row.turnLost, 1),
+                     fixed(row.turnShare, 3), fixed(row.turns), fixed(row.falls), fixed(row.gybes)]
+                        + rules.map { fixed(row.calls[$0] ?? 0, 3) }
                 })
         }
         return lines

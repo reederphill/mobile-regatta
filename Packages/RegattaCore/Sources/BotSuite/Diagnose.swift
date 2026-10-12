@@ -328,9 +328,69 @@ public struct PlaningObservation: Hashable, Sendable {
     public init() {}
 }
 
+/// A leg of the course by how it is sailed: from where it starts to its mark, up the course's axis (a beat), down
+/// it (a run) or across (the reach to the offset mark); the first beat and the run to the finish apart, as the start
+/// ends on the one and the finish window closes on the other.
+public enum LegKind: String, CaseIterable, Codable, Hashable, Sendable {
+    case firstBeat, beat, reach, run, lastRun
+
+    public var label: String {
+        switch self {
+        case .firstBeat: "first beat"
+        case .beat: "later beats"
+        case .reach: "reaches"
+        case .run: "runs"
+        case .lastRun: "last run"
+        }
+    }
+
+    /// The kinds of `course`'s legs, by leg index.
+    static func kinds(of course: CourseLayout) -> [LegKind] {
+        let legs = course.legs
+        return legs.indices.map { index in
+            let from = index == 0 ? course.startLine.centre : course.targetPosition(for: legs[index - 1])
+            let made = (course.targetPosition(for: legs[index]) - from).dot(course.upwind)
+            if made > course.beat / 4 { return index == 0 ? .firstBeat : .beat }
+            if made < -course.beat / 4 { return index == legs.count - 1 ? .lastRun : .run }
+            return .reach
+        }
+    }
+}
+
+/// What the observer saw of a boat on one leg she began (#462): where the boats that miss the finish window lose
+/// their time, and to what.
+public struct LegObservation: Hashable, Sendable {
+    public var kind: LegKind
+    /// Seconds after the first boat of her race onto the leg that she came onto it; the first leg's is her start's
+    /// after the first start.
+    public var secondsBehind: Double
+    /// Her seconds on it; nil when she did not sail it to its end.
+    public var seconds: Double?
+    /// Those over the fastest boat's on the leg in her race.
+    public var secondsLost: Double?
+    /// The penalty turns she was given on it.
+    public var turns = 0
+    /// Her falls off the plane (`PlaningObservation.falls`) and her gybes on it, penalty turns aside.
+    public var falls = 0
+    public var gybes = 0
+    /// Rule calls against her on it, by rule (`RacingRule.rawValue`), and her mark touches under "31".
+    public var calls: [String: Int] = [:]
+
+    public init(kind: LegKind, secondsBehind: Double) {
+        self.kind = kind
+        self.secondsBehind = secondsBehind
+    }
+}
+
 /// What `--diagnose` saw of one boat in one race.
 public struct BoatDiagnosis: Hashable, Sendable {
     public var tier: BotTier
+    /// A live bot's tactics skill and handling skill, as tiers (`AxesSummary.init(live:)`'s buckets); nil for any other
+    /// seat.
+    public var skill: BotTier?
+    public var hand: BotTier?
+    /// The legs she began, in order.
+    public var legs: [LegObservation] = []
     public var start: StartObservation
     public var planing = PlaningObservation()
     public var episodes: [PenaltyEpisode] = []
@@ -435,6 +495,18 @@ public struct RaceObserver {
     private var onLeg: [(index: Int, sinceTick: Int)]
     private var gybeTicks: [[Int]]
 
+    /// A leg a seat began: the ticks she came onto it and left it, and what happened on it (`LegObservation`).
+    private struct LegLog {
+        var entry: Int
+        var end: Int?
+        var turns = 0
+        var falls = 0
+        var gybes = 0
+        var calls: [String: Int] = [:]
+    }
+    private var legLog: [[LegLog]]
+    private let legKinds: [LegKind]
+
     public init(race: Race) {
         let count = race.boats.count
         line = race.course.startLine
@@ -466,6 +538,31 @@ public struct RaceObserver {
         fallCauses = Array(repeating: [], count: count)
         onLeg = race.boats.map { ($0.legIndex, race.tick) }
         gybeTicks = Array(repeating: [], count: count)
+        legLog = Array(repeating: [], count: count)
+        legKinds = LegKind.kinds(of: race.course)
+    }
+
+    /// One tick of a boat's legs: her first begins at her start, each next as she rounds onto it, the last ends at her
+    /// finish.
+    private mutating func recordLeg(_ seat: Int, _ boat: Boat, _ tick: Int) {
+        guard let start = startTicks[seat] else { return }
+        if legLog[seat].isEmpty { legLog[seat].append(LegLog(entry: start)) }
+        while let last = legLog[seat].indices.last, legLog[seat][last].end == nil {
+            if boat.status == .finished {
+                legLog[seat][last].end = tick
+            } else if boat.status == .racing, boat.legIndex > last, last + 1 < legs {
+                legLog[seat][last].end = tick
+                legLog[seat].append(LegLog(entry: tick))
+            } else {
+                break
+            }
+        }
+    }
+
+    /// Something on the leg `seat` is sailing, if she is on one.
+    private mutating func onHerLeg(_ seat: Int, _ change: (inout LegLog) -> Void) {
+        guard let last = legLog[seat].indices.last, legLog[seat][last].end == nil else { return }
+        change(&legLog[seat][last])
     }
 
     /// Her polar speed for the wind she has at the angle she sails, close-hauled if she points higher, with her
@@ -487,6 +584,7 @@ public struct RaceObserver {
         for event in events { record(event, race) }
         for (seat, boat) in race.boats.enumerated() {
             defer { progress[seat] = boat.penaltyProgress }
+            recordLeg(seat, boat, tick)
             guard !boat.isGhost else { continue }
             lastOnWaterTick[seat] = tick
             if startTicks[seat] == nil { recordStart(seat, boat, race) }
@@ -516,9 +614,12 @@ public struct RaceObserver {
         case .ocsNotice(let seat): starts[seat].ocs = true
         case .started(let seat):
             if startTicks[seat] == nil { startTicks[seat] = tick }
-        case .ruleCall(let call) where call.turnsOwed > 0: recordCall(call.offender, race)
+        case .ruleCall(let call) where call.turnsOwed > 0:
+            onHerLeg(call.offender) { $0.calls[call.rule.rawValue, default: 0] += 1 }
+            recordCall(call.offender, race)
         case .markTouch(let seat, _):
             lastTouchTick[seat] = tick
+            onHerLeg(seat) { $0.calls[RacingRule.touchingMark.rawValue, default: 0] += 1 }
             recordCall(seat, race)
         case .obstructionContact(let seat, _): lastTouchTick[seat] = tick
         case .penaltyStarted(let seat):
@@ -570,6 +671,7 @@ public struct RaceObserver {
         case .gybed(let seat) where race.boats[seat].status == .racing && !race.boats[seat].isTakingPenalty:
             planing[seat].gybes += 1
             gybeTicks[seat].append(tick)
+            onHerLeg(seat) { $0.gybes += 1 }
         case .tacked(let seat), .gybed(let seat):
             // Under a `tackAndGybe` penalty (#487) the crossing that served a turn is the turn's too.
             guard startTicks[seat] == nil, !race.boats[seat].isTakingPenalty, !(tackAndGybe && servedTick[seat] == tick),
@@ -588,6 +690,7 @@ public struct RaceObserver {
     /// A call that cost `seat` a turn: it opens an episode if she owed nothing, and stacks into the open one if not.
     private mutating func recordCall(_ seat: Int, _ race: Race) {
         turnsOwed[seat] += 1
+        onHerLeg(seat) { $0.turns += 1 }
         if var turn = open[seat] {
             turn.owed += 1
             open[seat] = turn
@@ -674,6 +777,7 @@ public struct RaceObserver {
         if !boat.isPlaning { planing[seat].offSeconds += step }
         if wasPlaning[seat], wasRunning[seat], !boat.isPlaning {
             planing[seat].falls += 1
+            onHerLeg(seat) { $0.falls += 1 }
             fallTick[seat] = race.tick
             fallTicks[seat].append(race.tick)
             var cause = PlaningObservation.Cause.slow
@@ -691,7 +795,12 @@ public struct RaceObserver {
 
     /// Each seat's diagnosis once the race is sailed; `tiers` are the seats' tiers.
     public func boats(of race: Race, tiers: [BotTier]) -> [BoatDiagnosis] {
-        race.boats.indices.map { seat in
+        // Each leg's first boat onto it and its fastest boat, of this race.
+        let first = legKinds.indices.map { leg in legLog.compactMap { leg < $0.count ? $0[leg].entry : nil }.min() }
+        let fastest = legKinds.indices.map { leg in
+            legLog.compactMap { log in leg < log.count ? log[leg].end.map { $0 - log[leg].entry } : nil }.min()
+        }
+        return race.boats.indices.map { seat in
             let boat = race.boats[seat]
             var start = starts[seat]
             start.startSeconds = startTicks[seat].map(seconds)
@@ -727,6 +836,18 @@ public struct RaceObserver {
                 diagnosis.planing.fallsByCause[cause, default: 0] += 1
             }
             diagnosis.turnsOwed = turnsOwed[seat]
+            diagnosis.legs = legLog[seat].enumerated().map { leg, log in
+                var seen = LegObservation(kind: legKinds[leg], secondsBehind: seconds(log.entry - (first[leg] ?? log.entry)))
+                if let end = log.end {
+                    seen.seconds = seconds(end - log.entry)
+                    seen.secondsLost = seconds(end - log.entry - (fastest[leg] ?? end - log.entry))
+                }
+                seen.turns = log.turns
+                seen.falls = log.falls
+                seen.gybes = log.gybes
+                seen.calls = log.calls
+                return seen
+            }
             return diagnosis
         }
     }
@@ -755,7 +876,15 @@ extension BotRaceHarness {
             }
             observer?.record(race, events: events)
         }
-        let boats = sailed.flatMap { race in observer?.boats(of: race, tiers: result.seats.map(\.tier)) } ?? []
+        var boats = sailed.flatMap { race in observer?.boats(of: race, tiers: result.seats.map(\.tier)) } ?? []
+        // The live mix's live bots by their two skills, as `AxesSummary.init(live:)` buckets them.
+        if cell.profileMix == .live {
+            for (seat, metrics) in result.seats.enumerated() where boats.indices.contains(seat) && metrics.profile == nil && !metrics.cautious {
+                guard let handling = metrics.handling else { continue }
+                boats[seat].skill = BotTier.holding(skill: metrics.skill)
+                boats[seat].hand = AxesSummary.handlingTier(handling)
+            }
+        }
         return (result, RaceDiagnosis(cell: cell, boats: boats))
     }
 }

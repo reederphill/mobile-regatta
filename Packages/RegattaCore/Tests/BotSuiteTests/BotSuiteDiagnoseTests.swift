@@ -362,11 +362,11 @@ import Testing
         #expect(untimed(diagnosed.lines) == untimed(plain.lines) + summary.lines)
         #expect(summary.lines.first?.hasPrefix("diagnose: 4 races") == true)
 
-        // The JSON's shape: the eight keys, each table's rows in their fixed order.
+        // The JSON's shape: the nine keys, each table's rows in their fixed order.
         let json = try #require(JSONSerialization.jsonObject(with: diagnosed.jsonData()) as? [String: Any])
         let diagnose = try #require(json["diagnose"] as? [String: Any])
         #expect(Set(diagnose.keys) == ["races", "starts", "lateStarters", "penaltyEpisodes", "penaltiesOwed", "preStartCalls",
-                                       "nonFinishers", "planing"])
+                                       "nonFinishers", "planing", "legs"])
         let boats = diagnosed.races.flatMap(\.seats)
         let tiers = [DiagnoseSummary.all] + BotTier.allCases.filter { tier in boats.contains { $0.tier == tier } }.map(\.rawValue)
         #expect(tiers.count >= 2)
@@ -383,6 +383,23 @@ import Testing
         #expect(summary.penaltyEpisodes.allSatisfy { Set($0.resetsPerEpisodeByCause.keys) == Set(ResetCause.allCases.map(\.rawValue)) })
         let finishCauses = NonFinishCause.allCases.map(\.rawValue) + [DiagnoseSummary.all]
         #expect(summary.nonFinishers.map(\.cause) == Array(repeating: finishCauses, count: tiers.count).flatMap { $0 })
+        // The legs table (#462): the live mix's live bots by their two skills, each kind of leg of a one-lap course;
+        // every one that started began the first beat, and those that sailed the last run to its end finished.
+        let live = diagnosed.races.filter { $0.cell.profileMix == .live }.flatMap(\.seats)
+            .filter { $0.profile == nil && !$0.cautious && $0.handling != nil }
+        #expect(!live.isEmpty && !summary.legs.isEmpty)
+        #expect(Set(summary.legs.map(\.kind)) == [LegKind.firstBeat.rawValue, LegKind.reach.rawValue, LegKind.lastRun.rawValue])
+        for row in summary.legs {
+            #expect(BotTier(rawValue: row.skill) != nil && BotTier(rawValue: row.hand) != nil && row.legs > 0, "\(row)")
+            #expect((0...1).contains(row.completedShare) && (0...1).contains(row.turnShare) && row.turns >= row.turnShare, "\(row)")
+            #expect((row.secondsBehind?.median ?? 0) >= 0 && (row.cleanLost ?? 0) >= 0 && (row.turnLost ?? 0) >= 0, "\(row)")
+        }
+        func legs(_ kind: LegKind) -> [DiagnoseSummary.LegRow] { summary.legs.filter { $0.kind == kind.rawValue } }
+        #expect(legs(.firstBeat).map(\.boats).reduce(0, +) == live.count)
+        #expect(legs(.firstBeat).allSatisfy { $0.legs <= $0.boats })
+        let sailedIn = legs(.lastRun).map { (Double($0.legs) * $0.completedShare).rounded() }.reduce(0, +)
+        #expect(Int(sailedIn) == live.filter(\.finished).count)
+        #expect(summary.lines.contains { $0.hasPrefix("legs by tactics skill and handling") })
         let episodeRow = try #require((diagnose["penaltyEpisodes"] as? [[String: Any]])?.first)
         #expect(Set(episodeRow.keys).isSuperset(of: ["tier", "phase", "episodes", "served", "disqualified", "open", "oneTurnEpisodes",
                                                      "resetsPerEpisode", "resetsPerEpisodeByCause", "stackedShare", "turnsServed",
