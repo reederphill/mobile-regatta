@@ -86,7 +86,7 @@ import Testing
         effects.update(with: boat, pose: BoatPose(boat, ease: false, isGhost: true, boatClass: Self.boatClass),
                        style: .standard, quality: .full, time: 0, dt: 0, settled: true)
         #expect(effects.backwind.isHidden && !effects.trail.isHidden)
-        #expect(effects.nodes.count == 2, "her backwind and wake string; no cone (#377)")
+        #expect(effects.nodes.count == 3, "her backwind, wake string and stern-corner wakes (#492); no cone (#377)")
     }
 
     /// The fleet's wind shadow draws as one faint layer (#15, #377): the sim's ribbons (`TickFrame.wake`) in the scene's
