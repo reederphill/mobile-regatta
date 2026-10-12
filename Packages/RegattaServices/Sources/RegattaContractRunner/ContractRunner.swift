@@ -81,7 +81,30 @@ public struct ContractLinks: Sendable {
     }
 }
 
+/// Services the caller makes itself, for the suites that can't be run from a signed-in link alone (#161): the
+/// client's online session makes its own connection, signs in on it and survives it, so its identity and terms
+/// are handed over ready, each in the situation asked for.
+public struct ContractServices: Sendable {
+    public var identity: @Sendable (IdentityServiceContract.Situation) async throws -> any IdentityService
+    public var terms: @Sendable (TermsServiceContract.Situation) async throws -> any TermsService
+
+    public init(identity: @escaping @Sendable (IdentityServiceContract.Situation) async throws -> any IdentityService,
+                terms: @escaping @Sendable (TermsServiceContract.Situation) async throws -> any TermsService) {
+        self.identity = identity
+        self.terms = terms
+    }
+}
+
 public enum ContractRunner {
+    /// Runs `suite` on services the caller made. Identity and terms only: `ContractRunnerError.notProvided` for the rest.
+    public static func run(_ suite: ContractSuiteID, services: ContractServices) async throws {
+        switch suite {
+        case .identity: try await IdentityServiceContract().run(services.identity)
+        case .terms: try await TermsServiceContract().run(services.terms)
+        default: throw ContractRunnerError.notProvided(suite)
+        }
+    }
+
     /// Runs the wired suite `suite` through its adapter, a fresh connection for each situation from `links`. Throws
     /// `ContractViolation` on the first check that fails, and `ContractRunnerError.notWired` for a local suite.
     /// `lobbyParts`: the halves of the Lobby suite to run (a server serves `.chat` before #153 adds `.reports`).
@@ -139,4 +162,6 @@ public enum ContractRunnerError: Error, Equatable, Sendable {
     case notWired(ContractSuiteID)
     /// `CONTRACT_SUITES` names something that isn't a wired suite.
     case unknownSuite(String)
+    /// `ContractServices` has no service for the suite.
+    case notProvided(ContractSuiteID)
 }

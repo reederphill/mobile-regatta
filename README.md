@@ -359,9 +359,12 @@ build the menu has **Race online (dev)**: it asks the dev server at the menu's `
 predicted fleet, shows rule calls, OCS, penalties and finishes only from the server's events, rejoins with a
 `Resync` when the connection drops, and raises a lag signal after about 5 s of round trips over 250 ms.
 
-`scripts/e2e.sh` runs the end-to-end check: it builds and starts `RegattaServer` with `ENV=dev` on a free port,
-runs `OnlineRaceUITests` on the simulator against it (a short instant race with bots, raced to the close), and
-stops the server. The regular UI test run skips that test, saying why, since it has no server.
+`scripts/e2e.sh` runs the end-to-end check: it builds `RegattaServer`, starts Postgres (Homebrew's
+`postgresql@17`, in a temporary directory) and the server on it with `ENV=dev` on a free port, and runs
+`OnlineRaceUITests` (a short instant race with bots, raced to the close) and `OnlineAccountUITests` (#161: a dev
+player signs in, accepts the terms, relaunches, meets a suspension and the cooldown) on the simulator against it. It
+then restarts the server with `TERMS_VERSION=2` on the same database for the test of a terms bump, and stops both.
+The regular UI test run skips those tests, saying why, since it has no server.
 
 ```bash
 scripts/e2e.sh

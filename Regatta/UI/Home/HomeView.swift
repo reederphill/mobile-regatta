@@ -9,6 +9,9 @@ struct HomeView: View {
     var online: HomeOnlineActions
     @Environment(\.isOnline) private var isOnline
     @Environment(\.lobbyStatus) private var lobbyStatus
+    /// What the server and the session say beyond the gating matrix (#161): Race online's line and spinner, the lobby
+    /// area's Try again, the terms sheet's line. Nil in previews and tests.
+    @Environment(\.onlineStatus) private var onlineStatus
 
     var body: some View {
         NavigationStack(path: $model.path) {
@@ -25,8 +28,9 @@ struct HomeView: View {
                     if let lastRace = model.lastRace {
                         LastRaceRow(lastRace: lastRace) { model.sheet = .lastRace }
                     }
-                    LobbyPanel(state: LobbyPanelState(isOnline: isOnline, status: lobbyStatus), onSignIn: online.signIn,
-                               onReviewTerms: { model.sheet = .terms })
+                    LobbyPanel(state: LobbyPanelState(isOnline: isOnline, status: lobbyStatus,
+                                                      retryLine: onlineStatus?.lobbyRetryLine),
+                               onSignIn: online.signIn, onReviewTerms: { model.sheet = .terms })
                 }
                 .padding(.vertical, 20)
                 .readableColumn()
@@ -50,7 +54,8 @@ struct HomeView: View {
         .tint(ChromePalette.tint)
         .sheet(item: $model.sheet, onDismiss: online.sheetDismissed) { sheet in
             if sheet == .terms {
-                TermsSheet(version: lobbyStatus.termsVersion, agree: online.agreeToTerms, close: { model.sheet = nil })
+                TermsSheet(version: lobbyStatus.termsVersion, saveFailed: onlineStatus?.termsSaveFailed ?? false,
+                           agree: online.agreeToTerms, close: { model.sheet = nil })
             } else if sheet == .lastRace, let lastRace = model.lastRace {
                 // Your last race's results, reopened (#24, #132): large, with Close only.
                 ResultsView(model: lastRace, buttons: .reopened(close: { model.sheet = nil }), presentation: .page)
@@ -63,16 +68,30 @@ struct HomeView: View {
     }
 
     private var raceOnline: some View {
-        let availability = RaceOnlineAvailability(isOnline: isOnline, lobbyStatus: lobbyStatus)
+        let availability = RaceOnlineAvailability(isOnline: isOnline, lobbyStatus: lobbyStatus, line: onlineStatus?.restrictionLine,
+                                                  isConnecting: onlineStatus?.isOpeningSession ?? false)
+        // On the tint fill, or on the grey the system draws a disabled button in.
+        let ink = availability.isEnabled ? ChromePalette.onTint : ChromePalette.onDisabled
         return Button(action: online.raceOnline) {
             VStack(spacing: 2) {
                 Text("Race online").font(MenuFont.heading(.title2))
-                if let reason = availability.reason {
+                if availability.isConnecting {
+                    // Waiting for the session after a tap (#161): a small spinner, no words.
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(ink)
+                        .accessibilityIdentifier("race-online-connecting")
+                } else if case .cooldown = availability.line {
+                    // The one number on Home: the cooldown, counted down each second.
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text(availability.text(now: context.date) ?? "").font(MenuFont.body(.subheadline)).monospacedDigit()
+                    }
+                } else if let reason = availability.text(now: .now) {
                     Text(reason).font(MenuFont.body(.subheadline))
                 }
             }
             // The page's `menuBackground` text colour would otherwise reach the label: navy on the navy fill.
-            .foregroundStyle(ChromePalette.onTint)
+            .foregroundStyle(ink)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)
         }
@@ -176,6 +195,9 @@ struct HomeOnlineActions {
 /// What the lobby area shows, from connectivity and the player's account (#25), by the gating matrix (#138).
 enum LobbyPanelState: Equatable {
     case offline
+    /// Game Center has her on the phone but there is no session (#161): the server didn't answer her last tap, or
+    /// wouldn't sign her in. The line under Race online, with Try again.
+    case tryAgain(RestrictionLine)
     case signIn
     case acceptTerms
     /// Hide lobby chat is on, or Game Center restricts the player's chat (#17, #34): the queue's size and the
@@ -183,12 +205,14 @@ enum LobbyPanelState: Equatable {
     case chatHidden(queuedPlayers: Int?)
     case lobby
 
-    init(isOnline: Bool, status: LobbyStatus) {
+    /// `retryLine`: Game Center has her on the phone, and the server didn't answer her last tap or refused the
+    /// sign-in (#161).
+    init(isOnline: Bool, status: LobbyStatus, retryLine: RestrictionLine? = nil) {
         let access = status.access(isOnline: isOnline)
         if !isOnline {
             self = .offline
         } else if !status.isSignedIn {
-            self = .signIn
+            self = retryLine.map(LobbyPanelState.tryAgain) ?? .signIn
         } else if access.termsDue {
             self = .acceptTerms
         } else if status.hidesChat || !access.chatVisible {
@@ -222,6 +246,15 @@ private struct LobbyPanel: View {
         case .offline:
             heading("You're offline", systemImage: "wifi.slash")
             detail("Practice races work offline.")
+        case .tryAgain(let line):
+            // The words under Race online: neither line carries a date.
+            heading(line.text(now: .now),
+                    systemImage: line == .unreachable ? "icloud.slash" : "person.crop.circle.badge.exclamationmark")
+            // Signing in again: with Game Center there already, that is the session alone.
+            // TODO-COPY (#171)
+            Button("Try again", action: onSignIn)
+                .buttonStyle(.bordered)
+                .accessibilityIdentifier("lobby-retry")
         case .signIn:
             heading("Sign in to Game Center to chat", systemImage: "person.crop.circle.badge.checkmark")
             Button("Sign in", action: onSignIn)
@@ -310,18 +343,29 @@ private struct LastRaceRow: View {
 
 /// Whether Home's Race online can be tapped, and the one line under it when it can't (#242, #314): "Offline", or
 /// "Practice races only" for Game Center's multiplayer restriction (#34), by the gating matrix (#138). Signed out it
-/// can: the tap signs in (#25).
+/// can: the tap signs in (#25). Past the matrix, what the server and the session say (#161): a suspension, the
+/// cooldown, an update, a refusal, each with its line and no tap; an unreachable server or a sign-in that failed,
+/// with its line under a button that tries again; and a tap waiting for the session, a spinner and no tap.
 struct RaceOnlineAvailability: Equatable {
     var isEnabled: Bool
+    /// The gating matrix's line.
     var reason: String?
+    /// The server's or the session's line, shown when the matrix has none.
+    var line: RestrictionLine?
+    var isConnecting = false
 
-    init(isOnline: Bool, lobbyStatus: LobbyStatus) {
+    init(isOnline: Bool, lobbyStatus: LobbyStatus, line: RestrictionLine? = nil, isConnecting: Bool = false) {
         let access = lobbyStatus.access(isOnline: isOnline)
-        self.init(isEnabled: access.onlineAllowed, reason: access.reason)
+        self.init(isEnabled: access.onlineAllowed && !isConnecting && line?.allowsTap != false, reason: access.reason)
+        self.isConnecting = isConnecting
+        if access.reason == nil { self.line = line }
     }
 
     init(isEnabled: Bool, reason: String?) {
         self.isEnabled = isEnabled
         self.reason = reason
     }
+
+    /// The line under Race online at `now`: the cooldown counts down.
+    func text(now: Date) -> String? { reason ?? line?.text(now: now) }
 }

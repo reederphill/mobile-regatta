@@ -29,9 +29,19 @@ public enum SessionError: Error, Equatable, Sendable {
 }
 
 /// An open session: the token resumes it on a later connection; the player is as the server keeps it.
-public struct OpenSession: Equatable, Sendable {
+public struct OpenSession: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public var token: [UInt8]
     public var player: GameCenterPlayer
+
+    public init(token: [UInt8], player: GameCenterPlayer) {
+        self.token = token
+        self.player = player
+    }
+
+    // The token never prints (#161): not in a description, a debug description or a dump.
+    public var description: String { "OpenSession(\(player.gamePlayerID.rawValue))" }
+    public var debugDescription: String { description }
+    public var customMirror: Mirror { Mirror(self, children: ["player": player]) }
 }
 
 public struct RemoteSession: Sendable {
@@ -49,7 +59,8 @@ public struct RemoteSession: Sendable {
         switch try await self.call(call) {
         case .signedIn(let token, let player): return OpenSession(token: token, player: GameCenterPlayer(wire: player))
         case .refused(let refusal): throw SessionError.refused(SessionRefusal(wire: refusal))
-        case .signedOut: throw ServiceLinkError.unexpectedReply("signedOut to \(call)")
+        // The call isn't named by value: a resume carries its token, a sign-in its signature (#161).
+        case .signedOut: throw ServiceLinkError.unexpectedReply("signedOut to \(call.name)")
         }
     }
 
@@ -65,5 +76,16 @@ public struct RemoteSession: Sendable {
 
     public func signOut() async throws {
         guard case .signedOut = try await call(.signOut) else { throw ServiceLinkError.unexpectedReply("to signOut") }
+    }
+}
+
+extension SessionCall {
+    /// Which call it is, without what it carries.
+    var name: String {
+        switch self {
+        case .signIn: "signIn"
+        case .resume: "resume"
+        case .signOut: "signOut"
+        }
     }
 }

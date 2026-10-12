@@ -12,7 +12,8 @@ import Testing
     @Test func everyScenarioBuildsItsServices() async throws {
         #expect(FakeServiceScenario.allCases.map(\.rawValue) == [
             "signed-out", "underage", "communication-restricted", "multiplayer-restricted", "offline", "queued", "cancelled-race",
-            "online-results", "online-results-unrated", "terms-bump",
+            "online-results", "online-results-unrated", "terms-bump", "suspended", "suspended-permanent", "cooldown", "cannot-race",
+            "update-required", "terms-save-failed", "session-failed", "unreachable", "connecting",
         ])
         for scenario in FakeServiceScenario.allCases {
             let services = ServiceSet.fake(scenario)
@@ -21,7 +22,7 @@ import Testing
             let lobby = try await services.lobby.state().access
             let online = await services.connectivity.status()
 
-            #expect((player == nil) == (scenario == .signedOut), "\(scenario): signed in")
+            #expect((player == nil) == !scenario.startsSignedIn, "\(scenario): signed in")
             #expect(online == (scenario == .offline ? .offline : .online), "\(scenario): connectivity")
             if player != nil {
                 #expect(try await services.terms.status().isAccepted == (scenario != .termsBump), "\(scenario): terms accepted")
@@ -87,6 +88,25 @@ import Testing
                 await #expect(throws: LobbyError.notReportable) {
                     try await services.lobby.report(race: RaceID("fake-race"), seat: 3, reason: .suspectedCheating)
                 }
+            // The queue's refusals (#161): each is the state a stream gives first, and stops a join.
+            case .suspended:
+                #expect(queue == .unavailable(.suspended(until: FakeServiceScenario.suspendedUntil)))
+                await #expect(throws: QueueError.refused(.suspended(until: FakeServiceScenario.suspendedUntil))) { try await services.queue.join() }
+            case .suspendedPermanent: #expect(queue == .unavailable(.suspended(until: nil)))
+            case .cooldown: #expect(queue == .unavailable(.cooldown(secondsRemaining: FakeServiceScenario.cooldownSeconds)))
+            case .cannotRace: #expect(queue == .unavailable(.attestationFailed))
+            case .updateRequired: #expect(queue == .unavailable(.updateRequired))
+            case .termsSaveFailed:
+                #expect(await services.identity.signIn().player != nil, "signing in gives a player")
+                #expect(try await services.terms.status() == .needsAcceptance(current: TermsVersion(1), lastAccepted: nil))
+                await #expect(throws: ScriptedTermsError.notSaved) { try await services.terms.accept(TermsVersion(1)) }
+                #expect(try await services.terms.status().isAccepted == false, "nothing was recorded")
+            // The session's own states: these fakes stay signed out, and the app plays the session over them.
+            case .sessionFailed, .unreachable, .connecting:
+                #expect(scenario.playsSession)
+                #expect(queue == .unavailable(.notSignedIn))
+                #expect(lobby == .closed(.notSignedIn))
+                #expect(await services.identity.signIn().player == nil, "no service signs her in")
             }
         }
     }

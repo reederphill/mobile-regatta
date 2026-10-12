@@ -1,4 +1,5 @@
 import GameKit
+import RegattaServiceClient
 import RegattaServices
 import UIKit
 
@@ -30,6 +31,32 @@ nonisolated final class GameKitIdentityService: IdentityService {
     func identitySignature() async throws -> IdentitySignature { try await core.identitySignature() }
 
     func signIn() async -> GameCenterState { await core.signIn() }
+
+    /// The signed-in player with the id the server keys her by (#161).
+    func devicePlayer() async -> DevicePlayer? { await core.devicePlayer() }
+}
+
+/// Game Center as the online session's device identity (#161): who is signed in on the phone, and her signature.
+/// What the app shows as signed in is the session's word, not this.
+nonisolated struct GameKitDeviceIdentity: DeviceIdentitySource {
+    let gameKit: GameKitIdentityService
+
+    func playerUpdates() -> AsyncStream<DevicePlayer?> {
+        let (stream, continuation) = AsyncStream.makeStream(of: DevicePlayer?.self)
+        let gameKit = gameKit
+        let task = Task {
+            for await _ in gameKit.stateUpdates() { continuation.yield(await gameKit.devicePlayer()) }
+        }
+        continuation.onTermination = { _ in task.cancel() }
+        return stream
+    }
+
+    func identitySignature() async throws -> IdentitySignature { try await gameKit.identitySignature() }
+
+    func signIn() async -> DevicePlayer? {
+        _ = await gameKit.signIn()
+        return await gameKit.devicePlayer()
+    }
 }
 
 /// `GKLocalPlayer` and the held sign-in sheet, on the main actor.
@@ -67,6 +94,10 @@ nonisolated final class GameKitIdentityService: IdentityService {
             gamePlayerID: GamePlayerID(local.gamePlayerID), alias: local.alias, isUnderage: local.isUnderage,
             isPersonalizedCommunicationRestricted: local.isPersonalizedCommunicationRestricted,
             isMultiplayerGamingRestricted: local.isMultiplayerGamingRestricted))
+    }
+
+    func devicePlayer() -> DevicePlayer? {
+        state().player.map { DevicePlayer(teamPlayerID: GKLocalPlayer.local.teamPlayerID, player: $0) }
     }
 
     func add(_ continuation: AsyncStream<GameCenterState>.Continuation) {

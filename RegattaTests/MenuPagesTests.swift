@@ -13,6 +13,7 @@ import UIKit
             (UIColor(ChromePalette.text), 0x0E2A47, 0xE8F1F8),
             (UIColor(ChromePalette.tint), 0x1B4F82, 0x7FB3E0),
             (UIColor(ChromePalette.surface), 0xFFFFFF, 0x13304D),
+            (UIColor(ChromePalette.errorText), 0xC8102E, 0xFF7A7A),
         ]
         for (colour, light, dark) in colours {
             let resolved = await Task.detached {
