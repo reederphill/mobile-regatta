@@ -118,15 +118,17 @@ final class FeedReader: @unchecked Sendable {
 struct LobbyRig {
     static let words = ["bitch", "asshole", "contract filtered phrase"]
 
-    let clock = VirtualClock()
+    let clock: VirtualClock
     let store = FaultyLobbyStore()
-    let book = InMemoryRatingBook()
+    let book: InMemoryRatingBook
     let moderation = NoModeration()
     let classifier: FakeToxicityClassifier?
     let hub: LobbyHub
 
     init(settings: LobbySettings = LobbySettings(), classifier: FakeToxicityClassifier? = nil, classifierTimeout: Duration = .seconds(30),
-         moderation custom: (any LobbyModeration)? = nil) {
+         clock: VirtualClock = VirtualClock(), book: InMemoryRatingBook = InMemoryRatingBook(), moderation custom: (any LobbyModeration)? = nil) {
+        self.clock = clock
+        self.book = book
         self.classifier = classifier
         hub = Self.hub(settings: settings, store: store, book: book, moderation: custom ?? moderation, classifier: classifier,
                        classifierTimeout: classifierTimeout, clock: clock)

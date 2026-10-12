@@ -145,7 +145,7 @@ public struct ReportedLine: Sendable, Equatable {
     public var postedAt: Date
 }
 
-/// What chat moderation decides for the lobby (#153 implements it; #152 ships the seam and `NoModeration`).
+/// What chat moderation decides for the lobby (#152 ships the seam; `Moderation` is #153's).
 ///
 /// `standing` is read before every post and for every state: a failure or a slow answer fails closed (the post isn't
 /// sent). `hiddenMessages` are the lines a player reported, hidden from her alone. The `report` calls throw
@@ -162,8 +162,8 @@ public protocol LobbyModeration: Sendable {
     func report(race: RaceID, seat: Int, reason: RaceReportReason, by playerID: String) async throws
 }
 
-/// No moderation (#152's default; never shipped: #153 precedes any build). Everyone stands clear and nothing can be
-/// reported. A dev server sets standings on it for the contract's `muted` and `banned` situations.
+/// No moderation: the hub's default, for tests of the chat alone (the server runs `Moderation`, #153). Everyone stands clear and nothing can be
+/// reported. A test sets standings on it.
 public final class NoModeration: LobbyModeration {
     private let standings = Mutex<[String: ChatStanding]>([:])
 

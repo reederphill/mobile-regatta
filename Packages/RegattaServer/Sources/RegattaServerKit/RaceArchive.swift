@@ -25,6 +25,8 @@ public protocol RaceArchive: Sendable {
     func lastRace(of playerID: String) async throws -> StoredRaceResult?
     /// A closed race as it was written, nil unless it closed.
     func closedRace(_ race: UUID) async throws -> ClosedRaceRecord?
+    /// Who sat where (#153: a race report names a seat): nil for a race this archive never registered.
+    func seats(of race: UUID) async throws -> RaceSeating?
 }
 
 /// Postgres (`RaceRegistryStore`, `RaceResultStore`, `RaceLogStore`).
@@ -58,6 +60,13 @@ public struct PostgresRaceArchive: RaceArchive {
         return ClosedRaceRecord(id: race, log: log, digest: digest, simulationVersion: version, toolchain: toolchain,
                                 results: results.results, incidents: results.incidents, rated: results.rated,
                                 bots: try await RaceResultStore(database).bots(of: race))
+    }
+
+    public func seats(of race: UUID) async throws -> RaceSeating? {
+        guard try await RaceRegistryStore(database).race(race) != nil else { return nil }
+        let results = RaceResultStore(database)
+        return RaceSeating(humans: try await results.players(of: race),
+                           takenOver: Set(try await results.bots(of: race).filter { $0.source == .takeover }.map(\.seat)))
     }
 }
 
@@ -124,6 +133,14 @@ public final class InMemoryRaceArchive: RaceArchive {
     }
 
     public func closedRace(_ race: UUID) async throws -> ClosedRaceRecord? { entries.withLock { $0.races[race]?.closed } }
+
+    public func seats(of race: UUID) async throws -> RaceSeating? {
+        entries.withLock { state in
+            state.races[race].map { entry in
+                RaceSeating(humans: entry.players, takenOver: Set(entry.closed?.bots.filter { $0.source == .takeover }.map(\.seat) ?? []))
+            }
+        }
+    }
 
     private static func running(_ id: UUID, in races: [UUID: Entry]) throws -> Entry {
         guard let entry = races[id] else { throw PersistenceError.raceNotFound(id) }

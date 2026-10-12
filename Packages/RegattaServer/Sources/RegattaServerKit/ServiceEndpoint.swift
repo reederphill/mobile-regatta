@@ -122,10 +122,14 @@ public struct ServiceEndpoint: Sendable {
     public let analyticsRetention: AnalyticsRetention?
     /// The rating book (#151) the profile reads: `POST /dev/situation` arranges a player's counts on a dev server's.
     public let ratings: (any RatingBook)?
+    /// Moderation (#153): the lobby's reports and standings, the admin queue, the penalties. `POST /dev/situation`
+    /// arranges standings and race seatings on it.
+    public let moderation: Moderation?
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
                 matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil, lobby: LobbyHub? = nil,
-                analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil, ratings: (any RatingBook)? = nil) {
+                analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil, ratings: (any RatingBook)? = nil,
+                moderation: Moderation? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
@@ -135,6 +139,7 @@ public struct ServiceEndpoint: Sendable {
         self.analytics = analytics
         self.analyticsRetention = analyticsRetention
         self.ratings = ratings
+        self.moderation = moderation
     }
 
     public var store: any AccountStore { sessions.store }

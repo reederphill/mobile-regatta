@@ -24,7 +24,8 @@ import Testing
             let server = try await RegattaHTTPServer.start(
                 config: config, services: try ServiceEndpoint.make(config: config, store: PostgresAccountStore(database),
                                                                    archive: PostgresRaceArchive(database),
-                                                                   restrictions: PlayerRestrictionStore(database)))
+                                                                   restrictions: PlayerRestrictionStore(database),
+                                                                   moderationStore: ModerationRecordStore(database)))
             do {
                 try await ServiceEndpointContractTests.run(ServiceEndpointContractTests.served, against: "ws://127.0.0.1:\(server.port)")
             } catch {
