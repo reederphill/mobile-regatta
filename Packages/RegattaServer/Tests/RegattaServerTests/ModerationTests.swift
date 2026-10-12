@@ -165,6 +165,51 @@ struct ModerationRig {
         #expect(try await rig.store.penalties(of: "T:gull").filter(\.automatic).allSatisfy { $0.liftedBy == "admin-1" })
     }
 
+    /// Three reports on one line, each upheld, are one incident: one step, not a ban.
+    @Test func oneIncidentIsOneStep() async throws {
+        let rig = ModerationRig()
+        let line = try await rig.line(by: "gull")
+        for name in ["wren", "skua", "puffin"] { try await rig.lobby.service(name).report(message: line.id) }
+        try await rig.lobby.service("tern").report(player: GamePlayerID("G:gull"))
+        var given: [Int64] = []
+        for report in try await rig.moderation.queue() {
+            if let penalty = try await rig.moderation.decide(report.id, .upholdChat, by: rig.admin) { given.append(penalty.id) }
+        }
+        #expect(Set(given).count == 1)
+        guard case .muted(_, false) = try await rig.standing("gull") else { Issue.record("not muted 24 h"); return }
+        // A report filed after it is a new incident (muted, her chat is reported as a player).
+        rig.clock.advance(60)
+        try await rig.lobby.service("wren").report(player: GamePlayerID("G:gull"))
+        let report = try #require(try await rig.moderation.queue().first)
+        let next = try await rig.moderation.decide(report.id, .upholdChat, by: rig.admin)
+        #expect(next.flatMap { $0.endsAt?.timeIntervalSince($0.startsAt) } == TimeInterval(7 * 86_400))
+    }
+
+    /// Reports already reviewed don't mute again, even inside the window.
+    @Test func reviewedReportsDontCountTowardTheAutomaticMute() async throws {
+        let rig = ModerationRig()
+        let line = try await rig.line(by: "gull")
+        for name in ["wren", "skua"] { try await rig.lobby.service(name).report(message: line.id) }
+        for report in try await rig.moderation.queue() {
+            let penalty = try await rig.moderation.decide(report.id, .upholdChat, by: rig.admin)
+            if let penalty { try await rig.moderation.lift(penalty.id, of: "T:gull", by: rig.admin) }
+        }
+        let later = try await rig.line(by: "gull", "later")
+        try await rig.lobby.service("puffin").report(message: later.id)
+        #expect(try await rig.standing("gull") == .clear)
+    }
+
+    @Test func signInWritesOnlyTheSuspensionsModerationGave() async throws {
+        let rig = ModerationRig()
+        try await rig.restrictions.setSuspension("T:wren", .permanent)
+        try await rig.moderation.syncSuspension("T:wren")
+        #expect(try await rig.restrictions.restrictions(of: "T:wren").suspension == .permanent)
+        _ = try await rig.moderation.penalize("T:gull", .suspension7d, by: rig.admin)
+        try await rig.restrictions.setSuspension("T:gull", nil)
+        try await rig.moderation.syncSuspension("T:gull")
+        #expect(try await rig.restrictions.restrictions(of: "T:gull").suspension == StoredSuspension(until: rig.clock.now + 7 * 86_400))
+    }
+
     @Test func aLiftedChatPenaltyIsNoStep() async throws {
         let rig = ModerationRig()
         let first = try await rig.moderation.muteNext("T:gull", by: rig.admin)

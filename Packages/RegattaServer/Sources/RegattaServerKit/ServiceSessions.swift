@@ -38,12 +38,16 @@ public struct SessionAuthority: Sendable {
     public let maxSessionsPerPlayer: Int
     public let now: @Sendable () -> Date
     /// The nickname a player shows, from what Game Center calls her: hers, unless moderation overrode it (#153, #34).
+    /// Applied to the session at each sign-in and resume; the store keeps her own, so lifting it takes effect at once.
     public let nickname: @Sendable (AccountPlayer) async throws -> String
+    /// Called after each sign-in is stored (#153: moderation writes her racing suspension again). Doesn't fail it.
+    public let signedIn: @Sendable (AccountPlayer) async -> Void
 
     public init(store: any AccountStore, verifier: any GameCenterVerifier, lifetime: TimeInterval = 30 * 86_400,
                 absoluteLifetime: TimeInterval = 90 * 86_400, maxSessionsPerPlayer: Int = 5,
                 now: @escaping @Sendable () -> Date = { Date() },
-                nickname: @escaping @Sendable (AccountPlayer) async throws -> String = { $0.alias }) {
+                nickname: @escaping @Sendable (AccountPlayer) async throws -> String = { $0.alias },
+                signedIn: @escaping @Sendable (AccountPlayer) async -> Void = { _ in }) {
         self.store = store
         self.verifier = verifier
         self.lifetime = lifetime
@@ -51,6 +55,18 @@ public struct SessionAuthority: Sendable {
         self.maxSessionsPerPlayer = max(maxSessionsPerPlayer, 1)
         self.now = now
         self.nickname = nickname
+        self.signedIn = signedIn
+    }
+
+    /// `player` as she shows: her own nickname when the override can't be read (logged).
+    func shown(_ player: AccountPlayer) async -> AccountPlayer {
+        var shown = player
+        do {
+            shown.alias = try await nickname(player)
+        } catch {
+            FileHandle.standardError.write(Data("RegattaServer: can't read \(player.teamPlayerID)'s nickname override: \(error)\n".utf8))
+        }
+        return shown
     }
 
     public enum Outcome: Sendable, Equatable {
@@ -76,8 +92,8 @@ public struct SessionAuthority: Sendable {
         }
         let restrictions = SessionRestrictions(wire: player)
         do {
-            let alias = try await nickname(AccountPlayer(teamPlayerID: teamPlayerID, gamePlayerID: signature.gamePlayerID, alias: player.alias))
-            let account = try await store.signIn(teamPlayerID: teamPlayerID, gamePlayerID: signature.gamePlayerID, alias: alias)
+            let account = await shown(try await store.signIn(teamPlayerID: teamPlayerID, gamePlayerID: signature.gamePlayerID, alias: player.alias))
+            await signedIn(account)
             let token = Self.newToken()
             let time = now()
             let session = try await store.createSession(playerID: teamPlayerID, tokenHash: Self.hash(token),
@@ -116,7 +132,7 @@ public struct SessionAuthority: Sendable {
             try await store.touchSession(teamPlayerID: account.teamPlayerID, at: time)
             var named = account
             named.alias = player.alias
-            named.alias = try await nickname(named)
+            named = await shown(named)
             return .signedIn(token: token, session: SignedInSession(sessionID: refreshed.id, player: named, restrictions: restrictions,
                                                                     signature: nil))
         } catch {

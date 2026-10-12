@@ -202,8 +202,9 @@ public final class Moderation: LobbyModeration {
     let now: @Sendable () -> Date
     /// The lobby, told of standings that change and of lines to take down. Made after this, as it reads it.
     private let lobby = LateBound<LobbyHub>()
-    /// Writes one after another: three reports at once still mute once.
-    private let tail = Mutex<Task<Void, Never>?>(nil)
+    /// Each player's writes one after another (by the player reported or penalized): three reports at once still mute
+    /// once. Other players' writes don't wait on hers.
+    private let tails = Mutex<[String: Task<Void, Never>]>([:])
     /// Dev: race seatings the contract's situations arrange.
     private let devSeatings = Mutex<[RaceID: RaceSeating]>([:])
 
@@ -285,7 +286,7 @@ public final class Moderation: LobbyModeration {
 
     /// Files `report` unless the same reporter's same report waits already, then mutes on a third reporter.
     private func file(_ report: StoredReport) async throws {
-        let muted: Bool = try await serially { [self] in
+        let muted: Bool = try await serially(report.subjectID) { [self] in
             let waiting = try await store.reports(by: report.reporterID).contains {
                 $0.decision == nil && $0.kind == report.kind && $0.subjectID == report.subjectID && $0.messageID == report.messageID
                     && $0.raceID == report.raceID && $0.seat == report.seat
@@ -297,10 +298,10 @@ public final class Moderation: LobbyModeration {
     }
 
     /// Mutes `subjectID` for `autoMuteLength` when players enough reported her chat within the window and no chat
-    /// penalty holds her already. Reports dismissed don't count; one reporter counts once, however often she reports.
+    /// penalty holds her already. Only reports awaiting review count; one reporter counts once, however often she reports.
     private func autoMute(_ subjectID: String, at time: Date) async throws -> Bool {
         let reporters = Set(try await store.reports(against: subjectID, since: time - settings.autoMuteWindow)
-            .filter { $0.isChat && $0.decision != .dismissed }.map(\.reporterID))
+            .filter { $0.isChat && $0.decision == nil }.map(\.reporterID))
         guard reporters.count >= settings.autoMuteReporters else { return false }
         guard !(try await store.penalties(of: subjectID)).contains(where: { $0.kind.isChat && $0.applies(at: time) }) else { return false }
         _ = try await store.add(StoredPenalty(playerID: subjectID, kind: .chatMute, automatic: true, actorID: nil, startsAt: time,
@@ -317,7 +318,8 @@ public final class Moderation: LobbyModeration {
     @discardableResult
     public func decide(_ reportID: Int64, _ decision: ReviewDecision, by actor: AdminActor) async throws -> StoredPenalty? {
         let time = now()
-        let (penalty, removed): (StoredPenalty?, Int64?) = try await serially { [self] in
+        guard let filed = try await store.report(reportID) else { throw ModerationError.unknownReport }
+        let (penalty, removed): (StoredPenalty?, Int64?) = try await serially(filed.subjectID) { [self] in
             guard let report = try await store.report(reportID) else { throw ModerationError.unknownReport }
             guard report.decision == nil else { throw ModerationError.alreadyDecided }
             switch (report.kind, decision) {
@@ -333,6 +335,11 @@ public final class Moderation: LobbyModeration {
                 return (nil, nil)
             case .upholdChat:
                 try await liftAutoMute(report.subjectID, unlessWaiting: false, by: actor, at: time)
+                // One step per incident: a chat penalty given since this report was filed covers it.
+                let covering = try await store.penalties(of: report.subjectID).first {
+                    $0.kind.isChat && !$0.automatic && $0.startsAt >= report.createdAt && $0.applies(at: time)
+                }
+                if let covering { return (covering, report.messageID) }
                 return (try await escalate(report.subjectID, report: reportID, by: actor, at: time), report.messageID)
             case .overrideNickname:
                 let active = try await store.penalties(of: report.subjectID).first { $0.kind == .nicknameOverride && $0.applies(at: time) }
@@ -343,9 +350,16 @@ public final class Moderation: LobbyModeration {
                 return (try await give(racing, to: report.subjectID, report: reportID, by: actor, at: time), nil)
             }
         }
-        guard let report = try await store.report(reportID) else { return penalty }
-        if let removed { try await lobby.value?.remove(ids: [removed], reason: "report upheld") }
-        if report.isChat { await lobby.value?.refresh(players: [report.subjectID]) }
+        // The decision is stored: what the lobby does with it can't undo it. A line that can't be taken down now is
+        // logged (an admin takes it down by hand); her feeds are told whatever happened.
+        if let removed {
+            do {
+                try await lobby.value?.remove(ids: [removed], reason: "report upheld")
+            } catch {
+                Self.log("can't take down line \(removed) after report \(reportID) was upheld: \(error)")
+            }
+        }
+        if filed.isChat { await lobby.value?.refresh(players: [filed.subjectID]) }
         return penalty
     }
 
@@ -377,7 +391,7 @@ public final class Moderation: LobbyModeration {
     @discardableResult
     public func penalize(_ playerID: String, _ penalty: RacingPenalty, by actor: AdminActor, report: Int64? = nil) async throws -> StoredPenalty {
         let time = now()
-        return try await serially { [self] in try await give(penalty, to: playerID, report: report, by: actor, at: time) }
+        return try await serially(playerID) { [self] in try await give(penalty, to: playerID, report: report, by: actor, at: time) }
     }
 
     private func give(_ racing: RacingPenalty, to playerID: String, report: Int64?, by actor: AdminActor, at time: Date) async throws -> StoredPenalty {
@@ -402,7 +416,7 @@ public final class Moderation: LobbyModeration {
     @discardableResult
     public func muteNext(_ playerID: String, by actor: AdminActor) async throws -> StoredPenalty {
         let time = now()
-        let given = try await serially { [self] in try await escalate(playerID, report: nil, by: actor, at: time) }
+        let given = try await serially(playerID) { [self] in try await escalate(playerID, report: nil, by: actor, at: time) }
         await lobby.value?.refresh(players: [playerID])
         return given
     }
@@ -410,7 +424,7 @@ public final class Moderation: LobbyModeration {
     /// Lifts one of the player's penalties (an appeal, or a mistake). A lifted chat penalty no longer counts as a step.
     public func lift(_ penaltyID: Int64, of playerID: String, by actor: AdminActor) async throws {
         let time = now()
-        let lifted = try await serially { [self] () -> StoredPenalty in
+        let lifted = try await serially(playerID) { [self] () -> StoredPenalty in
             guard let penalty = try await store.penalties(of: playerID).first(where: { $0.id == penaltyID }) else {
                 throw ModerationError.unknownPenalty
             }
@@ -424,7 +438,14 @@ public final class Moderation: LobbyModeration {
     /// Writes the player's racing suspension to the restriction store, where the queue and the profile read it: a ban
     /// over a suspension, and the suspension that ends last; none lifts it. #160 calls it again when a deleted player
     /// returns, as her row (and the columns on it) went with her.
-    public func syncSuspension(_ playerID: String) async throws { try await syncSuspension(playerID, at: now()) }
+    /// The server calls it at each sign-in. A player moderation never suspended is left alone.
+    public func syncSuspension(_ playerID: String) async throws {
+        let time = now()
+        try await serially(playerID) { [self] in
+            guard try await store.penalties(of: playerID).contains(where: { $0.kind == .racingSuspension || $0.kind == .racingBan }) else { return }
+            try await syncSuspension(playerID, at: time)
+        }
+    }
 
     private func syncSuspension(_ playerID: String, at time: Date) async throws {
         let active = try await store.penalties(of: playerID).filter { ($0.kind == .racingSuspension || $0.kind == .racingBan) && $0.applies(at: time) }
@@ -451,7 +472,7 @@ public final class Moderation: LobbyModeration {
     /// then `standing`'s given by the "dev" admin.
     public func devSet(_ standing: ChatStanding, for playerID: String) async throws {
         let actor = try AdminActor("dev"), time = now()
-        try await serially { [self] in
+        try await serially(playerID) { [self] in
             for penalty in try await store.penalties(of: playerID) where penalty.kind.isChat && penalty.applies(at: time) {
                 _ = try await store.lift(penalty.id, by: actor.id, at: time)
             }
@@ -471,15 +492,26 @@ public final class Moderation: LobbyModeration {
 
     // MARK: -
 
-    /// Runs `work` after every write before it.
-    private func serially<T: Sendable>(_ work: @escaping @Sendable () async throws -> T) async throws -> T {
-        let task: Task<T, any Error> = tail.withLock { tail in
-            let previous = tail
+    /// Runs `work` after every earlier write of `playerID`'s.
+    private func serially<T: Sendable>(_ playerID: String, _ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        let (task, marker): (Task<T, any Error>, Task<Void, Never>) = tails.withLock { tails in
+            let previous = tails[playerID]
             let task = Task { _ = await previous?.value; return try await work() }
-            tail = Task { _ = try? await task.value }
-            return task
+            let marker = Task { _ = try? await task.value }
+            tails[playerID] = marker
+            return (task, marker)
+        }
+        defer {
+            Task { [self] in
+                await marker.value
+                tails.withLock { if $0[playerID] == marker { $0[playerID] = nil } }
+            }
         }
         return try await task.value
+    }
+
+    static func log(_ message: String) {
+        FileHandle.standardError.write(Data("RegattaServer: moderation: \(message)\n".utf8))
     }
 }
 

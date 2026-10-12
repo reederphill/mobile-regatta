@@ -105,6 +105,13 @@ extension ServiceEndpoint {
                                        nickname: { player in
                                            guard try await moderation.nicknameOverridden(player.teamPlayerID) else { return player.alias }
                                            return Moderation.overriddenNickname(sailNumber: try await liveries.livery(of: player).sailNumber)
+                                       },
+                                       signedIn: { player in
+                                           do {
+                                               try await moderation.syncSuspension(player.teamPlayerID)
+                                           } catch {
+                                               Moderation.log("can't write \(player.teamPlayerID)'s suspension at sign-in: \(error)")
+                                           }
                                        }),
             backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
                                       raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
