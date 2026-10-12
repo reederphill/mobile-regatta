@@ -454,3 +454,35 @@ import Testing
         #expect(rig.controller.bar == nil && rig.model.notice == .leftQueue)
     }
 }
+
+/// The online session under the queue (#162): her place lives on its connection.
+extension QueueControllerTests {
+    @Test func sessionLostWhileQueuedIsAConnectionLoss() async {
+        let rig = Rig()
+        // Not open while she waits for nothing: nothing to lose.
+        rig.controller.sessionChanged(isOpen: false)
+        rig.controller.sessionChanged(isOpen: true)
+        #expect(rig.controller.bar == nil && rig.model.notice == nil)
+
+        await rig.joinAndWait()
+        rig.controller.sessionChanged(isOpen: false)
+        #expect(rig.controller.bar == .connectionLost)
+        #expect(rig.display()?.title == "Connection lost" && rig.display()?.canLeave == false)
+        #expect(rig.model.notice == nil)
+        // The device's path going as well changes nothing more.
+        rig.controller.connectionChanged(isOnline: false)
+        #expect(rig.controller.bar == .connectionLost && rig.model.notice == nil)
+    }
+
+    @Test func sessionBackAfterALossPostsLeftTheQueue() async {
+        let rig = Rig()
+        await rig.joinAndWait()
+        rig.controller.sessionChanged(isOpen: false)
+        // What the new connection's stream says of the queue is no place of hers: no silent re-queue.
+        await rig.queued(4, 20)
+        #expect(rig.controller.bar == .connectionLost)
+        rig.controller.sessionChanged(isOpen: true)
+        #expect(rig.controller.bar == nil && rig.controller.entry == .ready)
+        #expect(rig.model.notice == AppModel.Notice(title: "You left the queue", message: "The connection dropped."))
+    }
+}

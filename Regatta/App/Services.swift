@@ -71,6 +71,8 @@ final class OnlineStatus {
     let queue: QueueController
     /// The online race from the briefing's end to Home again (#141).
     let race: OnlineRaceController
+    /// The livery between My boat and the server (#162).
+    let livery: LiverySync
     private let session: Session?
     private let now: () -> Date
 
@@ -93,6 +95,10 @@ final class OnlineStatus {
         queue = QueueController(queue: services.queue, raceSession: services.raceSession, sequence: race,
                                 isOnline: isInitiallyOnline, now: now)
         race.queue = queue
+        livery = LiverySync(profile: services.profile)
+        livery.isLive = session != nil
+        race.mayAskService = { [weak self] in self?.mayAskService ?? false }
+        livery.mayAskService = { [weak self] in self?.mayAskService ?? false }
         Task { [weak self] in
             for await status in services.connectivity.statusUpdates() {
                 self?.isOnline = status.isOnline
@@ -148,8 +154,41 @@ final class OnlineStatus {
     }
 
     func show(_ phase: SessionPhase) {
+        let wasOpen = isSessionOpen
         sessionPhase = phase
         if case .open = phase { tapFailed = false }
+        guard session != nil else { return }
+        // Queued, a session that is gone took her place with it (#162).
+        queue.sessionChanged(isOpen: isSessionOpen)
+        if isSessionOpen, !wasOpen {
+            Task {
+                await refreshAccount()
+                throughTheGate()
+            }
+        }
+    }
+
+    private var isSessionOpen: Bool {
+        if case .open = sessionPhase { true } else { false }
+    }
+
+    /// With a session (#162): one is there to join the queue on.
+    var hasSession: Bool { session != nil }
+
+    /// Whether the race session and the profile may be asked (#162): the server closes the connection on either from
+    /// a player who hasn't accepted the current terms or may not race online, and the session would open it again, and
+    /// again. With no session (the fakes) there is nothing to close.
+    var mayAskService: Bool {
+        guard session != nil else { return true }
+        return isSessionOpen && lobbyStatus.hasAcceptedTerms && lobbyStatus.canRaceOnline
+    }
+
+    /// The session opened, or the terms were just accepted on it: a race she dropped out of may still run (a cold
+    /// launch after a drop), and the livery is brought in line with the server's.
+    private func throughTheGate() {
+        guard session != nil, mayAskService else { return }
+        race.sessionOpened()
+        Task { await livery.sessionOpened() }
     }
 
     /// The scene became active, or went to the background: the queue is left there (#140), and the session's socket
@@ -259,6 +298,7 @@ final class OnlineStatus {
         }
         if accepted { analytics.log(.practiceToOnline(.termsAccepted)) }
         await refreshAccount()
+        if accepted { throughTheGate() }
         return accepted && lobbyStatus.hasAcceptedTerms
     }
 

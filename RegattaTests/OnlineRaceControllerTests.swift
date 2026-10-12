@@ -2,6 +2,7 @@ import Foundation
 import RegattaClient
 import RegattaCore
 import RegattaProtocol
+import RegattaServiceClient
 import RegattaServices
 import Testing
 @testable import Regatta
@@ -79,6 +80,8 @@ nonisolated final class MutableRaceSession: RaceSessionService, @unchecked Senda
     var offer: RejoinOffer?
     var last: LastRace?
     private(set) var rejoinsAsked = 0
+    /// What `rejoin()` throws instead of answering: a session that is down, or a call that timed out (#162).
+    var rejoinFailure: (any Error)?
     private var ratings: [AsyncStream<RatingChange>.Continuation] = []
 
     func handOff() throws -> HandOff {
@@ -88,6 +91,7 @@ nonisolated final class MutableRaceSession: RaceSessionService, @unchecked Senda
 
     func rejoin() throws -> RejoinOffer {
         rejoinsAsked += 1
+        if let rejoinFailure { throw rejoinFailure }
         guard let offer else { throw RaceSessionError.noRace }
         return offer
     }
@@ -615,5 +619,66 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
         await rig.race.rejoin()
         #expect(rig.race.rejoinEntry == nil && rig.race.phase == .idle && !rig.model.isLiveryLocked)
         #expect(rig.model.notice == AppModel.Notice(title: "The race has ended", message: "Back to Race online."))
+    }
+}
+
+/// The race session on the real session (#162): no answer is never "no race".
+extension OnlineRaceControllerTests {
+    @Test func aTokenAskBacksOffWhileTheSessionIsDown() async {
+        let rig = SequenceRig()
+        await rig.sail(to: 300)
+        rig.session.rejoinFailure = OnlineSessionError.notConnected
+        rig.link.status = .reconnecting
+        rig.link.wantsToken = true
+        rig.race.tick()
+        await rig.settle()
+        #expect(rig.session.rejoinsAsked == 1)
+        // Not every tick: again two seconds on.
+        rig.clock.advance(1)
+        rig.race.tick()
+        await rig.settle()
+        #expect(rig.session.rejoinsAsked == 1)
+        rig.clock.advance(1.1)
+        rig.race.tick()
+        await rig.settle()
+        #expect(rig.session.rejoinsAsked == 2)
+        // And she is still in her race, with nothing said.
+        #expect(rig.race.phase == .racing && rig.model.notice == nil && rig.link.closes == 0)
+
+        // The session back, the answer is a fresh token.
+        rig.session.rejoinFailure = nil
+        rig.session.offer = rig.offer(at: 400)
+        rig.clock.advance(2.1)
+        rig.race.tick()
+        await rig.settle()
+        #expect(rig.link.provided == [SequenceRig.fresh])
+
+        // A player who isn't through the gate is never asked.
+        rig.race.mayAskService = { false }
+        rig.link.wantsToken = true
+        rig.clock.advance(5)
+        rig.race.tick()
+        await rig.settle()
+        #expect(rig.session.rejoinsAsked == 3)
+    }
+}
+
+extension RejoinOfferTests {
+    @Test func theSessionOpeningAsksForARejoin() async {
+        let rig = SequenceRig()
+        rig.session.offer = rig.offer(at: 90 * Race.tickRate)
+        // A cold launch after a drop: no scene change, no word from the queue's stream yet.
+        rig.race.sessionOpened()
+        await rig.settle()
+        #expect(rig.session.rejoinsAsked == 1)
+        #expect(rig.race.rejoinEntry?.clock(at: rig.clock.date) == "1:30" && rig.model.isLiveryLocked)
+        #expect(rig.model.phase == .home && rig.links.isEmpty)
+
+        // No answer leaves Home as it was: the row stays, and so does a tap on it.
+        rig.session.rejoinFailure = OnlineSessionError.timedOut
+        rig.race.sessionOpened()
+        await rig.settle()
+        await rig.race.rejoin()
+        #expect(rig.race.rejoinEntry != nil && rig.model.notice == nil && rig.race.phase == .idle)
     }
 }

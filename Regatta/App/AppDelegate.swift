@@ -13,18 +13,17 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     /// out until the real services arrive. Tests and UI tests never touch Game Center.
     ///
     /// With a service endpoint (`OnlineEndpoint`) and a device identity (Game Center, or Debug's `-devIdentity`), the
-    /// identity, the terms and the queue's state are the online session's (#161); the rest stay on their fakes
-    /// until their tickets (#162–#166). With no endpoint nothing changes.
+    /// identity, the terms, the queue, the race session and the profile are the online session's (#161, #162); the
+    /// rest stay on their fakes until their tickets (#163–#166). With no endpoint nothing changes.
     let services: ServiceSet
     /// The online session and the device identity under it, when there is an endpoint.
     let online: OnlineStatus.Session?
-    /// Opens a hand-off's race connection (#141): the Debug fake race host on the fakes; nothing answers otherwise,
-    /// until #162 gives the app its race server.
+    /// Opens a hand-off's race connection (#141): `/race` on the services' host with a session (#162), the Debug fake
+    /// race host on the fakes; with neither (no endpoint) nothing answers.
     let raceConnector: RaceConnector
 
     override init() {
-        var (services, online) = AppDelegate.makeServices(launchOptions: .current)
-        var connector: RaceConnector = { _ in UnansweredRaceConnection() }
+        var (services, online, connector) = AppDelegate.makeServices(launchOptions: .current)
         #if DEBUG
         if let director = FakeRaceDirector.make(launchOptions: .current, services: services) {
             services.raceSession = FakeRaceSession(director)
@@ -40,7 +39,7 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     private(set) lazy var analytics = Analytics.app(transport: services.analytics)
     private var metricKit: MetricKitForwarder?
 
-    private static func makeServices(launchOptions: LaunchOptions) -> (ServiceSet, OnlineStatus.Session?) {
+    private static func makeServices(launchOptions: LaunchOptions) -> (ServiceSet, OnlineStatus.Session?, RaceConnector) {
         // The fakes' online results scenarios fill in live, a sleep apart (the services package keeps no clock).
         var services = launchOptions.fakeServices.map { ServiceSet.fake($0, wait: { try? await Task.sleep(for: $0) }) }
             ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
@@ -66,24 +65,24 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         if let fake = launchOptions.fakeServices.flatMap(FakeSession.make) {
             services.identity = fake.session.identity
             services.terms = fake.session.terms
-            services.queue = fake.session.queueStatus
+            services.queue = fake.session.queue
             online = fake
         }
         #endif
+        var connector: RaceConnector = { _ in UnansweredRaceConnection() }
         if let device, let url = OnlineEndpoint.serviceURL(launchOptions: launchOptions, defaults: .standard,
                                                            info: Bundle.main.infoDictionary ?? [:]) {
             let session = makeSession(url: url, device: device)
-            services.identity = session.identity
-            services.terms = session.terms
-            services.queue = session.queueStatus
+            services.adopt(session)
             online = OnlineStatus.Session(session: session, device: device)
+            if let race = OnlineEndpoint.raceConnector(serviceURL: url) { connector = race }
         }
         // The shop sells every paid design from a stub until StoreKit (#137): see `StubStoreService`. Its defaults
         // are My boat's (UI tests' own suite, emptied at launch).
         services.store = StubStoreService(boatClass: RaceFiles.defaults.boatClass.ref.id,
                                           defaults: .init(MyBoatDefaults.defaults(for: launchOptions, standard: .standard)),
                                           isOnline: OnlineStatus.isInitiallyOnline(launchOptions))
-        return (services, online)
+        return (services, online, connector)
     }
 
     /// The online session on the real transport, the Keychain and the system's clock (#161).

@@ -114,4 +114,13 @@ nonisolated enum OnlineEndpoint {
         guard let text = info[infoKey] as? String, let url = URL(string: text), url.scheme == "wss", url.host != nil else { return nil }
         return url
     }
+
+    /// The race endpoint beside the services' (#162): the same scheme, host and port, at `/race`.
+    static func raceURL(_ serviceURL: URL) -> URL? {
+        guard var parts = URLComponents(url: serviceURL, resolvingAgainstBaseURL: false), parts.host != nil else { return nil }
+        parts.path = "/race"
+        parts.query = nil
+        parts.fragment = nil
+        return parts.url
+    }
 }

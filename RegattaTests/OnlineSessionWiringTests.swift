@@ -14,6 +14,8 @@ nonisolated final class StubService: Sendable {
         var terms = WireTermsStatus.needsAcceptance(current: 1, lastAccepted: nil)
         var queue = QueueState.idle
         var connects = 0
+        /// The queue, race session and profile calls asked of it (#162), by name.
+        var calls: [String] = []
     }
 
     let state = OSAllocatedUnfairLock(initialState: State())
@@ -27,6 +29,7 @@ nonisolated final class StubService: Sendable {
     }
 
     var connects: Int { state.withLock { $0.connects } }
+    var calls: [String] { state.withLock { $0.calls } }
 }
 
 nonisolated final class StubLink: SessionLink {
@@ -64,6 +67,15 @@ nonisolated final class StubLink: SessionLink {
                 return .status(state.terms)
             }
             deliver(.termsReply(ServiceReply(id: request.id, result: result)))
+        case .queueRequest(let request) where request.call != .openStateUpdates:
+            service.state.withLock { $0.calls.append("\(request.call)") }
+            deliver(.queueReply(ServiceReply(id: request.id, result: .done)))
+        case .raceSessionRequest(let request):
+            service.state.withLock { $0.calls.append("\(request.call)") }
+            deliver(.raceSessionReply(ServiceReply(id: request.id, result: request.call == .lastRace ? .noLastRace : .noRace)))
+        case .profileRequest(let request):
+            service.state.withLock { $0.calls.append(request.call == .profile ? "profile" : "saveLivery") }
+            deliver(.profileReply(ServiceReply(id: request.id, result: .notSignedIn)))
         default:
             // The queue's stream is opened and never answered: the tests show the status its states themselves.
             break
@@ -77,9 +89,9 @@ nonisolated final class StubLink: SessionLink {
 /// The online session under `OnlineStatus` (#161): what Race online's gate does with a session that opens, one that
 /// can't, terms the build is too old for, and a player who gets no session.
 @MainActor @Suite struct OnlineSessionWiringTests {
-    private static let wren = DevicePlayer(teamPlayerID: "T:wren", player: GameCenterPlayer(gamePlayerID: GamePlayerID("G:wren"), alias: "Wren"))
+    fileprivate static let wren = DevicePlayer(teamPlayerID: "T:wren", player: GameCenterPlayer(gamePlayerID: GamePlayerID("G:wren"), alias: "Wren"))
 
-    private struct Rig {
+    fileprivate struct Rig {
         let service = StubService()
         let tokens = InMemorySessionTokenStore()
         let session: OnlineSession
@@ -97,9 +109,7 @@ nonisolated final class StubLink: SessionLink {
                 sleep: { _ in for await _ in AsyncStream<Void>.makeStream().stream {}; throw CancellationError() },
                 jitter: { 0 }, clientBuild: "test"))
             var services = ServiceSet.fake(.signedOut)
-            services.identity = session.identity
-            services.terms = session.terms
-            services.queue = session.queueStatus
+            services.adopt(session)
             status = OnlineStatus(services: services, session: OnlineStatus.Session(session: session, device: device))
             await status.deviceChanged(player)
         }
@@ -311,7 +321,7 @@ nonisolated final class StubLink: SessionLink {
             var services = ServiceSet.fake(scenario)
             services.identity = fake.session.identity
             services.terms = fake.session.terms
-            services.queue = fake.session.queueStatus
+            services.queue = fake.session.queue
             return (OnlineStatus(services: services, session: fake), fake.session)
         }
 
@@ -490,5 +500,110 @@ nonisolated final class StubLink: SessionLink {
         try store.setToken(Self.token, for: "T:wren")
         store.purgeOnFreshInstall(defaults: defaults)
         #expect(try store.token(for: "T:wren") == Self.token)
+    }
+}
+
+/// The session's services in the app (#162): what a real launch races on, and where Race online leads.
+extension OnlineSessionWiringTests {
+    @Test func realSessionReplacesQueueRaceSessionAndProfile() async throws {
+        let rig = await Rig(player: Self.wren)
+        #expect(await rig.status.signIn(analytics: .discarding()))
+        #expect(await rig.session.phase == .open(Self.wren.player))
+        let services = rig.status.services
+        try await services.queue.join()
+        await #expect(throws: RaceSessionError.noRace) { _ = try await services.raceSession.handOff() }
+        await #expect(throws: RaceSessionError.noRace) { _ = try await services.raceSession.rejoin() }
+        #expect(try await services.raceSession.lastRace() == nil)
+        await #expect(throws: ProfileError.notSignedIn) { _ = try await services.profile.profile() }
+        // Every one of them went to the server, on the session's one connection.
+        #expect(rig.service.calls == ["join", "handOff", "rejoin", "lastRace", "profile"])
+        #expect(rig.service.connects == 1 && rig.status.hasSession)
+    }
+
+    @Test func raceURLIsTheServiceHostsRaceEndpoint() throws {
+        func race(_ service: String) throws -> String? { OnlineEndpoint.raceURL(try #require(URL(string: service)))?.absoluteString }
+        #expect(try race("ws://127.0.0.1:8080/service") == "ws://127.0.0.1:8080/race")
+        #expect(try race("wss://regatta.example/service") == "wss://regatta.example/race")
+        #expect(try race("wss://regatta.example:8443/v1/service?x=1") == "wss://regatta.example:8443/race")
+    }
+
+    @Test func noEndpointKeepsTheStubAlert() {
+        let plain = LaunchOptions(arguments: ["Regatta"])
+        #expect(QueueEntry(launchOptions: plain, hasSession: false, isDebug: false) == .stubAlert)
+        // A Debug build's plain tap is still the dev server's instant race, outside UI tests.
+        #expect(QueueEntry(launchOptions: plain, hasSession: false, isDebug: true) == .devInstantRace)
+        #expect(QueueEntry(launchOptions: LaunchOptions(arguments: ["Regatta", "-uitesting"]), hasSession: false, isDebug: true) == .stubAlert)
+    }
+
+    @Test func aSessionNeverShowsTheStubAlert() {
+        for arguments in [["Regatta"], ["Regatta", "-uitesting"], ["Regatta", "-onlineHost", "127.0.0.1:8080", "-devIdentity", "1"]] {
+            for isDebug in [true, false] {
+                #expect(QueueEntry(launchOptions: LaunchOptions(arguments: arguments), hasSession: true, isDebug: isDebug) == .queue)
+            }
+        }
+        // The fakes have their own queue.
+        #expect(QueueEntry(launchOptions: LaunchOptions(arguments: ["Regatta", "-uitesting", "-fakeServices", "joinable"]),
+                           hasSession: false, isDebug: false) == .queue)
+    }
+}
+
+/// The race link's address (#162).
+@MainActor @Suite struct RaceConnectorTests {
+    @Test func theConnectorOpensTheServiceHostsRaceURL() throws {
+        var opened: [URL] = []
+        let service = try #require(URL(string: "ws://10.0.0.2:8080/service"))
+        let made = OnlineEndpoint.raceConnector(serviceURL: service) { url in
+            opened.append(url)
+            return UnansweredRaceConnection()
+        }
+        let connector = try #require(made)
+        _ = connector(RaceToken(bytes: [1, 2, 3]))
+        _ = connector(RaceToken(bytes: [4]))
+        // The token is `RaceJoin`'s to send, not part of the address.
+        #expect(opened.map(\.absoluteString) == ["ws://10.0.0.2:8080/race", "ws://10.0.0.2:8080/race"])
+    }
+}
+
+/// The gate before the gated services (#162): the server closes the connection on a race session or profile call from a
+/// player who isn't through it, so nothing asks one for her.
+extension RejoinOfferTests {
+    private func settle() async {
+        for _ in 0..<10 {
+            try? await Task.sleep(for: .milliseconds(10))
+            await Task.yield()
+        }
+    }
+
+    @Test func nothingIsAskedBeforeTheTermsAreAccepted() async {
+        let rig = await OnlineSessionWiringTests.Rig(player: OnlineSessionWiringTests.wren)
+        #expect(await rig.status.passGate(analytics: .discarding()) == .terms)
+        await settle()
+        #expect(!rig.status.mayAskService)
+        rig.status.race.sessionOpened()
+        await rig.status.race.rejoin()
+        await rig.status.livery.sessionOpened()
+        await settle()
+        #expect(rig.service.calls == [])
+
+        // Through the gate, the session's opening is made up for: a race to rejoin, then the hand-off of a fleet not started.
+        #expect(await rig.status.acceptTerms(TermsVersion(1), analytics: .discarding()))
+        await settle()
+        #expect(rig.status.mayAskService)
+        #expect(rig.service.calls.prefix(2) == ["rejoin", "handOff"])
+    }
+
+    @Test func nothingIsAskedWhenMultiplayerRestricted() async {
+        let restricted = DevicePlayer(teamPlayerID: "T:finch", player: GameCenterPlayer(
+            gamePlayerID: GamePlayerID("G:finch"), alias: "Finch", isMultiplayerGamingRestricted: true))
+        let rig = await OnlineSessionWiringTests.Rig(player: restricted)
+        rig.service.state.withLock { $0.terms = .accepted(version: 1) }
+        // She can chat, so she has a session.
+        _ = await rig.status.signIn(analytics: .discarding())
+        await settle()
+        #expect(rig.status.sessionPhase == .open(restricted.player) && rig.status.lobbyStatus.hasAcceptedTerms)
+        #expect(!rig.status.mayAskService)
+        rig.status.race.sessionOpened()
+        await settle()
+        #expect(rig.service.calls == [])
     }
 }
