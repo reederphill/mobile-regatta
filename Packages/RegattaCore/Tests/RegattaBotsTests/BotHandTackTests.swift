@@ -16,7 +16,7 @@ import Testing
 
     /// Old classes sail the tap and the roll exactly as before #459: an all-bot race on skiff@7 (the default class until #461, the
     /// autohelm off, a roll tack) and on skiff@6 (the autohelm on), pinned on #458's tip before any bot code changed.
-    @Test func skiffSevenBotsAreBitIdentical() throws {
+    @Test(.onFiveRules) func skiffSevenBotsAreBitIdentical() throws {
         let seven = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 7))
         let six = try Self.digest(seed: 459, boatClass: BoatClassFile.bundled(id: "skiff", version: 6))
         #expect(hex64(seven) == "0xa802fd2cfe1d943f")
@@ -425,7 +425,7 @@ import Testing
     /// the rudder go for steerage only until `penaltyStartMargin` before the deadline, then turns with what way she
     /// has, and is not disqualified. Waiting on centred (for steerage, or `HandTackTable.stallWait`), a National boat
     /// held off her turn by the committee boat and luffed into irons keeping clear sat through her start deadline.
-    @Test func stalledOwingATurnSheTurnsBeforeItsStartDeadline() throws {
+    @Test(.onFiveRules) func stalledOwingATurnSheTurnsBeforeItsStartDeadline() throws {
         let toStart = 7.0
         let penalty = try Self.alone(seed: 3).race.rules.raceFormat.penalty
         let (race, _) = try Self.alone(seed: 3) { snapshot, water in
@@ -458,7 +458,7 @@ import Testing
 
     /// A mark close aboard holds a penalty turn by hand off only while the turn itself still fits its complete
     /// deadline (`markHoldLeavesTheTurn`, #471): in light air the turn is longer than the 26 s the start margin leaves.
-    @Test func aMarkHoldsHerTurnOffOnlyWhileTheTurnFits() throws {
+    @Test(.onFiveRules) func aMarkHoldsHerTurnOffOnlyWhileTheTurnFits() throws {
         /// Whether the hold still stands with `slack` seconds more than the hold must leave her to its complete deadline.
         func holds(slack: Double) throws -> Bool {
             let (probe, _) = try Self.alone(seed: 3)

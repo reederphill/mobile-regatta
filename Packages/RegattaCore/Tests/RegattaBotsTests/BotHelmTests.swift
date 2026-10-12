@@ -21,12 +21,13 @@ import Testing
         return try BoatClassFile(data: Data(text.utf8), tune: 1)
     }
 
-    /// `botRace(seed:)`'s race, every seat a bot, sailing `boatClass`.
+    /// `botRace(seed:)`'s race, every seat a bot, sailing `boatClass` under `BotConductTests.waterRules`.
     static func race(seed: UInt64, boatClass: BoatClassFile, seats: Int = 8) throws -> Race {
         var catalog = RaceFileCatalog()
         try catalog.boatClasses.add(boatClass)
         let setup = try RaceSetup(raceSeed: RaceSeed(seed), seats: Array(repeating: .bot, count: seats), laps: 2,
-                                  startSequenceTicks: 45 * Race.tickRate, boatClass: boatClass.ref)
+                                  startSequenceTicks: 45 * Race.tickRate, boatClass: boatClass.ref,
+                                  rulesConfiguration: BotConductTests.waterRules)
         return try Race(setup: setup, files: RaceFiles(resolving: setup, from: catalog),
                         mode: .authoritative(windSeed: WindSeed(seed &* 0x9E37_79B9_7F4A_7C15 &+ 1)))
     }

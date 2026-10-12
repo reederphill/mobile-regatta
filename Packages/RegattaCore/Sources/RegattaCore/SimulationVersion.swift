@@ -255,8 +255,9 @@ import Glibc
 ///    go the first one's way, and the one limit is 40 s from the turn's clock (`missedComplete`; no start deadline). A
 ///    turn that becomes current while she is rounding has its clock pending (`Boat.penaltyClockTick` nil) until the end
 ///    of the first tick she is clear of the mark; once started it runs on through any later rounding.
-///    Rule 21.2 binds her from the first counting crossing until the turn is served. Not the default: a race naming
-///    fleet-rules@5 or older sails as on 37, bit for bit (the new state is hashed only under `tackAndGybe`).
+///    Rule 21.2 binds her from the first counting crossing until the turn is served. Races sail fleet-rules@6 by
+///    default (#490), so every default race's penalty turn is a tack and a gybe; a race naming fleet-rules@5 or older
+///    sails as on 37, bit for bit (the new state is hashed only under `tackAndGybe`).
 public let simulationRevision = 38
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`

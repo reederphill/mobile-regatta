@@ -30,8 +30,8 @@ import RegattaCore
     /// the gate (`running`); the wind there, and the best upwind and downwind in it.
     /// The class the scripted encounters' water sails (`Water`): the default, or a pinned one a test binds (#437).
     @TaskLocal static var waterClass: FileRef = RaceFiles.defaults.boatClass.ref
-    /// The rules the scripted encounters' water races under (`Water`): the default, or fleet-rules@6 for a test that
-    /// binds it (`.onSixRules`, #488).
+    /// The rules the scripted encounters' water races under (`Water`): the default (fleet-rules@6 since #490), or the
+    /// version a test pins (`.onSixRules`, #488; `.onFiveRules`, the full circle).
     @TaskLocal static var waterRules: FileRef = RaceFiles.defaults.rulesConfiguration.ref
 
     struct Water {
@@ -746,7 +746,7 @@ import RegattaCore
     /// boat went from one turn owed to four in 2 s.
     // skiff@7 until #455: on skiff@8 seeds 5 and 7 draw a rule 15 call on the penalised boat (tried again after #471's
     // step C: the same two, a second turn owed).
-    @Test(.onSkiffSeven) func prestartPenaltyDoesNotCascade() throws {
+    @Test(.onFiveRules, .onSkiffSeven) func prestartPenaltyDoesNotCascade() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 5, 7] {
             for (ahead, across) in [(2.0, 0.5), (14.0 / 4.9, 7.0 / 4.9), (3.0, 1.0), (1.5, 1.0)] {
@@ -792,7 +792,7 @@ import RegattaCore
     /// missed-penalty disqualification).
     // skiff@7 until #455: on skiff@8 seed 3 draws a rule 21.2 call on the turning boat (tried again after #471's step C:
     // the same, the boat abeam to leeward).
-    @Test(.onSkiffSeven) func racingPenaltyInACrowdIsPutOffAndDoesNotCascade() throws {
+    @Test(.onFiveRules, .onSkiffSeven) func racingPenaltyInACrowdIsPutOffAndDoesNotCascade() throws {
         var failures: [String] = []
         for seed: UInt64 in [3, 5, 7] {
             for pair in Self.racingPenalisedPairs {
@@ -868,7 +868,7 @@ import RegattaCore
     /// still owing the turn, is 30° into the turn she serves only after she has started and inside its deadline (the
     /// scene's two-boat line is short, so its end marks hold her off to the start margin, #461), and serves it. Called
     /// 30 s before the gun the deadline falls before it: she turns where she is.
-    @Test func aLateCallIsServedAfterTheStart() throws {
+    @Test(.onFiveRules) func aLateCallIsServedAfterTheStart() throws {
         for seed: UInt64 in [3, 5, 7] {
             let late = Self.penalisedBeforeTheGun(try Self.prestartCalled(seed: seed, toGun: 8, below: 4, across: 12), seconds: 50)
             let started = try #require(late.started, "seed \(seed): she never started")
@@ -889,7 +889,7 @@ import RegattaCore
     /// wait sailed her into the turn's 30° and out again, a started turn given up 1.5 times an episode): with a boat
     /// a length and a half to windward 40 s before the gun she bears away for room, is 30° in inside 9 s, never gives
     /// the turn up, and serves it inside its deadline.
-    @Test func beforeHerStartShePutsNoTurnOffInTheCrowd() throws {
+    @Test(.onFiveRules) func beforeHerStartShePutsNoTurnOffInTheCrowd() throws {
         for seed: UInt64 in [3, 5, 7] {
             let seen = Self.penalisedBeforeTheGun(try Self.prestartCalled(seed: seed, toGun: 40, below: 6, across: 1.5), seconds: 40)
             let thirtyIn = try #require(seen.firstThirtyIn, "seed \(seed): she never turned")
@@ -903,7 +903,7 @@ import RegattaCore
     /// (she doesn't put the turn off for the pack): with a boat abeam to windward inside three lengths she bears away
     /// first, under the rules' 30° for the first 2 s and 10° or more off her course by then, and turns after it; alone
     /// she is 30° into her turn inside 2.5 s.
-    @Test func bearsAwayForRoomBeforeHerTurn() throws {
+    @Test(.onFiveRules) func bearsAwayForRoomBeforeHerTurn() throws {
         for seed: UInt64 in [3, 5] {
             func sailed(across: Double) throws -> (twoSeconds: Double, thirtyIn: Double?, served: Bool) {
                 let race = try Self.racingPenalised(seed: seed, ahead: 0, across: across)
@@ -925,7 +925,7 @@ import RegattaCore
     }
 
     /// #351: on the last leg she can't finish owing a turn, so there she starts it at once, crowd or not.
-    @Test func racingPenaltyOnTheLastLegStartsAtOnce() throws {
+    @Test(.onFiveRules) func racingPenaltyOnTheLastLegStartsAtOnce() throws {
         for seed: UInt64 in [3, 5] {
             let probe = Water(seed: seed).race.course.legs
             let last = probe.count - 1
@@ -1011,7 +1011,7 @@ import RegattaCore
     /// water on the other: she turns towards the open side, though her own way (`BotStyle.penaltyDirection`) is
     /// towards the boat, and the nearest boat (a boat close astern on the open side, sailing away) would turn her
     /// towards it too. Before #486 she turned her own way into the boat: neither boat was within 2.5 hull lengths of her.
-    @Test func penaltyTurnStartsTheWayItsSweepIsClear() throws {
+    @Test(.onFiveRules) func penaltyTurnStartsTheWayItsSweepIsClear() throws {
         for side in [1.0, -1.0] {
             let others: [(ahead: Double, across: Double)] = [(6, 2.1 * side), (-3.5, -1.0 * side)]
             // A seed whose scene crosses only the circle on the boat's side.
@@ -1027,9 +1027,9 @@ import RegattaCore
     /// #486 acceptance: boats coming down through both her circles, the nearer, on her starboard side, soon past her:
     /// she sails on, putting her turn off, while both sweeps cross a boat, and starts once one is clear, that way (her
     /// own way is the other), inside the start deadline's `penaltyStartMargin`.
-    @Test func penaltyTurnIsPutOffWhileBothSweepsCross() throws {
+    @Test(.onFiveRules) func penaltyTurnIsPutOffWhileBothSweepsCross() throws {
         let others: [(ahead: Double, across: Double)] = [(3, 2.0), (8, -2.0)]
-        let start = RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.start
+        let start = fiveRulesPenalty.start
         let seed = try firstSeed(in: 1...20) { Self.clearSweeps(try Self.sweepScene(seed: $0, others)).isEmpty }
         let swept = Self.sailSweepScene(try Self.sweepScene(seed: seed, others), seconds: 20, penaltyDirection: -1)
         let chosen = try #require(swept.chosen, "seed \(seed): she never chose a way")
@@ -1044,10 +1044,10 @@ import RegattaCore
     /// to windward, through both circles she could turn: she waits for it to pass (it is astern of her when she is 30°
     /// in), is called for nothing, touches nothing, and serves the turn. Before #486 a Club bot read no pack and turned
     /// at once, her own way: into it.
-    @Test func clubBotWaitsForAPassingBoat() throws {
+    @Test(.onFiveRules) func clubBotWaitsForAPassingBoat() throws {
         let club = BotTier.club.skill(at: 0.5)
         let others: [(ahead: Double, across: Double)] = [(3, 0.6)]
-        let complete = RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.complete
+        let complete = fiveRulesPenalty.complete
         // A seed whose boat crosses both circles, and whose turn by hand leaves her time to wait for it to pass.
         let seed = try firstSeed(in: 1...20) { seed in
             let race = try Self.sweepScene(seed: seed, others)

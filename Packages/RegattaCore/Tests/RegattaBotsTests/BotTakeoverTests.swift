@@ -159,7 +159,7 @@ import RegattaCore
     /// turning it back would reset it (`.penaltyReset`), losing the player's turn. In clear water (`clearWater` from
     /// the one other boat): near a boat she still gives a turn up to keep clear of it (rule 21.2,
     /// `BotBrain.penaltyInput`), which resets it.
-    @Test func takeoverMidPenaltyTurnsOnTheSameWay() throws {
+    @Test(.onFiveRules) func takeoverMidPenaltyTurnsOnTheSameWay() throws {
         var resets: [UInt64] = []
         var started = 0
         for seed: UInt64 in 1...60 {
@@ -205,7 +205,7 @@ import RegattaCore
     /// leaves the boat to the autohelm (`BotBrain.turningOn`), but never for more than `penaltyHoldSeconds`: with the
     /// rudder held there (settled on the wrong side), she then turns it on her way regardless. A rudder within a tick's
     /// slew of centre she doesn't wait on, nor a turn not yet started within `penaltyStartMargin` of its start deadline.
-    @Test func turningOnFromTheAutohelmWaitsAtMostPenaltyHoldSeconds() throws {
+    @Test(.onFiveRules) func turningOnFromTheAutohelmWaitsAtMostPenaltyHoldSeconds() throws {
         /// Two seconds of her decisions on a penalty turn she turns to starboard (rudder +), `progress` into it, with
         /// the autohelm holding her and its rudder at `rudder` every tick; the start deadline `startLeft` seconds off
         /// (the rules' whole start time if nil). Each decision's time and rudder.

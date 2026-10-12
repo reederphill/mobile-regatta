@@ -59,20 +59,21 @@ import Testing
         #expect(past.noticeText == "Turn · 0s / 0s")
     }
 
-    /// A practice frame carries your keep-clear row and the rules' penalty windows (fleet-rules@5: 20 s / 40 s); a
-    /// frame's readout reads those windows, and none shows for a seat that owes nothing.
+    /// A practice frame carries your keep-clear row and the rules' penalty (the default fleet-rules@6, #490: a tack and
+    /// a gybe, one 40 s limit, its start window the complete one); a frame's readout reads them, and none shows for a
+    /// seat that owes nothing.
     @Test func practiceFramesCarryKeepClearRowsAndTheRulesPenalty() throws {
         let driver = PracticeDriver(config: RaceDriverTests.config)
         let base = driver.currentFrame
         #expect(base.keepClear?.count == base.boats.count)
         #expect(base.keepClear?[driver.myBoatIndex] == nil)
         let penalty = try #require(base.penalty)
-        #expect(penalty.start == 20 && penalty.complete == 40)
+        #expect(penalty.turn == .tackAndGybe && penalty.start == 40 && penalty.complete == 40)
         var owed = [OwedPenalty?](repeating: nil, count: base.boats.count)
-        owed[0] = Self.owed(start: penalty.start, complete: penalty.complete)
+        owed[0] = Self.tackAndGybe(complete: penalty.complete)
         let frame = TickFrame(tick: 300 + 9 * Race.tickRate, boats: base.boats, standings: base.standings, wind: base.wind,
                               isOver: false, owed: owed, penalty: penalty)
-        #expect(PenaltyReadout(frame: frame, seat: 0)?.noticeText == "Turn · 11s / 31s")
+        #expect(PenaltyReadout(frame: frame, seat: 0)?.noticeText == "Turn · 31s")
         #expect(PenaltyReadout(frame: frame, seat: 1) == nil)
         #expect(frame.extrapolatedBackOneTick().owed == owed)
     }
@@ -161,7 +162,8 @@ import Testing
                                                 served: flash))
         #expect(after.marks == Marks(isTackLit: false, isGybeLit: false, direction: -1))
         // Fleet-rules@5 has no flash.
-        let older = try #require(base.penalty)
+        var older = try #require(base.penalty)
+        older.turn = .fullCircle
         #expect(PenaltyReadout(frame: frame(tick: 1005, owed: nil, penalty: older), seat: 0, served: flash) == nil)
         #expect(PenaltyReadout(frame: frame(tick: 1005, owed: Self.owed(clock: 1000, start: 20, complete: 40),
                                             penalty: older), seat: 0, served: flash)?.marks == nil)

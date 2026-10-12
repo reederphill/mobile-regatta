@@ -43,6 +43,10 @@ enum RuleWords {
         }
     }
 
+    /// The penalty line for the default rules' penalty turn (`RaceFiles.defaults`, fleet-rules@6 since #490: a tack and
+    /// a gybe): what Help's "Penalty turns" section and the rule-call hint say, outside any race.
+    static let defaultPenaltyLine = clearingLine(RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.turn)
+
     // TODO-COPY (#171): #228's example, for a keep-clear call made while your autohelm was holding.
     static let autohelmKeepClear = "Your boat kept its angle to the wind as it shifted; steer to keep clear"
 

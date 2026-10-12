@@ -60,15 +60,16 @@ public struct RaceFiles: Sendable {
     /// The bundled files a `RaceSetup` names unless told otherwise: skiff@8 (v1.0's class, planing with an
     /// automatic spinnaker, #248, turning a penalty turn in about 10 s, #89, with #263's momentum, shadow cost, tack
     /// cost and roll tack, #298's backwind astern on her windward quarter; in skiff@5 the backwind's stern edge is steep, it grows with her speed and it is off while running; in skiff@6, #377, the shadow is a ribbon wake and the backwind a header off a working sail; in skiff@7, #437, the autohelm is off a centred rudder, so every boat steers by hand; in skiff@8, #458 and #461, she tacks and gybes by hand too: the rudder's drag goes with the cube of the rudder, she falls off out of irons with the rudder centred, the tap sails nothing and there is no roll tack), dev-venue@2 (whose pairings name the schema-2 conditions),
-    /// classic-oscillating@2 and fleet-rules@5 (schema 5: the start row's spacing floor, #85, sequential
-    /// penalty deadlines, #89, the escape simulation's "changes course" rate, #92, and rule 17's limits, #345).
+    /// classic-oscillating@2 and fleet-rules@6 (schema 6: the start row's spacing floor, #85, sequential
+    /// penalty deadlines, #89, the escape simulation's "changes course" rate, #92, rule 17's limits, #345, and the
+    /// penalty turn as one tack and one gybe turning the same way within 40 s, #487, the default since #490).
     public static let defaults: RaceFiles = {
         do {
             return try RaceFiles(
                 boatClass: .bundled(id: "skiff", version: 8),
                 venue: .bundled(id: "dev-venue", version: 2),
                 conditions: .bundled(id: "classic-oscillating", version: 2),
-                rulesConfiguration: .bundled(id: "fleet-rules", version: 5)
+                rulesConfiguration: .bundled(id: "fleet-rules", version: 6)
             )
         } catch {
             preconditionFailure("the bundled default race files failed to load: \(error)")
