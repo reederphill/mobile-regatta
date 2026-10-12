@@ -1,6 +1,6 @@
 {
   "log" : "rules-turn.racelog.json",
-  "freezeTick" : -1240,
+  "freezeTick" : -1260,
   "camera" : "boat",
   "vision" : "none",
   "view" : "courseUp",

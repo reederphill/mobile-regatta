@@ -9,7 +9,7 @@ final class ResultsUITests: RaceUITestCase {
     /// by hand four times, 13, 77, 107, 394, as sim changes stopped the clock too soon). `-timescale 4` holds the race
     /// to at most 120 ticks/s (30 Hz × 4), so the close comes at least 14 s of wall-clock time after your finish and the
     /// 3 s delay is the sheet's, not the close's. It ran at 8× until a one-lap fleet no longer spread the 3,360 ticks
-    /// that needed (#445); at 4× her finish comes about 50 s of wall-clock time in, well inside the 200 s watch.
+    /// that needed (#445); at 4× her finish comes about 65 s of wall-clock time in, well inside the 200 s watch.
     @MainActor func testSheetAppearsAbout3sAfterFinishWhileSceneRenders() throws {
         let app = launchRace(["-demo", "-seed", "\(SeedTable.resultsSheet)", "-laps", "1", "-timescale", "4"])
         let status = app.staticTexts["race-status"]
