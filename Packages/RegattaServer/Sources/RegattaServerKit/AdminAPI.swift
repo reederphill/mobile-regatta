@@ -5,8 +5,8 @@ import Persistence
 import RegattaCore
 import RegattaServices
 
-// The admin tool (#154; #17, #26, #34): the admin queue, each report's detail (the line, the player, the race), the
-// decisions and penalties, the nickname override and the audit, as JSON routes under `/admin/` on the server's port.
+// The admin tool (#154; #17, #26, #34): the admin queue, each report's detail (the line, the player, the race) and each
+// fair-play flag's (#155), the decisions and penalties, the nickname override and the audit, as JSON routes under `/admin/` on the server's port.
 // Every request carries an admin's token (`Authorization: Bearer …`, `REGATTA_ADMIN_TOKENS`), and every action is taken
 // as the admin it names: a request without a known token is refused, whatever it asks for. A server without admin
 // tokens has no `/admin/` routes (404). `regatta-admin` is the command line over them.
@@ -107,6 +107,15 @@ public struct AdminAPI: Sendable {
                 guard let id = Int64(id) else { return HTTPReply(.notFound, error: "no such penalty of that player") }
                 try await moderation.lift(id, of: player, by: admin)
                 return HTTPReply(.ok, json: try await self.player(player))
+            case .flag(let id):
+                guard let id = Int64(id), let detail = try await flag(id) else { return HTTPReply(.notFound, error: "no such flag") }
+                return HTTPReply(.ok, json: detail)
+            case .decideFlag(let id):
+                guard let id = Int64(id) else { return HTTPReply(.notFound, error: "no such flag") }
+                guard let decision = params["decision"].flatMap(FlagDecision.init(rawValue:)) else {
+                    return HTTPReply(.badRequest, error: "decision is one of \(FlagDecision.allCases.map(\.rawValue).joined(separator: ", "))")
+                }
+                return HTTPReply(.ok, json: AdminFlag(try await moderation.decideFlag(id, decision, by: admin), at: moderation.now()))
             case .audit:
                 let actions = try await moderation.store.actions(about: params["player"], limit: limit(params))
                 return HTTPReply(.ok, json: AdminAudit(actions: actions.map(AdminAuditEntry.init)))
@@ -124,6 +133,7 @@ public struct AdminAPI: Sendable {
         case .noAdmin: HTTPReply(.unauthorized, error: "an admin token is required")
         case .unknownReport: HTTPReply(.notFound, error: "no such report")
         case .unknownPenalty: HTTPReply(.notFound, error: "no such penalty of that player")
+        case .unknownFlag: HTTPReply(.notFound, error: "no such flag")
         case .alreadyDecided: HTTPReply(.conflict, error: "the report was decided already")
         case .decisionDoesntFit: HTTPReply(.unprocessableEntity, error: "that decision doesn't fit the report's kind")
         }
@@ -143,11 +153,22 @@ public struct AdminAPI: Sendable {
 
     // MARK: Views
 
-    /// The admin queue (#34): what waits for a decision, the first due first.
+    /// The admin queue (#34): the reports and fair-play flags (#155) that wait for a decision, the first due first.
     func queue(limit: Int) async throws -> AdminQueue {
         let now = moderation.now()
-        let reports = try await moderation.queue(limit: limit)
-        return AdminQueue(now: Self.seconds(now), items: reports.map { AdminQueueItem(report: AdminReport($0, at: now)) })
+        let reports = try await moderation.queue(limit: limit).map { AdminQueueItem(report: AdminReport($0, at: now)) }
+        let flags = try await moderation.flagQueue(limit: limit).map { AdminQueueItem(flag: AdminFlag($0, at: now)) }
+        let items = (reports + flags).sorted { ($0.dueAt, $0.type, $0.id) < ($1.dueAt, $1.type, $1.id) }
+        return AdminQueue(now: Self.seconds(now), items: Array(items.prefix(limit)))
+    }
+
+    /// A flag and what an admin looks at it with: the player's penalties and her other flags.
+    func flag(_ id: Int64) async throws -> AdminFlagDetail? {
+        guard let flag = try await moderation.store.flag(id) else { return nil }
+        let now = moderation.now()
+        return AdminFlagDetail(flag: AdminFlag(flag, at: now),
+                               penalties: try await moderation.store.penalties(of: flag.playerID).map { AdminPenalty($0, at: now) },
+                               otherFlags: try await moderation.store.flags(of: flag.playerID).filter { $0.id != id }.map { AdminFlag($0, at: now) })
     }
 
     /// A report and what an admin decides it on: the reported player's penalties and the other reports on her, and
@@ -202,6 +223,8 @@ enum AdminRoute: Equatable {
     case mute(String)
     case nicknameOverride(String)
     case lift(String, penalty: String)
+    case flag(String)
+    case decideFlag(String)
     case audit
 
     init?(_ parts: [String]) {
@@ -210,6 +233,8 @@ enum AdminRoute: Equatable {
         case (1, "audit"): self = .audit
         case (2, "reports"): self = .report(parts[1])
         case (3, "reports") where parts[2] == "decide": self = .decide(parts[1])
+        case (2, "flags"): self = .flag(parts[1])
+        case (3, "flags") where parts[2] == "decide": self = .decideFlag(parts[1])
         case (2, "players"): self = .player(parts[1])
         case (3, "players"):
             switch parts[2] {
@@ -226,8 +251,8 @@ enum AdminRoute: Equatable {
     /// Reads are GETs; everything that changes something is a POST.
     var method: HTTPMethod {
         switch self {
-        case .queue, .report, .player, .audit: .GET
-        case .decide, .penalize, .mute, .nicknameOverride, .lift: .POST
+        case .queue, .report, .player, .flag, .audit: .GET
+        case .decide, .penalize, .mute, .nicknameOverride, .lift, .decideFlag: .POST
         }
     }
 }
@@ -241,12 +266,13 @@ struct AdminQueue: Encodable {
 }
 
 struct AdminQueueItem: Encodable {
-    /// "report".
+    /// "report" or "flag".
     var type: String
     var id: Int64
     var dueAt: Int64
     var overdue: Bool
     var report: AdminReport?
+    var flag: AdminFlag?
 
     init(report: AdminReport) {
         type = "report"
@@ -255,6 +281,53 @@ struct AdminQueueItem: Encodable {
         overdue = report.overdue
         self.report = report
     }
+
+    init(flag: AdminFlag) {
+        type = "flag"
+        id = flag.id
+        dueAt = flag.dueAt
+        overdue = flag.overdue
+        self.flag = flag
+    }
+}
+
+/// A fair-play flag (#155): what the scan measured, the threshold it reached, and the races.
+struct AdminFlag: Encodable {
+    var id: Int64
+    var kind: String
+    var playerID: String
+    var value: Double
+    var threshold: Double
+    var raceIDs: [String]
+    var detail: String
+    var createdAt: Int64
+    var dueAt: Int64
+    var overdue: Bool
+    var decision: String?
+    var decidedAt: Int64?
+    var decidedBy: String?
+
+    init(_ flag: StoredFlag, at now: Date) {
+        id = flag.id
+        kind = flag.kind.rawValue
+        playerID = flag.playerID
+        value = flag.value
+        threshold = flag.threshold
+        raceIDs = flag.raceIDs
+        detail = flag.detail
+        createdAt = AdminAPI.seconds(flag.createdAt)
+        dueAt = AdminAPI.seconds(flag.dueAt)
+        overdue = flag.decision == nil && flag.dueAt < now
+        decision = flag.decision?.rawValue
+        decidedAt = flag.decidedAt.map(AdminAPI.seconds)
+        decidedBy = flag.decidedBy
+    }
+}
+
+struct AdminFlagDetail: Encodable {
+    var flag: AdminFlag
+    var penalties: [AdminPenalty]
+    var otherFlags: [AdminFlag]
 }
 
 struct AdminReport: Encodable {

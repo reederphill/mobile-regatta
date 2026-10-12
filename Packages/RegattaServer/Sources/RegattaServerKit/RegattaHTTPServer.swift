@@ -46,6 +46,7 @@ public final class RegattaHTTPServer: Sendable {
         let registry = services.matchmaker?.registry ?? RaceRegistry(maxRaces: config.maxRaces)
         await services.analyticsRetention?.start()
         services.retention?.start()
+        services.fairPlay?.start()
         let listener = try await ServerBootstrap(group: group)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             // A TCP-level option. (`.socketOption(.tcp_nodelay)` is SOL_SOCKET option 1: SO_DEBUG on Linux,
@@ -127,6 +128,7 @@ public final class RegattaHTTPServer: Sendable {
         services.lobby?.finish()
         await services.analyticsRetention?.stop()
         services.retention?.stop()
+        services.fairPlay?.stop()
         task.cancel()
         _ = await task.value
     }

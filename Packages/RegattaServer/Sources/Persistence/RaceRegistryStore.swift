@@ -103,6 +103,16 @@ public struct RaceRegistryStore: Sendable {
     @discardableResult
     public func cancel(_ id: UUID) async throws -> RaceRecord { try await end(id, as: .cancelled) }
 
+    /// The races that closed at or after `from` and before `to`, with when, the first closed first (#155, #157).
+    public func closedRaces(endedFrom from: Date, to: Date) async throws -> [(id: UUID, endedAt: Date)] {
+        let rows = try await database.client.query("""
+            SELECT id, ended_at FROM races WHERE state = 'closed' AND ended_at >= \(from) AND ended_at < \(to) ORDER BY ended_at, id
+            """, logger: database.logger)
+        var races: [(id: UUID, endedAt: Date)] = []
+        for try await (id, ended) in rows.decode((UUID, Date).self) { races.append((id, ended)) }
+        return races
+    }
+
     /// Cancels every race still running (#30): run at server start, when no race can still be running, so a
     /// crash's orphans don't stay "running". Returns their ids.
     @discardableResult

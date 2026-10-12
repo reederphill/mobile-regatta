@@ -104,6 +104,7 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     Moderation.swift         moderation (#153): reports, the automatic mute, the chat ladder, racing penalties, the admin queue
     OnlineData.swift         Delete my online data (#160): the plan, the erase, leaderboard blocks, the retention and inactivity jobs
     AdminAPI.swift           the admin tool (#154): /admin/ routes behind admin tokens, the queue, decisions, penalties, the audit
+    FairPlay.swift           fair-play flags (#155): the nightly scan of the window's race logs, flags to the admin queue
   GameCenterIdentity/      Game Center identity verification: Apple's chain, RSA PKCS#1 v1.5 over the signed payload
   RegattaServer/           the `RegattaServer` executable
   RegattaDevAPI/           the dev endpoints' JSON, shared by the server and the load client
@@ -115,7 +116,7 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     DataFileStore.swift      every version of every data file, by FileRef; a version never changes
     AnalyticsStore.swift     usage analytics (#156): raw events 90 days, the daily aggregates and the roll-up's arithmetic
     LiveryStore.swift        players' stored liveries (#159), one per player, gone with her
-    ModerationStore.swift    reports and penalties (#153), kept past Delete my online data for their retention; the admin audit (#154)
+    ModerationStore.swift    reports and penalties (#153), kept past Delete my online data for their retention; the admin audit (#154); fair-play flags (#155)
     PlayerDataStore.swift    a player's online data erased in one transaction (#160), her seats anonymised, the deletion audit
   RegattaLoadClient/       RegattaClient over a NIO WebSocket: scripted helm, bytes and RTT measured; the
                            contract runner's WebSocketServiceConnector (#145)
@@ -305,7 +306,9 @@ whose token is in `REGATTA_ADMIN_TOKEN` (the server at `REGATTA_ADMIN_URL`, defa
 player's penalties and other reports, and a race report's results and the seat's incidents; `decide <id> <decision>`
 (`dismiss`, `uphold_chat`, `override_nickname`, or a racing penalty); `player <id>`; `penalize <player> <penalty>`
 (`warning`, `suspension_24h`, `suspension_7d`, `permanent`, `rating_reset`); `mute <player>` (the next chat step);
-`nickname-override <player>`; `lift <player> <penalty-id>`; `audit [player]`. Every action is in the audit. It isn't in
+`nickname-override <player>`; `lift <player> <penalty-id>`; `flag <id>` and `decide-flag <id> dismiss|confirm` for the
+fair-play flags (#155), which the server raises into the same queue each night from the last 30 days' race logs and
+which never penalize anyone; `audit [player]`. Every action is in the audit. It isn't in
 the container image: run it from a checkout, `swift run --package-path Packages/RegattaServer regatta-admin queue`.
 
 `regatta-loadclient` creates an instant race and sails every seat at once with `RaceClient` on a scripted helm,

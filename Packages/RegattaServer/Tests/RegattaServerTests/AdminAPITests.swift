@@ -283,4 +283,23 @@ enum AdminScenario {
                                                    ratings: RatingStore(database), accounts: PostgresAccountStore(database)))
         }
     }
+
+    /// The fair-play job over races closed in Postgres (#155): read back from their stored log, results and incidents.
+    @Test func theFairPlayJobReadsRacesFromPostgres() async throws {
+        try await EndpointDatabase.withMigratedSchema { database in
+            let world = AdminWorld(store: ModerationRecordStore(database), restrictions: PlayerRestrictionStore(database),
+                                   ratings: RatingStore(database), accounts: PostgresAccountStore(database))
+            try await world.signIn(["gull", "wren"])
+            let archive = PostgresRaceArchive(database)
+            for _ in 0..<5 {
+                let race = try RaceFixture.race(["T:gull", "T:wren"], calls: [.init(offender: 0, victim: 1)], rated: false)
+                try await archive.register(race.id, players: race.seating.humans)
+                try await archive.close(RaceFixture.record(race))
+            }
+            let raised = await FairPlayJob(store: world.store, archive: archive, now: { Date() + 1 }).runOnce()
+            #expect(raised.map(\.playerID) == ["T:gull"] && raised.first?.raceIDs.count == 5)
+            #expect(try await world.store.pendingFlags(limit: 10).map(\.id) == raised.map(\.id))
+            #expect(try await world.store.penalties(of: "T:gull").isEmpty)
+        }
+    }
 }

@@ -129,6 +129,9 @@ final class FaultyArchive: RaceArchive {
     func cancel(_ race: UUID) async throws { try await inner.cancel(race) }
     func cancelOrphans() async throws -> [UUID] { try await inner.cancelOrphans() }
     func seats(of race: UUID) async throws -> RaceSeating? { try await inner.seats(of: race) }
+    func closedRaces(endedFrom from: Date, to: Date) async throws -> [(id: UUID, endedAt: Date)] {
+        try await inner.closedRaces(endedFrom: from, to: to)
+    }
     func state(of race: UUID) async throws -> RaceState? { try await inner.state(of: race) }
     func lastRace(of playerID: String) async throws -> StoredRaceResult? { try await inner.lastRace(of: playerID) }
     func closedRace(_ race: UUID) async throws -> ClosedRaceRecord? { try await inner.closedRace(race) }

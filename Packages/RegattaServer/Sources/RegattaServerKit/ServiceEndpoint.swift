@@ -130,12 +130,14 @@ public struct ServiceEndpoint: Sendable {
     public let retention: RetentionJobs?
     /// Where closed races are kept (#148): the admin tool (#154) shows a race report's race from it.
     public let archive: (any RaceArchive)?
+    /// The nightly fair-play scan (#155): the server runs it while it listens.
+    public let fairPlay: FairPlayJob?
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
                 matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil, lobby: LobbyHub? = nil,
                 analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil, ratings: (any RatingBook)? = nil,
                 moderation: Moderation? = nil, deletion: OnlineDataDeletion? = nil, retention: RetentionJobs? = nil,
-                archive: (any RaceArchive)? = nil) {
+                archive: (any RaceArchive)? = nil, fairPlay: FairPlayJob? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
@@ -149,6 +151,7 @@ public struct ServiceEndpoint: Sendable {
         self.deletion = deletion
         self.retention = retention
         self.archive = archive
+        self.fairPlay = fairPlay
     }
 
     public var store: any AccountStore { sessions.store }

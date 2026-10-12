@@ -41,6 +41,15 @@ public protocol ModerationStore: Sendable {
     func record(_ action: StoredAdminAction) async throws -> StoredAdminAction
     /// The audit, newest first: every admin's, or those about `playerID`.
     func actions(about playerID: String?, limit: Int) async throws -> [StoredAdminAction]
+    /// Raises a fair-play flag (#155).
+    func raise(_ flag: StoredFlag) async throws -> StoredFlag
+    func flag(_ id: Int64) async throws -> StoredFlag?
+    /// The flags awaiting a decision, the first due first.
+    func pendingFlags(limit: Int) async throws -> [StoredFlag]
+    /// Every flag raised on `playerID`, decided or not, oldest first.
+    func flags(of playerID: String) async throws -> [StoredFlag]
+    /// Decides a pending flag; false when it was decided already, or there is none.
+    func decideFlag(_ id: Int64, _ decision: StoredReport.Decision, by actorID: String, at time: Date) async throws -> Bool
 }
 
 extension ModerationRecordStore: ModerationStore {}
@@ -51,6 +60,7 @@ public final class InMemoryModerationStore: ModerationStore {
         var reports: [StoredReport] = []
         var penalties: [StoredPenalty] = []
         var actions: [StoredAdminAction] = []
+        var flags: [StoredFlag] = []
         var nextID: Int64 = 1
     }
 
@@ -139,6 +149,7 @@ public final class InMemoryModerationStore: ModerationStore {
             let reports = state.reports.count
             state.reports.removeAll { $0.createdAt < cutoff && !decided.contains($0.id) }
             state.actions.removeAll { $0.at < cutoff }
+            state.flags.removeAll { $0.createdAt < cutoff }
             return (penalties - state.penalties.count, reports - state.reports.count)
         }
     }
@@ -158,6 +169,36 @@ public final class InMemoryModerationStore: ModerationStore {
         state.withLock { state in
             Array(state.actions.filter { playerID == nil || $0.playerID == playerID }
                 .sorted { ($0.at, $0.id) > ($1.at, $1.id) }.prefix(limit))
+        }
+    }
+
+    public func raise(_ flag: StoredFlag) async throws -> StoredFlag {
+        state.withLock { state in
+            var raised = flag
+            raised.id = state.nextID
+            state.nextID += 1
+            state.flags.append(raised)
+            return raised
+        }
+    }
+
+    public func flag(_ id: Int64) async throws -> StoredFlag? { state.withLock { $0.flags.first { $0.id == id } } }
+
+    public func pendingFlags(limit: Int) async throws -> [StoredFlag] {
+        state.withLock { state in
+            Array(state.flags.filter { $0.decision == nil }.sorted { ($0.dueAt, $0.id) < ($1.dueAt, $1.id) }.prefix(limit))
+        }
+    }
+
+    public func flags(of playerID: String) async throws -> [StoredFlag] { state.withLock { $0.flags.filter { $0.playerID == playerID } } }
+
+    public func decideFlag(_ id: Int64, _ decision: StoredReport.Decision, by actorID: String, at time: Date) async throws -> Bool {
+        state.withLock { state in
+            guard let index = state.flags.firstIndex(where: { $0.id == id }), state.flags[index].decision == nil else { return false }
+            state.flags[index].decision = decision
+            state.flags[index].decidedAt = time
+            state.flags[index].decidedBy = actorID
+            return true
         }
     }
 }
@@ -183,6 +224,7 @@ public enum ModerationError: Error, Equatable, Sendable {
     /// nickname override for a line.
     case decisionDoesntFit
     case unknownPenalty
+    case unknownFlag
 }
 
 /// A racing penalty (#26), always an admin's. The raw values are the admin tool's words for them (#154).
@@ -230,9 +272,19 @@ public enum ReviewDecision: Sendable, Equatable {
     public static let all: [ReviewDecision] = [.dismiss, .upholdChat, .overrideNickname] + RacingPenalty.allCases.map { .racing($0) }
 }
 
+/// What an admin decides about a fair-play flag (#155). Neither gives a penalty: a flag is only ever looked at, and a
+/// penalty is the admin's own action on the player.
+public enum FlagDecision: String, Sendable, Equatable, CaseIterable {
+    /// Nothing in it.
+    case dismiss
+    /// Looked at and worth it: kept as upheld, for the next flag's reviewer to see.
+    case confirm
+}
+
 /// What the admin audit records an admin did (#154).
 public enum AdminAction: String, Sendable, Equatable {
     case decideReport = "decide_report"
+    case decideFlag = "decide_flag"
     case penalize
     case mute
     case overrideNickname = "override_nickname"
@@ -473,6 +525,23 @@ public final class Moderation: LobbyModeration {
                             endsAt: time + settings.chatMutes[steps])
             : StoredPenalty(playerID: playerID, kind: .chatBan, actorID: actor.id, reportID: report, startsAt: time)
         return try await store.add(penalty)
+    }
+
+    // MARK: Fair-play flags
+
+    /// The fair-play flags awaiting a decision (#155), the first due first.
+    public func flagQueue(limit: Int = 100) async throws -> [StoredFlag] { try await store.pendingFlags(limit: limit) }
+
+    /// Decides a flag. It never gives a penalty, whatever the decision: that is the admin's own action.
+    @discardableResult
+    public func decideFlag(_ flagID: Int64, _ decision: FlagDecision, by actor: AdminActor) async throws -> StoredFlag {
+        let time = now()
+        guard let flag = try await store.flag(flagID) else { throw ModerationError.unknownFlag }
+        guard flag.decision == nil, try await store.decideFlag(flagID, decision == .dismiss ? .dismissed : .upheld, by: actor.id, at: time) else {
+            throw ModerationError.alreadyDecided
+        }
+        await audit(.decideFlag, by: actor, player: flag.playerID, detail: "\(decision.rawValue) flag \(flagID) (\(flag.kind.rawValue))", at: time)
+        return try await store.flag(flagID) ?? flag
     }
 
     // MARK: Penalties
