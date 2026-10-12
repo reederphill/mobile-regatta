@@ -28,6 +28,10 @@ enum ChromePalette {
     /// Decorative accent only (headers, the burgee motif, the icon), never a button: red reads destructive on iOS.
     // placeholder: docs/palette.md.
     static let flagRed = Color(uiColor: UIColor(rgb: 0xC8102E))
+    /// A short line that says something failed (#161): `flagRed` in light mode; in dark mode, where that is dim on a
+    /// navy sheet (2.3:1), a lighter red (5.3:1 or better on every dark menu colour).
+    // placeholder: docs/palette.md.
+    static let errorText = dynamic(light: 0xC8102E, dark: 0xFF7A7A)
     /// Decorative accent only, like `flagRed`.
     // placeholder: docs/palette.md.
     static let flagYellow = Color(uiColor: UIColor(rgb: 0xFFC72C))

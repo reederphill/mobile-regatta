@@ -95,6 +95,7 @@ Cue-to-cue hue separation: vermillion–orange 29°, orange–yellow 28°, chevr
 | `text` | `#0E2A47` | `#E8F1F8` | 12.0:1 / 14.6:1 |
 | `tint` (buttons, controls, `AccentColor`) | `#1B4F82` | `#7FB3E0` | on background 6.9:1 / 7.5:1; white on light tint 8.4:1 |
 | `flagRed` (decorative accent only) | `#C8102E` | `#C8102E` | 4.8:1 on light background |
+| `errorText` (a line that says something failed) | `#C8102E` | `#FF7A7A` | 4.8:1 on light background; 5.4:1 on the dark terms sheet's bar |
 | `flagYellow` (decorative accent only) | `#FFC72C` | `#FFC72C` | 10.7:1 on dark background |
 
 - Flag accents: headers, burgee motif, icon. Not buttons (red reads destructive on iOS).

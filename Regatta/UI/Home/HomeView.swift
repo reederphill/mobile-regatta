@@ -29,7 +29,7 @@ struct HomeView: View {
                         LastRaceRow(lastRace: lastRace) { model.sheet = .lastRace }
                     }
                     LobbyPanel(state: LobbyPanelState(isOnline: isOnline, status: lobbyStatus,
-                                                      serverUnreachable: onlineStatus?.serverUnreachable ?? false),
+                                                      retryLine: onlineStatus?.lobbyRetryLine),
                                onSignIn: online.signIn, onReviewTerms: { model.sheet = .terms })
                 }
                 .padding(.vertical, 20)
@@ -195,8 +195,9 @@ struct HomeOnlineActions {
 /// What the lobby area shows, from connectivity and the player's account (#25), by the gating matrix (#138).
 enum LobbyPanelState: Equatable {
     case offline
-    /// The server didn't answer her last tap (#161): Try again.
-    case unreachable
+    /// Game Center has her on the phone but there is no session (#161): the server didn't answer her last tap, or
+    /// wouldn't sign her in. The line under Race online, with Try again.
+    case tryAgain(RestrictionLine)
     case signIn
     case acceptTerms
     /// Hide lobby chat is on, or Game Center restricts the player's chat (#17, #34): the queue's size and the
@@ -204,13 +205,14 @@ enum LobbyPanelState: Equatable {
     case chatHidden(queuedPlayers: Int?)
     case lobby
 
-    /// `serverUnreachable`: Game Center has her on the phone, and the server didn't answer her last tap (#161).
-    init(isOnline: Bool, status: LobbyStatus, serverUnreachable: Bool = false) {
+    /// `retryLine`: Game Center has her on the phone, and the server didn't answer her last tap or refused the
+    /// sign-in (#161).
+    init(isOnline: Bool, status: LobbyStatus, retryLine: RestrictionLine? = nil) {
         let access = status.access(isOnline: isOnline)
         if !isOnline {
             self = .offline
         } else if !status.isSignedIn {
-            self = serverUnreachable ? .unreachable : .signIn
+            self = retryLine.map(LobbyPanelState.tryAgain) ?? .signIn
         } else if access.termsDue {
             self = .acceptTerms
         } else if status.hidesChat || !access.chatVisible {
@@ -244,9 +246,10 @@ private struct LobbyPanel: View {
         case .offline:
             heading("You're offline", systemImage: "wifi.slash")
             detail("Practice races work offline.")
-        case .unreachable:
-            // TODO-COPY (#171)
-            heading("Can't reach the server", systemImage: "icloud.slash")
+        case .tryAgain(let line):
+            // The words under Race online: neither line carries a date.
+            heading(line.text(now: .now),
+                    systemImage: line == .unreachable ? "icloud.slash" : "person.crop.circle.badge.exclamationmark")
             // Signing in again: with Game Center there already, that is the session alone.
             // TODO-COPY (#171)
             Button("Try again", action: onSignIn)

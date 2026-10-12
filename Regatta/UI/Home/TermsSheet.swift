@@ -66,7 +66,7 @@ struct TermsSheet: View {
                         // TODO-COPY (#171)
                         Text("Couldn't save. Try again.")
                             .font(MenuFont.body(.footnote))
-                            .foregroundStyle(ChromePalette.flagRed)
+                            .foregroundStyle(ChromePalette.errorText)
                             .accessibilityIdentifier("terms-save-failed")
                     }
                     Button(action: agree) {

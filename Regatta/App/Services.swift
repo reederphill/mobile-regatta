@@ -148,9 +148,9 @@ final class OnlineStatus {
         return queueLine
     }
 
-    /// The server didn't answer her last tap: the lobby area says so, with Try again, where it would ask her to sign
-    /// in to Game Center, which she is.
-    var serverUnreachable: Bool { restrictionLine == .unreachable }
+    /// The server didn't answer her last tap, or wouldn't sign her in: the lobby area says so, with Try again, where
+    /// it would ask her to sign in to Game Center, which she is.
+    var lobbyRetryLine: RestrictionLine? { restrictionLine.flatMap { $0.allowsTap ? $0 : nil } }
 
     /// Reads the player, her restrictions and the terms again: after signing in, say. Terms that can't be read
     /// are due (`LocalTermsService` already falls back to what the device last recorded).

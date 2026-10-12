@@ -78,14 +78,22 @@ final class OnlineRestrictionUITests: XCTestCase {
         XCTAssertFalse(app.buttons["terms-agree"].exists, "a tap with no session went on to the terms")
     }
 
-    /// A sign-in the server refuses: said under a Race online that still taps.
+    /// A sign-in the server refuses: said under a Race online that still taps, and in the lobby area with Try again.
     @MainActor func testASignInTheServerRefusesIsSaid() {
         let app = launch("session-failed")
         let raceOnline = app.buttons["race-online"]
         XCTAssertTrue(raceOnline.waitForExistence(timeout: 20), "no Race online")
         raceOnline.tap()
         wait(on: raceOnline, "isEnabled == true AND label CONTAINS %@", with: ["Couldn't sign in"], "no line after the sign-in was refused")
-        XCTAssertFalse(app.buttons["lobby-retry"].exists, "a refused sign-in reads as an unreachable server")
+        let retry = app.buttons["lobby-retry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10), "no Try again in the lobby area")
+        XCTAssertTrue(app.staticTexts["Couldn't sign in"].exists, "the lobby area doesn't say why")
+        XCTAssertFalse(app.buttons["lobby-sign-in"].exists, "the lobby area asks a signed-in player to sign in to Game Center")
+        retry.tap()
+        // Refused again: the line and Try again stand, and nothing goes on to the terms.
+        wait(on: raceOnline, "isEnabled == true AND label CONTAINS %@", with: ["Couldn't sign in"], "Try again lost the line")
+        XCTAssertTrue(retry.waitForExistence(timeout: 10), "Try again went away with the sign-in still refused")
+        XCTAssertFalse(app.buttons["terms-agree"].exists, "a tap with no session went on to the terms")
     }
 
     /// A tap that waits for the session: Race online can't be tapped again, and says nothing yet.

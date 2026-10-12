@@ -192,27 +192,28 @@ nonisolated final class StubLink: SessionLink {
     }
 
     /// The lobby's Try again is the tap again: an unreachable server shows there after a tap that failed, where the
-    /// area would ask her to sign in to Game Center, and the next tap that gets a session clears it.
+    /// area would ask her to sign in to Game Center, and the next tap that gets a session clears it. A sign-in the
+    /// server refused shows there the same way.
     @Test func theLobbysTryAgainOpensTheSession() async {
         let rig = await Rig(player: Self.wren)
         rig.service.state.withLock { $0.isReachable = false }
         func panel() -> LobbyPanelState {
-            LobbyPanelState(isOnline: true, status: rig.status.lobbyStatus, serverUnreachable: rig.status.serverUnreachable)
+            LobbyPanelState(isOnline: true, status: rig.status.lobbyStatus, retryLine: rig.status.lobbyRetryLine)
         }
         #expect(panel() == .signIn, "nothing up front")
 
         #expect(!(await rig.status.signIn(analytics: .discarding())))
-        #expect(rig.status.tapFailed && rig.status.serverUnreachable)
-        #expect(panel() == .unreachable)
+        #expect(rig.status.tapFailed && rig.status.lobbyRetryLine == .unreachable)
+        #expect(panel() == .tryAgain(.unreachable))
         #expect(!rig.status.isOpeningSession, "the spinner is the tap's wait alone")
         // Offline says offline, whatever the server did.
-        #expect(LobbyPanelState(isOnline: false, status: rig.status.lobbyStatus, serverUnreachable: true) == .offline)
+        #expect(LobbyPanelState(isOnline: false, status: rig.status.lobbyStatus, retryLine: .unreachable) == .offline)
 
         #expect(!(await rig.status.signIn(analytics: .discarding())), "Try again, the server still away")
-        #expect(panel() == .unreachable)
+        #expect(panel() == .tryAgain(.unreachable))
         rig.service.state.withLock { $0.isReachable = true }
         #expect(await rig.status.signIn(analytics: .discarding()))
-        #expect(!rig.status.tapFailed && !rig.status.serverUnreachable)
+        #expect(!rig.status.tapFailed && rig.status.lobbyRetryLine == nil)
         #expect(panel() == .acceptTerms)
     }
 
@@ -296,7 +297,7 @@ nonisolated final class StubLink: SessionLink {
             let availability = RaceOnlineAvailability(isOnline: true, lobbyStatus: status.lobbyStatus, line: status.restrictionLine)
             #expect(!availability.isEnabled, "\(scenario)")
             // The lobby area is as for any signed-in player: a suspension from racing is no chat mute.
-            #expect(LobbyPanelState(isOnline: true, status: status.lobbyStatus, serverUnreachable: status.serverUnreachable) == .lobby)
+            #expect(LobbyPanelState(isOnline: true, status: status.lobbyStatus, retryLine: status.lobbyRetryLine) == .lobby)
         }
         #expect(RestrictionLine.cooldown(until: now.addingTimeInterval(TimeInterval(FakeServiceScenario.cooldownSeconds))).text(now: now) == "Cooling off 4:12")
     }
@@ -318,7 +319,7 @@ nonisolated final class StubLink: SessionLink {
         await unreachable.deviceChanged(FakeSession.player)
         #expect(unreachable.restrictionLine == nil, "nothing up front")
         #expect(await unreachable.passGate(analytics: .discarding()) == .stopped)
-        #expect(unreachable.restrictionLine == .unreachable && unreachable.serverUnreachable)
+        #expect(unreachable.restrictionLine == .unreachable && unreachable.lobbyRetryLine == .unreachable)
         await unreachableSession.shutdown()
 
         let (failed, failedSession) = try status(.sessionFailed)
@@ -326,7 +327,9 @@ nonisolated final class StubLink: SessionLink {
         #expect(await failed.passGate(analytics: .discarding()) == .stopped)
         #expect(failed.sessionPhase == .refused(.invalidSignature))
         #expect(failed.restrictionLine == .couldNotSignIn)
-        #expect(!failed.serverUnreachable, "the lobby area keeps its Sign in")
+        #expect(failed.lobbyRetryLine == .couldNotSignIn)
+        #expect(LobbyPanelState(isOnline: true, status: failed.lobbyStatus, retryLine: failed.lobbyRetryLine) == .tryAgain(.couldNotSignIn),
+                "the lobby area's Try again, not a Sign in to Game Center")
         #expect(RaceOnlineAvailability(isOnline: true, lobbyStatus: failed.lobbyStatus, line: failed.restrictionLine).isEnabled)
         await failedSession.shutdown()
     }
