@@ -55,6 +55,10 @@ extension Trait where Self == SkiffPin {
     /// the rudder's drag is linear and there is a roll tack. A scene fitted to the tap's turn, or one whose bots don't
     /// yet sail it on skiff@8's hand tacks, names it ("until #455": that ticket un-pins it).
     static var onSkiffSeven: Self { SkiffPin(version: 7) }
+    /// skiff@8, the default class from #461 to #462: nothing but a slow boat or a high angle takes her off the plane,
+    /// and the bots sail it with the planing tactics of #263 (`downwindAim` without `planingAim`). A test of those
+    /// names it.
+    static var onSkiffEight: Self { SkiffPin(version: 8) }
 }
 
 /// The rudder a bot turns a penalty turn with, to `direction` (-1 port, 1 starboard), on the default class:

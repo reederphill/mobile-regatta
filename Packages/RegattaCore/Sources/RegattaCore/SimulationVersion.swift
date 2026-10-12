@@ -269,7 +269,9 @@ import Glibc
 ///    true wind her sails see. skiff@9 sails 0.6 and 0.675: 4.0 / 4.5 kn from 6.67 kn of wind up, 3.6 / 4.05 kn at 6 kn.
 ///    Races still sail skiff@8 by default; a race naming it or any older class sails as on 38, bit for bit, and the
 ///    golden digest is 38's.
-public let simulationRevision = 39
+/// 40: races sail skiff@9 by default (#462), on 39: every default race's boats can fall off the plane, players and
+///    bots. A race naming skiff@8 or older sails as on 39, bit for bit, and the golden digest is 39's.
+public let simulationRevision = 40
 
 /// The race server's platform: the pinned image in `scripts/linux-test.sh`
 /// (`swift:6.3.3-noble`, `linux/amd64`, glibc 2.39). Only results on this platform are

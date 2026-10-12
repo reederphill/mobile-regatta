@@ -43,7 +43,7 @@ public struct BotSuiteOptions: Hashable, Sendable {
                                  cautious, rivals, rankStability, handling (repeatable)
           --autohelm <on|off>    off: sail each race on a copy of its class with the autohelm off a centred
                                  rudder, so the bots steer by hand (default: the matrix's, the class as bundled)
-          --boat-class <id@v>    sail every race on that bundled class (e.g. skiff@9) instead of the default
+          --boat-class <id@v>    sail every race on that bundled class (e.g. skiff@8) instead of the default
           --laps <n>             laps per race instead of the matrix's
           --json <path|->        write the JSON report there (- for stdout)
           --diagnose             also print, and write under the JSON's "diagnose" key, why boats start late,

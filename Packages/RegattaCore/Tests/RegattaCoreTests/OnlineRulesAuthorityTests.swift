@@ -134,7 +134,7 @@ import Testing
 
         // Port meets starboard bow to bow below the line (`RaceAssemblyTests.predictionModeNeverEmitsRuleEvents`),
         // then both turn hard one way: the offender serves her turn; later the other way, giving a turn up. On
-        // skiff@7, which turns hard over in about 10 s: the default, skiff@8, stalls her with the rudder's cubed drag
+        // skiff@7, which turns hard over in about 10 s: the default (from skiff@8) stalls her with the rudder's cubed drag
         // and serves nothing inside these 900 ticks (#458).
         for rudder: Int8 in [127, -127] {
             let setup = try RaceAssemblyTests.setup(seats: [.human, .human], boatClass: SkiffFixtures.tapClass)

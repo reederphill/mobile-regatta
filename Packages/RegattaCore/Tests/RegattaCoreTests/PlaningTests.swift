@@ -241,9 +241,10 @@ enum SkiffNine {
         #expect(content == SkiffEight.boatClass)
     }
 
-    /// The default switch is a later change: races still sail skiff@8.
-    @Test func skiffEightIsStillTheDefault() throws {
-        #expect(RaceFiles.defaults.boatClass.ref == SkiffEight.file.ref)
+    /// Races sail it by default (simulation revision 40); skiff@8 stays bundled for the races naming it.
+    @Test func skiffNineIsTheDefault() throws {
+        #expect(RaceFiles.defaults.boatClass.ref == SkiffNine.file.ref)
+        #expect(BoatClassFile.bundledKeys().contains(SkiffEight.file.ref.key))
     }
 
     @Test func olderClassesLoadUnchanged() throws {

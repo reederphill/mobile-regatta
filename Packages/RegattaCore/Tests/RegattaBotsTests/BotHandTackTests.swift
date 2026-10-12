@@ -23,7 +23,7 @@ import Testing
         #expect(hex64(six) == "0x3c5c84c4afc4054b")
     }
 
-    /// And skiff@8, the default class, sails exactly as before #462's bots layer (every change there is behind "the
+    /// And skiff@8, the default class until #462's switch, sails exactly as before #462's bots layer (every change there is behind "the
     /// class has the new planing rule", skiff@9's `stayOnSpeedShare` and `apparentWind`): all-bot races through the
     /// start and the first beat, and through two laps with their runs, pinned on #462's core tip before any bot code
     /// changed (re-pinned there on fleet-rules@6, #490's default).

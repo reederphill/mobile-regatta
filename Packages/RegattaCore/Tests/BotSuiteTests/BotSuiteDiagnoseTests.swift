@@ -293,10 +293,10 @@ import Testing
         return (race.digest(), observer?.boats(of: race, tiers: tiers) ?? [])
     }
 
-    /// The observer only reads: a race on skiff@8 (the default class, turned by hand) and on skiff@7 (the tap and the
-    /// roll, whose bots stay bit-identical, `BotHandTackTests.skiffSevenBotsAreBitIdentical`) has the same digest
-    /// watched or not.
-    @Test(arguments: [7, 8]) func observingLeavesTheRaceBitIdentical(version: Int) throws {
+    /// The observer only reads: a race on skiff@9 (the default class, turned by hand, falling off the plane), on skiff@8
+    /// (the default before it) and on skiff@7 (the tap and the roll, whose bots stay bit-identical,
+    /// `BotHandTackTests.skiffSevenBotsAreBitIdentical`) has the same digest watched or not.
+    @Test(arguments: [7, 8, 9]) func observingLeavesTheRaceBitIdentical(version: Int) throws {
         let boatClass = try BoatClassFile.bundled(id: "skiff", version: version)
         let plain = try Self.digest(boatClass: boatClass, seed: 471, seconds: 150, observed: false)
         let watched = try Self.digest(boatClass: boatClass, seed: 471, seconds: 150, observed: true)
