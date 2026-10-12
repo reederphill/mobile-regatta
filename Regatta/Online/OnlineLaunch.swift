@@ -19,7 +19,7 @@ struct RaceServer: Equatable {
     /// Where a development build looks by default: the Mac the simulator runs on.
     static let defaultAddress = "127.0.0.1:8080"
     /// The menu's field, in user defaults.
-    static let addressDefaultsKey = "onlineHost"
+    nonisolated static let addressDefaultsKey = "onlineHost"
 
     var address: String
 

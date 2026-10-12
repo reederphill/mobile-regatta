@@ -21,7 +21,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         sceneState.phase = SceneState.phase(for: windowScene.activationState)
         guard let app = AppDelegate.current else { return }
         self.windowScene = windowScene
-        onlineStatus = OnlineStatus(services: app.services, isInitiallyOnline: OnlineStatus.isInitiallyOnline(.current))
+        onlineStatus = OnlineStatus(services: app.services, isInitiallyOnline: OnlineStatus.isInitiallyOnline(.current),
+                                    session: app.online)
         let launchOptions = LaunchOptions.current
         showWindow(launchOptions: launchOptions)
         if launchOptions.uiTesting {
@@ -53,11 +54,17 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         self.window = window
     }
 
-    func sceneDidBecomeActive(_ scene: UIScene) { sceneState.phase = .active }
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        sceneState.phase = .active
+        // The session's socket closes in the background and opens again here (#161).
+        onlineStatus?.setSceneActive(true)
+    }
+
     func sceneWillResignActive(_ scene: UIScene) { sceneState.phase = .inactive }
     func sceneWillEnterForeground(_ scene: UIScene) { sceneState.phase = .inactive }
     func sceneDidEnterBackground(_ scene: UIScene) {
         sceneState.phase = .background
+        onlineStatus?.setSceneActive(false)
         guard let analytics = AppDelegate.current?.analytics else { return }
         // A little background time to send what's waiting, after any flush already running; whatever doesn't go
         // waits for the next launch.

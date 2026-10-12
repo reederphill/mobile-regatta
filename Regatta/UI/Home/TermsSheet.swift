@@ -4,8 +4,20 @@ import SwiftUI
 /// The Terms of Use the app asks the player to accept (#34): placeholders until the real text and its lawyer pass
 /// (#171). A material change to the text bumps `version`, and the sheet asks again.
 nonisolated enum TermsOfUse {
-    /// The version the device's `LocalTermsService` asks for until the server says (#161).
-    static let version = TermsVersion(1)
+    /// The version of the text below. With no server, the device's `LocalTermsService` asks for it; with one, the
+    /// server says which version is current, and one newer than this asks for an update, not for an "I agree" to
+    /// text the player can't see (#161). `-termsVersion` stands in for a build with newer text (Debug).
+    static let version: TermsVersion = {
+        #if DEBUG
+        // Read from the arguments here (`LaunchOptions`, which checks them, is the main actor's).
+        let arguments = ProcessInfo.processInfo.arguments
+        if let flag = arguments.firstIndex(of: "-termsVersion"), arguments.indices.contains(flag + 1),
+           let version = Int(arguments[flag + 1]), version >= 1 {
+            return TermsVersion(version)
+        }
+        #endif
+        return TermsVersion(1)
+    }()
 
     static let lines = [
         // TODO-COPY (#171)
@@ -26,6 +38,8 @@ nonisolated enum TermsOfUse {
 struct TermsSheet: View {
     /// The version shown and accepted.
     let version: TermsVersion?
+    /// The last I agree couldn't be saved (#161): the sheet stays, with a short line.
+    var saveFailed = false
     var agree: () -> Void
     var close: () -> Void
 
@@ -48,6 +62,13 @@ struct TermsSheet: View {
             }
             .safeAreaInset(edge: .bottom) {
                 VStack(spacing: 10) {
+                    if saveFailed {
+                        // TODO-COPY (#171)
+                        Text("Couldn't save. Try again.")
+                            .font(MenuFont.body(.footnote))
+                            .foregroundStyle(ChromePalette.errorText)
+                            .accessibilityIdentifier("terms-save-failed")
+                    }
                     Button(action: agree) {
                         // The page's `menuBackground` text colour would otherwise reach the label: navy on the navy fill.
                         Text("I agree").font(MenuFont.heading(.headline)).foregroundStyle(ChromePalette.onTint)

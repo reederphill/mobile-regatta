@@ -14,6 +14,8 @@ struct RootView: View {
     @State private var showsOnlineStub = false
     /// The Terms of Use sheet came from Race online's gate for a player who can race: I agree goes on to the queue.
     @State private var racesAfterTerms = false
+    /// The terms' version the sheet opened with: what its I agree accepts (#161).
+    @State private var termsShown: TermsVersion?
     /// I agree took; what waits on the sheet runs once it's gone (`termsSheetDismissed`).
     @State private var agreedToTerms = false
     /// The `-onlineResults` harness's results stream (#133), while it shows.
@@ -137,14 +139,37 @@ struct RootView: View {
             if launchOptions.tuning { model.path = [.tuning] }
             #endif
         }
+        #if DEBUG
+        if !launchOptions.taps.isEmpty { Task { await play(launchOptions.taps) } }
+        #endif
     }
+
+    #if DEBUG
+    /// `-tap`: Home's controls tapped at launch, for a local screenshot of a state only a tap reaches (#161). I agree
+    /// waits for the sheet Race online's gate puts up, and gives up if none comes.
+    private func play(_ taps: [LaunchOptions.LaunchTap]) async {
+        for tap in taps {
+            // Home is up, and the launch's own reads (the player, the terms, the session's first try) are in.
+            try? await Task.sleep(for: .seconds(1))
+            switch tap {
+            case .raceOnline: raceOnline()
+            case .termsAgree:
+                let sheetUp = ContinuousClock.now + .seconds(5)
+                while model.sheet != .terms, ContinuousClock.now < sheetUp { try? await Task.sleep(for: .milliseconds(100)) }
+                if model.sheet == .terms { agreeToTerms() }
+            }
+        }
+    }
+    #endif
 
     /// Home's Race online, the one way in (#138): Game Center's sign-in when signed out, then the Terms of Use sheet
     /// when due, then the queue. The e2e launches (`-online`, `-onlineHost`) skip the gate.
     private func raceOnline() {
         model.analytics.log(.practiceToOnline(.raceOnlineTapped))
         #if DEBUG
-        if model.launchOptions.online || model.launchOptions.onlineHost != nil { return startOnlineRace() }
+        // A dev identity (#161) goes through the gate like a player.
+        let skipsGate = model.launchOptions.online || (model.launchOptions.onlineHost != nil && model.launchOptions.devIdentity == nil)
+        if skipsGate { return startOnlineRace() }
         #endif
         guard let onlineStatus else { return enterQueue() }
         Task {
@@ -169,6 +194,7 @@ struct RootView: View {
     private func showTerms(thenRace: Bool) {
         racesAfterTerms = thenRace
         agreedToTerms = false
+        termsShown = onlineStatus?.lobbyStatus.termsVersion
         model.sheet = .terms
     }
 
@@ -177,7 +203,11 @@ struct RootView: View {
     private func agreeToTerms() {
         guard let onlineStatus else { return model.sheet = nil }
         Task {
-            guard await onlineStatus.acceptTerms(analytics: model.analytics) else { return }
+            // The version the sheet showed, not whatever is current by the tap (#161).
+            guard await onlineStatus.acceptTerms(termsShown, analytics: model.analytics) else {
+                termsShown = onlineStatus.lobbyStatus.termsVersion
+                return
+            }
             agreedToTerms = true
             model.sheet = nil
         }
@@ -189,6 +219,7 @@ struct RootView: View {
         let races = agreedToTerms && racesAfterTerms
         agreedToTerms = false
         racesAfterTerms = false
+        onlineStatus?.termsSheetClosed()
         if races { enterQueue() }
     }
 

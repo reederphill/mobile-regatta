@@ -121,7 +121,8 @@ import RegattaServices
         #expect(unknown.fakeServices == nil)
         #expect(unknown.problems == ["-fakeServices haunted: expected "
             + "signed-out, underage, communication-restricted, multiplayer-restricted, offline, queued, cancelled-race, "
-            + "online-results, online-results-unrated, terms-bump"])
+            + "online-results, online-results-unrated, terms-bump, suspended, suspended-permanent, cooldown, cannot-race, "
+            + "update-required, terms-save-failed, session-failed, unreachable, connecting"])
         let missing = parse("-fakeServices", "-autostart")
         #expect(missing.fakeServices == nil && missing.autostart)
         #expect(missing.problems == ["-fakeServices needs a value"])
@@ -186,6 +187,33 @@ import RegattaServices
         #expect(options.fixture == nil)
         #expect(options.autostart)
         #expect(options.problems == ["-seed needs a value", "-fixture needs a value"])
+    }
+
+    /// The dev identity (#161): the player's number, her restrictions and the bundled terms' version, Debug only.
+    @Test func parsesTheDevIdentity() {
+        let options = parse("-onlineHost", "127.0.0.1:50123", "-devIdentity", "7", "-devRestrictions", "underage,multiplayer", "-termsVersion", "2")
+        #expect(options.devIdentity == 7)
+        #expect(options.devRestrictions == [.underage, .multiplayer])
+        #expect(options.termsVersion == 2)
+        #expect(options.problems.isEmpty)
+        #expect(DevIdentity.player(7, restrictions: options.devRestrictions).teamPlayerID == "T:dev-7")
+        #expect(DevIdentity.player(7, restrictions: options.devRestrictions).player.gamePlayerID.rawValue == "G:dev-7")
+        #expect(!DevIdentity.player(7, restrictions: options.devRestrictions).player.canRaceOnline)
+
+        let bad = parse("-devIdentity", "-1", "-devRestrictions", "underage,tall", "-termsVersion", "0")
+        #expect(bad.devIdentity == nil && bad.devRestrictions.isEmpty && bad.termsVersion == nil)
+        #expect(bad.problems.count == 3)
+    }
+
+    /// `-tap` (#161): Home's controls tapped at launch for a local screenshot, in order; a name it doesn't know drops
+    /// the lot.
+    @Test func parsesTheLaunchTaps() {
+        #expect(parse().taps.isEmpty)
+        #expect(parse("-fakeServices", "unreachable", "-tap", "race-online").taps == [.raceOnline])
+        #expect(parse("-tap", "race-online,terms-agree").taps == [.raceOnline, .termsAgree])
+        let bad = parse("-tap", "race-online,practice")
+        #expect(bad.taps.isEmpty)
+        #expect(bad.problems == ["-tap race-online,practice: expected race-online or terms-agree, separated by commas"])
     }
 
     /// The online dev race (#68): the flag, the server and the race-length overrides; not a practice race.

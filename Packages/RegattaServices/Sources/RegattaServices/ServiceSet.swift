@@ -73,6 +73,42 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
     case onlineResultsUnrated = "online-results-unrated"
     /// Signed in, having accepted the terms' version 1 when version 2 is current: the sheet asks again (#34, #138).
     case termsBump = "terms-bump"
+    /// Signed in, suspended from online racing until a day (#26): Race online says until when (#161).
+    case suspended
+    /// Suspended for good.
+    case suspendedPermanent = "suspended-permanent"
+    /// Signed in, in the briefing-leave cooldown (#26): Race online counts it down (#161).
+    case cooldown
+    /// Signed in, refused the queue for a reason she isn't told (a failed attestation, #147).
+    case cannotRace = "cannot-race"
+    /// Signed in on a build the server no longer takes.
+    case updateRequired = "update-required"
+    /// Signed out, and signing in gives a player whose I agree can't be saved (#161).
+    case termsSaveFailed = "terms-save-failed"
+    /// Game Center has a player on the phone but the server won't sign her in (#161). These fakes are signed out and
+    /// stay so; the app plays the session over them, as for `unreachable` and `connecting`.
+    case sessionFailed = "session-failed"
+    /// Game Center has a player on the phone but the server doesn't answer (#161).
+    case unreachable
+    /// Game Center has a player on the phone and the server is taking its time to answer (#161).
+    case connecting
+
+    /// When the `suspended` scenario's suspension ends, in seconds since the epoch: noon UTC on 14 October 2037.
+    public static let suspendedUntil: Int64 = 2_139_134_400
+    /// The `cooldown` scenario's seconds to go when its queue state is first read.
+    public static let cooldownSeconds = 252
+
+    /// Whether the scenario's player is signed in from the start.
+    public var startsSignedIn: Bool {
+        switch self {
+        case .signedOut, .termsSaveFailed, .sessionFailed, .unreachable, .connecting: false
+        default: true
+        }
+    }
+
+    /// Whether the app plays an online session over the scenario's fakes (#161): the session's own states, which no
+    /// service says.
+    public var playsSession: Bool { self == .sessionFailed || self == .unreachable || self == .connecting }
 
     /// How far apart the online results scenarios' updates come.
     public static let onlineResultsPacing = Duration.milliseconds(1500)
@@ -144,19 +180,28 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
             case .multiplayerRestricted: player.isMultiplayerGamingRestricted = true
             default: break
             }
-            let signedIn = scenario != .signedOut
+            let signedIn = scenario.startsSignedIn
 
             let identity = ScriptedIdentityService(signedIn
                 ? IdentityScenario(initial: .signedIn(player))
-                : IdentityScenario(initial: .signedOut, afterSignIn: .signedIn(player)))
+                : IdentityScenario(initial: .signedOut, afterSignIn: scenario.playsSession ? .signedOut : .signedIn(player)))
             let terms = ScriptedTermsService(scenario == .termsBump
                 ? TermsScenario(current: TermsVersion(Self.terms.rawValue + 1), accepted: Self.terms)
-                : TermsScenario(current: Self.terms, accepted: signedIn ? Self.terms : nil))
+                : TermsScenario(current: Self.terms, accepted: signedIn ? Self.terms : nil, saves: scenario != .termsSaveFailed))
 
             let queue: ScriptedQueueService
             let raceSession: ScriptedRaceSessionService
             switch scenario {
-            case .signedOut: queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.notSignedIn)))
+            case .signedOut, .termsSaveFailed, .sessionFailed, .unreachable, .connecting:
+                queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.notSignedIn)))
+            case .suspended:
+                queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.suspended(until: FakeServiceScenario.suspendedUntil))))
+            case .suspendedPermanent: queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.suspended(until: nil))))
+            case .cooldown:
+                queue = ScriptedQueueService(QueueScenario(
+                    initial: .unavailable(.cooldown(secondsRemaining: FakeServiceScenario.cooldownSeconds))))
+            case .cannotRace: queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.attestationFailed)))
+            case .updateRequired: queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.updateRequired)))
             case .multiplayerRestricted: queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.multiplayerRestricted)))
             case .queued:
                 queue = ScriptedQueueService(QueueScenario(

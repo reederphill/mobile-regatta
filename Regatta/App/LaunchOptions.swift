@@ -46,10 +46,18 @@ import RegattaServices
 ///   `RenderQualityPolicy`); every build draws at 60 without it. Debug builds only: other builds don't know it.
 /// - `-briefing practice|online` opens on the briefing (#130) for the launch race (`RaceConfig.launch()`, and `-seed`), with
 ///   no server: `practice` waits for Ready, `online` counts down 15 s (at `-timescale`) and advances itself.
+/// - `-devIdentity <n>` (Debug builds, with `-onlineHost`) signs in to the dev server as the dev player `n` in place
+///   of Game Center, with `-devRestrictions underage,communication,multiplayer` as her restrictions; `-termsVersion
+///   <n>` is the bundled Terms of Use text's version (#161).
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued`,
-///   `cancelled-race`, `online-results`, `online-results-unrated` or `terms-bump` (`FakeServiceScenario`). Debug builds only (#314): other builds don't know it, so a release
-///   build always runs on the real services.
+///   `cancelled-race`, `online-results`, `online-results-unrated`, `terms-bump`, and #161's `suspended`,
+///   `suspended-permanent`, `cooldown`, `cannot-race`, `update-required`, `terms-save-failed`, `session-failed`,
+///   `unreachable` or `connecting` (`FakeServiceScenario`). Debug builds only (#314): other builds don't know it, so a
+///   release build always runs on the real services.
+/// - `-tap race-online[,terms-agree]` (Debug builds) taps Home's Race online at launch, then the Terms of Use sheet's
+///   I agree once it is up: for a local screenshot of a state only a tap reaches (#161: the spinner, an unreachable
+///   server, a save that failed), where `simctl` can't tap.
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
@@ -82,6 +90,14 @@ struct LaunchOptions: Equatable {
     enum Briefing: String, CaseIterable {
         case practice, online
     }
+
+    #if DEBUG
+    /// `-tap`'s controls (#161).
+    enum LaunchTap: String, CaseIterable {
+        case raceOnline = "race-online"
+        case termsAgree = "terms-agree"
+    }
+    #endif
 
     /// `-thermal`'s states (#127).
     enum Thermal: String, CaseIterable {
@@ -142,6 +158,14 @@ struct LaunchOptions: Equatable {
     var fps120 = false
     /// `-beatMetres`: honoured only with `-uitesting` (`AppModel`).
     var beatMetres: Double?
+    /// `-devIdentity <n>`: signed in as the dev player `n` against a dev server, in place of Game Center (#161).
+    var devIdentity: Int?
+    /// `-devRestrictions underage,communication,multiplayer`: the dev player's Game Center restrictions.
+    var devRestrictions: Set<DevIdentity.Restriction> = []
+    /// `-termsVersion <n>`: the version of the bundled Terms of Use text, for the end-to-end run's terms bump.
+    var termsVersion: Int?
+    /// `-tap`: Home's controls tapped at launch, in order.
+    var taps: [LaunchTap] = []
     #endif
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
@@ -170,7 +194,7 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
-            case "-fakeServices", "-referenceRace", "-beatMetres":
+            case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-tap":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             #endif
@@ -201,7 +225,8 @@ struct LaunchOptions: Equatable {
                           "-thermal", "-cuesOnly",
                           "-onlineResults"]
         #if DEBUG
-        flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace", "-beatMetres"])
+        flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
+                         "-termsVersion", "-tap"])
         #endif
         return flags
     }()
@@ -277,6 +302,24 @@ struct LaunchOptions: Equatable {
         #if DEBUG
         case "-beatMetres":
             if let n = Double(value), Self.beatMetresRange.contains(n) { beatMetres = n } else { reject(argument, value, "a number of metres, 120…360") }
+        case "-devIdentity":
+            if let n = Int(value), n >= 0 { devIdentity = n } else { reject(argument, value, "a whole number ≥ 0") }
+        case "-devRestrictions":
+            let named = value.split(separator: ",").map { DevIdentity.Restriction(rawValue: String($0)) }
+            if !named.isEmpty, !named.contains(nil) {
+                devRestrictions = Set(named.compactMap { $0 })
+            } else {
+                reject(argument, value, "underage, communication or multiplayer, separated by commas")
+            }
+        case "-tap":
+            let named = value.split(separator: ",").map { LaunchTap(rawValue: String($0)) }
+            if !named.isEmpty, !named.contains(nil) {
+                taps = named.compactMap { $0 }
+            } else {
+                reject(argument, value, "race-online or terms-agree, separated by commas")
+            }
+        case "-termsVersion":
+            if let n = Int(value), n >= 1 { termsVersion = n } else { reject(argument, value, "a whole number ≥ 1") }
         #endif
         case "-fakeServices":
             if let scenario = FakeServiceScenario(rawValue: value) {

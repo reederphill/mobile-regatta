@@ -12,6 +12,7 @@
 		AA0000000000000000000033 /* RegattaClient in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000036 /* RegattaClient */; };
 		AA0000000000000000000034 /* RegattaProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000037 /* RegattaProtocol */; };
 		AA000000000000000000003B /* RegattaServices in Frameworks */ = {isa = PBXBuildFile; productRef = AA000000000000000000003A /* RegattaServices */; };
+		AA0000000000000000000042 /* RegattaServiceClient in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000041 /* RegattaServiceClient */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -89,6 +90,7 @@
 				AA0000000000000000000033 /* RegattaClient in Frameworks */,
 				AA0000000000000000000034 /* RegattaProtocol in Frameworks */,
 				AA000000000000000000003B /* RegattaServices in Frameworks */,
+				AA0000000000000000000042 /* RegattaServiceClient in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -155,6 +157,7 @@
 				AA0000000000000000000036 /* RegattaClient */,
 				AA0000000000000000000037 /* RegattaProtocol */,
 				AA000000000000000000003A /* RegattaServices */,
+				AA0000000000000000000041 /* RegattaServiceClient */,
 			);
 			productName = Regatta;
 			productReference = AA0000000000000000000004 /* Regatta.app */;
@@ -619,6 +622,10 @@
 		AA000000000000000000003A /* RegattaServices */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = RegattaServices;
+		};
+		AA0000000000000000000041 /* RegattaServiceClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = RegattaServiceClient;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
