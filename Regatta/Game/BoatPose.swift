@@ -269,8 +269,9 @@ nonisolated struct BoatStyle: Codable, Equatable, Sendable {
     /// What the plane margin counts as comfortable (`BoatClass.PlaningTuning.MarginRanges`): the share of her polar
     /// speed at which the speed edge reads full (from the class's stay-on share, where it reads nothing), the knots of
     /// apparent wind over the class's floor at which the wind edge does, and the degrees of apparent wind angle
-    /// forward of the class's limit over which the speed edge comes in.
-    var planeMarginFullSpeedShare = 1.0
+    /// forward of the class's limit over which the speed edge comes in. The first is under 1, so the corner wakes are
+    /// full length in ordinary planing: a breezy run is sailed at 0.8 to 0.9 of the polar.
+    var planeMarginFullSpeedShare = 0.85
     var planeMarginApparentKnots = 3.0
     var planeMarginAngleBandDegrees = 15.0
     /// Your speed tile turns yellow on the plane (`PlaningTile`): the yellow's alpha over the tile's face, and the

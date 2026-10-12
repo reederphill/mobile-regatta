@@ -111,7 +111,8 @@ extension BoatClass.PlaningTuning {
     /// (#492). Drawing's, not the rule's: nothing here is in a class file, and the sim never reads it.
     public struct MarginRanges: Sendable, Equatable {
         /// The share of the polar's (on-plane) speed at her angle and wind at which the speed edge reads 1; it reads 0
-        /// at the class's `stayOnSpeedShare`.
+        /// at the class's `stayOnSpeedShare`. Under 1: a fleet on a breezy run sails 0.8 to 0.9 of its polar, and that
+        /// is ordinary planing, not the edge.
         public var fullSpeedShare: Double
         /// The apparent wind over the class's floor (`ApparentWind.offSpeed(tws:)`), m/s, at which the wind edge reads
         /// 1; it reads 0 at the floor.
@@ -120,7 +121,7 @@ extension BoatClass.PlaningTuning {
         /// far forward or more, all of it from `onMaxAWA` aft.
         public var angleBand: Double
 
-        public init(fullSpeedShare: Double = 1, apparentRange: Double = metresPerSecond(knots: 3),
+        public init(fullSpeedShare: Double = 0.85, apparentRange: Double = metresPerSecond(knots: 3),
                     angleBand: Double = deg2rad(15)) {
             self.fullSpeedShare = fullSpeedShare
             self.apparentRange = apparentRange

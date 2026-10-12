@@ -646,16 +646,19 @@ enum SkiffNine {
     }
 
     /// The speed edge, with the apparent wind aft of the beam (170° in 18 kn, where she is slower than the wind behind her even at the polar's speed): 0 at the class's
-    /// stay-on share of the polar and below, 1 at the polar's speed and above, straight between, so never falling as
-    /// she speeds up; and a narrower range reads 1 sooner.
+    /// stay-on share of the polar and below, 1 at 0.85 of the polar's speed and above, straight between, so never
+    /// falling as she speeds up; and a narrower range reads 1 sooner, a wider one later.
     @Test func speedEdgeRunsFromTheStayOnShareToThePolar() {
         let full = polarKnots(twa: 170, tws: 18)
         #expect(apparentDegrees(twa: 170, knots: 1.2 * full, tws: 18) > 90 && apparentDegrees(twa: 170, knots: 0.5 * full, tws: 18) > 90)
         #expect(margin(speedOnly, twa: 170, knots: 0.7 * full, tws: 18) < 1e-9)
         #expect(margin(speedOnly, twa: 170, knots: 0.6 * full, tws: 18) == 0)
-        #expect(abs(margin(speedOnly, twa: 170, knots: 0.85 * full, tws: 18) - 0.5) < 1e-9)
-        #expect(abs(margin(speedOnly, twa: 170, knots: 0.775 * full, tws: 18) - 0.25) < 1e-9)
-        #expect(margin(speedOnly, twa: 170, knots: full, tws: 18) > 1 - 1e-9 && margin(speedOnly, twa: 170, knots: 1.2 * full, tws: 18) == 1)
+        #expect(Rule.MarginRanges.standard.fullSpeedShare == 0.85)
+        #expect(abs(margin(speedOnly, twa: 170, knots: 0.775 * full, tws: 18) - 0.5) < 1e-9)
+        #expect(abs(margin(speedOnly, twa: 170, knots: 0.7375 * full, tws: 18) - 0.25) < 1e-9)
+        #expect(margin(speedOnly, twa: 170, knots: 0.85 * full, tws: 18) > 1 - 1e-9 && margin(speedOnly, twa: 170, knots: 1.2 * full, tws: 18) == 1)
+        let wide = Rule.MarginRanges(fullSpeedShare: 1)
+        #expect(abs(margin(speedOnly, twa: 170, knots: 0.85 * full, tws: 18, ranges: wide) - 0.5) < 1e-9)
         var last = 0.0
         for share in stride(from: 0.5, through: 1.2, by: 0.01) {
             let next = margin(speedOnly, twa: 170, knots: share * full, tws: 18)
