@@ -179,6 +179,7 @@ jobs:
               - "Regatta/Online*"
               - "Regatta/Online*/**"
               - "RegattaUITests/OnlineRaceUITests.swift"
+              - "RegattaUITests/OnlineAccountUITests.swift"
             # What shapes the race view in the window (G5): the iPad's letterbox test runs only for these.
             viewport:
               - *ci
@@ -518,14 +519,19 @@ jobs:
       E2E_DESTINATION: platform=iOS Simulator,name=iPhone 17,OS=26.5
     steps:
       - uses: actions/checkout@v4
-      - name: scripts/e2e.sh (a dev instant race with bots, raced to its close)
+      # The server's accounts live in Postgres (#161); macOS runners have no Docker, so Homebrew's.
+      - name: Install Postgres
+        run: brew list postgresql@17 > /dev/null 2>&1 || HOMEBREW_NO_AUTO_UPDATE=1 brew install postgresql@17
+      - name: scripts/e2e.sh (a dev instant race raced to its close; the online account, and a terms bump)
         run: |
           scripts/e2e.sh -retry-tests-on-failure -test-iterations 2 \
             -derivedDataPath DerivedData -resultBundlePath E2E.xcresult
-      - name: Upload the result bundle
+      - name: Upload the result bundles
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: E2E.xcresult
-          path: E2E.xcresult
+          path: |
+            E2E.xcresult
+            E2E-terms-bump.xcresult
           if-no-files-found: ignore
