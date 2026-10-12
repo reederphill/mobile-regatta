@@ -84,6 +84,7 @@ Each parked ticket is labelled `needs:human`, unassigned, and has the question a
 | #263 | Tack cost with drag 0.25 missed at 6 kn (0.49 L); shadow over its cap; later the tier gap, pin third, a takeover seed and the funPass tactician. | **You (2026-09-29):** option (a): speed-up 2.5 s, shadow ≈ 0.5 (landed 0.48). Then: fix regressions, defer close misses (#300). Then: publish as-is; merge (2026-09-30), the tactician's funPass share joins #174. |
 | wrap-up | **You (2026-09-27):** wrap up, don't pick up more work. | Finished #101 through merge; #102 (briefed, rulings ready) unassigned; nothing else started. |
 | #232 | Should the Debug-only tuning panel ship in internal TestFlight builds (needs an "Internal" build configuration; ADR 0004 said "debug and internal TestFlight")? | **You (2026-09-27):** Debug-only for now; ADR 0004 amended to say Debug builds. Revisit after #49 (Apple Developer Program). |
+| #486–#490 | One PR for the penalty-turn rework, or split by layer with the default switched last (orchestration.md), one ticket per session (AGENTS.md)? | Owner override 2026-10-11: one PR ([#499](https://github.com/reederphill/mobile-regatta/pull/499)), the layers kept as five ordered commits (#487 core, #486, #488, #489 HUD, #490 default), one sim revision (38) for @6 and @6-by-default. Built in a Linux cloud container (Swift 6.3.3, no Xcode): app code first compiled in CI; bot `--diagnose` before/after run locally. Club DSQs and @6 pre-gun OCS left for #494. |
 
 ## Completed
 
