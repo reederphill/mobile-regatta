@@ -96,8 +96,7 @@ import RegattaCore
         let sliders = model.groups.flatMap(\.sliders)
         // The pressure field's sliders name numbers only in schema-3 to -5 conditions (`pressureFieldIsTunable`).
         // The roll tack's sliders name numbers only in a class with a roll tack (`rollTackIsTunableOnAnOlderClass`).
-        // The planing rule's stay-on sliders name numbers only from skiff@9 on (`planingRuleIsTunableOnSkiffNine`).
-        for slider in sliders where !Self.isPressureField(slider) && !Self.isRollTack(slider) && !Self.isPlaningStayOn(slider) {
+        for slider in sliders where !Self.isPressureField(slider) && !Self.isRollTack(slider) {
             let file = model.fileValue(slider)
             #expect(file != nil, "\(slider.id) names nothing in its file")
             if let file { #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider") }
@@ -110,14 +109,14 @@ import RegattaCore
         #expect(Set(sliders.map(\.id)).count == sliders.count)
     }
 
-    /// #461: the default class, skiff@8, has no roll tack (#458), so the Roll tack group's sliders are "not in this
-    /// file" on it; on skiff@7, still bundled and pickable, each names its number.
+    /// #461: the default class has no roll tack (from skiff@8, #458), so the Roll tack group's sliders are "not in
+    /// this file" on it; on skiff@7, still bundled and pickable, each names its number.
     @Test func rollTackIsTunableOnAnOlderClass() throws {
         let (model, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
         let rolls = model.groups.flatMap(\.sliders).filter(Self.isRollTack)
         #expect(rolls.count == 3)
-        #expect(rolls.allSatisfy { model.fileValue($0) == nil }, "skiff@8 has no roll tack")
+        #expect(rolls.allSatisfy { model.fileValue($0) == nil }, "the default class has no roll tack")
         model.setBase(.boatClass, DataFileKey(id: "skiff", version: 7))
         for slider in rolls {
             let file = try #require(model.fileValue(slider), "\(slider.id) names nothing in skiff@7")
@@ -127,19 +126,23 @@ import RegattaCore
 
     private static func isRollTack(_ slider: TuningSlider) -> Bool { slider.id.hasPrefix("boatClass:/rollTack/") }
 
-    /// #462: the planing rule's stay-on speed share and apparent wind have sliders, "not in this file" on the default
-    /// class, skiff@8; on skiff@9 each names its number, and the three older planing values name theirs on both.
+    /// #462: the planing rule's stay-on speed share and apparent wind have sliders: on the default class, skiff@9,
+    /// each names its number; on skiff@8, still bundled and pickable, they are "not in this file", and the three older
+    /// planing values name theirs on both.
     @Test func planingRuleIsTunableOnSkiffNine() throws {
         let (model, root) = model()
         defer { try? FileManager.default.removeItem(at: root) }
         let planing = try #require(model.groups.first { $0.id == "planing" }).sliders
         let stayOn = planing.filter(Self.isPlaningStayOn)
         #expect(planing.count == 9 && stayOn.count == 6)
-        #expect(stayOn.allSatisfy { model.fileValue($0) == nil }, "skiff@8 has neither value")
-        model.setBase(.boatClass, DataFileKey(id: "skiff", version: 9))
         for slider in planing {
             let file = try #require(model.fileValue(slider), "\(slider.id) names nothing in skiff@9")
             #expect(slider.range.contains(file), "\(slider.id)'s file value \(file) is off its slider")
+        }
+        model.setBase(.boatClass, DataFileKey(id: "skiff", version: 8))
+        #expect(stayOn.allSatisfy { model.fileValue($0) == nil }, "skiff@8 has neither value")
+        for slider in planing where !Self.isPlaningStayOn(slider) {
+            #expect(model.fileValue(slider) != nil, "\(slider.id) names nothing in skiff@8")
         }
     }
 
@@ -420,7 +423,7 @@ import RegattaCore
     }
 
     /// #436: the Steering group, first, holds the Auto tiller, a 0/1 slider on the class's
-    /// `steering.autohelm.holdsWhenCentred` (#434). The default class (skiff@8, #461; skiff@7 before it, #437) sets it false, so it reads 0
+    /// `steering.autohelm.holdsWhenCentred` (#434). The default class (skiff@9, #462; skiff@7 and skiff@8 before it, #437, #461) sets it false, so it reads 0
     /// (off); 1 sails a tuned copy from the next race whose autohelm holds a centred rudder, every boat's, and exports as
     /// a schema-4 next version; back to 0 is untuned again.
     @Test func autoTillerSliderTargetsClassValue() throws {

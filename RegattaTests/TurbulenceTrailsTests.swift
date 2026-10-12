@@ -16,7 +16,7 @@ import Testing
     /// the app's own path, `TickFrame(race:)`) carry, tick by tick, the wake and backwind levels and sides that the race
     /// replayed from its log holds at the same tick. Through the tack her stripes fade on the side they were cast on
     /// past her boom crossing before building on the new one, and the layer draws a strip for every run that shows.
-    /// On skiff@7, whose autohelm sails the tap that tacks her here (the default, skiff@8, has none, #458).
+    /// On skiff@7, whose autohelm sails the tap that tacks her here (the default, skiff@9, has none, from skiff@8, #458).
     @Test func sceneAndSimAgreeOverATack() throws {
         var config = RaceConfig(opponents: 1, prestartSeconds: 30, seed: 377, windSeed: RaceConfig.windSeed(pinnedTo: 377))
         config.files.boatClass = try BoatClassFile.bundled(id: "skiff", version: 7).ref
