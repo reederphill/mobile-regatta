@@ -402,7 +402,7 @@ import Testing
     /// Drawn (`BoatEffects.cornerTrail`): a planing boat trails two lines from her stern corners, half a beam either
     /// side of her wake, shorter, thinner and fainter than it; a boat off the plane, a ghost, and a class that never
     /// planes trail none. On skiff@9 they are as long as her plane margin: full on a fast reach, shorter run deep with
-    /// little apparent wind, their shortest at the edge. The default class has no margin to read: full while she planes.
+    /// little apparent wind, their shortest at the edge. A class before it has no margin to read: full while she planes.
     @Test func planingBoatTrailsHerSternCornerWakes() throws {
         let style = BoatStyle.standard
         let ppm: CGFloat = 8
@@ -459,10 +459,52 @@ import Testing
         let short = drawn(reach, quality: .short)
         #expect(!short.cornerTrail.isHidden)
         #expect(abs(Self.reach(short.cornerTrail) / Self.reach(full.cornerTrail) - CGFloat(style.wakeShortShare)) < 0.1)
-        // The default class has no margin to read (before skiff@9): full while she planes, none off the plane.
-        #expect(Self.boatClass.planing?.stayOnSpeedShare == nil, "the default class has the rule: read its margin here")
-        #expect(drawn(deep, boatClass: Self.boatClass).corners?.share == 1)
-        #expect(drawn(boat(twa: 160, knots: 7, tws: 14, planing: false), boatClass: Self.boatClass).cornerTrail.isHidden)
+        // The default class is skiff@9's rule: her margin is read in every default race.
+        #expect(Self.boatClass.planing?.stayOnSpeedShare != nil && Self.boatClass.planing?.apparentWind != nil)
+        #expect(drawn(deep, boatClass: Self.boatClass).corners?.share == shorter.corners?.share)
+        // A class before it (skiff@8) has no margin to read: full while she planes, none off the plane.
+        let skiffEight = try BoatClassFile.bundled(id: "skiff", version: 8).content
+        #expect(skiffEight.planing != nil && skiffEight.planing?.stayOnSpeedShare == nil)
+        #expect(drawn(deep, boatClass: skiffEight).corners?.share == 1)
+        #expect(drawn(boat(twa: 160, knots: 7, tws: 14, planing: false), boatClass: skiffEight).cornerTrail.isHidden)
+        // The plane the race seats her on (`TickFrame.isJustSeated`) draws none, frozen or sailing.
+        let seated = BoatEffects(seat: 1, boatClass: Self.skiffNine, pointsPerMeter: ppm, style: style)
+        let pose = BoatPose(reach, ease: false, isGhost: false, boatClass: Self.skiffNine)
+        seated.update(with: reach, pose: pose, style: style, quality: .full, time: 100, dt: 0, settled: true, justSeated: true)
+        #expect(seated.cornerTrail.isHidden && seated.corners?.share == 0 && !seated.trail.isHidden)
+    }
+
+    /// The seated fleet (#492): for the seconds the frame calls her just seated a boat with the flag on trails no
+    /// corner wakes at all, while her wake takes its planing look as before (#462: the flag's); once the seating is
+    /// behind her and she is still on the plane they come in, eased as getting on the plane is, with no step.
+    @Test func seatedBoatTrailsNoCornerWakesUntilTheSeatingIsBehindHer() throws {
+        let style = BoatStyle.standard
+        let boatClass = Self.skiffNine
+        let dt = 1.0 / 60
+        let effects = BoatEffects(seat: 1, boatClass: boatClass, pointsPerMeter: 8, style: style)
+        var boat = Self.boat(speed: metresPerSecond(knots: 11), planing: true)
+        boat.heading = deg2rad(95)
+        boat.sailingWind = Wind(direction: 0, speed: metresPerSecond(knots: 11))
+        #expect(PlaneMargin.of(boat, boatClass: boatClass, style: style) == 1)
+        let most = 1 - exp(-dt * style.cornerWakeEaseRate) + 1e-12
+        var time = 0.0, last = 0.0
+        while time < PlaningCue.seatedSeconds + 4 {
+            time += dt
+            boat.position = boat.position + boat.forward * (boat.speed * dt)
+            let justSeated = time < PlaningCue.seatedSeconds
+            let pose = BoatPose(boat, ease: false, isGhost: false, boatClass: boatClass)
+            effects.update(with: boat, pose: pose, style: style, quality: .full, time: time, dt: dt, settled: false,
+                           justSeated: justSeated)
+            let share = try #require(effects.corners).share
+            if justSeated {
+                #expect(share == 0 && effects.cornerTrail.isHidden, "\(time) s: \(share)")
+            } else {
+                #expect(share >= last && share - last <= most, "\(time) s: \(last) to \(share)")
+            }
+            last = share
+        }
+        #expect(try #require(effects.planing).level == 1, "her wake's planing look is the flag's")
+        #expect(last > 0.99 && !effects.cornerTrail.isHidden)
     }
 
     /// A boat bears away on the plane until she falls off it, on skiff@9 through `BoatEffects`: her corner wakes

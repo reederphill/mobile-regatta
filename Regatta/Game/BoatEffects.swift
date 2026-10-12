@@ -45,8 +45,11 @@ final class BoatEffects {
     private(set) var shape: WakeShape?
     /// How far on the plane her wake is drawn, settling and lifting over `BoatStyle.wakePlaningSeconds` (#462).
     private(set) var planing: PlaningEase?
-    /// How much of her stern-corner wakes is drawn, following her plane margin (#492).
+    /// How much of her stern-corner wakes is drawn, following her plane margin (#492), and how far on the plane the
+    /// planing cue draws her: `planing`'s twin over the plane the cue counts (`PlaningCue`), the same but while the
+    /// fleet has only just been seated.
     private(set) var corners: CornerWakes?
+    private var cuePlaning: PlaningEase?
     /// Where her stern has been, world points, oldest first, each with the race time it was there and her starboard
     /// hand then (a unit vector in scene space: the corner wakes start out along it).
     private var history: [TrackSample] = []
@@ -91,8 +94,9 @@ final class BoatEffects {
     /// Draws `boat`'s effects in `pose` at race time `time`. `settled` draws the wake straight at its target, with no easing (a frozen render fixture). `backwindSail`, 0...1, her backwind level, scales her
     /// backwind's alpha and `backwindSide` (nil: her windward side now) is the side it lies on (#377,
     /// `RenderWorld.backwind(ofSeat:)`): a fading zone keeps the side it was cast on past her boom crossing.
+    /// `justSeated` (`TickFrame.isJustSeated`) draws no stern-corner wakes for the plane the race seated her on (#492).
     func update(with boat: Boat, pose: BoatPose, style: BoatStyle, quality: WakeQuality, time: Double, dt: Double,
-                settled: Bool, backwindSail: Double = 1, backwindSide: Tack? = nil) {
+                settled: Bool, backwindSail: Double = 1, backwindSide: Tack? = nil, justSeated: Bool = false) {
         // Her backwind trails her: it turns after her heading and her apparent wind, not with them, as the air she
         // disturbed does (`BoatStyle.shadowFollowSeconds`). Drawn only; core's backwind is cast at once.
         let followed = follow(heading: boat.heading, wind: boat.apparentWind.direction, dt: dt,
@@ -141,10 +145,14 @@ final class BoatEffects {
         trail.alpha = CGFloat(shape.alpha) * (pose.isGhost ? CGFloat(style.ghostAlpha) : 1)
         trail.isHidden = history.isEmpty || trail.alpha < 0.005
 
-        // Her stern-corner wakes (#492): as long as her plane margin, coming and going with her wake's planing look. A
-        // ghost draws hers in, as she does her wake.
-        let margin = PlaneMargin.of(boat, boatClass: boatClass, style: style)
-        let planes = boat.isPlaning && !pose.isGhost, level = pose.isGhost ? 0 : planing.level
+        // Her stern-corner wakes (#492): as long as her plane margin, coming and going as her wake's planing look
+        // does, over the plane the cue counts. A ghost draws hers in, as she does her wake.
+        let planes = PlaningCue.shows(boat, justSeated: justSeated) && !pose.isGhost
+        let margin = planes ? PlaneMargin.of(boat, boatClass: boatClass, style: style) : 0
+        var cuePlaning = (settled ? nil : cuePlaning) ?? PlaningEase(isPlaning: planes)
+        cuePlaning.advance(isPlaning: planes, dt: dt, seconds: style.wakePlaningSeconds)
+        self.cuePlaning = cuePlaning
+        let level = pose.isGhost ? 0 : cuePlaning.level
         var corners = (settled ? nil : corners) ?? CornerWakes(margin: margin, isPlaning: planes, level: level, style: style)
         corners.advance(margin: margin, isPlaning: planes, level: level, dt: dt, style: style)
         self.corners = corners

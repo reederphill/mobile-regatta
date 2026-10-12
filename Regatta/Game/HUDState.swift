@@ -38,7 +38,8 @@ struct HUDState {
     /// The same, display-smoothed by the session (`InstrumentSmoother`): what the bottom row shows. The raw reading
     /// until the session smooths it.
     var shownInstruments = InstrumentReading()
-    /// Your boat is on the plane (#492): VoiceOver's word on the speed instrument.
+    /// Your boat is on the plane (#492), as the planing cue counts it (not while the fleet has only just been seated,
+    /// `TickFrame.isJustSeated`): VoiceOver's word on the speed instrument.
     var isPlaning = false
     /// How yellow the speed tile is, 0...1: her planing, eased by the session (`PlaningTile`), times the style's
     /// strength. All or nothing, as she is, until the session eases it.
@@ -76,8 +77,8 @@ struct HUDState {
         windDirection = p.windOverGround.direction
         instruments = InstrumentReading(boat: p)
         shownInstruments = instruments
-        isPlaning = p.isPlaning
-        planingYellow = p.isPlaning ? 1 : 0
+        isPlaning = PlaningCue.shows(p, justSeated: frame.isJustSeated)
+        planingYellow = isPlaning ? 1 : 0
         isGhost = world.isGhost(ofSeat: me)
         fleet = frame.boats.count
         place = frame.place(of: me)

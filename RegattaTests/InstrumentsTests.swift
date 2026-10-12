@@ -301,6 +301,51 @@ import RegattaCore
         // The yellow is the planing token, at the style's strength: clear of the penalty arc's amber by the hue rule.
         #expect(OKLCH.hueDistance(CuePalette.planingYellow.oklch.h, CuePalette.orange.oklch.h) >= 20)
         #expect(BoatStyle.standard.planingTileAlpha == 0.85 && BoatStyle.standard.planingTileSeconds == 0.4)
+        #expect(BoatStyle.standard.planeMarginFullSpeedShare == 0.85, "full length in ordinary planing (owner, 2026-10-12)")
+    }
+
+    /// #492: the plane the race seats the fleet on is not the cue's. `Race.init` rows every boat up reaching at speed,
+    /// so the rule has them planing from the first tick; for `PlaningCue.seatedSeconds` from the seating the frame
+    /// says so (`TickFrame.isJustSeated`) and your tile stays as it was, VoiceOver's word with it. After that a boat
+    /// still on the plane shows it. The race's own flags are untouched: the frames carry them as the race has them.
+    @Test func seatedFleetShowsNoPlane() throws {
+        let driver = PracticeDriver(config: RaceDriverTests.config)
+        let me = driver.myBoatIndex
+        func hud(_ frame: TickFrame) -> HUDState {
+            HUDState(world: RenderWorld(course: driver.course, boatClass: driver.boatClass, myBoatIndex: me,
+                                        previous: frame, current: frame, alpha: 1))
+        }
+        let seated = driver.currentFrame
+        #expect(seated.seatedTick == seated.tick && seated.tick == -60 * Race.tickRate && seated.isJustSeated)
+        var flagged = 0, frames = [seated]
+        while frames.count <= Int(PlaningCue.seatedSeconds * Double(Race.tickRate)) + 30 {
+            frames += driver.tick(1.0 / Double(Race.tickRate))
+        }
+        for frame in frames.dropFirst() {
+            let since = Double(frame.tick - seated.tick) / Double(Race.tickRate)
+            #expect(frame.seatedTick == seated.tick && frame.isJustSeated == (since < PlaningCue.seatedSeconds), "\(since) s")
+            #expect(frame.extrapolatedBackOneTick().seatedTick == seated.tick)
+            if frame.isJustSeated {
+                flagged += frame.boats.count { $0.isPlaning }
+                #expect(!hud(frame).isPlaning && hud(frame).planingYellow == 0, "\(since) s after the seating")
+                #expect(!HUDModel(hud(frame)).speedAccessibilityValue.contains("planing"))
+            } else {
+                #expect(hud(frame).isPlaning == frame.boats[me].isPlaning)
+            }
+        }
+        #expect(flagged > 0, "the seated fleet no longer carries the flag: the cue has nothing to leave out")
+        // A boat's flag a second in, and the same boat once the seating is behind her.
+        var boats = seated.boats
+        boats[me].isPlaning = true
+        for (ticks, shows) in [(0, false), (30, false), (89, false), (90, true), (600, true)] {
+            let frame = TickFrame(tick: seated.tick + ticks, boats: boats, standings: seated.standings, wind: seated.wind,
+                                  isOver: false, seatedTick: seated.tick)
+            #expect(hud(frame).isPlaning == shows && frame.isJustSeated == !shows, "\(ticks) ticks")
+        }
+        // A frame that is no race's (the help legend's) is never just seated.
+        #expect(!TickFrame(tick: seated.tick, boats: boats, standings: seated.standings, wind: seated.wind, isOver: false).isJustSeated)
+        #expect(PlaningCue.shows(boats[me], justSeated: false) && !PlaningCue.shows(boats[me], justSeated: true))
+        #expect(!PlaningCue.shows(seated.boats[me], justSeated: false))
     }
 
     /// #460: the Tack/Gybe button, the roll ring and their plumbing are gone from the app, tests and UI tests. The

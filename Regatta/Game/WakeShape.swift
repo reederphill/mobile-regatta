@@ -107,17 +107,36 @@ nonisolated struct PlaningEase: Equatable, Sendable {
     }
 }
 
+/// What the planing cue (#492: the yellow speed tile, the stern-corner wakes) counts as a boat on the plane: the sim's
+/// flag, but for the plane the race seats her on. `Race.init` puts every boat on the start row reaching at speed, so
+/// the rule has her planing from her first tick until she has headed up for the line: a plane nobody sailed onto,
+/// which the cue leaves out for `seatedSeconds` from the seating (`TickFrame.isJustSeated`). A boat still reaching
+/// on the plane after that shows it, eased in as any other. The cue's alone: the race, and her wake's planing look
+/// (#462), read the flag.
+nonisolated enum PlaningCue {
+    /// How long after the fleet is seated the cue shows no plane, race seconds: a fleet heads up off the row within
+    /// about 2.5 s.
+    static let seatedSeconds = 3.0
+
+    static func shows(_ boat: Boat, justSeated: Bool) -> Bool { boat.isPlaning && !justSeated }
+}
+
 /// A boat's plane margin as it is drawn (#492): the sim's rule read by `BoatClass.PlaningTuning.planeMargin` from what
 /// the rule itself reads (`BoatDynamics.advance`: her wind angle, her speed and the wind her polar sees), over the
-/// style's ranges. 0 off the plane, and for a class that never planes.
+/// style's ranges. 0 off the plane, and for a class that never planes. Of her flag: `PlaningCue.shows` is the
+/// caller's to ask.
 nonisolated enum PlaneMargin {
     static func of(_ boat: Boat, boatClass: BoatClass, style: BoatStyle) -> Double {
         guard let planing = boatClass.planing else { return 0 }
-        let ranges = BoatClass.PlaningTuning.MarginRanges(fullSpeedShare: style.planeMarginFullSpeedShare,
-                                                         apparentRange: metresPerSecond(knots: max(style.planeMarginApparentKnots, 0)),
-                                                         angleBand: deg2rad(max(style.planeMarginAngleBandDegrees, 0)))
         return planing.planeMargin(isPlaning: boat.isPlaning, twa: boat.twa, speed: boat.speed,
-                                   tws: boat.polarWindSpeed(in: boatClass), polar: boatClass.polar, ranges: ranges)
+                                   tws: boat.polarWindSpeed(in: boatClass), polar: boatClass.polar, ranges: ranges(style))
+    }
+
+    /// The style's ranges: its defaults are core's standard ones.
+    static func ranges(_ style: BoatStyle) -> BoatClass.PlaningTuning.MarginRanges {
+        BoatClass.PlaningTuning.MarginRanges(fullSpeedShare: style.planeMarginFullSpeedShare,
+                                             apparentRange: metresPerSecond(knots: max(style.planeMarginApparentKnots, 0)),
+                                             angleBand: deg2rad(max(style.planeMarginAngleBandDegrees, 0)))
     }
 }
 
@@ -126,10 +145,11 @@ nonisolated enum PlaneMargin {
 /// nothing here reaches the race (ADR 0002).
 ///
 /// On the plane they are never shorter than `BoatStyle.cornerWakeMinShare` of their longest, so the last stretch
-/// before a fall still reads; they come and go with her wake's planing look (`PlaningEase.level`), not with the flag,
-/// and follow her margin at `BoatStyle.cornerWakeEaseRate`, so no frame moves them more than `1 - exp(-dt * rate)`.
-/// Off the plane the margin she last had on it is kept, so a fall draws them in from where they were and a boat held
-/// on the edge of the plane, her flag flickering, trails them steady.
+/// before a fall still reads; they come and go as her wake's planing look does (a `PlaningEase.level`, of the plane
+/// the cue counts), not with the flag, so a fall draws them in over about a second; and they follow her margin at
+/// `BoatStyle.cornerWakeEaseRate`, so no frame moves them more than `1 - exp(-dt * rate)`. Off the plane the margin
+/// she last had on it is kept, so a fall draws them in from where they were and a boat held on the edge of the plane,
+/// her flag flickering, trails them steady.
 nonisolated struct CornerWakes: Equatable, Sendable {
     /// The share of their longest drawn, 0...1.
     private(set) var share: Double
