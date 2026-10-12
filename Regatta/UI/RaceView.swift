@@ -23,6 +23,9 @@ struct RaceView: View {
     /// The queue's chip (#140), while queued over a practice race: top-centre in the race rect, with the HUD, the
     /// pause button and the TUNED badge moved down under it only while it shows.
     var queueChip: QueueChip? = nil
+    /// An online race's menu, leave confirm and connection line (#141), from the race sequence; nil in practice and in
+    /// the Debug dev race.
+    var online: OnlineRaceChrome? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Sending the app to the background pauses a practice race (#25), read from the scene (`SceneState`).
     @Environment(\.sceneState) private var sceneState
@@ -199,6 +202,20 @@ struct RaceView: View {
                 )
             }
 
+            if let online, online.isMenuOpen, !session.playerDone {
+                PauseMenu(style: .online, settings: deviceSettings, onResume: online.closeMenu, onRestart: nil,
+                          onLeave: online.askToLeave, onHelp: openHelp, onTuning: nil)
+            }
+
+            if let online, online.isReconnecting {
+                VStack {
+                    ReconnectingLine()
+                        .padding(.top, HUDView.noticeTop(showsLeaderboard: session.controls.showsLeaderboard) + topInset)
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+            }
+
             // About 3 s after your finish horn the results slide up over the race, which keeps running and drawing
             // above them (#24, #132).
             // Only the sheet animates: the HUD and controls under it don't pick up its transaction.
@@ -208,6 +225,10 @@ struct RaceView: View {
                 }
             }
             .animation(.easeOut(duration: 0.35), value: session.showsResults)
+
+            if let online, online.isConfirmingLeave {
+                LeaveConfirm(isBeforeGun: online.isBeforeGun, leave: online.leave, stay: online.stay)
+            }
 
             // Over the pause menu and the results too: its x leaves the queue from any of them.
             chipRow
@@ -268,17 +289,23 @@ struct RaceView: View {
     private var controls: some View {
         VStack {
             HStack {
-                if session.driver.isPausable {
+                if session.driver.isPausable || online != nil {
                     Button {
-                        session.setPaused(true)
+                        if let online {
+                            // The race runs on under its menu: the controls are let go, the rudder centred.
+                            session.releaseControls()
+                            online.openMenu()
+                        } else {
+                            session.setPaused(true)
+                        }
                     } label: {
-                        Image(systemName: "pause.fill")
+                        Image(systemName: online == nil ? "pause.fill" : "line.3.horizontal")
                             .font(.headline)
                             .frame(width: 40, height: 40)
                             .background(.ultraThinMaterial, in: .circle)
                     }
                     .foregroundStyle(.white)
-                    .accessibilityLabel("Pause")
+                    .accessibilityLabel(online == nil ? "Pause" : "Race menu") // TODO-COPY (#171)
                     .accessibilityIdentifier("race-pause")
                 }
                 Spacer()

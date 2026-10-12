@@ -45,7 +45,7 @@ import Testing
         }
         await queued.queue.reader?.value
         #expect(counts == [6, 9, 11, nil])
-        #expect(queued.queue.bar == nil && queued.queue.takeover == nil)
+        #expect(queued.queue.bar == nil && queued.race.phase == .idle)
     }
 
     /// Race online: enabled online; "Offline" offline; "Practice races only" when Game Center restricts

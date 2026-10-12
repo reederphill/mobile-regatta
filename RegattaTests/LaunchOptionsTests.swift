@@ -122,7 +122,8 @@ import RegattaServices
         #expect(unknown.problems == ["-fakeServices haunted: expected "
             + "signed-out, underage, communication-restricted, multiplayer-restricted, offline, queued, cancelled-race, "
             + "online-results, online-results-unrated, terms-bump, suspended, suspended-permanent, cooldown, cannot-race, "
-            + "update-required, terms-save-failed, session-failed, unreachable, connecting, joinable, joinable-alone, joinable-hold"])
+            + "update-required, terms-save-failed, session-failed, unreachable, connecting, joinable, joinable-alone, joinable-hold, "
+            + "rejoinable, race-gone"])
         let missing = parse("-fakeServices", "-autostart")
         #expect(missing.fakeServices == nil && missing.autostart)
         #expect(missing.problems == ["-fakeServices needs a value"])
@@ -215,7 +216,9 @@ import RegattaServices
         let bad = parse("-tap", "race-online,practice")
         #expect(bad.taps.isEmpty)
         #expect(bad.problems == ["-tap race-online,practice: expected race-online, terms-agree, settings, practice-setup, "
-            + "start-practice, ready, takeover, briefing-leave, home, connection-lost, connection-regained, separated by commas"])
+            + "start-practice, ready, takeover, briefing-leave, home, connection-lost, connection-regained, race, gun, done, "
+            + "race-menu, race-leave, confirm-leave, race-home, race-again, rejoin, leaderboard, last-race, race-ended, "
+            + "separated by commas"])
     }
 
     /// The online dev race (#68): the flag, the server and the race-length overrides; not a practice race.

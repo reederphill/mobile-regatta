@@ -16,8 +16,16 @@ import UIKit
 final class GameSession {
     let driver: any RaceDriver
     let scene: GameScene
-    /// Names and bot marks, kept outside the simulation (#60).
-    let roster: FleetRoster
+    /// Names and bot marks, kept outside the simulation (#60). Online it is the server's roster as it stands (#141):
+    /// a seat a leaver handed to a bot changes its name and takes the bot glyph, with no line, toast or sound.
+    var roster: FleetRoster { rosterSource.current() }
+    @ObservationIgnored private let rosterSource: RosterSource
+
+    /// Where the roster is read from: the race's own, or the online driver's live one.
+    private final class RosterSource {
+        var current: () -> FleetRoster
+        init(_ roster: FleetRoster) { current = { roster } }
+    }
     /// The colour-vision filter `RaceView` draws the race through: scene, HUD and letterbox under one matrix
     /// (#22, #111). `-vision`'s in Debug builds, or a render fixture's. Never the scene's own `SKScene.filter`:
     /// SpriteKit filters a scene over its frame, which a scaled or moved camera doesn't follow, so the view's
@@ -153,6 +161,7 @@ final class GameSession {
                      rulesSeen: RuleSeenStore = RuleSeenStore(), hints: HintEngine? = nil) {
         self.init(driver: driver, roster: driver.roster, haptics: haptics, sound: sound, controls: controls,
                   rulesSeen: rulesSeen, hints: hints)
+        rosterSource.current = { [unowned driver] in driver.roster }
     }
 
     /// A render fixture (#62): `log` replayed to the fixture's freeze tick and frozen there, drawn from
@@ -208,13 +217,14 @@ final class GameSession {
          rulesSeen: RuleSeenStore = RuleSeenStore(), hints: HintEngine? = nil) {
         self.driver = driver
         self.hints = hints
-        self.roster = roster
+        let rosterSource = RosterSource(roster)
+        self.rosterSource = rosterSource
         self.haptics = haptics
         self.sound = RaceSound(output: sound)
         self.controls = controls
         let me = driver.myBoatIndex
         presenter = RaceEventPresenter(me: me, seen: rulesSeen, penaltyTurn: driver.currentFrame.penalty?.turn ?? .fullCircle) {
-            roster.label(of: $0, playerSeat: me)
+            rosterSource.current().label(of: $0, playerSeat: me)
         }
         // `-vision` (Debug); a fixture sets its own after this.
         vision = LaunchOptions.current.raceVision
@@ -344,14 +354,16 @@ final class GameSession {
     private func refreshHUD(samplesPressure: Bool) {
         let world = driver.renderWorld
         let roster = roster
-        var hud = HUDState(world: world) { roster[$0].isBot }
+        // Online the live leaderboard names the fleet (#141, owner question 2); a practice board stays nameless.
+        let me = driver.myBoatIndex
+        let name: ((Int) -> String)? = driver is OnlineDriver ? { roster.label(of: $0, playerSeat: me) } : nil
+        var hud = HUDState(world: world, isBot: { roster[$0].isBot }, name: name)
         hud.shownInstruments = instrumentSmoother.step(hud.instruments, at: hud.clock)
         hud.pressureImage = samplesPressure ? minimapField.refresh(world) : minimapField.image
         self.hud = hud
         if !driver.isFrozen {
             // The ambience follows what the HUD shows: the ground wind before shadow, your speed, your eased sail.
             // It fades once you're done.
-            let me = driver.myBoatIndex
             let input = AmbienceInput(windKnots: hud.windKnots, boatKnots: knots(metresPerSecond: myBoat.speed),
                                       isEasing: world.ease(ofSeat: me))
             sound.stepAmbience(playerDone ? nil : input, at: now())

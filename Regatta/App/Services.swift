@@ -69,22 +69,35 @@ final class OnlineStatus {
     private(set) var termsPrompt = TermsPrompt.none
     /// The queue, from the Race online tap to fleet lock (#140): the one reader of the queue's state stream.
     let queue: QueueController
+    /// The online race from the briefing's end to Home again (#141).
+    let race: OnlineRaceController
     private let session: Session?
     private let now: () -> Date
 
     /// `isOnline` starts at `isInitiallyOnline` until the connectivity service says: optimistic for the device's
     /// path, so Race online doesn't flash "Offline", and `isInitiallyOnline(_:)` for a launch's fakes, so the
     /// offline scenario isn't online for its first frame (#314).
-    init(services: ServiceSet, isInitiallyOnline: Bool = true, session: Session? = nil, now: @escaping () -> Date = Date.init) {
+    init(services: ServiceSet, isInitiallyOnline: Bool = true, session: Session? = nil, raceTimescale: Double = 1,
+         now: @escaping () -> Date = Date.init) {
         self.services = services
         self.session = session
         self.now = now
         isOnline = isInitiallyOnline
-        queue = QueueController(queue: services.queue, raceSession: services.raceSession, isOnline: isInitiallyOnline, now: now)
+        // Until a window attaches its app model's link: a race nobody answers.
+        let race = OnlineRaceController(raceSession: services.raceSession, makeLink: { handOff in
+            OnlineRaceLink(handOff: handOff, connector: { _ in UnansweredRaceConnection() }, results: nil) { connect, token in
+                OnlineLaunch(connect: connect, token: token)
+            }
+        }, isOnline: isInitiallyOnline, timescale: raceTimescale, now: now)
+        self.race = race
+        queue = QueueController(queue: services.queue, raceSession: services.raceSession, sequence: race,
+                                isOnline: isInitiallyOnline, now: now)
+        race.queue = queue
         Task { [weak self] in
             for await status in services.connectivity.statusUpdates() {
                 self?.isOnline = status.isOnline
                 self?.queue.connectionChanged(isOnline: status.isOnline)
+                self?.race.connectionChanged(isOnline: status.isOnline)
                 // Offline the session tries nothing; back online it connects at once (#161).
                 await session?.session.setOnline(status.isOnline)
             }
@@ -143,6 +156,7 @@ final class OnlineStatus {
     /// follows (#161).
     func setSceneActive(_ active: Bool) {
         queue.sceneChanged(isBackground: !active)
+        race.sceneChanged(isBackground: !active)
         guard let session else { return }
         Task { await session.session.setActive(active) }
     }

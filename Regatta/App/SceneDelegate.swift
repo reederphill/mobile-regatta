@@ -22,7 +22,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let app = AppDelegate.current else { return }
         self.windowScene = windowScene
         onlineStatus = OnlineStatus(services: app.services, isInitiallyOnline: OnlineStatus.isInitiallyOnline(.current),
-                                    session: app.online)
+                                    session: app.online,
+                                    raceTimescale: LaunchOptions.current.fakeServices == nil ? 1 : LaunchOptions.current.timescale)
         let launchOptions = LaunchOptions.current
         showWindow(launchOptions: launchOptions)
         if launchOptions.uiTesting {
@@ -133,6 +134,13 @@ final class RootHostingController: UIHostingController<AppRoot> {
         let onlineStatus = onlineStatus ?? OnlineStatus(services: .fake(.signedOut))
         // Fleet lock takes this window's app over (#140).
         onlineStatus.queue.attach(host: model, haptics: model.haptics)
+        // The race it locks into sails over this app's race link (#141).
+        let connector = AppDelegate.current?.raceConnector ?? { _ in UnansweredRaceConnection() }
+        let raceSession = onlineStatus.services.raceSession
+        onlineStatus.race.attach(host: model)
+        onlineStatus.race.makeLink = { [model] handOff in
+            model.onlineRaceLink(handOff, connector: connector, service: raceSession)
+        }
         super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize,
                                      maximumFramesPerSecond: maximumFramesPerSecond, onlineStatus: onlineStatus))
         isOrientationLocked = sceneState.isRaceSequenceShowing

@@ -114,6 +114,22 @@ struct LaunchOptions: Equatable {
         case home
         case connectionLost = "connection-lost"
         case connectionRegained = "connection-regained"
+        /// The online race sequence (#141): waits for the water, the gun and her results; the race menu, Leave race
+        /// and its confirm, the results' Home and Race again, Home's Rejoin race, the live leaderboard open, and the
+        /// Last race sheet.
+        case race
+        case gun
+        case done
+        case raceMenu = "race-menu"
+        case raceLeave = "race-leave"
+        case confirmLeave = "confirm-leave"
+        case raceHome = "race-home"
+        case raceAgain = "race-again"
+        case rejoin
+        case leaderboard
+        case lastRace = "last-race"
+        /// The fake race closes with the queue's stream lagging: Rejoin race is still up, and finds no race.
+        case raceEnded = "race-ended"
     }
     #endif
 

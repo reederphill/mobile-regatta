@@ -14,6 +14,8 @@ struct HomeView: View {
     @Environment(\.onlineStatus) private var onlineStatus
     /// The queue (#140): its bar stands in for Race online while you wait.
     private var queue: QueueController? { onlineStatus?.queue }
+    /// The online race sequence (#141): its Rejoin race stands in for Race online while a race she dropped out of runs.
+    private var sequence: OnlineRaceController? { onlineStatus?.race }
 
     var body: some View {
         NavigationStack(path: $model.path) {
@@ -23,7 +25,11 @@ struct HomeView: View {
                         NoticeRow(notice: notice)
                     }
                     // Queued, the bar above is Race online's place: no second control, and Practice moves up.
-                    if queue?.entry != .queued { raceOnline }
+                    if let entry = sequence?.rejoinEntry {
+                        rejoin(entry)
+                    } else if queue?.entry != .queued {
+                        raceOnline
+                    }
                     practice
                     #if DEBUG
                     tuning
@@ -72,6 +78,30 @@ struct HomeView: View {
                 MenuSheetView(sheet: sheet)
             }
         }
+    }
+
+    /// Rejoin race, with the race clock counted on each second (#141): straight back to the water.
+    private func rejoin(_ entry: OnlineRaceController.RejoinEntry) -> some View {
+        Button {
+            Task { await sequence?.rejoin() }
+        } label: {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                VStack(spacing: 2) {
+                    // TODO-COPY (#171)
+                    Text("Rejoin race").font(MenuFont.heading(.title2))
+                    Text(entry.clock(at: context.date)).font(MenuFont.body(.subheadline)).monospacedDigit()
+                }
+                .foregroundStyle(ChromePalette.onTint)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(entry.spoken(at: context.date))
+                .accessibilityValue(entry.clock(at: context.date))
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .accessibilityIdentifier("race-rejoin")
     }
 
     private var raceOnline: some View {
@@ -338,6 +368,16 @@ private struct LastRaceRow: View {
                 // TODO-COPY (#171)
                 Text("Last race").font(MenuFont.heading(.headline))
                 Spacer()
+                if let badge = lastRace.ratingBadge {
+                    // The rating change only (#141): nothing for an unrated or a pending race.
+                    Text(badge.text)
+                        .font(MenuFont.number(.subheadline))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(ChromePalette.tint.opacity(0.18), in: .capsule)
+                        .accessibilityLabel(badge.spoken)
+                        .accessibilityIdentifier("last-race-rating")
+                }
                 Text(lastRace.summary).font(MenuFont.number(.headline))
                 Image(systemName: "chevron.right").foregroundStyle(.secondary)
             }

@@ -7,10 +7,13 @@ import RegattaServices
 /// The monotonic clock the online client runs on (#64): microseconds since it was made.
 struct MonotonicClock: Sendable {
     private let origin = ContinuousClock.now
+    /// `-timescale` on the fakes (#141): the fake race host and its client run on the same scaled clock.
+    var timescale = 1.0
 
     func now() -> UInt64 {
         let (seconds, attoseconds) = (ContinuousClock.now - origin).components
-        return UInt64(seconds) * 1_000_000 + UInt64(attoseconds / 1_000_000_000_000)
+        let micros = UInt64(seconds) * 1_000_000 + UInt64(attoseconds / 1_000_000_000_000)
+        return timescale == 1 ? micros : UInt64(Double(micros) * timescale)
     }
 }
 
@@ -51,7 +54,15 @@ final class OnlineLaunch {
     private(set) var phase = Phase.connecting
     let server: RaceServer
     @ObservationIgnored private let ticket: () async throws -> [UInt8]
-    @ObservationIgnored private let clock = MonotonicClock()
+    @ObservationIgnored private let clock: MonotonicClock
+    /// Opens a race connection: the server's WebSocket, or the hand-off's connector (#141).
+    @ObservationIgnored private let connect: () -> (any RaceConnection)?
+    /// The online race sequence's link (#141): the join is tried again every second until it is in, with no failure
+    /// panel; the Debug dev race keeps its one try and its panel.
+    let isSequence: Bool
+    /// Told of the race's driver as it joins, before anything runs it.
+    @ObservationIgnored var onDriver: ((OnlineDriver) -> Void)?
+    @ObservationIgnored private var isStopped = false
     /// The race's haptics: the app passes `AppModel.haptics`, gated by Settings (#110).
     @ObservationIgnored private let haptics: any Haptics
     /// The race's sounds: the app passes `AppModel.sound`, gated by Settings' Effects (#126).
@@ -74,6 +85,9 @@ final class OnlineLaunch {
          hints: (() -> HintEngine)? = nil, onHintRetired: ((String, HintRetirement) -> Void)? = nil,
          results: OnlineResults? = nil, ticket: @escaping () async throws -> [UInt8]) {
         self.server = server
+        clock = MonotonicClock()
+        isSequence = false
+        connect = { server.raceURL.map { WebSocketTransport(url: $0) } }
         self.results = results
         self.hints = hints
         self.onHintRetired = onHintRetired
@@ -84,38 +98,86 @@ final class OnlineLaunch {
         self.ticket = ticket
     }
 
+    /// The race a hand-off seats her in (#141): `connect` opens each connection, `token` gives the token to join
+    /// with now.
+    init(connect: @escaping () -> any RaceConnection, token: @escaping () -> [UInt8], timescale: Double = 1,
+         haptics: any Haptics = SilentHaptics(), sound: any SoundOutput = SilentSoundOutput(),
+         controls: ControlSettings = ControlSettings(), rulesSeen: RuleSeenStore = RuleSeenStore(),
+         hints: (() -> HintEngine)? = nil, onHintRetired: ((String, HintRetirement) -> Void)? = nil,
+         results: OnlineResults? = nil) {
+        server = RaceServer(address: "")
+        clock = MonotonicClock(timescale: timescale)
+        isSequence = true
+        self.connect = { connect() }
+        self.results = results
+        self.hints = hints
+        self.onHintRetired = onHintRetired
+        self.haptics = haptics
+        self.sound = sound
+        self.rulesSeen = rulesSeen
+        self.controls = controls
+        ticket = { token() }
+    }
+
+    /// The race's session, once joined.
+    var session: GameSession? {
+        if case .racing(let session) = phase { session } else { nil }
+    }
+
+    /// Gives the join up (#141): the link is closed.
+    func stop() { isStopped = true }
+
+    /// The link's clock, in microseconds.
+    func now() -> UInt64 { clock.now() }
+
     /// The app's build, for `Hello`: "0.1 (1)".
     static var clientBuild: String {
         let info = Bundle.main.infoDictionary ?? [:]
         return "\(info["CFBundleShortVersionString"] as? String ?? "?") (\(info["CFBundleVersion"] as? String ?? "?"))"
     }
 
-    /// Gets a token, connects and joins; ends racing, at the prompt, or failed.
+    /// Gets a token, connects and joins; ends racing, at the prompt, or failed. The sequence's link (`isSequence`)
+    /// never fails: it tries again every second until it is in or stopped.
     func start() async {
         phase = .connecting
-        guard let url = server.raceURL else {
-            phase = .failed("\(server.address) isn't a host:port")
-            return
+        while !isStopped {
+            if await join() { return }
+            guard isSequence else { return }
+            try? await Task.sleep(for: .seconds(1))
         }
+    }
+
+    /// One try. True when it is settled: racing, the prompt, or a failure that isn't retried.
+    private func join() async -> Bool {
         let token: [UInt8]
         do {
             token = try await ticket()
         } catch {
             phase = .failed("No race from \(server.address): \(error.localizedDescription)")
-            return
+            return !isSequence
         }
-        let transport = WebSocketTransport(url: url)
+        guard let transport = connect() else {
+            phase = .failed("\(server.address) isn't a host:port")
+            return true
+        }
         let join = RaceJoin(connection: transport, token: token, clientBuild: Self.clientBuild, now: clock.now())
-        while !join.isFinished {
+        while !join.isFinished, !isStopped {
             try? await Task.sleep(for: .milliseconds(5))
             join.poll(now: clock.now())
         }
         switch join.state {
         case .joined(let start):
-            guard let joined = join.transport else { return }
+            guard let joined = join.transport, !isStopped else {
+                transport.close()
+                return true
+            }
             let clock = clock
+            let connect = connect
+            let underway = isSequence && (join.joinedTick ?? Int.min) > -start.setup.startSequenceTicks
             let driver = OnlineDriver(start: start, transport: joined, token: token, clientBuild: Self.clientBuild,
-                                      now: clock.now, connect: { WebSocketTransport(url: url) })
+                                      now: clock.now, connect: { connect() ?? UnansweredRaceConnection() },
+                                      joiningUnderway: underway)
+            onDriver?(driver)
             let session = GameSession(online: driver, haptics: haptics, sound: sound, controls: controls,
                                       rulesSeen: rulesSeen, hints: hints?())
             session.onHintRetired = onHintRetired
@@ -124,14 +186,19 @@ final class OnlineLaunch {
                 results.start()
             }
             phase = .racing(session)
+            return true
         case .updateRequired(let reason):
             transport.close()
             phase = .updateRequired(reason)
+            return true
         case .failed(let reason):
             transport.close()
-            phase = .failed("\(reason)\(transport.closeReason.map { " (\($0))" } ?? "")")
+            let closeReason = (transport as? WebSocketTransport)?.closeReason.map { " (\($0))" } ?? ""
+            if !isSequence { phase = .failed("\(reason)\(closeReason)") }
+            return !isSequence
         case .awaitingAck, .awaitingStart:
-            break
+            transport.close()
+            return true
         }
     }
 }

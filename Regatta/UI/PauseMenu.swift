@@ -5,6 +5,13 @@ import SwiftUI
 /// Restart race; the debug tuning panel (Debug builds); Leave race, with no warning in practice. Sound settings stay in
 /// Settings. It scrolls when it doesn't fit.
 struct PauseMenu: View {
+    /// Online the race never stops (#141): "Race continues" over a lighter dim, so the water reads through, with no
+    /// Restart or Tuning.
+    enum Style {
+        case practice, online
+    }
+
+    var style = Style.practice
     /// The device's settings the toggles change, or nil to leave them out.
     var settings: Binding<DeviceSettings>?
     var onResume: () -> Void
@@ -18,7 +25,7 @@ struct PauseMenu: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.5).ignoresSafeArea()
+            Color.black.opacity(style == .online ? 0.2 : 0.5).ignoresSafeArea()
             ViewThatFits(in: .vertical) {
                 card
                 ScrollView { card }
@@ -30,7 +37,8 @@ struct PauseMenu: View {
 
     private var card: some View {
         VStack(spacing: 14) {
-            Text("Paused").font(.title.bold())
+            // TODO-COPY (#171)
+            Text(style == .online ? "Race continues" : "Paused").font(.title.bold())
             Button(action: onResume) { label("Resume") }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("pause-resume")

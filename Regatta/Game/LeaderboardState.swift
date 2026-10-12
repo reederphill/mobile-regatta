@@ -51,6 +51,8 @@ struct LeaderboardState: Equatable {
         let colorIndex: Int
         let isMe: Bool
         let gap: Gap
+        /// The seat's name, with the bot glyph for a bot: an online race's board only (#141).
+        var name: String? = nil
 
         var id: Int { seat }
     }
@@ -77,13 +79,13 @@ struct LeaderboardState: Equatable {
     init() {}
 
     /// The board for `frame`, from seat `me`.
-    init(frame: TickFrame, me: Int) {
+    init(frame: TickFrame, me: Int, name: ((Int) -> String)? = nil) {
         isVisible = frame.time >= 0 && !frame.isOver
         rows = frame.standings.enumerated().map { rank, seat in
             let boat = frame.boats[seat]
             let metres = frame.gaps.indices.contains(seat) ? frame.gaps[seat] : nil
             return Row(seat: seat, place: rank + 1, colorIndex: boat.colorIndex, isMe: seat == me,
-                       gap: Self.gap(status: boat.status, rank: rank, metres: metres))
+                       gap: Self.gap(status: boat.status, rank: rank, metres: metres), name: name?(seat))
         }
     }
 

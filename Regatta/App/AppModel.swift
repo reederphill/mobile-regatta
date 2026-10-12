@@ -229,7 +229,7 @@ final class AppModel {
 
     /// The online results' Try it (#24, #25): My boat with the earned design on.
     func tryEarnedDesign(_ design: DesignID) {
-        endRaceSequence()
+        if phase == .raceSequence { endRaceSequence() }
         openMyBoat(trying: design)
     }
 
@@ -468,6 +468,60 @@ final class AppModel {
     }
 
     func postNotice(_ notice: Notice) { self.notice = notice }
+
+    // MARK: The online race sequence (#141)
+
+    /// The race link for a hand-off's seat, with the race's results stream, built with this app's settings.
+    func onlineRaceLink(_ handOff: HandOff, connector: @escaping RaceConnector, service: any RaceSessionService) -> OnlineRaceLink {
+        let results = onlineResults(service: service, raceID: handOff.raceID)
+        // `-timescale` runs the fakes' race, as it does their queue and briefing.
+        let timescale = launchOptions.fakeServices == nil ? 1 : launchOptions.timescale
+        return OnlineRaceLink(handOff: handOff, connector: connector, results: results) { [self] connect, token in
+            OnlineLaunch(connect: connect, token: token, timescale: timescale, haptics: haptics, sound: sound,
+                         controls: controls, rulesSeen: rulesSeen, hints: hintEngine, onHintRetired: logsHintRetired,
+                         results: results)
+        }
+    }
+
+    /// The briefing gives way to the race it briefed, in the same cover: no archive, no notice, the music already out.
+    func showRace(_ launch: OnlineLaunch) {
+        guard phase == .raceSequence else { return }
+        if case .online(let shown) = race, shown === launch { return }
+        race = .online(launch)
+    }
+
+    func rejoinRace(_ launch: OnlineLaunch) {
+        dismissAll()
+        isLiveryLocked = true
+        startRaceSequence(.online(launch))
+    }
+
+    func setBriefingRemaining(_ seconds: Double) {
+        guard let briefing, briefing.isFleetLocked else { return }
+        briefing.endCountdown(in: seconds)
+    }
+
+    func setLiveryLocked(_ locked: Bool) { isLiveryLocked = locked }
+
+    func keepLastRace(_ results: RaceResultViewModel) { lastRace = results }
+
+    func keepLastRace(_ report: RaceReport, rating: RatingOutcome?) {
+        let entrants = report.roster.indices.map { seat in
+            RaceResultViewModel.Entrant(name: seat == report.seat ? "You" : report.roster[seat].name,
+                                        isBot: report.roster[seat].isBot,
+                                        livery: seat == report.seat ? myLivery : FleetLiveries.yours)
+        }
+        let cell: RaceResultViewModel.RatingCell = rating.map { .init($0) }
+            ?? (report.results.rated ? .pending : .unrated(.noOtherHumans))
+        let results = RaceResultViewModel(report: report, entrants: entrants, rating: cell, earned: nil)
+        if results.keepsAsLastRace { lastRace = results }
+    }
+
+    func setLastRaceRating(_ outcome: RatingOutcome, raceID: RaceID) {
+        guard var kept = lastRace, kept.online?.raceID == raceID.rawValue else { return }
+        kept.online?.rating = .init(outcome)
+        lastRace = kept
+    }
 
     /// Home's Last race takes `results` unless you retired from that race (#132): a RET leaves the one before. Your
     /// finish in `session` goes into the practice history the rivals' skill is set from (#235), once per race.

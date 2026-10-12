@@ -12,23 +12,19 @@ protocol FleetLockHost: AnyObject {
     /// Out of the race sequence to the bare home screen, the livery unlocked, with `notice` if given.
     func endRaceSequence(notice: AppModel.Notice?)
     func postNotice(_ notice: AppModel.Notice)
-}
-
-/// What follows the online briefing (#141 replaces the stand-in with the 60 s sequence and the race).
-protocol OnlineSequence {
-    /// The briefing's countdown ran out.
-    func briefingEnded(_ handOff: HandOff, host: any FleetLockHost)
-    /// The briefing's Leave, confirmed: a bot takes the seat.
-    func leave(_ handOff: HandOff) async
-}
-
-/// Until #141: the briefing leads home, and leaving tells nobody.
-struct StandInOnlineSequence: OnlineSequence {
-    func briefingEnded(_ handOff: HandOff, host: any FleetLockHost) {
-        host.endRaceSequence(notice: .raceStartsInTheNextUpdate)
-    }
-
-    func leave(_ handOff: HandOff) async {}
+    /// The briefing gives way to the race it briefed, in the same cover (#141).
+    func showRace(_ launch: OnlineLaunch)
+    /// Home's Rejoin race: the cover, straight to the water.
+    func rejoinRace(_ launch: OnlineLaunch)
+    /// The locked fleet's briefing ends this many seconds from now: the race clock's word, once the link has it.
+    func setBriefingRemaining(_ seconds: Double)
+    func setLiveryLocked(_ locked: Bool)
+    /// Her results in an online race she was done in, for Home's Last race.
+    func keepLastRace(_ results: RaceResultViewModel)
+    /// The results of a race that closed while she was away, from the service's last race.
+    func keepLastRace(_ report: RaceReport, rating: RatingOutcome?)
+    /// The rating the server pushed for the Last race row's race, after the cover was gone.
+    func setLastRaceRating(_ outcome: RatingOutcome, raceID: RaceID)
 }
 
 extension AppModel.Notice {
@@ -40,24 +36,13 @@ extension AppModel.Notice {
     static let couldNotStartRace = AppModel.Notice(title: "Couldn't start the race", message: "Try Race online again.")
     static let raceCancelled = AppModel.Notice(title: "The race was cancelled", message: "")
     static let updateToRaceOnline = AppModel.Notice(title: "Update to race online", message: "")
-    /// The stand-in's only (#141 removes it).
-    static let raceStartsInTheNextUpdate = AppModel.Notice(title: "The race starts in the next update", message: "")
 }
 
 /// The queue from the Race online tap to the gun's briefing (#140, #16, #25): joining, the wait and its lock banner,
-/// leaving, a lost connection, and at fleet lock the takeover. The one reader of the queue's state stream; the bar,
+/// leaving, a lost connection, and at fleet lock the takeover, where the race sequence (#141) takes it from here. The one reader of the queue's state stream; the bar,
 /// the chip and Home's Race online slot read its values, and it draws nothing itself (no SwiftUI or UIKit).
 @MainActor @Observable
 final class QueueController {
-    /// The online briefing the takeover shows, and what its Leave and a lost connection have done to it.
-    struct Takeover: Equatable {
-        var handOff: HandOff
-        /// "Leave the race?" is up; the countdown runs on behind it.
-        var isConfirmingLeave = false
-        /// The connection has been gone 2 s: the line under the countdown.
-        var isReconnecting = false
-    }
-
     private enum Stage: Equatable {
         case idle
         case joining(deadline: Date)
@@ -65,14 +50,14 @@ final class QueueController {
         case connectionLost
         /// `.fleetLocked` came; the hand-off is being fetched.
         case locking
-        case briefing
+        /// From the takeover's briefing to Home again: the race sequence's (`OnlineRaceController`).
+        case inRace
         case settling(until: Date)
     }
 
     /// The bar and the chip; nil when neither shows.
     private(set) var bar: QueueBarState?
     private(set) var entry = RaceOnlineEntry.ready
-    private(set) var takeover: Takeover?
 
     /// Every state the stream gives, and a refusal `join` threw: `OnlineStatus` words Race online's line and the
     /// lobby's count from it.
@@ -87,15 +72,13 @@ final class QueueController {
     static let joinTimeout: TimeInterval = 8
     /// After leaving a locked fleet, Race online waits this long at most for the server's word.
     static let settleTimeout: TimeInterval = 3
-    /// A connection gone this long in the briefing shows "Reconnecting".
-    static let reconnectingAfter: TimeInterval = 2
     /// The lock haptic fires once per stretch in the queue, and again only if the lock moved back past this (a hold).
     static let lockSoonRearmSeconds = 20
 
     private var stage = Stage.idle {
         didSet {
             switch stage {
-            case .idle, .briefing:
+            case .idle, .inRace:
                 bar = nil
                 entry = .ready
             case .joining:
@@ -119,7 +102,7 @@ final class QueueController {
 
     @ObservationIgnored private let queue: any QueueService
     @ObservationIgnored private let raceSession: any RaceSessionService
-    @ObservationIgnored private let sequence: any OnlineSequence
+    @ObservationIgnored private let sequence: (any OnlineSequence)?
     @ObservationIgnored private let now: () -> Date
     @ObservationIgnored private let sleep: (Duration) async -> Void
     /// How often the controller looks at its clock while something is timed; nil in tests, which call `tick()`.
@@ -134,8 +117,6 @@ final class QueueController {
     @ObservationIgnored private var cooldownUntil: Date?
     /// After Leave, a `.queued` the server sent before it heard is ignored until this.
     @ObservationIgnored private var leavingUntil: Date?
-    /// When the connection went, in the briefing.
-    @ObservationIgnored private var lostAt: Date?
     /// The read of the queue's stream, while it runs.
     @ObservationIgnored private(set) var reader: Task<Void, Never>?
     @ObservationIgnored private var readerEnded = false
@@ -143,7 +124,7 @@ final class QueueController {
     /// The last leave sent to the queue, best effort: the bar never waits for it.
     @ObservationIgnored private(set) var leaving: Task<Void, Never>?
 
-    init(queue: any QueueService, raceSession: any RaceSessionService, sequence: any OnlineSequence = StandInOnlineSequence(),
+    init(queue: any QueueService, raceSession: any RaceSessionService, sequence: (any OnlineSequence)? = nil,
          isOnline: Bool = true, now: @escaping () -> Date = Date.init,
          sleep: @escaping (Duration) async -> Void = { try? await Task.sleep(for: $0) }, tickInterval: Duration? = .seconds(1)) {
         self.queue = queue
@@ -212,32 +193,25 @@ final class QueueController {
         await join()
     }
 
-    // MARK: The takeover
+    // MARK: The race sequence
 
-    /// The briefing's Leave: asks first.
-    func askToLeave() { takeover?.isConfirmingLeave = true }
-
-    func stay() { takeover?.isConfirmingLeave = false }
-
-    /// "Leave the race?", confirmed: home, and a bot takes the seat. Race online stays off until the server says where
-    /// she stands (idle, or the cooldown).
-    func leaveRace() {
-        guard let takeover else { return }
-        self.takeover = nil
-        lostAt = nil
-        stage = .settling(until: now().addingTimeInterval(Self.settleTimeout))
-        host?.endRaceSequence(notice: nil)
-        Task { [sequence] in await sequence.leave(takeover.handOff) }
-        scheduleTick()
+    /// Home's Rejoin race took her back into a race: the queue stays out of it, as from a takeover.
+    func sequenceBegan() {
+        guard stage == .idle else { return }
+        stage = .inRace
     }
 
-    /// The briefing's countdown ran out.
-    func briefingEnded() {
-        guard let takeover, let host else { return }
-        self.takeover = nil
-        lostAt = nil
-        stage = .idle
-        sequence.briefingEnded(takeover.handOff, host: host)
+    /// The race sequence is over and Home is up. Having left, Race online stays off until the server says where she
+    /// stands (idle, or the cooldown); otherwise the queue is free at once.
+    func sequenceEnded(_ outcome: SequenceOutcome) {
+        guard stage == .inRace else { return }
+        switch outcome {
+        case .left:
+            stage = .settling(until: now().addingTimeInterval(Self.settleTimeout))
+            scheduleTick()
+        case .over, .cancelled:
+            stage = .idle
+        }
     }
 
     // MARK: The world
@@ -256,8 +230,6 @@ final class QueueController {
         guard isOnline != self.isOnline else { return }
         self.isOnline = isOnline
         if isOnline {
-            lostAt = nil
-            takeover?.isReconnecting = false
             if stage == .connectionLost {
                 stage = .idle
                 host?.postNotice(.leftQueueOnDrop)
@@ -266,9 +238,6 @@ final class QueueController {
         } else if isWaiting {
             // The server drops her place with the connection: no silent re-queue.
             stage = .connectionLost
-        } else if stage == .briefing {
-            lostAt = now()
-            scheduleTick()
         }
     }
 
@@ -276,6 +245,7 @@ final class QueueController {
     func receive(_ state: QueueState) async {
         lastState = state
         onState?(state)
+        if state != .fleetLocked { sequence?.fleetUnlocked() }
         let now = now()
         cooldownUntil = nil
         switch state {
@@ -284,7 +254,7 @@ final class QueueController {
             switch stage {
             case .queued, .settling: stage = .idle
             // Joining, the join's own answer or its timeout decides.
-            case .idle, .joining, .connectionLost, .locking, .briefing: break
+            case .idle, .joining, .connectionLost, .locking, .inRace: break
             }
         case .unavailable(let refusal):
             leavingUntil = nil
@@ -294,7 +264,7 @@ final class QueueController {
             case .queued:
                 stage = .idle
                 host?.postNotice(.leftQueue)
-            case .idle, .connectionLost, .locking, .briefing: break
+            case .idle, .connectionLost, .locking, .inRace: break
             }
         case .queued(let status):
             switch stage {
@@ -309,11 +279,15 @@ final class QueueController {
                 wait(status, from: now)
             case .queued:
                 wait(status, from: now)
-            case .connectionLost, .locking, .briefing, .settling: break
+            case .connectionLost, .locking, .inRace, .settling: break
             }
         case .fleetLocked:
-            // Only a fleet she was waiting for: one she has left is stale.
-            guard isWaiting else { break }
+            // Only a fleet she was waiting for takes the app over. Waiting for nothing, it may be a race she dropped
+            // out of (#141), or stale after a leave: the sequence asks the service which.
+            guard isWaiting else {
+                if stage == .idle { sequence?.fleetLockedWhileIdle() }
+                break
+            }
             stage = .locking
             await takeOver()
         }
@@ -336,10 +310,6 @@ final class QueueController {
             // Ready at zero, without waiting for the server's `.idle`, and with no notice.
             self.cooldownUntil = nil
             onState?(.idle)
-        }
-        if let lostAt, takeover != nil, now >= lostAt.addingTimeInterval(Self.reconnectingAfter) {
-            self.lostAt = nil
-            takeover?.isReconnecting = true
         }
     }
 
@@ -386,16 +356,15 @@ final class QueueController {
         }
         guard host.takeOver(handOff, briefing: briefing) else {
             stage = .idle
+            // Nothing is sent: the server counts the seat she never took as a drop at the gun.
             host.postNotice(.updateToRaceOnline)
-            Task { [sequence] in await sequence.leave(handOff) }
             return
         }
-        takeover = Takeover(handOff: handOff)
-        stage = .briefing
-        if !isOnline { lostAt = now() }
+        stage = .inRace
         haptics.impact(intensity: 1)
         // TODO-COPY (#171)
         announce("Fleet set, briefing")
+        sequence?.begin(handOff, briefing: briefing, host: host)
     }
 
     private func streamEnded() {
@@ -412,7 +381,7 @@ final class QueueController {
     }
 
     private var needsTicks: Bool {
-        if cooldownUntil != nil || lostAt != nil { return true }
+        if cooldownUntil != nil { return true }
         switch stage {
         case .joining, .queued, .settling: return true
         default: return false

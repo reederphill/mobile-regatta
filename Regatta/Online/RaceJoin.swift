@@ -23,6 +23,8 @@ nonisolated final class RaceJoin {
     static let timeout: UInt64 = 10_000_000
 
     private(set) var state = State.awaitingAck
+    /// The race tick the `RaceStart` came at: past the setup's first tick, the race is under way (#141).
+    private(set) var joinedTick: Int?
     private let connection: RaceTransport
     private let token: [UInt8]
     private let deadline: UInt64
@@ -82,6 +84,7 @@ nonisolated final class RaceJoin {
         case (_, .updateRequired(let update)):
             state = .updateRequired(update.reason)
         case (.awaitingStart, .raceStart(let start)):
+            joinedTick = frame.tick
             state = .joined(start)
         default:
             fail("expected \(state == .awaitingAck ? "HelloAck" : "RaceStart"), got \(frame.message.type)")
