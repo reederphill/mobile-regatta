@@ -202,15 +202,18 @@ struct RaceView: View {
                 )
             }
 
-            if let online, online.isMenuOpen, !session.playerDone {
+            // The confirm stands alone over the water: the menu under it would dim the race twice.
+            if let online, online.isMenuOpen, !online.isConfirmingLeave, !session.playerDone {
                 PauseMenu(style: .online, settings: deviceSettings, onResume: online.closeMenu, onRestart: nil,
                           onLeave: online.askToLeave, onHelp: openHelp, onTuning: nil)
             }
 
             if let online, online.isReconnecting {
                 VStack {
+                    // Under the notice line, which a rule call or a hint may hold. TODO (#141 B2): a notice-slot kind.
                     ReconnectingLine()
-                        .padding(.top, HUDView.noticeTop(showsLeaderboard: session.controls.showsLeaderboard) + topInset)
+                        .padding(.top, HUDView.noticeTop(showsLeaderboard: session.controls.showsLeaderboard)
+                                 + HUDView.noticeHeight + 8 + topInset)
                     Spacer()
                 }
                 .allowsHitTesting(false)
