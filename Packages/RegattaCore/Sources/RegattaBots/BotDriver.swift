@@ -136,7 +136,8 @@ public struct BotDriver: Sendable {
     mutating func drive(_ race: Race, seeing view: SeatView) -> BotDecision {
         precondition(view.seat == seat && view.tick == race.tick, "seat \(seat) at tick \(race.tick) given the view of seat \(view.seat) at tick \(view.tick)")
         var decision = brain.decide(helm.view(view))
-        decision.input = helm.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred)
+        decision.input = helm.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred,
+                                    holdsHerAngle: decision.holdsHerAngle)
         decisions += 1
         isHuntingTurn = decision.hunt == .turn
         // A play is her tap's, or on a class she turns by hand (#459) the decision she puts the rudder over on.

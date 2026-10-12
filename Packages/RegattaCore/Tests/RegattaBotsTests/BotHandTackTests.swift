@@ -176,7 +176,8 @@ import Testing
             guard (race.tick + seat).isMultiple(of: BotDriver.decisionInterval) else { return nil }
             let view = race.seatView(for: seat)
             var decision = brain.decide(helm.view(view))
-            decision.input = helm.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred)
+            decision.input = helm.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred,
+                                        holdsHerAngle: decision.holdsHerAngle)
             race.apply(decision.input, seat: seat, atTick: race.tick + 1)
             if let tap = decision.tap { race.tap(tap, seat: seat, atTick: race.tick + 1) }
             return decision

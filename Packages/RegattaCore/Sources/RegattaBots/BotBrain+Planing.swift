@@ -27,6 +27,16 @@ import RegattaCore
 //   on, however deep her mark or a missed groove asks her to sail (`floorAim`'s reach, from her groove).
 // - "A gybe within her skill": a helm who would slam gybes on half rudder, a wider, slower arc that stays on the plane
 //   (`PlaningTable.safeGybe`, `startHandTurn`); a flubbed gybe is still cranked, and falls.
+//
+// Fewer falls (#462 round 3: 2.4 falls a boat a race on the live matrix against skiff@8's 0.35):
+// - "Set, then gybe": on the plane but slow for her angle (round the windward mark and the offset with the kite going
+//   up) she builds speed before she gybes (`buildsSpeedToGybe`); the gybe at the end of her run is her rounding's.
+// - "Her own angle, held": the angle her hand holds when she lets the rudder go is the one she aims at, not the
+//   downwind groove a snap's width below it (`holdsHerAngle`, `BotHelm.input`).
+// - "Under a boat's lee": behind a boat she bears away to her proper course only when she is coming up under her lee,
+//   and then no further than the rules ask (`BotBrain.properCourseAnticipated`, `PlaningTable.leeAllowance`).
+// - "Finish where she lays it": close to the line she crosses it on the angle she planes at when that is still
+//   between its ends, rather than square off to her spot (`finishingOnThePlane`).
 
 /// The planing heuristics' values (#462), one table to tune, as `HandTackTable` is the hand turn's.
 public enum PlaningTable {
@@ -88,6 +98,21 @@ public enum PlaningTable {
     /// at 75 % she fell entering slow (70 % of her polar speed; 60 %: gybe falls 1.89 to 1.57 a boat a race for Club,
     /// 50 %: 1.29). A flubbed gybe is still cranked hard over, and falls.
     public static let safeGybe = 0.5
+
+    /// "Under a boat's lee": coming up clear astern of a boat she sails no higher than this above her proper course
+    /// (`BotBrain.properCourseAnticipated`), radians: the rules' own allowance on a reach or run
+    /// (`fleet-rules@5`'s `reachRunToleranceDegrees`), never more, or she is called on the tick she makes the overlap.
+    public static let leeAllowance = deg2rad(8)
+    /// "Set, then gybe": racing on the plane she gybes only with this share of her polar speed at her angle, or after
+    /// `gybeWait` seconds of wanting to. Round the offset she has about 0.6 of it, on two sails, and a gybe from there
+    /// fell (the falls probe, 96 boat-races: 44 such falls without it, 4 with it); the gybes that stayed on went in at
+    /// 0.8 or more. Neither value was swept.
+    public static let gybeSpeed = 0.85
+    public static let gybeWait = 10.0
+    /// "Finish where she lays it": metres inside the finish line's ends she crosses at the least, on her planing angle.
+    public static let finishInside = 5.0
+    /// "Under a boat's lee": she is coming up on a boat ahead when she closes on her faster than this, m/s.
+    public static let leeClosing = 0.25
 }
 
 extension BotBrain {
@@ -305,5 +330,55 @@ extension BotBrain {
         let most = HandTackTable.gybeFraction(handling: turnHandling)
         guard abs(input.rudderValue) > most else { return input }
         return BoatInput(rudder: input.rudderValue < 0 ? -most : most, ease: input.ease)
+    }
+
+    /// Whether the angle her hand holds for `aim` is her own (`BotDecision.holdsHerAngle`): racing off the wind on a
+    /// class with the new planing rule, an aim that is an angle and not the groove.
+    func holdsHerAngle(_ aim: Aim, _ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard aim.groove == nil, b.status == .racing, Self.hasPlaningRule(view.boatClass),
+              let planing = view.boatClass.planing else { return false }
+        return aim.angle >= planing.fromTWA
+    }
+
+    /// "Set, then gybe": whether she puts off a gybe she wants to build speed for it first. On the plane but slow for
+    /// her angle (round the windward mark with the kite going up, out of a luff) a gybe takes the wind aft of her
+    /// beam under the class's share of her polar speed, and she falls: she sails on, coming down as she gathers
+    /// speed, and gybes at `PlaningTable.gybeSpeed` of her polar speed or after `gybeWait` seconds. Not near her
+    /// mark, where the gybe is her rounding; nor off the plane, where there is nothing to lose.
+    mutating func buildsSpeedToGybe(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        let angle = abs(sailingAngle(b))
+        // The mark at the end of a run (a gate, the finish line), not the windward mark or the offset.
+        let rounds = isNearHerMark && view.course.marksOfLeg(view.course.legs[b.legIndex]).count > 1
+        guard b.status == .racing, Self.hasPlaningRule(view.boatClass), let planing = view.boatClass.planing,
+              senses.planing, !rounds, angle >= planing.fromTWA else {
+            gybeWantedSince = nil
+            return false
+        }
+        let since = gybeWantedSince ?? view.time
+        gybeWantedSince = since
+        guard view.time - since < PlaningTable.gybeWait else { return false }
+        return b.speed < PlaningTable.gybeSpeed * view.boatClass.polar.speed(twa: angle, tws: b.polarWindSpeed) * b.speedShadow
+    }
+
+    /// "Finish where she lays it": `straight`, her course at her spot on the finish line from close to it, or nil; held
+    /// up to the angle that keeps her on the plane (`floorAim`) when that still crosses the line
+    /// `PlaningTable.finishInside` metres or more inside its ends. Her spot is often deeper than she planes (she ran
+    /// in above her groove): squared off to it for the last lengths she fell off the plane on the line.
+    func finishingOnThePlane(_ straight: Aim, _ b: SeatView.OwnBoat, _ view: SeatView) -> Aim? {
+        guard Self.hasPlaningRule(view.boatClass), let planing = view.boatClass.planing, senses.planing,
+              straight.tack == b.tack, straight.angle >= planing.fromTWA else { return nil }
+        let kept = floorAim(b, view, aim: straight)
+        guard kept.angle < straight.angle else { return nil }
+        let line = view.course.finishLine
+        let along = line.committee.position - line.pin.position
+        let course = Vec2.heading(kept.heading(wind: b.windDirection))
+        let denominator = along.cross(course)
+        guard abs(denominator) > 1e-9 else { return nil }
+        // Where her course crosses the line, as a share of it from the pin, and how far ahead of her.
+        let share = (b.position - line.pin.position).cross(course) / denominator
+        let ahead = (line.pin.position + along * share - b.position).dot(course)
+        let inside = PlaningTable.finishInside / max(along.length, 1)
+        guard ahead > 0, share >= inside, share <= 1 - inside else { return nil }
+        return kept
     }
 }

@@ -352,8 +352,9 @@ import Testing
             let now = race.boatClass.polar.bestDownwind(tws: boat.polarWindSpeed(in: race.boatClass)).twa
             print("BOTPLANING come down seed \(seed): off \(off) s, after 20 s \(rad2deg(boat.twa - now))° off her groove")
             #expect(off == 0, "seed \(seed): off the plane \(off) s")
-            // Down to her groove, or past it for her mark (seed 2's is close below her).
-            #expect(now - boat.twa < deg2rad(2), "seed \(seed): \(rad2deg(boat.twa - now))° off her groove")
+            // Down to her groove, or past it for her mark (seed 2's is close below her): within the slack of the angle
+            // her hand holds (round 3: her own angle, no longer snapped onto the groove).
+            #expect(now - boat.twa < deg2rad(4), "seed \(seed): \(rad2deg(boat.twa - now))° off her groove")
         }
         #expect(held >= 5, "held above her groove in \(held) waters of 6")
     }
@@ -458,44 +459,238 @@ import Testing
         #expect(fleet.finished >= fleet.tacks.count / 2, "\(fleet.finished) finished")
     }
 
+    // MARK: - Fewer falls (round 3)
+
+    /// "Set, then gybe": on the plane at 60 % of her speed for her angle (round the offset, the kite going up), told to
+    /// gybe, she sails on and puts the rudder over only once she has `PlaningTable.gybeSpeed` of it, or after
+    /// `gybeWait` seconds; at full speed she gybes at once, and on skiff@8 slow as fast.
+    @Test func slowSheBuildsSpeedBeforeSheGybes() throws {
+        /// Seconds from being told to gybe to the rudder going over, and her speed's share of her polar's then.
+        func gybe(seed: UInt64, speed: Double, boatClass: BoatClassFile = Self.skiffNine) throws -> (after: Double, share: Double)? {
+            var (race, hand, _) = try Self.runner(seed: seed, planing: true, speed: speed, deep: deg2rad(-30), handling: 0.8, boatClass: boatClass)
+            hand.brain.plannedTack = race.boats[0].tack.other
+            for tick in 0..<(16 * Race.tickRate) {
+                hand.drive(race)
+                // Off the plane there is nothing to wait for: not this scene.
+                if boatClass.ref == Self.skiffNine.ref, !race.boats[0].isPlaning { return nil }
+                if let turn = hand.brain.handTurn, !turn.isTack {
+                    let boat = race.boats[0]
+                    let polar = race.boatClass.polar.speed(twa: boat.twa, tws: boat.polarWindSpeed(in: race.boatClass))
+                    return (Double(tick) * Race.dt, boat.speed / polar)
+                }
+                race.step()
+            }
+            return nil
+        }
+        var waited = 0
+        for seed in UInt64(1)...6 {
+            let fast = try #require(try gybe(seed: seed, speed: 1), "seed \(seed): never gybed at speed")
+            #expect(fast.after <= 0.2, "seed \(seed): at speed she waited \(fast.after) s")
+            let eight = try #require(try gybe(seed: seed, speed: 0.6, boatClass: BotHandTackTests.skiffEight), "seed \(seed): skiff@8 never gybed")
+            #expect(eight.after <= 0.2, "seed \(seed): skiff@8 waited \(eight.after) s")
+            // In some waters 60 % of her speed has the wind aft of her beam at once, and she is off the plane.
+            guard let slow = try gybe(seed: seed, speed: 0.6) else { continue }
+            waited += 1
+            print("BOTPLANING set then gybe seed \(seed): rudder over after \(slow.after) s at \(slow.share) of her polar speed")
+            #expect(slow.after >= 1, "seed \(seed): gybed slow after \(slow.after) s")
+            #expect(slow.share >= PlaningTable.gybeSpeed - 0.02 || slow.after >= PlaningTable.gybeWait - 0.2, "seed \(seed): \(slow)")
+        }
+        #expect(waited >= 3, "on the plane and slow in \(waited) waters of 6")
+    }
+
+    /// "Her own angle, held": running 5° above her groove on skiff@9, inside the downwind groove's snap, the angle
+    /// her hand takes when she lets the rudder go is that angle and she stays there; before, and on skiff@8 still, her
+    /// hand took the groove and sailed her down to it. A groove aim is the groove's on both.
+    @Test func herHandHoldsHerOwnAngleNotTheGroove() throws {
+        for seed in UInt64(1)...4 {
+            for boatClass in [Self.skiffNine, BotHandTackTests.skiffEight] {
+                var (race, hand, _) = try Self.runner(seed: seed, planing: true, deep: deg2rad(-5), handling: 1, boatClass: boatClass) {
+                    // As in a race on a class whose autohelm holds nothing: the angle is her hand's to hold.
+                    $0.seats[0].boat.autohelm = nil
+                }
+                let nine = boatClass.ref == Self.skiffNine.ref
+                let view = race.seatView(for: 0)
+                let own = Aim(angle: view.own.twa, tack: .starboard, tolerance: deg2rad(2))
+                #expect(hand.brain.holdsHerAngle(own, view.own, view) == nine)
+                #expect(!hand.brain.holdsHerAngle(Aim.groove(.downwind, tack: .starboard, angle: view.own.twa), view.own, view))
+                var helm = BotHelm()
+                _ = helm.input(.neutral, view, holdsHerAngle: hand.brain.holdsHerAngle(own, view.own, view))
+                #expect((helm.held?.target.groove == nil) == nine, "seed \(seed), \(boatClass.ref): her hand holds \(String(describing: helm.held?.target))")
+                // And sailed: asked for that angle for 8 s, she is still on it on skiff@9.
+                let asked = view.own.twa
+                for _ in 0..<(8 * Race.tickRate) {
+                    if (race.tick).isMultiple(of: BotDriver.decisionInterval) {
+                        let seen = race.seatView(for: 0)
+                        let held = hand.helm.view(seen)
+                        hand.brain.observe(held.own, held)
+                        let aim = Aim(angle: asked, tack: .starboard, tolerance: deg2rad(2))
+                        let input = hand.brain.helm(held.own, to: aim, held)
+                        race.apply(hand.helm.input(input, seen, holdsHerAngle: hand.brain.holdsHerAngle(aim, held.own, held)), seat: 0, atTick: race.tick + 1)
+                    }
+                    race.step()
+                }
+                let off = rad2deg(race.boats[0].twa - asked)
+                print("BOTPLANING own angle seed \(seed) \(boatClass.ref): \(off)° off the angle she asked for after 8 s")
+                if nine {
+                    #expect(abs(off) < 2.5, "seed \(seed): \(off)° off her angle")
+                } else {
+                    #expect(off > 2.5, "seed \(seed): skiff@8 \(off)° off her angle, not down on her groove")
+                }
+            }
+        }
+    }
+
+    /// "Under a boat's lee": clear astern of a boat two and a half lengths ahead on her run, 12° above her groove (a
+    /// Club hand's own angle). On skiff@8 she is held down to her proper course wherever that boat is. On skiff@9 only
+    /// when the boat is to windward of her course and she is closing on it, and then to the rules' allowance above
+    /// her proper course, as rule 17's notice would hold her; to leeward of her, or not closing, she sails her angle.
+    @Test func behindABoatSheBearsAwayOnlyUnderHerLee() throws {
+        func aims(side: Double, speed: Double, boatClass: BoatClassFile) throws -> (own: Aim, sailed: Aim, proper: Double) {
+            var (race, hand, water) = try Self.runner(seed: 3, planing: true, deep: deg2rad(-12), handling: 0.55, boatClass: boatClass)
+            let allowed = try #require(race.rules.incidents.properCourse).reachRunTolerance
+            #expect(PlaningTable.leeAllowance <= allowed)
+            // The boat ahead: 12 m up her course, `side` metres to windward of it (negative: to leeward), at `speed` of hers.
+            var snapshot = race.exportSnapshot()
+            let hers = snapshot.seats[0].boat
+            let forward = Vec2.heading(hers.heading)
+            let windward = forward.rightPerp * (forward.rightPerp.dot(Vec2.heading(water.wind)) >= 0 ? 1 : -1)
+            snapshot.seats[1].boat.position = hers.position + forward * 12 + windward * side
+            snapshot.seats[1].boat.heading = hers.heading
+            snapshot.seats[1].boat.speed = hers.speed * speed
+            snapshot.seats[1].boat.boomSide = hers.boomSide
+            snapshot.seats[1].boat.legIndex = hers.legIndex
+            snapshot.seats[1].boat.isPlaning = true
+            snapshot.seats[1].boat.spinnaker = .up
+            try race.importSnapshot(snapshot)
+            _ = race.drainEvents()
+            let view = Self.seen(race, &hand)
+            let own = Aim(angle: view.own.twa, tack: .starboard, tolerance: deg2rad(2))
+            let proper = try #require(ProperCourse.of(position: view.own.position, boomSide: view.own.boomSide, status: view.own.status,
+                                                      legIndex: view.own.legIndex, windDirection: view.own.windDirection,
+                                                      grooveTWS: view.own.grooveWindSpeed, course: view.course, boatClass: view.boatClass))
+            return (own, BotBrain.properCourseAnticipated(own, view.own, view), proper.sailingAngle)
+        }
+        let slack = BotBrain.properCourseMargin + BotBrain.properCourseSlack
+        for (side, speed) in [(4.0, 0.7), (-4.0, 0.7), (4.0, 1.0)] {
+            let eight = try aims(side: side, speed: speed, boatClass: BotHandTackTests.skiffEight)
+            #expect(abs(eight.sailed.angle - min(.pi, eight.proper + slack)) < 1e-9 && eight.sailed.angle > eight.own.angle,
+                    "skiff@8, \(side) m, \(speed): \(rad2deg(eight.own.angle))° held to \(rad2deg(eight.sailed.angle))°, proper \(rad2deg(eight.proper))°")
+            let nine = try aims(side: side, speed: speed, boatClass: Self.skiffNine)
+            print("BOTPLANING lee \(side) m, speed \(speed): at \(rad2deg(nine.own.angle))°, proper \(rad2deg(nine.proper))°, sails \(rad2deg(nine.sailed.angle))° (skiff@8 \(rad2deg(eight.sailed.angle))°)")
+            if side > 0, speed < 1 {
+                #expect(abs(nine.sailed.angle - (nine.proper - PlaningTable.leeAllowance + slack)) < 1e-9, "\(rad2deg(nine.sailed.angle))°")
+                #expect(nine.sailed.angle > nine.own.angle)
+            } else {
+                #expect(nine.sailed == nine.own, "\(side) m, \(speed): held to \(rad2deg(nine.sailed.angle))°")
+            }
+        }
+    }
+
+    /// "Finish where she lays it": on starboard 20 m above the finish line, towards its committee-boat end, planing on
+    /// her own angle well above the course that squares her off to her spot: she keeps the angle she planes at, which
+    /// crosses the line inside its ends. From 30 m above its middle that angle would take her past the pin: she sails
+    /// for her spot. On skiff@8 always.
+    @Test func closeToTheLineSheFinishesWhereSheLaysIt() throws {
+        var kept = 0
+        for seed in UInt64(1)...6 {
+            for (boatClass, along, above) in [(Self.skiffNine, 0.8, 20.0), (Self.skiffNine, 0.5, 30.0), (BotHandTackTests.skiffEight, 0.8, 20.0)] {
+                var (race, hand, _) = try Self.runner(seed: seed, planing: true, handling: 0.55, boatClass: boatClass)
+                Self.wandering(&hand, race, handling: 0.55)
+                var snapshot = race.exportSnapshot()
+                let line = race.course.finishLine
+                let span = line.committee.position - line.pin.position
+                snapshot.seats[0].boat.position = line.pin.position + span * along + race.course.upwind * above
+                try race.importSnapshot(snapshot)
+                _ = race.drainEvents()
+                let view = Self.seen(race, &hand)
+                let straight = Aim(angle: min(.pi, view.own.twa + deg2rad(25)), tack: .starboard, tolerance: BotBrain.reachTolerance)
+                let floor = hand.brain.floorAim(view.own, view, aim: straight)
+                let course = Vec2.heading(floor.heading(wind: view.own.windDirection))
+                let share = (view.own.position - line.pin.position).cross(course) / span.cross(course)
+                let inside = PlaningTable.finishInside / span.length
+                let aim = hand.brain.finishingOnThePlane(straight, view.own, view)
+                print("BOTPLANING finish seed \(seed) \(boatClass.ref.version) from \(along) of the line, \(above) m up: straight \(rad2deg(straight.angle))°, she planes at \(rad2deg(floor.angle))°, crossing at \(share): \(aim.map { "\(rad2deg($0.angle))°" } ?? "straight")")
+                guard boatClass.ref == Self.skiffNine.ref else {
+                    #expect(aim == nil, "seed \(seed): skiff@8")
+                    continue
+                }
+                #expect(floor.angle < straight.angle, "seed \(seed)")
+                if share >= inside, share <= 1 - inside {
+                    #expect(aim == floor, "seed \(seed)")
+                    if along == 0.8 { kept += 1 }
+                } else {
+                    #expect(aim == nil, "seed \(seed): crossing at \(share)")
+                }
+            }
+        }
+        #expect(kept >= 4, "kept in \(kept) waters of 6")
+    }
+
     /// A probe, not a test: every fall off the plane in all-bot races on skiff@9, with what the boat and her bot were
     /// doing. Prints only with REGATTA_PLANING_PROBE set.
     @Test func probeFalls() throws {
-        guard ProcessInfo.processInfo.environment["REGATTA_PLANING_PROBE"] != nil else { return }
-        var lines: [String: [String]] = [:]
-        for seed in UInt64(1)...6 {
+        guard let out = ProcessInfo.processInfo.environment["REGATTA_PLANING_PROBE"] else { return }
+        var lines: [String] = []
+        let seeds = UInt64(ProcessInfo.processInfo.environment["REGATTA_PLANING_PROBE_SEEDS"] ?? "") ?? 6
+        var boatRaces = 0
+        for seed in UInt64(1)...seeds {
             let race = try BotHelmTests.race(seed: seed, boatClass: Self.skiffNine)
             var controllers = allBots(race)
+            let count = race.boats.count
+            boatRaces += count
             var was = race.boats.map(\.isPlaning)
             var legs = race.boats.map { ($0.legIndex, race.tick) }
-            var gybed = Array(repeating: -10_000, count: race.boats.count)
+            var gybed = Array(repeating: -10_000, count: count)
             var booms = race.boats.map(\.boomSide)
+            // Her last turn by hand: its rudder, over-steer, start, end, and her speed going in as a share of her polar's.
+            var turns: [(fraction: Double, over: Double, start: Int, end: Int?, entry: Double, twa: Double)?] = Array(repeating: nil, count: count)
+            var trail: [[(twa: Double, rudder: Double, speed: Double)]] = Array(repeating: [], count: count)
             let tuning = try #require(race.boatClass.planing)
             for _ in 0..<(900 * Race.tickRate) where !race.isOver {
                 controllers.drive(race)
                 race.step()
                 for (seat, boat) in race.boats.enumerated() {
                     defer { was[seat] = boat.isPlaning; booms[seat] = boat.boomSide }
+                    let tws = boat.polarWindSpeed(in: race.boatClass)
+                    let brain = controllers[seat].driver!.brain
+                    trail[seat].append((boat.twa, boat.rudder, boat.speed))
+                    if trail[seat].count > 61 { trail[seat].removeFirst() }
+                    if let turn = brain.handTurn, !turn.isTack {
+                        let start = Int((turn.started * 30).rounded())
+                        if turns[seat]?.start != start {
+                            turns[seat] = (turn.fraction, turn.overSteer, start, nil, boat.speed / max(race.boatClass.polar.speed(twa: boat.twa, tws: tws), 0.1), boat.twa)
+                        }
+                    } else if let turn = turns[seat], turn.end == nil { turns[seat]?.end = race.tick }
                     if boat.legIndex != legs[seat].0 { legs[seat] = (boat.legIndex, race.tick) }
                     if boat.boomSide != booms[seat] { gybed[seat] = race.tick }
                     guard was[seat], !boat.isPlaning, boat.status == .racing, boat.penaltyTurnsOwed == 0, boat.twa >= deg2rad(100) else { continue }
-                    let tws = boat.polarWindSpeed(in: race.boatClass)
                     let groove = race.boatClass.polar.bestDownwind(tws: tws)
                     guard groove.speed >= tuning.onSpeed else { continue }
-                    let brain = controllers[seat].driver!.brain
                     let aws = BoatClass.PlaningTuning.apparentWindSpeed(twa: boat.twa, speed: boat.speed, tws: tws)
                     let sinceLeg = Double(race.tick - legs[seat].1) / 30, sinceGybe = Double(race.tick - gybed[seat]) / 30
                     let floor = abs(boat.rudder) <= 0.2 && aws < tuning.apparentWind!.offSpeed(tws: tws)
-                    let kind = sinceGybe < 8 ? "gybe" : sinceLeg < 15 ? "rounding" : floor ? "floor" : "slow"
+                    let turning = brain.handTurn.map { !$0.isTack } ?? false
+                    let kind = sinceGybe < 8 || turning ? "gybe" : sinceLeg < 15 ? "rounding" : floor && boat.twa > groove.twa + deg2rad(3) ? "deep" : floor ? "lull" : "slow"
                     func r(_ x: Double) -> Double { (x * 10).rounded() / 10 }
+                    func r2(_ x: Double) -> Double { (x * 100).rounded() / 100 }
                     let k = knots(metresPerSecond: 1)
-                    lines[kind, default: []].append("s\(seed)#\(seat) h\(r(brain.turnHandling)) leg\(boat.legIndex)+\(r(sinceLeg))s gybe+\(r(min(sinceGybe, 99)))s twa \(Int(rad2deg(boat.twa)))/\(Int(rad2deg(groove.twa))) \(r(boat.speed * k))/\(r(race.boatClass.polar.speed(twa: boat.twa, tws: tws) * k))kn tws \(r(tws * k)) gw \(r((brain.senses.grooveWind ?? 0) * k)) aws \(r(aws * k)) rud \(r(boat.rudder)) sh \(r(boat.speedShadow(in: race.boatClass))) turn \(brain.handTurn != nil) repl \(brain.replane != nil) aim \(Int(rad2deg(brain.planingAimed.asked)))>\(Int(rad2deg(brain.planingAimed.sailed))) \(r(Double(race.tick) / 30 - brain.planingAimed.time))s ago st \(boat.roundingStage) sens \(brain.senses.planing) d \(Int((race.course.targetPosition(for: race.course.legs[boat.legIndex]) - boat.position).length))m")
+                    var turn = "-"
+                    if let t = turns[seat] {
+                        turn = "f\(r2(t.fraction)) o\(Int(rad2deg(t.over))) st-\(r(Double(race.tick - t.start) / 30)) end-\(t.end.map { "\(r(Double(race.tick - $0) / 30))" } ?? "on") in\(r2(t.entry))@\(Int(rad2deg(t.twa)))"
+                    }
+                    let past = trail[seat]
+                    let tr = [60, 45, 30, 15, 0].compactMap { back -> String? in
+                        let i = past.count - 1 - back
+                        return i >= 0 ? "\(Int(rad2deg(past[i].twa)))/\(r2(past[i].rudder))/\(r(past[i].speed * k))" : nil
+                    }.joined(separator: " ")
+                    let leg = race.course.legs[boat.legIndex]
+                    var legName = "fin"
+                    if case .round(let index) = leg { legName = "m\(index)" }
+                    lines.append("\(kind) \(floor ? "FLOOR" : "SHARE") s\(seed)#\(seat) h\(r2(brain.turnHandling)) \(legName)+\(r(sinceLeg))s gybe+\(r(min(sinceGybe, 99)))s twa \(Int(rad2deg(boat.twa)))/\(Int(rad2deg(groove.twa))) \(r(boat.speed * k))/\(r(race.boatClass.polar.speed(twa: boat.twa, tws: tws) * k))kn tws \(r(tws * k)) gw \(r((brain.senses.grooveWind ?? 0) * k)) aws \(r(aws * k)) rud \(r2(boat.rudder)) sh \(r2(boat.speedShadow(in: race.boatClass))) turn[\(turn)] repl \(brain.replane != nil) aim \(Int(rad2deg(brain.planingAimed.asked)))>\(Int(rad2deg(brain.planingAimed.sailed))) \(r(Double(race.tick) / 30 - brain.planingAimed.time))s ago st \(boat.roundingStage) d \(Int((race.course.targetPosition(for: leg) - boat.position).length))m trail[\(tr)]")
                 }
             }
         }
-        for (kind, all) in lines.sorted(by: { $0.key < $1.key }) {
-            print("PROBE \(kind): \(all.count)")
-            for line in all.prefix(9) { print("PROBE   ", line) }
-        }
+        lines.insert("boat-races \(boatRaces) falls \(lines.count)", at: 0)
+        try lines.joined(separator: "\n").write(toFile: out, atomically: true, encoding: .utf8)
     }
 }
