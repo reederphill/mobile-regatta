@@ -12,6 +12,8 @@ struct HomeView: View {
     /// What the server and the session say beyond the gating matrix (#161): Race online's line and spinner, the lobby
     /// area's Try again, the terms sheet's line. Nil in previews and tests.
     @Environment(\.onlineStatus) private var onlineStatus
+    /// The queue (#140): its bar stands in for Race online while you wait.
+    private var queue: QueueController? { onlineStatus?.queue }
 
     var body: some View {
         NavigationStack(path: $model.path) {
@@ -20,7 +22,8 @@ struct HomeView: View {
                     if let notice = model.notice {
                         NoticeRow(notice: notice)
                     }
-                    raceOnline
+                    // Queued, the bar above is Race online's place: no second control, and Practice moves up.
+                    if queue?.entry != .queued { raceOnline }
                     practice
                     #if DEBUG
                     tuning
@@ -51,6 +54,8 @@ struct HomeView: View {
                 MenuPageView(page: page, model: model)
             }
         }
+        // Outside the stack, so every pushed page has it, above the navigation bar; a half-height sheet sits below it.
+        .queueBar(queue)
         .tint(ChromePalette.tint)
         .sheet(item: $model.sheet, onDismiss: online.sheetDismissed) { sheet in
             if sheet == .terms {
@@ -59,6 +64,8 @@ struct HomeView: View {
             } else if sheet == .lastRace, let lastRace = model.lastRace {
                 // Your last race's results, reopened (#24, #132): large, with Close only.
                 ResultsView(model: lastRace, buttons: .reopened(close: { model.sheet = nil }), presentation: .page)
+                    // A large sheet covers Home's bar: it carries its own.
+                    .queueBar(queue)
                     .environment(\.colorScheme, .dark)
                     .presentationDetents([.large])
             } else {
@@ -68,8 +75,10 @@ struct HomeView: View {
     }
 
     private var raceOnline: some View {
-        let availability = RaceOnlineAvailability(isOnline: isOnline, lobbyStatus: lobbyStatus, line: onlineStatus?.restrictionLine,
+        var availability = RaceOnlineAvailability(isOnline: isOnline, lobbyStatus: lobbyStatus, line: onlineStatus?.restrictionLine,
                                                   isConnecting: onlineStatus?.isOpeningSession ?? false)
+        // Just out of a locked fleet (#140): off, with no words, until the server says where she stands.
+        if queue?.entry == .settling { availability = RaceOnlineAvailability(isEnabled: false, reason: "…") }
         // On the tint fill, or on the grey the system draws a disabled button in.
         let ink = availability.isEnabled ? ChromePalette.onTint : ChromePalette.onDisabled
         return Button(action: online.raceOnline) {
@@ -300,7 +309,9 @@ private struct NoticeRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(notice.title).font(MenuFont.heading(.headline))
-            Text(notice.message).font(MenuFont.body(.subheadline)).foregroundStyle(.secondary)
+            if !notice.message.isEmpty {
+                Text(notice.message).font(MenuFont.body(.subheadline)).foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
