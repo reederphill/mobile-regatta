@@ -650,6 +650,12 @@ public actor QueueMatchmaker {
         await restrictionsChanged(id)
     }
 
+    /// Whether the player's livery is locked (#21, #159): from her fleet's lock until its race closes, unless she gave
+    /// her seat up.
+    public func holdsLivery(_ id: String) -> Bool {
+        starting[id] != nil || races.values.contains { $0.contains(id) }
+    }
+
     /// Dev only (`POST /dev/situation`, #148): the queue locks now with the player in it, so the RaceSession contract's
     /// `fleetLocked` has a hand-off without waiting out `lockAfter`.
     /// Returns the race, if one locked with her in it.

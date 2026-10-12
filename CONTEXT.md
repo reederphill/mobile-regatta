@@ -501,6 +501,13 @@ _Avoid_: skin
 A pattern and sail graphic with two or three colour slots, which the player fills from the safe palette. Starter designs are free, some are earned by racing, and the rest are sold one at a time.
 _Avoid_: skin, template
 
+**Earned design**:
+A livery design a player owns once her completed online races reach its threshold (10, 50 and 200 for the skiff). A completed race is one she finished, by distance, DSQ or OCS; a retirement or a cancelled race counts nothing. Before then she can try it on but not store it; a stored design she no longer owns races as the same colours on a free starter design.
+_Avoid_: unlock (as a noun for the design), achievement
+
+**Livery lock**:
+From her fleet's lock until its race closes, a player's livery can't be changed: the briefing has already shown it to the fleet.
+
 **Safe palette**:
 The only colours a livery may use: readable against every venue's water and never the hue of an on-water cue (vermillion, orange, yellow, or the give-way chevron's blue). White and charcoal are allowed.
 

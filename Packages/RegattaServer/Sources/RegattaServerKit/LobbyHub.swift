@@ -170,7 +170,8 @@ public final class LobbyHub: LobbyRaceEvents, Sendable {
         state = Mutex(State(roomTokens: settings.roomBurst))
     }
 
-    /// Until #159 stores liveries: the chip of the starter livery the briefing shows for her.
+    /// The chip of the starter livery the briefing shows for her: a player who stored none, and tests. The server's
+    /// chips are `StoredLiveries.chip(of:)` (#159).
     public static let starterChip: LobbyChipSource = { player in
         let fallback = LiveryChip(deck: SwatchID("sky-blue"), sail: SwatchID("white"))
         guard let livery = try? await StarterLiveries().livery(of: player),

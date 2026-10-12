@@ -25,13 +25,16 @@ extension ServiceEndpoint {
     /// one. `moderation` is #153's; until then nobody is muted and nothing can be reported.
     ///
     /// Usage analytics (#156) go to `analyticsStore` (memory by default), rolled up and purged by the retention job the
-    /// HTTP server runs.
+    /// HTTP server runs. Players' liveries (#159) are kept in `liveryStore` (memory by default): the profile stores and
+    /// shows them, the briefing reads them at fleet lock, the lobby shows their chips, and a close that earns a design
+    /// tells analytics.
     public static func make(config: ServerConfig, store: any AccountStore, archive: any RaceArchive = InMemoryRaceArchive(),
                             restrictions: any RestrictionStore = InMemoryRestrictionStore(), ratings: (any RatingBook)? = nil,
                             registry: RaceRegistry? = nil, fetcher: (any CertificateFetching)? = nil,
                             submitter: (any LeaderboardSubmitting)? = nil, lobbyStore: (any LobbyStore)? = nil,
                             wordList: ChatWordList? = nil, classifier: (any ToxicityClassifier)? = nil,
-                            moderation: (any LobbyModeration)? = nil, analyticsStore: (any AnalyticsStore)? = nil) throws -> ServiceEndpoint {
+                            moderation: (any LobbyModeration)? = nil, analyticsStore: (any AnalyticsStore)? = nil,
+                            liveryStore: (any LiveryStore)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
         let verifier: any GameCenterVerifier
         if let pem = identity.appleRootsPEM {
@@ -61,20 +64,29 @@ extension ServiceEndpoint {
         if checker == nil, let key = config.chat.moderationKey { checker = try OpenAIModerationClassifier(key: key) }
         var lobbySettings = config.chat.lobby
         lobbySettings.rating = rating
+        // The livery lock reads the queue, which is made below and reads the liveries.
+        let queueBox = LateBound<QueueMatchmaker>()
+        let liveries = StoredLiveries(store: liveryStore ?? InMemoryLiveryStore(), ratings: book,
+                                      isLocked: { await queueBox.value?.holdsLivery($0) ?? false })
         let hub = LobbyHub(settings: lobbySettings, store: lobbyStore ?? InMemoryLobbyStore(), ratings: book,
-                           moderation: moderation ?? NoModeration(), wordList: words, classifier: checker.map { ClassifierGate($0) })
+                           moderation: moderation ?? NoModeration(), wordList: words, classifier: checker.map { ClassifierGate($0) },
+                           chip: { await liveries.chip(of: $0) })
         let analyticsStore = analyticsStore ?? InMemoryAnalyticsStore()
         let analytics = AnalyticsIngest(settings: config.analytics, store: analyticsStore)
+        let unlocks = EarnedUnlocks(ratings: book, earned: liveries.earned, analytics: analytics)
         let lifecycle = RaceLifecycle(settings: config.lifecycle, archive: archive, tokenKey: config.tokenKey,
                                       tokenLifetime: config.tokenLifetime, toolchain: config.serverBuild, registry: registry, rated: rated,
-                                      lobby: hub)
+                                      completed: { await unlocks.completed($0) }, lobby: hub)
         let matchmaker = QueueMatchmaker(
             settings: queue, registry: registry,
             draw: RaceDraw(pairings: OnlinePairing.bundled(venues: queue.venues),
                            seeds: FixtureWindSeedPools(poolSize: queue.windSeedPoolSize, reuseCap: queue.windSeedReuseCap)),
             tokenKey: config.tokenKey, tokenLifetime: config.tokenLifetime, restrictions: restrictions, runningRaces: lifecycle,
+            liveries: { await liveries.raceLivery(of: $0) },
             fleetRatings: { humans in try await book.ratings(of: humans.map(\.teamPlayerID)).mapValues(\.displayed) },
             seatReleased: { await lifecycle.seatReleased($0, race: $1) }, lobby: hub, launch: lifecycle.launcher())
+        queueBox.set(matchmaker)
+        let earned = liveries.earned
         return ServiceEndpoint(
             config: ServiceEndpointConfig(termsVersion: identity.termsVersion, sessionLifetime: identity.sessionLifetime,
                                           streamIdleTimeout: identity.streamIdleTimeout, frameCap: identity.frameCap,
@@ -86,10 +98,11 @@ extension ServiceEndpoint {
             backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
                                       raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
                                       lobby: { ServerLobbyService(hub: hub, player: $0) },
-                                      profile: { ServerProfileService(player: $0, ratings: book, restrictions: restrictions, config: rating) },
+                                      profile: { ServerProfileService(player: $0, ratings: book, restrictions: restrictions, liveries: liveries,
+                                                                      progress: { earned.progress(completedRaces: $1) }, config: rating) },
                                       analytics: { analytics.service(for: $0) }),
             matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub, analytics: analytics,
-            analyticsRetention: AnalyticsRetention(settings: config.analytics, store: analyticsStore))
+            analyticsRetention: AnalyticsRetention(settings: config.analytics, store: analyticsStore), ratings: book)
     }
 
     /// The lobby's word list (#152, owner 2026-10-11: the offline list always applies). Outside `ENV=dev` it is the
@@ -109,7 +122,7 @@ extension ServiceEndpoint {
 
     /// `POST /dev/situation` (dev only): puts the test account in the contract situation asked for, and says how
     /// the client signs in for it. Only the suites this server serves: Identity and Terms (#145), Queue (#146),
-    /// RaceSession (#148), Lobby (#152), AnalyticsTransport (#156).
+    /// RaceSession (#148), Lobby (#152), AnalyticsTransport (#156), Profile (#159).
     func arrange(_ request: DevSituationRequest) async -> HTTPReply {
         let current = config.termsVersion
         func signedIn(accepting version: Int?, multiplayerRestricted: Bool = false, underage: Bool = false,
@@ -137,8 +150,11 @@ extension ServiceEndpoint {
         if request.service == "AnalyticsTransport", analytics == nil {
             return HTTPReply(.notFound, error: "this server takes no analytics")
         }
+        if request.service == "ProfileService", matchmaker == nil || ratings == nil {
+            return HTTPReply(.notFound, error: "this server has no profiles")
+        }
         let account = AccountPlayer(teamPlayerID: request.teamPlayerID, gamePlayerID: request.gamePlayerID, alias: "Contract")
-        let lifecycle = lifecycle, lobby = lobby, analytics = analytics
+        let lifecycle = lifecycle, lobby = lobby, analytics = analytics, ratings = ratings
         /// The lobby, open to her (#152): free text unlocked unless `locked`, and the room holding a system line and then
         /// a line by another player, seeded here. `standing`: hers, set on the dev server's `NoModeration`.
         func lobbyOpen(locked: Bool = false, standing: ChatStanding = .clear) async -> HTTPReply {
@@ -217,6 +233,17 @@ extension ServiceEndpoint {
         case ("AnalyticsTransport", "accepting"): return await signedIn(accepting: current)
         case ("AnalyticsTransport", "unavailable"):
             return await signedIn(accepting: current) { _ in analytics?.devSetUnavailable(player) }
+        // The profile (#159). `established`: 12 completed races and 2 wins, set on the dev server's in-memory rating
+        // book (the first earned design is at 10); `liveryLocked`: the queue locks her fleet now.
+        case ("ProfileService", "signedOut"): return HTTPReply(.ok, json: DevSituationResponse(signIn: false))
+        case ("ProfileService", "newPlayer"): return await signedIn(accepting: current)
+        case ("ProfileService", "established"):
+            guard let book = ratings as? InMemoryRatingBook else { return HTTPReply(.notFound, error: "established needs the dev server's rating book") }
+            return await signedIn(accepting: current) { _ in book.setStats(completedRaces: 12, wins: 2, for: player) }
+        case ("ProfileService", "suspended"):
+            return await signedIn(accepting: current) { await $0.arrangeSuspension(player, until: Int64(sessions.now().timeIntervalSince1970) + 3600) }
+        case ("ProfileService", "banned"): return await signedIn(accepting: current) { await $0.arrangeSuspension(player, until: nil) }
+        case ("ProfileService", "liveryLocked"): return await signedIn(accepting: current) { await $0.arrangeLock(account) }
         default:
             return HTTPReply(.notFound, error: "\(request.service).\(request.situation) isn't served yet")
         }

@@ -10,11 +10,11 @@ import Testing
 /// The #145 review's hardening of the service endpoint: one gate in front of every service, deny by default; the
 /// last online session time moving with use; a cap on open streams.
 @Suite(.timeLimit(.minutes(1))) struct ServiceEndpointHardeningTests {
-    /// Every gated request a connection can make that has no refusal shape of its own: race sessions, profile,
-    /// analytics. (Data deletion needs only the sign-in: `deletionNeedsOnlyTheSignIn`.)
+    /// Every gated request a connection can make that has no refusal shape of its own: race sessions, analytics.
+    /// (Data deletion needs only the sign-in: `deletionNeedsOnlyTheSignIn`. The profile answers a signed-out
+    /// connection: `profileAnswersSignedOutAndClosesOtherRefusals`.)
     static let ungatedShapes: [(String, Message)] = [
         ("race session", .raceSessionRequest(ServiceRequest(id: 7, call: .openResults))),
-        ("profile", .profileRequest(ServiceRequest(id: 7, call: .profile))),
         ("analytics", .analyticsRequest(ServiceRequest(id: 7, call: WireAnalyticsBatch(installID: "i", events: [])))),
     ]
 
@@ -43,6 +43,20 @@ import Testing
             #expect(accepted.closeReason == "no \(name) service")
             withExtendedLifetime(connection) {}
         }
+    }
+
+    /// #159: signed out, the profile answers `notSignedIn` (the Profile contract's shape) and the connection stays open;
+    /// signed in with the terms unaccepted, it closes as before.
+    @Test func profileAnswersSignedOutAndClosesOtherRefusals() async throws {
+        let endpoint = ServiceFixtures.endpoint()
+        let signedOut = try await InProcessServiceLink.open(endpoint)
+        await #expect(throws: ProfileError.notSignedIn) { try await RemoteProfileService(ServiceConnection(signedOut)).profile() }
+        #expect(signedOut.closeReason == nil)
+
+        let (unaccepted, held, _) = try await ServiceFixtures.signedIn(endpoint, "u-profile")
+        try await Self.send(.profileRequest(ServiceRequest(id: 7, call: .profile)), on: unaccepted)
+        #expect(unaccepted.closeReason == "profile refused: terms not accepted")
+        withExtendedLifetime(held) {}
     }
 
     /// Owner ruling (2026-10-08): "Delete my online data" needs only the sign-in. Refused signed out; signed in, it

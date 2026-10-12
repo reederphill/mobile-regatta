@@ -97,6 +97,9 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     private let start: RaceStarter
     /// Hears the players a close has just rated, after it is stored (the leaderboard mirror, #151); nil: nobody.
     private let rated: (@Sendable ([String]) -> Void)?
+    /// Hears the players who completed a close (`earnedProgressResultCodes`), after it is stored: the earned designs'
+    /// unlocks (#159). Awaited.
+    private let completed: (@Sendable ([String]) async -> Void)?
 
     private struct Live {
         let session: RaceSession
@@ -134,7 +137,8 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
 
     public init(settings: RaceLifecycleSettings = RaceLifecycleSettings(), archive: any RaceArchive, tokenKey: SymmetricKey,
                 tokenLifetime: TimeInterval, toolchain: String, now: @escaping @Sendable () -> Date = { Date() },
-                rated: (@Sendable ([String]) -> Void)? = nil, lobby: (any LobbyRaceEvents)? = nil, start: @escaping RaceStarter) {
+                rated: (@Sendable ([String]) -> Void)? = nil, completed: (@Sendable ([String]) async -> Void)? = nil,
+                lobby: (any LobbyRaceEvents)? = nil, start: @escaping RaceStarter) {
         self.lobby = lobby
         self.settings = settings
         self.archive = archive
@@ -143,15 +147,17 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         self.toolchain = toolchain
         self.now = now
         self.rated = rated
+        self.completed = completed
         self.start = start
     }
 
     /// Races start on `registry`, on the wall clock.
     public init(settings: RaceLifecycleSettings = RaceLifecycleSettings(), archive: any RaceArchive, tokenKey: SymmetricKey,
                 tokenLifetime: TimeInterval, toolchain: String, registry: RaceRegistry, now: @escaping @Sendable () -> Date = { Date() },
-                rated: (@Sendable ([String]) -> Void)? = nil, lobby: (any LobbyRaceEvents)? = nil) {
+                rated: (@Sendable ([String]) -> Void)? = nil, completed: (@Sendable ([String]) async -> Void)? = nil,
+                lobby: (any LobbyRaceEvents)? = nil) {
         self.init(settings: settings, archive: archive, tokenKey: tokenKey, tokenLifetime: tokenLifetime, toolchain: toolchain, now: now,
-                  rated: rated, lobby: lobby, start: { session, ended in try await registry.start(session, onClose: ended) })
+                  rated: rated, completed: completed, lobby: lobby, start: { session, ended in try await registry.start(session, onClose: ended) })
     }
 
     // MARK: Starting
@@ -514,6 +520,9 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
         // Every rated player, seated or not: one who left after the gun was rated as retired, and is told.
         for change in rating?.changes ?? [] { push(RatingChange(raceID: raceID, outcome: Self.outcome(change)), to: change.playerID) }
         if !changes.isEmpty { rated?(changes.keys.sorted()) }
+        // A cancelled race never gets here: it completes nobody's race (#30).
+        let completers = stats.filter(\.completed).map(\.playerID)
+        if !completers.isEmpty { await completed?(completers) }
         // The lobby's "X won" (#36, #152): a queue race's human winner who sailed her own finish, by her roster name.
         if live.announces, case .winner(let venue, let nickname)? = stored.summary.winnerLine(sailedWhileGone: Set(covered.keys)),
            let first = stored.summary.results.rows.first, let winner = live.seats.first(where: { $0.value == first.seat })?.key {
