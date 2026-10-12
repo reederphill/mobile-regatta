@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaServices
 import Testing
 
@@ -13,7 +14,8 @@ import Testing
         #expect(FakeServiceScenario.allCases.map(\.rawValue) == [
             "signed-out", "underage", "communication-restricted", "multiplayer-restricted", "offline", "queued", "cancelled-race",
             "online-results", "online-results-unrated", "terms-bump", "suspended", "suspended-permanent", "cooldown", "cannot-race",
-            "update-required", "terms-save-failed", "session-failed", "unreachable", "connecting",
+            "update-required", "terms-save-failed", "session-failed", "unreachable", "connecting", "joinable", "joinable-alone",
+            "joinable-hold",
         ])
         for scenario in FakeServiceScenario.allCases {
             let services = ServiceSet.fake(scenario)
@@ -35,6 +37,11 @@ import Testing
                 #expect(lobby == .closed(.notSignedIn))
                 await #expect(throws: ProfileError.notSignedIn) { try await services.profile.profile() }
                 #expect(await services.identity.signIn().player != nil, "signing in gives a player")
+                // Past the gate she joins the queue (#140): the fake queue takes the join for the sign-in.
+                try await services.queue.join()
+                var states: [QueueState] = []
+                for await state in services.queue.stateUpdates() { states.append(state) }
+                #expect(states == [.idle] + FakeServiceScenario.joinable.afterJoin)
             case .underage:
                 #expect(player?.isUnderage == true && player?.canChat == false)
                 #expect(lobby == .closed(.communicationRestricted))
@@ -52,6 +59,8 @@ import Testing
                 #expect(terms == .needsAcceptance(current: TermsVersion(2), lastAccepted: TermsVersion(1)), "the sheet asks again")
                 #expect(lobby == .closed(.termsNotAccepted))
                 #expect(try await services.terms.accept(TermsVersion(2)).isAccepted)
+                try await services.queue.join()
+                #expect(try await services.raceSession.handOff().briefing == FakeServiceScenario.briefing(), "a queue to join, to its briefing")
             case .offline:
                 await #expect(throws: StoreError.offline) { try await services.store.products() }
                 await #expect(throws: AnalyticsError.unavailable) {
@@ -68,6 +77,34 @@ import Testing
                 while let state = await states.next() { last = state }
                 #expect(last == .fleetLocked, "the countdown ends in fleet lock")
                 #expect(try await services.raceSession.handOff().raceID == RaceID("fake-race"))
+                #expect(try await services.raceSession.handOff().briefing == FakeServiceScenario.briefing())
+            // The queue from a tap to fleet lock (#140): idle, and a join plays the wait.
+            case .joinable, .joinableAlone, .joinableHold:
+                #expect(queue == .idle)
+                await #expect(throws: QueueError.notQueued) { try await services.queue.leave() }
+                try await services.queue.join()
+                var states: [QueueState] = []
+                for await state in services.queue.stateUpdates() { states.append(state) }
+                #expect(states == [.idle] + scenario.afterJoin, "\(scenario): the wait after a join")
+                #expect(states.suffix(2) == [.fleetLocked, .idle], "the fakes sail no race: the queue is free after the lock")
+                // Race online again after the lock (#140): the wait plays again.
+                try await services.queue.join()
+                var again: [QueueState] = []
+                for await state in services.queue.stateUpdates() { again.append(state) }
+                #expect(again == states)
+                let waits = states.compactMap { state -> QueuedStatus? in
+                    if case .queued(let status) = state { status } else { nil }
+                }
+                if scenario == .joinableAlone { #expect(waits.allSatisfy { $0.queuedPlayers == 1 }, "nobody else waits") }
+                #expect((waits.first?.secondsToLock ?? 0 > 60) == (scenario == .joinableHold), "only a hold waits longer than a minute")
+                #expect(waits.last?.secondsToLock == 0, "the fleet is being set before it locks")
+                let briefing = try #require(try await services.raceSession.handOff().briefing)
+                #expect(briefing.fleet.count == 6 && briefing.setup.fleetSize == 6)
+                #expect(briefing.fleet.filter(\.isBot).count == 2)
+                #expect(briefing.fleet.allSatisfy { $0.isBot == ($0.rating == nil) }, "a rating for every human, none for a bot")
+                #expect(briefing.fleet.indices.allSatisfy { (briefing.setup.seats[$0] == .bot) == briefing.fleet[$0].isBot })
+                #expect(Set(briefing.fleet.map(\.livery.sailNumber)).count == 6, "sail numbers as the fleet shows them")
+                #expect(briefing.isMe(0) && briefing.briefingSeconds == 15 && briefing.gunInSeconds == 75)
             case .cancelledRace:
                 var updates: [RaceUpdate] = []
                 for await update in services.raceSession.results() { updates.append(update) }

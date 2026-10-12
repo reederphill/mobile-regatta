@@ -21,6 +21,8 @@ public protocol RatingBook: Sendable {
     func mirrorPending(_ playerIDs: [String]?, maxFailures: Int, limit: Int) async throws -> [MirrorEntry]
     func mirrored(_ playerID: String, rating: Int) async throws
     func mirrorFailed(_ playerID: String) async throws
+    /// The rating changes a race made, by player (#157: the ratings' calibration).
+    func changes(of race: UUID) async throws -> [StoredRatingChange]
 }
 
 extension RatingStore: RatingBook {}

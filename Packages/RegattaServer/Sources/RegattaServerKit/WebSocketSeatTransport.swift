@@ -53,6 +53,14 @@ public final class WebSocketSeatTransport: SeatTransport {
         }
     }
 
+    /// A WebSocket ping carrying `stamp` (#157: the server's round-trip measure), unless the connection is closing.
+    func ping(_ stamp: UInt64) {
+        guard !state.withLock({ $0.closed }) else { return }
+        var data = channel.allocator.buffer(capacity: 8)
+        data.writeInteger(stamp)
+        channel.writeAndFlush(WebSocketFrame(fin: true, opcode: .ping, data: data), promise: nil)
+    }
+
     /// The host disconnected the seat.
     public func close() { close(code: .normalClosure, reason: nil) }
 

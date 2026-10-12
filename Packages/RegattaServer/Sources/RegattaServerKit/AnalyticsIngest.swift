@@ -61,6 +61,8 @@ public protocol AnalyticsStore: Sendable {
     func rollUp(limit: Int, bounds: AnalyticsRollup.Bounds) async throws -> Int
     /// Deletes the counted raw events received before `time`. Returns how many.
     func purge(receivedBefore time: Date) async throws -> Int
+    /// The server's raw events named one of `names` that happened at or after `since`, oldest first (#157).
+    func serverEvents(named names: [String], since: Date) async throws -> [StoredAnalyticsEvent]
     func daily(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsDaily]
     func dailyProperties(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsPropertyStats]
 }
@@ -390,4 +392,12 @@ public final class InMemoryAnalyticsStore: AnalyticsStore {
 
     /// Every raw event still kept, oldest first: for tests.
     public func raw() -> [StoredAnalyticsEvent] { state.withLock { $0.rows.map(\.event) } }
+
+    public func serverEvents(named names: [String], since: Date) async throws -> [StoredAnalyticsEvent] {
+        let wanted = Set(names)
+        return state.withLock { state in
+            state.rows.map(\.event).filter { $0.source == .server && wanted.contains($0.name) && $0.occurredAt >= since }
+                .sorted { $0.occurredAt < $1.occurredAt }
+        }
+    }
 }

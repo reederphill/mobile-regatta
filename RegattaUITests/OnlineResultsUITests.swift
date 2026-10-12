@@ -5,10 +5,10 @@ import XCTest
 /// then the rating. A harness, not a sailed race: the session's use of the stream is unit-tested
 /// (`OnlineResultsTests`), and the end-to-end through a real server is #163's. CI only, like every UI test.
 final class OnlineResultsUITests: XCTestCase {
-    @MainActor private func launch() -> XCUIApplication {
+    @MainActor private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         if app.state != .notRunning { app.terminate() }
-        app.launchArguments = ["-uitesting", "-fakeServices", "online-results", "-onlineResults", "-completedRaces", "9"]
+        app.launchArguments = ["-uitesting", "-fakeServices", "online-results", "-onlineResults", "-completedRaces", "9"] + extra
         app.launch()
         return app
     }
@@ -42,13 +42,15 @@ final class OnlineResultsUITests: XCTestCase {
         XCTAssertTrue(app.buttons["results-raceAgain"].exists && app.buttons["results-menu"].exists)
     }
 
-    /// Race again joins the queue and goes home.
+    /// Race again goes home with the queue joining (#140): its bar in Race online's place.
     @MainActor func testRaceAgainGoesHome() throws {
-        let app = launch()
+        // The scripted queue at a fifth of its pace: Home shows for 20 s before the fleet locks.
+        let app = launch(["-timescale", "0.2"])
         let raceAgain = app.buttons["results-raceAgain"]
         XCTAssertTrue(raceAgain.waitForExistence(timeout: 30), "no Race again")
         raceAgain.tap()
         XCTAssertTrue(app.staticTexts["race-results"].waitForNonExistence(timeout: 10), "the results stayed up")
         XCTAssertTrue(app.buttons["toolbar-myboat"].waitForExistence(timeout: 10), "Race again didn't go home")
+        XCTAssertTrue(app.descendants(matching: .any)["queue-bar"].firstMatch.waitForExistence(timeout: 15), "Race again didn't join the queue")
     }
 }

@@ -26,10 +26,12 @@ extension ServiceEndpoint {
     ///
     /// Moderation (#153) keeps its reports and penalties in `moderationStore` (memory by default): the lobby's
     /// standings and reports, race reports read from `archive`, racing suspensions written to `restrictions`, and
-    /// nicknames it overrode shown from sign-in.
+    /// nicknames it overrode shown from sign-in. The nightly fair-play scan (#155) reads `archive`'s races and raises
+    /// its flags in `moderationStore`.
     ///
     /// Usage analytics (#156) go to `analyticsStore` (memory by default), rolled up and purged by the retention job the
-    /// HTTP server runs. Players' liveries (#159) are kept in `liveryStore` (memory by default): the profile stores and
+    /// HTTP server runs; so do the measures (#157): the queue's waits, fleets and briefing leaves, and each seat's round
+    /// trips, read back with the window's races by the admin routes. Players' liveries (#159) are kept in `liveryStore` (memory by default): the profile stores and
     /// shows them, the briefing reads them at fleet lock, the lobby shows their chips, and a close that earns a design
     /// tells analytics.
     ///
@@ -103,6 +105,7 @@ extension ServiceEndpoint {
         deletion?.attach(hub)
         let retention = deletion.map { RetentionJobs(deletion: $0, moderation: moderationStore, lobby: hub) }
         let analytics = AnalyticsIngest(settings: config.analytics, store: analyticsStore)
+        let measures = ServerMeasures(analytics: analytics, archive: archive, ratings: book, pingInterval: config.roundTripPingInterval)
         let unlocks = EarnedUnlocks(ratings: book, earned: liveries.earned, analytics: analytics)
         let lifecycle = RaceLifecycle(settings: config.lifecycle, archive: archive, tokenKey: config.tokenKey,
                                       tokenLifetime: config.tokenLifetime, toolchain: config.serverBuild, registry: registry, rated: rated,
@@ -114,7 +117,8 @@ extension ServiceEndpoint {
             tokenKey: config.tokenKey, tokenLifetime: config.tokenLifetime, restrictions: restrictions, runningRaces: lifecycle,
             liveries: { await liveries.raceLivery(of: $0) },
             fleetRatings: { humans in try await book.ratings(of: humans.map(\.teamPlayerID)).mapValues(\.displayed) },
-            seatReleased: { await lifecycle.seatReleased($0, race: $1) }, lobby: hub, launch: lifecycle.launcher())
+            seatReleased: { await lifecycle.seatReleased($0, race: $1) }, lobby: hub, launch: lifecycle.launcher(),
+            events: { measures.queue($0) })
         queueBox.set(matchmaker)
         let earned = liveries.earned
         return ServiceEndpoint(
@@ -145,7 +149,8 @@ extension ServiceEndpoint {
                                       deletion: { player in deletion.map { ServerDataDeletionService(deletion: $0, player: player) } }),
             matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub, analytics: analytics,
             analyticsRetention: AnalyticsRetention(settings: config.analytics, store: analyticsStore), ratings: book,
-            moderation: moderation, deletion: deletion, retention: retention)
+            moderation: moderation, deletion: deletion, retention: retention, archive: archive,
+            fairPlay: FairPlayJob(store: moderationStore, archive: archive), measures: measures)
     }
 
     /// The lobby's word list (#152, owner 2026-10-11: the offline list always applies). Outside `ENV=dev` it is the

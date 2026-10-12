@@ -126,6 +126,19 @@ public typealias RaceLauncher = @Sendable (_ fleet: LockedFleet, _ closed: @esca
 public typealias SeatReleased = @Sendable (_ playerID: String, _ race: UUID) async -> Void
 
 /// A queued player, since when.
+/// What the queue tells the measures (#157, #28): who joined, how long each waited, the fleets it locked, and the
+/// briefing leaves.
+public enum QueueEvent: Sendable, Equatable {
+    case joined(String)
+    /// Out of the queue before her fleet locked: she left, or her connection went.
+    case left(String, waited: TimeInterval)
+    /// Her fleet locked, with this many humans in it.
+    case matched(String, waited: TimeInterval, humans: Int)
+    case fleetLocked(humans: Int, boats: Int)
+    /// She left a race between lock and gun; `cooldown`: the cooldown it started, 0 if none.
+    case briefingLeave(String, cooldown: TimeInterval)
+}
+
 public struct QueueEntry: Sendable, Equatable {
     public let player: AccountPlayer
     public let joinedAt: Date
@@ -259,13 +272,16 @@ public actor QueueMatchmaker {
     public private(set) var lastFleet: LockedFleet?
     private var driver: Task<Void, Never>?
     private var stopped = false
+    /// Hears what the measures count (#157); nil: nobody.
+    private let events: (@Sendable (QueueEvent) -> Void)?
 
     public init(settings: QueueSettings, registry: RaceRegistry, draw: RaceDraw, tokenKey: SymmetricKey, tokenLifetime: TimeInterval,
                 random: SeededRandom = .system(), now: @escaping @Sendable () -> Date = { Date() },
                 bands: @escaping RatingBands = { [$0] },
                 restrictions: any RestrictionStore = InMemoryRestrictionStore(), runningRaces: (any RunningRaces)? = nil,
                 liveries: LiverySource? = nil, ratings: RatingSource? = nil, fleetRatings: FleetRatingSource? = nil,
-                seatReleased: SeatReleased? = nil, lobby: (any LobbyRaceEvents)? = nil, launch: RaceLauncher? = nil) {
+                seatReleased: SeatReleased? = nil, lobby: (any LobbyRaceEvents)? = nil, launch: RaceLauncher? = nil,
+                events: (@Sendable (QueueEvent) -> Void)? = nil) {
         self.settings = settings
         self.registry = registry
         self.draw = draw
@@ -281,6 +297,7 @@ public actor QueueMatchmaker {
         self.fleetRatings = fleetRatings
         self.seatReleased = seatReleased
         self.lobby = lobby
+        self.events = events
         briefingLeaves = BriefingLeaveTracker(store: restrictions, rule: settings.briefingLeaves, now: now)
         self.launch = launch ?? Self.registryLauncher(registry)
     }
@@ -411,19 +428,24 @@ public actor QueueMatchmaker {
         case .idle: break
         }
         book.add(player, at: now())
+        events?(.joined(id))
         await refreshHold()
         await lockIfDue()
         pushAll()
     }
 
     public func leave(_ id: String) throws(QueueError) {
+        let joined = book.entries.first { $0.player.teamPlayerID == id }?.joinedAt
         guard book.remove(id) else { throw .notQueued }
+        if let joined { events?(.left(id, waited: now().timeIntervalSince(joined))) }
         pushAll()
     }
 
     /// The player's connection ended: a place in the queue goes with it (leaving is free). A locked seat stays.
     public func dropped(_ id: String) {
+        let joined = book.entries.first { $0.player.teamPlayerID == id }?.joinedAt
         guard book.remove(id) else { return }
+        if let joined { events?(.left(id, waited: now().timeIntervalSince(joined))) }
         pushAll()
     }
 
@@ -511,6 +533,8 @@ public actor QueueMatchmaker {
         }
         fleetsLocked += 1
         lastFleet = locked
+        for entry in fleet { events?(.matched(entry.player.teamPlayerID, waited: time.timeIntervalSince(entry.joinedAt), humans: humans.count)) }
+        events?(.fleetLocked(humans: humans.count, boats: setup.fleetSize))
         pushAll()
     }
 
@@ -569,7 +593,8 @@ public actor QueueMatchmaker {
     func briefingLeave(_ raceID: UUID, _ leave: BriefingLeave) async {
         guard let players = races[raceID], players.indices.contains(leave.seat), !players[leave.seat].isEmpty else { return }
         let id = players[leave.seat]
-        await briefingLeaves.recordLeave(id, race: raceID)
+        let cooldown = await briefingLeaves.recordLeave(id, race: raceID)
+        events?(.briefingLeave(id, cooldown: cooldown == nil ? 0 : briefingLeaves.rule.cooldown))
         if leave.kind == .left { await releaseSeat(raceID, seat: leave.seat) }
         await loadRestrictions(id)
         pushAll()

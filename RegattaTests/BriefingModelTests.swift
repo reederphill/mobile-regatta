@@ -2,6 +2,7 @@ import Foundation
 import Testing
 import RegattaBots
 import RegattaCore
+import RegattaServices
 @testable import Regatta
 
 /// The briefing's model (#130): the words it says about the wind, current and course, its countdown and its start.
@@ -218,5 +219,41 @@ extension BriefingModelTests {
         #expect(Set(rivals.map(\.seat)) == config.rivalSeats)
         #expect(rivals.count == 2)
         #expect(rivals.allSatisfy { $0.isBot && !$0.isMe && $0.rating == nil })
+    }
+
+    /// #140, #147: a locked fleet's briefing is the payload's: its names, its bots, its liveries with the fleet's sail
+    /// numbers, and a plain rating for every human and none for a bot.
+    @Test func payloadBuildsTheOnlineFleetWithNamesBotsAndRatings() throws {
+        let payload = FakeServiceScenario.briefing()
+        let model = BriefingModel(payload: payload, files: try RaceFiles(resolving: payload.setup), menuMusic: SilentMenuMusic())
+        #expect(model.isFleetLocked)
+        #expect(model.mySeat == payload.yourSeat)
+        #expect(model.fleet.map(\.name) == ["You", "Wren", "Kestrel", "Tern", "Skua", "Petrel"])
+        #expect(model.fleet.map(\.isMe) == [true, false, false, false, false, false])
+        #expect(model.fleet.map(\.isBot) == [false, false, false, false, true, true])
+        #expect(model.fleet.map(\.rating) == ["1500", "1500", "1500", "1500", nil, nil], "no provisional mark, none for a bot")
+        #expect(model.fleet.map(\.livery) == payload.fleet.map(\.livery), "as locked, not drawn again on the device")
+        #expect(model.fleet.allSatisfy { !$0.isRival })
+        #expect(model.venueName == RaceFiles.defaults.venue.content.displayName)
+        #expect(!model.windLines.isEmpty && model.courseLine.hasPrefix("Course: "))
+        // A practice briefing is no locked fleet's.
+        #expect(try !Self.model(mode: Self.online).isFleetLocked)
+    }
+
+    /// #140: it counts down the payload's seconds, once, on the injected clock.
+    @Test func onlineBriefingFromPayloadCountsDownBriefingSeconds() throws {
+        var payload = FakeServiceScenario.briefing()
+        payload.briefingSeconds = 12
+        let clock = FakeClock()
+        let model = BriefingModel(payload: payload, files: try RaceFiles(resolving: payload.setup), menuMusic: SilentMenuMusic(),
+                                  now: { clock.date })
+        #expect(model.mode == .online(seconds: 12))
+        #expect(model.displayedSeconds == 12, "the full length before it begins")
+        model.begin()
+        clock.advance(11.5)
+        #expect(model.displayedSeconds == 1 && !model.advanceIfDue())
+        clock.advance(0.5)
+        #expect(model.advanceIfDue())
+        #expect(!model.advanceIfDue(), "once")
     }
 }

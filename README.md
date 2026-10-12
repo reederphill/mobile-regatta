@@ -93,7 +93,7 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     RaceRegistry.swift       running races by id, and nothing else
     SeatConnection.swift     one connection's Hello, JoinRace and hand-off to the host
     WebSocketSeatTransport.swift  a seat's WebSocket as the host's SeatTransport: buffered, never blocks
-    Routes.swift             /health and the dev-only /dev/instant-race and /dev/situation
+    Routes.swift             /health, the dev-only /dev/instant-race and /dev/situation, and /admin/ (#154)
     RegattaHTTPServer.swift  the port: HTTP/1.1, upgraded to a WebSocket at /race or /service
     ServiceEndpoint.swift    one /service connection (#145): handshake, session calls, the Terms gate, pulled streams
     ServiceSessions.swift    sign-in by Game Center signature, session tokens (SHA-256 stored), identity and terms
@@ -103,6 +103,9 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     Liveries.swift           seat liveries (#159): stored per player, ownership, the lock, raced as a starter, earned unlocks
     Moderation.swift         moderation (#153): reports, the automatic mute, the chat ladder, racing penalties, the admin queue
     OnlineData.swift         Delete my online data (#160): the plan, the erase, leaderboard blocks, the retention and inactivity jobs
+    AdminAPI.swift           the admin tool (#154): /admin/ routes behind admin tokens, the queue, decisions, penalties, the audit
+    FairPlay.swift           fair-play flags (#155): the nightly scan of the window's race logs, flags to the admin queue
+    Measures.swift           measures and balance queries (#157): queue, fleet, briefing, round-trip and Race again events; queries over logs
   GameCenterIdentity/      Game Center identity verification: Apple's chain, RSA PKCS#1 v1.5 over the signed payload
   RegattaServer/           the `RegattaServer` executable
   RegattaDevAPI/           the dev endpoints' JSON, shared by the server and the load client
@@ -114,11 +117,13 @@ Packages/RegattaServer/   The race server (#65, #67) and the load client; SwiftN
     DataFileStore.swift      every version of every data file, by FileRef; a version never changes
     AnalyticsStore.swift     usage analytics (#156): raw events 90 days, the daily aggregates and the roll-up's arithmetic
     LiveryStore.swift        players' stored liveries (#159), one per player, gone with her
-    ModerationStore.swift    reports and penalties (#153), kept past Delete my online data for their retention
+    ModerationStore.swift    reports and penalties (#153), kept past Delete my online data for their retention; the admin audit (#154); fair-play flags (#155)
     PlayerDataStore.swift    a player's online data erased in one transaction (#160), her seats anonymised, the deletion audit
   RegattaLoadClient/       RegattaClient over a NIO WebSocket: scripted helm, bytes and RTT measured; the
                            contract runner's WebSocketServiceConnector (#145)
   regatta-loadclient/      the `regatta-loadclient` executable
+  RegattaAdminClient/      `regatta-admin`'s commands as the requests they make (#154)
+  regatta-admin/           the `regatta-admin` executable: the admin tool's command line
 Regatta/                The iOS app
   Game/RaceDriver.swift   what the app sails a race through: 30 Hz tick clock, tick frames, the interpolated RenderWorld
   Game/PracticeDriver.swift  an offline practice race: owns the Race and on-device bots, latches your input per tick, keeps the log
@@ -285,6 +290,7 @@ with it, the signature is checked against Apple's chain. It reads:
 | `LEADERBOARD_SWEEP_SECONDS` | `300` | how often leaderboard scores that weren't sent are tried again (#151) |
 | `OPENAI_MODERATION_API_KEY` | none | the lobby's toxicity classifier (#152, #51): each free-text post that passes the bundled word list is also checked by OpenAI's moderation endpoint (the text only). Required outside `ENV=dev`. Unset, nothing is called and the word list alone filters. When the classifier can't answer, the post goes through on the word list |
 | `CHAT_EXTRA_BLOCKED_PHRASES` | none | `ENV=dev` only: comma-separated phrases the lobby's filter blocks besides the word list (the contract runner needs `contract filtered phrase`) |
+| `REGATTA_ADMIN_TOKENS` | none | the admin tool (#154): comma-separated `id:token` pairs, one per admin, each token 32 characters or more (`openssl rand -hex 32`). Each action through `/admin/` is recorded with the id of the admin whose token it carried. Unset: the server has no `/admin/` routes |
 
 The per-address connection caps (8 on `/service`, 32 on `/race`) count an IPv4 address, or an IPv6 address's /64 prefix.
 A staging or production server behind a proxy must set `CLIENT_ADDRESS_HEADER`, or all its clients share one address's
@@ -294,6 +300,23 @@ cap (#167).
 and answers each client's seat and signed race token. `raceSeconds=S` closes the race S seconds after the gun,
 where it stands (the dev race-length override, for e2e runs); `startSeconds=S` sets the start sequence (default 60);
 `seed=X` makes it reproducible.
+
+The admin tool (#154) is `regatta-admin`, one command per request to the server's `/admin/` routes, as the admin
+whose token is in `REGATTA_ADMIN_TOKEN` (the server at `REGATTA_ADMIN_URL`, default `http://127.0.0.1:8080`):
+`queue` lists what waits, the first due first (24 h from filing, #34); `report <id>` shows a report with the reported
+player's penalties and other reports, and a race report's results and the seat's incidents; `decide <id> <decision>`
+(`dismiss`, `uphold_chat`, `override_nickname`, or a racing penalty); `player <id>`; `penalize <player> <penalty>`
+(`warning`, `suspension_24h`, `suspension_7d`, `permanent`, `rating_reset`); `mute <player>` (the next chat step);
+`nickname-override <player>`; `lift <player> <penalty-id>`; `flag <id>` and `decide-flag <id> dismiss|confirm` for the
+fair-play flags (#155), which the server raises into the same queue each night from the last 30 days' race logs and
+which never penalize anyone; `audit [player]`; and the measures (#157): `measures [days]` (queue wait, humans per fleet,
+briefing leaves and cooldowns, drops, rejoins and RET, the round-trip distribution and the time over 250 ms, the Race
+again rate and the time from finish to re-queue) and `balance [days] [--no-splits]` (rule calls and protests per rule,
+start and leg splits by venue × conditions from a replay of each race, results by tier, the ratings' calibration by
+rating gap, each player's finish variance; races on tuned files left out). The server records what the measures need
+as its own analytics events (`queue_joined`, `queue_wait`, `fleet_locked`, `briefing_leave`, `round_trip`: it pings
+each seated race connection every 2 s). Every action is in the audit. It isn't in
+the container image: run it from a checkout, `swift run --package-path Packages/RegattaServer regatta-admin queue`.
 
 `regatta-loadclient` creates an instant race and sails every seat at once with `RaceClient` on a scripted helm,
 then prints each client's bytes down and up (TCP payload, the join included) and its ping round trips. It exits

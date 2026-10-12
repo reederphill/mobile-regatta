@@ -3,6 +3,7 @@ import Observation
 import RegattaServiceClient
 import RegattaServices
 import SwiftUI
+import UIKit
 
 // The app's online services (#242): the `RegattaServices` protocols (#109, #241), read into the environment values
 // the views use, so the views don't change when the real services arrive (#161–#166). A launch runs on
@@ -66,6 +67,8 @@ final class OnlineStatus {
     private(set) var termsSaveFailed = false
     /// What the terms ask of her, by the server's version against the bundled text's.
     private(set) var termsPrompt = TermsPrompt.none
+    /// The queue, from the Race online tap to fleet lock (#140): the one reader of the queue's state stream.
+    let queue: QueueController
     private let session: Session?
     private let now: () -> Date
 
@@ -77,9 +80,11 @@ final class OnlineStatus {
         self.session = session
         self.now = now
         isOnline = isInitiallyOnline
+        queue = QueueController(queue: services.queue, raceSession: services.raceSession, isOnline: isInitiallyOnline, now: now)
         Task { [weak self] in
             for await status in services.connectivity.statusUpdates() {
                 self?.isOnline = status.isOnline
+                self?.queue.connectionChanged(isOnline: status.isOnline)
                 // Offline the session tries nothing; back online it connects at once (#161).
                 await session?.session.setOnline(status.isOnline)
             }
@@ -98,9 +103,16 @@ final class OnlineStatus {
         Task { [weak self] in
             for await _ in services.identity.stateUpdates() { await self?.refreshAccount() }
         }
-        Task { [weak self] in
-            for await state in services.queue.stateUpdates() { self?.show(state) }
+        queue.onState = { [weak self] state in self?.show(state) }
+        queue.announce = { UIAccessibility.post(notification: .announcement, argument: $0) }
+        queue.whileAwake = { work in
+            let awake = BackgroundAssertion(name: "Leave queue")
+            return Task {
+                await work()
+                awake.end()
+            }
         }
+        queue.start()
     }
 
     /// Whether the app starts online for these launch options: not on the offline scenario's fakes.
@@ -127,8 +139,10 @@ final class OnlineStatus {
         if case .open = phase { tapFailed = false }
     }
 
-    /// The scene became active, or went to the background: the session's socket follows (#161).
+    /// The scene became active, or went to the background: the queue is left there (#140), and the session's socket
+    /// follows (#161).
     func setSceneActive(_ active: Bool) {
+        queue.sceneChanged(isBackground: !active)
         guard let session else { return }
         Task { await session.session.setActive(active) }
     }
@@ -247,4 +261,19 @@ extension EnvironmentValues {
     /// The services' state, for Race online's gate and the lobby's Sign in and Terms of Use (#138). Nil in previews
     /// and tests.
     @Entry var onlineStatus: OnlineStatus? = nil
+}
+
+/// A background task (#140): the app stays awake from here to `end()`, or until the system calls time.
+final class BackgroundAssertion {
+    private var id = UIBackgroundTaskIdentifier.invalid
+
+    init(name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in self?.end() }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
 }

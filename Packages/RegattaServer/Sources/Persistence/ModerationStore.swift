@@ -127,6 +127,82 @@ public struct StoredPenalty: Sendable, Equatable {
     }
 }
 
+/// One action an admin took through the admin tool (#154, migration 0016): its audit.
+public struct StoredAdminAction: Sendable, Equatable {
+    /// Assigned by the store; 0 on an action not yet recorded.
+    public var id: Int64
+    public var actorID: String
+    /// What she did: `AdminAction`'s raw value, e.g. "decide_report".
+    public var action: String
+    /// The player it was about, the report it decided and the penalty it gave or lifted, where it had them.
+    public var playerID: String?
+    public var reportID: Int64?
+    public var penaltyID: Int64?
+    /// The decision or the penalty, in words.
+    public var detail: String
+    public var at: Date
+
+    public init(id: Int64 = 0, actorID: String, action: String, playerID: String? = nil, reportID: Int64? = nil, penaltyID: Int64? = nil,
+                detail: String = "", at: Date) {
+        self.id = id
+        self.actorID = actorID
+        self.action = action
+        self.playerID = playerID
+        self.reportID = reportID
+        self.penaltyID = penaltyID
+        self.detail = detail
+        self.at = at
+    }
+}
+
+/// A fair-play flag (#155, migration 0017): what the nightly scan over race logs found about a player, for an admin to
+/// look at. Never a penalty: any penalty is the admin's own action.
+public struct StoredFlag: Sendable, Equatable {
+    public enum Kind: String, Sendable, Equatable, CaseIterable {
+        /// Her rule calls per race, or those from contacts, over the window.
+        case ruleCalls = "rule_calls"
+        /// Protests against her from many different players.
+        case protests
+        /// Her inputs identical, tick for tick, in more than one race.
+        case identicalInputs = "identical_inputs"
+        /// Gone just before the close, unfinished, in race after race.
+        case lateDrops = "late_drops"
+    }
+
+    /// Assigned by the store; 0 on a flag not yet raised.
+    public var id: Int64
+    public var kind: Kind
+    public var playerID: String
+    /// What the scan measured, and the threshold it reached.
+    public var value: Double
+    public var threshold: Double
+    /// The races it was found in, by id.
+    public var raceIDs: [String]
+    /// The measure in words.
+    public var detail: String
+    public var createdAt: Date
+    public var dueAt: Date
+    public var decision: StoredReport.Decision?
+    public var decidedAt: Date?
+    public var decidedBy: String?
+
+    public init(id: Int64 = 0, kind: Kind, playerID: String, value: Double, threshold: Double, raceIDs: [String], detail: String,
+                createdAt: Date, dueAt: Date, decision: StoredReport.Decision? = nil, decidedAt: Date? = nil, decidedBy: String? = nil) {
+        self.id = id
+        self.kind = kind
+        self.playerID = playerID
+        self.value = value
+        self.threshold = threshold
+        self.raceIDs = raceIDs
+        self.detail = detail
+        self.createdAt = createdAt
+        self.dueAt = dueAt
+        self.decision = decision
+        self.decidedAt = decidedAt
+        self.decidedBy = decidedBy
+    }
+}
+
 /// Reports and penalties in Postgres (#153, migration 0014). Keyed by teamPlayerID with no reference to `players`:
 /// they outlive the player's row (#160).
 public struct ModerationRecordStore: Sendable {
@@ -244,9 +320,102 @@ public struct ModerationRecordStore: Sendable {
         return count
     }
 
+    /// Records an admin's action (#154) and returns it with its id.
+    @discardableResult
+    public func record(_ action: StoredAdminAction) async throws -> StoredAdminAction {
+        let rows = try await database.client.query("""
+            INSERT INTO admin_actions (actor_id, action, player_id, report_id, penalty_id, detail, at)
+            VALUES (\(action.actorID), \(action.action), \(action.playerID), \(action.reportID), \(action.penaltyID), \(action.detail), \(action.at))
+            RETURNING id
+            """, logger: database.logger)
+        for try await id in rows.decode(Int64.self) {
+            var recorded = action
+            recorded.id = id
+            return recorded
+        }
+        throw ModerationWriteFailed()
+    }
+
+    /// The audit, newest first: every admin's, or those about `playerID`.
+    public func actions(about playerID: String? = nil, limit: Int) async throws -> [StoredAdminAction] {
+        let columns = "id, actor_id, action, player_id, report_id, penalty_id, detail, at"
+        let rows = try await database.client.query(playerID.map { player in """
+            SELECT \(unescaped: columns) FROM admin_actions WHERE player_id = \(player) ORDER BY at DESC, id DESC LIMIT \(Int64(limit))
+            """ } ?? """
+            SELECT \(unescaped: columns) FROM admin_actions ORDER BY at DESC, id DESC LIMIT \(Int64(limit))
+            """, logger: database.logger)
+        var actions: [StoredAdminAction] = []
+        for try await (id, actor, action, player, report, penalty, detail, at)
+            in rows.decode((Int64, String, String, String?, Int64?, Int64?, String, Date).self) {
+            actions.append(StoredAdminAction(id: id, actorID: actor, action: action, playerID: player, reportID: report, penaltyID: penalty,
+                                             detail: detail, at: at))
+        }
+        return actions
+    }
+
+    /// Raises a flag (#155) and returns it with its id.
+    public func raise(_ flag: StoredFlag) async throws -> StoredFlag {
+        let rows = try await database.client.query("""
+            INSERT INTO fair_play_flags (kind, player_id, value, threshold, race_ids, detail, created_at, due_at)
+            VALUES (\(flag.kind.rawValue), \(flag.playerID), \(flag.value), \(flag.threshold), \(flag.raceIDs), \(flag.detail), \(flag.createdAt),
+                \(flag.dueAt))
+            RETURNING id
+            """, logger: database.logger)
+        for try await id in rows.decode(Int64.self) {
+            var raised = flag
+            raised.id = id
+            return raised
+        }
+        throw ModerationWriteFailed()
+    }
+
+    static let flagColumns = "id, kind, player_id, value, threshold, race_ids, detail, created_at, due_at, decision, decided_at, decided_by"
+
+    public func flag(_ id: Int64) async throws -> StoredFlag? {
+        try await flags(try await database.client.query("SELECT \(unescaped: Self.flagColumns) FROM fair_play_flags WHERE id = \(id)",
+                                                        logger: database.logger)).first
+    }
+
+    /// The flags awaiting a decision, the first due first.
+    public func pendingFlags(limit: Int) async throws -> [StoredFlag] {
+        try await flags(try await database.client.query("""
+            SELECT \(unescaped: Self.flagColumns) FROM fair_play_flags WHERE decision IS NULL ORDER BY due_at, id LIMIT \(Int64(limit))
+            """, logger: database.logger))
+    }
+
+    /// Every flag raised on `playerID`, decided or not, oldest first.
+    public func flags(of playerID: String) async throws -> [StoredFlag] {
+        try await flags(try await database.client.query("""
+            SELECT \(unescaped: Self.flagColumns) FROM fair_play_flags WHERE player_id = \(playerID) ORDER BY created_at, id
+            """, logger: database.logger))
+    }
+
+    /// Decides a pending flag. False when it was decided already, or there is no such flag.
+    public func decideFlag(_ id: Int64, _ decision: StoredReport.Decision, by actorID: String, at time: Date) async throws -> Bool {
+        let rows = try await database.client.query("""
+            UPDATE fair_play_flags SET decision = \(decision.rawValue), decided_at = \(time), decided_by = \(actorID)
+            WHERE id = \(id) AND decision IS NULL RETURNING id
+            """, logger: database.logger)
+        for try await _ in rows.decode(Int64.self) { return true }
+        return false
+    }
+
+    private func flags(_ rows: PostgresRowSequence) async throws -> [StoredFlag] {
+        var flags: [StoredFlag] = []
+        for try await (id, kind, player, value, threshold, races, detail, created, due, decision, decided, decidedBy)
+            in rows.decode((Int64, String, String, Double, Double, [String], String, Date, Date, String?, Date?, String?).self) {
+            guard let kind = StoredFlag.Kind(rawValue: kind) else { continue }
+            flags.append(StoredFlag(id: id, kind: kind, playerID: player, value: value, threshold: threshold, raceIDs: races, detail: detail,
+                                    createdAt: created, dueAt: due, decision: decision.flatMap(StoredReport.Decision.init(rawValue:)),
+                                    decidedAt: decided, decidedBy: decidedBy))
+        }
+        return flags
+    }
+
     /// The retention prune (#28, #160): a penalty given before `cutoff` that is no longer in force at `time`, then a
     /// report filed before `cutoff` that no remaining penalty decided. A penalty in force stays as long as it lasts,
-    /// and so does its report; a warning or a rating reset lasts no time (it was given, and that is all).
+    /// and so does its report; a warning or a rating reset lasts no time (it was given, and that is all). The admin
+    /// audit's rows (#154) and the fair-play flags (#155) from before `cutoff` go too, uncounted.
     public func prune(before cutoff: Date, at time: Date) async throws -> (penalties: Int, reports: Int) {
         try await database.transaction { connection in
             let penalties = try await connection.query("""
@@ -264,6 +433,8 @@ public struct ModerationRecordStore: Sendable {
                 """, logger: database.logger)
             var reportCount = 0
             for try await _ in reports.decode(Int64.self) { reportCount += 1 }
+            try await connection.query("DELETE FROM admin_actions WHERE at < \(cutoff)", logger: database.logger)
+            try await connection.query("DELETE FROM fair_play_flags WHERE created_at < \(cutoff)", logger: database.logger)
             return (penaltyCount, reportCount)
         }
     }

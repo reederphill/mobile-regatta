@@ -27,6 +27,27 @@ import Testing
         }
     }
 
+    /// The queue's controller is the one reader of the queue's stream (#140): what it reads reaches Race online's
+    /// line and the lobby's count with nobody else reading.
+    @Test func theQueueControllerIsTheOneReaderOfTheQueue() async {
+        let suspended = OnlineStatus(services: .fake(.suspendedPermanent))
+        await suspended.refreshAccount()
+        await suspended.queue.reader?.value
+        #expect(suspended.restrictionLine == .suspended(until: nil))
+
+        // The `queued` scenario's count shows, then clears at its fleet lock; with no app to take over, nothing more.
+        let queued = OnlineStatus(services: .fake(.queued))
+        var counts: [Int?] = []
+        let forward = queued.queue.onState
+        queued.queue.onState = { state in
+            forward?(state)
+            counts.append(queued.lobbyStatus.queuedPlayers)
+        }
+        await queued.queue.reader?.value
+        #expect(counts == [6, 9, 11, nil])
+        #expect(queued.queue.bar == nil && queued.queue.takeover == nil)
+    }
+
     /// Race online: enabled online; "Offline" offline; "Practice races only" when Game Center restricts
     /// multiplayer (a signed-in player's flag); offline wins over the restriction.
     @Test func raceOnlineShowsWhyItIsUnavailable() {

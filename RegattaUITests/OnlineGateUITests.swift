@@ -1,14 +1,15 @@
 import XCTest
 
 /// Race online's gate (#138) on the fake services: Game Center's sign-in (the fake signs in at once), the Terms of
-/// Use sheet, then the queue's stand-in, the stub alert, until #140. Declining keeps the sheet a tap away in the
-/// lobby area; a version bump asks again; a multiplayer-restricted player gets practice races only. CI only, like
+/// Use sheet, then the queue (#140: its bar; off the fakes it is still the stub alert until #162). Declining keeps the
+/// sheet a tap away in the lobby area; a version bump asks again; a multiplayer-restricted player gets practice races only. CI only, like
 /// every UI test. The gating matrix itself is unit-tested (`OnlineAccessTests`, `OnlineStatusTests`).
 final class OnlineGateUITests: XCTestCase {
     @MainActor private func launch(_ scenario: String) -> XCUIApplication {
         let app = XCUIApplication()
         if app.state != .notRunning { app.terminate() }
-        app.launchArguments = ["-uitesting", "-fakeServices", scenario]
+        // The scripted queue at a fifth of its pace (#140): past the gate, the bar is up 20 s before the fleet locks.
+        app.launchArguments = ["-uitesting", "-fakeServices", scenario, "-timescale", "0.2"]
         app.launch()
         return app
     }
@@ -17,7 +18,7 @@ final class OnlineGateUITests: XCTestCase {
         app.descendants(matching: .any)[id].firstMatch
     }
 
-    /// Signed out: Race online → sign-in → the terms sheet → I agree → the stub alert.
+    /// Signed out: Race online → sign-in → the terms sheet → I agree → the queue, its bar in Race online's place.
     @MainActor func testRaceOnlineSignsInThenTermsThenQueue() {
         let app = launch("signed-out")
         XCTAssertTrue(app.staticTexts["Sign in to Game Center to chat"].waitForExistence(timeout: 20), "no signed-out lobby panel")
@@ -29,7 +30,9 @@ final class OnlineGateUITests: XCTestCase {
         XCTAssertTrue(agree.waitForExistence(timeout: 10), "no terms sheet after signing in")
         XCTAssertTrue(app.buttons["terms-close"].exists, "no Close on the terms sheet")
         agree.tap()
-        XCTAssertTrue(app.alerts["Online racing is on its way"].waitForExistence(timeout: 10), "I agree didn't go on to the queue")
+        XCTAssertTrue(element(app, "queue-bar").waitForExistence(timeout: 15), "I agree didn't go on to the queue")
+        XCTAssertFalse(app.alerts["Online racing is on its way"].exists, "the stub alert came up on the fakes")
+        XCTAssertTrue(app.buttons["queue-bar-leave"].waitForExistence(timeout: 15), "the join past the gate never queued")
     }
 
     /// Closing the sheet declines: no queue; the lobby area asks for the terms and reopens the sheet.
@@ -41,7 +44,7 @@ final class OnlineGateUITests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 10), "no terms sheet after signing in")
         close.tap()
         XCTAssertTrue(app.buttons["terms-close"].waitForNonExistence(timeout: 10), "Close didn't close the sheet")
-        XCTAssertFalse(app.alerts["Online racing is on its way"].exists, "declining went on to the queue")
+        XCTAssertFalse(element(app, "queue-bar").exists, "declining went on to the queue")
 
         XCTAssertTrue(app.staticTexts["Accept the terms to chat and race online"].waitForExistence(timeout: 10))
         let reopen = app.buttons["lobby-terms"]
@@ -51,7 +54,7 @@ final class OnlineGateUITests: XCTestCase {
         XCTAssertTrue(agree.waitForExistence(timeout: 10), "Review terms didn't reopen the sheet")
         agree.tap()
         XCTAssertTrue(agree.waitForNonExistence(timeout: 10))
-        XCTAssertFalse(app.alerts["Online racing is on its way"].exists, "the lobby's sheet went on to the queue")
+        XCTAssertFalse(element(app, "queue-bar").exists, "the lobby's sheet went on to the queue")
         XCTAssertFalse(app.buttons["lobby-terms"].exists, "the terms are still due after I agree")
     }
 
@@ -63,7 +66,8 @@ final class OnlineGateUITests: XCTestCase {
         XCTAssertTrue(app.buttons["terms-agree"].waitForExistence(timeout: 10), "no terms sheet on a version bump")
         XCTAssertEqual(app.staticTexts["terms-version"].label, "Version 2")
         app.buttons["terms-agree"].tap()
-        XCTAssertTrue(app.alerts["Online racing is on its way"].waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "queue-bar").waitForExistence(timeout: 15), "I agree didn't go on to the queue")
+        XCTAssertTrue(app.buttons["queue-bar-leave"].waitForExistence(timeout: 15), "the join past the gate never queued")
     }
 
     /// Game Center's multiplayer restriction: Race online disabled, "Practice races only".

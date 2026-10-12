@@ -1,6 +1,7 @@
 import Foundation
 import RegattaBots
 import RegattaCore
+import RegattaServices
 
 /// A render fixture (#62): a race log replayed headless to `freezeTick`, drawn from `camera` (or `view`) through a
 /// `vision` filter, and frozen there, so a UI test can diff the screen against a reference image.
@@ -26,6 +27,9 @@ import RegattaCore
 /// penalty arc and, with `hud`, the Turn notice. Without it they are off, so the fixtures before #123 keep their
 /// references.
 ///
+/// `"queueChip": { "players": 3, "seconds": 25 }` draws the queue's chip over the race (#140), top-centre in the race
+/// rect with the HUD moved down under it, as it rides over a practice race while you wait.
+///
 /// The app is launched with `-fixture <name>`, and finds `<name>.json` in the directory the
 /// `REGATTA_FIXTURE_DIR` environment variable names (the UI test passes its own `Fixtures` folder).
 struct RenderFixture: Codable, Equatable {
@@ -48,6 +52,22 @@ struct RenderFixture: Codable, Equatable {
     var hud: HUDFixture? = nil
     /// Whether the rule cues are drawn (#123); nil leaves them off.
     var ruleCues: Bool? = nil
+    /// The queue's chip over the race (#140); nil leaves it off.
+    var queueChip: QueueFixture? = nil
+
+    /// The queue's wait a fixture draws (#140), in the chip or the bar: `{ "players": 3, "seconds": 25 }`, frozen
+    /// with that many seconds to the lock. More than 60 is a hold, 10 or fewer the lock banner.
+    struct QueueFixture: Codable, Equatable {
+        var players: Int
+        var seconds: Int
+
+        /// The moment every queue fixture is drawn at.
+        nonisolated static let moment = Date(timeIntervalSinceReferenceDate: 0)
+
+        var state: QueueBarState {
+            .waiting(players: players, lockAt: Self.moment.addingTimeInterval(TimeInterval(seconds)))
+        }
+    }
 
     struct HUDFixture: Codable, Equatable {
         /// A notice the fixture shows for good: the replay drains no events, so it can't post one itself.
@@ -119,6 +139,12 @@ struct RenderFixture: Codable, Equatable {
         case livery
         /// The briefing for a race the fixture describes (#130): `{ "gallery": "briefing", "briefing": { … } }`.
         case briefing(BriefingFixture)
+        /// A locked fleet's briefing with its Leave bar (#140), the takeover's frame, on the fake services' fleet:
+        /// `{ "gallery": "briefingLocked" }`.
+        case briefingLocked
+        /// The queue bar above a pushed page, the practice setup (#140):
+        /// `{ "gallery": "queueBar", "queueBar": { "players": 3, "seconds": 42 } }`.
+        case queueBar(QueueFixture)
         /// The practice setup page on a fresh install's choices (#131): `{ "gallery": "practiceSetup" }`.
         case practiceSetup
         /// The pause menu over the race's chrome (#131): `{ "gallery": "pauseMenu" }`.
@@ -228,9 +254,17 @@ struct RenderFixture: Codable, Equatable {
         }
     }
 
+    /// The locked fleet's briefing a `briefingLocked` fixture shows (#140): the fake services' hand-off
+    /// (`FakeServiceScenario.briefing()`), its countdown frozen at its start.
+    static func lockedBriefing() throws -> BriefingModel {
+        let payload = FakeServiceScenario.briefing()
+        return BriefingModel(payload: payload, files: try RaceFiles(resolving: payload.setup), menuMusic: SilentMenuMusic(),
+                             now: { QueueFixture.moment })
+    }
+
     private struct GalleryFile: Decodable {
         enum Kind: String, Decodable {
-            case livery, briefing, practiceSetup, pauseMenu, results, myBoat, help
+            case livery, briefing, briefingLocked, queueBar, practiceSetup, pauseMenu, results, myBoat, help
         }
 
         var gallery: Kind?
@@ -240,9 +274,11 @@ struct RenderFixture: Codable, Equatable {
         var rivalSkill: Double?
         var myBoat: MyBoatFixture?
         var help: HelpTopic?
+        var queueBar: QueueFixture?
     }
 
     enum GalleryError: Error, Equatable {
+        case queueBarMissing
         case briefingMissing
         case resultsStageMissing
         case myBoatMissing
@@ -269,6 +305,10 @@ struct RenderFixture: Codable, Equatable {
                 return .myBoat(myBoat)
             case .help?:
                 return .help(decoded.help)
+            case .briefingLocked?: return .briefingLocked
+            case .queueBar?:
+                guard let queueBar = decoded.queueBar else { throw GalleryError.queueBarMissing }
+                return .queueBar(queueBar)
             }
         } catch {
             throw LoadError.unreadable(file.path, error)

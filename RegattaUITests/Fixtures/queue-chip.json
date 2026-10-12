@@ -1,0 +1,9 @@
+{
+  "log" : "fleet.racelog.json",
+  "freezeTick" : 720,
+  "camera" : "boat",
+  "vision" : "none",
+  "view" : "courseUp",
+  "hud" : { },
+  "queueChip" : { "players" : 3, "seconds" : 23 }
+}
