@@ -159,6 +159,17 @@ public final class InMemoryRatingBook: RatingBook {
         }
     }
 
+    /// Her rating, counts, history and mirror go (#160), and she may come back as a new player.
+    public func forget(_ playerID: String) {
+        state.withLock { state in
+            state.ratings[playerID] = nil
+            state.stats[playerID] = nil
+            state.mirrored[playerID] = nil
+            state.mirrorFailures[playerID] = nil
+            for race in state.history.keys { state.history[race]?.removeAll { $0.playerID == playerID } }
+        }
+    }
+
     public var resets: [String] { state.withLock { $0.resets.map(\.player) } }
     public func mirroredRating(of playerID: String) -> Int? { state.withLock { $0.mirrored[playerID] } }
     public func mirrorFailures(of playerID: String) -> Int { state.withLock { $0.mirrorFailures[playerID, default: 0] } }

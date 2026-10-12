@@ -234,6 +234,39 @@ public struct ModerationRecordStore: Sendable {
         return false
     }
 
+    /// Deletes every report `reporterID` filed (#160: Delete my online data). Returns how many.
+    @discardableResult
+    public func deleteReports(by reporterID: String) async throws -> Int {
+        let rows = try await database.client.query("DELETE FROM moderation_reports WHERE reporter_id = \(reporterID) RETURNING id",
+                                                   logger: database.logger)
+        var count = 0
+        for try await _ in rows.decode(Int64.self) { count += 1 }
+        return count
+    }
+
+    /// The retention prune (#28, #160): a penalty given before `cutoff` that is no longer in force at `time`, then a
+    /// report filed before `cutoff` that no remaining penalty decided. A penalty in force stays as long as it lasts,
+    /// and so does its report.
+    public func prune(before cutoff: Date, at time: Date) async throws -> (penalties: Int, reports: Int) {
+        try await database.transaction { connection in
+            let penalties = try await connection.query("""
+                DELETE FROM moderation_penalties WHERE starts_at < \(cutoff)
+                    AND (lifted_at IS NOT NULL OR (ends_at IS NOT NULL AND ends_at <= \(time)))
+                RETURNING id
+                """, logger: database.logger)
+            var penaltyCount = 0
+            for try await _ in penalties.decode(Int64.self) { penaltyCount += 1 }
+            let reports = try await connection.query("""
+                DELETE FROM moderation_reports r WHERE r.created_at < \(cutoff)
+                    AND NOT EXISTS (SELECT 1 FROM moderation_penalties p WHERE p.report_id = r.id)
+                RETURNING id
+                """, logger: database.logger)
+            var reportCount = 0
+            for try await _ in reports.decode(Int64.self) { reportCount += 1 }
+            return (penaltyCount, reportCount)
+        }
+    }
+
     private func reports(_ rows: PostgresRowSequence) async throws -> [StoredReport] {
         var reports: [StoredReport] = []
         for try await row in rows {

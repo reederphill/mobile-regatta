@@ -12,8 +12,8 @@ import Testing
 /// started in process on a free port, reached over its `/service` WebSocket by `WebSocketServiceConnector`, which
 /// arranges each situation with `POST /dev/situation`. `CONTRACT_ENDPOINT` runs them against a server started elsewhere.
 @Suite(.timeLimit(.minutes(2))) struct ServiceEndpointContractTests {
-    /// The suites the server serves as of #159; the whole Lobby suite, its reports too, as of #153.
-    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession, .lobby, .analytics, .profile]
+    /// The suites the server serves as of #160; the whole Lobby suite, its reports too, as of #153.
+    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession, .lobby, .analytics, .profile, .deletion]
     static let lobbyParts = Set(LobbyServiceContract.Part.allCases)
 
     /// A dev config the suites can run on: the Terms suite's `versionBumped` situation needs an older version to have

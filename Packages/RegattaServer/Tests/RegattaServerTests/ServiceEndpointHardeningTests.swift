@@ -59,14 +59,15 @@ import Testing
         withExtendedLifetime(held) {}
     }
 
-    /// Owner ruling (2026-10-08): "Delete my online data" needs only the sign-in. Refused signed out; signed in, it
-    /// gets past the gate (to the missing backend) with the terms unaccepted and the player restricted.
+    /// Owner ruling (2026-10-08): "Delete my online data" needs only the sign-in. Signed out it answers `notSignedIn`
+    /// (the DataDeletion contract's shape, #160) and the connection stays open; signed in, it gets past the gate (to
+    /// the missing backend) with the terms unaccepted and the player restricted.
     @Test func deletionNeedsOnlyTheSignIn() async throws {
         let message = Message.deletionRequest(ServiceRequest(id: 7, call: .plan))
         let endpoint = ServiceFixtures.endpoint()
         let signedOut = try await InProcessServiceLink.open(endpoint)
-        try await Self.send(message, on: signedOut)
-        #expect(signedOut.closeReason == "deletion refused: not signed in")
+        await #expect(throws: DataDeletionError.notSignedIn) { _ = try await RemoteDataDeletionService(ServiceConnection(signedOut)).plan() }
+        #expect(signedOut.closeReason == nil)
 
         let (unaccepted, held, _) = try await ServiceFixtures.signedIn(endpoint, "u-deletion", multiplayerRestricted: true)
         try await Self.send(message, on: unaccepted)

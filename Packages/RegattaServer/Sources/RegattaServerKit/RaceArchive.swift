@@ -134,6 +134,20 @@ public final class InMemoryRaceArchive: RaceArchive {
 
     public func closedRace(_ race: UUID) async throws -> ClosedRaceRecord? { entries.withLock { $0.races[race]?.closed } }
 
+    /// Whether the player sat in a race this archive registered.
+    public func hasRaced(_ playerID: String) -> Bool {
+        entries.withLock { $0.races.values.contains { $0.players.contains { $0.playerID == playerID } } }
+    }
+
+    /// Her seats become `anonymousID`'s (#160): the races replay as they were, under no one's id.
+    public func anonymise(_ playerID: String, as anonymousID: String) {
+        entries.withLock { state in
+            for (id, entry) in state.races where entry.players.contains(where: { $0.playerID == playerID }) {
+                state.races[id]?.players = entry.players.map { $0.playerID == playerID ? RaceSeatHolder(playerID: anonymousID, seat: $0.seat) : $0 }
+            }
+        }
+    }
+
     public func seats(of race: UUID) async throws -> RaceSeating? {
         entries.withLock { state in
             state.races[race].map { entry in

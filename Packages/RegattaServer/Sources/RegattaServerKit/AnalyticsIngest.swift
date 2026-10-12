@@ -351,6 +351,13 @@ public final class InMemoryAnalyticsStore: AnalyticsStore {
         }
     }
 
+    /// The server's events about the player become `anonymousID`'s (#160).
+    public func anonymise(_ playerID: String, as anonymousID: String) {
+        state.withLock { state in
+            for index in state.rows.indices where state.rows[index].event.playerID == playerID { state.rows[index].event.playerID = anonymousID }
+        }
+    }
+
     public func purge(receivedBefore time: Date) async throws -> Int {
         state.withLock { state in
             let gone = state.rows.filter { $0.rolledUp && $0.event.receivedAt < time }

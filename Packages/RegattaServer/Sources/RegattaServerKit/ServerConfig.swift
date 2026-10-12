@@ -84,6 +84,7 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `RATING_WEIGHT_EXPONENT` | `0.5` | a rated race with m opponents weighs each of its games m^-x (ADR 0012): 0.5 is 1/√m; 0…1 (#151) |
 /// | `COVERED_FINISH_GRACE_SECONDS` | `60` | a finish the cautious bot sails for a dropped player counts for her rating if she dropped less than this before it, else she is rated as retired; 0…3600 (#150) |
 /// | `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PEM`, `GC_LEADERBOARD_ID` | none | the App Store Connect team key (id, issuer, a PEM file of its P-256 private key) and the Game Center leaderboard's id: all four, or none (no leaderboard mirror) (#151, #55) |
+/// | `GC_LEADERBOARD_RESOURCE_ID` | none | the leaderboard's App Store Connect resource id: with the four above, a deleted player's scores are blocked (#160); without it, deletions wait to be blocked |
 /// | `LEADERBOARD_SWEEP_SECONDS` | `300` | how often unsent leaderboard scores are tried again (#151) |
 /// | `OPENAI_MODERATION_API_KEY` | none | the lobby's toxicity classifier (#152): asked for each free-text post that passes the word list; required outside `ENV=dev`. Without it the word list alone filters |
 /// | `CHAT_EXTRA_BLOCKED_PHRASES` | none | dev only: comma-separated phrases the lobby's filter blocks besides the word list |
@@ -203,7 +204,8 @@ public struct ServerConfig: Sendable {
                 throw .invalid(variable: "ASC_PRIVATE_KEY_PEM", value: path, expected: "a readable PEM file of a P-256 private key")
             }
             config.leaderboard = AppStoreConnectConfig(keyID: env["ASC_KEY_ID"] ?? "", issuerID: env["ASC_ISSUER_ID"] ?? "", privateKeyPEM: pem,
-                                                       leaderboardID: env["GC_LEADERBOARD_ID"] ?? "", bundleID: config.identity.bundleID)
+                                                       leaderboardID: env["GC_LEADERBOARD_ID"] ?? "", bundleID: config.identity.bundleID,
+                                                       leaderboardResourceID: env["GC_LEADERBOARD_RESOURCE_ID"].flatMap { $0.isEmpty ? nil : $0 })
         } else if !given.isEmpty, let missing = mirror.first(where: { !given.contains($0) }) {
             throw .invalid(variable: missing, value: "(unset)", expected: "all of \(mirror.joined(separator: ", ")), or none")
         }
