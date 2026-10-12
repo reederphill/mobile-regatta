@@ -50,12 +50,12 @@
     },
     {
         "fixtures": ["cues", "cues-deuteranopia", "cues-greyscale", "cues-protanopia", "cues-tritanopia", "cues-washout"],
-        "log": "cues.racelog.json", "camera": "race",
-        "leg": 0, "racing": true, "groove": "pinching", "grooveDegrees": [2, 15], "markInView": false, "sailsWorkingInView": 2
+        "log": "cues.racelog.json", "camera": "race", "clear": [210, 110, 20],
+        "leg": 0, "racing": true, "groove": "pinching", "grooveDegrees": [2, 10], "markInView": false, "sailsWorkingInView": 2
     },
     {
         "fixtures": ["cues-footed"],
-        "log": "cues.racelog.json", "camera": "race",
+        "log": "cues.racelog.json", "camera": "race", "clear": [210, 110, 20],
         "leg": 0, "racing": true, "groove": "footing", "grooveDegrees": [2, 15], "markInView": false, "sailsWorkingInView": 2
     }
 ]
