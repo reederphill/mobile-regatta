@@ -26,7 +26,7 @@ import RegattaCore
     ///   sailing on the autohelm with the rudder centred, the player takes the boat back sending a centred rudder too;
     ///   the target is the one the bot left until the player steers, and the player's rudder takes the helm on the
     ///   tick after they send it.
-    @Test func handbackKeepsPenaltyProgressAndAutohelmTarget() throws {
+    @Test(.onFiveRules) func handbackKeepsPenaltyProgressAndAutohelmTarget() throws {
         var penaltyHandbacks = 0, autohelmHandbacks = 0
         for seed: UInt64 in 1...16 {
             if try Self.penaltyHandback(seed: seed) { penaltyHandbacks += 1 }

@@ -178,6 +178,7 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: (
             snapshot.seats[3].boat.place = 1
             snapshot.seats[3].boat.finishTime = 0
         }
+        let turningFrom = race.boats[2].heading
         for _ in 0..<(4 * Race.tickRate) {
             let before = race.boats
             race.step()
@@ -188,7 +189,8 @@ func placedRace(seats: Int = 2, current: CurrentField, seed: UInt64 = 3, wind: (
                 #expect((moved - boat.velocityOverGround).length < 1e-9, "seat \(seat)")
             }
         }
-        #expect(race.boats[2].penaltyProgress != 0)
+        // She turned (fleet-rules@6, the default since #490, keeps no turned angle: the heading says it).
+        #expect(abs(wrapAngle(race.boats[2].heading - turningFrom)) > deg2rad(10))
     }
 
     @Test func threeWindsResolveFromTheGroundTheCurrentAndTheBoat() throws {

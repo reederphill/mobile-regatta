@@ -151,10 +151,15 @@ import Testing
     }
 
     /// A scripted race: two boats nobody steers, and the observer fed the events of a start and of two penalty
-    /// episodes at set ticks. What it makes of them doesn't move when the bots do.
+    /// episodes at set ticks. What it makes of them doesn't move when the bots do. The script is a full-circle turn's
+    /// (30° in, given up, served), so the race sails fleet-rules@5, not the default (@6 since #490).
     @Test func observerKeepsTheEpisodesAndTheStartsItIsTold() throws {
         let cell = Self.cell()
-        let setup = try BotRaceHarness.raceSetup(for: cell)
+        let cellSetup = try BotRaceHarness.raceSetup(for: cell)
+        let setup = try RaceSetup(raceSeed: cellSetup.raceSeed, seats: cellSetup.seats, laps: cellSetup.laps,
+                                  startSequenceTicks: cellSetup.startSequenceTicks, boatClass: cellSetup.boatClass,
+                                  venue: cellSetup.venue, conditions: cellSetup.conditions,
+                                  rulesConfiguration: RulesConfigFile.bundled(id: "fleet-rules", version: 5).ref)
         let race = try Race(setup: setup, files: RaceFiles(resolving: setup),
                             mode: .authoritative(windSeed: BotRaceHarness.windSeed(for: cell.seed)))
         let rate = Race.tickRate

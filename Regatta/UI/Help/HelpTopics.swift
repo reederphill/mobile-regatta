@@ -169,7 +169,7 @@ private struct RulesHelp: View {
             }
         }
         HelpSection(heading: "Starts", lines: [RuleWords.ocs])
-        HelpSection(heading: "Penalty turns", lines: [RuleWords.penaltyLine])
+        HelpSection(heading: "Penalty turns", lines: [RuleWords.defaultPenaltyLine])
     }
 }
 

@@ -25,11 +25,12 @@ changes; a change ships as `<id>@<version + 1>.json`.
 - `fleet-rules@4` (bundled, schema 4): version 3 plus `escape.changesCourseDegreesPerSecond`, 12 (#92). Kept
   so its race logs replay.
 - `fleet-rules@5` (bundled, schema 5): version 4 plus `incidents.properCourse` (#345, rule 17): 2 hull lengths,
-  5° on a beat, 8° on a reach or run, a 4 s "promptly sails astern" window. The default (`RaceFiles.defaults`,
-  `Race.defaultRulesConfiguration`).
+  5° on a beat, 8° on a reach or run, a 4 s "promptly sails astern" window. The default until #490; kept so its
+  race logs replay.
 - `fleet-rules@6` (bundled, schema 6): version 5 with `penalty.turn` `tackAndGybe` (#487): a penalty turn is one
   tack and one gybe turning the same way, completed within 40 s of its clock, which starts when she is clear of
-  the mark she is rounding; no `startSeconds`, no `startedTurnDegrees`. Not the default yet.
+  the mark she is rounding; no `startSeconds`, no `startedTurnDegrees`. The default (`RaceFiles.defaults`,
+  `Race.defaultRulesConfiguration`) since #490.
 
 Schema 2 is schema 1 plus `raceFormat.startRow.minimumSpacingHullLengths`, the start row's spacing floor:
 required in schema 2, refused in schema 1. A schema-1 file has no floor (`RulesConfig.StartRow.minimumSpacing`

@@ -190,7 +190,7 @@ import RegattaCore
     /// past her on the side she is turning to: she breaks off the turn to keep clear, turning it again the other way,
     /// hard over away from seat 1 (turning back gives the first up), touches nobody and is called for nothing, and
     /// serves it inside its deadlines. With nobody near she holds her turn hard over, as ever.
-    @Test func penaltyTurningBotKeepsClearUnder21_2() throws {
+    @Test(.onFiveRules) func penaltyTurningBotKeepsClearUnder21_2() throws {
         let style = BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
         let hardOver = penaltyHelm(1)
 
@@ -324,7 +324,7 @@ import RegattaCore
     /// skiff@7 until #455: on skiff@8 her turn at 70 % rudder doesn't finish inside the 12 s this scene leaves her, and
     /// she is disqualified. Tried again after #471's step C: the same (a turn by hand from 60° in takes her over 12 s,
     /// and she is called 21.2 on the way).
-    @Test(.onSkiffSeven) func penaltyTurnNearItsDeadlineIsNotGivenUp() throws {
+    @Test(.onFiveRules, .onSkiffSeven) func penaltyTurnNearItsDeadlineIsNotGivenUp() throws {
         let style = BotStyle(skill: 0.8, startSpot: 0.5, finishSpot: 0.7, timingSlack: 0, penaltyDirection: 1)
         let hardOver = BoatInput(rudder: 1.0)
         func sail(completeIn seconds: Double) throws -> (kinds: [RaceEvent.Kind], inputs: [BoatInput], race: Race) {

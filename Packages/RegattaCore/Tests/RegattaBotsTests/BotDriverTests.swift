@@ -25,19 +25,29 @@ struct SkiffPin: TestTrait, TestScoping {
     }
 }
 
-/// Runs a test with the bot tests' race builders (`botRace`, by `BotConductTests.waterRules`) racing under fleet-rules@6:
-/// a penalty turn is one tack and one gybe the same way (#487), which the bots sail as #488 has them.
-struct SixRules: TestTrait, TestScoping {
+/// Runs a test with the bot tests' race builders (`botRace`, `BotHelmTests.race`, by `BotConductTests.waterRules`) racing
+/// under bundled fleet-rules@`version` rather than the default rules.
+struct RulesPin: TestTrait, TestScoping {
+    var version: Int
+
     func provideScope(for test: Test, testCase: Test.Case?,
                       performing function: @Sendable () async throws -> Void) async throws {
-        let ref = try RulesConfigFile.bundled(id: "fleet-rules", version: 6).ref
+        let ref = try RulesConfigFile.bundled(id: "fleet-rules", version: version).ref
         try await BotConductTests.$waterRules.withValue(ref) { try await function() }
     }
 }
 
-extension Trait where Self == SixRules {
-    /// fleet-rules@6 (#487): the tack-and-gybe penalty turn.
-    static var onSixRules: Self { SixRules() }
+/// fleet-rules@5's penalty (20 s to start the full circle, 40 s to complete it): what a `.onFiveRules` test races under.
+let fiveRulesPenalty = try! RulesConfigFile.bundled(id: "fleet-rules", version: 5).content.raceFormat.penalty
+
+extension Trait where Self == RulesPin {
+    /// fleet-rules@6 (#487): a penalty turn is one tack and one gybe the same way, which the bots sail as #488 has
+    /// them. The default since #490: the pin keeps the test on @6 whatever the default becomes.
+    static var onSixRules: Self { RulesPin(version: 6) }
+    /// fleet-rules@5, the default until #490: a penalty turn is a full circle, started 30° in by its start deadline
+    /// (20 s) and completed by its complete deadline (40 s). A test of the bots' full-circle turns names it: races
+    /// naming @5 or older still sail them (replays, the reference regattas).
+    static var onFiveRules: Self { RulesPin(version: 5) }
 }
 
 extension Trait where Self == SkiffPin {
@@ -329,7 +339,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     /// The #79 smoke breach: a bot that touched a mark spun hard over beside it on `isTakingPenalty`,
     /// touching it again and owing another turn each time round (up to 15 mark contacts a race). Beside
     /// the mark she sails (the same rudder whichever side she turns penalties to); clear, she turns.
-    @Test func aBotOwingATurnBesideAMarkSailsClearBeforeTurning() throws {
+    @Test(.onFiveRules) func aBotOwingATurnBesideAMarkSailsClearBeforeTurning() throws {
         let beside = Vec2(3, -3)
         #expect(try decide(atOffset: beside, penaltyDirection: 1).rudder == decide(atOffset: beside, penaltyDirection: -1).rudder)
         let clear = Vec2(30, -30)
@@ -341,7 +351,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     /// once whoever is near, away from the nearest boat: put off, it came due beside the mark
     /// (`BotBrain.putOffEndsAtAMark`). (Until she is 30° into it she keeps her rights; from there she keeps clear of
     /// them, rule 21.2: `BotNavigationTests.penaltyTurningBotKeepsClearUnder21_2`.)
-    @Test func nearHerNextMarkABotStartsItsTurnAtOnceWhateverBoatsAreNear() throws {
+    @Test(.onFiveRules) func nearHerNextMarkABotStartsItsTurnAtOnceWhateverBoatsAreNear() throws {
         let clear = Vec2(30, -30), other = Vec2(3, 4)
         for direction in [1.0, -1.0] {
             let (rudder, race) = try decide(atOffset: clear, penaltyDirection: direction, turned: 0, other: other)
@@ -355,7 +365,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     /// with a boat close aboard, in the water of the circles she would turn both ways, she first bears away for room
     /// (`BotBrain.clearingRoom`, #471), the same rudder whichever way she turns penalties, and no turn's. On a class
     /// whose tap sails her turns she starts it at once, her own way, as before #486 (#351).
-    @Test func aClubBotReadsThePackByHand() throws {
+    @Test(.onFiveRules) func aClubBotReadsThePackByHand() throws {
         let byHand = !RaceFiles.defaults.boatClass.content.steering.autohelm.sailsTap
         let club = BotTier.club.skill(at: 0.5)
         var rudders: [Int8] = []
@@ -374,8 +384,8 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     /// #351: racing in open water (not on the last leg) with a boat close aboard (by hand, in both circles she could
     /// turn, #486), she puts her turn off and sails on (the same rudder whichever side she turns penalties to), until
     /// `penaltyStartMargin` before the start deadline; then she turns hard over away from that boat.
-    @Test func inOpenWaterABotPutsHerTurnOffInThePackUntilItsDeadline() throws {
-        let start = RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.start
+    @Test(.onFiveRules) func inOpenWaterABotPutsHerTurnOffInThePackUntilItsDeadline() throws {
+        let start = fiveRulesPenalty.start
         let late = start - BotBrain.penaltyStartMargin
         let other = Vec2(3, 4)
         let (rudder, race) = try decide(atOffset: .zero, penaltyDirection: 1, turned: 0, other: other, inOpenWater: true)
@@ -395,9 +405,9 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     /// #89: beside a mark she sails on to get clear of it, but never past her turn's start deadline:
     /// `penaltyStartMargin` before it she turns wherever she is, away from the mark, whichever side she
     /// turns penalties to.
-    @Test func besideAMarkABotStillStartsItsTurnBeforeTheStartDeadline() throws {
+    @Test(.onFiveRules) func besideAMarkABotStillStartsItsTurnBeforeTheStartDeadline() throws {
         let beside = Vec2(3, -3)
-        let start = RaceFiles.defaults.rulesConfiguration.content.raceFormat.penalty.start
+        let start = fiveRulesPenalty.start
         let late = start - BotBrain.penaltyStartMargin
         let (rudder, race) = try decide(atOffset: beside, penaltyDirection: 1, since: late)
         #expect(try decide(atOffset: beside, penaltyDirection: -1, since: late).rudder == rudder)
@@ -413,7 +423,7 @@ func sail(_ race: Race, _ controllers: inout SeatControllers, ticks: Int, each: 
     /// #89: a bot owing two turns in open water serves both inside their deadlines, hard over the same way
     /// from the moment she starts until she owes none: through head to wind and on into the second turn,
     /// never giving one up.
-    @Test func aBotServesOwedTurnsHardOverOneWayInsideTheDeadlines() throws {
+    @Test(.onFiveRules) func aBotServesOwedTurnsHardOverOneWayInsideTheDeadlines() throws {
         let race = botRace(seats: [.bot, .bot], seed: 5)
         var controllers = allBots(race)
         sail(race, &controllers, ticks: race.setup.startSequenceTicks + 60 * Race.tickRate)

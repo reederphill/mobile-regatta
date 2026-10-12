@@ -113,7 +113,7 @@ enum HintCatalogue {
              isPlaceholderCopy: true, learning: .steeredBothWays, trigger: HintTriggers.raceStart),
         Hint(id: .ocs, delivery: .presenter, text: HintText(RuleWords.ocs), isPlaceholderCopy: true,
              learning: .never, trigger: { _, _ in nil }),
-        Hint(id: .ruleCall, delivery: .presenter, text: HintText(RuleWords.penaltyLine), isPlaceholderCopy: true,
+        Hint(id: .ruleCall, delivery: .presenter, text: HintText(RuleWords.defaultPenaltyLine), isPlaceholderCopy: true,
              learning: .never, trigger: { _, _ in nil }),
         Hint(id: .startSequence, delivery: .engine, text: HintText(halves: "Hold both sides to ease.",
                                                                     tiller: "Pull down to ease."),

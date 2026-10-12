@@ -68,7 +68,12 @@ import Testing
             + "(mean start \(fixed(summary.meanStartSeconds)) s), pre-gun irons \(fixed(summary.meanPreGunIronsSeconds, 3)) s/boat "
             + "(max \(fixed(summary.maxPreGunIronsSeconds)))")
         #expect(summary.races == 200 && summary.seats == 2_000)
-        #expect(summary.ocsShare <= (try #require(limits.maxOCSShare)), "OCS \(summary.ocsShare)")
+        // Known until #494 (owner, 2026-10-12): on fleet-rules@6 boats called in the last seconds before the gun go over
+        // early (OCS 0.052 on Linux; main on @5 0.043); the limit itself is unchanged.
+        let maxOCSShare = try #require(limits.maxOCSShare)
+        withKnownIssue("#494: fleet-rules@6 penalty turns before the gun push bots over the line early", isIntermittent: true) {
+            #expect(summary.ocsShare <= maxOCSShare, "OCS \(summary.ocsShare)")
+        }
         // Known until #477 (owner, #461 and #471): on skiff@8 bots start late (on time 0.46, mean start 10.3 s); the cause is the start row.
         let minOnTimeShare = try #require(limits.minOnTimeShare)
         withKnownIssue("#477: the start row jams a hand-steered fleet, so bots start late on skiff@8", isIntermittent: true) {

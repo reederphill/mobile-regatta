@@ -38,9 +38,23 @@ import Testing
         #expect(byConditions.values.allSatisfy { $0.count == 4 })
     }
 
+    /// #490: version 4 is version 3's races on fleet-rules@6 and nothing else; version 3 (fleet-rules@5) stays bundled.
+    @Test func versionFourIsVersionThreeOnFleetRulesSix() throws {
+        #expect(ReferenceRegatta.currentVersion == 4)
+        let four = try ReferenceRegatta.load(version: 4), three = try ReferenceRegatta.load(version: 3)
+        #expect(four.races.count == three.races.count)
+        for (new, old) in zip(four.races, three.races) {
+            #expect(new.setup.rulesConfiguration.key == DataFileKey(id: "fleet-rules", version: 6))
+            #expect(old.setup.rulesConfiguration.key == DataFileKey(id: "fleet-rules", version: 5))
+            #expect(new.setup.raceSeed == old.setup.raceSeed && new.windSeed == old.windSeed && new.tier == old.tier)
+            #expect(new.setup.venue == old.setup.venue && new.setup.conditions == old.setup.conditions)
+            #expect(new.setup.boatClass == old.setup.boatClass && new.setup.seats == old.setup.seats)
+            #expect(new.setup.laps == old.setup.laps && new.setup.startSequenceTicks == old.setup.startSequenceTicks)
+        }
+    }
+
     /// #461: version 3 is version 2's races on skiff@8 and nothing else; versions 1 (skiff@6) and 2 (skiff@7) stay bundled.
     @Test func versionThreeIsVersionTwoOnSkiffEight() throws {
-        #expect(ReferenceRegatta.currentVersion == 3)
         let three = try ReferenceRegatta.load(version: 3), two = try ReferenceRegatta.load(version: 2)
         let one = try ReferenceRegatta.load(version: 1)
         #expect(three.races.count == two.races.count && one.races.count == two.races.count)
@@ -106,7 +120,7 @@ import Testing
         let own = BotWeaknesses(skill: 0.35)
         #expect(noviceWeaknesses.steering(like: own) == own)
 
-        // Since #437 the reference regatta sails a class (skiff@8 in version 3, #461) whose autohelm doesn't hold a centred rudder: the
+        // Since #437 the reference regatta sails a class (skiff@8 from version 3, #461) whose autohelm doesn't hold a centred rudder: the
         // National stand-in's Club hand steering shows, and it leaves the tactician's race.
         let cap = 60
         #expect(!RaceFiles.defaults.boatClass.content.steering.autohelm.holdsWhenCentred)

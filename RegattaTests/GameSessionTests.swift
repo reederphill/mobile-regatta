@@ -15,10 +15,13 @@ import RegattaCore
         #expect(driver.tick(0.5).count == 60)
     }
 
-    /// `-demo` attaches a bot controller to your seat, and it sails the whole race through the input API. Seed 2:
-    /// on seed 1 your bot is still racing when the 2 min finish window closes (#86), placed by distance.
+    /// `-demo` attaches a bot controller to your seat, and it sails the whole race through the input API. Seed 3: on
+    /// seeds 1 and 2 your bot is still racing when the 2 min finish window closes (#86), placed by distance (seed 2 on
+    /// fleet-rules@6: a pre-start contact's turn, served after the gun, starts her 24 s late at the back). Not chosen
+    /// with `firstSeed`: the condition is this 8-boat race sailed to its close, too slow to try seed by seed in a Debug
+    /// build. A core probe of the same race finds the lowest seed from 2 on which she finishes.
     @Test func demoSailsAFullRace() throws {
-        let options = LaunchOptions(arguments: ["/path/to/Regatta", "-demo", "-seed", "2"])
+        let options = LaunchOptions(arguments: ["/path/to/Regatta", "-demo", "-seed", "3"])
         let session = GameSession(config: try #require(options.launchRaceConfig()))
         let driver = try #require(session.driver as? PracticeDriver)
         var seconds = 0

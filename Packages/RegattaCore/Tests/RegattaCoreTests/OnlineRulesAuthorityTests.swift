@@ -199,10 +199,12 @@ import Testing
     /// A prediction never serves a penalty turn itself: its progress runs on past a full turn (the arc,
     /// `OwedPenalty.progress`, waits just short of one) until the server's `penaltyServed` comes, which carries the
     /// turning past the full turn into the next owed turn as the server did, however late it comes.
-    /// On skiff@7, which turns two turns hard over inside the 800 ticks (skiff@8's cubed rudder drag makes it one, #458).
+    /// On skiff@7, which turns two turns hard over inside the 800 ticks (skiff@8's cubed rudder drag makes it one, #458),
+    /// under fleet-rules@5's full circle (fleet-rules@6, the default since #490, is `OnlineRulesTests`' in RegattaClient).
     @Test func aPredictionNeverServesAPenaltyTurnItself() throws {
         let setup = try RaceSetup(raceSeed: RaceSeed(96), seats: [.human, .bot], startSequenceTicks: 60,
-                                  boatClass: SkiffFixtures.tapClass)
+                                  boatClass: SkiffFixtures.tapClass,
+                                  rulesConfiguration: RulesConfigFile.bundled(id: "fleet-rules", version: 5).ref)
         let authoritative = Race(setup: setup, windSeed: WindSeed(96))
         let prediction = try Self.prediction(of: authoritative, through: 900, windSeed: WindSeed(96))
         for race in [authoritative, prediction] {

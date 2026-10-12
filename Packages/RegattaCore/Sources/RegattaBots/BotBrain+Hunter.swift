@@ -9,7 +9,7 @@ import RegattaCore
 //
 // - Racing, as the right-of-way boat with a boat that must keep clear of her within `Hunter.rangeLengths` and not clear
 //   astern of her (`quarry`), she turns towards that boat with a held rudder of `Hunter.rudder`, never faster than
-//   `Hunter.rateShare` of the rules' course-change rate (`Hunter.courseChangeRate`, fleet-rules@5's `changesCourse`):
+//   `Hunter.rateShare` of the rules' course-change rate (`Hunter.courseChangeRate`, fleet-rules@6's `changesCourse`, as @5's):
 //   - as the leeward boat (rule 11) she luffs her, up to just outside the no-go zone, and while restricted under rule 17
 //     no higher than her proper course's edge plus `properCourseMargin` (the aim's limit, `properCourseLimited`, isn't
 //     enough: her luff is steered after it);
@@ -32,7 +32,7 @@ extension BotBrain {
     enum Hunter {
         /// Her held rudder turning at a boat: about 7°/s at the skiff's top turn rate, the gentle turn of #342's playtest.
         static let rudder = 0.2
-        /// The rules' 16.1 course-change rate (fleet-rules@5 `incidents.escape.changesCourse`), radians a second: a turn
+        /// The rules' 16.1 course-change rate (fleet-rules@6 `incidents.escape.changesCourse`, as @5's), radians a second: a turn
         /// no faster on any tick can never be rule 16.1 on her. A mirror; `BotProfileTests` pins it to the rules file.
         static let courseChangeRate = deg2rad(12)
         /// The share of `courseChangeRate` she turns at most, whatever her speed: a held rudder's rate grows as she

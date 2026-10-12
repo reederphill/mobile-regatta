@@ -4,7 +4,8 @@ import Testing
 
 /// The rules configuration file (#73): its values, its hash, and where the race reads it.
 @Suite struct RulesConfigTests {
-    /// The bundled bytes of fleet-rules@`version`: by default the default file, @5.
+    /// The bundled bytes of fleet-rules@`version`: by default @5 (the default file until #490; its tampered copies
+    /// still read its full-circle penalty).
     static func bundledData(version: Int = 5) throws -> Data {
         try #require(try RulesConfigFile.bundledData(id: "fleet-rules", version: version))
     }
@@ -254,12 +255,13 @@ import Testing
 
     /// fleet-rules@5 (schema 5, #345) is @4 with rule 17's limits: 2 hull lengths, 5° on a beat, 8° on a reach or
     /// run, a 4 s "promptly sails astern" window, the tolerances and window listed as builder values; every other
-    /// value the same. It is the default. @1 to @4 still load, with none: their races never call rule 17.
+    /// value the same. It was the default until #490 (fleet-rules@6). @1 to @4 still load, with none: their races never
+    /// call rule 17.
     @Test func version5IsVersion4WithRule17Limits() throws {
         let v4 = try RulesConfigFile.bundled(id: "fleet-rules", version: 4)
         let v5 = try RulesConfigFile.bundled(id: "fleet-rules", version: 5)
         #expect(v5.header.schemaVersion == 5)
-        #expect(v5.ref == RaceFiles.defaults.rulesConfiguration.ref && v5.ref == Race.defaultRulesConfiguration.ref)
+        #expect(v5.ref != RaceFiles.defaults.rulesConfiguration.ref)
         for version in 1...4 {
             #expect(try RulesConfigFile.bundled(id: "fleet-rules", version: version).content.incidents.properCourse == nil)
         }
@@ -329,7 +331,7 @@ import Testing
             .content.raceFormat.finishWindow == 150)
         let before = original.setup.rulesConfiguration
         let after = retuned.setup.rulesConfiguration
-        #expect(before == Race.defaultRulesConfiguration.ref)
+        #expect(before == (try RulesConfigFile.bundled(id: "fleet-rules", version: 5)).ref)
         #expect(after.hash != before.hash)
 
         // Through the log's JSON, as it is stored and replayed.
@@ -433,13 +435,13 @@ import Testing
     }
 
     /// fleet-rules@6 (schema 6, #487) is @5 with a `tackAndGybe` penalty turn: completed within 40 s of its clock, no
-    /// start deadline (`start` is `complete`) and no started turn; every other value the same. It is not the default.
+    /// start deadline (`start` is `complete`) and no started turn; every other value the same. It is the default (#490).
     /// @1 to @5 still parse as before: a `fullCircle` turn.
     @Test func fleetRulesSixParsesTackAndGybe() throws {
         let v5 = try RulesConfigFile.bundled(id: "fleet-rules", version: 5)
         let v6 = try RulesConfigFile.bundled(id: "fleet-rules", version: 6)
         #expect(v6.header.schemaVersion == 6)
-        #expect(v5.ref == RaceFiles.defaults.rulesConfiguration.ref && v6.ref != Race.defaultRulesConfiguration.ref)
+        #expect(v6.ref == RaceFiles.defaults.rulesConfiguration.ref && v6.ref == Race.defaultRulesConfiguration.ref)
         let penalty = v6.content.raceFormat.penalty
         #expect(penalty == RulesConfig.Penalty(start: 40, complete: 40, startedTurn: 0, stackedPenaltyDeadlines: .sequential,
                                                turn: .tackAndGybe))
@@ -580,7 +582,8 @@ import Testing
 
     /// A short scripted race's index, entry by entry (#94): a contact the umpire calls, a touch again inside the
     /// incident, a protest 5 s after and one with no incident. Pinned as JSON, integers and strings only, so it
-    /// reads the same on every platform.
+    /// reads the same on every platform. Under the default fleet-rules@6 (#490) the call's start deadline is its
+    /// complete deadline (one 40 s limit).
     @Test func scriptedIndexIsPinned() throws {
         let race = try IncidentFixture.race()
         try IncidentFixture.touching(race, tick: 300)
@@ -600,7 +603,7 @@ import Testing
         #expect(json == ##"{"contacts":[{"incidentId":0,"leg":0,"parties":{"high":1,"low":0},"tick":301},"## +
             ##"{"incidentId":0,"leg":0,"parties":{"high":1,"low":0},"tick":303}],"## +
             ##""incidents":[{"exonerated":[],"id":0,"leg":0,"outcome":{"called":{"_0":{"completeDeadlineTick":1501,"## +
-            ##""incidentId":0,"leg":0,"offender":1,"rule":"11","startDeadlineTick":901,"tick":301,"turnsOwed":1,"victim":0}}},"## +
+            ##""incidentId":0,"leg":0,"offender":1,"rule":"11","startDeadlineTick":1501,"tick":301,"turnsOwed":1,"victim":0}}},"## +
             ##""parties":{"high":1,"low":0},"tick":301,"trigger":"contact"}],"markTouches":[],"obstructionContacts":[],"## +
             ##""protests":[{"leg":0,"matchedIncidentId":0,"protested":1,"protester":0,"tick":451},"## +
             ##"{"leg":0,"protested":0,"protester":1,"tick":900}]}"##)
