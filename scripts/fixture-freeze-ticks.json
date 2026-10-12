@@ -13,7 +13,7 @@
     {
         "fixtures": ["hud-racing", "hud-instruments", "hud-leaderboard", "hud-leaderboard-deuteranopia",
                      "hud-leaderboard-greyscale", "hud-leaderboard-protanopia", "hud-leaderboard-tritanopia",
-                     "hud-leaderboard-washout", "hud-leaderboard-expanded", "queue-chip"],
+                     "hud-leaderboard-washout", "hud-leaderboard-expanded", "queue-chip", "online-menu"],
         "log": "fleet.racelog.json", "camera": "race", "clear": [210, 110, 20], "zoom": [0.6, 1.0],
         "leg": 0, "racing": true, "racingInView": 5, "place": [3, 6]
     },
