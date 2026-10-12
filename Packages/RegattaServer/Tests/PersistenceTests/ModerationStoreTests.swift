@@ -125,4 +125,27 @@ import Testing
             #expect(try await store.actions(limit: 10) == [nobody, report])
         }
     }
+
+    /// Fair-play flags (#155): raised, queued by due time, decided once, and pruned at a year.
+    @Test func flagsAreRaisedQueuedAndDecidedOnce() async throws {
+        try await TestDatabase.withMigratedSchema { database in
+            let store = ModerationRecordStore(database), time = Self.time
+            let late = try await store.raise(StoredFlag(kind: .lateDrops, playerID: "T:a", value: 3, threshold: 3, raceIDs: ["r1", "r2", "r3"],
+                                                        detail: "gone", createdAt: time, dueAt: time + 7200))
+            let calls = try await store.raise(StoredFlag(kind: .ruleCalls, playerID: "T:b", value: 1.2, threshold: 0.75, raceIDs: [],
+                                                         detail: "calls", createdAt: time + 60, dueAt: time + 3600))
+            #expect(late.id > 0 && late.raceIDs == ["r1", "r2", "r3"])
+            #expect(try await store.flag(late.id) == late)
+            #expect(try await store.pendingFlags(limit: 10) == [calls, late])
+            #expect(try await store.decideFlag(calls.id, .upheld, by: "alice", at: time + 120))
+            #expect(try await !store.decideFlag(calls.id, .dismissed, by: "alice", at: time + 180))
+            #expect(try await store.pendingFlags(limit: 10) == [late])
+            let decided = try #require(try await store.flag(calls.id))
+            #expect(decided.decision == .upheld && decided.decidedBy == "alice" && decided.decidedAt == time + 120)
+            #expect(try await store.flags(of: "T:b") == [decided])
+            _ = try await store.prune(before: time + 30, at: time + 30)
+            #expect(try await store.flag(late.id) == nil)
+            #expect(try await store.flag(calls.id) != nil)
+        }
+    }
 }

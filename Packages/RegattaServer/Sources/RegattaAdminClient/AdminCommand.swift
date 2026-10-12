@@ -41,6 +41,8 @@ public enum AdminCommand {
           queue [limit]                       what waits for a decision, the first due first
           report <report-id>                  a report, the reported player's penalties and reports, and a race report's race
           decide <report-id> <decision>       dismiss, uphold_chat, override_nickname, or a racing penalty
+          flag <flag-id>                      a fair-play flag, the player's penalties and her other flags
+          decide-flag <flag-id> <decision>    dismiss or confirm: never a penalty, which is an action of its own
           player <player-id>                  a player's chat standing, penalties and the reports on her
           penalize <player-id> <penalty>      warning, suspension_24h, suspension_7d, permanent or rating_reset
           mute <player-id>                    the next step of the chat ladder
@@ -70,6 +72,13 @@ public enum AdminCommand {
         case "decide":
             try need(2)
             return AdminRequest(method: "POST", path: "/admin/reports/\(try id(args[0], "a report id"))/decide",
+                                query: [URLQueryItem(name: "decision", value: args[1])])
+        case "flag":
+            try need(1)
+            return AdminRequest(method: "GET", path: "/admin/flags/\(try id(args[0], "a flag id"))")
+        case "decide-flag":
+            try need(2)
+            return AdminRequest(method: "POST", path: "/admin/flags/\(try id(args[0], "a flag id"))/decide",
                                 query: [URLQueryItem(name: "decision", value: args[1])])
         case "player":
             try need(1)

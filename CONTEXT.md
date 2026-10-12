@@ -210,6 +210,10 @@ _Avoid_: cooldown (the briefing-leave cooldown is automatic and short), chat ban
 What an upheld report on a nickname does: she shows as "Sailor" and her sail number from her next sign-in.
 _Avoid_: rename
 
+**Fair-play flag**:
+What the server's nightly scan of race logs raises on a player when a pattern looks wrong: rule calls against her running high (contacts above all), protests from many different players, inputs identical tick for tick across races, or leaving unfinished just before the close in race after race. It waits in the admin queue beside the reports, and is only ever looked at: deciding it never penalizes anyone. A penalty is the admin's own action.
+_Avoid_: report (a report is a player's), strike, auto-ban
+
 **Not sent**:
 What a post is when the filter blocks it (the bundled word list, or the classifier flagging it) or the server can't record it. Only its sender sees it, greyed out; it is never stored or shown to anyone else.
 _Avoid_: shadow-ban, masked

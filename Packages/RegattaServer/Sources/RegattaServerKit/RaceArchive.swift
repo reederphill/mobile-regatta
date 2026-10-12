@@ -27,6 +27,9 @@ public protocol RaceArchive: Sendable {
     func closedRace(_ race: UUID) async throws -> ClosedRaceRecord?
     /// Who sat where (#153: a race report names a seat): nil for a race this archive never registered.
     func seats(of race: UUID) async throws -> RaceSeating?
+    /// The races that closed at or after `from` and before `to`, with when, the first closed first: what the fair-play
+    /// scan (#155) and the measures (#157) read.
+    func closedRaces(endedFrom from: Date, to: Date) async throws -> [(id: UUID, endedAt: Date)]
 }
 
 /// Postgres (`RaceRegistryStore`, `RaceResultStore`, `RaceLogStore`).
@@ -60,6 +63,10 @@ public struct PostgresRaceArchive: RaceArchive {
         return ClosedRaceRecord(id: race, log: log, digest: digest, simulationVersion: version, toolchain: toolchain,
                                 results: results.results, incidents: results.incidents, rated: results.rated,
                                 bots: try await RaceResultStore(database).bots(of: race))
+    }
+
+    public func closedRaces(endedFrom from: Date, to: Date) async throws -> [(id: UUID, endedAt: Date)] {
+        try await RaceRegistryStore(database).closedRaces(endedFrom: from, to: to)
     }
 
     public func seats(of race: UUID) async throws -> RaceSeating? {
@@ -153,6 +160,16 @@ public final class InMemoryRaceArchive: RaceArchive {
             state.races[race].map { entry in
                 RaceSeating(humans: entry.players, takenOver: Set(entry.closed?.bots.filter { $0.source == .takeover }.map(\.seat) ?? []))
             }
+        }
+    }
+
+    public func closedRaces(endedFrom from: Date, to: Date) async throws -> [(id: UUID, endedAt: Date)] {
+        entries.withLock { state in
+            state.races.compactMap { id, entry -> (id: UUID, endedAt: Date, order: Int)? in
+                guard entry.state == .closed, let ended = entry.endedAt, ended >= from, ended < to else { return nil }
+                return (id, ended, entry.closeOrder)
+            }
+            .sorted { ($0.endedAt, $0.order) < ($1.endedAt, $1.order) }.map { ($0.id, $0.endedAt) }
         }
     }
 

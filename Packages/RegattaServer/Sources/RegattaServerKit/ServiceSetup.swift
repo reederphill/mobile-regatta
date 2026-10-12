@@ -26,7 +26,8 @@ extension ServiceEndpoint {
     ///
     /// Moderation (#153) keeps its reports and penalties in `moderationStore` (memory by default): the lobby's
     /// standings and reports, race reports read from `archive`, racing suspensions written to `restrictions`, and
-    /// nicknames it overrode shown from sign-in.
+    /// nicknames it overrode shown from sign-in. The nightly fair-play scan (#155) reads `archive`'s races and raises
+    /// its flags in `moderationStore`.
     ///
     /// Usage analytics (#156) go to `analyticsStore` (memory by default), rolled up and purged by the retention job the
     /// HTTP server runs. Players' liveries (#159) are kept in `liveryStore` (memory by default): the profile stores and
@@ -145,7 +146,8 @@ extension ServiceEndpoint {
                                       deletion: { player in deletion.map { ServerDataDeletionService(deletion: $0, player: player) } }),
             matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub, analytics: analytics,
             analyticsRetention: AnalyticsRetention(settings: config.analytics, store: analyticsStore), ratings: book,
-            moderation: moderation, deletion: deletion, retention: retention, archive: archive)
+            moderation: moderation, deletion: deletion, retention: retention, archive: archive,
+            fairPlay: FairPlayJob(store: moderationStore, archive: archive))
     }
 
     /// The lobby's word list (#152, owner 2026-10-11: the offline list always applies). Outside `ENV=dev` it is the
