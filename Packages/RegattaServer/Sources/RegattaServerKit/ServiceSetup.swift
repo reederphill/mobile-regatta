@@ -98,7 +98,8 @@ extension ServiceEndpoint {
             blocker = AppStoreConnectScoreModeration(tokens: try AppStoreConnectLeaderboard(config: key, poster: poster),
                                                      leaderboardResourceID: resource, requester: poster)
         }
-        let deletion = online.map { OnlineDataDeletion(store: $0, scores: blocker) }
+        // The queue is made below and reads the lobby, which this tells: it reaches the queue late.
+        let deletion = online.map { OnlineDataDeletion(store: $0, scores: blocker, beforeErase: { await queueBox.value?.forget($0) }) }
         deletion?.attach(hub)
         let retention = deletion.map { RetentionJobs(deletion: $0, moderation: moderationStore, lobby: hub) }
         let analytics = AnalyticsIngest(settings: config.analytics, store: analyticsStore)

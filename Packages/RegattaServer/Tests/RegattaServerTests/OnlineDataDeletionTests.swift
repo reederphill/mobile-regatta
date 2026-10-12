@@ -46,11 +46,11 @@ final class FakeScoreBlocker: ScoreBlocking {
 
     struct Down: Error {}
 
-    func blockScores(of gamePlayerID: String) async throws -> Int {
+    func blockScores(of players: [String: Date]) async throws -> [String: Int] {
         try state.withLock { state in
             if state.failing { throw Down() }
-            state.blocked.append(gamePlayerID)
-            return 2
+            state.blocked += players.keys.sorted()
+            return players.mapValues { _ in 2 }
         }
     }
 }
@@ -169,29 +169,53 @@ struct DeletionRig {
     @Test func appStoreConnectListsAndBlocksHerScores() async throws {
         let first = "/v2/gameCenterLeaderboards/lb-1/gameCenterScoreModerations?include=player&limit=200"
         let second = "/v2/gameCenterLeaderboards/lb-1/gameCenterScoreModerations?cursor=Mg&include=player&limit=200"
-        func score(_ id: String, _ player: String, blocked: Bool = false) -> String {
-            #"{"type":"gameCenterScoreModerations","id":"\#(id)","attributes":{"score":1500,"blocked":\#(blocked)},"#
+        func score(_ id: String, _ player: String, blocked: Bool = false, at date: String = "2026-10-01T12:00:00Z") -> String {
+            #"{"type":"gameCenterScoreModerations","id":"\#(id)","attributes":{"score":1500,"blocked":\#(blocked),"submittedDate":"\#(date)"},"#
                 + #""relationships":{"player":{"data":{"type":"gameCenterDetailPlayers","id":"\#(player)"}}}}"#
         }
         let stub = StubAppStoreConnect(pages: [
             first: #"{"data":[\#(score("s1", "G:wren")),\#(score("s2", "G:gull"))],"links":{"self":"x","next":"https://api.appstoreconnect.apple.com\#(second)"}}"#,
-            second: #"{"data":[\#(score("s3", "G:wren")),\#(score("s4", "G:wren", blocked: true))],"links":{"self":"y"}}"#,
+            second: #"{"data":[\#(score("s3", "G:wren", at: "2026-10-02T08:00:00.250Z")),\#(score("s4", "G:wren", blocked: true)),"#
+                + #"\#(score("s5", "G:wren", at: "2026-10-20T00:00:00Z")),\#(score("s6", "G:tern"))],"links":{"self":"y"}}"#,
         ])
         let key = AppStoreConnectConfig(keyID: "K", issuerID: "I", privateKeyPEM: P256.Signing.PrivateKey().pemRepresentation,
                                         leaderboardID: "rating", bundleID: "com.example", leaderboardResourceID: "lb-1")
         let moderation = AppStoreConnectScoreModeration(tokens: try AppStoreConnectLeaderboard(config: key, poster: stub),
                                                         leaderboardResourceID: "lb-1", requester: stub)
-        #expect(try await moderation.blockScores(of: "G:wren") == 2)
+        // Wren's two scores from before her deletion, not the one she earned after coming back, nor anyone else's.
+        let deleted = Date(timeIntervalSince1970: 1_791_590_400) // 2026-10-10
+        #expect(try await moderation.blockScores(of: ["G:wren": deleted, "G:skua": deleted]) == ["G:wren": 2, "G:skua": 0])
         #expect(stub.sent.map(\.method) == [.get, .get, .patch, .patch])
         #expect(stub.sent.map(\.target) == [first, second, "/v1/gameCenterScoreModerations/s1", "/v1/gameCenterScoreModerations/s3"])
         #expect(stub.sent[2].body == #"{"data":{"attributes":{"blocked":true},"id":"s1","type":"gameCenterScoreModerations"}}"#)
 
         stub.patches(answer: 409)
-        await #expect(throws: ScoreBlockError.status(409)) { _ = try await moderation.blockScores(of: "G:wren") }
+        await #expect(throws: ScoreBlockError.status(409)) { _ = try await moderation.blockScores(of: ["G:wren": deleted]) }
         #expect(throws: ScoreBlockError.badNextLink("https://evil.example/v2/x")) { _ = try AppStoreConnectScoreModeration.target("https://evil.example/v2/x") }
         let unknown = AppStoreConnectScoreModeration(tokens: try AppStoreConnectLeaderboard(config: key, poster: stub),
                                                      leaderboardResourceID: "missing", requester: stub)
-        await #expect(throws: ScoreBlockError.status(404)) { _ = try await unknown.blockScores(of: "G:wren") }
+        await #expect(throws: ScoreBlockError.status(404)) { _ = try await unknown.blockScores(of: ["G:wren": deleted]) }
+    }
+
+    /// A queued player who deletes her data leaves the queue first, so no fleet registers her after her row is gone.
+    @Test func deletingLetsTheQueueGoOfHer() async throws {
+        let rig = DeletionRig()
+        let clock = rig.clock
+        let matchmaker = QueueMatchmaker(settings: QueueSettings(), registry: RaceRegistry(),
+                                         draw: RaceDraw(pairings: OnlinePairing.bundled(), seeds: FixtureWindSeedPools(poolSize: 8)),
+                                         tokenKey: QueueMatchmakerTests.key, tokenLifetime: 600, now: { clock.now })
+        let deletion = OnlineDataDeletion(store: rig.memory, blocksAtOnce: false, beforeErase: { await matchmaker.forget($0) }, now: { clock.now })
+        let wren = try await rig.holding("wren")
+        try await matchmaker.join(wren)
+        try await deletion.delete(wren.teamPlayerID, confirmedBy: try await deletion.plan(for: wren.teamPlayerID).confirmation)
+        let state = await matchmaker.state(of: wren.teamPlayerID), queued = await matchmaker.queuedCount
+        #expect(state == .idle && queued == 0)
+    }
+
+    /// Race reports filed after a deletion can't reach the anonymous seat.
+    @Test func anAnonymousSeatIsNoOnesToReport() {
+        let seating = RaceSeating(humans: [RaceSeatHolder(playerID: "deleted:x", seat: 1), RaceSeatHolder(playerID: "T:gull", seat: 2)])
+        #expect(seating.human(at: 1) == nil && seating.human(at: 2) == "T:gull")
     }
 
     // MARK: Retention (#28), on a fake clock
@@ -216,13 +240,14 @@ struct DeletionRig {
         _ = try await rig.moderation.add(StoredPenalty(playerID: "T:b", kind: .chatBan, actorID: "admin", reportID: report.id, startsAt: start))
         let week = try await rig.moderation.add(StoredPenalty(playerID: "T:b", kind: .racingSuspension, actorID: "admin", startsAt: start,
                                                               endsAt: start + 7 * 86_400))
+        _ = try await rig.moderation.add(StoredPenalty(playerID: "T:b", kind: .racingWarning, actorID: "admin", startsAt: start))
         rig.clock.advance(365 * 86_400 - 1)
         var run = await rig.retention.runOnce()
         #expect(run.penalties == 0 && run.reports == 0)
         rig.clock.advance(2)
         run = await rig.retention.runOnce()
-        // The week's suspension and the undecided report go; the ban, in force, keeps itself and its report.
-        #expect(run.penalties == 1 && run.reports == 1)
+        // The week's suspension, the warning and the undecided report go; the ban, in force, keeps itself and its report.
+        #expect(run.penalties == 2 && run.reports == 1)
         #expect(try await rig.moderation.penalties(of: "T:b").map(\.kind) == [.chatBan])
         #expect(try await rig.moderation.report(report.id) != nil)
         _ = week

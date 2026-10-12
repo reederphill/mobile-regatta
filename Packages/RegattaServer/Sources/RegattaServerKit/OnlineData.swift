@@ -94,8 +94,10 @@ public final class InMemoryOnlineData: OnlineDataStore {
     public func pendingScoreBlocks(limit: Int) async throws -> [PendingScoreBlock] {
         records.withLock { records in
             Array(records.all.compactMap { record in
-                record.gamePlayerID.map { PendingScoreBlock(id: record.id, gamePlayerID: $0, failures: records.failures[record.id] ?? 0) }
-            }.prefix(limit))
+                record.gamePlayerID.map {
+                    PendingScoreBlock(id: record.id, gamePlayerID: $0, deletedAt: record.deletedAt, failures: records.failures[record.id] ?? 0)
+                }
+            }.sorted { ($0.failures, $0.id) < ($1.failures, $1.id) }.prefix(limit))
         }
     }
 
@@ -127,10 +129,12 @@ public final class InMemoryOnlineData: OnlineDataStore {
 
 // MARK: - The leaderboard
 
-/// Blocks a player's scores on the Game Center leaderboard (#160): blocking takes an entry off it.
+/// Blocks deleted players' scores on the Game Center leaderboard (#160): blocking takes an entry off it.
 public protocol ScoreBlocking: Sendable {
-    /// Blocks every score of hers not blocked yet. Returns how many it blocked.
-    func blockScores(of gamePlayerID: String) async throws -> Int
+    /// Blocks, in one pass over the leaderboard, each player's scores not blocked yet that were submitted by her
+    /// deletion (`players`: gamePlayerID → deletion time): a player who came back keeps her new ones. Returns how many
+    /// it blocked of each.
+    func blockScores(of players: [String: Date]) async throws -> [String: Int]
 }
 
 public enum HTTPSMethod: Sendable, Equatable {
@@ -175,7 +179,7 @@ public enum ScoreBlockError: Error, Equatable, Sendable {
 public struct AppStoreConnectScoreModeration: ScoreBlocking {
     public static let host = AppStoreConnectLeaderboard.host
     static let pageLimit = 200
-    static let maxPages = 500
+    static let maxPages = 5000
 
     let tokens: AppStoreConnectLeaderboard
     let leaderboardResourceID: String
@@ -192,7 +196,10 @@ public struct AppStoreConnectScoreModeration: ScoreBlocking {
 
     struct Page: Decodable {
         struct Score: Decodable {
-            struct Attributes: Decodable { var blocked: Bool? }
+            struct Attributes: Decodable {
+                var blocked: Bool?
+                var submittedDate: String?
+            }
             struct Relationships: Decodable {
                 struct Player: Decodable {
                     struct Data: Decodable { var id: String }
@@ -225,10 +232,13 @@ public struct AppStoreConnectScoreModeration: ScoreBlocking {
         return "/v2/gameCenterLeaderboards/\(id)/gameCenterScoreModerations?include=player&limit=\(Self.pageLimit)"
     }
 
-    /// Her scores not blocked yet, by moderation id, from every page.
-    func scores(of gamePlayerID: String) async throws -> [String] {
+    /// The players' scores not blocked yet and submitted by their deadlines, by moderation id and player, from every
+    /// page. A score without a readable submission date is taken as hers.
+    func scores(of players: [String: Date]) async throws -> [(id: String, player: String)] {
         var target: String? = firstPage
-        var found: [String] = []
+        var found: [(id: String, player: String)] = []
+        let dates = ISO8601DateFormatter(), fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         var pages = 0
         while let current = target {
             pages += 1
@@ -236,7 +246,11 @@ public struct AppStoreConnectScoreModeration: ScoreBlocking {
             let reply = try await requester.request(.get, host: Self.host, target: current, bearer: try tokens.bearer(at: now()), json: nil)
             guard reply.status == 200 else { throw ScoreBlockError.status(reply.status) }
             let page = try JSONDecoder().decode(Page.self, from: reply.body)
-            found += page.data.filter { $0.relationships?.player?.data?.id == gamePlayerID && $0.attributes?.blocked != true }.map(\.id)
+            for score in page.data where score.attributes?.blocked != true {
+                guard let player = score.relationships?.player?.data?.id, let deadline = players[player] else { continue }
+                let submitted = score.attributes?.submittedDate.flatMap { dates.date(from: $0) ?? fractional.date(from: $0) }
+                if submitted.map({ $0 <= deadline }) ?? true { found.append((score.id, player)) }
+            }
             target = try page.links?.next.map(Self.target)
         }
         return found
@@ -252,17 +266,20 @@ public struct AppStoreConnectScoreModeration: ScoreBlocking {
         return target
     }
 
-    public func blockScores(of gamePlayerID: String) async throws -> Int {
-        let ids = try await scores(of: gamePlayerID)
+    public func blockScores(of players: [String: Date]) async throws -> [String: Int] {
+        guard !players.isEmpty else { return [:] }
+        let found = try await scores(of: players)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
-        for id in ids {
+        var blocked = players.mapValues { _ in 0 }
+        for (id, player) in found {
             let path = "/v1/gameCenterScoreModerations/" + (id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? id)
             let reply = try await requester.request(.patch, host: Self.host, target: path, bearer: try tokens.bearer(at: now()),
                                                     json: try encoder.encode(Block(data: .init(id: id))))
             guard reply.status == 200 else { throw ScoreBlockError.status(reply.status) }
+            blocked[player, default: 0] += 1
         }
-        return ids.count
+        return blocked
     }
 }
 
@@ -296,15 +313,19 @@ public final class OnlineDataDeletion: Sendable {
     private let confirmations = Mutex<[String: (token: String, issued: Date)]>([:])
     /// Whether a deletion starts blocking its scores at once (else the retention job's next run does).
     let blocksAtOnce: Bool
+    /// Before her data goes: the queue lets her go (her place, and any seat she holds), so no race registers her after.
+    let beforeErase: @Sendable (String) async -> Void
     /// One block run at a time: two would block the same scores twice.
     private let blocking = Mutex(false)
 
     public init(store: any OnlineDataStore, settings: DeletionSettings = DeletionSettings(), scores: (any ScoreBlocking)? = nil,
-                blocksAtOnce: Bool = true, now: @escaping @Sendable () -> Date = { Date() }) {
+                blocksAtOnce: Bool = true, beforeErase: @escaping @Sendable (String) async -> Void = { _ in },
+                now: @escaping @Sendable () -> Date = { Date() }) {
         self.store = store
         self.settings = settings
         self.scores = scores
         self.blocksAtOnce = blocksAtOnce
+        self.beforeErase = beforeErase
         self.now = now
     }
 
@@ -327,7 +348,11 @@ public final class OnlineDataDeletion: Sendable {
         let held = try await store.held(by: playerID)
         guard !held.isEmpty else { throw DataDeletionError.nothingToDelete }
         let token = UUID().uuidString, time = now()
-        confirmations.withLock { $0[playerID] = (token, time) }
+        let lifetime = settings.confirmationLifetime
+        confirmations.withLock { confirmations in
+            confirmations = confirmations.filter { time.timeIntervalSince($0.value.issued) <= lifetime }
+            confirmations[playerID] = (token, time)
+        }
         return DeletionPlan(deletes: Set(held.kinds.map(Self.kind)), anonymisesRaceLogs: held.hasRaced,
                             confirmation: DeletionConfirmation(token: token))
     }
@@ -350,6 +375,7 @@ public final class OnlineDataDeletion: Sendable {
     /// Erases the player under a new anonymous id, then clears the lobby's memory of her.
     func erase(_ playerID: String, reason: DeletionReason) async throws -> Bool {
         let anonymous = PlayerDataStore.anonymousPrefix + UUID().uuidString.lowercased()
+        await beforeErase(playerID)
         guard try await store.erase(playerID, as: anonymous, reason: reason, at: now()) else { return false }
         do {
             try await lobby.value?.deleteAll(of: playerID)
@@ -386,18 +412,24 @@ public final class OnlineDataDeletion: Sendable {
         defer { blocking.withLock { $0 = false } }
         var finished = 0
         do {
-            for pending in try await store.pendingScoreBlocks(limit: settings.batch) {
-                do {
-                    let count = try await scores.blockScores(of: pending.gamePlayerID)
-                    try await store.scoresBlocked(pending.id, count: count, at: now())
-                    finished += 1
-                } catch {
-                    Self.log("can't block deletion \(pending.id)'s scores (tried \(pending.failures + 1) times): \(error)")
-                    try await store.scoreBlockFailed(pending.id)
-                }
+            let pending = try await store.pendingScoreBlocks(limit: settings.batch)
+            guard !pending.isEmpty else { return 0 }
+            // One pass for them all; a player deleted twice is blocked up to her latest deletion.
+            let players = Dictionary(pending.map { ($0.gamePlayerID, $0.deletedAt) }, uniquingKeysWith: max)
+            let blocked: [String: Int]
+            do {
+                blocked = try await scores.blockScores(of: players)
+            } catch {
+                Self.log("can't block \(pending.count) deletions' scores: \(error)")
+                for each in pending { try await store.scoreBlockFailed(each.id) }
+                return 0
+            }
+            for each in pending {
+                try await store.scoresBlocked(each.id, count: blocked[each.gamePlayerID] ?? 0, at: now())
+                finished += 1
             }
         } catch {
-            Self.log("can't read the scores to block: \(error)")
+            Self.log("can't read or record the scores to block: \(error)")
         }
         return finished
     }

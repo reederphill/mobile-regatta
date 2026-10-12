@@ -246,12 +246,13 @@ public struct ModerationRecordStore: Sendable {
 
     /// The retention prune (#28, #160): a penalty given before `cutoff` that is no longer in force at `time`, then a
     /// report filed before `cutoff` that no remaining penalty decided. A penalty in force stays as long as it lasts,
-    /// and so does its report.
+    /// and so does its report; a warning or a rating reset lasts no time (it was given, and that is all).
     public func prune(before cutoff: Date, at time: Date) async throws -> (penalties: Int, reports: Int) {
         try await database.transaction { connection in
             let penalties = try await connection.query("""
                 DELETE FROM moderation_penalties WHERE starts_at < \(cutoff)
-                    AND (lifted_at IS NOT NULL OR (ends_at IS NOT NULL AND ends_at <= \(time)))
+                    AND (lifted_at IS NOT NULL OR (ends_at IS NOT NULL AND ends_at <= \(time))
+                        OR kind IN ('racing_warning', 'rating_reset'))
                 RETURNING id
                 """, logger: database.logger)
             var penaltyCount = 0

@@ -40,11 +40,14 @@ public enum DeletionReason: String, Sendable, Equatable {
 public struct PendingScoreBlock: Sendable, Equatable {
     public var id: Int64
     public var gamePlayerID: String
+    /// Only scores submitted by then are hers to block: a player who came back may have new ones.
+    public var deletedAt: Date
     public var failures: Int
 
-    public init(id: Int64, gamePlayerID: String, failures: Int) {
+    public init(id: Int64, gamePlayerID: String, deletedAt: Date, failures: Int) {
         self.id = id
         self.gamePlayerID = gamePlayerID
+        self.deletedAt = deletedAt
         self.failures = failures
     }
 }
@@ -83,7 +86,7 @@ public struct PlayerDataStore: Sendable {
 
     public func held(by playerID: String) async throws -> HeldOnlineData {
         let rows = try await database.client.query("""
-            SELECT EXISTS (SELECT 1 FROM player_stats WHERE player_id = \(playerID)),
+            SELECT EXISTS (SELECT 1 FROM player_stats WHERE player_id = \(playerID) AND (completed_races > 0 OR wins > 0)),
                 EXISTS (SELECT 1 FROM ratings WHERE player_id = \(playerID)),
                 EXISTS (SELECT 1 FROM player_liveries WHERE player_id = \(playerID)),
                 EXISTS (SELECT 1 FROM lobby_messages WHERE author_id = \(playerID)),
@@ -140,14 +143,15 @@ public struct PlayerDataStore: Sendable {
         return players
     }
 
-    /// Deletions whose scores aren't blocked yet, the oldest first.
+    /// Deletions whose scores aren't blocked yet: the fewest failures first, then the oldest.
     public func pendingScoreBlocks(limit: Int) async throws -> [PendingScoreBlock] {
         let rows = try await database.client.query("""
-            SELECT id, game_player_id, block_failures FROM data_deletions WHERE game_player_id IS NOT NULL ORDER BY id LIMIT \(Int64(limit))
+            SELECT id, game_player_id, deleted_at, block_failures FROM data_deletions WHERE game_player_id IS NOT NULL
+            ORDER BY block_failures, id LIMIT \(Int64(limit))
             """, logger: database.logger)
         var pending: [PendingScoreBlock] = []
-        for try await (id, game, failures) in rows.decode((Int64, String, Int32).self) {
-            pending.append(PendingScoreBlock(id: id, gamePlayerID: game, failures: Int(failures)))
+        for try await (id, game, deleted, failures) in rows.decode((Int64, String, Date, Int32).self) {
+            pending.append(PendingScoreBlock(id: id, gamePlayerID: game, deletedAt: deleted, failures: Int(failures)))
         }
         return pending
     }

@@ -126,7 +126,9 @@ public final class InMemoryModerationStore: ModerationStore {
     public func prune(before cutoff: Date, at time: Date) async throws -> (penalties: Int, reports: Int) {
         state.withLock { state in
             let penalties = state.penalties.count
-            state.penalties.removeAll { $0.startsAt < cutoff && ($0.liftedAt != nil || $0.endsAt.map { $0 <= time } == true) }
+            state.penalties.removeAll {
+                $0.startsAt < cutoff && ($0.liftedAt != nil || $0.endsAt.map { $0 <= time } == true || $0.kind == .racingWarning || $0.kind == .ratingReset)
+            }
             let decided = Set(state.penalties.compactMap(\.reportID))
             let reports = state.reports.count
             state.reports.removeAll { $0.createdAt < cutoff && !decided.contains($0.id) }
@@ -214,8 +216,9 @@ public struct RaceSeating: Sendable, Equatable {
 
     /// The human who sailed `seat`, if a human did.
     public func human(at seat: Int) -> String? {
-        guard !takenOver.contains(seat) else { return nil }
-        return humans.first { $0.seat == seat }?.playerID
+        guard !takenOver.contains(seat), let player = humans.first(where: { $0.seat == seat })?.playerID,
+              !player.hasPrefix(PlayerDataStore.anonymousPrefix) else { return nil }
+        return player
     }
 }
 

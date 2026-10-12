@@ -87,7 +87,9 @@ import Testing
             #expect(try await !store.erase("T:a", as: "deleted:y", reason: .request, at: Self.time + 60))
 
             #expect(try await Self.references(database, to: ["T:a", "GT:a"])
-                == ["moderation_penalties.player_id", "moderation_reports.subject_id", "data_deletions.game_player_id"])
+                == ["moderation_penalties.player_id", "moderation_reports.subject_id", "data_deletions.game_player_id",
+                    // T:b's block of her: T:b's record, kept so she stays hidden from T:b if she returns.
+                    "lobby_blocks.blocked_id"])
             #expect(try await store.held(by: "T:a").isEmpty)
             #expect(try await archive.players(of: record.id) == [RaceSeatHolder(playerID: "deleted:x", seat: 0), RaceSeatHolder(playerID: "T:b", seat: 1)])
             #expect(try await RaceLogStore(database).log(for: record.id) == record.log)
@@ -104,9 +106,11 @@ import Testing
             for try await count in anonymous.decode(Int.self) { #expect(count == 1) }
             let audit = try await store.deletions(limit: 10)
             #expect(audit == [DeletionRecord(id: audit[0].id, reason: .request, deletedAt: Self.time + 60, gamePlayerID: "GT:a", scoresBlocked: nil)])
-            // She may come back: a new row, and the penalty against her applies again.
+            // She may come back: a new row, the penalty against her applies again, and T:b's block of her still hides her.
             _ = try await PlayerStore(database).signIn(teamPlayerID: "T:a", gamePlayerID: "GT:a", displayName: "back")
             #expect(try await store.held(by: "T:a").isEmpty)
+            #expect(try await LobbyMessageStore(database).blocks().map { [$0.blocker, $0.blocked] } == [["T:b", "T:a"]])
+            #expect(try await LobbyMessageStore(database).blockedPlayers(of: "T:b").map(\.nickname) == ["back"])
         }
     }
 
@@ -118,12 +122,18 @@ import Testing
             try await store.erase("T:b", as: "deleted:b", reason: .inactive, at: Self.time + 1)
             let pending = try await store.pendingScoreBlocks(limit: 10)
             #expect(pending.map(\.gamePlayerID) == ["GT:a", "GT:b"] && pending.map(\.failures) == [0, 0])
+            #expect(pending.map(\.deletedAt) == [Self.time, Self.time + 1])
             try await store.scoreBlockFailed(pending[0].id)
             try await store.scoresBlocked(pending[1].id, count: 3, at: Self.time + 2)
-            #expect(try await store.pendingScoreBlocks(limit: 10) == [PendingScoreBlock(id: pending[0].id, gamePlayerID: "GT:a", failures: 1)])
+            #expect(try await store.pendingScoreBlocks(limit: 10)
+                == [PendingScoreBlock(id: pending[0].id, gamePlayerID: "GT:a", deletedAt: Self.time, failures: 1)])
+            // A deletion that keeps failing waits behind newer ones.
+            _ = try await PlayerStore(database).signIn(teamPlayerID: "T:c", gamePlayerID: "GT:c", displayName: "c")
+            try await store.erase("T:c", as: "deleted:c", reason: .request, at: Self.time + 3)
+            #expect(try await store.pendingScoreBlocks(limit: 1).map(\.gamePlayerID) == ["GT:c"])
             let audit = try await store.deletions(limit: 10)
-            #expect(audit.map(\.reason) == [.inactive, .request])
-            #expect(audit[0].gamePlayerID == nil && audit[0].scoresBlocked == 3)
+            #expect(audit.map(\.reason) == [.request, .inactive, .request])
+            #expect(audit[1].gamePlayerID == nil && audit[1].scoresBlocked == 3)
         }
     }
 

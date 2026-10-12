@@ -166,6 +166,7 @@ public final class InMemoryRatingBook: RatingBook {
             state.stats[playerID] = nil
             state.mirrored[playerID] = nil
             state.mirrorFailures[playerID] = nil
+            state.gamePlayerIDs[playerID] = nil
             for race in state.history.keys { state.history[race]?.removeAll { $0.playerID == playerID } }
         }
     }
