@@ -1,6 +1,6 @@
 {
   "log" : "cues.racelog.json",
-  "freezeTick" : 950,
+  "freezeTick" : 960,
   "camera" : "boat",
   "vision" : "tritanopia",
   "view" : "courseUp",

@@ -17,6 +17,9 @@ import RegattaCore
 //   can't keep clear at once, is called on that tick before she can bear away (#337 round 4: seed 2, mixed 16, seat 7,
 //   reaching up from astern 15 degrees above her proper course). Not on a beat, where she sails her groove, the proper
 //   course itself, and a pinch below the beat's tolerance.
+//   On a class with the new planing rule (#462) only behind a boat she is coming up under the lee of, and with the
+//   rules' allowance (`PlaningTable.leeAllowance`): her own angle there is above her groove, and her proper course
+//   itself took her off the plane.
 // - Her aim alone: the evasions that steer after it (`evasion`, the cautious bot's `guarded`) are outside it.
 // - A bot-only limit: nothing clamps a player's helm (#343: no helm clamp).
 extension BotBrain {
@@ -46,15 +49,28 @@ extension BotBrain {
     /// `aim` as `properCourseLimited(_:_:)` holds it while she is told she's restricted; before that, on a reach or a
     /// run (`ProperCourse.Kind`), held no higher than her proper course itself (no tolerance: the view doesn't carry
     /// the rules file's) while she is clear astern (rule 12) of a boat within `properCourseLookahead` hull lengths:
-    /// she would become restricted if she made the overlap to leeward. Not in a mark's zone.
+    /// she would become restricted if she made the overlap to leeward. Not in a mark's zone. On a class with the new
+    /// planing rule only when that boat is to windward of her course or dead ahead and she closes on her faster than
+    /// `PlaningTable.leeClosing`, and then held `PlaningTable.leeAllowance` above her proper course, as the notice
+    /// would hold her.
     static func properCourseAnticipated(_ aim: Aim, _ b: SeatView.OwnBoat, _ view: SeatView) -> Aim {
         if b.properCourse != nil { return properCourseLimited(aim, b) }
         // In a mark's zone rule 18 has the pair, not rule 17, and she sails her rounding.
         if b.zone?.isIn == true { return aim }
         let reach = properCourseLookahead * view.boatClass.hull.length
+        // "Under a boat's lee" (#462): on a class with the new planing rule, only behind a boat she is coming up under
+        // the lee of (on her windward side or dead ahead, and she is closing), and with the rules' own allowance. Held
+        // down past her groove behind every boat within four lengths, slow out of a rounding or above it by what her
+        // hand wanders, she fell off the plane.
+        let planes = hasPlaningRule(view.boatClass)
+        let windward = b.forward.rightPerp * (b.forward.rightPerp.dot(Vec2.heading(b.windDirection)) >= 0 ? 1 : -1)
         let astern = view.others.contains { o in
-            o.rightOfWay == RightOfWay(keepClear: view.seat, rule: .clearAstern)
-                && ((o.position - b.position) * (o.position - b.position)).sum() < reach * reach
+            guard o.rightOfWay == RightOfWay(keepClear: view.seat, rule: .clearAstern),
+                  ((o.position - b.position) * (o.position - b.position)).sum() < reach * reach else { return false }
+            guard planes else { return true }
+            let to = o.position - b.position
+            return to.dot(windward) > -view.boatClass.hull.beam
+                && (b.velocity - o.velocity).dot(to.normalized) > PlaningTable.leeClosing
         }
         guard astern,
               let proper = ProperCourse.of(position: b.position, boomSide: b.boomSide, status: b.status,
@@ -62,7 +78,8 @@ extension BotBrain {
                                            grooveTWS: b.grooveWindSpeed, course: view.course, boatClass: view.boatClass),
               proper.kind != .beat
         else { return aim }
-        return properCourseLimited(aim, edge: proper.sailingAngle)
+        return properCourseLimited(aim, edge: planes ? proper.edgeSailingAngle(tolerance: PlaningTable.leeAllowance)
+                                   : proper.sailingAngle)
     }
 
     /// `aim` held no closer to the wind than `edge` (a sailing angle on her tack) plus `properCourseMargin`.

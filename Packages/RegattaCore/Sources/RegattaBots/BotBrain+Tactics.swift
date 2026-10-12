@@ -248,7 +248,7 @@ struct Senses: Sendable, Equatable {
     /// Her reckoning of the wind strength her grooves read (`Boat.grooveWindSpeed`): the class's running
     /// average of what her polar reads, m/s.
     var grooveWind: Double?
-    /// Whether she reckons she is on the plane (`BoatClass.PlaningTuning.isPlaning`, from her speed and angle).
+    /// Whether she reckons she is on the plane (`BoatClass.PlaningTuning.isPlaning`, from her speed, angle and rudder).
     var planing = false
     /// The wind direction at her, smoothed over a few seconds, radians.
     var direction: Double?
@@ -289,7 +289,10 @@ extension BotBrain {
             senses.grooveWind = tws
         }
         if let planing = view.boatClass.planing {
-            senses.planing = b.isOnCourse && planing.isPlaning(was: senses.planing, twa: b.twa, speed: b.speed, tws: tws)
+            // The class's whole rule, with her own rudder and polar (#462): on a class without the new values it is
+            // the rule before, bit for bit.
+            senses.planing = b.isOnCourse && planing.isPlaning(was: senses.planing, twa: b.twa, speed: b.speed, tws: tws,
+                                                               rudder: b.rudder, polar: view.boatClass.polar)
         }
         if let side = senses.boomSide, side != b.boomSide {
             senses.tacking = b.twa < .pi / 2
@@ -555,7 +558,14 @@ extension BotBrain {
 
     /// `aim`, a groove or an angle off the wind, as her tactics sail it: headed up to get back on the plane
     /// when she has come off it and the wind is strong enough to plane, or above the groove in a lull on it.
-    func downwindAim(_ b: SeatView.OwnBoat, _ view: SeatView, aim: Aim) -> Aim {
+    ///
+    /// On a class with the new planing rule (#462) it is `planingAim` instead, for every bot whatever her tactics.
+    mutating func downwindAim(_ b: SeatView.OwnBoat, _ view: SeatView, aim: Aim, nearMark: Bool = false) -> Aim {
+        if Self.hasPlaningRule(view.boatClass) {
+            let sailed = planingAim(b, view, aim: aim, nearMark: nearMark)
+            planingAimed = (aim.angle, sailed.angle, view.time)
+            return sailed
+        }
         guard let planing = view.boatClass.planing, aim.angle >= planing.fromTWA else { return aim }
         let tws = b.polarWindSpeed
         if !senses.planing {
@@ -587,7 +597,9 @@ extension BotBrain {
             let wind = Vec2.heading(angle) * tws
             let ahead = wind.y + speed
             let apparent = (ahead * ahead + wind.x * wind.x).squareRoot()
-            if speed >= planing.onSpeed * planingSpeedMargin && apparent > 0 && ahead / apparent >= Vec2.heading(planing.onMaxAWA).y {
+            if speed >= planing.onSpeed * planingSpeedMargin && apparent > 0 && ahead / apparent >= Vec2.heading(planing.onMaxAWA).y,
+               // ... and no lighter than she needs to get on (#462, skiff@9's `apparentWind.onSpeed`).
+               apparent >= planing.apparentWind?.onSpeed(tws: tws) ?? 0 {
                 return angle
             }
             angle -= planingSearchStep

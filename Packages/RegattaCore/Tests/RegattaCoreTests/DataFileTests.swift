@@ -48,8 +48,9 @@ enum SkiffFixtures {
     static let classID = "skiff"
     /// The version most fixtures edit: skiff@6, the autohelm on (schema 3). The default class is `defaultVersion`.
     static let version = 6
-    /// The default class's version (`RaceFiles.defaults`): skiff@8, tacking and gybing by hand (#461).
-    static let defaultVersion = 8
+    /// The default class's version (`RaceFiles.defaults`): skiff@9, tacking and gybing by hand (#461) and falling off
+    /// the plane (#462).
+    static let defaultVersion = 9
     /// skiff@7, the last class whose autohelm sails the tack/gybe tap, with a roll tack and linear rudder drag (the
     /// default from #437 to #461): for tests of the tap, the roll, and a penalty turn hard over in about 10 s.
     static let tapClass: FileRef = try! BoatClassFile.bundled(id: classID, version: 7).ref
@@ -65,6 +66,7 @@ enum SkiffFixtures {
         6: "4c20609ea59408e6ea81cb58d2aa3dba8365d24fcbe8ba883c819e6071d097e8",
         7: "4b3c9e3212fca5d39816e3adb5bb46d091fed874df75e44d6b938959c810dba1",
         8: "8045fbbd0f30a69bd3c3e2353b9b49c05cea7a7e73a3186070b772b8b9f1681f",
+        9: "e087b3e4e12eedd456d628b6768630829bb6f668aa41c713b581195b1b737cf6",
     ]
 
     static func bytes(version: Int = version) throws -> Data {
@@ -162,7 +164,7 @@ enum SkiffFixtures {
         }
         #expect(BoatClass.supportedSchemaVersions == [2, 3, 4])
         #expect(RaceFiles.defaults.boatClass.ref == (try BoatClassFile.bundled(id: SkiffFixtures.classID, version: SkiffFixtures.defaultVersion)).ref,
-                "races sail skiff@8 unless told otherwise (#248, #89, #263, #298, #377, #437, #461)")
+                "races sail skiff@9 unless told otherwise (#248, #89, #263, #298, #377, #437, #461, #462)")
     }
 
     @Test func missingHeaderIsMalformed() throws {
@@ -639,7 +641,7 @@ enum SkiffFixtures {
         #expect(ContentHash(of: data).hex == SkiffFixtures.pinnedHashes[version],
                 "a released file never changes (ADR 0004): ship the change as the next version")
         let file = try BoatClassFile.bundled(id: SkiffFixtures.classID, version: version)
-        // Version 7 (#437) is schema 4: schema 3 plus the autohelm's hold (#434).
+        // Version 7 (#437) is schema 4: schema 3 plus the autohelm's hold (#434); 8 (#458) and 9 (#462) add their own values to it.
         #expect(file.schemaVersion == (version >= 7 ? 4 : 3) && file.id == "skiff" && file.version == version)
         #expect(file.content.name == "Skiff")
         // Every value is a placeholder: every top-level block is listed.

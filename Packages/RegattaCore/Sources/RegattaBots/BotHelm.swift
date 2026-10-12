@@ -48,7 +48,8 @@ struct BotHelm: Sendable, Equatable {
     /// the tack/gybe tap if `tapping`: then the rudder stays as her brain left it, centred, for the race's autohelm to
     /// sail the tap (a rudder held off centre would cancel it). `centred` (#459), her brain lets the rudder go in
     /// irons: it is sent truly centred and she holds nothing, so the class's irons recovery falls her off.
-    mutating func input(_ input: BoatInput, _ view: SeatView, tapping: Bool = false, centred: Bool = false) -> BoatInput {
+    mutating func input(_ input: BoatInput, _ view: SeatView, tapping: Bool = false, centred: Bool = false,
+                        holdsHerAngle: Bool = false) -> BoatInput {
         let boatClass = view.boatClass
         guard !boatClass.steering.autohelm.holdsWhenCentred, !tapping else {
             held = nil
@@ -75,7 +76,8 @@ struct BotHelm: Sendable, Equatable {
             return input
         }
         let angle = own.boomSide.sailingAngle(relativeWind: own.relativeWind)
-        let helm = held ?? Autohelm.engage(sailingAngle: angle, tws: own.grooveWindSpeed, boatClass: boatClass).autohelm
+        let helm = held ?? (holdsHerAngle ? Autohelm(target: .angle(angle))
+            : Autohelm.engage(sailingAngle: angle, tws: own.grooveWindSpeed, boatClass: boatClass).autohelm)
         held = helm
         guard !hand.isPerfect else {
             let rudder = helm.rudder(sailingAngle: angle, boomSide: own.boomSide, tws: own.polarWindSpeed,

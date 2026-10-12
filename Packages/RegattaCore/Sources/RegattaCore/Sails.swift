@@ -62,10 +62,55 @@ extension BoatClass.PlaningTuning {
     /// Off it she gets on only from `fromTWA` aft, at `onSpeed` or more, with the apparent wind no further
     /// aft than `onMaxAWA`: the sails fed from forward. Deep downwind off the plane the apparent wind is
     /// aft of that, so she has to head up to get going (#244 §4.4).
+    ///
+    /// This is the whole rule of a class without `stayOnSpeedShare` and `apparentWind` (every class before
+    /// skiff@9), and the first part of `isPlaning(was:twa:speed:tws:rudder:polar:)` for one with them.
     public func isPlaning(was: Bool, twa: Double, speed: Double, tws: Double) -> Bool {
         if was { return twa >= offBelowTWA && speed >= offSpeed }
         guard twa >= fromTWA && speed >= onSpeed else { return false }
         return Self.apparentWindCosine(twa: twa, speed: speed, tws: tws) >= cos(onMaxAWA)
+    }
+
+    /// Whether a boat planes after this tick, as `isPlaning(was:twa:speed:tws:)`, with her `rudder` (−1...1) and
+    /// her class's `polar`: what `BoatDynamics.advance` asks. A class with neither `stayOnSpeedShare` nor
+    /// `apparentWind` gets that rule's answer, bit for bit. One with them (#462, skiff@9) has two more ways off
+    /// the plane, and one more condition to get on it:
+    ///
+    /// - With the apparent wind aft of `onMaxAWA` she drops off below `stayOnSpeedShare` of the polar's speed at
+    ///   her angle and wind: a slammed, cranked or lingering gybe comes out slow with the wind behind her.
+    /// - With the rudder within `apparentWind.rudderWithin` of centre she drops off with the apparent wind under
+    ///   `apparentWind.offSpeed`: sailed too deep, or in a lull, she outruns her wind.
+    /// - Off the plane she gets on only with the apparent wind at `apparentWind.onSpeed` or more.
+    /// - Both apparent wind speeds taper in very light wind, to `apparentWind.offWindShare` and `onWindShare` of `tws`
+    ///   where that is less (`ApparentWind.offSpeed(tws:)`): from the wind at which the share reaches the fixed speed
+    ///   up, nothing differs.
+    ///
+    /// The same at every wind strength. `was` is the only state: nothing is remembered between ticks.
+    public func isPlaning(was: Bool, twa: Double, speed: Double, tws: Double, rudder: Double, polar: PolarTable) -> Bool {
+        guard stayOnSpeedShare != nil || apparentWind != nil else {
+            return isPlaning(was: was, twa: twa, speed: speed, tws: tws)
+        }
+        let apparentSpeed = Self.apparentWindSpeed(twa: twa, speed: speed, tws: tws)
+        guard was else {
+            guard twa >= fromTWA && speed >= onSpeed else { return false }
+            if let apparentWind, apparentSpeed < apparentWind.onSpeed(tws: tws) { return false }
+            return Self.apparentWindCosine(twa: twa, speed: speed, tws: tws) >= cos(onMaxAWA)
+        }
+        guard twa >= offBelowTWA && speed >= offSpeed else { return false }
+        if let stayOnSpeedShare, Self.apparentWindCosine(twa: twa, speed: speed, tws: tws) < cos(onMaxAWA),
+           speed < stayOnSpeedShare * polar.speed(twa: twa, tws: tws) {
+            return false
+        }
+        if let apparentWind, apparentSpeed < apparentWind.offSpeed(tws: tws), abs(rudder) <= apparentWind.rudderWithin { return false }
+        return true
+    }
+
+    /// The apparent wind speed (m/s) of a boat sailing at `speed` (m/s) at `twa` (radians) to a true wind of `tws`
+    /// (m/s): the true wind plus her own, over the bow.
+    public static func apparentWindSpeed(twa: Double, speed: Double, tws: Double) -> Double {
+        let ahead = tws * cos(twa) + speed
+        let abeam = tws * sin(twa)
+        return (ahead * ahead + abeam * abeam).squareRoot()
     }
 
     /// The cosine of the apparent wind angle of a boat sailing at `speed` (m/s) at `twa` (radians) to a

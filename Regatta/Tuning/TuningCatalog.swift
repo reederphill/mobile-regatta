@@ -290,6 +290,29 @@ enum TuningCatalog {
                     TuningSlider(.boatClass, "/rollTack/missSpeedFactor", "Speed after a miss", 0.5...1, step: 0.01),
                 ]),
             TuningGroup(
+                id: "planing", title: "Planing",
+                note: "Getting on and off the plane (#248, #462). She gets on at the speed below with the apparent wind forward of the angle, and drops off under the lower speed. From skiff@9 two more ways off, at every wind strength: with the apparent wind aft of that angle, under a share of her polar speed (a slammed or lingering gybe); and with the rudder near centre, under the apparent wind speed below (too deep, or a lull), getting back on only with the higher one.",
+                applies: .nextRace,
+                sliders: [
+                    TuningSlider(.boatClass, "/planing/onSpeedKnots", "Gets on from", unit: " kn", 4...14, step: 0.5),
+                    TuningSlider(.boatClass, "/planing/offSpeedKnots", "Drops off below", unit: " kn", 2...12, step: 0.5),
+                    TuningSlider(.boatClass, "/planing/onMaxAWADegrees", "Apparent wind forward of", unit: "°", 40...180, step: 5),
+                    // #462, from skiff@9: "Not in this file" before.
+                    TuningSlider(.boatClass, "/planing/stayOnSpeedShare", "Stays on above this share of polar speed", 0...1,
+                                 step: 0.05),
+                    TuningSlider(.boatClass, "/planing/apparentWind/offKnots", "Drops off under apparent wind", unit: " kn",
+                                 0.5...8, step: 0.25),
+                    TuningSlider(.boatClass, "/planing/apparentWind/onKnots", "Gets on from apparent wind", unit: " kn",
+                                 0.5...8, step: 0.25),
+                    TuningSlider(.boatClass, "/planing/apparentWind/rudderWithin", "Apparent wind counts with rudder within",
+                                 0...1, step: 0.05),
+                    // The light-air taper: the lesser of the speed above and this share of the true wind.
+                    TuningSlider(.boatClass, "/planing/apparentWind/offWindShare", "Drops off under this share of the wind",
+                                 0.1...1.5, step: 0.025),
+                    TuningSlider(.boatClass, "/planing/apparentWind/onWindShare", "Gets on from this share of the wind",
+                                 0.1...1.5, step: 0.025),
+                ]),
+            TuningGroup(
                 id: "raceFormat", title: "Race format",
                 note: "The race area's width (a fraction of the beat) and how widely the fleet starts (line lengths, #223).",
                 applies: .nextRace,
@@ -372,6 +395,8 @@ enum TuningCatalog {
                     boat("wakePressureFan", "Wake pressure fan", \.wakePressureFan, 0...3, 0.1),
                     boat("wakeAlpha", "Wake alpha", \.wakeAlpha, 0...1, 0.02),
                     boat("wakePlaningBoost", "Planing wake", \.wakePlaningBoost, 1...2.5, 0.05),
+                    // #462: on and off the plane her wake lifts and settles, never snaps.
+                    boat("wakePlaningSeconds", "Planing wake comes and goes over", \.wakePlaningSeconds, 0...4, 0.1, unit: " s"),
                     boat("coneAlpha", "Cone hatch", \.coneAlpha, 0...0.4, 0.01),
                     boat("backwindShare", "Backwind hatch", \.backwindShare, 0...6, 0.1),
                     boat("backwindFeather", "Backwind edge softness", \.backwindFeather, 0...8, 0.5, unit: " pt"),

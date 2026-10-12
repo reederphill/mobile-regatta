@@ -38,9 +38,23 @@ import Testing
         #expect(byConditions.values.allSatisfy { $0.count == 4 })
     }
 
+    /// #462: version 5 is version 4's races on skiff@9 and nothing else; version 4 (skiff@8) stays bundled.
+    @Test func versionFiveIsVersionFourOnSkiffNine() throws {
+        #expect(ReferenceRegatta.currentVersion == 5)
+        let five = try ReferenceRegatta.load(version: 5), four = try ReferenceRegatta.load(version: 4)
+        #expect(five.races.count == four.races.count)
+        for (new, old) in zip(five.races, four.races) {
+            #expect(new.setup.boatClass.key == DataFileKey(id: "skiff", version: 9))
+            #expect(old.setup.boatClass.key == DataFileKey(id: "skiff", version: 8))
+            #expect(new.setup.raceSeed == old.setup.raceSeed && new.windSeed == old.windSeed && new.tier == old.tier)
+            #expect(new.setup.venue == old.setup.venue && new.setup.conditions == old.setup.conditions)
+            #expect(new.setup.rulesConfiguration == old.setup.rulesConfiguration && new.setup.seats == old.setup.seats)
+            #expect(new.setup.laps == old.setup.laps && new.setup.startSequenceTicks == old.setup.startSequenceTicks)
+        }
+    }
+
     /// #490: version 4 is version 3's races on fleet-rules@6 and nothing else; version 3 (fleet-rules@5) stays bundled.
     @Test func versionFourIsVersionThreeOnFleetRulesSix() throws {
-        #expect(ReferenceRegatta.currentVersion == 4)
         let four = try ReferenceRegatta.load(version: 4), three = try ReferenceRegatta.load(version: 3)
         #expect(four.races.count == three.races.count)
         for (new, old) in zip(four.races, three.races) {
@@ -97,7 +111,7 @@ import Testing
 
     /// #435: the National stand-in is the tactician steering by hand at Club level and nothing else; the Club stand-in
     /// the novice (skill 0.35, that skill's weaknesses) with the same hand steering. On a class that steers by hand
-    /// (skiff@7 since #437, skiff@8 since #461), her hand steering shows: the National stand-in sails a race of her own.
+    /// (skiff@7 since #437, skiff@8 since #461, skiff@9 since #462), her hand steering shows: the National stand-in sails a race of her own.
     @Test func standInsSteerByHandAtClubLevel() throws {
         let club = BotWeaknesses.clubHandSteering
         #expect(club.shiftLag > 0 && club.wander > 0 && club.overshoot > 0)
@@ -120,7 +134,7 @@ import Testing
         let own = BotWeaknesses(skill: 0.35)
         #expect(noviceWeaknesses.steering(like: own) == own)
 
-        // Since #437 the reference regatta sails a class (skiff@8 from version 3, #461) whose autohelm doesn't hold a centred rudder: the
+        // Since #437 the reference regatta sails a class (skiff@8 from version 3, #461, skiff@9 from version 5, #462) whose autohelm doesn't hold a centred rudder: the
         // National stand-in's Club hand steering shows, and it leaves the tactician's race.
         let cap = 60
         #expect(!RaceFiles.defaults.boatClass.content.steering.autohelm.holdsWhenCentred)

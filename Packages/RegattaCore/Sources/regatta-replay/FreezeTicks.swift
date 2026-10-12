@@ -92,7 +92,9 @@ struct FreezeTickRow: Decodable {
     var groove: String?
     /// The size of that offset in degrees, above the first and below the second: past the app's sail-cue dead band
     /// and short of the reach where it shows no cue (`BoatStyle.grooveCueDeadbandDegrees`, `grooveCueReachDegrees`),
-    /// so the drawn sail lifts its luff or fills as `BoatCueTests` checks.
+    /// so the drawn sail lifts its luff or fills as `BoatCueTests` checks. A pinching row stays short of head to wind
+    /// too (the no-go angle and `SailTrim`'s margin, 13° inside a 45° groove), where her sail doesn't draw and no luff
+    /// lifts: the cues row's 10.
     var grooveDegrees: [Double]?
 
     static let callSeconds = 8

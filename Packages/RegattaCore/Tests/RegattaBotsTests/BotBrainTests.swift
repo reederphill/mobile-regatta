@@ -268,8 +268,10 @@ import RegattaCore
 
     /// "Heats up in a lull, not in a shadow" (#263): the tactician on the plane and slowing towards falling off it
     /// heads up to stay on it in clean air; in another boat's wind shadow, which slows her whatever angle she sails
-    /// (skiff@3's speed loss), she holds her aim.
-    @Test func theTacticianHeatsUpInALullNotInAShadow() throws {
+    /// (skiff@3's speed loss), she holds her aim. On skiff@8, the last class with those tactics: on the default,
+    /// skiff@9, every bot sails `planingAim` instead (#462, `BotPlaningTests`), which heads her up when the wind left
+    /// in a shadow is too little to plane in.
+    @Test(.onSkiffEight) func theTacticianHeatsUpInALullNotInAShadow() throws {
         func aim(shadow: Double) throws -> (aim: Aim, heated: Aim) {
             let race = botRace(seats: [.bot, .human], seed: 3)
             let planing = try #require(race.boatClass.planing)

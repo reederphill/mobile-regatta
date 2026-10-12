@@ -78,6 +78,11 @@ public struct BotDecision: Hashable, Sendable {
     /// Whether she lets the rudder go, truly centred, stalled in irons (#459, `BotBrain.centresStalled`): her helm sends
     /// it as it is and holds no angle by hand (`BotHelm.input`), so the class's irons recovery can fall her off.
     var centred = false
+    /// Whether, on a class with the new planing rule (#462), the angle her hand holds when she lets the rudder go is
+    /// the one she is at, never the downwind groove's snap (`BotHelm.input`): the angle she aims at running is her
+    /// own, above the groove by what her hand wanders (`BotBrain.ownRunAngle`), and snapped to the groove 8° from it
+    /// she sailed the groove after all.
+    var holdsHerAngle = false
 
     public init(input: BoatInput, tap: BoatTap? = nil) {
         self.input = input
@@ -170,6 +175,19 @@ struct BotBrain: Sendable {
     var handTurn: HandTurn?
     /// Her draws for her flubbed hand turns (#459): a stream of her seed of its own, drawn only by the hand turn.
     var handTurnRng: SplitMix64
+    /// What she is doing about a fall off the plane (#462, `planingAim`): only on a class with the new planing rule.
+    var replane: Replane?
+    /// Her draws for it: a stream of her seed of its own.
+    var planingRng: SplitMix64
+    /// The angle her plan asked of `planingAim` at her last decision off the wind and the one it gave, radians, and
+    /// when: for tests and probes.
+    var planingAimed = (asked: 0.0, sailed: 0.0, time: -Double.infinity)
+    /// Since when she has wanted a gybe she is building speed for (`buildsSpeedToGybe`, #462); nil when she wants none.
+    var gybeWantedSince: Double?
+    /// Whether her last course to a mark was within `PlaningTable.markRange` of it (`navigate`).
+    var isNearHerMark = false
+    /// Whether that course was to her point through a gate from within `PlaningTable.gateRange` of it (`navigate`).
+    var isAtHerGate = false
     /// What she knows of a stall in irons (#459, `centresStalled`): only on a class she turns by hand.
     var stall = Stall()
     /// What she has made of the boats around her (#234, `observeFleet`): each one's tack, when she saw it tack, and
@@ -217,6 +235,7 @@ struct BotBrain: Sendable {
         tacticsRng = SplitMix64(seed: seed, stream: Self.tacticsStream)
         turnHandling = Self.turnHandling(profile: profile, weaknesses: self.weaknesses, caution: caution)
         handTurnRng = SplitMix64(seed: seed, stream: Self.handTurnStream)
+        planingRng = SplitMix64(seed: seed, stream: Self.planingStream)
     }
 
     private var skill: Double { style.skill }
@@ -308,8 +327,10 @@ struct BotBrain: Sendable {
             let input = steer(boat, toHeading: evasion.heading, view, closest: evasion.closest)
             return BotDecision(input: clearingQuarter(boat, view, input.eased(ease)))
         }
+        if aim.tack == boat.tack { gybeWantedSince = nil }
         if aim.tack != boat.tack {
-            if canTap(boat, view) {
+            // "Set, then gybe" (#462): on the plane but slow, she builds speed for the gybe first.
+            if canTap(boat, view), !(byHand && buildsSpeedToGybe(boat, view)) {
                 lastTapTime = view.time
                 let play = lastFleetPlayTime == view.time ? lastFleetPlay : nil
                 if byHand {
@@ -350,9 +371,13 @@ struct BotBrain: Sendable {
                 // By hand, where her groove would have her over the line early, she reaches along it instead (#461).
                 if byHand, !running, let reach = startReachAim(boat, view, groove: groove) { own = reach }
             }
-            return holding(boat, view, helm(boat, to: own, view), desired: own.heading(wind: boat.windDirection))
+            var decision = holding(boat, view, helm(boat, to: own, view), desired: own.heading(wind: boat.windDirection))
+            decision.holdsHerAngle = holdsHerAngle(own, boat, view)
+            return decision
         }
-        return holding(boat, view, helm(boat, to: aim, view).eased(aim.ease), desired: desired)
+        var decision = holding(boat, view, helm(boat, to: aim, view).eased(aim.ease), desired: desired)
+        decision.holdsHerAngle = holdsHerAngle(aim, boat, view)
+        return decision
     }
 
     /// Her decision as the right-of-way boat, `input` her plan's helm: holding her course (`holdingCourse`, #228), or for
@@ -1039,13 +1064,17 @@ struct BotBrain: Sendable {
             let side = error != 0 ? -windSign * error : windSign
             return BoatInput(rudder: side < 0 ? -Self.noGoRudder : Self.noGoRudder)
         }
-        if let held = b.autohelm, Self.holds(held, aim, boatClass) { return .neutral }
+        // Her own angle on the plane (#462) is held as itself, not as the groove a snap's width from it.
+        let isHeld = { (held: Autohelm.Reading) in
+            self.holdsHerAngle(aim, b, view) ? abs(wrapAngle(held.aim - aim.angle)) <= aim.tolerance : Self.holds(held, aim, boatClass)
+        }
+        if let held = b.autohelm, !aim.insists, isHeld(held) { return .neutral }
         let tuning = boatClass.steering.autohelm
         let letGo = aim.groove.map { ($0 == .upwind ? tuning.upwindSnap : tuning.downwindSnap) * Self.grooveLetGo } ?? Self.letGoError
         guard abs(error) > letGo else {
             return b.autohelm == nil ? .neutral : rudder(b, error)
         }
-        return rudder(b, error)
+        return bearingAwayGently(rudder(b, error), error, b, view)
     }
 
     /// Whether the autohelm's `held` target sails `aim`: its groove, or an angle within the aim's tolerance.
@@ -1159,7 +1188,9 @@ struct BotBrain: Sendable {
         let through = spot - c.upwind * 12
         guard (spot - b.position).length < Self.finishApproach else { return navigate(b, to: through, view) }
         plannedTack = b.tack
-        return Aim(heading: (through - b.position).bearing, b, tolerance: Self.reachTolerance)
+        isNearHerMark = true
+        let straight = Aim(heading: (through - b.position).bearing, b, tolerance: Self.reachTolerance)
+        return finishingOnThePlane(straight, b, view) ?? straight
     }
 
     /// Metres down the starboard layline from the windward mark's fetch point to where a boat that can't
@@ -1223,6 +1254,10 @@ struct BotBrain: Sendable {
         let overstand = laylineOverstand(b)
         let toTarget = target - b.position
         let distance = toTarget.length
+        isNearHerMark = distance < PlaningTable.markRange
+        isAtHerGate = false
+        if distance < PlaningTable.gateRange, b.status == .racing, case .round(let index) = view.course.legs[b.legIndex],
+           case .gate = view.course.elements[index] { isAtHerGate = true }
         let bearing = toTarget.bearing
         let w = b.windDirection
         let offWind = abs(wrapAngle(bearing - w))
@@ -1276,11 +1311,13 @@ struct BotBrain: Sendable {
             }
             setTack(gybe, view)
             let aim = Aim.groove(.downwind, tack: gybe, angle: down)
-            return downwindAim(b, view, aim: distance > Self.tacticalRange ? missingGroove(aim, b, view) : aim)
+            return downwindAim(b, view, aim: distance > Self.tacticalRange ? missingGroove(aim, b, view) : aim,
+                               nearMark: distance < PlaningTable.markRange)
         }
 
         plannedTack = b.tack
-        return downwindAim(b, view, aim: Aim(heading: bearing, b, tolerance: Self.reachTolerance))
+        return downwindAim(b, view, aim: Aim(heading: bearing, b, tolerance: Self.reachTolerance),
+                           nearMark: distance < PlaningTable.markRange)
     }
 
     /// How far the angle held on a reach may drift off the one her mark needs before she steers again.
@@ -1511,7 +1548,7 @@ struct BotBrain: Sendable {
     }
 
     /// Whether every mark is more than `lengths` hull lengths clear of the boat.
-    private func isClearOfMarks(_ b: SeatView.OwnBoat, _ view: SeatView, lengths: Double) -> Bool {
+    func isClearOfMarks(_ b: SeatView.OwnBoat, _ view: SeatView, lengths: Double) -> Bool {
         let room = view.boatClass.hull.length * lengths
         return view.course.obstacles.allSatisfy { ($0.position - b.position).length > $0.radius + room }
     }
@@ -1531,6 +1568,9 @@ struct Aim: Equatable {
     var tolerance: Double
     /// Sheets let out (`BoatInput.ease`): she sails the angle at the class's eased fraction of her speed.
     var ease = false
+    /// She steers for it from the angle she is at now, whatever her hand holds (#462, `BotBrain.floorAim`'s reflex):
+    /// an angle within the hold's width of what she holds is otherwise taken as held.
+    var insists = false
 
     init(angle: Double, tack: Tack, tolerance: Double = deg2rad(1.5), ease: Bool = false) {
         self.tack = tack

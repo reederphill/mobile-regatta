@@ -23,6 +23,17 @@ import Testing
         #expect(hex64(six) == "0x3c5c84c4afc4054b")
     }
 
+    /// And skiff@8, the default class until #462's switch, sails exactly as before #462's bots layer (every change there is behind "the
+    /// class has the new planing rule", skiff@9's `stayOnSpeedShare` and `apparentWind`): all-bot races through the
+    /// start and the first beat, and through two laps with their runs, pinned on #462's core tip before any bot code
+    /// changed (re-pinned there on fleet-rules@6, #490's default).
+    @Test func skiffEightBotsAreBitIdentical() throws {
+        let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
+        let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
+        #expect(hex64(short) == "0xf996b3e87c5984b7")
+        #expect(hex64(long) == "0x08607166a1b7aa3c")
+    }
+
     // MARK: - skiff@8: tacks and gybes by hand
 
     static let skiffEight = try! BoatClassFile.bundled(id: "skiff", version: 8)
@@ -43,8 +54,9 @@ import Testing
 
     /// An all-bot race on skiff@8 for `seconds`: the fleet's normal draw, or every bot's handling `handling`; seat 0
     /// the cautious bot's from a minute after the gun if `cautiousTakeover`.
-    static func fleet(seed: UInt64, seconds: Int, handling: Double? = nil, cautiousTakeover: Bool = false) throws -> Fleet {
-        let race = try BotHelmTests.race(seed: seed, boatClass: skiffEight)
+    static func fleet(seed: UInt64, seconds: Int, handling: Double? = nil, cautiousTakeover: Bool = false,
+                      boatClass: BoatClassFile = skiffEight) throws -> Fleet {
+        let race = try BotHelmTests.race(seed: seed, boatClass: boatClass)
         var controllers = handling.map { handling in
             SeatControllers(race.boats.indices.map { seat in
                 let skill = BotTier.mixedFleetDraw(seed: botSeed(raceSeed: race.setup.raceSeed, seat: seat)).skill
@@ -164,7 +176,8 @@ import Testing
             guard (race.tick + seat).isMultiple(of: BotDriver.decisionInterval) else { return nil }
             let view = race.seatView(for: seat)
             var decision = brain.decide(helm.view(view))
-            decision.input = helm.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred)
+            decision.input = helm.input(decision.input, view, tapping: decision.tap != nil, centred: decision.centred,
+                                        holdsHerAngle: decision.holdsHerAngle)
             race.apply(decision.input, seat: seat, atTick: race.tick + 1)
             if let tap = decision.tap { race.tap(tap, seat: seat, atTick: race.tick + 1) }
             return decision
