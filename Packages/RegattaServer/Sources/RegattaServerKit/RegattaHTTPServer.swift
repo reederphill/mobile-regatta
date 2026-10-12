@@ -217,7 +217,9 @@ public final class RegattaHTTPServer: Sendable {
         }
     }
 
-    /// A race connection: each binary message through `SeatConnection`, in order, until either side closes.
+    /// A race connection: each binary message through `SeatConnection`, in order, until either side closes. Once seated,
+    /// the server pings it every `ServerConfig.roundTripPingInterval` and times the pongs: the round trips (#157, #31)
+    /// go to the measures when the connection ends.
     private static func serveRace(_ channel: NIOAsyncChannel<WebSocketFrame, WebSocketFrame>, handler: RequestHandler) async throws {
         let transport = WebSocketSeatTransport(channel: channel.channel)
         var connection = SeatConnection(config: handler.config, registry: handler.registry, transport: transport,
@@ -230,16 +232,27 @@ public final class RegattaHTTPServer: Sendable {
             transport.close(code: .policyViolation, reason: "no JoinRace in time")
         }
         defer { handshakeDeadline.cancel() }
+        var seated: (race: UUID, seat: Int)?
+        var pinger: Task<Void, Never>?
+        var roundTrips = RoundTrips()
+        defer { pinger?.cancel() }
         do {
             try await channel.executeThenClose { inbound, outbound in
                 for try await frame in inbound {
                     switch frame.opcode {
                     case .binary:
                         await connection.receive(Array(buffer: frame.unmaskedData))
-                        if connection.isSeated { handshakeDeadline.cancel() }
+                        if case .seated(let session, let seat) = connection.phase, seated == nil {
+                            handshakeDeadline.cancel()
+                            seated = (session.id, seat)
+                            pinger = Self.pinging(transport, every: handler.config.roundTripPingInterval)
+                        }
                         if connection.isClosed { return }
                     case .ping:
                         try await outbound.write(WebSocketFrame(fin: true, opcode: .pong, data: frame.unmaskedData))
+                    case .pong:
+                        var data = frame.unmaskedData
+                        if let stamp = data.readInteger(as: UInt64.self) { roundTrips.add(sentAt: stamp, now: Self.monotonicNanoseconds()) }
                     case .connectionClose:
                         transport.close(code: .normalClosure, reason: nil)
                         return
@@ -249,11 +262,28 @@ public final class RegattaHTTPServer: Sendable {
                 }
             }
         } catch {
+            pinger?.cancel()
             await connection.ended()
+            if let seated { await handler.services?.measures?.roundTrips(race: seated.race, seat: seated.seat, roundTrips) }
             throw error
         }
+        pinger?.cancel()
         await connection.ended()
+        if let seated { await handler.services?.measures?.roundTrips(race: seated.race, seat: seated.seat, roundTrips) }
     }
+
+    /// Pings `transport` every `interval`, each ping stamped with the time it was sent.
+    private static func pinging(_ transport: WebSocketSeatTransport, every interval: Duration) -> Task<Void, Never> {
+        Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { return }
+                transport.ping(monotonicNanoseconds())
+            }
+        }
+    }
+
+    static func monotonicNanoseconds() -> UInt64 { DispatchTime.now().uptimeNanoseconds }
 
     /// A service connection (#145): each binary message through `ServiceConnectionHandler`, in order, until either
     /// side closes. A connection that doesn't send `Hello` in time is closed, as on `/race`.

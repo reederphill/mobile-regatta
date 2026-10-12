@@ -639,6 +639,28 @@ public struct AnalyticsEventStore: Sendable {
         try await events(where: "source = 'server' AND name = \(name) ORDER BY id")
     }
 
+    /// The server's raw events named one of `names` that happened at or after `since`, oldest first (#157: the measures).
+    /// Their properties come in the same query.
+    public func serverEvents(named names: [String], since: Date) async throws -> [StoredAnalyticsEvent] {
+        let rows = try await database.client.query("""
+            SELECT e.id, e.player_id, e.name, e.day, e.segment, e.occurred_at, e.received_at, p.key, jsonb_typeof(p.value), p.value #>> '{}'
+            FROM analytics_events e LEFT JOIN LATERAL jsonb_each(e.properties) p ON true
+            WHERE e.source = 'server' AND e.name = ANY(\(names)) AND e.occurred_at >= \(since) ORDER BY e.occurred_at, e.id
+            """, logger: database.logger)
+        var events: [StoredAnalyticsEvent] = []
+        var last: Int64?
+        for try await (id, player, name, day, segment, occurred, received, key, type, text)
+            in rows.decode((Int64, String?, String, Int32, String, Date, Date, String?, String?, String?).self) {
+            if id != last {
+                events.append(StoredAnalyticsEvent(source: .server, playerID: player, name: name, day: day, segment: segment, occurredAt: occurred,
+                                                   receivedAt: received))
+                last = id
+            }
+            if let key, let type, let value = AnalyticsJSON.decode(type: type, text: text) { events[events.count - 1].properties[key] = value }
+        }
+        return events
+    }
+
     /// How many raw events are stored, counted or not.
     public func rawCount() async throws -> Int {
         let rows = try await database.client.query("SELECT count(*) FROM analytics_events", logger: database.logger)

@@ -132,12 +132,14 @@ public struct ServiceEndpoint: Sendable {
     public let archive: (any RaceArchive)?
     /// The nightly fair-play scan (#155): the server runs it while it listens.
     public let fairPlay: FairPlayJob?
+    /// The measures (#157): what the queue and the race connections record, and the queries over it.
+    public let measures: ServerMeasures?
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
                 matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil, lobby: LobbyHub? = nil,
                 analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil, ratings: (any RatingBook)? = nil,
                 moderation: Moderation? = nil, deletion: OnlineDataDeletion? = nil, retention: RetentionJobs? = nil,
-                archive: (any RaceArchive)? = nil, fairPlay: FairPlayJob? = nil) {
+                archive: (any RaceArchive)? = nil, fairPlay: FairPlayJob? = nil, measures: ServerMeasures? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
@@ -152,6 +154,7 @@ public struct ServiceEndpoint: Sendable {
         self.retention = retention
         self.archive = archive
         self.fairPlay = fairPlay
+        self.measures = measures
     }
 
     public var store: any AccountStore { sessions.store }

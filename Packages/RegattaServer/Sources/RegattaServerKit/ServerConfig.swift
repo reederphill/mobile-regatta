@@ -100,6 +100,8 @@ public struct ServerConfig: Sendable {
     public var maxRaces: Int
     /// How long a race connection has to send `Hello` and `JoinRace` before it's closed (policy violation).
     public var handshakeTimeout: Duration = .seconds(10)
+    /// How often the server pings a seated race connection to time its round trip (#157, #31).
+    public var roundTripPingInterval: Duration = .seconds(2)
     /// Identity, sessions and the Terms of Use (#145).
     public var identity = IdentitySettings()
     /// Connections held at once on `/service` and `/race`, per address and in all (#146).

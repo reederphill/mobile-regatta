@@ -49,6 +49,8 @@ public enum AdminCommand {
           nickname-override <player-id>       she shows as "Sailor" and her sail number
           lift <player-id> <penalty-id>       lifts one of her penalties
           audit [player-id]                   what admins did, newest first
+          measures [days]                     queue wait, fleets, briefing leaves, drops, round trips, Race again (default 30)
+          balance [days] [--no-splits]        per rule, splits by venue and conditions, by tier, calibration, variance
         environment: REGATTA_ADMIN_URL (default http://127.0.0.1:8080), REGATTA_ADMIN_TOKEN (required)
         """
 
@@ -99,6 +101,19 @@ public enum AdminCommand {
         case "audit":
             guard args.count <= 1 else { throw .usage(usage) }
             return AdminRequest(method: "GET", path: "/admin/audit", query: args.first.map { [URLQueryItem(name: "player", value: $0)] } ?? [])
+        case "measures":
+            guard args.count <= 1 else { throw .usage(usage) }
+            var query: [URLQueryItem] = []
+            if let days = args.first { query.append(URLQueryItem(name: "days", value: try id(days, "days"))) }
+            return AdminRequest(method: "GET", path: "/admin/measures", query: query)
+        case "balance":
+            let splits = !args.contains("--no-splits")
+            let rest = args.filter { $0 != "--no-splits" }
+            guard rest.count <= 1 else { throw .usage(usage) }
+            var query: [URLQueryItem] = []
+            if let days = rest.first { query.append(URLQueryItem(name: "days", value: try id(days, "days"))) }
+            if !splits { query.append(URLQueryItem(name: "splits", value: "0")) }
+            return AdminRequest(method: "GET", path: "/admin/balance", query: query)
         default:
             throw .usage("unknown command \(command)\n\n\(usage)")
         }
