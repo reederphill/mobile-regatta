@@ -39,8 +39,9 @@ extension AppModel.Notice {
 }
 
 /// The queue from the Race online tap to the gun's briefing (#140, #16, #25): joining, the wait and its lock banner,
-/// leaving, a lost connection, and at fleet lock the takeover, where the race sequence (#141) takes it from here. The one reader of the queue's state stream; the bar,
-/// the chip and Home's Race online slot read its values, and it draws nothing itself (no SwiftUI or UIKit).
+/// leaving, a lost connection, and at fleet lock the takeover, where the race sequence (#141) takes it from here. The
+/// one reader of the queue's state stream; the bar, the chip and Home's Race online slot read its values, and it draws
+/// nothing itself (no SwiftUI or UIKit).
 @MainActor @Observable
 final class QueueController {
     private enum Stage: Equatable {
@@ -195,10 +196,12 @@ final class QueueController {
 
     // MARK: The race sequence
 
-    /// Home's Rejoin race took her back into a race: the queue stays out of it, as from a takeover.
-    func sequenceBegan() {
-        guard stage == .idle else { return }
+    /// Home's Rejoin race, or a relaunch in the briefing, took her back into a race: the queue stays out of it, as
+    /// from a takeover. False when she is waiting for another by now.
+    @discardableResult func sequenceBegan() -> Bool {
+        guard stage == .idle else { return false }
         stage = .inRace
+        return true
     }
 
     /// The race sequence is over and Home is up. Having left, Race online stays off until the server says where she

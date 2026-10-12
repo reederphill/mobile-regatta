@@ -44,13 +44,21 @@ import RegattaProtocol
     /// Seed 3's race, as the fake server sails it, in a ten-second sequence. With `collisionCourse`, seats 1
     /// and 2 are set head to head below the fleet and seat 1 fouls seat 2 (port/starboard) about four
     /// seconds in, whatever the bots do (`FakeRaceServer.setCollisionCourse`).
-    init(seed: UInt64 = 3, collisionCourse: Bool = false, markRoomAt: Int? = nil, uplink: LinkFaults = .none,
+    /// `joiningAfter`: the server has sailed that long, of a sequence of `startSequenceTicks`, before the client
+    /// joins, as a race link coming up late does (#141).
+    init(seed: UInt64 = 3, seats: Int = 10, startSequenceTicks: Int = 300, joiningAfter: UInt64 = 0,
+         collisionCourse: Bool = false, markRoomAt: Int? = nil, uplink: LinkFaults = .none,
          downlink: LinkFaults = .none) throws {
         let clock = VirtualClock(now: 1_000_000)
         let link = FaultInjectingLink(clock: clock, uplink: uplink, downlink: downlink, seed: 1)
-        let server = try FakeRaceServer(seed: seed, collisionCourse: collisionCourse, markRoomAt: markRoomAt,
+        let server = try FakeRaceServer(seats: seats, seed: seed, startSequenceTicks: startSequenceTicks,
+                                        collisionCourse: collisionCourse, markRoomAt: markRoomAt,
                                         transport: link.server, clock: clock)
         let network = Network(link: link, server: server)
+        if joiningAfter > 0 {
+            clock.advance(by: joiningAfter)
+            server.poll()
+        }
         let join = RaceJoin(connection: link.client, token: Self.token, clientBuild: "test", now: clock.now)
         while !join.isFinished {
             clock.advance(by: 1000)
@@ -61,8 +69,10 @@ import RegattaProtocol
             throw RigError.notJoined(join.state)
         }
         (self.clock, self.link, self.server, self.network) = (clock, link, server, network)
+        // As `OnlineLaunch` reads it: a `RaceStart` from past the setup's first tick is a race under way.
+        let underway = (join.joinedTick ?? Int.min) > -start.setup.startSequenceTicks
         driver = OnlineDriver(start: start, transport: transport, token: Self.token, clientBuild: "test",
-                              now: { clock.now }, connect: { network.connect() })
+                              now: { clock.now }, connect: { network.connect() }, joiningUnderway: underway)
         session = GameSession(online: driver)
     }
 
@@ -275,6 +285,58 @@ import RegattaProtocol
         #expect(rig.shown.filter { if case .raceClosed = $0.event.kind { true } else { false } }.count == 1)
         #expect(rig.network.attempts == 0)
         #expect(!rig.driver.tap(.tackGybe))
+    }
+
+    /// Leave race (#141): `LeaveRace` reaches the server from her seat, and with the link closed (`canRejoin`) the
+    /// driver doesn't come back for the seat it gave up.
+    @Test func leaveSendsLeaveRaceAndFreesTheClient() throws {
+        let rig = try OnlineRig()
+        rig.run(for: 2_000_000)
+        rig.driver.canRejoin = { false }
+        rig.driver.client.leave()
+        rig.run(for: 200_000)
+        #expect(rig.server.leaves == 1)
+        // The server closes the connection once the seat is released.
+        rig.link.disconnect()
+        rig.run(for: 3_000_000)
+        #expect(rig.network.attempts == 0, "the driver went back for a seat it left")
+        #expect(rig.server.joins == 1)
+        #expect(rig.driver.client.ending == nil, "a leave isn't the race's end")
+    }
+
+    /// A seat a leaver handed to a bot (#149, #141): the live roster renames it and marks the bot, so the board and
+    /// the rule-call lines name it so from then on; every other seat and your own stay as they were.
+    @Test func aRosterChangeRenamesTheSeatAndMarksTheBot() throws {
+        let rig = try OnlineRig(collisionCourse: true)
+        rig.run(for: 1_000_000)
+        // Seat 2 is a human seat here, under the server's name for it.
+        #expect(!rig.session.roster[2].isBot)
+        #expect(rig.session.roster.label(of: 2, playerSeat: 0) == "Seat 3")
+        #expect(rig.session.roster.label(of: 0, playerSeat: 0) == "You")
+        let before = rig.session.roster[1]
+
+        rig.server.handOver(seat: 2, to: "Fulmar")
+        rig.run(for: 500_000)
+        #expect(rig.session.roster[2].isBot)
+        #expect(rig.session.roster.label(of: 2, playerSeat: 0).contains("Fulmar"))
+        #expect(rig.session.roster[1] == before)
+        #expect(rig.session.roster.label(of: 0, playerSeat: 0) == "You")
+        #expect(rig.session.hud.leaderboard.rows.first { $0.seat == 2 }?.name?.contains("Fulmar") == true,
+                "the live leaderboard still has the old name")
+    }
+
+    /// The link came up 35 s into the server's 75 s (#141): the client asks for a `Resync` and sails from it, on the
+    /// server's clock, instead of simulating its way there from the setup.
+    @Test func joiningAtMinusFortyAsksForAResync() throws {
+        let rig = try OnlineRig(seats: 4, startSequenceTicks: 75 * Race.tickRate, joiningAfter: 35_000_000)
+        #expect(rig.driver.client.status == .awaitingResync || rig.driver.client.stats.resyncsApplied > 0)
+        rig.run(for: 2_000_000)
+        #expect(rig.driver.client.stats.resyncsApplied >= 1)
+        #expect(rig.server.resyncsSent >= 1)
+        #expect(rig.driver.connection == .connected)
+        let tick = try #require(rig.driver.serverTick)
+        #expect(abs(tick - (-38 * Race.tickRate)) <= Race.tickRate, "the race clock reads \(tick) ticks")
+        #expect(abs(rig.driver.currentFrame.tick - tick) <= Race.tickRate, "the race isn't sailed to the server's tick")
     }
 
     @Test func isNotPausable() throws {

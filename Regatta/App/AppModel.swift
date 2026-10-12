@@ -370,7 +370,8 @@ final class AppModel {
 
     /// Shows the briefing for a practice race on `config` (on the tuning panel's files in a Debug build), resolved
     /// once so the briefing and the race it leads to sail the same files. `mode` `.online` is the online briefing's
-    /// countdown, which #141 wires to the online race; here it leads to a practice race on `config`.
+    /// countdown as a Debug harness (`-briefing online`): it leads to a practice race on `config`. A locked fleet's
+    /// briefing is `takeOver`'s, and leads to its online race (#141).
     /// Only the practice setup's races (`beginPractice`, and Restart of one) go into the practice history (#235), not
     /// `-briefing`'s.
     func startBriefing(config: RaceConfig, mode: BriefingModel.Mode) {
@@ -459,7 +460,7 @@ final class AppModel {
     }
 
     /// Out of the race sequence to the bare home screen with the livery unlocked (#140): the briefing's Leave, a
-    /// cancelled race, the stand-in's end. `notice` shows on Home.
+    /// cancelled race, and every way out of an online race (#141). `notice` shows on Home.
     func endRaceSequence(notice: Notice?) {
         endRaceSequence()
         dismissAll()
@@ -506,14 +507,9 @@ final class AppModel {
     func keepLastRace(_ results: RaceResultViewModel) { lastRace = results }
 
     func keepLastRace(_ report: RaceReport, rating: RatingOutcome?) {
-        let entrants = report.roster.indices.map { seat in
-            RaceResultViewModel.Entrant(name: seat == report.seat ? "You" : report.roster[seat].name,
-                                        isBot: report.roster[seat].isBot,
-                                        livery: seat == report.seat ? myLivery : FleetLiveries.yours)
-        }
-        let cell: RaceResultViewModel.RatingCell = rating.map { .init($0) }
-            ?? (report.results.rated ? .pending : .unrated(.noOtherHumans))
-        let results = RaceResultViewModel(report: report, entrants: entrants, rating: cell, earned: nil)
+        let results = RaceResultViewModel(lastRace: LastRace(report: report, rating: rating.map {
+            RatingChange(raceID: report.raceID, outcome: $0)
+        }), livery: myLivery)
         if results.keepsAsLastRace { lastRace = results }
     }
 

@@ -1,4 +1,5 @@
 import RegattaCore
+import RegattaServices
 import SwiftUI
 
 /// What an online race draws over the water for the race sequence (#141): the race menu, the leave confirm and the
@@ -7,7 +8,7 @@ struct OnlineRaceChrome {
     var isMenuOpen = false
     var isConfirmingLeave = false
     var isReconnecting = false
-    /// The leave confirm's wording: before the gun a bot takes the seat, after it she is scored RET.
+    /// The leave confirm's wording: before the gun a bot takes the seat, after it she is scored as retired.
     var isBeforeGun = true
     var openMenu: () -> Void = {}
     var closeMenu: () -> Void = {}
@@ -58,48 +59,73 @@ struct OnlineSequenceView: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("race-joining")
             if race.isConfirmingLeave {
-                LeaveConfirm(isBeforeGun: race.isBeforeGun, leave: race.leaveRace, stay: race.stay)
+                LeaveConfirm(place: .race, isBeforeGun: race.isBeforeGun, leave: race.leaveRace, stay: race.stay)
             }
         }
     }
 }
 
-/// "Leave the race?" over the race (#141, #140's card on the race's chrome): Stay prominent, Leave plain. The race
-/// runs on behind it.
+/// "Leave the race?" (#140, #141): the one card over the locked fleet's briefing and over the race, Stay prominent,
+/// Leave plain. Everything runs on behind it. Over the race it is drawn dark, as the race's chrome is.
 struct LeaveConfirm: View {
+    /// Where it stands: the briefing keeps #140's identifiers.
+    enum Place {
+        case briefing, race
+
+        var identifiers: (card: String, leave: String, stay: String) {
+            switch self {
+            case .briefing: ("briefing-leave-question", "briefing-leave-confirm", "briefing-leave-stay")
+            case .race: ("race-leave-confirm", "race-leave-confirm-leave", "race-leave-confirm-stay")
+            }
+        }
+    }
+
+    var place: Place
     var isBeforeGun: Bool
     var leave: () -> Void
     var stay: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    // TODO-COPY (#171)
+    static func consequence(isBeforeGun: Bool) -> String {
+        isBeforeGun ? "A bot takes your seat." : "You'll be scored as retired."
+    }
 
     var body: some View {
         ZStack {
             Color.black.opacity(0.5).ignoresSafeArea()
             VStack(spacing: 14) {
                 // TODO-COPY (#171)
-                Text("Leave the race?").font(.title3.bold())
+                Text("Leave the race?").font(MenuFont.heading(.title3))
                     .accessibilityAddTraits(.isHeader)
-                Text(isBeforeGun ? "A bot takes your seat." : "You'll be scored RET.")
-                    .foregroundStyle(.white.opacity(0.75))
+                Text(Self.consequence(isBeforeGun: isBeforeGun)).font(MenuFont.body())
+                    .foregroundStyle(ChromePalette.text.opacity(0.7))
                 HStack(spacing: 12) {
-                    Button(action: leave) { Text("Leave").frame(maxWidth: .infinity) }
-                        .buttonStyle(.bordered)
-                        .accessibilityIdentifier("race-leave-confirm-leave")
-                    Button(action: stay) { Text("Stay").bold().frame(maxWidth: .infinity) }
-                        .buttonStyle(.borderedProminent)
-                        .accessibilityIdentifier("race-leave-confirm-stay")
+                    Button(action: leave) {
+                        Text("Leave").font(MenuFont.body()).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier(place.identifiers.leave)
+                    Button(action: stay) {
+                        Text("Stay").font(MenuFont.heading(.headline)).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier(place.identifiers.stay)
                 }
                 .controlSize(.large)
             }
             .multilineTextAlignment(.center)
-            .foregroundStyle(.white)
+            .foregroundStyle(ChromePalette.text)
             .padding(24)
             .frame(maxWidth: 360)
-            .background(.ultraThinMaterial, in: .rect(cornerRadius: 24))
-            .padding(.horizontal, 16)
+            .background(ChromePalette.surface, in: .rect(cornerRadius: 20))
+            .padding(.horizontal, 24)
             .accessibilityElement(children: .contain)
             .accessibilityAddTraits(.isModal)
-            .accessibilityIdentifier("race-leave-confirm")
+            .accessibilityIdentifier(place.identifiers.card)
         }
+        .tint(ChromePalette.tint)
+        .environment(\.colorScheme, place == .race ? .dark : colorScheme)
     }
 }
 
@@ -118,6 +144,19 @@ struct ReconnectingLine: View {
 }
 
 extension RaceResultViewModel {
+    /// The results of a race as the service remembers it (#141): one that closed while she was away. Its rating is
+    /// pending until it is pushed, unless the race was unrated. She wears `livery`; the wire carries no other yet.
+    init(lastRace: LastRace, livery: Livery) {
+        let report = lastRace.report
+        let entrants = report.roster.indices.map { seat in
+            Entrant(name: seat == report.seat ? "You" : report.roster[seat].name, isBot: report.roster[seat].isBot,
+                    livery: seat == report.seat ? livery : FleetLiveries.yours)
+        }
+        let cell: RatingCell = lastRace.rating.map { .init($0.outcome) }
+            ?? (report.results.rated ? .pending : .unrated(.noOtherHumans))
+        self.init(report: report, entrants: entrants, rating: cell, earned: nil)
+    }
+
     /// Home's Last race badge (#141): the rating change only, "+12" or "−8"; nil unrated, pending or offline.
     var ratingBadge: (text: String, spoken: String)? {
         guard case .rated(let change, _, _) = online?.rating else { return nil }

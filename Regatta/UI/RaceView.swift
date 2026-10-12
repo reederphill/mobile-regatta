@@ -139,6 +139,11 @@ struct RaceView: View {
                     RaceControls.fixtureRow(hud: session.hud)
                 }
             }
+            if session.showsFixtureOnlineMenu {
+                // The online race menu (#141), its toggles at the device defaults.
+                PauseMenu(style: .online, settings: .constant(DeviceSettings()), onResume: {}, onRestart: nil,
+                          onLeave: {}, onHelp: {}, onTuning: nil)
+            }
         }
             .accessibilityElement()
             .accessibilityLabel("Render fixture")
@@ -210,7 +215,7 @@ struct RaceView: View {
 
             if let online, online.isReconnecting {
                 VStack {
-                    // Under the notice line, which a rule call or a hint may hold. TODO (#141 B2): a notice-slot kind.
+                    // A capsule under the notice line, which a rule call or a hint may hold (owner 2026-10-12).
                     ReconnectingLine()
                         .padding(.top, HUDView.noticeTop(showsLeaderboard: session.controls.showsLeaderboard)
                                  + HUDView.noticeHeight + 8 + topInset)
@@ -230,7 +235,7 @@ struct RaceView: View {
             .animation(.easeOut(duration: 0.35), value: session.showsResults)
 
             if let online, online.isConfirmingLeave {
-                LeaveConfirm(isBeforeGun: online.isBeforeGun, leave: online.leave, stay: online.stay)
+                LeaveConfirm(place: .race, isBeforeGun: online.isBeforeGun, leave: online.leave, stay: online.stay)
             }
 
             // Over the pause menu and the results too: its x leaves the queue from any of them.
@@ -298,6 +303,8 @@ struct RaceView: View {
                             // The race runs on under its menu: the controls are let go, the rudder centred.
                             session.releaseControls()
                             online.openMenu()
+                            // VoiceOver hears that nothing stopped.
+                            UIAccessibility.post(notification: .announcement, argument: PauseMenu.title(.online))
                         } else {
                             session.setPaused(true)
                         }

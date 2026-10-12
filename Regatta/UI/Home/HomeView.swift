@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaServices
 import SwiftUI
 
@@ -16,6 +17,24 @@ struct HomeView: View {
     private var queue: QueueController? { onlineStatus?.queue }
     /// The online race sequence (#141): its Rejoin race stands in for Race online while a race she dropped out of runs.
     private var sequence: OnlineRaceController? { onlineStatus?.race }
+    /// A render fixture's Home (#141): a rejoin offer at a fixed moment, or a Last race row, in place of the app's.
+    var fixture: HomeFixture? = nil
+
+    /// What stands in Race online's place.
+    enum RaceSlot: Equatable {
+        case raceOnline
+        /// A race she dropped out of still runs (#141): the way back, and no queue meanwhile.
+        case rejoin(OnlineRaceController.RejoinEntry)
+        /// Queued: the bar above is Race online's place, no second control, and Practice moves up.
+        case none
+    }
+
+    static func raceSlot(rejoin: OnlineRaceController.RejoinEntry?, entry: RaceOnlineEntry?) -> RaceSlot {
+        if let rejoin { return .rejoin(rejoin) }
+        return entry == .queued ? .none : .raceOnline
+    }
+
+    private var lastRace: RaceResultViewModel? { fixture?.lastRace ?? model.lastRace }
 
     var body: some View {
         NavigationStack(path: $model.path) {
@@ -24,17 +43,16 @@ struct HomeView: View {
                     if let notice = model.notice {
                         NoticeRow(notice: notice)
                     }
-                    // Queued, the bar above is Race online's place: no second control, and Practice moves up.
-                    if let entry = sequence?.rejoinEntry {
-                        rejoin(entry)
-                    } else if queue?.entry != .queued {
-                        raceOnline
+                    switch Self.raceSlot(rejoin: fixture?.rejoin ?? sequence?.rejoinEntry, entry: queue?.entry) {
+                    case .rejoin(let entry): rejoin(entry)
+                    case .raceOnline: raceOnline
+                    case .none: EmptyView()
                     }
                     practice
                     #if DEBUG
                     tuning
                     #endif
-                    if let lastRace = model.lastRace {
+                    if let lastRace {
                         LastRaceRow(lastRace: lastRace) { model.sheet = .lastRace }
                     }
                     LobbyPanel(state: LobbyPanelState(isOnline: isOnline, status: lobbyStatus,
@@ -86,17 +104,19 @@ struct HomeView: View {
             Task { await sequence?.rejoin() }
         } label: {
             TimelineView(.periodic(from: .now, by: 1)) { context in
+                // A fixture's clock stands still at the moment its offer was read.
+                let date = fixture == nil ? context.date : entry.readAt
                 VStack(spacing: 2) {
                     // TODO-COPY (#171)
                     Text("Rejoin race").font(MenuFont.heading(.title2))
-                    Text(entry.clock(at: context.date)).font(MenuFont.body(.subheadline)).monospacedDigit()
+                    Text(entry.clock(at: date)).font(MenuFont.body(.subheadline)).monospacedDigit()
                 }
                 .foregroundStyle(ChromePalette.onTint)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(entry.spoken(at: context.date))
-                .accessibilityValue(entry.clock(at: context.date))
+                .accessibilityLabel(entry.spoken(at: date))
+                .accessibilityValue(entry.clock(at: date))
             }
         }
         .buttonStyle(.borderedProminent)
@@ -221,6 +241,22 @@ struct HomeView: View {
 }
 
 /// What Home's online controls do (#138): RootView runs Race online's gate, Game Center's sign-in and the terms.
+/// What a render fixture puts on Home (#141, `MenuGalleryView`).
+struct HomeFixture {
+    var rejoin: OnlineRaceController.RejoinEntry?
+    var lastRace: RaceResultViewModel?
+
+    /// 12 minutes 41 seconds into a race.
+    static let rejoin = HomeFixture(rejoin: OnlineRaceController.RejoinEntry(tick: 761 * Race.tickRate,
+                                                                              readAt: RenderFixture.QueueFixture.moment))
+
+    /// The fake services' rated online race, closed, its rating in: third of six, "+12".
+    @MainActor static var lastRaceRating: HomeFixture {
+        let last = FakeServiceScenario.onlineRace(rated: true).lastRace
+        return HomeFixture(lastRace: last.map { RaceResultViewModel(lastRace: $0, livery: FleetLiveries.yours) })
+    }
+}
+
 struct HomeOnlineActions {
     var raceOnline: () -> Void = {}
     /// The lobby area's Sign in.

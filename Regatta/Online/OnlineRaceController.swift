@@ -38,7 +38,8 @@ enum SequenceOutcome: Equatable {
 protocol OnlineSequence: AnyObject {
     /// The takeover's briefing is up: the race link starts under it.
     func begin(_ handOff: HandOff, briefing: BriefingPayload, host: any FleetLockHost)
-    /// The stream says `.fleetLocked` and she is waiting for nothing: a race she dropped out of may still run.
+    /// The stream says `.fleetLocked` and she is waiting for nothing: a race she dropped out of may still run, or the
+    /// app was killed in its briefing.
     func fleetLockedWhileIdle()
     /// The stream left `.fleetLocked`: nothing to rejoin any more.
     func fleetUnlocked()
@@ -386,7 +387,7 @@ final class OnlineRaceController: OnlineSequence {
     /// reconnects at once with the cover where it was. With no race on, the return asks for one to rejoin.
     func sceneChanged(isBackground: Bool) {
         guard phase != .idle else {
-            if !isBackground { fleetLockedWhileIdle() }
+            if !isBackground { ask(orTakeOver: false) }
             return
         }
         if isBackground { link?.drop() } else { tick() }
@@ -399,17 +400,21 @@ final class OnlineRaceController: OnlineSequence {
 
     // MARK: Rejoin
 
-    func fleetLockedWhileIdle() {
+    func fleetLockedWhileIdle() { ask(orTakeOver: true) }
+
+    private func ask(orTakeOver: Bool) {
         guard phase == .idle, !askingRejoin else { return }
         askingRejoin = true
         Task {
-            await askForRejoin()
+            await askForRejoin(orTakeOver: orTakeOver)
             askingRejoin = false
         }
     }
 
-    /// Asks the service once for a race in progress to take back: an offer puts Rejoin race on Home.
-    func askForRejoin() async {
+    /// Asks the service once for a race in progress to take back: an offer puts Rejoin race on Home. `orTakeOver`
+    /// (the stream said `.fleetLocked`): with nothing to rejoin, a seat in a fleet that hasn't started yet takes the
+    /// app over again, as at fleet lock (the app was killed in the briefing).
+    func askForRejoin(orTakeOver: Bool = false) async {
         guard phase == .idle else { return }
         do {
             let offer = try await raceSession.rejoin()
@@ -418,9 +423,18 @@ final class OnlineRaceController: OnlineSequence {
             rejoinEntry = RejoinEntry(tick: offer.clock.tick, readAt: now(), timescale: timescale)
             host?.setLiveryLocked(true)
         } catch {
-            // Stale: a `.fleetLocked` after a leave, or nothing to rejoin.
+            // Nothing to rejoin: before the gun, or stale (a `.fleetLocked` after a leave).
             clearOffer()
+            if orTakeOver, case RaceSessionError.noRace = error { await takeOverAgain() }
         }
+    }
+
+    /// The briefing again, with the time the race clock leaves it, or straight to the sequence: the link says which
+    /// once it is up. A seat she left has no hand-off, so a stale `.fleetLocked` ends here.
+    private func takeOverAgain() async {
+        guard let handOff = try? await raceSession.handOff(), let briefing = handOff.briefing, phase == .idle, let host,
+              queue?.sequenceBegan() != false, host.takeOver(handOff, briefing: briefing) else { return }
+        begin(handOff, briefing: briefing, host: host)
     }
 
     func fleetUnlocked() {

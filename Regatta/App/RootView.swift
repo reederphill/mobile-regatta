@@ -41,7 +41,8 @@ struct RootView: View {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
             case .briefingLocked: BriefingGalleryView(fixture: nil)
-            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar: MenuGalleryView(gallery: fixtureGallery, model: model)
+            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar, .rejoin, .lastRaceRating:
+                MenuGalleryView(gallery: fixtureGallery, model: model)
             case .results(let stage, let rivalSkill): ResultsGalleryView(stage: stage, rivalSkill: rivalSkill)
             }
         } else if let harnessResults, let scenario = model.launchOptions.fakeServices {

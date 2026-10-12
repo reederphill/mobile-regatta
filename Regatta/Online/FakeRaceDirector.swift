@@ -82,6 +82,8 @@ final class FakeRaceDirector {
     }
 
     func rejoin() throws -> RejoinOffer {
+        // Asked the moment the app is back from the background: the race as it stands now.
+        host?.poll()
         guard let host, host.isRejoinable else { throw RaceSessionError.noRace }
         return RejoinOffer(handOff: HandOff(raceID: Self.raceID, token: RaceToken(bytes: [0xF0, 0x0D])), seat: FakeRaceHost.seat,
                            clock: RaceClockReading(tick: host.tick, expectedCloseTick: host.closeTick))

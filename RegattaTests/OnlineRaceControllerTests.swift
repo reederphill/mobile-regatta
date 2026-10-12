@@ -42,6 +42,37 @@ import Testing
     }
 }
 
+/// Whether the fake host answers yet.
+nonisolated final class AnsweringSwitch {
+    var isOn = false
+}
+
+/// A connection to the fake host that has the host answer whenever the client looks, once `answers` is on: the
+/// handshake needs no clock and no second task, however busy the main actor is with the suites beside this one.
+nonisolated final class AnsweredConnection: RaceConnection {
+    private let connection: FakeRaceConnection
+    private let host: FakeRaceHost
+    private let answers: AnsweringSwitch
+
+    init(_ connection: FakeRaceConnection, host: FakeRaceHost, answers: AnsweringSwitch) {
+        (self.connection, self.host, self.answers) = (connection, host, answers)
+    }
+
+    var isConnected: Bool {
+        if answers.isOn { host.poll() }
+        return connection.isConnected
+    }
+
+    func send(_ frame: [UInt8]) { connection.send(frame) }
+
+    func receive() -> [[UInt8]] {
+        if answers.isOn { host.poll() }
+        return connection.receive()
+    }
+
+    func close() { connection.close() }
+}
+
 /// A race session the test changes as it goes.
 nonisolated final class MutableRaceSession: RaceSessionService, @unchecked Sendable {
     var handOffAnswer: HandOff?
@@ -214,6 +245,43 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
         #expect(rig.queue.entry == .ready)
     }
 
+    /// Leave before the link is up: the link's own leave joins first, on the hand-off's token, only to say
+    /// `LeaveRace`, and the fake host hands the seat to a bot, as the server does before the gun.
+    @Test func leaveInTheBriefingWithNoLinkConnectsJustToLeave() async throws {
+        let briefing = FakeServiceScenario.briefing()
+        // The host's clock stands still, before the gun, however long the suites beside this one take.
+        let host = try FakeRaceHost(setup: briefing.setup, names: briefing.fleet.map(\.name), closeTick: 600, now: { 0 })
+        var released = 0
+        host.onSeatReleased = { released += 1 }
+        var tokens: [RaceToken] = []
+        let answers = AnsweringSwitch()
+        let rig = SequenceRig()
+        rig.race.makeLink = { handOff in
+            let link = OnlineRaceLink(handOff: handOff, connector: { token in
+                tokens.append(token)
+                let connection = FakeRaceConnection()
+                host.accept(connection)
+                return AnsweredConnection(connection, host: host, answers: answers)
+            }, results: nil) { connect, token in OnlineLaunch(connect: connect, token: token) }
+            // The suites run side by side on a slow machine: the join gets the time it needs.
+            link.leaveJoinTimeout = .seconds(120)
+            return link
+        }
+        await rig.lock()
+        // Nothing has answered yet: no race, no seat taken.
+        #expect(rig.race.link?.status == .joining && !host.roster[FakeRaceHost.seat].isBot)
+        rig.race.askToLeave()
+        rig.race.leaveRace()
+        #expect(rig.model.phase == .home, "Home doesn't wait for the leave")
+        // The host answers from here on.
+        answers.isOn = true
+        await rig.race.leaving?.value
+        #expect(tokens.first == SequenceRig.token)
+        #expect(host.hasLeft && released == 1, "LeaveRace never reached the host")
+        #expect(host.roster[FakeRaceHost.seat].isBot, "no bot took the seat")
+        #expect(rig.race.phase == .idle && rig.queue.entry == .settling)
+    }
+
     @Test func leaveInTheSequenceTakesTheBotSeatAndGoesHome() async {
         let rig = SequenceRig()
         await rig.sail(to: -45 * Race.tickRate)
@@ -319,6 +387,29 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
         #expect(rig.link.closes == 1 && rig.link.leaves == 0)
     }
 
+    /// The cancel may come on the results stream first (the race link down, or slower): the link reads it there.
+    @Test func raceCancelledOnTheResultsStreamGoesHomeWithTheNotice() async {
+        let rig = SequenceRig()
+        let service = ScriptedRaceSessionService(RaceSessionScenario(results: [.cancelled(.serverShutdown)]))
+        let results = OnlineResults(service: service, raceID: SequenceRig.raceID)
+        rig.race.makeLink = { handOff in
+            OnlineRaceLink(handOff: handOff, connector: { _ in UnansweredRaceConnection() }, results: results) { connect, token in
+                OnlineLaunch(connect: connect, token: token)
+            }
+        }
+        await rig.lock()
+        let before = rig.model.lastRace
+        rig.race.tick()
+        #expect(rig.race.phase == .briefing, "nothing is cancelled yet")
+        results.start()
+        await rig.settle()
+        #expect(results.isCancelled)
+        rig.race.tick()
+        #expect(rig.race.phase == .idle && rig.model.phase == .home)
+        #expect(rig.model.notice == .raceCancelled && !rig.model.isLiveryLocked)
+        #expect(rig.model.lastRace == before && rig.queue.entry == .ready)
+    }
+
     @Test func serverGoneSixtySecondsAsksTheServiceThenEnds() async {
         let rig = SequenceRig()
         await rig.sail(to: 300)
@@ -416,6 +507,8 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
 
     @Test func noRaceIgnoresAStaleFleetLocked() async {
         let rig = SequenceRig()
+        // A seat she left has no hand-off either.
+        rig.session.handOffAnswer = nil
         await rig.queue.receive(.fleetLocked)
         await rig.settle()
         #expect(rig.session.rejoinsAsked == 1 && rig.race.rejoinEntry == nil)
@@ -463,6 +556,49 @@ nonisolated final class CountingQueue: QueueService, @unchecked Sendable {
         rig.race.tick()
         rig.race.home()
         #expect(rig.queue.entry == .ready && rig.model.phase == .home)
+    }
+
+    /// The app was killed in the briefing and is back before the gun: the stream says `.fleetLocked`, there is
+    /// nothing to rejoin yet, and the hand-off still seats her. The app is taken over again as at fleet lock, with
+    /// the briefing time the race clock leaves; back after the briefing's end, straight to the sequence.
+    @Test func aRelaunchInTheBriefingTakesTheAppOverAgain() async throws {
+        let rig = SequenceRig()
+        await rig.queue.receive(.fleetLocked)
+        await rig.settle()
+        #expect(rig.session.rejoinsAsked == 1, "the rejoin is asked first")
+        #expect(rig.race.phase == .briefing && rig.race.rejoinEntry == nil)
+        let briefing = try #require(rig.model.briefing)
+        #expect(briefing.isFleetLocked && rig.model.phase == .raceSequence && rig.model.isLiveryLocked)
+        #expect(rig.handOffs.last?.token == SequenceRig.token && rig.link.started)
+        #expect(rig.queue.entry == .ready && rig.queue.bar == nil, "the queue stays out of it")
+        // 4 s of the briefing are left on the race clock.
+        rig.link.up(at: -64 * Race.tickRate)
+        rig.race.tick()
+        let left = try #require(briefing.secondsLeft)
+        #expect(left > 3 && left <= 4)
+        // Leaving works as from any briefing.
+        rig.race.leaveRace()
+        await rig.race.leaving?.value
+        #expect(rig.link.leaves == 1 && rig.model.phase == .home && rig.queue.entry == .settling)
+
+        let late = SequenceRig()
+        await late.queue.receive(.fleetLocked)
+        await late.settle()
+        late.link.up(at: -30 * Race.tickRate)
+        late.race.tick()
+        #expect(late.race.phase == .sequence, "back after the briefing's end, the sequence")
+
+        // Back on the foreground with no race on, only a rejoin is asked for: no fleet has locked.
+        let idle = SequenceRig()
+        idle.race.sceneChanged(isBackground: false)
+        await idle.settle()
+        #expect(idle.session.rejoinsAsked == 1 && idle.race.phase == .idle && idle.model.phase == .home)
+
+        // Waiting for another fleet by the time the hand-off answers, that one is left alone.
+        let queued = SequenceRig()
+        await queued.queue.join()
+        await queued.race.askForRejoin(orTakeOver: true)
+        #expect(queued.race.phase == .idle && queued.model.phase == .home)
     }
 
     @Test func rejoinThatFindsNoRaceSaysSo() async {

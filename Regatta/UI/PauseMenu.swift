@@ -11,6 +11,25 @@ struct PauseMenu: View {
         case practice, online
     }
 
+    /// What the menu holds, top to bottom.
+    enum Row: Equatable {
+        case resume, toggles, help, restart, tuning, leave
+    }
+
+    /// The rows for `style`: an online race can't be sailed again from its start (#25) and has no tuning panel,
+    /// whatever its race offers.
+    static func rows(style: Style, hasToggles: Bool, hasHelp: Bool, canRestart: Bool, canTune: Bool) -> [Row] {
+        var rows = [Row.resume]
+        if hasToggles { rows.append(.toggles) }
+        if hasHelp { rows.append(.help) }
+        if canRestart, style == .practice { rows.append(.restart) }
+        if canTune, style == .practice { rows.append(.tuning) }
+        return rows + [.leave]
+    }
+
+    // TODO-COPY (#171)
+    static func title(_ style: Style) -> String { style == .online ? "Race continues" : "Paused" }
+
     var style = Style.practice
     /// The device's settings the toggles change, or nil to leave them out.
     var settings: Binding<DeviceSettings>?
@@ -37,8 +56,7 @@ struct PauseMenu: View {
 
     private var card: some View {
         VStack(spacing: 14) {
-            // TODO-COPY (#171)
-            Text(style == .online ? "Race continues" : "Paused").font(.title.bold())
+            Text(Self.title(style)).font(.title.bold())
             Button(action: onResume) { label("Resume") }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("pause-resume")
@@ -50,12 +68,12 @@ struct PauseMenu: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("pause-help")
             }
-            if let onRestart {
+            if let onRestart, rows.contains(.restart) {
                 Button(action: onRestart) { label("Restart race") }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("pause-restart")
             }
-            if let onTuning {
+            if let onTuning, rows.contains(.tuning) {
                 Button(action: onTuning) { label("Tuning") }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("pause-tuning")
@@ -71,6 +89,11 @@ struct PauseMenu: View {
         .padding(.horizontal, 16)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("pause-menu")
+    }
+
+    private var rows: [Row] {
+        Self.rows(style: style, hasToggles: settings != nil, hasHelp: onHelp != nil, canRestart: onRestart != nil,
+                  canTune: onTuning != nil)
     }
 
     private func label(_ title: String) -> some View {

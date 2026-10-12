@@ -185,6 +185,7 @@ final class GameSession {
         showsHUDInFixture = fixture.hud != nil
         showsInstrumentsInFixture = fixture.hud?.instruments ?? false
         fixtureQueueChip = fixture.queueChip
+        showsFixtureOnlineMenu = fixture.onlineMenu ?? false
         // The board only where the fixture asks for it (#268), held open if it says so: the session's controls are
         // its own here, never the app's.
         controls.showsLeaderboard = fixture.hud?.leaderboard != nil
@@ -249,6 +250,8 @@ final class GameSession {
     @ObservationIgnored private var showsInstrumentsInFixture = false
     /// The queue's chip a render fixture draws over the race (#140).
     @ObservationIgnored private(set) var fixtureQueueChip: RenderFixture.QueueFixture?
+    /// A fixture's online race menu (#141), drawn over its race.
+    @ObservationIgnored private(set) var showsFixtureOnlineMenu = false
 
     /// The halves' faint "‹ Port / Starboard ›" edge labels show in the first race only, and only in halves (#23).
     var showsEdgeLabels: Bool { Self.showsEdgeLabels(isFirstRace: isFirstRace, steering: controls.steering) }

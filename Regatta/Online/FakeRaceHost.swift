@@ -116,23 +116,34 @@ nonisolated final class FakeRaceHost {
     /// Handles what has arrived, then simulates every tick that is due (a few at most, so a stall doesn't freeze the
     /// app catching up).
     func poll() {
+        if let connection, !connection.isConnected {
+            // Dropped: the seat stays hers.
+            seated = false
+            self.connection = nil
+        }
+        // With nobody on the link the race keeps its clock, as the server's does while the app is suspended in the
+        // background: back on, it has sailed on, or closed.
+        if !seated { sail(atMost: Self.catchUpTicks) }
         if let connection {
-            if connection.isConnected {
-                let frames = connection.uplink
-                connection.uplink.removeAll()
-                for bytes in frames {
-                    guard let frame = try? Frame(decoding: bytes) else { continue }
-                    receive(frame)
-                }
-            } else {
-                // Dropped: the seat stays hers.
-                seated = false
-                self.connection = nil
+            let frames = connection.uplink
+            connection.uplink.removeAll()
+            for bytes in frames {
+                guard let frame = try? Frame(decoding: bytes) else { continue }
+                receive(frame)
             }
         }
+        sail(atMost: 8)
+        // Too far behind to catch up: the race clock slips rather than the app.
+        if ending == nil, Double(now()) - time(ofTick: race.tick + 1) > 500_000 { origin += 250_000 }
+    }
+
+    /// The most ticks one poll sails to catch up while nobody is connected: a minute of the race.
+    static let catchUpTicks = 1800
+
+    private func sail(atMost limit: Int) {
         var steps = 0
         let now = Double(now())
-        while ending == nil, !race.isOver, now >= time(ofTick: race.tick + 1), steps < 8 {
+        while ending == nil, !race.isOver, now >= time(ofTick: race.tick + 1), steps < limit {
             step()
             steps += 1
             if let cancelTick, race.tick >= cancelTick {
@@ -141,8 +152,6 @@ nonisolated final class FakeRaceHost {
                 end(.closed)
             }
         }
-        // Too far behind to catch up: the race clock slips rather than the app.
-        if ending == nil, now - time(ofTick: race.tick + 1) > 500_000 { origin += 250_000 }
     }
 
     private func end(_ ending: Ending) {

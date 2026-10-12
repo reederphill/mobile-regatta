@@ -213,6 +213,12 @@ import RegattaServices
         #expect(parse("-fakeServices", "unreachable", "-tap", "race-online").taps == [.raceOnline])
         #expect(parse("-tap", "race-online,terms-agree").taps == [.raceOnline, .termsAgree])
         #expect(parse("-tap", "race-online,takeover,briefing-leave").taps == [.raceOnline, .takeover, .briefingLeave])
+        // The race sequence's (#141).
+        #expect(parse("-tap", "race-online,gun,race-menu,race-leave,confirm-leave").taps
+            == [.raceOnline, .gun, .raceMenu, .raceLeave, .confirmLeave])
+        #expect(parse("-tap", "race-online,race,done,race-home,race-again,rejoin,leaderboard,last-race,race-ended").taps
+            == [.raceOnline, .race, .done, .raceHome, .raceAgain, .rejoin, .leaderboard, .lastRace, .raceEnded])
+        #expect(parse("-fakeServices", "rejoinable", "-raceSeconds", "90").raceSeconds == 90)
         let bad = parse("-tap", "race-online,practice")
         #expect(bad.taps.isEmpty)
         #expect(bad.problems == ["-tap race-online,practice: expected race-online, terms-agree, settings, practice-setup, "

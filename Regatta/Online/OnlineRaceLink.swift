@@ -52,6 +52,8 @@ final class OnlineRaceLink: RaceLinking {
     private let onlineLaunch: OnlineLaunch
     private let results: OnlineResults?
     private var task: Task<Void, Never>?
+    /// How long a leave waits for a link that isn't up yet, to say `LeaveRace` on it. A builder choice.
+    var leaveJoinTimeout = Duration.seconds(5)
 
     /// `build` makes the launch from the link's connection and token sources (`AppModel.onlineRaceLink`).
     init(handOff: HandOff, connector: @escaping RaceConnector, results: OnlineResults?,
@@ -113,7 +115,7 @@ final class OnlineRaceLink: RaceLinking {
     }
 
     func leave() async {
-        let joinBy = ContinuousClock.now + .seconds(5)
+        let joinBy = ContinuousClock.now + leaveJoinTimeout
         while driver == nil, status == .joining, ContinuousClock.now < joinBy {
             try? await Task.sleep(for: .milliseconds(50))
         }

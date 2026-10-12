@@ -226,8 +226,16 @@ _Avoid_: shadow-ban, masked
 The moment an online race's boats are fixed and the briefing begins. It takes the app over: pages, sheets and any practice race go, and the briefing shows. A player who leaves before the gun gives her seat to a bot; three such leaves within an hour cost a cooldown.
 
 **Briefing leave**:
-Leaving a locked fleet from its briefing, with Leave and a confirm. A bot takes the seat. Sending the app to the background there is a drop, not a leave: the seat is kept, and the player is back in the race if she returns before the gun.
+Leaving a locked fleet before the gun, with a confirm: Leave on its briefing, Leave race on the race menu once the start sequence is on the water. A bot takes the seat. After the gun Leave race is as final and the player is scored RET; there is no way back from either. Sending the app to the background is a drop, not a leave, before the gun and after it: the seat is kept, and the player is back where the race now is when she returns.
 _Avoid_: quit, forfeit
+
+**Race menu**:
+An online race's menu, where practice has the pause menu: "Race continues" over the water, with Resume, the same toggles, Help and Leave race, and no Restart. The race never stops under it; the player's controls are let go while it is open.
+_Avoid_: pause (an online race can't be paused)
+
+**Rejoin**:
+A dropped player's way back into a race still running, from Home: Rejoin race stands in Race online's place with the race clock, from the gun until the race closes, and leads straight to the water. Only a drop offers it (the background, a lost connection, a relaunch), never Leave race. Until the close she can't join the queue. If the race closed while she was away, Home has it as her last race and says nothing more.
+_Avoid_: reconnect (the link's own retry, which the player never asks for), resume
 
 **Cooldown**:
 Five minutes in which a player can't join the queue, after three briefing leaves within an hour. The server counts the leaves; Race online counts the cooldown down.
@@ -379,7 +387,7 @@ How far a boat is behind the leader in **Ladder distance**, in metres: her ladde
 _Avoid_: time gap, distance behind
 
 **Live leaderboard**:
-The in-race HUD board under the clock and place, from the gun to the close: the leader, the boats directly ahead of and behind you, and you, each with a livery swatch and a **Gap to leader**; tap to see the whole fleet. Never names. Not the online ratings leaderboard (#165).
+The in-race HUD board under the clock and place, from the gun to the close: the leader, the boats directly ahead of and behind you, and you, each with a livery swatch and a **Gap to leader**; tap to see the whole fleet. Nameless in practice. In an online race each row also carries the seat's name as the server's roster has it now ([#141](https://github.com/reederphill/mobile-regatta/issues/141), owner 2026-10-12, superseding #15 and #268's "never names" for online): a nickname, "You", or a bot's sailing name with the bot glyph; a seat a leaver handed to a bot just changes its name. Not the online ratings leaderboard (#165).
 _Avoid_: ranking table, leaderboard (alone, for this board)
 
 ### Conditions
