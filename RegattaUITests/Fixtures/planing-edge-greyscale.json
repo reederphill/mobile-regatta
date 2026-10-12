@@ -1,0 +1,8 @@
+{
+  "log" : "planing.racelog.json",
+  "freezeTick" : 7490,
+  "camera" : "boat",
+  "vision" : "greyscale",
+  "view" : "courseUp",
+  "hud" : { "instruments" : true }
+}

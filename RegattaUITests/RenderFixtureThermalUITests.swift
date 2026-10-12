@@ -18,6 +18,9 @@ final class RenderFixtureThermalUITests: RenderFixtureTestCase {
     @MainActor func testRuleCallCuesIdenticalAcrossThermalTiers() throws { try assertCuesIdenticalAcrossTiers("rules-call") }
     @MainActor func testPenaltyCuesIdenticalAcrossThermalTiers() throws { try assertCuesIdenticalAcrossTiers("rules-penalty") }
     @MainActor func testPressureCuesIdenticalAcrossThermalTiers() throws { try assertCuesIdenticalAcrossTiers("water-pressure") }
+    /// #492: the yellow speed tile is a cue, the same at every tier; the stern-corner wakes are the wake's, which the
+    /// short tier shortens, and `-cuesOnly` hides them with it.
+    @MainActor func testPlaningCueIdenticalAcrossThermalTiers() throws { try assertCuesIdenticalAcrossTiers("planing") }
 
     @MainActor private func assertCuesIdenticalAcrossTiers(_ name: String) throws {
         try skipOnIPad()
