@@ -99,6 +99,10 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
     case joinableAlone = "joinable-alone"
     /// As `joinable`, joined while a running race is about to finish: the lock is held back, then counts down.
     case joinableHold = "joinable-hold"
+    /// Signed in, dropped from a race that is still running (#141): the app's fake race session offers the way back.
+    case rejoinable
+    /// As `joinable`, but the race server never answers after fleet lock (#141).
+    case raceGone = "race-gone"
 
     /// When the `suspended` scenario's suspension ends, in seconds since the epoch: noon UTC on 14 October 2037.
     public static let suspendedUntil: Int64 = 2_139_134_400
@@ -124,7 +128,7 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
         case .queued, .suspended, .suspendedPermanent, .cooldown, .cannotRace, .updateRequired, .multiplayerRestricted,
              .termsSaveFailed, .sessionFailed, .unreachable, .connecting:
             return []
-        case .joinable, .signedOut, .underage, .communicationRestricted, .offline, .cancelledRace, .onlineResults,
+        case .joinable, .rejoinable, .raceGone, .signedOut, .underage, .communicationRestricted, .offline, .cancelledRace, .onlineResults,
              .onlineResultsUnrated, .termsBump:
             return [queued(1, 40), queued(3, 25), queued(4, 8), queued(4, 0), .fleetLocked, .idle]
         }
