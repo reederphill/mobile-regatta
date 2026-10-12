@@ -14,6 +14,8 @@ struct BriefingView: View {
     var onBack: () -> Void
     /// A locked fleet's briefing (#140): its Leave bar, the confirm, and the line while the connection is gone.
     var leave: BriefingLeave? = nil
+    /// The takeover puts VoiceOver on the venue (#140): the briefing came unasked, over whatever she was reading.
+    @AccessibilityFocusState private var isVenueFocused: Bool
 
     var body: some View {
         ScrollView {
@@ -51,6 +53,12 @@ struct BriefingView: View {
         .accessibilityIdentifier("briefing")
         .onAppear(perform: model.begin)
         .task {
+            guard leave != nil else { return }
+            // Once the cross-fade is done and the cover is VoiceOver's.
+            try? await Task.sleep(for: .milliseconds(400))
+            isVenueFocused = true
+        }
+        .task {
             guard model.mode != .practice else { return }
             while !Task.isCancelled {
                 if model.advanceIfDue() {
@@ -66,6 +74,8 @@ struct BriefingView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(model.venueName)
                 .font(MenuFont.heading(.largeTitle))
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityFocused($isVenueFocused)
                 .accessibilityIdentifier("briefing-venue")
             Text(model.conditionsName)
                 .font(MenuFont.heading(.title3))

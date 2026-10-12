@@ -53,14 +53,17 @@ import RegattaServices
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued`,
 ///   `cancelled-race`, `online-results`, `online-results-unrated`, `terms-bump`, and #161's `suspended`,
 ///   `suspended-permanent`, `cooldown`, `cannot-race`, `update-required`, `terms-save-failed`, `session-failed`,
-///   `unreachable` or `connecting` (`FakeServiceScenario`). Debug builds only (#314): other builds don't know it, so a
+///   `unreachable` or `connecting`, and #140's `joinable`, `joinable-alone` or `joinable-hold` (`FakeServiceScenario`).
+///   Every scenario whose player gets past Race online's gate has a queue to join, to fleet lock and its briefing
+///   (#140). Debug builds only (#314): other builds don't know it, so a
 ///   release build always runs on the real services.
 /// - `-tap race-online[,terms-agree]` (Debug builds) taps Home's Race online at launch, then the Terms of Use sheet's
 ///   I agree once it is up: for a local screenshot of a state only a tap reaches (#161: the spinner, an unreachable
 ///   server, a save that failed), where `simctl` can't tap. The queue's (#140): `settings` and `practice-setup` push
 ///   a page, `start-practice` and `ready` start a practice race, `takeover` waits for fleet lock, then
-///   `briefing-leave` taps the briefing's Leave, and `connection-lost` and `connection-regained` drop the connection
-///   and bring it back.
+///   `briefing-leave` taps the briefing's Leave or `home` waits for the race sequence to end, and `connection-lost`
+///   and `connection-regained` drop the connection and bring it back. The scripted queue plays a state a second at
+///   `-timescale` (a join answered within 2 s).
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
@@ -107,6 +110,8 @@ struct LaunchOptions: Equatable {
         case ready
         case takeover
         case briefingLeave = "briefing-leave"
+        /// Waits for the race sequence to end: the takeover's briefing run out, back on Home.
+        case home
         case connectionLost = "connection-lost"
         case connectionRegained = "connection-regained"
     }

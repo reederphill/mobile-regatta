@@ -26,6 +26,10 @@ struct RootView: View {
     @Environment(\.lobbyService) private var lobbyService
     @Environment(\.onlineServices) private var services
     @Environment(\.onlineStatus) private var onlineStatus
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// The fleet-lock takeover is showing (#140): the locked fleet's briefing.
+    private var isTakeover: Bool { model.briefing?.isFleetLocked == true }
 
     var body: some View {
         if let fixtureError {
@@ -36,7 +40,8 @@ struct RootView: View {
             switch fixtureGallery {
             case .livery: LiveryGalleryView()
             case .briefing(let fixture): BriefingGalleryView(fixture: fixture)
-            case .practiceSetup, .pauseMenu, .myBoat, .help: MenuGalleryView(gallery: fixtureGallery, model: model)
+            case .briefingLocked: BriefingGalleryView(fixture: nil)
+            case .practiceSetup, .pauseMenu, .myBoat, .help, .queueBar: MenuGalleryView(gallery: fixtureGallery, model: model)
             case .results(let stage, let rivalSkill): ResultsGalleryView(stage: stage, rivalSkill: rivalSkill)
             }
         } else if let harnessResults, let scenario = model.launchOptions.fakeServices {
@@ -52,7 +57,9 @@ struct RootView: View {
             HomeView(model: model, online: HomeOnlineActions(raceOnline: raceOnline, signIn: signIn, agreeToTerms: agreeToTerms,
                                                              sheetDismissed: termsSheetDismissed))
                 .onAppear(perform: autostartIfRequested)
-                .raceCover(isPresented: model.phase == .raceSequence && model.race != nil) { raceCover }
+                // The takeover cross-fades in over whatever was up (0.25 s), where a race you chose slides in.
+                .raceCover(isPresented: model.phase == .raceSequence && model.race != nil,
+                           fadesIn: isTakeover && !reduceMotion) { raceCover }
                 // A stub past Race online's gate while the queue has no service to join (#162); Debug builds on the real
                 // services join the dev server's instant race instead (#68). On the fakes, the queue (#140).
                 .alert("Online racing is on its way", isPresented: $showsOnlineStub) {
@@ -68,24 +75,19 @@ struct RootView: View {
     /// own presentation, so it gets the scene's environment explicitly.
     @ViewBuilder private var raceCover: some View {
         if let race = model.race {
-            Group {
+            // A stack, so a practice race or its briefing fades out under the takeover's briefing fading in.
+            ZStack {
                 switch race {
                 case .practice(let session):
-                    let chip = queueChip
-                    let placement = QueueChipPlacement.current
+                    // Queued, the chip rides over the practice race (#140); a render fixture draws its own.
                     RaceView(session: session, onRestart: model.restartPractice, onExit: model.leaveRace,
                              deviceSettings: Bindable(model).deviceSettings, onSailAgain: model.sailAgain,
                              onChangeSetup: model.changeSetup,
                              onRaceOnline: { model.leaveRace(); raceOnline() },
-                             topInset: chip != nil && placement == .top ? QueueChip.hudInset : 0)
+                             queueChip: session.fixtureQueueChip.map {
+                                 QueueChip(state: $0.state, moment: RenderFixture.QueueFixture.moment, leave: {})
+                             } ?? queueChip)
                         .id(ObjectIdentifier(session))
-                        // Queued, the chip rides over the practice race (#140).
-                        .overlay(alignment: .top) {
-                            if let chip {
-                                chip.padding(.top, placement == .top ? -6
-                                    : HUDView.noticeTop(showsLeaderboard: session.controls.showsLeaderboard))
-                            }
-                        }
                 case .online(let launch):
                     OnlineLaunchView(launch: launch, onRestart: startOnlineRace, onExit: model.endRaceSequence,
                                      onRaceAgain: raceAgain, onTryIt: model.tryEarnedDesign)
@@ -110,6 +112,7 @@ struct RootView: View {
                     }
                 }
             }
+            .animation(reduceMotion ? nil : .easeInOut(duration: RaceCoverController.fadeDuration), value: isTakeover)
             // UI tests swipe on it and check it stays. A full-size element behind the race, not a container
             // around it: a container folds into the race view's own single element (`race-viewport`) and takes
             // over its identifier, and the viewport UI tests look the race rect up by it.
@@ -196,6 +199,9 @@ struct RootView: View {
                 let lockedBy = ContinuousClock.now + .seconds(300)
                 while onlineStatus?.queue.takeover == nil, ContinuousClock.now < lockedBy { try? await Task.sleep(for: .milliseconds(100)) }
             case .briefingLeave: onlineStatus?.queue.askToLeave()
+            case .home:
+                let homeBy = ContinuousClock.now + .seconds(300)
+                while model.phase != .home, ContinuousClock.now < homeBy { try? await Task.sleep(for: .milliseconds(100)) }
             case .connectionLost: onlineStatus?.queue.connectionChanged(isOnline: false)
             case .connectionRegained: onlineStatus?.queue.connectionChanged(isOnline: true)
             }

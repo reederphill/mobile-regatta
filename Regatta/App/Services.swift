@@ -105,6 +105,13 @@ final class OnlineStatus {
         }
         queue.onState = { [weak self] state in self?.show(state) }
         queue.announce = { UIAccessibility.post(notification: .announcement, argument: $0) }
+        queue.whileAwake = { work in
+            let awake = BackgroundAssertion(name: "Leave queue")
+            return Task {
+                await work()
+                awake.end()
+            }
+        }
         queue.start()
     }
 
@@ -254,4 +261,19 @@ extension EnvironmentValues {
     /// The services' state, for Race online's gate and the lobby's Sign in and Terms of Use (#138). Nil in previews
     /// and tests.
     @Entry var onlineStatus: OnlineStatus? = nil
+}
+
+/// A background task (#140): the app stays awake from here to `end()`, or until the system calls time.
+final class BackgroundAssertion {
+    private var id = UIBackgroundTaskIdentifier.invalid
+
+    init(name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in self?.end() }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
+    }
 }

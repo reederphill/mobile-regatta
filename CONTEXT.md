@@ -175,7 +175,7 @@ Where players wait to be placed in an online race. There's one, global.
 _Avoid_: lobby (the lobby is the chat space), room, matchmaking
 
 **Queue bar**:
-The strip across the top of Home and every page pushed on it while the player waits in the queue: how many are waiting, the seconds to fleet lock, and Leave. About 10 s before the lock it is the lock banner. Over a practice race or its briefing it is a small chip, so the player can practise while she waits.
+The strip across the top of Home and every page pushed on it while the player waits in the queue: how many are waiting, the seconds to fleet lock, and Leave. While the lock waits for a running race's finishers it says so, with the count and no seconds. About 10 s before the lock it is the lock banner. Over a practice race or its briefing it is a small chip, so the player can practise while she waits.
 _Avoid_: toast, status bar, banner (the banner is only its last 10 s)
 
 **Lobby**:

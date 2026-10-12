@@ -215,7 +215,7 @@ import RegattaServices
         let bad = parse("-tap", "race-online,practice")
         #expect(bad.taps.isEmpty)
         #expect(bad.problems == ["-tap race-online,practice: expected race-online, terms-agree, settings, practice-setup, "
-            + "start-practice, ready, takeover, briefing-leave, connection-lost, connection-regained, separated by commas"])
+            + "start-practice, ready, takeover, briefing-leave, home, connection-lost, connection-regained, separated by commas"])
     }
 
     /// The online dev race (#68): the flag, the server and the race-length overrides; not a practice race.

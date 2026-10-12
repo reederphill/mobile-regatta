@@ -8,6 +8,9 @@ nonisolated final class PacedQueueService: QueueService {
     private let base: any QueueService
     private let interval: Duration
     private let scripts = Scripts()
+    /// A join or a leave is answered within this however slow the pace, as a server answers: the queue's controller
+    /// gives a join 8 s.
+    static let answerWithin = Duration.seconds(2)
 
     init(_ base: any QueueService, interval: Duration) {
         self.base = base
@@ -20,11 +23,16 @@ nonisolated final class PacedQueueService: QueueService {
             var last: QueueState?
             while !Task.isCancelled {
                 let script = await scripts.count
+                // The launch's own script plays at the pace from its start; one a join or a leave started, once
+                // its answer is out.
+                var answered = script == 0
                 for await state in base.stateUpdates() where state != last {
-                    if last != nil { try? await Task.sleep(for: interval) }
+                    if last != nil { try? await Task.sleep(for: answered ? interval : min(interval, Self.answerWithin)) }
                     // A join or a leave meanwhile started another script: this state is the old one's.
                     if await scripts.count != script || Task.isCancelled { break }
                     last = state
+                    // An idle before the first queued state is the join's stream opening, not its answer.
+                    if state != .idle || script == 0 { answered = true }
                     continuation.yield(state)
                 }
                 await scripts.wait(after: script)

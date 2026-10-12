@@ -20,8 +20,10 @@ struct RaceView: View {
     var onRaceAgain: (() -> Void)? = nil
     /// The online results' Try it (#24): My boat with the earned design on. Nil falls back to `onExit`.
     var onTryIt: ((DesignID) -> Void)? = nil
-    /// What the HUD and the pause button move down by: the queue's chip above them (#140), only while it shows.
-    var topInset: CGFloat = 0
+    /// The queue's chip (#140), while queued over a practice race: top-centre in the race rect, with the HUD, the
+    /// pause button and the TUNED badge moved down under it only while it shows.
+    var queueChip: QueueChip? = nil
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Sending the app to the background pauses a practice race (#25), read from the scene (`SceneState`).
     @Environment(\.sceneState) private var sceneState
     /// The screen's top frame rate (#127): 120 on ProMotion.
@@ -34,6 +36,20 @@ struct RaceView: View {
     @Environment(TuningModel.self) private var tuning: TuningModel?
     @State private var showsTuning = false
     #endif
+
+    private var topInset: CGFloat { queueChip == nil ? 0 : QueueChip.hudInset }
+
+    /// The chip's row at the top of the race rect, so a letterboxed race (iPad) keeps it over the water.
+    private var chipRow: some View {
+        VStack(spacing: 0) {
+            if let queueChip {
+                queueChip
+                    .padding(.top, QueueChip.topOffset)
+                    .transition(.opacity)
+            }
+            Spacer(minLength: 0)
+        }
+    }
 
     private var debugOptions: SpriteView.DebugOptions {
         #if DEBUG
@@ -111,8 +127,9 @@ struct RaceView: View {
         ZStack {
             scene
             if session.showsFixtureHUD {
-                hudView
+                hudView.padding(.top, topInset)
             }
+            chipRow
             if session.showsFixtureInstruments {
                 VStack {
                     Spacer()
@@ -191,7 +208,12 @@ struct RaceView: View {
                 }
             }
             .animation(.easeOut(duration: 0.35), value: session.showsResults)
+
+            // Over the pause menu and the results too: its x leaves the queue from any of them.
+            chipRow
         }
+        // The chip fades in and out, the HUD moving with it.
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: queueChip != nil)
     }
 
     /// Help over the race (#135): a sheet, the controls let go first. A paused race stays paused; an online one keeps

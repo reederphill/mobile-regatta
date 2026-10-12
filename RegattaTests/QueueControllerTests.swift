@@ -23,13 +23,14 @@ import Testing
     @MainActor final class Rig {
         let clock: FakeClock
         let haptics = RecordingHaptics()
-        let model = AppModel()
+        let model: AppModel
         let services: ServiceSet
         let controller: QueueController
         var announced: [String] = []
         var states: [QueueState] = []
 
-        init(_ scenario: FakeServiceScenario = .joinable, raceSession: (any RaceSessionService)? = nil) {
+        init(_ scenario: FakeServiceScenario = .joinable, raceSession: (any RaceSessionService)? = nil, model: AppModel = AppModel()) {
+            self.model = model
             let services = ServiceSet.fake(scenario)
             self.services = services
             let clock = FakeClock()
@@ -105,16 +106,19 @@ import Testing
         #expect(rig.display()?.kind == .alone)
         #expect(rig.display()?.detail == "Just you" && rig.display()?.seconds == "40 s")
 
-        // Only a hold waits more than a minute: no seconds, until it is down to 60.
+        // Only a hold waits more than a minute: it says so, keeps the count, and shows no seconds until it is down to 60.
         await rig.queued(3, 150)
-        #expect(rig.display() == QueueBarState.Display(kind: .hold, title: "In the queue", detail: "Waiting for finishers",
-                                                       chip: "3 · waiting", spoken: "Queued, waiting for finishers"))
-        #expect(rig.display()?.canLeave == true)
+        #expect(rig.display() == QueueBarState.Display(kind: .hold, title: "Waiting for finishers", detail: "3 waiting",
+                                                       chip: "3 · waiting", spoken: "Queued, waiting for finishers, 3 waiting"))
+        #expect(rig.display()?.canLeave == true && rig.display()?.isBanner == false)
         rig.clock.advance(90)
         #expect(rig.display()?.kind == .others && rig.display()?.seconds == "60 s")
         // The hold moves the lock back again: the seconds hide again.
         await rig.queued(3, 75)
         #expect(rig.display()?.kind == .hold && rig.display()?.seconds == nil)
+        // Alone in a hold, the count still reads as it does alone.
+        await rig.queued(1, 75)
+        #expect(rig.display()?.title == "Waiting for finishers" && rig.display()?.detail == "Just you")
     }
 
     @Test func lockSoonHapticFiresOnceAndRearmsOnlyAfterTwentySeconds() async {
@@ -191,6 +195,25 @@ import Testing
         #expect(rig.model.session == nil, "the practice race is gone")
         #expect(rig.model.lastRace == lastRace, "nothing of a race left midway is kept")
         #expect(!rig.model.isPracticeShowing)
+    }
+
+    /// A practice race she had finished when the fleet locked keeps its results as Home's Last race, as leaving it
+    /// does; the takeover itself is the same.
+    @Test func aFinishedPracticeRaceKeepsItsResultsRow() async throws {
+        let model = AppModel(launchOptions: LaunchOptions(arguments: ["/path/to/Regatta", "-uitesting", "-seed", "1"]))
+        let rig = Rig(model: model)
+        await rig.joinAndWait()
+        model.beginPractice()
+        model.finishBriefing()
+        let session = try #require(model.session)
+        session.playerDone = true
+        #expect(model.lastRace == nil && rig.controller.showsChip)
+
+        await rig.controller.receive(.fleetLocked)
+        let kept = try #require(model.lastRace, "the race she was done in left no results row")
+        #expect(kept.rows.count == model.practiceSetup.fleetSize)
+        #expect(kept.isFinal, "closed as it was left, as Leave race closes it")
+        #expect(model.session == nil && model.briefing?.isFleetLocked == true)
     }
 
     @Test func takeOverLocksTheLivery() async {
@@ -284,11 +307,25 @@ import Testing
 
     @Test func backgroundWhileQueuedLeavesAndPostsTheNotice() async throws {
         let rig = Rig()
+        // The app's stand-in: what a background task holds open.
+        var held = 0
+        var sentWhileHeld = false
+        rig.controller.whileAwake = { work in
+            held += 1
+            return Task {
+                await work()
+                // The queue has heard by the time the hold ends: a second leave is refused.
+                do { try await rig.services.queue.leave() } catch QueueError.notQueued { sentWhileHeld = true } catch {}
+                held -= 1
+            }
+        }
         await rig.joinAndWait()
         rig.controller.sceneChanged(isBackground: true)
+        #expect(held == 1, "the leave runs under a background task")
         #expect(rig.controller.bar == nil && rig.controller.entry == .ready)
         #expect(rig.model.notice == AppModel.Notice(title: "You left the queue", message: "The app went to the background."))
         await rig.controller.leaving?.value
+        #expect(held == 0 && sentWhileHeld, "the leave was sent before the hold ended")
         try await rig.services.queue.join()
         // Coming back changes nothing more.
         rig.controller.sceneChanged(isBackground: false)
@@ -300,8 +337,13 @@ import Testing
     @Test func backgroundAfterLockKeepsTheSeat() async {
         let rig = Rig()
         await rig.lock()
+        var held = 0
+        rig.controller.whileAwake = { work in
+            held += 1
+            return Task { await work() }
+        }
         rig.controller.sceneChanged(isBackground: true)
-        #expect(rig.controller.takeover != nil && rig.controller.leaving == nil)
+        #expect(rig.controller.takeover != nil && rig.controller.leaving == nil && held == 0)
         #expect(rig.model.phase == .raceSequence && rig.model.briefing?.isFleetLocked == true)
         #expect(rig.model.isLiveryLocked && rig.model.notice == nil)
         rig.controller.sceneChanged(isBackground: false)

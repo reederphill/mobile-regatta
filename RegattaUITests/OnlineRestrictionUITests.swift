@@ -120,7 +120,7 @@ final class OnlineRestrictionUITests: XCTestCase {
         XCTAssertTrue(failed.waitForExistence(timeout: 10), "no line after the save failed")
         XCTAssertEqual(failed.label, "Couldn't save. Try again.")
         XCTAssertTrue(agree.exists, "the sheet went away on a save that failed")
-        XCTAssertFalse(app.alerts["Online racing is on its way"].exists, "a save that failed went on to the queue")
+        XCTAssertFalse(app.descendants(matching: .any)["queue-bar"].firstMatch.exists, "a save that failed went on to the queue")
 
         app.buttons["terms-close"].tap()
         XCTAssertTrue(agree.waitForNonExistence(timeout: 10), "Close didn't close the sheet")

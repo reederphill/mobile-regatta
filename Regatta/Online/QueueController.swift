@@ -79,6 +79,9 @@ final class QueueController {
     @ObservationIgnored var onState: ((QueueState) -> Void)?
     /// VoiceOver's announcements: joined, lock soon, lock. Nothing else is announced.
     @ObservationIgnored var announce: (String) -> Void = { _ in }
+    /// Runs the leave a backgrounded app sends, keeping the app awake until it is through (`OnlineStatus`: a
+    /// background task). Here it only runs it.
+    @ObservationIgnored var whileAwake: (@escaping @Sendable () async -> Void) -> Task<Void, Never> = { work in Task { await work() } }
 
     /// A join that hears nothing back gives up after this long.
     static let joinTimeout: TimeInterval = 8
@@ -133,7 +136,8 @@ final class QueueController {
     @ObservationIgnored private var leavingUntil: Date?
     /// When the connection went, in the briefing.
     @ObservationIgnored private var lostAt: Date?
-    @ObservationIgnored private var reader: Task<Void, Never>?
+    /// The read of the queue's stream, while it runs.
+    @ObservationIgnored private(set) var reader: Task<Void, Never>?
     @ObservationIgnored private var readerEnded = false
     @ObservationIgnored private var ticker: Task<Void, Never>?
     /// The last leave sent to the queue, best effort: the bar never waits for it.
@@ -243,7 +247,8 @@ final class QueueController {
     func sceneChanged(isBackground: Bool) {
         guard isBackground, isWaiting else { return }
         giveUpPlace()
-        leaving = Task { [queue] in try? await queue.leave() }
+        // The system may suspend the app any moment now: the leave gets the time it needs.
+        leaving = whileAwake { [queue] in try? await queue.leave() }
         host?.postNotice(.leftQueueInBackground)
     }
 

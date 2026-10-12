@@ -5,12 +5,17 @@ import SwiftUI
 /// yellow-edged lock banner.
 struct QueueBarView: View {
     let state: QueueBarState
+    /// The moment drawn, for a render fixture; nil counts the seconds down on the device between the server's pushes.
+    var moment: Date? = nil
     var leave: () -> Void
 
     var body: some View {
-        // The seconds count down on the device between the server's pushes.
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            bar(state.display(at: context.date))
+        if let moment {
+            bar(state.display(at: moment))
+        } else {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                bar(state.display(at: context.date))
+            }
         }
     }
 
@@ -47,7 +52,7 @@ struct QueueBarView: View {
                 Rectangle()
                     .fill(ChromePalette.flagYellow)
                     .frame(width: 6)
-                    .accessibilityIdentifier("queue-bar-banner")
+                    .accessibilityHidden(true)
             }
         }
         .overlay(alignment: .bottom) { Divider() }
@@ -55,22 +60,22 @@ struct QueueBarView: View {
         .accessibilityIdentifier("queue-bar")
     }
 
+    /// The words, one element for VoiceOver and the UI tests: its label says the whole wait, seconds included.
     private func words(_ display: QueueBarState.Display) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(display.title)
                 .font(MenuFont.heading(.headline))
                 .monospacedDigit()
-                .accessibilityIdentifier("queue-bar-status")
             if let detail = display.detail {
                 Text(detail)
                     .font(MenuFont.body(.subheadline))
                     .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("queue-bar-count")
             }
         }
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(display.spoken)
+        .accessibilityIdentifier("queue-bar-status")
     }
 
     @ViewBuilder private func seconds(_ display: QueueBarState.Display) -> some View {
@@ -97,16 +102,27 @@ struct QueueBarView: View {
 /// glyph, the count, the seconds and an "x" that leaves the queue at once.
 struct QueueChip: View {
     let state: QueueBarState
+    /// The moment drawn, for a render fixture; nil counts the seconds down on the device.
+    var moment: Date? = nil
     var leave: () -> Void
 
     /// The chip's drawn height; its row is taller, for the x's touch target.
     static let height: CGFloat = 32
     /// What the race HUD moves down by while the chip shows over it.
     static let hudInset: CGFloat = 32
+    /// The chip's row sits this far into the race rect's top safe area, so the drawn capsule clears the island by
+    /// the same gap as the HUD below clears the capsule.
+    static let topOffset: CGFloat = -6
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            chip(state.display(at: context.date))
+        Group {
+            if let moment {
+                chip(state.display(at: moment))
+            } else {
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    chip(state.display(at: context.date))
+                }
+            }
         }
         // The race HUD is fixed-size: the chip doesn't grow past what fits beside the island.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
@@ -120,6 +136,9 @@ struct QueueChip: View {
             Text(display.chip)
                 .font(HUDFont.number(size: 14))
                 .lineLimit(1)
+                // VoiceOver hears the wait in words, and can leave from it.
+                .accessibilityLabel(display.spoken)
+                .accessibilityAction(named: "Leave queue", leave)
             Button(action: leave) {
                 Image(systemName: "xmark")
                     .font(.footnote.weight(.bold))
@@ -140,8 +159,6 @@ struct QueueChip: View {
                 .frame(height: Self.height)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(display.spoken)
-        .accessibilityAction(named: "Leave queue", leave)
         .accessibilityIdentifier("queue-chip")
     }
 }
@@ -150,37 +167,31 @@ extension View {
     /// The queue bar above this view while `queue` has one to show (#140): above a navigation bar, its background
     /// filling the status area. It fades in and out, unless Reduce Motion is on.
     func queueBar(_ queue: QueueController?) -> some View {
-        modifier(QueueBarInset(queue: queue))
+        modifier(QueueBarInset(bar: queue?.bar, moment: nil, leave: { queue?.leave() }))
+    }
+
+    /// The bar on a fixed state at a fixed moment: a render fixture's.
+    func queueBar(_ bar: QueueBarState, at moment: Date) -> some View {
+        modifier(QueueBarInset(bar: bar, moment: moment, leave: {}))
     }
 }
 
 private struct QueueBarInset: ViewModifier {
-    let queue: QueueController?
+    let bar: QueueBarState?
+    let moment: Date?
+    let leave: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         // A column, not a safe-area inset: a navigation bar stays at the top of the screen under an inset, and so
         // under the bar.
         VStack(spacing: 0) {
-            if let queue, let bar = queue.bar {
-                QueueBarView(state: bar, leave: queue.leave)
+            if let bar {
+                QueueBarView(state: bar, moment: moment, leave: leave)
                     .transition(.opacity)
             }
             content
         }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: queue?.bar != nil)
-    }
-}
-
-/// Where the chip sits over a practice race: top-centre with the HUD moved down, or, for the design gate's second
-/// look (#140, `REGATTA_QUEUE_CHIP=B`, Debug builds), in the HUD's notice row with the HUD where it was.
-enum QueueChipPlacement {
-    case top, noticeRow
-
-    static var current: QueueChipPlacement {
-        #if DEBUG
-        if ProcessInfo.processInfo.environment["REGATTA_QUEUE_CHIP"] == "B" { return .noticeRow }
-        #endif
-        return .top
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: bar != nil)
     }
 }

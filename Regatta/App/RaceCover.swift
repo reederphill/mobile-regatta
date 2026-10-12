@@ -16,6 +16,9 @@ import UIKit
 /// phase returns home. The root prefers the lock during the race sequence too, so the lock holds whichever of the
 /// two UIKit asks.
 final class RaceCoverController: UIHostingController<AnyView> {
+    /// The fleet-lock takeover's cross-fade (#140, #25).
+    static let fadeDuration: TimeInterval = 0.25
+
     init(content: AnyView) {
         super.init(rootView: content)
         modalPresentationStyle = .overFullScreen
@@ -41,15 +44,17 @@ final class RaceCoverController: UIHostingController<AnyView> {
 
 extension View {
     /// Presents `content` in a `RaceCoverController` while `isPresented` is true. A transaction that disables
-    /// animations (the launch-argument path) presents and dismisses it without the slide.
-    func raceCover(isPresented: Bool, @ViewBuilder content: () -> some View) -> some View {
-        background(RaceCoverPresenter(content: isPresented ? AnyView(content()) : nil))
+    /// animations (the launch-argument path) presents and dismisses it without the slide. With `fadesIn` it
+    /// cross-fades in over what was up, in place of the slide: the fleet-lock takeover (#140).
+    func raceCover(isPresented: Bool, fadesIn: Bool = false, @ViewBuilder content: () -> some View) -> some View {
+        background(RaceCoverPresenter(content: isPresented ? AnyView(content()) : nil, fadesIn: fadesIn))
     }
 }
 
 /// Places an invisible controller in the view hierarchy to present the race cover from.
 private struct RaceCoverPresenter: UIViewControllerRepresentable {
     let content: AnyView?
+    let fadesIn: Bool
 
     func makeCoordinator() -> RaceCoverPresentation { RaceCoverPresentation() }
 
@@ -60,7 +65,8 @@ private struct RaceCoverPresenter: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ host: RaceCoverPresentation.Host, context: Context) {
-        context.coordinator.update(from: host, content: content, animated: !context.transaction.disablesAnimations)
+        context.coordinator.update(from: host, content: content, animated: !context.transaction.disablesAnimations,
+                                   fadesIn: fadesIn)
     }
 
     static func dismantleUIViewController(_ host: RaceCoverPresentation.Host, coordinator: RaceCoverPresentation) {
@@ -101,9 +107,9 @@ private struct RaceCoverPresenter: UIViewControllerRepresentable {
     }
 
     private(set) weak var cover: RaceCoverController?
-    private var pending: (content: AnyView, animated: Bool)?
+    private var pending: (content: AnyView, animated: Bool, fadesIn: Bool)?
 
-    func update(from host: UIViewController, content: AnyView?, animated: Bool) {
+    func update(from host: UIViewController, content: AnyView?, animated: Bool, fadesIn: Bool = false) {
         guard let content else {
             pending = nil
             if let cover, cover.presentingViewController != nil, !cover.isBeingDismissed {
@@ -121,15 +127,15 @@ private struct RaceCoverPresenter: UIViewControllerRepresentable {
             cover.rootView = content
             return
         }
-        present(content, from: host, animated: animated)
+        present(content, from: host, animated: animated, fadesIn: fadesIn)
     }
 
-    private func present(_ content: AnyView, from host: UIViewController, animated: Bool) {
+    private func present(_ content: AnyView, from host: UIViewController, animated: Bool, fadesIn: Bool) {
         // Not in a window yet (the launch-argument path starts the race as Home appears), or another presentation
         // is still moving: wait for it, as SwiftUI's own cover does.
         let transition = host.viewIfLoaded?.window?.rootViewController?.presentedViewController?.transitionCoordinator
         guard host.viewIfLoaded?.window != nil, transition == nil else {
-            pending = (content, animated)
+            pending = (content, animated, fadesIn)
             transition?.animate(alongsideTransition: nil) { [weak self, weak host] _ in
                 if let self, let host { self.retry(from: host) }
             }
@@ -138,11 +144,16 @@ private struct RaceCoverPresenter: UIViewControllerRepresentable {
         pending = nil
         let cover = RaceCoverController(content: content)
         self.cover = cover
-        host.present(cover, animated: animated)
+        guard animated, fadesIn else { return host.present(cover, animated: animated) }
+        // The takeover: up at once and clear, then faded in over Home, which stays in the window under it.
+        cover.view.alpha = 0
+        host.present(cover, animated: false) {
+            UIView.animate(withDuration: RaceCoverController.fadeDuration) { cover.view.alpha = 1 }
+        }
     }
 
     fileprivate func retry(from host: UIViewController) {
         guard let pending, cover == nil else { return }
-        present(pending.content, from: host, animated: pending.animated)
+        present(pending.content, from: host, animated: pending.animated, fadesIn: pending.fadesIn)
     }
 }

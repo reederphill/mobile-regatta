@@ -4,7 +4,8 @@ import SwiftUI
 /// the setup page on a fresh install's choices (UI tests keep the setup in a suite of their own, emptied at launch),
 /// and `{ "gallery": "pauseMenu" }` the pause menu, its toggles at the device defaults, over the race's dark chrome;
 /// `{ "gallery": "myBoat", … }` My boat on the fixture's livery (#136); `{ "gallery": "help", … }` Help or one of its
-/// topics (#135).
+/// topics (#135); `{ "gallery": "queueBar", … }` the queue bar above the practice setup page, as above any pushed page
+/// (#140).
 ///
 /// Like the race fixture (`RaceView`), it's one `render-fixture` element whose value is the bottom safe-area inset in
 /// points: the home-indicator band the diffs leave out.
@@ -36,6 +37,12 @@ struct MenuGalleryView: View {
             MyBoatGallery(fixture: fixture)
         case .help(let topic):
             HelpGallery(topic: topic)
+        case .queueBar(let queue):
+            NavigationStack {
+                PracticeSetupView(model: model)
+            }
+            .queueBar(queue.state, at: RenderFixture.QueueFixture.moment)
+            .tint(ChromePalette.tint)
         default:
             NavigationStack {
                 PracticeSetupView(model: model)

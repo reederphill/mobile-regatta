@@ -13,7 +13,8 @@ nonisolated enum QueueBarState: Equatable {
     /// The connection went while she was queued or joining: her place is gone.
     case connectionLost
 
-    /// A wait longer than this is a hold (#16, G2): the lock waits for a running race's finishers, and no seconds show.
+    /// A wait longer than this is a hold (#16, G2): the lock waits for a running race's finishers, and the bar says
+    /// so in place of "In the queue", with no seconds.
     static let countdownSeconds = 60
     /// The lock banner and its haptic come this close to the lock (#25).
     static let lockSoonSeconds = 10
@@ -27,7 +28,7 @@ nonisolated enum QueueBarState: Equatable {
     struct Display: Equatable {
         var kind: Kind
         var title: String
-        /// "3 waiting", "Just you" or "Waiting for finishers".
+        /// The waiting count: "3 waiting" or "Just you".
         var detail: String?
         /// "42 s"; none in a hold, or once the fleet is being set.
         var seconds: String?
@@ -76,8 +77,9 @@ nonisolated enum QueueBarState: Equatable {
             return Display(kind: kind, title: "In the queue", detail: count, seconds: "\(seconds) s", chip: "\(players) · \(seconds) s",
                            spoken: "Queued, \(count.lowercased()), \(seconds) seconds")
         case .hold:
-            return Display(kind: kind, title: "In the queue", detail: "Waiting for finishers", chip: "\(players) · waiting",
-                           spoken: "Queued, waiting for finishers")
+            // The count stays under it, as under the lock banner (owner, 2026-10-12).
+            return Display(kind: kind, title: "Waiting for finishers", detail: count, chip: "\(players) · waiting",
+                           spoken: "Queued, waiting for finishers, \(count.lowercased())")
         case .lockSoon:
             return Display(kind: kind, title: "Race in \(seconds)", detail: count, chip: "Race in \(seconds)",
                            spoken: "Race in \(seconds) seconds, \(count.lowercased())")
