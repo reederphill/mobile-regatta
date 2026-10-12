@@ -113,6 +113,8 @@ public struct ServerConfig: Sendable {
     public var leaderboardMirror = LeaderboardMirrorSettings()
     /// The lobby (#152): its limits, the classifier's key and a dev server's extra blocked phrases.
     public var chat = ChatSettings()
+    /// Usage analytics (#156): ingest limits, segments, the roll-up and the 90-day purge.
+    public var analytics = AnalyticsSettings()
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {

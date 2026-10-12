@@ -114,15 +114,23 @@ public struct ServiceEndpoint: Sendable {
     public let lifecycle: RaceLifecycle?
     /// The lobby (#152), when the server has one: shutdown ends its feeds, and `POST /dev/situation` arranges it.
     public let lobby: LobbyHub?
+    /// Usage analytics (#156), when the server takes them: devices' batches, and the server's own events for other
+    /// tickets to record. `POST /dev/situation` arranges it.
+    public let analytics: AnalyticsIngest?
+    /// The analytics roll-up and 90-day purge (#156): the server runs it while it listens.
+    public let analyticsRetention: AnalyticsRetention?
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
-                matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil, lobby: LobbyHub? = nil) {
+                matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil, lobby: LobbyHub? = nil,
+                analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
         self.matchmaker = matchmaker
         self.lifecycle = lifecycle
         self.lobby = lobby
+        self.analytics = analytics
+        self.analyticsRetention = analyticsRetention
     }
 
     public var store: any AccountStore { sessions.store }

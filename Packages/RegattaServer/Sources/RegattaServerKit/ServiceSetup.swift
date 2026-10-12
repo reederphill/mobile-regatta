@@ -23,12 +23,15 @@ extension ServiceEndpoint {
     /// `wordList` (the build's bundled list unless a test passes one; a build without one starts only in dev, on the
     /// dev phrases alone) and then by `classifier`: OpenAI's, only when its key is configured, unless a test passes
     /// one. `moderation` is #153's; until then nobody is muted and nothing can be reported.
+    ///
+    /// Usage analytics (#156) go to `analyticsStore` (memory by default), rolled up and purged by the retention job the
+    /// HTTP server runs.
     public static func make(config: ServerConfig, store: any AccountStore, archive: any RaceArchive = InMemoryRaceArchive(),
                             restrictions: any RestrictionStore = InMemoryRestrictionStore(), ratings: (any RatingBook)? = nil,
                             registry: RaceRegistry? = nil, fetcher: (any CertificateFetching)? = nil,
                             submitter: (any LeaderboardSubmitting)? = nil, lobbyStore: (any LobbyStore)? = nil,
                             wordList: ChatWordList? = nil, classifier: (any ToxicityClassifier)? = nil,
-                            moderation: (any LobbyModeration)? = nil) throws -> ServiceEndpoint {
+                            moderation: (any LobbyModeration)? = nil, analyticsStore: (any AnalyticsStore)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
         let verifier: any GameCenterVerifier
         if let pem = identity.appleRootsPEM {
@@ -60,6 +63,8 @@ extension ServiceEndpoint {
         lobbySettings.rating = rating
         let hub = LobbyHub(settings: lobbySettings, store: lobbyStore ?? InMemoryLobbyStore(), ratings: book,
                            moderation: moderation ?? NoModeration(), wordList: words, classifier: checker.map { ClassifierGate($0) })
+        let analyticsStore = analyticsStore ?? InMemoryAnalyticsStore()
+        let analytics = AnalyticsIngest(settings: config.analytics, store: analyticsStore)
         let lifecycle = RaceLifecycle(settings: config.lifecycle, archive: archive, tokenKey: config.tokenKey,
                                       tokenLifetime: config.tokenLifetime, toolchain: config.serverBuild, registry: registry, rated: rated,
                                       lobby: hub)
@@ -81,8 +86,10 @@ extension ServiceEndpoint {
             backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
                                       raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
                                       lobby: { ServerLobbyService(hub: hub, player: $0) },
-                                      profile: { ServerProfileService(player: $0, ratings: book, restrictions: restrictions, config: rating) }),
-            matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub)
+                                      profile: { ServerProfileService(player: $0, ratings: book, restrictions: restrictions, config: rating) },
+                                      analytics: { analytics.service(for: $0) }),
+            matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub, analytics: analytics,
+            analyticsRetention: AnalyticsRetention(settings: config.analytics, store: analyticsStore))
     }
 
     /// The lobby's word list (#152, owner 2026-10-11: the offline list always applies). Outside `ENV=dev` it is the
@@ -102,7 +109,7 @@ extension ServiceEndpoint {
 
     /// `POST /dev/situation` (dev only): puts the test account in the contract situation asked for, and says how
     /// the client signs in for it. Only the suites this server serves: Identity and Terms (#145), Queue (#146),
-    /// RaceSession (#148), Lobby (#152).
+    /// RaceSession (#148), Lobby (#152), AnalyticsTransport (#156).
     func arrange(_ request: DevSituationRequest) async -> HTTPReply {
         let current = config.termsVersion
         func signedIn(accepting version: Int?, multiplayerRestricted: Bool = false, underage: Bool = false,
@@ -127,8 +134,11 @@ extension ServiceEndpoint {
         if request.service == "LobbyService", lobby == nil || matchmaker == nil {
             return HTTPReply(.notFound, error: "this server has no lobby")
         }
+        if request.service == "AnalyticsTransport", analytics == nil {
+            return HTTPReply(.notFound, error: "this server takes no analytics")
+        }
         let account = AccountPlayer(teamPlayerID: request.teamPlayerID, gamePlayerID: request.gamePlayerID, alias: "Contract")
-        let lifecycle = lifecycle, lobby = lobby
+        let lifecycle = lifecycle, lobby = lobby, analytics = analytics
         /// The lobby, open to her (#152): free text unlocked unless `locked`, and the room holding a system line and then
         /// a line by another player, seeded here. `standing`: hers, set on the dev server's `NoModeration`.
         func lobbyOpen(locked: Bool = false, standing: ChatStanding = .clear) async -> HTTPReply {
@@ -202,6 +212,11 @@ extension ServiceEndpoint {
         case ("LobbyService", "notSignedIn"): return HTTPReply(.ok, json: DevSituationResponse(signIn: false))
         case ("LobbyService", "termsNotAccepted"): return await signedIn(accepting: nil)
         case ("LobbyService", "communicationRestricted"): return await signedIn(accepting: current, underage: true)
+        // Analytics (#156): the suite sends as a fresh install each run, so `accepting` needs nothing cleared.
+        // `unavailable`: her batches are answered as a store that can't be reached.
+        case ("AnalyticsTransport", "accepting"): return await signedIn(accepting: current)
+        case ("AnalyticsTransport", "unavailable"):
+            return await signedIn(accepting: current) { _ in analytics?.devSetUnavailable(player) }
         default:
             return HTTPReply(.notFound, error: "\(request.service).\(request.situation) isn't served yet")
         }
