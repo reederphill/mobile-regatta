@@ -194,6 +194,22 @@ _Avoid_: mute (a mute is a chat penalty), race mode
 Game Center's `isUnderage` or `isPersonalizedCommunicationRestricted` on a player's account. The lobby is closed to her, chat and quick-chat both, and her connection never carries a chat line.
 _Avoid_: mute, chat ban (those are penalties)
 
+**Report**:
+A player telling the admins about a lobby line (hidden from her at once), a player (her chat or her nickname), or another human's racing by seat from the results. Each waits in the admin queue, due for review within 24 h. Bots and system lines can't be reported.
+_Avoid_: flag (a fair-play flag is the server's own, #155), protest (a protest is the rules' own)
+
+**Chat penalty**:
+A mute (24 h, then 7 days) or a permanent chat ban, each a step up the ladder as the admins uphold reports on a player's chat; or the automatic 24 h mute when 3 different players report her chat within 24 h, until a review. Never stops her racing. She is always told, with the end time.
+_Avoid_: shadow-mute, silence (the silence window is racing's)
+
+**Racing penalty**:
+A warning, a 24 h or 7-day suspension, a permanent ban, or a rating reset, only ever given by an admin, by id. A suspension keeps her out of the queue and never stops her chat.
+_Avoid_: cooldown (the briefing-leave cooldown is automatic and short), chat ban
+
+**Nickname override**:
+What an upheld report on a nickname does: she shows as "Sailor" and her sail number from her next sign-in.
+_Avoid_: rename
+
 **Not sent**:
 What a post is when the filter blocks it (the bundled word list, or the classifier flagging it) or the server can't record it. Only its sender sees it, greyed out; it is never stored or shown to anyone else.
 _Avoid_: shadow-ban, masked

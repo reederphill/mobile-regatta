@@ -37,16 +37,20 @@ public struct SessionAuthority: Sendable {
     /// Sessions a player holds at once: a sign-in past it ends the oldest (#146, R11).
     public let maxSessionsPerPlayer: Int
     public let now: @Sendable () -> Date
+    /// The nickname a player shows, from what Game Center calls her: hers, unless moderation overrode it (#153, #34).
+    public let nickname: @Sendable (AccountPlayer) async throws -> String
 
     public init(store: any AccountStore, verifier: any GameCenterVerifier, lifetime: TimeInterval = 30 * 86_400,
                 absoluteLifetime: TimeInterval = 90 * 86_400, maxSessionsPerPlayer: Int = 5,
-                now: @escaping @Sendable () -> Date = { Date() }) {
+                now: @escaping @Sendable () -> Date = { Date() },
+                nickname: @escaping @Sendable (AccountPlayer) async throws -> String = { $0.alias }) {
         self.store = store
         self.verifier = verifier
         self.lifetime = lifetime
         self.absoluteLifetime = max(absoluteLifetime, 1)
         self.maxSessionsPerPlayer = max(maxSessionsPerPlayer, 1)
         self.now = now
+        self.nickname = nickname
     }
 
     public enum Outcome: Sendable, Equatable {
@@ -72,7 +76,8 @@ public struct SessionAuthority: Sendable {
         }
         let restrictions = SessionRestrictions(wire: player)
         do {
-            let account = try await store.signIn(teamPlayerID: teamPlayerID, gamePlayerID: signature.gamePlayerID, alias: player.alias)
+            let alias = try await nickname(AccountPlayer(teamPlayerID: teamPlayerID, gamePlayerID: signature.gamePlayerID, alias: player.alias))
+            let account = try await store.signIn(teamPlayerID: teamPlayerID, gamePlayerID: signature.gamePlayerID, alias: alias)
             let token = Self.newToken()
             let time = now()
             let session = try await store.createSession(playerID: teamPlayerID, tokenHash: Self.hash(token),
@@ -111,6 +116,7 @@ public struct SessionAuthority: Sendable {
             try await store.touchSession(teamPlayerID: account.teamPlayerID, at: time)
             var named = account
             named.alias = player.alias
+            named.alias = try await nickname(named)
             return .signedIn(token: token, session: SignedInSession(sessionID: refreshed.id, player: named, restrictions: restrictions,
                                                                     signature: nil))
         } catch {

@@ -22,7 +22,11 @@ extension ServiceEndpoint {
     /// The lobby (#152) keeps its lines and blocks in `lobbyStore` (memory by default). Its free text is filtered by
     /// `wordList` (the build's bundled list unless a test passes one; a build without one starts only in dev, on the
     /// dev phrases alone) and then by `classifier`: OpenAI's, only when its key is configured, unless a test passes
-    /// one. `moderation` is #153's; until then nobody is muted and nothing can be reported.
+    /// one.
+    ///
+    /// Moderation (#153) keeps its reports and penalties in `moderationStore` (memory by default): the lobby's
+    /// standings and reports, race reports read from `archive`, racing suspensions written to `restrictions`, and
+    /// nicknames it overrode shown from sign-in.
     ///
     /// Usage analytics (#156) go to `analyticsStore` (memory by default), rolled up and purged by the retention job the
     /// HTTP server runs. Players' liveries (#159) are kept in `liveryStore` (memory by default): the profile stores and
@@ -33,7 +37,7 @@ extension ServiceEndpoint {
                             registry: RaceRegistry? = nil, fetcher: (any CertificateFetching)? = nil,
                             submitter: (any LeaderboardSubmitting)? = nil, lobbyStore: (any LobbyStore)? = nil,
                             wordList: ChatWordList? = nil, classifier: (any ToxicityClassifier)? = nil,
-                            moderation: (any LobbyModeration)? = nil, analyticsStore: (any AnalyticsStore)? = nil,
+                            moderationStore: (any ModerationStore)? = nil, analyticsStore: (any AnalyticsStore)? = nil,
                             liveryStore: (any LiveryStore)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
         let verifier: any GameCenterVerifier
@@ -68,9 +72,12 @@ extension ServiceEndpoint {
         let queueBox = LateBound<QueueMatchmaker>()
         let liveries = StoredLiveries(store: liveryStore ?? InMemoryLiveryStore(), ratings: book,
                                       isLocked: { await queueBox.value?.holdsLivery($0) ?? false })
+        let moderation = Moderation(store: moderationStore ?? InMemoryModerationStore(), restrictions: restrictions, ratings: book,
+                                    ratingConfig: rating, seats: { try await archive.seating(of: $0) })
         let hub = LobbyHub(settings: lobbySettings, store: lobbyStore ?? InMemoryLobbyStore(), ratings: book,
-                           moderation: moderation ?? NoModeration(), wordList: words, classifier: checker.map { ClassifierGate($0) },
+                           moderation: moderation, wordList: words, classifier: checker.map { ClassifierGate($0) },
                            chip: { await liveries.chip(of: $0) })
+        moderation.attach(hub)
         let analyticsStore = analyticsStore ?? InMemoryAnalyticsStore()
         let analytics = AnalyticsIngest(settings: config.analytics, store: analyticsStore)
         let unlocks = EarnedUnlocks(ratings: book, earned: liveries.earned, analytics: analytics)
@@ -94,7 +101,11 @@ extension ServiceEndpoint {
                                           serverBuild: config.serverBuild),
             sessions: SessionAuthority(store: store, verifier: verifier, lifetime: identity.sessionLifetime,
                                        absoluteLifetime: identity.absoluteSessionLifetime,
-                                       maxSessionsPerPlayer: identity.maxSessionsPerPlayer),
+                                       maxSessionsPerPlayer: identity.maxSessionsPerPlayer,
+                                       nickname: { player in
+                                           guard try await moderation.nicknameOverridden(player.teamPlayerID) else { return player.alias }
+                                           return Moderation.overriddenNickname(sailNumber: try await liveries.livery(of: player).sailNumber)
+                                       }),
             backends: ServiceBackends(queue: { ServerQueueService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
                                       raceSession: { ServerRaceSessionService(matchmaker: matchmaker, player: $0, lifecycle: lifecycle) },
                                       lobby: { ServerLobbyService(hub: hub, player: $0) },
@@ -102,7 +113,8 @@ extension ServiceEndpoint {
                                                                       progress: { earned.progress(completedRaces: $1) }, config: rating) },
                                       analytics: { analytics.service(for: $0) }),
             matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub, analytics: analytics,
-            analyticsRetention: AnalyticsRetention(settings: config.analytics, store: analyticsStore), ratings: book)
+            analyticsRetention: AnalyticsRetention(settings: config.analytics, store: analyticsStore), ratings: book,
+            moderation: moderation)
     }
 
     /// The lobby's word list (#152, owner 2026-10-11: the offline list always applies). Outside `ENV=dev` it is the
@@ -122,7 +134,7 @@ extension ServiceEndpoint {
 
     /// `POST /dev/situation` (dev only): puts the test account in the contract situation asked for, and says how
     /// the client signs in for it. Only the suites this server serves: Identity and Terms (#145), Queue (#146),
-    /// RaceSession (#148), Lobby (#152), AnalyticsTransport (#156), Profile (#159).
+    /// RaceSession (#148), Lobby (#152, its reports #153), AnalyticsTransport (#156), Profile (#159).
     func arrange(_ request: DevSituationRequest) async -> HTTPReply {
         let current = config.termsVersion
         func signedIn(accepting version: Int?, multiplayerRestricted: Bool = false, underage: Bool = false,
@@ -154,15 +166,22 @@ extension ServiceEndpoint {
             return HTTPReply(.notFound, error: "this server has no profiles")
         }
         let account = AccountPlayer(teamPlayerID: request.teamPlayerID, gamePlayerID: request.gamePlayerID, alias: "Contract")
-        let lifecycle = lifecycle, lobby = lobby, analytics = analytics, ratings = ratings
+        let lifecycle = lifecycle, lobby = lobby, analytics = analytics, ratings = ratings, moderation = moderation
         /// The lobby, open to her (#152): free text unlocked unless `locked`, and the room holding a system line and then
-        /// a line by another player, seeded here. `standing`: hers, set on the dev server's `NoModeration`.
+        /// a line by another player, seeded here. `standing`: hers, given by the "dev" admin (#153). The contract's race
+        /// is seated: her in seat 0, the other player in 1, a bot in 2.
         func lobbyOpen(locked: Bool = false, standing: ChatStanding = .clear) async -> HTTPReply {
             await signedIn(accepting: current) { _ in
                 guard let lobby else { return }
                 if !locked { lobby.devUnlock(player) }
-                (lobby.moderation as? NoModeration)?.set(standing, for: player)
                 let other = AccountPlayer(teamPlayerID: player + "-other", gamePlayerID: request.gamePlayerID + "-other", alias: "Contract Crew")
+                do {
+                    try await moderation?.devSet(standing, for: player)
+                } catch {
+                    FileHandle.standardError.write(Data("RegattaServer: can't arrange a chat standing: \(error)\n".utf8))
+                }
+                moderation?.devSeat(Self.contractRace, RaceSeating(humans: [RaceSeatHolder(playerID: player, seat: 0),
+                                                                           RaceSeatHolder(playerID: other.teamPlayerID, seat: 1)]))
                 guard (try? await store.signIn(teamPlayerID: other.teamPlayerID, gamePlayerID: other.gamePlayerID, alias: other.alias)) != nil else { return }
                 lobby.gun(race: UUID(), venue: "Dev Bay", boats: 10, humans: 2)
                 await lobby.settled()
@@ -256,6 +275,8 @@ extension ServiceEndpoint {
     /// The Lobby contract's `racing` situation: how long after her feed opens she stays silent. Long enough for the
     /// suite to read the feed's first words and the state they must equal, one call later.
     static let contractSilenceHold: Duration = .seconds(2)
+    /// The Lobby contract's race (`LobbyServiceContract.race`), whose seats it reports.
+    static let contractRace = RaceID("contract-race")
 }
 
 /// Fetches Game Center's certificate over HTTPS (HTTP/1.1 on NIO with NIOSSL: no FoundationNetworking on Linux). The
