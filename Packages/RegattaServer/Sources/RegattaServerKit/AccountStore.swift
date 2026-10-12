@@ -181,4 +181,23 @@ public actor InMemoryAccountStore: AccountStore {
     public func lastAcceptedTerms(playerID: String) -> Int? { terms[playerID]?.max() }
 
     public func acceptTerms(playerID: String, version: Int, at time: Date) { terms[playerID, default: []].insert(version) }
+
+    /// Deletes the player, her sessions and her terms acceptances (#160). False when she isn't stored.
+    @discardableResult
+    public func delete(_ teamPlayerID: String) -> Bool {
+        guard players.removeValue(forKey: teamPlayerID) != nil else { return false }
+        sessions = sessions.filter { $0.value.playerID != teamPlayerID }
+        terms[teamPlayerID] = nil
+        lastSession[teamPlayerID] = nil
+        return true
+    }
+
+    /// The player's gamePlayerID, if she is stored.
+    public func gamePlayerID(of teamPlayerID: String) -> String? { players[teamPlayerID]?.gamePlayerID }
+
+    /// Players whose last online session was before `time` (G8), oldest first.
+    public func inactivePlayers(lastSessionBefore time: Date, limit: Int) -> [String] {
+        Array(players.keys.compactMap { id in lastSession[id].flatMap { $0 < time ? (id, $0) : nil } }
+            .sorted { ($0.1, $0.0) < ($1.1, $1.0) }.prefix(limit).map(\.0))
+    }
 }

@@ -27,7 +27,9 @@ import Testing
                                                                    restrictions: PlayerRestrictionStore(database),
                                                                    moderationStore: ModerationRecordStore(database)))
             do {
-                try await ServiceEndpointContractTests.run(ServiceEndpointContractTests.served, against: "ws://127.0.0.1:\(server.port)")
+                // DataDeletion's `hasOnlineData` arranges data on the in-memory stores: its Postgres erase is PlayerDataStoreTests'.
+                try await ServiceEndpointContractTests.run(ServiceEndpointContractTests.served.filter { $0 != .deletion },
+                                                           against: "ws://127.0.0.1:\(server.port)")
             } catch {
                 await server.shutdown()
                 throw error

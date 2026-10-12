@@ -32,13 +32,19 @@ extension ServiceEndpoint {
     /// HTTP server runs. Players' liveries (#159) are kept in `liveryStore` (memory by default): the profile stores and
     /// shows them, the briefing reads them at fleet lock, the lobby shows their chips, and a close that earns a design
     /// tells analytics.
+    ///
+    /// Delete my online data and the retention job (#160) erase through `onlineData`: Postgres's in production; by
+    /// default, over the in-memory stores when the accounts are in memory (none otherwise). A deleted player's
+    /// leaderboard scores are blocked by `scoreBlocker`: App Store Connect's when the leaderboard's resource id is
+    /// configured, unless a test passes one.
     public static func make(config: ServerConfig, store: any AccountStore, archive: any RaceArchive = InMemoryRaceArchive(),
                             restrictions: any RestrictionStore = InMemoryRestrictionStore(), ratings: (any RatingBook)? = nil,
                             registry: RaceRegistry? = nil, fetcher: (any CertificateFetching)? = nil,
                             submitter: (any LeaderboardSubmitting)? = nil, lobbyStore: (any LobbyStore)? = nil,
                             wordList: ChatWordList? = nil, classifier: (any ToxicityClassifier)? = nil,
                             moderationStore: (any ModerationStore)? = nil, analyticsStore: (any AnalyticsStore)? = nil,
-                            liveryStore: (any LiveryStore)? = nil) throws -> ServiceEndpoint {
+                            liveryStore: (any LiveryStore)? = nil, onlineData: (any OnlineDataStore)? = nil,
+                            scoreBlocker: (any ScoreBlocking)? = nil) throws -> ServiceEndpoint {
         let identity = config.identity
         let verifier: any GameCenterVerifier
         if let pem = identity.appleRootsPEM {
@@ -70,15 +76,32 @@ extension ServiceEndpoint {
         lobbySettings.rating = rating
         // The livery lock reads the queue, which is made below and reads the liveries.
         let queueBox = LateBound<QueueMatchmaker>()
-        let liveries = StoredLiveries(store: liveryStore ?? InMemoryLiveryStore(), ratings: book,
+        let liveryStore = liveryStore ?? InMemoryLiveryStore(), moderationStore = moderationStore ?? InMemoryModerationStore()
+        let lobbyStore = lobbyStore ?? InMemoryLobbyStore()
+        let liveries = StoredLiveries(store: liveryStore, ratings: book,
                                       isLocked: { await queueBox.value?.holdsLivery($0) ?? false })
-        let moderation = Moderation(store: moderationStore ?? InMemoryModerationStore(), restrictions: restrictions, ratings: book,
+        let moderation = Moderation(store: moderationStore, restrictions: restrictions, ratings: book,
                                     ratingConfig: rating, seats: { try await archive.seating(of: $0) })
-        let hub = LobbyHub(settings: lobbySettings, store: lobbyStore ?? InMemoryLobbyStore(), ratings: book,
+        let hub = LobbyHub(settings: lobbySettings, store: lobbyStore, ratings: book,
                            moderation: moderation, wordList: words, classifier: checker.map { ClassifierGate($0) },
                            chip: { await liveries.chip(of: $0) })
         moderation.attach(hub)
         let analyticsStore = analyticsStore ?? InMemoryAnalyticsStore()
+        let online: (any OnlineDataStore)? = onlineData ?? (store as? InMemoryAccountStore).map {
+            InMemoryOnlineData(accounts: $0, ratings: book as? InMemoryRatingBook, liveries: liveryStore as? InMemoryLiveryStore,
+                               lobby: lobbyStore as? InMemoryLobbyStore, moderation: moderationStore as? InMemoryModerationStore,
+                               archive: archive as? InMemoryRaceArchive, analytics: analyticsStore as? InMemoryAnalyticsStore)
+        }
+        var blocker = scoreBlocker
+        if blocker == nil, let key = config.leaderboard, let resource = key.leaderboardResourceID {
+            let poster = try NIOHTTPSPoster()
+            blocker = AppStoreConnectScoreModeration(tokens: try AppStoreConnectLeaderboard(config: key, poster: poster),
+                                                     leaderboardResourceID: resource, requester: poster)
+        }
+        // The queue is made below and reads the lobby, which this tells: it reaches the queue late.
+        let deletion = online.map { OnlineDataDeletion(store: $0, scores: blocker, beforeErase: { await queueBox.value?.forget($0) }) }
+        deletion?.attach(hub)
+        let retention = deletion.map { RetentionJobs(deletion: $0, moderation: moderationStore, lobby: hub) }
         let analytics = AnalyticsIngest(settings: config.analytics, store: analyticsStore)
         let unlocks = EarnedUnlocks(ratings: book, earned: liveries.earned, analytics: analytics)
         let lifecycle = RaceLifecycle(settings: config.lifecycle, archive: archive, tokenKey: config.tokenKey,
@@ -118,10 +141,11 @@ extension ServiceEndpoint {
                                       lobby: { ServerLobbyService(hub: hub, player: $0) },
                                       profile: { ServerProfileService(player: $0, ratings: book, restrictions: restrictions, liveries: liveries,
                                                                       progress: { earned.progress(completedRaces: $1) }, config: rating) },
-                                      analytics: { analytics.service(for: $0) }),
+                                      analytics: { analytics.service(for: $0) },
+                                      deletion: { player in deletion.map { ServerDataDeletionService(deletion: $0, player: player) } }),
             matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub, analytics: analytics,
             analyticsRetention: AnalyticsRetention(settings: config.analytics, store: analyticsStore), ratings: book,
-            moderation: moderation)
+            moderation: moderation, deletion: deletion, retention: retention)
     }
 
     /// The lobby's word list (#152, owner 2026-10-11: the offline list always applies). Outside `ENV=dev` it is the
@@ -141,7 +165,7 @@ extension ServiceEndpoint {
 
     /// `POST /dev/situation` (dev only): puts the test account in the contract situation asked for, and says how
     /// the client signs in for it. Only the suites this server serves: Identity and Terms (#145), Queue (#146),
-    /// RaceSession (#148), Lobby (#152, its reports #153), AnalyticsTransport (#156), Profile (#159).
+    /// RaceSession (#148), Lobby (#152, its reports #153), AnalyticsTransport (#156), Profile (#159), DataDeletion (#160).
     func arrange(_ request: DevSituationRequest) async -> HTTPReply {
         let current = config.termsVersion
         func signedIn(accepting version: Int?, multiplayerRestricted: Bool = false, underage: Bool = false,
@@ -172,8 +196,19 @@ extension ServiceEndpoint {
         if request.service == "ProfileService", matchmaker == nil || ratings == nil {
             return HTTPReply(.notFound, error: "this server has no profiles")
         }
+        if request.service == "DataDeletionService", deletion == nil || lobby == nil {
+            return HTTPReply(.notFound, error: "this server deletes no online data")
+        }
         let account = AccountPlayer(teamPlayerID: request.teamPlayerID, gamePlayerID: request.gamePlayerID, alias: "Contract")
-        let lifecycle = lifecycle, lobby = lobby, analytics = analytics, ratings = ratings, moderation = moderation
+        let lifecycle = lifecycle, lobby = lobby, analytics = analytics, ratings = ratings, moderation = moderation, deletion = deletion
+        /// The test account's online data gone, as a deletion takes it, so each Data Deletion situation starts clean.
+        func forgotten() async {
+            do {
+                _ = try await deletion?.erase(player, reason: .request)
+            } catch {
+                FileHandle.standardError.write(Data("RegattaServer: can't clear the test account: \(error)\n".utf8))
+            }
+        }
         /// The lobby, open to her (#152): free text unlocked unless `locked`, and the room holding a system line and then
         /// a line by another player, seeded here. `standing`: hers, given by the "dev" admin (#153). The contract's race
         /// is seated: her in seat 0, the other player in 1, a bot in 2.
@@ -270,6 +305,25 @@ extension ServiceEndpoint {
             return await signedIn(accepting: current) { await $0.arrangeSuspension(player, until: Int64(sessions.now().timeIntervalSince1970) + 3600) }
         case ("ProfileService", "banned"): return await signedIn(accepting: current) { await $0.arrangeSuspension(player, until: nil) }
         case ("ProfileService", "liveryLocked"): return await signedIn(accepting: current) { await $0.arrangeLock(account) }
+        // Delete my online data (#160). `hasOnlineData`: every kind the server holds, on the dev server's in-memory
+        // stores, and a line of hers in the lobby; `nothingHeld`: signed in, terms not yet accepted, nothing else.
+        case ("DataDeletionService", "signedOut"): return HTTPReply(.ok, json: DevSituationResponse(signIn: false))
+        case ("DataDeletionService", "nothingHeld"):
+            await forgotten()
+            return await signedIn(accepting: nil)
+        case ("DataDeletionService", "hasOnlineData"):
+            guard let memory = deletion?.store as? InMemoryOnlineData else {
+                return HTTPReply(.notFound, error: "hasOnlineData needs the dev server's in-memory stores")
+            }
+            await forgotten()
+            return await signedIn(accepting: current) { _ in
+                do {
+                    try await memory.devHoldEverything(account, reporting: player + "-other", at: sessions.now())
+                } catch {
+                    FileHandle.standardError.write(Data("RegattaServer: can't arrange online data: \(error)\n".utf8))
+                }
+                await lobby?.devPost("fair winds", by: account)
+            }
         default:
             return HTTPReply(.notFound, error: "\(request.service).\(request.situation) isn't served yet")
         }

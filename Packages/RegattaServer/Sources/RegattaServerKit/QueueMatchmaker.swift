@@ -427,6 +427,16 @@ public actor QueueMatchmaker {
         pushAll()
     }
 
+    /// Her online data is being deleted (#160): she leaves the queue, and gives up any seat she holds, as a player
+    /// who leaves does (a bot takes it before the gun), so no race registers her once her row is gone.
+    public func forget(_ id: String) async {
+        book.remove(id)
+        for (race, players) in races {
+            if let seat = players.firstIndex(of: id) { await releaseSeat(race, seat: seat) }
+        }
+        pushAll()
+    }
+
     /// Players queued now.
     public var queuedCount: Int { book.count }
 

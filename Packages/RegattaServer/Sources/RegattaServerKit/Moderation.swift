@@ -31,6 +31,11 @@ public protocol ModerationStore: Sendable {
     func penalties(of playerID: String) async throws -> [StoredPenalty]
     /// Lifts a penalty; false when it was lifted already, or there is none.
     func lift(_ id: Int64, by actorID: String, at time: Date) async throws -> Bool
+    /// Deletes every report the player filed (#160). Returns how many.
+    func deleteReports(by reporterID: String) async throws -> Int
+    /// The retention prune (#28, #160): penalties given before `cutoff` no longer in force at `time`, then reports filed
+    /// before `cutoff` that no remaining penalty decided.
+    func prune(before cutoff: Date, at time: Date) async throws -> (penalties: Int, reports: Int)
 }
 
 extension ModerationRecordStore: ModerationStore {}
@@ -103,6 +108,31 @@ public final class InMemoryModerationStore: ModerationStore {
             state.penalties[index].liftedAt = time
             state.penalties[index].liftedBy = actorID
             return true
+        }
+    }
+
+    public func deleteReports(by reporterID: String) async throws -> Int {
+        state.withLock { state in
+            let before = state.reports.count
+            let gone = Set(state.reports.filter { $0.reporterID == reporterID }.map(\.id))
+            state.reports.removeAll { gone.contains($0.id) }
+            for index in state.penalties.indices where state.penalties[index].reportID.map(gone.contains) == true {
+                state.penalties[index].reportID = nil
+            }
+            return before - state.reports.count
+        }
+    }
+
+    public func prune(before cutoff: Date, at time: Date) async throws -> (penalties: Int, reports: Int) {
+        state.withLock { state in
+            let penalties = state.penalties.count
+            state.penalties.removeAll {
+                $0.startsAt < cutoff && ($0.liftedAt != nil || $0.endsAt.map { $0 <= time } == true || $0.kind == .racingWarning || $0.kind == .ratingReset)
+            }
+            let decided = Set(state.penalties.compactMap(\.reportID))
+            let reports = state.reports.count
+            state.reports.removeAll { $0.createdAt < cutoff && !decided.contains($0.id) }
+            return (penalties - state.penalties.count, reports - state.reports.count)
         }
     }
 }
@@ -186,8 +216,9 @@ public struct RaceSeating: Sendable, Equatable {
 
     /// The human who sailed `seat`, if a human did.
     public func human(at seat: Int) -> String? {
-        guard !takenOver.contains(seat) else { return nil }
-        return humans.first { $0.seat == seat }?.playerID
+        guard !takenOver.contains(seat), let player = humans.first(where: { $0.seat == seat })?.playerID,
+              !player.hasPrefix(PlayerDataStore.anonymousPrefix) else { return nil }
+        return player
     }
 }
 

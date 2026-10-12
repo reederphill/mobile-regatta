@@ -148,13 +148,18 @@ public struct AppStoreConnectConfig: Sendable {
     public var privateKeyPEM: String
     public var leaderboardID: String
     public var bundleID: String
+    /// The leaderboard's App Store Connect resource id (`GC_LEADERBOARD_RESOURCE_ID`), for blocking a deleted player's
+    /// scores (#160); nil: they aren't blocked, and the deletions wait for it.
+    public var leaderboardResourceID: String?
 
-    public init(keyID: String, issuerID: String, privateKeyPEM: String, leaderboardID: String, bundleID: String) {
+    public init(keyID: String, issuerID: String, privateKeyPEM: String, leaderboardID: String, bundleID: String,
+                leaderboardResourceID: String? = nil) {
         self.keyID = keyID
         self.issuerID = issuerID
         self.privateKeyPEM = privateKeyPEM
         self.leaderboardID = leaderboardID
         self.bundleID = bundleID
+        self.leaderboardResourceID = leaderboardResourceID
     }
 }
 
@@ -244,9 +249,12 @@ public struct AppStoreConnectLeaderboard: LeaderboardSubmitting {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    /// A token for `time`: the cached one while it may be reused.
+    public func bearer(at time: Date) throws -> String { try cache.token(at: time, reuse: Self.tokenReuse) { try token(at: time) } }
+
     public func submit(_ entry: MirrorEntry) async throws {
         let time = now()
-        let bearer = try cache.token(at: time, reuse: Self.tokenReuse) { try token(at: time) }
+        let bearer = try bearer(at: time)
         let status = try await poster.post(host: Self.host, path: Self.path, bearer: bearer, json: try body(for: entry))
         guard status == 201 else { throw LeaderboardSubmitError.status(status) }
     }
@@ -267,7 +275,7 @@ public struct AppStoreConnectLeaderboard: LeaderboardSubmitting {
 
 /// HTTPS over NIO with NIOSSL, as `HTTPSCertificateFetcher` (no FoundationNetworking on Linux): one request per
 /// connection, the system's trust roots.
-public struct NIOHTTPSPoster: HTTPSPosting {
+public struct NIOHTTPSPoster: HTTPSPosting, HTTPSRequesting {
     let group: any EventLoopGroup
     let timeout: Duration
     let context: NIOSSLContext
@@ -279,6 +287,19 @@ public struct NIOHTTPSPoster: HTTPSPosting {
     }
 
     public func post(host: String, path: String, bearer: String, json: Data) async throws -> Int {
+        try await send(.POST, host: host, target: path, bearer: bearer, json: json, readBody: false).status
+    }
+
+    public func request(_ method: HTTPSMethod, host: String, target: String, bearer: String, json: Data?) async throws -> HTTPSReply {
+        let nio: HTTPMethod = switch method {
+        case .get: .GET
+        case .patch: .PATCH
+        }
+        return try await send(nio, host: host, target: target, bearer: bearer, json: json, readBody: true)
+    }
+
+    /// One request; the reply's body read only when asked (at most `maxBody` bytes).
+    private func send(_ method: HTTPMethod, host: String, target: String, bearer: String, json: Data?, readBody: Bool) async throws -> HTTPSReply {
         let context = context
         let channel = try await ClientBootstrap(group: group)
             .connectTimeout(.seconds(Int64(timeout.components.seconds)))
@@ -298,18 +319,33 @@ public struct NIOHTTPSPoster: HTTPSPosting {
             var headers = HTTPHeaders()
             headers.add(name: "Host", value: host)
             headers.add(name: "Authorization", value: "Bearer \(bearer)")
-            headers.add(name: "Content-Type", value: "application/json")
-            headers.add(name: "Content-Length", value: String(json.count))
+            if let json {
+                headers.add(name: "Content-Type", value: "application/json")
+                headers.add(name: "Content-Length", value: String(json.count))
+            }
             headers.add(name: "Connection", value: "close")
-            try await outbound.write(contentsOf: [
-                .head(HTTPRequestHead(version: .http1_1, method: .POST, uri: path, headers: headers)),
-                .body(.byteBuffer(ByteBuffer(bytes: json))),
-                .end(nil),
-            ])
+            var parts: [HTTPClientRequestPart] = [.head(HTTPRequestHead(version: .http1_1, method: method, uri: target, headers: headers))]
+            if let json { parts.append(.body(.byteBuffer(ByteBuffer(bytes: json)))) }
+            parts.append(.end(nil))
+            try await outbound.write(contentsOf: parts)
+            var status = 0
+            var body: [UInt8] = []
             for try await part in inbound {
-                if case .head(let head) = part { return Int(head.status.code) }
+                switch part {
+                case .head(let head):
+                    status = Int(head.status.code)
+                    if !readBody { return HTTPSReply(status: status, body: Data()) }
+                case .body(let buffer):
+                    body += Array(buffer: buffer)
+                    guard body.count <= Self.maxBody else { throw HTTPSCertificateFetcher.FetchError.tooLarge }
+                case .end:
+                    return HTTPSReply(status: status, body: Data(body))
+                }
             }
             throw HTTPSCertificateFetcher.FetchError.incomplete
         }
     }
+
+    /// A page of App Store Connect's list is well under this.
+    static let maxBody = 4 * 1024 * 1024
 }

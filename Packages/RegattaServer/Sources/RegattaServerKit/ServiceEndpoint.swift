@@ -125,11 +125,14 @@ public struct ServiceEndpoint: Sendable {
     /// Moderation (#153): the lobby's reports and standings, the admin queue, the penalties. `POST /dev/situation`
     /// arranges standings and race seatings on it.
     public let moderation: Moderation?
+    /// Delete my online data (#160), and the retention job the server runs while it listens.
+    public let deletion: OnlineDataDeletion?
+    public let retention: RetentionJobs?
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
                 matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil, lobby: LobbyHub? = nil,
                 analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil, ratings: (any RatingBook)? = nil,
-                moderation: Moderation? = nil) {
+                moderation: Moderation? = nil, deletion: OnlineDataDeletion? = nil, retention: RetentionJobs? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
@@ -140,6 +143,8 @@ public struct ServiceEndpoint: Sendable {
         self.analyticsRetention = analyticsRetention
         self.ratings = ratings
         self.moderation = moderation
+        self.deletion = deletion
+        self.retention = retention
     }
 
     public var store: any AccountStore { sessions.store }
@@ -377,8 +382,16 @@ public actor ServiceConnectionHandler {
             guard let service = backends?.analytics else { return close("no analytics service") }
             answer(await ServiceAnswers.analytics(request.call, service)) { .analyticsReply(ServiceReply(id: request.id, result: $0)) }
         case .deletionRequest(let request):
-            if let denial { return close("deletion refused: \(denial)") }
-            guard let service = backends?.deletion else { return close("no deletion service") }
+            let service: any DataDeletionService
+            if let denial {
+                // Signed out, the deletion answers as its contract says (#160); any other refusal closes.
+                guard case .notSignedIn = denial else { return close("deletion refused: \(denial)") }
+                service = SignedOutDeletionService()
+            } else if let deletion = backends?.deletion {
+                service = deletion
+            } else {
+                return close("no deletion service")
+            }
             answer(await ServiceAnswers.deletion(request.call, service)) { .deletionReply(ServiceReply(id: request.id, result: $0)) }
         default:
             close("\(message.type) isn't a service request")

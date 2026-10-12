@@ -45,6 +45,7 @@ public final class RegattaHTTPServer: Sendable {
         // The queue locks its races onto the registry the race connections find them in.
         let registry = services.matchmaker?.registry ?? RaceRegistry(maxRaces: config.maxRaces)
         await services.analyticsRetention?.start()
+        services.retention?.start()
         let listener = try await ServerBootstrap(group: group)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
             // A TCP-level option. (`.socketOption(.tcp_nodelay)` is SOL_SOCKET option 1: SO_DEBUG on Linux,
@@ -125,6 +126,7 @@ public final class RegattaHTTPServer: Sendable {
         await services.lifecycle?.stop()
         services.lobby?.finish()
         await services.analyticsRetention?.stop()
+        services.retention?.stop()
         task.cancel()
         _ = await task.value
     }
