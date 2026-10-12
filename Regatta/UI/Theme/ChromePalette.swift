@@ -17,6 +17,11 @@ enum ChromePalette {
     /// white on the light-mode navy (8.5:1), the dark-mode background navy on the pale dark-mode tint (7.5:1).
     // placeholder: not in docs/palette.md yet, until #169.
     static let onTint = dynamic(light: 0xFFFFFF, dark: 0x0B1F33)
+    /// A label on the grey the system draws a disabled prominent button in (#161), where `onTint` all but vanishes
+    /// (dark navy on dark grey in dark mode, 1.4:1; white on pale grey in light, 1.3:1): the page's text colour, which
+    /// the system dims on a disabled button, so it still reads as off.
+    // placeholder: not in docs/palette.md yet, until #169.
+    static let onDisabled = text
     /// Panels and rows on `background`.
     // placeholder: not in docs/palette.md yet; white on the pale chart blue, a lighter navy in dark mode.
     static let surface = dynamic(light: 0xFFFFFF, dark: 0x13304D)

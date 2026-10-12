@@ -51,8 +51,13 @@ import RegattaServices
 ///   <n>` is the bundled Terms of Use text's version (#161).
 /// - `-fakeServices <scenario>` runs the online services on a scenario's scripted fakes, for UI tests (#242):
 ///   `signed-out`, `underage`, `communication-restricted`, `multiplayer-restricted`, `offline`, `queued`,
-///   `cancelled-race`, `online-results`, `online-results-unrated` or `terms-bump` (`FakeServiceScenario`). Debug builds only (#314): other builds don't know it, so a release
-///   build always runs on the real services.
+///   `cancelled-race`, `online-results`, `online-results-unrated`, `terms-bump`, and #161's `suspended`,
+///   `suspended-permanent`, `cooldown`, `cannot-race`, `update-required`, `terms-save-failed`, `session-failed`,
+///   `unreachable` or `connecting` (`FakeServiceScenario`). Debug builds only (#314): other builds don't know it, so a
+///   release build always runs on the real services.
+/// - `-tap race-online[,terms-agree]` (Debug builds) taps Home's Race online at launch, then the Terms of Use sheet's
+///   I agree once it is up: for a local screenshot of a state only a tap reaches (#161: the spinner, an unreachable
+///   server, a save that failed), where `simctl` can't tap.
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
@@ -85,6 +90,14 @@ struct LaunchOptions: Equatable {
     enum Briefing: String, CaseIterable {
         case practice, online
     }
+
+    #if DEBUG
+    /// `-tap`'s controls (#161).
+    enum LaunchTap: String, CaseIterable {
+        case raceOnline = "race-online"
+        case termsAgree = "terms-agree"
+    }
+    #endif
 
     /// `-thermal`'s states (#127).
     enum Thermal: String, CaseIterable {
@@ -151,8 +164,8 @@ struct LaunchOptions: Equatable {
     var devRestrictions: Set<DevIdentity.Restriction> = []
     /// `-termsVersion <n>`: the version of the bundled Terms of Use text, for the end-to-end run's terms bump.
     var termsVersion: Int?
-    /// `-gatePreview <state>`: draws one of #161's proposed visual states on Home, for the design gate.
-    var gatePreview: GatePreview?
+    /// `-tap`: Home's controls tapped at launch, in order.
+    var taps: [LaunchTap] = []
     #endif
     /// Recognised arguments with a missing or bad value; each is ignored.
     var problems: [String] = []
@@ -181,7 +194,7 @@ struct LaunchOptions: Equatable {
             #if DEBUG
             case "-tuning": tuning = true
             case "-fps120": fps120 = true
-            case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-gatePreview":
+            case "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions", "-termsVersion", "-tap":
                 guard let value = takeValue(of: argument, from: &rest) else { continue }
                 apply(argument, value)
             #endif
@@ -213,7 +226,7 @@ struct LaunchOptions: Equatable {
                           "-onlineResults"]
         #if DEBUG
         flags.formUnion(["-tuning", "-fps120", "-fakeServices", "-referenceRace", "-beatMetres", "-devIdentity", "-devRestrictions",
-                         "-termsVersion", "-gatePreview"])
+                         "-termsVersion", "-tap"])
         #endif
         return flags
     }()
@@ -298,11 +311,12 @@ struct LaunchOptions: Equatable {
             } else {
                 reject(argument, value, "underage, communication or multiplayer, separated by commas")
             }
-        case "-gatePreview":
-            if let preview = GatePreview(rawValue: value) {
-                gatePreview = preview
+        case "-tap":
+            let named = value.split(separator: ",").map { LaunchTap(rawValue: String($0)) }
+            if !named.isEmpty, !named.contains(nil) {
+                taps = named.compactMap { $0 }
             } else {
-                reject(argument, value, GatePreview.allCases.map(\.rawValue).joined(separator: ", "))
+                reject(argument, value, "race-online or terms-agree, separated by commas")
             }
         case "-termsVersion":
             if let n = Int(value), n >= 1 { termsVersion = n } else { reject(argument, value, "a whole number ≥ 1") }

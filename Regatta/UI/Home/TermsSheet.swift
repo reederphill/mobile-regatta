@@ -38,7 +38,7 @@ nonisolated enum TermsOfUse {
 struct TermsSheet: View {
     /// The version shown and accepted.
     let version: TermsVersion?
-    /// The last I agree couldn't be saved (#161, V3): the sheet stays, with a short line.
+    /// The last I agree couldn't be saved (#161): the sheet stays, with a short line.
     var saveFailed = false
     var agree: () -> Void
     var close: () -> Void

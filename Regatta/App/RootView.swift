@@ -139,7 +139,28 @@ struct RootView: View {
             if launchOptions.tuning { model.path = [.tuning] }
             #endif
         }
+        #if DEBUG
+        if !launchOptions.taps.isEmpty { Task { await play(launchOptions.taps) } }
+        #endif
     }
+
+    #if DEBUG
+    /// `-tap`: Home's controls tapped at launch, for a local screenshot of a state only a tap reaches (#161). I agree
+    /// waits for the sheet Race online's gate puts up, and gives up if none comes.
+    private func play(_ taps: [LaunchOptions.LaunchTap]) async {
+        for tap in taps {
+            // Home is up, and the launch's own reads (the player, the terms, the session's first try) are in.
+            try? await Task.sleep(for: .seconds(1))
+            switch tap {
+            case .raceOnline: raceOnline()
+            case .termsAgree:
+                let sheetUp = ContinuousClock.now + .seconds(5)
+                while model.sheet != .terms, ContinuousClock.now < sheetUp { try? await Task.sleep(for: .milliseconds(100)) }
+                if model.sheet == .terms { agreeToTerms() }
+            }
+        }
+    }
+    #endif
 
     /// Home's Race online, the one way in (#138): Game Center's sign-in when signed out, then the Terms of Use sheet
     /// when due, then the queue. The e2e launches (`-online`, `-onlineHost`) skip the gate.
@@ -198,6 +219,7 @@ struct RootView: View {
         let races = agreedToTerms && racesAfterTerms
         agreedToTerms = false
         racesAfterTerms = false
+        onlineStatus?.termsSheetClosed()
         if races { enterQueue() }
     }
 

@@ -45,6 +45,15 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         }
         #endif
         var online: OnlineStatus.Session?
+        #if DEBUG
+        // The scenarios that are the session's own states play a session over their fakes (#161).
+        if let fake = launchOptions.fakeServices.flatMap(FakeSession.make) {
+            services.identity = fake.session.identity
+            services.terms = fake.session.terms
+            services.queue = fake.session.queueStatus
+            online = fake
+        }
+        #endif
         if let device, let url = OnlineEndpoint.serviceURL(launchOptions: launchOptions, defaults: .standard,
                                                            info: Bundle.main.infoDictionary ?? [:]) {
             let session = makeSession(url: url, device: device)

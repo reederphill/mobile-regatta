@@ -191,6 +191,146 @@ nonisolated final class StubLink: SessionLink {
         #expect(rig.status.restrictionLine == nil)
     }
 
+    /// The lobby's Try again is the tap again: an unreachable server shows there after a tap that failed, where the
+    /// area would ask her to sign in to Game Center, and the next tap that gets a session clears it.
+    @Test func theLobbysTryAgainOpensTheSession() async {
+        let rig = await Rig(player: Self.wren)
+        rig.service.state.withLock { $0.isReachable = false }
+        func panel() -> LobbyPanelState {
+            LobbyPanelState(isOnline: true, status: rig.status.lobbyStatus, serverUnreachable: rig.status.serverUnreachable)
+        }
+        #expect(panel() == .signIn, "nothing up front")
+
+        #expect(!(await rig.status.signIn(analytics: .discarding())))
+        #expect(rig.status.tapFailed && rig.status.serverUnreachable)
+        #expect(panel() == .unreachable)
+        #expect(!rig.status.isOpeningSession, "the spinner is the tap's wait alone")
+        // Offline says offline, whatever the server did.
+        #expect(LobbyPanelState(isOnline: false, status: rig.status.lobbyStatus, serverUnreachable: true) == .offline)
+
+        #expect(!(await rig.status.signIn(analytics: .discarding())), "Try again, the server still away")
+        #expect(panel() == .unreachable)
+        rig.service.state.withLock { $0.isReachable = true }
+        #expect(await rig.status.signIn(analytics: .discarding()))
+        #expect(!rig.status.tapFailed && !rig.status.serverUnreachable)
+        #expect(panel() == .acceptTerms)
+    }
+
+    /// An I agree the server doesn't take keeps the sheet, with its line; a newer version is no failure; the line
+    /// goes with the sheet.
+    @Test func aSaveThatFailsSaysSoOnTheSheet() async {
+        let failing = OnlineStatus(services: .fake(.termsSaveFailed))
+        #expect(await failing.passGate(analytics: .discarding()) == .terms)
+        #expect(!failing.termsSaveFailed)
+        #expect(!(await failing.acceptTerms(TermsVersion(1), analytics: .discarding())))
+        #expect(failing.termsSaveFailed)
+        #expect(!failing.lobbyStatus.hasAcceptedTerms)
+        failing.termsSheetClosed()
+        #expect(!failing.termsSaveFailed)
+
+        // Through the session: the link gone by the tap.
+        let rig = await Rig(player: Self.wren)
+        #expect(await rig.status.passGate(analytics: .discarding()) == .terms)
+        await rig.session.setOnline(false)
+        #expect(!(await rig.status.acceptTerms(TermsVersion(1), analytics: .discarding())))
+        #expect(rig.status.termsSaveFailed)
+        await rig.session.setOnline(true)
+        #expect(await rig.session.open() == .open(Self.wren.player))
+        #expect(await rig.status.acceptTerms(TermsVersion(1), analytics: .discarding()))
+        #expect(!rig.status.termsSaveFailed, "a save that takes clears the line")
+
+        let bumped = OnlineStatus(services: .fake(.termsBump))
+        await bumped.refreshAccount()
+        #expect(!(await bumped.acceptTerms(TermsVersion(1), analytics: .discarding())))
+        #expect(!bumped.termsSaveFailed, "the sheet shows the newer version instead")
+    }
+
+    /// Race online under the server's and the session's lines: no tap under a suspension, the cooldown, an update or a
+    /// refusal; a tap under an unreachable server or a failed sign-in; none while a tap waits; the matrix's own line
+    /// first.
+    @Test func raceOnlineFollowsTheLine() {
+        let now = Date(timeIntervalSince1970: 1_791_720_000)
+        var signedIn = LobbyStatus()
+        signedIn.isSignedIn = true
+        signedIn.hasAcceptedTerms = true
+        func availability(_ line: RestrictionLine?, isOnline: Bool = true, isConnecting: Bool = false) -> RaceOnlineAvailability {
+            RaceOnlineAvailability(isOnline: isOnline, lobbyStatus: signedIn, line: line, isConnecting: isConnecting)
+        }
+        for line: RestrictionLine in [.suspended(until: nil), .cooldown(until: now.addingTimeInterval(252)), .cannotRace, .updateRequired] {
+            #expect(!availability(line).isEnabled, "\(line)")
+            #expect(availability(line).text(now: now) == line.text(now: now))
+        }
+        #expect(availability(.cooldown(until: now.addingTimeInterval(252))).text(now: now.addingTimeInterval(2)) == "Cooling off 4:10")
+        for line: RestrictionLine in [.unreachable, .couldNotSignIn] {
+            #expect(availability(line).isEnabled, "\(line): the tap tries again")
+            #expect(availability(line).text(now: now) == line.text(now: now))
+        }
+        #expect(availability(nil).isEnabled && availability(nil).text(now: now) == nil)
+
+        let connecting = availability(nil, isConnecting: true)
+        #expect(!connecting.isEnabled && connecting.isConnecting && connecting.text(now: now) == nil)
+        #expect(!availability(.unreachable, isConnecting: true).isEnabled)
+
+        let offline = availability(.suspended(until: nil), isOnline: false)
+        #expect(!offline.isEnabled && offline.text(now: now) == "Offline" && offline.line == nil)
+    }
+
+    /// The fake scenarios (#161) reach Home as their lines: the queue's refusals as its stream gives them.
+    @Test func theFakeScenariosShowTheirLines() async throws {
+        let now = Date(timeIntervalSince1970: 1_791_720_000)
+        let lines: [(FakeServiceScenario, RestrictionLine)] = [
+            (.suspended, .suspended(until: Date(timeIntervalSince1970: TimeInterval(FakeServiceScenario.suspendedUntil)))),
+            (.suspendedPermanent, .suspended(until: nil)),
+            (.cooldown, .cooldown(until: now.addingTimeInterval(TimeInterval(FakeServiceScenario.cooldownSeconds)))),
+            (.cannotRace, .cannotRace),
+            (.updateRequired, .updateRequired),
+        ]
+        for (scenario, line) in lines {
+            let services = ServiceSet.fake(scenario)
+            let status = OnlineStatus(services: services, now: { now })
+            await status.refreshAccount()
+            var states = services.queue.stateUpdates().makeAsyncIterator()
+            status.show(try #require(await states.next()))
+            #expect(status.restrictionLine == line, "\(scenario)")
+            #expect(await status.passGate(analytics: .discarding()) == .stopped, "\(scenario)")
+            let availability = RaceOnlineAvailability(isOnline: true, lobbyStatus: status.lobbyStatus, line: status.restrictionLine)
+            #expect(!availability.isEnabled, "\(scenario)")
+            // The lobby area is as for any signed-in player: a suspension from racing is no chat mute.
+            #expect(LobbyPanelState(isOnline: true, status: status.lobbyStatus, serverUnreachable: status.serverUnreachable) == .lobby)
+        }
+        #expect(RestrictionLine.cooldown(until: now.addingTimeInterval(TimeInterval(FakeServiceScenario.cooldownSeconds))).text(now: now) == "Cooling off 4:12")
+    }
+
+    /// The scenarios that are the session's own states play a real session over a server that isn't one.
+    @Test func theSessionScenariosPlayASession() async throws {
+        for scenario in FakeServiceScenario.allCases where !scenario.playsSession { #expect(FakeSession.make(scenario) == nil) }
+
+        func status(_ scenario: FakeServiceScenario) throws -> (OnlineStatus, OnlineSession) {
+            let fake = try #require(FakeSession.make(scenario))
+            var services = ServiceSet.fake(scenario)
+            services.identity = fake.session.identity
+            services.terms = fake.session.terms
+            services.queue = fake.session.queueStatus
+            return (OnlineStatus(services: services, session: fake), fake.session)
+        }
+
+        let (unreachable, unreachableSession) = try status(.unreachable)
+        await unreachable.deviceChanged(FakeSession.player)
+        #expect(unreachable.restrictionLine == nil, "nothing up front")
+        #expect(await unreachable.passGate(analytics: .discarding()) == .stopped)
+        #expect(unreachable.restrictionLine == .unreachable && unreachable.serverUnreachable)
+        await unreachableSession.shutdown()
+
+        let (failed, failedSession) = try status(.sessionFailed)
+        await failed.deviceChanged(FakeSession.player)
+        #expect(await failed.passGate(analytics: .discarding()) == .stopped)
+        #expect(failed.sessionPhase == .refused(.invalidSignature))
+        #expect(failed.restrictionLine == .couldNotSignIn)
+        #expect(!failed.serverUnreachable, "the lobby area keeps its Sign in")
+        #expect(RaceOnlineAvailability(isOnline: true, lobbyStatus: failed.lobbyStatus, line: failed.restrictionLine).isEnabled)
+        await failedSession.shutdown()
+    }
+
     /// With no session (no endpoint) nothing of #161 shows: the app as before.
     @Test func withoutASessionNothingChanges() async {
         let status = OnlineStatus(services: .fake(.signedOut))
