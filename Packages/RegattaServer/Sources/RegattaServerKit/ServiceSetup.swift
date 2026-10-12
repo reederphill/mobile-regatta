@@ -76,7 +76,7 @@ extension ServiceEndpoint {
         let unlocks = EarnedUnlocks(ratings: book, earned: liveries.earned, analytics: analytics)
         let lifecycle = RaceLifecycle(settings: config.lifecycle, archive: archive, tokenKey: config.tokenKey,
                                       tokenLifetime: config.tokenLifetime, toolchain: config.serverBuild, registry: registry, rated: rated,
-                                      completed: { await unlocks.completed($0) }, lobby: hub)
+                                      completed: { players in Task { await unlocks.completed(players) } }, lobby: hub)
         let matchmaker = QueueMatchmaker(
             settings: queue, registry: registry,
             draw: RaceDraw(pairings: OnlinePairing.bundled(venues: queue.venues),

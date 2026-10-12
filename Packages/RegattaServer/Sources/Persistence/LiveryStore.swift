@@ -32,4 +32,9 @@ public struct PlayerLiveryStore: Sendable {
         for try await _ in rows.decode(String.self) { return true }
         return false
     }
+
+    /// Forgets the player's livery.
+    public func delete(of playerID: String) async throws {
+        try await database.client.query("DELETE FROM player_liveries WHERE player_id = \(playerID)", logger: database.logger)
+    }
 }

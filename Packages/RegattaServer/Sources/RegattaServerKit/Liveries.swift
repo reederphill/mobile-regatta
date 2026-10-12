@@ -18,6 +18,8 @@ public protocol LiveryStore: Sendable {
     func livery(of playerID: String) async throws -> Livery?
     /// Stores `livery` as the player's. False when the store doesn't know the player.
     func save(_ livery: Livery, for playerID: String, at time: Date) async throws -> Bool
+    /// Forgets the player's livery: she wears her starter again.
+    func delete(of playerID: String) async throws
 }
 
 extension PlayerLiveryStore: LiveryStore {}
@@ -34,6 +36,8 @@ public final class InMemoryLiveryStore: LiveryStore {
         liveries.withLock { $0[playerID] = livery }
         return true
     }
+
+    public func delete(of playerID: String) async throws { liveries.withLock { $0[playerID] = nil } }
 }
 
 /// A boat class's earned designs (#21), by the completed online races each takes, fewest first.
@@ -96,8 +100,11 @@ public struct StoredLiveries: LiveryProfileBackend {
     }
 
     /// Stores her livery: refused while it is locked, when the catalogue refuses it, and when the design isn't hers.
-    /// Storing the one she has changes nothing.
+    /// Storing the one she has changes nothing, locked or not (a resend after a lost reply). A fleet that locks while
+    /// the write is in flight may already have read the old one for its briefing, so the write is undone and refused.
     public func save(_ livery: Livery, for player: AccountPlayer) async throws -> Livery {
+        let previous = try await store.livery(of: player.teamPlayerID)
+        if previous == livery { return livery }
         guard await !isLocked(player.teamPlayerID) else { throw ProfileError.liveryLocked }
         guard let catalogue else { throw LiveryStorageUnavailable() }
         do {
@@ -108,17 +115,38 @@ public struct StoredLiveries: LiveryProfileBackend {
         guard let design = catalogue.design(livery.design), owns(design, completedRaces: try await completedRaces(player.teamPlayerID)) else {
             throw ProfileError.invalidLivery(.notOwned)
         }
-        if try await store.livery(of: player.teamPlayerID) == livery { return livery }
         guard try await store.save(livery, for: player.teamPlayerID, at: now()) else { throw LiveryStorageUnavailable() }
+        if await isLocked(player.teamPlayerID) {
+            if let previous { _ = try await store.save(previous, for: player.teamPlayerID, at: now()) } else { try await store.delete(of: player.teamPlayerID) }
+            throw ProfileError.liveryLocked
+        }
         return livery
     }
 
     /// The livery she races in, read at fleet lock for the briefing: her stored one, raced as `raceable` makes it; nil
-    /// when she has stored none (the briefing gives her starter).
+    /// when she has stored none, or it can't be read (the briefing gives her starter). When her completed races can't be
+    /// read, a design stored is taken as hers: it was hers when she stored it.
     public func raceLivery(of player: AccountPlayer) async -> Livery? {
-        guard let stored = try? await store.livery(of: player.teamPlayerID), let catalogue else { return nil }
-        let races = (try? await completedRaces(player.teamPlayerID)) ?? 0
-        return Self.raceable(stored, catalogue: catalogue, boatClass: boatClass) { owns($0, completedRaces: races) }
+        let stored: Livery?
+        do {
+            stored = try await store.livery(of: player.teamPlayerID)
+        } catch {
+            Self.log("can't read \(player.teamPlayerID)'s livery for the briefing, she races her starter: \(error)")
+            return nil
+        }
+        guard let stored, let catalogue else { return nil }
+        let races: Int?
+        do {
+            races = try await completedRaces(player.teamPlayerID)
+        } catch {
+            Self.log("can't read \(player.teamPlayerID)'s completed races for the briefing, her stored design is taken as hers: \(error)")
+            races = nil
+        }
+        return Self.raceable(stored, catalogue: catalogue, boatClass: boatClass) { design in races.map { owns(design, completedRaces: $0) } ?? true }
+    }
+
+    static func log(_ message: String) {
+        FileHandle.standardError.write(Data("RegattaServer: liveries: \(message)\n".utf8))
     }
 
     /// Her lobby chip (#152): the deck and sail colours of the livery the profile shows.
@@ -168,7 +196,9 @@ public struct StoredLiveries: LiveryProfileBackend {
 }
 
 /// Tells telemetry (#156) when a close earns a player a design (#159, #28): her completed races are read after the
-/// close, and a design whose threshold they now equal was earned by it (a close adds at most one).
+/// close, and a design whose threshold they now equal was earned by it (a close adds at most one). Two closes of hers
+/// counted at once could skip a threshold or tell it twice; under the shipped codes they can't, as a player who leaves
+/// a race to queue for another retires from it (RET counts nothing, G6).
 public struct EarnedUnlocks: Sendable {
     public let ratings: any RatingBook
     public let earned: EarnedDesigns

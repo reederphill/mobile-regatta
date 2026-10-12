@@ -98,7 +98,7 @@ public actor RaceLifecycle: RaceLifecycleProviding, RunningRaces {
     /// Hears the players a close has just rated, after it is stored (the leaderboard mirror, #151); nil: nobody.
     private let rated: (@Sendable ([String]) -> Void)?
     /// Hears the players who completed a close (`earnedProgressResultCodes`), after it is stored: the earned designs'
-    /// unlocks (#159). Awaited.
+    /// unlocks (#159). Awaited: the server's starts its own task, so a slow write never holds the close up.
     private let completed: (@Sendable ([String]) async -> Void)?
 
     private struct Live {

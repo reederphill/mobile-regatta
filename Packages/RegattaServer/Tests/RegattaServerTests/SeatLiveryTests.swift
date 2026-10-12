@@ -1,6 +1,7 @@
 import Foundation
 import Persistence
 import RaceHost
+import Ratings
 import RegattaCore
 @testable import RegattaServerKit
 import RegattaServices
@@ -57,12 +58,36 @@ import Testing
         }
     }
 
-    /// From fleet lock to the close nothing is stored, valid or not.
+    /// From fleet lock to the close nothing is stored, valid or not; resending the livery she has is answered as stored.
     @Test func lockedFromFleetLockToTheClose() async throws {
-        let (liveries, _) = Self.liveries(locked: true)
-        let before = try await liveries.livery(of: Self.ann)
+        let locked = Mutex(false)
+        let liveries = StoredLiveries(store: InMemoryLiveryStore(), ratings: InMemoryRatingBook(), isLocked: { _ in locked.withLock { $0 } })
+        let mine = Self.three("skiff-stripe")
+        _ = try await liveries.save(mine, for: Self.ann)
+        locked.withLock { $0 = true }
+        await #expect(throws: ProfileError.liveryLocked) { try await liveries.save(Self.three("skiff-sheer"), for: Self.ann) }
+        #expect(try await liveries.livery(of: Self.ann) == mine)
+        #expect(try await liveries.save(mine, for: Self.ann) == mine)
+    }
+
+    /// A fleet that locks while her write is in flight has read the old livery: the write is undone and refused.
+    @Test func aWriteRacingTheLockIsUndone() async throws {
+        let checks = Mutex(0)
+        // Unlocked at the check before the write, locked by the one after it.
+        let liveries = StoredLiveries(store: InMemoryLiveryStore(), ratings: InMemoryRatingBook(),
+                                      isLocked: { _ in checks.withLock { $0 += 1; return $0 > 1 } })
+        let starter = try await liveries.livery(of: Self.ann)
         await #expect(throws: ProfileError.liveryLocked) { try await liveries.save(Self.three("skiff-stripe"), for: Self.ann) }
-        #expect(try await liveries.livery(of: Self.ann) == before)
+        #expect(try await liveries.livery(of: Self.ann) == starter, "nothing stored: she wears her starter")
+        #expect(await liveries.raceLivery(of: Self.ann) == nil)
+    }
+
+    /// Her stored livery races when her completed races can't be read: it was hers when she stored it.
+    @Test func anUnreadableCountRacesTheStoredDesign() async throws {
+        let store = InMemoryLiveryStore()
+        _ = try await store.save(Self.three("skiff-earned-10"), for: Self.ann.teamPlayerID, at: Date())
+        let liveries = StoredLiveries(store: store, ratings: UnreadableRatings())
+        #expect(await liveries.raceLivery(of: Self.ann) == Self.three("skiff-earned-10"))
     }
 
     /// The queue holds her livery from her fleet's lock until its race closes.
@@ -79,6 +104,10 @@ import Testing
         #expect(await queue.holdsLivery("T:0"))
         #expect(await queue.holdsLivery("T:1"))
         let race = try #require(await log.fleets.first?.raceID)
+        // Giving her seat up frees hers alone.
+        await queue.releaseSeat(race, seat: 1)
+        #expect(await !queue.holdsLivery("T:1"))
+        #expect(await queue.holdsLivery("T:0"))
         await queue.raceClosed(race)
         #expect(await !queue.holdsLivery("T:0"))
     }
@@ -226,4 +255,15 @@ extension RaceSims {
             #expect(analytics.raw().isEmpty)
         }
     }
+}
+
+/// A rating book whose reads fail.
+struct UnreadableRatings: RatingBook {
+    struct Down: Error {}
+    func ratings(of playerIDs: [String]) async throws -> [String: PlayerRating] { throw Down() }
+    func standing(of playerID: String) async throws -> PlayerStanding? { throw Down() }
+    func reset(_ playerID: String, reason: String, at time: Date, config: RatingConfig) async throws -> Bool { throw Down() }
+    func mirrorPending(_ playerIDs: [String]?, maxFailures: Int, limit: Int) async throws -> [MirrorEntry] { throw Down() }
+    func mirrored(_ playerID: String, rating: Int) async throws { throw Down() }
+    func mirrorFailed(_ playerID: String) async throws { throw Down() }
 }
