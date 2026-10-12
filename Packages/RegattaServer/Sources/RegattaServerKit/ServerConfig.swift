@@ -88,6 +88,7 @@ public enum ServerConfigError: Error, Equatable, Sendable, CustomStringConvertib
 /// | `LEADERBOARD_SWEEP_SECONDS` | `300` | how often unsent leaderboard scores are tried again (#151) |
 /// | `OPENAI_MODERATION_API_KEY` | none | the lobby's toxicity classifier (#152): asked for each free-text post that passes the word list; required outside `ENV=dev`. Without it the word list alone filters |
 /// | `CHAT_EXTRA_BLOCKED_PHRASES` | none | dev only: comma-separated phrases the lobby's filter blocks besides the word list |
+/// | `REGATTA_ADMIN_TOKENS` | none | the admin tool (#154): comma-separated `id:token` pairs, each token 32 characters or more; the admin's id is recorded with each action. Unset: no `/admin/` routes |
 public struct ServerConfig: Sendable {
     public var environment: ServerEnvironment
     public var auth: SeatAuthPolicy
@@ -116,6 +117,8 @@ public struct ServerConfig: Sendable {
     public var chat = ChatSettings()
     /// Usage analytics (#156): ingest limits, segments, the roll-up and the 90-day purge.
     public var analytics = AnalyticsSettings()
+    /// The admin tool (#154): who may use it.
+    public var admin = AdminSettings()
 
     /// A dev config: dev auth, the given port (0 for a free one), a random token key.
     public static func dev(host: String = "127.0.0.1", port: Int = 0) -> ServerConfig {
@@ -217,6 +220,13 @@ public struct ServerConfig: Sendable {
         }
         if environment.isDev, let phrases = env["CHAT_EXTRA_BLOCKED_PHRASES"] {
             config.chat.extraBlockedPhrases = phrases.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        }
+        if let text = env["REGATTA_ADMIN_TOKENS"], !text.isEmpty {
+            guard let tokens = AdminSettings.parse(text) else {
+                throw .invalid(variable: "REGATTA_ADMIN_TOKENS", value: "(hidden)",
+                               expected: "comma-separated id:token pairs, each id once and each token \(AdminSettings.minTokenLength) characters or more")
+            }
+            config.admin.tokens = tokens
         }
         do {
             config.identity.database = try DatabaseConfiguration.fromEnvironment(env)

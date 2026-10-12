@@ -145,7 +145,7 @@ extension ServiceEndpoint {
                                       deletion: { player in deletion.map { ServerDataDeletionService(deletion: $0, player: player) } }),
             matchmaker: matchmaker, lifecycle: lifecycle, lobby: hub, analytics: analytics,
             analyticsRetention: AnalyticsRetention(settings: config.analytics, store: analyticsStore), ratings: book,
-            moderation: moderation, deletion: deletion, retention: retention)
+            moderation: moderation, deletion: deletion, retention: retention, archive: archive)
     }
 
     /// The lobby's word list (#152, owner 2026-10-11: the offline list always applies). Outside `ENV=dev` it is the

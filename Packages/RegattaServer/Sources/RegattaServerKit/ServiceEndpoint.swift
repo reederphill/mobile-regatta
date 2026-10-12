@@ -128,11 +128,14 @@ public struct ServiceEndpoint: Sendable {
     /// Delete my online data (#160), and the retention job the server runs while it listens.
     public let deletion: OnlineDataDeletion?
     public let retention: RetentionJobs?
+    /// Where closed races are kept (#148): the admin tool (#154) shows a race report's race from it.
+    public let archive: (any RaceArchive)?
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
                 matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil, lobby: LobbyHub? = nil,
                 analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil, ratings: (any RatingBook)? = nil,
-                moderation: Moderation? = nil, deletion: OnlineDataDeletion? = nil, retention: RetentionJobs? = nil) {
+                moderation: Moderation? = nil, deletion: OnlineDataDeletion? = nil, retention: RetentionJobs? = nil,
+                archive: (any RaceArchive)? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
@@ -145,6 +148,7 @@ public struct ServiceEndpoint: Sendable {
         self.moderation = moderation
         self.deletion = deletion
         self.retention = retention
+        self.archive = archive
     }
 
     public var store: any AccountStore { sessions.store }
