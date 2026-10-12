@@ -106,3 +106,66 @@ nonisolated struct PlaningEase: Equatable, Sendable {
         progress = isPlaning ? min(progress + step, target) : max(progress - step, target)
     }
 }
+
+/// A boat's plane margin as it is drawn (#492): the sim's rule read by `BoatClass.PlaningTuning.planeMargin` from what
+/// the rule itself reads (`BoatDynamics.advance`: her wind angle, her speed and the wind her polar sees), over the
+/// style's ranges. 0 off the plane, and for a class that never planes.
+nonisolated enum PlaneMargin {
+    static func of(_ boat: Boat, boatClass: BoatClass, style: BoatStyle) -> Double {
+        guard let planing = boatClass.planing else { return 0 }
+        let ranges = BoatClass.PlaningTuning.MarginRanges(fullSpeedShare: style.planeMarginFullSpeedShare,
+                                                         apparentRange: metresPerSecond(knots: max(style.planeMarginApparentKnots, 0)),
+                                                         angleBand: deg2rad(max(style.planeMarginAngleBandDegrees, 0)))
+        return planing.planeMargin(isPlaning: boat.isPlaning, twa: boat.twa, speed: boat.speed,
+                                   tws: boat.polarWindSpeed(in: boatClass), polar: boatClass.polar, ranges: ranges)
+    }
+}
+
+/// The two stern-corner wakes of a planing boat (#492): how much of their longest is drawn, 0...1. Their length is her
+/// plane margin, so they shorten as she nears falling off the plane and are gone when she is off. Pure: drawn only,
+/// nothing here reaches the race (ADR 0002).
+///
+/// On the plane they are never shorter than `BoatStyle.cornerWakeMinShare` of their longest, so the last stretch
+/// before a fall still reads; they come and go with her wake's planing look (`PlaningEase.level`), not with the flag,
+/// and follow her margin at `BoatStyle.cornerWakeEaseRate`, so no frame moves them more than `1 - exp(-dt * rate)`.
+/// Off the plane the margin she last had on it is kept, so a fall draws them in from where they were and a boat held
+/// on the edge of the plane, her flag flickering, trails them steady.
+nonisolated struct CornerWakes: Equatable, Sendable {
+    /// The share of their longest drawn, 0...1.
+    private(set) var share: Double
+    /// Her plane margin when she last planed.
+    private(set) var margin: Double
+
+    /// As she is, with nothing to ease from (her first frame, a frozen frame): `level` of the way on the plane.
+    init(margin: Double, isPlaning: Bool, level: Double, style: BoatStyle) {
+        self.margin = isPlaning ? margin.clamped(to: 0...1) : 0
+        share = Self.target(margin: self.margin, level: level, style: style)
+    }
+
+    /// The share to settle at: between the shortest and the longest by her margin, times how far on the plane she is
+    /// drawn.
+    static func target(margin: Double, level: Double, style: BoatStyle) -> Double {
+        let shortest = style.cornerWakeMinShare.clamped(to: 0...1)
+        return level.clamped(to: 0...1) * (shortest + (1 - shortest) * margin.clamped(to: 0...1))
+    }
+
+    /// `dt` race seconds on: towards `margin` while she planes, and the margin she last had while she doesn't.
+    mutating func advance(margin: Double, isPlaning: Bool, level: Double, dt: Double, style: BoatStyle) {
+        if isPlaning { self.margin = margin.clamped(to: 0...1) }
+        let target = Self.target(margin: self.margin, level: level, style: style)
+        let k = style.cornerWakeEaseRate > 0 ? 1 - exp(-max(dt, 0) * style.cornerWakeEaseRate) : 1
+        share += (target - share) * k
+    }
+
+    /// The race seconds of her track they are drawn over, of a middle wake `wakeSeconds` long.
+    func seconds(wakeSeconds: Double, style: BoatStyle) -> Double {
+        max(wakeSeconds, 0) * style.cornerWakeLengthShare.clamped(to: 0...1) * share
+    }
+
+    /// Their alpha: the style's, fading with them below their shortest as she comes off the plane or gets on, so they
+    /// never pop in or out at a stub's length.
+    func alpha(style: BoatStyle) -> Double {
+        let shortest = max(style.cornerWakeMinShare.clamped(to: 0...1), 0.1)
+        return style.cornerWakeAlpha.clamped(to: 0...1) * min(1, share / shortest)
+    }
+}

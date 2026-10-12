@@ -16,6 +16,9 @@ nonisolated enum CuePalette {
     static let chevronBlue = PaletteToken("chevronBlue", 0x3F51E0)
     /// Laylines, and the HUD's start clock (#30 reuses it).
     static let yellow = PaletteToken("yellow", 0xF0E442)
+    /// The HUD's speed tile while your boat planes (#492), over the tile's dark face: the cue yellow's family, a
+    /// little warmer and stronger, clear of the penalty arc's amber. Not in `reserved`: `yellow` holds the hue.
+    static let planingYellow = PaletteToken("planingYellow", 0xFFE31A)
     /// Inactive marks.
     static let inactiveGrey = PaletteToken("inactiveGrey", 0x9AA0A6)
     /// The right-of-way glow round a boat you must keep clear of. Not in `reserved`: it isn't held to the hue rule,
@@ -31,7 +34,7 @@ nonisolated enum CuePalette {
 
     /// The hues nothing else may come near. Grey and white have no hue to reserve.
     static let reserved = [vermillion, orange, yellow, chevronBlue]
-    static let all = reserved + [giveWayRed, hasRightGreen, inactiveGrey, cueWhite, hullOutline]
+    static let all = reserved + [planingYellow, giveWayRed, hasRightGreen, inactiveGrey, cueWhite, hullOutline]
 }
 
 /// Water and land (#22, `docs/palette.md` "ChartPalette"), held to the hue rule: blue-teal water and sage land,

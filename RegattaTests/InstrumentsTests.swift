@@ -205,18 +205,102 @@ import RegattaCore
     }
 
     /// No target, no band, no tone: the instruments draw white on translucent black only, never the reserved cue
-    /// colours (orange is the active leg's, #22, G7) and nothing by red or green (#5, #15).
+    /// colours (orange is the active leg's, #22, G7) and nothing by red or green (#5, #15). One exception (#492): the
+    /// speed tile on the plane, the planing yellow under dark figures, named once.
     @Test func instrumentsDrawWhiteOnly() throws {
         let url = RaceDriverTests.repoRoot.appending(path: "Regatta/UI/RaceControls.swift")
         let source = try String(contentsOf: url, encoding: .utf8)
         let start = try #require(source.range(of: "struct InstrumentRow"))
         let end = try #require(source.range(of: "/// VoiceOver's Ease (#453)"))
-        let instruments = String(source[start.lowerBound..<end.lowerBound])
+        let all = String(source[start.lowerBound..<end.lowerBound])
+        #expect(all.components(separatedBy: "CuePalette.planingYellow").count == 2, "the planing yellow, once")
+        #expect(all.contains(".foregroundStyle(darkFigures ? .black : .white)"))
+        let instruments = all.replacingOccurrences(of: "CuePalette.planingYellow", with: "")
         for colour in ["CuePalette", "Palette.", "orange", ".red", ".green", ".yellow", ".tint", "Color("] {
             #expect(!instruments.contains(colour), "the instruments use \(colour)")
         }
-        #expect(instruments.contains(".foregroundStyle(.white)"))
+        #expect(!instruments.contains(".foregroundStyle(.white)"), "one face, one figure colour")
         #expect(instruments.contains(".allowsHitTesting(false)"), "never a tap target")
+    }
+
+    /// #492: the speed tile's planing yellow follows your boat's flag over its seconds of race time: all the way after
+    /// that long on or off, never more than `1.5 * dt / seconds` a step, steady while the flag flickers, and as she
+    /// is on the first reading, after a jump in race time and when time runs backwards. With no race time passing (a
+    /// pause, a frozen fixture) it holds.
+    @Test func planingTileComesAndGoesWithTheFlag() {
+        let seconds = 0.4, dt = 1.0 / 15
+        var tile = PlaningTile()
+        #expect(tile.step(isPlaning: false, at: 10, seconds: seconds) == 0)
+        var time = 10.0, last = 0.0
+        func run(_ isPlaning: (Int) -> Bool, steps: Int, _ check: (Double) -> Void = { _ in }) {
+            for step in 0..<steps {
+                time += dt
+                let level = tile.step(isPlaning: isPlaning(step), at: time, seconds: seconds)
+                #expect((0...1).contains(level) && abs(level - last) <= 1.5 * dt / seconds + 1e-12, "\(last) to \(level)")
+                last = level
+                check(level)
+            }
+        }
+        run({ _ in true }, steps: 1)
+        #expect(last > 0 && last < 0.5, "a step in she is on her way, not there: \(last)")
+        run({ _ in true }, steps: 6)
+        #expect(last == 1)
+        // The flag flickering every step: within a step's worth of where it was.
+        run({ $0.isMultiple(of: 2) }, steps: 30) { #expect($0 > 1 - 1.5 * dt / seconds - 1e-12) }
+        run({ _ in false }, steps: 7)
+        #expect(last == 0)
+        // Paused: the same race time again moves nothing.
+        run({ _ in true }, steps: 2)
+        let held = last
+        #expect(held > 0 && held < 1)
+        #expect(tile.step(isPlaning: true, at: time, seconds: seconds) == held)
+        #expect(tile.step(isPlaning: false, at: time, seconds: seconds) == held)
+        // A restart (time back) and a jump ahead: as she is.
+        #expect(tile.step(isPlaning: false, at: time - 5, seconds: seconds) == 0)
+        #expect(tile.step(isPlaning: true, at: time + 60, seconds: seconds) == 1)
+        // No seconds: with the flag.
+        var snap = PlaningTile()
+        #expect(snap.step(isPlaning: false, at: 0, seconds: 0) == 0 && snap.step(isPlaning: true, at: dt, seconds: 0) == 1)
+    }
+
+    /// #492: the tile's state in the HUD. The world's frame gives your boat's flag and the tile all or nothing (a
+    /// frozen fixture's HUD, which nothing eases); the figures go dark from half yellow; VoiceOver's value gains
+    /// "planing" with the flag, whatever the tile's strength.
+    @Test func speedTileIsYellowOnThePlane() throws {
+        let off = Self.hud(shown: InstrumentReading(speedKnots: 6.4, apparentAngle: 0.6, apparentKnots: 12))
+        #expect(off.planingYellow == 0 && !off.isPlaning)
+        #expect(HUDModel(off).speedTileYellow == 0 && !HUDModel(off).speedTileHasDarkFigures)
+        #expect(HUDModel(off).speedAccessibilityValue == "6.4 knots")
+        var on = Self.hud(shown: InstrumentReading(speedKnots: 16, apparentAngle: 0.6, apparentKnots: 12))
+        on.isPlaning = true
+        on.planingYellow = 0.85
+        #expect(HUDModel(on).speedTileYellow == 0.85 && HUDModel(on).speedTileHasDarkFigures)
+        #expect(HUDModel(on).speedAccessibilityValue == "16.0 knots, planing")
+        for (yellow, dark) in [(0.0, false), (0.2, false), (0.49, false), (0.5, true), (0.85, true), (1, true), (1.4, true), (-1, false)] {
+            on.planingYellow = yellow
+            #expect(HUDModel(on).speedTileHasDarkFigures == dark, "\(yellow)")
+            #expect((0...1).contains(HUDModel(on).speedTileYellow))
+        }
+        // The tile switched off in the tuning panel: no yellow, the word stays.
+        on.planingYellow = 0
+        #expect(HUDModel(on).speedAccessibilityValue == "16.0 knots, planing")
+
+        // From the world: your boat's flag, and the tile as she is.
+        let driver = PracticeDriver(config: RaceDriverTests.config)
+        let frame = driver.currentFrame
+        let me = driver.myBoatIndex
+        for planing in [false, true] {
+            var boats = frame.boats
+            boats[me].isPlaning = planing
+            let moved = TickFrame(tick: frame.tick, boats: boats, standings: frame.standings, wind: frame.wind,
+                                  isOver: frame.isOver)
+            let hud = HUDState(world: RenderWorld(course: driver.course, boatClass: driver.boatClass, myBoatIndex: me,
+                                                  previous: moved, current: moved, alpha: 1))
+            #expect(hud.isPlaning == planing && hud.planingYellow == (planing ? 1 : 0))
+        }
+        // The yellow is the planing token, at the style's strength: clear of the penalty arc's amber by the hue rule.
+        #expect(OKLCH.hueDistance(CuePalette.planingYellow.oklch.h, CuePalette.orange.oklch.h) >= 20)
+        #expect(BoatStyle.standard.planingTileAlpha == 0.85 && BoatStyle.standard.planingTileSeconds == 0.4)
     }
 
     /// #460: the Tack/Gybe button, the roll ring and their plumbing are gone from the app, tests and UI tests. The

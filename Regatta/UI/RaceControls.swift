@@ -95,9 +95,13 @@ struct InstrumentRow: View {
 }
 
 /// An instrument's face: figures, white on translucent black, the controls' height; never a tap target, and never a
-/// tone of its own: no reserved cue colour, nothing read by colour (#22, #15, #454).
+/// tone of its own: no reserved cue colour, nothing read by colour (#22, #15, #454). One exception, the speed tile on
+/// the plane (#492): `planing` of the way yellow, its figures dark from `darkFigures`; a light face with dark figures
+/// against a dark one with white, so it reads without the hue, and VoiceOver's value says it.
 private struct InstrumentFace<Content: View>: View {
     let isShown: Bool
+    var planing = 0.0
+    var darkFigures = false
     @ViewBuilder let content: Content
 
     var body: some View {
@@ -107,8 +111,11 @@ private struct InstrumentFace<Content: View>: View {
             .padding(.horizontal, RaceControls.instrumentInset)
             .frame(maxWidth: RaceControls.instrumentMaxWidth)
             .frame(height: RaceControls.controlHeight)
+            .background(planingYellow.opacity(planing), in: .rect(cornerRadius: 14))
             .background(.black.opacity(0.5), in: .rect(cornerRadius: 14))
-            .foregroundStyle(.white)
+            .foregroundStyle(darkFigures ? .black : .white)
+            // The HUD's steps (15 a second) run together.
+            .animation(.linear(duration: 0.08), value: planing)
             .shadow(radius: 6, y: 3)
             .opacity(isShown ? 1 : 0)
             .animation(.easeOut(duration: 0.3), value: isShown)
@@ -117,6 +124,8 @@ private struct InstrumentFace<Content: View>: View {
             .accessibilityHidden(!isShown)
             .accessibilityAddTraits(.updatesFrequently)
     }
+
+    private var planingYellow: Color { CuePalette.planingYellow.color }
 }
 
 /// Your speed through the water (#457): "6.4" over "kn", one decimal.
@@ -124,7 +133,8 @@ private struct SpeedInstrument: View {
     let model: HUDModel
 
     var body: some View {
-        InstrumentFace(isShown: model.showsInstruments) {
+        InstrumentFace(isShown: model.showsInstruments, planing: model.speedTileYellow,
+                       darkFigures: model.speedTileHasDarkFigures) {
             VStack(spacing: -2) {
                 Text(model.speedText)
                     .font(HUDFont.number(size: RaceControls.speedSize, weight: .heavy))

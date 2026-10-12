@@ -88,8 +88,14 @@ struct HUDModel {
     /// The apparent wind's speed, whole knots: "21 kn".
     var apparentSpeedText: String { Self.knotsText(hud.shownInstruments.apparentKnots) }
 
-    /// VoiceOver's values (read on demand, never announced): "6.4 knots", "38 degrees port, 21 knots".
-    var speedAccessibilityValue: String { "\(speedText) knots" }
+    /// How yellow the speed tile's face is, 0...1 (#492: your boat on the plane, `HUDState.planingYellow`), and
+    /// whether its figures are dark: from half yellow up, where white would no longer read on it.
+    var speedTileYellow: Double { hud.planingYellow.clamped(to: 0...1) }
+    var speedTileHasDarkFigures: Bool { speedTileYellow >= 0.5 }
+
+    /// VoiceOver's values (read on demand, never announced): "6.4 knots", "16.0 knots, planing", "38 degrees port,
+    /// 21 knots".
+    var speedAccessibilityValue: String { "\(speedText) knots" + (hud.isPlaning ? ", planing" : "") }
     var apparentAccessibilityValue: String {
         let (degrees, side) = Self.apparentAngleParts(angle: hud.shownInstruments.apparentAngle)
         let knots = Int(max(0, hud.shownInstruments.apparentKnots).rounded())
