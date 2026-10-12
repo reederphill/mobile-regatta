@@ -5,7 +5,8 @@ extension Migration {
     /// epoch, UTC) and `segment` are fixed at ingest; `rolled_up` marks a row already counted in the aggregates.
     /// `analytics_daily` and `analytics_daily_properties`: what is kept after the purge, per day, source, event name
     /// and segment: how many events and distinct actors (installs or players), and per property its count, and for a
-    /// number its sum, sum of squares, least and greatest. No install id or player id is kept in them.
+    /// number its sum, sum of squares, least and greatest. No install id or player id is kept in them. Each day keeps a
+    /// bounded number of names, segments and property rows (`AnalyticsRollup.Bounds`); the rest count as "(other)".
     static let analytics = Migration(
         version: 12,
         name: "analytics",
@@ -25,12 +26,13 @@ extension Migration {
                 properties jsonb NOT NULL,
                 rolled_up boolean NOT NULL DEFAULT false,
                 UNIQUE (install_id, sequence),
-                CHECK ((source = 'device') = (install_id IS NOT NULL AND sequence IS NOT NULL AND player_id IS NULL))
+                CHECK (source <> 'device' OR (install_id IS NOT NULL AND sequence IS NOT NULL AND player_id IS NULL)),
+                CHECK (source <> 'server' OR (install_id IS NULL AND sequence IS NULL))
             )
             """,
             "CREATE INDEX analytics_events_pending ON analytics_events (id) WHERE NOT rolled_up",
             "CREATE INDEX analytics_events_received ON analytics_events (received_at)",
-            "CREATE INDEX analytics_events_actor_day ON analytics_events (day, name, segment) WHERE rolled_up",
+            "CREATE INDEX analytics_events_counted ON analytics_events (source, day, name, segment, (COALESCE(install_id, player_id))) WHERE rolled_up",
             "CREATE INDEX analytics_events_player ON analytics_events (player_id) WHERE player_id IS NOT NULL",
             """
             CREATE TABLE analytics_daily (

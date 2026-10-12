@@ -124,12 +124,84 @@ public struct AnalyticsPropertyStats: Sendable, Equatable {
     public var mean: Double? { sum.map { $0 / Double(count) } }
 }
 
+// MARK: - Text
+
+/// Text the analytics tables can hold: Postgres's text refuses NUL, and a btree key is capped at about 2.7 KB, so
+/// every text the ingest stores is held to a number of UTF-8 bytes, cut on a scalar boundary.
+public enum AnalyticsText {
+    public static func clean(_ text: String, maxBytes: Int) -> String {
+        var out = String.UnicodeScalarView()
+        var bytes = 0
+        for scalar in text.unicodeScalars where scalar != "\0" {
+            let size = String(scalar).utf8.count
+            guard bytes + size <= maxBytes else { break }
+            bytes += size
+            out.append(scalar)
+        }
+        return String(out)
+    }
+}
+
 // MARK: - The roll-up's arithmetic
 
 /// How raw events add to the daily aggregates: shared by the Postgres store and the in-memory one.
 public enum AnalyticsRollup {
-    /// A text property longer than this isn't counted by value (it is kept raw for 90 days, then gone).
+    /// A text property longer than this, in UTF-8 bytes, isn't counted by value (it is kept raw for 90 days, then gone).
     public static let maxCategoryLength = 64
+    /// What a name, segment or value past a day's bound counts as.
+    public static let other = "(other)"
+
+    /// How much one day's aggregates hold, per source: event names, and per name its segments and property rows. Past
+    /// them, a new name, segment or text value counts as `other`, and a new number is left out: a client can't grow
+    /// the kept tables without bound.
+    public struct Bounds: Sendable, Equatable {
+        public var maxNames = 64
+        public var maxSegments = 100
+        public var maxPropertyRows = 500
+
+        public init() {}
+    }
+
+    public struct SourceDay: Sendable, Hashable {
+        public var day: Int32
+        public var source: AnalyticsSource
+
+        public init(day: Int32, source: AnalyticsSource) {
+            self.day = day
+            self.source = source
+        }
+    }
+
+    public struct NameDay: Sendable, Hashable {
+        public var day: Int32
+        public var source: AnalyticsSource
+        public var name: String
+
+        public init(day: Int32, source: AnalyticsSource, name: String) {
+            self.day = day
+            self.source = source
+            self.name = name
+        }
+    }
+
+    /// What the aggregates already hold on the days a roll-up touches.
+    public struct Existing: Sendable, Equatable {
+        public var names: [SourceDay: Set<String>] = [:]
+        public var segments: [NameDay: Set<String>] = [:]
+        public var properties: [NameDay: Set<PropertyKey>] = [:]
+
+        public init() {}
+
+        public mutating func add(_ dayKey: DayKey) {
+            names[SourceDay(day: dayKey.day, source: dayKey.source), default: []].insert(dayKey.name)
+            segments[NameDay(day: dayKey.day, source: dayKey.source, name: dayKey.name), default: []].insert(dayKey.segment)
+        }
+
+        public mutating func add(_ property: PropertyKey) {
+            let dayKey = property.dayKey
+            properties[NameDay(day: dayKey.day, source: dayKey.source, name: dayKey.name), default: []].insert(property)
+        }
+    }
 
     /// A raw event as the roll-up reads it.
     public struct Event: Sendable, Equatable {
@@ -221,6 +293,51 @@ public enum AnalyticsRollup {
         }
     }
 
+    /// The row a property counts in, or nil when it isn't counted: a number that isn't finite, a text over
+    /// `maxCategoryLength` bytes.
+    static func propertyKey(_ dayKey: DayKey, _ key: String, _ value: StoredAnalyticsValue) -> PropertyKey? {
+        switch value {
+        case .int: PropertyKey(dayKey: dayKey, key: key, kind: .number, value: "")
+        case .double(let number): number.isFinite ? PropertyKey(dayKey: dayKey, key: key, kind: .number, value: "") : nil
+        case .bool(let flag): PropertyKey(dayKey: dayKey, key: key, kind: .category, value: flag ? "true" : "false")
+        case .string(let text): text.utf8.count <= maxCategoryLength ? PropertyKey(dayKey: dayKey, key: key, kind: .category, value: text) : nil
+        }
+    }
+
+    /// `events` as the aggregates count them, held to `bounds` given what the days already hold: a name or segment
+    /// past its bound becomes `other`, a text value past the property bound becomes `other`, and a number past it is
+    /// left out. The segment's own keys are taken out of the properties. An install or player counted under `other`
+    /// may be counted there again.
+    public static func bounded(_ events: [Event], existing: Existing, bounds: Bounds) -> [Event] {
+        var held = existing
+        return events.map { original in
+            var event = original
+            let sourceDay = SourceDay(day: event.day, source: event.source)
+            if !held.names[sourceDay, default: []].contains(event.name), held.names[sourceDay, default: []].count >= bounds.maxNames {
+                event.name = other
+            }
+            let nameDay = NameDay(day: event.day, source: event.source, name: event.name)
+            if !held.segments[nameDay, default: []].contains(event.segment), held.segments[nameDay, default: []].count >= bounds.maxSegments {
+                event.segment = other
+            }
+            held.add(event.dayKey)
+            let segmentKeys = AnalyticsSegments.keys(in: original.segment)
+            var properties: [String: StoredAnalyticsValue] = [:]
+            for (key, value) in original.properties.sorted(by: { $0.key < $1.key }) where !segmentKeys.contains(key) {
+                guard let row = propertyKey(event.dayKey, key, value) else { continue }
+                if held.properties[nameDay, default: []].contains(row) || held.properties[nameDay, default: []].count < bounds.maxPropertyRows {
+                    properties[key] = value
+                    held.add(row)
+                } else if row.kind == .category {
+                    properties[key] = .string(other)
+                    held.add(PropertyKey(dayKey: event.dayKey, key: key, kind: .category, value: other))
+                }
+            }
+            event.properties = properties
+            return event
+        }
+    }
+
     /// What a set of events adds.
     public struct Delta: Sendable, Equatable {
         public var events: [DayKey: Int64] = [:]
@@ -230,7 +347,7 @@ public enum AnalyticsRollup {
 
     /// What `events` add to the aggregates, given the actors already counted on their days (`alreadyCounted`): each
     /// event once, each actor once a day, each property by its kind. A number that isn't finite, a text over
-    /// `maxCategoryLength`, and the segment's own keys aren't counted as properties.
+    /// `maxCategoryLength` bytes, and the segment's own keys aren't counted as properties. Run on `bounded` events.
     public static func delta(_ events: [Event], alreadyCounted: Set<ActorKey>) -> Delta {
         var delta = Delta()
         var counted = alreadyCounted
@@ -243,15 +360,11 @@ public enum AnalyticsRollup {
             }
             let segmentKeys = AnalyticsSegments.keys(in: event.segment)
             for (key, value) in event.properties where !segmentKeys.contains(key) {
+                guard let row = propertyKey(dayKey, key, value) else { continue }
                 switch value {
-                case .int(let number): delta.properties[PropertyKey(dayKey: dayKey, key: key, kind: .number, value: ""), default: Stats()].add(Double(number))
-                case .double(let number) where number.isFinite:
-                    delta.properties[PropertyKey(dayKey: dayKey, key: key, kind: .number, value: ""), default: Stats()].add(number)
-                case .double: continue
-                case .bool(let flag): delta.properties[PropertyKey(dayKey: dayKey, key: key, kind: .category, value: flag ? "true" : "false"), default: Stats()].count += 1
-                case .string(let text) where text.count <= maxCategoryLength:
-                    delta.properties[PropertyKey(dayKey: dayKey, key: key, kind: .category, value: text), default: Stats()].count += 1
-                case .string: continue
+                case .int(let number): delta.properties[row, default: Stats()].add(Double(number))
+                case .double(let number): delta.properties[row, default: Stats()].add(number)
+                case .bool, .string: delta.properties[row, default: Stats()].count += 1
                 }
             }
         }
@@ -265,13 +378,15 @@ public enum AnalyticsRollup {
 }
 
 /// What an event's aggregates are split by (#28: performance by device model): for each event name, the properties
-/// whose values make its segment, written `key=value` and joined by `;` in the order given. An event without a
-/// listed property has it as `key=` in its segment; an event name not listed has the segment "".
+/// whose values make its segment, written `key=value` and joined by `;` in the order given (a value's own `;` and `=`
+/// become `_`, and it is held to `maxCategoryLength` bytes). An event without a listed property has it as `key=` in
+/// its segment; an event name not listed has the segment "".
 public enum AnalyticsSegments {
     public static func segment(keys: [String], properties: [String: StoredAnalyticsValue]) -> String {
         keys.map { key in
             let value: String = switch properties[key] {
-            case .string(let text)?: String(text.prefix(AnalyticsRollup.maxCategoryLength))
+            case .string(let text)?:
+                AnalyticsText.clean(String(text.map { $0 == ";" || $0 == "=" ? "_" : $0 }), maxBytes: AnalyticsRollup.maxCategoryLength)
             case .bool(let flag)?: flag ? "true" : "false"
             case .int(let number)?: String(number)
             case .double(let number)?: number.isFinite ? String(number) : ""
@@ -384,10 +499,10 @@ public struct AnalyticsEventStore: Sendable {
             """, logger: database.logger)
     }
 
-    /// Counts up to `limit` raw events not yet counted into the aggregates, oldest first, and marks them. One
-    /// transaction under the roll-up lock. Returns how many it counted: fewer than `limit` when it caught up.
+    /// Counts up to `limit` raw events not yet counted into the aggregates, oldest first, held to `bounds`, and marks
+    /// them. One transaction under the roll-up lock. Returns how many it counted: fewer than `limit` when it caught up.
     @discardableResult
-    public func rollUp(limit: Int) async throws -> Int {
+    public func rollUp(limit: Int, bounds: AnalyticsRollup.Bounds = AnalyticsRollup.Bounds()) async throws -> Int {
         let logger = database.logger
         return try await database.transaction { connection in
             try await connection.query("SELECT pg_advisory_xact_lock(\(Self.rollupLock))", logger: logger)
@@ -408,6 +523,31 @@ public struct AnalyticsEventStore: Sendable {
                 if let key, let type, let value = AnalyticsJSON.decode(type: type, text: text) { events[events.count - 1].properties[key] = value }
             }
             guard !events.isEmpty else { return 0 }
+
+            // What the touched days hold already: bounded by `bounds`, so these reads are too.
+            let sourceDays = Array(Set(events.map { AnalyticsRollup.SourceDay(day: $0.day, source: $0.source) }))
+            let touchedDays = sourceDays.map(\.day), touchedSources = sourceDays.map(\.source.rawValue)
+            var existing = AnalyticsRollup.Existing()
+            let heldDays = try await connection.query("""
+                SELECT day, source, name, segment FROM analytics_daily
+                WHERE (day, source) IN (SELECT * FROM unnest(\(touchedDays)::integer[], \(touchedSources)::text[]))
+                """, logger: logger)
+            for try await (day, source, name, segment) in heldDays.decode((Int32, String, String, String).self) {
+                guard let source = AnalyticsSource(rawValue: source) else { continue }
+                existing.add(AnalyticsRollup.DayKey(day: day, source: source, name: name, segment: segment))
+            }
+            let heldProperties = try await connection.query("""
+                SELECT day, source, name, segment, key, kind, value FROM analytics_daily_properties
+                WHERE (day, source) IN (SELECT * FROM unnest(\(touchedDays)::integer[], \(touchedSources)::text[]))
+                """, logger: logger)
+            for try await (day, source, name, segment, key, kind, value)
+                in heldProperties.decode((Int32, String, String, String, String, String, String).self) {
+                guard let source = AnalyticsSource(rawValue: source), let kind = AnalyticsPropertyStats.Kind(rawValue: kind) else { continue }
+                existing.add(AnalyticsRollup.PropertyKey(dayKey: AnalyticsRollup.DayKey(day: day, source: source, name: name, segment: segment),
+                                                         key: key, kind: kind, value: value))
+            }
+            let ids = events.map(\.id)
+            events = AnalyticsRollup.bounded(events, existing: existing, bounds: bounds)
 
             let wanted = AnalyticsRollup.actorKeys(events)
             var counted: Set<AnalyticsRollup.ActorKey> = []
@@ -470,7 +610,7 @@ public struct AnalyticsEventStore: Sendable {
                     SET count = analytics_daily_properties.count + EXCLUDED.count
                     """, logger: logger)
             }
-            try await connection.query("UPDATE analytics_events SET rolled_up = true WHERE id = ANY(\(events.map(\.id)))", logger: logger)
+            try await connection.query("UPDATE analytics_events SET rolled_up = true WHERE id = ANY(\(ids))", logger: logger)
             return events.count
         }
     }

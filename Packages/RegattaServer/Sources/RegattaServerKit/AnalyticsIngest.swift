@@ -21,7 +21,8 @@ public struct AnalyticsSettings: Sendable {
     /// (a device's clock can be anything). Within the raw retention, so a day's earlier events are still there to tell
     /// whether an install has been counted on it.
     public var maxEventAge: TimeInterval = 30 * 86_400
-    /// An event name over this is cut short.
+    /// Lengths are UTF-8 bytes (a key's text must fit Postgres's index), and NUL is taken out of every text. An event
+    /// name over this is cut short.
     public var maxNameLength = 64
     /// The most properties an event keeps, by key order; a key over `maxKeyLength` is dropped.
     public var maxProperties = 32
@@ -30,10 +31,13 @@ public struct AnalyticsSettings: Sendable {
     public var maxTextLength = 256
     /// An install id over this is cut short (the device's is a UUID).
     public var maxInstallIDLength = 64
-    /// Batches one connection may send: a bucket of `batchBurst`, refilled `batchesPerMinute`. A batch the bucket can't
-    /// pay for is answered `unavailable`, so the device keeps it and sends it later.
+    /// Batches one player may send, over all her connections: a bucket of `batchBurst`, refilled `batchesPerMinute`.
+    /// A batch the bucket can't pay for is answered `unavailable`, so the device keeps it and sends it later. Held in
+    /// memory only, never with the events.
     public var batchBurst = 10.0
     public var batchesPerMinute = 6.0
+    /// How much one day's aggregates hold (`AnalyticsRollup.Bounds`).
+    public var bounds = AnalyticsRollup.Bounds()
     /// For each event name, the properties its aggregates are split by (`AnalyticsSegments`): performance by device
     /// model (#28), the practice → online funnel by step (and by tier, once #370 sends it), hints by hint.
     public var segments: [String: [String]] = [
@@ -52,8 +56,9 @@ public protocol AnalyticsStore: Sendable {
     func recordDevice(_ events: [StoredAnalyticsEvent]) async throws -> AnalyticsRecordResult
     /// Stores one of the server's events: about nobody when its player isn't stored.
     func recordServer(_ event: StoredAnalyticsEvent) async throws
-    /// Counts up to `limit` raw events not yet counted into the aggregates, oldest first. Returns how many.
-    func rollUp(limit: Int) async throws -> Int
+    /// Counts up to `limit` raw events not yet counted into the aggregates, oldest first, held to `bounds`. Returns how
+    /// many.
+    func rollUp(limit: Int, bounds: AnalyticsRollup.Bounds) async throws -> Int
     /// Deletes the counted raw events received before `time`. Returns how many.
     func purge(receivedBefore time: Date) async throws -> Int
     func daily(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsDaily]
@@ -69,6 +74,10 @@ public final class AnalyticsIngest: Sendable {
     let now: @Sendable () -> Date
     /// Players whose analytics the dev server answers `unavailable` (the contract's `unavailable` situation).
     private let devUnavailable = Mutex<Set<String>>([])
+    /// Each player's batch budget: what is left, and when it was last refilled.
+    private let budgets = Mutex<[String: (tokens: Double, at: ContinuousClock.Instant)]>([:])
+    /// Past this many players with a budget, those whose bucket has refilled are forgotten.
+    static let maxBudgets = 10_000
 
     public init(settings: AnalyticsSettings = AnalyticsSettings(), store: any AnalyticsStore,
                 now: @escaping @Sendable () -> Date = { Date() }) {
@@ -82,7 +91,7 @@ public final class AnalyticsIngest: Sendable {
     public func record(_ batch: AnalyticsBatch) async throws -> AnalyticsReceipt {
         guard batch.events.count <= AnalyticsBatch.maxEvents else { throw AnalyticsError.batchTooLarge(max: AnalyticsBatch.maxEvents) }
         let received = now()
-        let install = InstallID(String(batch.installID.rawValue.prefix(settings.maxInstallIDLength)))
+        let install = InstallID(AnalyticsText.clean(batch.installID.rawValue, maxBytes: settings.maxInstallIDLength))
         let events = batch.events.map { stored($0, installID: install, receivedAt: received) }
         do {
             let result = try await store.recordDevice(events)
@@ -101,7 +110,7 @@ public final class AnalyticsIngest: Sendable {
         let received = now()
         let occurred = min(max(time ?? received, received - settings.maxEventAge), received)
         let kept = held(properties)
-        let eventName = String(name.rawValue.prefix(settings.maxNameLength))
+        let eventName = AnalyticsText.clean(name.rawValue, maxBytes: settings.maxNameLength)
         try await store.recordServer(StoredAnalyticsEvent(
             source: .server, playerID: player, name: eventName, day: StoredAnalyticsEvent.day(of: occurred),
             segment: segment(eventName, kept), occurredAt: occurred, receivedAt: received, properties: kept))
@@ -113,28 +122,52 @@ public final class AnalyticsIngest: Sendable {
         let latest = receivedAt.timeIntervalSince1970.rounded(.down)
         let earliest = latest - settings.maxEventAge
         let occurred = Date(timeIntervalSince1970: min(max(Double(event.time), earliest), latest))
-        let name = String(event.name.rawValue.prefix(settings.maxNameLength))
+        let name = AnalyticsText.clean(event.name.rawValue, maxBytes: settings.maxNameLength)
         let kept = held(event.properties)
         return StoredAnalyticsEvent(source: .device, installID: installID.rawValue, sequence: Int64(event.sequence), name: name,
                                     day: StoredAnalyticsEvent.day(of: occurred), segment: segment(name, kept), occurredAt: occurred,
                                     receivedAt: receivedAt, properties: kept)
     }
 
-    /// The first `maxProperties` keys in order that are short enough and not empty; texts cut to `maxTextLength`, and
-    /// numbers that aren't finite left out.
+    /// The first `maxProperties` keys in order that are short enough and not empty once NUL is taken out; texts cut to
+    /// `maxTextLength`, and numbers that aren't finite left out.
     func held(_ properties: [String: AnalyticsValue]) -> [String: StoredAnalyticsValue] {
         var kept: [String: StoredAnalyticsValue] = [:]
-        for key in properties.keys.sorted() where !key.isEmpty && key.count <= settings.maxKeyLength {
+        for (raw, value) in properties.sorted(by: { $0.key < $1.key }) {
+            let key = AnalyticsText.clean(raw, maxBytes: .max)
+            guard !key.isEmpty, key.utf8.count <= settings.maxKeyLength, kept[key] == nil else { continue }
             guard kept.count < settings.maxProperties else { break }
-            switch properties[key]! {
+            switch value {
             case .int(let number): kept[key] = .int(Int64(number))
             case .double(let number) where number.isFinite: kept[key] = .double(number)
             case .double: continue
-            case .string(let text): kept[key] = .string(String(text.prefix(settings.maxTextLength)))
+            case .string(let text): kept[key] = .string(AnalyticsText.clean(text, maxBytes: settings.maxTextLength))
             case .bool(let flag): kept[key] = .bool(flag)
             }
         }
         return kept
+    }
+
+    /// Takes one batch from `player`'s budget; false when it is spent.
+    func payForBatch(_ player: String) -> Bool {
+        let now = ContinuousClock.now, burst = settings.batchBurst, perSecond = settings.batchesPerMinute / 60
+        func refilled(_ budget: (tokens: Double, at: ContinuousClock.Instant)) -> Double {
+            let elapsed = now - budget.at
+            let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+            return min(burst, budget.tokens + seconds * perSecond)
+        }
+        return budgets.withLock { budgets in
+            if budgets[player] == nil, budgets.count >= Self.maxBudgets {
+                budgets = budgets.filter { refilled($0.value) < burst }
+            }
+            let tokens = budgets[player].map(refilled) ?? burst
+            guard tokens >= 1 else {
+                budgets[player] = (tokens, now)
+                return false
+            }
+            budgets[player] = (tokens - 1, now)
+            return true
+        }
     }
 
     func segment(_ name: String, _ properties: [String: StoredAnalyticsValue]) -> String {
@@ -142,8 +175,8 @@ public final class AnalyticsIngest: Sendable {
         return AnalyticsSegments.segment(keys: keys, properties: properties)
     }
 
-    /// The analytics service for one signed-in connection, with its own batch budget. `player` is only for the dev
-    /// switch: nothing stores it.
+    /// The analytics service for one signed-in connection. `player` is only for the batch budget and the dev switch:
+    /// nothing stores it.
     func service(for player: AccountPlayer) -> any AnalyticsTransport {
         ServerAnalyticsTransport(ingest: self, player: player.teamPlayerID)
     }
@@ -159,36 +192,14 @@ public final class AnalyticsIngest: Sendable {
 }
 
 /// A signed-in connection's analytics: the device's batches, stored under their install id, at most as often as the
-/// connection's budget allows.
-final class ServerAnalyticsTransport: AnalyticsTransport {
+/// player's budget allows.
+struct ServerAnalyticsTransport: AnalyticsTransport {
     let ingest: AnalyticsIngest
     let player: String
-    /// What is left of the batch budget, and when it was last refilled.
-    private let budget: Mutex<(tokens: Double, at: ContinuousClock.Instant)>
-
-    init(ingest: AnalyticsIngest, player: String) {
-        self.ingest = ingest
-        self.player = player
-        budget = Mutex((ingest.settings.batchBurst, .now))
-    }
 
     func send(_ batch: AnalyticsBatch) async throws -> AnalyticsReceipt {
-        guard !ingest.isDevUnavailable(player), pay() else { throw AnalyticsError.unavailable }
+        guard !ingest.isDevUnavailable(player), ingest.payForBatch(player) else { throw AnalyticsError.unavailable }
         return try await ingest.record(batch)
-    }
-
-    /// Takes one batch from the budget; false when it is spent.
-    private func pay() -> Bool {
-        let settings = ingest.settings, now = ContinuousClock.now
-        return budget.withLock { budget in
-            let elapsed = now - budget.at
-            let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
-            budget.tokens = min(settings.batchBurst, budget.tokens + seconds * settings.batchesPerMinute / 60)
-            budget.at = now
-            guard budget.tokens >= 1 else { return false }
-            budget.tokens -= 1
-            return true
-        }
     }
 }
 
@@ -216,17 +227,24 @@ public actor AnalyticsRetention {
         self.now = now
     }
 
-    /// One pass: counts everything not yet counted, then purges what is past the retention.
+    /// One pass: counts everything not yet counted, then purges what is past the retention. A roll-up that fails
+    /// doesn't hold the purge up (it takes only counted rows); the pass then throws the roll-up's error.
     @discardableResult
     public func run() async throws -> Pass {
         var rolledUp = 0
         let batch = max(1, settings.rollupBatch)
-        while true {
-            let counted = try await store.rollUp(limit: batch)
-            rolledUp += counted
-            if counted < batch { break }
+        var failure: (any Error)?
+        do {
+            while true {
+                let counted = try await store.rollUp(limit: batch, bounds: settings.bounds)
+                rolledUp += counted
+                if counted < batch { break }
+            }
+        } catch {
+            failure = error
         }
         let purged = try await store.purge(receivedBefore: now() - settings.rawRetention)
+        if let failure { throw failure }
         return Pass(rolledUp: rolledUp, purged: purged)
     }
 
@@ -303,15 +321,19 @@ public final class InMemoryAnalyticsStore: AnalyticsStore {
         }
     }
 
-    public func rollUp(limit: Int) async throws -> Int {
+    public func rollUp(limit: Int, bounds: AnalyticsRollup.Bounds) async throws -> Int {
         state.withLock { state in
             let pending = state.rows.indices.filter { !state.rows[$0].rolledUp }.prefix(limit)
             guard !pending.isEmpty else { return 0 }
-            let events = pending.map { index in
+            var existing = AnalyticsRollup.Existing()
+            for key in state.daily.keys { existing.add(key) }
+            for key in state.properties.keys { existing.add(key) }
+            let raw = pending.map { index in
                 let row = state.rows[index]
                 return AnalyticsRollup.Event(id: row.id, source: row.event.source, actor: row.actor, day: row.event.day,
                                              name: row.event.name, segment: row.event.segment, properties: row.event.properties)
             }
+            let events = AnalyticsRollup.bounded(raw, existing: existing, bounds: bounds)
             let counted = Set(state.rows.filter(\.rolledUp).compactMap { row in
                 row.actor.map {
                     AnalyticsRollup.ActorKey(dayKey: AnalyticsRollup.DayKey(day: row.event.day, source: row.event.source, name: row.event.name,

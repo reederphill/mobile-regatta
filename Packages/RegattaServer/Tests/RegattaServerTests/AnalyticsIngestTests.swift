@@ -130,7 +130,8 @@ enum RetentionScenario {
         let stored = ingest.stored(event, installID: InstallID("i"), receivedAt: received)
         #expect(stored.name.count == settings.maxNameLength)
         #expect(stored.properties.count == settings.maxProperties)
-        #expect(stored.properties["k00"] == .string(String(repeating: "é", count: settings.maxTextLength)))
+        // Held to bytes: "é" is two.
+        #expect(stored.properties["k00"] == .string(String(repeating: "é", count: settings.maxTextLength / 2)))
         #expect(stored.properties["k01"] == nil && stored.properties[String(repeating: "x", count: 65)] == nil)
         // A time far in the past counts 30 days before it arrived; one in the future counts when it arrived.
         #expect(stored.occurredAt == received - settings.maxEventAge && stored.day == StoredAnalyticsEvent.day(of: received - settings.maxEventAge))
@@ -204,9 +205,9 @@ enum RetentionScenario {
         #expect(try await store.daily(.device, "earned_unlock").isEmpty)
     }
 
-    /// A connection's batches past its budget are answered `unavailable` (kept by the device, sent later); another
-    /// connection has its own budget. An install id is held to its length.
-    @Test func aConnectionsBatchesAreBudgeted() async throws {
+    /// A player's batches past her budget are answered `unavailable` (kept by the device, sent later), on a new
+    /// connection too; another player has her own budget. An install id is held to its length.
+    @Test func aPlayersBatchesAreBudgeted() async throws {
         var settings = AnalyticsSettings()
         settings.batchBurst = 3
         settings.batchesPerMinute = 0
@@ -221,8 +222,57 @@ enum RetentionScenario {
         await #expect(throws: AnalyticsError.unavailable) {
             try await connection.send(AnalyticsBatch(installID: long, events: [RetentionScenario.event(4, .drop, [:])]))
         }
-        #expect(try await ingest.service(for: player).send(AnalyticsBatch(installID: long, events: [RetentionScenario.event(4, .drop, [:])])).accepted == 1)
+        await #expect(throws: AnalyticsError.unavailable) {
+            try await ingest.service(for: player).send(AnalyticsBatch(installID: long, events: [RetentionScenario.event(4, .drop, [:])]))
+        }
+        let other = AccountPlayer(teamPlayerID: "T:b", gamePlayerID: "G:b", alias: "b")
+        #expect(try await ingest.service(for: other).send(AnalyticsBatch(installID: long, events: [RetentionScenario.event(4, .drop, [:])])).accepted == 1)
         #expect(store.raw().allSatisfy { $0.installID == String(repeating: "i", count: settings.maxInstallIDLength) })
+    }
+
+    /// Each day's aggregates are bounded: past `maxNames`, `maxSegments` and `maxPropertyRows` a new name, segment or
+    /// text value counts as "(other)" and a new number is left out; what is already held keeps counting.
+    @Test func eachDaysAggregatesAreBounded() async throws {
+        var settings = AnalyticsSettings()
+        settings.bounds.maxNames = 2
+        settings.bounds.maxSegments = 2
+        settings.bounds.maxPropertyRows = 3
+        settings.segments = ["seg": ["s"]]
+        let store = InMemoryAnalyticsStore()
+        let ingest = AnalyticsIngest(settings: settings, store: store, now: { RetentionScenario.start })
+        let retention = AnalyticsRetention(settings: settings, store: store, now: { RetentionScenario.start })
+        _ = try await ingest.record(AnalyticsBatch(installID: InstallID("a"), events: [
+            RetentionScenario.event(1, AnalyticsEventName("one"), [:]),
+            RetentionScenario.event(2, AnalyticsEventName("seg"), ["s": .string("x"), "k": .string("v1"), "n": .int(1)]),
+        ]))
+        try await retention.run()
+        _ = try await ingest.record(AnalyticsBatch(installID: InstallID("a"), events: [
+            RetentionScenario.event(3, AnalyticsEventName("three"), [:]),
+            RetentionScenario.event(4, AnalyticsEventName("one"), [:]),
+            RetentionScenario.event(5, AnalyticsEventName("seg"), ["s": .string("y"), "k": .string("v2")]),
+            RetentionScenario.event(6, AnalyticsEventName("seg"), ["s": .string("z"), "k": .string("v3"), "m": .int(2), "n": .int(3)]),
+        ]))
+        try await retention.run()
+        #expect(try await store.daily(.device, "one").map(\.events) == [2])
+        #expect(try await store.daily(.device, "three").isEmpty)
+        #expect(try await store.daily(.device, "(other)").map(\.events) == [1])
+        #expect(try await store.daily(.device, "seg").map(\.segment) == ["(other)", "s=x", "s=y"])
+        let rows = try await store.dailyProperties(.device, "seg").map { "\($0.segment) \($0.key) \($0.value)" }
+        // Event 6's `m` and `n` are new numbers past the bound under its "(other)" segment: left out.
+        #expect(rows == ["(other) k (other)", "s=x k v1", "s=x n ", "s=y k v2"])
+    }
+
+    /// A roll-up that fails doesn't hold the purge up: the counted rows past the cut still go, and the pass throws.
+    @Test func aFailedRollUpStillPurges() async throws {
+        let store = InMemoryAnalyticsStore()
+        let clock = AnalyticsTestClock(RetentionScenario.start)
+        let ingest = AnalyticsIngest(store: store, now: clock.now)
+        _ = try await ingest.record(AnalyticsBatch(installID: InstallID("a"), events: [RetentionScenario.event(1, .drop, [:])]))
+        try await AnalyticsRetention(store: store, now: clock.now).run()
+        clock.advance(days: 91)
+        _ = try await ingest.record(AnalyticsBatch(installID: InstallID("a"), events: [RetentionScenario.event(2, .drop, [:])]))
+        await #expect(throws: FailingAnalyticsStore.Down.self) { try await AnalyticsRetention(store: RollUpFails(base: store), now: clock.now).run() }
+        #expect(store.raw().map(\.sequence) == [2])
     }
 
     /// A store that fails answers `unavailable`, so the device keeps the batch; over the cap is refused before the store.
@@ -239,11 +289,22 @@ extension AnalyticsEvent {
     typealias Properties = [String: AnalyticsValue]
 }
 
+/// A store whose roll-up fails, and nothing else.
+struct RollUpFails: AnalyticsStore {
+    let base: any AnalyticsStore
+    func recordDevice(_ events: [StoredAnalyticsEvent]) async throws -> AnalyticsRecordResult { try await base.recordDevice(events) }
+    func recordServer(_ event: StoredAnalyticsEvent) async throws { try await base.recordServer(event) }
+    func rollUp(limit: Int, bounds: AnalyticsRollup.Bounds) async throws -> Int { throw FailingAnalyticsStore.Down() }
+    func purge(receivedBefore time: Date) async throws -> Int { try await base.purge(receivedBefore: time) }
+    func daily(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsDaily] { try await base.daily(source, name) }
+    func dailyProperties(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsPropertyStats] { try await base.dailyProperties(source, name) }
+}
+
 struct FailingAnalyticsStore: AnalyticsStore {
     struct Down: Error {}
     func recordDevice(_ events: [StoredAnalyticsEvent]) async throws -> AnalyticsRecordResult { throw Down() }
     func recordServer(_ event: StoredAnalyticsEvent) async throws { throw Down() }
-    func rollUp(limit: Int) async throws -> Int { throw Down() }
+    func rollUp(limit: Int, bounds: AnalyticsRollup.Bounds) async throws -> Int { throw Down() }
     func purge(receivedBefore time: Date) async throws -> Int { throw Down() }
     func daily(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsDaily] { throw Down() }
     func dailyProperties(_ source: AnalyticsSource, _ name: String) async throws -> [AnalyticsPropertyStats] { throw Down() }
