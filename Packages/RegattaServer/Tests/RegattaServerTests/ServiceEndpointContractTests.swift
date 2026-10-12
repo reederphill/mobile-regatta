@@ -5,14 +5,15 @@ import RegattaLoadClient
 import RegattaServerKit
 import RegattaServiceClient
 import RegattaServiceContracts
+import RegattaServices
 import Testing
 
-/// #109's Identity, Terms (#145), Queue (#146), RaceSession (#148) and Lobby (#152: its chat half) contract suites through #143's runner against the real server: a `RegattaServer`
+/// #109's Identity, Terms (#145), Queue (#146), RaceSession (#148), Lobby (#152: its chat half) and AnalyticsTransport (#156) contract suites through #143's runner against the real server: a `RegattaServer`
 /// started in process on a free port, reached over its `/service` WebSocket by `WebSocketServiceConnector`, which
 /// arranges each situation with `POST /dev/situation`. `CONTRACT_ENDPOINT` runs them against a server started elsewhere.
 @Suite(.timeLimit(.minutes(2))) struct ServiceEndpointContractTests {
-    /// The suites the server serves as of #152. Of the Lobby suite it serves the chat; reports are #153's.
-    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession, .lobby]
+    /// The suites the server serves as of #156. Of the Lobby suite it serves the chat; reports are #153's.
+    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession, .lobby, .analytics]
     static let lobbyParts: Set<LobbyServiceContract.Part> = [.chat]
 
     /// A dev config the suites can run on: the Terms suite's `versionBumped` situation needs an older version to have
@@ -30,11 +31,13 @@ import Testing
 
     static func run(_ suites: [ContractSuiteID], against endpoint: String) async throws {
         for suite in suites {
-            try await ContractRunner.run(suite, over: .endpoint(endpoint, connector: WebSocketServiceConnector()), lobbyParts: lobbyParts)
+            // A fresh install for the AnalyticsTransport suite (#156): a server on Postgres keeps an earlier run's events.
+            try await ContractRunner.run(suite, over: .endpoint(endpoint, connector: WebSocketServiceConnector()), lobbyParts: lobbyParts,
+                                         analyticsInstall: InstallID("contract-\(UUID().uuidString)"))
         }
     }
 
-    /// Acceptance (#145, #146): the Identity, Terms and Queue suites pass against the real server through the runner.
+    /// Acceptance (#145, #146, #148, #152, #156): the served suites pass against the real server through the runner.
     @Test func servedSuitesPassAgainstTheServer() async throws {
         let server = try await RegattaHTTPServer.start(config: Self.config())
         do {

@@ -48,11 +48,11 @@ import Testing
             #expect(try await migrator.up(database) == all)
             #expect(try await migrator.applied(database) == all)
             #expect(try await tables(database)
-                == ["briefing_leaves", "data_files", "lobby_blocks", "lobby_messages", "player_stats", "players", "race_bots", "race_files", "race_logs", "race_players",
+                == ["analytics_daily", "analytics_daily_properties", "analytics_events", "briefing_leaves", "data_files", "lobby_blocks", "lobby_messages", "player_stats", "players", "race_bots", "race_files", "race_logs", "race_players",
                     "race_results", "races", "rating_history", "ratings", "schema_migrations", "sessions", "terms_acceptances"])
             #expect(try await migrator.up(database) == [])
 
-            #expect(try await migrator.down(database, to: 3) == [11, 10, 9, 8, 7, 6, 5, 4])
+            #expect(try await migrator.down(database, to: 3) == [12, 11, 10, 9, 8, 7, 6, 5, 4])
             #expect(try await migrator.applied(database) == [1, 2, 3])
             #expect(try await tables(database) == ["data_files", "players", "schema_migrations", "sessions"])
 
@@ -73,10 +73,11 @@ import Testing
             try await migrator.up(database)
             let with = try await tables(database)
             #expect(with.contains("race_bots"))
-            #expect(try await migrator.down(database, to: 8) == [11, 10, 9])
-            #expect(try await tables(database) == with.filter { !["race_bots", "player_stats", "rating_history", "ratings", "lobby_blocks", "lobby_messages"].contains($0) })
+            #expect(try await migrator.down(database, to: 8) == [12, 11, 10, 9])
+            #expect(try await tables(database) == with.filter { !(["race_bots", "player_stats", "rating_history", "ratings", "lobby_blocks", "lobby_messages"]
+                + Self.analyticsTables).contains($0) })
             #expect(try await migrator.applied(database) == Array(1...8))
-            #expect(try await migrator.up(database) == [9, 10, 11])
+            #expect(try await migrator.up(database) == [9, 10, 11, 12])
             #expect(try await tables(database) == with)
         }
     }
@@ -90,8 +91,8 @@ import Testing
             let with = try await tables(database)
             let added = ["player_stats", "rating_history", "ratings"]
             #expect(added.allSatisfy(with.contains))
-            #expect(try await migrator.down(database, to: 9) == [11, 10])
-            #expect(try await tables(database) == with.filter { !(added + ["lobby_blocks", "lobby_messages"]).contains($0) })
+            #expect(try await migrator.down(database, to: 9) == [12, 11, 10])
+            #expect(try await tables(database) == with.filter { !(added + ["lobby_blocks", "lobby_messages"] + Self.analyticsTables).contains($0) })
             #expect(try await migrator.applied(database) == Array(1...9))
 
             // A race closed on the schema before it.
@@ -100,14 +101,14 @@ import Testing
             try await database.client.query("UPDATE races SET state = 'closed', ended_at = now() WHERE id = \(race.id)")
             try await database.client.query("INSERT INTO race_results (race_id, results, incidents, rated) VALUES (\(race.id), '\\x7b7d', '\\x7b7d', true)")
 
-            #expect(try await migrator.up(database) == [10, 11])
+            #expect(try await migrator.up(database) == [10, 11, 12])
             #expect(try await tables(database) == with)
             let old = try #require(try await RaceResultStore(database).lastRace(of: "T:a"))
             #expect(old.ratingState == .none && old.ratingChange == nil)
             #expect(try await RatingStore(database).ratings(of: ["T:a"]).isEmpty)
             #expect(try await RatingStore(database).reset("T:a", reason: "test", at: Date()))
-            #expect(try await migrator.down(database, to: 9) == [11, 10])
-            #expect(try await migrator.up(database) == [10, 11])
+            #expect(try await migrator.down(database, to: 9) == [12, 11, 10])
+            #expect(try await migrator.up(database) == [10, 11, 12])
             #expect(try await RatingStore(database).ratings(of: ["T:a"]).isEmpty)
         }
     }
@@ -124,14 +125,37 @@ import Testing
             let store = LobbyMessageStore(database)
             _ = try await store.append(StoredLobbyLine(kind: .gun, venue: "Bay", boats: 10, humans: 2, createdAt: Date()))
             try await store.block("T:b", by: "T:a", at: Date())
-            #expect(try await migrator.down(database, to: 10) == [11])
-            #expect(try await tables(database) == with.filter { !added.contains($0) })
+            #expect(try await migrator.down(database, to: 10) == [12, 11])
+            #expect(try await tables(database) == with.filter { !(added + Self.analyticsTables).contains($0) })
             #expect(try await migrator.applied(database) == Array(1...10))
             #expect(try await PlayerStore(database).player(teamPlayerID: "T:a") != nil)
-            #expect(try await migrator.up(database) == [11])
+            #expect(try await migrator.up(database) == [11, 12])
             #expect(try await tables(database) == with)
             #expect(try await store.recent(since: .distantPast, limit: 10).isEmpty)
             #expect(try await store.blocks().isEmpty)
+        }
+    }
+
+    static let analyticsTables = ["analytics_daily", "analytics_daily_properties", "analytics_events"]
+
+    /// #156: migration 0012 adds the analytics tables alone, and takes them away again, with rows in them.
+    @Test(TestDatabase.available) func testAnalyticsMigrationGoesUpAndDown() async throws {
+        try await TestDatabase.withFreshSchema { database in
+            let migrator = try Migrator()
+            try await migrator.up(database)
+            let with = try await tables(database)
+            #expect(Self.analyticsTables.allSatisfy(with.contains))
+            let store = AnalyticsEventStore(database)
+            let time = Date(timeIntervalSince1970: 1_791_460_800)
+            _ = try await store.recordDevice([StoredAnalyticsEvent(source: .device, installID: "i", sequence: 1, name: "drop",
+                                                                   day: StoredAnalyticsEvent.day(of: time), occurredAt: time, receivedAt: time)])
+            try await store.rollUp(limit: 10)
+            #expect(try await migrator.down(database, to: 11) == [12])
+            #expect(try await tables(database) == with.filter { !Self.analyticsTables.contains($0) })
+            #expect(try await migrator.up(database) == [12])
+            #expect(try await tables(database) == with)
+            #expect(try await store.rawCount() == 0)
+            #expect(try await store.daily(.device, "drop").isEmpty)
         }
     }
 

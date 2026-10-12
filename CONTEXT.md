@@ -256,6 +256,22 @@ _Avoid_: tip, tooltip, coach mark
 The first call of each rule number on a player, for or against her, spelled out as a sentence with the number in a notice. Later calls of that number show only the line and badge on the water. Seen numbers are stored per device with hint progress and reset with it; Hints off doesn't silence them.
 _Avoid_: rule explanation, tooltip
 
+**Usage analytics**:
+The events a device sends the race server while Share usage data is on (#28): onboarding, matchmaking and netcode, livery try-ons, and MetricKit's performance summary. First-party only. Keyed to the install ID, never to the player, even though they travel on her signed-in connection. The server's own events (an earned unlock, say) are keyed to the player they are about.
+_Avoid_: telemetry (as the umbrella term), tracking
+
+**Install ID**:
+The random id a device makes on first use and keeps until the app is reinstalled. The only key a device's usage analytics carry.
+_Avoid_: device ID, user ID
+
+**Daily aggregate**:
+What the server keeps of usage analytics after the raw events go (90 days from receipt): per day, event and segment, how many events and distinct installs or players, and each property's count, sum and range. It holds no install ID or player.
+_Avoid_: rollup (as a noun for the data), summary
+
+**Segment**:
+The properties an event's daily aggregates are split by, such as device model for performance and step and tier for the practice → online funnel. Without one, an event's properties are counted each on its own, and how they combine is gone with the raw events.
+_Avoid_: dimension, cohort
+
 ### Course
 
 **Venue**:
