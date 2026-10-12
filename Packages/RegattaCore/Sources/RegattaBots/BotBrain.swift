@@ -186,6 +186,8 @@ struct BotBrain: Sendable {
     var gybeWantedSince: Double?
     /// Whether her last course to a mark was within `PlaningTable.markRange` of it (`navigate`).
     var isNearHerMark = false
+    /// Whether that course was to her point through a gate from within `PlaningTable.gateRange` of it (`navigate`).
+    var isAtHerGate = false
     /// What she knows of a stall in irons (#459, `centresStalled`): only on a class she turns by hand.
     var stall = Stall()
     /// What she has made of the boats around her (#234, `observeFleet`): each one's tack, when she saw it tack, and
@@ -1253,6 +1255,9 @@ struct BotBrain: Sendable {
         let toTarget = target - b.position
         let distance = toTarget.length
         isNearHerMark = distance < PlaningTable.markRange
+        isAtHerGate = false
+        if distance < PlaningTable.gateRange, b.status == .racing, case .round(let index) = view.course.legs[b.legIndex],
+           case .gate = view.course.elements[index] { isAtHerGate = true }
         let bearing = toTarget.bearing
         let w = b.windDirection
         let offWind = abs(wrapAngle(bearing - w))

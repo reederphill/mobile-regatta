@@ -22,7 +22,7 @@ import RegattaCore
 // Bots err on the side of caution (the owner's ruling of 2026-10-11): each sails within her own skill, a safer line for
 // herself and nothing to do with the boats around her.
 // - "Inside her own hand": she aims above the plane's edge by what her hand wanders (`ownRunAngle`), so its
-//   excursions stay on the plane: nothing for a perfect hand, 10° above her groove for Club's centre.
+//   excursions stay on the plane: nothing for a perfect hand, 4° to 5° above her groove for Club's centre.
 // - "Come down as she gathers speed": slow out of a rounding she bears away only as fast as her speed lets her stay
 //   on, however deep her mark or a missed groove asks her to sail (`floorAim`'s reach, from her groove).
 // - "A gybe within her skill": a helm who would slam gybes on half rudder, a wider, slower arc that stays on the plane
@@ -37,6 +37,12 @@ import RegattaCore
 //   and then no further than the rules ask (`BotBrain.properCourseAnticipated`, `PlaningTable.leeAllowance`).
 // - "Finish where she lays it": close to the line she crosses it on the angle she planes at when that is still
 //   between its ends, rather than square off to her spot (`finishingOnThePlane`).
+//
+// Club hands finish (#462 round 4: on the live matrix a Club helm with a Club hand finished 0.565 of her races against
+// skiff@8's 0.629, the time lost on the runs):
+// - "Round the gate, on the plane or off": close above the leeward gate she sails for it (`PlaningTable.gateRange`,
+//   `BotBrain.isAtHerGate`). Held up to the angle she planes at she reached across the gate above it and bore away on
+//   top of its far mark.
 
 /// The planing heuristics' values (#462), one table to tune, as `HandTackTable` is the hand turn's.
 public enum PlaningTable {
@@ -87,12 +93,19 @@ public enum PlaningTable {
     /// "Inside her own hand" (the owner's ruling of 2026-10-11, bots err on the side of caution): she aims this share
     /// of her hand's wander running (`BotWeaknesses.wander` times `HandSteeringTable.downwindWander`) above the
     /// deepest angle that keeps `floorMargin`. More than the wander itself: her lag on a shift and her overshoot carry
-    /// her past it (measured: a hand that wanders 13° was dropped 15° deep of her aim). In 9 to 13 kn Club's centre
-    /// (handling 0.55) aims 10° to 11° above her groove and the floor of her band 18°, National's (0.8) 1° to 2°; a
-    /// perfect hand sails her groove.
+    /// her past it (measured: a hand that wanders 13° was dropped 15° deep of her aim). At 1.6, in 9 to 13 kn, Club's
+    /// centre (handling 0.55) aimed 10° to 11° above her groove and the floor of her band 18°, National's (0.8) 1° to
+    /// 2°; a perfect hand sails her groove.
     /// Measured on the mixed quick loop, Club / Regional / National falls for want of apparent wind a boat a race:
     /// 1.40 / 1.54 / 0.85 at 0, 1.08 / 1.19 / 1.06 at 1, 0.67 / 0.82 / 1.14 at 1.3, 0.51 / 0.61 / 0.74 at 1.6.
-    public static let handMargin = 1.6
+    ///
+    /// 1.0 since round 4 (1.6 before, tuned while the groove's snap swallowed any margin under 8°): the falls 1.6 saves
+    /// cost a Club hand less than the hotter angle does. On the live matrix (1,920 races) a Club helm with a Club hand
+    /// finished 2655 / 2696 / 2748 / 2657 / 2628 of 4700 at 1.6 / 1.3 / 1.0 / 0.5 / 0; on the all-Club loop with
+    /// "round the gate" her run made good 0.611 / 0.621 / 0.622 of her groove's (her hand's floor) at 1.6 / 1.3 / 1.0,
+    /// fouls racing 5162 / 4980 / 4874. Club's centre now aims 4° to 5° above her groove and the floor of her band 9°
+    /// (`BotPlaningTests.sheAimsInsideHerOwnHand`'s waters).
+    public static let handMargin = 1.0
     /// "A gybe within her skill": racing, the most rudder she gybes with, a share of full, whatever her handling
     /// (`HandTackTable.gybeFraction` gives a poor helm all of it). Half is on the plane from every speed she gybes at;
     /// at 75 % she fell entering slow (70 % of her polar speed; 60 %: gybe falls 1.89 to 1.57 a boat a race for Club,
@@ -113,6 +126,10 @@ public enum PlaningTable {
     public static let finishInside = 5.0
     /// "Under a boat's lee": she is coming up on a boat ahead when she closes on her faster than this, m/s.
     public static let leeClosing = 0.25
+    /// "Round the gate, on the plane or off": metres from her point through the leeward gate inside which she sails for
+    /// it as a class without the rule does. All-Club loop, 2640 boats: 47 boats touched a gate mark without it (5 on
+    /// skiff@8), 30 with it at 30 m; 50 m read no better.
+    public static let gateRange = 30.0
 }
 
 extension BotBrain {
@@ -144,6 +161,11 @@ extension BotBrain {
     mutating func planingAim(_ b: SeatView.OwnBoat, _ view: SeatView, aim: Aim, nearMark: Bool) -> Aim {
         let boatClass = view.boatClass
         guard let planing = boatClass.planing, aim.angle >= planing.fromTWA, b.status == .racing else {
+            replane = nil
+            return aim
+        }
+        // "Round the gate, on the plane or off".
+        if isAtHerGate {
             replane = nil
             return aim
         }

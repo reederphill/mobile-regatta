@@ -267,8 +267,9 @@ import Testing
     }
 
     /// "Inside her own hand" (bots err on the side of caution): planing in her groove, a perfect hand sails the groove
-    /// she is asked for; the poorer her handling the further above it she aims, by what her hand wanders: 1.6 of her
-    /// wander running deeper than her aim she still has the apparent wind the class planes on and half a knot. It is
+    /// she is asked for; the poorer her handling the further above it she aims, by what her hand wanders:
+    /// `PlaningTable.handMargin` of her wander running deeper than her aim she still has the apparent wind the class
+    /// planes on and half a knot. It is
     /// the same angle when her hand has carried her deep of it. On skiff@8 she sails as asked.
     @Test func sheAimsInsideHerOwnHand() throws {
         for seed in UInt64(1)...6 {
@@ -624,6 +625,42 @@ import Testing
             }
         }
         #expect(kept >= 4, "kept in \(kept) waters of 6")
+    }
+
+    /// "Round the gate, on the plane or off": above the leeward gate a Club hand (handling 0.35) is held above her
+    /// groove by what her hand wanders; inside `PlaningTable.gateRange` of her point through the gate she sails the
+    /// groove for it, as she does at any distance on skiff@8.
+    @Test func closeAboveTheGateSheSailsForIt() throws {
+        for seed in UInt64(1)...6 {
+            for (boatClass, above) in [(Self.skiffNine, 20.0), (Self.skiffNine, 45.0), (BotHandTackTests.skiffEight, 20.0),
+                                       (BotHandTackTests.skiffEight, 45.0)] {
+                var (race, hand, _) = try Self.runner(seed: seed, planing: true, handling: 0.35, boatClass: boatClass)
+                Self.wandering(&hand, race, handling: 0.35)
+                let course = race.course
+                let leg = try #require(course.legs.firstIndex { leg in
+                    if case .round(let index) = leg, case .gate = course.elements[index] { return true }
+                    return false
+                })
+                let through = course.targetPosition(for: course.legs[leg]) - course.upwind * 6
+                var snapshot = race.exportSnapshot()
+                snapshot.seats[0].boat.legIndex = leg
+                snapshot.seats[0].boat.roundingStage = 0
+                snapshot.seats[0].boat.position = through + course.upwind * above
+                try race.importSnapshot(snapshot)
+                _ = race.drainEvents()
+                let view = Self.seen(race, &hand)
+                let groove = hand.brain.grooveAngle(.downwind, view.own, view)
+                let aim = hand.brain.navigate(view.own, to: through, view)
+                print("BOTPLANING gate seed \(seed) \(boatClass.ref.version) \(above) m above: groove \(rad2deg(groove))°, she aims \(rad2deg(aim.angle))°")
+                if boatClass.ref == Self.skiffNine.ref, above > PlaningTable.gateRange {
+                    #expect(aim.angle < groove - deg2rad(2), "seed \(seed): \(rad2deg(aim.angle))° for a groove of \(rad2deg(groove))°")
+                    #expect(!hand.brain.isAtHerGate, "seed \(seed)")
+                } else {
+                    #expect(abs(aim.angle - groove) < deg2rad(0.01), "seed \(seed), \(boatClass.ref.version), \(above) m: \(rad2deg(aim.angle))° for a groove of \(rad2deg(groove))°")
+                    #expect(hand.brain.isAtHerGate == (above < PlaningTable.gateRange), "seed \(seed)")
+                }
+            }
+        }
     }
 
     /// A probe, not a test: every fall off the plane in all-bot races on skiff@9, with what the boat and her bot were
