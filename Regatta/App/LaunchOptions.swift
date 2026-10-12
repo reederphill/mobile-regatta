@@ -57,7 +57,10 @@ import RegattaServices
 ///   release build always runs on the real services.
 /// - `-tap race-online[,terms-agree]` (Debug builds) taps Home's Race online at launch, then the Terms of Use sheet's
 ///   I agree once it is up: for a local screenshot of a state only a tap reaches (#161: the spinner, an unreachable
-///   server, a save that failed), where `simctl` can't tap.
+///   server, a save that failed), where `simctl` can't tap. The queue's (#140): `settings` and `practice-setup` push
+///   a page, `start-practice` and `ready` start a practice race, `takeover` waits for fleet lock, then
+///   `briefing-leave` taps the briefing's Leave, and `connection-lost` and `connection-regained` drop the connection
+///   and bring it back.
 /// - `-myBoat <design-id>` opens My boat with that design tried on (#136): the stand-in for results' Try it deep link.
 /// - `-keepMyBoat` (with `-uitesting`) keeps My boat's livery, owned designs and races from the last launch, which UI
 ///   tests otherwise empty at launch: a relaunch that checks what was saved.
@@ -96,6 +99,16 @@ struct LaunchOptions: Equatable {
     enum LaunchTap: String, CaseIterable {
         case raceOnline = "race-online"
         case termsAgree = "terms-agree"
+        /// The queue's states (#140): a page pushed under the bar, a practice race under the chip, and the takeover's
+        /// Leave and lost connection, each waiting for `takeover`.
+        case settings
+        case practiceSetup = "practice-setup"
+        case startPractice = "start-practice"
+        case ready
+        case takeover
+        case briefingLeave = "briefing-leave"
+        case connectionLost = "connection-lost"
+        case connectionRegained = "connection-regained"
     }
     #endif
 
@@ -316,7 +329,7 @@ struct LaunchOptions: Equatable {
             if !named.isEmpty, !named.contains(nil) {
                 taps = named.compactMap { $0 }
             } else {
-                reject(argument, value, "race-online or terms-agree, separated by commas")
+                reject(argument, value, LaunchTap.allCases.map(\.rawValue).joined(separator: ", ") + ", separated by commas")
             }
         case "-termsVersion":
             if let n = Int(value), n >= 1 { termsVersion = n } else { reject(argument, value, "a whole number ≥ 1") }

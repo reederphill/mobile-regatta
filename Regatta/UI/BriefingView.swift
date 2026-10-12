@@ -12,6 +12,8 @@ struct BriefingView: View {
     var onAdvance: () -> Void
     /// Practice's Back: out of the race sequence, to the setup.
     var onBack: () -> Void
+    /// A locked fleet's briefing (#140): its Leave bar, the confirm, and the line while the connection is gone.
+    var leave: BriefingLeave? = nil
 
     var body: some View {
         ScrollView {
@@ -38,7 +40,10 @@ struct BriefingView: View {
         }
         .scrollIndicators(.hidden)
         .safeAreaInset(edge: .bottom) {
-            if model.mode == .practice { buttons }
+            if model.mode == .practice { buttons } else if let leave { leaveBar(leave) }
+        }
+        .overlay {
+            if let leave, leave.isConfirming { leaveConfirm(leave) }
         }
         .foregroundStyle(ChromePalette.text)
         .background(ChromePalette.background.ignoresSafeArea())
@@ -70,13 +75,73 @@ struct BriefingView: View {
     }
 
     private var countdown: some View {
-        TimelineView(.periodic(from: .now, by: 0.25)) { _ in
-            let seconds = model.displayedSeconds ?? 0
-            Text("Start sequence in \(seconds) s") // TODO-COPY (#171)
-                .font(MenuFont.number(.title3))
-                .accessibilityLabel("Start sequence in \(seconds) seconds")
-                .accessibilityValue(String(seconds))
-                .accessibilityIdentifier("briefing-countdown")
+        VStack(alignment: .leading, spacing: 6) {
+            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                let seconds = model.displayedSeconds ?? 0
+                Text("Start sequence in \(seconds) s") // TODO-COPY (#171)
+                    .font(MenuFont.number(.title3))
+                    .accessibilityLabel("Start sequence in \(seconds) seconds")
+                    .accessibilityValue(String(seconds))
+                    .accessibilityIdentifier("briefing-countdown")
+            }
+            if leave?.isReconnecting == true {
+                // The connection has been gone a moment (#140): the briefing runs on.
+                Label("Reconnecting", systemImage: "wifi.exclamationmark") // TODO-COPY (#171)
+                    .font(MenuFont.body(.subheadline))
+                    .foregroundStyle(ChromePalette.text.opacity(0.7))
+                    .accessibilityIdentifier("briefing-reconnecting")
+            }
+        }
+    }
+
+    /// The locked fleet's Leave (#140), where practice has Back: it asks first.
+    private func leaveBar(_ leave: BriefingLeave) -> some View {
+        HStack {
+            Button(action: leave.ask) {
+                Text("Leave").font(MenuFont.body()).padding(.vertical, 6).padding(.horizontal, 8) // TODO-COPY (#171)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .accessibilityIdentifier("briefing-leave")
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+        .frame(maxWidth: 640)
+        .frame(maxWidth: .infinity)
+        .background(ChromePalette.background.ignoresSafeArea())
+        .overlay(alignment: .top) { Divider().overlay(ChromePalette.text.opacity(0.15)) }
+    }
+
+    /// "Leave the race?" (#140): over the briefing, whose countdown runs on behind it.
+    private func leaveConfirm(_ leave: BriefingLeave) -> some View {
+        ZStack {
+            Color.black.opacity(0.5).ignoresSafeArea()
+            VStack(spacing: 14) {
+                // TODO-COPY (#171)
+                Text("Leave the race?").font(MenuFont.heading(.title3))
+                Text("A bot takes your seat.").font(MenuFont.body()).foregroundStyle(ChromePalette.text.opacity(0.7))
+                HStack(spacing: 12) {
+                    Button(action: leave.confirm) {
+                        Text("Leave").font(MenuFont.body()).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("briefing-leave-confirm")
+                    Button(action: leave.stay) {
+                        Text("Stay").font(MenuFont.heading(.headline)).frame(maxWidth: .infinity).padding(.vertical, 6)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("briefing-leave-stay")
+                }
+                .controlSize(.large)
+            }
+            .multilineTextAlignment(.center)
+            .padding(24)
+            .frame(maxWidth: 360)
+            .background(ChromePalette.surface, in: .rect(cornerRadius: 20))
+            .padding(.horizontal, 24)
+            .accessibilityElement(children: .contain)
+            .accessibilityAddTraits(.isModal)
         }
     }
 
@@ -115,4 +180,17 @@ struct BriefingView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+/// A locked fleet's briefing's Leave (#140): what the queue's takeover says of it, and what its buttons do.
+struct BriefingLeave {
+    /// "Leave the race?" is up.
+    var isConfirming = false
+    /// The connection has been gone 2 s.
+    var isReconnecting = false
+    /// Leave: asks first.
+    var ask: () -> Void = {}
+    /// The confirm's Leave: home, and a bot takes the seat.
+    var confirm: () -> Void = {}
+    var stay: () -> Void = {}
 }

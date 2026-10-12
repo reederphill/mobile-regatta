@@ -20,6 +20,8 @@ struct RaceView: View {
     var onRaceAgain: (() -> Void)? = nil
     /// The online results' Try it (#24): My boat with the earned design on. Nil falls back to `onExit`.
     var onTryIt: ((DesignID) -> Void)? = nil
+    /// What the HUD and the pause button move down by: the queue's chip above them (#140), only while it shows.
+    var topInset: CGFloat = 0
     /// Sending the app to the background pauses a practice race (#25), read from the scene (`SceneState`).
     @Environment(\.sceneState) private var sceneState
     /// The screen's top frame rate (#127): 120 on ProMotion.
@@ -139,7 +141,7 @@ struct RaceView: View {
                 EdgeLabels()
             }
 
-            hudView
+            hudView.padding(.top, topInset)
 
             #if DEBUG
             if session.isTuned {
@@ -151,14 +153,14 @@ struct RaceView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, HUDView.noticeTop(showsLeaderboard: session.controls.showsLeaderboard)
-                             + HUDView.noticeHeight + 8)
+                             + HUDView.noticeHeight + 8 + topInset)
                     Spacer()
                 }
                 .allowsHitTesting(false)
             }
             #endif
 
-            controls
+            controls.padding(.top, topInset)
 
             if LaunchOptions.current.uiTesting {
                 BoatSpeedProbe(session: session)

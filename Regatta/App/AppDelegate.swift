@@ -32,6 +32,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         // The fakes' online results scenarios fill in live, a sleep apart (the services package keeps no clock).
         var services = launchOptions.fakeServices.map { ServiceSet.fake($0, wait: { try? await Task.sleep(for: $0) }) }
             ?? ServiceSet.unconnected(connectivity: PathConnectivityService())
+        // A scripted queue plays at a pace a person can watch: a state a second, at `-timescale` (#140).
+        if launchOptions.fakeServices != nil {
+            services.queue = PacedQueueService(services.queue, interval: .seconds(1 / launchOptions.timescale))
+        }
         var device: (any DeviceIdentitySource)?
         if usesGameCenter(launchOptions) {
             let identity = GameKitIdentityService()

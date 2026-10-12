@@ -122,7 +122,7 @@ import RegattaServices
         #expect(unknown.problems == ["-fakeServices haunted: expected "
             + "signed-out, underage, communication-restricted, multiplayer-restricted, offline, queued, cancelled-race, "
             + "online-results, online-results-unrated, terms-bump, suspended, suspended-permanent, cooldown, cannot-race, "
-            + "update-required, terms-save-failed, session-failed, unreachable, connecting"])
+            + "update-required, terms-save-failed, session-failed, unreachable, connecting, joinable, joinable-alone, joinable-hold"])
         let missing = parse("-fakeServices", "-autostart")
         #expect(missing.fakeServices == nil && missing.autostart)
         #expect(missing.problems == ["-fakeServices needs a value"])
@@ -211,9 +211,11 @@ import RegattaServices
         #expect(parse().taps.isEmpty)
         #expect(parse("-fakeServices", "unreachable", "-tap", "race-online").taps == [.raceOnline])
         #expect(parse("-tap", "race-online,terms-agree").taps == [.raceOnline, .termsAgree])
+        #expect(parse("-tap", "race-online,takeover,briefing-leave").taps == [.raceOnline, .takeover, .briefingLeave])
         let bad = parse("-tap", "race-online,practice")
         #expect(bad.taps.isEmpty)
-        #expect(bad.problems == ["-tap race-online,practice: expected race-online or terms-agree, separated by commas"])
+        #expect(bad.problems == ["-tap race-online,practice: expected race-online, terms-agree, settings, practice-setup, "
+            + "start-practice, ready, takeover, briefing-leave, connection-lost, connection-regained, separated by commas"])
     }
 
     /// The online dev race (#68): the flag, the server and the race-length overrides; not a practice race.

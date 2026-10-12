@@ -174,6 +174,10 @@ _Avoid_: loading screen, pre-race
 Where players wait to be placed in an online race. There's one, global.
 _Avoid_: lobby (the lobby is the chat space), room, matchmaking
 
+**Queue bar**:
+The strip across the top of Home and every page pushed on it while the player waits in the queue: how many are waiting, the seconds to fleet lock, and Leave. About 10 s before the lock it is the lock banner. Over a practice race or its briefing it is a small chip, so the player can practise while she waits.
+_Avoid_: toast, status bar, banner (the banner is only its last 10 s)
+
 **Lobby**:
 The one global chat space where signed-in players talk between races. Queued players wait here. It isn't a room or a match.
 _Avoid_: room, channel
@@ -215,7 +219,15 @@ What a post is when the filter blocks it (the bundled word list, or the classifi
 _Avoid_: shadow-ban, masked
 
 **Fleet lock**:
-The moment an online race's boats are fixed and the briefing begins. Leaving before the gun costs nothing; a bot takes the seat.
+The moment an online race's boats are fixed and the briefing begins. It takes the app over: pages, sheets and any practice race go, and the briefing shows. A player who leaves before the gun gives her seat to a bot; three such leaves within an hour cost a cooldown.
+
+**Briefing leave**:
+Leaving a locked fleet from its briefing, with Leave and a confirm. A bot takes the seat. Sending the app to the background there is a drop, not a leave: the seat is kept, and the player is back in the race if she returns before the gun.
+_Avoid_: quit, forfeit
+
+**Cooldown**:
+Five minutes in which a player can't join the queue, after three briefing leaves within an hour. The server counts the leaves; Race online counts the cooldown down.
+_Avoid_: ban, timeout, suspension (a suspension is a moderation penalty)
 
 **Rated race**:
 An online race with at least two humans at the gun. Only results between humans move ratings.

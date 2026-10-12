@@ -221,11 +221,10 @@ final class AppModel {
         return results
     }
 
-    /// The online results' Race again (#24, #25): joins the queue, then home, where the queue shows (#140's bar). A
-    /// refusal (cooldown, suspension) just lands home; the queue's own state says why.
-    func raceAgain(queue: any QueueService) {
-        Task { try? await queue.join() }
-        leaveRace()
+    /// The online results' Race again (#24, #25): home, with the queue joining (#140's bar). A refusal (cooldown,
+    /// suspension) lands on Race online's line.
+    func raceAgain(queue: QueueController) {
+        Task { await queue.raceAgain() }
     }
 
     /// The online results' Try it (#24, #25): My boat with the earned design on.
@@ -281,6 +280,8 @@ final class AppModel {
         case .briefing: break
         }
         sheet = nil
+        // A notice is read by now: the next visit home starts clean.
+        notice = nil
         self.race = race
         phase = .raceSequence
     }
@@ -424,6 +425,50 @@ final class AppModel {
         menuMusic.play()
     }
 
+    // MARK: Fleet lock (#140)
+
+    /// A practice race or its briefing is in the race sequence: the queue's chip rides over it.
+    var isPracticeShowing: Bool {
+        switch race {
+        case .practice: true
+        case .briefing(let briefing, _): !briefing.isFleetLocked
+        case .online, nil: false
+        }
+    }
+
+    /// The fleet-lock takeover (#25, #16): pages, sheets and any practice race or briefing go at once, with no pause
+    /// and nothing saved (a practice race you were done in keeps its results row, as leaving one does), the livery
+    /// locks, and the online briefing shows. False when this build doesn't have the files the race names.
+    func takeOver(_ handOff: HandOff, briefing payload: BriefingPayload) -> Bool {
+        guard let files = try? RaceFiles(resolving: payload.setup) else { return false }
+        let setup = payload.setup
+        // The race the briefing leads to (#141 sails it): the server keeps the wind seed (ADR 0001).
+        var config = RaceConfig(opponents: setup.fleetSize - 1, laps: setup.laps,
+                                prestartSeconds: Double(setup.startSequenceTicks) / Double(RegattaCore.Race.tickRate),
+                                seed: setup.raceSeed.value, windSeed: 0)
+        config.files = PracticeFiles(boatClass: setup.boatClass, venue: setup.venue, conditions: setup.conditions,
+                                     rulesConfiguration: setup.rulesConfiguration)
+        let origin = Date()
+        let timescale = launchOptions.timescale
+        let model = BriefingModel(payload: payload, files: files, menuMusic: menuMusic,
+                                  now: { origin.addingTimeInterval(Date().timeIntervalSince(origin) * timescale) })
+        dismissAll()
+        isLiveryLocked = true
+        startRaceSequence(.briefing(model, config))
+        return true
+    }
+
+    /// Out of the race sequence to the bare home screen with the livery unlocked (#140): the briefing's Leave, a
+    /// cancelled race, the stand-in's end. `notice` shows on Home.
+    func endRaceSequence(notice: Notice?) {
+        endRaceSequence()
+        dismissAll()
+        isLiveryLocked = false
+        if let notice { self.notice = notice }
+    }
+
+    func postNotice(_ notice: Notice) { self.notice = notice }
+
     /// Home's Last race takes `results` unless you retired from that race (#132): a RET leaves the one before. Your
     /// finish in `session` goes into the practice history the rivals' skill is set from (#235), once per race.
     private func keepAsLastRace(_ results: RaceResultViewModel, from session: GameSession?) {
@@ -458,6 +503,8 @@ final class AppModel {
         #endif
     }
 }
+
+extension AppModel: FleetLockHost {}
 
 /// Home's Last race (#24, #132): the last race's results as JSON in the practice defaults, so UI tests, which empty
 /// those at launch, start with none.

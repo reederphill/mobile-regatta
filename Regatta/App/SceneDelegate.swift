@@ -131,6 +131,8 @@ final class RootHostingController: UIHostingController<AppRoot> {
         let model = AppModel(sceneState: sceneState, launchOptions: launchOptions, store: onlineStatus?.services.store,
                              analytics: analytics, audio: .live())
         let onlineStatus = onlineStatus ?? OnlineStatus(services: .fake(.signedOut))
+        // Fleet lock takes this window's app over (#140).
+        onlineStatus.queue.attach(host: model, haptics: model.haptics)
         super.init(rootView: AppRoot(model: model, sceneState: sceneState, screenSize: screenSize,
                                      maximumFramesPerSecond: maximumFramesPerSecond, onlineStatus: onlineStatus))
         isOrientationLocked = sceneState.isRaceSequenceShowing

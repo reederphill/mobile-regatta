@@ -53,8 +53,8 @@ struct RootView: View {
                                                              sheetDismissed: termsSheetDismissed))
                 .onAppear(perform: autostartIfRequested)
                 .raceCover(isPresented: model.phase == .raceSequence && model.race != nil) { raceCover }
-                // A stub past Race online's gate until the queue (#140); Debug builds on the real services join the dev
-                // server's instant race instead (#68).
+                // A stub past Race online's gate while the queue has no service to join (#162); Debug builds on the real
+                // services join the dev server's instant race instead (#68). On the fakes, the queue (#140).
                 .alert("Online racing is on its way", isPresented: $showsOnlineStub) {
                     Button("OK", role: .cancel) {}
                 } message: {
@@ -71,18 +71,43 @@ struct RootView: View {
             Group {
                 switch race {
                 case .practice(let session):
+                    let chip = queueChip
+                    let placement = QueueChipPlacement.current
                     RaceView(session: session, onRestart: model.restartPractice, onExit: model.leaveRace,
                              deviceSettings: Bindable(model).deviceSettings, onSailAgain: model.sailAgain,
                              onChangeSetup: model.changeSetup,
-                             onRaceOnline: { model.leaveRace(); raceOnline() })
+                             onRaceOnline: { model.leaveRace(); raceOnline() },
+                             topInset: chip != nil && placement == .top ? QueueChip.hudInset : 0)
                         .id(ObjectIdentifier(session))
+                        // Queued, the chip rides over the practice race (#140).
+                        .overlay(alignment: .top) {
+                            if let chip {
+                                chip.padding(.top, placement == .top ? -6
+                                    : HUDView.noticeTop(showsLeaderboard: session.controls.showsLeaderboard))
+                            }
+                        }
                 case .online(let launch):
                     OnlineLaunchView(launch: launch, onRestart: startOnlineRace, onExit: model.endRaceSequence,
                                      onRaceAgain: raceAgain, onTryIt: model.tryEarnedDesign)
                         .id(ObjectIdentifier(launch))
                 case .briefing(let briefing, _):
-                    BriefingView(model: briefing, onAdvance: model.finishBriefing, onBack: model.endRaceSequence)
-                        .id(ObjectIdentifier(briefing))
+                    if briefing.isFleetLocked, let queue = onlineStatus?.queue {
+                        // The takeover (#140): the locked fleet's briefing, with Leave; its end is the queue's.
+                        BriefingView(model: briefing, onAdvance: queue.briefingEnded, onBack: {},
+                                     leave: BriefingLeave(isConfirming: queue.takeover?.isConfirmingLeave ?? false,
+                                                          isReconnecting: queue.takeover?.isReconnecting ?? false,
+                                                          ask: queue.askToLeave, confirm: queue.leaveRace, stay: queue.stay))
+                            .id(ObjectIdentifier(briefing))
+                    } else {
+                        BriefingView(model: briefing, onAdvance: model.finishBriefing, onBack: model.endRaceSequence)
+                            .id(ObjectIdentifier(briefing))
+                            // Queued, the chip rides over the practice briefing too (#140).
+                            .safeAreaInset(edge: .top, spacing: 0) {
+                                if let chip = queueChip {
+                                    chip.frame(maxWidth: .infinity).background(ChromePalette.background)
+                                }
+                            }
+                    }
                 }
             }
             // UI tests swipe on it and check it stays. A full-size element behind the race, not a container
@@ -106,6 +131,12 @@ struct RootView: View {
             .environment(model.tuning)
             #endif
         }
+    }
+
+    /// The queue's chip, while queued over a practice race or its briefing (#140).
+    private var queueChip: QueueChip? {
+        guard let queue = onlineStatus?.queue, queue.showsChip, let bar = queue.bar else { return nil }
+        return QueueChip(state: bar, leave: queue.leave)
     }
 
     /// Development launch arguments (`LaunchOptions`): `-autostart`, `-demo`, `-perf`, `-fixture`, `-online` and `-briefing` open
@@ -157,6 +188,16 @@ struct RootView: View {
                 let sheetUp = ContinuousClock.now + .seconds(5)
                 while model.sheet != .terms, ContinuousClock.now < sheetUp { try? await Task.sleep(for: .milliseconds(100)) }
                 if model.sheet == .terms { agreeToTerms() }
+            case .settings: model.path = [.settings]
+            case .practiceSetup: model.path = [.practiceSetup]
+            case .startPractice: model.beginPractice()
+            case .ready: model.finishBriefing()
+            case .takeover:
+                let lockedBy = ContinuousClock.now + .seconds(300)
+                while onlineStatus?.queue.takeover == nil, ContinuousClock.now < lockedBy { try? await Task.sleep(for: .milliseconds(100)) }
+            case .briefingLeave: onlineStatus?.queue.askToLeave()
+            case .connectionLost: onlineStatus?.queue.connectionChanged(isOnline: false)
+            case .connectionRegained: onlineStatus?.queue.connectionChanged(isOnline: true)
             }
         }
     }
@@ -166,6 +207,8 @@ struct RootView: View {
     /// when due, then the queue. The e2e launches (`-online`, `-onlineHost`) skip the gate.
     private func raceOnline() {
         model.analytics.log(.practiceToOnline(.raceOnlineTapped))
+        // The last notice was about the last try.
+        model.notice = nil
         #if DEBUG
         // A dev identity (#161) goes through the gate like a player.
         let skipsGate = model.launchOptions.online || (model.launchOptions.onlineHost != nil && model.launchOptions.devIdentity == nil)
@@ -223,19 +266,24 @@ struct RootView: View {
         if races { enterQueue() }
     }
 
-    /// Past the gate: the stub alert until the queue (#140). A Debug build on the real services joins the dev server's
-    /// instant race instead (#68).
+    /// Past the gate: the queue (#140), whose bar shows the wait. The queue's service can't be joined until #162, so
+    /// off the fakes it is still the stub alert, and a Debug build on the real services joins the dev server's instant
+    /// race instead (#68).
     private func enterQueue() {
-        #if DEBUG
-        if model.launchOptions.fakeServices == nil, !model.launchOptions.uiTesting { return startOnlineRace() }
-        #endif
-        showsOnlineStub = true
+        guard model.launchOptions.fakeServices != nil, let queue = onlineStatus?.queue else {
+            #if DEBUG
+            if model.launchOptions.fakeServices == nil, !model.launchOptions.uiTesting { return startOnlineRace() }
+            #endif
+            showsOnlineStub = true
+            return
+        }
+        Task { await queue.join() }
     }
 
-    /// The online results' Race again (#24, #133): joins the queue, then home.
+    /// The online results' Race again (#24, #133): home, with the queue joining.
     private func raceAgain() {
-        guard let services else { return model.leaveRace() }
-        model.raceAgain(queue: services.queue)
+        guard let queue = onlineStatus?.queue else { return model.leaveRace() }
+        model.raceAgain(queue: queue)
     }
 
     /// A new online race: in a Debug build, the dev server's instant race on the Settings page's host or

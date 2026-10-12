@@ -1,6 +1,7 @@
 import Foundation
 import RegattaBots
 import RegattaCore
+import RegattaServices
 
 /// The briefing (#130, #15, #16): what the player sees between choosing a race and its start sequence. The venue and
 /// conditions, a short wind and current description (current only at a venue with it, ADR 0003) and the fleet.
@@ -65,6 +66,8 @@ final class BriefingModel {
     let current: CurrentSummary?
     let fleet: [FleetRow]
     let boatClass: String
+    /// The online briefing of a fleet that has locked (#140): it shows Leave, and leads to the online race.
+    let isFleetLocked: Bool
 
     private let menuMusic: any MenuMusic
     private let now: () -> Date
@@ -74,10 +77,38 @@ final class BriefingModel {
 
     /// `files` are the files `setup` names; `ratings` gives a seat's rating text (nil until the services carry them);
     /// `rivals` are the practice rivals' seats (#235, `RaceConfig.rivalSeats`), none online.
-    init(setup: RaceSetup, files: RaceFiles, mySeat: Int, mode: Mode, liveries: FleetLiveries,
-         menuMusic: any MenuMusic, ratings: (Int) -> String? = { _ in nil }, rivals: Set<Int> = [],
-         now: @escaping () -> Date = Date.init) {
+    convenience init(setup: RaceSetup, files: RaceFiles, mySeat: Int, mode: Mode, liveries: FleetLiveries,
+                     menuMusic: any MenuMusic, ratings: (Int) -> String? = { _ in nil }, rivals: Set<Int> = [],
+                     now: @escaping () -> Date = Date.init) {
+        let roster = FleetRoster(setup: setup, rivals: rivals)
+        let fleet = setup.seats.indices.map { seat in
+            let isBot = roster[seat].isBot && seat != mySeat
+            return FleetRow(seat: seat, name: roster.name(of: seat, playerSeat: mySeat), isMe: seat == mySeat,
+                            isBot: isBot, livery: liveries[seat], rating: isBot ? nil : ratings(seat),
+                            isRival: isBot && roster[seat].isRival)
+        }
+        self.init(setup: setup, files: files, mySeat: mySeat, mode: mode, fleet: fleet, isFleetLocked: false,
+                  menuMusic: menuMusic, now: now)
+    }
+
+    /// The briefing of a fleet that has locked (#140, #147), from the server's payload: its names, bots, liveries (as
+    /// locked, sail numbers as the fleet shows them) and a plain rating for every human, counting down
+    /// `briefingSeconds`. The wind, current and course are worded from the setup's files, as in practice; the payload's
+    /// tide state isn't read (the current comes from the setup), and there is no wind seed to show.
+    convenience init(payload: BriefingPayload, files: RaceFiles, menuMusic: any MenuMusic, now: @escaping () -> Date = Date.init) {
+        let fleet = payload.fleet.enumerated().map { seat, entry in
+            FleetRow(seat: seat, name: payload.isMe(seat) ? "You" : entry.name, isMe: payload.isMe(seat), isBot: entry.isBot,
+                     livery: entry.livery, rating: entry.isBot ? nil : entry.rating.map { String($0) })
+        }
+        self.init(setup: payload.setup, files: files, mySeat: payload.yourSeat, mode: .online(seconds: Double(payload.briefingSeconds)),
+                  fleet: fleet, isFleetLocked: true, menuMusic: menuMusic, now: now)
+    }
+
+    private init(setup: RaceSetup, files: RaceFiles, mySeat: Int, mode: Mode, fleet: [FleetRow], isFleetLocked: Bool,
+                 menuMusic: any MenuMusic, now: @escaping () -> Date) {
         self.mode = mode
+        self.fleet = fleet
+        self.isFleetLocked = isFleetLocked
         self.setup = setup
         self.mySeat = mySeat
         self.menuMusic = menuMusic
@@ -97,13 +128,6 @@ final class BriefingModel {
             current = Self.currentSummary(field: CurrentField(venue: venue, raceSeed: setup.raceSeed), window: window)
         } else {
             current = nil
-        }
-        let roster = FleetRoster(setup: setup, rivals: rivals)
-        fleet = setup.seats.indices.map { seat in
-            let isBot = roster[seat].isBot && seat != mySeat
-            return FleetRow(seat: seat, name: roster.name(of: seat, playerSeat: mySeat), isMe: seat == mySeat,
-                            isBot: isBot, livery: liveries[seat], rating: isBot ? nil : ratings(seat),
-                            isRival: isBot && roster[seat].isRival)
         }
     }
 
