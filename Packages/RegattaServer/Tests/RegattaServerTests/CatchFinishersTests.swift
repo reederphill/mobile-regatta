@@ -68,13 +68,10 @@ final class FakeRunningRaces: RunningRaces {
         try await rig.queue.join(QueueMatchmakerTests.player(0))
         let shown = await rig.secondsToLock(0)
         let lock = await rig.stepUntilLocked()
-        var lines = await rig.queue.gunLines().makeAsyncIterator()
+        // The gun is the race's own tick 0: its start sequence after the lock.
         let gunTicks = try #require(await rig.log.fleets.first).setup.startSequenceTicks
-        rig.clock.advance(Double(gunTicks) / Double(Race.tickRate))
-        await rig.queue.step()
         await rig.queue.stop()
-        let gun: TimeInterval? = await lines.next() == nil ? nil : rig.clock.now.timeIntervalSince(t0)
-        return (lock, shown, gun)
+        return (lock, shown, lock.map { $0 + Double(gunTicks) / Double(Race.tickRate) })
     }
 
     // MARK: Acceptance
@@ -180,18 +177,11 @@ final class FakeRunningRaces: RunningRaces {
 
     @Test func gunIsSeventyFiveSecondsAfterLock() async throws {
         let rig = Rig()
-        var lines = await rig.queue.gunLines().makeAsyncIterator()
         try await rig.queue.join(QueueMatchmakerTests.player(0))
         #expect(await rig.stepUntilLocked() == 60)
         let fleet = try #require(await rig.log.fleets.first)
         #expect(fleet.setup.startSequenceTicks == 75 * Race.tickRate)
-        rig.clock.advance(74)
-        await rig.queue.step()
-        rig.clock.advance(1)
-        await rig.queue.step()
         await rig.queue.stop()
-        #expect(await lines.next() != nil)
-        #expect(await lines.next() == nil)
     }
 
     /// The server's config: G2's values, and the dev overrides.

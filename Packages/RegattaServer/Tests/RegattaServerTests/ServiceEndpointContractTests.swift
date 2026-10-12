@@ -4,35 +4,41 @@ import RegattaDevAPI
 import RegattaLoadClient
 import RegattaServerKit
 import RegattaServiceClient
+import RegattaServiceContracts
 import RegattaServices
 import Synchronization
 import Testing
 
-/// #109's Identity, Terms (#145) and Queue (#146) contract suites through #143's runner against the real server: a `RegattaServer`
+/// #109's Identity, Terms (#145), Queue (#146), RaceSession (#148), Lobby (#152: its chat half), AnalyticsTransport (#156) and Profile (#159) contract suites through #143's runner against the real server: a `RegattaServer`
 /// started in process on a free port, reached over its `/service` WebSocket by `WebSocketServiceConnector`, which
 /// arranges each situation with `POST /dev/situation`. `CONTRACT_ENDPOINT` runs them against a server started elsewhere.
 @Suite(.timeLimit(.minutes(2))) struct ServiceEndpointContractTests {
-    /// The suites the server serves as of #148.
-    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession]
+    /// The suites the server serves as of #159. Of the Lobby suite it serves the chat; reports are #153's.
+    static let served: [ContractSuiteID] = [.identity, .terms, .queue, .raceSession, .lobby, .analytics, .profile]
+    static let lobbyParts: Set<LobbyServiceContract.Part> = [.chat]
 
     /// A dev config the suites can run on: the Terms suite's `versionBumped` situation needs an older version to have
     /// accepted; the Queue suite's `joinable` waits for fleet lock, so it locks 3 s after the oldest join (long enough
     /// to see the queued state and leave before it), and never holds for the RaceSession suite's races' finishers (#147).
+    /// The Lobby suite needs a phrase the filter blocks (`CHAT_EXTRA_BLOCKED_PHRASES` on a server started elsewhere).
     static func config() -> ServerConfig {
         var config = ServerConfig.dev()
         config.identity.termsVersion = 2
         config.queue.lockAfter = 3
         config.queue.catchFinishers = nil
+        config.chat.extraBlockedPhrases = [LobbyServiceContract.filteredText]
         return config
     }
 
     static func run(_ suites: [ContractSuiteID], against endpoint: String) async throws {
         for suite in suites {
-            try await ContractRunner.run(suite, over: .endpoint(endpoint, connector: WebSocketServiceConnector()))
+            // A fresh install for the AnalyticsTransport suite (#156): a server on Postgres keeps an earlier run's events.
+            try await ContractRunner.run(suite, over: .endpoint(endpoint, connector: WebSocketServiceConnector()), lobbyParts: lobbyParts,
+                                         analyticsInstall: InstallID("contract-\(UUID().uuidString)"))
         }
     }
 
-    /// Acceptance (#145, #146): the Identity, Terms and Queue suites pass against the real server through the runner.
+    /// Acceptance (#145, #146, #148, #152, #156, #159): the served suites pass against the real server through the runner.
     @Test func servedSuitesPassAgainstTheServer() async throws {
         let server = try await RegattaHTTPServer.start(config: Self.config())
         do {

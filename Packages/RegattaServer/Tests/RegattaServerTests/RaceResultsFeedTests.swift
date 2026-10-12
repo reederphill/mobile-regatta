@@ -81,35 +81,44 @@ extension RaceSims {
 
             // Through the lifecycle: one line when a race closes after the gun, none when one is cancelled.
             let rig = LifecycleRig(settings: LifecycleRig.quickGrace())
-            let lines = await rig.lifecycle.systemLines()
             let cancelled = try await rig.race(["T:0"])
             await rig.lifecycle.cancel(cancelled.id)
             await rig.end(cancelled)
-            let closed = try await rig.race(["T:0"])
-            let transport = KeptTransport()
-            try await closed.join(seat: 0, transport: transport)
-            var seq: UInt32 = 0
-            await rig.sail(closed, [0], to: 900, seq: &seq)
-            await closed.leave(seat: 0, transport: transport)
-            await rig.runUntilEnded(closed, limit: 1_200)
-            // Her boat sailed it home ahead of the bots: the race as its host closed it, with her seat's row first.
-            var outcome = await closed.host.close()
-            let rows = try #require(outcome.results).rows
-            outcome.results = RaceResults(rows: [SeatResult(seat: 0, place: 1, code: .finished, finishTick: 900)]
-                                              + rows.filter { $0.seat != 0 }.enumerated().map {
-                                                  SeatResult(seat: $1.seat, place: $0 + 2, code: $1.code, finishTick: $1.finishTick)
-                                              }, rated: false)
-            await rig.lifecycle.ended(closed.id, .closed(outcome))
+            /// A race `player` sails alone against the bots and closes having won, as a queue race or a dev-arranged one.
+            func sailHome(_ player: String, announces: Bool) async throws {
+                let closed = try await rig.race([player], announces: announces)
+                let transport = KeptTransport()
+                try await closed.join(seat: 0, transport: transport)
+                var seq: UInt32 = 0
+                await rig.sail(closed, [0], to: 900, seq: &seq)
+                await closed.leave(seat: 0, transport: transport)
+                await rig.runUntilEnded(closed, limit: 1_200)
+                // Her boat sailed it home ahead of the bots: the race as its host closed it, with her seat's row first.
+                var outcome = await closed.host.close()
+                let rows = try #require(outcome.results).rows
+                outcome.results = RaceResults(rows: [SeatResult(seat: 0, place: 1, code: .finished, finishTick: 900)]
+                                                  + rows.filter { $0.seat != 0 }.enumerated().map {
+                                                      SeatResult(seat: $1.seat, place: $0 + 2, code: $1.code, finishTick: $1.finishTick)
+                                                  }, rated: false)
+                await rig.lifecycle.ended(closed.id, .closed(outcome))
+            }
+            try await sailHome("T:0", announces: true)
             // The cancelled race said nothing: the first line is the closed race's.
-            let read = await collect(lines, seconds: 30) { _ in true }
-            #expect(read == [.winner(venue: "Test Bay", nickname: "NT:0")])
+            #expect(rig.lobby.lines == [.winner(venue: "Test Bay", nickname: "NT:0")])
+            // The line's player is stored with it, so her deletion takes it (#152).
+            #expect(rig.lobby.events.all.last == .winner(venue: "Test Bay", nickname: "NT:0", playerID: "T:0"))
 
             // A race the bots won: no line.
             let bots = try await rig.race(["T:1"])
             await rig.runUntilEnded(bots, limit: 300)
             #expect(await bots.host.outcome?.results?.rows.first?.seat != 0)
             await rig.end(bots)
-            #expect(await collect(lines, seconds: 0.3) { _ in true }.isEmpty)
+            #expect(rig.lobby.lines.count == 1)
+
+            // A dev-arranged race (#152): the same win is no line, and the lobby hears nothing of its finishers.
+            let before = rig.lobby.events.all
+            try await sailHome("T:2", announces: false)
+            #expect(rig.lobby.events.all == before)
         }
 
         /// #149: a report's roster, live and closed, and the last race's mark each bot: the ones that filled the fleet

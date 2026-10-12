@@ -107,17 +107,25 @@ public enum ContractRunner {
 
     /// Runs the wired suite `suite` through its adapter, a fresh connection for each situation from `links`. Throws
     /// `ContractViolation` on the first check that fails, and `ContractRunnerError.notWired` for a local suite.
-    public static func run(_ suite: ContractSuiteID, over links: ContractLinks) async throws {
+    /// `lobbyParts`: the halves of the Lobby suite to run (a server serves `.chat` before #153 adds `.reports`).
+    /// `analyticsInstall`: the install the AnalyticsTransport suite sends as. A real server keeps what an earlier run
+    /// sent, so a caller running against one passes a fresh id each run (#156).
+    public static func run(_ suite: ContractSuiteID, over links: ContractLinks,
+                           lobbyParts: Set<LobbyServiceContract.Part> = Set(LobbyServiceContract.Part.allCases),
+                           analyticsInstall: InstallID = InstallID("contract-install")) async throws {
         switch suite {
         case .identity: try await IdentityServiceContract().run { RemoteIdentityService(ServiceConnection(try await links.identity($0))) }
         case .terms: try await TermsServiceContract().run { RemoteTermsService(ServiceConnection(try await links.terms($0))) }
         case .queue: try await QueueServiceContract().run { RemoteQueueService(ServiceConnection(try await links.queue($0))) }
         case .raceSession:
             try await RaceSessionServiceContract().run { RemoteRaceSessionService(ServiceConnection(try await links.raceSession($0))) }
-        case .lobby: try await LobbyServiceContract().run { RemoteLobbyService(ServiceConnection(try await links.lobby($0))) }
+        case .lobby:
+            try await LobbyServiceContract().run(parts: lobbyParts) { RemoteLobbyService(ServiceConnection(try await links.lobby($0))) }
         case .profile: try await ProfileServiceContract().run { RemoteProfileService(ServiceConnection(try await links.profile($0))) }
         case .analytics:
-            try await AnalyticsTransportContract().run { RemoteAnalyticsTransport(ServiceConnection(try await links.analytics($0))) }
+            try await AnalyticsTransportContract(installID: analyticsInstall).run {
+                RemoteAnalyticsTransport(ServiceConnection(try await links.analytics($0)))
+            }
         case .deletion:
             try await DataDeletionServiceContract().run { RemoteDataDeletionService(ServiceConnection(try await links.deletion($0))) }
         case .store, .connectivity: throw ContractRunnerError.notWired(suite)

@@ -182,6 +182,22 @@ _Avoid_: room, channel
 The fixed set of phrases and emotes a player can post to the lobby with one tap.
 _Avoid_: emotes (as the umbrella term), canned messages
 
+**System line**:
+A lobby line the server posts itself: a queue race's gun (venue, boats, humans at the gun) or its human winner. Never filtered, never reportable. Bots never post, and a bot's win is no line.
+_Avoid_: announcement, bot message
+
+**Silence window**:
+The time a player can neither read nor post in the lobby: from her fleet lock until her own boat has a result, she gives her seat up for good, or the race ends. After it she sees the last hour's lines.
+_Avoid_: mute (a mute is a chat penalty), race mode
+
+**Communication restriction**:
+Game Center's `isUnderage` or `isPersonalizedCommunicationRestricted` on a player's account. The lobby is closed to her, chat and quick-chat both, and her connection never carries a chat line.
+_Avoid_: mute, chat ban (those are penalties)
+
+**Not sent**:
+What a post is when the filter blocks it (the bundled word list, or the classifier flagging it) or the server can't record it. Only its sender sees it, greyed out; it is never stored or shown to anyone else.
+_Avoid_: shadow-ban, masked
+
 **Fleet lock**:
 The moment an online race's boats are fixed and the briefing begins. Leaving before the gun costs nothing; a bot takes the seat.
 
@@ -239,6 +255,22 @@ _Avoid_: tip, tooltip, coach mark
 **Plain words**:
 The first call of each rule number on a player, for or against her, spelled out as a sentence with the number in a notice. Later calls of that number show only the line and badge on the water. Seen numbers are stored per device with hint progress and reset with it; Hints off doesn't silence them.
 _Avoid_: rule explanation, tooltip
+
+**Usage analytics**:
+The events a device sends the race server while Share usage data is on (#28): onboarding, matchmaking and netcode, livery try-ons, and MetricKit's performance summary. First-party only. Keyed to the install ID, never to the player, even though they travel on her signed-in connection. The server's own events (an earned unlock, say) are keyed to the player they are about.
+_Avoid_: telemetry (as the umbrella term), tracking
+
+**Install ID**:
+The random id a device makes on first use and keeps until the app is reinstalled. The only key a device's usage analytics carry.
+_Avoid_: device ID, user ID
+
+**Daily aggregate**:
+What the server keeps of usage analytics after the raw events go (90 days from receipt): per day, event and segment, how many events and distinct installs or players, and each property's count, sum and range. It holds no install ID or player.
+_Avoid_: rollup (as a noun for the data), summary
+
+**Segment**:
+The properties an event's daily aggregates are split by, such as device model for performance and step and tier for the practice → online funnel. Without one, an event's properties are counted each on its own, and how they combine is gone with the raw events.
+_Avoid_: dimension, cohort
 
 ### Course
 
@@ -468,6 +500,13 @@ _Avoid_: skin
 **Livery design**:
 A pattern and sail graphic with two or three colour slots, which the player fills from the safe palette. Starter designs are free, some are earned by racing, and the rest are sold one at a time.
 _Avoid_: skin, template
+
+**Earned design**:
+A livery design a player owns once her completed online races reach its threshold (10, 50 and 200 for the skiff). A completed race is one she finished, by distance, DSQ or OCS; a retirement or a cancelled race counts nothing. Before then she can try it on but not store it; a stored design she no longer owns races as the same colours on a free starter design.
+_Avoid_: unlock (as a noun for the design), achievement
+
+**Livery lock**:
+From her fleet's lock until its race closes, a player's livery can't be changed: the briefing has already shown it to the fleet.
 
 **Safe palette**:
 The only colours a livery may use: readable against every venue's water and never the hue of an on-water cue (vermillion, orange, yellow, or the give-way chevron's blue). White and charcoal are allowed.

@@ -205,7 +205,6 @@ extension RaceSims.RaceLifecycleTests {
         // Inside the grace (set one tick past her absence), beyond it (the absence itself), and the default minute.
         for (grace, counts) in [(gone + 1, true), (gone, false), (nil, false)] as [(Int?, Bool)] {
             let rig = Self.coverRig(graceTicks: grace)
-            let lines = await rig.lifecycle.systemLines()
             let race = try await Self.sailCovered(rig, seed: sailed.seed)
             await rig.end(race)
             // The race is what it was: same results, same digest, her row a finish in first place.
@@ -226,14 +225,13 @@ extension RaceSims.RaceLifecycleTests {
             let stayed = try #require(try await rig.archive.ratings.standing(of: "T:0"))
             #expect(stayed.completedRaces == (RaceLifecycleSettings().earnedProgressResultCodes.contains(other.code) ? 1 : 0) && stayed.wins == 0)
             // And nobody "won".
-            #expect(await collect(lines, seconds: 0.2) { _ in true }.isEmpty)
+            #expect(rig.lobby.lines.isEmpty)
             #expect(try await rig.lifecycle.lastRace(of: "T:1")?.report.results == sailed.results)
             _ = id
         }
 
         // Back six ticks before the bot would have finished, she sails the boat over the line herself: hers in full.
         let rig = Self.coverRig()
-        let lines = await rig.lifecycle.systemLines()
         let race = try await Self.sailCovered(rig, seed: sailed.seed, backAt: sailed.finish - 6)
         let outcome = try #require(await race.host.outcome)
         let row = try #require(outcome.results?.row(of: 1))
@@ -245,6 +243,6 @@ extension RaceSims.RaceLifecycleTests {
         #expect(changes.first { $0.playerID == "T:1" }?.place == 1)
         #expect(changes.first { $0.playerID == "T:1" }?.after.displayed == 1662)
         #expect(try await rig.archive.ratings.standing(of: "T:1").map { [$0.completedRaces, $0.wins] } == [1, 1])
-        #expect(await collect(lines, seconds: 5) { _ in true } == [.winner(venue: "Test Bay", nickname: "NT:1")])
+        #expect(rig.lobby.lines == [.winner(venue: "Test Bay", nickname: "NT:1")])
     }
 }

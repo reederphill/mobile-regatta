@@ -15,7 +15,8 @@ import RegattaServices
 // `StreamNext` on it is answered `StreamEnd`). Every service behind the identity, session and terms calls is gated
 // (#34), deny by default: signed in, allowed by Game Center's restrictions, and the current Terms of Use accepted
 // (deleting the player's online data needs only the sign-in). The lobby and the queue answer a refusal in the shape
-// the `OnlineAccess` contracts expect; the rest close the connection.
+// the `OnlineAccess` contracts expect, and the profile answers `notSignedIn` to a signed-out connection (#159); the
+// rest close the connection.
 // Until a session is signed in the connection's frames are capped at `preSignInFrameCap`, at the frame's header.
 
 /// What the endpoint is run with.
@@ -39,6 +40,11 @@ public struct ServiceEndpointConfig: Sendable {
     public var signInDeadline: Duration
     /// A connection with no frame either way (a WebSocket ping counts) for this long is closed (#146, R4).
     public var idleTimeout: Duration
+    /// Lobby calls a connection may make (#152): a bucket of `lobbyCallBurst`, refilled `lobbyCallsPerSecond`; reading
+    /// the history costs `lobbyHistoryCost`. A call the bucket can't pay for closes the connection.
+    public var lobbyCallBurst = 30.0
+    public var lobbyCallsPerSecond = 3.0
+    public var lobbyHistoryCost = 5.0
     public var serverBuild: String
 
     public init(termsVersion: Int = 1, sessionLifetime: TimeInterval = 30 * 86_400, streamIdleTimeout: Duration = .seconds(60),
@@ -107,14 +113,28 @@ public struct ServiceEndpoint: Sendable {
     public let matchmaker: QueueMatchmaker?
     /// The queue's races from fleet lock to the close (#148): race connections ask it about races that aren't running.
     public let lifecycle: RaceLifecycle?
+    /// The lobby (#152), when the server has one: shutdown ends its feeds, and `POST /dev/situation` arranges it.
+    public let lobby: LobbyHub?
+    /// Usage analytics (#156), when the server takes them: devices' batches, and the server's own events for other
+    /// tickets to record. `POST /dev/situation` arranges it.
+    public let analytics: AnalyticsIngest?
+    /// The analytics roll-up and 90-day purge (#156): the server runs it while it listens.
+    public let analyticsRetention: AnalyticsRetention?
+    /// The rating book (#151) the profile reads: `POST /dev/situation` arranges a player's counts on a dev server's.
+    public let ratings: (any RatingBook)?
 
     public init(config: ServiceEndpointConfig, sessions: SessionAuthority, backends: ServiceBackends = .none,
-                matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil) {
+                matchmaker: QueueMatchmaker? = nil, lifecycle: RaceLifecycle? = nil, lobby: LobbyHub? = nil,
+                analytics: AnalyticsIngest? = nil, analyticsRetention: AnalyticsRetention? = nil, ratings: (any RatingBook)? = nil) {
         self.config = config
         self.sessions = sessions
         self.backends = backends
         self.matchmaker = matchmaker
         self.lifecycle = lifecycle
+        self.lobby = lobby
+        self.analytics = analytics
+        self.analyticsRetention = analyticsRetention
+        self.ratings = ratings
     }
 
     public var store: any AccountStore { sessions.store }
@@ -154,6 +174,8 @@ public actor ServiceConnectionHandler {
     /// Closes a connection with no frame either way for `idleTimeout` (R4).
     private var idleWatch: Task<Void, Never>?
     private var lastActivity = ContinuousClock.now
+    /// What is left of the lobby call budget, and when it was last refilled.
+    private var lobbyBudget: (tokens: Double, at: ContinuousClock.Instant)?
 
     /// The backend services for the signed-in player, made once per session.
     private struct Backends {
@@ -308,6 +330,7 @@ public actor ServiceConnectionHandler {
             }
             answer(await ServiceAnswers.queue(request.call, service)) { .queueReply(ServiceReply(id: request.id, result: $0)) }
         case .lobbyRequest(let request):
+            guard payForLobbyCall(request.call) else { return close("too many lobby calls") }
             let service: any LobbyService
             if let denial {
                 guard let closure = denial.lobbyClosure else { return close("lobby refused: \(denial)") }
@@ -333,8 +356,16 @@ public actor ServiceConnectionHandler {
                 answer(await ServiceAnswers.raceSession(request.call, service)) { .raceSessionReply(ServiceReply(id: request.id, result: $0)) }
             }
         case .profileRequest(let request):
-            if let denial { return close("profile refused: \(denial)") }
-            guard let service = backends?.profile else { return close("no profile service") }
+            let service: any ProfileService
+            if let denial {
+                // Signed out, the profile answers as its contract says (#159); any other refusal closes.
+                guard case .notSignedIn = denial else { return close("profile refused: \(denial)") }
+                service = SignedOutProfileService()
+            } else if let profile = backends?.profile {
+                service = profile
+            } else {
+                return close("no profile service")
+            }
             answer(await ServiceAnswers.profile(request.call, service)) { .profileReply(ServiceReply(id: request.id, result: $0)) }
         case .analyticsRequest(let request):
             if let denial { return close("analytics refused: \(denial)") }
@@ -382,6 +413,9 @@ public actor ServiceConnectionHandler {
         if previous?.player.teamPlayerID != session?.player.teamPlayerID {
             for backend in backends?.scoped ?? [] { await backend.connectionEnded() }
             backends = session.map { Self.backends(endpoint.backends, $0.player) }
+        } else if let session, session.restrictions.isUnderage || session.restrictions.isPersonalizedCommunicationRestricted {
+            // The same player, now restricted from communication (#152): the feeds she opened before end here.
+            await (backends?.lobby as? any ConnectionScoped)?.connectionEnded()
         }
         lastTouch = session.map { _ in endpoint.sessions.now() }
         isSignedIn = session != nil
@@ -393,6 +427,21 @@ public actor ServiceConnectionHandler {
     private static func backends(_ factories: ServiceBackends, _ player: AccountPlayer) -> Backends {
         Backends(queue: factories.queue(player), raceSession: factories.raceSession(player), lobby: factories.lobby(player),
                  profile: factories.profile(player), analytics: factories.analytics(player), deletion: factories.deletion(player))
+    }
+
+    /// Takes a lobby call's cost from the connection's budget; false when it can't pay (#152).
+    private func payForLobbyCall(_ call: LobbyCall) -> Bool {
+        let config = endpoint.config, now = ContinuousClock.now
+        var budget = lobbyBudget ?? (config.lobbyCallBurst, now)
+        let elapsed = now - budget.at
+        let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+        budget.tokens = min(config.lobbyCallBurst, budget.tokens + seconds * config.lobbyCallsPerSecond)
+        budget.at = now
+        let cost = call == .history ? config.lobbyHistoryCost : 1
+        defer { lobbyBudget = budget }
+        guard budget.tokens >= cost else { return false }
+        budget.tokens -= cost
+        return true
     }
 
     // MARK: The gate (#34, #145)
