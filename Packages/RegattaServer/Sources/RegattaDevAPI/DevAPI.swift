@@ -12,6 +12,9 @@ public enum ServerPath {
     /// `POST`, dev only: puts a test account in a contract suite's situation (#145, the contract runner's
     /// `ServiceEndpointConnector`). Absent (404) otherwise.
     public static let devSituation = "/dev/situation"
+    /// The admin tool's routes (#154) are under this, on a server with admin tokens: each request carries an admin's
+    /// token. Absent (404) on a server without.
+    public static let admin = "/admin"
 }
 
 /// What `POST /dev/situation` takes, as query parameters: the test account (its Game Center ids, which the dev

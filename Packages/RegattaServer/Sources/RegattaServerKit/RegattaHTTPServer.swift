@@ -5,7 +5,7 @@ import NIOPosix
 import NIOWebSocket
 import RegattaDevAPI
 
-/// The server's one port (ADR 0006): HTTP/1.1 for `/health` and the dev routes, upgraded to a WebSocket at
+/// The server's one port (ADR 0006): HTTP/1.1 for `/health`, the dev routes and the admin tool (#154), upgraded to a WebSocket at
 /// `/race` for races and at `/service` for the service messages (#145). SwiftNIO's typed upgrade pipeline and async
 /// channels; one task per connection.
 public final class RegattaHTTPServer: Sendable {
@@ -305,7 +305,7 @@ public final class RegattaHTTPServer: Sendable {
                 case .body: break
                 case .end:
                     guard let head else { return }
-                    let reply = await handler.respond(method: head.method, uri: head.uri)
+                    let reply = await handler.respond(method: head.method, uri: head.uri, headers: head.headers)
                     var headers = HTTPHeaders()
                     headers.add(name: "Content-Type", value: "application/json")
                     headers.add(name: "Content-Length", value: String(reply.body.count))

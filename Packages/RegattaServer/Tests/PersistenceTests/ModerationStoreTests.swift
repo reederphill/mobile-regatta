@@ -108,4 +108,21 @@ import Testing
             #expect(try await store.reports(against: "T:b", since: .distantPast) == [report])
         }
     }
+
+    /// The admin audit (#154): newest first, for everyone or one player, and pruned with the moderation tables at a year.
+    @Test func theAdminAuditIsKeptAYear() async throws {
+        try await TestDatabase.withMigratedSchema { database in
+            let store = ModerationRecordStore(database), time = Self.time
+            let old = try await store.record(StoredAdminAction(actorID: "alice", action: "mute", playerID: "T:a", at: time))
+            let report = try await store.record(StoredAdminAction(actorID: "bob", action: "decide_report", playerID: "T:b", reportID: 4,
+                                                                  penaltyID: 9, detail: "uphold_chat", at: time + 60))
+            let nobody = try await store.record(StoredAdminAction(actorID: "bob", action: "note", at: time + 120))
+            #expect(try await store.actions(limit: 10) == [nobody, report, old])
+            #expect(try await store.actions(limit: 2) == [nobody, report])
+            #expect(try await store.actions(about: "T:b", limit: 10) == [report])
+            await #expect(throws: (any Error).self) { try await store.record(StoredAdminAction(actorID: "", action: "mute", at: time)) }
+            _ = try await store.prune(before: time + 30, at: time + 30)
+            #expect(try await store.actions(limit: 10) == [nobody, report])
+        }
+    }
 }

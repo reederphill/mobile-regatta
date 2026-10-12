@@ -36,6 +36,11 @@ public protocol ModerationStore: Sendable {
     /// The retention prune (#28, #160): penalties given before `cutoff` no longer in force at `time`, then reports filed
     /// before `cutoff` that no remaining penalty decided.
     func prune(before cutoff: Date, at time: Date) async throws -> (penalties: Int, reports: Int)
+    /// Records an admin's action in the audit (#154).
+    @discardableResult
+    func record(_ action: StoredAdminAction) async throws -> StoredAdminAction
+    /// The audit, newest first: every admin's, or those about `playerID`.
+    func actions(about playerID: String?, limit: Int) async throws -> [StoredAdminAction]
 }
 
 extension ModerationRecordStore: ModerationStore {}
@@ -45,6 +50,7 @@ public final class InMemoryModerationStore: ModerationStore {
     private struct State {
         var reports: [StoredReport] = []
         var penalties: [StoredPenalty] = []
+        var actions: [StoredAdminAction] = []
         var nextID: Int64 = 1
     }
 
@@ -132,7 +138,26 @@ public final class InMemoryModerationStore: ModerationStore {
             let decided = Set(state.penalties.compactMap(\.reportID))
             let reports = state.reports.count
             state.reports.removeAll { $0.createdAt < cutoff && !decided.contains($0.id) }
+            state.actions.removeAll { $0.at < cutoff }
             return (penalties - state.penalties.count, reports - state.reports.count)
+        }
+    }
+
+    @discardableResult
+    public func record(_ action: StoredAdminAction) async throws -> StoredAdminAction {
+        state.withLock { state in
+            var recorded = action
+            recorded.id = state.nextID
+            state.nextID += 1
+            state.actions.append(recorded)
+            return recorded
+        }
+    }
+
+    public func actions(about playerID: String?, limit: Int) async throws -> [StoredAdminAction] {
+        state.withLock { state in
+            Array(state.actions.filter { playerID == nil || $0.playerID == playerID }
+                .sorted { ($0.at, $0.id) > ($1.at, $1.id) }.prefix(limit))
         }
     }
 }
@@ -160,13 +185,13 @@ public enum ModerationError: Error, Equatable, Sendable {
     case unknownPenalty
 }
 
-/// A racing penalty (#26), always an admin's.
-public enum RacingPenalty: Sendable, Equatable, CaseIterable {
+/// A racing penalty (#26), always an admin's. The raw values are the admin tool's words for them (#154).
+public enum RacingPenalty: String, Sendable, Equatable, CaseIterable {
     case warning
-    case suspension24h
-    case suspension7d
+    case suspension24h = "suspension_24h"
+    case suspension7d = "suspension_7d"
     case permanent
-    case ratingReset
+    case ratingReset = "rating_reset"
 }
 
 /// What an admin decides about a report.
@@ -179,6 +204,39 @@ public enum ReviewDecision: Sendable, Equatable {
     case overrideNickname
     /// A race report upheld, with the penalty.
     case racing(RacingPenalty)
+
+    /// The admin tool's word for it (#154): `dismiss`, `uphold_chat`, `override_nickname`, or a racing penalty's.
+    public var name: String {
+        switch self {
+        case .dismiss: "dismiss"
+        case .upholdChat: "uphold_chat"
+        case .overrideNickname: "override_nickname"
+        case .racing(let penalty): penalty.rawValue
+        }
+    }
+
+    public init?(name: String) {
+        switch name {
+        case "dismiss": self = .dismiss
+        case "uphold_chat": self = .upholdChat
+        case "override_nickname": self = .overrideNickname
+        default:
+            guard let penalty = RacingPenalty(rawValue: name) else { return nil }
+            self = .racing(penalty)
+        }
+    }
+
+    /// Every decision, by name.
+    public static let all: [ReviewDecision] = [.dismiss, .upholdChat, .overrideNickname] + RacingPenalty.allCases.map { .racing($0) }
+}
+
+/// What the admin audit records an admin did (#154).
+public enum AdminAction: String, Sendable, Equatable {
+    case decideReport = "decide_report"
+    case penalize
+    case mute
+    case overrideNickname = "override_nickname"
+    case liftPenalty = "lift_penalty"
 }
 
 public struct ModerationSettings: Sendable, Equatable {
@@ -391,6 +449,7 @@ public final class Moderation: LobbyModeration {
             }
         }
         if filed.isChat { await lobby.value?.refresh(players: [filed.subjectID]) }
+        await audit(.decideReport, by: actor, player: filed.subjectID, report: reportID, penalty: penalty?.id, detail: decision.name, at: time)
         return penalty
     }
 
@@ -422,7 +481,9 @@ public final class Moderation: LobbyModeration {
     @discardableResult
     public func penalize(_ playerID: String, _ penalty: RacingPenalty, by actor: AdminActor, report: Int64? = nil) async throws -> StoredPenalty {
         let time = now()
-        return try await serially(playerID) { [self] in try await give(penalty, to: playerID, report: report, by: actor, at: time) }
+        let given = try await serially(playerID) { [self] in try await give(penalty, to: playerID, report: report, by: actor, at: time) }
+        await audit(.penalize, by: actor, player: playerID, report: report, penalty: given.id, detail: penalty.rawValue, at: time)
+        return given
     }
 
     private func give(_ racing: RacingPenalty, to playerID: String, report: Int64?, by actor: AdminActor, at time: Date) async throws -> StoredPenalty {
@@ -449,6 +510,22 @@ public final class Moderation: LobbyModeration {
         let time = now()
         let given = try await serially(playerID) { [self] in try await escalate(playerID, report: nil, by: actor, at: time) }
         await lobby.value?.refresh(players: [playerID])
+        await audit(.mute, by: actor, player: playerID, penalty: given.id, detail: given.kind.rawValue, at: time)
+        return given
+    }
+
+    /// An admin overrides the player's nickname outright (#34): she shows as "Sailor" and her sail number from her next
+    /// sign-in. An override in force already is returned as it is.
+    @discardableResult
+    public func overrideNickname(_ playerID: String, by actor: AdminActor) async throws -> StoredPenalty {
+        let time = now()
+        let given = try await serially(playerID) { [self] () -> StoredPenalty in
+            if let active = try await store.penalties(of: playerID).first(where: { $0.kind == .nicknameOverride && $0.applies(at: time) }) {
+                return active
+            }
+            return try await store.add(StoredPenalty(playerID: playerID, kind: .nicknameOverride, actorID: actor.id, startsAt: time))
+        }
+        await audit(.overrideNickname, by: actor, player: playerID, penalty: given.id, at: time)
         return given
     }
 
@@ -464,6 +541,19 @@ public final class Moderation: LobbyModeration {
             return penalty
         }
         if lifted.kind.isChat { await lobby.value?.refresh(players: [playerID]) }
+        await audit(.liftPenalty, by: actor, player: playerID, penalty: penaltyID, detail: lifted.kind.rawValue, at: time)
+    }
+
+    /// Records what an admin did in the audit (#154). The action stands whatever becomes of its record: a write that
+    /// fails is logged.
+    private func audit(_ action: AdminAction, by actor: AdminActor, player: String?, report: Int64? = nil, penalty: Int64? = nil,
+                       detail: String = "", at time: Date) async {
+        do {
+            try await store.record(StoredAdminAction(actorID: actor.id, action: action.rawValue, playerID: player, reportID: report,
+                                                     penaltyID: penalty, detail: detail, at: time))
+        } catch {
+            Self.log("can't record \(actor.id)'s \(action.rawValue) in the audit: \(error)")
+        }
     }
 
     /// Writes the player's racing suspension to the restriction store, where the queue and the profile read it: a ban

@@ -13,12 +13,15 @@ public enum Route: Hashable, Sendable {
     case instantRace
     /// `POST /dev/situation`, dev only (#145).
     case devSituation
+    /// `/admin/…` (#154), on a server with admin tokens: the admin tool answers it, and refuses it without a token.
+    case admin
     /// `/race` or `/service` without a WebSocket upgrade.
     case upgradeRequired
     case methodNotAllowed
     case notFound
 
-    public static func resolve(method: HTTPMethod, path: String, environment: ServerEnvironment) -> Route {
+    public static func resolve(method: HTTPMethod, path: String, environment: ServerEnvironment, hasAdmin: Bool = false) -> Route {
+        if hasAdmin, path == ServerPath.admin || path.hasPrefix(ServerPath.admin + "/") { return .admin }
         switch path {
         case ServerPath.health:
             return method == .GET || method == .HEAD ? .health : .methodNotAllowed
@@ -63,6 +66,8 @@ public struct RequestHandler: Sendable {
     public let registry: RaceRegistry
     /// The service endpoint (#145), when the server has one.
     public let services: ServiceEndpoint?
+    /// The admin tool (#154): with the service endpoint's moderation, when the config has admin tokens.
+    public let admin: AdminAPI?
     /// Unix seconds now, for token expiry.
     let now: @Sendable () -> Int64
 
@@ -72,11 +77,14 @@ public struct RequestHandler: Sendable {
         self.registry = registry
         self.services = services
         self.now = now
+        admin = config.admin.tokens.isEmpty ? nil : services.flatMap { services in
+            services.moderation.map { AdminAPI(settings: config.admin, moderation: $0, archive: services.archive) }
+        }
     }
 
-    public func respond(method: HTTPMethod, uri: String) async -> HTTPReply {
+    public func respond(method: HTTPMethod, uri: String, headers: HTTPHeaders = HTTPHeaders()) async -> HTTPReply {
         let (path, query) = Self.split(uri)
-        switch Route.resolve(method: method, path: path, environment: config.environment) {
+        switch Route.resolve(method: method, path: path, environment: config.environment, hasAdmin: admin != nil) {
         case .health:
             return HTTPReply(.ok, json: HealthStatus(status: "ok", environment: config.environment.name,
                                                      serverBuild: config.serverBuild,
@@ -91,6 +99,9 @@ public struct RequestHandler: Sendable {
                 return HTTPReply(.badRequest, error: "service, situation, teamPlayerID and gamePlayerID are required")
             }
             return await services.arrange(request)
+        case .admin:
+            guard let admin else { return HTTPReply(.notFound, error: "not found") }
+            return await admin.respond(method: method, path: path, query: query, headers: headers)
         case .upgradeRequired:
             return HTTPReply(.upgradeRequired, error: "\(path) is a WebSocket")
         case .methodNotAllowed:

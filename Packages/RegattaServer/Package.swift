@@ -19,6 +19,7 @@ let package = Package(
         .executable(name: "RegattaServer", targets: ["RegattaServer"]),
         .executable(name: "regatta-loadclient", targets: ["regatta-loadclient"]),
         .executable(name: "regatta-bench", targets: ["regatta-bench"]),
+        .executable(name: "regatta-admin", targets: ["regatta-admin"]),
     ],
     dependencies: [
         .package(path: "../RegattaCore"),
@@ -128,6 +129,9 @@ let package = Package(
             ]
         ),
         .executableTarget(name: "regatta-loadclient", dependencies: ["RegattaLoadClient"]),
+        // The admin tool's command line (#154): each command one request to a server's `/admin/` routes. Foundation only.
+        .target(name: "RegattaAdminClient"),
+        .executableTarget(name: "regatta-admin", dependencies: ["RegattaAdminClient"]),
         // The tick benchmark (#69): scenarios, the tick loop, stats, the gate and the JSON report.
         .target(
             name: "Bench",
@@ -187,6 +191,8 @@ let package = Package(
                 "RegattaLoadClient",
                 "RegattaDevAPI",
                 "RaceHost",
+                // The admin tool's command line (#154).
+                "RegattaAdminClient",
                 .product(name: "RegattaCore", package: "RegattaCore"),
                 .product(name: "RegattaProtocol", package: "RegattaProtocol"),
                 .product(name: "RegattaClient", package: "RegattaClient"),
