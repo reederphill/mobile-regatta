@@ -1,3 +1,4 @@
+import RegattaCore
 import RegattaProtocol
 import RegattaServiceClient
 import RegattaServices
@@ -128,6 +129,8 @@ final class FakeService: Sendable {
         case signOut(link: Int)
         case ping
         case closed(link: Int)
+        /// A queue, race session or profile call (#162), by its name.
+        case call(String, link: Int)
     }
 
     struct Script: Sendable {
@@ -144,12 +147,26 @@ final class FakeService: Sendable {
         var answersPings = true
         var queue = QueueState.idle
         var terms = WireTermsStatus.needsAcceptance(current: 2, lastAccepted: nil)
+        /// The answers to the queue's join and leave; nil for none.
+        var join: QueueResult? = .done
+        var leave: QueueResult? = .done
+        /// The answers to the race session's calls; nil for none (the request is held: `answerHeld`).
+        var handOff: RaceSessionResult? = .noRace
+        var rejoin: RaceSessionResult? = .noRace
+        var lastRace: RaceSessionResult? = .noLastRace
+        /// What a results or rating stream is primed with when it opens.
+        var results: [RaceUpdate] = []
+        var ratings: [RatingChange] = []
+        var profile: ProfileResult? = .notSignedIn
+        /// The answer to `saveLivery`; nil stores what was sent.
+        var saveLivery: ProfileResult?
     }
 
     private struct State {
         var script = Script()
         var links: [FakeLink] = []
         var issued = 0
+        var held: [(link: FakeLink, id: UInt32)] = []
     }
 
     let events = Recorder<Event>()
@@ -185,7 +202,26 @@ final class FakeService: Sendable {
             state.script.queue = queue
             return state.links.last
         }
-        link?.push(queue)
+        link?.push(.queue) { .queueReply(ServiceReply(id: $0, result: .state(queue.wire))) }
+    }
+
+    /// The race's results change, for the newest link's results streams.
+    func push(_ update: RaceUpdate) {
+        state.withLock { $0.links.last }?.push(.results) { .raceSessionReply(ServiceReply(id: $0, result: .update(update.wire))) }
+    }
+
+    /// A rating change, for the newest link's rating streams.
+    func push(_ change: RatingChange) {
+        state.withLock { $0.links.last }?.push(.ratings) { .raceSessionReply(ServiceReply(id: $0, result: .ratingChange(change.wire))) }
+    }
+
+    /// Answers the race session calls the script left unanswered, late.
+    func answerHeld(_ result: RaceSessionResult) {
+        let held = state.withLock { state in
+            defer { state.held = [] }
+            return state.held
+        }
+        for (link, id) in held { link.deliver(.raceSessionReply(ServiceReply(id: id, result: result))) }
     }
 
     fileprivate func answersPings() -> Bool { state.withLock { $0.script.answersPings } }
@@ -235,9 +271,54 @@ final class FakeService: Sendable {
             }
             link.deliver(.termsReply(ServiceReply(id: request.id, result: result)))
         case .queueRequest(let request):
-            if request.call == .openStateUpdates { link.push(state.withLock { $0.script.queue }) }
+            let script = state.withLock { $0.script }
+            switch request.call {
+            case .openStateUpdates:
+                link.open(.queue, id: request.id, primed: [{ .queueReply(ServiceReply(id: $0, result: .state(script.queue.wire))) }])
+            case .join:
+                events.add(.call("join", link: link.number))
+                if let result = script.join { link.deliver(.queueReply(ServiceReply(id: request.id, result: result))) }
+            case .leave:
+                events.add(.call("leave", link: link.number))
+                if let result = script.leave { link.deliver(.queueReply(ServiceReply(id: request.id, result: result))) }
+            }
+        case .raceSessionRequest(let request):
+            events.add(.call("\(request.call)", link: link.number))
+            let script = state.withLock { $0.script }
+            let result: RaceSessionResult?
+            switch request.call {
+            case .handOff: result = script.handOff
+            case .rejoin: result = script.rejoin
+            case .lastRace: result = script.lastRace
+            case .openResults:
+                return link.open(.results, id: request.id, primed: script.results.map { update in
+                    { .raceSessionReply(ServiceReply(id: $0, result: .update(update.wire))) }
+                })
+            case .openRatingChanges:
+                return link.open(.ratings, id: request.id, primed: script.ratings.map { change in
+                    { .raceSessionReply(ServiceReply(id: $0, result: .ratingChange(change.wire))) }
+                })
+            }
+            if let result {
+                link.deliver(.raceSessionReply(ServiceReply(id: request.id, result: result)))
+            } else {
+                state.withLock { $0.held.append((link, request.id)) }
+            }
+        case .profileRequest(let request):
+            let script = state.withLock { $0.script }
+            switch request.call {
+            case .profile:
+                events.add(.call("profile", link: link.number))
+                if let result = script.profile { link.deliver(.profileReply(ServiceReply(id: request.id, result: result))) }
+            case .saveLivery(let livery):
+                events.add(.call("saveLivery \(livery.sailNumber)", link: link.number))
+                link.deliver(.profileReply(ServiceReply(id: request.id, result: script.saveLivery ?? .livery(livery))))
+            }
         case .streamNext(let next):
-            link.asked(next.id)
+            link.asked(next.id, stream: next.stream)
+        case .streamClose(let close):
+            events.add(.call("streamClose", link: link.number))
+            link.closeStream(close.stream)
         default:
             break
         }
@@ -245,8 +326,13 @@ final class FakeService: Sendable {
 }
 
 final class FakeLink: SessionLink {
-    private struct Queue {
-        var waiting: [QueueState] = []
+    enum StreamKind: Sendable { case queue, results, ratings }
+    typealias Item = @Sendable (UInt32) -> Message
+
+    /// One stream the client opened: the items it hasn't read, or the `StreamNext` waiting for one.
+    private struct Stream {
+        var kind: StreamKind
+        var waiting: [Item] = []
         var asked: UInt32?
     }
 
@@ -257,7 +343,7 @@ final class FakeLink: SessionLink {
     private let gone: AsyncStream<Void>
     private let goneEnd: AsyncStream<Void>.Continuation
     private let isClosed = Mutex(false)
-    private let queue = Mutex(Queue())
+    private let streams = Mutex<[UInt32: Stream]>([:])
     private let server: FakeService
 
     fileprivate init(_ server: FakeService, number: Int) {
@@ -296,27 +382,39 @@ final class FakeLink: SessionLink {
         frames.yield(try! Frame(seq: 0, tick: 0, message: message).encoded())
     }
 
-    fileprivate func push(_ state: QueueState) {
-        let asked = queue.withLock { queue -> UInt32? in
-            guard let asked = queue.asked else {
-                queue.waiting.append(state)
-                return nil
-            }
-            queue.asked = nil
-            return asked
-        }
-        if let asked { deliver(.queueReply(ServiceReply(id: asked, result: .state(state.wire)))) }
+    fileprivate func open(_ kind: StreamKind, id: UInt32, primed: [Item]) {
+        streams.withLock { $0[id] = Stream(kind: kind, waiting: primed) }
     }
 
-    fileprivate func asked(_ id: UInt32) {
-        let state = queue.withLock { queue -> QueueState? in
-            guard !queue.waiting.isEmpty else {
-                queue.asked = id
+    fileprivate func closeStream(_ id: UInt32) { streams.withLock { $0[id] = nil } }
+
+    /// `item` to every stream of `kind` the client has open.
+    fileprivate func push(_ kind: StreamKind, _ item: @escaping Item) {
+        let asked = streams.withLock { streams -> [UInt32] in
+            var asked: [UInt32] = []
+            for id in streams.keys where streams[id]?.kind == kind {
+                if let request = streams[id]?.asked {
+                    streams[id]?.asked = nil
+                    asked.append(request)
+                } else {
+                    streams[id]?.waiting.append(item)
+                }
+            }
+            return asked
+        }
+        for request in asked { deliver(item(request)) }
+    }
+
+    fileprivate func asked(_ id: UInt32, stream: UInt32) {
+        let item = streams.withLock { streams -> Item? in
+            guard streams[stream] != nil else { return nil }
+            guard streams[stream]?.waiting.isEmpty == false else {
+                streams[stream]?.asked = id
                 return nil
             }
-            return queue.waiting.removeFirst()
+            return streams[stream]?.waiting.removeFirst()
         }
-        if let state { deliver(.queueReply(ServiceReply(id: id, result: .state(state.wire)))) }
+        if let item { deliver(item(id)) }
     }
 }
 
@@ -330,6 +428,9 @@ struct SessionRig: Sendable {
     /// Unlike any other of the session's waits, so a test can tell them apart.
     static let openDeadline = Duration.seconds(7)
     static let signatureDeadline = Duration.seconds(9)
+    static let openWait = Duration.milliseconds(4_500)
+    static let callTimeout = Duration.seconds(11)
+    static let leaveTimeout = Duration.milliseconds(2_500)
 
     let server = FakeService()
     let sleeper = VirtualSleeper()
@@ -357,6 +458,9 @@ struct SessionRig: Sendable {
         var settings = OnlineSession.Settings()
         settings.openDeadline = Self.openDeadline
         settings.signatureDeadline = Self.signatureDeadline
+        settings.openWait = Self.openWait
+        settings.callTimeout = Self.callTimeout
+        settings.leaveTimeout = Self.leaveTimeout
         session = OnlineSession(
             OnlineSession.Dependencies(
                 connect: { try server.connect() }, device: device, tokens: store, sleep: { try await sleeper.sleep($0) },
@@ -385,6 +489,6 @@ struct SessionRig: Sendable {
 
     /// The back-off's sleeps so far: not the open deadline's or the keep-alive's.
     var backoffs: [Duration] {
-        sleeper.requested.filter { $0 != Self.openDeadline && $0 != Self.signatureDeadline && $0 != .seconds(30) && $0 != .seconds(10) }
+        sleeper.requested.filter { ![Self.openDeadline, Self.signatureDeadline, Self.openWait, Self.callTimeout, Self.leaveTimeout, .seconds(30), .seconds(10)].contains($0) }
     }
 }
