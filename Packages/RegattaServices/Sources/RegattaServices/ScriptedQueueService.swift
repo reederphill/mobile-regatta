@@ -8,11 +8,16 @@ public struct QueueScenario: Sendable {
     /// The changes that follow a successful `join`, replacing any background ones still to come: the
     /// countdown and the queued count, ending in `.fleetLocked`.
     public var afterJoin: [QueueState]
+    /// Whether a join is taken while the state says not signed in or terms not accepted. The fake identity and terms
+    /// don't tell the fake queue, and the app joins only past its own gate (#138): the join stands for the server's
+    /// having heard of the sign-in and the acceptance.
+    public var admitsAtJoin: Bool
 
-    public init(initial: QueueState, background: [QueueState] = [], afterJoin: [QueueState] = []) {
+    public init(initial: QueueState, background: [QueueState] = [], afterJoin: [QueueState] = [], admitsAtJoin: Bool = false) {
         self.initial = initial
         self.background = background
         self.afterJoin = afterJoin
+        self.admitsAtJoin = admitsAtJoin
     }
 }
 
@@ -25,6 +30,7 @@ public actor ScriptedQueueService: QueueService {
     /// The state before the script's first step: a stream opened at its start gives it first.
     private var scriptStart: QueueState
     private let afterJoin: [QueueState]
+    private let admitsAtJoin: Bool
     /// Whether a join is under way: after `join`, until the script reaches fleet lock or `leave` is called.
     private var joined = false
 
@@ -33,6 +39,7 @@ public actor ScriptedQueueService: QueueService {
         script = StreamScript(scenario.background)
         scriptStart = scenario.initial
         afterJoin = scenario.afterJoin
+        admitsAtJoin = scenario.admitsAtJoin
     }
 
     /// Each stream reads the script with its own cursor (#314): the first read gives the state when the stream was
@@ -63,6 +70,9 @@ public actor ScriptedQueueService: QueueService {
     public func join() throws {
         guard !joined else { throw QueueError.alreadyQueued }
         switch current {
+        case .unavailable(.notSignedIn) where admitsAtJoin, .unavailable(.termsNotAccepted) where admitsAtJoin:
+            // Past the app's gate: signed in and agreed by now.
+            current = .idle
         case .unavailable(let refusal): throw QueueError.refused(refusal)
         case .queued, .fleetLocked: throw QueueError.alreadyQueued
         case .idle: break

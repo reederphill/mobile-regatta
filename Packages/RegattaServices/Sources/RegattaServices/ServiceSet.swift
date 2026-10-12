@@ -108,22 +108,29 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
     /// The seconds the queue's hold scenario starts its wait at: more than a countdown alone ever shows (#16, G2).
     public static let holdSeconds = 150
 
-    /// What the `joinable` scenarios' queue says after a join, in order, ending in fleet lock.
+    /// What the scenario's queue says after a join (#140): the wait, fleet lock, and then idle again, since the fakes
+    /// sail no race and the queue is free for the next join. Every scenario whose player can get past Race online's
+    /// gate has a queue to join (`joinable`'s, unless it is one of the other two); the ones the server refuses, and
+    /// the ones that never open a session, have none.
     public var afterJoin: [QueueState] {
         func queued(_ players: Int, _ seconds: Int) -> QueueState {
             .queued(QueuedStatus(queuedPlayers: players, secondsToLock: seconds))
         }
         switch self {
-        case .joinable: return [queued(1, 40), queued(3, 25), queued(4, 8), queued(4, 0), .fleetLocked]
-        case .joinableAlone: return [queued(1, 40), queued(1, 25), queued(1, 8), queued(1, 0), .fleetLocked]
+        case .joinableAlone: return [queued(1, 40), queued(1, 25), queued(1, 8), queued(1, 0), .fleetLocked, .idle]
         case .joinableHold:
             return [queued(3, Self.holdSeconds), queued(3, 120), queued(4, 90), queued(4, 60), queued(4, 30), queued(4, 8),
-                    queued(4, 0), .fleetLocked]
-        default: return []
+                    queued(4, 0), .fleetLocked, .idle]
+        case .queued, .suspended, .suspendedPermanent, .cooldown, .cannotRace, .updateRequired, .multiplayerRestricted,
+             .termsSaveFailed, .sessionFailed, .unreachable, .connecting:
+            return []
+        case .joinable, .signedOut, .underage, .communicationRestricted, .offline, .cancelledRace, .onlineResults,
+             .onlineResultsUnrated, .termsBump:
+            return [queued(1, 40), queued(3, 25), queued(4, 8), queued(4, 0), .fleetLocked, .idle]
         }
     }
 
-    /// The briefing the `queued` and `joinable` scenarios hand off at fleet lock (#140, #147): six seats on the bundled
+    /// The briefing every scenario with a queue to join, and `queued`, hands off at fleet lock (#140, #147): six seats on the bundled
     /// defaults, the player in seat 0, three other humans and two bots.
     public static func briefing() -> BriefingPayload {
         let names = [Story.player.alias, "Wren", "Kestrel", "Tern", "Skua", "Petrel"]
@@ -237,7 +244,9 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
             let raceSession: ScriptedRaceSessionService
             switch scenario {
             case .signedOut, .termsSaveFailed, .sessionFailed, .unreachable, .connecting:
-                queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.notSignedIn)))
+                // Signed in and agreed, `signed-out`'s player joins the queue (#140).
+                queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.notSignedIn), afterJoin: scenario.afterJoin,
+                                                           admitsAtJoin: scenario == .signedOut))
             case .suspended:
                 queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.suspended(until: FakeServiceScenario.suspendedUntil))))
             case .suspendedPermanent: queue = ScriptedQueueService(QueueScenario(initial: .unavailable(.suspended(until: nil))))
@@ -252,24 +261,24 @@ public enum FakeServiceScenario: String, CaseIterable, Sendable {
                     initial: .queued(QueuedStatus(queuedPlayers: 6, secondsToLock: 30)),
                     background: [.queued(QueuedStatus(queuedPlayers: 9, secondsToLock: 15)),
                                  .queued(QueuedStatus(queuedPlayers: 11, secondsToLock: 5)), .fleetLocked]))
-            case .joinable, .joinableAlone, .joinableHold:
-                queue = ScriptedQueueService(QueueScenario(initial: .idle, afterJoin: scenario.afterJoin))
-            default: queue = ScriptedQueueService(QueueScenario(initial: .idle))
+            default: queue = ScriptedQueueService(QueueScenario(initial: .idle, afterJoin: scenario.afterJoin))
             }
+            // The seat a fleet lock hands off, and its briefing.
+            let handOff = scenario == .queued || !scenario.afterJoin.isEmpty
+                ? HandOff(raceID: Self.race, token: RaceToken(bytes: [0xF0, 0x0D]), briefing: FakeServiceScenario.briefing()) : nil
             switch scenario {
-            case .queued, .joinable, .joinableAlone, .joinableHold:
-                raceSession = ScriptedRaceSessionService(RaceSessionScenario(
-                    handOff: HandOff(raceID: Self.race, token: RaceToken(bytes: [0xF0, 0x0D]), briefing: FakeServiceScenario.briefing())))
             case .cancelledRace:
                 let partial = RaceReport(
                     raceID: Self.race, seat: 0, roster: [RosterEntry(name: player.alias, colorIndex: 0), RosterEntry(name: "Bot Tern", colorIndex: 1)],
                     results: RaceResults(rows: [], rated: true), sailing: [0, 1], incidents: [], isClosed: false)
-                raceSession = ScriptedRaceSessionService(RaceSessionScenario(results: [.report(partial), .cancelled(.serverShutdown)]))
+                raceSession = ScriptedRaceSessionService(RaceSessionScenario(
+                    handOff: handOff, results: [.report(partial), .cancelled(.serverShutdown)]))
             case .onlineResults, .onlineResultsUnrated:
                 let pacing = wait.map { RaceSessionPacing(interval: FakeServiceScenario.onlineResultsPacing, wait: $0) }
-                raceSession = ScriptedRaceSessionService(
-                    FakeServiceScenario.onlineRace(rated: scenario == .onlineResults, pacing: pacing))
-            default: raceSession = ScriptedRaceSessionService(RaceSessionScenario())
+                var race = FakeServiceScenario.onlineRace(rated: scenario == .onlineResults, pacing: pacing)
+                race.handOff = handOff
+                raceSession = ScriptedRaceSessionService(race)
+            default: raceSession = ScriptedRaceSessionService(RaceSessionScenario(handOff: handOff))
             }
 
             let me = LobbyAuthor(gamePlayerID: player.gamePlayerID, nickname: player.alias,

@@ -37,6 +37,11 @@ import Testing
                 #expect(lobby == .closed(.notSignedIn))
                 await #expect(throws: ProfileError.notSignedIn) { try await services.profile.profile() }
                 #expect(await services.identity.signIn().player != nil, "signing in gives a player")
+                // Past the gate she joins the queue (#140): the fake queue takes the join for the sign-in.
+                try await services.queue.join()
+                var states: [QueueState] = []
+                for await state in services.queue.stateUpdates() { states.append(state) }
+                #expect(states == [.idle] + FakeServiceScenario.joinable.afterJoin)
             case .underage:
                 #expect(player?.isUnderage == true && player?.canChat == false)
                 #expect(lobby == .closed(.communicationRestricted))
@@ -54,6 +59,8 @@ import Testing
                 #expect(terms == .needsAcceptance(current: TermsVersion(2), lastAccepted: TermsVersion(1)), "the sheet asks again")
                 #expect(lobby == .closed(.termsNotAccepted))
                 #expect(try await services.terms.accept(TermsVersion(2)).isAccepted)
+                try await services.queue.join()
+                #expect(try await services.raceSession.handOff().briefing == FakeServiceScenario.briefing(), "a queue to join, to its briefing")
             case .offline:
                 await #expect(throws: StoreError.offline) { try await services.store.products() }
                 await #expect(throws: AnalyticsError.unavailable) {
@@ -79,7 +86,12 @@ import Testing
                 var states: [QueueState] = []
                 for await state in services.queue.stateUpdates() { states.append(state) }
                 #expect(states == [.idle] + scenario.afterJoin, "\(scenario): the wait after a join")
-                #expect(states.last == .fleetLocked)
+                #expect(states.suffix(2) == [.fleetLocked, .idle], "the fakes sail no race: the queue is free after the lock")
+                // Race online again after the lock (#140): the wait plays again.
+                try await services.queue.join()
+                var again: [QueueState] = []
+                for await state in services.queue.stateUpdates() { again.append(state) }
+                #expect(again == states)
                 let waits = states.compactMap { state -> QueuedStatus? in
                     if case .queued(let status) = state { status } else { nil }
                 }
