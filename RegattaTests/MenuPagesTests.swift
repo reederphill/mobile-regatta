@@ -73,7 +73,7 @@ import UIKit
         #expect(PauseMenu.rows(style: .online, hasToggles: true, hasHelp: true, canRestart: true, canTune: true)
             == [.resume, .toggles, .help, .leave])
         #expect(PauseMenu.rows(style: .practice, hasToggles: true, hasHelp: true, canRestart: true, canTune: true)
-            == [.resume, .toggles, .help, .restart, .tuning, .leave])
+            == [.resume, .toggles, .help, .restart, .tuningPanel, .leave])
         #expect(PauseMenu.rows(style: .practice, hasToggles: false, hasHelp: false, canRestart: false, canTune: false)
             == [.resume, .leave])
         #expect(PauseMenu.title(.online) == "Race continues" && PauseMenu.title(.practice) == "Paused")

@@ -13,7 +13,7 @@ struct PauseMenu: View {
 
     /// What the menu holds, top to bottom.
     enum Row: Equatable {
-        case resume, toggles, help, restart, tuning, leave
+        case resume, toggles, help, restart, tuningPanel, leave
     }
 
     /// The rows for `style`: an online race can't be sailed again from its start (#25) and has no tuning panel,
@@ -23,7 +23,7 @@ struct PauseMenu: View {
         if hasToggles { rows.append(.toggles) }
         if hasHelp { rows.append(.help) }
         if canRestart, style == .practice { rows.append(.restart) }
-        if canTune, style == .practice { rows.append(.tuning) }
+        if canTune, style == .practice { rows.append(.tuningPanel) }
         return rows + [.leave]
     }
 
@@ -73,7 +73,7 @@ struct PauseMenu: View {
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("pause-restart")
             }
-            if let onTuning, rows.contains(.tuning) {
+            if let onTuning, rows.contains(.tuningPanel) {
                 Button(action: onTuning) { label("Tuning") }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("pause-tuning")
