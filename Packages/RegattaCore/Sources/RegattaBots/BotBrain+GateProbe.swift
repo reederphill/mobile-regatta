@@ -7,7 +7,8 @@ import RegattaCore
 //     it and her gybes, one round the mark dearest) and sail for its inside; inside `straightRange` of that point she
 //     sails straight for it on her own gybe (no gybe). Further out she sails straight for it on the gybe she rounds it
 //     on unless it lies more than `deepest` deeper than her groove: then she gybes away and comes back on its layline.
-//     s (with P): straight from the pick however deep (the second draft).   p: P0, the first draft: the nearer mark, no rounding gybe counted.
+//     s (with P): straight from the pick however deep (the second draft).  u (with P): without the latch that holds
+//     her on a point she has sailed straight for (the third draft).   p: P0, the first draft: the nearer mark, no rounding gybe counted.
 //  C: no corridor gybe inside `PlaningTable.gateRange` of her point through the gate (REGATTA_GATE_C_RANGE metres).
 //  R: below the line and not through it, she sails back above it round the nearer end, latched until 10 m above.
 //  X: off the gate, a turn by hand onto the beat goes the shorter way (through the wind, with the speed for it).
@@ -74,8 +75,11 @@ extension BotBrain {
         let lee = Double.pi - deg2rad(10)
         // What rounding a mark costs her from here, metres: the way to her point inside it, and her gybes. She rounds
         // it in one luff on the gybe that heads her outwards across the line (`needs`); on the other she gybes round it.
-        func farDeep(_ offWind: Double, _ metres: Double) -> Bool {
-            metres >= BotVariant.straightRange && offWind > down + BotVariant.deepest
+        // Once she has sailed straight for a mark's point she is no longer far and deep of it: she holds on (latch).
+        func farDeep(_ offWind: Double, _ metres: Double, _ mark: CourseLayout.Mark) -> Bool {
+            if !BotVariant.on("u"), let held = gateCommitted, held.leg == b.legIndex,
+               held.left == (mark.position == gate.left.position) { return false }
+            return metres >= BotVariant.straightRange && offWind > down + BotVariant.deepest
         }
         func cost(_ mark: CourseLayout.Mark) -> (cost: Double, entry: Vec2, onOwn: Bool, offWind: Double, needs: Tack) {
             let entry = Self.gateEntry(mark, centre: gate.centre, view)
@@ -93,7 +97,7 @@ extension BotBrain {
                 cost = length + (aim.tack != b.tack ? g : 0)
             } else if b.tack == needs {
                 // Far out and much deeper than her groove she gybes away and back for it rather than run by the lee.
-                cost = !onOwn || (farDeep(aim.angle, to.length) && !BotVariant.on("s")) ? length + 2 * g : length
+                cost = !onOwn || (farDeep(aim.angle, to.length, mark) && !BotVariant.on("s")) ? length + 2 * g : length
             } else if !onOwn {
                 cost = length + g
             } else if aim.angle > down, to.length >= BotVariant.straightRange {
@@ -120,7 +124,7 @@ extension BotBrain {
         } else if b.tack == mine.needs {
             // On the gybe she rounds it on: straight for her point from her pick, not down her groove past it. Past it
             // already, she gybes now; a reach to it is `navigate`'s.
-            if !mine.onOwn || (farDeep(mine.offWind, to.length) && !BotVariant.on("s")) {
+            if !mine.onOwn || (farDeep(mine.offWind, to.length, picksLeft ? gate.left : gate.right) && !BotVariant.on("s")) {
                 gateNote += "-gybe"
                 plannedTack = b.tack.other
                 return navigate(b, to: mine.entry, view)
@@ -132,6 +136,7 @@ extension BotBrain {
         }
         // Straight for it on her own gybe, by the lee no further than a few degrees.
         gateNote += "-straight"
+        if b.tack == mine.needs { gateCommitted = (b.legIndex, picksLeft) }
         plannedTack = b.tack
         isNearHerMark = true
         isAtHerGate = to.length < PlaningTable.gateRange

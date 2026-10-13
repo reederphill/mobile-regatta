@@ -191,6 +191,8 @@ struct BotBrain: Sendable {
     /// PROTOTYPE (#510): R's latch, P's pick, and what the gate probe did this decision (trace).
     var gateRecovering = false
     var gatePick: (leg: Int, left: Bool)?
+    /// PROTOTYPE (#510): the leg on which she has sailed straight for her pick on the gybe she rounds it on.
+    var gateCommitted: (leg: Int, left: Bool)?
     var gateNote = ""
     /// What she knows of a stall in irons (#459, `centresStalled`): only on a class she turns by hand.
     var stall = Stall()
