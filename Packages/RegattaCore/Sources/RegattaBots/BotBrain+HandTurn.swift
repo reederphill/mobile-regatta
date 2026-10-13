@@ -516,7 +516,15 @@ extension BotBrain {
     /// from her handling, a flub drawn from her own stream, and in light air a bear-off first.
     mutating func startHandTurn(_ b: SeatView.OwnBoat, _ aim: Aim, _ view: SeatView, fleetPlay: Bool) {
         let h = turnHandling
-        let isTack = abs(sailingAngle(b)) < .pi / 2
+        var isTack = abs(sailingAngle(b)) < .pi / 2
+        // VARIANT X: the shorter way round to the aim: through the wind when that is less turning than through dead
+        // downwind (off a reach onto a beat), with the speed to carry her through it.
+        if BotVariant.on("X"), b.status == .racing {
+            let now = abs(sailingAngle(b))
+            let throughWind = now + aim.angle, throughLee = (2 * .pi) - now - aim.angle
+            if throughWind < throughLee, b.speed >= closeHauledSpeed(b, view) * HandTackTable.penaltyBuild.speed { isTack = true }
+            else if throughLee < throughWind { isTack = false }
+        }
         // Turning to starboard (+) luffs her with the wind over her starboard side.
         let luff: Double = b.boomSide == .port ? 1 : -1
         var turn = HandTurn(isTack: isTack, toTack: aim.tack, sign: isTack ? luff : -luff,

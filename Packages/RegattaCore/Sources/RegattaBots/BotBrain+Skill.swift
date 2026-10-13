@@ -42,7 +42,8 @@ extension BotBrain {
     mutating func laylineOverstand(_ b: SeatView.OwnBoat) -> Double {
         if laylineError?.leg != b.legIndex {
             let error = weaknesses.laylineMisjudge > 0 ? weaknesses.laylineMisjudge * rng.range(-0.3, 1) : 0
-            laylineError = (b.legIndex, error)
+            // VARIANT C (#385): capped at a few degrees.
+            laylineError = (b.legIndex, BotVariant.on("C") ? error.clamped(to: -deg2rad(2)...deg2rad(4)) : error)
         }
         return Self.overstand + (laylineError?.error ?? 0)
     }

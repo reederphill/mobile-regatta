@@ -1,4 +1,18 @@
+import Foundation
 import RegattaCore
+
+/// PROBE (#464): candidate fixes switched on by letters in `REGATTA_BOT_VARIANT`, so one binary sails the baseline and each
+/// variant. Never merged.
+///  C: cap the layline misjudgement (#385 cap-only)       E: laylines from the tack's exit point (#385)
+///  F: windward final approach, tack away / tack short (#385)   G: gate landing point and gybe-aware rounding (#385)
+///  R: gate recovery: a boat below the line, not through it, aims back above it round the nearer end
+///  T: near her mark a wanted turn is not put off for speed, and refused she eases rather than sail away at speed
+///  A: avoidMarks turns to the rounding side of the mark of her leg      X: a turn by hand goes the shorter way through the wind
+///  S: near her mark she tacks by hand from 0.55 of close-hauled speed (not 0.75)
+public enum BotVariant {
+    public static let flags: Set<Character> = Set(ProcessInfo.processInfo.environment["REGATTA_BOT_VARIANT"] ?? "")
+    public static func on(_ c: Character) -> Bool { flags.contains(c) }
+}
 
 /// PROBE (#464, prototype branch only, never merged): what the brain decided and why, for the rounding probe to read
 /// after each decision. Written by `BotBrain.navigate`, `waypoint` and `sail`; read through `BotDriver.probe`.
