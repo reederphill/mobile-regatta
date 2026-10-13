@@ -9,6 +9,7 @@ let package = Package(
         .library(name: "RegattaBots", targets: ["RegattaBots"]),
         .executable(name: "regatta-replay", targets: ["regatta-replay"]),
         .executable(name: "regatta-botsuite", targets: ["regatta-botsuite"]),
+        .executable(name: "regatta-roundprobe", targets: ["regatta-roundprobe"]),
         .executable(name: "regatta-venue-png", targets: ["regatta-venue-png"]),
     ],
     dependencies: [
@@ -56,6 +57,8 @@ let package = Package(
         ),
         // A thin command line over BotSuite, and the UI tests' seed probe (#404) over RegattaBots.
         .executableTarget(name: "regatta-botsuite", dependencies: ["BotSuite", "RegattaBots", "RegattaCore"]),
+        // PROBE (#464, prototype branch only): the mark-rounding loss probe.
+        .executableTarget(name: "regatta-roundprobe", dependencies: ["BotSuite", "RegattaBots", "RegattaCore"]),
         // regatta-botsuite is a dependency so `swift test` builds it: the gate tests run it as its own process.
         .testTarget(name: "BotSuiteTests", dependencies: ["BotSuite", "regatta-botsuite", "RegattaCore", "RegattaBots"]),
     ]

@@ -211,6 +211,8 @@ struct BotBrain: Sendable {
     /// (`properCourseLimited`, #346). A test seam: always true in play; only tests that compare her steering with the
     /// limit left out set it false.
     var limitsProperCourse = true
+    /// PROBE (#464): what she decided and why, for the rounding probe.
+    var probe = BotProbeTrace()
 
     /// The stream of her seed her own draws come from.
     static let brainStream: UInt64 = 0x6272_6169_6e64_7277 // "braindrw"
@@ -295,11 +297,24 @@ struct BotBrain: Sendable {
             decision.centred = true
             return decision
         }
+        probe.evasion = ""
+        probe.keepClearRule = ""
+        probe.wantsOtherTack = false
+        probe.cantTapWhy = ""
+        probe.handTurning = false
+        probe.handTurnFlubbed = false
         if let input = penaltyInput(boat, view) {
             handTurn = nil
+            probe.branch = "penalty"
             return BotDecision(input: input)
         }
         var aim = plan(boat, view)
+        probe.aimAngleDeg = rad2deg(aim.angle)
+        probe.aimTack = aim.tack
+        if let turn = handTurn {
+            probe.handTurning = turn.isTurning
+            probe.handTurnFlubbed = turn.overSteer > 0 || turn.fraction == HandTackTable.underSteer
+        }
         // Tacked before her start, she bears away to close-hauled before she holds any closer to the wind: until
         // she's there, rule 13 has her keep clear of every boat (#99).
         let closeHauled = Self.closeHauled(boat.polarWindSpeed, view) + deg2rad(2)
@@ -322,6 +337,18 @@ struct BotBrain: Sendable {
         if byHand, let turn = handTurn, let decision = handTurning(turn, aim, boat, view) { return decision }
         let desired = aim.tack == boat.tack ? aim.heading(wind: boat.windDirection) : boat.heading
         if let evasion = evasion(boat, view, desired: desired) {
+            // PROBE: which of the three turned her off her plan.
+            if let kept = keepClear(boat, view, desired: desired) {
+                probe.evasion = "keepClear"
+                for other in view.others where !other.isGhost {
+                    if let rule = keepClearRule(boat, view, other) { probe.keepClearRule = "\(rule)"; break }
+                }
+                if avoidMarks(boat, view, desired: kept.heading) != nil { probe.evasion = "keepClear+mark" }
+            } else if let off = avoidMarks(boat, view, desired: desired) {
+                probe.evasion = abs(wrapAngle(off - boat.windDirection)) < deg2rad(20) ? "shoot" : "avoidMarks"
+            } else {
+                probe.evasion = "edge"
+            }
             let ease = aim.ease && aim.tack == boat.tack || evasion.dropsAstern
                 || easesKeepingClear(boat, view, heading: evasion.heading)
             let input = steer(boat, toHeading: evasion.heading, view, closest: evasion.closest)
@@ -329,6 +356,14 @@ struct BotBrain: Sendable {
         }
         if aim.tack == boat.tack { gybeWantedSince = nil }
         if aim.tack != boat.tack {
+            probe.wantsOtherTack = true
+            if view.time - lastTapTime < Self.tapInterval { probe.cantTapWhy = "interval" }
+            else if !isClearOfMarks(boat, view, lengths: Self.tapMarkClearance) { probe.cantTapWhy = "mark" }
+            else if !tapIsClear(boat, view) { probe.cantTapWhy = "boats" }
+            else if tapTurnsAtKeepClearBoat(boat, view) { probe.cantTapWhy = "atKeepClear" }
+            else if abs(sailingAngle(boat)) < .pi / 2, boat.speed < closeHauledSpeed(boat, view) * Self.tackingSpeed { probe.cantTapWhy = "slow" }
+            else if abs(sailingAngle(boat)) >= .pi / 2, !hasGybeRoom(boat, view) { probe.cantTapWhy = "gybeRoom" }
+            else if byHand, gybeWantedSince != nil, abs(sailingAngle(boat)) >= .pi / 2, senses.planing { probe.cantTapWhy = "buildSpeed" }
             // "Set, then gybe" (#462): on the plane but slow, she builds speed for the gybe first.
             if canTap(boat, view), !(byHand && buildsSpeedToGybe(boat, view)) {
                 lastTapTime = view.time
@@ -1139,7 +1174,7 @@ struct BotBrain: Sendable {
     /// The point to sail at for the current leg: round each mark to port, approaching it along the
     /// course (upwind to W on the starboard layline, across from W to O); through the gate, then round the
     /// nearer of its marks.
-    private func waypoint(_ b: SeatView.OwnBoat, _ view: SeatView) -> Vec2 {
+    private mutating func waypoint(_ b: SeatView.OwnBoat, _ view: SeatView) -> Vec2 {
         let c = view.course
         let leg = c.legs[b.legIndex]
         switch leg {
@@ -1152,23 +1187,34 @@ struct BotBrain: Sendable {
                 let side = approach.rightPerp
                 if b.roundingStage == 0 && index == CourseLayout.windwardIndex {
                     let room = mark.radius + view.boatClass.hull.beam + Self.markClearance + Self.layMargin
-                    return Self.windwardApproach(from: b.position, tack: b.tack, mark: m, room: room,
-                                                 fetch: m + side * 6 + approach * 4, wind: b.windDirection,
+                    let fetch = m + side * 6 + approach * 4
+                    let point = Self.windwardApproach(from: b.position, tack: b.tack, mark: m, room: room,
+                                                 fetch: fetch, wind: b.windDirection,
                                                  groove: grooveAngle(.upwind, b, view), upwind: c.upwind,
                                                  overstand: Self.overstand + (laylineError.map { $0.leg == b.legIndex ? $0.error : 0 } ?? 0))
+                    // PROBE
+                    if point == fetch { probe.waypoint = "W-fetch" }
+                    else if (b.position - m).dot(c.upwind) > 0 { probe.waypoint = (b.position - m).dot(c.upwind.rightPerp) >= 0 ? "W-above-right" : "W-above-left" }
+                    else { probe.waypoint = "W-lead" }
+                    return point
                 }
                 if b.roundingStage == 0 {
-                    return detour(from: b.position, to: m + side * 6 + approach * 4, around: m,
-                                  via: m + side * 7 - approach * 7)
+                    let direct = m + side * 6 + approach * 4
+                    let point = detour(from: b.position, to: direct, around: m, via: m + side * 7 - approach * 7)
+                    probe.waypoint = point == direct ? "O-direct" : "O-via"
+                    return point
                 }
+                probe.waypoint = index == CourseLayout.windwardIndex ? "W-stage1" : "O-stage1"
                 return m + approach * 9 - side * 10
             case .gate(let left, let right):
                 let centre = c.targetPosition(for: leg)
-                if b.roundingStage == 0 { return centre - c.upwind * 6 }
+                if b.roundingStage == 0 { probe.waypoint = "gate-centre"; return centre - c.upwind * 6 }
                 let near = (left.position - b.position).length <= (right.position - b.position).length ? left : right
+                probe.waypoint = near.position == left.position ? "gate-stage1-L" : "gate-stage1-R"
                 return near.position - c.upwind * 9 + (near.position - centre).normalized * 10
             }
         case .finish:
+            probe.waypoint = "finish"
             let line = c.finishLine
             return line.pin.position + (line.committee.position - line.pin.position) * finishSpot - c.upwind * 12
         }
@@ -1189,6 +1235,8 @@ struct BotBrain: Sendable {
         guard (spot - b.position).length < Self.finishApproach else { return navigate(b, to: through, view) }
         plannedTack = b.tack
         isNearHerMark = true
+        probe.branch = "finish"
+        probe.waypoint = "finish-straight"
         let straight = Aim(heading: (through - b.position).bearing, b, tolerance: Self.reachTolerance)
         return finishingOnThePlane(straight, b, view) ?? straight
     }
@@ -1269,27 +1317,42 @@ struct BotBrain: Sendable {
         // sails her below its layline, into it.
         let bias = tactics.corridorBias * min(max(distance / Self.tacticalRange - 1, 0), 1)
         let lateral = (b.position - target).dot(Vec2.heading(w).rightPerp) - bias * corridor
+        // PROBE
+        probe.target = target
+        probe.relativeDeg = rad2deg(wrapAngle(bearing - w))
+        probe.lateral = lateral
+        probe.corridor = corridor
+        probe.laylineErrorDeg = rad2deg(overstand - Self.overstand)
+        probe.pinching = false
 
         if offWind < up + deg2rad(2) {
             // Where the target bears from her: to the right of the wind positive.
             let relative = wrapAngle(bearing - w)
             var tack = plannedTack
+            probe.branch = "up-hold"
             if lateral < -corridor {
                 tack = .port
+                probe.branch = "up-corridor"
             } else if lateral > corridor {
                 tack = .starboard
+                probe.branch = "up-corridor"
             } else if tack == .starboard && relative >= up + overstand {
                 tack = .port // on the port layline
+                probe.branch = "up-layline-P"
             } else if tack == .port && relative <= -(up + overstand) {
                 tack = .starboard // on the starboard layline
+                probe.branch = "up-layline-S"
             } else if distance > Self.tacticalRange {
                 // A fleet tactic's tack (#234) onto a board past its layline would only be tacked back.
+                let before = tack
                 tack = upwindTack(b, view, planned: tack) { other in
                     other == .starboard ? relative >= up + overstand : relative <= -(up + overstand)
                 }
+                if tack != before { probe.branch = "up-fleet" }
             }
             setTack(tack, view)
             let aim = upwindAim(b, view, tack: tack, relative: relative, distance: distance)
+            probe.pinching = aim.groove == nil
             return distance > Self.tacticalRange ? missingGroove(aim, b, view) : aim
         }
 
@@ -1298,16 +1361,23 @@ struct BotBrain: Sendable {
             // port gybe's heading lies and against the starboard gybe's.
             let fromDeadDownwind = wrapAngle(bearing - w - .pi)
             var gybe = plannedTack
+            probe.branch = "down-hold"
             if lateral < -corridor {
                 gybe = .port
+                probe.branch = "down-corridor"
             } else if lateral > corridor {
                 gybe = .starboard
+                probe.branch = "down-corridor"
             } else if gybe == .starboard && fromDeadDownwind <= -(.pi - down + overstand) {
                 gybe = .port // on the port layline
+                probe.branch = "down-layline-P"
             } else if gybe == .port && fromDeadDownwind >= .pi - down + overstand {
                 gybe = .starboard // on the starboard layline
+                probe.branch = "down-layline-S"
             } else if distance > Self.tacticalRange {
+                let before = gybe
                 gybe = downwindGybe(b, view, planned: gybe)
+                if gybe != before { probe.branch = "down-fleet" }
             }
             setTack(gybe, view)
             let aim = Aim.groove(.downwind, tack: gybe, angle: down)
@@ -1316,6 +1386,7 @@ struct BotBrain: Sendable {
         }
 
         plannedTack = b.tack
+        probe.branch = "reach"
         return downwindAim(b, view, aim: Aim(heading: bearing, b, tolerance: Self.reachTolerance),
                            nearMark: distance < PlaningTable.markRange)
     }
