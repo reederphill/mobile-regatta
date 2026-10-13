@@ -2,7 +2,8 @@ import XCTest
 
 /// The online account end to end (#161): the app signs in to a real server as a dev player (`-devIdentity`, in place
 /// of Game Center), accepts the terms, comes back without being asked again, is asked again when the server's terms
-/// move on, and shows a suspension and the cooldown the server puts her in (`POST /dev/situation`).
+/// move on, and shows a suspension and the cooldown the server puts her in (`POST /dev/situation`). Past the gate is
+/// the real queue (#162): its bar, which each test leaves again so no fleet locks under the next launch.
 ///
 /// `scripts/e2e.sh` starts the server on Postgres and passes its address as `REGATTA_ONLINE_HOST`; without one the
 /// tests skip, saying so. Its second phase restarts the server with `TERMS_VERSION=2` on the same database and sets
@@ -16,8 +17,16 @@ final class OnlineAccountUITests: XCTestCase {
     /// The dev player who accepts the terms in the first phase and meets the new version in the second.
     static let returningPlayer = 16102
 
-    /// The past-the-gate stand-in until the queue (#140).
-    private static let queueStub = "Online racing is on its way"
+    /// Past the gate: the queue's bar (#162), never the stand-in alert of a build with no server. Leaves the queue again.
+    @MainActor private func expectTheQueue(_ app: XCUIApplication, _ message: String) {
+        let bar = app.descendants(matching: .any)["queue-bar"].firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 20), message)
+        XCTAssertFalse(app.alerts["Online racing is on its way"].exists, "the stand-in alert came up with a server to race on")
+        let leave = app.buttons["queue-bar-leave"]
+        XCTAssertTrue(leave.waitForExistence(timeout: 10), "the queue's bar has no Leave")
+        leave.tap()
+        XCTAssertTrue(bar.waitForNonExistence(timeout: 10), "Leave left the queue's bar up")
+    }
 
     /// The server's address, for the phase the test is for; skips otherwise.
     private func host(inPhase phase: String? = nil) throws -> String {
@@ -70,7 +79,7 @@ final class OnlineAccountUITests: XCTestCase {
     }
 
     /// A new dev player: the session opens, Race online asks for the terms, I agree records them on the server and
-    /// goes on to the queue's stand-in.
+    /// goes on to the queue.
     @MainActor func testDevIdentityAcceptsTermsAndOpensTheSession() throws {
         let app = launch(host: try host(), player: newPlayer())
         raceOnlineWithTermsDue(app).tap()
@@ -78,8 +87,7 @@ final class OnlineAccountUITests: XCTestCase {
         XCTAssertTrue(agree.waitForExistence(timeout: 20), "no terms sheet for a new player")
         XCTAssertEqual(app.staticTexts["terms-version"].label, "Version 1")
         agree.tap()
-        XCTAssertTrue(app.alerts[Self.queueStub].waitForExistence(timeout: 20), "I agree didn't go on to the queue")
-        app.alerts[Self.queueStub].buttons["OK"].tap()
+        expectTheQueue(app, "I agree didn't go on to the queue")
         XCTAssertTrue(app.buttons["lobby-terms"].waitForNonExistence(timeout: 10), "the terms are still due after I agree")
         XCTAssertFalse(app.buttons["lobby-sign-in"].exists, "the session closed after I agree")
     }
@@ -93,14 +101,14 @@ final class OnlineAccountUITests: XCTestCase {
         app.buttons["race-online"].tap()
         // A first run asks; a retry of this test, or a second run on the same database, finds them accepted.
         if app.buttons["terms-agree"].waitForExistence(timeout: 10) { app.buttons["terms-agree"].tap() }
-        XCTAssertTrue(app.alerts[Self.queueStub].waitForExistence(timeout: 20), "never got past the gate")
+        expectTheQueue(app, "never got past the gate")
 
         app = launch(host: host, player: Self.returningPlayer)
         XCTAssertTrue(app.buttons["race-online"].waitForExistence(timeout: 30), "no Race online after the relaunch")
         app.buttons["race-online"].tap()
-        XCTAssertTrue(app.alerts[Self.queueStub].waitForExistence(timeout: 20), "the relaunch didn't get past the gate")
+        XCTAssertTrue(app.descendants(matching: .any)["queue-bar"].firstMatch.waitForExistence(timeout: 20), "the relaunch didn't get past the gate")
         XCTAssertFalse(app.buttons["terms-agree"].exists, "the terms were asked again after a relaunch")
-        app.alerts[Self.queueStub].buttons["OK"].tap()
+        expectTheQueue(app, "the relaunch didn't get past the gate")
         XCTAssertFalse(app.buttons["lobby-terms"].exists, "the lobby area asks for terms already accepted")
     }
 
@@ -121,7 +129,7 @@ final class OnlineAccountUITests: XCTestCase {
         XCTAssertTrue(agree.waitForExistence(timeout: 20), "the new version didn't ask again")
         XCTAssertEqual(app.staticTexts["terms-version"].label, "Version 2")
         agree.tap()
-        XCTAssertTrue(app.alerts[Self.queueStub].waitForExistence(timeout: 20), "I agree to the new version didn't go on to the queue")
+        expectTheQueue(app, "I agree to the new version didn't go on to the queue")
     }
 
     /// A player the server has suspended (the dev situation's suspension has no end: "Racing closed"; one with an end
