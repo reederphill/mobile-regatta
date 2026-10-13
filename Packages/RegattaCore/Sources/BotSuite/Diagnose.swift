@@ -897,6 +897,18 @@ extension BotRaceHarness {
                 boats[seat].hand = AxesSummary.handlingTier(handling)
             }
         }
+        // PROTOTYPE (#510): REGATTA_GATE_DUMP=<metres> lists the gate roundings that many metres or more over, on stderr.
+        if let least = ProcessInfo.processInfo.environment["REGATTA_GATE_DUMP"].flatMap(Double.init) {
+            var lines = ""
+            for (seat, boat) in boats.enumerated() {
+                for (n, seen) in boat.roundings.filter({ $0.mark == .gate }).enumerated() where seen.extraMetres >= least {
+                    lines += String(format: "GD %@:%@:%d:%d seat=%d tier=%@ gate#%d extra=%.0f approach=%.0f round=%.0f exit=%.0f below=%d\n",
+                                    cell.venue, cell.conditions, Int(cell.seed), cell.fleetSize, seat, "\(boat.tier)", n + 1,
+                                    seen.extraMetres, seen.approachExtra, seen.roundExtra, seen.exitExtra, seen.overshootTicks)
+                }
+            }
+            if !lines.isEmpty { FileHandle.standardError.write(lines.data(using: .utf8)!) }
+        }
         return (result, RaceDiagnosis(cell: cell, boats: boats))
     }
 }

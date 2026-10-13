@@ -188,6 +188,10 @@ struct BotBrain: Sendable {
     var isNearHerMark = false
     /// Whether that course was to her point through a gate from within `PlaningTable.gateRange` of it (`navigate`).
     var isAtHerGate = false
+    /// PROTOTYPE (#510): R's latch, P's pick, and what the gate probe did this decision (trace).
+    var gateRecovering = false
+    var gatePick: (leg: Int, left: Bool)?
+    var gateNote = ""
     /// What she knows of a stall in irons (#459, `centresStalled`): only on a class she turns by hand.
     var stall = Stall()
     /// What she has made of the boats around her (#234, `observeFleet`): each one's tack, when she saw it tack, and
@@ -300,6 +304,7 @@ struct BotBrain: Sendable {
             return BotDecision(input: input)
         }
         var aim = plan(boat, view)
+        gateTrace(boat, view, aim, "")
         // Tacked before her start, she bears away to close-hauled before she holds any closer to the wind: until
         // she's there, rule 13 has her keep clear of every boat (#99).
         let closeHauled = Self.closeHauled(boat.polarWindSpeed, view) + deg2rad(2)
@@ -1153,6 +1158,8 @@ struct BotBrain: Sendable {
             if case .finish = c.legs[b.legIndex] { return finishAim(b, view) }
             // The windward mark's last 60 m are sailed by her board, not the corridor (#508).
             if let aim = windwardFinalAim(b, view) { return aim }
+            gateNote = ""
+            if let aim = gateProbeAim(b, view) { return aim }
             return navigate(b, to: waypoint(b, view), view)
         case .finished, .dsq:
             return Aim(heading: b.heading, b, tolerance: .pi)
@@ -1321,9 +1328,10 @@ struct BotBrain: Sendable {
             // port gybe's heading lies and against the starboard gybe's.
             let fromDeadDownwind = wrapAngle(bearing - w - .pi)
             var gybe = plannedTack
-            if lateral < -corridor {
+            let held = gateHoldsCorridor(b, view, distance: distance)
+            if !held && lateral < -corridor {
                 gybe = .port
-            } else if lateral > corridor {
+            } else if !held && lateral > corridor {
                 gybe = .starboard
             } else if gybe == .starboard && fromDeadDownwind <= -(.pi - down + overstand) {
                 gybe = .port // on the port layline
