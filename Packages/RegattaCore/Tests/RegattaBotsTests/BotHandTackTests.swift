@@ -29,12 +29,14 @@ import Testing
     /// start and the first beat, and through two laps with their runs, pinned on #462's core tip before any bot code
     /// changed (re-pinned there on fleet-rules@6, #490's default, and on #508: the windward final approach and the lower
     /// tacking speed by hand near her mark are every class's; the two laps again on #509, whose hold of a turn refused
-    /// near her mark is every class's too: the start and the first beat have none and kept their digest).
+    /// near her mark is every class's too: the start and the first beat have none and kept their digest; the two laps
+    /// again on #518, whose pick of the leeward gate's mark is every class's: the start and the first beat reach no gate
+    /// and kept theirs).
     @Test func skiffEightBotsAreBitIdentical() throws {
         let short = try Self.digest(seed: 459, boatClass: Self.skiffEight)
         let long = try Self.digest(seed: 462, boatClass: Self.skiffEight, seconds: 700)
         #expect(hex64(short) == "0x2f226740a8699d03")
-        #expect(hex64(long) == "0xd70ad36f891de8fa")
+        #expect(hex64(long) == "0x66ecaf694e85d067")
     }
 
     // MARK: - skiff@8: tacks and gybes by hand
