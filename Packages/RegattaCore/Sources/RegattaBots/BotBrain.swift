@@ -330,7 +330,7 @@ struct BotBrain: Sendable {
         if aim.tack == boat.tack { gybeWantedSince = nil }
         if aim.tack != boat.tack {
             // "Set, then gybe" (#462): on the plane but slow, she builds speed for the gybe first.
-            if canTap(boat, view), !(byHand && buildsSpeedToGybe(boat, view)) {
+            if canTap(boat, view, byHand: byHand), !(byHand && buildsSpeedToGybe(boat, view)) {
                 lastTapTime = view.time
                 let play = lastFleetPlayTime == view.time ? lastFleetPlay : nil
                 if byHand {
@@ -1002,6 +1002,14 @@ struct BotBrain: Sendable {
     /// She tacks (a tap with the wind forward of the beam) only at this share of her close-hauled speed or
     /// more: slower, the tap leaves her head to wind. A gybe keeps her sails full, so it needs none.
     static let tackingSpeed = 0.75
+    /// That share for a tack she steers by hand within `PlaningTable.markRange` of a mark or gate of her course
+    /// (`tacksFromLowerSpeed`, #508): slow out of a rounding or a layline tack and refused the next one, she sailed
+    /// her groove away from the mark at speed until she had the 0.75. A tap's tack keeps `tackingSpeed`: slower, the
+    /// tap leaves her head to wind. Before her start and on the finish leg she keeps it too: there `isNearHerMark`
+    /// is a point of her start or the line, and from 0.55 she turned into a penalty before the gun (#471).
+    /// #464's sweep, variant S on top of the final approach: roundings 50 m or more over 96 to 78 in 80 races, mark
+    /// touches 23 to 15.
+    static let nearMarkTackingSpeed = 0.55
 
     /// Hull lengths a mark must be clear of her for a tap: the tack or gybe sails itself, hands off.
     static let tapMarkClearance = 2.0
@@ -1032,12 +1040,21 @@ struct BotBrain: Sendable {
 
     /// Whether she can tap now: a tap done, no mark close enough for the turn to swing her onto, and for a
     /// tack, the speed to carry her through it; for a gybe, room to leeward inside the race area. Racing, she also
-    /// taps only clear of every boat (`tapIsClear`, #101).
-    func canTap(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+    /// taps only clear of every boat (`tapIsClear`, #101). `byHand`: the turn asked about is one she steers herself,
+    /// which near her mark she tacks from less speed (`nearMarkTackingSpeed`).
+    func canTap(_ b: SeatView.OwnBoat, _ view: SeatView, byHand: Bool = false) -> Bool {
         guard view.time - lastTapTime >= Self.tapInterval, isClearToTurn(b, view) else { return false }
         guard abs(sailingAngle(b)) < .pi / 2 else { return hasGybeRoom(b, view) }
         let closeHauled = view.boatClass.polar.bestUpwind(tws: b.polarWindSpeed).speed * b.speedShadow
-        return b.speed >= closeHauled * Self.tackingSpeed
+        return b.speed >= closeHauled * (byHand && tacksFromLowerSpeed(b, view) ? Self.nearMarkTackingSpeed : Self.tackingSpeed)
+    }
+
+    /// Whether a tack by hand goes from `nearMarkTackingSpeed`: racing, near a mark or gate she rounds. Not before
+    /// her start or returning to it, and not on the finish leg, where `isNearHerMark` is no mark of her course.
+    func tacksFromLowerSpeed(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
+        guard isNearHerMark, b.status == .racing, view.course.legs.indices.contains(b.legIndex),
+              case .round = view.course.legs[b.legIndex] else { return false }
+        return true
     }
 
     /// Whether a tack or gybe begun now turns clear: no mark close enough for the turn to swing her onto, clear of
@@ -1130,6 +1147,8 @@ struct BotBrain: Sendable {
             return returnAim(b, view)
         case .racing:
             if case .finish = c.legs[b.legIndex] { return finishAim(b, view) }
+            // The windward mark's last 60 m are sailed by her board, not the corridor (#508).
+            if let aim = windwardFinalAim(b, view) { return aim }
             return navigate(b, to: waypoint(b, view), view)
         case .finished, .dsq:
             return Aim(heading: b.heading, b, tolerance: .pi)
@@ -1153,7 +1172,7 @@ struct BotBrain: Sendable {
                 if b.roundingStage == 0 && index == CourseLayout.windwardIndex {
                     let room = mark.radius + view.boatClass.hull.beam + Self.markClearance + Self.layMargin
                     return Self.windwardApproach(from: b.position, tack: b.tack, mark: m, room: room,
-                                                 fetch: m + side * 6 + approach * 4, wind: b.windDirection,
+                                                 fetch: m + side * Self.windwardFetchOffset + approach * 4, wind: b.windDirection,
                                                  groove: grooveAngle(.upwind, b, view), upwind: c.upwind,
                                                  overstand: Self.overstand + (laylineError.map { $0.leg == b.legIndex ? $0.error : 0 } ?? 0))
                 }

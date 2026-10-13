@@ -358,4 +358,210 @@ import RegattaCore
         let early = try sail(completeIn: 30)
         #expect(early.kinds.contains(.penaltyReset(seat: 0)), "with 30 s to go she gives it up to keep clear")
     }
+
+    // MARK: - The windward mark's final approach (#508)
+
+    /// Seat 0 posed on the windward mark's final approach, and a bot for her helm.
+    struct FinalApproach {
+        let race: Race
+        var brain: BotBrain
+        /// Metres a boat's close-hauled board must leave the mark to port (`windwardFinalAim`'s room).
+        let room: Double
+        var view: SeatView { race.seatView(for: 0) }
+
+        /// Metres the starboard close-hauled board from `position`, in her wind and by her groove, leaves the mark to
+        /// port, more than `room`: the reckoning the brain makes, made again here.
+        func over(from position: Vec2) -> Double {
+            let view = view
+            let mark = view.course.elements[CourseLayout.windwardIndex].marks[0]
+            let board = Vec2.heading(view.own.windDirection - brain.grooveAngle(.upwind, view.own, view))
+            return -(mark.position - position).dot(board.rightPerp) - room
+        }
+
+        /// Where the tack onto starboard leaves her (`BotBrain.tackAdvanceSeconds`).
+        var exit: Vec2 {
+            let own = view.own
+            return own.position + Vec2.heading(own.windDirection) * (max(own.speed, 1) * BotBrain.tackAdvanceSeconds)
+        }
+    }
+
+    /// Seat 0 beating to the windward mark on `tack` in her groove at `speedShare` of her speed, `along` metres short
+    /// of the mark down the starboard close-hauled board that passes it `over` metres clear of its room: her own board
+    /// on starboard; on port, the board from where her tack would leave her. Seat 1 far off. Her bot is the baseline,
+    /// judging its laylines true, the cautious bot with `caution`; `edit` the snapshot further.
+    static func finalApproach(tack: Tack, over: Double, along: Double = 40, seed: UInt64 = 3, speedShare: Double = 1,
+                              caution: BotBrain.Caution? = nil,
+                              edit: @escaping (inout WorldSnapshot) -> Void = { _ in }) throws -> FinalApproach {
+        let water = BotConductTests.Water(seed: seed)
+        let course = water.race.course
+        let mark = course.elements[CourseLayout.windwardIndex].marks[0]
+        let room = mark.radius + water.race.boatClass.hull.beam + BotBrain.markClearance + BotBrain.layMargin
+        var brain = BotBrain(style: BotConductTests.skill1, profile: .baseline, seed: 1, caution: caution)
+        brain.tactics.headerThreshold = nil
+        brain.tactics.corridor = 100
+        brain.plannedTack = tack
+        brain.laylineError = (water.leg, 0)
+        let speed = water.up.speed * speedShare
+        var wind = water.race.groundWind(at: mark.position).direction
+        var groove = water.up.twa
+        var posed: FinalApproach?
+        // The wind bends over the water, so she is placed by the wind where she is: thrice over, to the centimetre.
+        for _ in 0..<3 {
+            let board = Vec2.heading(wind - groove)
+            var position = mark.position - board * along + board.rightPerp * (room + over)
+            if tack == .port { position = position - Vec2.heading(wind) * (max(speed, 1) * BotBrain.tackAdvanceSeconds) }
+            let heading = tack == .starboard ? wind - groove : wind + groove
+            let race = try BotConductTests.place(water, [
+                .init(position: position, heading: heading, speed: speed),
+                .init(position: mark.position - course.upwind * 300 + course.right * 150, heading: water.beat(.starboard),
+                      speed: water.up.speed),
+            ], edit: edit)
+            let approach = FinalApproach(race: race, brain: brain, room: room)
+            let own = approach.view.own
+            wind = own.windDirection
+            groove = brain.grooveAngle(.upwind, own, approach.view)
+            posed = approach
+        }
+        let approach = try #require(posed)
+        let own = approach.view.own
+        try #require(own.tack == tack)
+        try #require(abs(approach.over(from: tack == .starboard ? own.position : approach.exit) - over) < 0.2)
+        return approach
+    }
+
+    /// #508 acceptance: on the final approach a starboard boat whose close-hauled board no longer clears the windward
+    /// mark by its room tacks away to port (before #508 nothing inside `tacticalRange` did, and she passed the mark on
+    /// its wrong side, #464); one whose board clears it holds her board; one well overstood is the beat's to reach in.
+    @Test func starboardBoardThatCannotLayTheWindwardMarkTacksAway() throws {
+        // Her board runs 3 m inside the mark's room: at the mark itself.
+        var short = try Self.finalApproach(tack: .starboard, over: -3)
+        var view = short.view
+        var decides = short.brain
+        #expect(short.brain.windwardFinalAim(view.own, view)?.tack == .port)
+        #expect(short.brain.plannedTack == .port)
+        // And so she plans at the helm: the final approach is asked before the beat's corridor.
+        _ = decides.decide(view)
+        #expect(decides.plannedTack == .port)
+
+        var laying = try Self.finalApproach(tack: .starboard, over: 1)
+        view = laying.view
+        decides = laying.brain
+        let held = laying.brain.windwardFinalAim(view.own, view)
+        let aim = try #require(held)
+        #expect(aim.tack == .starboard && abs(aim.angle - laying.brain.grooveAngle(.upwind, view.own, view)) < 1e-9)
+        #expect(laying.brain.plannedTack == .starboard)
+        _ = decides.decide(view)
+        #expect(decides.plannedTack == .starboard)
+
+        // Past the fetch point and `overstandReach` more, it is no longer the final approach's: the beat reaches her in.
+        let reach = BotBrain.layBoardMargin + BotBrain.overstandReach + BotBrain.windwardFetchOffset
+        var overstood = try Self.finalApproach(tack: .starboard, over: reach + 2)
+        view = overstood.view
+        #expect(overstood.brain.windwardFinalAim(view.own, view) == nil)
+        var justUnder = try Self.finalApproach(tack: .starboard, over: reach - 2)
+        view = justUnder.view
+        #expect(justUnder.brain.windwardFinalAim(view.own, view)?.tack == .starboard)
+    }
+
+    /// #508 acceptance: on port she tacks onto starboard only once the board from where her tack leaves her clears the
+    /// mark by `layBoardMargin` more than its room; a board that would only just clear it, or not at all, she holds
+    /// port for.
+    @Test func portApproachTacksOntoStarboardOnlyWhenTheBoardClearsTheMark() throws {
+        var clears = try Self.finalApproach(tack: .port, over: BotBrain.layBoardMargin + 1)
+        var view = clears.view
+        var decides = clears.brain
+        #expect(clears.brain.windwardFinalAim(view.own, view)?.tack == .starboard)
+        #expect(clears.brain.plannedTack == .starboard)
+        _ = decides.decide(view)
+        #expect(decides.plannedTack == .starboard)
+
+        // Clear of the mark's room, but not by the margin a hand tack's exit needs.
+        var bare = try Self.finalApproach(tack: .port, over: BotBrain.layBoardMargin - 1)
+        view = bare.view
+        decides = bare.brain
+        #expect(bare.brain.windwardFinalAim(view.own, view)?.tack == .port)
+        #expect(bare.brain.plannedTack == .port)
+        _ = decides.decide(view)
+        #expect(decides.plannedTack == .port)
+
+        var short = try Self.finalApproach(tack: .port, over: -4)
+        view = short.view
+        #expect(short.brain.windwardFinalAim(view.own, view)?.tack == .port)
+        #expect(short.brain.plannedTack == .port)
+    }
+
+    /// #508 acceptance: a small header on the final approach leaves her board be. A starboard board headed to half a
+    /// metre under the mark's room (at 40 m, a header of under a degree from a board that just cleared it) is inside
+    /// `dropBoardMargin`'s slack and she holds it; headed to 2 m under, she tacks away.
+    @Test func smallHeaderOnTheFinalApproachLeavesHerBoardBe() throws {
+        var headed = try Self.finalApproach(tack: .starboard, over: -0.5)
+        var view = headed.view
+        #expect(headed.brain.windwardFinalAim(view.own, view)?.tack == .starboard)
+        #expect(headed.brain.plannedTack == .starboard)
+
+        var gone = try Self.finalApproach(tack: .starboard, over: -2)
+        view = gone.view
+        #expect(gone.brain.windwardFinalAim(view.own, view)?.tack == .port)
+        #expect(BotBrain.dropBoardMargin == 1)
+    }
+
+    /// #508 acceptance: the final approach is hers only below the windward mark, between `finalTackRange` and
+    /// `finalApproachRange` of it, beating to it and yet to round it.
+    @Test func finalApproachAppliesBelowTheMarkBetweenItsRanges() throws {
+        /// Whether a starboard boat whose board no longer lays the mark is the final approach's to tack away.
+        func applies(along: Double, edit: @escaping (inout WorldSnapshot) -> Void = { _ in }) throws -> Bool {
+            var approach = try Self.finalApproach(tack: .starboard, over: -3, along: along, edit: edit)
+            let view = approach.view
+            let mark = view.course.elements[CourseLayout.windwardIndex].marks[0]
+            let distance = (mark.position - view.own.position).length
+            try #require(abs(distance - along) < 1, "\(distance) m from the mark, not \(along)")
+            return approach.brain.windwardFinalAim(view.own, view) != nil
+        }
+        #expect(BotBrain.finalApproachRange == 60 && BotBrain.finalTackRange == 14)
+        #expect(try !applies(along: 63))
+        #expect(try applies(along: 57))
+        #expect(try applies(along: 40))
+        #expect(try applies(along: 17))
+        #expect(try !applies(along: 11))
+        // Round the mark's first stage, or on another leg within its range, it is not her approach.
+        #expect(try !applies(along: 40) { $0.seats[0].boat.roundingStage = 1 })
+        #expect(try !applies(along: 40) { $0.seats[0].boat.legIndex = 1 })
+        #expect(try !applies(along: 40) { $0.seats[0].boat.status = .prestart })
+
+        // Above the mark the beat's own recovery sails her back down.
+        var above = try Self.finalApproach(tack: .starboard, over: -3)
+        var snapshot = above.race.exportSnapshot()
+        let below = snapshot.seats[0].boat.position
+        let upwind = above.race.course.upwind
+        let windward = above.race.course.elements[CourseLayout.windwardIndex].marks[0]
+        snapshot.seats[0].boat.position = below - upwind * (2 * (below - windward.position).dot(upwind))
+        try above.race.importSnapshot(snapshot)
+        let view = above.view
+        let mark = view.course.elements[CourseLayout.windwardIndex].marks[0]
+        try #require((view.own.position - mark.position).dot(view.course.upwind) > 10)
+        #expect(above.brain.windwardFinalAim(view.own, view) == nil)
+    }
+
+    /// #508 acceptance: the cautious bot (#104) sails the final approach as every bot does: she tacks away from a
+    /// board that cannot lay the mark, holds one that does, and comes onto starboard from port when the board clears.
+    @Test func cautiousBotSailsTheFinalApproach() throws {
+        var short = try Self.finalApproach(tack: .starboard, over: -3, caution: .standard)
+        var view = short.view
+        var decides = short.brain
+        try #require(short.brain.caution != nil)
+        #expect(short.brain.windwardFinalAim(view.own, view)?.tack == .port)
+        _ = decides.decide(view)
+        #expect(decides.plannedTack == .port)
+
+        var laying = try Self.finalApproach(tack: .starboard, over: 1, caution: .standard)
+        view = laying.view
+        #expect(laying.brain.windwardFinalAim(view.own, view)?.tack == .starboard)
+
+        var clears = try Self.finalApproach(tack: .port, over: BotBrain.layBoardMargin + 1, caution: .standard)
+        view = clears.view
+        decides = clears.brain
+        #expect(clears.brain.windwardFinalAim(view.own, view)?.tack == .starboard)
+        _ = decides.decide(view)
+        #expect(decides.plannedTack == .starboard)
+    }
 }
