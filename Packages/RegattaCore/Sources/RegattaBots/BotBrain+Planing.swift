@@ -30,7 +30,8 @@ import RegattaCore
 //
 // Fewer falls (#462 round 3: 2.4 falls a boat a race on the live matrix against skiff@8's 0.35):
 // - "Set, then gybe": on the plane but slow for her angle (round the windward mark and the offset with the kite going
-//   up) she builds speed before she gybes (`buildsSpeedToGybe`); the gybe at the end of her run is her rounding's.
+//   up) she builds speed before she gybes (`buildsSpeedToGybe`); a gybe on her way to any mark of her leg is her
+//   rounding's (#509).
 // - "Her own angle, held": the angle her hand holds when she lets the rudder go is the one she aims at, not the
 //   downwind groove a snap's width below it (`holdsHerAngle`, `BotHelm.input`).
 // - "Under a boat's lee": behind a boat she bears away to her proper course only when she is coming up under her lee,
@@ -365,14 +366,17 @@ extension BotBrain {
     /// "Set, then gybe": whether she puts off a gybe she wants to build speed for it first. On the plane but slow for
     /// her angle (round the windward mark with the kite going up, out of a luff) a gybe takes the wind aft of her
     /// beam under the class's share of her polar speed, and she falls: she sails on, coming down as she gathers
-    /// speed, and gybes at `PlaningTable.gybeSpeed` of her polar speed or after `gybeWait` seconds. Not near her
-    /// mark, where the gybe is her rounding; nor off the plane, where there is nothing to lose.
+    /// speed, and gybes at `PlaningTable.gybeSpeed` of her polar speed or after `gybeWait` seconds. Not near any mark
+    /// of her leg (#509: the windward mark and the offset as much as a gate or the finish line), where the gybe is her
+    /// rounding and waiting for speed sails her on past it; nor off the plane, where there is nothing to lose. Round
+    /// the windward mark or the offset she builds it again: gybing at once there, slow, she fell (#509's bot matrix).
     mutating func buildsSpeedToGybe(_ b: SeatView.OwnBoat, _ view: SeatView) -> Bool {
         let angle = abs(sailingAngle(b))
-        // The mark at the end of a run (a gate, the finish line), not the windward mark or the offset.
-        let rounds = isNearHerMark && view.course.marksOfLeg(view.course.legs[b.legIndex]).count > 1
+        // Round the windward mark or the offset (past its first ray, `roundingStage`) her mark is astern and she sails
+        // for her point beyond it, slow, with the kite going up: the gybe there is no longer her approach's.
+        let rounded = b.roundingStage > 0 && view.course.marksOfLeg(view.course.legs[b.legIndex]).count == 1
         guard b.status == .racing, Self.hasPlaningRule(view.boatClass), let planing = view.boatClass.planing,
-              senses.planing, !rounds, angle >= planing.fromTWA else {
+              senses.planing, !isNearHerMark || rounded, angle >= planing.fromTWA else {
             gybeWantedSince = nil
             return false
         }

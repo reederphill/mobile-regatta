@@ -506,6 +506,75 @@ import Testing
         #expect(waited >= 3, "on the plane and slow in \(waited) waters of 6")
     }
 
+    /// #509: near any mark of her leg the gybe is her rounding's and she builds no speed for it first (before, only at
+    /// a gate or the finish line: slow on the plane at the windward mark or the offset she sailed on past it for up to
+    /// `gybeWait` seconds); away from her marks she builds it as before.
+    @Test func noSpeedBuildBeforeAGybeNearAnyMarkOfHerLeg() throws {
+        // The decision itself: slow on the plane and wanting a gybe.
+        var decided = 0
+        for seed in UInt64(1)...6 {
+            for (leg, name) in [(0, "the windward leg"), (1, "the offset leg"), (2, "the gate leg")] {
+                let (race, hand, _) = try Self.runner(seed: seed, planing: true, speed: 0.6, deep: deg2rad(-30), handling: 0.8) {
+                    $0.seats[0].boat.legIndex = leg
+                }
+                let view = race.seatView(for: 0)
+                var away = hand.brain
+                away.isNearHerMark = false
+                // In some waters 60 % of her speed is no longer slow for her angle: not this scene.
+                guard away.buildsSpeedToGybe(view.own, view) else { continue }
+                decided += 1
+                #expect(away.gybeWantedSince == view.time, "seed \(seed), \(name)")
+                var near = away
+                near.isNearHerMark = true
+                let builds = near.buildsSpeedToGybe(view.own, view)
+                #expect(!builds, "seed \(seed): she builds speed near her mark on \(name)")
+                #expect(near.gybeWantedSince == nil, "seed \(seed), \(name)")
+                // Round the windward mark or the offset (past its first ray) her mark is astern: she builds it again.
+                let rounded = try Self.runner(seed: seed, planing: true, speed: 0.6, deep: deg2rad(-30), handling: 0.8) {
+                    $0.seats[0].boat.legIndex = leg
+                    $0.seats[0].boat.roundingStage = 1
+                }.race.seatView(for: 0)
+                let buildsRounded = near.buildsSpeedToGybe(rounded.own, rounded)
+                #expect(buildsRounded == (leg < 2), "seed \(seed), round the mark of \(name)")
+            }
+        }
+        #expect(decided >= 9, "slow on the plane in \(decided) scenes of 18")
+
+        /// Seconds from being told to gybe to the rudder going over: on the offset mark's leg, `metres` dead upwind of
+        /// the offset mark, on the plane at 60 % of her speed. Nil: off the plane before she gybed, or never.
+        func gybe(seed: UInt64, metres: Double) throws -> Double? {
+            let probe = try Self.runner(seed: seed, planing: true, speed: 0.6, deep: deg2rad(-30), handling: 0.8)
+            let mark = probe.race.course.elements[CourseLayout.offsetIndex].marks[0].position
+            let position = mark + Vec2.heading(probe.water.wind) * metres
+            var (race, hand, _) = try Self.runner(seed: seed, planing: true, speed: 0.6, deep: deg2rad(-30), handling: 0.8) {
+                $0.seats[0].boat.legIndex = 1
+                $0.seats[0].boat.position = position
+            }
+            try #require(race.course.isInRaceArea(position), "seed \(seed): \(metres) m above the offset mark is off the water")
+            hand.brain.plannedTack = race.boats[0].tack.other
+            for tick in 0..<(16 * Race.tickRate) {
+                hand.drive(race)
+                if !race.boats[0].isPlaning { return nil }
+                if let turn = hand.brain.handTurn, !turn.isTack { return Double(tick) * Race.dt }
+                race.step()
+            }
+            return nil
+        }
+        var near = 0, far = 0
+        for seed in UInt64(1)...6 {
+            if let after = try gybe(seed: seed, metres: 40) {
+                near += 1
+                #expect(after <= 0.2, "seed \(seed): 40 m from the offset mark she waited \(after) s")
+            }
+            if let after = try gybe(seed: seed, metres: 90) {
+                far += 1
+                print("BOTPLANING set then gybe 90 m above the offset mark, seed \(seed): rudder over after \(after) s")
+                #expect(after >= 1, "seed \(seed): 90 m from the offset mark she gybed slow after \(after) s")
+            }
+        }
+        #expect(near >= 3 && far >= 3, "gybed on the plane near the mark in \(near) waters of 6, away from it in \(far)")
+    }
+
     /// "Her own angle, held": running 5° above her groove on skiff@9, inside the downwind groove's snap, the angle
     /// her hand takes when she lets the rudder go is that angle and she stays there; before, and on skiff@8 still, her
     /// hand took the groove and sailed her down to it. A groove aim is the groove's on both.

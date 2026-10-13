@@ -83,4 +83,37 @@ extension BotBrain {
         setTack(lays ? .starboard : .port, view)
         return upwindAim(b, view, tack: lays ? .starboard : .port)
     }
+
+    // A turn refused near her mark (#509, #464's findings, proposal 4). The plan wants the other tack and `canTap`
+    // says not yet (a tap just done, a boat or a mark in the turn's way, no room to gybe, too slow to tack): she sails
+    // the plan's angle on her own tack meanwhile. For a groove that is her own groove, the closest she sails to a mark
+    // to windward or dead to leeward. For a reach it is the worst course she has: a reach of 70° on the wrong side
+    // of the wind opens the mark at about twice her speed, where her own groove would still close it. #464's traces:
+    // 143 of the 276 roundings in the tail were refused turns, one planing away from her mark at 6.9 m/s to 61 m.
+
+    /// What she holds on her own tack while a turn onto `aim` is refused, or nil for the plan's angle mirrored onto her
+    /// tack as before: racing within `PlaningTable.markRange` of a mark or gate she rounds (`isNearMarkOfHerLeg`),
+    /// `aim` a reach on the other tack (no groove), the end of her own tack's range of courses (her upwind groove to
+    /// her downwind one) that points nearest the reach's heading: through the wind to her upwind groove, or through
+    /// dead downwind to her downwind one. It only chooses what she sails while she waits; who keeps clear, and of
+    /// which mark, is decided before it (`evasion`) and after it (`holding`) as for any aim.
+    ///
+    /// The downwind end is a downwind aim like `navigate`'s near her mark, and sailed as one (`downwindAim`): on the
+    /// plane no deeper than keeps her on it (`floorAim`). Slow just round a mark and held on the bare groove she fell
+    /// off the plane (#509's bot matrix: 0.23 falls a boat a race within 15 s of a rounding became 0.47).
+    func refusedTurnAim(_ aim: Aim, _ b: SeatView.OwnBoat, _ view: SeatView) -> Aim? {
+        guard aim.tack != b.tack, aim.groove == nil, isNearMarkOfHerLeg(b, view) else { return nil }
+        let up = grooveAngle(.upwind, b, view)
+        let down = grooveAngle(.downwind, b, view)
+        // The turn from each end of her range to the reach on the other side of the wind.
+        let throughTheWind = aim.angle + up
+        let throughDeadDownwind = (.pi - aim.angle) + (.pi - down)
+        guard throughTheWind > throughDeadDownwind else {
+            return Aim(angle: up, tack: b.tack, tolerance: aim.tolerance, ease: aim.ease)
+        }
+        // What she holds, not her plan: the plan's own notes (`replane`, `planingAimed`) stay the plan's.
+        var holding = self
+        return holding.downwindAim(b, view, aim: Aim(angle: down, tack: b.tack, tolerance: aim.tolerance, ease: aim.ease),
+                                   nearMark: true)
+    }
 }
